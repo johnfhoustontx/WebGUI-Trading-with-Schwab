@@ -98,6 +98,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#velocity-and-divergence">Velocity and divergence</a></li>
 <li><a href="#intraday-market-trend-directional-0100">Intraday Market Trend (directional 0–100)</a></li>
 <li><a href="#daily-trend-regime-state-machine">Daily trend-regime state machine</a></li>
+<li><a href="#blended-market-regime-the-market-regime-console">Blended market regime (the Market Regime Console)</a><ul>
+<li><a href="#the-direction-axis">The direction axis</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li><a href="#options-scoring">Options Scoring</a><ul>
@@ -135,6 +139,12 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#candidate-builders-and-economics">Candidate builders and economics</a></li>
 <li><a href="#scoring-and-ranking">Scoring and ranking</a></li>
 <li><a href="#apply-and-the-stale-price-guard">Apply and the stale-price guard</a></li>
+</ul>
+</li>
+<li><a href="#known-issues">Known issues</a><ul>
+<li><a href="#the-price-sub-score-nan-exposure-open">The PRICE sub-score NaN exposure (open)</a></li>
+<li><a href="#expected-move-deliberately-disagrees-with-thinkorswim">Expected Move deliberately disagrees with ThinkorSwim</a></li>
+<li><a href="#index-open-interest-reads-zero-after-hours">Index open interest reads zero after hours</a></li>
 </ul>
 </li>
 <li><a href="#constants-appendix">Constants Appendix</a><ul>
@@ -561,12 +571,12 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>sentiment_svc</td>
 <td>8210</td>
-<td>Sentiment composite, trend, rotation.</td>
+<td>Sentiment composite, trend, market regime, rotation, nightly momentum cascade.</td>
 </tr>
 <tr>
 <td>options_svc</td>
 <td>8211</td>
-<td>Scans, paper trading, gamma, calculator, simulator, expected move.</td>
+<td>Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>
@@ -576,17 +586,17 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>trade_svc</td>
 <td>8213</td>
-<td>On-demand single-symbol analysis.</td>
+<td>On-demand single-symbol analysis + deep dive.</td>
 </tr>
 <tr>
 <td>driver_svc</td>
 <td>8214</td>
-<td>Morning order-approval pipeline.</td>
+<td>Autonomous decision layer (Claude + pure-code guardrails).</td>
 </tr>
 <tr>
 <td>market_svc</td>
 <td>8215</td>
-<td>Live macro-ticker Market Dashboard (~2 s RTH poll).</td>
+<td>Live macro-ticker Market Dashboard (~3 s RTH poll).</td>
 </tr>
 <tr>
 <td>webgui</td>
@@ -596,6 +606,19 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 </tbody>
 </table>
 <p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
+<blockquote>
+<p><strong>These are the <em>prod</em> profile.</strong> A <strong>dev</strong> checkout offsets the <code>[services]</code>
+ports to 9210–9215 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
+and starts <strong>no proxy of its own</strong> — it borrows prod's on 8100, because the Schwab
+OAuth refresh token is a single rotating credential that two proxies would
+invalidate for each other. Identity comes from the gitignored
+<code>config/env.local.toml</code>; a missing marker resolves to prod. See
+<code>docs/dev-prod-environments.md</code>.</p>
+<p><strong><code>driver_svc</code> no longer runs a morning order-approval pipeline.</strong> That queue and
+its <code>claude-driver</code> engine were removed in July 2026. The service now runs
+autonomous checkpoints whose output is a command on <code>cmd:options</code>; the risk
+clamping is pure code in <code>guardrails.py</code>, never the model.</p>
+</blockquote>
 <h2 id="data-flow-one-request">Data flow (one request)</h2>
 <ol>
 <li>The GUI enqueues a command on <code>cmd:{domain}</code> (a Redis Stream).</li>
@@ -891,6 +914,87 @@ otherwise                                               -&gt; range
 </code></pre>
 <p><code>commit_state</code> requires the raw state to repeat for <code>HYSTERESIS_DAYS</code> before
 flipping. Confidence: 0.0 below 50 bars, 0.5 from 50–200, 1.0 at ≥200 bars.</p>
+<h2 id="blended-market-regime-the-market-regime-console">Blended market regime (the Market Regime Console)</h2>
+<p><strong>File:</strong> <code>sentiment-dashboard/scoring/market_regime.py</code>. Published to
+<code>cache:sentiment:regime</code> + <code>:regime_history</code> every <strong>5 min</strong> in market hours.</p>
+<p>This is a <strong>different</strong> classifier from the daily state machine above. It is a
+five-member simplex — every regime holds a <em>share</em> of the current tape, and the
+"label" is simply the largest share.</p>
+<p><strong>Display names versus internal keys.</strong> The names were changed for display in
+August 2026; <strong>the keys were not</strong>, because they are the <code>RegimeState</code> contract,
+the <code>regime_intraday</code> DB columns and the driver packet.</p>
+<table>
+<thead>
+<tr>
+<th>Key (contract, DB, logs)</th>
+<th>Displayed as</th>
+<th>Why the name changed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mean_reversion</code></td>
+<td><strong>Balanced</strong></td>
+<td>All five of its inputs say price is <em>at</em> its mean. Nothing measures an extreme, so the old name promised a fade the model never tested — and it was the only name naming a <em>strategy</em> rather than the tape.</td>
+</tr>
+<tr>
+<td><code>trending</code></td>
+<td><strong>Trending</strong></td>
+<td>unchanged</td>
+</tr>
+<tr>
+<td><code>breakout</code></td>
+<td><strong>Breakout</strong></td>
+<td>unchanged</td>
+</tr>
+<tr>
+<td><code>choppy</code></td>
+<td><strong>Whipsaw</strong></td>
+<td>Same "not trending" axis as Balanced; what distinguishes it is <em>energy</em> (high ATR with low ADX, failed breaks, two-sided wicks). Balanced/Whipsaw carries that contrast; Mean-Reversion/Choppy did not.</td>
+</tr>
+<tr>
+<td><code>crisis</code></td>
+<td><strong>Stressed</strong></td>
+<td><code>VIX_STRESS_LO</code> is 22 and the fast-attack fires near VIX 30 — stress, not crisis. "Volatile" was also rejected: it equally describes breakout and whipsaw days.</td>
+</tr>
+</tbody>
+</table>
+<p><code>REGIME_DISPLAY</code> in that module is the source. The mapping is <strong>duplicated in four
+tiers</strong> (<code>webgui/pages/sentiment.py</code>, <code>driver_svc/compute.py</code>,
+<code>options_svc/market_snapshot.py</code>) because none of those may import the package —
+Tier 1 takes no engine imports, and the services would hit the documented
+cross-app <code>scoring</code> name collision. Keep them in step.</p>
+<h3 id="the-direction-axis">The direction axis</h3>
+<p><code>trending</code> and <code>breakout</code> additionally render a direction word — <strong>Rallying</strong> /
+<strong>Firming</strong> (up), <strong>Retreating</strong> / <strong>Softening</strong> (down), <strong>Breakdown</strong>. Balanced,
+Whipsaw and Stressed are directionless by construction.</p>
+<pre><code>DIRECTION_SLOPE_DEADBAND = EMA_TREND_LO          # 0.05, the trending ramp's own floor
+DIRECTION_TREND_DEADBAND = 3.0                   # points either side of the 50 neutral
+DIRECTION_STRONG_SLOPE   = 0.5 * (EMA_TREND_LO + EMA_TREND_HI)   # Rallying vs Firming
+</code></pre>
+<p><strong>This is a label adornment, not a sixth regime.</strong> The intensity maths stays
+sign-blind (<code>ramp(abs(slope), …)</code>) — "is this a trend day" is answered identically
+up or down. Splitting <code>trending</code> would need a DB column, a chart series and a
+contract change, and would tear the membership across two bins when the slope flips
+mid-session, defeating the blended model.</p>
+<p><strong>How the contradiction risk is avoided — the load-bearing part.</strong> The app has two
+independent direction reads: this module's signed <code>ema_slope_atr</code> (SPY price,
+5-minute) and the Market Trend composite (price + breadth + sector + VIX,
+15-minute, hysteresis-committed). They diverge on a real condition — the index up
+on narrow leadership while breadth is negative — so a word taken from either alone
+can contradict the other panel.</p>
+<p><code>direction_sign</code> therefore names a direction <strong>only when both agree past their
+deadbands</strong>; otherwise the neutral base label renders. <code>commit_direction</code> is
+deliberately <strong>asymmetric</strong>: two consecutive reads to <em>claim</em> a direction, one to
+drop back to neutral — never keep asserting a direction the evidence stopped
+backing.</p>
+<p>Two rendering rules follow from this and are easy to get wrong:</p>
+<ol>
+<li>The stacked/ranked panel's <strong>series names stay the base words</strong>. A legend that
+   renames itself intra-session destroys the reading position that makes it legible.</li>
+<li>The headline <strong>colour follows the direction</strong> for the two directional regimes,
+   because a fixed green would paint "Retreating" as though it were bullish.</li>
+</ol>
 <hr />
 <h1 id="options-scoring">Options Scoring</h1>
 <p><strong>File:</strong> <code>options-scanner/scoring.py</code></p>
@@ -1707,6 +1811,33 @@ and:</p>
 <code>list_adjustments</code>). <code>rescue_apply</code> refuses non-paper ids — <strong>captured signals are
 advisory-only</strong> (no paper position to mutate).</p>
 <hr />
+<h1 id="known-issues">Known issues</h1>
+<p>Documented defects a maintainer should know about before trusting a number. These
+are recorded rather than silently carried.</p>
+<h2 id="the-price-sub-score-nan-exposure-open">The PRICE sub-score NaN exposure (open)</h2>
+<p><code>sentiment_svc/compute._finite_pcts</code> guards only the <strong>sector</strong> input. An all-NaN
+read of the structural price inputs (<code>macd_hist</code> / <code>rsi</code> / <code>adx</code>, feeding
+<code>score_price</code> with a hardcoded <code>vwap_pct = 0.0</code>) scores <strong>82.50 — near-maximum
+bullish — at unchanged confidence</strong>, where a sane read of the same tape scores
+<strong>56.25</strong>. The same all-NaN read in <code>compute_intraday_trend</code>, which drives the
+<strong>live Day gauge</strong>, scores <strong>92.50</strong>.</p>
+<p>The failure is silent: nothing in the payload marks the inputs as missing, so the
+gauge renders a confident bullish number built on nothing. A fix must cover <strong>both
+call sites with one shared filter</strong> — patching only <code>score_price</code> leaves the live
+gauge wrong.</p>
+<p><strong>Until it is fixed</strong>, treat a strongly bullish structural reading with
+<em>unremarkable</em> confidence as suspect, and cross-check against the Market Dashboard.</p>
+<h2 id="expected-move-deliberately-disagrees-with-thinkorswim">Expected Move deliberately disagrees with ThinkorSwim</h2>
+<p>Not a defect — a definitional difference that has been measured and is documented
+in full under <em>Expected move and IV analysis</em>. Two independent differences push in
+opposite directions and <strong>nearly cancelled on the one symbol they were measured on</strong>,
+which is luck rather than calibration. Do not "fix" either number to match a broker
+without first deciding which definition is wanted; the same <code>atm_iv</code> also sizes the
+drawn cone.</p>
+<h2 id="index-open-interest-reads-zero-after-hours">Index open interest reads zero after hours</h2>
+<p><code>$SPX</code> and <code>$NDX</code> report zero open interest overnight, which yields all-zero GEX
+grids and arbitrary wall levels. Index gamma is only meaningful during the session.</p>
+<hr />
 <h1 id="constants-appendix">Constants Appendix</h1>
 <p>A consolidated table of the load-bearing constants. The cited file governs.</p>
 <table>
@@ -1801,6 +1932,8 @@ advisory-only</strong> (no paper position to mutate).</p>
 </tbody>
 </table>
 <h2 id="service-cadences">Service cadences</h2>
+<p>All windows are US Central and gate on a trading day. The constants named below are
+the source; this table is a summary of them.</p>
 <table>
 <thead>
 <tr>
@@ -1811,15 +1944,15 @@ advisory-only</strong> (no paper position to mutate).</p>
 <tbody>
 <tr>
 <td>sentiment_svc</td>
-<td>Composite refresh every 120 s; trend recompute gated to 15 min; rotation at startup / on demand.</td>
+<td>Composite refresh every <strong>120 s</strong> (<code>REFRESH_INTERVAL_SEC</code>), throttled to one refresh per <strong>15 min</strong> off-hours (<code>_OFFHOURS_INTERVAL_MIN</code>); directional trend recompute every <strong>900 s</strong> (<code>TREND_INTERVAL_SEC</code>); market-regime recompute every <strong>5 min</strong> (<code>REGIME_INTERVAL_MIN</code>); order-flow publish every <strong>30 s</strong> (<code>ORDER_FLOW_PUBLISH_SEC</code>); <strong>momentum cascade once nightly at 16:20</strong> (<code>momentum_due</code>); rotation at startup / on demand.</td>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Auto-scan 15-min slots (08:00–15:15 CT); GEX collect 2-min slots (08:30–15:20 CT); paper auto-manage every 5 min in market hours; header tick each 30 s (skip-unchanged).</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>driver</strong> paper auto-manage every <strong>1 min</strong> (<code>_MANAGE_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00, no 15:00 run</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>
-<td>Live SSE ticks; throttled publish ≤ every 2 s; full rebuild every 10 min or on demand.</td>
+<td>Live SSE ticks; throttled publish ≤ every <strong>2 s</strong> (<code>PUBLISH_INTERVAL_SEC</code>); full rebuild every <strong>600 s</strong> (<code>REBUILD_INTERVAL_SEC</code>), or <strong>3600 s</strong> off-hours (<code>OFFHOURS_REBUILD_INTERVAL_SEC</code>), or on demand.</td>
 </tr>
 <tr>
 <td>trade_svc</td>
@@ -1827,10 +1960,27 @@ advisory-only</strong> (no paper position to mutate).</p>
 </tr>
 <tr>
 <td>driver_svc</td>
-<td>Morning run once/day at 09:28 ET; perf refresh ≈ every 5 min.</td>
+<td>Run gate polled every <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>); checkpoint at 09:28 ET then every 30 min inside the <strong>09:45–15:30 ET</strong> entry window (<code>checkpoint_due</code>).</td>
+</tr>
+<tr>
+<td>market_svc</td>
+<td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); Claude summary every <strong>40 min</strong> RTH / <strong>60 min</strong> off-hours (<code>SUMMARY_RTH_SEC</code>, <code>SUMMARY_OFFHOURS_SEC</code>).</td>
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>Two cadences are easy to state wrongly, because they used to be the same
+number.</strong> The <strong>driver's</strong> isolated paper account re-prices every <strong>1 minute</strong>
+(raised from 5 in July 2026 so its stops react within the minute and the −$1,500
+loss-halt read stays fresh). The <strong>manual</strong> paper account moved the other way, to
+an <strong>hourly</strong> top-of-the-hour cycle. They are different books on different clocks.</p>
+<p><strong>The GEX collection interval is 1 minute, not 2.</strong> The serial per-symbol chain
+fetch was measured dropping roughly 37% of its slots; fetching in a small pool
+(<code>POLL_FETCH_WORKERS = 6</code>) and launching scheduler branches as keyed background
+tasks fixed it. A 2-minute figure also silently corrupted the flow-alert spike
+detector, which compares volume increments and reads a 2-minute delta as roughly
+twice baseline.</p>
+</blockquote>
 <h2 id="commissions">Commissions</h2>
 <p>Source of truth: <code>config/commissions.toml</code>, loaded by
 <code>services/options_svc/commission.py</code> — never hard-coded. Used by the Rescue

@@ -47,8 +47,17 @@ under pytest). Connection from `repo_paths.MEMURAI_URL` (default
 |---------|---------|
 | `cache:{domain}:{view}` | Versioned cache key holding a `CacheEnvelope`. |
 | `cache:{domain}:{view}:ver` | Integer version counter, `INCR`'d by `cache_set`. |
+| `cache:{domain}:{view}:ts` | ISO freshness stamp, `SET` by `cache_set` in the same pipeline. |
 | `events:{domain}:{view}` | Pub/sub channel; messages are `{"version": int}`. |
 | `cmd:{domain}` | Redis Stream of commands (GUI → service RPC). |
+| `dead:{domain}` | Dead-letter list for commands that could not be parsed or handled. |
+
+**Why two side keys.** `:ver` answers *"has this changed?"* and `:ts` answers
+*"when did the publisher last confirm this is current?"* — which are different
+questions, and the difference matters for `skip_unchanged` writes. A payload that
+is republished byte-identically does **not** bump `:ver` (so pollers do not
+repaint) but **does** refresh `:ts` (so freshness monitoring still sees a live
+publisher). The `/status` page's freshness table reads `:ts`.
 
 ## Cache methods
 
@@ -68,6 +77,23 @@ payload deserialize). This is what GUI poll timers use.
 
 **`cache_versions(keys) -> dict`** — pipelined `cache_version` for many keys in one
 round-trip (use when a page polls several views).
+
+**`cache_metas(keys) -> dict`** — pipelined read of the `:ver` **and** `:ts` side
+keys for many keys at once, with no payload deserialize. This is what the app-wide
+freshness watcher uses; `ts` is `None` for a key written before the `:ts` side key
+existed.
+
+## Dead-lettering
+
+**`enqueue_command`** validates before writing, but a malformed or unhandleable
+message that reaches a consumer is moved aside rather than retried forever:
+
+**`dead_letter(stream, raw_fields, reason) -> None`** — records the raw message and
+why it failed under `dead_letter_key(stream)` (`dead:{domain}`).
+
+**`drain_pending(stream, group, consumer) -> int`** — reclaims messages left
+pending by a consumer that died mid-handler, returning how many were recovered.
+The service scaffold calls this at startup.
 
 ## Pub/sub
 
@@ -116,8 +142,10 @@ a contract (listed in *Cache Key Index*).
 | `ScanResult` | `options.py` | `cache:options:scan` | `signals_0dte[]`, `signals_swing[]`, `vix_term_structure{}`, `timestamp`, `errors[]`, `warnings[]` |
 | `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `swing_model{}` (optional), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
-| `ApprovalState` | `driver.py` | `cache:driver:approvals` | `date`, `grade`, `grade_reasons[]`, `conditions{}`, `pnl_today`, `pnl_week`, `proposed_trades[]`, `status`, `decision`, `results[]`, `reasons[]`, `error`, `timestamp` |
-| `PerfReport` | `driver.py` | `cache:driver:performance` | `summary{}`, `trades[]`, `timestamp` |
+| `DriverControl` | `driver.py` | `cache:driver:control` | `enabled`, `halted`, `reason`, `halted_date` (ISO date the latch was set, so it re-arms next day), `timestamp` |
+| `AutonomousState` | `driver.py` | `cache:driver:autonomous` | `date`, `enabled`, `halted`, `halt_reason`, `day_pnl`, `target`, `positions[]`, `decisions[]` (newest-first checkpoint log), `perf{}`, `last_cycle_ts`, `error`, `timestamp` |
+| `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
+| `MarketSummary` | `market.py` | `cache:market:summary` | `narrative` (a short Claude-written verdict; empty when there is no key or the call failed) |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
@@ -258,18 +286,81 @@ Re-running the fit (e.g. after a regime shift) is the supported maintenance path
 
 ## Driver service — :8214
 
-**Entry:** `services/driver_svc/app.py`. **Scheduler:** morning pipeline once/day at
-09:28 ET; perf refresh ≈ every 5 min. The scheduler **never executes orders** — only
-an explicit `approve` does.
+**Entry:** `services/driver_svc/app.py`. **Scheduler:** polls the run gate every
+30 s; fires a checkpoint at 09:28 ET and then every 30 minutes inside the entry
+window **09:45–15:30 ET**.
+
+> **The order-approval queue was removed in July 2026.** `ApprovalState`,
+> `PerfReport`, `cache:driver:approvals`, `cache:driver:performance` and the
+> `approve` / `skip` commands no longer exist. The service is now an autonomous
+> decision layer whose output is a **command enqueued on `cmd:options`**, and the
+> page is a monitor with a kill switch.
+
+**The cycle.** `build_packet` → `decider.decide` (Claude, forced tool call) →
+`guardrails.apply_guardrails` → `driver_paper_create` on `cmd:options`.
+
+`apply_guardrails` is **pure code** and is the reason the design is defensible: it
+clamps position size and halts on the banked daily target, the daily loss cap, or a
+VIX threshold. **The model never sizes its own risk.** Risk is evaluated in
+*per-contract* dollars (`CONTRACT_MULTIPLIER = 100`) — an earlier version compared
+the scanner's per-share `max_loss` against a per-contract cap, a 100× mismatch that
+silently rejected every index trade.
+
+**Key settings** (`services/driver_svc/settings.py`):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `DAILY_TARGET` | `500.0` | Base bank-the-day threshold ($ net day P&L). |
+| `TARGET_CAP` | `1000.0` | Maximum ratcheted daily target (2× base) when behind the MTD pace. |
+| `TARGET_FLOOR` | `250.0` | Minimum daily target when ahead of the MTD pace. |
+| `DAILY_LOSS_HALT` | `1500.0` | Daily loss that halts new entries. |
 
 **Commands (`cmd:driver`):**
 
 | Type | Args | Effect |
 |------|------|--------|
-| `run` | — | Run the morning pipeline → cache a *pending* `ApprovalState`. |
-| `approve` | — | If still pending, execute the proposed trades (simulated, `PAPER_TRADE=True`), re-cache as `approved` with results. |
-| `skip` | — | Mark the cached approval `skipped`. |
-| `perf` | — | Recompute the `PerfReport` → `cache:driver:performance`. |
+| `cycle` | — | Run one decision checkpoint now (packet → decide → guardrails → enqueue). |
+| `enable` | — | Set `cache:driver:control.enabled = true`. |
+| `disable` | — | Clear the enable flag; the scheduler stops opening new positions. |
+| `stop` | — | Latch `halted` for the rest of the day (`halted_date` re-arms it next session). Management and exits continue. |
+
+> **The arm state lives in Redis, not in the process.** Disabling the scheduler
+> alone would not stop a restored snapshot that carried `cache:driver:control`
+> enabled, which is why `run_autonomous_cycle` also checks the environment's
+> `autonomous_trading` flag directly.
+
+---
+
+## Market service — :8215
+
+**Entry:** `services/market_svc/app.py`. Publishes the macro-ticker board that backs
+`/market` and the summary the bottom ticker leads with.
+
+**Scheduler cadence** (`services/market_svc/scheduler.py`):
+
+| Constant | Value | When |
+|---|---|---|
+| `RTH_INTERVAL_SEC` | `3` | Regular trading hours. |
+| `OFFHOURS_INTERVAL_SEC` | `15` | Outside RTH — futures trade nearly around the clock, so the board stays live. |
+| `WEEKEND_INTERVAL_SEC` | `60` | Saturday and Sunday before 17:00 CT, when futures are closed. |
+| `SUMMARY_RTH_SEC` | `40 * 60` | Claude verdict refresh during RTH. |
+| `SUMMARY_OFFHOURS_SEC` | `60 * 60` | Claude verdict refresh off-hours. |
+
+Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQUITY
+/ FUTURE instrument types, computes the `$ADVN-$DECN` breadth spread and the
+`BIG10` basket, reads the cap-weighted put/call from `cache:sentiment:composite` and
+the dollar-weighted premium skew from `cache:options:matrix`, and publishes
+`cache:market:dashboard`.
+
+The Claude summary runs as a **background task** rather than inline, so a slow
+completion cannot stall the poll loop.
+
+**Commands (`cmd:market`):**
+
+| Type | Args | Effect |
+|------|------|--------|
+| `enable_summary` | — | Turn the Claude narrative on (`cache:market:summary_enabled`). |
+| `disable_summary` | — | Turn it off. This stops the API calls, not just the display. |
 
 ---
 
@@ -330,10 +421,15 @@ defensively in compute.
 **Sentiment:**
 
 ```
-cache:sentiment:composite      events:sentiment:composite
-cache:sentiment:history        (no event)
-cache:sentiment:sectors        events:sentiment:sectors
-cache:sentiment:rotation       events:sentiment:rotation
+cache:sentiment:composite          events:sentiment:composite
+cache:sentiment:history            (no event)
+cache:sentiment:intraday_history   events:sentiment:intraday_history
+cache:sentiment:sectors            events:sentiment:sectors
+cache:sentiment:rotation           events:sentiment:rotation
+cache:sentiment:regime             events:sentiment:regime
+cache:sentiment:regime_history     events:sentiment:regime_history
+cache:sentiment:momentum           events:sentiment:momentum
+cache:sentiment:order_flow         events:sentiment:order_flow
 cmd:sentiment
 ```
 
@@ -341,6 +437,12 @@ cmd:sentiment
 
 ```
 cache:options:scan             events:options:scan          (ScanResult contract)
+cache:options:scan_day         events:options:scan_day      (the DAY UNION the Scanner renders)
+cache:options:matrix           events:options:matrix        (Opportunity Board)
+cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
+cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)
+cache:options:flow_skew        events:options:flow_skew
+cache:options:net_premium      events:options:net_premium   (Net Prem subtab, 28 symbols)
 cache:options:header           events:options:header
 cache:options:swing            events:options:swing
 cache:options:paper_account    events:options:paper_account
@@ -352,6 +454,24 @@ cache:options:gamma            events:options:gamma
 cache:options:gamma_explain    events:options:gamma_explain
 cache:options:gamma_analyze    events:options:gamma_analyze
 cache:options:gamma_symbols    events:options:gamma_symbols
+cache:options:gamma_history    events:options:gamma_history
+cache:options:gamma_briefings  events:options:gamma_briefings
+cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto briefings)
+cache:options:gamma_regime_state
+cache:options:market_snapshot  events:options:market_snapshot
+cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
+cache:options:calc_iv          events:options:calc_iv
+cache:options:driver_paper_account    events:options:driver_paper_account
+cache:options:driver_paper_perf       events:options:driver_paper_perf
+cache:options:driver_paper_analytics  events:options:driver_paper_analytics
+cache:options:paper_analytics  events:options:paper_analytics
+cache:options:captured_closed  events:options:captured_closed
+cache:options:action_alert     events:options:action_alert
+cache:options:eod_summary      events:options:eod_summary
+cache:options:autoclose_enabled           (Settings toggle)
+cache:options:manual_paper_lifecycle      (Settings toggle)
+cache:options:notified_scan | :notified_captured    (alert de-duplication)
+cache:options:eth_eligible
 cache:options:sim_meta         events:options:sim_meta
 cache:options:sim_result       events:options:sim_result
 cache:options:sim_replay       events:options:sim_replay
@@ -364,15 +484,27 @@ cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 ```
 
-**Trade / Portfolio / Driver:**
+**Trade / Portfolio / Driver / Market:**
 
 ```
 cache:trade:analysis           events:trade:analysis          (TradeAnalysis)
+cache:trade:deepdive           events:trade:deepdive
+cache:trade:deepdive_query     events:trade:deepdive_query
+cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
-cache:driver:approvals         events:driver:approvals        (ApprovalState)
-cache:driver:performance       events:driver:performance      (PerfReport)
-cmd:trade   cmd:portfolio   cmd:driver
+cache:driver:control           events:driver:control          (DriverControl)
+cache:driver:autonomous        events:driver:autonomous       (AutonomousState)
+cache:market:dashboard         events:market:dashboard        (MarketDashboard)
+cache:market:summary           events:market:summary          (MarketSummary)
+cache:market:summary_enabled                                  (ticker/Claude toggle)
+cmd:trade   cmd:portfolio   cmd:driver   cmd:market
 ```
+
+> **`cache:driver:approvals` and `cache:driver:performance` no longer exist** — they
+> belonged to the order-approval queue removed in July 2026. The driver's realized
+> performance now lives in its isolated paper book under
+> `cache:options:driver_paper_account` and `:driver_paper_perf`, published by
+> `options_svc` rather than `driver_svc`.
 
 ---
 
@@ -451,10 +583,38 @@ hard-code ports or `D:\` paths.
 | portfolio_svc | 8212 | `SERVICE_PORTS["portfolio"]` |
 | trade_svc | 8213 | `SERVICE_PORTS["trade"]` |
 | driver_svc | 8214 | `SERVICE_PORTS["driver"]` |
+| market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 
 > The `dashboard_frontend = 5173` entry in `config/ports.toml` belongs to the retired
 > React frontend and is **not** used by this app. The web GUI is on **8500**.
+
+## Environments — the ports above are the *prod* profile
+
+Two checkouts of this repo run simultaneously on one machine. `repo_paths.py`
+resolves the identity and every port consumer follows it with no edit of its own:
+
+| | prod | dev |
+|---|---|---|
+| `[services]` ports | 8210–8215 | **9210–9215** (`port_offset`) |
+| webgui | 8500 | **9500** |
+| Redis | Memurai db **0** | Memurai db **1** |
+| schwab-proxy | **owns** it on 8100 | **borrows** prod's — starts none |
+
+Identity comes from `config/env.local.toml` (**gitignored**, so `git pull` can never
+carry it between checkouts); a missing marker resolves to **prod**, which is why the
+table above is the default. Exports: `ENV_NAME`, `ENV_FLAGS`, `IS_DEV`,
+`OWNS_PROXY`, `REDIS_DB`, `PEER_ROOT`.
+
+> **`[services]` ports are offset automatically; a top-level port is not.** That is
+> correct for a process this repo does not start, and a bug for one it does.
+
+> **Under pytest the process presents as PROD** regardless of the marker — ports,
+> Redis DB, `owns_proxy` and `ENV_NAME` — with all four behaviour suppressions
+> forced on. Consequence for anyone writing tests: a dev-only branch is only ever
+> reached by monkeypatch. Patch a flag with
+> `monkeypatch.setitem(repo_paths.ENV_FLAGS, …)`, but patch a by-value export like
+> `IS_DEV` with `monkeypatch.setattr` **on the module that consumed it**.
 
 **Key paths:**
 

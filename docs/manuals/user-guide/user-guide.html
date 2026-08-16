@@ -99,17 +99,23 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#captured-signals">Captured Signals</a></li>
 <li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#rescue">Rescue</a></li>
+<li><a href="#opportunity-board">Opportunity Board</a></li>
+<li><a href="#flow-alerts">Flow Alerts</a></li>
 <li><a href="#cross-page-actions">Cross-page actions</a></li>
 </ul>
 </li>
-<li><a href="#sentiment">Sentiment</a><ul>
-<li><a href="#sentiment-dashboard">Sentiment dashboard</a></li>
+<li><a href="#trend-sentiment">Trend &amp; Sentiment</a><ul>
+<li><a href="#market-dashboard">Market Dashboard</a></li>
+<li><a href="#sentiment">Sentiment</a></li>
+<li><a href="#sector-industry">Sector &amp; Industry</a></li>
 <li><a href="#sector-rotation">Sector Rotation</a></li>
+<li><a href="#rrg">RRG</a></li>
+<li><a href="#momentum">Momentum</a></li>
 </ul>
 </li>
 <li><a href="#trade">Trade</a></li>
 <li><a href="#portfolio">Portfolio</a></li>
-<li><a href="#driver">Driver</a></li>
+<li><a href="#claude-trades">Claude Trades</a></li>
 <li><a href="#reports-system">Reports &amp; System</a><ul>
 <li><a href="#eod-report">EOD Report</a></li>
 <li><a href="#system-status">System Status</a></li>
@@ -135,10 +141,10 @@ older desktop and dashboard tools with one web app you open in your browser at
 <li><strong>Model</strong> options trades — a P&amp;L calculator, an expected-move chart, a
   Black-Scholes "what-if" simulator, and a dealer-gamma (GEX) view.</li>
 <li><strong>Track</strong> paper trades and captured signals, with automatic management.</li>
-<li><strong>Read the market's mood</strong> through a sentiment composite, market-trend gauges,
-  and a sector-rotation map.</li>
+<li><strong>Read the market's mood</strong> through a sentiment composite, Day/Week/Month trend
+  rings, a market-regime console, and a sector-rotation map.</li>
 <li><strong>Review</strong> your live brokerage portfolio and an end-of-day report.</li>
-<li><strong>Approve</strong> the morning trading agent's proposed orders.</li>
+<li><strong>Watch</strong> an autonomous paper trader pick and size defined-risk spreads.</li>
 </ul>
 <blockquote>
 <p><strong>This is a single-user, local application.</strong> It runs on your own machine and
@@ -252,7 +258,7 @@ message, that service hasn't started or has stopped. Start the full stack with a
 launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
 <h2 id="stopping-everything">Stopping everything</h2>
 <p>Use <strong>More → Stop All Services</strong> inside the app, or run <code>stop_all.bat</code>. This stops the
-gateway, the five services, and the web app. (Memurai is intentionally left
+gateway, the six services, and the web app. (Memurai is intentionally left
 running — it's a shared Windows service.)</p>
 <hr />
 <h1 id="the-interface">The Interface</h1>
@@ -270,6 +276,9 @@ running — it's a shared Windows service.)</p>
 <p>The left edge is a narrow <strong>icon rail</strong> that widens when you hover it. Clicking a
 <strong>group</strong> opens its first page and shows that group's pages as a <strong>tab strip</strong>
 across the top; the other rail entries are <strong>standalone pages</strong> with no tab strip.</p>
+<p>The rail is organised into <strong>three captioned sections</strong>, each answering one
+question, plus a block of machine controls pinned to the bottom.</p>
+<p><strong>MARKETS — what is the market doing?</strong></p>
 <table>
 <thead>
 <tr>
@@ -279,14 +288,6 @@ across the top; the other rail entries are <strong>standalone pages</strong> wit
 </thead>
 <tbody>
 <tr>
-<td><strong>Options</strong> (group)</td>
-<td>Market Scanner · Strategy Finder · Simulator · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue</td>
-</tr>
-<tr>
-<td><strong>Calculator</strong> (standalone)</td>
-<td>—</td>
-</tr>
-<tr>
 <td><strong>Dealer Positioning</strong> (standalone)</td>
 <td>—</td>
 </tr>
@@ -295,30 +296,76 @@ across the top; the other rail entries are <strong>standalone pages</strong> wit
 <td>—</td>
 </tr>
 <tr>
-<td><strong>Market Trend &amp; Sentiment</strong> (group)</td>
-<td>Market Dashboard · Sentiment · Sector &amp; Industry · Sector Rotation · RRG</td>
+<td><strong>Flow Alerts</strong> (standalone)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Trend &amp; Sentiment</strong> (group)</td>
+<td>Market Dashboard · Sentiment · Sector &amp; Industry · Sector Rotation · RRG · Momentum</td>
+</tr>
+</tbody>
+</table>
+<p><strong>STRATEGY — what should I trade?</strong></p>
+<table>
+<thead>
+<tr>
+<th>Rail item</th>
+<th>Pages</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strategy Tools</strong> (group)</td>
+<td>Calculator · Simulator</td>
+</tr>
+<tr>
+<td><strong>Options</strong> (group)</td>
+<td>Market Scanner · Strategy Finder · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue</td>
 </tr>
 <tr>
 <td><strong>Trade Analyzer</strong> (standalone)</td>
 <td>—</td>
 </tr>
 <tr>
+<td><strong>Claude Trades</strong> (standalone)</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>ACCOUNT — what do I own?</strong></p>
+<table>
+<thead>
+<tr>
+<th>Rail item</th>
+<th>Pages</th>
+</tr>
+</thead>
+<tbody>
+<tr>
 <td><strong>Portfolio</strong> (standalone)</td>
 <td>—</td>
 </tr>
 <tr>
-<td><strong>Claude Trades</strong> (standalone)</td>
-<td>—</td>
-</tr>
-<tr>
 <td><strong>More</strong> (group)</td>
-<td>EOD Report · System Status · Settings · Stop All Services · User Manuals</td>
+<td>EOD Report · User Manuals</td>
 </tr>
 </tbody>
 </table>
-<p>The Options tabs run in trading order — find a trade, analyze it, track it, and
-repair it if it goes against you. The <strong>hamburger</strong> at the top left pins the rail
-open so it stops collapsing.</p>
+<p><strong>System controls</strong> sit at the foot of the rail, below a separator: <strong>System
+Status</strong>, <strong>Settings</strong>, and a red-outlined <strong>Stop All Services</strong> button. They are
+kept apart because none of them is a step in a trading workflow, and the
+destructive one is placed last so overshooting Settings cannot land on it.</p>
+<p>Two groupings are worth explaining because they are deliberate:</p>
+<ul>
+<li><strong>Dealer Positioning, Opportunity Board and Flow Alerts sit under MARKETS, not
+  under Options.</strong> They are market-<em>wide</em> reads. The Options group is the
+  per-signal workflow — find a trade, analyze it, track it, repair it — and its
+  tabs run in that order.</li>
+<li><strong>Calculator and Simulator are their own group.</strong> They model legs <em>you</em> bring,
+  whereas the Options tabs work on signals the app <em>finds</em>. They share a leg
+  editor and copy trades to each other, so they belong side by side.</li>
+</ul>
+<p>The <strong>hamburger</strong> at the top left pins the rail open so it stops collapsing.</p>
 <h2 id="alert-badges-and-chimes">Alert badges and chimes</h2>
 <p>A small background watcher runs on <strong>every</strong> page. When new qualifying scanner
 signals appear it can:</p>
@@ -330,10 +377,15 @@ signals appear it can:</p>
 <ul>
 <li><strong>Scanner</strong> — number of brand-new signals.</li>
 <li><strong>Captured Signals</strong> — new captures.</li>
-<li><strong>Driver</strong> — a pending order approval.</li>
+<li><strong>Claude Trades</strong> — new autonomous-driver activity.</li>
 </ul>
-<p>Opening that page clears its badge.</p>
+<p>Opening that page clears its badge. A <strong>group's</strong> rail badge is the sum of its
+children's badges, so a count on the collapsed rail still tells you which section
+to open.</p>
 <blockquote>
+<p>The scanner chime and badge count <strong>credit spreads only</strong>. The Directional tab
+is scored on a different, non-comparable scale, so it is deliberately left out
+of the alert threshold.</p>
 <p><strong>Browser sound is blocked until you interact with the page.</strong> Click any nav
 link, or use <strong>Test sound</strong> on the Settings page, to unlock audio for the
 session.</p>
@@ -351,9 +403,17 @@ session.</p>
   shock</strong>, and the Scanner's <strong>0-DTE / Swing / Directional</strong>). Hover an individual
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.</li>
-<li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group.
-  It opens this User Guide plus the Technical and API references in your browser.</li>
+<li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group. It opens this User Guide, the
+  <strong>Reference Guide</strong>, and the Technical and API references in your browser.</li>
 </ul>
+<blockquote>
+<p><strong>If you want to understand <em>why</em> a page exists rather than how to operate it,
+read the Reference Guide.</strong> This User Guide is task-oriented — it tells you what
+to click. The Reference Guide covers every tab and sub-tab in depth: what its
+data is, how to read each panel and column, what edge it gives (and where it is
+weak), and when in the day to reach for it. It opens with a one-page summary of
+the whole app.</p>
+</blockquote>
 <hr />
 <h1 id="options">Options</h1>
 <p>The Options section is the heart of the app. All Options pages share a common
@@ -364,8 +424,10 @@ session.</p>
 two-pane layout.</p>
 <p><strong>Left pane — the signal list:</strong></p>
 <ul>
-<li>A <strong>Scan</strong> button (re-runs the scan) and a status line ("N signals").</li>
-<li>Two tabs: <strong>0-DTE</strong> and <strong>Swing</strong>.</li>
+<li>A <strong>Run scan</strong> button (forces a refresh) and a status line ("N live signals").</li>
+<li>Three tabs: <strong>0-DTE</strong>, <strong>Swing</strong> and <strong>Directional</strong>. Directional lists
+  single-leg long and short calls and puts, scored on a <em>different</em> scale from the
+  credit-spread tabs — do not compare their numbers.</li>
 <li>A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
   Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
   a color-coded <strong>Score</strong> chip, and a letter <strong>Grade</strong>.</li>
@@ -381,7 +443,19 @@ two-pane layout.</p>
 <li><strong>Send to Paper Trade</strong> — create a paper trade from this signal.</li>
 <li><strong>Expected Move</strong> — open the Expected Move chart for this trade in a new tab.</li>
 </ul>
-<p>The list refreshes itself automatically; you rarely need to press <strong>Scan</strong>.</p>
+<p>The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
+days; you rarely need to press <strong>Run scan</strong>.</p>
+<blockquote>
+<p><strong>The table shows the whole day's signals, not just the current scan.</strong> A signal
+that has stopped qualifying stays visible but is <strong>dimmed and frozen</strong>, stamped
+with the time it dropped out, and its <strong>Paper</strong> button is removed — its price is
+stale, so a paper entry from it would be fictional. The status line's "N live
+signals" counts only those still qualifying.</p>
+<p><strong>An empty Directional tab is normal.</strong> The engine only emits candidates scoring
+50 or better, so empty means nothing cleared the bar rather than something
+failed. Index names (<code>$SPX</code>, <code>SPY</code>, <code>QQQ</code>) are also frequently absent, because
+their implied volatility is usually too low to clear the credit floor.</p>
+</blockquote>
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><strong>Route:</strong> <code>/options/swing</code>.</p>
 <p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
@@ -440,7 +514,7 @@ related measures.</p>
 <li>A <strong>Symbol</strong> dropdown (default <code>$SPX</code>; the list is the collected watchlist).</li>
 <li><strong>Refresh now</strong>, an <strong>Explain</strong> button, an <strong>Analyze</strong> button, and a <strong>Next
   refresh</strong> countdown.</li>
-<li>A <strong>view toggle</strong>: <strong>GEX / Charm / DEX / Vanna / Term</strong>.</li>
+<li>A <strong>view toggle</strong>: <strong>Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term</strong>.</li>
 </ul>
 <p><strong>Status row:</strong> a collector status dot, last-scan and next-scan times, and a one-
 line summary (spot, strike count, net exposure).</p>
@@ -534,8 +608,10 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 <li><strong>Open Positions</strong> table and a <strong>Fills log</strong> (last 100 orders).</li>
 </ul>
 <blockquote>
-<p>The manage cycle also runs automatically every 5 minutes during market hours, so
-the paper portfolio updates on its own — the buttons are manual triggers.</p>
+<p>The entry and manage cycles also run automatically <strong>at the top of each hour,
+09:00–14:00 CT</strong> on trading days — there is no 15:00 run. So a target hit at 09:15
+is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself. (The
+autonomous driver's separate account re-prices every minute; this one does not.)</p>
 </blockquote>
 <h2 id="rescue">Rescue</h2>
 <p><strong>Route:</strong> <code>/options/rescue</code>.</p>
@@ -592,6 +668,39 @@ at-risk table and gets a full candidate menu, but it has <strong>no Apply button
 paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 Captured signals do <strong>not</strong> add to the Rescue nav badge (that counts paper positions).</p>
 </blockquote>
+<h2 id="opportunity-board">Opportunity Board</h2>
+<p><strong>Route:</strong> <code>/options/matrix</code>. In the rail under <strong>MARKETS</strong>, not in the Options tab
+strip — it is a market-wide read rather than a step in the per-signal workflow.</p>
+<p>Every watchlist symbol as one sortable row, so you can triage the whole board
+without opening a page per ticker.</p>
+<p>Columns: <strong>Ticker · Spot · Day % · Trend</strong> (an arrow) <strong>· Call / Put</strong> (whether
+premium is accelerating) <strong>· P/C · Net $M · GEX</strong> (whether spot is above or below
+the dealer gamma flip) <strong>· Sig</strong> (live scanner signals) <strong>· Flow</strong> (flow alerts
+today) <strong>· Signal</strong> (buy/neutral/sell) <strong>· Hot</strong>.</p>
+<p><strong>Hot</strong> is the default sort. Click any column header to re-sort. Three tiles at the
+top count how many symbols are currently Buy, Neutral and Sell.</p>
+<blockquote>
+<p><strong>Hotness measures activity, not quality.</strong> Use it to decide <em>where to look</em>,
+then open Dealer Positioning or Strategy Finder for that symbol. It is not a
+trade signal.</p>
+</blockquote>
+<h2 id="flow-alerts">Flow Alerts</h2>
+<p><strong>Route:</strong> <code>/options/flow</code>. Also a rail item under <strong>MARKETS</strong>.</p>
+<p>Every unusual options event the app detected <strong>today</strong>, newest first — the same
+alerts that chime and push to your phone, kept somewhere you can read them.</p>
+<p>Four detector types: <strong>Crossover</strong> (call premium overtook put premium, or the
+reverse), <strong>Unusual activity</strong> (a contract traded far above its open interest),
+<strong>Gamma flip</strong> (spot crossed the dealer gamma flip) and <strong>Big delta</strong> (one contract
+holds an outsized share of the symbol's directional exposure).</p>
+<p>Columns: <strong>Time · Age · Symbol · Type · Side · Detail · Share · Alert</strong>. Filter by
+type or symbol — filtering is instant. <strong>Click any row</strong> to open Dealer Positioning
+for that symbol.</p>
+<blockquote>
+<p>The list covers <strong>today only</strong> and resets overnight. There is no history.</p>
+<p><strong>No alert can tell a buy from a sell</strong> — Schwab publishes no options tape. Read
+every row as "something large happened here", then use price and gamma to decide
+direction.</p>
+</blockquote>
 <h2 id="cross-page-actions">Cross-page actions</h2>
 <p>Three buttons appear on signal rows across the Options section:</p>
 <table>
@@ -621,41 +730,107 @@ Captured signals do <strong>not</strong> add to the Rescue nav badge (that count
 </tbody>
 </table>
 <hr />
-<h1 id="sentiment">Sentiment</h1>
-<h2 id="sentiment-dashboard">Sentiment dashboard</h2>
-<p><strong>Route:</strong> <code>/sentiment</code>.</p>
-<p>A market-mood overview that updates on its own (about every two minutes) whether or
-not the page is open.</p>
+<h1 id="trend-sentiment">Trend &amp; Sentiment</h1>
+<p>Six tabs, running from the widest lens to the narrowest.</p>
+<h2 id="market-dashboard">Market Dashboard</h2>
+<p><strong>Route:</strong> <code>/market</code>. The group's first tab, so clicking <strong>Trend &amp; Sentiment</strong> in
+the rail lands here.</p>
+<p>A live wall of about 48 macro instruments in framed panels — volatility, options
+sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
+ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p>
 <ul>
-<li><strong>Two Market Sentiment gauges</strong> — <strong>Today</strong> and <strong>30-Day Average</strong> — showing a
-  0–10 contrarian composite (higher = more fear/opportunity), with a regime label.</li>
-<li><strong>Two Market Trend gauges</strong> — <strong>Today</strong> (live intraday) and <strong>30-Day</strong>
-  (structural) — a directional 0–100 trend score. A press-and-hold <strong>Trend Detail</strong>
-  popup breaks the score into Price / Breadth / Sector / VIX sub-scores.</li>
-<li>A <strong>component breakdown</strong> (press-and-hold popup): each component's value, score,
-  weight, and confidence.</li>
-<li>A <strong>2×2 signal matrix</strong> (Bias / Signal / Yesterday / Change) over a traffic-light
-  background.</li>
-<li>A collapsible <strong>30-Day History</strong> chart with rolling averages.</li>
-<li>A full-width <strong>Sector &amp; Industry Performance</strong> table — 11 sectors with Day / Week
-  / Month %, Put/Call, and an RRG reading; each sector <strong>expands</strong> into its
-  industries. A rotation banner and a green/cap-weighted/score summary sit above it.</li>
-<li>A status bar (Updated / Next / Sectors / Proxy).</li>
+<li><strong>Tile colour means risk-on (green) / risk-off (red) / no data (grey)</strong>, not
+  simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
+  shade <strong>red when they rise</strong>.</li>
+<li>Four frames — <strong>Top 10</strong>, <strong>Sector SPDR</strong>, <strong>Thematic</strong> and <strong>Countries</strong> —
+  re-order themselves by the day's move. Every other frame keeps its curated order
+  on purpose.</li>
+<li>The <strong>top rail</strong> carries a clock, an advancing/declining breadth meter, and an
+  <strong>A/B skin toggle</strong> that is remembered.</li>
+<li>Tiles <strong>flash</strong> when their value changes.</li>
 </ul>
-<p>Press <strong>Refresh</strong> for an immediate update.</p>
+<p>Updates about every 3 seconds during market hours, 15 seconds outside them, and 60
+seconds at weekends.</p>
+<h2 id="sentiment">Sentiment</h2>
+<p><strong>Route:</strong> <code>/sentiment</code>.</p>
+<p>The <strong>Market Regime Console</strong> — market mood and market character on one screen. It
+updates on its own about every two minutes whether or not the page is open; press
+<strong>Refresh</strong> to force it.</p>
+<ul>
+<li><strong>Market Sentiment ring</strong> — a 0–10 <strong>contrarian</strong> composite (higher = more fear,
+  historically the better environment to sell premium), drawn as three arcs on one
+  dial: <strong>Day</strong>, <strong>Week</strong> (the last 5 sessions' average) and <strong>Month</strong> (the full
+  history's average). A <strong>Model confidence</strong> figure sits beneath it.</li>
+<li><strong>Market Trend ring</strong> — the same three horizons for direction, 0–100, where 50 is
+  neutral. The Day reading carries a five-state label — <strong>Bull / Weak Bull /
+  Neutral / Resilient / Bear</strong> — and a plain-English suggestion.</li>
+<li><strong>Signals</strong> — four tiles (Bias / Signal / Yesterday / Change) with rate-of-change
+  readings and a divergence line beneath.</li>
+<li><strong>Regime block</strong> — which of five regimes the tape is in (<strong>Balanced</strong>,
+  <strong>Trending</strong>, <strong>Breakout</strong>, <strong>Whipsaw</strong>, <strong>Stressed</strong>), a confidence figure,
+  diagnostic tags, and a table ranking all five by share with their change since
+  the open. Trending and Breakout also carry a direction word (<em>Rallying</em>,
+  <em>Retreating</em>, <em>Breakdown</em> and so on).</li>
+<li><strong>Components</strong> and <strong>Trend Detail</strong> — press and hold either for a full breakdown.</li>
+<li><strong>Daily Sentiment &amp; Trend</strong> — two intraday graphs over the last five trading days.</li>
+</ul>
+<blockquote>
+<p><strong>An arc drawn as a plain track with an em-dash means "no usable reading", not
+zero.</strong> Likewise a regime of <strong>Unclear</strong> means the evidence is genuinely weak.
+The app prefers to say nothing over stating a confident wrong number.</p>
+<p><strong>Read the LEAD figure in the regime footer.</strong> It is the leader's margin over the
+runner-up. A 10-point lead is a real reading; a 0.2-point lead means the headline
+was very nearly a coin toss.</p>
+</blockquote>
+<h2 id="sector-industry">Sector &amp; Industry</h2>
+<p><strong>Route:</strong> <code>/sentiment/sectors</code>.</p>
+<p>A performance table for the eleven S&amp;P sectors, each expandable into its
+industries.</p>
+<ul>
+<li><strong>Day / Week / Month %</strong>, a <strong>P/C</strong> (put/call) reading, and an <strong>RRG</strong> quadrant
+  per sector.</li>
+<li><strong>Click a row</strong>, or use <strong>Expand All</strong> / <strong>Collapse All</strong>, to see industries.</li>
+<li>A summary line above the table gives the percentage of sectors green, the
+  cap-weighted move, a 0–10 score, and the <strong>cyclical-versus-defensive</strong> spread with
+  the day's leaders and laggards.</li>
+</ul>
 <h2 id="sector-rotation">Sector Rotation</h2>
 <p><strong>Route:</strong> <code>/sentiment/rotation</code>.</p>
-<p>A Relative-Rotation-Graph (RRG) view of the 11 sectors against the S&amp;P 500.</p>
+<p>Which sectors money is rotating into and out of, measured against SPY.</p>
 <ul>
-<li>A <strong>headline</strong> — Risk-ON / Risk-OFF, an assessment line, and the cyclical-vs-
-  defensive spread.</li>
-<li><strong>Rotating From / Into</strong> columns showing which sectors are leaving and entering
-  leadership, with each sector's S&amp;P weight.</li>
-<li>A <strong>quadrant map</strong> table sorted by momentum.</li>
-<li>A full-width <strong>RRG scatter</strong> with one "meteor-tail" trail per sector (a faded
-  history line plus a bright current dot). Hovering a sector dims the others.</li>
+<li>A <strong>headline</strong> — Risk-ON / Risk-OFF, an assessment line, and the
+  cyclical-versus-defensive spread shown against the ±1.5 threshold it had to clear.</li>
+<li>A <strong>quadrant map</strong> table sorted by momentum, with <strong>RS-Ratio</strong> (relative strength)
+  and <strong>RS-Mom</strong> (its rate of change) for each sector.</li>
+<li><strong>Rotating From / Into</strong> columns, with each sector's <strong>S&amp;P weight</strong> — which is what
+  tells you whether a rotation is material.</li>
 </ul>
 <p>This page refreshes <strong>only when you press Refresh</strong>.</p>
+<h2 id="rrg">RRG</h2>
+<p><strong>Route:</strong> <code>/sentiment/rrg</code>.</p>
+<p>The same rotation data drawn as a Relative Rotation Graph: a full-width scatter with
+one "meteor-tail" trail per sector — a faded history line plus a bright current dot.
+Hovering a sector dims the others.</p>
+<p>Top-right is <strong>Leading</strong>, bottom-right <strong>Weakening</strong>, bottom-left <strong>Lagging</strong>,
+top-left <strong>Improving</strong>; sectors tend to rotate clockwise. Refresh-only, like Sector
+Rotation.</p>
+<h2 id="momentum">Momentum</h2>
+<p><strong>Route:</strong> <code>/sentiment/momentum</code>.</p>
+<p>A momentum screen across three levels — sectors, about 70 industry ETFs, and 311
+stocks. <strong>Recomputed once nightly at 16:20 CT</strong>, not live, because it is built on
+daily bars.</p>
+<ul>
+<li><strong>Read the banner first.</strong> <em>Favorable</em> means trending conditions. <em>Neutral</em> means
+  chop. <strong>Suppressed</strong> means momentum-crash risk, and the leaderboard dims — that is
+  the app telling you not to chase.</li>
+<li>A <strong>quadrant scatter</strong> (score against acceleration), a <strong>rank ribbon</strong> over recent
+  sessions, and <strong>top/bottom-15 leaderboards</strong> exposing every component.</li>
+<li><strong>Align</strong> shows three blocks — sector, industry, stock — filled when each is in its
+  top quartile. Three filled blocks is the highest-conviction row on the page.</li>
+<li>The footer counts <strong>excluded</strong> symbols, so a delisted or renamed ticker becomes
+  visible instead of silently vanishing.</li>
+</ul>
+<p>Use the dropdown to switch between industries and stocks.</p>
 <hr />
 <h1 id="trade">Trade</h1>
 <p><strong>Route:</strong> <code>/trade</code>.</p>
@@ -717,22 +892,49 @@ not the page is open.</p>
 </ul>
 <p>P&amp;L streams live tick-by-tick; press <strong>Refresh</strong> to rebuild sectors and grades.</p>
 <hr />
-<h1 id="driver">Driver</h1>
+<h1 id="claude-trades">Claude Trades</h1>
 <p><strong>Route:</strong> <code>/driver</code>.</p>
-<p>The morning trading agent's <strong>order-approval queue</strong>. Orders are <strong>simulated</strong>
-(paper) — nothing is sent to a live brokerage account from here.</p>
+<p>An <strong>autonomous paper options trader</strong>. Claude selects and sizes defined-risk credit
+spreads from the scanner's output, and code-enforced guardrails cap the risk.
+Everything is <strong>paper</strong> — nothing is ever sent to a live brokerage account.</p>
+<blockquote>
+<p>The old <strong>order-approval queue</strong> — where a morning agent proposed trades for you
+to APPROVE or SKIP — was removed in July 2026. This page is now purely a monitor
+with a stop button.</p>
+</blockquote>
+<p><strong>Controls:</strong></p>
 <ul>
-<li><strong>Run morning agent</strong> grades the day and proposes trades; <strong>Refresh
-  performance</strong> rebuilds the performance view.</li>
-<li>When a run is pending you'll see a <strong>grade card</strong>, a <strong>conditions strip</strong> (VIX,
-  SPX, VIX1D, P&amp;L today/week), and <strong>proposed-trade cards</strong> (bucket, structure,
-  instrument, strikes, contracts, max risk, ML signal/confidence).</li>
-<li><strong>APPROVE</strong> (behind a confirmation dialog) executes the proposed trades as
-  simulated orders; <strong>SKIP</strong> declines them.</li>
-<li>A <strong>Performance</strong> section shows win rate, realized P&amp;L, and a per-trade table.</li>
+<li><strong>Autonomous</strong> — enable or disable the trader.</li>
+<li><strong>Run now</strong> — fire one decision checkpoint immediately.</li>
+<li><strong>STOP</strong> (confirm-gated) — halt new entries for the rest of the day. Open
+  positions continue to be managed and closed.</li>
 </ul>
-<p>The morning run also fires automatically once each weekday at <strong>09:28 ET</strong> — you
-just approve or skip the result.</p>
+<p><strong>What you see:</strong></p>
+<ul>
+<li><strong>Tiles</strong> — Day P&amp;L against the day's target, Session P&amp;L, Realized, Open P&amp;L,
+  Equity, and the open-position count.</li>
+<li><strong>Open positions</strong> and a <strong>decision log</strong> (newest first, in CT) recording each
+  checkpoint's reasoning and a one-line market-context summary.</li>
+<li>A <strong>Performance scorecard</strong> — trades, win rate, realized and total P&amp;L, average
+  win and loss, <strong>profit factor</strong>, best and worst trade, plus P&amp;L broken down by
+  symbol and by strategy.</li>
+<li>A <strong>Performance</strong> view listing closed trades with their exit reason (<em>Target hit</em>,
+  <em>Delta stop</em>, <em>Time stop</em>, <em>Money stop</em>).</li>
+</ul>
+<p><strong>When it runs:</strong> a 09:28 ET morning checkpoint, then every 30 minutes within an
+entry window of <strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
+so the structure is readable, and no <em>new</em> entries are taken in the last half hour.
+Open positions are re-priced every minute during market hours regardless.</p>
+<blockquote>
+<p><strong>The daily target is not fixed.</strong> The base is $500, ratcheted against the
+month-to-date pace — as high as $1,000 when behind, as low as $250 when ahead. A
+$1,500 daily loss halts new entries outright.</p>
+<p><strong>"Executed" in the decision log means the order was enqueued, not filled.</strong> A
+trade can be logged as executed and then rejected by the risk guardrails; the real
+outcome is in the account view.</p>
+<p><strong>Enabling autonomy spends Claude API credit</strong> on every checkpoint. The running
+count is on the Settings page.</p>
+</blockquote>
 <hr />
 <h1 id="reports-system">Reports &amp; System</h1>
 <h2 id="eod-report">EOD Report</h2>
@@ -753,7 +955,7 @@ just approve or skip the result.</p>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
 <li>A <strong>component grid</strong> — Memurai, the Schwab gateway, <strong>Schwab Authorization</strong>, the
-  five services, and the web app itself, each with Online/Offline and its tier.</li>
+  six services, and the web app itself, each with Online/Offline and its tier.</li>
 <li>A <strong>Schwab Authorization</strong> card with an <strong>Authorize</strong> button that opens the
   gateway's OAuth login in a new tab (use this if your Schwab token has expired).</li>
 <li>A <strong>data-freshness</strong> table showing each domain's latest update age, flagging
@@ -762,26 +964,49 @@ just approve or skip the result.</p>
   seconds and on demand.</li>
 </ul>
 <h2 id="settings">Settings</h2>
-<p><strong>Route:</strong> <code>/settings</code> (under <strong>More</strong>).</p>
-<p>Preferences for the alert system (saved on your machine, no login):</p>
+<p><strong>Route:</strong> <code>/settings</code> — a standalone item at the <strong>foot of the rail</strong>, with System
+Status and Stop All Services.</p>
+<p>Preferences, all saved on your machine (there is no login):</p>
 <ul>
-<li><strong>Scanner Alerts</strong> — enable the audio alert, pick the sound (chime / bell /
+<li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
   hours</strong> toggle, and a <strong>minimum score to alert</strong>.</li>
-<li><strong>Desktop Notifications</strong> — enable desktop notifications and grant the browser
-  permission.</li>
+<li><strong>Desktop notifications</strong> — enable them and grant the browser permission.</li>
+<li><strong>Flow alerts</strong> — whether put/call premium crossovers and unusual activity alert
+  you.</li>
+<li><strong>Captured trade auto-management</strong> — whether captured signals are actively
+  managed (break-even stop after +50%, deferred delta cuts on recoverable trades,
+  auto-close on the exit rules). Off leaves them advisory.</li>
+<li><strong>Manual paper: break-even lifecycle (experimental)</strong> — opts the manual paper
+  account into that same lifecycle instead of taking profit at +50% immediately.
+  The autonomous driver's account is never affected by this toggle.</li>
+<li><strong>Market summary ticker</strong> — the scrolling bar at the bottom of every page, with a
+  speed setting.</li>
+<li><strong>Appearance</strong> — every colour, font and menu style, in seven tabs. <strong>Save &amp;
+  restart web GUI</strong> applies the change; <strong>Reset to defaults</strong> is confirm-gated.</li>
+<li><strong>API usage</strong> — how many calls the app has made to <strong>Schwab</strong> (counted at the
+  gateway) and to <strong>Claude</strong> (counted at each call site), for today, the last 7 days
+  and the last 30.</li>
+<li><strong>Maintenance</strong> — <strong>Vacuum GEX history DB</strong> compacts the intraday options
+  database and reports the before-and-after size.</li>
 </ul>
 <blockquote>
 <p>Clicking <strong>Test sound</strong> also unlocks browser audio for the session.</p>
+<p><strong>Turning the ticker off also stops the Claude calls behind it</strong>, so it is a cost
+control as well as a display setting.</p>
+<p><strong>Run Vacuum after hours.</strong> It locks the database for minutes, and the tool
+refuses to run while the collector is active.</p>
 </blockquote>
-<p>The <strong>Settings</strong> nav entry is also a small sub-group: click its caret to reveal
-<strong>User Manuals</strong>, which opens this User Guide and the Technical / API references in
-your browser.</p>
+<p><strong>User Manuals</strong> is no longer nested under Settings — it is a tab in the <strong>More</strong>
+group, next to EOD Report.</p>
 <h2 id="user-manuals">User Manuals</h2>
-<p><strong>Route:</strong> <code>/manuals</code> (nested under <strong>Settings</strong> in the <strong>More</strong> group).</p>
-<p>A simple index that links the three manuals — each opens in a new browser tab:</p>
+<p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used
+to be nested under Settings; it is now a peer tab.)</p>
+<p>A simple index that links the four manuals — each opens in a new browser tab:</p>
 <ul>
 <li><strong>User Guide</strong> — how to use the app (this document).</li>
+<li><strong>Reference Guide</strong> — what each tab and sub-tab is for, why it matters and when to
+  open it, starting from a one-page summary of the whole app.</li>
 <li><strong>Technical Reference</strong> — the math behind every number.</li>
 <li><strong>API / Developer Reference</strong> — the integration surface for developers.</li>
 </ul>
@@ -789,7 +1014,7 @@ your browser.</p>
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><strong>Route:</strong> <code>/terminate</code> (under <strong>More</strong>).</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
-(behind a confirmation) stops the gateway, the five services, and the web app.</p>
+(behind a confirmation) stops the gateway, the six services, and the web app.</p>
 <blockquote>
 <p><strong>This also stops the page you're on</strong> — it will become unresponsive right after
 you confirm, by design. Memurai is left running. Re-launch with <code>start_all.bat</code>

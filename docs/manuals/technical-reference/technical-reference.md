@@ -215,15 +215,28 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 |---------|------|------|
 | schwab-proxy | 8100 | Schwab auth/token manager + market-data gateway. Start first. |
 | Memurai (Redis) | 6379 | Cache, pub/sub, command streams. |
-| sentiment_svc | 8210 | Sentiment composite, trend, rotation. |
-| options_svc | 8211 | Scans, paper trading, gamma, calculator, simulator, expected move. |
+| sentiment_svc | 8210 | Sentiment composite, trend, market regime, rotation, nightly momentum cascade. |
+| options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
-| trade_svc | 8213 | On-demand single-symbol analysis. |
-| driver_svc | 8214 | Morning order-approval pipeline. |
-| market_svc | 8215 | Live macro-ticker Market Dashboard (~2 s RTH poll). |
+| trade_svc | 8213 | On-demand single-symbol analysis + deep dive. |
+| driver_svc | 8214 | Autonomous decision layer (Claude + pure-code guardrails). |
+| market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
 | webgui | 8500 | The web UI. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
+
+> **These are the *prod* profile.** A **dev** checkout offsets the `[services]`
+> ports to 9210–9215 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
+> and starts **no proxy of its own** — it borrows prod's on 8100, because the Schwab
+> OAuth refresh token is a single rotating credential that two proxies would
+> invalidate for each other. Identity comes from the gitignored
+> `config/env.local.toml`; a missing marker resolves to prod. See
+> `docs/dev-prod-environments.md`.
+
+> **`driver_svc` no longer runs a morning order-approval pipeline.** That queue and
+> its `claude-driver` engine were removed in July 2026. The service now runs
+> autonomous checkpoints whose output is a command on `cmd:options`; the risk
+> clamping is pure code in `guardrails.py`, never the model.
 
 ## Data flow (one request)
 
@@ -514,6 +527,71 @@ otherwise                                               -> range
 
 `commit_state` requires the raw state to repeat for `HYSTERESIS_DAYS` before
 flipping. Confidence: 0.0 below 50 bars, 0.5 from 50–200, 1.0 at ≥200 bars.
+
+## Blended market regime (the Market Regime Console)
+
+**File:** `sentiment-dashboard/scoring/market_regime.py`. Published to
+`cache:sentiment:regime` + `:regime_history` every **5 min** in market hours.
+
+This is a **different** classifier from the daily state machine above. It is a
+five-member simplex — every regime holds a *share* of the current tape, and the
+"label" is simply the largest share.
+
+**Display names versus internal keys.** The names were changed for display in
+August 2026; **the keys were not**, because they are the `RegimeState` contract,
+the `regime_intraday` DB columns and the driver packet.
+
+| Key (contract, DB, logs) | Displayed as | Why the name changed |
+|---|---|---|
+| `mean_reversion` | **Balanced** | All five of its inputs say price is *at* its mean. Nothing measures an extreme, so the old name promised a fade the model never tested — and it was the only name naming a *strategy* rather than the tape. |
+| `trending` | **Trending** | unchanged |
+| `breakout` | **Breakout** | unchanged |
+| `choppy` | **Whipsaw** | Same "not trending" axis as Balanced; what distinguishes it is *energy* (high ATR with low ADX, failed breaks, two-sided wicks). Balanced/Whipsaw carries that contrast; Mean-Reversion/Choppy did not. |
+| `crisis` | **Stressed** | `VIX_STRESS_LO` is 22 and the fast-attack fires near VIX 30 — stress, not crisis. "Volatile" was also rejected: it equally describes breakout and whipsaw days. |
+
+`REGIME_DISPLAY` in that module is the source. The mapping is **duplicated in four
+tiers** (`webgui/pages/sentiment.py`, `driver_svc/compute.py`,
+`options_svc/market_snapshot.py`) because none of those may import the package —
+Tier 1 takes no engine imports, and the services would hit the documented
+cross-app `scoring` name collision. Keep them in step.
+
+### The direction axis
+
+`trending` and `breakout` additionally render a direction word — **Rallying** /
+**Firming** (up), **Retreating** / **Softening** (down), **Breakdown**. Balanced,
+Whipsaw and Stressed are directionless by construction.
+
+```
+DIRECTION_SLOPE_DEADBAND = EMA_TREND_LO          # 0.05, the trending ramp's own floor
+DIRECTION_TREND_DEADBAND = 3.0                   # points either side of the 50 neutral
+DIRECTION_STRONG_SLOPE   = 0.5 * (EMA_TREND_LO + EMA_TREND_HI)   # Rallying vs Firming
+```
+
+**This is a label adornment, not a sixth regime.** The intensity maths stays
+sign-blind (`ramp(abs(slope), …)`) — "is this a trend day" is answered identically
+up or down. Splitting `trending` would need a DB column, a chart series and a
+contract change, and would tear the membership across two bins when the slope flips
+mid-session, defeating the blended model.
+
+**How the contradiction risk is avoided — the load-bearing part.** The app has two
+independent direction reads: this module's signed `ema_slope_atr` (SPY price,
+5-minute) and the Market Trend composite (price + breadth + sector + VIX,
+15-minute, hysteresis-committed). They diverge on a real condition — the index up
+on narrow leadership while breadth is negative — so a word taken from either alone
+can contradict the other panel.
+
+`direction_sign` therefore names a direction **only when both agree past their
+deadbands**; otherwise the neutral base label renders. `commit_direction` is
+deliberately **asymmetric**: two consecutive reads to *claim* a direction, one to
+drop back to neutral — never keep asserting a direction the evidence stopped
+backing.
+
+Two rendering rules follow from this and are easy to get wrong:
+
+1. The stacked/ranked panel's **series names stay the base words**. A legend that
+   renames itself intra-session destroys the reading position that makes it legible.
+2. The headline **colour follows the direction** for the two directional regimes,
+   because a fixed green would paint "Retreating" as though it were bullish.
 
 ---
 
@@ -1182,6 +1260,44 @@ advisory-only** (no paper position to mutate).
 
 ---
 
+# Known issues
+
+Documented defects a maintainer should know about before trusting a number. These
+are recorded rather than silently carried.
+
+## The PRICE sub-score NaN exposure (open)
+
+`sentiment_svc/compute._finite_pcts` guards only the **sector** input. An all-NaN
+read of the structural price inputs (`macd_hist` / `rsi` / `adx`, feeding
+`score_price` with a hardcoded `vwap_pct = 0.0`) scores **82.50 — near-maximum
+bullish — at unchanged confidence**, where a sane read of the same tape scores
+**56.25**. The same all-NaN read in `compute_intraday_trend`, which drives the
+**live Day gauge**, scores **92.50**.
+
+The failure is silent: nothing in the payload marks the inputs as missing, so the
+gauge renders a confident bullish number built on nothing. A fix must cover **both
+call sites with one shared filter** — patching only `score_price` leaves the live
+gauge wrong.
+
+**Until it is fixed**, treat a strongly bullish structural reading with
+*unremarkable* confidence as suspect, and cross-check against the Market Dashboard.
+
+## Expected Move deliberately disagrees with ThinkorSwim
+
+Not a defect — a definitional difference that has been measured and is documented
+in full under *Expected move and IV analysis*. Two independent differences push in
+opposite directions and **nearly cancelled on the one symbol they were measured on**,
+which is luck rather than calibration. Do not "fix" either number to match a broker
+without first deciding which definition is wanted; the same `atm_iv` also sizes the
+drawn cone.
+
+## Index open interest reads zero after hours
+
+`$SPX` and `$NDX` report zero open interest overnight, which yields all-zero GEX
+grids and arbitrary wall levels. Index gamma is only meaningful during the session.
+
+---
+
 # Constants Appendix
 
 A consolidated table of the load-bearing constants. The cited file governs.
@@ -1207,13 +1323,30 @@ A consolidated table of the load-bearing constants. The cited file governs.
 
 ## Service cadences
 
+All windows are US Central and gate on a trading day. The constants named below are
+the source; this table is a summary of them.
+
 | Service | Cadence |
 |---------|---------|
-| sentiment_svc | Composite refresh every 120 s; trend recompute gated to 15 min; rotation at startup / on demand. |
-| options_svc | Auto-scan 15-min slots (08:00–15:15 CT); GEX collect 2-min slots (08:30–15:20 CT); paper auto-manage every 5 min in market hours; header tick each 30 s (skip-unchanged). |
-| portfolio_svc | Live SSE ticks; throttled publish ≤ every 2 s; full rebuild every 10 min or on demand. |
+| sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **driver** paper auto-manage every **1 min** (`_MANAGE_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
+| portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | On-demand only (no scheduler). |
-| driver_svc | Morning run once/day at 09:28 ET; perf refresh ≈ every 5 min. |
+| driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoint at 09:28 ET then every 30 min inside the **09:45–15:30 ET** entry window (`checkpoint_due`). |
+| market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); Claude summary every **40 min** RTH / **60 min** off-hours (`SUMMARY_RTH_SEC`, `SUMMARY_OFFHOURS_SEC`). |
+
+> **Two cadences are easy to state wrongly, because they used to be the same
+> number.** The **driver's** isolated paper account re-prices every **1 minute**
+> (raised from 5 in July 2026 so its stops react within the minute and the −$1,500
+> loss-halt read stays fresh). The **manual** paper account moved the other way, to
+> an **hourly** top-of-the-hour cycle. They are different books on different clocks.
+
+> **The GEX collection interval is 1 minute, not 2.** The serial per-symbol chain
+> fetch was measured dropping roughly 37% of its slots; fetching in a small pool
+> (`POLL_FETCH_WORKERS = 6`) and launching scheduler branches as keyed background
+> tasks fixed it. A 2-minute figure also silently corrupted the flow-alert spike
+> detector, which compares volume increments and reads a 2-minute delta as roughly
+> twice baseline.
 
 ## Commissions
 
