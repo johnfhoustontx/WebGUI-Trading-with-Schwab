@@ -138,13 +138,10 @@ open migration item. Full design:
 `webgui/main.py` is the server + nav shell (**sub-menus are TABS** since
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
-the drawer FOOT 2026-08-12**): the left drawer is a **FLAT main menu** of **13
-items** — one per group (**Options**, **Strategy Tools**, **Market Trend &
-Sentiment**, **More**), the **three standalone `OPTIONS_RAIL` pages** that sit
-directly under the Options group (**Dealer Positioning**, **Opportunity Board**,
-**Flow Alerts**), the flat Trade Analyzer / Portfolio / Claude Trades items, and
-a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**, **Stop All
-Services**, **Settings**) — and the active group's
+the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
+the left drawer holds **13 items** — 10 in three captioned sections plus a
+bottom-pinned **`SYSTEM_RAIL`** block (**System Status**, **Settings**, **Stop
+All Services**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with
 `.compact-tabs` small padding — q-tab min-height 30px — clicking a tab
@@ -158,32 +155,80 @@ a step in any analysis workflow). They render like `OPTIONS_RAIL` (standalone
 which eats the leftover column height so the block sits on the bottom edge —
 note `mt-auto` + `my-*` on one element fight over `margin-top`, so the separator
 uses `mb-2`. **Settings therefore no longer owns User Manuals** as a sub-page;
-`SETTINGS_CHILDREN` survives as a More tab, a peer of EOD Report. **Market Dashboard is the FIRST tab of the Market Trend &
+`SETTINGS_CHILDREN` survives as a More tab, a peer of EOD Report. **Market Dashboard is the FIRST tab of the Trend &
 Sentiment group** (it was a flat item until 2026-07-27), and since
 `_nav_group_link` navigates to `children[0]`, that group's rail item lands on
 `/market`.
 
-**The drawer is a 64px ICON RAIL that expands to 248px on hover and OVERLAYS
-the page.** It is LAID OUT at `NAV_WIDTH_RAIL=64` via Quasar's `width` prop
-(`drawer_width(pinned)` → 64, or `NAV_WIDTH_OPEN=248` when pinned — `ui.left_drawer`
+**The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
+`NAV_SECTIONS` is a list of `(caption, entries)` — **MARKETS** (Dealer
+Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
+(Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
+(Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
+standalone rail page (`_nav_link`). Entries reference their group/page **by name**
+via `_sec_group`/`_sec_page`, so `_NAV_GROUPS` / `OPTIONS_RAIL` / `FLAT_NAV` stay
+the single source of every label + icon and **a typo raises at import** rather
+than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
+(it is now just the flat-route registry `_NAV_LABEL` iterates). Caption counts are
+**derived** from `len(entries)` — never written down. The sentiment group renamed
+**"Market Trend & Sentiment" → "Trend & Sentiment"** now the MARKETS caption
+carries the word. ⚠ The Options group sits under STRATEGY while Dealer Positioning
+/ Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are
+market-WIDE reads, the Options group is the per-signal find → analyze → track →
+repair workflow. `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
+is the guard that matters: a regrouping that drops or doubles an item is invisible
+to every other test. **Stop All Services** is now a **danger-outlined button**
+(`_nav_danger_link`) sitting LAST in `SYSTEM_RAIL` (`SYSTEM_DANGER_ROUTE`) — the
+one irreversible item in the rail, moved out from between System Status and
+Settings so an overshoot can't land on it. A **live service-status card**
+(`_status_card` / PURE `status_card_facts`) sits above that block: it reads the
+throttled `/health` fan-out the watcher ALREADY runs (no new probe; latency is the
+mean of services that ANSWERED — a timed-out probe would report the failure, not
+the feed) and its warning count **IS** `len(alerts.unhealthy_keys(...))`, the same
+computation behind the System Status badge, so the two cannot drift. No probe data
+→ **"unknown"**, never a confident "Data feed live"; a bus outage resets it via
+`_guarded_compute` rather than stranding the last good reading. The card is
+**display:none** in the rail (not faded — it must surrender its height too).
+
+**The drawer is a 68px ICON RAIL that expands to 264px on hover and OVERLAYS
+the page.** It is LAID OUT at `NAV_WIDTH_RAIL=68` via Quasar's `width` prop
+(`drawer_width(pinned)` → 68, or `NAV_WIDTH_OPEN=264` when pinned — `ui.left_drawer`
 has **no `width` kwarg**, so it goes through `.props(f"width={...}")`), and
 `_NAV_CSS` widens it on hover/`:focus-within` with
-`.q-drawer:has(> .nav-drawer:not(.nav-pinned))` → `width: 248px !important`.
-**Quasar's LAYOUT still uses 64, so `.q-page-container`'s padding never changes —
+`.q-drawer:has(> .nav-drawer:not(.nav-pinned))` → `width: 264px !important`
+(**interpolated from `NAV_WIDTH_OPEN`** since 2026-08-16 — that one rule is
+appended to `_NAV_CSS` as its own f-string, since the main block is a plain
+literal whose CSS braces would otherwise all need escaping).
+**Quasar's LAYOUT still uses 68, so `.q-page-container`'s padding never changes —
 the expanded menu OVERLAYS content rather than reflowing it.** That is deliberate:
 this app's Highcharts have no ResizeObserver, so a reflow on every hover would
 leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
 only the icon is visible when collapsed, **the icon is the affordance** (the
 `icon` arg is live again — the earlier colored-dot indicator is retired; a test
-guards that the 7 drawer icons stay non-empty + mutually distinct). Labels/title
+guards that the 13 drawer icons stay non-empty + mutually distinct). Labels/title
 clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
-248px of content raising a scrollbar in the rail. The **hamburger pins/unpins**
+264px of content raising a scrollbar in the rail. **Section captions cross-fade to
+HAIRLINES in the rail** (2026-08-16): `.nav-sep` is the exact INVERSE of the
+`.nav-title` opacity rule — visible by default, hidden under the same three
+"drawer is open" selectors — with both absolutely placed inside ONE fixed-height
+`relative` box (`_nav_section_header`), so neither state reflows the other. The
+**hamburger pins/unpins**
 (`_toggle_pin`, persisted in `app_settings` `nav_pinned`, default False) rather
-than show/hide: pinned lays out at 248 (the page genuinely reflows — correct for
+than show/hide: pinned lays out at 264 (the page genuinely reflows — correct for
 an explicit choice) and the `.nav-pinned` class opts out of the hover rule. The
 **active-icon accent** is `.nav-drawer .nav-active .nav-icon` — 3 classes +
 `!important`, which it must be to out-specify `theme.build_nav_css`'s
-`[menu].text` rule (see the gotchas). Per-page alert badges **float on the tabs**
+`[menu].text` rule (see the gotchas). ⚠ **THREE more rail colours need the same
+treatment, and all three shipped broken until a live browser caught them
+(2026-08-16)** — a Tailwind `text-[#…]` is ONE class with no `!important`, so it
+loses both to `build_nav_css`'s `.nav-drawer a{color:…!important}` and to
+`_NAV_CSS`'s own 3-class `.nav-drawer .nav-active .nav-label`. Measured: the
+danger button's LABEL rendered menu-grey `rgb(152,161,192)` (its icon was fine —
+that one already had the rule), and the static **AI** pill rendered white
+`rgb(238,241,246)` on the ACTIVE row, the only row it ever appears on. Hence
+`.nav-drawer .nav-danger .nav-icon, .nav-drawer .nav-danger .nav-label` and
+`.nav-drawer .nav-pill`, each `!important`. **The rule: any colour you set on a
+rail element needs ≥3 classes + `!important`, or it is decorative only.** Per-page alert badges **float on the tabs**
 (`_badge_refs`) and, in the drawer, on each **icon's top-right corner** (Quasar
 `floating` on a `relative` wrapper — so a collapsed rail still reports counts);
 each drawer group item carries the **SUM of its children's badges**

@@ -4,7 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-15 (**Options Flow redesign — Premium Divergence + Flow Field.** The
+**Last updated:** 2026-08-16 (**Nav rail + top bar — the NEURALSTRIKE design ported.** A supplied
+design set (`Menu.dc.html` 264x764, `Menu Collapsed.dc.html` 68x764, `Top Bar.dc.html` 1400x56)
+ported into the NiceGUI shell. Design: [design](plans/2026-08-16-nav-topbar-redesign-design.md).
+- **The rail's order became DATA.** It used to be implicit in the sequence of render calls inside
+  `_layout`, so reordering the menu meant editing render code. `NAV_SECTIONS` now holds three
+  captioned sections — **MARKETS** (Dealer Positioning · Opportunity Board · Flow Alerts · Trend &
+  Sentiment) · **STRATEGY** (Strategy Tools · Options · Trade Analyzer · Claude Trades) ·
+  **ACCOUNT** (Portfolio · More) — whose entries reference their group/page **by name**, so
+  `_NAV_GROUPS`/`OPTIONS_RAIL`/`FLAT_NAV` stay the single source of every label + icon and a typo
+  raises at import instead of silently dropping a page from the menu. Caption counts are DERIVED
+  from `len(entries)`. All ten rail entries survive; the sentiment group renamed **"Market Trend &
+  Sentiment" → "Trend & Sentiment"**. ⚠ Options sits under STRATEGY while Dealer Positioning /
+  Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are market-WIDE
+  reads, the Options group is the per-signal find → analyze → track → repair workflow.
+- **Geometry 64/248 → 68/264**, and the open width is now **interpolated from `NAV_WIDTH_OPEN`**
+  rather than duplicated as a CSS literal.
+- **Captions cross-fade to hairlines when collapsed** — `.nav-sep` is the exact inverse of the
+  existing `.nav-title` opacity rule, both absolutely placed in one fixed-height box so neither
+  state reflows the other. No JS, no second render path.
+- **Live footer status card, costing NO new probe.** It reads the throttled `/health` fan-out the
+  2 s watcher already runs, and its warning count **IS** `len(alerts.unhealthy_keys(...))` — the
+  same computation behind the System Status badge, so the two cannot drift apart. No probe data
+  renders as **"unknown"**, never a confident "Data feed live"; a bus outage resets it rather than
+  stranding the last good reading. Latency is the mean of services that ANSWERED, since a timed-out
+  probe would report the failure rather than the feed. `display:none` in the rail (not faded — it
+  must surrender its height too).
+- **Stop All Services became a danger-outlined button** and moved LAST in `SYSTEM_RAIL`: it is the
+  one irreversible item in the rail and should not sit where an overshoot from Settings lands.
+- **Breadcrumb moved to the LEFT** of the top bar behind a hairline, reading as a continuation of
+  the brand, with a `›` caret in place of the 4px dot; the market pill keeps the right edge alone.
+- **The design's ⌘K search pill and notification bell were deliberately NOT ported** — a palette
+  over ~26 route labels is real work for a rail one hover away, and the bell would duplicate the
+  System Status badge. Shipping them as decoration was rejected outright.
+- ⚠ **Three rail colours shipped broken and only a live browser caught them.** A Tailwind
+  `text-[#…]` is ONE class with no `!important`, so it loses both to `theme.build_nav_css`'s
+  `.nav-drawer a{color:<[menu].text>!important}` and to `_NAV_CSS`'s own 3-class
+  `.nav-drawer .nav-active .nav-label`. Measured: the danger button's label rendered menu-grey
+  `rgb(152,161,192)` (its icon was fine — that already had the 3-class rule), and the AI pill
+  rendered white `rgb(238,241,246)` on the ACTIVE row, the only row it ever appears on. Fixed with
+  a rule each; **the general rule is now in CLAUDE.md** — any colour on a rail element needs ≥3
+  classes + `!important` or it is decorative only.
+- **Tests: 1606 green** (was 1587 + 4 failing pinned invariants). Four updated — the group rename,
+  the geometry, the `NAV_SECTIONS`-scoped icon check, and the group-reachability guard that used to
+  count `_nav_group_link(` occurrences in `_layout`'s source (the drawer now LOOPS, so reachability
+  became a property of the data). Fifteen added, the load-bearing one asserting `NAV_SECTIONS` is a
+  **partition** — a regrouping that drops or doubles an item is invisible to every other test.
+- **Live-verified** on a spare port against the running stack: 68/264, derived counts, the
+  cross-fade inverting both ways, badges landing inside the rail, the card reading "6 services ·
+  8 ms" with its count equal to the System Status badge, and the breadcrumb rendering
+  "Trend & Sentiment › Sector Rotation".)
+
+**Prior — 2026-08-15** (**Options Flow redesign — Premium Divergence + Flow Field.** The
 `/options/gamma` **Flow** and **Net Prem** views are replaced by two dark-console panels built to a
 supplied spec, in the same visual system as the plasma heatmap. Design/plan:
 [design](plans/2026-08-15-options-flow-redesign-design.md) /
