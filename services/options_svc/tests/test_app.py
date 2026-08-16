@@ -62,10 +62,49 @@ def test_autoscan_due_logic():
     assert scheduler.autoscan_due(holiday, None)[0] is False
 
 
+# Every handler ``scheduler.loop`` can hand to an executor. Stubbed wholesale in
+# the loop test below — see there for why this list has to be complete.
+_BRANCH_HANDLERS = (
+    "refresh_paper_account", "refresh_paper_trades", "refresh_captured",
+    "publish_captured_closed", "refresh_gamma", "publish_gamma_symbols",
+    "publish_gex_status", "publish_gamma_briefing_index", "refresh_header",
+    "collect_gex_history", "refresh_gamma_current",
+    "run_driver_manage_and_refresh", "run_captured_manage_and_publish",
+    "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",
+    "run_action_alert", "run_eod_summary", "run_market_snapshot",
+)
+
+
 def test_scheduler_scans_when_due(monkeypatch):
-    """When the slot is due, the loop runs exactly one rescan before sleeping."""
+    """When the slot is due, the loop runs exactly one rescan before sleeping.
+
+    The stubbing and the executor drain below are NOT belt-and-braces — without
+    them this test leaks work into every test that follows it, and it did:
+
+    one iteration of the real loop launches up to ten branches, each handing a
+    handler to ``loop.run_in_executor``. Those run on THREADS. ``loop.close()``
+    calls ``shutdown(wait=False)``, so the threads keep going after this test
+    returns, executing real gamma / manage / paper work against the real DBs
+    while later tests run. ``test_captured_autoclose_e2e`` monkeypatches
+    ``signal_repricer.reprice_swing`` with a fixed-length iterator; a leaked
+    manage branch landing inside that window drains it, and the test fails on
+    ``StopIteration`` with a traceback pointing at code it never called.
+
+    That was latent for as long as the leak existed and surfaced when an
+    unrelated change made the gamma branch a few milliseconds slower — which is
+    exactly how much it took to shift the collision into the wrong test. A
+    pass/fail that depends on the timing of another test's background threads is
+    not a signal, so the leak is closed here rather than absorbed.
+
+    ``_BRANCH_HANDLERS`` must list EVERY handler the loop can submit: one
+    unstubbed name is one real branch running loose again.
+    """
     bus = Bus(fake=True)
     calls = []
+    for name in _BRANCH_HANDLERS:
+        monkeypatch.setattr(handlers, name, lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(handlers, "autoclose_enabled", lambda *a, **k: False,
+                        raising=False)
     monkeypatch.setattr(handlers, "rescan", lambda b: calls.append(b))
 
     # Fixed in-window weekday so the first iteration is always due.
@@ -83,6 +122,31 @@ def test_scheduler_scans_when_due(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             loop.run_until_complete(scheduler.loop(bus))
     finally:
+        # Wait for the executor threads BEFORE closing. close() only calls
+        # shutdown(wait=False), which returns while they are still running.
+        loop.run_until_complete(loop.shutdown_default_executor())
         loop.close()
 
     assert calls == [bus]
+
+
+def test_the_loop_test_leaves_no_branch_work_running():
+    """Guards the stub list above against the loop growing a new branch.
+
+    A branch added to ``scheduler.loop`` without its handler added to
+    ``_BRANCH_HANDLERS`` silently starts running for real again, and the damage
+    shows up as an unrelated test failing intermittently — the hardest kind to
+    attribute. Comparing against the source keeps that honest.
+    """
+    import pathlib
+    import re
+
+    src = pathlib.Path(scheduler.__file__).read_text(encoding="utf-8")
+    submitted = set(re.findall(r"handlers\.([a-z_]+)", src))
+    # ``autoclose_enabled`` is a gate read inline, not submitted; ``rescan`` is
+    # stubbed separately above because it is the one the test asserts on.
+    exempt = {"autoclose_enabled", "rescan"}
+    missing = submitted - exempt - set(_BRANCH_HANDLERS)
+    assert not missing, (
+        f"scheduler.loop can submit {sorted(missing)} but the loop test does "
+        f"not stub them — add them to _BRANCH_HANDLERS")
