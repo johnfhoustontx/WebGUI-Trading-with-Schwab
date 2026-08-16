@@ -447,9 +447,17 @@ def test_field_panel_falls_back_for_an_unmapped_symbol():
 
 
 def test_field_panel_pill_agrees_with_the_plotted_count():
+    """The pill's COUNT, which is what this has always been about. Its prefix is
+    no longer the constant "LIVE" — it now names the session the series came
+    from (see ``session_pill``), so the assertion pins the count alone."""
     rows = {"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]}
     html, _ = fp.field_panel(rows, ["SPY"], {}, "dollars", "fxf")
-    assert "LIVE · 1 SYMBOL<" in html          # singular, no stray "S"
+    assert "1 SYMBOL<" in html                 # singular, no stray "S"
+    assert "1 SYMBOLS" not in html
+
+    two = {"SPY": [(_T0, 1.0)], "QQQ": [(_T0, -1.0)]}
+    html2, _ = fp.field_panel(two, ["SPY", "QQQ"], {}, "dollars", "fxf")
+    assert "2 SYMBOLS<" in html2
 
 
 #############################################

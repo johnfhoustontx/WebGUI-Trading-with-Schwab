@@ -2271,10 +2271,18 @@ def render():
             # Premium Divergence console panel — the call/put ribbon, the strike
             # ladder and the readout rail, full width (no heatmap). A raw ui.html
             # fragment rather than a Highcharts figure; see flow_panels.
+            # ``session_dte`` is the tenor the SERIES was collected against;
+            # ``dte`` is the live chain's and describes right now. They agree
+            # during market hours and diverge the moment the page outlives its
+            # session — over a weekend the panel shows Friday's 0DTE-dominated
+            # series while the live read says 2DTE. Falls back to ``dte`` for a
+            # snapshot published before options_svc carried the new field.
+            _sdte = snap.get("session_dte")
             html, scrub = _fx.divergence_panel(
                 snap.get("flow") or [], snap.get("prem_ladder") or [],
                 snap.get("symbol") or _current_symbol(),
-                _fx.dte_label(snap.get("dte")), "fxdiv")
+                _fx.dte_label(snap.get("dte") if _sdte is None else _sdte),
+                "fxdiv")
             _show_panel(html, "div", scrub, "fxdiv")
             _set_summary(flow_summary_text(snap.get("flow")))
             return

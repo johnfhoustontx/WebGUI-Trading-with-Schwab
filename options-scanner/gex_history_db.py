@@ -502,6 +502,41 @@ def latest_flip(
     return row[0] if row else None
 
 
+def session_dte(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str = "gex",
+    date=None,
+) -> float | None:
+    """The DTE recorded WITH the session's last row, or ``None`` when there is none.
+
+    The tenor of the data on screen, as opposed to the tenor of the chain right
+    now. Those are the same thing during market hours and diverge the moment the
+    page outlives its session: over a weekend the panel shows Friday's series,
+    collected against Friday's 0DTE book, while a live chain read says 2DTE
+    (Saturday counted to Monday). Reading the stored column keeps the header
+    describing the series it sits above.
+
+    Selects ONLY ``dte`` and takes one row, like ``latest_flip`` — no grid decode.
+    """
+    start, end = _local_unix_range(date)
+    cur = conn.execute(
+        """
+        SELECT dte
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+           AND ts >= ? AND ts < ?
+           AND dte IS NOT NULL
+         ORDER BY ts DESC
+         LIMIT 1
+        """,
+        (symbol, view, start, end),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def latest_spot_flip(
     conn: sqlite3.Connection,
     symbol: str,

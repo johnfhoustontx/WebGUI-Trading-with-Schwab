@@ -166,6 +166,44 @@ def fmt_m(value, decimals=1):
     return "—" if v is None else f"{v:,.{decimals}f}"
 
 
+# Stored premiums are already in MILLIONS, so the axis starts at M and steps up
+# from there. Ordered smallest-first; the loop takes the last unit the value
+# clears.
+_MONEY_UNITS = ((1.0, "M"), (1_000.0, "B"), (1_000_000.0, "T"))
+
+
+def fmt_axis_money(value, signed=False):
+    """An axis tick as a scaled dollar amount: ``946M`` / ``1.2B`` / ``−90M``.
+
+    The bare number these labels used to carry said nothing about magnitude — a
+    premium axis reading ``0 237 473 710 946`` could be dollars, thousands or
+    millions, and the only clue was a ``$M`` suffix on a chip elsewhere in the
+    panel. Carrying the unit on the axis makes it readable on its own.
+
+    A value that clears the next unit switches to it with one decimal (``1.2B``),
+    and a whole number drops the decimal (``1B`` not ``1.0B``) so the column
+    stays narrow. Zero is plain ``0`` — signed or unit-suffixed zero reads as a
+    measurement rather than as the origin.
+    """
+    v = _num(value)
+    if v is None:
+        return "—"
+    a = abs(v)
+    if a < 0.05:
+        return "0"
+    scale, unit = _MONEY_UNITS[0]
+    for factor, suffix in _MONEY_UNITS:
+        if a >= factor:
+            scale, unit = factor, suffix
+    n = a / scale
+    # Sub-unit and fractional values keep a decimal; whole ones drop it.
+    text = f"{n:,.1f}".rstrip("0").rstrip(".") if n < 100 else f"{n:,.0f}"
+    if not signed:
+        return f"{text}{unit}"
+    # U+2212 MINUS, matching fmt_signed — a hyphen makes the column jitter.
+    return f"{'+' if v >= 0 else '−'}{text}{unit}"
+
+
 def fmt_signed(value, decimals=1):
     """A net reading with the sign LEADING (``+425`` / ``−90.2``), so it reads as
     a direction rather than as a negative quantity. Uses U+2212 MINUS, which is
@@ -197,6 +235,41 @@ def fmt_time(ts):
         return _dt.datetime.fromtimestamp(v, _CT).strftime("%H:%M")
     except (OverflowError, OSError, ValueError):
         return "—"
+
+
+# A sample older than this is not "streaming". Collection polls every minute, so
+# five minutes is several missed polls rather than one slow tick.
+LIVE_MAX_AGE_SEC = 300
+
+
+def session_pill(times, now=None):
+    """``{"text", "short", "live"}`` for the panel's status pill.
+
+    The pill used to be the constant string ``LIVE · STREAMING``, which asserted
+    a live feed at 9pm on a Saturday over Friday's series — the one moment a
+    reader most needs to be told otherwise. Three honest states, derived from
+    the DATA rather than from a clock, so a holiday or a stalled collector reads
+    correctly without this needing to know the calendar:
+
+    * a sample within ``LIVE_MAX_AGE_SEC`` — genuinely streaming;
+    * an older sample from today — collection has stopped for the session
+      (after the 15:20 CT close, or a stalled collector mid-session);
+    * a sample from an earlier date — the last session, named.
+    """
+    stamps = [int(t) for t in (times or ()) if _num(t) is not None]
+    if not stamps:
+        return {"text": "NO DATA", "short": "NO DATA", "live": False}
+    newest = max(stamps)
+    now_ts = int(now if now is not None else _dt.datetime.now(_CT).timestamp())
+    at = _dt.datetime.fromtimestamp(newest, _CT)
+    if now_ts - newest <= LIVE_MAX_AGE_SEC:
+        return {"text": "LIVE · STREAMING", "short": "LIVE", "live": True}
+    if at.date() == _dt.datetime.fromtimestamp(now_ts, _CT).date():
+        short = f"{at:%H:%M} CT"
+        return {"text": f"SESSION CLOSED · {short}", "short": short,
+                "live": False}
+    short = f"{at:%a %d %b}".upper()
+    return {"text": f"LAST SESSION · {short}", "short": short, "live": False}
 
 
 def dte_label(dte):
@@ -498,7 +571,7 @@ def divergence_svg(series, geom, times, uid):
         parts.append(f'<line x1="{x0}" y1="{y:.1f}" x2="{x1}" y2="{y:.1f}" '
                      f'stroke="{C["grid"]}" stroke-opacity="0.07" '
                      f'stroke-width="1"></line>')
-        parts.append(_text(x0 - 8, y, f"{value:,.0f}", 10, C["label"],
+        parts.append(_text(x0 - 8, y, fmt_axis_money(value), 10, C["label"],
                            anchor="end", opacity="0.42"))
 
     pos, neg = ribbon_segments(geom["xs"], geom["y_call"], geom["y_put"])
@@ -619,7 +692,9 @@ def field_geometry(model):
     lo, hi = lo - span * 0.08, hi + span * 0.08
 
     xs = [_scale(i, 0, max(n - 1, 1), x0, x1) for i in range(n)]
-    out = {"n": n, "xs": xs, "range": (lo, hi),
+    # ``times`` rides along so the panel's status pill can date the series it is
+    # actually drawing, rather than asserting a live feed from a clock.
+    out = {"n": n, "xs": xs, "range": (lo, hi), "times": list(model["times"]),
            "zero_y": _scale(0.0, lo, hi, y1, y0), "lines": []}
     for line in model["lines"]:
         out["lines"].append({
@@ -650,13 +725,17 @@ def field_svg(geom, times, colors, uid, mode=DEFAULT_MODE):
     parts = [f'<svg viewBox="0 0 {w} {h}" '
              f'style="display:block;width:100%;height:auto">']
 
-    # Both modes plot signed numbers of similar magnitude, so without the suffix
-    # a skew axis and a dollar axis are indistinguishable at a glance.
-    suffix = "%" if mode == "skew" else ""
+    # Both modes plot signed numbers of similar magnitude, so without a unit a
+    # skew axis and a dollar axis are indistinguishable at a glance. Skew keeps
+    # its bare percentage; dollars now carry their scale (M / B) rather than a
+    # bare count that could be read as any magnitude.
+    skew = mode == "skew"
     lo, hi = geom["range"]
     for value in _nice_ticks(lo, hi, XTICKS):
         y = _scale(value, lo, hi, y1, y0)
-        parts.append(_text(x0 - 8, y, fmt_signed(value, 0) + suffix, 10,
+        label = (fmt_signed(value, 0) + "%" if skew
+                 else fmt_axis_money(value, signed=True))
+        parts.append(_text(x0 - 8, y, label, 10,
                            C["label"], anchor="end", opacity="0.42"))
     step = max(1, (geom["n"] - 1) // max(XTICKS - 1, 1)) if geom["n"] > 1 else 1
     for i in range(0, geom["n"], step):
@@ -690,7 +769,11 @@ def field_svg(geom, times, colors, uid, mode=DEFAULT_MODE):
                      f'stroke-opacity="0.55"></line>')
         parts.append(_text(FLD_LABEL_X, y_lab, line["k"], 12, color,
                            anchor="start", weight="600", spacing="0.06em"))
-        parts.append(_text(FLD_VALUE_X, y_lab, fmt_signed(value) + suffix, 11,
+        # Same units as the axis it sits beside — a terminus reading "+425"
+        # against an axis reading "+425M" invites the reader to guess.
+        end_label = (fmt_signed(value) + "%" if skew
+                     else fmt_axis_money(value, signed=True))
+        parts.append(_text(FLD_VALUE_X, y_lab, end_label, 11,
                            C["label"], anchor="start", opacity="0.55"))
 
     parts.append(_text(x0, FLD_FOOTER_Y, FIELD_FOOTER[mode], 9, C["label"],
@@ -725,16 +808,28 @@ _HAIR = "rgba(53,200,255,.10)"
 _RAIL_BG = "linear-gradient(180deg,rgba(53,200,255,.05),transparent 38%)"
 
 
-def _live_pill(text):
+def _live_pill(text, live=True):
+    """The status pill. ``live=False`` drops the green and the pulse.
+
+    Both are assertions — a pulsing green dot says "arriving now" on its own,
+    regardless of the words beside it — so a stale panel must not keep them, or
+    the colour contradicts the text."""
+    if live:
+        tint, ring, dot = "rgba(94,240,184,.10)", "rgba(94,240,184,.30)", C["live"]
+        glow = "box-shadow:0 0 10px 2px rgba(94,240,184,.85);"
+        pulse = ' class="fx-pulse"'
+    else:
+        tint, ring, dot = "rgba(174,205,232,.06)", "rgba(174,205,232,.22)", C["label"]
+        glow = ""
+        pulse = ""
     return (f'<span style="flex:none;white-space:nowrap;display:flex;'
             f'align-items:center;gap:8px;padding:6px 12px;'
-            f'background:rgba(94,240,184,.10);'
-            f'box-shadow:inset 0 0 0 1px rgba(94,240,184,.30)">'
-            f'<span class="fx-pulse" style="width:6px;height:6px;'
-            f'background:{C["live"]};box-shadow:0 0 10px 2px '
-            f'rgba(94,240,184,.85)"></span>'
+            f'background:{tint};'
+            f'box-shadow:inset 0 0 0 1px {ring}">'
+            f'<span{pulse} style="width:6px;height:6px;'
+            f'background:{dot};{glow}"></span>'
             f'<span style="font:500 9px/1 {MONO};letter-spacing:.18em;'
-            f'color:{C["live"]}">{_esc(text)}</span></span>')
+            f'color:{dot}">{_esc(text)}</span></span>')
 
 
 def _title(text):
@@ -831,6 +926,7 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
             "the next 1-minute poll."), None
 
     times = [fmt_time(ts) for ts in series["ts"]]
+    status = session_pill(series["ts"])
     session = divergence_session(series)
     lad = align_ladder(series["ts"], ladder)
     has_ladder = any(rows_ is not None for rows_ in lad)
@@ -906,7 +1002,8 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
         f'<div style="flex:1;min-width:0;padding:20px 0 16px 4px">'
         f'<div style="display:flex;align-items:center;gap:12px;'
         f'padding:0 24px 14px;flex-wrap:wrap">'
-        f'{_live_pill("LIVE · STREAMING")}{_title("PREMIUM DIVERGENCE")}'
+        f'{_live_pill(status["text"], status["live"])}'
+        f'{_title("PREMIUM DIVERGENCE")}'
         f'{_meta(f"{symbol} · {dte_label} · SESSION")}</div>'
         f'<div style="display:flex;align-items:center;gap:8px;'
         f'padding:0 24px 14px;flex-wrap:wrap">{chips}</div>'
@@ -1027,15 +1124,19 @@ def field_panel(rows_by_symbol, order, colors, mode, uid):
         f'<span id="{u}-least">—</span></div></div></div>')
 
     n_sym = len(geom["lines"])
-    pill = f"LIVE · {n_sym} SYMBOL" + ("" if n_sym == 1 else "S")
+    # The SHORT status here, not the full sentence — this pill already carries
+    # the symbol count, and "LAST SESSION · FRI 14 AUG · 8 SYMBOLS" wraps.
+    status = session_pill(geom.get("times") or [])
+    pill = (f"{status['short']} · {n_sym} SYMBOL"
+            + ("" if n_sym == 1 else "S"))
     html = (
         f'<div class="fx-panel" id="{u}-root" style="display:flex;width:100%;'
         f'background:{_PANEL_BG};box-shadow:{_PANEL_SHADOW}">'
         f'<div style="flex:1;min-width:0;padding:20px 0 14px 4px">'
         f'<div style="display:flex;align-items:center;gap:12px;'
         f'padding:0 22px 14px;flex-wrap:wrap">'
-        f'{_live_pill(pill)}'
-        f'{_title("FLOW FIELD")}'
+        f'{_live_pill(pill, status["live"])}'
+        f'{_title("NET PREMIUM")}'
         f'<span style="display:flex;align-items:center;gap:7px;'
         f'flex-wrap:wrap">{chips}</span>'
         f'{toggle}</div>'

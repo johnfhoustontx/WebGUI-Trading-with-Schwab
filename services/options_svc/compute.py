@@ -2099,6 +2099,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     gex, charm, dex, vanna = res
     by_index = {0: gex, 1: charm, 2: dex, 3: vanna}
     dte = eng._last_dte
+    session_dte = None          # filled from the stored series below, if present
     spot = (gex or {}).get("spot")
 
     def _walls(vname, data):
@@ -2175,6 +2176,18 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
                          "call_prem": r[4], "put_prem": r[5]} for r in _frows]
             except Exception:
                 flow = []
+            # The tenor OF THE SERIES ABOVE, which is not ``dte`` — that comes
+            # from the live chain (``eng._last_dte``) and describes right now.
+            # They agree during market hours and diverge the moment the page
+            # outlives its session: over a weekend the panel shows Friday's
+            # 0DTE-dominated series while the live read says 2DTE. Additive, so a
+            # reader that predates it simply falls back to ``dte``.
+            try:
+                session_dte = gh.session_dte(hist_conn, symbol, "gex",
+                                             session_date)
+            except Exception:
+                log.debug("session dte load failed", exc_info=True)
+                session_dte = None
             # 0-DTE hedge-pressure track — same connection, same RTH window as the
             # heatmap rows so the panel's time axis lines up with it. Empty for any
             # symbol whose nearest expiry isn't today (the column is NULL there).
@@ -2237,6 +2250,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         projected_flip = None
 
     return {"symbol": symbol, "spot": spot, "dte": dte,
+            "session_dte": session_dte,
             "views": views, "term": term, "flow": flow,
             "projected_flip": projected_flip, "hedge_history": hedge_history,
             "prem_ladder": ladder}
