@@ -230,6 +230,10 @@ level on this page. Above it, expect mean-reversion; below it, expect momentum.
 | **Net Prem** | Net premium (call dollars − put dollars) for up to 28 symbols at once. | Comparing where money is going across names. |
 | **Term** | The same exposure across the **next five expirations**. | Deciding which expiry to trade. |
 
+The first four share one layout and are described together below. **Flow**, **Net
+Prem** and **Term** are different screens with their own controls, and each has its
+own subsection further down.
+
 **Bars (top chart).** Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Blue/cyan is
 call-heavy, magenta is put-heavy. A tall bar is a strike where a lot of hedging
@@ -277,18 +281,115 @@ and lows.
 - **Briefings** opens the four automatic runs — premarket, ~18 minutes after the open,
   midday, and the close — plus a **History** picker for previous days.
 
+Everything above describes the four **exposure** views — Gamma, Charm, Delta and
+Vanna — which share the same bars-plus-heat-map layout. The remaining three subtabs
+are different screens with their own controls, and are covered next.
+
+### The Flow subtab — premium divergence
+
+Where the exposure views ask *where are dealers positioned*, Flow asks *where is
+today's money actually going*, for the one symbol you are viewing.
+
+**What it draws.** Call premium and put premium through the session as a two-tone
+ribbon, with the spot price as a white line on its own scale. **The crossover is the
+read** — the moment call dollars overtake put dollars, or the reverse. That is the
+same event the [Flow Alerts](#flow-alerts) page logs as a *Crossover*, shown here in
+context so you can see whether it was a decisive break or a wobble around the line.
+
+**The other elements:** status chips summarising the current state, a **strike
+ladder** showing where in the chain the premium is concentrated, and a readout rail
+with the numbers.
+
+> **Premium here is mid-based, unsigned and forward-only.** *Unsigned* is the
+> important word: Schwab publishes no time-and-sales tape for options, so this is
+> **traded dollars through calls versus puts** — a money-weighted put/call read, and
+> **not** net buying. A large call figure is equally consistent with someone buying
+> calls and someone selling covered calls. *Forward-only* means the series begins
+> when collection starts each morning; there is no overnight carry.
+
+### The Net Prem subtab — many symbols at once
+
+The only view on this page that shows **more than one symbol**. It plots **net
+premium** — call dollars minus put dollars — as one line per name, from a menu of
+**28**.
+
+**The symbol picker** is grouped into three tabs: **Indices & Broad**, **SPDR
+Sectors**, and **Mega-caps**. Two behaviours are worth knowing because they are not
+obvious:
+
+- **The group tab only filters the tick-boxes, it does not filter the chart.** Your
+  selection **persists across tabs**, so you can plot `$SPX` next to `XLK` by
+  ticking one in each group.
+- **Each symbol keeps a fixed colour** whatever else is on the chart, so a line
+  means the same thing between sessions.
+
+Instead of a legend, lines carry **terminus labels** at their right-hand end, and a
+live **leaderboard** rail ranks the current selection.
+
+**DOLLARS / SKEW % — the toggle that makes the view usable.** In the panel header.
+The magnitudes span roughly four orders: measured live, SPY at −$375M sat beside DIA
+at +$0.1M on the same axis, which renders DIA as a flat line on zero.
+
+| Setting | Shows | Use it to |
+|---|---|---|
+| **Dollars ($M)** | The real money | Judge whether a flow is big enough to matter |
+| **Skew %** | Net as a share of **that symbol's own** premium | Compare a large name and a small one side by side — the same two symbols read −46.6% and +2.5% |
+
+Group, ticks and scale are all remembered. **Explain** works per selected symbol.
+
+> Sector history begins the day the feature shipped, so those lines fill in going
+> forward rather than showing a long back-history.
+
+> The status line distinguishes **"not collected yet"** from **"the publisher is
+> failing"** — an empty chart otherwise looks identical in both cases.
+
+### The Term subtab — exposure across expirations
+
+The same exposure measure, but spread across the **next five expirations** rather
+than across strikes within one. It answers *which expiry carries the positioning* —
+which is how you choose a DTE rather than a strike.
+
+It is drawn as a heat map with a **1-pixel hairline between each expiry column**, so
+you can see where one expiration ends and the next begins.
+
+> **Its vertical axis is categorical, not proportional.** Rows are addressed by
+> index (expiry 1, 2, 3…), not by time, so the spacing between columns tells you
+> nothing about how far apart the expirations actually are — a weekly and a monthly
+> sit one column apart either way.
+
+> **Read the blending with care.** The heat map interpolates between samples exactly
+> as the intraday view does, but the intraday view's x-axis is *time*, where
+> interpolating between two adjacent minutes is reasonable. Here the axis is
+> *expirations*, and nothing varies continuously between one expiry and the next —
+> so the smooth gradient across a column boundary is a drawing artifact, not a
+> measurement. The hairlines exist to keep that visible. Read the columns, not the
+> gradient between them.
+
+**A side effect worth knowing:** because Term's rows are indexed rather than priced,
+it is immune to the uneven-strike-spacing problem that affects the intraday heat map
+on `$NDX` (see *Caveats* below).
+
 ### Why it matters
 
 This is the app's edge, such as it is. Support and resistance drawn from chart patterns
 are subjective; gamma walls are computed from open interest that anyone can verify, and
 they exert real mechanical force because dealers are contractually obliged to hedge.
 
-Two concrete uses:
+Four concrete uses, one per family of view:
 
-1. **Strike selection.** Selling a put credit spread below the put wall is materially
-   safer than selling one above it, because dealer buying supports that level.
-2. **Expectation setting.** Above the flip, an intraday breakout is more likely to fail
-   than follow through. Below it, the opposite. This alone should change position size.
+1. **Strike selection** (exposure views). Selling a put credit spread below the put
+   wall is materially safer than selling one above it, because dealer buying supports
+   that level.
+2. **Expectation setting** (exposure views). Above the flip, an intraday breakout is
+   more likely to fail than follow through. Below it, the opposite. This alone should
+   change position size.
+3. **Confirming a bias** (**Flow**). Positioning tells you where dealers *are*; the
+   premium ribbon tells you which way today's money is leaning, and its crossover
+   dates that change to a minute.
+4. **Choosing an expiry, and choosing a name** (**Term**, **Net Prem**). Term shows
+   which expiration carries the positioning, so a DTE choice stops being arbitrary.
+   Net Prem is the only view that compares symbols, which is how you notice that the
+   flow you are looking at is ordinary for that name — or is not.
 
 **Where it is weak.** Open interest is a snapshot, not a live tape — it updates once a
 day. The dealer-is-short-gamma assumption is a convention, not a fact; it is usually
@@ -308,9 +409,11 @@ pressure panel. And any time you are choosing strikes.
 - **`$NDX` quotes mixed strike spacing** (5-wide near the money among 10-wide). The app
   resamples onto an even ladder to stop the heat map from banding; real strikes pass
   through untouched.
-- The **Term** heat map's vertical axis is *ordinal* (expiry 1, 2, 3…), not
-  proportional to time. Blending between columns is cosmetic.
 - Off-hours the page shows the **last session**, not live data. The status line says so.
+- **Flow, Net Prem and Term each carry their own caveats** — see their subsections
+  above. The two that catch people out: Net Prem's group tabs filter the *tick-boxes*
+  and not the chart, and Term's smooth gradient across a column boundary is a drawing
+  artifact rather than a measurement.
 
 ### Related pages
 

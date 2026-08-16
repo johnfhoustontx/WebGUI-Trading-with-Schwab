@@ -85,6 +85,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is">What it is</a></li>
 <li><a href="#where-the-data-comes-from">Where the data comes from</a></li>
 <li><a href="#reading-the-screen">Reading the screen</a></li>
+<li><a href="#the-flow-subtab-premium-divergence">The Flow subtab — premium divergence</a></li>
+<li><a href="#the-net-prem-subtab-many-symbols-at-once">The Net Prem subtab — many symbols at once</a></li>
+<li><a href="#the-term-subtab-exposure-across-expirations">The Term subtab — exposure across expirations</a></li>
 <li><a href="#why-it-matters">Why it matters</a></li>
 <li><a href="#when-to-use-it">When to use it</a></li>
 <li><a href="#caveats-and-gotchas">Caveats and gotchas</a></li>
@@ -690,6 +693,9 @@ will not match another service's, and the <em>shape</em> is what you should read
 </tr>
 </tbody>
 </table>
+<p>The first four share one layout and are described together below. <strong>Flow</strong>, <strong>Net
+Prem</strong> and <strong>Term</strong> are different screens with their own controls, and each has its
+own subsection further down.</p>
 <p><strong>Bars (top chart).</strong> Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Blue/cyan is
 call-heavy, magenta is put-heavy. A tall bar is a strike where a lot of hedging
@@ -733,16 +739,116 @@ and lows.</p>
 <li><strong>Briefings</strong> opens the four automatic runs — premarket, ~18 minutes after the open,
   midday, and the close — plus a <strong>History</strong> picker for previous days.</li>
 </ul>
+<p>Everything above describes the four <strong>exposure</strong> views — Gamma, Charm, Delta and
+Vanna — which share the same bars-plus-heat-map layout. The remaining three subtabs
+are different screens with their own controls, and are covered next.</p>
+<h3 id="the-flow-subtab-premium-divergence">The Flow subtab — premium divergence</h3>
+<p>Where the exposure views ask <em>where are dealers positioned</em>, Flow asks <em>where is
+today's money actually going</em>, for the one symbol you are viewing.</p>
+<p><strong>What it draws.</strong> Call premium and put premium through the session as a two-tone
+ribbon, with the spot price as a white line on its own scale. <strong>The crossover is the
+read</strong> — the moment call dollars overtake put dollars, or the reverse. That is the
+same event the <a href="#flow-alerts">Flow Alerts</a> page logs as a <em>Crossover</em>, shown here in
+context so you can see whether it was a decisive break or a wobble around the line.</p>
+<p><strong>The other elements:</strong> status chips summarising the current state, a <strong>strike
+ladder</strong> showing where in the chain the premium is concentrated, and a readout rail
+with the numbers.</p>
+<blockquote>
+<p><strong>Premium here is mid-based, unsigned and forward-only.</strong> <em>Unsigned</em> is the
+important word: Schwab publishes no time-and-sales tape for options, so this is
+<strong>traded dollars through calls versus puts</strong> — a money-weighted put/call read, and
+<strong>not</strong> net buying. A large call figure is equally consistent with someone buying
+calls and someone selling covered calls. <em>Forward-only</em> means the series begins
+when collection starts each morning; there is no overnight carry.</p>
+</blockquote>
+<h3 id="the-net-prem-subtab-many-symbols-at-once">The Net Prem subtab — many symbols at once</h3>
+<p>The only view on this page that shows <strong>more than one symbol</strong>. It plots <strong>net
+premium</strong> — call dollars minus put dollars — as one line per name, from a menu of
+<strong>28</strong>.</p>
+<p><strong>The symbol picker</strong> is grouped into three tabs: <strong>Indices &amp; Broad</strong>, <strong>SPDR
+Sectors</strong>, and <strong>Mega-caps</strong>. Two behaviours are worth knowing because they are not
+obvious:</p>
+<ul>
+<li><strong>The group tab only filters the tick-boxes, it does not filter the chart.</strong> Your
+  selection <strong>persists across tabs</strong>, so you can plot <code>$SPX</code> next to <code>XLK</code> by
+  ticking one in each group.</li>
+<li><strong>Each symbol keeps a fixed colour</strong> whatever else is on the chart, so a line
+  means the same thing between sessions.</li>
+</ul>
+<p>Instead of a legend, lines carry <strong>terminus labels</strong> at their right-hand end, and a
+live <strong>leaderboard</strong> rail ranks the current selection.</p>
+<p><strong>DOLLARS / SKEW % — the toggle that makes the view usable.</strong> In the panel header.
+The magnitudes span roughly four orders: measured live, SPY at −$375M sat beside DIA
+at +$0.1M on the same axis, which renders DIA as a flat line on zero.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Shows</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dollars ($M)</strong></td>
+<td>The real money</td>
+<td>Judge whether a flow is big enough to matter</td>
+</tr>
+<tr>
+<td><strong>Skew %</strong></td>
+<td>Net as a share of <strong>that symbol's own</strong> premium</td>
+<td>Compare a large name and a small one side by side — the same two symbols read −46.6% and +2.5%</td>
+</tr>
+</tbody>
+</table>
+<p>Group, ticks and scale are all remembered. <strong>Explain</strong> works per selected symbol.</p>
+<blockquote>
+<p>Sector history begins the day the feature shipped, so those lines fill in going
+forward rather than showing a long back-history.</p>
+<p>The status line distinguishes <strong>"not collected yet"</strong> from <strong>"the publisher is
+failing"</strong> — an empty chart otherwise looks identical in both cases.</p>
+</blockquote>
+<h3 id="the-term-subtab-exposure-across-expirations">The Term subtab — exposure across expirations</h3>
+<p>The same exposure measure, but spread across the <strong>next five expirations</strong> rather
+than across strikes within one. It answers <em>which expiry carries the positioning</em> —
+which is how you choose a DTE rather than a strike.</p>
+<p>It is drawn as a heat map with a <strong>1-pixel hairline between each expiry column</strong>, so
+you can see where one expiration ends and the next begins.</p>
+<blockquote>
+<p><strong>Its vertical axis is categorical, not proportional.</strong> Rows are addressed by
+index (expiry 1, 2, 3…), not by time, so the spacing between columns tells you
+nothing about how far apart the expirations actually are — a weekly and a monthly
+sit one column apart either way.</p>
+<p><strong>Read the blending with care.</strong> The heat map interpolates between samples exactly
+as the intraday view does, but the intraday view's x-axis is <em>time</em>, where
+interpolating between two adjacent minutes is reasonable. Here the axis is
+<em>expirations</em>, and nothing varies continuously between one expiry and the next —
+so the smooth gradient across a column boundary is a drawing artifact, not a
+measurement. The hairlines exist to keep that visible. Read the columns, not the
+gradient between them.</p>
+</blockquote>
+<p><strong>A side effect worth knowing:</strong> because Term's rows are indexed rather than priced,
+it is immune to the uneven-strike-spacing problem that affects the intraday heat map
+on <code>$NDX</code> (see <em>Caveats</em> below).</p>
 <h3 id="why-it-matters">Why it matters</h3>
 <p>This is the app's edge, such as it is. Support and resistance drawn from chart patterns
 are subjective; gamma walls are computed from open interest that anyone can verify, and
 they exert real mechanical force because dealers are contractually obliged to hedge.</p>
-<p>Two concrete uses:</p>
+<p>Four concrete uses, one per family of view:</p>
 <ol>
-<li><strong>Strike selection.</strong> Selling a put credit spread below the put wall is materially
-   safer than selling one above it, because dealer buying supports that level.</li>
-<li><strong>Expectation setting.</strong> Above the flip, an intraday breakout is more likely to fail
-   than follow through. Below it, the opposite. This alone should change position size.</li>
+<li><strong>Strike selection</strong> (exposure views). Selling a put credit spread below the put
+   wall is materially safer than selling one above it, because dealer buying supports
+   that level.</li>
+<li><strong>Expectation setting</strong> (exposure views). Above the flip, an intraday breakout is
+   more likely to fail than follow through. Below it, the opposite. This alone should
+   change position size.</li>
+<li><strong>Confirming a bias</strong> (<strong>Flow</strong>). Positioning tells you where dealers <em>are</em>; the
+   premium ribbon tells you which way today's money is leaning, and its crossover
+   dates that change to a minute.</li>
+<li><strong>Choosing an expiry, and choosing a name</strong> (<strong>Term</strong>, <strong>Net Prem</strong>). Term shows
+   which expiration carries the positioning, so a DTE choice stops being arbitrary.
+   Net Prem is the only view that compares symbols, which is how you notice that the
+   flow you are looking at is ordinary for that name — or is not.</li>
 </ol>
 <p><strong>Where it is weak.</strong> Open interest is a snapshot, not a live tape — it updates once a
 day. The dealer-is-short-gamma assumption is a convention, not a fact; it is usually
@@ -759,9 +865,11 @@ pressure panel. And any time you are choosing strikes.</p>
 <li><strong><code>$NDX</code> quotes mixed strike spacing</strong> (5-wide near the money among 10-wide). The app
   resamples onto an even ladder to stop the heat map from banding; real strikes pass
   through untouched.</li>
-<li>The <strong>Term</strong> heat map's vertical axis is <em>ordinal</em> (expiry 1, 2, 3…), not
-  proportional to time. Blending between columns is cosmetic.</li>
 <li>Off-hours the page shows the <strong>last session</strong>, not live data. The status line says so.</li>
+<li><strong>Flow, Net Prem and Term each carry their own caveats</strong> — see their subsections
+  above. The two that catch people out: Net Prem's group tabs filter the <em>tick-boxes</em>
+  and not the chart, and Term's smooth gradient across a column boundary is a drawing
+  artifact rather than a measurement.</li>
 </ul>
 <h3 id="related-pages">Related pages</h3>
 <p><a href="#flow-alerts">Flow Alerts</a> (row click jumps here for that symbol) ·
