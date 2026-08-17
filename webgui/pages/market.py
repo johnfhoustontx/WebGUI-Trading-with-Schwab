@@ -392,10 +392,24 @@ def render():
         tx = tile_text(t)
         rc = _reactive_classes(t)
         oc = order_class(i)
+        # EVERY tile is exactly 152x94 (2026-08-16). It used to be `min-w-[104px]`
+        # with no height at all, which produced 6 distinct widths and 2 heights
+        # across the 69 tiles:
+        #   * WIDTH — a min-width in a wrapping flex row lets each tile grow to
+        #     fill whatever space its row has left, so the same tile was 104px in
+        #     one frame and 152px in another, and a frame's last row stretched
+        #     differently from the rows above it.
+        #   * HEIGHT — `descriptor_line` is empty for most tiles, and an empty
+        #     label collapses, so tiles WITH a subline stood 16px taller than
+        #     tiles without. (A `min-h-[92px]` was documented but never in the
+        #     code.)
+        # Fixed width + no grow/shrink is what makes them uniform; a frame now
+        # sizes to a whole number of tiles instead of stretching them.
         container = ui.column().classes(
             f"mb-tile {_T['MB_TILE_BG']} border {rc['border']} {rc['opacity']} "
             f"{rc['cvar']} {rc['wash']} {rc['heat']} {oc} "
-            "min-w-[104px] px-[11px] pt-[9px] pb-[8px] gap-0")
+            "w-[152px] shrink-0 grow-0 min-h-[94px] "
+            "px-[11px] pt-[9px] pb-[8px] gap-0")
         with container:
             ui.element("div").classes("mb-ig")
             ui.label(t.get("display", "")).classes(
