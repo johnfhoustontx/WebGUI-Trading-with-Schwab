@@ -545,9 +545,12 @@ The page reads as **five numbered steps**, top to bottom.
    own top quartile, plus a count of the **stocks whose industry and sector both
    confirm** — the highest-conviction rows on the page.
 3. **Where the names sit** — the four quadrants as counts, with the strongest names in
-   each.
-4. **What a score is made of** — the current leader decomposed into its five z-scores,
-   as bars either side of a centre line (the universe average).
+   each and **+N more** opening the full membership of that quadrant. This is where you
+   get the list of what is Leading, Improving, Weakening or Lagging.
+4. **What a score is made of** — **click any name** in section 3, or any leaderboard row,
+   and it is decomposed here into its five z-scores, as bars either side of a centre line
+   (the universe average). With nothing selected it shows the current leader; **Top
+   ranked** returns to it.
 5. **Rank over recent sessions** — steady climbers beat one-day pops. A short line means
    that name has fewer stored sessions, not a shorter trend.
 

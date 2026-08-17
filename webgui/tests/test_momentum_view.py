@@ -178,6 +178,34 @@ def test_quadrant_names_are_the_strongest_by_score_and_the_rest_are_counted():
     assert lead["more"] == 6                       # 9 in the quadrant, 3 shown
 
 
+def test_every_quadrant_carries_its_FULL_membership_not_just_the_chips():
+    """The page needs the whole list, not a teaser — "which names are Leading?"
+    is the question section 3 exists to answer."""
+    by = {p["name"]: p for p in V.quadrant_panels(_quad_rows(), top_names=3)}
+    assert len(by["Leading"]["members"]) == 9
+    assert len(by["Weakening"]["members"]) == 24
+    assert sum(len(p["members"]) for p in V.quadrant_panels(_quad_rows())) == 69
+
+
+def test_members_are_ranked_by_score_and_carry_what_a_row_needs():
+    lead = {p["name"]: p for p in V.quadrant_panels(_quad_rows())}["Leading"]
+    scores = [m["score"] for m in lead["members"]]
+    assert scores == sorted(scores, reverse=True)
+    for key in ("symbol", "label", "score", "rank"):
+        assert key in lead["members"][0]
+
+
+def test_the_chips_are_the_head_of_the_membership_list():
+    lead = {p["name"]: p for p in V.quadrant_panels(_quad_rows(), top_names=3)}["Leading"]
+    assert [n["symbol"] for n in lead["names"]] ==         [m["symbol"] for m in lead["members"][:3]]
+
+
+def test_a_member_with_no_score_sorts_last_rather_than_raising():
+    rows = _quad_rows() + [_row("NOSCORE", None, 1.0, 50, 99)]
+    panels = V.quadrant_panels(rows)
+    assert all(isinstance(p["members"], list) for p in panels)
+
+
 def test_a_quadrant_smaller_than_the_name_budget_has_nothing_more_to_show():
     rows = [_row("A", 1.0, 1.0, 90, 1)]
     by = {p["name"]: p for p in V.quadrant_panels(rows, top_names=3)}
@@ -196,9 +224,24 @@ def test_quadrant_panels_of_nothing_still_render_all_four_at_zero():
 
 
 # ── 4 · what a score is made of ──────────────────────────────────────────────
-def test_example_row_is_the_top_ranked_one():
+def test_example_row_defaults_to_the_top_ranked_one():
     rows = [_row("B", 1.0, 0.5, 80, 2), _row("A", 2.0, 0.5, 99, 1)]
-    assert V.example_row(rows)["symbol"] == "A"
+    ex = V.example_row(rows)
+    assert ex["symbol"] == "A" and ex["is_default"] is True
+
+
+def test_example_row_follows_an_explicit_selection():
+    rows = [_row("B", 1.0, 0.5, 80, 2), _row("A", 2.0, 0.5, 99, 1)]
+    ex = V.example_row(rows, "B")
+    assert ex["symbol"] == "B" and ex["is_default"] is False
+
+
+def test_a_selection_that_is_not_on_this_level_falls_back_to_the_leader():
+    """Switching Industries → Stocks strands the previous pick; the card must
+    show the new level's leader rather than going blank."""
+    rows = [_row("B", 1.0, 0.5, 80, 2), _row("A", 2.0, 0.5, 99, 1)]
+    ex = V.example_row(rows, "NOT-HERE")
+    assert ex["symbol"] == "A" and ex["is_default"] is True
 
 
 def test_example_row_carries_everything_the_card_shows():

@@ -1129,14 +1129,18 @@ universe size, so all three stay legible instead of the 296-stock bar dwarfing t
 the highest-conviction rows on the page.
 
 **3 · Where the names sit.** The four quadrants as counts and shares, with the strongest
-few named in each. Same four quadrant names as [RRG](#rrg) — Leading, Improving,
+few named in each and **+N more** opening that quadrant's full membership — this is the
+answer to "which names are Leading right now?". Every name is clickable. Same four quadrant names as [RRG](#rrg) — Leading, Improving,
 Weakening, Lagging — but **the axes are different**: RRG measures strength purely against
 the S&P, whereas this score blends five components of which relative strength is only
 one. The two screens can legitimately disagree about the same sector.
 
-**4 · What a score is made of.** The current top-ranked name, decomposed. Bars run either
-side of a centre line which is the universe average, so the *sign* is the reading. They
-clamp at ±3, which is where the service caps the z-scores.
+**4 · What a score is made of.** Whichever name you selected — from a quadrant chip or a
+leaderboard row — decomposed. Bars run either side of a centre line which is the universe
+average, so the *sign* is the reading. They clamp at ±3, which is where the service caps
+the z-scores. With nothing selected the card shows the current top-ranked name, so the
+anatomy and the leaderboard's first row agree; **Top ranked** returns to that. Switching
+level clears the selection, since a pick from one level does not exist on another.
 
 **5 · Rank over recent sessions.** A name that has climbed steadily for two weeks is a
 better candidate than one that jumped yesterday. Note that **not every symbol has the

@@ -194,12 +194,23 @@ def quadrant_panels(rows, top_names=3):
     out = []
     for q in QUAD_ORDER:
         got = sorted(buckets[q], key=lambda r: -(_num(r.get("score")) or -9e9))
-        names = [str(r.get("label") or r.get("symbol") or "") for r in got[:top_names]]
+        # The FULL membership, not just the chips: "which names are Leading?" is
+        # the question this section exists to answer, and a three-name teaser
+        # cannot answer it. The page shows the head inline and the tail behind
+        # an expander, but both come from one list so they cannot disagree.
+        members = [{
+            "symbol": r.get("symbol"),
+            "label": str(r.get("label") or r.get("symbol") or ""),
+            "score": _num(r.get("score")),
+            "rank": _num(r.get("rank")),
+        } for r in got]
         out.append({
             "name": q, "count": len(got), "blurb": QUAD_BLURB[q],
             "share": f"{round(len(got) / total * 100) if total else 0}%",
             "bar_pct": (len(got) / fullest * 100.0) if fullest else 0.0,
-            "names": names, "more": max(0, len(got) - len(names)),
+            "members": members,
+            "names": members[:top_names],
+            "more": max(0, len(members) - len(members[:top_names])),
         })
     return out
 
@@ -219,22 +230,33 @@ COMPONENT_MEANING = {
 Z_CAP = 3.0
 
 
-def example_row(rows):
-    """The top-ranked row, decomposed — the page's worked example.
+def example_row(rows, symbol=None):
+    """One row decomposed — the page's worked example.
 
-    Deterministic on purpose: it doubles as "the current leader, explained", so
-    the anatomy and the leaderboard's first line always agree."""
+    ``symbol`` selects a specific row (a quadrant chip or a leaderboard click);
+    with no selection it is the **top-ranked** row, which doubles as "the current
+    leader, explained" and keeps the card in step with the board's first line.
+
+    A selection that is not on this level — switching Industries → Stocks
+    strands the previous pick — falls back to the leader rather than blanking
+    the card, and says so via ``is_default``."""
     rows = [r for r in (rows or []) if r]
     if not rows:
         return None
-    best = min(rows, key=lambda r: (_num(r.get("rank")) is None,
-                                    _num(r.get("rank")) or 9e9))
+    best = None
+    if symbol:
+        best = next((r for r in rows if r.get("symbol") == symbol), None)
+    picked = best is not None
+    if best is None:
+        best = min(rows, key=lambda r: (_num(r.get("rank")) is None,
+                                        _num(r.get("rank")) or 9e9))
     score, pct = _num(best.get("score")), _num(best.get("percentile"))
     rank, prev = _num(best.get("rank")), _num(best.get("rank_prev"))
     delta = None if rank is None or prev is None else int(prev - rank)
     align = [bool(b) for b in (best.get("alignment") or [])]
     return {
         "symbol": best.get("symbol"),
+        "is_default": not picked,
         "label": best.get("label") or best.get("symbol") or "",
         "sector": best.get("sector") or "",
         "score": DASH if score is None else f"{score:.2f}",

@@ -384,11 +384,15 @@ The page reads as five numbered steps, top to bottom.
 - **3 · Where the names sit.** The four quadrants as counts: **Leading** (strong
   and still accelerating), **Improving** (weak but turning up), **Weakening**
   (strong but fading — late, don't chase), **Lagging** (weak and decelerating).
+  The strongest few are named in each; **+N more** opens the rest of that
+  quadrant. **Click any name** to decompose it in the section below.
   Same four names as the **RRG** tab, though the axes differ: RRG measures
   strength purely against the S&P, while this score blends five things of which
   relative strength is one.
-- **4 · What a score is made of.** The current leader, decomposed into its five
-  z-scores (trend, relative strength, acceleration, path quality, participation).
+- **4 · What a score is made of.** Whichever name you clicked, decomposed into its
+  five z-scores (trend, relative strength, acceleration, path quality,
+  participation) — the current leader until you pick something else, and
+  **Top ranked** puts it back. Leaderboard rows are clickable too.
   Bars run either side of a centre line, which is the universe average.
   **Participation** is how many of an industry's constituents are above their own
   50-day average — leadership its own members don't confirm is thin.

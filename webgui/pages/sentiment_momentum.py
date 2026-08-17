@@ -427,6 +427,9 @@ _DISP_FILL = f"bg-[{_ok(0.52, 0.10, 80)}]"
 _DISP_MARK = f"bg-[{_ok(0.92, 0.08, 80)}]"
 _LIMIT_BG = f"bg-[{_ok(0.115, 0.006, 90)}]"
 _LIMIT_TAG = f"text-[{_ok(0.62, 0.09, 80)}]"
+# The ring on the currently-selected name chip. Near-white rather than a
+# quadrant hue: it has to read as "this one" against four different tints.
+_SEL_RING = f"ring-[{_ok(0.92, 0.006, 90)}]"
 
 
 def render(level="industry"):
@@ -438,7 +441,9 @@ def render(level="industry"):
     """
     from nicegui import ui
 
-    state = {"ver": None, "level": normalise_level(level), "payload": None}
+    # ``selected`` is the symbol driving section 4. None = the level's leader.
+    state = {"ver": None, "level": normalise_level(level), "payload": None,
+             "selected": None}
 
     ui.add_head_html(ROTATION_FONT_HEAD_HTML)
 
@@ -675,6 +680,16 @@ def render(level="industry"):
                         ui.label(f"of {b['total']}").classes(
                             f"{_MONO} {NT['rail']} text-[11px]")
 
+    def _name_chip(member, cls):
+        """One clickable name. Clicking drives section 4 rather than navigating
+        — the whole point is to decompose it without losing your place."""
+        sel = member["symbol"] == state["selected"]
+        ui.button(member["label"], color=None,
+                  on_click=lambda _e=None, sym=member["symbol"]: _select(sym))             .props("flat no-caps dense")             .classes(f"{_MONO} {cls['chip_txt']} {cls['chip']} text-[10.5px] "
+                     "tracking-[.06em] px-2.5 py-[5px] max-w-full normal-case "
+                     "leading-none min-h-0"
+                     + (f" ring-1 {_SEL_RING}" if sel else ""))
+
     def _paint_quadrants(rows):
         quad_box.clear()
         with quad_box:
@@ -711,29 +726,42 @@ def render(level="industry"):
                         f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.14em] "
                         "uppercase mb-2.5")
                     with ui.row().classes("flex-wrap gap-[5px] w-full"):
-                        for name in q["names"]:
-                            ui.label(name).classes(
-                                f"{_MONO} {cls['chip_txt']} {cls['chip']} "
-                                "text-[10.5px] tracking-[.06em] px-2.5 py-[5px] "
-                                "truncate max-w-full")
-                        if q["more"]:
-                            ui.label(f"+{q['more']} more").classes(
-                                f"{_MONO} {NT['caption']} border "
-                                f"{NE['btn_edge']} text-[10.5px] "
-                                "tracking-[.06em] px-2.5 py-[5px]")
+                        for m in q["names"]:
+                            _name_chip(m, cls)
+                    if q["more"]:
+                        # The tail, not a teaser: "which names are Leading?"
+                        # is what this section is for, so the rest of the
+                        # membership is one click away rather than absent.
+                        with ui.expansion(f"+{q['more']} more").classes(
+                                f"w-full mt-2 {_MONO} {NT['caption']} "
+                                "text-[10px] tracking-[.1em] uppercase "
+                                f"border {NE['btn_edge']} momentum-more"):
+                            with ui.row().classes(
+                                    "flex-wrap gap-[5px] w-full p-1 normal-case"):
+                                for m in q["members"][len(q["names"]):]:
+                                    _name_chip(m, cls)
 
     def _paint_example(rows):
         example_box.clear()
         comp_box.clear()
-        ex = V.example_row(rows)
+        ex = V.example_row(rows, state["selected"])
         with example_box:
             if not ex:
                 ui.label("No rows for this level.").classes(
                     f"text-[13px] {NT['blurb']}")
                 return
-            ui.label(f"Example row · {ex['sector'] or 'top ranked'}").classes(
-                f"{_MONO} {NT['caption']} text-[10px] tracking-[.16em] "
-                "uppercase leading-none")
+            with ui.row().classes(
+                    "items-baseline justify-between w-full no-wrap gap-3"):
+                ui.label(
+                    ("Top ranked · " if ex["is_default"] else "Selected · ")
+                    + (ex["sector"] or "—")).classes(
+                    f"{_MONO} {NT['caption']} text-[10px] tracking-[.16em] "
+                    "uppercase leading-none truncate")
+                if not ex["is_default"]:
+                    ui.button("Top ranked", color=None,
+                              on_click=lambda: _select(None))                         .props("flat no-caps dense").classes(
+                            f"{_MONO} {NT['rail']} text-[9px] tracking-[.12em] "
+                            "uppercase leading-none px-1.5 min-h-0 shrink-0")
             ui.label(ex["label"]).classes(
                 "text-[22px] font-semibold leading-[1.1] tracking-[-0.02em]")
             with ui.row().classes("items-baseline flex-wrap gap-[18px]"):
@@ -835,8 +863,12 @@ def render(level="industry"):
                 ui.label(section_heading(title, level)).classes(
                     f"{_MONO} {NT['caption']} text-[10px] tracking-[.18em] "
                     "uppercase")
-                ui.table(columns=cols, rows=data, row_key="symbol").classes(
-                    "w-full momentum-table" + (" opacity-50" if muted else ""))
+                tbl = ui.table(columns=cols, rows=data, row_key="symbol")                     .classes("w-full momentum-table cursor-pointer"
+                             + (" opacity-50" if muted else ""))
+                # rowClick carries the clicked row in args[1]; `table.selected`
+                # is a different thing entirely and would lag a click behind.
+                tbl.on("rowClick",
+                       lambda e: _select((e.args[1] or {}).get("symbol")))
 
     # ── apply ───────────────────────────────────────────────────────────────
     def _apply():
@@ -874,8 +906,20 @@ def render(level="industry"):
         state["payload"] = bus_client.read(VIEW) or {}
 
     @guard
+    def _select(symbol):
+        """Point section 4 at one row. ``None`` returns to the leader."""
+        state["selected"] = symbol or None
+        p = state["payload"] or {}
+        rows = rows_for(p, state["level"])
+        _paint_example(rows)
+        _paint_quadrants(rows)      # so the selected chip shows its ring
+
+    @guard
     def _set_level(value):
         state["level"] = normalise_level(value)
+        # A pick from one level does not exist on another, and silently
+        # carrying it would strand the card on a fallback with no explanation.
+        state["selected"] = None
         _apply()
 
     @guard
