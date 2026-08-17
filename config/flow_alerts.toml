@@ -26,7 +26,13 @@ push_threshold = 0.35     # PHONE-PUSH share bar, SEPARATE from rel_threshold's 
                           #             still shows every rel_threshold fire, but only fires whose share
                           #             of gross >= this get a Telegram push (~15-20/day at 0.35 vs
                           #             ~100/day at 0.20). Raise to quiet the phone; lower to hear more.
-rel_threshold = 0.20      # FIRE bar (screen). contract's delta-notional >= this share of the symbol's OWN gross
+rel_threshold = 0.25      # FIRE bar (screen). contract's delta-notional >= this share of the symbol's OWN gross
+                          #             Raised 0.20 -> 0.25 on 2026-08-17: at 0.20 the detector fired
+                          #             98-136/day and was ~33% of the whole flow channel (296 alerts on
+                          #             08-17), against a design estimate of ~18/day. The response is a
+                          #             CLIFF, not a slope — measured on real fires, not a re-model:
+                          #             20% -> 98, 25% -> 23, 30% -> 11, 35% -> 8. min_contract_notional
+                          #             deliberately left at $10M so the next reading isolates this knob.
 min_contract_notional = 10000000   # AND >= this absolute $ ($10M) — a big share of a tiny name isn't real
 delta_lo = 0.05           # delta band low  — drop near-zero delta (noise)
 delta_hi = 0.85           # delta band high — drop deep-ITM (stock-replacement / assignment)
