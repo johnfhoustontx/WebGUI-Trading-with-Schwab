@@ -19,6 +19,7 @@ would silently delete a working feature's first 30 / last 20 minutes.
 2026-08-14 is the Friday before activation; 2026-08-17 the Monday it goes live.
 """
 import datetime as dt
+import sqlite3
 
 import pytest
 
@@ -246,3 +247,29 @@ def test_flow_skew_is_not_published_during_gth(monkeypatch):
     handlers.publish_flow_skew(bus)
     assert built == [True]
     assert bus.cache_get("cache:options:flow_skew").payload == {"$SPX": {"rr_25d": 1.0}}
+
+
+def test_a_missing_history_db_degrades_instead_of_raising(monkeypatch):
+    """``gex_history.db`` is gitignored DATA and legitimately absent on a fresh
+    install, so ``run_flow_alerts`` opens it defensively and carries on with no
+    series when it cannot.
+
+    This test exists because the conftest ``_in_memory_gex_db`` fixture now makes
+    ``connect`` always succeed — which is right (tests must not depend on machine
+    state) but silently removed the only coverage this degrade path had. Assert
+    it deliberately rather than by accident.
+    """
+    import gex_history_db as gh
+
+    def _boom(read_only=False):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(gh, "connect", _boom)
+    bus = Bus(fake=True)
+    sent = []
+    _wire(monkeypatch, sent=sent)
+    monkeypatch.setattr(handlers, "_alert_now", lambda: _at(BEFORE, 10, 0))
+
+    handlers.run_flow_alerts(bus)          # must not raise
+
+    assert sent == [], "no history means no series, so nothing to alert on"

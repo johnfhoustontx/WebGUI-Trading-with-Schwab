@@ -1,5 +1,7 @@
 # services/options_svc/tests/conftest.py
 import datetime as _dt
+import sqlite3 as _sqlite3
+import sys as _sys
 
 import pytest
 
@@ -50,3 +52,45 @@ def _pin_flow_window_clock(monkeypatch):
     ``test_flow_alert_window.py``.
     """
     monkeypatch.setattr(handlers, "_alert_now", lambda: _RTH_NOW)
+
+
+@pytest.fixture(autouse=True)
+def _in_memory_gex_db(monkeypatch):
+    """Give ``gex_history_db.connect`` an EMPTY IN-MEMORY database.
+
+    ``run_flow_alerts`` opens the real ``gex_history.db`` and then reads its
+    series behind ``if conn is not None``. That file is gitignored DATA, so on a
+    fresh checkout the connect raises, ``conn`` stays None, and the guard
+    silently skips the loader the test just monkeypatched — detection sees an
+    empty series and the test fails with "lost its alerts".
+
+    The result was a suite that passed or failed on MACHINE STATE: green in a
+    checkout that happened to have collected GEX history, red in a fresh worktree
+    or on CI. Exactly the same class of problem as ``_pin_flow_window_clock``
+    above, which pins the clock so tests do not depend on the hour they run.
+
+    An in-memory DB with the real schema is the honest stand-in: connect
+    succeeds, so patched loaders are actually reached, and a test that does NOT
+    patch one reads a genuinely empty table instead of a machine's leftovers.
+    Tests that fake the whole module via ``sys.modules`` are unaffected — their
+    ``setitem`` replaces the module this fixture patched.
+    """
+    try:
+        import gex_history_db as gh
+    except Exception:                                   # pragma: no cover
+        return                                          # nothing to patch
+
+    def _connect(read_only: bool = False):
+        conn = _sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            gh.init_schema(conn)
+        except Exception:                               # pragma: no cover
+            pass
+        return conn
+
+    monkeypatch.setattr(gh, "connect", _connect)
+    # handlers imports it lazily INSIDE the function, so the patch has to land on
+    # the module object every later `import gex_history_db` resolves to.
+    if "gex_history_db" in _sys.modules:
+        monkeypatch.setattr(_sys.modules["gex_history_db"], "connect", _connect,
+                            raising=False)
