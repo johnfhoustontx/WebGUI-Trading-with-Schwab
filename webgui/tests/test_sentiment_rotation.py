@@ -177,19 +177,21 @@ def test_rrg_scatter_handles_missing_tail():
     assert _head(xlk)["marker"]["enabled"] is True
 
 
-def test_render_uses_native_hover_dimming():
+def test_neither_rotation_page_round_trips_hover_to_the_server():
+    """The durable half of the old plotly-migration guard.
+
+    Originally this also pinned ``ui.highchart`` on the RRG page. That stopped
+    being true on 2026-08-17, when the RRG was rebuilt from a supplied design as
+    a hand-drawn plot — absolutely-positioned markers over an SVG trail layer —
+    so neither page renders a chart element at all now. What must never come
+    back is the per-hover client→server round-trip the plotly version used."""
     import inspect
 
     from pages import sentiment_rrg
-    # The RRG chart now lives on its own tab (/sentiment/rrg). Its render draws the
-    # Highcharts RRG and relies on native hover dimming (states.inactive), so no
-    # plotly event round-trip remains.
-    src = inspect.getsource(sentiment_rrg.render)
-    assert "plotly_hover" not in src and "plotly_unhover" not in src
-    assert "run_plot_method" not in src
-    assert "ui.highchart" in src
-    # The Sector Rotation page no longer renders a chart (moved to the RRG tab).
-    assert "ui.highchart" not in inspect.getsource(R.render)
+    for src in (inspect.getsource(sentiment_rrg.render),
+                inspect.getsource(R.render)):
+        assert "plotly_hover" not in src and "plotly_unhover" not in src
+        assert "run_plot_method" not in src
 
 
 def test_hex_to_rgba_helper():

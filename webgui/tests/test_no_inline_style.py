@@ -106,6 +106,11 @@ def test_sentiment_pages_have_no_inline_style():
                # runtime `left-[…%]`/`w-[…%]` arbitraries carry it, the
                # documented continuous-value exception.
                "rotation_view.py", "oklch.py",
+               # The hand-drawn RRG plot. Its markers and ticks are runtime
+               # percentage arbitraries; its only non-utility content is the
+               # trail layer, a raw `ui.html()` SVG string — the documented
+               # out-of-scope case, same as pages/rings.py.
+               "rrg_view.py",
                # The Market Regime Console. Its whole design is glows, hairline
                # grids and gradients — the shapes most likely to reach for
                # `.style()` — and a Phase 0/2 spike measured that every one of

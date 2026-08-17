@@ -687,12 +687,22 @@ the panels, which carry the same sectors plus the weight the table never showed.
 <strong>RRG</strong> tab has the RS-Ratio detail. This page refreshes <strong>only when you press Refresh</strong>.</p>
 <h2 id="rrg">RRG</h2>
 <p><strong>Route:</strong> <code>/sentiment/rrg</code>.</p>
-<p>The same rotation data drawn as a Relative Rotation Graph: a full-width scatter with
-one "meteor-tail" trail per sector — a faded history line plus a bright current dot.
-Hovering a sector dims the others.</p>
-<p>Top-right is <strong>Leading</strong>, bottom-right <strong>Weakening</strong>, bottom-left <strong>Lagging</strong>,
-top-left <strong>Improving</strong>; sectors tend to rotate clockwise. Refresh-only, like Sector
-Rotation.</p>
+<p>The same rotation data drawn as a Relative Rotation Graph: every sector plotted on
+strength (left–right, RS-Ratio) against momentum (up–down, RS-Mom), with the crosshair
+at 100/100 — the S&amp;P itself.</p>
+<ul>
+<li>The four quadrants are <strong>tinted</strong>, so a sector's position tells you its state without
+  a colour key: top-right <strong>Leading</strong>, bottom-right <strong>Weakening</strong>, bottom-left
+  <strong>Lagging</strong>, top-left <strong>Improving</strong>. Sectors tend to rotate clockwise.</li>
+<li><strong>Dot size is the sector's S&amp;P 500 weight, by area.</strong> This is the part worth having:
+  a heavyweight sliding into Lagging is a market event, a 2% sector doing the same is
+  not, and on this plot you can see which is which.</li>
+<li><strong>Each trail is that sector's last five readings</strong>, thinning and fading toward the
+  oldest, so it points the direction of travel.</li>
+<li>A <strong>tinted strip</strong> above the plot repeats the Risk-on / Risk-off verdict and the
+  numbers behind it.</li>
+</ul>
+<p>Refresh-only, like Sector Rotation.</p>
 <h2 id="momentum">Momentum</h2>
 <p><strong>Route:</strong> <code>/sentiment/momentum</code>.</p>
 <p>A momentum screen across three levels — sectors, about 70 industry ETFs, and 311

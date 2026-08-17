@@ -342,13 +342,23 @@ Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
     "/sentiment/rrg": """
 **RRG — the simple version**
 
-The Relative Rotation Graph: each sector's momentum vs the S&P 500, over time.
+The Relative Rotation Graph: where every sector sits against the S&P 500, and
+which way it is heading.
 
-- **The plot** — top-right is **Leading**, bottom-right **Weakening**, bottom-left
-  **Lagging**, top-left **Improving**.
-- **Each sector** draws a trail; the **bright dot** is now, the faded line is where
-  it came from. **Hover** one to dim the rest.
-- **Risk-ON / OFF headline** gives the one-line summary. **Refresh** only.
+- **The four tinted areas are the answer.** Top-right **Leading** (strong and
+  still strengthening), top-left **Improving** (weak but turning up), bottom-left
+  **Lagging** (weak and getting weaker), bottom-right **Weakening** (strong but
+  rolling over). Sectors tend to travel clockwise around the centre.
+- **Left–right is strength** (RS-Ratio, 100 = matching the S&P). **Up–down is
+  momentum** (RS-Mom). The crosshair is always at 100/100.
+- **Dot size is the sector's weight in the S&P 500** — by area, so Technology is
+  visibly the elephant. A big dot drifting into Lagging matters far more than a
+  small one doing the same.
+- **The trail is its last five readings**, faintest and thinnest at the oldest —
+  so the trail points the way it is travelling.
+- **The strip at the top** is the verdict, with the cyclical-versus-defensive
+  numbers behind it.
+- **Refresh** only — this changes slowly by design.
 """,
     "/sentiment/momentum": """
 **Momentum — the simple version**

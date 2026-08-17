@@ -4,6 +4,62 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**RRG rebuilt as a hand-drawn plot.** `/sentiment/rrg` rebuilt from a
+supplied design (`RRG.html`), the third screen from that design project. Design:
+[design](plans/2026-08-17-rrg-plot-design.md); per-page detail in [webgui-routes](webgui-routes.md).
+- **Highcharts is gone from this page.** The design is a plain scatter with quadrant washes, a fixed
+  crosshair and per-marker sizing; Highcharts brings a scale model, a legend, a tooltip engine and a
+  reflow lifecycle none of that needs — against this app's documented list of Highcharts traps.
+  Eleven markers and 44 line segments do not justify any of it, and the geometry becomes pure and
+  testable instead of living in an options dict. Still Tier-1; no service change.
+- **Marker AREA is the sector's S&P weight** (diameter as √weight). A linear diameter would draw
+  Technology as ~10× Utilities rather than the ~16× in area it is. The old chart drew every sector
+  the same size, so a heavyweight sliding out of Leading looked identical to a 2% sector doing it.
+- **Each trail is the last FIVE readings** (as requested), fading AND thinning toward the past — age
+  encoded twice, because either alone is ambiguous against eleven overlapping trails and together
+  they read as direction without an arrowhead. Confirmed against the payload that `tail[-1]` IS the
+  current position, so a trail ends exactly on its marker.
+- **⚠ Three departures from the design, each forced by real data and each of the kind that ships
+  looking fine and is wrong.** (1) **The domain is computed, not fixed** — the design hard-codes
+  RS-Ratio 98.9…101.1 and the real five-reading tails reach **97.28**, clipped clean off the plot
+  with nothing to indicate anything was missing. Now derived from the data, padded 8%, floored at
+  the design's window, and **kept symmetric about 100** — load-bearing, because the washes and
+  crosshair are drawn at exactly 50%/50% and an asymmetric window would put the axes somewhere other
+  than 100/100 and silently reassign every sector's quadrant on screen. (2) **The trails are real** —
+  the design generates a spiral with `sampleTail()` and says so in its own footer. (3) **No
+  `vector-effect`** — the design scales a 0–100 viewBox with `preserveAspectRatio="none"` and leans
+  on `vector-effect:non-scaling-stroke`; **that attribute is not in DOMPurify's allowlist**, so
+  `ui.html` strips it and every trail renders thick horizontally and hairline vertically, with the
+  server-side string still perfectly correct. Percentage coordinates on the `<line>`s need neither
+  the viewBox nor the rescue. Guarded by `test_tail_svg_emits_nothing_dompurify_would_strip`, the
+  same invariant `rings.py` carries for the same reason.
+- **Labels are decluttered per side** — eleven sectors cluster hard around 100 (four within 3% of
+  each other vertically, measured live), so without it the ETF codes overprint into a smear. They
+  flip to the marker's left past 78% of the width. Per side, because a left label cannot collide
+  with a right one.
+- **A tinted verdict strip** above the plot carries the regime, its sentence and the arithmetic, so
+  a reader who takes nothing else away still leaves knowing which way the rotation points.
+- **Palette imported from `rotation_view.py`** — same quadrant hues, same warm-neutral ladder — so
+  the two rotation tabs cannot drift apart.
+- **⚠ `sentiment_rotation.rrg_scatter_figure` / `_sector_trace` / `quadrant_label_bands` /
+  `_hex_to_rgba` are now DEAD** — nothing imports them but their own tests, both consumers having
+  been rebuilt. Left in place rather than deleted unilaterally; worth a follow-up.
+- **One existing test rewritten:** `test_render_uses_native_hover_dimming` asserted `ui.highchart`
+  appears in the RRG render, which is no longer true by design. Rewritten around its durable half —
+  neither rotation page may reintroduce the per-hover client→server round-trip the plotly version
+  used.
+- **Pure/impure split:** all geometry in `webgui/pages/rrg_view.py` (38 tests). Webgui suite 1836
+  passed, 0 failed.
+- **Live-verified** at 9500: plot 609×600, **44 trail lines** and **11 markers** sized 13–21px with
+  Technology largest; percentage coordinates survive the sanitizer and resolve correctly
+  (`x1="3.70%"` → 23px of 609) with `stroke`/`stroke-width`/`opacity` all present; four quadrant
+  washes in the right corners; **crosshair at exactly 50.00%/50.00%**; corner labels correct;
+  Y ticks 97–103, X ticks 98–102; strip tinted red for Risk-off; no horizontal overflow.
+- **Docs:** design doc, CHANGELOG, webgui-routes, the CLAUDE.md route row, `page_help.py`, and the
+  User Guide + Reference Guide RRG sections.)
+
+---
+
 **Last updated:** 2026-08-17 (**Sector Rotation rebuilt as a board.** `/sentiment/rotation`
 rebuilt from a supplied design (`Sector Rotation.dc.html`), the second screen from the same design
 project as the Sector & Industry heat grid below. Design:

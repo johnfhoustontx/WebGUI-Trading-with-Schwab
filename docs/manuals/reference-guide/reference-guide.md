@@ -1035,8 +1035,18 @@ That gives four quadrants, and sectors tend to rotate **clockwise** through them
 | **Weakening** | bottom-right | Still strong, losing steam | → Lagging |
 | **Lagging** | bottom-left | Weak and still falling | → Improving |
 
-**Each sector draws a trail.** The bright dot is now; the faded line is where it has
-been. **Hover a sector to dim the others.**
+The four quadrants are **tinted**, so a sector's state is readable from where it sits
+rather than from a colour key.
+
+**Each sector draws a trail** of its **last five readings**, thinning and fading toward
+the oldest — so the trail points the direction of travel, and the bright dot at its end
+is now.
+
+**Dot size is the sector's weight in the S&P 500, encoded by area.** This is the piece
+that changes how the chart is used. A heavyweight sliding out of Leading is a market
+event; a 2% sector doing the same is a curiosity. The old version drew both the same
+size, so the chart could not distinguish them and you had to carry the weights in your
+head.
 
 The clockwise rotation is the whole point of the chart. A dot in Leading that is curving
 toward the right-hand edge and starting to drop is an early warning that leadership is
@@ -1047,7 +1057,12 @@ about to change — visible here well before it shows in a returns table.
 Trail *shape* carries information a table cannot. A long straight trail into Leading is
 a durable trend; a short jittery cluster around the centre is noise regardless of which
 quadrant it currently sits in. Distance from the centre is conviction — a sector at 104
-is meaningfully strong; one at 100.2 is essentially flat against SPY.
+is meaningfully strong; one at 100.2 is essentially flat against SPY. And with dot size
+carrying index weight, the single most useful read on the page is a **large** dot a long
+way from the centre.
+
+Note that the axes **rescale to fit the data**, so the plot always fills its space. Read
+the tick numbers, not the distance in pixels, when comparing one session to another.
 
 **Where it is weak.** RRG is a *relative* measure. In a market where everything falls,
 some sector still plots in Leading. It tells you what to prefer, never whether to be in

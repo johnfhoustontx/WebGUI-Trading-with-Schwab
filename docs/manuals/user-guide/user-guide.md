@@ -507,13 +507,22 @@ the panels, which carry the same sectors plus the weight the table never showed.
 
 **Route:** `/sentiment/rrg`.
 
-The same rotation data drawn as a Relative Rotation Graph: a full-width scatter with
-one "meteor-tail" trail per sector — a faded history line plus a bright current dot.
-Hovering a sector dims the others.
+The same rotation data drawn as a Relative Rotation Graph: every sector plotted on
+strength (left–right, RS-Ratio) against momentum (up–down, RS-Mom), with the crosshair
+at 100/100 — the S&P itself.
 
-Top-right is **Leading**, bottom-right **Weakening**, bottom-left **Lagging**,
-top-left **Improving**; sectors tend to rotate clockwise. Refresh-only, like Sector
-Rotation.
+- The four quadrants are **tinted**, so a sector's position tells you its state without
+  a colour key: top-right **Leading**, bottom-right **Weakening**, bottom-left
+  **Lagging**, top-left **Improving**. Sectors tend to rotate clockwise.
+- **Dot size is the sector's S&P 500 weight, by area.** This is the part worth having:
+  a heavyweight sliding into Lagging is a market event, a 2% sector doing the same is
+  not, and on this plot you can see which is which.
+- **Each trail is that sector's last five readings**, thinning and fading toward the
+  oldest, so it points the direction of travel.
+- A **tinted strip** above the plot repeats the Risk-on / Risk-off verdict and the
+  numbers behind it.
+
+Refresh-only, like Sector Rotation.
 
 ## Momentum
 
