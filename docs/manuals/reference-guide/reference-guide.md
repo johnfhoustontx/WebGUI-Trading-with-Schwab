@@ -1101,8 +1101,12 @@ tells you whether momentum is currently *worth trading at all*.
 
 ### Reading the screen
 
-**Read the banner first.** It is the most important element and it governs everything
-below:
+The page is laid out as **five numbered steps**. Work down them in order — each one
+qualifies the next.
+
+**1 · Is momentum worth trading today?** All three states render side by side with the
+live one enlarged. Showing the other two is the point: the premise of this page is that
+momentum only pays in some conditions, and that is a comparison rather than a label.
 
 | Banner | Meaning | What to do |
 |---|---|---|
@@ -1114,19 +1118,34 @@ below:
 > during volatile rebounds is a well-documented effect — see Daniel & Moskowitz,
 > *Momentum Crashes*, Journal of Financial Economics (2016).
 
-The banner also names the **dispersion percentile**. Low dispersion means everything is
-moving together, so a relative-strength screen has little to separate.
+Beneath the cards, the **dispersion percentile** on a 0–100 bar. Low dispersion means
+everything is moving together, so a relative-strength screen has little to separate — the
+score still computes, it just matters less.
 
-**The scatter.** Momentum score on the horizontal axis, acceleration on the vertical.
-Same four quadrant names as [RRG](#rrg) — Leading, Improving, Weakening, Lagging — but
-**the axes are different**: RRG measures strength purely against the S&P, whereas this
-score blends five components of which relative strength is only one. The two screens can
-legitimately disagree about the same sector.
+**2 · Three levels, and where they agree.** One track per level showing how many of its
+names are in their own top quartile. Track width scales with the *square root* of
+universe size, so all three stay legible instead of the 296-stock bar dwarfing the
+11-sector one. Beside it, the count of **stocks whose industry and sector both confirm** —
+the highest-conviction rows on the page.
 
-**The rank ribbon** shows rank over recent sessions. A name that has climbed steadily
-for two weeks is a better candidate than one that jumped yesterday.
+**3 · Where the names sit.** The four quadrants as counts and shares, with the strongest
+few named in each. Same four quadrant names as [RRG](#rrg) — Leading, Improving,
+Weakening, Lagging — but **the axes are different**: RRG measures strength purely against
+the S&P, whereas this score blends five components of which relative strength is only
+one. The two screens can legitimately disagree about the same sector.
 
-**The leaderboards** (top 15 and bottom 15) expose every component:
+**4 · What a score is made of.** The current top-ranked name, decomposed. Bars run either
+side of a centre line which is the universe average, so the *sign* is the reading. They
+clamp at ±3, which is where the service caps the z-scores.
+
+**5 · Rank over recent sessions.** A name that has climbed steadily for two weeks is a
+better candidate than one that jumped yesterday. Note that **not every symbol has the
+same history** — a line that starts partway across has fewer stored sessions, not a
+shorter trend — and the rank axis **scales to the data**, so it routinely runs far deeper
+than the top twenty.
+
+**The full leaderboard** is collapsed at the foot of the page. Open it for the ranked top
+15 and bottom 15, exposing every component:
 
 | Column | What it measures |
 |---|---|

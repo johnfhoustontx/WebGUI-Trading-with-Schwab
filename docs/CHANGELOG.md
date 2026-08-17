@@ -4,6 +4,56 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Momentum rebuilt as a guided page.** `/sentiment/momentum` rebuilt
+from a supplied design (`Momentum.html`), the fourth screen from that project. Design:
+[design](plans/2026-08-17-momentum-guided-page-design.md); per-page detail in
+[webgui-routes](webgui-routes.md).
+- **A pure Tier-1 re-render — `sentiment_svc` untouched.** Checked the design against the live
+  payload first: every element binds to `cache:sentiment:momentum` as it already exists, down to
+  the five component z-score keys and the `dispersion_pct` of 0.1176 the design renders as "12th".
+- **The page became a numbered argument** rather than a dashboard: (1) is momentum worth trading
+  today — **all three regime states side by side** with the live one enlarged and each carrying an
+  instruction, then dispersion as a percentile + bar; (2) three levels' top-quartile counts on
+  **√-scaled** tracks plus the count of stocks where industry AND sector confirm; (3) the four
+  quadrants as counts + chips; (4) the **top-ranked** row decomposed into diverging z-score bars;
+  (5) rank over recent sessions. Then **limits cards** that state on the page the four ways this
+  screen can be confidently wrong.
+- **Showing all three regime states at once is the point of section 1.** The old banner named the
+  live state and left the reader to remember what the other two meant — but the premise of the page
+  is that momentum only pays in some conditions, which is a comparison, not a label.
+- **The leaderboard survives behind a COLLAPSED expander** (the page owner's call). Deleting it, as
+  the design does, turns a screener into an orientation page with nowhere to see which names to act
+  on; leaving it open makes the argument above it read as preamble.
+- **The example row is the top-ranked row**, deterministically — so the anatomy card and the
+  leaderboard's first line are always the same name, i.e. "the current leader, explained".
+- **⚠ Three design assumptions that would have shipped broken**, each caught against live data.
+  (a) **`rank_history` is ragged** — symbols carry 15/10/7/**5** sessions, and the design's
+  `i/(len-1)*100` would stretch a five-session symbol across the full width as a full-length trend;
+  every series now shares ONE date axis (verified: AWAY has 10 of 15 and starts at x=35.7%).
+  (b) **The rank domain is computed, not capped at 21** — live ranks reach 61 (industries) and 272
+  (stocks), and the most interesting name is usually the one climbing from deep: today **GDX
+  60th→23rd** and **TER 272nd→52nd**, both cut off entirely by a 21-deep window. The bottom tick is
+  always labelled, so a 1…272 axis cannot read as ending at 205. (c) **`vector-effect` is stripped
+  by DOMPurify** (verified) — the design's `<polyline>` in a scaled viewBox relies on it; `points`
+  cannot take percentages either, hence percentage-addressed `<line>`s.
+- **Scatter and ribbon dropped.** `quadrant_figure` / `ribbon_figure` / `ribbon_subset` /
+  `quadrant_label_bands` / `_zero_line` are now **dead**, kept only because their tests pin them —
+  same as the RRG's `rrg_scatter_figure`. Worth one cleanup pass across both pages.
+- **Pure/impure split:** the new arithmetic in `webgui/pages/momentum_view.py` (59 tests); the
+  leaderboard's own transforms stay in the page module because the board does. Webgui suite 1905
+  passed, 0 failed.
+- **Live-verified** at 9500: all five sections against the live payload — Neutral · now with the
+  21/63 lookback interpolated, dispersion 12th, levels 3/11 · 17/69 · 74/296 with tracks
+  19.3/48.3/100%, 26 stocks aligned, quadrants 9/17/24/19 summing to 69, ARKG decomposed with
+  Trend/RS clamped at +3.00, 65 rank-line segments in two stroke widths. Leaderboard collapsed by
+  default and opening to 2×15 rows whose first row matches the example card. Level switch verified
+  via `?level=stock` (heading → 296 stocks, align text appears, story → TER). One cosmetic fix on
+  the way: the expander header's `uppercase` was inheriting into the table cells.
+- **Docs:** design doc, CHANGELOG, webgui-routes, the CLAUDE.md route row, `page_help.py`, and the
+  User Guide + Reference Guide Momentum sections.)
+
+---
+
 **Last updated:** 2026-08-17 (**RRG follow-up: smoothed trails + sector-name labels.** Two changes on
 top of the rebuild below. Design doc updated:
 [design](plans/2026-08-17-rrg-plot-design.md).

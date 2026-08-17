@@ -367,27 +367,39 @@ which way it is heading.
 
 Which sectors, industries and stocks are actually moving — and whether the
 current market pays for chasing them. Recomputed **once a night**, not live.
+The page reads as five numbered steps, top to bottom.
 
-- **The banner is the first thing to read.** *Favorable* = momentum's home turf.
-  *Neutral* = chop, so the score leans on a shorter lookback. **Suppressed** =
-  momentum-crash risk (a volatile rebound off a low, where the biggest losers rip
-  hardest) — the leaderboard below dims, and that is deliberate.
-- **The scatter** — right means strong, up means still accelerating. Top-right is
-  **Leading**, top-left **Improving** (turning up early), bottom-right **Weakening**
-  (strong but fading — late, don't chase), bottom-left **Lagging**. Same four names
-  as the **RRG** tab, though the axes differ: RRG measures strength purely against
-  the S&P, while this score blends five things of which relative strength is one.
-  Switch between industries and stocks with the dropdown.
-- **The ribbon** shows rank over recent sessions — steady climbers beat one-day pops.
-- **The tables** show every component behind the score (trend, relative strength,
-  acceleration, path quality, participation) so you can see *why* something ranks.
-  **Align** shows three blocks — sector, industry, stock — filled when each is in
-  its top quartile. Three filled blocks is the highest-conviction row.
-- **Participation** is how many of an industry's five constituents are above their
-  own 50-day average. Leadership that its own members don't confirm is thin.
-- **Excluded count** at the bottom lists names that were dropped (too illiquid, too
-  little history, or no quote at all) — that is how a renamed or delisted ticker
-  becomes visible instead of silently vanishing.
+- **1 · Is it worth trading today?** All three states are shown side by side and
+  the live one is enlarged, so you can see what today *isn't* as well as what it
+  is. *Favorable* = momentum's home turf. *Neutral* = chop, so the score leans on
+  a shorter lookback. **Suppressed** = momentum-crash risk (a volatile rebound off
+  a low, where the biggest losers rip hardest) — stand aside. Each card ends with
+  what to actually do about it.
+- **Dispersion** underneath is how spread out the field is, as a percentile. Low
+  dispersion means everything is moving together, so a relative-strength screen
+  has little to separate — the score still computes, it just matters less.
+- **2 · Three levels.** How many names in each universe are in their own top
+  quartile. The green panel counts the **stocks whose industry and sector both
+  confirm** — the highest-conviction rows on the page.
+- **3 · Where the names sit.** The four quadrants as counts: **Leading** (strong
+  and still accelerating), **Improving** (weak but turning up), **Weakening**
+  (strong but fading — late, don't chase), **Lagging** (weak and decelerating).
+  Same four names as the **RRG** tab, though the axes differ: RRG measures
+  strength purely against the S&P, while this score blends five things of which
+  relative strength is one.
+- **4 · What a score is made of.** The current leader, decomposed into its five
+  z-scores (trend, relative strength, acceleration, path quality, participation).
+  Bars run either side of a centre line, which is the universe average.
+  **Participation** is how many of an industry's constituents are above their own
+  50-day average — leadership its own members don't confirm is thin.
+- **5 · Rank over recent sessions.** Steady climbers beat one-day pops. A short
+  line means that name has fewer stored sessions, not a shorter trend.
+- **Full leaderboard** is collapsed at the bottom — open it for the ranked table
+  with every component column.
+- The **limits** cards spell out what this page cannot tell you, and the footnote
+  counts names that were dropped (too illiquid, too little history, or no quote)
+  — that is how a renamed or delisted ticker becomes visible instead of silently
+  vanishing.
 """,
     "/trade": """
 **Trade Analyzer — the simple version**

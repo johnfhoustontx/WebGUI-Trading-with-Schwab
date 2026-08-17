@@ -533,17 +533,31 @@ A momentum screen across three levels — sectors, about 70 industry ETFs, and 3
 stocks. **Recomputed once nightly at 16:20 CT**, not live, because it is built on
 daily bars.
 
-- **Read the banner first.** *Favorable* means trending conditions. *Neutral* means
-  chop. **Suppressed** means momentum-crash risk, and the leaderboard dims — that is
-  the app telling you not to chase.
-- A **quadrant scatter** (score against acceleration), a **rank ribbon** over recent
-  sessions, and **top/bottom-15 leaderboards** exposing every component.
-- **Align** shows three blocks — sector, industry, stock — filled when each is in its
-  top quartile. Three filled blocks is the highest-conviction row on the page.
-- The footer counts **excluded** symbols, so a delisted or renamed ticker becomes
-  visible instead of silently vanishing.
+The page reads as **five numbered steps**, top to bottom.
 
-Use the dropdown to switch between industries and stocks.
+1. **Is momentum worth trading today?** All three states are shown side by side with the
+   live one enlarged, so you can see what today *isn't* as well as what it is.
+   *Favorable* means trending conditions; *Neutral* means chop; **Suppressed** means
+   momentum-crash risk. Each card ends with what to do about it. Underneath,
+   **dispersion** as a percentile — low dispersion means everything is moving together,
+   so a relative-strength screen has little to separate.
+2. **Three levels, and where they agree.** How many names in each universe are in their
+   own top quartile, plus a count of the **stocks whose industry and sector both
+   confirm** — the highest-conviction rows on the page.
+3. **Where the names sit** — the four quadrants as counts, with the strongest names in
+   each.
+4. **What a score is made of** — the current leader decomposed into its five z-scores,
+   as bars either side of a centre line (the universe average).
+5. **Rank over recent sessions** — steady climbers beat one-day pops. A short line means
+   that name has fewer stored sessions, not a shorter trend.
+
+Then **limits** cards spelling out what this page cannot tell you, and a footer counting
+**excluded** symbols, so a delisted or renamed ticker becomes visible instead of
+silently vanishing.
+
+**Full leaderboard** at the bottom is collapsed — open it for the ranked top/bottom-15
+table with every component column. Use the dropdown to switch between industries and
+stocks.
 
 ---
 
