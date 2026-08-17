@@ -253,6 +253,12 @@ def test_example_row_carries_everything_the_card_shows():
     assert r["quadrant"] == "Weakening"           # score up, acceleration down
 
 
+def test_example_row_score_uses_the_same_minus_as_the_figures_beside_it():
+    neg = V.example_row([_row("A", -0.04, 0.5, 49, 5)])
+    assert neg["score"] == "−0.04"          # U+2212, not a hyphen
+    assert V.example_row([_row("A", 1.55, 0.5, 99, 1)])["score"] == "1.55"
+
+
 def test_example_row_delta_reads_zero_and_negative_correctly():
     assert V.example_row([_row("A", 1.0, 0.5, 90, 5, prev=5)])["delta"] == "0"
     down = V.example_row([_row("A", 1.0, 0.5, 90, 8, prev=5)])

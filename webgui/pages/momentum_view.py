@@ -259,7 +259,10 @@ def example_row(rows, symbol=None):
         "is_default": not picked,
         "label": best.get("label") or best.get("symbol") or "",
         "sector": best.get("sector") or "",
-        "score": DASH if score is None else f"{score:.2f}",
+        # A real minus, matching Δ rank and the component values beside it — a
+        # hyphen is visibly shorter and sits at the wrong height in the mono face.
+        "score": DASH if score is None else
+                 (f"{MINUS}{abs(score):.2f}" if score < 0 else f"{score:.2f}"),
         "percentile": DASH if pct is None else f"{pct:.0f}",
         "delta": DASH if delta is None else
                  ("0" if delta == 0 else
