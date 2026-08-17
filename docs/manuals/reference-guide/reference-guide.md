@@ -571,7 +571,8 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ## Market Dashboard
 
-*Menu: MARKETS → Trend & Sentiment → Market Dashboard · Route `/market`*
+*Menu: MARKETS → Trend & Sentiment → Market Dashboard · Route `/market` — and the
+app's **landing page**: opening `http://127.0.0.1:8500` redirects here*
 
 ### What it is
 
@@ -1294,7 +1295,7 @@ position is behaving in a way you do not understand.
 
 ## Market Scanner
 
-*Menu: STRATEGY → Options → Market Scanner · Route `/` (the app's home page)*
+*Menu: STRATEGY → Options → Market Scanner · Route `/options/scanner`*
 
 ### What it is
 

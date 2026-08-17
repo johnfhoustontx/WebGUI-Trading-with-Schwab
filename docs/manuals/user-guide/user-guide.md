@@ -397,8 +397,9 @@ for that symbol.
 
 ## Market Dashboard
 
-**Route:** `/market`. The group's first tab, so clicking **Trend & Sentiment** in
-the rail lands here.
+**Route:** `/market`. **This is the app's landing page** — opening
+`http://127.0.0.1:8500` redirects here. It is also the group's first tab, so
+clicking **Trend & Sentiment** in the rail lands here.
 
 A live wall of about 48 macro instruments in framed panels — volatility, options
 sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
@@ -588,7 +589,7 @@ heat map (the Calculator's **Copy to Simulator** brings them back).
 
 ## Market Scanner
 
-**Route:** the home page (`/`).
+**Route:** `/options/scanner`.
 
 The Market Scanner continuously looks for credit-spread opportunities and lists them in a
 two-pane layout.
