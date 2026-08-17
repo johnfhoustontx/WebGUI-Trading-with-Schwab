@@ -169,9 +169,12 @@ def render():
                         f"absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 "
                         f"rounded-full w-[{d}px] h-[{d}px] "
                         f"{cls['dot']} {cls['halo']}")
-                    ui.label(str(p["etf"] or "")).classes(
-                        f"{_MONO} {cls['label']} absolute whitespace-nowrap "
-                        "text-[11.5px] font-medium tracking-[.06em] "
+                    # The sector NAME, in the sans face: a proper noun set in a
+                    # mono ticker face reads as a code, which is the confusion
+                    # this change exists to remove.
+                    ui.label(str(p["label"])).classes(
+                        f"{cls['label']} absolute whitespace-nowrap "
+                        "text-[11.5px] font-medium tracking-[-0.005em] "
                         + ("-translate-y-1/2" if p["anchor"] == "left"
                            else "-translate-x-full -translate-y-1/2")
                         + f" left-[{p['dx']:.1f}px] top-[{p['dy']:.1f}px]")

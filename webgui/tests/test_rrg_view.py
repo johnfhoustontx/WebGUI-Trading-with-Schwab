@@ -193,13 +193,49 @@ def test_a_sector_missing_coordinates_is_dropped_rather_than_drawn_at_zero():
 
 
 # ── label placement ──────────────────────────────────────────────────────────
-def test_labels_flip_to_the_left_near_the_right_edge():
+def test_labels_carry_the_sector_name_not_the_ticker():
+    secs = [{"name": "Real Estate", "etf": "XLRE", "rs_ratio": 100.0,
+             "rs_momentum": 100.0, "quadrant": "Leading"}]
+    p = R.plot_points(secs, {}, R.domain(secs))[0]
+    assert p["label"] == "Real Estate"
+    assert p["etf"] == "XLRE"          # kept, for the palette and weights lookup
+
+
+def test_a_sector_with_no_name_falls_back_to_its_ticker():
+    secs = [{"etf": "XLRE", "rs_ratio": 100.0, "rs_momentum": 100.0,
+             "quadrant": "Leading"}]
+    assert R.plot_points(secs, {}, R.domain(secs))[0]["label"] == "XLRE"
+
+
+def test_labels_flip_to_the_left_when_they_would_hang_off_the_plot():
+    # The side decision MEASURES the label, because a sector name is roughly
+    # four times a ticker: "Communication" to the right of a marker at 70%
+    # would run off the edge where "XLC" would have fitted.
     d = {"x_lo": 99.0, "x_hi": 101.0, "y_lo": 99.0, "y_hi": 101.0}
-    pts = R.plot_points([_sec("R", 100.99, 100.0, "Leading"),
-                         _sec("L", 99.01, 100.0, "Leading")], {}, d)
+    pts = R.plot_points([
+        {"name": "Communication", "etf": "XLC", "rs_ratio": 100.9,
+         "rs_momentum": 100.0, "quadrant": "Leading"},
+        {"name": "Energy", "etf": "XLE", "rs_ratio": 99.1,
+         "rs_momentum": 100.0, "quadrant": "Leading"}], {}, d)
     by = {p["etf"]: p for p in pts}
-    assert by["R"]["dx"] < 0 and by["R"]["anchor"] == "right"
-    assert by["L"]["dx"] > 0 and by["L"]["anchor"] == "left"
+    assert by["XLC"]["anchor"] == "right" and by["XLC"]["dx"] < 0
+    assert by["XLE"]["anchor"] == "left" and by["XLE"]["dx"] > 0
+
+
+def test_a_long_name_flips_where_a_short_one_at_the_same_spot_would_not():
+    d = {"x_lo": 99.0, "x_hi": 101.0, "y_lo": 99.0, "y_hi": 101.0}
+    spot = {"rs_ratio": 100.5, "rs_momentum": 100.0, "quadrant": "Leading"}
+    long_ = R.plot_points([{**spot, "name": "Consumer Discretionary", "etf": "A"}],
+                          {}, d)[0]
+    short = R.plot_points([{**spot, "name": "Energy", "etf": "B"}], {}, d)[0]
+    assert long_["anchor"] == "right"
+    assert short["anchor"] == "left"
+
+
+def test_label_width_grows_with_the_name():
+    assert R.label_width_px("Communication") > R.label_width_px("Energy")
+    assert R.label_width_px("") == 0
+    assert R.label_width_px(None) == 0
 
 
 def test_labels_stacked_on_top_of_each_other_are_pushed_apart():
@@ -219,15 +255,21 @@ def test_labels_that_are_already_clear_are_left_alone():
 
 def test_decluttering_is_per_side_so_a_left_label_cannot_push_a_right_one():
     d = {"x_lo": 99.0, "x_hi": 101.0, "y_lo": 99.0, "y_hi": 101.0}
-    pts = R.plot_points([_sec("RGT", 100.99, 100.0, "Leading"),
-                         _sec("LFT", 99.01, 100.0, "Leading")], {}, d)
-    assert all(p["dy"] == 0 for p in pts)
+    pts = R.plot_points([
+        {"name": "Consumer Discretionary", "etf": "RGT", "rs_ratio": 100.9,
+         "rs_momentum": 100.0, "quadrant": "Leading"},
+        {"name": "Energy", "etf": "LFT", "rs_ratio": 99.01,
+         "rs_momentum": 100.0, "quadrant": "Leading"}], {}, d)
+    by = {p["etf"]: p for p in pts}
+    assert by["RGT"]["anchor"] != by["LFT"]["anchor"]     # opposite sides …
+    assert all(p["dy"] == 0 for p in pts)                # … so neither moves
 
 
 # ── the tail layer ───────────────────────────────────────────────────────────
-def test_tail_segments_join_consecutive_readings():
+def test_tail_segments_form_one_unbroken_polyline():
     segs = R.tail_segments(_sectors()[:1], R.domain(_sectors()))
-    assert len(segs) == R.TAIL_POINTS - 1          # 5 points → 4 segments
+    # 4 spans, each resampled — many more segments than readings, all joined.
+    assert len(segs) == (R.TAIL_POINTS - 1) * R.SMOOTH_SAMPLES
     for a, b in zip(segs, segs[1:]):
         assert a["x2"] == b["x1"] and a["y2"] == b["y1"]
 
@@ -236,6 +278,58 @@ def test_a_tail_fades_and_thins_toward_its_oldest_reading():
     segs = R.tail_segments(_sectors()[:1], R.domain(_sectors()))
     assert [s["opacity"] for s in segs] == sorted(s["opacity"] for s in segs)
     assert [s["width"] for s in segs] == sorted(s["width"] for s in segs)
+
+
+def test_smoothing_passes_through_every_real_reading():
+    """The curve may choose the route between readings; it may not move them."""
+    pts = [(99.0, 99.0), (99.5, 100.5), (100.0, 100.0), (100.5, 101.5)]
+    out = R.smooth_tail(pts)
+    for p in pts:
+        assert any(abs(p[0] - q[0]) < 1e-9 and abs(p[1] - q[1]) < 1e-9
+                   for q in out), p
+    assert out[0] == pts[0] and out[-1] == pts[-1]
+
+
+def test_smoothing_adds_intermediate_points_between_every_reading():
+    pts = [(99.0, 99.0), (99.5, 100.5), (100.0, 100.0)]
+    out = R.smooth_tail(pts)
+    assert len(out) == 1 + (len(pts) - 1) * R.SMOOTH_SAMPLES
+
+
+def test_smoothing_actually_bends_the_path():
+    # A corner in the raw readings must come out rounded, i.e. the resampled
+    # point nearest the corner should sit off the original polyline.
+    pts = [(99.0, 100.0), (100.0, 100.0), (100.0, 101.0)]
+    out = R.smooth_tail(pts)
+    assert any(abs(y - 100.0) > 1e-6 and 99.0 < x < 100.0 for x, y in out)
+
+
+def test_smoothing_stays_within_the_readings_bounding_box():
+    # A spline that overshoots is claiming the sector visited a position it
+    # never held, so the tension is set to keep the curve tight.
+    pts = [(99.0, 99.0), (99.4, 100.6), (100.1, 99.4), (100.6, 101.0)]
+    out = R.smooth_tail(pts)
+    pad = 0.25
+    assert min(x for x, _ in out) >= min(p[0] for p in pts) - pad
+    assert max(x for x, _ in out) <= max(p[0] for p in pts) + pad
+    assert min(y for _, y in out) >= min(p[1] for p in pts) - pad
+    assert max(y for _, y in out) <= max(p[1] for p in pts) + pad
+
+
+def test_smoothing_a_two_point_or_shorter_tail_is_a_no_op():
+    assert R.smooth_tail([(99.0, 99.0), (100.0, 100.0)]) ==         [(99.0, 99.0), (100.0, 100.0)]
+    assert R.smooth_tail([(99.0, 99.0)]) == [(99.0, 99.0)]
+    assert R.smooth_tail([]) == []
+
+
+def test_taper_is_continuous_rather_than_stepping_once_per_reading():
+    segs = R.tail_segments(_sectors()[:1], R.domain(_sectors()))
+    widths = [s["width"] for s in segs]
+    # Every sub-segment differs from its neighbour: a stepped taper would show
+    # only as many distinct widths as there are readings.
+    assert len(set(round(w, 6) for w in widths)) == len(widths)
+    assert widths[0] == pytest.approx(R.TAIL_W[0], abs=0.05)
+    assert widths[-1] == pytest.approx(R.TAIL_W[1])
 
 
 def test_a_sector_with_no_tail_contributes_no_segments():

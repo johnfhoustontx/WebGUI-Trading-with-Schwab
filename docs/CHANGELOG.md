@@ -4,6 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**RRG follow-up: smoothed trails + sector-name labels.** Two changes on
+top of the rebuild below. Design doc updated:
+[design](plans/2026-08-17-rrg-plot-design.md).
+- **Trails are smoothed** — each is resampled along a **Catmull-Rom spline** at 6 sub-segments per
+  span, so a five-reading trail draws 24 sub-segments instead of 4 straight ones. Measured live, the
+  per-segment turn angle within one trail fell from **max 142° / median 27.3°** to **max 8.3° /
+  median 4.0°**.
+- **Two properties keep it honest as a data plot.** The curve **passes through every real reading** —
+  smoothing only decides the route *between* them — and the end tangents are clamped so a trail
+  cannot flare past its own endpoints. `TAIL_TENSION` stays at the standard 0.5 with a bounding-box
+  test, because a spline that overshoots is claiming the sector visited a position it never held:
+  the same class of quiet dishonesty as the fixed domain clipping tails.
+- **Side benefit:** with the trail resampled, width and opacity became CONTINUOUS functions of
+  position along it rather than stepping once per reading, so the fade reads as one gesture.
+- **Cost:** 264 `<line>`s / ~34 KB of SVG for eleven sectors, on a page that repaints only on a
+  manual refresh (~8 ms to walk the rendered DOM).
+- **Markers are labelled with the SECTOR NAME**, not the ETF code, and moved to the sans face — a
+  proper noun set in a mono ticker face reads as a code. A name is ~4× a ticker's width, which broke
+  the fixed flip-at-78% rule ("Communication" right of a marker at 70% would hang off the plot where
+  "XLC" fitted), so the side decision now **measures the label** against the plot's right edge.
+- **Live-verified:** 264 lines, stroke tapering 1.33 → 1.72 → 2.14 and opacity 0.18 → 0.67 across one
+  trail; all eleven sector names render in Instrument Sans with **no overflow on either edge**.
+  Webgui suite green.
+- ⚠ **Process note:** the first verification pass read a STALE server. A previous webgui had kept
+  :9500, so the restart failed to bind and exited while the old process kept serving — the page
+  showed 44 lines and ETF labels, i.e. the pre-change code. Root cause: the ad-hoc
+  `netstat`-and-taskkill one-liners used a `$`-anchored regex inside a double-quoted `-c` string,
+  where the shell ate the anchor, so they matched nothing and reported success. Check the port is
+  actually free after killing, and read the launcher's log for `Errno 10048`.)
+
+---
+
 **Last updated:** 2026-08-17 (**RRG rebuilt as a hand-drawn plot.** `/sentiment/rrg` rebuilt from a
 supplied design (`RRG.html`), the third screen from that design project. Design:
 [design](plans/2026-08-17-rrg-plot-design.md); per-page detail in [webgui-routes](webgui-routes.md).

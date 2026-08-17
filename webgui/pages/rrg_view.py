@@ -216,16 +216,29 @@ def marker_classes(quadrant):
 
 
 # ── points + label decluttering ──────────────────────────────────────────────
-# Labels sit beside their marker. Past this fraction of the width they would run
-# off the right edge, so they flip to the marker's left instead.
-FLIP_SIDE_AT_PCT = 78.0
+# Labels sit beside their marker and carry the SECTOR NAME, not the ETF code —
+# so the plot is readable without knowing that XLRE is Real Estate. Names are
+# ~4x wider than a ticker, which is why the flip rule below measures the label
+# instead of using a fixed threshold: "Communication" placed to the right of a
+# marker at 70% would hang off the plot entirely.
 LABEL_GAP_PX = 8.0
-# Two ETF codes closer than this vertically overprint into an unreadable smear.
-# Nominal plot height, used only to turn the percentage positions into the pixel
-# space the gap is expressed in — a label nudge, not layout, so an approximate
-# height is fine.
+# Two labels closer than this vertically overprint into an unreadable smear.
 LABEL_MIN_GAP_PX = 15.0
+# Nominal plot size, used only to turn percentage positions into the pixel space
+# the gap and the width estimate are expressed in. These are label nudges, not
+# layout, so approximate values are fine — the plot's real height is fixed at
+# 600 and its width is fluid around this figure.
 PLOT_H_PX = 600.0
+PLOT_W_PX = 620.0
+EDGE_PAD_PX = 6.0
+# Mean advance of Instrument Sans at 11.5px, measured across the eleven sector
+# names. Only ever used to decide which SIDE a label goes on.
+LABEL_CHAR_PX = 6.35
+
+
+def label_width_px(text):
+    """Rough rendered width of a label, for the side decision."""
+    return len(str(text or "")) * LABEL_CHAR_PX
 
 
 def plot_points(sectors, weights, dom):
@@ -242,13 +255,19 @@ def plot_points(sectors, weights, dom):
         q = s.get("quadrant")
         xp = px(x, dom["x_lo"], dom["x_hi"])
         size = marker_px((weights or {}).get(s.get("etf")))
-        left = xp <= FLIP_SIDE_AT_PCT
+        label = s.get("name") or s.get("etf") or ""
+        # Place the label to the marker's right unless the whole thing would
+        # then hang off the plot — measured, because a sector name is wide.
+        gap = size / 2 + LABEL_GAP_PX
+        fits_right = (xp / 100.0 * PLOT_W_PX + gap + label_width_px(label)
+                      <= PLOT_W_PX - EDGE_PAD_PX)
         out.append({
-            "etf": s.get("etf"), "name": s.get("name"), "quadrant": q,
+            "etf": s.get("etf"), "name": s.get("name"), "label": label,
+            "quadrant": q,
             "x_pct": xp, "y_pct": py(y, dom["y_lo"], dom["y_hi"]),
             "size_px": size, "classes": marker_classes(q),
-            "anchor": "left" if left else "right",
-            "dx": (size / 2 + LABEL_GAP_PX) * (1 if left else -1),
+            "anchor": "left" if fits_right else "right",
+            "dx": gap * (1 if fits_right else -1),
             "dy": 0.0,
         })
     return _declutter(out)
@@ -276,32 +295,74 @@ def _declutter(points):
 
 
 # ── the tail layer ───────────────────────────────────────────────────────────
-TAIL_W0, TAIL_DW = 1.3, 0.28        # oldest segment thinnest
-TAIL_O0, TAIL_DO = 0.16, 0.17       # oldest segment faintest
+TAIL_W = (1.30, 2.14)      # stroke width: oldest end → newest end
+TAIL_O = (0.16, 0.67)      # opacity: oldest end → newest end
+# Sub-samples per span of the smoothing spline. Six is where the corners stop
+# being visible at this plot size; more only inflates the emitted SVG.
+SMOOTH_SAMPLES = 6
+# Catmull-Rom tangent scale. 0.5 is the standard uniform form. Lower values pull
+# the curve toward the straight polyline, which is the direction of safety here:
+# this is a data plot, and a spline that bulges is claiming the sector visited a
+# position it never held.
+TAIL_TENSION = 0.5
+
+
+def _catmull_rom(p0, p1, p2, p3, t, tension=TAIL_TENSION):
+    """One point on the Catmull-Rom span between ``p1`` and ``p2``."""
+    t2, t3 = t * t, t * t * t
+    out = []
+    for a, b, c, d in zip(p0, p1, p2, p3):
+        m1 = tension * (c - a)
+        m2 = tension * (d - b)
+        out.append((2 * b - 2 * c + m1 + m2) * t3
+                   + (-3 * b + 3 * c - 2 * m1 - m2) * t2
+                   + m1 * t + b)
+    return tuple(out)
+
+
+def smooth_tail(points, samples=SMOOTH_SAMPLES):
+    """A polyline through ``points``, resampled along a Catmull-Rom spline.
+
+    The curve passes through every real reading — the smoothing only decides the
+    route *between* them, and the end tangents are clamped (the first and last
+    points are duplicated) so a trail never flares off past its own endpoints."""
+    pts = list(points or [])
+    if len(pts) < 3:
+        return pts
+    ext = [pts[0]] + pts + [pts[-1]]
+    out = [pts[0]]
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+        for k in range(1, samples + 1):
+            out.append(_catmull_rom(p0, p1, p2, p3, k / samples))
+    return out
 
 
 def tail_segments(sectors, dom):
-    """Every trail segment, oldest first, fading and thinning toward the past.
+    """Every trail sub-segment, oldest first, fading and thinning toward the past.
 
     Age is encoded twice on purpose — width *and* opacity. Either alone is
-    ambiguous against eleven overlapping trails; together they read as
-    direction without needing an arrowhead."""
+    ambiguous against eleven overlapping trails; together they read as direction
+    without needing an arrowhead. Because the trail is resampled along a spline,
+    both taper CONTINUOUSLY rather than stepping once per reading."""
     segs = []
     for s in sectors or []:
-        pts = tail_points(s)
+        pts = smooth_tail(tail_points(s))
         if len(pts) < 2:
             continue
         stroke = marker_classes(s.get("quadrant"))["tail"]
-        for i in range(len(pts) - 1):
+        n = len(pts) - 1
+        for i in range(n):
             a, b = pts[i], pts[i + 1]
+            u = (i + 1) / n if n else 1.0        # 0 at the oldest end, 1 at now
             segs.append({
                 "x1": px(a[0], dom["x_lo"], dom["x_hi"]),
                 "y1": py(a[1], dom["y_lo"], dom["y_hi"]),
                 "x2": px(b[0], dom["x_lo"], dom["x_hi"]),
                 "y2": py(b[1], dom["y_lo"], dom["y_hi"]),
                 "stroke": stroke,
-                "width": TAIL_W0 + i * TAIL_DW,
-                "opacity": TAIL_O0 + i * TAIL_DO,
+                "width": TAIL_W[0] + u * (TAIL_W[1] - TAIL_W[0]),
+                "opacity": TAIL_O[0] + u * (TAIL_O[1] - TAIL_O[0]),
             })
     return segs
 

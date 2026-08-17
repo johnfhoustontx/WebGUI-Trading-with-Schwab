@@ -1740,9 +1740,11 @@ terminals. Background:
 </table>
 <p>The four quadrants are <strong>tinted</strong>, so a sector's state is readable from where it sits
 rather than from a colour key.</p>
-<p><strong>Each sector draws a trail</strong> of its <strong>last five readings</strong>, thinning and fading toward
-the oldest — so the trail points the direction of travel, and the bright dot at its end
-is now.</p>
+<p><strong>Each sector draws a trail</strong> of its <strong>last five readings</strong>, drawn as a smooth curve that
+thins and fades toward the oldest — so the trail points the direction of travel, and the
+bright dot at its end is now. The curve passes through every actual reading; the
+smoothing only decides the path between them.</p>
+<p>Markers are labelled with the <strong>sector name</strong>, not the ETF ticker.</p>
 <p><strong>Dot size is the sector's weight in the S&amp;P 500, encoded by area.</strong> This is the piece
 that changes how the chart is used. A heavyweight sliding out of Leading is a market
 event; a 2% sector doing the same is a curiosity. The old version drew both the same

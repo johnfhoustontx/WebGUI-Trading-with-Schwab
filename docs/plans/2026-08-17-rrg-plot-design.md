@@ -65,6 +65,38 @@ they resolve straight against the viewport and leave `stroke-width` in real
 pixels. Guarded by `test_tail_svg_emits_nothing_dompurify_would_strip`, the same
 invariant `rings.py` carries for the same reason.
 
+## Follow-up, same day: smoothed trails + sector names
+
+Two changes on top of the first pass.
+
+**Trails are smoothed.** Each is resampled along a **Catmull-Rom spline** at six
+sub-segments per span, so a five-reading trail draws 24 sub-segments instead of
+four straight ones. Two properties keep it honest as a data plot:
+
+- **The curve passes through every real reading.** Smoothing only decides the
+  route *between* them, and the end tangents are clamped (first and last points
+  duplicated) so a trail cannot flare off past its own endpoints.
+- **`TAIL_TENSION` stays at the standard 0.5**, with a bounding-box test, because
+  a spline that overshoots is claiming the sector visited a position it never
+  held — the same class of quiet dishonesty as the fixed domain clipping tails.
+
+A side benefit: with the trail resampled, the width and opacity taper became
+**continuous** functions of position along the trail rather than stepping once
+per reading, so the fade reads as a single gesture.
+
+Measured live, the per-segment turn angle within one trail fell from **max 142°
+/ median 27.3°** to **max 8.3° / median 4.0°**. Cost is 264 `<line>` elements
+(~34 KB of SVG) for eleven sectors, on a page that repaints only on a manual
+refresh — measured at ~8 ms to walk the rendered DOM.
+
+**Markers are labelled with the sector name.** A proper noun set in a mono
+ticker face reads as a code, so the labels moved to the sans face too. A name is
+roughly four times the width of a ticker, which broke the old fixed
+flip-at-78% rule — "Communication" placed to the right of a marker at 70% would
+hang off the plot where "XLC" fitted. The side decision now **measures the
+label** (`label_width_px`) against the plot's right edge. Verified live: all
+eleven names render, none overflow either edge.
+
 ## Smaller decisions
 
 - **Marker diameter goes as √weight**, so *area* is proportional to weight. A

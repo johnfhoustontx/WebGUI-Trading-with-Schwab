@@ -1038,9 +1038,12 @@ That gives four quadrants, and sectors tend to rotate **clockwise** through them
 The four quadrants are **tinted**, so a sector's state is readable from where it sits
 rather than from a colour key.
 
-**Each sector draws a trail** of its **last five readings**, thinning and fading toward
-the oldest — so the trail points the direction of travel, and the bright dot at its end
-is now.
+**Each sector draws a trail** of its **last five readings**, drawn as a smooth curve that
+thins and fades toward the oldest — so the trail points the direction of travel, and the
+bright dot at its end is now. The curve passes through every actual reading; the
+smoothing only decides the path between them.
+
+Markers are labelled with the **sector name**, not the ETF ticker.
 
 **Dot size is the sector's weight in the S&P 500, encoded by area.** This is the piece
 that changes how the chart is used. A heavyweight sliding out of Leading is a market

@@ -354,8 +354,10 @@ which way it is heading.
 - **Dot size is the sector's weight in the S&P 500** — by area, so Technology is
   visibly the elephant. A big dot drifting into Lagging matters far more than a
   small one doing the same.
-- **The trail is its last five readings**, faintest and thinnest at the oldest —
-  so the trail points the way it is travelling.
+- **The trail is its last five readings**, drawn as a smooth curve that is faintest
+  and thinnest at the oldest — so the trail points the way it is travelling. It
+  bends only between readings; it always passes through the real ones.
+- Each marker is labelled with its **sector name**.
 - **The strip at the top** is the verdict, with the cyclical-versus-defensive
   numbers behind it.
 - **Refresh** only — this changes slowly by design.

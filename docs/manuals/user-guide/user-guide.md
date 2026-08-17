@@ -517,8 +517,9 @@ at 100/100 — the S&P itself.
 - **Dot size is the sector's S&P 500 weight, by area.** This is the part worth having:
   a heavyweight sliding into Lagging is a market event, a 2% sector doing the same is
   not, and on this plot you can see which is which.
-- **Each trail is that sector's last five readings**, thinning and fading toward the
-  oldest, so it points the direction of travel.
+- **Each trail is that sector's last five readings**, drawn as a smooth curve that thins
+  and fades toward the oldest, so it points the direction of travel.
+- Markers are labelled with the **sector name**, not the ETF ticker.
 - A **tinted strip** above the plot repeats the Risk-on / Risk-off verdict and the
   numbers behind it.
 
