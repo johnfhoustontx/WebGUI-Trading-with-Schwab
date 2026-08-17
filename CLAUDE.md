@@ -276,7 +276,7 @@ Routes:
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/sectors` | Sector & Industry — a magnitude-forward **heat grid**: Day/Week/Month as three flush filled tiles, intensity normalised **per column** on that column's own p90, plus P/C and expandable industries. Sortable; RRG dropped. Reader of `cache:sentiment:sectors`. [Detail](docs/webgui-routes.md) | built |
-| `/sentiment/rotation` | Sector Rotation — Risk-ON/OFF headline + quadrant map + rotating from/into. Cached, manual Refresh only. | built |
+| `/sentiment/rotation` | Sector Rotation — verdict strip (regime · **diverging spread gauge** on a −3…+3 scale with both ±threshold triggers · the spread and how far past its trigger it sits), a **weight-proportional flow band**, and four quadrant panels. Quadrant map table + rotating-from/into lists retired. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/rrg` | RRG — full-width relative-rotation chart, one spline per sector with a faded tail. Cached, manual Refresh only. | built |
 | `/sentiment/momentum` | Momentum — regime-conditioned momentum cascade over sectors / industry ETFs / stocks. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
 | `/trade` | Trade Analyzer — on-demand Position (1–8wk) + Investor verdicts; Position runs the backtested IC-weighted factor model. Deep Dive and AI Query open separate reports. [Detail](docs/webgui-routes.md) | built |
@@ -898,20 +898,33 @@ candidate menu). **Rule: don't hard-code commission rates** — add them here.
 speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
-See the "App theme — dark-navy 'dashboard'" section. **Four sections are page-scoped
+See the "App theme — dark-navy 'dashboard'" section. **Five sections are page-scoped
 languages, NOT the app-wide palette and NOT surfaced in Settings → Appearance:**
 `[flow]` (the Options Flow console panels, the `/options/gamma` Flow + Net Prem
 subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
 `[console]` (Market Regime Console, `/sentiment` only), `[macro]` (the Macro Board
-redesign, `/market` only) and `[sectors]` (the Sector & Industry heat grid,
-`/sentiment/sectors` only). Each has matching `theme.py` builders
-(`build_console_*` / `build_macro_*` / `build_sector_*`); the first three are
-injected via that page's ONE `ui.add_css` escape-hatch block. **`[sectors]` is
-the exception that proves the rule holds** — the heat grid is nothing but colour
-and measurement and it still needs **no `ui.add_css` at all**, only tokens and a
-font `<link>`. Its green/red ramp is deliberately NOT config-driven: it is a
-data-driven cell map (the category excluded above, alongside the gauge face and
-the score/heat/P&L zone maps) and lives in `webgui/pages/sector_heat.py`.
+redesign, `/market` only), `[sectors]` (the Sector & Industry heat grid,
+`/sentiment/sectors` only) and `[rotation]` (the Sector Rotation board,
+`/sentiment/rotation` only). Each has matching `theme.py` builders
+(`build_console_*` / `build_macro_*` / `build_sector_*` / `build_rotation_*`); the
+first three are injected via that page's ONE `ui.add_css` escape-hatch block.
+**`[sectors]` and `[rotation]` are the two that prove the rule holds** — a heat
+grid and a diverging gauge are nothing but colour and measurement, and both need
+**no `ui.add_css` at all**, only tokens and a font `<link>`. Their colour ramps
+are deliberately NOT config-driven: both are data-driven cell maps (the category
+excluded above, alongside the gauge face and the score/heat/P&L zone maps),
+living in `webgui/pages/sector_heat.py` and `webgui/pages/rotation_view.py`.
+`webgui/pages/oklch.py` holds the oklch→sRGB conversion both use — both supplied
+designs were authored in oklch, and both sit at the dark end of the range where
+an sRGB interpolation visibly bunches the low steps.
+
+⚠ **The four RRG quadrant colours now exist in TWO palettes, on purpose.**
+`sentiment_rotation.quadrant_color` (Leading `#66bb6a` / Improving `#3fb6c7` /
+Weakening `#ffd54f` / Lagging `#ef5350`) still drives the **RRG scatter** and the
+**Sector & Industry** quadrant text; the Sector Rotation board's supplied design
+re-hues them (Leading 158 / Improving **232 blue** / Weakening **80 olive** /
+Lagging 22) and `rotation_view.QUAD_CLASSES` implements that **for that page
+only**. Unifying the two is a live open question, not an oversight.
 
 `config/flow_alerts.toml` is the single source of truth for the **options-flow alert
 thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`/

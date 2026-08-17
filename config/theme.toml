@@ -276,3 +276,24 @@ warn    = "#E0A63C"            # mixed regime, and put/call above 1.5
 # JetBrains Mono for every figure. The mono face is what makes tabular-nums
 # align digits down a column — a system fallback is a visible downgrade.
 font_url = "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+
+[rotation]                     # ── Sector Rotation board (/sentiment/rotation ONLY)
+# A verdict strip (regime · diverging spread gauge · spread vs its trigger), a
+# weight-proportional flow band, and four quadrant panels. Page-scoped like
+# [console] / [macro] / [sectors], and NOT shown in Settings → Appearance.
+#
+# ONLY the two grounds and the faces are here, on purpose. Everything else on
+# the board is either the WARM-NEUTRAL LADDER — oklch(L 0.006-0.01 90), one
+# lightness step per role so the hierarchy is visible in the source — or the
+# FOUR QUADRANT HUES (Leading 158 / Improving 232 / Weakening 80 / Lagging 22).
+# Both are design ramps rather than palette knobs, so both live in
+# webgui/pages/rotation_view.py, the same call made for the [sectors] heat ramp.
+#
+# ⚠ Those quadrant hues are PAGE-SCOPED and deliberately differ from the RRG
+# tab's (sentiment_rotation.quadrant_color: green/cyan/yellow/red), which still
+# drives the RRG scatter and the Sector & Industry quadrant text.
+void  = "#08090B"              # page ground
+panel = "#0B0C0E"              # quadrant panel fill, one step lighter
+# Same two faces as [sectors] — the screens are one design family — but declared
+# per page so either can be restyled without silently changing the other.
+font_url = "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"

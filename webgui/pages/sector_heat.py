@@ -29,11 +29,14 @@ vocabulary deduped — see ``test_heat_palette_is_a_finite_deduped_vocabulary``.
 import math
 from datetime import datetime, timezone
 
+from pages.oklch import oklch_hex  # noqa: F401 — re-exported; the ramp's unit
+
 # ── oklch ────────────────────────────────────────────────────────────────────
 # The ramp is authored in oklch because that is the space in which "one step
 # brighter" is one step brighter to the *eye*; interpolating the same endpoints
 # in sRGB bunches the dark steps together, which is precisely the end of the
-# range this grid spends most of its time in.
+# range this grid spends most of its time in. The conversion itself moved to
+# ``pages/oklch.py`` when the Sector Rotation board landed needing the same one.
 LEVELS = 6                       # intensity steps per direction
 HUE_UP, HUE_DN = 158.0, 22.0     # green / red
 RAMP_L = (0.175, 0.300)          # tile lightness: faintest step → strongest
@@ -42,31 +45,6 @@ FLAT_BG = (0.155, 0.004, 90.0)   # a neutral one hair above the page ground
 TXT_L = (0.660, 0.965)           # the figure lifts as its tile saturates …
 TXT_C = (0.030, 0.055)
 FLAT_TXT = (0.580, 0.006, 90.0)  # … and recedes to grey when the cell is flat
-
-
-def oklch_hex(lightness, chroma, hue):
-    """``oklch(L C H)`` → ``#RRGGBB``, gamut-clamped.
-
-    Out-of-gamut requests clamp per channel rather than raising or wrapping, so
-    a mis-tuned ramp degrades to a flat-looking colour instead of taking the
-    page down (the house rule for anything on the styling path)."""
-    a = chroma * math.cos(math.radians(hue))
-    b = chroma * math.sin(math.radians(hue))
-    l_ = lightness + 0.3963377774 * a + 0.2158037573 * b
-    m_ = lightness - 0.1055613458 * a - 0.0638541728 * b
-    s_ = lightness - 0.0894841775 * a - 1.2914855480 * b
-    l3, m3, s3 = l_ ** 3, m_ ** 3, s_ ** 3
-    lin = (
-        4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
-        -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
-        -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3,
-    )
-    out = []
-    for x in lin:
-        x = min(1.0, max(0.0, x))
-        x = 1.055 * x ** (1 / 2.4) - 0.055 if x > 0.0031308 else 12.92 * x
-        out.append(round(min(1.0, max(0.0, x)) * 255))
-    return "#%02X%02X%02X" % tuple(out)
 
 
 def _lerp(pair, f):

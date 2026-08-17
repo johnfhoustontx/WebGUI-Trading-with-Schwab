@@ -484,14 +484,24 @@ A heat grid for the eleven S&P sectors, each expandable into its industries.
 
 Which sectors money is rotating into and out of, measured against SPY.
 
-- A **headline** — Risk-ON / Risk-OFF, an assessment line, and the
-  cyclical-versus-defensive spread shown against the ±1.5 threshold it had to clear.
-- A **quadrant map** table sorted by momentum, with **RS-Ratio** (relative strength)
-  and **RS-Mom** (its rate of change) for each sector.
-- **Rotating From / Into** columns, with each sector's **S&P weight** — which is what
-  tells you whether a rotation is material.
+- A **verdict strip**: the regime in one word (Risk-on / Risk-off), a plain sentence
+  saying what it means, and a **diverging gauge** putting the cyclical-versus-defensive
+  spread on a −3 to +3 scale. The bar runs from zero out to the reading — left of
+  centre is risk-off, right is risk-on — with both **±1.50 triggers** ticked, so you
+  can see at a glance whether the signal has cleared its threshold or is sitting on it.
+- Beside it the spread itself, and a line telling you whether it **just** cleared the
+  trigger (a fresh signal) or is **well past** it (entrenched).
+- A **flow band** showing where the index's weight is moving. Each sector is a block
+  whose **width is its S&P 500 weight**, so the picture answers "how much of the market
+  is actually rotating?" rather than "how many sectors are". The red side is rotating
+  out, the green side in, with both totals and sector counts underneath.
+- **Four quadrant panels** — Improving, Leading, Lagging, Weakening — each showing its
+  share of the index and one card per sector with **RS-Mom** (momentum) and a weight
+  bar. All bars share one scale, so a long bar always means a heavy sector.
 
-This page refreshes **only when you press Refresh**.
+The quadrant map table and the Rotating From / Into lists were replaced by the band and
+the panels, which carry the same sectors plus the weight the table never showed. The
+**RRG** tab has the RS-Ratio detail. This page refreshes **only when you press Refresh**.
 
 ## RRG
 

@@ -667,14 +667,24 @@ was very nearly a coin toss.</p>
 <p><strong>Route:</strong> <code>/sentiment/rotation</code>.</p>
 <p>Which sectors money is rotating into and out of, measured against SPY.</p>
 <ul>
-<li>A <strong>headline</strong> — Risk-ON / Risk-OFF, an assessment line, and the
-  cyclical-versus-defensive spread shown against the ±1.5 threshold it had to clear.</li>
-<li>A <strong>quadrant map</strong> table sorted by momentum, with <strong>RS-Ratio</strong> (relative strength)
-  and <strong>RS-Mom</strong> (its rate of change) for each sector.</li>
-<li><strong>Rotating From / Into</strong> columns, with each sector's <strong>S&amp;P weight</strong> — which is what
-  tells you whether a rotation is material.</li>
+<li>A <strong>verdict strip</strong>: the regime in one word (Risk-on / Risk-off), a plain sentence
+  saying what it means, and a <strong>diverging gauge</strong> putting the cyclical-versus-defensive
+  spread on a −3 to +3 scale. The bar runs from zero out to the reading — left of
+  centre is risk-off, right is risk-on — with both <strong>±1.50 triggers</strong> ticked, so you
+  can see at a glance whether the signal has cleared its threshold or is sitting on it.</li>
+<li>Beside it the spread itself, and a line telling you whether it <strong>just</strong> cleared the
+  trigger (a fresh signal) or is <strong>well past</strong> it (entrenched).</li>
+<li>A <strong>flow band</strong> showing where the index's weight is moving. Each sector is a block
+  whose <strong>width is its S&amp;P 500 weight</strong>, so the picture answers "how much of the market
+  is actually rotating?" rather than "how many sectors are". The red side is rotating
+  out, the green side in, with both totals and sector counts underneath.</li>
+<li><strong>Four quadrant panels</strong> — Improving, Leading, Lagging, Weakening — each showing its
+  share of the index and one card per sector with <strong>RS-Mom</strong> (momentum) and a weight
+  bar. All bars share one scale, so a long bar always means a heavy sector.</li>
 </ul>
-<p>This page refreshes <strong>only when you press Refresh</strong>.</p>
+<p>The quadrant map table and the Rotating From / Into lists were replaced by the band and
+the panels, which carry the same sectors plus the weight the table never showed. The
+<strong>RRG</strong> tab has the RS-Ratio detail. This page refreshes <strong>only when you press Refresh</strong>.</p>
 <h2 id="rrg">RRG</h2>
 <p><strong>Route:</strong> <code>/sentiment/rrg</code>.</p>
 <p>The same rotation data drawn as a Relative Rotation Graph: a full-width scatter with

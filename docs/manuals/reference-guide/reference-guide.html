@@ -1629,23 +1629,39 @@ where money is rotating between sectors.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_6">Reading the screen</h3>
-<p><strong>The headline</strong> states the verdict and shows the arithmetic behind it: the average
-rotation momentum of cyclical sectors versus defensive ones, the spread between them,
-and the threshold (±1.5) that had to be cleared. Showing the threshold is what makes
-this honest — a spread of −1.5 against a ±1.5 threshold is a verdict that only just
-qualified.</p>
-<p><strong>The quadrant map</strong> ranks every sector by rotation momentum, with two numbers:</p>
+<p><strong>The verdict strip</strong> states the regime, the arithmetic behind it, and how strong the
+signal is — three panels, left to right.</p>
+<p>The middle panel is the argument in one picture. The average rotation momentum of
+cyclical sectors sits on the left, defensives on the right, and the <strong>diverging gauge</strong>
+below plots the spread between them on a −3 to +3 scale. The bar runs from the centre
+out to the reading, so <strong>left of centre is risk-off and right is risk-on</strong>, and distance
+from centre is conviction. Both <strong>±1.50 triggers</strong> are ticked on the track.</p>
+<p>Showing the triggers is what makes this honest — a spread of −1.51 against a ±1.50
+threshold is a verdict that only just qualified — and the right-hand panel says so in
+words: <em>just past the trigger</em> means a fresh signal that could reverse next session,
+<em>well past</em> means an entrenched rotation.</p>
+<p><strong>The flow band</strong> answers the question the old table could not: <em>how much of the index
+is actually moving?</em> Every rotating sector is a block whose <strong>width is its S&amp;P 500
+weight</strong>, split into the side rotating out (red) and the side rotating in (green), with
+each side's total and sector count beneath. "Money rotating out of Technology" means
+much more when Technology is 32.5% of the index than when a 2% sector moves — and here
+that is the size of the block rather than a number you have to look up. Very thin
+slices drop their labels; they are all named in the panels below.</p>
+<p><strong>The four quadrant panels</strong> carry every sector, with the share of the index sitting in
+each quadrant:</p>
 <ul>
-<li><strong>RS-Ratio</strong> — relative <em>strength</em> against SPY. Above 100 means outperforming.</li>
-<li><strong>RS-Mom</strong> — relative <em>momentum</em>, the rate of change of that strength. Above 100
-  means the outperformance is still improving.</li>
+<li><strong>Leading</strong> — strong and still strengthening. Where the rotation is going.</li>
+<li><strong>Improving</strong> — still weak against SPY, but momentum has turned up. Early.</li>
+<li><strong>Weakening</strong> — still strong, but momentum has rolled over. Money is leaving.</li>
+<li><strong>Lagging</strong> — weak and getting weaker. Where the rotation is coming from.</li>
 </ul>
-<p>Together they produce a quadrant: <strong>Leading</strong> (strong and improving), <strong>Weakening</strong>
-(strong but fading), <strong>Lagging</strong> (weak and still falling), <strong>Improving</strong> (weak but
-turning up).</p>
-<p><strong>Rotating From / Into</strong> groups the sectors and — usefully — shows each one's <strong>S&amp;P
-weight</strong>. "Money rotating out of Technology" means much more when Technology is 32.5%
-of the index than when a 2% sector moves.</p>
+<p>Each sector card shows <strong>RS-Mom</strong> — relative <em>momentum</em>, the rate of change of its
+strength against SPY, where above 100 means its outperformance is still improving — and
+a bar for its index weight. <strong>All bars share one scale</strong> (the heaviest sector on the
+page), so a long bar always means a heavy sector, whichever panel it is in.</p>
+<p>The other axis, <strong>RS-Ratio</strong> — relative <em>strength</em> against SPY, where above 100 means
+outperforming — is named on the rails around the panels and plotted properly on the
+<a href="#rrg">RRG</a> tab.</p>
 <blockquote>
 <p>The footnote is important: <em>pairing is ordinal</em>. The app is ranking relative buying
 and selling pressure. It is <strong>not</strong> measuring literal cash flow between sectors — no
@@ -1658,8 +1674,8 @@ here before it shows up in the index.</p>
 <p>For an options seller specifically: Risk-OFF with the index flat is the setup where call
 credit spreads work and put credit spreads quietly bleed.</p>
 <p><strong>Where it is weak.</strong> The verdict is a two-group average, so a single extreme sector can
-tip it. Always read the spread against the threshold, and look at the quadrant table
-rather than trusting the headline alone.</p>
+tip it. Always read the spread against the triggers on the gauge, and look at the
+quadrant panels rather than trusting the headline word alone.</p>
 <h3 id="when-to-use-it_6">When to use it</h3>
 <p>Once a day. It changes slowly by design — refreshing it every ten minutes tells you
 nothing new, which is why it is manual-refresh only.</p>

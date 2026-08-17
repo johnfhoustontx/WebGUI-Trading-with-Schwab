@@ -4,6 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Sector Rotation rebuilt as a board.** `/sentiment/rotation`
+rebuilt from a supplied design (`Sector Rotation.dc.html`), the second screen from the same design
+project as the Sector & Industry heat grid below. Design:
+[design](plans/2026-08-17-sector-rotation-board-design.md); per-page detail in
+[webgui-routes](webgui-routes.md).
+- **A pure Tier-1 re-render — `sentiment_svc` was not touched.** Checked first: every number the
+  design shows already existed in `cache:sentiment:rotation`, down to the 42.4/57.5 flow totals and
+  the four quadrant weights. The design had clearly been authored against this exact payload.
+- **A verdict strip** replaces the headline sentence: regime word + tone dot; the cyclical and
+  defensive means either side of a **diverging spread gauge** (−3…+3 track, both ±threshold triggers
+  ticked, zero marked); and the spread with a derived sentence on how far past its trigger it sits.
+  **The fill spans between the reading and zero rather than growing from the left** — the quantity is
+  signed, so which side of zero it lands on IS the verdict, and a left-anchored bar would encode −3
+  and +3 as "small" and "large" instead of "opposite".
+- **A flow band** replaces the Rotating From/Into name lists: one segment per rotating sector,
+  `flex-grow` carrying its S&P weight so **segment area is index share**. Both the side wrappers AND
+  the segments are weight-grown — growing only the segments would render a 42/58 split as 50/50. The
+  split keys on the engine's own `direction` field, not the quadrant, so the band always partitions
+  exactly what the assessment called rotating. A segment under 7.5% of its own side drops its label
+  rather than clipping it (3 of 11 today).
+- **Four quadrant panels** replace the 6-column quadrant map, in rotation reading order (Improving ·
+  Leading · Lagging · Weakening), each with its share of the index and a chip per sector carrying
+  RS-Momentum and a weight bar. **All bars share ONE scale — the heaviest sector on the page** — so a
+  2% sector alone in a quadrant cannot draw the same bar as a 32% one. Every panel renders even when
+  empty: a quadrant nobody is in is information, and dropping it would silently reflow the rest.
+- **Retired:** the Full Quadrant Map table, and with it the `RS-Ratio` and `Dir` columns. RS-Ratio is
+  named on the axis rails and plotted properly on the RRG tab; `Dir` is what the band's two sides
+  encode. The `pairs` field was already unused.
+- **Three things the design left implicit, now explicit.** The trigger sentence needed a ladder (a
+  board that says "just past the trigger" at −1.51 must say something else at −4.0) — inside the
+  band / under 1.5× / beyond, with the ratio named in `ENTRENCHED_RATIO` rather than buried. The
+  verdict sentence is rewritten rather than echoing the service's log line (`"Risk-OFF rotation -
+  money rotating into defensives, out of cyclicals"` repeats the regime beside it and uses a hyphen
+  for a dash), falling back to the service text for any regime we cannot phrase. And hairlines are
+  gaps, not borders, in both regions — a real border orphans a rule when a panel wraps.
+- **New `[rotation]` section in `config/theme.toml`** carrying only the two grounds and the two
+  faces. The warm-neutral ladder (one oklch lightness step per role, so the hierarchy is visible in
+  the source) and the four quadrant hues are ramps, so they live in `webgui/pages/rotation_view.py`
+  — the same call made for the `[sectors]` heat ramp. **`webgui/pages/oklch.py`** now holds the
+  oklch→sRGB conversion both pages share.
+- **⚠ Two quadrant palettes now coexist, deliberately.** `sentiment_rotation.quadrant_color`
+  (green/cyan/yellow/red) still drives the RRG scatter and the Sector & Industry quadrant text; this
+  design re-hues Improving to blue 232 and Weakening to olive 80, implemented for this page only.
+  Restyling the RRG chart is a change nobody asked for — flagged in CLAUDE.md as an open question.
+- **`render()` replaced; every existing builder kept** — `pages/sentiment_rrg.py` imports
+  `SENT_TEXT_CLASSES` / `headline_parts` / `regime_text_class` / `rrg_scatter_figure` from this
+  module and its tests pin them. **No `ui.add_css`**: the gauge is absolutely-positioned runtime
+  percentage arbitraries, the documented continuous-value exception.
+- **Pure/impure split:** all arithmetic in `webgui/pages/rotation_view.py` (38 tests in
+  `tests/test_rotation_view.py`). Webgui suite green.
+- **Live-verified** at 9500 against prod's rotation cache: gauge triggers at exactly 25.00/75.00%,
+  zero at 50.00%, fill 24.67%→50% for the live −1.52; band sides 42.1%/57.0% with 8 labelled and 3
+  correctly unlabelled segments and per-quadrant hues; 4 panels, 11 chip bars, widest exactly 100%
+  (XLK) and XLF at 41.3% = 13.42/32.53; both faces loaded; no horizontal overflow; **RRG tab
+  unaffected** (11 series, all labels).
+- **Docs:** `page_help.py`, the User Guide and the Reference Guide all rewritten for the new
+  controls, plus the CLAUDE.md route row and the theme.toml page-scoped-section paragraph.)
+
+---
+
 **Last updated:** 2026-08-17 (**Sector & Industry rebuilt as a heat grid.** `/sentiment/sectors`
 rebuilt from a supplied design set (a README of design decisions + collapsed/expanded screenshots).
 Design: [design](plans/2026-08-17-sector-heat-grid-design.md); per-page detail in

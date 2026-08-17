@@ -100,6 +100,12 @@ def test_sentiment_pages_have_no_inline_style():
                # nothing BUT colour and measurement, and it still needs no
                # `.style()` and no `ui.add_css` block of its own.
                "sector_heat.py",
+               # The Sector Rotation board and its display language. Its
+               # diverging gauge is absolutely-positioned percentages — the
+               # shape most likely to reach for `.style()` — and it does not:
+               # runtime `left-[…%]`/`w-[…%]` arbitraries carry it, the
+               # documented continuous-value exception.
+               "rotation_view.py", "oklch.py",
                # The Market Regime Console. Its whole design is glows, hairline
                # grids and gradients — the shapes most likely to reach for
                # `.style()` — and a Phase 0/2 spike measured that every one of

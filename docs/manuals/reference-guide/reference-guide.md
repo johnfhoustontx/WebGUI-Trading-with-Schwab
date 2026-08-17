@@ -932,25 +932,44 @@ where money is rotating between sectors.
 
 ### Reading the screen
 
-**The headline** states the verdict and shows the arithmetic behind it: the average
-rotation momentum of cyclical sectors versus defensive ones, the spread between them,
-and the threshold (±1.5) that had to be cleared. Showing the threshold is what makes
-this honest — a spread of −1.5 against a ±1.5 threshold is a verdict that only just
-qualified.
+**The verdict strip** states the regime, the arithmetic behind it, and how strong the
+signal is — three panels, left to right.
 
-**The quadrant map** ranks every sector by rotation momentum, with two numbers:
+The middle panel is the argument in one picture. The average rotation momentum of
+cyclical sectors sits on the left, defensives on the right, and the **diverging gauge**
+below plots the spread between them on a −3 to +3 scale. The bar runs from the centre
+out to the reading, so **left of centre is risk-off and right is risk-on**, and distance
+from centre is conviction. Both **±1.50 triggers** are ticked on the track.
 
-- **RS-Ratio** — relative *strength* against SPY. Above 100 means outperforming.
-- **RS-Mom** — relative *momentum*, the rate of change of that strength. Above 100
-  means the outperformance is still improving.
+Showing the triggers is what makes this honest — a spread of −1.51 against a ±1.50
+threshold is a verdict that only just qualified — and the right-hand panel says so in
+words: *just past the trigger* means a fresh signal that could reverse next session,
+*well past* means an entrenched rotation.
 
-Together they produce a quadrant: **Leading** (strong and improving), **Weakening**
-(strong but fading), **Lagging** (weak and still falling), **Improving** (weak but
-turning up).
+**The flow band** answers the question the old table could not: *how much of the index
+is actually moving?* Every rotating sector is a block whose **width is its S&P 500
+weight**, split into the side rotating out (red) and the side rotating in (green), with
+each side's total and sector count beneath. "Money rotating out of Technology" means
+much more when Technology is 32.5% of the index than when a 2% sector moves — and here
+that is the size of the block rather than a number you have to look up. Very thin
+slices drop their labels; they are all named in the panels below.
 
-**Rotating From / Into** groups the sectors and — usefully — shows each one's **S&P
-weight**. "Money rotating out of Technology" means much more when Technology is 32.5%
-of the index than when a 2% sector moves.
+**The four quadrant panels** carry every sector, with the share of the index sitting in
+each quadrant:
+
+- **Leading** — strong and still strengthening. Where the rotation is going.
+- **Improving** — still weak against SPY, but momentum has turned up. Early.
+- **Weakening** — still strong, but momentum has rolled over. Money is leaving.
+- **Lagging** — weak and getting weaker. Where the rotation is coming from.
+
+Each sector card shows **RS-Mom** — relative *momentum*, the rate of change of its
+strength against SPY, where above 100 means its outperformance is still improving — and
+a bar for its index weight. **All bars share one scale** (the heaviest sector on the
+page), so a long bar always means a heavy sector, whichever panel it is in.
+
+The other axis, **RS-Ratio** — relative *strength* against SPY, where above 100 means
+outperforming — is named on the rails around the panels and plotted properly on the
+[RRG](#rrg) tab.
 
 > The footnote is important: *pairing is ordinal*. The app is ranking relative buying
 > and selling pressure. It is **not** measuring literal cash flow between sectors — no
@@ -966,8 +985,8 @@ For an options seller specifically: Risk-OFF with the index flat is the setup wh
 credit spreads work and put credit spreads quietly bleed.
 
 **Where it is weak.** The verdict is a two-group average, so a single extreme sector can
-tip it. Always read the spread against the threshold, and look at the quadrant table
-rather than trusting the headline alone.
+tip it. Always read the spread against the triggers on the gauge, and look at the
+quadrant panels rather than trusting the headline word alone.
 
 ### When to use it
 

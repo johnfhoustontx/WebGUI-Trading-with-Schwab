@@ -318,11 +318,26 @@ heat band you read down the page rather than a table you read across.
 
 Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
 
-- **Risk-ON / OFF headline** — are the leaders aggressive (cyclical) or defensive
-  sectors?
-- **Quadrant map** — every sector ranked by rotation momentum.
-- **Rotating From / Into** — sectors crossing between quadrants, with their S&P
-  weights. The **RRG** chart is on its own tab. **Refresh** only (no auto-update).
+- **The verdict** — Risk-on or Risk-off, in one word, with a sentence saying what
+  that means.
+- **The gauge** is the whole argument in one picture. Cyclical sectors' momentum
+  versus defensive sectors' momentum, on a −3 to +3 scale. The bar runs from zero
+  to wherever the reading landed: **left of centre is risk-off, right is risk-on**,
+  and the further out, the stronger. The two ticks at ±1.50 are the triggers — a
+  reading has to clear one for a rotation to be called at all.
+- **The sentence under the spread** tells you whether it *just* cleared the
+  trigger (a fresh signal, easy to reverse) or is well past it (entrenched).
+- **The band** answers "how much of the index is actually moving?" Every sector is
+  a block, and **the width is its weight in the S&P 500** — so Technology at 32%
+  is a third of the bar on its own. Red side is rotating out, green side in, and
+  the two totals tell you the split. Thin slivers drop their labels; hover isn't
+  needed, they are in the panels below.
+- **The four panels** are the RRG quadrants, each showing what share of the index
+  sits in it. **Leading** is where money is going, **Lagging** where it is coming
+  from; **Improving** is turning up early, **Weakening** is rolling over. Inside
+  each, one card per sector with its RS-Momentum and a bar for its index weight —
+  **all the bars share one scale**, so a long bar means a heavy sector, always.
+- The **RRG** chart itself is on its own tab. **Refresh** only (no auto-update).
 """,
     "/sentiment/rrg": """
 **RRG — the simple version**
