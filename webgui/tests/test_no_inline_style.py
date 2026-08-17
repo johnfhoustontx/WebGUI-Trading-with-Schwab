@@ -95,6 +95,11 @@ def test_sentiment_pages_have_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages"
     for fn in ["sentiment.py", "sentiment_sectors.py", "sentiment_rotation.py",
                "sentiment_rrg.py", "sentiment_momentum.py",
+               # The sector heat grid and its pure display language. The grid is
+               # the strongest case in the app for the standard holding: it is
+               # nothing BUT colour and measurement, and it still needs no
+               # `.style()` and no `ui.add_css` block of its own.
+               "sector_heat.py",
                # The Market Regime Console. Its whole design is glows, hairline
                # grids and gradients — the shapes most likely to reach for
                # `.style()` — and a Phase 0/2 spike measured that every one of

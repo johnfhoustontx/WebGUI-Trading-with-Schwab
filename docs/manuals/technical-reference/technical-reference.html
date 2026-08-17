@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Technical Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-16</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -97,7 +97,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#putcall">Put/Call</a></li>
 <li><a href="#breadth">Breadth</a></li>
 <li><a href="#rotation">Rotation</a></li>
-<li><a href="#sector-performance">Sector Performance</a></li>
+<li><a href="#sector-performance">Sector Performance</a><ul>
+<li><a href="#the-sector-industry-heat-scale">The Sector &amp; Industry heat scale</a></li>
+</ul>
+</li>
 <li><a href="#velocity-and-divergence">Velocity and divergence</a></li>
 <li><a href="#intraday-market-trend-directional-0100">Intraday Market Trend (directional 0–100)</a></li>
 <li><a href="#daily-trend-regime-state-machine">Daily trend-regime state machine</a></li>
@@ -939,6 +942,26 @@ RS_momentum     = 100 · RS_today / RS_(20 bars ago)
 <p>Mapping (return → score): <code>+2.0% → 10</code>, <code>+1.5 → 9</code>, <code>+1.0 → 8</code>, <code>+0.5 → 7</code>,
 <code>0..+0.5 → 6</code>, <code>-0.5..0 → 5</code>, <code>-1.0..-0.5 → 4</code>, <code>-1.0 → 3</code>, <code>-1.5 → 2</code>, <code>≤-2.0 → 1</code>.
 Cap weights live in <code>sectors_ref.SP500_SECTOR_WEIGHTS</code>.</p>
+<h3 id="the-sector-industry-heat-scale">The Sector &amp; Industry heat scale</h3>
+<p><strong>File:</strong> <code>webgui/pages/sector_heat.py</code> (display only — it feeds no score)</p>
+<p>The colour of a tile on the <strong>Sector &amp; Industry</strong> screen is a signed intensity level
+in <code>-6..+6</code>, computed per column. For a reading <code>p</code> in column <code>c</code>:</p>
+<pre><code>band  = FLAT_BAND[c]                     # day 0.50, week 1.00, month 1.50 (%)
+scale = quantile(|values in c|, 0.90)    # over sectors AND all industries
+level = 0                                       if |p| &lt;= band
+      = sign(p) · clamp(ceil(f · 6), 1, 6)      otherwise,
+        where f = (|p| - band) / (scale - band)
+</code></pre>
+<p><code>scale</code> is the column's <strong>90th percentile, not its maximum</strong>. Industry ETFs have a fat
+right tail — one +27% month against a ~3% median pins every sector into the bottom of
+the ramp — so the top decile saturates at level 6 instead of defining the scale. When
+every reading in a column is flat (<code>scale &lt;= band</code>) any single reading past the band is
+by definition that column's largest, and takes level 6.</p>
+<p>The level maps to one of 13 fixed colours, an oklch ramp with lightness <code>0.175 → 0.300</code>
+and chroma <code>0.022 → 0.110</code> at hue <strong>158</strong> (up) or <strong>22</strong> (down); level 0 is
+<code>oklch(0.155 0.004 90)</code>. The figure's own colour lifts along a parallel ramp
+(lightness <code>0.660 → 0.965</code>) so a saturated tile carries a bright number and a flat one a
+grey one.</p>
 <h2 id="velocity-and-divergence">Velocity and divergence</h2>
 <p><strong>File:</strong> <code>scoring/composite.py</code></p>
 <p><strong>Velocity</strong> (<code>velocity(history_scores, today)</code>):</p>

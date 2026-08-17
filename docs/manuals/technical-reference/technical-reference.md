@@ -464,6 +464,33 @@ Mapping (return → score): `+2.0% → 10`, `+1.5 → 9`, `+1.0 → 8`, `+0.5 �
 `0..+0.5 → 6`, `-0.5..0 → 5`, `-1.0..-0.5 → 4`, `-1.0 → 3`, `-1.5 → 2`, `≤-2.0 → 1`.
 Cap weights live in `sectors_ref.SP500_SECTOR_WEIGHTS`.
 
+### The Sector & Industry heat scale
+
+**File:** `webgui/pages/sector_heat.py` (display only — it feeds no score)
+
+The colour of a tile on the **Sector & Industry** screen is a signed intensity level
+in `-6..+6`, computed per column. For a reading `p` in column `c`:
+
+```
+band  = FLAT_BAND[c]                     # day 0.50, week 1.00, month 1.50 (%)
+scale = quantile(|values in c|, 0.90)    # over sectors AND all industries
+level = 0                                       if |p| <= band
+      = sign(p) · clamp(ceil(f · 6), 1, 6)      otherwise,
+        where f = (|p| - band) / (scale - band)
+```
+
+`scale` is the column's **90th percentile, not its maximum**. Industry ETFs have a fat
+right tail — one +27% month against a ~3% median pins every sector into the bottom of
+the ramp — so the top decile saturates at level 6 instead of defining the scale. When
+every reading in a column is flat (`scale <= band`) any single reading past the band is
+by definition that column's largest, and takes level 6.
+
+The level maps to one of 13 fixed colours, an oklch ramp with lightness `0.175 → 0.300`
+and chroma `0.022 → 0.110` at hue **158** (up) or **22** (down); level 0 is
+`oklch(0.155 0.004 90)`. The figure's own colour lifts along a parallel ramp
+(lightness `0.660 → 0.965`) so a saturated tile carries a bright number and a flat one a
+grey one.
+
 ## Velocity and divergence
 
 **File:** `scoring/composite.py`

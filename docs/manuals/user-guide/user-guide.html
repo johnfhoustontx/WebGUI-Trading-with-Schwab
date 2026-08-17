@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-16</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -640,15 +640,28 @@ was very nearly a coin toss.</p>
 </blockquote>
 <h2 id="sector-industry">Sector &amp; Industry</h2>
 <p><strong>Route:</strong> <code>/sentiment/sectors</code>.</p>
-<p>A performance table for the eleven S&amp;P sectors, each expandable into its
-industries.</p>
+<p>A heat grid for the eleven S&amp;P sectors, each expandable into its industries.</p>
 <ul>
-<li><strong>Day / Week / Month %</strong>, a <strong>P/C</strong> (put/call) reading, and an <strong>RRG</strong> quadrant
-  per sector.</li>
-<li><strong>Click a row</strong>, or use <strong>Expand All</strong> / <strong>Collapse All</strong>, to see industries.</li>
-<li>A summary line above the table gives the percentage of sectors green, the
-  cap-weighted move, a 0–10 score, and the <strong>cyclical-versus-defensive</strong> spread with
-  the day's leaders and laggards.</li>
+<li><strong>Day / Week / Month</strong> are filled tiles, not plain numbers. <strong>The colour is the
+  size of the move as well as its direction</strong>, so the shape of the day is visible
+  before you read a single figure.</li>
+<li><strong>Each column is judged against itself.</strong> Day is compared to the day's own
+  spread, Week to the week's, Month to the month's — so a strong day still looks
+  strong inside a quiet month.</li>
+<li><strong>Small moves deliberately stay dark.</strong> Under ±0.50% (Day), ±1.00% (Week) or
+  ±1.50% (Month) a tile reads flat, so only moves worth noticing light up.</li>
+<li><strong>Click Day, Week or Month to sort by it</strong>; click again to reverse. The
+  <strong>RANK n OF 11</strong> line under each sector name follows whichever column you sorted
+  by.</li>
+<li><strong>Click a row</strong>, or use <strong>Expand all</strong> / <strong>Collapse</strong>, to see industries. They
+  render as the same tiles on a shorter row.</li>
+<li><strong>P/C</strong> (put/call) stays a plain number, tinted amber above 1.5. It is a ratio
+  rather than a return, so it gets no tile.</li>
+<li>A line above the grid gives the <strong>regime word</strong> with the
+  <strong>cyclical-versus-defensive</strong> spread behind it, and — because the grid itself is
+  unweighted — the percentage of sectors green, the cap-weighted move and a 0–10
+  score.</li>
+<li><strong>Rotation quadrants live on the RRG and Sector Rotation tabs</strong>, not here.</li>
 </ul>
 <h2 id="sector-rotation">Sector Rotation</h2>
 <p><strong>Route:</strong> <code>/sentiment/rotation</code>.</p>

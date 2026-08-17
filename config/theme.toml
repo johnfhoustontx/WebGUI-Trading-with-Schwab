@@ -251,3 +251,28 @@ sat_ceiling = 0.45
 # Chakra Petch (board title), Rajdhani (ticker symbols), IBM Plex Mono (numbers).
 # Tracking values are tuned to these faces — system fallbacks reflow noticeably.
 font_url = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+
+[sectors]                      # ── Sector & Industry heat grid (/sentiment/sectors ONLY)
+# A magnitude-forward heat grid: Day / Week / Month render as three adjacent
+# filled tiles flush right, forming one continuous colour band down the page.
+# Like [console] + [macro] + [brand] this is page-scoped and NOT shown in
+# Settings → Appearance (that editor's sections are single-kind; this mixes
+# colours with a font URL). HEX ONLY; alphas live in the token layer.
+#
+# NOT here, on purpose: the green/red heat ramp itself. It is a data-driven cell
+# map (oklch L 0.175→0.300, C 0.022→0.110, hue 158 up / 22 down), the category
+# CLAUDE.md excludes from the config-driven palette alongside the gauge face and
+# the score/heat/P&L zone maps. It lives in webgui/pages/sector_heat.py.
+void    = "#080808"            # page ground — the flat end of the heat ramp
+edge    = "#1A1A1A"            # row hairlines
+edge_hi = "#2C2C2C"            # header rule, button outlines
+txt     = "#F2F2F2"            # sector names, the regime headline
+dim     = "#8C8C8C"            # ETF codes, put/call, button labels
+faint   = "#5A5A5A"            # column headers, rank lines, composition
+up      = "#3FD98A"            # risk-on regime word + dot
+dn      = "#E8697B"            # risk-off regime word + dot
+warn    = "#E0A63C"            # mixed regime, and put/call above 1.5
+# Two faces, loaded page-scoped in one request: Instrument Sans for names,
+# JetBrains Mono for every figure. The mono face is what makes tabular-nums
+# align digits down a column — a system fallback is a visible downgrade.
+font_url = "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"

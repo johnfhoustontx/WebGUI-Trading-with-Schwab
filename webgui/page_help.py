@@ -293,14 +293,25 @@ fear, which can mean opportunity.
     "/sentiment/sectors": """
 **Sector & Industry — the simple version**
 
-How each S&P sector — and the industries inside it — is performing.
+How each S&P sector — and the industries inside it — is performing, painted as a
+heat band you read down the page rather than a table you read across.
 
-- **Day / Week / Month %** — return over each window, green up / red down.
-- **P/C** — put/call volume (call-heavy green, put-heavy red); **RRG** — the sector's
-  rotation quadrant.
-- **Click a row** (or **Expand All**) to see that sector's industries.
-- **Summary line** — % of sectors green, cap-weighted move, and a 0–10 score.
-- **Refresh** re-pulls the data (also refreshes on its own).
+- **Day / Week / Month** — return over each window, filled green up / red down.
+  **The colour is the size of the move, not just its direction.**
+- **Intensity is judged per column.** Day is compared against the day's own
+  spread, Week against the week's, Month against the month's — so a strong day
+  looks strong even in a quiet month.
+- **Small moves stay dark on purpose.** Under ±0.50% (Day), ±1.00% (Week) or
+  ±1.50% (Month) a cell reads flat, so only real moves light up.
+- **The rank line** under each sector name restates its position in the pack, on
+  whichever column you are sorted by.
+- **Click Day, Week or Month** to sort by it; click again to reverse.
+- **Click a row** (or **Expand all**) to see that sector's industries.
+- **P/C** — put/call volume, plain number, tinted amber above 1.5 (put-heavy).
+  It is a ratio, not a return, so it deliberately gets no heat tile.
+- **Rotation quadrants** are no longer here — the **RRG** and **Sector Rotation**
+  tabs show them properly.
+- **Refresh** re-pulls the data (it also refreshes on its own).
 """,
     "/sentiment/rotation": """
 **Sector Rotation — the simple version**

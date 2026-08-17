@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Reference Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-16</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1493,8 +1493,9 @@ can genuinely change within a session — the share table shows that happening.<
 <h2 id="sector-industry">Sector &amp; Industry</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Sector &amp; Industry · Route <code>/sentiment/sectors</code></em></p>
 <h3 id="what-it-is_5">What it is</h3>
-<p>A performance table for the eleven S&amp;P 500 sectors, each expandable into the industries
-inside it. It is the "where is it working" screen.</p>
+<p>A performance <strong>heat grid</strong> for the eleven S&amp;P 500 sectors, each expandable into the
+industries inside it. It is the "where is it working" screen, and since the 2026-08-17
+rebuild it answers that by colour before you read any number.</p>
 <h3 id="where-the-data-comes-from_5">Where the data comes from</h3>
 <table>
 <thead>
@@ -1519,15 +1520,17 @@ inside it. It is the "where is it working" screen.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_5">Reading the screen</h3>
-<p><strong>The summary line</strong> gives three numbers at once: what percentage of sectors are green,
-the cap-weighted move (what the index actually did), and a 0–10 score. Below it a
-sentence names the <strong>cyclical versus defensive</strong> spread and the day's leaders and
-laggards.</p>
+<p><strong>The header line</strong> names the regime and shows the <strong>cyclical versus defensive</strong>
+spread behind it, then — set apart on the right — the percentage of sectors green, the
+cap-weighted move (what the index actually did), and a 0–10 score.</p>
 <p>That cyclical/defensive spread is the useful part. Cyclical sectors — Technology,
 Discretionary, Financials, Industrials, Energy, Materials — do well when growth is
 expected. Defensive sectors — Staples, Utilities, Health Care, Real Estate — do well
 when it is not. Which group leads tells you what the market believes about growth,
 independently of whether the index went up.</p>
+<p>The three stats to its right are there <strong>because the grid is unweighted</strong>. Eight green
+micro-sectors against three red mega-caps paints an overwhelmingly green grid on a day
+the index fell, and the cap-weighted number is the only thing on the page that says so.</p>
 <table>
 <thead>
 <tr>
@@ -1538,27 +1541,50 @@ independently of whether the index went up.</p>
 <tbody>
 <tr>
 <td><strong>Sector</strong> / <strong>ETF</strong></td>
-<td>Name and its tradeable proxy.</td>
+<td>Name and its tradeable proxy, with a <strong>rank line</strong> beneath giving its position in the pack on whichever column you are sorted by.</td>
 </tr>
 <tr>
-<td><strong>Description</strong></td>
+<td><strong>Composition</strong></td>
 <td>What is actually in it.</td>
 </tr>
 <tr>
-<td><strong>Day % / Week % / Month %</strong></td>
-<td>Return over each window, green up, red down.</td>
-</tr>
-<tr>
 <td><strong>P/C</strong></td>
-<td>Put/call volume for that sector's options. Call-heavy is green.</td>
+<td>Put/call volume for that sector's options. Amber above 1.5 means put-heavy. It is a ratio, not a return, so it deliberately gets no colour tile.</td>
 </tr>
 <tr>
-<td><strong>RRG</strong></td>
-<td>The sector's rotation quadrant — Leading, Weakening, Lagging, Improving. See <a href="#rrg">RRG</a>.</td>
+<td><strong>Day / Week / Month</strong></td>
+<td>Return over each window, as a filled tile.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Click any row</strong> (or <strong>Expand All</strong>) to see the industries within that sector.</p>
+<p><strong>Reading the tiles.</strong> This is the part that changed, and it is the point of the screen.
+Each figure sits inside a filled block, and the three blocks are flush against each
+other, so the eleven rows form one continuous colour band you can read top to bottom
+without reading a number.</p>
+<ul>
+<li><strong>Colour carries magnitude, not just direction.</strong> A deep green is a big move; a faint
+  one is a small move in the same direction.</li>
+<li><strong>Each column is normalised against itself</strong> — Day against the day's own spread, Week
+  against the week's, Month against the month's — because the three live on different
+  natural scales. Sharing one scale would leave Day permanently pale or Month
+  permanently saturated.</li>
+<li><strong>The scale spans sectors and industries together</strong>, and does so whether or not the
+  industries are expanded. Opening a sector therefore never repaints the rows above it.</li>
+<li><strong>A flat band keeps small moves dark</strong>: under ±0.50% (Day), ±1.00% (Week) or ±1.50%
+  (Month) a tile drops to neutral. The bands widen with the horizon because a month is
+  <em>expected</em> to have travelled further than a day — a single band would paint an
+  unremarkable month as a move.</li>
+<li><strong>Outliers saturate rather than setting the scale.</strong> Industry ETFs occasionally print
+  something like a +27% month; normalising on that would flatten every sector to the same
+  near-black green. The scale sits at the column's 90th percentile instead, and the
+  handful above it simply max out.</li>
+</ul>
+<p><strong>Click Day, Week or Month</strong> to sort by it; click again to reverse. Default is Day
+descending. <strong>Click any row</strong> (or <strong>Expand all</strong>) to see the industries within that
+sector, which render as the same tiles on a shorter row.</p>
+<p><strong>Rotation quadrants are not on this screen.</strong> They were, as an "RRG" column, but a
+one-word quadrant sitting beside a colour band invited reading it as a fourth timeframe.
+<a href="#rrg">RRG</a> and <a href="#sector-rotation">Sector Rotation</a> show that read properly.</p>
 <h3 id="why-it-matters_5">Why it matters</h3>
 <p>Index-level readings hide dispersion. A flat S&amp;P can be a violent rotation from
 Technology into Staples, and that rotation is often more tradeable than the index move.

@@ -4,6 +4,54 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Sector & Industry rebuilt as a heat grid.** `/sentiment/sectors`
+rebuilt from a supplied design set (a README of design decisions + collapsed/expanded screenshots).
+Design: [design](plans/2026-08-17-sector-heat-grid-design.md); per-page detail in
+[webgui-routes](webgui-routes.md).
+- **Magnitude became the primary encoding.** Day / Week / Month are three adjacent filled tiles
+  flush to the right edge with the figure inside, so the colour band is continuous across a row and
+  down the page. Previously they were signed numbers coloured only by sign, which made the reader do
+  the ranking.
+- **Intensity normalises PER COLUMN**, across sectors *and* all industries whether or not they are
+  expanded — so opening a sector adds rows without repainting the ones above it. Below a per-horizon
+  flat band (±0.50 / ±1.00 / ±1.50%) a cell reads neutral, so a quiet month doesn't glow merely
+  because a month drifts further than a day.
+- **⚠ The scale is the column's p90, NOT its max — a deliberate departure from the reference.** That
+  prototype normalises on the max, which works on its *synthetic* industry placeholders because they
+  cluster near their sectors. Real industry ETFs have a fat right tail: measured live over the 81-row
+  set, one **+27.46%** Month reading against a **3.24%** median pinned all eleven sectors into 4 of
+  the 13 steps — destroying the "a column always uses its full range" property the design exists to
+  get. Swept 0.80/0.85/0.90/1.00; **0.90 is the highest quantile that still spends every step on
+  every column**. Values above it saturate (`heat_level` already clamps).
+- **The ramp is oklch** (L 0.175→0.300, C 0.022→0.110, hue 158 up / 22 down), authored in that space
+  because the grid lives at the dark end where an sRGB interpolation bunches the low steps. Baked
+  into **13 static Tailwind classes**, not a per-datum arbitrary value — the house rule on
+  data-driven colour. The figure's colour lifts with its tile.
+- **Sortable + ranked.** Day / Week / Month headers sort (click to switch, again to reverse; default
+  Day desc), and the `RANK 1 OF 11 · DAY` line under each sector name follows the active column.
+- **RRG dropped**; **P/C keeps a plain number** with an amber tint above 1.5. Both for the same
+  reason: neither is a percentage change, and sitting them beside a colour band invited reading them
+  as a fourth timeframe. The rotation read has two dedicated tabs that show it properly.
+- **New `[sectors]` section in `config/theme.toml`** (chrome palette + Instrument Sans / JetBrains
+  Mono), with `build_sector_tokens` / `build_sector_font_head_html` following the `[console]` /
+  `[macro]` pattern. The heat ramp itself is deliberately NOT config — it is a data-driven cell map,
+  the category already excluded alongside the gauge face and the score/heat/P&L zone maps.
+- **The page needs NO `ui.add_css` block at all.** A screen that is nothing but colour and
+  measurement is the strongest case for the Tailwind-first standard, and it holds: fractional column
+  tracks, flush tiles, truncation and the scroll wrapper are all utilities. Only the font `<link>` is
+  injected.
+- **Pure/impure split:** all arithmetic in `webgui/pages/sector_heat.py` (45 tests in
+  `tests/test_sector_heat.py`); `sentiment_sectors.py` is widgets + wiring. Webgui suite green.
+- **Live-verified** against prod's sectors cache at 9500: 11 sector rows @66px + 70 industry rows
+  @34px, tiles exactly 112px apart, Day band spanning full green → neutral → full red, sorting +
+  rank line + amber P/C all correct, both faces loaded, and at a 900px viewport the grid scrolls
+  inside its own wrapper with no page-level horizontal overflow.
+- **Docs:** `page_help.py` rewritten for the new controls (it claimed an RRG column and a summary
+  line that no longer exist), plus the CLAUDE.md route row and the `theme.toml` page-scoped-section
+  paragraph.)
+
+---
+
 **Last updated:** 2026-08-16 (**Nav rail + top bar — the NEURALSTRIKE design ported.** A supplied
 design set (`Menu.dc.html` 264x764, `Menu Collapsed.dc.html` 68x764, `Top Bar.dc.html` 1400x56)
 ported into the NiceGUI shell. Design: [design](plans/2026-08-16-nav-topbar-redesign-design.md).

@@ -824,8 +824,9 @@ can genuinely change within a session — the share table shows that happening.
 
 ### What it is
 
-A performance table for the eleven S&P 500 sectors, each expandable into the industries
-inside it. It is the "where is it working" screen.
+A performance **heat grid** for the eleven S&P 500 sectors, each expandable into the
+industries inside it. It is the "where is it working" screen, and since the 2026-08-17
+rebuild it answers that by colour before you read any number.
 
 ### Where the data comes from
 
@@ -837,10 +838,9 @@ inside it. It is the "where is it working" screen.
 
 ### Reading the screen
 
-**The summary line** gives three numbers at once: what percentage of sectors are green,
-the cap-weighted move (what the index actually did), and a 0–10 score. Below it a
-sentence names the **cyclical versus defensive** spread and the day's leaders and
-laggards.
+**The header line** names the regime and shows the **cyclical versus defensive**
+spread behind it, then — set apart on the right — the percentage of sectors green, the
+cap-weighted move (what the index actually did), and a 0–10 score.
 
 That cyclical/defensive spread is the useful part. Cyclical sectors — Technology,
 Discretionary, Financials, Industrials, Energy, Materials — do well when growth is
@@ -848,15 +848,46 @@ expected. Defensive sectors — Staples, Utilities, Health Care, Real Estate —
 when it is not. Which group leads tells you what the market believes about growth,
 independently of whether the index went up.
 
+The three stats to its right are there **because the grid is unweighted**. Eight green
+micro-sectors against three red mega-caps paints an overwhelmingly green grid on a day
+the index fell, and the cap-weighted number is the only thing on the page that says so.
+
 | Column | Meaning |
 |---|---|
-| **Sector** / **ETF** | Name and its tradeable proxy. |
-| **Description** | What is actually in it. |
-| **Day % / Week % / Month %** | Return over each window, green up, red down. |
-| **P/C** | Put/call volume for that sector's options. Call-heavy is green. |
-| **RRG** | The sector's rotation quadrant — Leading, Weakening, Lagging, Improving. See [RRG](#rrg). |
+| **Sector** / **ETF** | Name and its tradeable proxy, with a **rank line** beneath giving its position in the pack on whichever column you are sorted by. |
+| **Composition** | What is actually in it. |
+| **P/C** | Put/call volume for that sector's options. Amber above 1.5 means put-heavy. It is a ratio, not a return, so it deliberately gets no colour tile. |
+| **Day / Week / Month** | Return over each window, as a filled tile. |
 
-**Click any row** (or **Expand All**) to see the industries within that sector.
+**Reading the tiles.** This is the part that changed, and it is the point of the screen.
+Each figure sits inside a filled block, and the three blocks are flush against each
+other, so the eleven rows form one continuous colour band you can read top to bottom
+without reading a number.
+
+- **Colour carries magnitude, not just direction.** A deep green is a big move; a faint
+  one is a small move in the same direction.
+- **Each column is normalised against itself** — Day against the day's own spread, Week
+  against the week's, Month against the month's — because the three live on different
+  natural scales. Sharing one scale would leave Day permanently pale or Month
+  permanently saturated.
+- **The scale spans sectors and industries together**, and does so whether or not the
+  industries are expanded. Opening a sector therefore never repaints the rows above it.
+- **A flat band keeps small moves dark**: under ±0.50% (Day), ±1.00% (Week) or ±1.50%
+  (Month) a tile drops to neutral. The bands widen with the horizon because a month is
+  *expected* to have travelled further than a day — a single band would paint an
+  unremarkable month as a move.
+- **Outliers saturate rather than setting the scale.** Industry ETFs occasionally print
+  something like a +27% month; normalising on that would flatten every sector to the same
+  near-black green. The scale sits at the column's 90th percentile instead, and the
+  handful above it simply max out.
+
+**Click Day, Week or Month** to sort by it; click again to reverse. Default is Day
+descending. **Click any row** (or **Expand all**) to see the industries within that
+sector, which render as the same tiles on a shorter row.
+
+**Rotation quadrants are not on this screen.** They were, as an "RRG" column, but a
+one-word quadrant sitting beside a colour band invited reading it as a fourth timeframe.
+[RRG](#rrg) and [Sector Rotation](#sector-rotation) show that read properly.
 
 ### Why it matters
 

@@ -275,7 +275,7 @@ Routes:
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
-| `/sentiment/sectors` | Sector & Industry — Day/Week/Month %, P/C, RRG quadrant, expandable industries. Reader of `cache:sentiment:sectors`. | built |
+| `/sentiment/sectors` | Sector & Industry — a magnitude-forward **heat grid**: Day/Week/Month as three flush filled tiles, intensity normalised **per column** on that column's own p90, plus P/C and expandable industries. Sortable; RRG dropped. Reader of `cache:sentiment:sectors`. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/rotation` | Sector Rotation — Risk-ON/OFF headline + quadrant map + rotating from/into. Cached, manual Refresh only. | built |
 | `/sentiment/rrg` | RRG — full-width relative-rotation chart, one spline per sector with a faded tail. Cached, manual Refresh only. | built |
 | `/sentiment/momentum` | Momentum — regime-conditioned momentum cascade over sectors / industry ETFs / stocks. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
@@ -898,13 +898,20 @@ candidate menu). **Rule: don't hard-code commission rates** — add them here.
 speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
-See the "App theme — dark-navy 'dashboard'" section. **Three sections are page-scoped
+See the "App theme — dark-navy 'dashboard'" section. **Four sections are page-scoped
 languages, NOT the app-wide palette and NOT surfaced in Settings → Appearance:**
 `[flow]` (the Options Flow console panels, the `/options/gamma` Flow + Net Prem
 subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
-`[console]` (Market Regime Console, `/sentiment` only) and `[macro]` (the Macro Board
-redesign, `/market` only). Each has matching `theme.py` builders (`build_console_*` /
-`build_macro_*`) and is injected via that page's ONE `ui.add_css` escape-hatch block.
+`[console]` (Market Regime Console, `/sentiment` only), `[macro]` (the Macro Board
+redesign, `/market` only) and `[sectors]` (the Sector & Industry heat grid,
+`/sentiment/sectors` only). Each has matching `theme.py` builders
+(`build_console_*` / `build_macro_*` / `build_sector_*`); the first three are
+injected via that page's ONE `ui.add_css` escape-hatch block. **`[sectors]` is
+the exception that proves the rule holds** — the heat grid is nothing but colour
+and measurement and it still needs **no `ui.add_css` at all**, only tokens and a
+font `<link>`. Its green/red ramp is deliberately NOT config-driven: it is a
+data-driven cell map (the category excluded above, alongside the gauge face and
+the score/heat/P&L zone maps) and lives in `webgui/pages/sector_heat.py`.
 
 `config/flow_alerts.toml` is the single source of truth for the **options-flow alert
 thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`/

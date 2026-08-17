@@ -241,6 +241,14 @@ _DEFAULTS = {
                      "&family=Chakra+Petch:wght@600;700"
                      "&family=IBM+Plex+Mono:wght@400;500;600&display=swap"),
     },
+    "sectors": {
+        "void": "#080808", "edge": "#1A1A1A", "edge_hi": "#2C2C2C",
+        "txt": "#F2F2F2", "dim": "#8C8C8C", "faint": "#5A5A5A",
+        "up": "#3FD98A", "dn": "#E8697B", "warn": "#E0A63C",
+        "font_url": ("https://fonts.googleapis.com/css2"
+                     "?family=Instrument+Sans:wght@400;500;600;700"
+                     "&family=JetBrains+Mono:wght@400;500;600&display=swap"),
+    },
 }
 
 
@@ -945,6 +953,56 @@ def build_nav_css(theme):
         rules.append(f".nav-drawer .nav-title{{color:{m['title']}!important;}}")
     return "\n".join(rules)
 
+# ── Sector & Industry heat grid (/sentiment/sectors) helpers ─────────────────
+# Page-scoped, and deliberately the *lightest* of these blocks: the grid needs no
+# ``ui.add_css`` escape-hatch at all. Everything it draws — the fractional column
+# tracks, the flush tiles, the truncation, the scroll wrapper — is a Tailwind
+# utility, so this file contributes only the chrome palette and the two faces.
+# The heat ramp itself lives in ``pages/sector_heat.py``: it is a data-driven
+# cell map, the category CLAUDE.md excludes from the config-driven palette.
+def build_sector_tokens(theme):
+    """Tailwind class-string vocabulary for the sector heat grid.
+
+    Namespaced ``SC_*`` so a sector token can never be mistaken for one of the
+    app-wide dark-navy tokens — this page keeps its own near-black ground."""
+    s = theme["sectors"]
+    return {
+        "SC_SANS": "font-['Instrument_Sans',system-ui,sans-serif]",
+        "SC_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
+        "SC_VOID_BG": f"bg-[{s['void']}]",
+        "SC_TXT": f"text-[{s['txt']}]",
+        "SC_DIM": f"text-[{s['dim']}]",
+        "SC_FAINT": f"text-[{s['faint']}]",
+        "SC_UP": f"text-[{s['up']}]",
+        "SC_DN": f"text-[{s['dn']}]",
+        "SC_WARN": f"text-[{s['warn']}]",
+        "SC_WARN_BG": f"bg-[{s['warn']}]",
+        "SC_UP_BG": f"bg-[{s['up']}]",
+        "SC_DN_BG": f"bg-[{s['dn']}]",
+        "SC_DIM_BG": f"bg-[{s['dim']}]",
+        "SC_EDGE": f"border-[{s['edge']}]",
+        "SC_EDGE_HI": f"border-[{s['edge_hi']}]",
+    }
+
+
+def build_sector_font_head_html(theme):
+    """``<link>``s for the grid's two faces (``[sectors].font_url``), or "".
+
+    Instrument Sans for names, JetBrains Mono for every figure — the mono face
+    is what makes ``tabular-nums`` align digits optically down a column, so the
+    system fallback is a visible downgrade rather than a neutral one."""
+    try:
+        url = str(theme["sectors"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
+
 
 # ---------------------------------------------------------------------------
 # Module-level theme + tokens — loaded ONCE at import (restart the webgui after
@@ -1025,3 +1083,7 @@ MACRO_COLORS = macro_colors(THEME)             # raw hexes + sat_ceiling
 MACRO_TOKENS = build_macro_tokens(THEME)       # Tailwind class-string vocabulary
 MACRO_CSS = build_macro_css(THEME)             # the ONE ui.add_css escape-hatch
 MACRO_FONT_HEAD_HTML = build_macro_font_head_html(THEME)  # "" when no url
+
+# ── Sector & Industry heat grid (/sentiment/sectors) page-scoped exports ─────
+SECTOR_TOKENS = build_sector_tokens(THEME)     # Tailwind class-string vocabulary
+SECTOR_FONT_HEAD_HTML = build_sector_font_head_html(THEME)  # "" when no url

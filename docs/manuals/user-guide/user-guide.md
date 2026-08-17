@@ -455,15 +455,28 @@ updates on its own about every two minutes whether or not the page is open; pres
 
 **Route:** `/sentiment/sectors`.
 
-A performance table for the eleven S&P sectors, each expandable into its
-industries.
+A heat grid for the eleven S&P sectors, each expandable into its industries.
 
-- **Day / Week / Month %**, a **P/C** (put/call) reading, and an **RRG** quadrant
-  per sector.
-- **Click a row**, or use **Expand All** / **Collapse All**, to see industries.
-- A summary line above the table gives the percentage of sectors green, the
-  cap-weighted move, a 0–10 score, and the **cyclical-versus-defensive** spread with
-  the day's leaders and laggards.
+- **Day / Week / Month** are filled tiles, not plain numbers. **The colour is the
+  size of the move as well as its direction**, so the shape of the day is visible
+  before you read a single figure.
+- **Each column is judged against itself.** Day is compared to the day's own
+  spread, Week to the week's, Month to the month's — so a strong day still looks
+  strong inside a quiet month.
+- **Small moves deliberately stay dark.** Under ±0.50% (Day), ±1.00% (Week) or
+  ±1.50% (Month) a tile reads flat, so only moves worth noticing light up.
+- **Click Day, Week or Month to sort by it**; click again to reverse. The
+  **RANK n OF 11** line under each sector name follows whichever column you sorted
+  by.
+- **Click a row**, or use **Expand all** / **Collapse**, to see industries. They
+  render as the same tiles on a shorter row.
+- **P/C** (put/call) stays a plain number, tinted amber above 1.5. It is a ratio
+  rather than a return, so it gets no tile.
+- A line above the grid gives the **regime word** with the
+  **cyclical-versus-defensive** spread behind it, and — because the grid itself is
+  unweighted — the percentage of sectors green, the cap-weighted move and a 0–10
+  score.
+- **Rotation quadrants live on the RRG and Sector Rotation tabs**, not here.
 
 ## Sector Rotation
 
