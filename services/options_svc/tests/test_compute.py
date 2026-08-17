@@ -2873,16 +2873,42 @@ def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
 # fake the lazily-imported gex_collector/gamma_tool/gex_history_db modules so
 # nothing touches a live proxy or the on-disk DB.
 
-def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None):
+def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None, now=None):
     """Fake the lazily-imported collector modules.
 
     ``chains`` — optional ``{symbol: chain}`` the fake ``poll_once`` feeds through
     the ``on_chain`` callback, so tests can exercise the hooks that ride it (the
     tick-chain stash, the UOA stash, the ETH-eligibility harvest) WITHOUT any
     extra fetch. ``calls["poll_n"]`` counts poll_once invocations, which is how a
-    test proves no second fetch was introduced."""
+    test proves no second fetch was introduced.
+
+    ``now`` — the market clock these tests run against, defaulting to a fixed
+    REGULAR-hours instant. **This is load-bearing, not decoration.** The cases
+    below call ``collect_gex_snapshots()`` with no ``now``, which falls through
+    to ``scheduler._market_now()`` — the real wall clock. They assert the
+    full-universe poll, so once ETH activated on 2026-08-17 they began FAILING
+    every morning between 06:30 and 08:00 CT: inside the GTH window
+    ``_gth_symbols`` narrows to the ETH-eligible subset, finds no cached
+    eligibility under the fakes, and returns ``[]`` — "skip this poll" — so the
+    poll under test never happens. They then passed again after 08:00. Pinning
+    the clock makes them assert what they were written to assert at any hour.
+
+    Tests that genuinely exercise the GTH branch pass an explicit ``now`` to
+    ``collect_gex_snapshots``, which takes precedence over this patch — see
+    ``tests/test_eth_activation.py``, which has its own fixture and is
+    deliberately untouched by this."""
     import sys as _sys
     import types as _types
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZoneInfo
+
+    from services.options_svc import scheduler as _sched
+
+    # A plain Monday inside 08:00-15:20 CT, so the collection window is open for
+    # the FULL universe and no ETH narrowing applies.
+    fixed_now = now or _dt.datetime(2026, 8, 17, 10, 0,
+                                    tzinfo=_ZoneInfo("America/Chicago"))
+    monkeypatch.setattr(_sched, "_market_now", lambda: fixed_now)
 
     calls = {"poll": False, "touched": False, "closed": False,
              "client": None, "engine": None, "conn": None, "poll_n": 0,
@@ -2934,6 +2960,28 @@ def test_big_delta_stash_roundtrips_and_clears():
     got = compute.take_big_delta_stash()
     assert got == {"SPY": [{"type": "big_delta", "strike": 100}]}
     assert compute.take_big_delta_stash() == {}   # take clears
+
+
+def test_gex_fixture_pins_the_market_clock(monkeypatch):
+    """GUARD: the collection tests must not read the wall clock.
+
+    They call ``collect_gex_snapshots()`` with no ``now`` and assert the
+    full-universe poll. Unpinned, that made them pass or fail by the time of
+    day — green all afternoon, red every morning from 06:30 to 08:00 CT once
+    ETH activated, because ``_gth_symbols`` narrows to the eligible subset
+    inside the GTH window and skips the poll entirely.
+
+    If this fails, someone dropped the clock patch from ``_fake_gex_modules``
+    and eight tests below have quietly gone time-dependent again."""
+    from services.options_svc import scheduler as _sched
+    from shared import market_calendar as mc
+
+    _fake_gex_modules(monkeypatch)
+    pinned = _sched._market_now()
+    assert mc.is_regular_hours(pinned), (
+        f"fixture clock {pinned} is not inside regular hours")
+    # And it must be CONSTANT -- a lambda over the real clock would still drift.
+    assert _sched._market_now() == pinned
 
 
 def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
