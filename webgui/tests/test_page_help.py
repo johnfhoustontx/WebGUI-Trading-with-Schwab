@@ -64,7 +64,7 @@ def test_subtab_help_covers_every_sub_tab():
     new view can't ship without one. The tab VALUES here mirror what the pages pass
     to ``ui.tab(...)``."""
     expected = {
-        "/": {"0-DTE", "Swing", "Directional"},
+        "/options/scanner": {"0-DTE", "Swing", "Directional"},
         "/options/gamma": {"GEX", "Charm", "DEX", "Vanna", "Flow", "Net Prem",
                            "Term", "indices", "sectors", "megacaps"},
         "/options/simulator": {"Replay", "What-if", "IV shock"},
@@ -103,7 +103,7 @@ _REMOVED_CLAIMS = [
     ("/sentiment", "stacked chart"),
     ("/sentiment", "30-day average"),
     # The Scanner grew a third tab; the help still listed two.
-    ("/", "**0-DTE / Swing** —"),
+    ("/options/scanner", "**0-DTE / Swing** —"),
 ]
 
 
@@ -134,6 +134,6 @@ def test_trade_guide_matches_the_cards_the_page_renders():
 def test_scanner_guide_lists_every_subtab_it_has_help_for():
     """SUBTAB_HELP is the authority on which tabs exist; the prose must agree."""
     import page_help
-    guide = page_help.HELP_MD["/"]
-    for tab in page_help.SUBTAB_HELP["/"]:
+    guide = page_help.HELP_MD["/options/scanner"]
+    for tab in page_help.SUBTAB_HELP["/options/scanner"]:
         assert tab in guide, f"the Market Scanner guide never mentions the {tab} tab"

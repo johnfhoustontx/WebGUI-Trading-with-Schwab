@@ -12,7 +12,7 @@ def test_shell_registers_all_pages():
 
     routes = set(Client.page_routes.values())
     expected = (
-        "/", "/options/paper", "/options/captured", "/options/portfolio",
+        "/options/scanner", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
         "/options/matrix", "/options/flow",
@@ -79,7 +79,7 @@ def test_group_children_maps_routes_to_their_group():
     """The top tab strip shows the active route's group; flat + rail pages have none."""
     import main
     opts = main._group_children("/options/rescue")
-    assert ("/", "Market Scanner", "radar") in opts                # Options group
+    assert ("/options/scanner", "Market Scanner", "radar") in opts  # Options group
     assert main._group_children("/sentiment/rotation") == main.SENTIMENT_CHILDREN
     assert main._group_children("/market") == main.SENTIMENT_CHILDREN  # folded in
     more = main._group_children("/manuals")                        # Settings child
@@ -164,7 +164,7 @@ def test_acknowledge_scanner_reads_scan_once(monkeypatch):
     monkeypatch.setattr(main.bus_client, "read_version", lambda v: None)
     monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
 
-    main._acknowledge("/")
+    main._acknowledge("/options/scanner")
     assert reads.count("options:scan") == 1
 
 
@@ -216,7 +216,7 @@ def test_acknowledge_reuses_injected_scan(monkeypatch):
     monkeypatch.setattr(main.bus_client, "read_version", lambda v: None)
     monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
 
-    main._acknowledge("/", scan={"signals": []})
+    main._acknowledge("/options/scanner", scan={"signals": []})
     assert "options:scan" not in reads
 
 
@@ -421,7 +421,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     and "Options" (a group) in the same slot."""
     import main
     # A page inside a group → three crumbs, the full path through the menu.
-    assert main.breadcrumb_trail("/") == ["Strategy", "Options", "Market Scanner"]
+    assert main.breadcrumb_trail("/options/scanner") == ["Strategy", "Options", "Market Scanner"]
     assert main.breadcrumb_trail("/sentiment/rotation") == [
         "Markets", "Trend & Sentiment", "Sector Rotation"]
     assert main.breadcrumb_trail("/market") == [
@@ -1067,7 +1067,7 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
     # The Options strip keeps its find -> analyze -> track -> repair workflow.
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
-        "/", "/options/swing", "/options/expected-move", "/options/captured",
+        "/options/scanner", "/options/swing", "/options/expected-move", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
     assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
@@ -1342,7 +1342,7 @@ def test_two_open_tabs_do_not_write_into_each_others_breadcrumb():
     assert leaf_a.text == "Gamma"
 
     # Tab B builds later and takes over the module-level refs...
-    leaf_b, _c2, _p2 = _mount_breadcrumb("/")
+    leaf_b, _c2, _p2 = _mount_breadcrumb("/options/scanner")
     with ui.card():
         tabs_b = ui.tabs(value="0-DTE")
     main.bind_breadcrumb_leaf(tabs_b)

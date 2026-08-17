@@ -277,35 +277,59 @@ def render():
     wrap = ui.column().classes(
         f"macro-board macro-{skin.lower()} w-full gap-[18px] pb-16")
 
+    # ── rail typography (2026-08-16) ────────────────────────────────────────
+    # ONE label style and ONE value style for the whole rail. It previously ran
+    # five near-identical sizes (9 / 9.5 / 10 / 10.5 / 14px) across four different
+    # tracking values, which reads as inconsistent even though the family is the
+    # same everywhere but the wordmark.
+    #
+    # ``leading-none`` on both is what makes the alignment work: with default
+    # line-heights a 9.5px caption and a 15px number sit in boxes of different
+    # heights, so their baselines cannot line up between one stat block and the
+    # next however the flex container is aligned.
+    _LBL = (f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9.5px] tracking-[.18em] "
+            "leading-none whitespace-nowrap")
+    _VAL = f"{_T['MB_MONO']} text-[15px] leading-none tabular-nums"
+
     with wrap:
         # ---- top rail ----
+        # items-start, NOT items-center: the stat blocks have different row counts
+        # (the breadth meter carries a bar the clock does not), and centring blocks
+        # of unequal height is exactly what pushed their labels and values onto
+        # different lines. Top-aligned with identical label/value rows, every
+        # caption sits on one line and every value on the next.
         with ui.row().classes(
-                f"mb-rail {_T['MB_EDGE']} border items-center gap-6 flex-wrap "
+                f"mb-rail {_T['MB_EDGE']} border items-start gap-7 flex-wrap "
                 "w-full px-5 py-3.5"):
-            with ui.row().classes("items-baseline gap-3"):
+            # brand + status, on their own baseline
+            with ui.row().classes("items-baseline gap-3 self-center"):
                 ui.label("MACRO BOARD").classes(
                     f"{_T['MB_TITLE']} {_T['MB_TXT']} text-[17px] font-bold "
-                    "tracking-[.18em]")
-                ui.label("LIVE TAPE").classes(
-                    f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[10px] tracking-[.24em]")
-            with ui.row().classes("items-center gap-2"):
-                ui.element("div").classes(
-                    f"mb-dot w-[7px] h-[7px] {_T['MB_UP'].replace('text-', 'bg-')} "
-                    "shadow-[0_0_10px_#00E5A0]")
-                ui.label("STREAMING").classes(
-                    f"{_T['MB_MONO']} {_T['MB_UP']} text-[10.5px] tracking-[.2em]")
-            with ui.column().classes("gap-[3px]"):
-                ui.label("SESSION").classes(
-                    f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9px] tracking-[.2em]")
-                clock_lbl = ui.label("—").classes(
-                    f"{_T['MB_MONO']} {_T['MB_TXT']} text-[14px] tabular-nums")
-            # breadth meter
-            with ui.column().classes("gap-[5px] min-w-[190px]"):
-                with ui.row().classes(
-                        f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9.5px] "
-                        "tracking-[.14em] justify-between w-full"):
-                    ui.label("ADVANCING")
-                    ui.label("DECLINING")
+                    "tracking-[.18em] leading-none")
+                ui.label("LIVE TAPE").classes(_LBL)
+                with ui.row().classes("items-center gap-2 ml-1"):
+                    ui.element("div").classes(
+                        f"mb-dot w-[7px] h-[7px] "
+                        f"{_T['MB_UP'].replace('text-', 'bg-')} "
+                        "shadow-[0_0_10px_#00E5A0]")
+                    ui.label("STREAMING").classes(
+                        f"{_T['MB_MONO']} {_T['MB_UP']} text-[9.5px] "
+                        "tracking-[.18em] leading-none whitespace-nowrap")
+            # session clock — label row then value row, same shape as the breadth
+            # block so the two align
+            with ui.column().classes("gap-[7px]"):
+                ui.label("SESSION").classes(_LBL)
+                clock_lbl = ui.label("—").classes(f"{_VAL} {_T['MB_TXT']}")
+            # breadth meter — same label row + value row, with the bar hanging
+            # BELOW the value. It used to sit between them, which offset this
+            # block's numbers a whole bar-height below the clock.
+            with ui.column().classes("gap-[7px] min-w-[190px]"):
+                with ui.row().classes("justify-between w-full gap-6"):
+                    ui.label("ADVANCING").classes(_LBL)
+                    ui.label("DECLINING").classes(_LBL)
+                with ui.row().classes("justify-between w-full gap-6"):
+                    bup_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_UP']}")
+                    bdn_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_DN']}")
                 with ui.row().classes("h-[7px] gap-[2px] w-full") as bbar:
                     bar_up = ui.element("div").classes(
                         f"mb-shear {_T['MB_UP'].replace('text-', 'bg-')} "
@@ -313,20 +337,15 @@ def render():
                     bar_dn = ui.element("div").classes(
                         f"mb-shear {_T['MB_DN'].replace('text-', 'bg-')} "
                         "flex-[1_1_0%] shadow-[0_0_8px_rgba(255,77,109,0.5)]")
-                with ui.row().classes(
-                        f"{_T['MB_MONO']} text-[9.5px] tracking-[.14em] "
-                        "justify-between w-full"):
-                    bup_lbl = ui.label("0").classes(_T["MB_UP"])
-                    bdn_lbl = ui.label("0").classes(_T["MB_DN"])
             ui.space()
             # skin toggle (segmented)
-            with ui.row().classes(f"{_T['MB_EDGE']} border") as seg:
+            with ui.row().classes(f"{_T['MB_EDGE']} border self-center") as seg:
                 btn_a = ui.button("INSTRUMENT", on_click=lambda: _set_skin("A")) \
-                    .props("flat no-caps").classes(
-                        f"{_T['MB_SYM']} text-[11.5px] tracking-[.18em] rounded-none")
+                    .props("flat no-caps dense").classes(
+                        f"{_T['MB_SYM']} text-[9.5px] tracking-[.18em] rounded-none")
                 btn_b = ui.button("HEAT LATTICE", on_click=lambda: _set_skin("B")) \
-                    .props("flat no-caps").classes(
-                        f"{_T['MB_SYM']} text-[11.5px] tracking-[.18em] rounded-none")
+                    .props("flat no-caps dense").classes(
+                        f"{_T['MB_SYM']} text-[9.5px] tracking-[.18em] rounded-none")
         board = ui.row().classes("flex-wrap gap-[13px] items-start w-full")
 
     _SEG_ON = f"{_T['MB_CYAN']} bg-[rgba(53,224,255,0.13)]"

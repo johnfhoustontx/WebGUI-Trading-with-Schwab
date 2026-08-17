@@ -18,7 +18,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi.responses import HTMLResponse  # noqa: E402
+from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
@@ -308,7 +308,7 @@ def _serve_manual(name: str):
 # Options is a menu GROUP; each child is a tab in the strip. Ordered by the
 # trading workflow: find → analyze → track → repair. (route, label, icon)
 OPTIONS_CHILDREN = [
-    ("/", "Market Scanner", "radar"),
+    ("/options/scanner", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
@@ -721,7 +721,7 @@ _NAV_LABEL = {route: label for route, label, _icon in
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
-    "/": "#42a5f5",                       # Market Scanner — blue
+    "/options/scanner": "#42a5f5",        # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
     "/options/flow": "#d500f9",           # Flow Alerts — magenta
     "/options/paper": "#66bb6a",          # Paper Ledger — green
@@ -1240,7 +1240,7 @@ def _acknowledge(active: str, scan=None) -> None:
     ``scan`` — the ``options:scan`` payload, when the caller (``_layout``) already
     read it this navigation, so the (large) scan payload isn't deserialized 2-3×
     per page build (the ack + the badge recompute would each re-read it)."""
-    if active == "/":                                   # Scanner
+    if active == "/options/scanner":                    # Scanner
         if scan is None:
             scan = bus_client.read("options:scan") or {}
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
@@ -1268,7 +1268,7 @@ def _recompute_badges(scan=None) -> None:
     """
     if scan is None:
         scan = bus_client.read("options:scan") or {}
-    _NAV_BADGES["/"] = alerts.unread_count(
+    _NAV_BADGES["/options/scanner"] = alerts.unread_count(
         alerts.scanner_keys(scan), _ALERT_STATE["acked_scan"])
     # Captured: fire on a genuinely NEW captured signal (a new signal_id), NOT on
     # the periodic reprice-republish (same ids, bumped version). Deserialize the
@@ -1961,9 +1961,23 @@ def _layout(active: str, title: str):
         yield content
 
 
-@ui.page("/")
+# The app's LANDING page is the Market Dashboard (2026-08-16). It is the widest
+# read in the app and the natural first thing to look at, so opening
+# http://127.0.0.1:8500 should show the tape rather than a scanner whose signals
+# only mean something once you know what the tape is doing.
+#
+# This is a REDIRECT rather than a second render of the dashboard: rendering it at
+# both paths would give one page two URLs, and the shell keys the active nav item,
+# the tab strip and the breadcrumb off the route — so `/` would highlight nothing.
+# The Market Scanner moved to its own `/options/scanner`, matching its siblings.
+@app.get("/")
+def _root_to_market_dashboard():
+    return RedirectResponse(url="/market")
+
+
+@ui.page("/options/scanner")
 def options_scanner_page() -> None:
-    with _layout("/", "Options · Market Scanner"):
+    with _layout("/options/scanner", "Options · Market Scanner"):
         from pages.options import scanner
         scanner.render()
 

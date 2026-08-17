@@ -601,7 +601,7 @@ def render():
             td = ui.tab("Directional").classes(f"tab-dir text-[{TAB_DIR_COLOR}]")
             for _tab, _key in ((t0, "0-DTE"), (ts, "Swing"), (td, "Directional")):
                 with _tab:
-                    ui.tooltip(_page_help.subtab_help("/", _key)
+                    ui.tooltip(_page_help.subtab_help("/options/scanner", _key)
                                ).props("delay=350 max-width=340px")
         return tabs, t0, ts, td
 

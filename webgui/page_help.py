@@ -45,7 +45,7 @@ displays show that same drift three ways:
 
 
 HELP_MD: dict[str, str] = {
-    "/": """
+    "/options/scanner": """
 **Market Scanner — the simple version**
 
 Finds option trades across the watchlist and scores each one **0–100** for
@@ -520,7 +520,7 @@ def help_md(active: str) -> str:
 # ---------------------------------------------------------------------------
 
 SUBTAB_HELP: dict[str, dict[str, str]] = {
-    "/": {  # Market Scanner
+    "/options/scanner": {  # Market Scanner
         "0-DTE": "Credit spreads that expire TODAY — fastest decay, highest risk "
                  "(zero days to expiration).",
         "Swing": "Credit spreads days-to-weeks out — slower decay, more room to be "
