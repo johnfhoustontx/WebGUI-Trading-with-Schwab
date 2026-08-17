@@ -653,7 +653,8 @@ def market_snapshot_caption(trend, sentiment, regime) -> str:
 
 
 def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_hist,
-                         *, slot: str, config: dict | None = None) -> bool:
+                         *, slot: str, config: dict | None = None,
+                         derived=None, snaps=None) -> bool:
     """Push the 30-min market snapshot PNG to Telegram + Discord. Never raises.
 
     Two gates: the master ``enabled`` and the ``market_snapshot.enabled`` block.
@@ -669,8 +670,9 @@ def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_h
     tok, chat = telegram_target(cfg, "market_snapshot")
     webhook = discord_target(cfg, "market_snapshot")
     doc = market_snapshot.market_snapshot_doc(dashboard, trend, sentiment, regime,
-                                              intraday, regime_hist, subtitle=f"{slot} CT")
-    png = briefing_image.render_html_png(doc)
+                                              intraday, regime_hist, subtitle=f"{slot} CT",
+                                              derived=derived, snaps=snaps)
+    png = briefing_image.render_html_png(doc, width=market_snapshot.DOC_WIDTH)
     if not png:
         log.warning("market snapshot %s: render failed — pushing text only", slot)
         send_telegram(tok, chat, _html.escape(caption))

@@ -1125,7 +1125,11 @@ def test_send_market_snapshot_block_disabled(monkeypatch):
 def test_send_market_snapshot_pushes_png(monkeypatch):
     got = {}
     monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc", lambda *a, **k: "<html></html>")
-    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: b"PNGDATA")
+    def _render(h, **k):
+        got["w"] = k.get("width")
+        return b"PNGDATA"
+
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", _render)
     monkeypatch.setattr(pn, "send_telegram_photo", lambda tok, cid, fn, png, cap: got.setdefault("t", (fn, png)))
     monkeypatch.setattr(pn, "send_discord_file", lambda wh, fn, png, cap, content_type=None: got.setdefault("d", (wh, fn)))
     cfg = {"enabled": True, "market_snapshot": {"enabled": True},
@@ -1135,6 +1139,9 @@ def test_send_market_snapshot_pushes_png(monkeypatch):
     assert got["t"][1] == b"PNGDATA"
     assert got["d"][0] == "MS"                       # per-channel webhook wins
     assert got["d"][1].startswith("market-snapshot-")
+    # rendered WIDE: the board needs room for two 4-tile frames, and the doc's
+    # inherited .ga wrapper caps at 860px without the override.
+    assert got["w"] == pn.market_snapshot.DOC_WIDTH
 
 
 def test_market_snapshot_caption_coerces_numeric_string():
@@ -1325,7 +1332,15 @@ def _ms_capture(monkeypatch, png=b"PNGDATA"):
     got = {"photo": [], "file": [], "tg_text": [], "dc_embed": []}
     monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc",
                         lambda *a, **k: "<html></html>")
-    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: png)
+    # accepts **k: the snapshot renders at market_snapshot.DOC_WIDTH, not the
+    # module default, because the board needs room for two 4-tile frames.
+    got["width"] = []
+
+    def _render(h, **k):
+        got["width"].append(k.get("width"))
+        return png
+
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", _render)
     monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: got["photo"].append(a))
     monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: got["file"].append(a))
     monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: got["tg_text"].append(a))
@@ -1339,6 +1354,7 @@ def test_send_market_snapshot_uses_route(monkeypatch):
     assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=cfg) is True
     assert got["photo"][0][:2] == ("TOK", 66)
     assert got["file"][0][0] == "MS_D"
+    assert got["width"] == [pn.market_snapshot.DOC_WIDTH]
 
 
 def test_send_market_snapshot_route_applies_to_text_fallback(monkeypatch):

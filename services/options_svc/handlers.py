@@ -1431,12 +1431,18 @@ def run_market_snapshot(bus, slot):
         regime = _snap_payload(bus.cache_get("cache:sentiment:regime")) or {}
         intraday = _snap_payload(bus.cache_get("cache:sentiment:intraday_history")) or {}
         regime_hist = _snap_payload(bus.cache_get("cache:sentiment:regime_history")) or {}
+        # The sentiment ring's WEEK (last 5 scored sessions) and MONTH (full
+        # history) horizons come from the session snapshots, not the composite —
+        # this read exists solely for them.
+        hist = _snap_payload(bus.cache_get("cache:sentiment:history")) or {}
     except Exception:  # noqa: BLE001 — a down bus must not break the tick.
         log.exception("market snapshot %s: cache read failed", slot)
         return
     try:
         push_notify.send_market_snapshot(dashboard, trend, sentiment, regime,
-                                         intraday, regime_hist, slot=slot)
+                                         intraday, regime_hist, slot=slot,
+                                         derived=(comp.get("derived") or {}),
+                                         snaps=(hist.get("snaps") or []))
     except Exception:  # noqa: BLE001 — the push primitives shouldn't raise, belt+braces.
         log.exception("market snapshot %s: push failed", slot)
     try:
