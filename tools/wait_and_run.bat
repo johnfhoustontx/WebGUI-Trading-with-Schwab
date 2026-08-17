@@ -25,7 +25,7 @@ if not "%WAITPORT%"=="0" (
     echo [wait_and_run] waiting for dependency on 127.0.0.1:%WAITPORT% ...
     :waitloop
     timeout /t 1 /nobreak >nul
-    powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',%WAITPORT%);exit 0}catch{exit 1}" >nul 2>&1
+    "%PY%" "%ROOT%\tools\wait_http.py" --port %WAITPORT% --timeout 0 --label "the dependency" >nul 2>&1
     if errorlevel 1 goto waitloop
     echo [wait_and_run] dependency on :%WAITPORT% is up.
 )

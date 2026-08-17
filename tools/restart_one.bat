@@ -25,6 +25,12 @@ setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 set "PY=%ROOT%\.venv\Scripts\python.exe"
 set "PYW=%ROOT%\.venv\Scripts\pythonw.exe"
+REM The dependency wait below runs tools\wait_http.py, so it needs an
+REM interpreter. Fall back to PATH rather than abort: this script runs
+REM WINDOWLESS from the Status page Restart buttons, where an abort is silent
+REM and a probe that can never run would loop forever.
+set "PYPROBE=%PY%"
+if not exist "%PYPROBE%" set "PYPROBE=python"
 set "KILLPORT=%~1"
 set "WAITPORT=%~2"
 set "NAME=%~3"
@@ -38,7 +44,7 @@ if not "%KILLPORT%"=="0" (
 if not "%WAITPORT%"=="0" (
     :waitdep
     ping -n 2 127.0.0.1 >nul
-    powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',%WAITPORT%);exit 0}catch{exit 1}" >nul 2>&1
+    "%PY%" "%ROOT%\tools\wait_http.py" --port %WAITPORT% --timeout 0 --label "the dependency" >nul 2>&1
     if errorlevel 1 goto waitdep
 )
 

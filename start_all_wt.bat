@@ -128,7 +128,7 @@ echo Starting proxy (hidden) and waiting for :8100...
 call :launch_hidden proxy schwab-proxy\schwab_proxy.py
 :waitproxy_h
 timeout /t 1 /nobreak >nul
-powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',8100);exit 0}catch{exit 1}" >nul 2>&1
+"%PY%" "%~dp0tools\wait_http.py" --port 8100 --timeout 0 --label "the proxy" >nul 2>&1
 if errorlevel 1 goto waitproxy_h
 echo Proxy is up.
 echo.
@@ -159,6 +159,9 @@ REM ------------------------------- subroutines -------------------------------
 
 :memurai_check
 echo Checking Memurai (Redis) on :6379...
+REM Memurai speaks RESP, not HTTP, so this probe stays a TCP connect while the
+REM proxy / web GUI waits use tools\wait_http.py. See that file's header: an
+REM HTTP GET is what catches a socket that is BOUND but no longer accepting.
 powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',6379);exit 0}catch{exit 1}" >nul 2>&1
 if errorlevel 1 (
     echo   WARNING: Memurai not reachable on :6379. Start the "Memurai" Windows service,
@@ -183,7 +186,7 @@ goto :eof
 echo Waiting for web gui to bind :8500...
 :waitweb
 timeout /t 1 /nobreak >nul
-powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',8500);exit 0}catch{exit 1}" >nul 2>&1
+"%PY%" "%~dp0tools\wait_http.py" --port 8500 --timeout 0 --label "the web GUI" >nul 2>&1
 if errorlevel 1 goto waitweb
 echo Web gui is up.
 echo.

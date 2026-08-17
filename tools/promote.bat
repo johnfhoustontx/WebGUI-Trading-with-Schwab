@@ -147,6 +147,10 @@ REM there, then warns and carries on - a hard stop here would leave prod down,
 REM which is worse than a restart that may need a second look.
 REM Attempts, not seconds: each probe spawns a PowerShell, which measured ~2.5s
 REM on its own, so a message promising "30s" would simply be wrong.
+REM DELIBERATELY a TCP connect, not the HTTP probe the start-up waits now use:
+REM this waits for a socket to DISAPPEAR. An HTTP GET failing here is ambiguous
+REM -- gone, or bound but broken -- so it would report a still-held port as free
+REM and let the relaunch race the process it is waiting for.
 set /a FREE_TRIES=0
 :waitfree
 powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',%~1);exit 0}catch{exit 1}" >nul 2>&1
