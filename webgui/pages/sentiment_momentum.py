@@ -14,9 +14,9 @@ sessions. The **ranked leaderboard survives beneath all of it behind a collapsed
 expander** — the orientation read is the default and the screening surface is
 one click away.
 
-The Highcharts quadrant scatter and rank ribbon are **gone**; section 3 replaces
-the scatter with counts and section 5 draws the ranks as a hand-built SVG. Their
-builders are kept below only because their tests still pin them.
+The Highcharts quadrant scatter and rank ribbon are **gone** — section 3
+replaces the scatter with counts and section 5 draws the ranks as a hand-built
+SVG — and their builders were deleted with them.
 
 All the new arithmetic is pure in ``pages/momentum_view.py``; the leaderboard's
 own transforms stay here.
@@ -33,20 +33,13 @@ from pages.ui_guard import guard
 
 VIEW = "sentiment:momentum"
 
-# In `suppressed` the banner is the loud element on the page and the
-# leaderboard renders muted beneath it.
-BANNER_CLASSES = {
-    "favorable": "text-[#66bb6a] text-subtitle1 text-bold",
-    "neutral": "text-[#ffd54f] text-subtitle1 text-bold",
-    "suppressed": "text-[#ef5350] text-h6 text-bold",
-}
 
-# Deliberately the SAME four names the RRG page uses (pages.sentiment_rotation
-# _QUAD_COLOR). Both charts are 2x2 strength-vs-rate-of-change scatters sitting on
-# adjacent tabs in one nav group, so two vocabularies that agree on half the
-# corners read as a bug rather than a distinction. The axes still differ — RRG is
-# purely relative to SPY, this x is a five-component blend — and that nuance lives
-# in the tooltip and page help, not in a second set of names.
+# Deliberately the SAME four names the rotation screens use (see
+# ``pages/rotation_view.py``, from which ``momentum_view`` takes the hues). Both
+# are 2x2 strength-vs-rate-of-change reads sitting in one nav group, so two
+# vocabularies agreeing on half the corners would read as a bug rather than a
+# distinction. The axes still differ — RRG is purely relative to SPY, this score
+# is a five-component blend — and that nuance lives in the page help.
 QUADRANTS = {
     "leading": "Leading",       # strong and still accelerating
     "improving": "Improving",   # weak but turning up — the early screen
@@ -56,58 +49,9 @@ QUADRANTS = {
 
 LEVEL_OPTIONS = {"industry": "Industries", "stock": "Stocks"}
 
-# Sector colours reused across the scatter series (finite palette, no runtime
-# hex — the Tailwind-first rule applies to classes; chart config is exempt).
-_SERIES_COLORS = [
-    "#42a5f5", "#66bb6a", "#ffa726", "#ab47bc", "#26c6da", "#ef5350",
-    "#8d6e63", "#d4e157", "#5c6bc0", "#ec407a", "#78909c",
-]
 
 _ALIGN_FILLED = "▮"
 _ALIGN_HOLLOW = "▯"
-
-# The zero lines are this chart's frame of reference — which side of each you
-# are on IS the quadrant — so they read louder than the gridlines behind them.
-ZERO_LINE_COLOR = "rgba(255,255,255,0.55)"
-ZERO_LINE_WIDTH = 2
-_GRID_COLOR = "rgba(255,255,255,0.06)"
-
-# Matches the RRG page's corner-label treatment (same vocabulary, same look).
-_QUAD_LABEL_STYLE = {"color": "rgba(255,255,255,0.34)", "fontSize": "11px",
-                     "fontWeight": "bold", "letterSpacing": "2px",
-                     "textTransform": "uppercase"}
-
-
-def _zero_line():
-    return {"value": 0, "width": ZERO_LINE_WIDTH, "color": ZERO_LINE_COLOR,
-            "zIndex": 4}
-
-
-def quadrant_label_bands():
-    """Four invisible x-bands whose only job is to carry a corner label.
-
-    Split at 0, not the RRG's 100 — these axes are z-scores centred on zero.
-    The band gives left/right; the label's verticalAlign gives top/bottom.
-    """
-    def band(right, top, text):
-        return {
-            "from": 0 if right else -1e9,
-            "to": 1e9 if right else 0,
-            "color": "rgba(0,0,0,0)",          # invisible band — label only
-            "zIndex": 0,
-            "label": {"text": text,
-                      "align": "right" if right else "left",
-                      "textAlign": "right" if right else "left",
-                      "verticalAlign": "top" if top else "bottom",
-                      "x": -10 if right else 10,
-                      "y": 18 if top else -12,
-                      "style": dict(_QUAD_LABEL_STYLE)},
-        }
-    # Strong is to the right, accelerating is up.
-    return [band(True, True, QUADRANTS["leading"]),
-            band(True, False, QUADRANTS["weakening"]),
-            band(False, True, QUADRANTS["improving"]),
-            band(False, False, QUADRANTS["lagging"])]
 
 
 def _num(value, digits=2, dash="—"):
@@ -133,40 +77,10 @@ def rank_history_for(payload, level):
     return (payload.get("rank_history") or {}).get(level) or {}
 
 
-def status_text(payload):
-    if not payload or not payload.get("session_date"):
-        return "Waiting for sentiment service…"
-    return f"Session {payload['session_date']}"
-
-
-# --- regime banner ----------------------------------------------------------
-
-def banner_parts(regime):
-    """(headline, tailwind classes) for the regime banner.
-
-    The current regime and the lookback it implies are what make the rest of
-    the screen interpretable at a glance, so they lead the page.
-    """
-    regime = regime or {}
-    state = regime.get("state") or "neutral"
-    label = regime.get("label") or state.title()
-    lookback = regime.get("lookback") or "—"
-    text = f"Momentum {label} — weighting the {lookback} lookback"
-    if regime.get("crash_risk"):
-        text += " · momentum-crash risk"
-    return text, BANNER_CLASSES.get(state, BANNER_CLASSES["neutral"])
-
-
-def banner_reasons(regime):
-    return list((regime or {}).get("reasons") or [])
-
-
 def leaderboard_muted(regime):
     """True when the leaderboard should render muted beneath the banner."""
     return (regime or {}).get("state") == "suppressed"
 
-
-# --- quadrant scatter -------------------------------------------------------
 
 def quadrant_for(score, accel):
     """Which corner a row sits in — the vocabulary the chart labels use."""
@@ -175,137 +89,6 @@ def quadrant_for(score, accel):
     if score >= 0:
         return QUADRANTS["leading"] if accel >= 0 else QUADRANTS["weakening"]
     return QUADRANTS["improving"] if accel >= 0 else QUADRANTS["lagging"]
-
-
-def _accel(row):
-    return (row.get("components") or {}).get("accel")
-
-
-def quadrant_figure(rows, title="Momentum vs acceleration"):
-    """Score on x, acceleration on y, bubble by rank, one series per sector.
-
-    This chart replaces about six tables: where a name sits relative to the
-    axes says whether the move is starting, running, or finished.
-    """
-    groups = {}
-    for row in rows or []:
-        if row.get("score") is None or _accel(row) is None:
-            continue
-        groups.setdefault(row.get("sector") or "All", []).append({
-            "x": float(row["score"]),
-            "y": float(_accel(row)),
-            "name": row.get("label") or row.get("symbol"),
-            "symbol_code": row.get("symbol"),
-            "quadrant": quadrant_for(row["score"], _accel(row)),
-        })
-
-    series = [{"name": name, "data": data,
-               "color": _SERIES_COLORS[i % len(_SERIES_COLORS)],
-               "marker": {"radius": 5, "symbol": "circle"}}
-              for i, (name, data) in enumerate(sorted(groups.items()))]
-
-    return {
-        "accessibility": {"enabled": False},
-        "chart": {"type": "scatter", "backgroundColor": "transparent",
-                  "height": 420, "zoomType": "xy"},
-        "title": {"text": title, "style": {"color": "#cdd8ee"}},
-        "credits": {"enabled": False},
-        "legend": {"itemStyle": {"color": "#8794b4"}},
-        "xAxis": {
-            "title": {"text": "Momentum score (z)", "style": {"color": "#8794b4"}},
-            "labels": {"style": {"color": "#8794b4"}},
-            "gridLineColor": _GRID_COLOR, "lineColor": "rgba(255,255,255,0.15)",
-            "plotLines": [_zero_line()],
-            "plotBands": quadrant_label_bands(),
-        },
-        "yAxis": {
-            "title": {"text": "Acceleration (z)", "style": {"color": "#8794b4"}},
-            "labels": {"style": {"color": "#8794b4"}},
-            "gridLineColor": _GRID_COLOR,
-            "plotLines": [_zero_line()],
-        },
-        "tooltip": {
-            "pointFormat": ("<b>{point.name}</b><br/>score {point.x:.2f} · "
-                            "accel {point.y:.2f}<br/>{point.quadrant}"),
-        },
-        "plotOptions": {"series": {"states": {"inactive": {"enabled": False}}}},
-        "series": series,
-    }
-
-
-# --- rank ribbon ------------------------------------------------------------
-
-# A bump chart stops being readable somewhere around a dozen lines; drawing all
-# 68 industries produced solid spaghetti that conveyed nothing.
-RIBBON_MAX_SERIES = 12
-
-
-def _latest_rank(points):
-    return points[-1][1] if points and points[-1][1] is not None else 10**9
-
-
-def ribbon_subset(rank_history, n=RIBBON_MAX_SERIES):
-    """The n best CURRENTLY ranked symbols — chosen on the latest session.
-
-    Ranking on the latest session (not the first) is what lets a climber into
-    the chart; that movement is the whole point of a bump chart.
-    """
-    have = [(s, p) for s, p in (rank_history or {}).items() if p]
-    have.sort(key=lambda sp: (_latest_rank(sp[1]), sp[0]))
-    return have[:n]
-
-
-def ribbon_figure(rank_history, title="Rank over recent sessions",
-                  n=RIBBON_MAX_SERIES):
-    """Bump chart of rank over time for the current leaders.
-
-    Rank 1 sits at the top via a reversed axis rather than negated data, so the
-    tooltip still shows the real rank number.
-    """
-    chosen = ribbon_subset(rank_history, n)
-    total = len([p for p in (rank_history or {}).values() if p])
-
-    categories = sorted({d for _s, pts in chosen for d, _r in pts})
-    series = [{"name": symbol,
-               "data": [rank for _d, rank in points],
-               "marker": {"enabled": True, "radius": 3}}
-              for symbol, points in chosen]
-
-    sessions = len(categories)
-    if not chosen:
-        note = "No ranked history yet — the first nightly run seeds it."
-    elif sessions < 2:
-        note = (f"Only {sessions} session stored — movement appears once a "
-                "second nightly run lands.")
-    elif total > len(chosen):
-        note = f"Top {len(chosen)} of {total} by current rank · {sessions} sessions"
-    else:
-        note = f"{total} tracked · {sessions} sessions"
-
-    return {
-        "accessibility": {"enabled": False},
-        "chart": {"type": "line", "backgroundColor": "transparent", "height": 380},
-        "title": {"text": title, "style": {"color": "#cdd8ee"}},
-        "subtitle": {"text": note, "style": {"color": "#8794b4",
-                                             "fontSize": "11px"}},
-        "credits": {"enabled": False},
-        # A line you cannot name is a line you cannot use.
-        "legend": {"enabled": True, "itemStyle": {"color": "#8794b4",
-                                                  "fontWeight": "normal"}},
-        "xAxis": {"categories": categories,
-                  "labels": {"style": {"color": "#8794b4"}},
-                  "gridLineColor": _GRID_COLOR},
-        "yAxis": {"reversed": True, "title": {"text": "Rank",
-                                              "style": {"color": "#8794b4"}},
-                  "labels": {"style": {"color": "#8794b4"}},
-                  "gridLineColor": _GRID_COLOR},
-        "tooltip": {"shared": False,
-                    "pointFormat": "<b>{series.name}</b> — rank {point.y}"},
-        # Hover one line, dim the rest — the only way to follow a path in a
-        # chart with a dozen overlapping series.
-        "plotOptions": {"series": {"states": {"inactive": {"opacity": 0.12}}}},
-        "series": series,
-    }
 
 
 # --- leaderboard ------------------------------------------------------------

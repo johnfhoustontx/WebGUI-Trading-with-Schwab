@@ -4,6 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Dead-code cleanup after the four screen rebuilds.** The Highcharts
+builders the rebuilds replaced, plus everything only they reached, removed from
+`pages/sentiment_rotation.py` and `pages/sentiment_momentum.py`.
+- **Found by reachability, not by memory.** A throwaway script parsed each module with `ast`,
+  built a symbol→symbol reference graph, and marked everything reachable from the real roots
+  (`render`, plus any name a NON-test file imports). Two earlier passes were wrong and are worth
+  recording: a plain grep counted *same-named symbols in other files* as references (both modules
+  define `quadrant_label_bands`), and a "used anywhere in the file" check kept helpers alive that
+  only dead code called (`_sector_trace` exists solely for `rrg_scatter_figure`). Only transitive
+  reachability from real roots gives the true set.
+- **`sentiment_rotation.py` 562 → 393 lines.** Gone: `rrg_scatter_figure`, `_sector_trace`,
+  `quadrant_label_bands`, `_QUAD_LABEL_STYLE`, `_hex_to_rgba`, `headline_parts`, `side_rows`,
+  `rotation_rows`, `quadrant_color`/`quadrant_text_class`, `regime_text_class`/`_regime_color`,
+  and the whole local `CLR_*`/`TXT_*`/`_HEX_TO_TXT`/`SENT_TEXT_CLASSES` palette. What survives is
+  `render` plus its five style constants and `DEFAULT_RISK_THRESHOLD`.
+- **`sentiment_momentum.py` 943 → 756 lines.** Gone: `quadrant_figure`, `ribbon_figure`,
+  `ribbon_subset`, `_latest_rank`, `quadrant_label_bands`, `_zero_line`, `ZERO_LINE_*`,
+  `_GRID_COLOR`, `_SERIES_COLORS`, `_QUAD_LABEL_STYLE`, `banner_parts`, `banner_reasons`,
+  `BANNER_CLASSES`, `status_text`, `_accel`. The leaderboard's transforms all survive — the board
+  is still on the page behind its expander.
+- **46 tests removed with their subjects**, plus four orphaned fixtures (`_assessment`, `_head`,
+  `_sector_traces`, `_hist`) and one vacuous guard: `test_rrg_page_caption_removed` asserted a
+  caption string was absent from a page that has since been rewritten end to end, so it could
+  never fail again. Suite 1912 → **1866 passed, 0 failed**.
+- **This closes the "two quadrant palettes" question** the Rotation redesign opened.
+  `sentiment_rotation.quadrant_color` was the second palette; its only consumers were the
+  Highcharts RRG scatter and the Sector & Industry RRG column, and both went in those rebuilds.
+  There is now ONE palette — `rotation_view.QUAD_HUE`/`QUAD_CHROMA`, imported by `rrg_view` and
+  `momentum_view`. CLAUDE.md's warning is rewritten accordingly.
+- **Verified beyond the suite:** all five render paths (`rotation`, `rrg`, `sectors`, `momentum`
+  at both levels) smoke-rendered in-process against the REAL cached payloads, because static
+  reachability cannot see a name reached by string or `getattr`.
+- **⚠ NOT done, deliberately: `pages/sentiment.py` has ~53 unreferenced top-level symbols** by the
+  same measurement — the same four rebuilds stranded them. Left alone because some predates this
+  work, several are still covered by `tests/test_sentiment_sectors.py`, and cutting ~50 symbols
+  out of a shared 1000-line module deserves its own change. Recorded in CLAUDE.md's Tests
+  section.)
+
+---
+
 **Last updated:** 2026-08-17 (**Momentum rebuilt as a guided page.** `/sentiment/momentum` rebuilt
 from a supplied design (`Momentum.html`), the fourth screen from that project. Design:
 [design](plans/2026-08-17-momentum-guided-page-design.md); per-page detail in
