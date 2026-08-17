@@ -210,8 +210,98 @@ def _maybe_lock(lock):
     return lock if lock is not None else contextlib.nullcontext()
 
 
+def live_spots(quotes_payload) -> dict:
+    """``{symbol: last_price}`` from a raw Schwab ``/quotes`` payload.
+
+    The shape is ``{SYM: {"quote": {"lastPrice": ...}}}``. Only positive, real
+    numbers survive: a zero or absent ``lastPrice`` is the off-hours "no print"
+    sentinel, and letting it through would overwrite a merely-stale spot with 0
+    and collapse every GEX number computed from it. Fully defensive — a
+    malformed payload yields ``{}``, i.e. "re-anchor nothing".
+    """
+    out: dict = {}
+    if not isinstance(quotes_payload, dict):
+        return out
+    for symbol, info in quotes_payload.items():
+        if not isinstance(info, dict):
+            continue
+        quote = info.get("quote")
+        if not isinstance(quote, dict):
+            continue
+        last = quote.get("lastPrice")
+        # bool is an int subclass; a True here would price the chain at 1.0.
+        if isinstance(last, bool) or not isinstance(last, (int, float)):
+            continue
+        if last > 0:
+            out[symbol] = float(last)
+    return out
+
+
+def _is_regular_hours(now) -> bool:
+    """Whether ``now`` is inside the regular cash session. Defensive: if the
+    shared calendar can't be reached, claim REGULAR — that is the no-change
+    answer, and a broken import must not start rewriting spot prices."""
+    try:
+        root = str(Path(__file__).resolve().parents[1])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from shared import market_calendar as mc
+
+        return mc.is_regular_hours(now)
+    except Exception:  # noqa: BLE001 — never let a calendar hiccup break a poll
+        log.debug("market_calendar unavailable; treating as regular hours",
+                  exc_info=True)
+        return True
+
+
+def _reanchor_spots(client, symbols, fetched, now) -> int:
+    """Overwrite each chain's STALE ``underlyingPrice`` with the live quote.
+
+    Outside the regular session Schwab's chain payload pins ``underlyingPrice``
+    to the previous close while ``/quotes`` reports the live print. Measured on
+    2026-08-17 at 06:44 CT, the first Cboe extended-hours session: NVDA's chain
+    said 225.16 (Friday's close, to the cent) against a live 226.58. Because GEX
+    is computed as a function of spot, that ONE field freezes net_total, the flip
+    and the walls for the entire session — the first 13 GTH snapshots of all 17
+    ETH-eligible symbols were identical.
+
+    The rest of the chain is genuinely fresh (post-expiry open interest, a moved
+    flip), so this re-anchors the single stale field rather than distrusting the
+    payload. Returns the number of chains corrected (for the caller's log line).
+
+    Scoped to NON-regular hours deliberately: intraday the two agree, so
+    overriding would perturb an established series to no benefit — and it also
+    covers the 08:00-08:30 CT pre-open stretch, where the same freeze has been
+    happening unnoticed since long before extended hours existed.
+
+    ONE batched ``/quotes`` call per poll, not one per symbol: across the
+    90-minute GTH window that is ~90 extra calls rather than ~1,500.
+    """
+    if _is_regular_hours(now):
+        return 0
+    try:
+        resp = client.get_quotes(list(symbols))
+        payload = resp.json() if getattr(resp, "status_code", 500) == 200 else None
+        spots = live_spots(payload)
+    except Exception as e:  # noqa: BLE001 — a stale spot beats a dead poll
+        log.warning("Live-spot re-anchor unavailable (%s); "
+                    "using the chain's own underlyingPrice", e)
+        return 0
+    corrected = 0
+    for symbol, chain in fetched:
+        if not chain or symbol not in spots:
+            continue
+        try:
+            if chain.get("underlyingPrice") != spots[symbol]:
+                corrected += 1
+            chain["underlyingPrice"] = spots[symbol]
+        except Exception:  # noqa: BLE001 — a non-mapping chain isn't ours to fix
+            log.debug("Could not re-anchor %s", symbol, exc_info=True)
+    return corrected
+
+
 def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
-              poll_term=None) -> None:
+              poll_term=None, now=None) -> None:
     """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
     not propagated, so one bad symbol doesn't kill the whole poll.
 
@@ -223,10 +313,14 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     can reuse a chain this tick already paid for (e.g. the options service hands
     the currently-viewed symbol's chain to ``gamma_snapshot`` instead of
     refetching it seconds later). Best-effort: a raising callback is logged and
-    the poll continues."""
+    the poll continues.
+
+    ``now`` — the CT wall clock, injectable for tests. Outside the regular
+    session each fetched chain's stale ``underlyingPrice`` is re-anchored on the
+    live quote before anything downstream sees it; see ``_reanchor_spots``."""
     if symbols is None:
         symbols = collection_symbols()
-    now = datetime.now(TZ)
+    now = now if now is not None else datetime.now(TZ)
     # snap down to nearest POLL_INTERVAL_MIN boundary so all rows in one poll
     # cycle share the same ts (idempotent re-runs replace, don't duplicate).
     snapped_min = (now.minute // POLL_INTERVAL_MIN) * POLL_INTERVAL_MIN
@@ -264,6 +358,14 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             fetched = list(ex.map(_fetch, symbols))
     else:
         fetched = [_fetch(s) for s in symbols]
+
+    # Outside RTH the chain's underlyingPrice is the PREVIOUS CLOSE. Fix it here,
+    # before on_chain / the engine / the term poll — every one of them prices off
+    # spot, so a single correction upstream serves them all.
+    corrected = _reanchor_spots(client, symbols, fetched, now)
+    if corrected:
+        log.info("Re-anchored %d chain(s) on live quotes (extended hours)",
+                 corrected)
 
     for symbol, chain in fetched:
         if not chain:
