@@ -85,9 +85,9 @@ HEAT_STOPS = [
     [0.00, "rgba(255,186,220,0.98)"],  # most-negative net → pale pink
     [0.12, "rgba(255,77,141,0.92)"],   # put "hot" (magenta)
     [0.28, "rgba(150,36,122,0.62)"],
-    [0.48, "rgba(52,10,44,0.0)"],      # put ramp base, faded out
+    [0.48, "rgba(52,10,44,0.33)"],     # put ramp base, nearest-zero alpha
     [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (the wash shows through)
-    [0.52, "rgba(8,44,78,0.0)"],       # call ramp base, faded out
+    [0.52, "rgba(8,44,78,0.33)"],      # call ramp base, nearest-zero alpha
     [0.72, "rgba(42,118,224,0.62)"],
     [0.88, "rgba(53,200,255,0.92)"],   # call "hot" (cyan)
     [1.00, "rgba(190,248,255,0.98)"],  # most-positive net → ice
