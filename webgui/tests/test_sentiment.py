@@ -36,74 +36,6 @@ def test_gauge_figure_is_no_longer_imported():
     assert not hasattr(S, "gauge_figure")
 
 
-def test_bias_color_buckets():
-    assert S.bias_color("Bullish") == S.CLR_GREEN
-    assert S.bias_color("Bearish") == S.CLR_RED
-    assert S.bias_color("Neutral") == S.CLR_YELLOW
-
-
-# ── Local Tailwind color-class maps (Phase 5) — driven by config [charts] ──
-# These test the band→color MAPPING, so they reference the module's own
-# config-derived class constants (S.TXT_G, S.BG_R, …) rather than literal hexes,
-# and stay correct when config/theme.toml is re-themed (e.g. Deep Slate).
-def test_local_class_constants_mirror_palette():
-    # The CLR_* constants mirror config/theme.toml [charts]; the class strings
-    # wrap them as text-[]/bg-[] utilities.
-    assert S.TXT_G == f"text-[{S.CLR_GREEN}]" and S.TXT_R == f"text-[{S.CLR_RED}]"
-    assert S.TXT_Y == f"text-[{S.CLR_YELLOW}]" and S.TXT_FLAT == f"text-[{S.CLR_FLAT}]"
-    assert S.TXT_CY == f"text-[{S.CLR_CYAN}]"
-    assert S.BG_G == f"bg-[{S.CLR_GREEN}]" and S.BG_R == f"bg-[{S.CLR_RED}]" and S.BG_Y == f"bg-[{S.CLR_YELLOW}]"
-    # remove-sets cover every class an in-place element can apply
-    assert set(S.SENT_TEXT_CLASSES.split()) == {S.TXT_G, S.TXT_R, S.TXT_Y, S.TXT_FLAT, S.TXT_CY}
-    assert set(S.TRAFFIC_BG_CLASSES.split()) == {S.BG_G, S.BG_R, S.BG_Y}
-
-
-def test_traffic_bg_class_maps_bands():
-    assert S.traffic_bg_class(7) == S.BG_G
-    assert S.traffic_bg_class(4) == S.BG_R
-    assert S.traffic_bg_class(5.5) == S.BG_Y
-
-
-def test_bias_text_class_buckets():
-    assert S.bias_text_class("Bullish") == S.TXT_G
-    assert S.bias_text_class("Bearish") == S.TXT_R
-    assert S.bias_text_class("Neutral") == S.TXT_Y
-
-
-def test_bias_text_class_agrees_with_the_signals_tile_on_the_same_word():
-    """The headline under the Sentiment ring and the BIAS tile render the SAME
-    word from the same payload. bias_color only substring-matches bull/bear, so
-    'Long' read amber in the headline while the tile beside it read green.
-    Pin the agreement, not just the buckets."""
-    for word in ("Long", "Short", "Cautious", "Neutral", "Strong Bull",
-                 "Strong Bear", "Bullish", "Bearish"):
-        assert S.bias_text_class(word) == S._TONE_TXT[S._word_tone(word)], word
-    # and the specific regression: positioning words are no longer amber
-    assert S.bias_text_class("Long") == S.TXT_G
-    assert S.bias_text_class("Short") == S.TXT_R
-    # an absent bias reads flat rather than a fabricated amber "neutral"
-    assert S.bias_text_class("") == S.TXT_FLAT
-    assert S.bias_text_class(None) == S.TXT_FLAT
-
-
-def test_pct_text_class():
-    assert S.pct_text_class(0.5) == S.TXT_G
-    assert S.pct_text_class(-0.5) == S.TXT_R
-    assert S.pct_text_class(0.0) == S.TXT_FLAT
-    assert S.pct_text_class(None) == S.TXT_FLAT
-
-
-def test_pcr_text_class_and_rrg_text_class():
-    assert S.pcr_text_class(0.9) == S.TXT_G
-    assert S.pcr_text_class(1.1) == S.TXT_R
-    assert S.pcr_text_class(1.0) == S.TXT_FLAT
-    assert S.rrg_text_class("Improving") == S.TXT_CY
-    assert S.rrg_text_class("Lagging") == S.TXT_R
-    assert S.rrg_text_class("Leading") == S.TXT_G
-    assert S.rrg_text_class("Weakening") == S.TXT_Y
-    assert S.rrg_text_class("???") == S.TXT_FLAT
-
-
 # ───────────────────────── Signals column (1x4 glowing tiles) ─────────────────
 def test_signal_tile_defs_carry_the_full_reference_anatomy():
     defs = S.SIGNAL_TILE_DEFS
@@ -113,32 +45,6 @@ def test_signal_tile_defs_carry_the_full_reference_anatomy():
         "MARKET DIRECTION", "STRENGTH & MOMENTUM", "PREVIOUS CLOSE", "VS YESTERDAY"]
     # every tile carries its header + footer icon
     assert all(d["icon"] and d["foot_icon"] for d in defs)
-
-
-def test_tone_classes_cover_the_finite_set_and_carry_the_glow():
-    assert set(S.TONE_CLASSES) == {"pos", "neg", "warn", "flat"}
-    pos = S.TONE_CLASSES["pos"]
-    # the neon glow on the value + the colour-tinted shell/rule/dot
-    assert f"[text-shadow:0_0_12px_{S.CLR_GREEN}]" in pos["text"]
-    assert f"text-[{S.CLR_GREEN}]" in pos["text"]
-    assert "bg-gradient-to-b" in pos["tile"] and "to-[#0a0f14]" in pos["tile"]
-    assert f"border-[{S.CLR_GREEN}]/40" in pos["tile"]
-    # box-shadow arbitraries must use the rgba() form, and hold no spaces
-    assert "shadow-[0_0_18px_-6px_rgba(" in pos["tile"]
-    assert " " not in pos["tile"].split("shadow-[")[1].split("]")[0]
-    assert pos["dot"] == f"bg-[{S.CLR_GREEN}]"
-
-
-def test_tone_remove_sets_cover_every_class_each_element_can_apply():
-    # If a remove-set misses a class, that class stacks across the page's
-    # version-poll repaint (the documented failure mode for reactive recolors).
-    for attr, remove_set in (("text", S.TONE_TEXT_CLASSES),
-                             ("tile", S.TONE_TILE_CLASSES),
-                             ("rule", S.TONE_RULE_CLASSES),
-                             ("dot", S.TONE_DOT_CLASSES)):
-        present = set(remove_set.split())
-        for tone in S.TONE_CLASSES.values():
-            assert set(tone[attr].split()) <= present, attr
 
 
 def _tile_values(bias="Neutral", signal="Neutral", change="+0.10"):
@@ -161,20 +67,6 @@ def test_word_tone_covers_the_signal_band_vocabularies():
     assert S._word_tone(None) == "flat"
     assert S._word_tone("Wildly Bullish") == "pos"   # substring fallback
     assert S._word_tone("Sideways") == "warn"        # unknown -> neutral tone
-
-
-def test_signal_tile_rows_tone_mapping():
-    rows = {r["key"]: r for r in
-            S.signal_tile_rows(_tile_values(bias="Long", signal="Bullish",
-                                            change="+0.42"), prev_total=4.0)}
-    assert rows["bias"]["tone"] == "pos"        # 'Long'
-    assert rows["signal"]["tone"] == "pos"      # 'Bullish'
-    assert rows["yesterday"]["tone"] == "neg"   # prior 4.0 -> red band
-    assert rows["change"]["tone"] == "pos"      # positive change
-    # values + static chrome ride along
-    assert rows["bias"]["value"] == "Long"
-    assert rows["change"]["descriptor"] == "VS YESTERDAY"
-    assert all(r["tone"] in S.TONE_CLASSES for r in rows.values())
 
 
 def test_signal_tile_rows_negative_and_neutral_tones():
@@ -201,51 +93,6 @@ def test_signal_tile_rows_cold_cache_is_flat_not_invented():
     assert rows["signal"]["tone"] == "flat"
     assert rows["yesterday"]["tone"] == "flat"
     assert rows["change"]["tone"] == "flat"
-
-
-def test_velocity_lines_recovers_the_published_fields():
-    derived = {"velocity": {"text": "3d ROC: +0.42 | 5d ROC: -0.18 | 20d Z: +1.10",
-                            "flag": "REGIME BREAK: +2.30σ from 20d mean"},
-               "divergence": "VIX complex diverging from breadth"}
-    out = S.velocity_lines(derived)
-    assert out["text"].startswith("3d ROC: +0.42")
-    assert out["flag"].startswith("REGIME BREAK")
-    assert out["divergence"] == "VIX complex diverging from breadth"
-
-
-def test_velocity_lines_defensive_on_missing_or_malformed():
-    for bad in (None, {}, {"velocity": None, "divergence": None},
-                {"velocity": "not-a-dict"}):
-        out = S.velocity_lines(bad)
-        assert out == {"text": "", "flag": "", "divergence": ""}
-    # a quiet tape: text present, no regime break, no divergence
-    out = S.velocity_lines({"velocity": {"text": "3d ROC: —", "flag": ""},
-                            "divergence": ""})
-    assert out["text"] == "3d ROC: —" and out["flag"] == "" and out["divergence"] == ""
-
-
-def test_tone_swap_does_not_accumulate_classes_across_repaints():
-    """Two successive tone applications must leave ONE tone's classes on each
-    element — the remove/add idiom, exercised through real NiceGUI elements."""
-    from nicegui import ui
-
-    with ui.card():
-        lbl = ui.label("—").classes(S.TONE_CLASSES["flat"]["text"])
-        card = ui.card().classes(S.TONE_CLASSES["flat"]["tile"])
-        dot = ui.element("div").classes(S.TONE_CLASSES["flat"]["dot"])
-    for tone in ("pos", "neg", "pos"):
-        t = S.TONE_CLASSES[tone]
-        lbl.classes(remove=S.TONE_TEXT_CLASSES, add=t["text"])
-        card.classes(remove=S.TONE_TILE_CLASSES, add=t["tile"])
-        dot.classes(remove=S.TONE_DOT_CLASSES, add=t["dot"])
-    # Compare within the tone vocabulary only (ui.card carries 'nicegui-card').
-    for el, attr, remove_set in ((lbl, "text", S.TONE_TEXT_CLASSES),
-                                 (card, "tile", S.TONE_TILE_CLASSES),
-                                 (dot, "dot", S.TONE_DOT_CLASSES)):
-        vocab = set(remove_set.split())
-        assert set(el._classes) & vocab == set(S.TONE_CLASSES["pos"][attr].split())
-    # and specifically: no other tone's colour survives
-    assert f"text-[{S.CLR_RED}]" not in lbl._classes
 
 
 def test_render_paints_velocity_and_divergence_from_cache():
@@ -275,22 +122,6 @@ def test_sc_text_class():
     assert S.sc_text_class(5) == S.TXT_Y
 
 
-def test_trend_text_class():
-    # old-vocab (still used by the 30-day structural gauge)
-    assert S.trend_text_class("bull_trend") == S.TXT_G
-    assert S.trend_text_class("pullback_in_bull") == S.TXT_G
-    assert S.trend_text_class("bear_trend") == S.TXT_R
-    assert S.trend_text_class("bear_rally") == S.TXT_R
-    assert S.trend_text_class("range") == S.TXT_Y
-    # new five-state vocab (direction x aggression) used by the Today gauge
-    assert S.trend_text_class("bullish") == S.TXT_G
-    assert S.trend_text_class("lack_of_bearishness") == S.TXT_G
-    assert S.trend_text_class("bearish") == S.TXT_R
-    assert S.trend_text_class("lack_of_bullishness") == S.TXT_Y
-    assert S.trend_text_class("neutral") == S.TXT_Y
-    assert S.trend_text_class("mystery") == S.TXT_Y  # unknown -> amber default
-
-
 def test_trend_short_covers_both_vocabularies():
     for k in ("bullish", "lack_of_bullishness", "neutral",
               "lack_of_bearishness", "bearish"):
@@ -306,13 +137,6 @@ def test_market_state_evidence_rows():
     assert S.market_state_evidence_rows({}) == []
     assert S.market_state_evidence_rows(None) == []
     assert S.market_state_evidence_rows({"evidence": None}) == []
-
-
-def test_rotation_text_class():
-    assert S.rotation_text_class(S.CLR_GREEN) == S.TXT_G
-    assert S.rotation_text_class(S.CLR_RED) == S.TXT_R
-    assert S.rotation_text_class(S.CLR_YELLOW) == S.TXT_Y
-    assert S.rotation_text_class(S.CLR_FLAT) == S.TXT_FLAT
 
 
 # ── Market Trend speedometer (needle = the directional 0-100 trend score) ─────
@@ -593,36 +417,9 @@ def test_trend_detail_dashes_a_horizon_the_service_has_not_published():
         t for t in _trend_detail_texts(_render_card()) if t.startswith("Day ")]
 
 
-# ── Windowed composite average (the ring's Week arc) ─────────────────────────
-def test_sentiment_avg_windows_to_the_last_n():
-    snaps = _snaps(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
-    assert S.sentiment_avg(snaps, 5) == 5.0     # mean of 3..7
-
-
-def test_sentiment_avg_with_no_window_uses_every_snap():
-    assert S.sentiment_avg(_snaps(2.0, 4.0)) == 3.0
-
-
-def test_sentiment_avg_window_larger_than_history_uses_all():
-    assert S.sentiment_avg(_snaps(2.0, 4.0), 5) == 3.0
-
-
-def test_sentiment_avg_is_zero_with_no_snaps():
-    assert S.sentiment_avg([], 5) == 0.0
-    assert S.sentiment_avg(None) == 0.0
-
-
 def test_sentiment_avg_or_none_is_none_with_no_snaps():
     assert S.sentiment_avg_or_none([], 5) is None
     assert S.sentiment_avg_or_none(None) is None
-
-
-def test_sentiment_avg_week_window_is_five_sessions():
-    """WEEK_SNAPS pins the Week arc's window; a 20-day history must NOT average
-    everything (the mutation this guards: WEEK_SNAPS = None)."""
-    assert S.WEEK_SNAPS == 5
-    snaps = _snaps(*([1.0] * 15 + [9.0] * 5))
-    assert S.sentiment_avg(snaps, S.WEEK_SNAPS) == 9.0   # not mean(all) == 3.0
 
 
 def test_sentiment_avg_drops_non_finite_scores():
@@ -899,103 +696,3 @@ def test_intraday_figures_render_in_central_time():
     assert "12:00" not in name            # NOT the UTC time-of-day
 
 
-# --- Market Regime panel (blended structural regime) --------------------------
-def _regime(**over):
-    r = {"ts": "2026-07-23T10:05:00-05:00", "label": "Trending",
-         "committed_label": "trending", "confidence": 0.62, "unclear": False,
-         "memberships": {"mean_reversion": 0.28, "trending": 0.52, "breakout": 0.08,
-                         "choppy": 0.09, "crisis": 0.03},
-         "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6},
-         "evidence": ["ADX 32 rising", "VWAP held 95%"]}
-    r.update(over)
-    return r
-
-
-def _regime_points(n=3, base_ts=1_753_280_700):
-    return [{"ts": base_ts + i * 300, "confidence": 0.6, "label": "trending",
-             "memberships": {"mean_reversion": 0.3, "trending": 0.5, "breakout": 0.05,
-                             "choppy": 0.1, "crisis": 0.05}} for i in range(n)]
-
-
-def test_regime_headline_parts():
-    label, conf, cls = S.regime_headline_parts(_regime())
-    assert label == "Trending" and "62" in conf and cls
-    # NiceGUI .classes(remove=...) splits a STRING; a list raises at render
-    # (caught live, not by the builder tests) — and every class it may ADD
-    # must be in the remove-set or repaints stack conflicting colors.
-    assert isinstance(S.REGIME_TEXT_CLASSES, str)
-    removable = set(S.REGIME_TEXT_CLASSES.split())
-    for key in list(S.REGIME_ORDER) + ["", "bogus"]:
-        for unclear in (False, True):
-            _l, _c, c = S.regime_headline_parts(
-                _regime(committed_label=key, unclear=unclear))
-            assert c in removable
-
-
-def test_regime_headline_unclear_and_missing():
-    assert S.regime_headline_parts(_regime(label="Unclear", unclear=True))[0] == "Unclear"
-    # No payload at all -> a waiting placeholder, never a crash.
-    for empty in ({}, None):
-        label, conf, cls = S.regime_headline_parts(empty)
-        assert label and conf == "" and cls
-
-
-def test_regime_transition_text():
-    assert S.regime_transition_text(_regime()) == "Balanced → Trending · 60%"
-    # Stable (no transition) / missing -> empty string, so the row hides.
-    assert S.regime_transition_text(_regime(transition=None)) == ""
-    assert S.regime_transition_text({}) == ""
-    assert S.regime_transition_text(None) == ""
-
-
-def test_regime_evidence_rows():
-    assert S.regime_evidence_rows(_regime()) == ["ADX 32 rising", "VWAP held 95%"]
-    assert S.regime_evidence_rows({}) == []
-
-
-def test_regime_transition_text_carries_the_direction():
-    r = _regime(direction=1, direction_strong=True)
-    assert S.regime_transition_text(r) == "Balanced → Rallying · 60%"
-    r = _regime(direction=-1, direction_strong=False)
-    assert S.regime_transition_text(r) == "Balanced → Softening · 60%"
-
-
-def test_regime_row_labels_never_take_the_direction():
-    """A row label that renames itself intra-session cannot be tracked across
-    repaints. Direction belongs on the headline, not in the panel."""
-    svg = S.regime_mix_svg(_regime_points())
-    for base in ("Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"):
-        assert base in svg
-    for adorned in ("Rallying", "Firming", "Retreating", "Softening", "Breakdown"):
-        assert adorned not in svg
-
-
-def test_regime_headline_color_follows_the_direction():
-    """Trending's band colour is fixed, but the HEADLINE must not paint a
-    down-trend green: green up, red down, neutral grey when no direction is
-    claimed."""
-    removable = set(S.REGIME_TEXT_CLASSES.split())
-    up = S.regime_headline_parts(
-        _regime(committed_label="trending", direction=1, direction_strong=True))
-    down = S.regime_headline_parts(
-        _regime(committed_label="trending", direction=-1, direction_strong=True))
-    flat = S.regime_headline_parts(_regime(committed_label="trending", direction=0))
-    assert up[0] == "Rallying" and down[0] == "Retreating" and flat[0] == "Trending"
-    assert up[2] != down[2]
-    assert {up[2], down[2], flat[2]} <= removable
-
-
-def test_regime_headline_direction_junk_is_neutral():
-    for bad in ("up", 2, None, True):
-        label, _c, cls = S.regime_headline_parts(
-            _regime(committed_label="trending", direction=bad))
-        assert label == "Trending"
-        assert cls in set(S.REGIME_TEXT_CLASSES.split())
-
-
-def test_regime_headline_prefers_a_locally_derived_label():
-    """The payload's own `label` is the service's word; the page re-derives it
-    from (committed_label, direction) so a stale/absent label can't outlive a
-    rename, and falls back to the payload when the key is unknown."""
-    r = _regime(committed_label="choppy", label="Choppy")
-    assert S.regime_headline_parts(r)[0] == "Whipsaw"

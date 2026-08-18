@@ -925,9 +925,8 @@ drift. The old local set (`sentiment_rotation.quadrant_color`, Leading `#66bb6a`
 / Improving `#3fb6c7` cyan / Weakening `#ffd54f` / Lagging `#ef5350`) was
 **deleted on 2026-08-17**: its two consumers were the Highcharts RRG scatter and
 the Sector & Industry RRG column, and both went in those pages' rebuilds. This
-closes the "two palettes" question that redesign opened. ⚠ `pages/sentiment.py`
-still *defines* an `rrg_color`/`rrg_text_class` of its own, but nothing calls
-them — see the dead-code note in the Tests section.
+closes the "two palettes" question that redesign opened. `pages/sentiment.py`'s own
+`rrg_color`/`rrg_text_class` went in the same 2026-08-17 cleanup.
 
 `config/flow_alerts.toml` is the single source of truth for the **options-flow alert
 thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`/
@@ -1493,19 +1492,6 @@ read them as a regression:**
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
   reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
   so it **predates** the dev/prod-environments branch; first documented 2026-08-08.
-
-⚠ **Known dead code — `webgui/pages/sentiment.py` (~53 top-level symbols).** The four
-2026-08-17 screen rebuilds stranded a large part of that module: nothing outside it now
-imports anything but `render`, `sector_table_rows` and `industry_rows`. Reachability from
-those three roots leaves `pct_color`/`pct_text_class`, `pcr_*`, `rrg_color`/`rrg_text_class`,
-`rotation_banner`, `sector_summary`, `week_month_from_closes`, `is_rth`, `pcr_from_chain`,
-the `CLR_*`/`TXT_*`/`BG_*` palette, the `regime_*` helpers and the `_tone_*` set all
-unreferenced. It was **left alone** in the 2026-08-17 cleanup, which took only the two
-modules whose charts had just been replaced: some of this predates that work (the Market
-Regime Console superseded the `regime_*` helpers), several are covered by
-`tests/test_sentiment_sectors.py`, and removing ~50 symbols from a shared 1000-line module
-is its own change with its own verification. Measure before trusting this list — the
-reachability script is in the 2026-08-17 CHANGELOG entry.
 
 **Compare the failing SET, not the count.** A matching total is not evidence of a
 clean run: this repo has a documented incident where two real regressions hid

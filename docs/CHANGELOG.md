@@ -4,6 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Dead-code cleanup, part 2 — `pages/sentiment.py`.** The
+deferral recorded in the entry below is now closed: the module is dead-code-free.
+- **`pages/sentiment.py` 1355 → 948 lines**, 96 top-level symbols → **43, all reachable**.
+  Measured the same way (ast reference graph, reachable from the real roots — `render`,
+  `sector_table_rows`, `industry_rows`, the only three names any non-test file imports, confirmed
+  by a **repo-wide** scan of 705 files). Verified afterwards that the module has **zero**
+  unreachable symbols left.
+- **Six clusters went, each traceable to a specific earlier change.** The old sectors-table
+  helpers (`pct_color`/`pct_text_class`, `pcr_*`, `rrg_color`/`rrg_text_class`, `rotation_banner`,
+  `rotation_text_class`, `sector_summary`) — stranded by the 2026-08-17 heat-grid rebuild. The
+  regime helpers (`regime_headline_parts`, `regime_transition_text`, `regime_label`,
+  `regime_direction`, `regime_evidence_rows`, `_REGIME_*`, `_DIRECTION_TEXT`,
+  `REGIME_TEXT_CLASSES`) and the tone/tile set (`_tone_classes`, `TONE_*`, `_TONE_HEX`,
+  `_TILE_FLOOR`, `_mix`, `_hex_rgb`, `_rgba`) — superseded by the **Market Regime Console**. The
+  leftover palette (`CLR_CYAN`/`CLR_FLAT`, `TXT_CY`/`TXT_FLAT`, `BG_*`, `SENT_TEXT_CLASSES`,
+  `_HEX_TO_TXT*`, `TRAFFIC_BG_CLASSES`, `BORDER_R`). Assorted colour helpers (`bias_color`,
+  `bias_text_class`, `trend_text_class`, `traffic_bg_class`, `_TREND_STATE_CLASS`, `_TONE_TXT`),
+  and `sentiment_avg` / `velocity_lines`.
+- **⚠ Three carried an explicit "retained for display/test parity" comment** — `pcr_from_chain`,
+  `week_month_from_closes`, `is_rth` — kept when the compute moved to `sentiment_svc` in the
+  3-tier migration. Deleted anyway, and the reason is worth recording: **no test ever compared
+  them to the service's implementation**, so they were not providing parity, only testing a
+  second copy in isolation while the display that used them was removed. That is precisely the
+  "tests keeping dead code green" trap. If real parity coverage is wanted, it belongs in a test
+  that exercises both sides, not in a duplicate transform.
+- **Two now-unused imports** dropped with them (`pages.rings.ring_svg`, and the four
+  `pages.regime_mix` re-exports) — the headline helpers that used them were the last consumers.
+- **~40 tests removed with their subjects**, plus two orphaned fixtures. `test_sentiment.py`
+  716 → 698, `test_sentiment_sectors.py` → 156. Suite 1866 → **1826 passed, 0 failed**.
+- **Verified beyond the suite:** all six render paths — **`/sentiment` itself**, rotation, rrg,
+  sectors and momentum at both levels — smoke-rendered in-process against the real cached
+  payloads. `/sentiment` matters most here: it is the page this module exists for, and 404 of
+  its 1355 lines just went.)
+
+---
+
 **Last updated:** 2026-08-17 (**Dead-code cleanup after the four screen rebuilds.** The Highcharts
 builders the rebuilds replaced, plus everything only they reached, removed from
 `pages/sentiment_rotation.py` and `pages/sentiment_momentum.py`.

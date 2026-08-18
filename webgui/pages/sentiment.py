@@ -27,9 +27,6 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages import busy as _busy
-from pages.rings import ring_svg
-from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
-                              regime_mix_svg)
 from pages import console_page
 from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
@@ -44,8 +41,6 @@ _CH = THEME["charts"]
 CLR_GREEN = _CH["green"]
 CLR_RED = _CH["red"]
 CLR_YELLOW = _CH["yellow"]
-CLR_FLAT = _CH["flat"]
-CLR_CYAN = _CH["cyan"]
 
 # LOCAL Tailwind class maps (Phase 5), generated from the same palette. These are
 # the page's OWN 5-color vocabulary — the yellow/cyan have no theme TXT_* token and
@@ -56,23 +51,7 @@ CLR_CYAN = _CH["cyan"]
 TXT_G = f"text-[{CLR_GREEN}]"
 TXT_R = f"text-[{CLR_RED}]"
 TXT_Y = f"text-[{CLR_YELLOW}]"
-TXT_FLAT = f"text-[{CLR_FLAT}]"
-TXT_CY = f"text-[{CLR_CYAN}]"
-BG_G = f"bg-[{CLR_GREEN}]"
-BG_R = f"bg-[{CLR_RED}]"
-BG_Y = f"bg-[{CLR_YELLOW}]"
-# Remove-sets for reactive in-place recolors (these MUST cover every class the
-# element can apply, or colors stack across the page's ~2s auto-refresh).
-SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_FLAT, TXT_CY])
-TRAFFIC_BG_CLASSES = " ".join([BG_G, BG_R, BG_Y])
 
-# Map a local hex -> its Tailwind text class (for helpers that already return a hex).
-_HEX_TO_TXT = {CLR_GREEN: TXT_G, CLR_RED: TXT_R, CLR_YELLOW: TXT_Y,
-               CLR_FLAT: TXT_FLAT, CLR_CYAN: TXT_CY}
-# Map a local hex -> its Tailwind bg class (only the three traffic bands have a bg).
-_HEX_TO_TXT_BG = {CLR_GREEN: BG_G, CLR_RED: BG_R, CLR_YELLOW: BG_Y}
-# Per-cell right divider for the sector/industry table rows (last cell omits it).
-BORDER_R = "border-r border-white/[0.04]"
 
 # (component_scores key, display name). Weights are NO LONGER baked from app
 # ``scoring`` at import — they arrive at render time via the cached
@@ -104,11 +83,6 @@ def traffic_color(total):
     if v <= 4.5:
         return CLR_RED
     return CLR_YELLOW
-
-
-def traffic_bg_class(total):
-    """Composite traffic-light band as a Tailwind bg class (tile backgrounds)."""
-    return _HEX_TO_TXT_BG[traffic_color(total)]
 
 
 def gauge_score(total):
@@ -166,59 +140,10 @@ def trend_subscore_rows(trend):
     return rows
 
 
-def bias_color(bias):
-    b = (bias or "").lower()
-    if "bull" in b:
-        return CLR_GREEN
-    if "bear" in b:
-        return CLR_RED
-    return CLR_YELLOW
-
-
-# Tone key -> plain text class. The Signals tiles add their own glow on top;
-# this is the un-glowed form, for running text like the headline under the ring.
-_TONE_TXT = {"pos": TXT_G, "neg": TXT_R, "warn": TXT_Y, "flat": TXT_FLAT}
-
-
-def bias_text_class(bias):
-    """Text colour for a positioning/strength word.
-
-    Delegates to ``_word_tone`` rather than ``bias_color``: the headline under
-    the Sentiment ring shows the SAME word as the BIAS tile, and ``bias_color``
-    only substring-matches bull/bear — so "Long" and "Short" fell through to
-    amber while the tile beside them read green and red. Same word, same screen,
-    two colours. The bull/bear/neutral buckets its own tests pin are unchanged;
-    this only adds the positioning vocabulary ``signal_band`` actually emits."""
-    return _TONE_TXT[_word_tone(bias)]
-
-
-# State -> text-color class, covering BOTH the new five-state vocab (Today gauge)
-# and the old trend-band vocab (30-day structural gauge). Unlisted -> amber.
-_TREND_STATE_CLASS = {
-    # new five-state vocab
-    "bullish": TXT_G, "lack_of_bearishness": TXT_G,
-    "bearish": TXT_R,
-    "lack_of_bullishness": TXT_Y, "neutral": TXT_Y,
-    # old trend-band vocab
-    "bull_trend": TXT_G, "pullback_in_bull": TXT_G,
-    "bear_rally": TXT_R, "bear_trend": TXT_R,
-    "range": TXT_Y}
-
-
-def trend_text_class(committed):
-    """Tailwind text class for a committed trend state (both vocabularies)."""
-    return _TREND_STATE_CLASS.get(committed, TXT_Y)
-
-
 def market_state_evidence_rows(trend):
     """Evidence strings explaining WHY the new five-state trend was chosen
     (e.g. "direction 75/100", "aggression -0.37"). Defensive: [] when absent."""
     return (trend or {}).get("evidence") or []
-
-
-def rotation_text_class(color):
-    """Map a rotation_banner() hex color -> Tailwind text class."""
-    return _HEX_TO_TXT.get(color, TXT_FLAT)
 
 
 def sc_text_class(score):
@@ -264,20 +189,6 @@ def sentiment_avg_or_none(snaps, n=None):
     if n is not None:
         scores = scores[-n:]
     return round(sum(scores) / len(scores), 2) if scores else None
-
-
-def sentiment_avg(snaps, n=None):
-    """``sentiment_avg_or_none`` with a 0.0 floor. Pure.
-
-    Currently called only by its own tests: its last production caller was the
-    30-Day-Avg speedometer, and the rings deliberately take the ``_or_none``
-    variant so a horizon with no scored session draws a bare track instead of a
-    0 they would paint as a genuine maximally-bearish reading. Kept anyway —
-    it is a distinct, tested contract (floored, not nullable) that the ring
-    horizons or a later tile may well want, and keeping one small function
-    costs less than deleting and restoring it."""
-    v = sentiment_avg_or_none(snaps, n)
-    return 0.0 if v is None else v
 
 
 def _composite_arc_value(snapshot):
@@ -470,180 +381,6 @@ def build_trend_intraday_figure(points):
                             y_title="Trend", zones=zones, scale=0.1)
 
 
-# --- Market Regime (blended structural regime, cache:sentiment:regime) -------
-# The display order, labels and colours live in ``pages.regime_mix`` alongside
-# the builder that draws them, and are re-exported here because this module's
-# headline helpers (and their tests) have always read them off ``sentiment``.
-#
-# Those labels are the BASE names. Direction adorns the HEADLINE only — the
-# panel's row labels never take it, because a label that renames itself
-# mid-session makes a row impossible to track across repaints.
-_REGIME_DIRECTIONAL = {
-    "trending": {(1, True): "Rallying", (1, False): "Firming",
-                 (-1, True): "Retreating", (-1, False): "Softening"},
-    "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
-}
-# Headline text color by committed regime — a finite map (Tailwind-first rule).
-_REGIME_TEXT = {"trending": "text-[#66bb6a]", "breakout": "text-[#ffd54f]",
-                "mean_reversion": "text-[#3fb6c7]", "choppy": "text-[#9e9e9e]",
-                "crisis": "text-[#ef5350]"}
-# ... but a DIRECTIONAL regime takes its colour from the direction instead: the
-# fixed green would paint "Retreating" as though it were bullish.
-_DIRECTION_TEXT = {1: "text-[#66bb6a]", -1: "text-[#ef5350]"}
-
-
-def regime_direction(regime):
-    """(direction, strong) off a regime payload. Junk, or a payload predating the
-    field, reads neutral — the base label then renders exactly as before."""
-    r = regime if isinstance(regime, dict) else {}
-    d = r.get("direction")
-    d = d if d in (-1, 0, 1) and not isinstance(d, bool) else 0
-    return d, r.get("direction_strong") is True
-
-
-def regime_label(key, direction=0, strong=False):
-    """Display name for a regime key, adorned with the direction where one
-    applies (Balanced / Whipsaw / Stressed are directionless by construction)."""
-    base = REGIME_LABELS.get(key)
-    if base is None:
-        return ""
-    words = _REGIME_DIRECTIONAL.get(key)
-    if not words or direction not in (-1, 1):
-        return base
-    return words.get((direction, bool(strong)), base)
-# Space-separated STRING (not a list) — that is what NiceGUI's
-# ``.classes(remove=...)`` splits on; a list raises AttributeError at render.
-REGIME_TEXT_CLASSES = " ".join(dict.fromkeys(list(_REGIME_TEXT.values())
-                                             + ["text-[#9e9e9e]"]))
-
-
-def regime_headline_parts(regime):
-    """(label, confidence_text, text_class) for the Market Regime headline.
-
-    An absent payload reads as a waiting placeholder; an ``unclear`` sample keeps
-    its "Unclear" label (the service never fabricates a regime it can't see).
-
-    The label is re-derived here from ``(committed_label, direction)`` rather than
-    echoing the payload's ``label``, so a held/stale sample can never outlive a
-    rename; the payload's own word is the fallback for an unknown key."""
-    r = regime if isinstance(regime, dict) else {}
-    key = "" if r.get("unclear") else (r.get("committed_label") or "")
-    direction, strong = regime_direction(r)
-    label = (regime_label(key, direction, strong) or r.get("label")
-             or ("Waiting for regime…" if not r else "Unclear"))
-    conf = r.get("confidence")
-    conf_txt = f"{float(conf) * 100:.0f}% confidence" if isinstance(
-        conf, (int, float)) and not isinstance(conf, bool) else ""
-    if r.get("unclear"):
-        cls = "text-[#9e9e9e]"
-    elif key in _REGIME_DIRECTIONAL and direction in _DIRECTION_TEXT:
-        cls = _DIRECTION_TEXT[direction]
-    else:
-        cls = _REGIME_TEXT.get(key, "text-[#9e9e9e]")
-    return label, conf_txt, cls
-
-
-def regime_transition_text(regime):
-    """'Balanced → Rallying · 60%' while a regime is handing over, else ''.
-
-    Blank when stable, so the row simply hides — the whole point of the blended
-    model is that this reads gradually instead of flipping."""
-    r = regime if isinstance(regime, dict) else {}
-    tr = r.get("transition")
-    if not isinstance(tr, dict) or not tr.get("from") or not tr.get("to"):
-        return ""
-    direction, strong = regime_direction(r)
-    frm = regime_label(tr["from"], direction, strong) or str(tr["from"])
-    to = regime_label(tr["to"], direction, strong) or str(tr["to"])
-    prog = tr.get("progress")
-    pct = (f" · {float(prog) * 100:.0f}%"
-           if isinstance(prog, (int, float)) and not isinstance(prog, bool) else "")
-    return f"{frm} → {to}{pct}"
-
-
-def regime_evidence_rows(regime):
-    """The 'why' lines the classifier attached to this sample (may be empty)."""
-    r = regime if isinstance(regime, dict) else {}
-    return [str(e) for e in (r.get("evidence") or [])]
-
-
-def pct_color(pct):
-    """Green up / red down / gray flat (|pct| < 0.05)."""
-    if pct is None or abs(float(pct)) < 0.05:
-        return CLR_FLAT
-    return CLR_GREEN if float(pct) > 0 else CLR_RED
-
-
-def pct_text_class(pct):
-    return _HEX_TO_TXT[pct_color(pct)]
-
-
-def pcr_color(pcr):
-    """<0.95 call-dominated green, >1.05 put-dominated red, else flat."""
-    if pcr is None or float(pcr) <= 0:
-        return CLR_FLAT
-    if float(pcr) < 0.95:
-        return CLR_GREEN
-    if float(pcr) > 1.05:
-        return CLR_RED
-    return CLR_FLAT
-
-
-def pcr_text_class(pcr):
-    return _HEX_TO_TXT[pcr_color(pcr)]
-
-
-def rrg_color(quadrant):
-    return {
-        "Leading": CLR_GREEN, "Improving": CLR_CYAN,
-        "Weakening": CLR_YELLOW, "Lagging": CLR_RED,
-    }.get(quadrant, CLR_FLAT)
-
-
-def rrg_text_class(quadrant):
-    return _HEX_TO_TXT[rrg_color(quadrant)]
-
-
-def pcr_from_chain(chain):
-    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume. Pure transform retained
-    for display/test parity (chain fetching itself lives in the service)."""
-    if not chain:
-        return None
-    pv = cv = 0
-    for strikes in (chain.get("putExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    pv += v
-    for strikes in (chain.get("callExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    cv += v
-    return round(pv / cv, 3) if cv > 0 else None
-
-
-def _pct_change_n(closes, n):
-    """%-change from n sessions ago to last close, or None."""
-    if not closes or len(closes) < n + 1:
-        return None
-    prev = float(closes[-(n + 1)])
-    last = float(closes[-1])
-    if prev == 0:
-        return None
-    return (last - prev) / prev * 100.0
-
-
-def week_month_from_closes(closes):
-    """(day3_pct, week_pct, month_pct) from a daily-close list (n=3/5/21)."""
-    return (_pct_change_n(closes, 3),
-            _pct_change_n(closes, 5),
-            _pct_change_n(closes, 21))
-
-
 def sector_table_rows(sector_data, quotes, trends, pcr, quadrants):
     """Build display rows for the sectors, sorted by Day % desc (None last)."""
     rows = []
@@ -665,63 +402,6 @@ def sector_table_rows(sector_data, quotes, trends, pcr, quadrants):
         })
     rows.sort(key=lambda r: (r["day"] is None, -(r["day"] or 0.0)))
     return rows
-
-
-def sector_summary(sector_data, quotes, summary=None):
-    """'{pct_up}% green | Cap-wtd {wpct} | Score {score}/10' (mirrors source).
-
-    ``pct_up`` is computed here from quotes (pure). The cap-weighted pct and
-    sector score come from the service-computed ``summary`` dict
-    (``{"wpct", "score"}``); when absent (cold cache) they render as '—'/0.0."""
-    pcts = []
-    for r in sector_data:
-        if r.get("kind") != "sector":
-            continue
-        q = (quotes or {}).get(r.get("etf")) or {}
-        p = q.get("change_pct")
-        if p is not None:
-            pcts.append(p)
-    if not pcts:
-        return "No sector data returned"
-    pct_up = sum(1 for p in pcts if p > 0) / len(pcts) * 100
-    summary = summary or {}
-    wpct = summary.get("wpct")
-    wpct_str = f"{wpct:+.2f}%" if wpct is not None else "—"
-    score = _safe_float(summary.get("score"))
-    return f"{pct_up:.0f}% green | Cap-wtd {wpct_str} | Score {score:.1f}/10"
-
-
-def rotation_banner(rot):
-    """(regime, color, detail) from a compute_rotation() dict (or None).
-    Mirrors source _update_rotation_banner: day -> 3d -> week fallback."""
-    if not rot:
-        return "—", CLR_FLAT, "Refresh sector data to compute rotation"
-    if rot.get("day_spread") is not None:
-        tf, spread = "day", rot["day_spread"]
-    elif rot.get("3d_spread") is not None:
-        tf, spread = "3d", rot["3d_spread"]
-    elif rot.get("week_spread") is not None:
-        tf, spread = "week", rot["week_spread"]
-    else:
-        return "—", CLR_FLAT, "Refresh sector data to compute rotation"
-    if spread >= 1.0:
-        regime, color = "STRONG RISK-ON", CLR_GREEN
-    elif spread >= 0.3:
-        regime, color = "RISK-ON", CLR_GREEN
-    elif spread <= -1.0:
-        regime, color = "STRONG RISK-OFF", CLR_RED
-    elif spread <= -0.3:
-        regime, color = "RISK-OFF", CLR_RED
-    else:
-        regime, color = "MIXED", CLR_YELLOW
-    cyc, dfn = rot.get(f"{tf}_cyc"), rot.get(f"{tf}_def")
-    top = rot.get(f"{tf}_top3") or []
-    bot = rot.get(f"{tf}_bot3") or []
-    cyc_s = f"{cyc:+.2f}%" if cyc is not None else "—"
-    def_s = f"{dfn:+.2f}%" if dfn is not None else "—"
-    detail = (f"{tf.upper()}: Cyc {cyc_s} vs Def {def_s} (spread {spread:+.2f}%)"
-              f"  ▲ {', '.join(top[:2]) or '—'}  ▼ {', '.join(bot[-2:]) or '—'}")
-    return regime, color, detail
 
 
 def industry_rows(sector_data, sector_name, ind_quotes, ind_trends, ind_pcr=None, ind_quadrants=None):
@@ -747,15 +427,6 @@ def industry_rows(sector_data, sector_name, ind_quotes, ind_trends, ind_pcr=None
             "is_industry": True,
         })
     return rows
-
-
-def is_rth(now):
-    """True if `now` (a tz-aware America/Chicago datetime) is within regular
-    trading hours (Mon–Fri 08:30–15:00 CT)."""
-    if now.weekday() >= 5:
-        return False
-    hm = (now.hour, now.minute)
-    return (8, 30) <= hm < (15, 0)
 
 
 def component_table_rows(snapshot, weights=None, rotation_value=None, sector_value=None):
@@ -846,63 +517,6 @@ def tiles(latest, prev_total, band=None):
 # remove-set here — each element type gets its own remove-set below.
 # ---------------------------------------------------------------------------
 
-def _hex_rgb(value):
-    h = str(value).lstrip("#")
-    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-
-
-def _rgba(value, alpha):
-    """'#66bb6a' -> 'rgba(102,187,106,0.5)'. No spaces: a Tailwind arbitrary
-    value cannot contain them (underscores are the escape, and rgba needs none)."""
-    r, g, b = _hex_rgb(value)
-    return f"rgba({r},{g},{b},{alpha})"
-
-
-def _mix(value, other, t):
-    """Blend two hexes; ``t`` = weight of ``other``. Used to derive each tile's
-    top gradient stop as its own colour barely lifted off the near-black base."""
-    a, b = _hex_rgb(value), _hex_rgb(other)
-    return "#%02x%02x%02x" % tuple(
-        int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
-
-
-# Near-black tile floor (the reference's bottom gradient stop).
-_TILE_FLOOR = "#0a0f14"
-
-# The four TONE keys are the finite set every data-driven tile colour maps into
-# — nothing here is ever built from a runtime value. Each tone carries the FOUR
-# class strings its tile needs (value text + glow, tile shell, hairline rule,
-# end dot); the CLR_* hexes come from config/theme.toml, resolved once at import.
-_TONE_HEX = {"pos": CLR_GREEN, "neg": CLR_RED, "warn": CLR_YELLOW,
-             "flat": CLR_FLAT}
-
-
-def _tone_classes(hexv):
-    top = _mix(_TILE_FLOOR, hexv, 0.10)
-    return {
-        # The neon glow. `[text-shadow:...]` JIT-generates (verified live).
-        "text": f"text-[{hexv}] [text-shadow:0_0_12px_{hexv}]",
-        # Subtle vertical gradient + colour-tinted hairline border + soft outer
-        # glow. The rgba() here is for the ALPHA, not because a hex fails —
-        # re-measured 2026-08-14 against this exact class shape, and
-        # `shadow-[0_0_18px_-6px_#35d68a]` JIT-generates perfectly well. It is
-        # simply opaque, which is not the look wanted. An 8-digit `#rrggbbaa`
-        # also works if you would rather not carry the _rgba() helper.
-        "tile": (f"bg-gradient-to-b from-[{top}] to-[{_TILE_FLOOR}] "
-                 f"border border-[{hexv}]/40 "
-                 f"shadow-[0_0_18px_-6px_{_rgba(hexv, 0.55)}]"),
-        "rule": f"bg-[{hexv}]/30",
-        "dot": f"bg-[{hexv}]",
-    }
-
-
-TONE_CLASSES = {k: _tone_classes(v) for k, v in _TONE_HEX.items()}
-# Reactive remove-sets — one per element type. These MUST cover every class the
-# element can apply or the classes stack across the page's version-poll repaint.
-TONE_TEXT_CLASSES = " ".join(t["text"] for t in TONE_CLASSES.values())
-TONE_TILE_CLASSES = " ".join(t["tile"] for t in TONE_CLASSES.values())
-TONE_RULE_CLASSES = " ".join(t["rule"] for t in TONE_CLASSES.values())
-TONE_DOT_CLASSES = " ".join(t["dot"] for t in TONE_CLASSES.values())
 
 # Per-tile static chrome: header icon + label, footer circled icon + descriptor.
 SIGNAL_TILE_DEFS = [
@@ -979,27 +593,6 @@ def signal_tile_rows(t, prev_total):
     }
     return [dict(d, value=t.get(d["key"], "—"), tone=tones[d["key"]])
             for d in SIGNAL_TILE_DEFS]
-
-
-def velocity_lines(derived):
-    """``derived`` -> ``{"text", "flag", "divergence"}`` for the foot of the
-    Signals column.
-
-    These three come from ``compute.derive_composite_extras`` (``derived
-    ["velocity"] = {"text", "flag"}`` and ``derived["divergence"]``, a string).
-    They are published on EVERY refresh but lost their on-screen home when the
-    intraday graphs replaced the old rolling/velocity/divergence text block —
-    an accident of that layout change, not a decision. Defensive: a missing or
-    wrongly-shaped payload yields empty strings, and the caller hides an empty
-    line (a blank flag means "no regime break", not "unknown")."""
-    d = derived or {}
-    vel = d.get("velocity")
-    if not isinstance(vel, dict):
-        vel = {}
-    div = d.get("divergence")
-    return {"text": str(vel.get("text") or ""),
-            "flag": str(vel.get("flag") or ""),
-            "divergence": str(div or "")}
 
 
 def _parse_iso(value):
