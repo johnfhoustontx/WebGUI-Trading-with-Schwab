@@ -85,9 +85,9 @@ HEAT_STOPS = [
     [0.00, "rgba(255,186,220,0.98)"],  # most-negative net → pale pink
     [0.12, "rgba(255,77,141,0.92)"],   # put "hot" (magenta)
     [0.28, "rgba(150,36,122,0.62)"],
-    [0.48, "rgba(52,10,44,0.5)"],     # put ramp base, nearest-zero alpha
+    [0.48, "rgba(122,44,92,0.5)"],    # put ramp base, near-zero (lifted)
     [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (the wash shows through)
-    [0.52, "rgba(8,44,78,0.5)"],      # call ramp base, nearest-zero alpha
+    [0.52, "rgba(42,95,155,0.5)"],    # call ramp base, near-zero (lifted)
     [0.72, "rgba(42,118,224,0.62)"],
     [0.88, "rgba(53,200,255,0.92)"],   # call "hot" (cyan)
     [1.00, "rgba(190,248,255,0.98)"],  # most-positive net → ice
@@ -106,8 +106,8 @@ HEAT_STOPS = [
 def _wash_background():
     return {
         "linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
-        "stops": [[0.00, "#0a1626"], [0.46, "#0b1420"],
-                  [0.62, "#140b16"], [1.00, "#170a12"]],
+        "stops": [[0.00, "#15263e"], [0.46, "#16223a"],
+                  [0.62, "#241628"], [1.00, "#281422"]],
     }
 
 

@@ -533,8 +533,8 @@ def test_wash_background_is_a_vertical_blue_to_magenta_gradient():
     # Vertical: same x, top-to-bottom y.
     assert lg["x1"] == lg["x2"] and lg["y1"] == 0 and lg["y2"] == 1
     stops = wash["stops"]
-    assert stops[0][1].lower() == "#0a1626"               # blue at the top
-    assert stops[-1][1].lower() == "#170a12"              # magenta at the bottom
+    assert stops[0][1].lower() == "#15263e"               # blue at the top
+    assert stops[-1][1].lower() == "#281422"              # magenta at the bottom
     assert [s[0] for s in stops] == sorted(s[0] for s in stops)
 
 
