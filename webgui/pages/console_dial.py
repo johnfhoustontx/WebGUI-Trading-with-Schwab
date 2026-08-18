@@ -41,9 +41,24 @@ FULL_CIRCLE_EPS = 0.999
 
 # Text layout — tuned by eye, deliberately not pinned by tests (a coordinate
 # someone is about to nudge should not turn the suite red).
-NAME_Y, NAME_SIZE = 100.0, 40
-VALUE_Y, VALUE_SIZE = 140.0, 46
-CAPTION_Y, CAPTION_SIZE = 172.0, 9.5
+
+# The regime WORD is the binding constraint here, not the percentage. Measured in
+# the push's own render engine (headless Chrome, local fonts — Rajdhani is never
+# fetched there) at the previous size 40: the widest word, BREAKDOWN, ran 241px of
+# glyphs plus 32px of tracking against roughly 150px of clear space inside the
+# neon arc, so it overlapped the ring. Even TRENDING (189px) never fitted; the old
+# 40 only ever looked right because nobody rendered the long words.
+#
+# Sized for the WHOLE closed vocabulary, not for TRENDING: BALANCED, WHIPSAW,
+# STRESSED, BREAKOUT, TRENDING, RALLYING, FIRMING, RETREATING, SOFTENING,
+# BREAKDOWN, UNCLEAR. At 21/track-2 the widest lands at ~144px and clears
+# the arc's inner edge by ~7px, so no word needs squashing and every dial keeps
+# the same type size — a headline that resized itself per regime would be worse
+# than one that is simply smaller.
+NAME_TRACK = 2
+NAME_Y, NAME_SIZE = 99.0, 21
+VALUE_Y, VALUE_SIZE = 127.0, 26
+CAPTION_Y, CAPTION_SIZE = 149.0, 9.5
 
 
 def _safe_confidence(v):
@@ -107,7 +122,7 @@ def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
                              f'stroke-width="{STROKE}"/>')
     parts.append(_ring(R_INNER, _hairline(0.12), 1))
     parts.append(_text(CX, NAME_Y, _esc(str(name or "").upper()), NAME_SIZE,
-                       _C["text"], weight=700, spacing=4,
+                       _C["text"], weight=700, spacing=NAME_TRACK,
                        family=fam or None))
     parts.append(_text(CX, VALUE_Y, "—" if conf is None else f"{conf * 100:.0f}%",
                        VALUE_SIZE, accent if conf is not None else _C["dim"],

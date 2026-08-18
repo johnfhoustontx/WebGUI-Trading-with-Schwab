@@ -610,9 +610,13 @@ BASELINE_DY = "0.35em"
 # draws NOTHING, so a confidence of 1.0 would render an EMPTY ring — the single
 # most misleading thing this dial could do. Past this it becomes a <circle>.
 FULL_CIRCLE_EPS = 0.999
-DIAL_NAME_Y, DIAL_NAME_SIZE = 100.0, 40
-DIAL_VALUE_Y, DIAL_VALUE_SIZE = 140.0, 46
-DIAL_CAPTION_Y, DIAL_CAPTION_SIZE = 172.0, 9.5
+
+# See webgui/pages/console_dial.py for why 21/track-2 — sized so the widest
+# regime word (BREAKDOWN) clears the neon arc. MIRRORED: change both.
+DIAL_NAME_TRACK = 2
+DIAL_NAME_Y, DIAL_NAME_SIZE = 99.0, 21
+DIAL_VALUE_Y, DIAL_VALUE_SIZE = 127.0, 26
+DIAL_CAPTION_Y, DIAL_CAPTION_SIZE = 149.0, 9.5
 
 
 def _dial_point(cx, cy, r, deg):
@@ -685,7 +689,7 @@ def dial_svg(confidence, name, accent=None):
     parts.append(_dial_ring(DIAL_R_INNER, _alpha_hex(_P["line"], 0.12), 1))
     parts.append(_dial_text(DIAL_CX, DIAL_NAME_Y, _e(str(name or "").upper()),
                             DIAL_NAME_SIZE, _P["text_primary"], weight=700,
-                            spacing=4, family=DISPLAY_FONT))
+                            spacing=DIAL_NAME_TRACK, family=DISPLAY_FONT))
     parts.append(_dial_text(DIAL_CX, DIAL_VALUE_Y,
                             "—" if conf is None else f"{conf * 100:.0f}%",
                             DIAL_VALUE_SIZE,
