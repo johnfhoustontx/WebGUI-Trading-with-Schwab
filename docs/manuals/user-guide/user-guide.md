@@ -542,8 +542,11 @@ The page reads as **five numbered steps**, top to bottom.
    **dispersion** as a percentile — low dispersion means everything is moving together,
    so a relative-strength screen has little to separate.
 2. **Three levels, and where they agree.** How many names in each universe are in their
-   own top quartile, plus a count of the **stocks whose industry and sector both
-   confirm** — the highest-conviction rows on the page.
+   own top quartile, plus the **stocks whose industry and sector both confirm** — the
+   highest-conviction rows on the page. The green panel gives the count *and lists every
+   one of them by rank*. Click a ticker to decompose it in step 4; because these are
+   stocks, that also switches the dropdown to Stocks. Hover a ticker for its sector and
+   industry.
 3. **Where the names sit** — the four quadrants as counts, with the strongest names in
    each and **+N more** opening the full membership of that quadrant. This is where you
    get the list of what is Leading, Improving, Weakening or Lagging.

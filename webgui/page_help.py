@@ -380,7 +380,10 @@ The page reads as five numbered steps, top to bottom.
   has little to separate — the score still computes, it just matters less.
 - **2 · Three levels.** How many names in each universe are in their own top
   quartile. The green panel counts the **stocks whose industry and sector both
-  confirm** — the highest-conviction rows on the page.
+  confirm** — the highest-conviction rows on the page — and **lists them by
+  rank** underneath. Clicking one decomposes it in section 4; because these are
+  stocks, it switches the level selector to Stocks to do it. Hover a ticker for
+  its sector and industry.
 - **3 · Where the names sit.** The four quadrants as counts: **Leading** (strong
   and still accelerating), **Improving** (weak but turning up), **Weakening**
   (strong but fading — late, don't chase), **Lagging** (weak and decelerating).

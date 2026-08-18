@@ -1126,7 +1126,9 @@ score still computes, it just matters less.
 names are in their own top quartile. Track width scales with the *square root* of
 universe size, so all three stay legible instead of the 296-stock bar dwarfing the
 11-sector one. Beside it, the count of **stocks whose industry and sector both confirm** —
-the highest-conviction rows on the page.
+the highest-conviction rows on the page — **and the names themselves, listed by rank**.
+Click one to decompose it in section 4; since these are stocks, that switches the level
+selector to Stocks. Hovering a ticker shows its sector and industry.
 
 **3 · Where the names sit.** The four quadrants as counts and shares, with the strongest
 few named in each and **+N more** opening that quadrant's full membership — this is the
@@ -1177,9 +1179,11 @@ Momentum is one of the most robustly documented return factors in finance, and a
 of the most dangerous — its drawdowns are sudden and severe. This page is unusual in
 telling you which of those two states you are in *before* showing you the list.
 
-Practically, the highest-value output is the **Align** column. A three-block row is a
-name where the whole hierarchy agrees, and those are the candidates worth taking to
-[Trade Analyzer](#trade-analyzer) or [Strategy Finder](#strategy-finder).
+Practically, the highest-value output is **alignment** — a name where the whole hierarchy
+agrees. The green panel in section 2 lists every one of them, ranked, and those are the
+candidates worth taking to [Trade Analyzer](#trade-analyzer) or
+[Strategy Finder](#strategy-finder). The leaderboard's **Align** column shows the same
+thing per row, as three blocks, but only for the names inside its top/bottom slice.
 
 **Where it is weak.** It is nightly, so it cannot react to today's news. Participation is
 measured on only five constituents per industry, which is a coarse sample. And a

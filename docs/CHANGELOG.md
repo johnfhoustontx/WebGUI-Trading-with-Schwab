@@ -4,6 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-18 (**Momentum's Align panel now lists the names, not just
+the count.**
+- **The gap.** Section 2's green panel printed *"24 stocks whose industry and sector both
+  confirm — the highest-conviction rows on the page, take these to Trade Analyzer"* and
+  then named none of them. It was the only number on the page that says the three levels
+  tell **one** story, and the reader had no way to find out which rows it meant. The
+  leaderboard could not answer it either: its Align column is three glyphs on a
+  top/bottom-15 slice, so a name aligned at rank 40 never appears.
+- **`momentum_view.aligned_names(levels, head=None)`** returns that membership, ordered by
+  rank (rankless rows last), each row reduced to what a chip needs — symbol, label, score,
+  rank, sector, industry. **`alignment_count` is now `len()` of it**, deliberately: the
+  figure above the chips and the chips beneath it come out of ONE filter, so a later change
+  to the alignment rule cannot move only one of them. `head` splits a visible run off the
+  front and reports the rest in `more`, but the page passes no head — all 24 render. A list
+  you have to expand is not a list you act on, and the whole point of the panel is the
+  handoff to Trade Analyzer.
+- **Picking one switches the level.** The chips reuse the page's existing `_name_chip`, so
+  they click through to section 4 exactly as the quadrant chips do. But an aligned row
+  exists **only at the stock level**, and `example_row` falls back to the leader for a
+  symbol that is not on the current level — so clicking SNOW from the Industries view would
+  have silently decomposed the top industry instead. `_select_aligned` sets the level first
+  and the pick second (the `level_sel.value` assignment fires `_set_level`, which clears
+  the selection — order is load-bearing).
+- **Chips gained a `sector · industry` tooltip**, in `_name_chip` rather than at the align
+  panel, so the quadrant chips get it too — a bare ticker does not say what it is and the
+  row already carried both.
+- **Verified live in dev, not merely green**: 24 chips against the panel's 24, ordered
+  SNOW · PANW · CRWD · ILMN · FTNT (ranks 2/3/5/6/7 in the live payload); clicking SNOW
+  from the Industries view flipped the selector to Stocks and repainted section 4 to
+  *"Selected · Information Technology · SNOW · 1.79 · 3 of 3 align"*, with the selection
+  ring on both the align chip and its Weakening-quadrant twin. webgui suite **1842 passed**.
+)
+
 **Last updated:** 2026-08-17 (**The live Market Trend gauge no longer reads near-maximum
 bullish on a data outage — `_finite_score_price`.**
 - **Same trap as `_finite_pcts`, other sub-score.** `scoring/intraday_trend._clamp` is
