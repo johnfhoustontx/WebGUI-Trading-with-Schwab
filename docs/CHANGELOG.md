@@ -4,6 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**Documentation + `.claude` sweep after the four rebuilds, the
+cleanup and the promote.**
+- **CLAUDE.md test baseline refreshed: webgui 1356 → 1826**, re-measured today. Noted that the
+  count FELL from 1912 because ~86 tests were deleted with the subjects they pinned — the one
+  case where a dropping count is the healthy signal, and worth saying out loud next to a
+  standing instruction to compare the failing SET rather than the count.
+- **The four `2026-08-17-*` design docs are indexed** in CLAUDE.md's Design/plan list, which they
+  were not.
+- **New durable gotcha recorded: `vector-effect` is not in DOMPurify's allowlist**, which makes
+  the standard `viewBox` + `preserveAspectRatio="none"` idiom a trap — geometry survives, strokes
+  render thick horizontally and hairline vertically, and the server-side string stays correct so
+  no test can see it. Both supplied designs used that idiom; it was caught twice before shipping.
+  The fix (percentage-addressed `<line>`s, no viewBox) and the `<polyline points>` caveat are
+  written next to the existing `dominant-baseline` story they rhyme with.
+- **The four rebuilt screens are documented as one design family** with `rotation_view` as the
+  palette root and `sector_heat`/`rrg_view`/`momentum_view`/`oklch` as its siblings.
+- **Three restart traps written down**, all hit today: a failed bind is SILENT and leaves the old
+  server serving stale code (`Errno 10048` in the launcher log is the tell); `netstat`-and-taskkill
+  one-liners lose a `$`-anchored regex to the shell and report success having killed nothing; and
+  dev serves the DEV CHECKOUT, so uncommitted worktree changes look exactly like a broken restart.
+- **`.claude/launch.json` gained a `webgui-dev` configuration on :9500.** The single `webgui` entry
+  named :8500 — PROD's port — and `autoPort:false` means the entry must match what the checkout
+  actually binds. A worktree has no `env.local.toml`, resolves to prod, and binds :8500 where the
+  live stack already is. Both configurations now exist and CLAUDE.md says which to pick.
+- **`.claude/settings.json` allow-list gained the absolute worktree venv path** for pytest/ruff —
+  every test run from a worktree uses it, and only the relative forms were listed.
+- **Technical Reference gained the display arithmetic** for the rotation gauge, the flow band, the
+  RRG domain/marker/trail maths and the Momentum bars, since that manual answers "where does this
+  number come from".
+- **⚠ NEW KNOWN ISSUE, found while checking a comment I had written: Sector & Industry and Sector
+  Rotation can print OPPOSITE regime verdicts.** They read different quantities on different
+  scales — `sector.rotation.day_spread` (cyclical minus defensive daily % RETURN, bands ±0.3/±1.0)
+  versus `assessment.headline.spread` (mean RS-MOMENTUM spread, threshold ±1.5). Measured live:
+  **+0.37 → "Risk-on regime"** on one tab, **−1.52 → "Risk-off"** on the next. It predates the
+  rebuilds — the old `rotation_banner` had the same split — and is recorded in CLAUDE.md with the
+  warning NOT to "align the thresholds", since the numbers are not commensurable. A real fix is a
+  product decision, not a refactor.)
+
+---
+
 **Last updated:** 2026-08-17 (**Dead-code cleanup, part 2 — `pages/sentiment.py`.** The
 deferral recorded in the entry below is now closed: the module is dead-code-free.
 - **`pages/sentiment.py` 1355 → 948 lines**, 96 top-level symbols → **43, all reachable**.

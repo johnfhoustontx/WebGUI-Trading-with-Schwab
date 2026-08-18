@@ -450,6 +450,52 @@ RS_momentum     = 100 · RS_today / RS_(20 bars ago)
 Quadrants: **Leading** (strength≥100, mom≥100), **Weakening** (≥100, <100),
 **Lagging** (<100, <100), **Improving** (<100, ≥100).
 
+### How the rotation screens draw those numbers
+
+Display geometry only — none of this feeds a score. All of it is pure and lives in
+`webgui/pages/rotation_view.py`, `rrg_view.py` and `momentum_view.py`.
+
+**Sector Rotation — the spread gauge.** The cyclical-vs-defensive spread on a fixed
+−3…+3 track:
+
+```
+pos(v)      = (clamp(v, -3, 3) + 3) / 6 · 100        # % across the track
+fill        = between pos(spread) and pos(0)         # signed, so it spans to the centre
+triggers at = pos(-threshold), pos(+threshold)       # the service's risk_threshold, ±1.50
+```
+
+The fill runs *between the reading and zero* rather than growing from the left, because
+the quantity is signed: a left-anchored bar would encode −3 and +3 as "small" and "large"
+instead of "opposite". The trigger sentence uses `|spread| / threshold`: under 1.0 no
+signal has fired, under **1.5** it is "just past", beyond that "entrenched".
+
+**Sector Rotation — the flow band.** Segment and side widths are `flex-grow` values equal
+to the S&P weight, so segment *area* is index share. The split keys on the engine's own
+`direction` field (`INTO`/`FROM`), not the quadrant. A segment under **7.5%** of its own
+side drops its label rather than clipping it.
+
+**RRG — the plot window.** Unlike the fixed axes above, this one is derived:
+
+```
+half = max(design_floor, max|value - 100| · 1.08)    # floors: 1.1 on RS-Ratio, 3.4 on RS-Mom
+domain = [100 - half, 100 + half]                    # ALWAYS symmetric about 100
+```
+
+Symmetry is load-bearing: the quadrant washes and crosshair are drawn at exactly 50%/50%,
+so an asymmetric window would put the axes somewhere other than 100/100 and silently
+reassign every sector's quadrant on screen. Marker **diameter** is
+`10 + sqrt(S&P weight) · 1.9`, so marker *area* is proportional to weight. Trails show
+the last **5** readings, resampled along a Catmull-Rom spline (tension 0.5, end tangents
+clamped) — the curve passes through every real reading and only chooses the route
+between them.
+
+**Momentum — the display arithmetic.** Level tracks scale with `sqrt(size / largest)`.
+Component bars are `min(1, |z| / 3) · 50%` either side of a centre line, clamped at ±3
+because that is where the service caps the z-scores. The rank chart puts every series on
+one shared date axis (histories are ragged — 15, 10, 7 or 5 sessions) and derives its
+rank domain from the data rather than assuming a top-20 window; live industry ranks reach
+~61 and stock ranks ~272.
+
 ## Sector Performance
 
 **File:** `scoring/sector_perf.py`

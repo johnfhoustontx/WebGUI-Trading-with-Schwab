@@ -238,8 +238,23 @@ def _eastern(iso):
         return None
 
 
-# spread → (headline, tone). Same thresholds as the shared ``rotation_banner``
-# so this page and /sentiment/rotation cannot disagree about the day's regime.
+# spread → (headline, tone), on the thresholds the deleted
+# ``sentiment.rotation_banner`` used.
+#
+# ⚠ THIS PAGE AND /sentiment/rotation CAN AND DO DISAGREE, and the bands are not
+# the reason — they measure DIFFERENT QUANTITIES on different scales:
+#
+#   here      sector["rotation"]["day_spread"] — cyclical minus defensive daily
+#             % RETURN. Bands ±0.3 / ±1.0.
+#   rotation  assessment.headline.spread — the mean RS-MOMENTUM spread from the
+#             RRG engine, against the service's own ±1.5 risk_threshold.
+#
+# Measured live 2026-08-17: day_spread +0.37 ("Risk-on regime" here) while the
+# RRG spread was −1.52 ("Risk-off" there) — opposite verdicts on adjacent tabs.
+# The old table had the same split; the rebuild inherited it rather than caused
+# it. Genuinely fixing it is a product decision (read one source, or relabel this
+# line so it stops claiming to be a regime) — see the known-issue note in
+# CLAUDE.md. Do NOT "align" the bands: the numbers are not commensurable.
 _REGIME_BANDS = (
     (1.0, "Strong risk-on regime", "up"),
     (0.3, "Risk-on regime", "up"),

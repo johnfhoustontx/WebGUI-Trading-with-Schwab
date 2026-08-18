@@ -332,6 +332,22 @@ navigation via a single-user module snapshot; see the route table). Options desi
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 
+**The four Trend & Sentiment screens rebuilt 2026-08-17 are ONE design family,
+and their arithmetic lives in four PURE sibling modules** — `sector_heat.py`
+(`/sentiment/sectors`), `rotation_view.py` (`/sentiment/rotation`), `rrg_view.py`
+(`/sentiment/rrg`) and `momentum_view.py` (`/sentiment/momentum`), over the
+shared `oklch.py` (oklch→sRGB, since all four designs were authored in oklch and
+all four sit at the dark end where an sRGB interpolation bunches). **The page
+modules hold widgets and wiring only**, which is why each screen's geometry —
+heat levels, gauge positions, marker sizes, spline resampling, rank projection —
+is unit-tested without a browser. **`rotation_view` is the palette root**: it
+owns the four quadrant hues and the warm-neutral lightness ladder, and
+`rrg_view` + `momentum_view` import them rather than restating, so the three
+rotation-flavoured screens cannot drift. Designs: the four
+`docs/plans/2026-08-17-*` docs. ⚠ Two of these pages ship a **hand-drawn SVG**
+layer via `ui.html` (`rrg_view.tail_svg`, `momentum_view.rank_svg`) — read the
+`vector-effect` gotcha above before touching either.
+
 **App theme — dark-navy "dashboard" (Tailwind-first; the canonical reference).**
 The shared dark-navy look (page-scoped via the `.calc-v2` scope hook; promotable
 app-wide) is now a set of **Tailwind design-token constants** in
@@ -565,6 +581,22 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   runs of quoted lowercase tokens, **dropping any run containing `script`** —
   DOMPurify also ships DENY lists, and unioning those in blessed `<use>`) and
   asserts every tag and attribute the builder emits survives it.
+- **`vector-effect` is NOT allow-listed either — which makes a scaled `viewBox`
+  a trap for any line you draw (2026-08-17, caught twice before shipping).** The
+  standard way to stretch a drawing across a fluid-width box is
+  `viewBox="0 0 100 100"` + `preserveAspectRatio="none"`, and the standard way to
+  stop that non-uniform scale smearing the stroke is
+  `vector-effect: non-scaling-stroke`. DOMPurify strips it, so the geometry
+  survives and the strokes render **thick horizontally and hairline vertically**
+  — and, as ever, the server-side string stays perfectly correct, so nothing in
+  the suite can see it. Both supplied designs the RRG and Momentum rebuilds came
+  from used exactly this idiom. **The fix is to need neither: address the line
+  endpoints in PERCENTAGES and drop the viewBox**, so percentages resolve against
+  the viewport and `stroke-width` stays in real pixels (`rrg_view.tail_svg`,
+  `momentum_view.rank_svg`). ⚠ `<polyline points="…">` **cannot** take
+  percentages — that attribute is a list of user-space numbers — so a percentage
+  layer has to be individual `<line>`s. Both builders carry the same
+  allow-list test `rings.py` does.
 - **`getBBox()` on an SVG `<text>` returns the EM box, not the ink — so it is the
   wrong tool for optical centring.** Centring the ring's value/caption pair on
   `getBBox()` left it visibly low: the box reported a 4.2px offset where the
@@ -739,10 +771,30 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - A page is built per request inside `_layout`; keep page state in a local dict
   closure, not module globals.
 
-**Verify in the browser.** `.claude/launch.json` defines the `webgui` dev server
-on **:8500** (`autoPort:false` — the NiceGUI port is fixed). Use the Claude
-Preview tool (start `webgui`, screenshot). Restart the preview after code changes
-to pick them up. To drive Quasar inputs from the preview, set the native value +
+**Verify in the browser.** `.claude/launch.json` defines TWO configurations
+(`autoPort:false` — the NiceGUI port is fixed, so the entry must match what the
+checkout will actually bind): **`webgui-dev` on :9500** and **`webgui` on :8500**.
+**Pick the one matching the checkout you are in** — `repo_paths` decides the real
+port from `config/env.local.toml`, and the launcher only *probes* the port named
+here. ⚠ **A worktree has no `env.local.toml`, so it resolves to PROD and binds
+:8500** — where the live prod stack already is. Either drop a
+`name = "dev"` marker in the worktree first (it is gitignored, so it cannot
+travel) or do not preview from a worktree at all.
+
+**Three restart traps, all hit on 2026-08-17.** (1) **A failed bind is silent.**
+If something already holds the port, the new server exits and the OLD one keeps
+serving — so you verify stale code while everything looks healthy. The tell is in
+the launcher log: `[Errno 10048] error while attempting to bind`. **Always
+confirm the port is actually free after killing, and read that log.** (2)
+**`netstat`-and-taskkill one-liners are easy to get wrong**: a `$`-anchored regex
+inside a double-quoted `-c "…"` string has its anchor eaten by the shell, so the
+kill matches nothing and cheerfully reports success. Prefer
+`Get-NetTCPConnection -LocalPort N -State Listen`. (3) **Dev serves the DEV
+CHECKOUT, not your worktree** — uncommitted worktree changes are invisible there,
+which reads exactly like a broken restart. Commit and fast-forward first.
+
+Use the Claude Preview tool (start the right config, screenshot). Restart the
+preview after code changes to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events. **Caveats (seen):** the **screenshot**
 tool TIMES OUT on heavy multi-panel Highcharts pages (e.g. the Replay 6-panel
 stack) — it works on lighter single-chart pages (EM); when it hangs, verify via
@@ -793,6 +845,28 @@ structural price inputs (`macd_hist`/`rsi`/`adx`, feeding `score_price` with a h
 `vwap_pct=0.0`) scores **82.50 — near-maximum bullish — at UNCHANGED confidence**, where a
 sane read scores 56.25; the same all-NaN read in `compute_intraday_trend` (the LIVE Day
 gauge) scores **92.50**. The fix must cover both call sites with one shared filter.
+
+**⚠ Known open issue — Sector & Industry and Sector Rotation can print OPPOSITE
+regime verdicts (not fixed; found 2026-08-17).** The two adjacent tabs each
+render a "risk-on / risk-off" headline from a **different quantity on a different
+scale**, so agreement is coincidence rather than design:
+
+| | reads | scale |
+|---|---|---|
+| `/sentiment/sectors` (`sector_heat.regime_headline`) | `sector["rotation"]["day_spread"]` — cyclical minus defensive **daily % return** | bands ±0.3 / ±1.0 |
+| `/sentiment/rotation` (`rotation_view.regime_display`) | `assessment.headline.spread` — mean **RS-momentum** spread from the RRG engine | the service's `risk_threshold`, ±1.5 |
+
+Measured live on 2026-08-17: `day_spread` **+0.37** rendered "Risk-on regime" on
+Sector & Industry while the RRG spread of **−1.52** rendered "Risk-off" on Sector
+Rotation. **This predates the 2026-08-17 rebuilds** — the old sectors table's
+`rotation_banner` had exactly the same split — so the rebuild inherited it rather
+than caused it. ⚠ **Do NOT "align the thresholds": the two numbers are not
+commensurable.** A real fix is a product decision — either the sectors header
+reads the same `assessment.headline` the rotation page does, or its line stops
+calling itself a *regime* and says what it actually measures (today's
+cyclical-vs-defensive return spread). Compare the Market Regime direction axis
+below, which solves the same class of problem by naming a direction only when two
+independent reads agree.
 
 **Market Regime — display names + the direction axis (2026-08-14).** The five
 regimes were renamed **for display only** and gained a direction word. **The
@@ -1429,7 +1503,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 1564 green: transforms + shell smoke
+cd webgui              ; python -m pytest .   # transforms + shell smoke (see Tests for the baseline)
 ```
 
 > **In a worktree** (`.claude/worktrees/…`) there is no `.venv` — use the absolute
@@ -1502,8 +1576,11 @@ failure count sat unmoved at 11 — that drift lives in the `test_gex_collector*
 group, which is timing-dependent.
 
 The remaining per-service counts in the block above are indicative, not pinned.
-Current: **webgui 1356** green, re-measured **2026-08-15** on the plasma-palette
-branch (1336 + 9 palette tests + 11 bevel/glow tests). **sentiment_svc 279 passed / 1 failed** (the
+Current: **webgui 1826** green, re-measured **2026-08-17** after the four
+sentiment-screen rebuilds and the dead-code cleanup — the count FELL from 1912 because
+~86 tests were deleted with the subjects they pinned (the Highcharts scatter/ribbon/RRG
+builders and the stranded `pages/sentiment.py` helpers), which is the one situation where
+a dropping count is the healthy signal. **sentiment_svc 279 passed / 1 failed** (the
 documented `test_daily_history_wins_over_session_latch`), last measured
 **2026-08-14** on the ring-graphics branch. Re-measured **2026-08-09** on
 `Using_Highcharts` at `b4ef24b`: **options_svc 932 passed / 2 failed**,
@@ -1528,6 +1605,10 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 - [`docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md`](docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md) — bite-sized TDD implementation plan for the above
 - [`docs/plans/2026-08-15-gamma-plasma-palette-design.md`](docs/plans/2026-08-15-gamma-plasma-palette-design.md) — **Dealer Positioning plasma palette + wash** (GEX/Charm/DEX/Vanna + Term recoloured cyan/magenta; why the `plotBackgroundColor` ban was narrower than it read)
 - [`docs/plans/2026-08-16-app-reference-guide-design.md`](docs/plans/2026-08-16-app-reference-guide-design.md) — **the Reference Guide** (a fourth manual; the per-page template, and why the audience level drives the plain-language + external-citation rules)
+- [`docs/plans/2026-08-17-sector-heat-grid-design.md`](docs/plans/2026-08-17-sector-heat-grid-design.md) — **Sector & Industry heat grid** (magnitude-forward tiles; why the column scale is p90 and not the max)
+- [`docs/plans/2026-08-17-sector-rotation-board-design.md`](docs/plans/2026-08-17-sector-rotation-board-design.md) — **Sector Rotation board** (diverging spread gauge, weight-proportional flow band, quadrant panels)
+- [`docs/plans/2026-08-17-rrg-plot-design.md`](docs/plans/2026-08-17-rrg-plot-design.md) — **RRG hand-drawn plot** (marker area = S&P weight, smoothed 5-reading trails; why the domain is computed and `vector-effect` unusable)
+- [`docs/plans/2026-08-17-momentum-guided-page-design.md`](docs/plans/2026-08-17-momentum-guided-page-design.md) — **Momentum guided page** (a numbered argument; leaderboard behind a toggle; the ragged `rank_history` trap)
 
 ## User-facing manuals
 

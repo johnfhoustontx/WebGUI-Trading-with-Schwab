@@ -2,6 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "webgui-dev",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["webgui/main.py"],
+      "port": 9500,
+      "autoPort": false
+    },
+    {
       "name": "webgui",
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["webgui/main.py"],

@@ -96,7 +96,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#vix-complex">VIX Complex</a></li>
 <li><a href="#putcall">Put/Call</a></li>
 <li><a href="#breadth">Breadth</a></li>
-<li><a href="#rotation">Rotation</a></li>
+<li><a href="#rotation">Rotation</a><ul>
+<li><a href="#how-the-rotation-screens-draw-those-numbers">How the rotation screens draw those numbers</a></li>
+</ul>
+</li>
 <li><a href="#sector-performance">Sector Performance</a><ul>
 <li><a href="#the-sector-industry-heat-scale">The Sector &amp; Industry heat scale</a></li>
 </ul>
@@ -934,6 +937,40 @@ RS_momentum     = 100 · RS_today / RS_(20 bars ago)
 </code></pre>
 <p>Quadrants: <strong>Leading</strong> (strength≥100, mom≥100), <strong>Weakening</strong> (≥100, &lt;100),
 <strong>Lagging</strong> (&lt;100, &lt;100), <strong>Improving</strong> (&lt;100, ≥100).</p>
+<h3 id="how-the-rotation-screens-draw-those-numbers">How the rotation screens draw those numbers</h3>
+<p>Display geometry only — none of this feeds a score. All of it is pure and lives in
+<code>webgui/pages/rotation_view.py</code>, <code>rrg_view.py</code> and <code>momentum_view.py</code>.</p>
+<p><strong>Sector Rotation — the spread gauge.</strong> The cyclical-vs-defensive spread on a fixed
+−3…+3 track:</p>
+<pre><code>pos(v)      = (clamp(v, -3, 3) + 3) / 6 · 100        # % across the track
+fill        = between pos(spread) and pos(0)         # signed, so it spans to the centre
+triggers at = pos(-threshold), pos(+threshold)       # the service's risk_threshold, ±1.50
+</code></pre>
+<p>The fill runs <em>between the reading and zero</em> rather than growing from the left, because
+the quantity is signed: a left-anchored bar would encode −3 and +3 as "small" and "large"
+instead of "opposite". The trigger sentence uses <code>|spread| / threshold</code>: under 1.0 no
+signal has fired, under <strong>1.5</strong> it is "just past", beyond that "entrenched".</p>
+<p><strong>Sector Rotation — the flow band.</strong> Segment and side widths are <code>flex-grow</code> values equal
+to the S&amp;P weight, so segment <em>area</em> is index share. The split keys on the engine's own
+<code>direction</code> field (<code>INTO</code>/<code>FROM</code>), not the quadrant. A segment under <strong>7.5%</strong> of its own
+side drops its label rather than clipping it.</p>
+<p><strong>RRG — the plot window.</strong> Unlike the fixed axes above, this one is derived:</p>
+<pre><code>half = max(design_floor, max|value - 100| · 1.08)    # floors: 1.1 on RS-Ratio, 3.4 on RS-Mom
+domain = [100 - half, 100 + half]                    # ALWAYS symmetric about 100
+</code></pre>
+<p>Symmetry is load-bearing: the quadrant washes and crosshair are drawn at exactly 50%/50%,
+so an asymmetric window would put the axes somewhere other than 100/100 and silently
+reassign every sector's quadrant on screen. Marker <strong>diameter</strong> is
+<code>10 + sqrt(S&amp;P weight) · 1.9</code>, so marker <em>area</em> is proportional to weight. Trails show
+the last <strong>5</strong> readings, resampled along a Catmull-Rom spline (tension 0.5, end tangents
+clamped) — the curve passes through every real reading and only chooses the route
+between them.</p>
+<p><strong>Momentum — the display arithmetic.</strong> Level tracks scale with <code>sqrt(size / largest)</code>.
+Component bars are <code>min(1, |z| / 3) · 50%</code> either side of a centre line, clamped at ±3
+because that is where the service caps the z-scores. The rank chart puts every series on
+one shared date axis (histories are ragged — 15, 10, 7 or 5 sessions) and derives its
+rank domain from the data rather than assuming a top-20 window; live industry ranks reach
+~61 and stock ranks ~272.</p>
 <h2 id="sector-performance">Sector Performance</h2>
 <p><strong>File:</strong> <code>scoring/sector_perf.py</code></p>
 <p>Cap-weighted daily move across the 11 GICS sectors, mapped to a 1–10 score:</p>

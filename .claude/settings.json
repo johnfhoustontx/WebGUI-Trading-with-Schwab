@@ -40,7 +40,11 @@
       "Bash(../.venv/Scripts/python.exe -m pytest *)",
       "Bash(.venv/Scripts/python.exe -m pytest *)",
       "Bash(.venv/Scripts/python -m ruff *)",
-      "Bash(.venv/Scripts/python.exe -m ruff *)"
+      "Bash(.venv/Scripts/python.exe -m ruff *)",
+      "Bash(D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe -m pytest *)",
+      "Bash(D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe -m ruff *)",
+      "Bash(\"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe\" -m pytest *)",
+      "Bash(\"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe\" -m ruff *)"
     ]
   }
 }
