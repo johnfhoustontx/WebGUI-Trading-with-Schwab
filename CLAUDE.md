@@ -644,7 +644,15 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `tabs.on_value_change`, **reflow** each chart after the panel is visible:
   `ui.timer(0.05, lambda: ui.run_javascript(f"getElement({el.id})?.chart?.reflow()"),
   once=True)` (`getElement(id)` → the Vue component; `.chart` is the Highcharts
-  instance). See `pages/options/simulator.py`.
+  instance). See `pages/options/simulator.py`. ⚠ **A tab panel is not the only way
+  to mount hidden — `set_visibility(False)` at build does it too**, and that one is
+  easier to miss because the element looks unconditional in the layout code. The
+  Gamma page's hedge-pressure panel is created then immediately hidden (a symbol
+  with no 0-DTE book never shows it), so it mounted at **8px wide inside a 689px
+  column** and stayed there once shown — a panel whose entire job is to read
+  vertically against the heatmap above it. Any element that mounts hidden belongs
+  in the page's reflow set, called AFTER the repaint's `set_visibility` (reflowing
+  a hidden element just re-measures zero).
 - Charts: **Highcharts** via `ui.highchart(options)` (the `nicegui-highcharts`
   element) — NOT Plotly. Build the options dict in a pure function so it's
   unit-testable; update in place with `el.options = fig; el.update()` (replaces the
