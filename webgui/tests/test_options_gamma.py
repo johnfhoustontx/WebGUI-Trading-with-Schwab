@@ -2024,3 +2024,19 @@ def test_empty_panels_do_not_pin_a_degenerate_axis():
     assert "min" not in fig["xAxis"] and "max" not in fig["xAxis"]
     empty = gamma.heatmap_figure([], "GEX")
     assert "min" not in empty["xAxis"] and "max" not in empty["xAxis"]
+
+
+def test_hedge_panel_is_reflowed_with_the_other_two():
+    """Regression: nothing else can align a chart that never measured its column.
+
+    The hedge element is CREATED hidden (a symbol with no 0-DTE book never shows
+    it), and nicegui-highcharts measures its width once at mount with no
+    ResizeObserver — so it mounts collapsed and stays collapsed when shown.
+    Measured live on $SPX before the fix: an 8px-wide chart container inside a
+    689px column, next to a 689px heatmap. It has to be in the same reflow set as
+    the bar + heatmap panels, which is also why the reflow must run AFTER the
+    per-repaint set_visibility (a reflow while hidden just re-measures zero)."""
+    src = inspect.getsource(gamma.render)
+    ids = [ln for ln in src.splitlines() if "heat_plot.id" in ln]
+    assert ids, "reflow id list not found"
+    assert any("hedge_plot.id" in ln for ln in ids)

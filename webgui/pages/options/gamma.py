@@ -2155,12 +2155,19 @@ def render():
         ResizeObserver, and ``chart.update()`` does NOT resize — so after a flex/width
         change the SVG stays frozen at its first-mount width (dead space to the right
         of the panel). Defer one tick so the new flex widths are laid out, then reflow
-        both panels to fill their containers. Null-safe (no-op if a chart isn't mounted
-        yet); the next repaint reflows again."""
+        all three panels to fill their containers. Null-safe (no-op if a chart isn't
+        mounted yet); the next repaint reflows again.
+
+        The HEDGE panel needs this even though its width never changes: it is created
+        hidden (a symbol with no 0-DTE book never shows it), so it mounts having
+        measured a zero-width container and stays collapsed once shown — measured at
+        8px inside a 689px column. Callers must therefore run this AFTER the repaint's
+        set_visibility, or the reflow just re-measures zero."""
         @guard
         def _do():
             el = state.get("chart_el")
-            ids = [i for i in (getattr(el, "id", None), heat_plot.id) if i]
+            ids = [i for i in (getattr(el, "id", None), heat_plot.id, hedge_plot.id)
+                   if i]
             if ids:
                 ui.run_javascript(";".join(f"getElement({i})?.chart?.reflow()" for i in ids))
         ui.timer(0.05, _do, once=True)
