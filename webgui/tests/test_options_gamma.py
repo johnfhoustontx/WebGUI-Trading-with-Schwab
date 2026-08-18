@@ -1921,3 +1921,106 @@ def test_zero_value_bars_do_not_trip_the_crisping_warning():
     assert bars["plotOptions"]["bar"]["crisp"] is False
     hedge = gamma.hedge_figure([{"ts": 1, "hedge_pressure": 0.0}], ["09:30"])
     assert hedge["series"][0]["crisp"] is False
+
+
+# --- Hedge panel ↔ heatmap column alignment ---------------------------------
+# The panel is a SEPARATE element under the heatmap whose only job is to read
+# vertically against it, so its columns must land on the heatmap's own time
+# columns. Two things break that, and both are invisible in the figure dicts
+# unless asserted: the hedge series is stored per-row (a minute with no 0-DTE
+# book is SKIPPED by load_hedge_series, which shifts every later column left),
+# and the GEX view widens the heatmap's axis with a forward projection band the
+# hedge panel knows nothing about (which stretches its session across the
+# projection's width too).
+
+_ALIGN_ROWS = [(10, 100.0, None, None, None, 0, {100.0: {"net": 1.0}}),
+               (20, 100.1, None, None, None, 0, {100.0: {"net": 2.0}}),
+               (30, 100.2, None, None, None, 0, {100.0: {"net": 3.0}}),
+               (40, 100.3, None, None, None, 0, {100.0: {"net": 4.0}})]
+_ALIGN_PROJ = {"times": ["13:15", "13:30"], "spot": 100.0,
+               "grid": {100.0: [5.0, 6.0]},
+               "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8],
+                        "down": [99.5, 99.2]}}
+
+
+def test_hedge_points_land_on_the_column_matching_their_timestamp():
+    # Minute 20 has no 0-DTE book, so load_hedge_series returns 3 rows for 4
+    # columns. Indexed by row position the 30/40 bars would slide onto columns
+    # 1 and 2 — one minute early, over the wrong heatmap cells.
+    hedge = [{"ts": 10, "hedge_pressure": 1e9},
+             {"ts": 30, "hedge_pressure": 2e9},
+             {"ts": 40, "hedge_pressure": -3e9}]
+    pts = gamma.hedge_points(hedge, [r[0] for r in _ALIGN_ROWS])
+    assert [p[0] for p in pts] == [0, 2, 3]
+
+
+def test_hedge_points_drop_rows_with_no_heatmap_column():
+    # A pressure reading outside the heatmap's window (the two series are RTH-
+    # filtered independently) has no column to sit under — drawing it anyway
+    # would put it under whatever minute happened to share its index.
+    hedge = [{"ts": 5, "hedge_pressure": 1e9}, {"ts": 20, "hedge_pressure": 2e9}]
+    assert [p[0] for p in gamma.hedge_points(hedge, [r[0] for r in _ALIGN_ROWS])] == [1]
+
+
+def test_hedge_panel_spans_the_heatmaps_full_axis_including_the_projection():
+    cats = gamma.heatmap_categories(_ALIGN_ROWS, _ALIGN_PROJ)
+    heat = gamma.heatmap_figure(_ALIGN_ROWS, "GEX", yrange=[95.0, 105.0],
+                                projection=_ALIGN_PROJ)
+    assert cats == heat["xAxis"]["categories"]     # one definition, two panels
+    hedge = gamma.hedge_figure([{"ts": 40, "hedge_pressure": 1e9}], cats,
+                               col_ts=[r[0] for r in _ALIGN_ROWS])
+    assert hedge["xAxis"]["categories"] == heat["xAxis"]["categories"]
+    # …and the bar still sits on the LAST COLLECTED column, not the last column.
+    assert hedge["series"][0]["data"][0]["x"] == 3
+
+
+def test_heatmap_categories_without_a_projection_are_just_the_collected_times():
+    heat = gamma.heatmap_figure(_ALIGN_ROWS, "Charm", yrange=[95.0, 105.0])
+    assert gamma.heatmap_categories(_ALIGN_ROWS) == heat["xAxis"]["categories"]
+    assert gamma.heatmap_categories(_ALIGN_ROWS, {"times": [], "grid": {}}) \
+        == heat["xAxis"]["categories"]
+
+
+def test_render_builds_the_hedge_panel_on_the_heatmaps_own_axis():
+    """Regression: the hedge panel must be wired to BOTH halves of the alignment.
+
+    It is a second element under the heatmap, so nothing about the layout forces
+    the two to agree — the wiring is the whole guarantee. It must pass the
+    heatmap's full category list (``heatmap_categories``, projection band
+    included) and the heatmap rows' timestamps (so a skipped minute doesn't shift
+    the bars), for the visibility probe as well as the figure."""
+    src = inspect.getsource(gamma.render)
+    assert "heatmap_categories(rows, projection)" in src
+    assert "col_ts=" in src
+    # The has-hedge probe must use the same mapping the figure does, or a symbol
+    # whose readings all fall outside the heatmap window shows an empty panel.
+    assert "hedge_points(_hedge)" not in src
+    # …and the heatmap itself must be drawn from that same category list, not a
+    # second independent build of it.
+    assert 'hedge_figure(_hedge, heatmap_matrix(rows)["x"])' not in src
+
+
+def test_both_panels_pin_their_time_axis_to_the_category_count():
+    """Highcharts derives axis extremes from the DATA, so equal category lists are
+    not enough: a hedge series that starts at 09:47 (no 0-DTE book before then) or
+    stops short of the projection band would auto-scale its axis to its own points
+    and stretch those bars across the full panel width. Both axes are therefore
+    pinned to the same -0.5 … n-0.5 band, which is exactly n column slots."""
+    cats = gamma.heatmap_categories(_ALIGN_ROWS, _ALIGN_PROJ)     # 4 collected + 2 future
+    heat = gamma.heatmap_figure(_ALIGN_ROWS, "GEX", yrange=[95.0, 105.0],
+                                projection=_ALIGN_PROJ)
+    # A single late reading — the degenerate case, where an unpinned axis has no
+    # range at all to derive.
+    hedge = gamma.hedge_figure([{"ts": 40, "hedge_pressure": 1e9}], cats,
+                               col_ts=[r[0] for r in _ALIGN_ROWS])
+    assert (heat["xAxis"]["min"], heat["xAxis"]["max"]) == (-0.5, len(cats) - 0.5)
+    assert (hedge["xAxis"]["min"], hedge["xAxis"]["max"]) == (-0.5, len(cats) - 0.5)
+
+
+def test_empty_panels_do_not_pin_a_degenerate_axis():
+    # No categories → nothing to align to; pinning -0.5…-0.5 would be an empty
+    # axis range, which Highcharts renders as a broken plot band.
+    fig = gamma.hedge_figure([], [])
+    assert "min" not in fig["xAxis"] and "max" not in fig["xAxis"]
+    empty = gamma.heatmap_figure([], "GEX")
+    assert "min" not in empty["xAxis"] and "max" not in empty["xAxis"]

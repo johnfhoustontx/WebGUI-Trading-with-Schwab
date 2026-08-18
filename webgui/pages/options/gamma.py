@@ -678,6 +678,38 @@ def heatmap_matrix(rows):
     return {"x": x, "y": strikes, "z": z, "spots": spots}
 
 
+def heatmap_categories(rows, projection=None):
+    """The heatmap's FULL x-axis categories: collected times + the forward band's.
+
+    The hedge panel below the heatmap is a SEPARATE element whose only job is to
+    read vertically against it, so it must be built on THIS list, not on the
+    collected times alone — a GEX projection widens the heatmap's axis by up to
+    26 forward marks, and a hedge panel spanning only the session would stretch
+    those same minutes across the projection's width too. The guard condition
+    mirrors ``heatmap_figure``'s projection block exactly (a test pins the two
+    together)."""
+    times = list(heatmap_matrix(rows)["x"])
+    if projection and projection.get("times") and projection.get("grid"):
+        times += list(projection["times"])
+    return times
+
+
+def _pin_time_axis(axis, categories):
+    """Pin a category time axis to EXACTLY ``len(categories)`` column slots.
+
+    Highcharts derives axis extremes from the series DATA, so two panels sharing a
+    category list still scale independently: the hedge series starts at the first
+    minute with a 0-DTE book and stops at the last collected column, while the
+    heatmap runs the whole session plus its projection band. Unpinned, those bars
+    stretch across the full width and land nowhere near the cells above them.
+    Both panels pin the same -0.5 … n-0.5 band instead (xAxis start/endOnTick
+    default False, so the values are honoured exactly). No categories → no pin: an
+    empty range renders as a broken plot band."""
+    if categories:
+        axis["min"], axis["max"] = -0.5, len(categories) - 0.5
+    return axis
+
+
 def _coloraxis(zmax):
     """Diverging RdYlGn color axis, symmetric about zero (so net 0 = yellow)."""
     ca = {"stops": HEAT_STOPS, "labels": {"enabled": False}}
@@ -758,21 +790,44 @@ def candle_points(bars):
     return body, wick
 
 
-def hedge_points(hedge_rows):
+def hedge_points(hedge_rows, col_ts=None):
     """``[[x, $B, color], …]`` for the hedge-pressure panel.
 
-    x is the row INDEX so the panel shares the heatmap's time-category axis exactly.
+    x is the heatmap COLUMN carrying that row's timestamp — ``col_ts`` is the
+    heatmap rows' ts in column order, and a row whose ts is not a column is
+    DROPPED. Row position is not a column index: ``load_hedge_series`` skips
+    minutes with a NULL pressure (the column is only written while the nearest
+    expiry is today), and the two series are RTH-filtered independently, so one
+    missing minute would slide every later bar a column left — under the wrong
+    cells, which is exactly what the panel exists to be compared against. With no
+    ``col_ts`` it falls back to the row index (callers with no heatmap to align
+    to).
+
     Dollars are converted to BILLIONS (raw values run to 1e9+ and are unreadable),
     and each point is colored by SIGN — positive means dealers must BUY into the
     close, negative SELL — so a flip from one to the other is visible at a glance.
     The colours are the plasma pair (``HEDGE_*_COLOR``), which ``hedge_figure`` also
     partitions its two series on."""
+    # First column wins a duplicated ts; the collector writes one row per view per
+    # boundary, so a repeat means a re-run, and the earlier column is the one the
+    # heatmap drew.
+    index = None
+    if col_ts is not None:
+        index = {}
+        for i, t in enumerate(col_ts):
+            index.setdefault(t, i)
     out = []
     for i, r in enumerate(hedge_rows or []):
         v = (r or {}).get("hedge_pressure")
         if not isinstance(v, (int, float)) or isinstance(v, bool):
             continue
-        out.append([i, round(v / 1e9, 4),
+        if index is None:
+            x = i
+        else:
+            x = index.get((r or {}).get("ts"))
+            if x is None:
+                continue
+        out.append([x, round(v / 1e9, 4),
                     HEDGE_BUY_COLOR if v >= 0 else HEDGE_SELL_COLOR])
     return out
 
@@ -789,14 +844,18 @@ def hedge_summary_text(hedge_rows):
             f"dealers must {side} into the close if spot holds")
 
 
-def hedge_figure(hedge_rows, times, height=150):
+def hedge_figure(hedge_rows, times, height=150, col_ts=None):
     """Compact signed-column panel of 0-DTE hedge pressure over the session.
 
     Its OWN element, below the heatmap: pressure is in DOLLARS while the heatmap's
     y-axis is STRIKE (and is pixel-aligned to the bar chart), so it cannot share
-    that axis. The x axis reuses the heatmap's time categories, so the two read
-    together vertically."""
-    pts = hedge_points(hedge_rows)
+    that axis. Horizontal alignment is therefore something this figure has to
+    reproduce rather than inherit, and it takes BOTH halves of it: ``times`` is
+    the heatmap's full category list (``heatmap_categories`` — projection band
+    included, so a column is the same width in both panels) and ``col_ts`` maps
+    each pressure reading onto the column holding its timestamp. Both panels also
+    run marginLeft/marginRight 0, so equal category counts mean equal plot bands."""
+    pts = hedge_points(hedge_rows, col_ts)
     fig = _base_chart("column", height)
     fig["chart"]["backgroundColor"] = "transparent"
     fig["chart"]["marginLeft"] = 0
@@ -804,8 +863,9 @@ def hedge_figure(hedge_rows, times, height=150):
     fig.update({
         "title": {"text": None},
         "legend": {"enabled": False},
-        "xAxis": {**_dark_axis(), "categories": list(times or []),
-                  "labels": {"enabled": False}},
+        "xAxis": _pin_time_axis(
+            {**_dark_axis(), "categories": list(times or []),
+             "labels": {"enabled": False}}, times),
         "yAxis": {**_dark_axis(), "title": {"text": None},
                   "labels": {"enabled": False},
                   "plotLines": [{"value": 0, "color": "#42506b", "width": 1,
@@ -1041,9 +1101,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                   "style": {"color": FONT}},
         # No "Time" axis title — the HH:MM labels make it obvious, and the title was
         # getting clipped at the bottom edge under the rotated labels.
-        "xAxis": {**_dark_axis(), "categories": times,
-                  "labels": {"rotation": -45, "style": {"color": FONT}},
-                  "plotLines": xaxis_plotlines},
+        "xAxis": _pin_time_axis(
+            {**_dark_axis(), "categories": times,
+             "labels": {"rotation": -45, "style": {"color": FONT}},
+             "plotLines": xaxis_plotlines}, times),
         "yAxis": yaxis,
         "colorAxis": _coloraxis(zmax),
         "series": series,
@@ -2373,11 +2434,18 @@ def render():
                                                   spot_style=spot_style_sel.value,
                                                   spot_interval=spot_int_sel.value,
                                                   projected_flip=snap.get("projected_flip")))
+            # The hedge panel is its own element under the heatmap, so their
+            # horizontal alignment is entirely this wiring's job: SAME categories
+            # (the projection band widens the GEX axis) and the heatmap rows' ts
+            # (a minute with no 0-DTE book is absent from hedge_history, and by
+            # row position every later bar would sit a column early).
             _hedge = snap.get("hedge_history") or []
-            _has_hedge = bool(hedge_points(_hedge))
+            _cats = heatmap_categories(rows, projection)
+            _col_ts = [r[0] for r in rows]
+            _has_hedge = bool(hedge_points(_hedge, _col_ts))
             if _has_hedge:
                 _set_figure(hedge_plot,
-                            hedge_figure(_hedge, heatmap_matrix(rows)["x"]))
+                            hedge_figure(_hedge, _cats, col_ts=_col_ts))
                 hedge_lbl.set_text(hedge_summary_text(_hedge))
             hedge_plot.set_visibility(_has_hedge)
             hedge_lbl.set_visibility(_has_hedge)
