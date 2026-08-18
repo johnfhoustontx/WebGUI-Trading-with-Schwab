@@ -378,6 +378,83 @@ def _mean(seq):
     return (sum(seq) / len(seq)) if seq else None
 
 
+# The four DIRECTION terms of ``intraday_trend.score_price``, each as
+# ``(neutral_substitute, direction_weight)``. The weights mirror that function's
+# ``direction = 0.5*a + 0.2*v + 0.15*m + 0.15*r``; the substitutes are the input
+# values that make each term contribute exactly zero. ``adx`` is deliberately
+# absent — it is a MAGNITUDE scaler, not a direction term (see below).
+_PRICE_DIRECTION_TERMS = (
+    (0.0, 0.50),    # alignment_pct  -> a = 0
+    (0.0, 0.20),    # price_vs_vwap_pct -> v = 0
+    (0.0, 0.15),    # macd_hist      -> m = 0
+    (50.0, 0.15),   # rsi            -> r = 0
+)
+
+# ``adx`` enters as ``adx_factor = _clamp(adx / 40, 0.3, 1.0)``. Substituting 0.0
+# floors that factor at 0.3, i.e. it collapses the needle TOWARD 50 — which is
+# the degradation a missing magnitude reading should cause. It carries no
+# direction weight, so it does not scale the confidence.
+_ADX_NEUTRAL = 0.0
+
+
+def _finite_score_price(align_pct, vwap_pct, macd_hist, rsi, adx, n_timeframes):
+    """``intraday_trend.score_price`` with non-finite indicators degraded to
+    NEUTRAL instead of clamped to a BOUND.
+
+    ``intraday_trend._clamp`` is ``max(lo, min(hi, v))``, and ``min(hi, nan)``
+    returns ``hi`` — so every NaN indicator clamps to the HIGH bound. All five
+    inputs NaN scored **92.50 at confidence 1.0** through ``compute_intraday_trend``
+    (the live Day gauge) and **82.50 at the unchanged 0.333** through
+    ``_structural_trend``: a data outage rendered as a confident buy signal, with
+    nothing in the confidence to warn the reader. This is the same failure
+    ``_finite_pcts`` fixes for the SECTOR sub-score, on the PRICE sub-score.
+
+    A non-finite direction input is replaced by the value that zeroes its term
+    and its weight is withheld from the confidence, so the sub-score moves toward
+    50 AND says it knows less; all five non-finite gives ``TrendSub(50.0, 0.0)``,
+    which drops the 45%-weighted price input out of ``blend_trend`` entirely. A
+    non-finite ``adx`` floors the magnitude scaler (see ``_ADX_NEUTRAL``).
+
+    **Finite input is bit-identical by construction**, not by arithmetic
+    coincidence: an all-finite call returns the untouched ``score_price`` result
+    from the early return below, never reaching the substitution branch. Both
+    price-scoring call sites go through here — ``compute_intraday_trend`` and
+    ``_structural_trend`` — so there is exactly ONE ``score_price`` call in this
+    module and a later "consistency" edit cannot re-introduce the bug on one side.
+    Never raises: a non-numeric input is treated as non-finite."""
+    raw = (align_pct, vwap_pct, macd_hist, rsi, adx)
+    finite = [_as_finite(v) for v in raw]
+    if all(f is not None for f in finite):
+        # Every input finite -> the original call, byte-for-byte untouched.
+        return intraday_trend.score_price(align_pct, vwap_pct, macd_hist, rsi,
+                                          adx, n_timeframes=n_timeframes)
+    vals, kept = [], 0.0
+    for f, (neutral, weight) in zip(finite[:4], _PRICE_DIRECTION_TERMS):
+        if f is None:
+            vals.append(neutral)
+        else:
+            vals.append(f)
+            kept += weight
+    sub = intraday_trend.score_price(
+        vals[0], vals[1], vals[2], vals[3],
+        finite[4] if finite[4] is not None else _ADX_NEUTRAL,
+        n_timeframes=n_timeframes)
+    scale = max(0.0, min(1.0, kept))
+    return intraday_trend.TrendSub(sub.score,
+                                   round(sub.confidence * scale, 3),
+                                   sub.interp)
+
+
+def _as_finite(v):
+    """``float(v)`` if it is finite, else ``None``. Mirrors the per-value test in
+    ``_finite_pcts``; factored out so both filters cannot drift apart."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                            prior_committed=None, prev_smoothed=None,
                            flow_skew=None, sector_pc_delta=None,
@@ -441,7 +518,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                              if hist is not None and len(hist) else 0.0)
                 rsi = float(technical.calculate_rsi(df15))
                 adx = float(technical.calculate_adx(df15))
-                price = intraday_trend.score_price(
+                price = _finite_score_price(
                     align_pct, vwap_pct, macd_hist, rsi, adx,
                     n_timeframes=len(frames))
         except Exception:  # noqa: BLE001
@@ -1222,11 +1299,8 @@ def _finite_pcts(pcts):
     caller's neutral fallback and lost the price sub-score too."""
     out = {}
     for etf, p in (pcts or {}).items():
-        try:
-            v = float(p)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(v):
+        v = _as_finite(p)
+        if v is not None:
             out[etf] = v
     return out
 
@@ -1252,7 +1326,7 @@ def _structural_trend(spy_daily_df, sector_pcts, cyc_def_scale) -> dict:
                      if hist is not None and len(hist) else 0.0)
         rsi = float(technical.calculate_rsi(spy_daily_df))
         adx = float(technical.calculate_adx(spy_daily_df))
-        price = intraday_trend.score_price(
+        price = _finite_score_price(
             align_pct, 0.0, macd_hist, rsi, adx, n_timeframes=1)
 
     # SECTOR — participation + cyc/def leadership from this horizon's %-moves.

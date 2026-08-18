@@ -10,6 +10,7 @@ import pytest
 
 from services import _proxy
 from services.sentiment_svc import compute
+from scoring import intraday_trend
 
 
 def test_load_live_returns_none_on_client_error(monkeypatch):
@@ -774,6 +775,115 @@ def test_non_finite_sector_pct_is_treated_as_missing():
     assert compute.compute_30d_trend(spy, with_nan) == \
         compute.compute_30d_trend(spy, without)
 
+
+# --- non-finite PRICE indicators (the same _clamp trap, other sub-score) ------
+#
+# ``intraday_trend._clamp`` is ``max(lo, min(hi, v))`` and ``min(hi, nan)``
+# returns ``hi``, so an unguarded NaN indicator clamps to the HIGH bound. Before
+# ``compute._finite_score_price`` the all-NaN read scored 92.50 at confidence 1.0
+# through ``compute_intraday_trend`` (the live Day gauge) and 82.50 at the
+# unchanged 0.333 through ``_structural_trend``. Deleting that guard turns every
+# test in this block red.
+
+def test_all_non_finite_price_indicators_score_neutral_not_maximum():
+    """The measured regression, pinned at both call sites' argument shapes."""
+    nan = float("nan")
+    # compute_intraday_trend's shape: vwap_pct is LIVE, 3 timeframes. Was 92.50/1.0.
+    live = compute._finite_score_price(nan, nan, nan, nan, nan, n_timeframes=3)
+    assert live.score == 50.0
+    assert live.confidence == 0.0
+    # _structural_trend's shape: vwap_pct hardcoded 0.0, 1 timeframe. Was 82.50/0.333.
+    struct = compute._finite_score_price(nan, 0.0, nan, nan, nan, n_timeframes=1)
+    assert struct.score == 50.0
+    # The one genuinely-known input (that hardcoded 0.0) is all that is left of
+    # the confidence — 20% of a 0.333 single-timeframe read.
+    assert struct.confidence < 0.1
+
+
+def test_infinite_and_junk_price_indicators_also_degrade():
+    """+-inf and non-numeric junk are 'no reading' too — and must never raise."""
+    inf = float("inf")
+    for bad in (inf, -inf, None, "n/a", object()):
+        sub = compute._finite_score_price(bad, bad, bad, bad, bad, n_timeframes=3)
+        assert (sub.score, sub.confidence) == (50.0, 0.0), bad
+
+
+def test_one_non_finite_price_indicator_costs_only_its_own_weight():
+    """A partial outage degrades proportionally: the missing term contributes
+    nothing to the direction and its weight is withheld from the confidence,
+    while the surviving indicators still read normally."""
+    nan = float("nan")
+    good = compute._finite_score_price(25.0, 0.4, 0.1, 55.0, 20.0, n_timeframes=3)
+    # VWAP carries 20% of the direction weight.
+    no_vwap = compute._finite_score_price(25.0, nan, 0.1, 55.0, 20.0, n_timeframes=3)
+    assert no_vwap.confidence == round(good.confidence * 0.8, 3)
+    # ... and it must land BELOW the reading that clamps VWAP to its high bound.
+    assert no_vwap.score < intraday_trend.score_price(
+        25.0, nan, 0.1, 55.0, 20.0, n_timeframes=3).score
+    # ADX is a MAGNITUDE scaler, not a direction term: a missing one floors the
+    # needle's travel (toward 50) but leaves the confidence alone.
+    no_adx = compute._finite_score_price(25.0, 0.4, 0.1, 55.0, nan, n_timeframes=3)
+    assert no_adx.confidence == good.confidence
+    assert 50.0 < no_adx.score < good.score
+
+
+def test_finite_price_indicators_pass_through_unchanged():
+    """Finite input must be bit-identical to the unguarded scorer — the guard is
+    a filter on missing data, not a change to the model."""
+    import itertools
+    grid = (-1000.0, -50.0, -0.0, 0.0, 1.0, 40.0, 50.0, 100.0)
+    for args in itertools.product(grid, repeat=4):
+        for adx in (0.0, 12.0, 40.0, 100.0):
+            full = args + (adx,)
+            assert (compute._finite_score_price(*full, n_timeframes=3)
+                    == intraday_trend.score_price(*full, n_timeframes=3))
+
+
+def test_structural_trend_with_non_finite_indicators_is_neutral(monkeypatch):
+    """End-to-end at the second call site: an all-NaN indicator read must drop
+    the price sub-score out of the blend, not push it to 82.50."""
+    nan = float("nan")
+    monkeypatch.setattr(compute.technical, "calculate_ema_alignment",
+                        lambda *a, **k: {"alignment_percentage": nan})
+    monkeypatch.setattr(compute.technical, "macd_histogram_series",
+                        lambda *a, **k: pd.Series([nan]))
+    monkeypatch.setattr(compute.technical, "calculate_rsi", lambda *a, **k: nan)
+    monkeypatch.setattr(compute.technical, "calculate_adx", lambda *a, **k: nan)
+    out = compute._structural_trend(_bars(260, 400.0, 0.6),
+                                    {"XLK": 1.0, "XLP": -0.5}, 1.0)
+    assert out["sub_scores"]["price"] == 50.0
+
+
+def test_live_day_gauge_with_non_finite_indicators_is_not_bullish(monkeypatch):
+    """End-to-end at the exposed call site: the live Market Trend gauge must read
+    the outage as missing data, not as a near-maximum bullish tape."""
+    nan = float("nan")
+    monkeypatch.setattr(compute.technical, "calculate_ema_alignment",
+                        lambda *a, **k: {"alignment_percentage": nan})
+    monkeypatch.setattr(compute.technical, "calculate_vwap", lambda *a, **k: nan)
+    monkeypatch.setattr(compute.technical, "macd_histogram_series",
+                        lambda *a, **k: pd.Series([nan]))
+    monkeypatch.setattr(compute.technical, "calculate_rsi", lambda *a, **k: nan)
+    monkeypatch.setattr(compute.technical, "calculate_adx", lambda *a, **k: nan)
+    out = compute.compute_intraday_trend(_FakeBullSchwab())
+    # Confidence 0 is the load-bearing assertion: it drops the 45%-weighted price
+    # input out of ``blend_trend`` entirely. Pre-fix this read 1.0.
+    assert out["sub_confidence"]["price"] == 0.0
+    # The sub-score is 59.9 rather than a flat 50 because step 1b still blends in
+    # SESSION STRUCTURE (a separate, genuinely-available reading) at 20%. What
+    # matters is that it is nowhere near the 93.9 the clamped NaNs produced here.
+    assert out["sub_scores"]["price"] < 70.0
+
+
+def test_as_finite_is_the_one_filter_behind_both_guards():
+    """``_finite_pcts`` (sector) and ``_finite_score_price`` (price) share
+    ``_as_finite``, so the two cannot drift apart."""
+    assert compute._as_finite(2.5) == 2.5
+    assert compute._as_finite("2.5") == 2.5
+    assert compute._as_finite(3) == 3.0
+    for bad in (float("nan"), float("inf"), float("-inf"), None, "x", object()):
+        assert compute._as_finite(bad) is None, bad
+    assert compute._finite_pcts({"A": float("nan"), "B": 1.0}) == {"B": 1.0}
 
 # --- shared sector %-move fetch (one fan-out serves both horizons) ------------
 

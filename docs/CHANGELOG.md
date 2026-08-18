@@ -4,6 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**The live Market Trend gauge no longer reads near-maximum
+bullish on a data outage — `_finite_score_price`.**
+- **Same trap as `_finite_pcts`, other sub-score.** `scoring/intraday_trend._clamp` is
+  `max(lo, min(hi, v))` and `min(hi, nan)` returns `hi`, so a NaN indicator pins the HIGH
+  bound instead of degrading. Measured against the live scorer with all five price inputs
+  non-finite: **92.50 at confidence 1.0** through `compute_intraday_trend` (the LIVE Day
+  gauge — its `vwap_pct` is live) and **82.50 at the unchanged 0.333** through
+  `_structural_trend` (which hardcodes `vwap_pct=0.0`), against a sane structural read of
+  ~56–58 at that same 0.333. The confidence gave the reader **no warning at all**.
+- **ONE shared guard, applied twice.** `compute._finite_score_price(...)` has
+  `score_price`'s exact signature and is now the module's ONLY caller of it — both the live
+  gauge (line ~521) and `_structural_trend` (line ~1329) go through it, so a later
+  "consistency" edit cannot re-introduce the bug on one side. Each direction input
+  (`align_pct` 0.50 / `vwap_pct` 0.20 / `macd_hist` 0.15 / `rsi` 0.15) is replaced by the
+  value that zeroes its term and its weight is withheld from the confidence; `adx` is a
+  MAGNITUDE scaler, so a missing one substitutes 0.0 (flooring `adx_factor` at 0.3,
+  collapsing the needle toward 50) and leaves confidence alone. All five non-finite →
+  `TrendSub(50.0, 0.0)`, which drops the 45%-weighted price input out of `blend_trend`.
+  ±inf, `None` and junk are handled identically; it never raises.
+- **After:** the live gauge reads **50.0 / 0.0** and `_structural_trend` **50.0 / 0.067**
+  (the surviving 0.0 vwap is real information). End-to-end on the canned bull fixture the
+  price sub-score went **93.9 at confidence 1.0 → 59.9 at confidence 0.0** (the 59.9 is
+  step 1b's session-structure blend, which is still a genuine reading).
+- **Finite input is bit-identical BY CONSTRUCTION** — an all-finite call early-returns the
+  untouched `score_price`, never reaching the substitution branch. Verified anyway:
+  **302,944** finite comparisons (200k randomized incl. ±0.0/1e±12/1e±300, a 12⁴×4
+  exhaustive grid over the clamp boundaries, 20k int-input calls), **0** mismatches; plus
+  **30,003** comparisons pinning the `_finite_pcts` refactor onto the shared `_as_finite`.
+- **Mutation-tested**: bypassing the guard turns 5 of the 7 new tests red; reverting call
+  site A alone reds `test_live_day_gauge_...`, call site B alone reds
+  `test_structural_trend_...` — each side independently covered.
+- **`_clamp` itself was considered and rejected** as the fix site; the reasoning is now a
+  standing note in CLAUDE.md (nine private copies; no single right answer inside the
+  primitive).
+- **Reachability is narrower than the write-up assumed, and that is worth recording:**
+  `technical.calculate_rsi` / `calculate_adx` **cannot** return NaN — both end in an
+  explicit `pd.isna` fallback (50.0 / 20.0) — `calculate_vwap` returns `None` (→ the
+  `else 0.0` branch) and `alignment_percentage` is built from ±1/0 scores. Probed live, the
+  only NaN that reaches `score_price` today is `macd_hist`, which is already benign
+  (`nan > 0` and `nan < 0` are both False → `m = 0`). So this is defense-in-depth against a
+  future change to those fallbacks, not a live outage — unlike the sector side, which IS
+  reachable via `_fetch_closes`' bare `float(c)` + `_pct_change_n`.
+- Tests: `services/sentiment_svc` **293 passed / 1 failed** (up from 286/1), the failure the
+  documented `test_compute_regime.py::test_daily_history_wins_over_session_latch`.)
+
+---
+
 **Last updated:** 2026-08-17 (**The pushed Market Snapshot's "Market Read" rebuilt as the
 Market Regime Console.**
 - **The complaint was right and the cause is structural.** `services/options_svc/market_snapshot.py`

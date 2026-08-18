@@ -839,12 +839,29 @@ Per-page detail moved to [docs/webgui-routes.md](docs/webgui-routes.md). Each fe
 has its own design/plan pair under `docs/plans/`. **Add new work to those, not to this file**
 — see the maintenance banner at the top.
 
-**⚠ Known open issue — the PRICE sub-score NaN exposure (not fixed).**
-`sentiment_svc/compute._finite_pcts` guards only the SECTOR input. An all-NaN read of the
-structural price inputs (`macd_hist`/`rsi`/`adx`, feeding `score_price` with a hardcoded
-`vwap_pct=0.0`) scores **82.50 — near-maximum bullish — at UNCHANGED confidence**, where a
-sane read scores 56.25; the same all-NaN read in `compute_intraday_trend` (the LIVE Day
-gauge) scores **92.50**. The fix must cover both call sites with one shared filter.
+**A NaN clamps to the HIGH bound, so "no reading" renders as an EXTREME reading —
+the trap behind two separate bugs in `sentiment_svc/compute.py`.** Every
+`scoring/*` module defines its own private `_clamp(v, lo, hi) = max(lo, min(hi, v))`,
+and `min(hi, nan)` returns **`hi`**. So an unguarded non-finite indicator does not
+degrade — it pins the maximum. It bit the SECTOR sub-score first
+(`score_sector_participation(5, 11, nan)` → 67.27 at confidence **1.0**, maximum
+cyclical leadership), fixed by `_finite_pcts`; then the PRICE sub-score, where an
+all-NaN read scored **92.50 at confidence 1.0** through `compute_intraday_trend`
+(the LIVE Day gauge) and **82.50 at an unchanged 0.333** through `_structural_trend`
+— a data outage rendering as a confident buy signal, fixed 2026-08-17 by
+**`_finite_score_price`**, the single guarded wrapper BOTH price call sites go
+through. Both filters share `_as_finite`.
+
+**Do not "fix" this in `_clamp` itself** — it looks like the one-line cure and is
+not. `_clamp` is **duplicated nine times** across `sentiment-dashboard/scoring/`
+(`intraday_trend`, `aggression`, `effort`, `daily_direction`, `market_regime`,
+`order_flow`, `profile_shape`, `rejection_defense`, `session_structure`), so
+patching one covers a ninth of the surface; and there is no single right answer
+inside the primitive — a NaN reaching `_clamp(50 + 50*direction, 0, 100)` means
+"neutral 50", reaching `_clamp(adx/40, 0.3, 1.0)` means "floor the magnitude", and
+reaching `_clamp(n_timeframes/3, 0, 1)` means "confidence 0", not the midpoint 0.5.
+**Only the caller knows what a missing input implies**, which is why the guard
+belongs at the call site. When you add a new scorer call, filter its inputs there.
 
 **⚠ Known open issue — Sector & Industry and Sector Rotation can print OPPOSITE
 regime verdicts (not fixed; found 2026-08-17).** The two adjacent tabs each
