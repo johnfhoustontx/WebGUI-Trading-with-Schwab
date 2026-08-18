@@ -144,6 +144,57 @@ def test_alignment_counts_only_stocks_where_all_three_levels_agree():
     assert V.alignment_count(None) == 0
 
 
+def test_the_alignment_panel_lists_the_names_behind_its_count():
+    # The count says HOW MANY have industry and sector behind them; the whole
+    # value of the panel is WHICH, because that is the list you act on.
+    a = V.aligned_names(_levels())
+    assert a["count"] == 26
+    assert [m["symbol"] for m in a["members"]] == [f"K{i}" for i in range(26)]
+
+
+def test_the_count_and_the_list_cannot_disagree():
+    # One filter, two readings — the number on the panel is len() of the list
+    # beneath it, so a change to the rule can never move only one of them.
+    for lv in (_levels(), {"stock": []}, None):
+        assert V.alignment_count(lv) == len(V.aligned_names(lv)["members"])
+
+
+def test_aligned_names_are_ordered_by_rank_so_the_head_leads_the_board():
+    rows = [_row("C", 0.5, 0.1, 90, 30, align=[True, True, True]),
+            _row("A", 0.9, 0.1, 99, 2, align=[True, True, True]),
+            _row("B", 0.7, 0.1, 95, 11, align=[True, True, True])]
+    assert [m["symbol"] for m in V.aligned_names({"stock": rows})["members"]] ==         ["A", "B", "C"]
+
+
+def test_a_rankless_aligned_row_sorts_last_rather_than_first():
+    rows = [_row("NR", 0.9, 0.1, 99, None, align=[True, True, True]),
+            _row("A", 0.5, 0.1, 90, 4, align=[True, True, True])]
+    assert [m["symbol"] for m in V.aligned_names({"stock": rows})["members"]] ==         ["A", "NR"]
+
+
+def test_aligned_chips_carry_what_a_chip_needs():
+    m = V.aligned_names(_levels())["members"][0]
+    for key in ("symbol", "label", "score", "rank", "sector", "industry"):
+        assert key in m
+
+
+def test_the_aligned_head_is_the_head_of_the_same_list():
+    a = V.aligned_names(_levels(), head=8)
+    assert [m["symbol"] for m in a["names"]] ==         [m["symbol"] for m in a["members"][:8]]
+    assert a["more"] == 18
+
+
+def test_no_head_means_the_whole_list_is_shown():
+    a = V.aligned_names(_levels())
+    assert a["names"] == a["members"] and a["more"] == 0
+
+
+def test_aligned_names_survive_a_cold_cache():
+    for lv in (None, {}, {"stock": []}, {"stock": [_row("X", 1.0, 0.1, 9, 1)]}):
+        a = V.aligned_names(lv)
+        assert a == {"count": 0, "members": [], "names": [], "more": 0}
+
+
 # ── 3 · the quadrant panels ──────────────────────────────────────────────────
 def _quad_rows():
     return ([_row(f"L{i}", 1.0, 1.0, 90, i + 1, label=f"Lead {i}") for i in range(9)]

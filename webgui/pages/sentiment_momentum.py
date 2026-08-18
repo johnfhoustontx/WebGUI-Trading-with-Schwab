@@ -295,6 +295,13 @@ def render(level="industry"):
                 ui.label("The highest-conviction rows on the page — these are "
                          "the ones to take to Trade Analyzer.").classes(
                     f"text-[13.5px] leading-[1.5] {_ALIGN_BODY}")
+                # The names themselves, not just the count. Clicking one sends
+                # it to section 4 — and to the stock level, since that is the
+                # only level these rows exist on.
+                ui.label("By rank · click to decompose").classes(
+                    f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.14em] "
+                    "uppercase")
+                aligned_box = ui.row().classes("flex-wrap gap-[5px] w-full")
 
         # ── 3 · quadrants ───────────────────────────────────────────────────
         quad_step = ui.label("").classes(_STEP)
@@ -437,9 +444,22 @@ def render(level="industry"):
                     f"flex-[1_1_260px] text-[13.5px] leading-[1.45] "
                     f"{NT['body']}")
 
+    def _paint_aligned(levels):
+        aligned_box.clear()
+        a = V.aligned_names(levels)
+        align_lbl.text = str(a["count"])
+        with aligned_box:
+            if not a["members"]:
+                ui.label("No stock has both its industry and its sector "
+                         "behind it today.").classes(
+                    f"text-[12.5px] leading-[1.4] {NT['blurb']}")
+                return
+            for m in a["members"]:
+                _name_chip(m, V.ALIGN_CLASSES, pick=_select_aligned)
+
     def _paint_levels(levels):
         levels_box.clear()
-        align_lbl.text = str(V.alignment_count(levels))
+        _paint_aligned(levels)
         with levels_box:
             for b in V.level_bars(levels):
                 with ui.element("div").classes(
@@ -463,15 +483,21 @@ def render(level="industry"):
                         ui.label(f"of {b['total']}").classes(
                             f"{_MONO} {NT['rail']} text-[11px]")
 
-    def _name_chip(member, cls):
+    def _name_chip(member, cls, pick=None):
         """One clickable name. Clicking drives section 4 rather than navigating
         — the whole point is to decompose it without losing your place."""
         sel = member["symbol"] == state["selected"]
-        ui.button(member["label"], color=None,
-                  on_click=lambda _e=None, sym=member["symbol"]: _select(sym))             .props("flat no-caps dense")             .classes(f"{_MONO} {cls['chip_txt']} {cls['chip']} text-[10.5px] "
+        act = pick or _select
+        btn = ui.button(member["label"], color=None,
+                        on_click=lambda _e=None, sym=member["symbol"]: act(sym))             .props("flat no-caps dense")             .classes(f"{_MONO} {cls['chip_txt']} {cls['chip']} text-[10.5px] "
                      "tracking-[.06em] px-2.5 py-[5px] max-w-full normal-case "
                      "leading-none min-h-0"
                      + (f" ring-1 {_SEL_RING}" if sel else ""))
+        # A ticker alone does not say what it is; the row already carries both.
+        where = " · ".join(x for x in (member.get("sector"),
+                                       member.get("industry")) if x)
+        if where:
+            btn.tooltip(where)
 
     def _paint_quadrants(rows):
         quad_box.clear()
@@ -696,6 +722,18 @@ def render(level="industry"):
         rows = rows_for(p, state["level"])
         _paint_example(rows)
         _paint_quadrants(rows)      # so the selected chip shows its ring
+        _paint_aligned(p.get("levels") or {})
+
+    @guard
+    def _select_aligned(symbol):
+        """Pick an aligned name. These are stocks, and section 4 can only
+        decompose a row on the level it is showing — so this switches the level
+        too rather than falling back to the leader with no explanation."""
+        if state["level"] != "stock":
+            state["level"] = "stock"
+            level_sel.value = "stock"      # fires _set_level, which clears
+        state["selected"] = symbol or None  # ...so the pick is set after it
+        _apply()
 
     @guard
     def _set_level(value):

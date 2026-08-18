@@ -147,13 +147,46 @@ def level_bars(levels):
     return out
 
 
+def _member(row):
+    """One row reduced to what a clickable name chip needs."""
+    return {
+        "symbol": row.get("symbol"),
+        "label": str(row.get("label") or row.get("symbol") or ""),
+        "score": _num(row.get("score")),
+        "rank": _num(row.get("rank")),
+        "sector": str(row.get("sector") or ""),
+        "industry": str(row.get("industry") or ""),
+    }
+
+
+def aligned_names(levels, head=None):
+    """The stocks behind the alignment count — **which**, not just how many.
+
+    Ordered by rank, so the head of this list is the head of the board. ``head``
+    splits off a visible run and reports the remainder in ``more``; with no
+    ``head`` the whole membership is the visible list, which is the page's
+    default because a list you have to expand is not a list you act on.
+
+    ``alignment_count`` is ``len()`` of this, deliberately — the number printed
+    above the chips and the chips themselves come out of one filter, so a change
+    to the rule cannot move only one of them."""
+    rows = [r for r in ((levels or {}).get("stock") or [])
+            if list(r.get("alignment") or []) == [True, True, True]]
+    rows.sort(key=lambda r: (_num(r.get("rank")) is None,
+                             _num(r.get("rank")) or 9e9,
+                             -(_num(r.get("score")) or -9e9)))
+    members = [_member(r) for r in rows]
+    shown = members if head is None else members[:max(0, int(head))]
+    return {"count": len(members), "members": members,
+            "names": shown, "more": max(0, len(members) - len(shown))}
+
+
 def alignment_count(levels):
     """Stocks whose industry **and** sector both confirm — all three true.
 
     The highest-conviction rows on the page, and the only number here that says
     the three levels are telling one story rather than three."""
-    return sum(1 for r in ((levels or {}).get("stock") or [])
-               if list(r.get("alignment") or []) == [True, True, True])
+    return aligned_names(levels)["count"]
 
 
 # ── 3 · the quadrant panels ──────────────────────────────────────────────────
@@ -198,12 +231,7 @@ def quadrant_panels(rows, top_names=3):
         # the question this section exists to answer, and a three-name teaser
         # cannot answer it. The page shows the head inline and the tail behind
         # an expander, but both come from one list so they cannot disagree.
-        members = [{
-            "symbol": r.get("symbol"),
-            "label": str(r.get("label") or r.get("symbol") or ""),
-            "score": _num(r.get("score")),
-            "rank": _num(r.get("rank")),
-        } for r in got]
+        members = [_member(r) for r in got]
         out.append({
             "name": q, "count": len(got), "blurb": QUAD_BLURB[q],
             "share": f"{round(len(got) / total * 100) if total else 0}%",
@@ -470,6 +498,13 @@ POS_BAR = f"bg-[{oklch_hex(0.70, 0.12, 158)}]"
 NEG_BAR = f"bg-[{oklch_hex(0.66, 0.15, 22)}]"
 ALIGN_ON = f"bg-[{oklch_hex(0.72, 0.13, 158)}]"
 ALIGN_OFF = f"bg-[{oklch_hex(0.24, 0.01, 90)}]"
+# The aligned-name chips. Same shape as a QUAD_CLASSES entry so they go through
+# the page's one chip builder, on the align panel's own green rather than a
+# quadrant hue — an aligned name is not a fifth corner.
+ALIGN_CLASSES = {
+    "chip": f"bg-[{oklch_hex(0.225, 0.032, 158)}]",
+    "chip_txt": f"text-[{oklch_hex(0.87, 0.06, 158)}]",
+}
 HILITE_TXT = f"text-[{oklch_hex(0.84, 0.11, 232)}]"
 LEVEL_FILL = f"bg-[{oklch_hex(0.68, 0.11, 232)}]"
 LEVEL_TRACK = f"bg-[{oklch_hex(0.26, 0.006, 90)}]"
