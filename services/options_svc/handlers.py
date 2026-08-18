@@ -1442,7 +1442,8 @@ def run_market_snapshot(bus, slot):
         push_notify.send_market_snapshot(dashboard, trend, sentiment, regime,
                                          intraday, regime_hist, slot=slot,
                                          derived=(comp.get("derived") or {}),
-                                         snaps=(hist.get("snaps") or []))
+                                         snaps=(hist.get("snaps") or []),
+                                         composite_at=comp.get("composite_at"))
     except Exception:  # noqa: BLE001 — the push primitives shouldn't raise, belt+braces.
         log.exception("market snapshot %s: push failed", slot)
     try:

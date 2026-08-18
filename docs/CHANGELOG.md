@@ -4,6 +4,67 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-17 (**The pushed Market Snapshot's "Market Read" rebuilt as the
+Market Regime Console.**
+- **The complaint was right and the cause is structural.** `services/options_svc/market_snapshot.py`
+  is an INDEPENDENT RENDERER — not a screenshot — so `/sentiment`'s rebuild into the Market Regime
+  Console left it untouched, silently, because nothing fails when it drifts. It was last aligned on
+  2026-08-16 (`d946ceb`) and was one whole design behind: ring + sparkline + one-line explainer per
+  panel, where the app now shows Sentiment / Trend / Signals cards over a regime block.
+- **New module `services/options_svc/market_console.py`** carries the mirror. It cannot import the
+  page (Tier 1 imports `nicegui`), so the two are kept in step by CONTRACT, and that module IS the
+  contract: every constant and pure decision names the Tier-1 function it mirrors —
+  `pages/console.py` (bands, meters, tag splitting), `console_cards.py` (hero/delta/tones/
+  divergence), `console_regime.py` (regime colours, sparkline, change text), `regime_mix.py`
+  (session slicing, ranked rows, callouts, lead margin), `console_dial.py` (the confidence dial),
+  `console_page.py` (chips, order, footer), and `config/theme.toml [console]` (the palette, hard-
+  coded as `PALETTE`). This widens the pattern that already existed for three ring constants to the
+  whole screen, which is what actually drifted.
+- **A units bug went with it.** The old Sentiment panel put the **0-10 composite ("5.0")** in its
+  ring centre while its own WEEK/MONTH legend read **0-100 (57 / 53)** — three numbers on one dial
+  on two scales. The hero, the meters and the ruler are now all 0-100, and the 0-10 composite
+  survives only inside the bias pill (`NEUTRAL 5.04`), labelled by the word beside it. `to100` lives
+  in exactly one place (`sentiment_arcs`).
+- **Threaded through:** `composite_at` (handlers → `push_notify.send_market_snapshot` →
+  `market_snapshot_doc`) for the DATA AS OF chip — the only thing in a still image that says whether
+  the numbers under it are current. Nothing else new was needed; `derived`, `snaps` and
+  `regime_history` already carried everything the console reads.
+- **Dropped rather than faked**, because their meaning is an INTERACTION a PNG cannot offer: the
+  `COMPONENTS →` / `TREND DETAIL →` popup links, the header dot's pulse animation (drawn as a static
+  dot with the same glow), and the busy/refresh overlay. The Signals meta reads `4 READS`, not
+  `4 READS · LIVE` — freshness belongs on the DATA AS OF chip in a still frame. The old push's
+  intraday sparklines went too: they were never part of the console (on `/sentiment` they live below
+  it in their own charts), and the Day/Week/Month meters plus the vs-WEEK / vs-MONTH deltas carry
+  that story. `intraday` stays in the signature; the handler still caches it.
+- **One deliberate ADDITION to the mirror:** the regime `transition` line, which `/sentiment` dropped.
+  A page can be re-read at any moment; a 30-minute image is one glance, and "mid-flip" is worth its
+  one line. It renders DISPLAY words — a `mean_reversion → trending` reaching a phone is the bug the
+  regime rename exists to prevent, and it is what this line used to say.
+- **Two traps hit while building, both invisible in the HTML string.** (1) A blanket
+  `.cn span{display:inline-block}` sits at specificity (0,1,1) and out-ranks every single-class rule
+  after it, so `.cn-sname{display:flex}` silently lost and the share rows stacked their swatch above
+  the name. (2) `DISPLAY_FONT` is interpolated into an SVG `font-family="…"` ATTRIBUTE, so a DOUBLE
+  quote in the stack terminates it early — the dial's regime name rendered in the default face until
+  the stack was respelled with single quotes. Both were caught only by rendering.
+- **The display face is local-only, deliberately.** Tier 1 loads Rajdhani from Google Fonts; a
+  render-blocking `<link>` inside a scheduled push turns one DNS hiccup into a snapshot that degrades
+  to a text caption. Measured headless ("TRENDING", 40px/4px tracking): remote Rajdhani **186** css
+  px, local **Bahnschrift 214**, Segoe UI **231** — so `Rajdhani,Bahnschrift,'Segoe UI Semibold',…`
+  keeps the condensed feel with no network at all.
+- **Measured, prod db-0 live caches → PNG at `DOC_WIDTH` 1450.** Before: 585,739 bytes, 2900x4898.
+  After: 2,102,755 bytes, 2900x6338 (3169 css px) — the console block adds ~720 css px and the cap is
+  `push_notify._MS_MAX_BYTES` 7,500,000, so ~28% of budget. A degraded render (no history, no prior
+  session, a zero-confidence horizon) was verified separately: NO READ hatches, em-dash dial,
+  "Waiting for regime…", em-dash callouts — nothing fabricated anywhere.
+- **Tests:** new `test_market_console.py` (**57**) pins the bands, the no-read path, the scale, the
+  ranked-share maths, both SVG builders and the assembly order; `test_market_snapshot.py` rewritten
+  (**19**) around the board, the horizon values and the ctx. The 2026-08-16 panel builders
+  (`gauge_svg`, the value `sparkline_svg`, the stacked `regime_mix_svg`, the three `*_panel_html`)
+  were DELETED and their tests went with their subjects. `services/options_svc` **1148 passed /
+  0 failed**, against a **1102 / 0** baseline taken the same day.
+
+---
+
 **Last updated:** 2026-08-17 (**Documentation + `.claude` sweep after the four rebuilds, the
 cleanup and the promote.**
 - **CLAUDE.md test baseline refreshed: webgui 1356 → 1826**, re-measured today. Noted that the
