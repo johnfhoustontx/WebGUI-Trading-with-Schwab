@@ -59,6 +59,33 @@ ranked broad-market frame, and a guaranteed newest-first Captured table.**
   summary on every publish (a close changes the day's closed count as it happens), and
   a source-level test pins the single remaining `cache_set(CACHE_CAPTURED,` call site.)
 
+**Prior — 2026-08-19** (**`promote.bat` half-completed a live promotion, and the fix
+for it had been written four days earlier on a branch nobody merged.**
+- **The defect.** `call stop_all.bat` and `call start_all_wt.bat nowindow` are bare
+  names, and cmd will not search the working directory when
+  `NoDefaultCurrentDirectoryInExePath` is set — which it is in an automation shell.
+  A failed `call` **does not abort the script**, so the promotion took the worst
+  possible shape: both guards passed, the stop never ran, `git pull --ff-only`
+  **succeeded**, and the restart never ran. Prod was left with new code on disk, old
+  code in memory, and its proxy down with nothing behind it to bring it back.
+  Recovery was a manual `.\stop_all.bat` then `.\start_all_wt.bat nowindow` with
+  explicit path prefixes, verified by an HTTP probe of all eight ports.
+- **The fix is the path, not the cwd.** `cd /d "%~dp0.."` at the top of promote.bat
+  does make the repo root current — and current is exactly what cmd refuses to
+  search. Both calls are now `call "%~dp0..\<name>"`.
+- **⚠ The real lesson is about delivery, not batch files.** This exact bug was
+  diagnosed and fixed on **2026-08-15 in `29e00d0`**, complete with a whole-repo
+  test — on branch `claude/dashboard-design-update-aaae7a`, which was **never merged
+  into `Using_Highcharts` or `main`**. So it never reached dev, never reached prod,
+  and the identical failure recurred four days later against a fix that already
+  existed in the object store. `git merge-base --is-ancestor 29e00d0 main` answers
+  NO. **A commit on an unmerged branch is not a fix**, which is the same rule the
+  development section states for features and is evidently worth restating for
+  repairs. That commit's guard — `tools/tests/test_batch_call_paths.py`, which
+  covers every `.bat` in the repo rather than the four launchers, matches `call foo`
+  with no extension, and excludes `call :label` — was **recovered from it and
+  merged** rather than rewritten, since it was the better of the two.)
+
 **Prior — 2026-08-18** (**The Desk — a single-screen home page, and the first
 Tier-2 change the webgui has needed in a while.**
 - **What shipped.** `/desk`, pinned alone at the top of the rail and now the target of
