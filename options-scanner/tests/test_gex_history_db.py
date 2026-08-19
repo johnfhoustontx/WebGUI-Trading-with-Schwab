@@ -454,6 +454,59 @@ def test_load_today_with_grid_empty_when_no_json(tmp_path, monkeypatch):
     assert rows[0][6] == {}
 
 
+def test_latest_grid_row_returns_only_the_newest_row(tmp_path, monkeypatch):
+    """One row, one grid decode — the point of the function.
+
+    load_date_with_grid(...)[-1] would answer the same question by decoding every
+    grid in the session; the matrix build runs this once per symbol per minute for
+    ~45 symbols, so it must touch exactly the newest row.
+    """
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    summary = lambda ts, spot, net: {
+        "ts": ts, "spot": spot, "flip": None,
+        "top_pos_strike": None, "top_neg_strike": None, "net_total": net,
+    }
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 120, 100.0, 5.0),
+                       {100.0: {"call": 1.0, "put": -1.0, "net": 0.0}}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now, 101.0, 7.0),
+                       {101.0: {"call": 2.0, "put": -1.0, "net": 1.0}}, 1)
+    row = db.latest_grid_row(conn, "SPY", "gex")
+    assert row is not None
+    ts, spot, net_total, grid = row
+    assert (ts, spot, net_total) == (now, 101.0, 7.0)
+    # Float keys, like every other grid reader here.
+    assert grid == {101.0: {"call": 2.0, "put": -1.0, "net": 1.0}}
+
+
+def test_latest_grid_row_is_none_when_symbol_or_view_has_no_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    assert db.latest_grid_row(conn, "NOPE", "gex") is None
+    db.insert_snapshot(conn, "SPY", "gex", _make_summary(int(time.time())),
+                       {100.0: {"call": 1.0, "put": -1.0, "net": 0.0}}, 1)
+    assert db.latest_grid_row(conn, "QQQ", "gex") is None      # other symbol
+    assert db.latest_grid_row(conn, "SPY", "charm") is None    # other view
+
+
+def test_latest_grid_row_is_date_bounded(tmp_path, monkeypatch):
+    """Date-bounded like its siblings: today's query cannot see yesterday's row,
+    and an explicit ``date`` reaches the prior session (gamma persistence)."""
+    import datetime as _dt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    yesterday = _dt.date.today() - _dt.timedelta(days=1)
+    grid = {100.0: {"call": 0.5, "put": -0.25, "net": 0.25}}
+    db.insert_snapshot(conn, "SPY", "gex", _make_summary(_day_ts(1)), grid, 1)
+    assert db.latest_grid_row(conn, "SPY", "gex") is None
+    row = db.latest_grid_row(conn, "SPY", "gex", date=yesterday)
+    assert row is not None and row[3] == grid
+
+
 def test_last_snapshot_age_no_data(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

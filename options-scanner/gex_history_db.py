@@ -471,6 +471,46 @@ def load_today_with_grid(
     return load_date_with_grid(conn, symbol, view, None)
 
 
+def latest_grid_row(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str = "gex",
+    date=None,
+) -> tuple | None:
+    """The NEWEST ``(ts, spot, net_total, grid)`` for (symbol, view) on LOCAL
+    ``date`` (default today), or ``None`` when there is no row.
+
+    Deliberately NOT ``load_date_with_grid(...)[-1]``: that decodes EVERY grid in
+    the session to hand back one of them. Re-decoding the whole session every
+    refresh was the single largest CPU burn in the options service — the reason
+    the gamma snapshot became incremental — and the caller here is worse still: the
+    matrix build runs once a minute across ~45 symbols, so a whole-session decode
+    per symbol would multiply that cost by the watchlist.
+
+    Unlike its ``latest_flip`` / ``session_dte`` / ``latest_spot_flip`` siblings
+    this one DOES read ``gex_json``, because per-strike walls can only come from
+    the grid — but it reads exactly one row's worth. Same sargable
+    ``ts >= ? AND ts < ?`` range as every other reader here.
+    """
+    start, end = _local_unix_range(date)
+    cur = conn.execute(
+        """
+        SELECT ts, spot, net_total, gex_json
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+           AND ts >= ? AND ts < ?
+         ORDER BY ts DESC
+         LIMIT 1
+        """,
+        (symbol, view, start, end),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return (*row[:3], _decode_grid(row[3]))
+
+
 def latest_flip(
     conn: sqlite3.Connection,
     symbol: str,
