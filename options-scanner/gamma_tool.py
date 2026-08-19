@@ -1222,13 +1222,33 @@ class GammaEngine:
 
         # Flip point: linear interpolation where net crosses zero near spot.
         # Collect all crossings within ±3% band, then pick nearest to spot.
+        #
+        # The comparison is STRICT (`< 0`, not `<= 0`) since 2026-08-19: a strike
+        # whose net GEX is exactly zero is the ABSENCE of data, not a level, and
+        # interpolating a "crossing" onto the boundary of a dead run invents a
+        # structural feature out of an untraded strike.
+        #
+        # This is not hypothetical. Index chains list far more strikes than
+        # trade: measured that day, $NDX carried ~135 zero-net strikes and $SPX
+        # ~45 inside this ±3% band, while SPY and QQQ carried NONE. Under the old
+        # non-strict test that manufactured 8.9 of $NDX's 23.6 candidates per
+        # snapshot -- and since the selection below picks the crossing NEAREST
+        # SPOT, an inflated candidate set degenerates into "report a level near
+        # spot". That is why the index flip tracked spot (corr +0.85/+0.97) while
+        # the ETFs did not (-0.10/-0.47), and why the above/below bit every
+        # downstream consumer reads changed 31% of minutes for $NDX vs 1% for SPY.
+        #
+        # The filter is a no-op for SPY/QQQ (no dead strikes), which is what makes
+        # it safe to ship alone. The selection rule is a SEPARATE question and is
+        # deliberately unchanged -- every alternative tested made the ETFs worse.
+        # docs/plans/2026-08-19-gamma-flip-spot-tracking-design.md
         strikes = sorted(gex.keys())
         flip = None
         candidates = []
         for i in range(len(strikes) - 1):
             s1, s2 = strikes[i], strikes[i + 1]
             v1, v2 = gex[s1]["net"], gex[s2]["net"]
-            if v1 * v2 <= 0 and (v2 - v1) != 0:
+            if v1 * v2 < 0 and (v2 - v1) != 0:
                 if abs(s1 - spot) <= spot * 0.03 or abs(s2 - spot) <= spot * 0.03:
                     interp = s1 + (s2 - s1) * (-v1) / (v2 - v1)
                     candidates.append(round(interp, 2))
