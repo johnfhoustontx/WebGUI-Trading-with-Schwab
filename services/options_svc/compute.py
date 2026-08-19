@@ -1665,11 +1665,18 @@ def _matrix_dealer_levels(gh, conn, symbol, session_date):
     contract is the disambiguator: the put wall is strictly BELOW spot, the call
     wall strictly ABOVE.
 
-    Every value degrades to None, never 0.0: index OI reads 0 after hours, so an
-    all-zero grid produces ARBITRARY walls, and the Desk withholds a wall it
-    cannot trust rather than printing a confident wrong one. ``net_gex`` is the
-    stored ``net_total`` COLUMN — a whole-chain aggregate computed at insert, NOT
-    reconstructable from the grid, which may be cropped and rounded. Never raises.
+    An unavailable value degrades to None, never 0.0 — 0.0 would render as a
+    confident wall at strike zero. ``net_gex`` is the stored ``net_total``
+    COLUMN — a whole-chain aggregate computed at insert, NOT reconstructable
+    from the grid, which may be cropped and rounded. Never raises.
+
+    ⚠ **This does NOT protect against the after-hours all-zero grid.** Index OI
+    reads 0 outside RTH, and the picker's ``max``/``min`` over an all-zero side
+    returns the FIRST strike it sees — verified: a 95/105/110 grid of pure zeros
+    yields ``put_wall 95, call_wall 105``. So off-hours ``$SPX``/``$NDX`` walls
+    are arbitrary and non-None, and nothing here can tell them from real ones.
+    Guarding it belongs upstream (the picker, or a zero-OI check at insert),
+    not in a per-symbol reader that would be the only caller holding the rule.
     """
     blank = {"call_wall": None, "put_wall": None, "net_gex": None}
     try:
