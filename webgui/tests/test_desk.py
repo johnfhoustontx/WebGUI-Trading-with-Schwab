@@ -374,3 +374,51 @@ def test_positions_summary_skips_a_non_finite_pnl_rather_than_poisoning_the_tota
         _pos("b", unrealized_pnl=float("nan")),
     ]}, None)
     assert d.positions_summary(rows)["unrealized"] == 50.0
+
+
+# ── freshness_facts ──────────────────────────────────────────────────────────
+def _status(**over):
+    st = {"status_label": "Collecting", "status_color": "#22c55e",
+          "last_scan": "9:31 AM", "next_scan": "9:32 AM",
+          "age_seconds": 41, "session": "Regular"}
+    st.update(over)
+    return st
+
+
+def test_freshness_facts_with_no_probe_is_unknown_not_live():
+    """The drawer's status card rule: no probe data reads 'unknown', never a
+    confident 'live'. This is also what gates ``dealer_rows(stale=…)``, so a
+    wrong guess here promotes off-hours walls to trustworthy."""
+    f = d.freshness_facts(None)
+    assert f["stale"] is True and "unknown" in f["label"].lower()
+
+
+def test_freshness_facts_is_unknown_for_a_view_with_no_age():
+    for view in ({}, _status(age_seconds=None), _status(age_seconds="soon"),
+                 _status(age_seconds=float("nan")), "nonsense"):
+        f = d.freshness_facts(view)
+        assert f["stale"] is True and "unknown" in f["label"].lower()
+
+
+def test_freshness_facts_is_live_during_collection():
+    f = d.freshness_facts(_status(age_seconds=41))
+    assert f["stale"] is False and "live" in f["label"].lower()
+    assert f["age_seconds"] == 41
+
+
+def test_freshness_facts_is_stale_on_a_large_age():
+    f = d.freshness_facts(_status(age_seconds=3600))
+    assert f["stale"] is True and "stale" in f["label"].lower()
+
+
+def test_freshness_facts_threshold_is_exactly_at_the_boundary():
+    assert d.freshness_facts(_status(age_seconds=d.STALE_AFTER_SEC))["stale"] is False
+    assert d.freshness_facts(
+        _status(age_seconds=d.STALE_AFTER_SEC + 1))["stale"] is True
+
+
+def test_freshness_facts_carries_the_collector_strip_fields_through():
+    f = d.freshness_facts(_status())
+    assert f["last_scan"] == "9:31 AM" and f["next_scan"] == "9:32 AM"
+    assert f["session"] == "Regular"
+    assert f["status_label"] == "Collecting"

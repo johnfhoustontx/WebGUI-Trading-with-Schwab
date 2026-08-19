@@ -378,3 +378,50 @@ def positions_summary(rows):
         "unrealized": round(total, 2),
         "at_risk": sum(1 for r in rows if r.get("rescue_state") in AT_RISK_STATES),
     }
+
+
+# ── freshness ────────────────────────────────────────────────────────────────
+# How old the last GEX snapshot may be before the Desk stops calling the feed
+# live. The collector runs on a ONE-MINUTE cadence, and a slot legitimately runs
+# late — its chain fan-out eats 15-35 s of the 60 s budget — so a single slot's
+# jitter must not raise a warning. 150 s is one whole missed slot plus the
+# in-flight one: late is normal, twice late is a problem.
+STALE_AFTER_SEC = 150
+
+_UNKNOWN_LABEL = "Data age unknown"
+
+
+def freshness_facts(gex_status_view):
+    """Is the GEX feed current? — the Desk's honest replacement for a green dot.
+
+    The mockup this page came from painted a permanent "STREAMING" pill, which
+    is a claim the app cannot back: the collector stops outside its window, and
+    it can die mid-session. This reads the age the collector itself publishes.
+
+    **No probe data reads "unknown", never "live"** — the same rule the drawer's
+    service-status card follows, and it matters more here, because ``stale``
+    gates ``dealer_rows``: a wrong "live" promotes off-hours walls (drawn from an
+    all-zero, OI-less grid) back to trustworthy. Note that a closed market reads
+    stale, which is correct rather than pessimistic — nothing is collecting, so
+    nothing on the screen is a current read of dealer positioning.
+    """
+    st = gex_status_view if isinstance(gex_status_view, dict) else {}
+    age = _finite(st.get("age_seconds"))
+    facts = {
+        "age_seconds": age,
+        "last_scan": st.get("last_scan"),
+        "next_scan": st.get("next_scan"),
+        "session": st.get("session") or "",
+        "status_label": st.get("status_label") or "",
+    }
+    if age is None:
+        return {**facts, "stale": True, "label": _UNKNOWN_LABEL}
+    if age <= STALE_AFTER_SEC:
+        return {**facts, "stale": False, "label": f"Live · {_age_text(age)}"}
+    return {**facts, "stale": True, "label": f"Stale · {_age_text(age)}"}
+
+
+def _age_text(age):
+    """'41s ago' / '4m ago' — matching the collector strip's own phrasing."""
+    secs = int(age)
+    return f"{secs}s ago" if secs < 60 else f"{secs // 60}m ago"
