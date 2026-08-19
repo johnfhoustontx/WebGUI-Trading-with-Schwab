@@ -4,9 +4,9 @@ Found by inspection of the new `/desk` Dealer Positioning panel, which shows fou
 symbols' flips side by side and refreshes every minute. The defect long predates
 that page — the single-symbol Gamma page simply never put `$NDX` next to SPY.
 
-**Status: root cause established and measured. Step 1 of the fix is implemented
-(zero-strike filter). The selection rule is deliberately NOT changed — see
-[What is not being fixed yet](#what-is-not-being-fixed-yet).**
+**Status: root cause established and measured. Steps 1 and 2 are implemented.
+$SPX is fixed; $NDX is halved but not fixed; the ETFs are untouched. See
+[the $NDX caveat](#-ndx-remains-partly-affected--known-not-overlooked).**
 
 ## The symptom
 
@@ -156,10 +156,72 @@ nobody traded is wrong independently of the tracking, and the cleaned candidate
 set is the correct basis on which to evaluate step 2. But it should not be
 described as a fix for the symptom.
 
-## What is not being fixed yet
+## The fix, step 2: require the sign to PERSIST (IMPLEMENTED)
 
-**The selection rule.** "Nearest to spot" is the proximate cause of the tracking,
-but the obvious replacements were tested and none is a clean win:
+A crossing counts only when the sign **holds for 2 live strikes on each side**
+(`_FLIP_PERSIST_STRIKES`). A genuine flip separates a sustained positive region
+from a sustained negative one; a profile that pops negative for one strike and
+returns is a lumpy strike, not a regime boundary.
+
+"Nearest to spot" is **kept** — with oscillation removed it is the right
+tie-break, and it is what makes SPY/QQQ correct today.
+
+**Zero-net strikes are SKIPPED when checking the run**, not counted as breaking
+it — the same principle as step 1. On an index ladder carrying ~135 dead strikes,
+treating a zero as a sign break would reject most genuine flips.
+
+### Why k=2, measured
+
+Every alternative was run over the session: strongest-crossing, cumulative
+totals, and re-binning the profile at 0.15 / 0.25 / 0.40% of spot, each crossed
+with k = 1 / 2 / 3.
+
+| bucket | k | $SPX range/flip-rate | $NDX | QQQ | SPY |
+|---|---|---|---|---|---|
+| none | 1 | 32.56 / 25% | 401 / 31% | 0.09 / 8% | 0.17 / 1% |
+| **none** | **2** | **1.08 / 1%** | **207 / 17%** | **0.09 / 8%** | **0.17 / 1%** |
+| none | 3 | **no flip on 323/324** | 121 / 2% | 0.09 / 8% | 0.17 / 1% |
+| 0.15% | 2 | 11.00 / 3% (179 misses) | 152 / 11% | 0.92 / 5% | 1.07 / 1% |
+| 0.25% | 2 | 43.68 / 11% (75 misses) | 258 / 8% | 1.47 / 2% | 1.22 / 2% |
+
+**No combination passed a strict acceptance bar.** Bucketing at any width widened
+the ETF ranges (SPY 0.17 → 1.07+), and k=3 destroyed `$SPX`. k=2 with no bucketing
+is the only rule that improves the indices while leaving the working symbols
+untouched.
+
+### Measured effect of the shipped rule
+
+| | corr(spot, flip) | flip range | above/below flips | misses |
+|---|---|---|---|---|
+| **$SPX** | +0.968 → **−0.374** | 32.56 → **1.08** | 25% → **1%** | 0/327 |
+| **$NDX** | +0.843 → +0.752 | 401.41 → **206.68** | 31% → **18%** | 0/241 |
+| QQQ | −0.252 → −0.099 | 0.09 → 0.10 | 8% → **7%** | 0/241 |
+| SPY | −0.414 → −0.394 | 0.17 → 0.18 | 1% → 1% | 0/241 |
+
+**`$SPX` is fixed. `$NDX` is halved, not fixed. The ETFs are untouched and nothing
+lost a reading.**
+
+### ⚠ $NDX remains partly affected — known, not overlooked
+
+Its 25-wide, unevenly-spaced ladder (5-wide near the money among 10-wide, the
+same unevenness documented as combing the Gamma heatmap) oscillates even at
+2-strike persistence: 18% of minutes still swap the above/below bit. No rule
+tested fixed it without damaging the symbols that work.
+
+The untested idea most likely to help is computing the flip on a **uniform strike
+ladder** — `gamma.uniform_strike_grid()` already exists for the heatmap and solves
+exactly this unevenness. That is a larger change (it moves what the engine
+computes on, not just how it selects) and belongs in its own investigation.
+
+Until then: **`$NDX`'s dealer-regime chip is materially more trustworthy than it
+was, and still the least trustworthy of the four.**
+
+## What is deliberately NOT changed
+
+**The nearest-to-spot tie-break is kept.** It is the proximate cause of the
+tracking only when the candidate set is noisy; with oscillation filtered out it
+is the correct rule, and it is why SPY/QQQ read correctly today. The replacements
+tested were all worse:
 
 | | current (nearest to spot) | strongest crossing |
 |---|---|---|

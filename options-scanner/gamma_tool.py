@@ -438,6 +438,61 @@ def _fmt_dollar_magnitude(val):
 # GammaEngine — pure computation, no UI
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# How many strikes either side of a zero crossing must keep their sign for it to
+# count as a gamma flip. A genuine flip separates a SUSTAINED positive region
+# from a sustained negative one; a profile that pops negative for one strike and
+# returns is a lumpy strike, not a regime boundary.
+#
+# 2 is measured, not chosen for elegance. Over the 2026-08-19 session, against
+# every alternative tried (strongest-crossing, cumulative totals, and re-binning
+# the profile at 0.15/0.25/0.40% of spot, each crossed with k = 1/2/3):
+#
+#   k=2 leaves SPY and QQQ BIT-IDENTICAL to the old rule (range 0.17 / 0.09,
+#       above-below flip rate 1% / 8%) - they never had the problem, and a fix
+#       that moved them would be the worse defect;
+#   k=2 fixes $SPX outright: flip range 32.56 -> 1.08, flip rate 25% -> 1%;
+#   k=2 halves $NDX: range 401 -> 207, rate 31% -> 17%;
+#   k=3 fixes $NDX but destroys $SPX - 323 of 324 snapshots report NO flip;
+#   re-binning at any width widened the ETF ranges (SPY 0.17 -> 1.07+).
+#
+# $NDX therefore remains PARTLY affected. Its 25-wide, unevenly-spaced ladder
+# oscillates even at 2-strike persistence, and no rule tested fixed it without
+# damaging the symbols that work. That is a known, documented limitation, not an
+# oversight: docs/plans/2026-08-19-gamma-flip-spot-tracking-design.md
+_FLIP_PERSIST_STRIKES = 2
+
+
+def _flip_sign_persists(strikes, gex, i, k=_FLIP_PERSIST_STRIKES):
+    """True when the sign holds ``k`` strikes either side of the crossing
+    between ``strikes[i]`` and ``strikes[i + 1]``.
+
+    ZERO-NET STRIKES ARE SKIPPED, not counted against the run. A strike nobody
+    traded is the absence of data - the same reason the crossing test itself is
+    strict - so it can neither confirm persistence nor deny it. Counting one as a
+    sign break would reject genuine flips that merely happen to sit beside an
+    untraded strike, which on an index ladder carrying ~135 dead strikes is most
+    of them.
+
+    Returns False when the grid does not offer ``k`` live strikes on both sides:
+    persistence that cannot be CHECKED is not persistence observed, and accepting
+    an unverifiable crossing at the edge of the ladder is how an artifact gets
+    promoted to a level.
+    """
+    def _run(start, step, ref):
+        seen, j = 0, start
+        while 0 <= j < len(strikes) and seen < k:
+            v = gex[strikes[j]]["net"]
+            if v != 0.0:
+                if v * ref <= 0:
+                    return False
+                seen += 1
+            j += step
+        return seen >= k
+
+    v1, v2 = gex[strikes[i]]["net"], gex[strikes[i + 1]]["net"]
+    return _run(i, -1, v1) and _run(i + 1, 1, v2)
+
+
 class GammaEngine:
     """Computes GEX from a Schwab option chain and manages snapshots."""
 
@@ -1250,6 +1305,12 @@ class GammaEngine:
             v1, v2 = gex[s1]["net"], gex[s2]["net"]
             if v1 * v2 < 0 and (v2 - v1) != 0:
                 if abs(s1 - spot) <= spot * 0.03 or abs(s2 - spot) <= spot * 0.03:
+                    # The sign must HOLD either side, or this is oscillation
+                    # rather than a regime boundary. Without it, "nearest to
+                    # spot" below picks whichever wobble happens to sit closest
+                    # to price - which is why the index flip tracked spot.
+                    if not _flip_sign_persists(strikes, gex, i):
+                        continue
                     interp = s1 + (s2 - s1) * (-v1) / (v2 - v1)
                     candidates.append(round(interp, 2))
         if candidates:

@@ -25,12 +25,16 @@ class TestSnapshotSummary:
         assert summary["net_total"] == 5.0 + 150.0 + (-280.0) + 5.0
 
     def test_flip_point_between_pos_and_neg(self):
+        # Four strikes, not three: the sign must be seen to HOLD two live strikes
+        # either side of the crossing (see TestFlipIgnoresDeadStrikes), and a
+        # three-strike fixture cannot show that. Real grids carry hundreds.
         data = {
             "spot": 6880.0,
             "gex": {
                 6875.0: {"call": 0, "put": 0, "net": 100.0},
                 6880.0: {"call": 0, "put": 0, "net": 50.0},
                 6885.0: {"call": 0, "put": 0, "net": -80.0},
+                6890.0: {"call": 0, "put": 0, "net": -100.0},
             },
         }
         summary = GammaEngine.snapshot_summary(data)
@@ -96,20 +100,28 @@ class TestFlipIgnoresDeadStrikes:
                 6875.0: {"call": 0, "put": 0, "net": 100.0},
                 6880.0: {"call": 0, "put": 0, "net": 50.0},
                 6885.0: {"call": 0, "put": 0, "net": -80.0},
+                6890.0: {"call": 0, "put": 0, "net": -100.0},
             },
         }
         assert GammaEngine.snapshot_summary(data)["flip"] == pytest.approx(
             6881.92, abs=0.01)
 
     def test_a_genuine_crossing_survives_dead_strikes_around_it(self):
-        """Dead strikes on both sides must not shadow the real sign change: the
-        old rule would have offered three candidates and taken the nearest to
-        spot, which is the dead-strike boundary at 6890, not the real flip."""
+        """Dead strikes must not shadow the real sign change. The old rule
+        offered the dead-strike boundary at 6890 as a candidate and, being
+        nearest spot (6889), returned it instead of the real flip.
+
+        This also pins that dead strikes are SKIPPED when checking that the sign
+        holds, rather than counted as breaking it — on an index ladder carrying
+        ~135 dead strikes, treating a zero as a sign break would reject most
+        genuine flips."""
         data = {
             "spot": 6889.0,
             "gex": {
+                6870.0: {"call": 0, "put": 0, "net": 150.0},
                 6875.0: {"call": 0, "put": 0, "net": 120.0},
                 6880.0: {"call": 0, "put": 0, "net": -60.0},   # the real flip
+                6882.0: {"call": 0, "put": 0, "net": -70.0},
                 6885.0: {"call": 0, "put": 0, "net": 0.0},     # dead
                 6890.0: {"call": 0, "put": 0, "net": 0.0},     # dead
                 6895.0: {"call": 0, "put": 0, "net": 90.0},
@@ -118,6 +130,59 @@ class TestFlipIgnoresDeadStrikes:
         flip = GammaEngine.snapshot_summary(data)["flip"]
         assert flip == pytest.approx(6878.33, abs=0.01), (
             "must report the genuine sign change, not a dead-strike boundary")
+
+    def test_a_crossing_that_immediately_reverses_is_not_a_flip(self):
+        """Oscillation, not structure. The profile pops negative for ONE strike
+        and returns - that is a lumpy strike, not a regime boundary. Requiring
+        the sign to hold either side is what separates the two."""
+        data = {
+            "spot": 6880.0,
+            "gex": {
+                6870.0: {"call": 0, "put": 0, "net": 100.0},
+                6875.0: {"call": 0, "put": 0, "net": 90.0},
+                6880.0: {"call": 0, "put": 0, "net": -70.0},   # a single dip
+                6885.0: {"call": 0, "put": 0, "net": 80.0},
+                6890.0: {"call": 0, "put": 0, "net": 95.0},
+            },
+        }
+        assert GammaEngine.snapshot_summary(data)["flip"] is None
+
+    def test_a_sustained_sign_change_IS_a_flip(self):
+        """The real thing: positive above, negative below, and it holds."""
+        data = {
+            "spot": 6880.0,
+            "gex": {
+                6870.0: {"call": 0, "put": 0, "net": 120.0},
+                6875.0: {"call": 0, "put": 0, "net": 60.0},
+                6880.0: {"call": 0, "put": 0, "net": -40.0},
+                6885.0: {"call": 0, "put": 0, "net": -90.0},
+            },
+        }
+        # 6875 -> 6880 crosses: 6875 + 5 * 60/100 = 6878.0
+        assert GammaEngine.snapshot_summary(data)["flip"] == pytest.approx(
+            6878.0, abs=0.01)
+
+    def test_an_oscillating_profile_reports_the_SUSTAINED_crossing(self):
+        """$NDX's shape in miniature: noise crossings nearer spot than the real
+        one. The old rule took the nearest, which is why the level tracked spot;
+        the sustained crossing is the level that means something."""
+        data = {
+            "spot": 6900.0,
+            "gex": {
+                6860.0: {"call": 0, "put": 0, "net": 150.0},
+                6865.0: {"call": 0, "put": 0, "net": 110.0},
+                6870.0: {"call": 0, "put": 0, "net": -80.0},   # sustained flip
+                6875.0: {"call": 0, "put": 0, "net": -120.0},
+                6890.0: {"call": 0, "put": 0, "net": 60.0},    # noise: one up...
+                6895.0: {"call": 0, "put": 0, "net": -55.0},   # ...one down
+                6900.0: {"call": 0, "put": 0, "net": 70.0},    # ...one up
+            },
+        }
+        flip = GammaEngine.snapshot_summary(data)["flip"]
+        # 6865 + 5 * 110/190 = 6867.89 — the sustained crossing, ~32 points from
+        # spot, chosen over three oscillation crossings sitting right beside it.
+        assert flip == pytest.approx(6867.89, abs=0.05), (
+            "must report the sustained crossing, not the oscillation beside spot")
 
     def test_the_ETF_shape_is_untouched_by_the_filter(self):
         """The regression guard that matters. SPY and QQQ carry no zero-net
@@ -141,17 +206,25 @@ class TestFlipIgnoresDeadStrikes:
         # Two crossings within 3% band — nearest to spot wins
         data = {
             "spot": 6880.0,
+            # Both crossings are SUSTAINED (the sign holds two live strikes each
+            # side), so both reach the nearest-to-spot tie-break this test is
+            # about. The old fixture's crossings were single-strike wobbles,
+            # which no longer qualify as levels at all.
             "gex": {
-                6870.0: {"call": 0, "put": 0, "net": 100.0},
-                6872.0: {"call": 0, "put": 0, "net": -80.0},  # crossing #1 ~6871.1
-                6874.0: {"call": 0, "put": 0, "net": -50.0},
-                6878.0: {"call": 0, "put": 0, "net": 60.0},
-                6882.0: {"call": 0, "put": 0, "net": -40.0},  # crossing #2 ~6880.4 (closest to spot)
+                6864.0: {"call": 0, "put": 0, "net": 120.0},
+                6866.0: {"call": 0, "put": 0, "net": 110.0},
+                6868.0: {"call": 0, "put": 0, "net": 100.0},
+                6872.0: {"call": 0, "put": 0, "net": -80.0},  # crossing #1 ~6870.2
+                6874.0: {"call": 0, "put": 0, "net": -70.0},
+                6876.0: {"call": 0, "put": 0, "net": 90.0},
+                6878.0: {"call": 0, "put": 0, "net": 85.0},
+                6882.0: {"call": 0, "put": 0, "net": -60.0},  # crossing #3 ~6880.3 (closest to spot)
+                6884.0: {"call": 0, "put": 0, "net": -70.0},
             },
         }
         summary = GammaEngine.snapshot_summary(data)
         assert summary["flip"] is not None
-        # Second crossing (~6880.4) is closest to spot
+        # The crossing nearest spot (~6880.3) wins over the ones at ~6870.2/~6874.9
         assert 6879.5 < summary["flip"] < 6881.0
 
     def test_flip_outside_band_returns_none(self):
