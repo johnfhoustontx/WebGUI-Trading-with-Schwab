@@ -28,6 +28,39 @@ GRID = "grid grid-cols-[190px_1fr_132px_74px] gap-[26px] items-center w-full"
 SPARK_W, SPARK_H = 132, 34
 
 
+def regime_name(regime):
+    """The displayed Market Regime word for a ``cache:sentiment:regime`` payload.
+
+    Extracted from ``render_dial_card`` (where it was one inline expression) so
+    the Desk can print the SAME word this console prints. It is the only
+    derivation of that word page-side, and it must stay that way: two screens
+    deriving one verdict independently is exactly how ``/sentiment/sectors`` and
+    ``/sentiment/rotation`` came to print opposite regimes.
+
+    How the three fields interact — worth stating, because it is not what the
+    field names suggest:
+
+    * ``label`` is the service's own pre-rendered word and wins outright. It
+      already carries the direction adornment (Rallying / Retreating / …), which
+      nothing here could reconstruct.
+    * ``committed_label`` is the raw regime KEY, and is the fallback for a
+      payload with no rendered label (an older writer, a hand-built dict).
+    * ``unclear`` does NOT participate. It means ``confidence <
+      UNCLEAR_FLOOR``, and the hysteresis commit exists precisely so a
+      weak-evidence sample does not blank a regime that is still in force. The
+      console withholds the CONFIDENCE on such a sample (the dial gets ``None``)
+      while keeping the word. A fully unclear read reaches "Unclear" anyway —
+      the service's own unclear shell publishes ``label="Unclear"`` with no
+      commit, and an empty pair falls through to it here.
+
+    Never raises; a missing / malformed payload reads "Unclear".
+    """
+    r = regime if isinstance(regime, dict) else {}
+    return (r.get("label")
+            or RM.REGIME_LABELS.get(r.get("committed_label"))
+            or "Unclear")
+
+
 def regime_hex(key, share):
     """A regime's colour, muted when it holds nothing.
 
@@ -88,8 +121,7 @@ def render_dial_card(regime, points):
     r = regime if isinstance(regime, dict) else {}
     rows = RM.rank_rows(points)
     _key, margin, tightest = RM.lead_margin(points)
-    name = r.get("label") or (RM.REGIME_LABELS.get(r.get("committed_label"))
-                              or "Unclear")
+    name = regime_name(r)
     runner = rows[1]["label"] if len(rows) > 1 else "—"
     with ui.column().classes(f"{_CARD} px-[24px] pt-[22px] pb-[24px] gap-4"):
         ui.label("REGIME IDENTIFIED").classes(

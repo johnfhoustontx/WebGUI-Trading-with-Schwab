@@ -422,3 +422,73 @@ def test_freshness_facts_carries_the_collector_strip_fields_through():
     assert f["last_scan"] == "9:31 AM" and f["next_scan"] == "9:32 AM"
     assert f["session"] == "Regular"
     assert f["status_label"] == "Collecting"
+
+
+# ── regime_display (+ the drift guard) ───────────────────────────────────────
+# Payload shapes sentiment_svc actually publishes, plus the degenerate ones a
+# cold start can produce. Every one of them goes through BOTH functions below.
+_REGIME_SAMPLES = [
+    # A normal committed sample: the service pre-renders `label`.
+    {"label": "Rallying", "committed_label": "trending", "unclear": False,
+     "direction": 1, "direction_strong": True, "confidence": 0.71},
+    # `_unclear_shell` — no evidence at all.
+    {"label": "Unclear", "committed_label": "", "unclear": True,
+     "direction": 0, "direction_strong": False, "confidence": 0.0},
+    # Weak evidence, but hysteresis is still holding a regime.
+    {"label": "Balanced", "committed_label": "mean_reversion", "unclear": True,
+     "direction": 0, "confidence": 0.11},
+    # A payload with no pre-rendered label — the committed key must carry it.
+    {"committed_label": "choppy", "unclear": False, "confidence": 0.4},
+    # Nothing usable at all.
+    {}, {"label": "", "committed_label": ""}, {"committed_label": "not_a_regime"},
+    None,
+]
+
+
+def test_desk_regime_word_matches_console_regime_for_the_same_payload():
+    """If these two ever disagree, the Desk contradicts the page it links to.
+
+    This is the whole reason the derivation was extracted rather than copied:
+    the app already ships one screen-pair printing opposite regime verdicts, and
+    a copy is exactly how that happened."""
+    from pages import console_regime
+    for sample in _REGIME_SAMPLES:
+        assert d.regime_display(sample)["word"] == console_regime.regime_name(sample)
+
+
+def test_desk_regime_word_is_unclear_when_the_sample_is_unclear():
+    # The shape the service publishes for an unclear read...
+    assert d.regime_display(
+        {"label": "Unclear", "committed_label": "", "unclear": True})["word"] == "Unclear"
+    # ...and the same conclusion reached through the fallback, from a payload
+    # carrying only the flag. `unclear` alone does NOT override a held commit —
+    # see ``console_regime.regime_name``; the hysteresis commit exists precisely
+    # so a weak sample does not blank a regime that is still in force.
+    assert d.regime_display({"unclear": True})["word"] == "Unclear"
+
+
+def test_desk_regime_word_falls_back_to_the_committed_key():
+    assert d.regime_display({"committed_label": "crisis"})["word"] == "Stressed"
+    assert d.regime_display({"committed_label": "choppy"})["word"] == "Whipsaw"
+
+
+def test_desk_regime_display_carries_the_supporting_reads():
+    r = d.regime_display({"label": "Rallying", "committed_label": "trending",
+                          "confidence": 0.71, "direction": 1,
+                          "direction_strong": True})
+    assert r["word"] == "Rallying"
+    assert r["confidence"] == 0.71
+    assert r["direction"] == 1 and r["direction_strong"] is True
+    assert r["unclear"] is False
+
+
+def test_desk_regime_display_withholds_a_non_finite_confidence():
+    """A NaN confidence must read as absent, not as a maximal one — the same
+    trap that made an all-NaN price read score 92.5 at confidence 1.0."""
+    assert d.regime_display({"confidence": float("nan")})["confidence"] is None
+    assert d.regime_display({"confidence": None})["confidence"] is None
+
+
+def test_desk_regime_display_survives_a_missing_view():
+    assert d.regime_display(None)["word"] == "Unclear"
+    assert d.regime_display("nonsense")["word"] == "Unclear"

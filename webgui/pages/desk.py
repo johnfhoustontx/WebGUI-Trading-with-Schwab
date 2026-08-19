@@ -21,6 +21,7 @@ The widgets and wiring land later, and none of it belongs here.
 """
 import math
 
+from pages import console_regime as _CR
 from pages.options import flow as _flow
 from pages.options import paper as _paper
 
@@ -425,3 +426,28 @@ def _age_text(age):
     """'41s ago' / '4m ago' — matching the collector strip's own phrasing."""
     secs = int(age)
     return f"{secs}s ago" if secs < 60 else f"{secs // 60}m ago"
+
+
+# ── market regime ────────────────────────────────────────────────────────────
+def regime_display(regime_view):
+    """The Market Regime word plus the reads that qualify it.
+
+    The word itself comes from ``console_regime.regime_name`` — the SAME
+    derivation the Market Regime Console prints, called rather than copied. The
+    Desk links to that page; a Desk that named a different regime than the page
+    one click away would be worse than showing nothing.
+
+    ``confidence`` is filtered through ``_finite``: a non-finite confidence must
+    read as absent, not as a maximal one. That is the documented app-wide trap
+    in its most expensive form — an all-NaN price read once scored 92.50 at
+    confidence 1.0, a data outage rendering as a confident buy signal.
+    """
+    r = regime_view if isinstance(regime_view, dict) else {}
+    return {
+        "word": _CR.regime_name(r),
+        "committed_label": r.get("committed_label") or "",
+        "confidence": _finite(r.get("confidence")),
+        "direction": r.get("direction", 0),
+        "direction_strong": bool(r.get("direction_strong")),
+        "unclear": bool(r.get("unclear")),
+    }
