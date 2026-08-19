@@ -593,7 +593,7 @@ def summary_line(summary):
 # requirement. Nothing here ever interpolates a value-derived colour.
 def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
           pad="px-[7px]"):
-    """A chip in the reference design's shape: 8px caps on wide tracking, a 2px
+    """A chip in the reference design's shape: small caps on wide tracking, a 2px
     radius, and a SOLID 1px border in the same hue as the text — an outline, not
     a filled badge.
 
@@ -609,17 +609,18 @@ def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
     and it is the one word on that panel saying whether dealer hedging dampens
     moves or amplifies them, so a truncated "SHORT GAMMA · RU…" would be worse
     than two lines. ``break-words`` rather than plain wrapping, so even a
-    single unbreakable word ("RESCUE" in a 44px track) folds instead of running
+    single unbreakable word ("RESCUE" in the narrow FLAG track) folds instead of running
     past the border it sits in.
 
     ``track``/``pad`` exist for the two NARROW tracks the reference gives us —
-    BOOK at 52px and FLAG at 44px. A chip is sized by its letter-spacing far
-    more than by its font size, so tightening the tracking is what buys the fit;
-    shrinking the text below 8px would make it unreadable instead.
+    BOOK and FLAG, the two tightest columns on the Positions panel. A chip is
+    sized by its letter-spacing far more than by its font size, so tightening
+    the tracking is what buys the fit; shrinking the text back down would make
+    it unreadable instead, which is the problem this page was just fixing.
     """
     flow = "break-words leading-[1.3]" if wrap else "whitespace-nowrap"
     bg = "" if fill is None else f"bg-[{hexv}]/[{fill}]"
-    return (f"{pad} py-[2px] rounded-[2px] text-[8px] tracking-[{track}] {flow} "
+    return (f"{pad} py-[2px] rounded-[2px] text-[11px] tracking-[{track}] {flow} "
             f"border border-[{hexv}] {bg} text-[{hexv}] {weight}").strip()
 
 
@@ -739,11 +740,36 @@ RING_PX = 150
 REF_TXT_STRONG = "text-[#eaf2f9]"      # the symbol — the brightest thing in a row
 REF_TXT = "text-[#dce7f3]"             # spot
 REF_TXT_SOFT = "text-[#cfdae8]"        # the gamma flip level
-REF_HEAD_TXT = "text-[#3f5265]"        # column labels
+# Column labels. The reference's own #3f5265 was drawn for 8px labels sitting
+# almost subliminally under the panel rule; at the 12px this page now sets (see
+# ``_HEAD``) that hex reads as a rendering fault rather than as restraint. This
+# is the reference's PANEL-TITLE colour, one step up the same ladder — bright
+# enough to read, still clearly below the data it labels.
+REF_HEAD_TXT = "text-[#5b7f8c]"
 CALL_HEX = "#2dd4a7"                   # the call wall, and its marker on the map
 PUT_HEX = "#fb5f7c"                    # the put wall, and its marker
 FLIP_HEX = "#f5b841"                   # the gamma flip tick
 SPOT_HEX = "#22d3ee"                   # the spot dot
+# The reference design's BODY face. It is a monospace, which is the whole point
+# on a screen that is nine columns of numbers: JetBrains Mono's figures are
+# fixed-width by construction, so a price column stays a column without
+# `tabular-nums` having to rescue it, and a digit changing on the 2 s poll does
+# not shuffle the cell beside it.
+#
+# Loaded and applied HERE, page-scoped, rather than through `config/theme.toml`:
+# `[console].font_url` is shared with /sentiment and the `[typography]` block is
+# app-wide, so moving either would repaint pages nobody asked to change. The
+# panel TITLES keep `CONSOLE_DISPLAY` (Rajdhani) — a display face over a data
+# face is the reference's own pairing, and a child's own font class beats the
+# wrapper's inherited one.
+DESK_FONT = "font-['JetBrains_Mono',ui-monospace,monospace]"
+DESK_FONT_HEAD_HTML = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+    'family=JetBrains+Mono:wght@400;500;600&display=swap">'
+)
+
 _ROW_RULE = "border-[#0d151e]"         # the rule under a data row
 _HEAD_RULE = "border-[#121b26]"        # the (brighter) rule under the labels
 _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
@@ -755,9 +781,9 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # head tuple and the row painter, or the labels silently slide one cell across
 # and every number on the panel starts reading as the wrong quantity.
 #
-# The widths are the reference design's, not derived here, and the widest panel
-# (Positions: 468px of fixed track + a 180px minimum + eight 10px gaps) is what
-# sets the page's two-column breakpoint — see the panel wrapper in ``render``.
+# The widest panel (Positions) is what sets the page's two-column breakpoint —
+# see the panel wrapper in ``render``, which does that arithmetic from the
+# minmax floors below.
 # Every qualifier rides as a SECOND LINE inside its owner's cell rather than
 # taking a column of its own: the day % under spot, the flip distance under the
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
@@ -778,30 +804,54 @@ _GAP = "gap-x-[10px] gap-y-0"
 # call 100%); it was just stretched across half the panel.
 #
 # Weighting every track instead spreads the slack proportionally, so the row
-# fills at any width and no single cell balloons. The minmax LOWER bounds are
-# the reference's exact pixels, so nothing can shrink below the geometry the
-# design was drawn at.
-DEALER_GRID = ("grid grid-cols-[76px_minmax(74px,1fr)_minmax(74px,1fr)_"
-               "minmax(130px,2fr)_minmax(72px,1fr)_minmax(72px,1fr)_"
-               f"minmax(118px,1.5fr)] {_GAP} w-full")
-BOARD_GRID = ("grid grid-cols-[44px_minmax(140px,2fr)_minmax(66px,1fr)_"
-              "minmax(56px,1fr)_minmax(52px,1fr)_minmax(84px,1fr)] "
+# fills at any width and no single cell balloons.
+#
+# The minmax LOWER bounds are the reference's pixels SCALED BY ~1.3, because the
+# type on this page is scaled ~1.35 (see the size ladder below) and a floor is
+# only meaningful relative to the text standing in it. The reference was drawn
+# for ~1920px; measured on the 2381px screen this page is actually read at, its
+# 8-16px range was uncomfortably small. Leaving the floors at the reference's
+# own pixels while enlarging the text would have made every one of them a
+# CLIPPING width rather than a minimum. The `fr` WEIGHTS are untouched — the
+# proportions were right, only the absolute floor moved.
+#
+# The BOARD's first track additionally jumps 44px -> 68px before that scaling:
+# it holds the word SCORE on .2em tracking, which never fit 44px and only fits
+# less well at 12px.
+DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
+               "minmax(170px,2fr)_minmax(94px,1fr)_minmax(94px,1fr)_"
+               f"minmax(154px,1.5fr)] {_GAP} w-full")
+BOARD_GRID = ("grid grid-cols-[88px_minmax(182px,2fr)_minmax(86px,1fr)_"
+              "minmax(74px,1fr)_minmax(68px,1fr)_minmax(110px,1fr)] "
               f"{_GAP} w-full")
-FLOW_GRID = ("grid grid-cols-[52px_minmax(160px,3fr)_minmax(80px,1fr)] "
+FLOW_GRID = ("grid grid-cols-[68px_minmax(208px,3fr)_minmax(104px,1fr)] "
              f"{_GAP} w-full")
-POS_GRID = ("grid grid-cols-[52px_minmax(180px,2fr)_minmax(40px,1fr)_"
-            "minmax(48px,1fr)_minmax(48px,1fr)_minmax(128px,2fr)_"
-            f"minmax(32px,1fr)_minmax(76px,1fr)_minmax(44px,1fr)] {_GAP} w-full")
+POS_GRID = ("grid grid-cols-[68px_minmax(234px,2fr)_minmax(52px,1fr)_"
+            "minmax(62px,1fr)_minmax(62px,1fr)_minmax(166px,2fr)_"
+            f"minmax(42px,1fr)_minmax(99px,1fr)_minmax(58px,1fr)] {_GAP} w-full")
 
-_EYEBROW = f"text-[9.5px] tracking-[.22em] {CON_TXT_DIM}"
-_HEAD = f"text-[8px] tracking-[.2em] {REF_HEAD_TXT}"
+# The type ladder. Every size is the reference design's own, multiplied by ~1.35
+# and rounded: the reference was authored against a ~1920px screen, and on the
+# 2381px screen this page is read at, its 8-16px range sat well below
+# comfortable reading size. The RATIOS between the steps are the reference's and
+# must stay that way — the three-tier hierarchy (value / qualifier / label) is
+# what makes a nine-column row scannable, and flattening it by scaling one step
+# and not another would cost more than the small type did.
+_EYEBROW = f"text-[13px] tracking-[.22em] {CON_TXT_DIM}"
+# Column labels get a step MORE than the ladder gives (11px -> 12px) and a
+# brighter hex (see ``REF_HEAD_TXT``): at 8px on .2em tracking they were the one
+# thing on the page that could not be read at all, and a label nobody can read
+# turns nine columns of numbers into nine unlabelled columns of numbers. The
+# wide tracking stays — it is what separates a LABEL from the data under it now
+# that the size difference between them is smaller.
+_HEAD = f"text-[12px] tracking-[.2em] {REF_HEAD_TXT}"
 _ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
-_VALUE = f"text-[13px] tabular-nums {CON_TXT}"
+_VALUE = f"text-[17px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
-_V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
-_V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
-_SUB = "text-[9px] tabular-nums"           # a cell's second line
-_PLACEHOLDER = f"text-[11.5px] {CON_TXT_MUTED} py-4"
+_V_SPOT = f"text-[18px] tabular-nums {REF_TXT}"
+_V_FLIP = f"text-[18px] tabular-nums {REF_TXT_SOFT}"
+_SUB = "text-[12px] tabular-nums"          # a cell's second line
+_PLACEHOLDER = f"text-[15px] {CON_TXT_MUTED} py-4"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
 # the same words for both would make a dead service indistinguishable from a
@@ -832,11 +882,11 @@ def _panel(title, subtitle=""):
                 f"items-baseline justify-between w-full gap-4 border-b "
                 f"{CONSOLE_RULE} pb-2"):
             ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[18px] font-bold tracking-[.16em] "
+                f"{CONSOLE_DISPLAY} text-[24px] font-bold tracking-[.16em] "
                 f"{CON_TXT}")
             if subtitle:
                 ui.label(subtitle).classes(
-                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
+                    f"text-[13px] tracking-[.2em] whitespace-nowrap "
                     f"{CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
     return body
@@ -884,10 +934,36 @@ def _structure_map(pos):
     documented exception to the map-to-a-finite-palette rule; every COLOUR below
     is a fixed palette constant.
     """
-    # Two hairline uprights instead of a filled track: the map is a SPAN, and
-    # its ends are the only part of it that is a fixed fact.
     with ui.element("div").classes(
             f"relative h-[34px] w-full border-l border-r {_MAP_EDGE} px-[2px]"):
+        # ── the track, and it is NOT decoration ──────────────────────────────
+        # These two elements are the reference design's own, and they were lost
+        # because the reference markup was transcribed from a TRUNCATED extract
+        # that ended before them. Without them the map is four floating markers
+        # over empty space: there is nothing connecting the put wall to the call
+        # wall, so the row reads as scattered ticks rather than as one span with
+        # price somewhere along it — which is the entire reading this cell
+        # exists to give. They are the FIRST two children because painting order
+        # is what puts them BEHIND the markers; move them and the band covers
+        # the spot ring.
+        #
+        # 1. The hairline: the axis itself, running the full width so the span
+        #    is continuous even where the band's rounded ends fall short.
+        ui.element("div").classes(
+            "absolute left-0 right-0 top-[21px] h-px bg-[#1a2836]")
+        # 2. The band: rose at the put end fading to green at the call end, so
+        #    the DIRECTION of the span is legible before any number is read —
+        #    the spot ring's position on it then says which half price is in.
+        #    Both stops carry the wall hexes at .16 alpha; written as `rgba()`
+        #    with NO SPACES, because a Tailwind arbitrary value cannot contain
+        #    one (underscore is the escape, commas are fine).
+        ui.element("div").classes(
+            "absolute top-[14px] h-[8px] rounded-[1px] left-[2px] right-[2px] "
+            "bg-gradient-to-r from-[rgba(251,95,124,0.16)] "
+            "to-[rgba(45,212,167,0.16)]")
+        # The markers, painted over that track. Two hairline uprights for the
+        # walls: they are the span's ends, the only part of it that is a fixed
+        # fact.
         ui.element("div").classes(
             f"absolute top-[6px] bottom-[4px] w-[2px] bg-[{PUT_HEX}] "
             f"shadow-[0_0_7px_rgba(251,95,124,0.7)] "
@@ -906,7 +982,7 @@ def _structure_map(pos):
             # Named, because a lone amber hairline between two glowing walls is
             # not self-explanatory. `ml-[-6px]` half-centres it on the tick.
             ui.label("FLIP").classes(
-                f"absolute bottom-[-3px] ml-[-6px] text-[8px] "
+                f"absolute bottom-[-4px] ml-[-8px] text-[11px] "
                 f"text-[#4b6070] {_K.left_class(pos['flip'])}")
         if pos.get("spot") is not None:
             # A ring, not a dot: it has to read as a position ON the span
@@ -929,6 +1005,9 @@ def render():
     """
     if CONSOLE_FONT_HEAD_HTML:
         ui.add_head_html(CONSOLE_FONT_HEAD_HTML)
+    # The reference's BODY face, loaded alongside the console's display face
+    # rather than instead of it — the panel titles still want Rajdhani.
+    ui.add_head_html(DESK_FONT_HEAD_HTML)
     # The console vocabulary's ONE escape hatch: a keyframes animation cannot be
     # expressed as a utility class.
     ui.add_css(CONSOLE_KEYFRAMES_CSS)
@@ -937,8 +1016,14 @@ def render():
     # over only the ones that moved and most regions read more than one view.
     state = {"versions": {}, "data": {}}
 
+    # ``DESK_FONT`` where the console pages carry ``CONSOLE_DISPLAY``: this page
+    # is nine columns of numbers, so the body face is the monospace and the
+    # display face is kept for the panel titles (``_panel``), which set it on
+    # themselves and so beat this inherited one. Both must NOT sit on this one
+    # element — two ``font-[…]`` utilities of equal specificity would leave the
+    # winner up to stylesheet order.
     with ui.column().classes(
-            f"{CONSOLE_PAGE} {CONSOLE_DISPLAY} w-full gap-4 p-4"):
+            f"{CONSOLE_PAGE} {DESK_FONT} w-full gap-4 p-4"):
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO SPX/QQQ quote. The Dealer Positioning panel
         # below shows those same symbols with far more context, and the two
@@ -953,28 +1038,28 @@ def render():
             with ui.column().classes("gap-1"):
                 ui.label("SESSION").classes(_EYEBROW)
                 clock_lbl = ui.label(_DASH).classes(
-                    f"text-[22px] leading-none tabular-nums {CON_TXT}")
+                    f"text-[30px] leading-none tabular-nums {CON_TXT}")
             with ui.column().classes("gap-1"):
                 ui.label("VIX").classes(_EYEBROW)
                 with ui.row().classes("items-center gap-2"):
                     vix_lbl = ui.label(_DASH).classes(
-                        f"text-[22px] leading-none tabular-nums {CON_TXT}")
+                        f"text-[30px] leading-none tabular-nums {CON_TXT}")
                     # color=None drops Quasar's bg-primary so the mapped
                     # bg-[...] class is what actually paints.
                     vix_badge = ui.badge("", color=None).classes(
-                        "text-[9.5px] tracking-[.14em]")
+                        "text-[13px] tracking-[.14em]")
             with ui.column().classes("gap-1 min-w-[190px]"):
                 ui.label("MARKET REGIME").classes(_EYEBROW)
                 regime_lbl = ui.label(_DASH).classes(
-                    f"text-[22px] leading-none font-semibold {CON_TXT}")
+                    f"text-[30px] leading-none font-semibold {CON_TXT}")
                 regime_sub = ui.label("").classes(
-                    f"text-[10px] {CON_TXT_MUTED}")
+                    f"text-[13px] {CON_TXT_MUTED}")
             ui.space()
             with ui.row().classes("items-center gap-2"):
                 fresh_dot = ui.element("div").classes(
                     "w-[8px] h-[8px] rounded-full shrink-0")
                 fresh_lbl = ui.label(_DASH).classes(
-                    f"text-[11px] tracking-[.14em] {CON_TXT_MUTED}")
+                    f"text-[14px] tracking-[.14em] {CON_TXT_MUTED}")
             with ui.row().classes("items-start gap-6"):
                 with ui.column().classes("items-center gap-1"):
                     # Distinct uids: ``ring_svg`` namespaces the SVG root DOM id
@@ -992,18 +1077,47 @@ def render():
         # already on. `items-stretch` so the two panels of a row square off at
         # the same height instead of leaving a stepped edge between them.
         #
-        # The breakpoint is ARITHMETIC, not a Tailwind size name. The Positions
-        # row needs 728px of content (468px of fixed track + a 180px minimum for
-        # the symbol + eight 10px gaps), and a panel spends 40px of its own on
-        # padding; two of those plus the 68px icon rail, the page's own padding
-        # and the 20px gutter is ~1700px. Below that the page is ONE column,
-        # where a full-width panel carries ~1130px and every grid fits with room
-        # to spare — so the narrow layout is the comfortable one, and the two-up
-        # layout is the one that has to be earned. `lg:` (1024px) was the old
-        # value and it was simply wrong: it promised two columns 675px short of
-        # what the widest panel needs.
+        # The breakpoint is ARITHMETIC, not a Tailwind size name, and it is
+        # re-derived whenever a track floor moves — which the ~1.35x type scale
+        # just did to every one of them. Positions is the widest panel:
+        #
+        #   843px  the nine ``POS_GRID`` minmax floors summed
+        #   + 80   eight 10px column gaps
+        #   +  8   the row's own px-1, both sides (``_ROW``)
+        #   + 40   the panel's px-5, both sides (``_panel``)
+        #   +  2   the card's 1px border, both sides
+        #   = 973px minimum for one panel
+        #   x2 + 20px gutter = 1966px of panel content
+        #
+        # The CHROME around that content was MEASURED in the live DOM, not
+        # assumed, and it is nearly double what a guess would give: 68px for the
+        # icon rail (`.q-page-container` padding-left) plus THREE stacked 16px
+        # paddings — `.nicegui-content`, the shell's own page column, and this
+        # page's `p-4` — for 164px in total. So the LAYOUT width two columns
+        # need is 1966 + 164 = 2130px.
+        #
+        # The breakpoint is 2160, not 2130, for a reason that is easy to measure
+        # and impossible to reason out: a media query here matches on
+        # `window.innerWidth`, while the grid is laid out in
+        # `documentElement.clientWidth`, and this page is always tall enough to
+        # carry a classic scrollbar — so the layout is 15px NARROWER than the
+        # width the query fired on. A breakpoint set to the bare 2130 therefore
+        # switches to two columns at 2115px of actual layout.
+        #
+        # Both earlier values were measured wrong rather than argued wrong. 2100
+        # (chrome guessed at rail + one p-4) overflowed the Positions rows by
+        # 11px. 2140 looked clean only by luck: every one of the nine tracks sat
+        # exactly on its floor, 2.5px over the content box, and nothing clipped
+        # solely because the last cell holds a short "OK" chip — a row flagged
+        # RESCUE would have clipped. At 2160 the same worst case has ~7px of
+        # genuine slack.
+        #
+        # Below the breakpoint the page is ONE column, where a full-width panel
+        # carries far more than 973px and every grid fits with room to spare —
+        # the narrow layout is the comfortable one, and the two-up layout is the
+        # one that has to be earned.
         with ui.element("div").classes(
-                "grid grid-cols-1 min-[1700px]:grid-cols-2 gap-5 w-full "
+                "grid grid-cols-1 min-[2160px]:grid-cols-2 gap-5 w-full "
                 "items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             board_body = _panel("OPPORTUNITY BOARD", "HOTTEST FIVE")
@@ -1088,7 +1202,7 @@ def render():
                 # a broken page; this reads as a stopped feed, which is true.
                 ui.label(
                     f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[10px] {CON_WARN} pb-1")
+                ).classes(f"text-[13px] {CON_WARN} pb-1")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
@@ -1110,7 +1224,7 @@ def render():
             f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             with _stack():
                 ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
                 ui.label(fmt_signed_pct(row["day_pct"])).classes(
@@ -1132,11 +1246,11 @@ def render():
             # and the tick standing for it are visibly one thing. The reference
             # puts an open-interest figure under each; this app publishes no
             # per-strike OI on a matrix row, so the second line is left out.
-            _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
-            _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
+            _cell(fmt_price(row["call_wall"]), f"text-[18px] text-[{CALL_HEX}]")
+            _cell(fmt_price(row["put_wall"]), f"text-[18px] text-[{PUT_HEX}]")
             with _stack():
                 ui.label(fmt_gex(row["net_gex"])).classes(
-                    f"text-[13px] font-medium tabular-nums "
+                    f"text-[17px] font-medium tabular-nums "
                     f"{signed_class(row['net_gex'])}")
                 # `self-start` so the chip shrinks to its words. Without it the
                 # chip stretches to the full 118px track and, on a row with no
@@ -1164,8 +1278,8 @@ def render():
             # Six labels for six tracks. The WHY sentence has none: it rides
             # under the symbol as that cell's second line, which is where it
             # was already being read from. SCORE rather than HOTNESS because
-            # the 44px track the reference gives this column cannot hold seven
-            # letters of 8px caps on .2em tracking — and the panel's own
+            # even the widened first track cannot hold seven letters of 12px
+            # caps on .2em tracking — and the panel's own
             # subtitle already says HOTTEST FIVE, so nothing is lost.
             _grid_head(BOARD_GRID,
                        ("SCORE", "SYMBOL", "ATM IV", "NET PREM", "P/C",
@@ -1197,7 +1311,7 @@ def render():
                             f"{_K.width_class(row['hotness'] / top * 100.0)}")
             with _stack():
                 ui.label(row["symbol"]).classes(
-                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
                 # A rationale is up to three clauses of ordinary words, so it
                 # takes whatever the flexible track gives it and ellipses the
                 # rest — never a track of its own, where it would be truncated
@@ -1208,7 +1322,7 @@ def render():
             with _stack():
                 _cell(fmt_iv(row["atm_iv"]))
                 ui.label(row["iv_state"]).classes(
-                    f"text-[9px] {iv_state_class(row['iv_state'])}")
+                    f"text-[12px] {iv_state_class(row['iv_state'])}")
             _cell(fmt_net_prem(row["net_prem_m"]),
                   signed_class(row["net_prem_m"]))
             _cell(fmt_ratio(row["pc_ratio"]))
@@ -1217,7 +1331,7 @@ def render():
                 # dealer regime chip: a chip stretched to its track is a box
                 # around a word rather than a label on it.
                 ui.label(row["signal"].upper()).classes(
-                    f"self-start px-[5px] py-[2px] rounded-[2px] text-[8px] "
+                    f"self-start px-[5px] py-[2px] rounded-[2px] text-[11px] "
                     f"tracking-[.1em] {_signal_class(row['signal'])}")
                 # An empty setup tag renders NO chip: a blank line reads as "no
                 # setup", where a "NEUTRAL" chip would read as a finding.
@@ -1253,10 +1367,10 @@ def render():
             f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["time"] or _DASH).classes(
-                f"text-[11px] tabular-nums {CON_TXT_MUTED}")
+                f"text-[14px] tabular-nums {CON_TXT_MUTED}")
             with _stack():
                 ui.label(row["symbol"]).classes(
-                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
                 ui.label(row["detail"] or row["text"] or _DASH).classes(
                     f"{_SUB} truncate w-full {CON_TXT_MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
@@ -1264,7 +1378,7 @@ def render():
             # and shared by the kind and the side it qualifies.
             with _stack():
                 ui.label(row["kind"]).classes(
-                    f"text-[10px] leading-[1.2] {row['_tone_class']}")
+                    f"text-[13px] leading-[1.2] {row['_tone_class']}")
                 ui.label(row["side"] or _DASH).classes(
                     f"{_SUB} {row['_tone_class']}")
         el.on("click", lambda _e: ui.navigate.to("/options/flow"))
@@ -1280,7 +1394,7 @@ def render():
             rows = position_rows(paper_view, driver_view)
             summary = positions_summary(rows)
             ui.label(summary_line(summary)).classes(
-                f"text-[11px] tracking-[.16em] pb-2 "
+                f"text-[14px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
                 ui.label("No open positions.").classes(_PLACEHOLDER)
@@ -1306,7 +1420,7 @@ def render():
                 f"self-start {source_chip_class(row['source'])}")
             with _stack():
                 ui.label(row["symbol"]).classes(
-                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
                 ui.label(strategy_label(row["strategy"])).classes(
                     f"{_SUB} truncate w-full {CON_TXT_MUTED}")
             _cell(dte_text(row["dte"]))
