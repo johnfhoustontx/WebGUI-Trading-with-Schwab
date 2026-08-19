@@ -1556,7 +1556,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time
 .venv\Scripts\python -m pytest services\sentiment_svc   # 279 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc     # 932 passed / 2 documented-baseline fail
+.venv\Scripts\python -m pytest services\options_svc     # 1148 passed / 0 fail (2026-08-18)
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
 .venv\Scripts\python -m pytest services\trade_svc       # 56
 .venv\Scripts\python -m pytest services\driver_svc      # 162
@@ -1575,9 +1575,10 @@ read them as a regression:**
   `test_key_levels_doc.py` ×3, and
   `test_scanner_engine.py::TestEarningsAvoidance` ×2. **Re-confirmed 2026-08-15**
   (1439 passed / 11 failed / 2 skipped) — same set, unchanged.
-- **options_svc** — **none as of 2026-08-15** (1091 passed). The 2 date-relative
-  `test_expected_move` failures previously listed here now pass — they depend on
-  the run date, so expect them to return. ⚠ `test_flow_alert_window.py::
+- **options_svc** — **none as of 2026-08-18** (**1148 passed**, re-measured on
+  `claude/dashboard-key-elements`). The 2 date-relative `test_expected_move`
+  failures previously listed here now pass — they depend on the run date, so
+  expect them to return. ⚠ `test_flow_alert_window.py::
   test_gth_signal_still_fires_at_the_open` is **FLAKY**: observed failing once in
   a full run, then passing in isolation and in two subsequent full runs.
 - **sentiment-dashboard** — **2**, both in `tests/test_apply_sector_perf.py`
@@ -1597,19 +1598,31 @@ clean run: this repo has a documented incident where two real regressions hid
 behind two tests flipping to skipped while the total held steady. Run with `-rf`
 and diff the node IDs name-by-name. It nearly bit again on 2026-08-09, when
 options-scanner's passed/skipped drifted 1351/2 → 1370/3 across a change while the
-failure count sat unmoved at 11 — that drift lives in the `test_gex_collector*`
-group, which is timing-dependent.
+failure count sat unmoved at 11.
+
+**That drift has TWO independent sources, not one** (the second measured
+2026-08-18). The first is the timing-dependent `test_gex_collector*` group. The
+second is a trio of Tk-dependent tests — `test_chart_style_vars.py:38`,
+`test_gex_dex.py:182`, `test_theme.py:130` — which race on Tk root creation:
+**whichever loses self-skips, and it is a DIFFERENT one each run.** Six no-op
+runs of just those three gave `34 passed` / `33 passed, 1 skipped` at random. So
+`1453/3` and `1454/2` are both healthy readings of an unchanged tree.
+
+⚠ Because the *identity* of the skipping test varies, **compare the skipped SET
+as well as the failed set.** A count-only comparison reads as stable while a
+different test silently does not run — which is the same trap as the 2026-08-09
+incident, one layer down.
 
 The remaining per-service counts in the block above are indicative, not pinned.
-Current: **webgui 1826** green, re-measured **2026-08-17** after the four
+Current, all three re-measured **2026-08-18** on `claude/dashboard-key-elements`:
+**webgui 1842 green**, **options_svc 1148 green**, **options-scanner 1454 passed /
+11 failed / 2–3 skipped**. (webgui was 1826 on 2026-08-17 after the four
 sentiment-screen rebuilds and the dead-code cleanup — the count FELL from 1912 because
 ~86 tests were deleted with the subjects they pinned (the Highcharts scatter/ribbon/RRG
 builders and the stranded `pages/sentiment.py` helpers), which is the one situation where
-a dropping count is the healthy signal. **sentiment_svc 279 passed / 1 failed** (the
+a dropping count is the healthy signal.) **sentiment_svc 279 passed / 1 failed** (the
 documented `test_daily_history_wins_over_session_latch`), last measured
-**2026-08-14** on the ring-graphics branch. Re-measured **2026-08-09** on
-`Using_Highcharts` at `b4ef24b`: **options_svc 932 passed / 2 failed**,
-**options-scanner 1370 passed / 11 failed / 3 skipped**. portfolio_svc,
+**2026-08-14** on the ring-graphics branch. portfolio_svc,
 trade_svc, driver_svc, `shared/bus` and `shared/contracts` have **not** been
 re-measured since they were first written down — treat those five as unverified
 and measure your own baseline before trusting them.
