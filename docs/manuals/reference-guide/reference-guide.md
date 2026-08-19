@@ -165,6 +165,95 @@ Three things are worth knowing before you trust a screen:
 
 ---
 
+## Desk
+
+*Menu: pinned at the top of the rail · Route `/desk` — also the app's home page,
+so plain `http://127.0.0.1:8500` lands here*
+
+### What it is
+
+One screen that answers, in order down the page, the four questions a trading
+session actually opens with:
+
+1. **What is the market doing?** — the top strip
+2. **Where is the structure?** — Dealer Positioning
+3. **What should I act on?** — the Opportunity Board and Flow Alerts
+4. **What am I holding?** — Positions
+
+That sequence is the whole design. It is also the admission rule: a panel earns a
+place here only if it answers one of those four *at a glance*. Screens that reward
+deliberate study — the RRG, the sector heat grid, the momentum leaderboard, the
+Calculator, the Simulator — are deliberately absent, not overlooked.
+
+### When to open it
+
+First thing, and whenever you have lost the thread. Every panel is a summary of a
+page that goes deeper, and **clicking any row opens that page already set to the
+symbol you clicked**.
+
+### The panels
+
+**Top strip.** The clock; **VIX** and its regime band; the **market regime** word
+(Rallying, Balanced, Whipsaw, Stressed…); and two dials showing **Day / Week /
+Month** for market **sentiment** and market **trend**.
+
+Note it shows VIX but *not* SPX or QQQ. That is deliberate. Those prices appear in
+Dealer Positioning immediately below with more context, and the two panels read
+from different caches with independent update counters — so showing both could
+display two different prices for one symbol on one screen. VIX stays because it is
+excluded from the dealer-row universe by design and cannot appear below.
+
+**Dealer Positioning.** One row each for **$SPX, SPY, QQQ, $NDX**: price and day
+change, the **gamma flip** with the signed distance to it, the **call and put
+walls**, net gamma exposure, and a regime chip. The small bar shows where price
+sits *between the two walls*.
+
+The chip reads **LONG GAMMA · PINS** or **SHORT GAMMA · RUNS**, and it is derived
+from price-versus-flip and nothing else. Net gamma exposure is shown beside it as a
+magnitude only. The two can legitimately disagree, and when they do that is real
+information — but the screen will never print two conflicting regime claims in one
+row. See *Dealer Positioning* below for what these levels mean.
+
+**Opportunity Board.** The five hottest names, each with a one-line reason, its
+at-the-money implied volatility **and whether that is rising or falling**, signal
+strength, put/call ratio, net premium, and a setup tag when one is active.
+
+There is no "edge" column. Edge normally means implied volatility minus *realized*
+volatility, and this app has no realized-volatility series — so the column would be
+decoration. Implied volatility's **direction** is published instead, and it is the
+more useful half: it is what separates a volatility-crush setup from a
+negative-gamma cascade.
+
+**Live Flow Alerts.** The five newest unusual-options events — crossover, unusual
+activity, gamma flip, large delta.
+
+These show **call or put**, never *bought* or *sold*. Schwab publishes no
+time-and-sales tape, so no one can honestly say which side initiated. Any product
+that tells you "$3.9M of calls were **bought**" is inferring it, usually from the
+bid/ask side, and that inference is often wrong.
+
+**Positions.** Your paper trades and Claude's, merged, open only: source, strikes,
+days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
+**OK**, **Watch**, **At risk**, **Rescue**. The header totals open trades,
+unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
+that count toward that total; *Watch* does not.
+
+### What the numbers are, and are not
+
+- **The Desk computes nothing of its own.** Every figure is produced by the same
+  function that produces it on the page it came from. This is deliberate: a summary
+  screen that quietly disagrees with the page it links to is worse than no summary
+  screen.
+- **After the close, the walls disappear rather than going to zero.** Index option
+  open interest reads 0 overnight, which produces an all-zero exposure grid and
+  therefore *arbitrary* walls. A greyed panel with a timestamp means "this is the
+  last reading I trust", not "the market is flat".
+- **The freshness indicator reports the real collection state**, including
+  "unknown". It is not a decorative "live" light.
+- **Nothing on this page can place, change, or close a trade.** It reads and links.
+
+---
+
 # MARKETS
 
 The four entries in this section answer *what is the market doing right now*. Nothing

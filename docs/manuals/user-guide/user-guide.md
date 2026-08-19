@@ -261,6 +261,47 @@ Three built-in help features are always within reach:
 
 ---
 
+## Desk
+
+**Route:** `/desk` — and the app's **home page**, so plain
+`http://127.0.0.1:8500` lands here. In the rail it is pinned on its own above the
+section captions.
+
+One screen aggregating the most useful element of every other page, laid out as
+the four questions you ask in order: *what is the market doing · where is the
+structure · what should I act on · what am I holding.*
+
+**The panels, top to bottom:**
+
+| Panel | What it gives you |
+|-------|-------------------|
+| **Top strip** | Clock, **VIX** and its band, the **market regime** word, and two dials showing **Day / Week / Month** for sentiment and trend |
+| **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
+| **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
+| **Live Flow Alerts** | The five newest unusual-options events |
+| **Positions** | Your paper trades and Claude's together, with live marks and an **OK / Watch / At risk / Rescue** flag |
+
+**Clicking any row** opens the page it came from, already set to that symbol — a
+dealer row opens Dealer Positioning on that symbol, a position opens the Paper
+Ledger or Claude Trades.
+
+**Nothing on this page can place or change a trade.** It reads and links only.
+
+**Three things that will look like faults and are not:**
+
+- **After the close the walls vanish and the panel greys out with a timestamp.**
+  Index option open interest reads 0 overnight, which would otherwise produce
+  confident-looking walls that are pure noise. The panel is telling you it is
+  showing the last reading it trusts.
+- **Flow alerts say "call" or "put", never "bought" or "sold".** Schwab publishes
+  no time-and-sales tape, so nobody — including this app — can honestly tell you
+  which side initiated.
+- **The top strip shows VIX but not SPX or QQQ.** Those sit in the panel directly
+  below with more context; showing them twice from two separately-updating sources
+  could briefly display two different prices for the same symbol.
+
+---
+
 # MARKETS — what is the market doing?
 
 The four rail entries in this section establish the conditions a trade would be
