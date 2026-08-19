@@ -29,7 +29,26 @@ PY="D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe"
 "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest services/options_svc -q -rf
 ```
 
-webgui should be **1826 passed**. options_svc had **0 failures** as of 2026-08-15, but `test_expected_move` carries date-relative tests that fail depending on the run date, and `test_flow_alert_window.py::test_gth_signal_still_fires_at_the_open` is known-flaky. Write down what you actually see before touching anything.
+**Measured on this branch 2026-08-18, before any Desk work** — use these, not CLAUDE.md's, which are stale:
+
+| suite | baseline |
+|---|---|
+| webgui | **1842 passed, 0 failed** (CLAUDE.md says 1826) |
+| options_svc | **1148 passed, 0 failed** (CLAUDE.md says 932/2) |
+| options-scanner | **11 failed, ~1454 passed, 2–3 skipped** — the documented 11, unchanged |
+
+⚠ **options-scanner's skip count drifts ±1 between runs from TWO independent
+sources, not the one CLAUDE.md records.** Besides the known timing-dependent
+`test_gex_collector*` group, three Tk-dependent tests —
+`test_chart_style_vars.py:38`, `test_gex_dex.py:182`, `test_theme.py:130` — race
+on Tk root creation, and **whichever loses self-skips, a different one each run**
+(six no-op runs gave `34 passed` / `33 passed, 1 skipped` at random). So
+`1453/3` and `1454/2` are both healthy readings of the same tree.
+
+Because the *identity* of the skipping test varies, **compare the skipped SET as
+well as the failed set** — a count-only comparison reads as stable while a
+different test silently does not run. This belongs in CLAUDE.md's Tests section
+at Task 23.
 
 **Commit after every task.** Do not batch.
 
