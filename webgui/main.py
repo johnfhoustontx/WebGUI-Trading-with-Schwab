@@ -352,6 +352,7 @@ STRATEGY_TOOLS_CHILDREN = [
 
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
+    ("/desk", "Desk", "space_dashboard"),
     ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
@@ -437,7 +438,14 @@ def _sec_page(route: str):
 
 # (caption, entries). The caption's COUNT is derived from len(entries) at render
 # time — never written down, so it cannot go stale when a page is added.
+#
+# A caption of None means "render NO header at all" — not an empty one. The Desk
+# is the landing page, so it is pinned ALONE above every caption: the rail's
+# mirror of the bottom-pinned SYSTEM_RAIL block, marking it as home rather than
+# filing it under one of the three workflow sections. Its breadcrumb is likewise
+# just ["Desk"], since there is no section to name above it.
 NAV_SECTIONS = [
+    (None, [_sec_page("/desk")]),
     ("MARKETS", [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
@@ -496,14 +504,18 @@ def breadcrumb_trail(active: str):
     trailing separator with nothing after it.
     """
     for caption, entries in NAV_SECTIONS:
+        # A None caption is the pinned landing block (see NAV_SECTIONS): it has no
+        # section name, so its pages render as a bare leaf rather than growing an
+        # empty leading crumb and a stray separator.
+        head = caption.title() if caption else ""
         for entry in entries:
             if entry[0] == "group":
                 _kind, label, _icon, children = entry
                 if any(path == active for path, _l, _i in children):
-                    return [c for c in (caption.title(), label,
+                    return [c for c in (head, label,
                                         _NAV_LABEL.get(active, "")) if c]
             elif entry[1] == active:
-                return [caption.title(), entry[2]]
+                return [c for c in (head, entry[2]) if c]
     for path, label, _icon in SYSTEM_RAIL:
         if path == active:
             return [SYSTEM_SECTION, label]
@@ -721,6 +733,7 @@ _NAV_LABEL = {route: label for route, label, _icon in
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
+    "/desk": "#f5c542",                   # Desk — gold, the landing page
     "/options/scanner": "#42a5f5",        # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
     "/options/flow": "#d500f9",           # Flow Alerts — magenta
@@ -1759,7 +1772,14 @@ def _layout(active: str, title: str):
             # so the rail opens straight onto its first section caption.
             _status_refs.clear()
             for _i, (caption, entries) in enumerate(NAV_SECTIONS):
-                _nav_section_header(caption, len(entries), first=(_i == 0))
+                # A None caption renders NO header — the pinned landing block.
+                # Note `first` is now never True: index 0 is that block, so the
+                # first VISIBLE caption (MARKETS) keeps its mt-4 gap, which is
+                # what separates it from the Desk row pinned above. Its header
+                # also supplies the hairline that marks the split in the
+                # collapsed rail, where captions cross-fade out.
+                if caption is not None:
+                    _nav_section_header(caption, len(entries), first=(_i == 0))
                 for entry in entries:
                     if entry[0] == "group":
                         _kind, _label, _icon, _children = entry
@@ -1961,18 +1981,27 @@ def _layout(active: str, title: str):
         yield content
 
 
-# The app's LANDING page is the Market Dashboard (2026-08-16). It is the widest
-# read in the app and the natural first thing to look at, so opening
-# http://127.0.0.1:8500 should show the tape rather than a scanner whose signals
-# only mean something once you know what the tape is doing.
+# The app's LANDING page is the DESK (2026-08-18). It answers, in one screen and
+# in order, the four questions a session actually opens with — what is the market
+# doing, where is the structure, what should I act on, what am I holding — by
+# aggregating the highest glance-value element of each page. It supersedes the
+# Market Dashboard here (2026-08-16 → 2026-08-18): the macro tape is the widest
+# read in the app, but it is one of those four answers, not all of them, and it
+# now sits a click away under Trend & Sentiment.
 #
-# This is a REDIRECT rather than a second render of the dashboard: rendering it at
-# both paths would give one page two URLs, and the shell keys the active nav item,
-# the tab strip and the breadcrumb off the route — so `/` would highlight nothing.
-# The Market Scanner moved to its own `/options/scanner`, matching its siblings.
+# This is a REDIRECT rather than a second render of the Desk: rendering it at both
+# paths would give one page two URLs, and the shell keys the active nav item, the
+# tab strip and the breadcrumb off the route — so `/` would highlight nothing.
 @app.get("/")
-def _root_to_market_dashboard():
-    return RedirectResponse(url="/market")
+def _root_to_desk():
+    return RedirectResponse(url="/desk")
+
+
+@ui.page("/desk")
+def desk_page() -> None:
+    with _layout("/desk", "Desk"):
+        from pages import desk
+        desk.render()
 
 
 @ui.page("/options/scanner")

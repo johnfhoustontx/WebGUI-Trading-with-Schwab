@@ -20,10 +20,24 @@ def test_shell_registers_all_pages():
         "/sentiment/momentum",
         "/trade", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
-        "/market",
+        "/market", "/desk",
     )
     for path in expected:
         assert path in routes, f"missing page route {path}; have {sorted(routes)}"
+
+
+def test_root_redirects_to_the_desk():
+    """`/` is a redirect, not a second render — rendering the Desk at both paths
+    would give one page two URLs, and the shell keys the active nav item and the
+    breadcrumb off the route, so `/` would highlight nothing.
+
+    Pinned because nothing else in the suite asserts the landing target: the
+    redirect moved Market Dashboard → Desk on 2026-08-18 and could silently move
+    again."""
+    import inspect
+    import main
+    src = inspect.getsource(main._root_to_desk)
+    assert 'RedirectResponse(url="/desk")' in src
 
 
 def test_shell_imports_proxy_for_banner():
@@ -440,12 +454,20 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/status") == ["System", "System Status"]
     assert main.breadcrumb_trail("/settings") == ["System", "Settings"]
     assert main.breadcrumb_trail("/terminate") == ["System", "Stop All Services"]
+    # The pinned landing block has no caption above it, so the home page is the one
+    # deliberate bare leaf — see test_desk_breadcrumb_is_just_its_own_name.
+    assert main.breadcrumb_trail("/desk") == ["Desk"]
     # Non-vacuity: every single nav route must produce a trail that STARTS with a
     # section, which is the invariant a future page is most likely to break.
-    sections = {c.title() for c, _e in main.NAV_SECTIONS} | {main.SYSTEM_SECTION}
+    # `_LANDING_ROUTES` is the explicit, enumerated exemption — a set rather than a
+    # blanket "or len(trail) == 1", so a page that loses its section by accident
+    # still fails here instead of being waved through as a second landing page.
+    _LANDING_ROUTES = {"/desk"}
+    sections = {c.title() for c, _e in main.NAV_SECTIONS if c} | {main.SYSTEM_SECTION}
     for route in main._NAV_LABEL:
         trail = main.breadcrumb_trail(route)
-        assert trail[0] in sections, f"{route} has no section: {trail}"
+        if route not in _LANDING_ROUTES:
+            assert trail[0] in sections, f"{route} has no section: {trail}"
         assert trail[-1] == main._NAV_LABEL[route], f"{route} ends wrong: {trail}"
 
 
@@ -595,15 +617,16 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 13 drawer items (the 10
-    NAV_SECTIONS entries + the 3 SYSTEM_RAIL pages at the foot); child-page icons
-    are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 14 drawer items (the 11
+    NAV_SECTIONS entries — Desk's pinned landing block plus the 10 workflow ones —
+    + the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 13, f"expected 13 drawer items, got {len(items)}: {items}"
+    assert len(items) == 14, f"expected 14 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1121,14 +1144,51 @@ def test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled():
 def test_nav_section_captions_and_their_derived_counts():
     """The captions are the design's three, in its order, and each count is
     DERIVED from the section's length rather than written down — a literal would
-    go stale the first time a page moved."""
+    go stale the first time a page moved.
+
+    The leading ``None`` caption is the pinned landing block (Desk), which renders
+    no header at all — see ``test_the_landing_block_is_pinned_above_every_caption``.
+    """
     import inspect
     import main
-    assert [c for c, _e in main.NAV_SECTIONS] == ["MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [4, 4, 2]
+    assert [c for c, _e in main.NAV_SECTIONS] == [
+        None, "MARKETS", "STRATEGY", "ACCOUNT"]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 4, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
+
+
+def test_the_landing_block_is_pinned_above_every_caption():
+    """Desk sits ALONE above the captions — the rail's mirror of the bottom-pinned
+    SYSTEM_RAIL block — and renders no section header.
+
+    Pinned because three separate things have to agree for this to look right and
+    none of the others would fail on its own: the block must be first, its caption
+    must be None (an empty string would render a blank 26px header box), and the
+    drawer must skip the header rather than call it with None (which would raise
+    on ``caption.title()``).
+    """
+    import inspect
+    import main
+    caption, entries = main.NAV_SECTIONS[0]
+    assert caption is None, "the landing block must carry NO caption"
+    assert entries == [main._sec_page("/desk")]
+    src = inspect.getsource(main._layout)
+    assert "if caption is not None:" in src, (
+        "the drawer must SKIP the header for a caption-less block")
+
+
+def test_desk_breadcrumb_is_just_its_own_name():
+    """No section sits above the landing page, so its trail is a bare leaf rather
+    than an empty leading crumb plus a stray separator."""
+    import main
+    assert main.breadcrumb_trail("/desk") == ["Desk"]
+
+
+def test_desk_is_a_rail_page_with_no_tab_strip():
+    import main
+    assert main._group_children("/desk") is None
 
 
 def test_only_the_first_section_header_skips_the_separating_gap():
