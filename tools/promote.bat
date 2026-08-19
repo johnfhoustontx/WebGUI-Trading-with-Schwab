@@ -56,7 +56,16 @@ if defined DIRTY (
 )
 
 echo Stopping the stack...
-call stop_all.bat
+REM --- Both launchers are called by QUALIFIED path, never a bare name. cmd will
+REM     not resolve a bare .bat against the current directory when
+REM     NoDefaultCurrentDirectoryInExePath is set in the caller's environment —
+REM     the same variable already blamed in the restart-evidence note below. On
+REM     2026-08-19 it bit here instead: both calls died with "is not recognized
+REM     as an internal or external command", so the stop never ran, the pull
+REM     SUCCEEDED, and the restart never ran — prod left on the old build with
+REM     its proxy down. `cd /d "%~dp0.."` above makes the repo root current, but
+REM     current is exactly what cmd refuses to search.
+call "%~dp0..\stop_all.bat"
 
 REM --- Wait for the ports to actually free before relaunching.
 REM     stop_all is best-effort and taskkill only REQUESTS termination, so
@@ -120,7 +129,7 @@ echo requirements.lock changed - reinstalling...
 
 :restart
 echo Restarting...
-call start_all_wt.bat nowindow
+call "%~dp0..\start_all_wt.bat" nowindow
 
 REM --- Judge the restart on EVIDENCE - whether the stack ANSWERS - and not on the
 REM     launcher's errorlevel. That errorlevel was the test here until 2026-08-19,

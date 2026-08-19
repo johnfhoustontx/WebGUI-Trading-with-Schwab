@@ -142,7 +142,11 @@ def test_promote_refuses_a_dirty_tree_before_stopping_anything():
     joined = "\n".join(code)
     assert "git status --porcelain" in joined, "promote.bat lost its dirty-tree check"
     dirty_at = next(i for i, ln in enumerate(code) if "git status --porcelain" in ln)
-    stop_at = next(i for i, ln in enumerate(code) if "call stop_all.bat" in ln)
+    # matched on the launcher NAME, not the whole call, so qualifying the path
+    # (see test_promote_calls_launchers_by_qualified_path) cannot silently turn
+    # this ordering guard into a no-op
+    stop_at = next(i for i, ln in enumerate(code)
+                   if ln.strip().startswith("call") and "stop_all.bat" in ln)
     assert dirty_at < stop_at, (
         "the dirty-tree check runs AFTER stop_all — a refusal would leave the "
         "stack down")
@@ -384,3 +388,41 @@ def test_start_webgui_probe_uses_no_percent_formatting():
             continue
         assert "%s" not in s and "%d" not in s, (
             f"%-formatting inside a batch -c argument will be mangled by cmd: {s}")
+
+
+# ── promote.bat must PATH-QUALIFY the launchers it calls ────────────────────
+# Measured on 2026-08-19, mid-promotion: `call stop_all.bat` and
+# `call start_all_wt.bat nowindow` both died with "is not recognized as an
+# internal or external command", because cmd will not resolve a bare .bat name
+# against the current directory when NoDefaultCurrentDirectoryInExePath is set
+# in the environment. promote.bat's own comment block already names that exact
+# variable as the cause of an earlier silent failure — the diagnosis was
+# recorded but the two `call` lines were never qualified.
+#
+# The consequence is the worst shape a promotion can take: the guards pass, the
+# stop never runs, `git pull` SUCCEEDS, the restart never runs — so the code is
+# promoted while the stack is left running the old build, and prod's proxy ends
+# up down with no restart behind it. A path-qualified call cannot miss.
+_BARE_CALL = re.compile(r"^\s*call\s+([A-Za-z_][A-Za-z0-9_]*\.bat)", re.MULTILINE)
+
+
+def test_promote_calls_launchers_by_qualified_path():
+    bare = _BARE_CALL.findall(PROMOTE)
+    assert not bare, (
+        "promote.bat calls %s by bare name; cmd cannot resolve those when "
+        "NoDefaultCurrentDirectoryInExePath is set. Use call \"%%~dp0..\<name>\"."
+        % ", ".join(bare))
+
+
+def test_promote_still_calls_both_halves_of_the_restart():
+    """The qualification must not have dropped either call — a promote that
+    pulls but never restarts leaves prod on the old build."""
+    assert "stop_all.bat" in PROMOTE, "promote.bat no longer stops the stack"
+    assert "start_all_wt.bat" in PROMOTE, "promote.bat no longer restarts the stack"
+
+
+def test_no_launcher_calls_a_bat_by_bare_name():
+    """The same trap in any launcher would fail the same way."""
+    offenders = {name: _BARE_CALL.findall(_launcher(name)) for name in ALL_LAUNCHERS}
+    offenders = {n: v for n, v in offenders.items() if v}
+    assert not offenders, f"bare .bat calls: {offenders}"
