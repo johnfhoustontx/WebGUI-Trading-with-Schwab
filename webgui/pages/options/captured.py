@@ -162,14 +162,15 @@ def sort_newest_first(signals):
     """PURE: open signals ordered newest capture first (the table's default).
 
     Signals with no readable timestamp trail the dated ones in the order the
-    service gave them — ``sorted`` is stable, so an undated pair never jitters
-    between the 2 s repaints.
+    service gave them, tie-broken on the incoming index, so neither an undated
+    pair nor two captures at the same instant jitter between the 2 s repaints.
     """
-    dated = [(t, i, s) for i, s in enumerate(signals or [])
-             if (t := _captured_at(s)) is not None]
-    undated = [s for s in signals or [] if _captured_at(s) is None]
+    dated, undated = [], []
+    for i, sig in enumerate(signals or []):
+        ts = _captured_at(sig)
+        (undated if ts is None else dated).append((ts, i, sig))
     dated.sort(key=lambda x: (-x[0], x[1]))
-    return [s for _, _, s in dated] + undated
+    return [sig for _, _, sig in dated + undated]
 
 
 def captured_rows(signals):
