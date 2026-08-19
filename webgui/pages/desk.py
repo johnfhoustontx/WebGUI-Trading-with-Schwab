@@ -766,13 +766,32 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # of on a tier of its own. `overflow-x-auto` was deliberately not used as the
 # fallback: a dashboard you scroll sideways to read defeats the page's purpose.
 _GAP = "gap-x-[10px] gap-y-0"
-DEALER_GRID = ("grid grid-cols-[76px_74px_74px_minmax(130px,1fr)_72px_72px_118px]"
-               f" {_GAP} w-full")
-BOARD_GRID = ("grid grid-cols-[44px_minmax(140px,1fr)_66px_56px_52px_84px] "
+# Column widths are the reference design's, but every flexible track is
+# ``minmax(<reference px>, <weight>fr)`` rather than a bare pixel width with ONE
+# 1fr track soaking up the remainder.
+#
+# Why: the reference was authored against ~920px panels. Measured live at a
+# 2381px viewport the panels are ~1100px, and with a single 1fr track the
+# structure map rendered **502px wide** — it needs ~200 — which left a void
+# between the map and the wall columns and made the markers read as scattered
+# rather than as a scale. The map was CORRECT (put 0%, spot 26%, flip 46%,
+# call 100%); it was just stretched across half the panel.
+#
+# Weighting every track instead spreads the slack proportionally, so the row
+# fills at any width and no single cell balloons. The minmax LOWER bounds are
+# the reference's exact pixels, so nothing can shrink below the geometry the
+# design was drawn at.
+DEALER_GRID = ("grid grid-cols-[76px_minmax(74px,1fr)_minmax(74px,1fr)_"
+               "minmax(130px,2fr)_minmax(72px,1fr)_minmax(72px,1fr)_"
+               f"minmax(118px,1.5fr)] {_GAP} w-full")
+BOARD_GRID = ("grid grid-cols-[44px_minmax(140px,2fr)_minmax(66px,1fr)_"
+              "minmax(56px,1fr)_minmax(52px,1fr)_minmax(84px,1fr)] "
               f"{_GAP} w-full")
-FLOW_GRID = f"grid grid-cols-[52px_minmax(160px,1fr)_80px] {_GAP} w-full"
-POS_GRID = ("grid grid-cols-[52px_minmax(180px,1fr)_40px_48px_48px_128px_32px_"
-            f"76px_44px] {_GAP} w-full")
+FLOW_GRID = ("grid grid-cols-[52px_minmax(160px,3fr)_minmax(80px,1fr)] "
+             f"{_GAP} w-full")
+POS_GRID = ("grid grid-cols-[52px_minmax(180px,2fr)_minmax(40px,1fr)_"
+            "minmax(48px,1fr)_minmax(48px,1fr)_minmax(128px,2fr)_"
+            f"minmax(32px,1fr)_minmax(76px,1fr)_minmax(44px,1fr)] {_GAP} w-full")
 
 _EYEBROW = f"text-[9.5px] tracking-[.22em] {CON_TXT_DIM}"
 _HEAD = f"text-[8px] tracking-[.2em] {REF_HEAD_TXT}"
