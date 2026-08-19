@@ -184,3 +184,67 @@ def test_dealer_rows_keeps_the_first_row_per_symbol_and_skips_junk():
     rows = d.dealer_rows(view, stale=False)
     assert [r["symbol"] for r in rows] == ["SPY"]
     assert rows[0]["spot"] == 1.0
+
+
+# ── opportunity_rows ─────────────────────────────────────────────────────────
+def test_opportunity_rows_takes_the_top_five_by_hotness_descending():
+    view = {"rows": [_mrow(f"S{i}", hotness=i) for i in range(10)]}
+    rows = d.opportunity_rows(view)
+    assert [r["hotness"] for r in rows] == [9, 8, 7, 6, 5]
+    assert [r["symbol"] for r in rows] == ["S9", "S8", "S7", "S6", "S5"]
+
+
+def test_opportunity_rows_sorts_rows_without_hotness_to_the_bottom():
+    view = {"rows": [_mrow("NOHOT", hotness=None), _mrow("HOT", hotness=1)]}
+    assert [r["symbol"] for r in d.opportunity_rows(view)] == ["HOT", "NOHOT"]
+
+
+def test_opportunity_rows_carries_the_decision_fields():
+    row = d.opportunity_rows({"rows": [_mrow("AMD", atm_iv=41.2, iv_state="spiking",
+                                             signal="sell", signal_strength=1,
+                                             pc_ratio=1.44, net_prem_m=-8.1)]})[0]
+    assert row["atm_iv"] == 41.2 and row["iv_state"] == "spiking"
+    assert row["signal"] == "sell" and row["signal_strength"] == 1
+    assert row["pc_ratio"] == 1.44 and row["net_prem_m"] == -8.1
+
+
+def test_opportunity_rows_maps_the_dealer_setup_word():
+    cases = {"gamma_cascade": "CASCADE", "vanna_squeeze": "VOL CRUSH",
+             "delta_wall_pin": "PIN", "charm_grind": "GRIND",
+             "neutral": "", "na": "", None: "", "nonsense": ""}
+    for regime, word in cases.items():
+        row = d.opportunity_rows({"rows": [_mrow("AMD", dealer_regime=regime)]})[0]
+        assert row["setup"] == word, regime
+
+
+def test_opportunity_rows_rationale_is_composed_from_real_state():
+    row = d.opportunity_rows({"rows": [_mrow(
+        "AMD", dealer_regime="neutral", gex_regime="below",
+        trend_state="flat", call_accel="hot", put_accel="steady")]})[0]
+    assert row["rationale"] == "below flip · call flow hot"
+
+
+def test_opportunity_rows_rationale_is_empty_when_nothing_is_known():
+    row = d.opportunity_rows({"rows": [{"symbol": "AMD", "hotness": 5}]})[0]
+    assert row["rationale"] == ""
+    assert row["setup"] == "" and row["atm_iv"] is None
+
+
+def test_opportunity_rows_never_claims_an_iv_edge():
+    """No ``rv``/``edge`` column, ever.
+
+    Realized volatility does not exist anywhere in this app — nothing collects
+    it, nothing publishes it — so an IV−RV "edge" cannot be computed. A column
+    with nothing behind it would be indistinguishable from one that works.
+    """
+    rows = d.opportunity_rows({"rows": [_mrow("AMD")]})
+    assert "rv" not in rows[0] and "edge" not in rows[0]
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    assert '"rv"' not in src and '"edge"' not in src
+
+
+def test_opportunity_rows_is_empty_for_a_missing_view():
+    assert d.opportunity_rows(None) == []
+    assert d.opportunity_rows({}) == []
+    assert d.opportunity_rows({"rows": ["junk", None]}) == []

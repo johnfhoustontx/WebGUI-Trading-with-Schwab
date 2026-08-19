@@ -169,3 +169,99 @@ def _flip_read(spot, flip):
         return None, None
     return ("above" if spot >= flip else "below",
             round(abs(spot - flip) / abs(flip) * 100.0, 4))
+
+
+# ── opportunity board ────────────────────────────────────────────────────────
+# dealer_regime → the short setup tag the board prints beside the score. A
+# regime with nothing to say ("neutral"/"na"/unknown) prints NOTHING rather than
+# a filler word — an empty cell reads as "no setup", where "NEUTRAL" would read
+# as a finding.
+SETUP_WORDS = {"gamma_cascade": "CASCADE", "vanna_squeeze": "VOL CRUSH",
+               "delta_wall_pin": "PIN", "charm_grind": "GRIND",
+               "neutral": "", "na": ""}
+
+# The rationale's vocabulary. Each map covers only the states worth a phrase;
+# everything else contributes nothing, so the line stays short and every word in
+# it is carrying a real reading.
+_SETUP_PHRASE = {"gamma_cascade": "cascade risk", "vanna_squeeze": "vol crush",
+                 "delta_wall_pin": "pinned at wall", "charm_grind": "charm grind"}
+_FLIP_PHRASE = {"above": "above flip", "below": "below flip"}
+_TREND_PHRASE = {"strong_up": "strong uptrend", "up": "uptrend",
+                 "down": "downtrend", "strong_down": "strong downtrend"}
+_ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
+
+OPPORTUNITY_LIMIT = 5
+
+
+def setup_word(dealer_regime):
+    """The board's short setup tag for a row's ``dealer_regime``."""
+    return SETUP_WORDS.get(dealer_regime, "")
+
+
+def rationale(row):
+    """One short line saying WHY this symbol is near the top, in plain words.
+
+    Built only from state the matrix already publishes — the dealer setup, which
+    side of the flip price sits on, the trend, and whichever side of the option
+    flow is actually moving. Nothing here is computed; the Desk's job is to read
+    the row aloud, not to form a second opinion about it. A row that knows
+    nothing gets an empty string, never a hedge sentence.
+    """
+    r = row if isinstance(row, dict) else {}
+    parts = []
+    for key, table in ((r.get("dealer_regime"), _SETUP_PHRASE),
+                       (r.get("gex_regime"), _FLIP_PHRASE),
+                       (r.get("trend_state"), _TREND_PHRASE)):
+        phrase = table.get(key)
+        if phrase:
+            parts.append(phrase)
+    # Flow: name the side that is moving. "steady"/"flat" is the resting state
+    # and says nothing worth a clause.
+    for side, key in (("call", r.get("call_accel")), ("put", r.get("put_accel"))):
+        word = _ACCEL_PHRASE.get(key)
+        if word:
+            parts.append(f"{side} flow {word}")
+    return " · ".join(parts[:3])
+
+
+# Sorts a hotness-less row below every scored one without inventing a score for
+# it (0 would be a claim; this is a sort position).
+_UNSCORED = float("-inf")
+
+
+def opportunity_rows(matrix_view, limit=OPPORTUNITY_LIMIT):
+    """The hottest ``limit`` symbols from ``cache:options:matrix``, hottest first.
+
+    Deliberately carries NO ``rv``/``edge`` field: realized volatility is not
+    collected or published anywhere in this app, so an IV-vs-RV edge cannot be
+    computed and a column pretending otherwise would look exactly like one that
+    works. ``atm_iv`` + ``iv_state`` are the honest version of that read.
+    """
+    rows = (matrix_view or {}).get("rows") if isinstance(matrix_view, dict) else None
+    if not isinstance(rows, list):
+        return []
+    scored = [r for r in rows if isinstance(r, dict)]
+
+    def _rank(r):
+        # `or _UNSCORED` would be wrong here: a genuine hotness of 0.0 is falsy
+        # and would be demoted as if it had no score at all.
+        h = _finite(r.get("hotness"))
+        return -(_UNSCORED if h is None else h)
+
+    # Stable sort, so equal hotness keeps the matrix's own (hotness-ranked) order.
+    scored.sort(key=_rank)
+    out = []
+    for r in scored[:max(0, int(limit))]:
+        out.append({
+            "symbol": r.get("symbol", ""),
+            "hotness": _finite(r.get("hotness")),
+            "rationale": rationale(r),
+            "setup": setup_word(r.get("dealer_regime")),
+            "atm_iv": _finite(r.get("atm_iv")),
+            "iv_state": r.get("iv_state") or "na",
+            "signal": r.get("signal") or "neutral",
+            "signal_strength": _finite(r.get("signal_strength")),
+            "pc_ratio": _finite(r.get("pc_ratio")),
+            "net_prem_m": _finite(r.get("net_prem_m")),
+        })
+    return out
