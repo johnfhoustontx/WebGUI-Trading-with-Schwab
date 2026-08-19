@@ -34,14 +34,13 @@ from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import header as _hdr
 from pages.options import paper as _paper
-from pages.options import theme as _theme
 from pages.options.matrix import signal_class as _signal_class
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
                                  CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
-                                 CONSOLE_DISPLAY, CONSOLE_DIVIDER,
-                                 CONSOLE_FONT_HEAD_HTML, CONSOLE_KEYFRAMES_CSS,
-                                 CONSOLE_PAGE, CONSOLE_RULE)
+                                 CONSOLE_DISPLAY, CONSOLE_FONT_HEAD_HTML,
+                                 CONSOLE_KEYFRAMES_CSS, CONSOLE_PAGE,
+                                 CONSOLE_RULE)
 from pages.sentiment import sentiment_arcs as _sentiment_arcs
 from pages.sentiment import trend_arcs as _trend_arcs
 from pages.ui_guard import guard, guard_async
@@ -592,39 +591,61 @@ def summary_line(summary):
 # A chip is built ONLY from a palette hex, and every call site passes a constant,
 # so the generated class strings come from a finite set — the styling standard's
 # requirement. Nothing here ever interpolates a value-derived colour.
-def _chip(hexv, fill=0.12, weight="", wrap=False):
-    """A chip. ``wrap=True`` lets the text break onto a second line INSIDE the
-    border instead of running past it.
+def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
+          pad="px-[7px]"):
+    """A chip in the reference design's shape: 8px caps on wide tracking, a 2px
+    radius, and a SOLID 1px border in the same hue as the text — an outline, not
+    a filled badge.
 
-    A chip is one short word or two, so ``whitespace-nowrap`` is the right
-    default — a wrapped "AT RISK" would be two stacked words for no reason. The
-    exception is the dealer regime, whose reading is genuinely three words long
-    and which must never be clipped: it is the one word on that panel that says
-    whether dealer hedging dampens moves or amplifies them, so a truncated
-    "SHORT GAMMA · RU…" would be worse than a two-line chip. ``break-words``
-    rather than plain wrapping so a narrow column can still never push the text
-    past the border it sits in."""
-    flow = "break-words leading-[1.25]" if wrap else "whitespace-nowrap"
-    return (f"px-2 py-[2px] text-[10px] tracking-[.14em] {flow} "
-            f"border border-[{hexv}]/[0.35] bg-[{hexv}]/[{fill}] "
-            f"text-[{hexv}] {weight}").strip()
+    ``fill=None`` emits no background class at all, which is what the reference
+    specifies for the dealer regime chip (border + colour, nothing else). It is
+    spelled as an absent class rather than a zero alpha so the generated string
+    can never depend on the JIT accepting ``/[0.0]``.
+
+    ``wrap=True`` lets the text break onto a second line INSIDE the border
+    instead of running past it. A chip is normally one short word, so
+    ``whitespace-nowrap`` would be the natural default — but the two cases that
+    matter here are both genuinely long: the dealer regime reads three words,
+    and it is the one word on that panel saying whether dealer hedging dampens
+    moves or amplifies them, so a truncated "SHORT GAMMA · RU…" would be worse
+    than two lines. ``break-words`` rather than plain wrapping, so even a
+    single unbreakable word ("RESCUE" in a 44px track) folds instead of running
+    past the border it sits in.
+
+    ``track``/``pad`` exist for the two NARROW tracks the reference gives us —
+    BOOK at 52px and FLAG at 44px. A chip is sized by its letter-spacing far
+    more than by its font size, so tightening the tracking is what buys the fit;
+    shrinking the text below 8px would make it unreadable instead.
+    """
+    flow = "break-words leading-[1.3]" if wrap else "whitespace-nowrap"
+    bg = "" if fill is None else f"bg-[{hexv}]/[{fill}]"
+    return (f"{pad} py-[2px] rounded-[2px] text-[8px] tracking-[{track}] {flow} "
+            f"border border-[{hexv}] {bg} text-[{hexv}] {weight}").strip()
 
 
-CHIP_POS = _chip(_C["positive"])
-CHIP_NEG = _chip(_C["negative"])
-CHIP_NEG_STRONG = _chip(_C["negative"], fill=0.28, weight="font-semibold")
-CHIP_WARN = _chip(_C["warning"])
-CHIP_ACCENT = _chip(_C["accent"])
-CHIP_MUTED = _chip(_C["muted"])
+# The book and flag chips live in the 52px and 44px tracks, so they take the
+# compact tracking and padding; they also wrap, because "AT RISK" is two words
+# and "RESCUE" is one long one.
+_TIGHT = {"track": ".1em", "pad": "px-[5px]", "wrap": True}
+
+CHIP_POS = _chip(_C["positive"], **_TIGHT)
+CHIP_NEG = _chip(_C["negative"], **_TIGHT)
+CHIP_NEG_STRONG = _chip(_C["negative"], fill=0.28, weight="font-semibold",
+                        **_TIGHT)
+CHIP_WARN = _chip(_C["warning"], **_TIGHT)
+CHIP_ACCENT = _chip(_C["accent"], **_TIGHT)
+CHIP_MUTED = _chip(_C["muted"], **_TIGHT)
 
 # regime_word → chip. Only the two real readings are coloured; the em-dash
 # ("no side known") stays muted rather than borrowing either verdict's colour.
-# Both readings wrap (see ``_chip``) — the words stay whole at any column
-# width. The em-dash fallback keeps the shared muted chip: one character has
-# nothing to wrap, and a chip built only for it would be a second constant
-# saying the same thing.
-_REGIME_CHIP = {"LONG GAMMA · PINS": _chip(_C["positive"], wrap=True),
-                "SHORT GAMMA · RUNS": _chip(_C["negative"], wrap=True)}
+# Both readings wrap (see ``_chip``) — the words stay whole at any column width.
+# The em-dash fallback keeps the shared muted chip because ``regime_chip_class``
+# is a total function, but the DEALER ROW never draws it: an unknown regime
+# renders the dash on its own, with no chip. An empty outlined box reads as a
+# broken widget, not as a missing reading.
+_REGIME_CHIP = {"LONG GAMMA · PINS": _chip(_C["positive"], wrap=True, fill=None),
+                "SHORT GAMMA · RUNS": _chip(_C["negative"], wrap=True,
+                                            fill=None)}
 
 # The four position flags. RESCUE shares the negative hue with AT RISK but fills
 # harder: they are the same KIND of trouble at two depths, and giving RESCUE a
@@ -705,6 +726,28 @@ POLL_SEC = 2.0
 CLOCK_SEC = 1.0
 RING_PX = 150
 
+# ── the reference design's own palette ───────────────────────────────────────
+# The supplied design carries a THREE-STEP text ladder — symbol, then spot, then
+# the flip level, each a shade softer than the last — and a green/red wall pair.
+# The `[console]` vocabulary has neither: `CON_TXT` is a single step, and the
+# console's positive/negative sit a shade off these two hues. So the reference
+# hexes are written out here as named constants rather than borrowed
+# approximations. They are constants, not interpolations, so the class set stays
+# finite exactly as the styling standard requires. Everything DATA-driven on this
+# page (a sign, a side, a state) still maps through the console tokens, which is
+# why those maps are untouched below.
+REF_TXT_STRONG = "text-[#eaf2f9]"      # the symbol — the brightest thing in a row
+REF_TXT = "text-[#dce7f3]"             # spot
+REF_TXT_SOFT = "text-[#cfdae8]"        # the gamma flip level
+REF_HEAD_TXT = "text-[#3f5265]"        # column labels
+CALL_HEX = "#2dd4a7"                   # the call wall, and its marker on the map
+PUT_HEX = "#fb5f7c"                    # the put wall, and its marker
+FLIP_HEX = "#f5b841"                   # the gamma flip tick
+SPOT_HEX = "#22d3ee"                   # the spot dot
+_ROW_RULE = "border-[#0d151e]"         # the rule under a data row
+_HEAD_RULE = "border-[#121b26]"        # the (brighter) rule under the labels
+_MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
+
 # Column tracks, shared by each panel's head row and its data rows. They must be
 # the SAME string in both places — that identity is the only thing keeping the
 # labels over their columns, and it is the first thing to drift if the two are
@@ -712,34 +755,33 @@ RING_PX = 150
 # head tuple and the row painter, or the labels silently slide one cell across
 # and every number on the panel starts reading as the wrong quantity.
 #
-# All four are sized for HALF the page. The panels sit in a 2x2 grid, so each
-# one gets ~495px of content at a 1265px window — a third of what these tables
-# were first drawn for. Three things buy the width back, in this order:
-#   1. Merged columns. The dealer walls are ONE thing (price sits between them),
-#      so they became the two ends of the structure line rather than two cells.
-#   2. Stacked sub-values. A qualifier goes UNDER its number in the same cell —
-#      the day % under spot, the flip distance under the flip, the DTE under the
-#      strikes, the strategy under the symbol — which costs a line of height
-#      instead of a whole column of width.
-#   3. `gap-x-2` rather than `gap-4`. Seven gaps at 16px is 112px of nothing.
-# The two panels carrying a genuinely wide element put it on a SECOND line of
-# the same row — the dealer structure bar and the board's rationale sentence.
-# Both read BETTER full-width than squeezed into a track, so this is not purely
-# a concession to the column. `overflow-x-auto` was deliberately not used as the
-# fix: a dashboard you scroll sideways to read defeats the page's whole purpose.
-DEALER_GRID = ("grid grid-cols-[48px_68px_84px_64px_minmax(120px,1fr)] gap-x-2 "
-               "items-center w-full")
-BOARD_GRID = ("grid grid-cols-[54px_48px_56px_minmax(66px,1fr)_40px_60px_78px] "
-              "gap-x-2 items-center w-full")
-FLOW_GRID = ("grid grid-cols-[58px_106px_54px_minmax(0,1fr)] gap-x-2 "
-             "items-center w-full")
-POS_GRID = ("grid grid-cols-[62px_minmax(0,1fr)_84px_40px_82px_70px] gap-x-2 "
-            "items-center w-full")
+# The widths are the reference design's, not derived here, and the widest panel
+# (Positions: 468px of fixed track + a 180px minimum + eight 10px gaps) is what
+# sets the page's two-column breakpoint — see the panel wrapper in ``render``.
+# Every qualifier rides as a SECOND LINE inside its owner's cell rather than
+# taking a column of its own: the day % under spot, the flip distance under the
+# flip, the rationale under the symbol, the expiry under the strikes. That costs
+# a line of height instead of a whole column of width, and it keeps each row to
+# ONE grid line — which is what puts the structure map beside its symbol instead
+# of on a tier of its own. `overflow-x-auto` was deliberately not used as the
+# fallback: a dashboard you scroll sideways to read defeats the page's purpose.
+_GAP = "gap-x-[10px] gap-y-0"
+DEALER_GRID = ("grid grid-cols-[76px_74px_74px_minmax(130px,1fr)_72px_72px_118px]"
+               f" {_GAP} w-full")
+BOARD_GRID = ("grid grid-cols-[44px_minmax(140px,1fr)_66px_56px_52px_84px] "
+              f"{_GAP} w-full")
+FLOW_GRID = f"grid grid-cols-[52px_minmax(160px,1fr)_80px] {_GAP} w-full"
+POS_GRID = ("grid grid-cols-[52px_minmax(180px,1fr)_40px_48px_48px_128px_32px_"
+            f"76px_44px] {_GAP} w-full")
 
 _EYEBROW = f"text-[9.5px] tracking-[.22em] {CON_TXT_DIM}"
-_HEAD = f"text-[9.5px] tracking-[.2em] {CON_TXT_DIM}"
-_ROW = f"py-[9px] border-b {CONSOLE_DIVIDER} cursor-pointer"
+_HEAD = f"text-[8px] tracking-[.2em] {REF_HEAD_TXT}"
+_ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
 _VALUE = f"text-[13px] tabular-nums {CON_TXT}"
+# The dealer panel's three price columns, one shade apart (see the ladder above).
+_V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
+_V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
+_SUB = "text-[9px] tabular-nums"           # a cell's second line
 _PLACEHOLDER = f"text-[11.5px] {CON_TXT_MUTED} py-4"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
@@ -782,7 +824,13 @@ def _panel(title, subtitle=""):
 
 
 def _grid_head(grid, labels):
-    with ui.element("div").classes(f"{grid} pb-1"):
+    """The column labels, on the SAME track list as the rows beneath them.
+
+    ``px-1`` matches the data row's own horizontal padding (``_ROW``), which is
+    what actually keeps a label over its column: the padding shrinks the grid's
+    content box, and if the two rows disagreed about it every fixed track would
+    start 4px out of step with its label."""
+    with ui.element("div").classes(f"{grid} px-1 pb-2 border-b {_HEAD_RULE}"):
         for text in labels:
             ui.label(text).classes(_HEAD)
 
@@ -791,8 +839,20 @@ def _cell(text, extra=""):
     return ui.label(text).classes(f"{_VALUE} {extra}".strip())
 
 
-def _structure_bar(pos):
-    """The put-wall → call-wall track with spot and the gamma flip marked on it.
+def _stack():
+    """A cell holding a value and its qualifier. ``min-w-0`` so a ``truncate``
+    on the second line can actually bite — a grid item's automatic minimum is
+    its content, so without it a long sub-label pushes the track wider than the
+    panel instead of ellipsing."""
+    return ui.column().classes("gap-[3px] min-w-0")
+
+
+def _structure_map(pos):
+    """The put-wall → call-wall span with spot and the gamma flip marked on it.
+
+    This is a CELL of the dealer row (the flexible 4th track), not a tier of its
+    own: the whole reading is "where does price sit between the walls", which is
+    only legible beside the symbol and the two wall prices it refers to.
 
     Positioned divs at ``left-[{pct}%]``, NOT a scaled ``viewBox`` SVG: that
     would need ``vector-effect: non-scaling-stroke`` to stop the non-uniform
@@ -805,73 +865,39 @@ def _structure_bar(pos):
     documented exception to the map-to-a-finite-palette rule; every COLOUR below
     is a fixed palette constant.
     """
-    with ui.element("div").classes(f"{_K.track_classes()} h-[10px] w-full"):
-        # The walls ARE the ends of the scale, so they are drawn as the bar's
-        # own end caps — the right one pulled back by its own width so it does
-        # not hang outside the track.
+    # Two hairline uprights instead of a filled track: the map is a SPAN, and
+    # its ends are the only part of it that is a fixed fact.
+    with ui.element("div").classes(
+            f"relative h-[34px] w-full border-l border-r {_MAP_EDGE} px-[2px]"):
         ui.element("div").classes(
-            f"absolute top-0 bottom-0 w-[2px] bg-[{_C['positive']}] "
+            f"absolute top-[6px] bottom-[4px] w-[2px] bg-[{PUT_HEX}] "
+            f"shadow-[0_0_7px_rgba(251,95,124,0.7)] "
             f"{_K.left_class(pos['put_wall'])}")
+        # The call wall sits at 100%, so without pulling it back by its own
+        # width it would hang past the map and widen the whole panel by 2px —
+        # enough to make the row report a horizontal overflow.
         ui.element("div").classes(
-            f"absolute top-0 bottom-0 w-[2px] -translate-x-full "
-            f"bg-[{_C['negative']}] {_K.left_class(pos['call_wall'])}")
+            f"absolute top-[6px] bottom-[4px] w-[2px] ml-[-2px] "
+            f"bg-[{CALL_HEX}] shadow-[0_0_7px_rgba(45,212,167,0.7)] "
+            f"{_K.left_class(pos['call_wall'])}")
         if pos.get("flip") is not None:
             ui.element("div").classes(
-                f"absolute top-0 bottom-0 w-[2px] -translate-x-1/2 "
-                f"bg-[{_C['warning']}] {_K.left_class(pos['flip'])}")
+                f"absolute top-[2px] bottom-0 w-px bg-[{FLIP_HEX}] "
+                f"opacity-[.85] {_K.left_class(pos['flip'])}")
+            # Named, because a lone amber hairline between two glowing walls is
+            # not self-explanatory. `ml-[-6px]` half-centres it on the tick.
+            ui.label("FLIP").classes(
+                f"absolute bottom-[-3px] ml-[-6px] text-[8px] "
+                f"text-[#4b6070] {_K.left_class(pos['flip'])}")
         if pos.get("spot") is not None:
+            # A ring, not a dot: it has to read as a position ON the span
+            # rather than as a third wall. `ml-[-5px]` centres its 11px on the
+            # percentage (a negative margin, so nothing overflows to the right).
             ui.element("div").classes(
-                f"absolute top-1/2 w-[9px] h-[9px] rounded-full "
-                f"-translate-x-1/2 -translate-y-1/2 bg-[{_C['text']}] "
-                f"{_K.left_class(pos['spot'])} "
-                f"{_theme.console_glow(_C['text'], px=8, alpha=0.55)}")
-
-
-def _wall_end(word, value, hexv, right=False):
-    """One end of the structure line: the wall's name and its price.
-
-    Painted in the SAME palette hex as the end cap the bar draws for it, so the
-    number and the tick standing for it are visibly one thing. The name sits on
-    the OUTSIDE of each end, which puts the two prices closest to the bar and
-    lets them read as the scale they are."""
-    word_cls = f"text-[9px] tracking-[.16em] {CON_TXT_DIM}"
-    val_cls = f"text-[11.5px] tabular-nums text-[{hexv}]"
-    with ui.element("div").classes("flex items-baseline gap-1 shrink-0"):
-        if right:
-            ui.label(fmt_price(value)).classes(val_cls)
-            ui.label(word).classes(word_cls)
-        else:
-            ui.label(word).classes(word_cls)
-            ui.label(fmt_price(value)).classes(val_cls)
-
-
-def _structure_line(row):
-    """The put-wall → call-wall axis on its own full-width line under the row.
-
-    The old CALL WALL and PUT WALL columns are merged into this: the bar's whole
-    point is that price sits BETWEEN the walls, so each wall's price belongs at
-    the end it defines rather than in a cell of its own two columns away. At
-    half-width there was no room for a bar AND two number columns anyway, and
-    the bar reads better across the full row than squeezed into a track.
-
-    Drawn only when at least one wall survived ``_walls_trustworthy``. Nothing
-    at all otherwise — the dealer panel already says in words why the walls
-    vanished, and a lone dash per row would only repeat it four times.
-    """
-    if row["put_wall"] is None and row["call_wall"] is None:
-        return
-    with ui.element("div").classes(
-            "flex items-center gap-2 w-full pt-[6px]"):
-        _wall_end("PUT", row["put_wall"], _C["positive"])
-        with ui.element("div").classes("flex-1 min-w-0"):
-            if row["structure"] is None:
-                # Walls but no placeable spot: the axis exists, so draw it, but
-                # leave it empty rather than marking a position nothing supports.
-                ui.element("div").classes(
-                    f"{_K.track_classes()} h-[10px] w-full")
-            else:
-                _structure_bar(row["structure"])
-        _wall_end("CALL", row["call_wall"], _C["negative"], right=True)
+                f"absolute top-[10px] w-[11px] h-[11px] ml-[-5px] rounded-full "
+                f"border-2 border-[{SPOT_HEX}] bg-[#06121a] "
+                f"shadow-[0_0_12px_rgba(34,211,238,0.75)] "
+                f"{_K.left_class(pos['spot'])}")
 
 
 def render():
@@ -944,18 +970,22 @@ def render():
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
         # the order the page argues: structure, then what to act on, then what is
-        # already on. `items-start` so a short panel does not stretch to its
-        # taller neighbour's height and leave a lake of empty card.
+        # already on. `items-stretch` so the two panels of a row square off at
+        # the same height instead of leaving a stepped edge between them.
         #
-        # The breakpoint is `lg` (1024px), NOT `xl` (1280px). A 1265px-wide
-        # window — an ordinary maximised browser on a 1366 laptop, and the size
-        # this was first checked at — falls 15px short of `xl` and silently
-        # collapsed all four panels into one column. `lg` is comfortably below
-        # the narrowest realistic desktop for this app while still dropping to a
-        # single column on a tablet, where two columns of an 8-column table
-        # would be unreadable anyway.
+        # The breakpoint is ARITHMETIC, not a Tailwind size name. The Positions
+        # row needs 728px of content (468px of fixed track + a 180px minimum for
+        # the symbol + eight 10px gaps), and a panel spends 40px of its own on
+        # padding; two of those plus the 68px icon rail, the page's own padding
+        # and the 20px gutter is ~1700px. Below that the page is ONE column,
+        # where a full-width panel carries ~1130px and every grid fits with room
+        # to spare — so the narrow layout is the comfortable one, and the two-up
+        # layout is the one that has to be earned. `lg:` (1024px) was the old
+        # value and it was simply wrong: it promised two columns 675px short of
+        # what the widest panel needs.
         with ui.element("div").classes(
-                "grid grid-cols-1 lg:grid-cols-2 gap-4 w-full items-start"):
+                "grid grid-cols-1 min-[1700px]:grid-cols-2 gap-5 w-full "
+                "items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             board_body = _panel("OPPORTUNITY BOARD", "HOTTEST FIVE")
             flow_body = _panel("LIVE FLOW ALERTS", "NEWEST FIVE")
@@ -1040,55 +1070,65 @@ def render():
                 ui.label(
                     f"Walls withheld — GEX feed {fresh['label'].lower()}"
                 ).classes(f"text-[10px] {CON_WARN} pb-1")
-            # Five labels for five tracks. The two wall columns are gone — they
-            # are the ends of the structure line under each row now — and the
-            # structure bar has no label because it IS the line those two
-            # prices bracket.
+            # Seven labels for seven tracks. NET GEX and the regime chip share
+            # the last one — the chip is the WORD for the number above it, so
+            # the label names both.
             _grid_head(DEALER_GRID,
-                       ("SYMBOL", "SPOT", "GAMMA FLIP", "NET GEX",
-                        "DEALER REGIME"))
+                       ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
+                        "CALL WALL", "PUT WALL", "NET GEX / REGIME"))
             for row in rows:
                 _dealer_row(row)
 
     def _dealer_row(row):
-        # Two tiers: the numbers on a grid line, the structure axis full-width
-        # beneath them. `_ROW` is on the OUTER element so the divider rule and
-        # the hover wash cover both tiers as one row.
+        # ONE grid line. The structure map is the flexible 4th cell, so it sits
+        # beside the symbol it describes rather than on a tier of its own.
         #
-        # `w-full` is load-bearing, not decoration. The panel body is a flex
-        # column that does NOT stretch its children, so a wrapper without it
-        # shrinks to fit — and the inner grid's own `w-full` then resolves
-        # against that shrunken width, collapsing every `1fr` track onto its
-        # content. It only worked before because the grid classes (which carry
-        # `w-full`) sat on this element itself.
+        # The symbol carries no second line: the reference shows a venue under
+        # it ("CBOE · INDEX") and this app publishes no venue for a matrix row.
+        # The cell stays a single line rather than borrowing something unrelated
+        # to fill the space.
         el = ui.element("div").classes(
-            f"{_ROW} w-full hover:bg-[{_C['line']}]/[0.06]")
+            f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
-            with ui.element("div").classes(DEALER_GRID):
-                ui.label(row["symbol"]).classes(
-                    f"text-[15px] font-semibold {CON_TXT}")
-                with ui.column().classes("gap-0"):
-                    _cell(fmt_price(row["spot"]))
-                    ui.label(fmt_signed_pct(row["day_pct"])).classes(
-                        f"text-[10px] tabular-nums "
-                        f"{signed_class(row['day_pct'])}")
-                with ui.column().classes("gap-0"):
-                    _cell(fmt_price(row["flip"]),
-                          flip_side_class(row["flip_side"]))
-                    # Empty string, not an em-dash: the level above it already
-                    # carries the dash when there is no flip to report.
-                    ui.label(flip_sub_text(row)).classes(
-                        f"text-[10px] tabular-nums "
-                        f"{flip_side_class(row['flip_side'])}")
-                _cell(fmt_gex(row["net_gex"]))
-                # `justify-self-start`: this is the row's flexible track, so on
-                # a wide window the chip would otherwise stretch to whatever is
-                # left over — a 500px box around eighteen characters. It sizes
-                # to its words and the slack stays slack.
-                ui.label(row["regime_word"]).classes(
-                    f"justify-self-start "
-                    f"{regime_chip_class(row['regime_word'])}")
-            _structure_line(row)
+            ui.label(row["symbol"]).classes(
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+            with _stack():
+                ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
+                ui.label(fmt_signed_pct(row["day_pct"])).classes(
+                    f"{_SUB} {signed_class(row['day_pct'])}")
+            with _stack():
+                ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
+                # Empty string, not an em-dash: the level above it already
+                # carries the dash when there is no flip to report.
+                ui.label(flip_sub_text(row)).classes(
+                    f"{_SUB} {flip_side_class(row['flip_side'])}")
+            if row["structure"] is None:
+                # No walls (or no placeable spot) is a missing READING, so it
+                # gets the same em-dash every other cell uses. An empty framed
+                # box would read as a widget that failed to draw.
+                _cell(_DASH, CON_TXT_MUTED)
+            else:
+                _structure_map(row["structure"])
+            # Each wall in the same hue as its marker on the map, so the number
+            # and the tick standing for it are visibly one thing. The reference
+            # puts an open-interest figure under each; this app publishes no
+            # per-strike OI on a matrix row, so the second line is left out.
+            _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
+            _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
+            with _stack():
+                ui.label(fmt_gex(row["net_gex"])).classes(
+                    f"text-[13px] font-medium tabular-nums "
+                    f"{signed_class(row['net_gex'])}")
+                # `self-start` so the chip shrinks to its words. Without it the
+                # chip stretches to the full 118px track and, on a row with no
+                # regime, would draw an EMPTY outlined box — which reads as a
+                # broken widget rather than as an absent reading. Hence the
+                # dash-and-no-chip branch as well.
+                if row["regime_word"] == _NO_REGIME:
+                    ui.label(_NO_REGIME).classes(f"{_SUB} {CON_TXT_MUTED}")
+                else:
+                    ui.label(row["regime_word"]).classes(
+                        f"self-start {regime_chip_class(row['regime_word'])}")
         el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
     def _paint_board():
@@ -1102,12 +1142,15 @@ def render():
             if not rows:
                 ui.label("No ranked symbols yet.").classes(_PLACEHOLDER)
                 return
-            # WHY has no label: it is a SENTENCE, and at half-width it gets a
-            # line of its own under each row's metrics rather than a track it
-            # would be truncated to eight characters inside.
+            # Six labels for six tracks. The WHY sentence has none: it rides
+            # under the symbol as that cell's second line, which is where it
+            # was already being read from. SCORE rather than HOTNESS because
+            # the 44px track the reference gives this column cannot hold seven
+            # letters of 8px caps on .2em tracking — and the panel's own
+            # subtitle already says HOTTEST FIVE, so nothing is lost.
             _grid_head(BOARD_GRID,
-                       ("HOTNESS", "SYMBOL", "ATM IV", "SIGNAL", "P/C",
-                        "NET PREM", "SETUP"))
+                       ("SCORE", "SYMBOL", "ATM IV", "NET PREM", "P/C",
+                        "SIGNAL"))
             # The bar is proportional to the HOTTEST row on screen, not to 100:
             # hotness has no published ceiling, so a fixed denominator would be
             # an invented scale.
@@ -1117,48 +1160,50 @@ def render():
                 _board_row(row, top)
 
     def _board_row(row, top):
-        # Two tiers, like the dealer rows: metrics on the grid line, the WHY
-        # sentence full-width beneath. A rationale is up to three clauses of
-        # ordinary words — it needs a line, not a column. `w-full` for the same
-        # non-obvious reason spelled out in ``_dealer_row``.
+        # One grid line, on the same seven-cell discipline as the dealer rows:
+        # every qualifier is the second line of the cell it qualifies — the WHY
+        # sentence under the symbol, the IV state under the IV, the setup tag
+        # under the signal it explains.
         el = ui.element("div").classes(
-            f"{_ROW} w-full hover:bg-[{_C['line']}]/[0.06]")
+            f"{BOARD_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
-            with ui.element("div").classes(BOARD_GRID):
-                with ui.column().classes("gap-1 w-full"):
-                    _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
-                    with ui.element("div").classes(
-                            f"{_K.track_classes()} h-[4px] w-full"):
-                        if row["hotness"] is not None and top:
-                            ui.element("div").classes(
-                                f"absolute left-0 top-0 bottom-0 "
-                                f"bg-[{_C['accent']}] "
-                                f"{_K.width_class(row['hotness'] / top * 100.0)}")
+            with _stack():
+                _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
+                with ui.element("div").classes(
+                        f"{_K.track_classes()} h-[4px] w-full"):
+                    if row["hotness"] is not None and top:
+                        ui.element("div").classes(
+                            f"absolute left-0 top-0 bottom-0 "
+                            f"bg-[{_C['accent']}] "
+                            f"{_K.width_class(row['hotness'] / top * 100.0)}")
+            with _stack():
                 ui.label(row["symbol"]).classes(
-                    f"text-[15px] font-semibold {CON_TXT}")
-                with ui.column().classes("gap-0"):
-                    _cell(fmt_iv(row["atm_iv"]))
-                    ui.label(row["iv_state"]).classes(
-                        f"text-[10px] {iv_state_class(row['iv_state'])}")
-                # Same reason as the dealer regime chip: SIGNAL is this grid's
-                # flexible track, and a centred word inside a stretched box
-                # drifts away from the column it is labelled by.
+                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                # A rationale is up to three clauses of ordinary words, so it
+                # takes whatever the flexible track gives it and ellipses the
+                # rest — never a track of its own, where it would be truncated
+                # to eight characters.
+                ui.label(row["rationale"] or _DASH).classes(
+                    f"{_SUB} truncate w-full "
+                    + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
+            with _stack():
+                _cell(fmt_iv(row["atm_iv"]))
+                ui.label(row["iv_state"]).classes(
+                    f"text-[9px] {iv_state_class(row['iv_state'])}")
+            _cell(fmt_net_prem(row["net_prem_m"]),
+                  signed_class(row["net_prem_m"]))
+            _cell(fmt_ratio(row["pc_ratio"]))
+            with _stack():
+                # `self-start` on both chips, for the reason spelled out on the
+                # dealer regime chip: a chip stretched to its track is a box
+                # around a word rather than a label on it.
                 ui.label(row["signal"].upper()).classes(
-                    f"justify-self-start px-2 py-[2px] text-[10px] "
-                    f"tracking-[.12em] text-center "
-                    f"{_signal_class(row['signal'])}")
-                _cell(fmt_ratio(row["pc_ratio"]))
-                _cell(fmt_net_prem(row["net_prem_m"]),
-                      signed_class(row["net_prem_m"]))
-                # An empty setup tag renders NO chip: a blank cell reads as "no
+                    f"self-start px-[5px] py-[2px] rounded-[2px] text-[8px] "
+                    f"tracking-[.1em] {_signal_class(row['signal'])}")
+                # An empty setup tag renders NO chip: a blank line reads as "no
                 # setup", where a "NEUTRAL" chip would read as a finding.
                 if row["setup"]:
-                    ui.label(row["setup"]).classes(CHIP_ACCENT)
-                else:
-                    ui.label("")
-            ui.label(row["rationale"] or _DASH).classes(
-                f"text-[11.5px] truncate pt-[3px] "
-                + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
+                    ui.label(row["setup"]).classes(f"self-start {CHIP_ACCENT}")
         el.on("click", lambda _e: ui.navigate.to("/options/matrix"))
 
     def _paint_flow():
@@ -1172,14 +1217,15 @@ def render():
             if not rows:
                 ui.label("No alerts today.").classes(_PLACEHOLDER)
                 return
-            # The side sits UNDER the kind rather than in a column of its own —
-            # it qualifies the kind ("Unusual activity / Call"), and the 74px
-            # that buys goes to DETAIL, which is the only cell here long enough
-            # to be truncated. It is still "Call"/"Put", never bought/sold:
-            # Schwab publishes no time-and-sales tape to this app, so nobody
-            # here knows who initiated. DETAIL carries the premium the alert
-            # fired on, in the Flow Alerts page's own wording.
-            _grid_head(FLOW_GRID, ("TIME", "KIND", "SYMBOL", "DETAIL"))
+            # Three labels for three tracks. DETAIL rides under the symbol it
+            # describes and the side under the kind it qualifies ("Unusual
+            # activity / Call"), which leaves the whole flexible track for the
+            # detail line — the only cell here long enough to be truncated. It
+            # is still "Call"/"Put", never bought/sold: Schwab publishes no
+            # time-and-sales tape to this app, so nobody here knows who
+            # initiated. DETAIL carries the premium the alert fired on, in the
+            # Flow Alerts page's own wording.
+            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "KIND"))
             for row in rows:
                 _flow_row(row)
 
@@ -1187,19 +1233,21 @@ def render():
         el = ui.element("div").classes(
             f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
-            _cell(row["time"] or _DASH, CON_TXT_MUTED)
+            ui.label(row["time"] or _DASH).classes(
+                f"text-[11px] tabular-nums {CON_TXT_MUTED}")
+            with _stack():
+                ui.label(row["symbol"]).classes(
+                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                ui.label(row["detail"] or row["text"] or _DASH).classes(
+                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
             # finite (type, side) map — borrowed here rather than re-derived,
             # and shared by the kind and the side it qualifies.
-            with ui.column().classes("gap-0"):
+            with _stack():
                 ui.label(row["kind"]).classes(
-                    f"text-[11.5px] {row['_tone_class']}")
+                    f"text-[10px] leading-[1.2] {row['_tone_class']}")
                 ui.label(row["side"] or _DASH).classes(
-                    f"text-[10px] {row['_tone_class']}")
-            ui.label(row["symbol"]).classes(
-                f"text-[13px] font-semibold {CON_TXT}")
-            ui.label(row["detail"] or row["text"] or _DASH).classes(
-                f"text-[11.5px] truncate {CON_TXT_MUTED}")
+                    f"{_SUB} {row['_tone_class']}")
         el.on("click", lambda _e: ui.navigate.to("/options/flow"))
 
     def _paint_positions():
@@ -1218,12 +1266,16 @@ def render():
             if not rows:
                 ui.label("No open positions.").classes(_PLACEHOLDER)
                 return
-            # Six labels for six tracks: STRATEGY now sits under the symbol it
+            # Nine labels for nine tracks. STRATEGY sits under the symbol it
             # describes and EXPIRY under the strikes it applies to, which is
-            # where each of them was already being read from anyway.
+            # where each of them was already being read from anyway; ENTRY and
+            # MARK are the pair the unrealized figure is the difference of, so
+            # the row now shows its own arithmetic rather than only its result.
+            # The track ORDER is the reference's own — the widths dictate which
+            # reading can sit where, and the strikes need the 128px one.
             _grid_head(POS_GRID,
-                       ("BOOK", "SYMBOL", "STRIKES", "QTY", "UNREALIZED",
-                        "FLAG"))
+                       ("BOOK", "SYMBOL", "DTE", "ENTRY", "MARK", "STRIKES",
+                        "QTY", "UNREALIZED", "FLAG"))
             for row in rows:
                 _position_row(row)
 
@@ -1231,23 +1283,27 @@ def render():
         el = ui.element("div").classes(
             f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
-            ui.label(row["source"]).classes(source_chip_class(row["source"]))
-            # `min-w-0` so the strategy's `truncate` can actually bite: a grid
-            # item's automatic minimum is its content, and without this the
-            # long strategy names would push the track past the panel again.
-            with ui.column().classes("gap-0 min-w-0"):
+            ui.label(row["source"]).classes(
+                f"self-start {source_chip_class(row['source'])}")
+            with _stack():
                 ui.label(row["symbol"]).classes(
-                    f"text-[13px] font-semibold {CON_TXT}")
+                    f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
                 ui.label(strategy_label(row["strategy"])).classes(
-                    f"text-[10px] truncate w-full {CON_TXT_MUTED}")
-            with ui.column().classes("gap-0"):
+                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
+            _cell(dte_text(row["dte"]))
+            # Both are per-share option prices (0.21 / 0.39), not position
+            # dollars — the same numbers the paper ledger quotes.
+            _cell(fmt_money(row["entry_credit"]))
+            _cell(fmt_money(row["current_value"]))
+            with _stack():
                 _cell(row["strikes"])
-                ui.label(dte_text(row["dte"])).classes(
-                    f"text-[10px] tabular-nums {CON_TXT_MUTED}")
+                ui.label(row["expiration"] or _DASH).classes(
+                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
             _cell(_DASH if row["quantity"] is None else f"{row['quantity']:g}")
             _cell(fmt_money(row["unrealized_pnl"]),
                   signed_class(row["unrealized_pnl"]))
-            ui.label(row["flag"]).classes(flag_chip_class(row["flag"]))
+            ui.label(row["flag"]).classes(
+                f"self-start {flag_chip_class(row['flag'])}")
         el.on("click", lambda _e, r=row: _open_position(r))
 
     # ── click-through ────────────────────────────────────────────────────────
