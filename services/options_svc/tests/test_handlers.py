@@ -661,7 +661,9 @@ def _fake_captured_view():
 def test_refresh_captured_caches_publishes(monkeypatch):
     bus = Bus(fake=True)
     view = _fake_captured_view()
+    day = {"date": "2026-08-19", "opened": 4, "closed": 2, "booked_pnl": 61.5}
     monkeypatch.setattr(handlers.compute, "captured_view", lambda: view)
+    monkeypatch.setattr(handlers.compute, "captured_day_summary", lambda: day)
 
     sub = bus.subscribe("events:options:captured")
     handlers.refresh_captured(bus)
@@ -670,7 +672,7 @@ def test_refresh_captured_caches_publishes(monkeypatch):
 
     env = bus.cache_get("cache:options:captured")
     assert env is not None
-    assert env.payload == view
+    assert env.payload == {"signals": view["signals"], "day": day}
     assert msg is not None and msg.get("version") == env.version
 
 
@@ -693,7 +695,7 @@ def test_captured_reprice_caches_signals_and_flags(monkeypatch):
 
     env = bus.cache_get("cache:options:captured")
     assert env is not None
-    assert env.payload == {"signals": repriced}
+    assert env.payload["signals"] == repriced
     assert msg is not None and msg.get("version") == env.version
 
     fenv = bus.cache_get("cache:options:captured_flags")
@@ -777,6 +779,78 @@ def test_captured_close_falls_back_to_persisted_when_cache_cold(monkeypatch):
 
     payload = bus.cache_get("cache:options:captured").payload
     assert [s["signal_id"] for s in payload["signals"]] == ["X2"]
+
+
+# ── the day footer block survives EVERY publisher ───────────────────────────
+# There are three writers of cache:options:captured, and two of them rebuild the
+# payload from scratch rather than editing it. Before ``_publish_captured``, a
+# reprice or a close silently dropped the day block and the page's footer went
+# blank until the next full refresh. This is the guard for that.
+def _day(monkeypatch, **over):
+    day = {"date": "2026-08-19", "opened": 4, "closed": 2, "booked_pnl": 61.5}
+    day.update(over)
+    monkeypatch.setattr(handlers.compute, "captured_day_summary", lambda: day)
+    return day
+
+
+def test_every_captured_publisher_attaches_the_day_block(monkeypatch):
+    day = _day(monkeypatch)
+    monkeypatch.setattr(handlers.compute, "captured_view",
+                        lambda: {"signals": [{"signal_id": "X1"}], "day": day})
+    monkeypatch.setattr(handlers.compute, "reprice_captured",
+                        lambda: {"signals": [{"signal_id": "X1"}], "flags": []})
+    monkeypatch.setattr(handlers.compute, "close_captured", lambda *a, **k: None)
+
+    def _payload():
+        return bus.cache_get("cache:options:captured").payload
+
+    # 1. the periodic / reload refresh
+    bus = Bus(fake=True)
+    handlers.refresh_captured(bus)
+    assert _payload()["day"] == day
+
+    # 2. "Refresh marks (live)" — rebuilds from the repriced list
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="captured_reprice"))
+    assert _payload()["day"] == day
+
+    # 3. a manual close — rebuilds from the cached list minus one row
+    bus = Bus(fake=True)
+    bus.cache_set("cache:options:captured",
+                  {"signals": [{"signal_id": "X1"}, {"signal_id": "X2"}]})
+    handlers.handle_command(bus, Command(type="captured_close", args={
+        "signal_id": "X1", "exit_val": 0.1, "reason": "MANUAL_CLOSE"}))
+    assert _payload()["day"] == day
+    assert [s["signal_id"] for s in _payload()["signals"]] == ["X2"]
+
+
+def test_close_recomputes_the_day_block_rather_than_carrying_it_over(monkeypatch):
+    """A close CHANGES the day's closed count, so the republish must re-read it —
+    carrying the stale cached block forward would leave the footer one behind."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:options:captured", {
+        "signals": [{"signal_id": "X1"}, {"signal_id": "X2"}],
+        "day": {"date": "2026-08-19", "opened": 4, "closed": 2, "booked_pnl": 61.5}})
+    monkeypatch.setattr(handlers.compute, "close_captured", lambda *a, **k: None)
+    _day(monkeypatch, closed=3, booked_pnl=101.5)
+
+    handlers.handle_command(bus, Command(type="captured_close", args={
+        "signal_id": "X1", "exit_val": 0.1, "reason": "MANUAL_CLOSE"}))
+
+    day = bus.cache_get("cache:options:captured").payload["day"]
+    assert day["closed"] == 3 and day["booked_pnl"] == 101.5
+
+
+def test_no_captured_publisher_bypasses_the_shared_helper():
+    """Structural guard: a NEW publish path that writes CACHE_CAPTURED directly
+    would reintroduce the dropped-footer bug, and no behavioural test would see
+    it until someone opened the page after that action."""
+    import inspect
+    src = inspect.getsource(handlers)
+    direct = [ln.strip() for ln in src.splitlines()
+              if "cache_set(CACHE_CAPTURED," in ln]
+    assert len(direct) == 1, f"write CACHE_CAPTURED via _publish_captured: {direct}"
+    assert "def _publish_captured" in src
 
 
 # ── captured auto-manage: publish both views + toggle (Task 5) ──────────────

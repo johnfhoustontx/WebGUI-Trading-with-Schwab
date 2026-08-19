@@ -276,6 +276,10 @@ Market Scanner signals you're **tracking over time** to see whether they're work
   alerted when a stop or target is hit.
 - Click a row to load it into the **detail panel** on the right, and to pick it
   for **Close selected**.
+- **The footer** under the table sums the day: how many signals were captured and
+  closed today, the **booked** P&L of today's closes, and the **open** P&L across
+  every signal still running. Open P&L shows a dash, not $0.00, until the signals
+  have been priced — hover it to see how many of them carry a live mark.
 """,
     "/options/portfolio": """
 **Paper Account — the simple version**

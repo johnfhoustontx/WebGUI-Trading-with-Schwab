@@ -33,7 +33,31 @@ ranked broad-market frame, and a guaranteed newest-first Captured table.**
   via a stable sort, so a pair of them never jitters between the 2 s repaints.
 - **Docs.** `page_help.py`'s Captured entry still described the **Entry / Current /
   Drift score columns**, which `captured_columns` dropped some time ago — corrected in
-  the same pass, per the standing rule that the hover guides rot first.)
+  the same pass, per the standing rule that the hover guides rot first.
+- **A day footer under the Captured Signals table**, added the same day: opened today ·
+  closed today · P&L today (booked) · P&L today (open). The first three ride in a new
+  **`day`** block on `cache:options:captured` (`compute.captured_day_summary`, over the
+  new `signal_db.count_opened_on` and the existing `get_outcomes_for_date`), dated in
+  **CT** because that is the timezone `first_seen_date` and `close_date` are written in.
+  "Opened" counts CAPTURES, so a signal taken and closed in one session lands in both.
+- **The open P&L is summed page-side**, off the same `signals` list the table renders,
+  so the footer can never disagree with the P&L column above it — and it reads an **em
+  dash rather than `$0.00` while nothing is priced.** Verified live and worth stating
+  plainly: the persisted view carries no marks at all (`signal_marks` has not been
+  written since **2026-06-17**), so all 289 open signals summed to a confident `$0.00`
+  in the first cut — a flat book reported where there is no reading. Same failure mode
+  as the NaN-clamps-to-the-bound trap in `sentiment_svc`, arrived at from the opposite
+  direction. An empty book still shows a true `$0.00`; a partly-priced one names its
+  coverage on hover.
+- **The trap this feature had to survive: three writers, two of which rebuild.**
+  `cache:options:captured` is written by `refresh_captured`, by the `captured_reprice`
+  command and by `remove_closed_from_captured` — and the latter two construct
+  `{"signals": …}` from scratch, so they dropped the `day` block and blanked the
+  footer until the next full refresh. Visible only by opening the page *after* a
+  reprice or a close, which is exactly the kind of gap a behavioural test does not
+  cover. All three now go through **`handlers._publish_captured`**, which re-reads the
+  summary on every publish (a close changes the day's closed count as it happens), and
+  a source-level test pins the single remaining `cache_set(CACHE_CAPTURED,` call site.)
 
 **Prior — 2026-08-18** (**The Desk — a single-screen home page, and the first
 Tier-2 change the webgui has needed in a while.**

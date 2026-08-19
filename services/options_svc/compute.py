@@ -1168,18 +1168,55 @@ def analyze_paper(trade_id) -> dict:
 _STOP_CODES = ("TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP")
 
 
-def captured_view() -> dict:
-    """Read the open-signals view: ``{"signals": [...]}``.
+def captured_day_summary() -> dict:
+    """Today's captured activity for the page's table footer.
 
-    Defensively guarded → ``{"signals": []}`` on any failure, mirroring the
-    page's per-read try/except. The GUI tier reads this cached view directly."""
+    ``{"date", "opened", "closed", "booked_pnl"}`` — how many signals were
+    CAPTURED today, how many were CLOSED today, and the realized total of those
+    closes. The fourth footer figure, open (unrealized) P&L, is NOT here: it is
+    summed page-side off the ``signals`` list this same payload carries, so the
+    footer can never disagree with the P&L column rendered above it.
+
+    The date is **CT**, because that is the timezone both ``first_seen_date``
+    (``signal_recorder``) and ``close_date`` (``signal_db.close_signal_manually``)
+    are written in — asking in local time would read the wrong day near midnight
+    from a machine in another zone. Each read is guarded separately so one cold
+    table still yields the other's number.
+    """
+    import signal_db
+
+    today = _dt.datetime.now(_PROJ_CT_TZ).date().isoformat()
+    try:
+        opened = int(signal_db.count_opened_on(today))
+    except Exception:
+        log.exception("captured_day_summary opened count degraded → 0")
+        opened = 0
+    try:
+        outcomes = signal_db.get_outcomes_for_date(today)
+    except Exception:
+        log.exception("captured_day_summary closed read degraded → empty")
+        outcomes = []
+    booked = round(sum((o.get("realized_pnl") or 0.0) for o in outcomes), 2)
+    return {"date": today, "opened": opened, "closed": len(outcomes),
+            "booked_pnl": booked}
+
+
+def captured_view() -> dict:
+    """Read the open-signals view: ``{"signals": [...], "day": {...}}``.
+
+    Defensively guarded → an empty signals list on any failure, mirroring the
+    page's per-read try/except. The GUI tier reads this cached view directly.
+    ``day`` is the footer summary (see ``captured_day_summary``) — note that
+    every publisher of ``cache:options:captured`` must attach it, which
+    ``handlers._publish_captured`` is what makes structurally true."""
     import signal_db
 
     try:
-        return {"signals": signal_db.get_open_signals_with_latest_mark()}
+        signals = signal_db.get_open_signals_with_latest_mark()
     except Exception:
         log.exception("captured_view read degraded → empty signals")
-        return {"signals": []}
+        signals = []
+    return {"signals": signals, "day": captured_day_summary()}
 
 
 def reprice_captured() -> dict:

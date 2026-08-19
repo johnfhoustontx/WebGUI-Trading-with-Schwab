@@ -1077,8 +1077,10 @@ def test_captured_view_shape(monkeypatch):
 
     sigs = [{"signal_id": "X1", "symbol": "SPY"}]
     monkeypatch.setitem(_sys.modules, "signal_db",
-                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs))
-    assert compute.captured_view() == {"signals": sigs}
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs,
+                                               count_opened_on=lambda d: 1,
+                                               get_outcomes_for_date=lambda d: []))
+    assert compute.captured_view()["signals"] == sigs
 
 
 def test_captured_view_defensive_on_failure(monkeypatch):
@@ -1089,8 +1091,86 @@ def test_captured_view_defensive_on_failure(monkeypatch):
         raise RuntimeError("db cold")
 
     monkeypatch.setitem(_sys.modules, "signal_db",
-                        _types.SimpleNamespace(get_open_signals_with_latest_mark=_boom))
-    assert compute.captured_view() == {"signals": []}
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=_boom,
+                                               count_opened_on=lambda d: 0,
+                                               get_outcomes_for_date=lambda d: []))
+    assert compute.captured_view()["signals"] == []
+
+
+# ── Captured day summary (the page's table footer) ─────────────────────────
+def _signal_db_day(monkeypatch, *, opened=0, outcomes=(), sigs=()):
+    import sys as _sys
+    import types as _types
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=lambda: list(sigs),
+        count_opened_on=lambda d: opened,
+        get_outcomes_for_date=lambda d: list(outcomes)))
+
+
+def test_captured_day_summary_counts_and_books(monkeypatch):
+    _signal_db_day(monkeypatch, opened=3, outcomes=[
+        {"signal_id": "a", "realized_pnl": 80.0},
+        {"signal_id": "b", "realized_pnl": -30.5},
+    ])
+    day = compute.captured_day_summary()
+    assert day["opened"] == 3
+    assert day["closed"] == 2
+    assert day["booked_pnl"] == 49.5
+
+
+def test_captured_day_summary_treats_a_missing_realized_as_zero(monkeypatch):
+    _signal_db_day(monkeypatch, opened=1, outcomes=[
+        {"signal_id": "a", "realized_pnl": None}, {"signal_id": "b"}])
+    day = compute.captured_day_summary()
+    assert day["closed"] == 2 and day["booked_pnl"] == 0.0
+
+
+def test_captured_day_summary_dates_in_ct_like_the_db_writes(monkeypatch):
+    # first_seen_date and close_date are both written in America/Chicago, so the
+    # summary must ask for the CT date or it reads the wrong day near midnight.
+    import datetime as _dt
+    seen = {}
+    import sys as _sys
+    import types as _types
+
+    def _opened(d):
+        seen["opened"] = d
+        return 0
+
+    def _closed(d):
+        seen["closed"] = d
+        return []
+
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        count_opened_on=_opened, get_outcomes_for_date=_closed))
+    day = compute.captured_day_summary()
+    ct_today = _dt.datetime.now(compute._PROJ_CT_TZ).date().isoformat()
+    assert day["date"] == ct_today
+    assert seen["opened"] == ct_today and seen["closed"] == ct_today
+
+
+def test_captured_day_summary_defensive_on_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom(d):
+        raise RuntimeError("db cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(count_opened_on=_boom,
+                                               get_outcomes_for_date=_boom))
+    day = compute.captured_day_summary()
+    assert day["opened"] == 0 and day["closed"] == 0 and day["booked_pnl"] == 0.0
+
+
+def test_captured_view_carries_the_day_block(monkeypatch):
+    sigs = [{"signal_id": "X1", "symbol": "SPY"}]
+    _signal_db_day(monkeypatch, opened=2, sigs=sigs,
+                   outcomes=[{"signal_id": "a", "realized_pnl": 10.0}])
+    out = compute.captured_view()
+    assert out["signals"] == sigs
+    assert out["day"]["opened"] == 2 and out["day"]["closed"] == 1
+    assert out["day"]["booked_pnl"] == 10.0
 
 
 def test_reprice_captured_merges_marks_and_flags(monkeypatch):

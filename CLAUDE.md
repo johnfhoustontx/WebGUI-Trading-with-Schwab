@@ -276,7 +276,7 @@ Routes:
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
-| `/options/captured` | Captured Signals | built |
+| `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
 | `/options/calculator` | Calculator — summary tiles + P&L heatmap over real chain strikes, multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — multi-strategy single-symbol scan (directional / spreads / neutral) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. [Detail](docs/webgui-routes.md) | built |

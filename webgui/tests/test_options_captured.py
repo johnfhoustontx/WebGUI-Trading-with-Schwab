@@ -251,6 +251,100 @@ def test_captured_rows_handle_no_signals():
     assert captured.captured_rows(None) == []
 
 
+# ── day footer under the table ───────────────────────────────────────────────
+def test_open_pnl_sums_the_unrealized_column():
+    assert captured.open_pnl([{"unrealized_pnl": 12.0}, {"unrealized_pnl": -4.5}]) == 7.5
+
+
+def test_open_pnl_ignores_unpriced_and_non_numeric_signals():
+    # A freshly captured signal has no mark yet, so unrealized_pnl is None.
+    assert captured.open_pnl([{"unrealized_pnl": None}, {}, {"unrealized_pnl": "x"},
+                              {"unrealized_pnl": 3.0}]) == 3.0
+
+
+def test_open_pnl_of_nothing_is_zero():
+    assert captured.open_pnl([]) == 0.0
+    assert captured.open_pnl(None) == 0.0
+
+
+def test_footer_cells_report_the_four_requested_figures():
+    day = {"date": "2026-08-19", "opened": 4, "closed": 2, "booked_pnl": 61.5}
+    cells = captured.footer_cells(day, [{"unrealized_pnl": 12.0}, {"unrealized_pnl": -4.5}])
+    assert [c["label"] for c in cells] == [
+        "Opened today", "Closed today", "P&L today (booked)", "P&L today (open)"]
+    assert [c["value"] for c in cells] == ["4", "2", "+$61.50", "+$7.50"]
+
+
+def test_footer_cells_sign_and_colour_the_two_pnl_figures():
+    cells = captured.footer_cells({"opened": 0, "closed": 1, "booked_pnl": -120.0},
+                                  [{"unrealized_pnl": -3.25}])
+    booked, open_ = cells[2], cells[3]
+    assert booked["value"] == "-$120.00" and booked["cls"] == captured.pnl_class(-120.0)
+    assert open_["value"] == "-$3.25" and open_["cls"] == captured.pnl_class(-3.25)
+    # the two COUNTS are never coloured — they carry no direction
+    assert cells[0]["cls"] == "" and cells[1]["cls"] == ""
+
+
+def test_footer_cells_render_a_flat_pnl_uncoloured_and_unsigned():
+    cells = captured.footer_cells({"opened": 0, "closed": 0, "booked_pnl": 0.0}, [])
+    assert cells[2]["value"] == "$0.00" and cells[2]["cls"] == ""
+    assert cells[3]["value"] == "$0.00" and cells[3]["cls"] == ""
+
+
+def test_footer_cells_survive_a_missing_day_block():
+    # A payload published before this shipped, or a cold service, carries no
+    # 'day'. The footer must degrade to zeros, never raise on the page build.
+    cells = captured.footer_cells(None, [{"unrealized_pnl": 5.0}])
+    assert [c["value"] for c in cells] == ["0", "0", "$0.00", "+$5.00"]
+
+
+def test_footer_cells_coerce_non_numeric_day_fields():
+    cells = captured.footer_cells({"opened": None, "closed": "x", "booked_pnl": None}, [])
+    assert [c["value"] for c in cells][:3] == ["0", "0", "$0.00"]
+
+
+def test_footer_open_pnl_reads_a_dash_when_nothing_is_priced_yet():
+    """A persisted view carries no marks until 'Refresh marks (live)' runs, so
+    every unrealized_pnl is None. Summing that to a confident $0.00 would read
+    as 'flat book' when the truth is 'not priced' — the same trap as a NaN
+    clamping to a confident extreme."""
+    cells = captured.footer_cells({"opened": 0, "closed": 0, "booked_pnl": 0.0},
+                                  [{"signal_id": "A"}, {"signal_id": "B"}])
+    assert cells[3]["value"] == "—" and cells[3]["cls"] == ""
+
+
+def test_footer_open_pnl_is_zero_when_there_is_genuinely_nothing_open():
+    # No open signals at all IS a flat book — that zero is real, not missing.
+    cells = captured.footer_cells({"opened": 0, "closed": 3, "booked_pnl": 0.0}, [])
+    assert cells[3]["value"] == "$0.00"
+
+
+def test_footer_open_pnl_notes_a_partially_priced_book():
+    cells = captured.footer_cells(
+        {"opened": 0, "closed": 0, "booked_pnl": 0.0},
+        [{"unrealized_pnl": 10.0}, {"unrealized_pnl": None}, {"signal_id": "C"}])
+    assert cells[3]["value"] == "+$10.00"
+    assert cells[3]["note"] == "1 of 3 open signals priced"
+
+
+def test_footer_open_pnl_has_no_note_when_every_signal_is_priced():
+    cells = captured.footer_cells({"opened": 0, "closed": 0, "booked_pnl": 0.0},
+                                  [{"unrealized_pnl": 10.0}, {"unrealized_pnl": -2.0}])
+    assert cells[3]["value"] == "+$8.00" and cells[3]["note"] == ""
+    assert all(c["note"] == "" for c in cells[:3])
+
+
+def test_footer_is_repainted_on_every_table_repaint():
+    """Structural guard: the footer must repaint from the SAME _populate the
+    table does, or it silently freezes at its page-build zeros while the rows
+    above it update every 2 s."""
+    src = inspect.getsource(captured.render)
+    call = '_paint_footer(cap.get("day"), sigs)'
+    assert call in src, "the footer is never repainted"
+    # and it sits INSIDE _populate, not in some once-only build path
+    assert src.index("def _populate(") < src.index(call) < src.index("def _select(")
+
+
 def test_exit_value_default_uses_current_value():
     """The close dialog pre-fills its Exit value with the signal's current price."""
     assert captured.exit_value_default({"current_value": 0.234}) == 0.23

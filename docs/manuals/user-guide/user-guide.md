@@ -777,6 +777,9 @@ Signals the system has "captured" to track over time, with live re-pricing.
   first**; click any column heading to re-sort it.
 - Click a row for its detail panel; the clicked row is also the one **Close
   selected** acts on.
+- **Footer:** opened today, closed today, P&L today (booked) and P&L today (open).
+  The open figure covers every signal still running, and shows a dash rather than
+  $0.00 until you have priced them with **Refresh marks (live)**.
 - When a tracked signal hits a stop or target, the page raises a notification.
 
 ## Paper Ledger

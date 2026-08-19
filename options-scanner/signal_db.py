@@ -364,6 +364,23 @@ def set_be_armed(signal_id, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
+def count_opened_on(date_iso, db_path=DEFAULT_DB_PATH):
+    """How many signals were CAPTURED on ``date_iso`` (YYYY-MM-DD).
+
+    Counts by ``first_seen_date`` (indexed), so a signal captured and closed in
+    the same session still counts — this is a count of captures, not of
+    positions still open. Feeds the Captured Signals footer's "Opened today"
+    alongside ``get_outcomes_for_date`` for the closed side.
+    """
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE first_seen_date = ?", (date_iso,))
+        return int(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
 def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH):
     """Closed-signal outcomes for a given ``close_date`` (YYYY-MM-DD), newest first.
 

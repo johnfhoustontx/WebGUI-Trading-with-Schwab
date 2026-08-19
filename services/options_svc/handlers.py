@@ -648,15 +648,30 @@ def refresh_paper_trades(bus, reprice: bool = True) -> None:
     bus.publish(EVENT_PAPER_TRADES, {"version": version})
 
 
+def _publish_captured(bus, signals) -> None:
+    """Cache + publish the captured view, ALWAYS carrying the day footer block.
+
+    Every writer of ``CACHE_CAPTURED`` goes through here. Two of the three
+    rebuild the payload from scratch (a reprice replaces the signal list, a
+    close filters it), so before this helper existed they silently dropped the
+    ``day`` block and the page's footer went blank until the next full refresh
+    — a failure only visible by opening the page after one of those actions.
+    The summary is RE-READ on every publish rather than carried over, because a
+    close changes the day's closed count and booked total as it happens.
+    """
+    version = bus.cache_set(CACHE_CAPTURED,
+                            {"signals": signals, "day": compute.captured_day_summary()})
+    bus.publish(EVENT_CAPTURED, {"version": version})
+
+
 def refresh_captured(bus) -> None:
     """Read the open-signals view and publish it to the bus.
 
     No strict contract: the view is a loosely-shaped read-only dict
-    (``{"signals": [...]}``) that only the Captured Signals page consumes, and
-    ``compute.captured_view`` is already fully defensive."""
+    (``{"signals": [...], "day": {...}}``) that only the Captured Signals page
+    consumes, and ``compute.captured_view`` is already fully defensive."""
     data = compute.captured_view()
-    version = bus.cache_set(CACHE_CAPTURED, data)
-    bus.publish(EVENT_CAPTURED, {"version": version})
+    _publish_captured(bus, (data or {}).get("signals") or [])
     _notify_captured(bus, (data or {}).get("signals"))
 
 
@@ -761,8 +776,7 @@ def remove_closed_from_captured(bus, signal_id) -> None:
         return
     signals = env.payload.get("signals") or []
     kept = [s for s in signals if s.get("signal_id") != signal_id]
-    version = bus.cache_set(CACHE_CAPTURED, {"signals": kept})
-    bus.publish(EVENT_CAPTURED, {"version": version})
+    _publish_captured(bus, kept)
 
 
 def refresh_gamma(bus, symbol="$SPX") -> None:
@@ -1740,8 +1754,7 @@ def handle_command(bus, command) -> None:
         res = compute.reprice_captured()
         # Cache the repriced signal list (so the table shows fresh marks) +
         # the flags list (so the page can notify) under separate views.
-        ver = bus.cache_set(CACHE_CAPTURED, {"signals": res["signals"]})
-        bus.publish(EVENT_CAPTURED, {"version": ver})
+        _publish_captured(bus, res["signals"])
         fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
         bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
         _notify_captured(bus, res.get("signals"))

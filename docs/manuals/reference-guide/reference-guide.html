@@ -2635,6 +2635,18 @@ time, re-pricing it and telling you whether it worked — without committing to 
 </tbody>
 </table>
 <p>The table opens <strong>newest capture first</strong>; click any column heading to re-sort it.</p>
+<p><strong>The footer</strong> sums the session in four figures: signals <strong>opened today</strong> and
+<strong>closed today</strong> (counts of captures and of closes, so a signal taken and closed in
+the same session appears in both), <strong>P&amp;L today (booked)</strong> — the realized total of
+today's closes — and <strong>P&amp;L today (open)</strong>, the unrealized total across every signal
+still running, whenever it was captured. Both counts and the booked figure are dated
+in <strong>CT</strong>, matching how the database stamps them.</p>
+<p>⚠ <strong>Open P&amp;L reads an em dash, not $0.00, until the signals are priced.</strong> The stored
+view carries no marks until a reprice runs, so on a cold page every unrealized figure
+is unknown rather than zero — reporting that as $0.00 would show a flat book where
+there is really no reading at all. An empty book still shows a true $0.00. Hover the
+figure to see how many open signals currently carry a live mark; <strong>Refresh marks
+(live)</strong> prices them all.</p>
 <p><strong>Refresh marks (live)</strong> re-prices everything against current chains. <strong>Close selected</strong>
 records an exit — click a row first to pick it, which also loads it into the detail
 panel on the right.</p>

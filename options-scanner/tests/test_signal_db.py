@@ -492,3 +492,42 @@ def test_insert_mark_ignores_unknown_columns_without_mutating(tmp_path):
     assert got["signal_id"] == "sig1"
     assert got["current_value"] == 0.40
     assert got["recommendation"] == "TAKE_PROFIT"
+
+
+# ── day activity counts (Captured Signals footer) ───────────────────────────
+def _open_on(db, signal_id, date_iso):
+    signal_db.insert_signal(_sample_signal_row(
+        signal_id=signal_id, dedup_key="k" + signal_id), db_path=db)
+    conn = signal_db.connect(db)
+    conn.execute("UPDATE signals SET first_seen_date=?, first_seen_ts=? "
+                 "WHERE signal_id=?", (date_iso, date_iso + "T09:00:00-05:00", signal_id))
+    conn.commit(); conn.close()
+
+
+def test_count_opened_on_counts_only_that_date(tmp_path):
+    db = tmp_path / "s.db"
+    _open_on(db, "t1", "2026-08-19")
+    _open_on(db, "t2", "2026-08-19")
+    _open_on(db, "y1", "2026-08-18")
+    assert signal_db.count_opened_on("2026-08-19", db_path=db) == 2
+    assert signal_db.count_opened_on("2026-08-18", db_path=db) == 1
+
+
+def test_count_opened_on_counts_a_signal_that_already_closed(tmp_path):
+    # "Opened today" is a count of CAPTURES, not of positions still open — a
+    # signal taken and closed in the same session must still be counted.
+    db = tmp_path / "s.db"
+    _open_on(db, "t1", "2026-08-19")
+    signal_db.insert_outcome({
+        "signal_id": "t1", "close_ts": "2026-08-19T14:00:00-05:00",
+        "close_date": "2026-08-19", "exit_value": 0.2, "realized_pnl": 40.0,
+        "exit_reason": "TARGET_HIT", "settlement_underlying": None,
+    }, new_status="CLOSED", db_path=db)
+    assert signal_db.get_signal("t1", db_path=db)["status"] == "CLOSED"
+    assert signal_db.count_opened_on("2026-08-19", db_path=db) == 1
+
+
+def test_count_opened_on_zero_for_a_quiet_day(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.init_db(db)
+    assert signal_db.count_opened_on("2026-08-19", db_path=db) == 0

@@ -26,7 +26,7 @@ from pages.ui_guard import guard
 from . import detail, handoff
 from .rescue import heat_border_class
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
-                    BTN_3D_DANGER, BTN_PRIMARY)
+                    BTN_3D_DANGER, BTN_PRIMARY, EYEBROW, LABEL)
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -202,6 +202,84 @@ def captured_rows(signals):
     return rows
 
 
+# ── Day footer (the four figures under the table) ───────────────────────────
+def open_pnl(signals):
+    """Total unrealized P&L across the OPEN signals — the footer's open figure.
+
+    Summed page-side off the very list the table renders, rather than published
+    as its own number, so the footer can never disagree with the P&L column
+    above it. A signal with no mark yet carries ``unrealized_pnl: None`` and
+    contributes nothing.
+    """
+    total = 0.0
+    for s in signals or []:
+        v = _float(s.get("unrealized_pnl"))
+        if v is not None:
+            total += v
+    return round(total, 2)
+
+
+def _money(v):
+    """'+$61.50' / '-$120.00' / '$0.00' — signed except at exactly flat."""
+    amount = _float(v) or 0.0
+    sign = "+" if amount > 0 else ("-" if amount < 0 else "")
+    return f"{sign}${abs(amount):,.2f}"
+
+
+def _count(v):
+    n = _float(v)
+    return str(int(n)) if n is not None else "0"
+
+
+def priced_count(signals):
+    """How many open signals carry a live mark (a numeric ``unrealized_pnl``)."""
+    return sum(1 for s in signals or [] if _float(s.get("unrealized_pnl")) is not None)
+
+
+NOT_PRICED = "—"   # em dash — "no reading", as distinct from a reading of zero
+
+
+def footer_cells(day, signals):
+    """The four footer figures as ``[{label, value, cls, note}]`` (PURE).
+
+    ``day`` is the service's summary block (opened/closed/booked_pnl for today,
+    CT); the open figure is derived here from ``signals``. A missing or
+    part-cold ``day`` degrades to zeros — a payload published before this
+    shipped has no block at all, and the page must still build.
+
+    Only the two P&L figures are coloured: a count has no direction to signal.
+
+    **An unpriced book reads as an em dash, not as $0.00.** The persisted view
+    carries no marks until a reprice runs (``signal_marks`` is only written by
+    the auto-manage cycle), so every ``unrealized_pnl`` can be None — and
+    summing that to a confident zero would report a flat book where the truth
+    is "not priced yet", the same failure mode as a missing indicator clamping
+    to a confident extreme. An empty book is still a real $0.00. When only some
+    signals are priced the sum is real but partial, so the cell carries a
+    ``note`` naming the coverage.
+    """
+    d = day or {}
+    booked = _float(d.get("booked_pnl")) or 0.0
+    n_open = len(signals or [])
+    n_priced = priced_count(signals)
+    live = open_pnl(signals)
+    if n_open and not n_priced:
+        open_cell = {"value": NOT_PRICED, "cls": "",
+                     "note": f"none of {n_open} open signals priced yet"}
+    else:
+        open_cell = {
+            "value": _money(live), "cls": pnl_class(live),
+            "note": (f"{n_priced} of {n_open} open signals priced"
+                     if n_priced < n_open else "")}
+    return [
+        {"label": "Opened today", "value": _count(d.get("opened")), "cls": "", "note": ""},
+        {"label": "Closed today", "value": _count(d.get("closed")), "cls": "", "note": ""},
+        {"label": "P&L today (booked)", "value": _money(booked),
+         "cls": pnl_class(booked), "note": ""},
+        {"label": "P&L today (open)", **open_cell},
+    ]
+
+
 def _float(v):
     """Coerce to float, or None — stored values arrive as strings often enough."""
     try:
@@ -306,6 +384,13 @@ def render():
             with table_box:
                 table = ui.table(columns=captured_columns(), rows=[],
                                  row_key="id").classes("w-full captured-table").props("dense")
+                # The day footer sits UNDER the table but inside its box, so the
+                # 70vh body scroll never carries it out of view — and so the
+                # reprice busy-overlay covers it too, since its figures are as
+                # stale as the marks above them while a reprice runs.
+                foot = ui.row().classes(
+                    "w-full flex-wrap items-start gap-x-10 gap-y-2 "
+                    "px-2 pt-2 mt-1 border-t border-[#213152]")
             status = ui.label("").classes("opacity-60 text-xs self-end")
             # No selection checkbox: clicking a row selects it (detail panel +
             # Close-selected) and the Rec cell shows a blue left-accent. The symbol
@@ -355,8 +440,35 @@ def render():
     # seconds of work, during which the table shows the OLD marks.
     table_busy = _busy.build_busy(table_box, "Repricing…")
 
+    # One handle per footer figure; the labels come from ``footer_cells`` itself
+    # so the pure builder stays the single source of the footer's wording.
+    foot_refs = []
+    with foot:
+        for cell in footer_cells(None, []):
+            with ui.column().classes("gap-0.5"):
+                ui.label(cell["label"]).classes(EYEBROW)
+                lbl = ui.label(cell["value"]).classes(
+                    f"{LABEL} text-sm font-semibold tabular-nums")
+                with lbl:
+                    # Mark coverage lives on hover, not in the number: a partial
+                    # sum is still a real number, but the reader deserves to know
+                    # it doesn't cover the whole book.
+                    tip = ui.tooltip("")
+                foot_refs.append({"lbl": lbl, "tip": tip, "cls": ""})
+
+    def _paint_footer(day, sigs):
+        for ref, cell in zip(foot_refs, footer_cells(day, sigs)):
+            ref["lbl"].text = cell["value"]
+            ref["tip"].text = cell["note"]
+            ref["tip"].set_visibility(bool(cell["note"]))
+            if cell["cls"] != ref["cls"]:
+                # swap only the tracked previous colour, so repeated repaints
+                # never stack two conflicting text-[...] classes
+                ref["lbl"].classes(remove=ref["cls"], add=cell["cls"])
+                ref["cls"] = cell["cls"]
+
     def _populate(cap):
-        """Paint the signals table from the cached captured view."""
+        """Paint the signals table + day footer from the cached captured view."""
         table_busy.hide()
         cap = cap or {}
         sigs = cap.get("signals") or []
@@ -370,6 +482,7 @@ def render():
             state["sel_id"] = None
         _apply_selection()
         table.update()
+        _paint_footer(cap.get("day"), sigs)
         status.text = f"{len(table.rows)} open signals." if cap else ""
 
     def _select(event):
