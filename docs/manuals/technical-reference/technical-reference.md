@@ -80,13 +80,13 @@ all apps). `requirements.lock` is a fully-pinned, byte-identical environment
 tooling (`ruff`, `pre-commit`, `pip-audit`, `pytest-cov`) and is **not needed to
 run** the app.
 
-⚠ **Regenerate the lock with `pip freeze --all`, not plain `pip freeze`.** The lock
-pins **`setuptools`** even though nothing imports it at runtime, because `pip-audit`
-audits the whole environment and an unpinned setuptools is a package whose version
-differs between a developer machine and the CI runner — which is how four CVEs sat
-unnoticed there until 2026-08-19. Plain `pip freeze` **omits setuptools by default**
-(verified), so regenerating the lock that way silently drops the pin and quietly
-reopens the gap.
+⚠ **Regenerate the lock with `pip freeze --all`, not plain `pip freeze`.** The lock pins
+**`setuptools`** and **`pip`** even though nothing imports them at runtime, because
+`pip-audit` audits the whole environment and an unpinned tool is a package whose version
+differs between machines — which is how four setuptools CVEs sat unnoticed until
+2026-08-19, and how prod was still on **pip 24.0 (six advisories)** that same day while
+dev audited clean. Plain `pip freeze` **omits both by default** (verified), so
+regenerating the lock that way silently drops the pins and quietly reopens the gap.
 
 Load-bearing runtime packages:
 

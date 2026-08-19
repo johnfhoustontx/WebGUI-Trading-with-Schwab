@@ -39,7 +39,11 @@ All eight servers bind **`127.0.0.1`** (verified) — the loopback bind is the p
   `setuptools` is **pinned** as of that date; while it was unpinned the lockfile said nothing
   about it, so the audited version differed between a developer machine and the CI runner —
   which is how a four-CVE package sat unnoticed in a lockfile whose purpose is reproducibility.
-  **Pin anything the audit can see, not just what the app imports.**
+  **Pin anything the audit can see, not just what the app imports.** `pip` itself is pinned
+  for the same reason and proved the point immediately: with the four packages fixed, dev
+  audited clean while **prod still carried pip 24.0 with six advisories**, purely because the
+  two venvs were created at different times and nothing pinned it. Audit **both** environments
+  — a clean dev tells you nothing about prod.
 
 ## The autonomous driver
 

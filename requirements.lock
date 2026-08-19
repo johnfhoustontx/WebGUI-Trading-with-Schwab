@@ -76,6 +76,7 @@ peewee==4.0.8
 pillow==12.3.0
 pip-api==0.0.34
 pip-requirements-parser==32.0.1
+pip==26.1.2
 pip_audit==2.10.1
 platformdirs==4.10.0
 pluggy==1.6.0

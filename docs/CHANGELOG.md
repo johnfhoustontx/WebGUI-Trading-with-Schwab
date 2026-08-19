@@ -102,6 +102,13 @@ by auditing the unmerged branches rather than the code.**
   to blocking "once the baseline is clean", and that condition is now met — but flipping
   means a newly-disclosed transitive CVE halts merges, which is an operator decision, not
   an automatic consequence of clearing the baseline. The flip is one line whenever wanted.
+- **⚠ A clean dev told us nothing about prod, and that is the sharpest lesson here.**
+  With the four packages fixed, the dev venv audited clean — while **prod was still on
+  pip 24.0 with six advisories**, purely because the two venvs were created at different
+  times and nothing pinned `pip`. It surfaced only because prod's venv was audited
+  separately after the promote. `pip` is now pinned too (26.1.2), both environments
+  report no known vulnerabilities, and the rule generalises: **audit every environment,
+  and pin every tool the audit can see.**
 - **Every suite in the repo was re-measured on the new pins** and the CLAUDE.md Tests
   section now carries all of them. The five previously marked *unverified* had drifted
   badly (driver_svc 162→239, `shared/bus` 15→25); four suites — market_svc, `shared/tests`,

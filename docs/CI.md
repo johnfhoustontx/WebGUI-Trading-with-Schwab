@@ -103,9 +103,9 @@ failures, so its job is `soft` and the following are deselected:
   (A `freeze` captures the whole venv, so the lock also contains the dev tooling —
   `ruff`, `pip-audit` — which is harmless for CI installs.)
 
-  ⚠ Use **`pip freeze --all`**. Plain `pip freeze` omits `setuptools`, which the lock
-  pins deliberately (`pip-audit` audits the environment, not just the imports), so a
-  plain regeneration silently drops that pin.
+  ⚠ Use **`pip freeze --all`**. Plain `pip freeze` omits `setuptools` **and `pip`**, both
+  of which the lock pins deliberately (`pip-audit` audits the environment, not just the
+  imports), so a plain regeneration silently drops those pins.
 - **`requirements-dev.txt`** — CI/local tooling only (`ruff`, `pre-commit`, `pip-audit`,
   `pytest-cov`).
 

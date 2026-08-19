@@ -318,13 +318,13 @@ all apps). <code>requirements.lock</code> is a fully-pinned, byte-identical envi
 (<code>pip freeze</code>) — install that for reproducibility. <code>requirements-dev.txt</code> holds
 tooling (<code>ruff</code>, <code>pre-commit</code>, <code>pip-audit</code>, <code>pytest-cov</code>) and is <strong>not needed to
 run</strong> the app.</p>
-<p>⚠ <strong>Regenerate the lock with <code>pip freeze --all</code>, not plain <code>pip freeze</code>.</strong> The lock
-pins <strong><code>setuptools</code></strong> even though nothing imports it at runtime, because <code>pip-audit</code>
-audits the whole environment and an unpinned setuptools is a package whose version
-differs between a developer machine and the CI runner — which is how four CVEs sat
-unnoticed there until 2026-08-19. Plain <code>pip freeze</code> <strong>omits setuptools by default</strong>
-(verified), so regenerating the lock that way silently drops the pin and quietly
-reopens the gap.</p>
+<p>⚠ <strong>Regenerate the lock with <code>pip freeze --all</code>, not plain <code>pip freeze</code>.</strong> The lock pins
+<strong><code>setuptools</code></strong> and <strong><code>pip</code></strong> even though nothing imports them at runtime, because
+<code>pip-audit</code> audits the whole environment and an unpinned tool is a package whose version
+differs between machines — which is how four setuptools CVEs sat unnoticed until
+2026-08-19, and how prod was still on <strong>pip 24.0 (six advisories)</strong> that same day while
+dev audited clean. Plain <code>pip freeze</code> <strong>omits both by default</strong> (verified), so
+regenerating the lock that way silently drops the pins and quietly reopens the gap.</p>
 <p>Load-bearing runtime packages:</p>
 <table>
 <thead>
