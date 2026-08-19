@@ -357,10 +357,21 @@ def market_premium_aggregate(raw):
             "symbols": n}
 
 
-def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
-    """raw = {symbol: {"series": [flow-row tuples], "flip": float|None}}.
+def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None,
+               mins_to_close=None):
+    """raw = {symbol: {"series": [flow-row tuples], "flip": float|None,
+    "call_wall": float|None, "put_wall": float|None, "net_gex": float|None,
+    "iv_series": [(ts, atm_iv)]}}. Every enrichment key is OPTIONAL — an older
+    caller passing only ``series``/``flip`` still builds, with the dealer
+    columns withheld.
 
     Returns a list of per-symbol row dicts (order = raw insertion order).
+
+    ``mins_to_close`` is minutes until the 4pm-ET cash close, THREADED IN for
+    the same reason as ``eth_symbols``: reading a clock here would make this
+    impure and its dealer-setup output untestable. ``None`` (off-hours) leaves
+    the time-gated setups unable to fire, which is the correct reading of "no
+    session left", not a degradation.
 
     ``eth_symbols`` is the set of Cboe extended-hours-eligible tickers, THREADED
     IN rather than read from a cache here so this stays pure. It drives the
@@ -398,6 +409,14 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
 
             sig, strength = composite_signal(t_dir, c_state, p_state, call_prem, put_prem)
 
+            call_wall = blob.get("call_wall")
+            put_wall = blob.get("put_wall")
+            net_gex = blob.get("net_gex")
+            iv_series = blob.get("iv_series") or []
+            iv_state, _iv_rel = iv_regime(iv_series, now_ts)
+            atm_iv = _latest_atm_iv(iv_series)
+            wall_dist = _wall_dist_pct(spot, call_wall, put_wall)
+
             rows.append({
                 "symbol": symbol,
                 "spot": round(spot, 2) if spot is not None else None,
@@ -422,6 +441,17 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
                 "signal_strength": strength,
                 "hotness": hotness(n_sig, n_alr, strength),
                 "eth_eligible": is_eth,
+                # Dealer-structure columns (2026-08-18). The Desk's structure map
+                # needs walls for EVERY symbol; cache:options:gamma holds only one
+                # at a time and is mutated by whichever Gamma page is open, so
+                # reading it from a second page is a race.
+                "call_wall": round(call_wall, 2) if call_wall is not None else None,
+                "put_wall": round(put_wall, 2) if put_wall is not None else None,
+                "net_gex": net_gex,
+                "atm_iv": atm_iv,
+                "iv_state": iv_state,
+                "dealer_regime": dealer_regime(spot, flip, iv_state, t_state,
+                                               mins_to_close, wall_dist),
             })
         except Exception:
             # Per-item construction can't sink the batch: one bad symbol must
@@ -450,5 +480,13 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
                 # likely to look broken, so the "not eligible" explanation
                 # matters here most.
                 "eth_eligible": is_eth,
+                # Present on the degraded row too, or the Desk's column read
+                # raises KeyError for the whole grid on one bad symbol.
+                "call_wall": None,
+                "put_wall": None,
+                "net_gex": None,
+                "atm_iv": None,
+                "iv_state": "na",
+                "dealer_regime": "na",
             })
     return rows

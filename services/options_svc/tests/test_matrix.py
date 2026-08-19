@@ -183,6 +183,84 @@ def test_build_rows_degraded_row_still_carries_eth_eligible():
                         eth_symbols={"NVDA"})
     assert rows[0]["eth_eligible"] is True
 
+
+# ---- dealer-structure columns (walls / net GEX / ATM IV / setup tag) ----
+def _blob(**over):
+    """A build_rows raw-blob with the new enrichment fields, overridable."""
+    blob = {
+        "series": [(0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
+                   (900, 101.0, 30, 8, 3_000_000.0, 800_000.0)],
+        "flip": 100.0,
+        "call_wall": 103.0,
+        "put_wall": 97.0,
+        "net_gex": 1_420_000_000.0,
+        "iv_series": [(0, 12.0), (900, 13.5)],
+    }
+    blob.update(over)
+    return blob
+
+
+def test_build_rows_emits_walls_net_gex_and_iv():
+    rows = m.build_rows({"SPY": _blob()}, {}, {}, now_ts=900)
+    r = rows[0]
+    assert r["call_wall"] == 103.0
+    assert r["put_wall"] == 97.0
+    assert r["net_gex"] == 1_420_000_000.0
+    assert r["atm_iv"] == 13.5
+    assert r["iv_state"] in ("spiking", "collapsing", "stable", "na")
+
+
+def test_build_rows_new_keys_are_none_not_zero_when_absent():
+    # The off-hours case depends on this. Index OI reads 0 after hours, so an
+    # all-zero grid yields ARBITRARY walls. None means "withhold"; 0.0 would
+    # render as a confident wall at strike zero.
+    rows = m.build_rows({"SPY": {"series": [], "flip": None}}, {}, {}, now_ts=0)
+    r = rows[0]
+    assert r["call_wall"] is None and r["put_wall"] is None
+    assert r["net_gex"] is None and r["atm_iv"] is None
+    assert r["iv_state"] == "na"
+    assert r["dealer_regime"] == "na"
+
+
+def test_build_rows_degraded_row_carries_the_new_keys():
+    # A row that raises mid-construction still needs every key, or the Desk's
+    # column read blows up on a KeyError for one bad symbol.
+    rows = m.build_rows({"BAD": {"series": "not-a-list", "flip": None}},
+                        {}, {}, now_ts=0)
+    r = rows[0]
+    for k in ("call_wall", "put_wall", "net_gex", "atm_iv",
+              "iv_state", "dealer_regime"):
+        assert k in r, f"degraded row missing {k}"
+
+
+def test_build_rows_dealer_regime_fires_gamma_cascade_below_flip_on_spiking_iv():
+    rows = m.build_rows(
+        {"SPY": _blob(flip=110.0,                                # spot 101 -> BELOW
+                      iv_series=[(0, 10.0), (900, 14.0)])},      # +40% -> spiking
+        {}, {}, now_ts=900)
+    assert rows[0]["gex_regime"] == "below"
+    assert rows[0]["dealer_regime"] == "gamma_cascade"
+
+
+def test_build_rows_dealer_regime_fires_vanna_squeeze_above_flip_on_collapsing_iv():
+    rows = m.build_rows(
+        {"SPY": _blob(flip=95.0,                                 # spot 101 -> ABOVE
+                      iv_series=[(0, 20.0), (900, 12.0)])},      # -40% -> collapsing
+        {}, {}, now_ts=900)
+    assert rows[0]["dealer_regime"] == "vanna_squeeze"
+
+
+def test_build_rows_dealer_regime_pins_only_when_mins_to_close_is_threaded_in():
+    # mins_to_close is a PARAMETER, not a clock read -- build_rows stays pure,
+    # the same reasoning as eth_symbols. Absent (off-hours) the time-gated
+    # setups cannot fire, which is exactly what "no session left" should mean.
+    blob = _blob(flip=95.0, iv_series=[(0, 20.0), (900, 20.05)],  # stable
+                 call_wall=101.2, put_wall=90.0)                  # spot 101 -> 0.198%
+    assert m.build_rows({"SPY": blob}, {}, {}, now_ts=900)[0]["dealer_regime"] == "neutral"
+    late = m.build_rows({"SPY": blob}, {}, {}, now_ts=900, mins_to_close=30)
+    assert late[0]["dealer_regime"] == "delta_wall_pin"
+
+
 # ---- market_premium_aggregate (dollar-weighted net-premium skew) ----
 def test_market_premium_aggregate_dollar_weighted_skew():
     # SPY latest: call 3M / put 1M ; QQQ latest: call 1M / put 1M.
