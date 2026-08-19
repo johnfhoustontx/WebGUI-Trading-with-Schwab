@@ -85,8 +85,23 @@ def _mrow(sym, **over):
 
 
 def test_dealer_rows_selects_and_orders_the_desk_symbols():
-    view = {"rows": [_mrow("QQQ"), _mrow("AAPL"), _mrow("$SPX")]}
-    assert [r["symbol"] for r in d.dealer_rows(view, stale=False)] == ["$SPX", "QQQ"]
+    """Asserted against ``DESK_SYMBOLS`` itself, never a written-out list.
+
+    The panel's subtitle is built from that tuple and the rows are emitted in
+    its order, so a reorder there has to reach this expectation — and a copy of
+    the order written down here is exactly how the two stop agreeing."""
+    view = {"rows": [_mrow(s) for s in reversed(d.DESK_SYMBOLS)] + [_mrow("AAPL")]}
+    assert [r["symbol"] for r in d.dealer_rows(view, stale=False)] == \
+        list(d.DESK_SYMBOLS)
+
+
+def test_desk_symbols_pair_each_index_with_its_tracking_etf():
+    """$SPX/SPY and $NDX/QQQ sit adjacent, index first.
+
+    The two rows a reader compares are an index and the ETF that tracks it, and
+    a comparison that needs the reader to skip a row is one they will not make.
+    """
+    assert d.DESK_SYMBOLS == ("$SPX", "SPY", "$NDX", "QQQ")
 
 
 def test_dealer_rows_regime_word_comes_only_from_gex_regime():
@@ -184,11 +199,16 @@ def test_dealer_rows_keeps_the_first_row_per_symbol_and_skips_junk():
 
 
 # ── opportunity_rows ─────────────────────────────────────────────────────────
-def test_opportunity_rows_takes_the_top_five_by_hotness_descending():
-    view = {"rows": [_mrow(f"S{i}", hotness=i) for i in range(10)]}
+def test_opportunity_rows_takes_the_top_n_by_hotness_descending():
+    """Asserted against ``BOARD_ROWS_N``, never a bare literal: the panel's row
+    cap, its "HOTTEST N" subtitle and this expectation all read the same
+    constant, and three independent numbers are how they stop agreeing."""
+    n = d.BOARD_ROWS_N
+    view = {"rows": [_mrow(f"S{i}", hotness=i) for i in range(n + 5)]}
     rows = d.opportunity_rows(view)
-    assert [r["hotness"] for r in rows] == [9, 8, 7, 6, 5]
-    assert [r["symbol"] for r in rows] == ["S9", "S8", "S7", "S6", "S5"]
+    assert [r["hotness"] for r in rows] == list(range(n + 4, 4, -1))
+    assert [r["symbol"] for r in rows] == [f"S{i}" for i in range(n + 4, 4, -1)]
+    assert len(rows) == n
 
 
 def test_opportunity_rows_sorts_rows_without_hotness_to_the_bottom():

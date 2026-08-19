@@ -53,7 +53,14 @@ from shared import market_calendar as _cal
 
 # The four symbols the Desk watches. Deliberately short: the Desk is a glance,
 # and the Opportunity Board already exists for the full watchlist.
-DESK_SYMBOLS = ("$SPX", "SPY", "QQQ", "$NDX")
+#
+# The ORDER pairs each index with its tracking ETF — $SPX with SPY for the S&P
+# complex, $NDX with QQQ for the Nasdaq — because those are the two rows a
+# reader actually compares. The index carries the real dealer book (its options
+# are where the gamma is) and the ETF carries the tradeable one; reading them
+# against each other is how a divergence between the two shows up at all. Split
+# across the panel, as they were, that comparison needs the reader to skip a row.
+DESK_SYMBOLS = ("$SPX", "SPY", "$NDX", "QQQ")
 
 # The trading clock, not the host's — and it sits up here rather than with the
 # rest of the display vocabulary because ``countdown_facts`` is a PURE builder
@@ -226,7 +233,35 @@ _TREND_PHRASE = {"strong_up": "strong uptrend", "up": "uptrend",
                  "down": "downtrend", "strong_down": "strong downtrend"}
 _ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
 
-OPPORTUNITY_LIMIT = 5
+# How many symbols the board carries. A CONSTANT rather than a literal at the
+# call site, and rather than a WORD in the panel subtitle ("HOTTEST FIVE", as it
+# read), because all three have to move together — the subtitle is built from it
+# and the tests assert against it.
+#
+# Six, not five. The rows became ONE line each (see ``_board_row``), which took a
+# row from 71px to 50px measured, and the panel had room for one more.
+#
+# ⚠ The rule that did NOT survive measurement on the Flow panel — "size this to
+# the panel it shares a grid row with" — DOES hold here, and the difference is
+# worth writing down. Flow's neighbour is Positions, whose length is DATA (open
+# trades), so a constant can only match it by accident. This panel's neighbour is
+# Dealer Positioning, which is exactly ``len(DESK_SYMBOLS)`` rows — deterministic
+# — so the two genuinely can be squared off. Measured live at 2381px:
+#
+#   dealer   87px chrome + 27px column head + 4 x 71.4px rows = 399.6px
+#   board    87px chrome + 27px column head + N x 50px rows
+#
+#   N = 5 -> 364px (36px SHORT of the dealer, and no extra rows at all)
+#   N = 6 -> 414px (14px OVER)
+#
+# `items-stretch` makes the two cards the same height either way, so this only
+# decides which panel carries the void — and six puts the smaller void in the
+# better place twice over. It is a third of a row, less than the panel's own
+# 16px bottom padding; and the dealer panel grows by a ~24px "walls withheld"
+# line whenever the GEX feed goes stale, which is most of the day, so six sits
+# BETWEEN the dealer's two heights (14px over the live one, 9px under the stale
+# one) rather than above both.
+BOARD_ROWS_N = 6
 
 
 def setup_word(dealer_regime):
@@ -265,7 +300,7 @@ def rationale(row):
 _UNSCORED = float("-inf")
 
 
-def opportunity_rows(matrix_view, limit=OPPORTUNITY_LIMIT):
+def opportunity_rows(matrix_view, limit=BOARD_ROWS_N):
     """The hottest ``limit`` symbols from ``cache:options:matrix``, hottest first.
 
     Deliberately carries NO ``rv``/``edge`` field: realized volatility is not
@@ -779,6 +814,13 @@ CHIP_WARN = _chip(_C["warning"], **_TIGHT)
 CHIP_ACCENT = _chip(_C["accent"], **_TIGHT)
 CHIP_MUTED = _chip(_C["muted"], **_TIGHT)
 
+# The board's setup tag. The tight tracking and padding of ``_TIGHT`` — it sits
+# in a 96px track — but explicitly NOT its ``wrap``: a board row is one line by
+# construction now, and a chip that folded onto a second line would be the only
+# thing on the panel breaking that. It fits without folding — "VOL CRUSH", the
+# longest of the four tags, measures 80px against the track's 96px floor.
+CHIP_SETUP = _chip(_C["accent"], track=".1em", pad="px-[5px]")
+
 # regime_word → chip. Only the two real readings are coloured; the em-dash
 # ("no side known") stays muted rather than borrowing either verdict's colour.
 # Both readings wrap (see ``_chip``) — the words stay whole at any column width.
@@ -962,9 +1004,33 @@ _GAP = "gap-x-[10px] gap-y-0"
 DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
                "minmax(170px,2fr)_minmax(94px,1fr)_minmax(94px,1fr)_"
                f"minmax(154px,1.5fr)] {_GAP} w-full")
-BOARD_GRID = ("grid grid-cols-[88px_minmax(182px,2fr)_minmax(86px,1fr)_"
-              "minmax(74px,1fr)_minmax(68px,1fr)_minmax(110px,1fr)] "
-              f"{_GAP} w-full")
+# Eight tracks now, not six: the board rows went flat (one line per symbol), so
+# WHY and SETUP take columns of their own instead of riding under the symbol and
+# the signal. The IV state rides INSIDE the ATM IV cell, on the same line — it
+# is two words wide and belongs beside the number it qualifies, not in a column
+# that would need its own label.
+#
+# WHY carries 5fr, far more than any other track, and that weight is what stops
+# it ellipsing. The longest rationale this page can build is three clauses —
+# "pinned at wall · below flip · strong downtrend", 46 characters — which is
+# 331px of JetBrains Mono at 12px (0.6em advance). Measured against the 2381px
+# viewport this page is read at, the weights hand WHY ~360px, so the worst case
+# clears with ~28px to spare. Its floor is 250px because the panel's total
+# minimum must stay UNDER the Positions panel's 973px, which is what sets the
+# page's two-column breakpoint: 848px of floors + 70px of gaps + 8px of row
+# padding + 40px of panel padding + 2px of border = 968px. Raising the floor
+# further would move the breakpoint, and the breakpoint belongs to Positions.
+#
+# ATM IV's 144px is likewise a WORST CASE, not the common one: it holds the
+# value AND its state word on one line, and "100.0% collapsing" measures 139px.
+# The obvious 132px (which is what the common "57.6% collapsing" wants) fits
+# every symbol on the board today and truncates the first three-digit IV that
+# appears — the kind of column that looks correct until the one row that matters
+# arrives. The 12px it needed came out of SCORE, which is a fixed track holding
+# a two-digit number under a 48px label and had the slack to give.
+BOARD_GRID = ("grid grid-cols-[64px_minmax(96px,1fr)_minmax(250px,5fr)_"
+              "minmax(144px,1.2fr)_minmax(82px,1fr)_minmax(46px,0.8fr)_"
+              f"minmax(70px,1fr)_minmax(96px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
 # weight is still on DETAIL because it is the only cell here that can be long —
@@ -1422,10 +1488,10 @@ def render():
                 "grid grid-cols-1 min-[2160px]:grid-cols-2 gap-5 w-full "
                 "items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
-            board_body = _panel("OPPORTUNITY BOARD", "HOTTEST FIVE")
-            # The subtitle is DERIVED from the row cap, because the two used to
-            # be a word and a number written down separately — and the number
-            # just moved.
+            # Both subtitles are DERIVED from their panel's row cap, because
+            # each used to be a word and a number written down separately — and
+            # both numbers have now moved.
+            board_body = _panel("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}")
             flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
             pos_body = _panel("POSITIONS", "PAPER · CLAUDE")
 
@@ -1593,68 +1659,63 @@ def render():
             if not rows:
                 ui.label("No ranked symbols yet.").classes(_PLACEHOLDER)
                 return
-            # Six labels for six tracks. The WHY sentence has none: it rides
-            # under the symbol as that cell's second line, which is where it
-            # was already being read from. SCORE rather than HOTNESS because
-            # even the widened first track cannot hold seven letters of 12px
-            # caps on .2em tracking — and the panel's own
-            # subtitle already says HOTTEST FIVE, so nothing is lost.
+            # Eight labels for eight tracks, ONE line per symbol. WHY and SETUP
+            # were the two qualifiers riding under the symbol and the signal;
+            # flat, each is a column of its own, which is what buys the extra
+            # rows (see ``BOARD_ROWS_N``). The IV state is the one qualifier
+            # that did NOT get a column: it is two words that only mean
+            # anything against the number they follow, so it rides inside the
+            # ATM IV cell on the same line.
+            #
+            # SCORE rather than HOTNESS because the first track cannot hold
+            # seven letters of 12px caps on .2em tracking — and the panel's own
+            # subtitle already says HOTTEST N, so nothing is lost.
             _grid_head(BOARD_GRID,
-                       ("SCORE", "SYMBOL", "ATM IV", "NET PREM", "P/C",
-                        "SIGNAL"))
-            # The bar is proportional to the HOTTEST row on screen, not to 100:
-            # hotness has no published ceiling, so a fixed denominator would be
-            # an invented scale.
-            top = max((r["hotness"] for r in rows if r["hotness"] is not None),
-                      default=None)
+                       ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
+                        "SIGNAL", "SETUP"))
             for row in rows:
-                _board_row(row, top)
+                _board_row(row)
 
-    def _board_row(row, top):
-        # One grid line, on the same seven-cell discipline as the dealer rows:
-        # every qualifier is the second line of the cell it qualifies — the WHY
-        # sentence under the symbol, the IV state under the IV, the setup tag
-        # under the signal it explains.
+    def _board_row(row):
+        # One grid line, and every cell on it is a single line — the same
+        # discipline the flow rows took. The proportional hotness bar that used
+        # to sit under the score went with the second line: a bar IS a second
+        # line by construction, and the scores are ranked and adjacent, so the
+        # ordering already carries the comparison the bar was drawing.
         el = ui.element("div").classes(
             f"{BOARD_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
-            with _stack():
-                _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
-                with ui.element("div").classes(
-                        f"{_K.track_classes()} h-[4px] w-full"):
-                    if row["hotness"] is not None and top:
-                        ui.element("div").classes(
-                            f"absolute left-0 top-0 bottom-0 "
-                            f"bg-[{_C['accent']}] "
-                            f"{_K.width_class(row['hotness'] / top * 100.0)}")
-            with _stack():
-                ui.label(row["symbol"]).classes(
-                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
-                # A rationale is up to three clauses of ordinary words, so it
-                # takes whatever the flexible track gives it and ellipses the
-                # rest — never a track of its own, where it would be truncated
-                # to eight characters.
-                ui.label(row["rationale"] or _DASH).classes(
-                    f"{_SUB} truncate w-full "
-                    + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
-            with _stack():
+            _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
+            ui.label(row["symbol"]).classes(
+                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+            # A rationale is up to three clauses of ordinary words. Its track
+            # carries by far the largest weight (see ``BOARD_GRID``) precisely
+            # so this never ellipses at the width the page is read at; the
+            # `truncate` is the graceful floor for the narrow two-column case,
+            # not the expected behaviour.
+            ui.label(row["rationale"] or _DASH).classes(
+                f"{_SUB} min-w-0 truncate "
+                + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
+            # `items-baseline` so the 12px state word sits on the 17px value's
+            # baseline rather than floating mid-cap.
+            with ui.row().classes(
+                    "items-baseline gap-[6px] flex-nowrap min-w-0"):
                 _cell(fmt_iv(row["atm_iv"]))
                 ui.label(row["iv_state"]).classes(
-                    f"text-[12px] {iv_state_class(row['iv_state'])}")
+                    f"text-[12px] truncate {iv_state_class(row['iv_state'])}")
             _cell(fmt_net_prem(row["net_prem_m"]),
                   signed_class(row["net_prem_m"]))
             _cell(fmt_ratio(row["pc_ratio"]))
-            with _stack():
-                # `self-start` on both chips, for the reason spelled out on the
-                # dealer regime chip: a chip stretched to its track is a box
-                # around a word rather than a label on it.
-                ui.label(row["signal"].upper()).classes(
-                    f"self-start px-[5px] py-[2px] rounded-[2px] text-[11px] "
-                    f"tracking-[.1em] {_signal_class(row['signal'])}")
-                # An empty setup tag renders NO chip: a blank line reads as "no
-                # setup", where a "NEUTRAL" chip would read as a finding.
-                if row["setup"]:
-                    ui.label(row["setup"]).classes(f"self-start {CHIP_ACCENT}")
+            # `self-start` on both chips, for the reason spelled out on the
+            # dealer regime chip: a chip stretched to its track is a box around
+            # a word rather than a label on it.
+            ui.label(row["signal"].upper()).classes(
+                f"self-start px-[5px] py-[2px] rounded-[2px] text-[11px] "
+                f"tracking-[.1em] whitespace-nowrap {_signal_class(row['signal'])}")
+            # An empty setup tag renders NO chip: an empty cell reads as "no
+            # setup", where a "NEUTRAL" chip would read as a finding.
+            if row["setup"]:
+                ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
         el.on("click", lambda _e: ui.navigate.to("/options/matrix"))
 
     def _paint_flow():
