@@ -2,9 +2,11 @@
 every other page, so the morning read is a single glance rather than a tour.
 
 Tier-1 reader: it consumes ``cache:options:matrix``, ``cache:options:paper_account``,
-``cache:options:driver_paper_account``, ``cache:options:flow_alerts``,
-``cache:options:gex_status`` and ``cache:sentiment:regime`` and renders them. No
-engine imports, no Schwab calls, no arithmetic of its own.
+``cache:options:driver_paper_account``, ``cache:options:captured``,
+``cache:options:flow_alerts``, ``cache:options:gex_status`` and
+``cache:sentiment:regime`` and renders them. No engine imports, no Schwab calls,
+no arithmetic of its own. Every one of them is polled in the SINGLE batched
+``read_versions`` in ``_poll`` — see ``VIEWS``.
 
 **The load-bearing principle: the Desk composes, it never restates.** Every
 number here is produced by the same pure function its owning page uses —
@@ -376,7 +378,7 @@ def flow_rows(flow_view, limit=FLOW_ROWS_N):
     return _flow.alert_rows(flow_view)[:max(0, int(limit))]
 
 
-# ── open positions (both paper books) ────────────────────────────────────────
+# ── open positions (all three books) ─────────────────────────────────────────
 # rescue_state → the flag word the card prints. WATCH is deliberately a separate
 # word from AT RISK: it means "keep an eye on it", and folding it in would blunt
 # the only word on this card meant to make the reader do something.
@@ -384,22 +386,107 @@ POSITION_FLAGS = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
                   "critical": "RESCUE"}
 _DEFAULT_FLAG = "OK"
 
+# The flag for a book the rescue overlay never looks at (see ``BOOKS``). It is
+# an em-dash and NOT the "OK" default, and that distinction is the whole point:
+# ``_DEFAULT_FLAG`` means "the manage cycle inspected this trade and found
+# nothing wrong", which is a real finding. Falling through to it for a book
+# nobody inspects would print a clean bill of health that no part of this app
+# ever issued — the same class of lie as a NaN clamping to a bound and rendering
+# as a confident extreme. ⚠ Do not "tidy" this back into the default.
+UNTAGGED_FLAG = "—"
+
 # The rescue states that genuinely mean "this trade is in trouble" — the same
 # pair ``paper._AT_RISK_STATES`` highlights.
 AT_RISK_STATES = ("tested", "critical")
 
-# Account views the Desk merges, and the chip each one's rows wear. Two separate
-# paper books with two separate P&Ls, so a row that did not say which it came
-# from would be unactionable.
-PAPER_SOURCE, CLAUDE_SOURCE = "PAPER", "CLAUDE"
+# The three books the panel merges, and the chip each one's rows wear. Three
+# separate ledgers with three separate P&Ls, so a row that did not say which it
+# came from would be unactionable.
+PAPER_SOURCE, CLAUDE_SOURCE, CAPTURED_SOURCE = "PAPER", "CLAUDE", "CAPTURED"
+
+# What each book's payload looks like, as DATA rather than as three near-copies
+# of the same loop. The three differ in more than their chip word, and every one
+# of those differences is a place a shared loop would quietly paper over:
+#
+#   list_key   captured publishes ``signals``, not ``positions``. A hardcoded
+#              "positions" would simply find nothing and the book would vanish
+#              from the panel with no error anywhere.
+#   id_key     ``signal_id`` vs ``position_id``.
+#   rescue     whether the manage cycle's rescue overlay tags this book at all.
+#              It tags the paper ACCOUNT only (see the comment in
+#              ``pages/options/captured.py``), so captured rows carry no
+#              ``rescue_state`` and no ``heat`` — see ``UNTAGGED_FLAG``.
+#   held       whether these are trades somebody is actually IN. Captured
+#              signals are ADVISORY: the scanner found them, nobody bought them.
+#              That drives two things — there is no quantity to print (rendering
+#              1 would state a size this app does not have, and would look
+#              exactly like a real one-contract position), and a held trade
+#              outranks an advisory one under the cap (see ``_URGENCY_RANK``).
+BOOKS = (
+    {"source": PAPER_SOURCE, "list_key": "positions", "id_key": "position_id",
+     "rescue": True, "held": True},
+    {"source": CLAUDE_SOURCE, "list_key": "positions", "id_key": "position_id",
+     "rescue": True, "held": True},
+    {"source": CAPTURED_SOURCE, "list_key": "signals", "id_key": "signal_id",
+     "rescue": False, "held": False},
+)
+
+# Where a row's own page lives. Click-through is the whole reason the Desk may
+# stay this terse: every row is one click from the page that can act on it, and
+# a book with no route would strand its rows here.
+POSITION_ROUTES = {PAPER_SOURCE: "/options/paper", CLAUDE_SOURCE: "/driver",
+                   CAPTURED_SOURCE: "/options/captured"}
 
 # The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
-# treated as open, matching ``paper_adjust``'s own default.
+# treated as open, matching ``paper_adjust``'s own default. The captured-signals
+# store uses the same two words, so all three books share one rule.
 _CLOSED_STATUSES = ("CLOSED", "EXPIRED")
 
+# How many rows the panel actually draws — see ``POSITION_ROWS_N``. The pure
+# builder returns the WHOLE book; slicing is the render layer's business,
+# because ``positions_summary`` has to total what is not on screen too.
+POSITION_ROWS_N = 8
 
-def position_flag(rescue_state):
-    """The flag word for a position's ``rescue_state`` (healthy when unknown)."""
+# The sort, in three keys. All three exist because the panel draws eight rows
+# out of a book that ran to thirty-five the day this was measured, so the ORDER
+# is what decides whether the cap is safe or is a defect.
+#
+# 1. URGENCY. At-risk states first, so the cap can never hide a trade in trouble
+#    behind a healthy one. An unsorted list would push every RESCUE row off the
+#    bottom the moment the captured book grew.
+_URGENCY_RANK = {"critical": 0, "tested": 1}
+_CALM = 2                       # everything else, including an untagged book
+
+# 2. HELD BEFORE ADVISORY. Measured live before this key existed: 30 captured
+#    signals at 2 DTE against 3 paper positions at 9 DTE meant every visible row
+#    was a captured signal, and a panel titled POSITIONS showed no positions at
+#    all. Money at risk outranks a suggestion nobody acted on. This sits BELOW
+#    urgency, never above it — a tested paper spread and a tested driver spread
+#    still lead the panel — and it only ever reorders the calm tier, since the
+#    advisory book carries no rescue state to be urgent with.
+_HELD_FIRST, _ADVISORY_LAST = 0, 1
+
+# 3. NEAREST EXPIRY, not largest absolute unrealized P&L. Size is not urgency: a
+#    $500 loser at 45 DTE has weeks to mean-revert, while a spread at 2 DTE has
+#    to be decided today — gamma and assignment risk both accelerate into
+#    expiry, and expiry is the one clock nobody can stop. Ranking on |unrealized|
+#    would also mix winners and losers into one order, so the biggest WINNER on
+#    the book would displace a small loser about to expire. A row whose
+#    expiration will not parse sorts LAST rather than first: an unreadable date
+#    is not evidence of urgency.
+_NO_DTE = 10 ** 6
+
+
+def position_flag(rescue_state, rescue_tagged=True):
+    """The flag word for a position's ``rescue_state``.
+
+    ``rescue_tagged=False`` is the explicit "nobody looked" answer for a book
+    the manage cycle does not inspect — see ``UNTAGGED_FLAG``. It is a parameter
+    rather than a lookup miss precisely so the caller has to SAY which case it
+    is: a missing state inside a tagged book really does mean healthy.
+    """
+    if not rescue_tagged:
+        return UNTAGGED_FLAG
     return POSITION_FLAGS.get(rescue_state, _DEFAULT_FLAG)
 
 
@@ -407,47 +494,87 @@ def _is_open(p):
     return (p.get("status") or "OPEN").upper() not in _CLOSED_STATUSES
 
 
-def position_rows(paper_view, driver_view):
-    """Open positions from BOTH paper accounts, each tagged with its source.
+def strikes_text(p):
+    """'600.0/595.0' — the spread's two strikes, or an em-dash.
 
-    Reads the *account* views, not the paper ledger: the ledger carries no live
-    mark, so an unrealized P&L taken from it would be entry-time arithmetic
-    wearing a live label.
+    Falls back to the CALL pair when there is no put side, which is what an iron
+    condor's payload looks like from the put-first fields. Shared by all three
+    books so a strike pair can never render one way on one chip and another way
+    on the next."""
+    for short_key, long_key in (("short_strike", "long_strike"),
+                                ("call_short", "call_long")):
+        sk, lk = p.get(short_key), p.get(long_key)
+        if sk is not None:
+            return f"{sk}/{lk}"
+    return "—"
+
+
+def position_rows(paper_view, driver_view, captured_view=None):
+    """Open rows from ALL THREE books, each tagged with its source, most
+    actionable first.
+
+    Reads the *account* views for the two paper books, not the paper ledger: the
+    ledger carries no live mark, so an unrealized P&L taken from it would be
+    entry-time arithmetic wearing a live label. Captured signals are the third
+    book — advisory rather than held, which is why they carry neither a size nor
+    a rescue verdict (see ``BOOKS``).
+
+    Returns the WHOLE merged book. The panel caps what it draws at
+    ``POSITION_ROWS_N``, but the cap must never reach the summary — unrealized
+    P&L and the at-risk count are book-level facts, and computing either off a
+    visible slice would understate both.
     """
     out = []
-    for view, source in ((paper_view, PAPER_SOURCE), (driver_view, CLAUDE_SOURCE)):
-        positions = (view or {}).get("positions") if isinstance(view, dict) else None
-        if not isinstance(positions, list):
+    for view, book in zip((paper_view, driver_view, captured_view), BOOKS):
+        entries = ((view or {}).get(book["list_key"])
+                   if isinstance(view, dict) else None)
+        if not isinstance(entries, list):
             continue
-        for p in positions:
+        for p in entries:
             if not isinstance(p, dict) or not _is_open(p):
                 continue
-            sk, lk = p.get("short_strike"), p.get("long_strike")
             out.append({
-                "source": source,
-                "position_id": p.get("position_id"),
+                "source": book["source"],
+                "position_id": p.get(book["id_key"]),
                 "symbol": p.get("symbol", ""),
                 "strategy": p.get("strategy", ""),
-                "short_strike": _finite(sk),
-                "long_strike": _finite(lk),
-                "strikes": f"{sk}/{lk}" if sk is not None else "—",
+                "short_strike": _finite(p.get("short_strike")),
+                "long_strike": _finite(p.get("long_strike")),
+                "strikes": strikes_text(p),
                 "width": _finite(p.get("width")),
                 "expiration": p.get("expiration", ""),
                 # The paper page's own helper — one calendar for the whole app.
+                # Deliberately NOT captured's stored ``dte_at_entry``, which is
+                # the countdown as it stood on the day the signal was found and
+                # would print a stale, too-large number for every row here.
                 "dte": _paper._dte_from_expiration(p.get("expiration")),
-                "quantity": _finite(p.get("quantity")),
+                # An unheld book prints an em-dash, never a 1 — see ``BOOKS``.
+                "quantity": (_finite(p.get("quantity")) if book["held"]
+                             else None),
+                "held": book["held"],
                 "entry_credit": _finite(p.get("entry_credit")),
                 "current_value": _finite(p.get("current_value")),
                 "unrealized_pnl": _finite(p.get("unrealized_pnl")),
-                "rescue_state": p.get("rescue_state"),
-                "heat": _finite(p.get("heat")),
-                "flag": position_flag(p.get("rescue_state")),
+                "rescue_state": p.get("rescue_state") if book["rescue"] else None,
+                "heat": _finite(p.get("heat")) if book["rescue"] else None,
+                "flag": position_flag(p.get("rescue_state"),
+                                      rescue_tagged=book["rescue"]),
             })
+    # Stable, so rows level on all three keys keep the book order they merged in.
+    out.sort(key=lambda r: (_URGENCY_RANK.get(r["rescue_state"], _CALM),
+                            _HELD_FIRST if r["held"] else _ADVISORY_LAST,
+                            _NO_DTE if r["dte"] is None else r["dte"]))
     return out
 
 
 def positions_summary(rows):
     """``{"open": n, "unrealized": float, "at_risk": n}`` over ``position_rows``.
+
+    ⚠ Hand this the FULL merged book, never the slice the panel draws. Both
+    numbers it produces are book-level facts, and ``at_risk`` in particular is
+    the one figure on this panel somebody acts on — computing it off eight
+    visible rows out of thirty-six would report zero trades in trouble while
+    trades were in trouble.
 
     ``at_risk`` counts TESTED + CRITICAL only. A non-finite P&L is skipped rather
     than summed — ``float('nan') + x`` is NaN, so one bad mark would erase the
@@ -756,12 +883,45 @@ def dte_text(dte):
     return "0DTE" if dte == 0 else f"{dte}d"
 
 
-def summary_line(summary):
-    """The Positions header: 'OPEN 4 · UNREALIZED $90.00 · AT RISK 2'."""
+def expiry_text(row):
+    """'2026-08-28 · 10d' — the expiration and how long is left of it.
+
+    ONE cell, not two columns, because these are not two fields: the DTE is
+    computed FROM the expiration (see ``position_rows``), so a column each would
+    be the row spending width to say the same thing twice. The date is the
+    contract's identity and the countdown is its urgency, which is why both are
+    worth printing — and why the countdown, being the reading that decides
+    anything, is also the panel's sort key.
+
+    A row missing either half prints the half it has rather than a dangling
+    separator, in the same shape ``flow_kind_text`` uses."""
+    r = row if isinstance(row, dict) else {}
+    date = str(r.get("expiration") or "").strip()
+    left = dte_text(r.get("dte"))
+    if not date:
+        return left
+    return f"{date} · {left}" if left != _DASH else date
+
+
+def summary_line(summary, shown=None):
+    """The Positions header: 'OPEN 4 · UNREALIZED $90.00 · AT RISK 2'.
+
+    ``shown`` adds a 'SHOWING n' clause when the panel is drawing fewer rows
+    than the book holds. A positions panel that silently truncates is dangerous
+    — the reader has no way to tell "three open trades" from "three of
+    thirty-six" — so the count of what is hidden rides on the one line that is
+    always visible. It is omitted when nothing is hidden, because a permanent
+    'SHOWING 3' on a three-row book would be noise that trained the eye to skip
+    the clause on the day it mattered.
+    """
     s = summary or {}
-    return (f"OPEN {s.get('open', 0)} · "
-            f"UNREALIZED {fmt_money(s.get('unrealized'))} · "
-            f"AT RISK {s.get('at_risk', 0)}")
+    total = s.get("open", 0)
+    parts = [f"OPEN {total}"]
+    if shown is not None and shown < total:
+        parts.append(f"SHOWING {shown}")
+    parts.append(f"UNREALIZED {fmt_money(s.get('unrealized'))}")
+    parts.append(f"AT RISK {s.get('at_risk', 0)}")
+    return " · ".join(parts)
 
 
 # --- chips ------------------------------------------------------------------
@@ -813,6 +973,14 @@ CHIP_NEG_STRONG = _chip(_C["negative"], fill=0.28, weight="font-semibold",
 CHIP_WARN = _chip(_C["warning"], **_TIGHT)
 CHIP_ACCENT = _chip(_C["accent"], **_TIGHT)
 CHIP_MUTED = _chip(_C["muted"], **_TIGHT)
+# The third book's chip, on the palette's dimmest readable step. Deliberately
+# the QUIETEST of the three rather than a third loud hue: captured signals are
+# advisory, they usually outnumber the two real books several times over, and a
+# bright chip repeated eight times down the panel would make the advisory book
+# look like the important one. It stays distinct from ``CHIP_MUTED``, which is
+# what an UNKNOWN source falls back to — those two must not collide, or a
+# malformed row would render as a captured signal.
+CHIP_LABEL = _chip(_C["label"], **_TIGHT)
 
 # The board's setup tag. The tight tracking and padding of ``_TIGHT`` — it sits
 # in a 96px track — but explicitly NOT its ``wrap``: a board row is one line by
@@ -838,9 +1006,11 @@ _REGIME_CHIP = {"LONG GAMMA · PINS": _chip(_C["positive"], wrap=True, fill=None
 _FLAG_CHIP = {"OK": CHIP_POS, "WATCH": CHIP_WARN, "AT RISK": CHIP_NEG,
               "RESCUE": CHIP_NEG_STRONG}
 
-# The paper book a position came from. Two books, two P&Ls — the chip is what
-# makes a merged row actionable.
-_SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CLAUDE_SOURCE: CHIP_WARN}
+# The book a row came from. Three books, three P&Ls — the chip is what makes a
+# merged row actionable, and it is also what says whether the row is a HELD
+# trade or an advisory signal.
+_SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CLAUDE_SOURCE: CHIP_WARN,
+                CAPTURED_SOURCE: CHIP_LABEL}
 
 # iv_state ∈ {spiking, collapsing, stable, na} (services/options_svc/matrix.py).
 # Deliberately NOT green/red: rising IV is neither good nor bad on its own — it
@@ -886,13 +1056,15 @@ def signed_class(v):
 # ── the page ─────────────────────────────────────────────────────────────────
 # Every cache view the Desk reads, in ONE tuple, because they are polled as one
 # batch. This page is the landing page and stays open all day, so a per-view
-# poller would be nine Redis round-trips every two seconds for the life of the
-# session; ``read_versions`` reads the nine tiny ``{key}:ver`` counters in a
+# poller would be ten Redis round-trips every two seconds for the life of the
+# session; ``read_versions`` reads the ten tiny ``{key}:ver`` counters in a
 # single pipelined round-trip and only the views that MOVED get deserialized.
+# ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
+# a timer of its own.
 VIEWS = ("options:header", "sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:paper_account",
-         "options:driver_paper_account")
+         "options:driver_paper_account", "options:captured")
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -904,7 +1076,8 @@ _REGION_VIEWS = {
     "dealer": ("options:matrix", "options:gex_status"),
     "board": ("options:matrix",),
     "flow": ("options:flow_alerts",),
-    "positions": ("options:paper_account", "options:driver_paper_account"),
+    "positions": ("options:paper_account", "options:driver_paper_account",
+                  "options:captured"),
 }
 
 POLL_SEC = 2.0
@@ -1037,9 +1210,49 @@ BOARD_GRID = ("grid grid-cols-[64px_minmax(96px,1fr)_minmax(250px,5fr)_"
 # the other three are a clock time, a ticker, and a two-word kind.
 FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
              f"minmax(158px,2fr)] {_GAP} w-full")
-POS_GRID = ("grid grid-cols-[68px_minmax(234px,2fr)_minmax(52px,1fr)_"
-            "minmax(62px,1fr)_minmax(62px,1fr)_minmax(166px,2fr)_"
-            f"minmax(42px,1fr)_minmax(99px,1fr)_minmax(58px,1fr)] {_GAP} w-full")
+# Ten tracks now, not nine: the position rows went flat like the board's and the
+# flow's, so STRATEGY takes a column of its own instead of riding under the
+# symbol, and the expiry rides WITH the DTE it is the source of rather than
+# under the strikes (see ``expiry_text``). Net, the panel spends one more track
+# and gets back a whole line of height per row — which is what pays for a third
+# book on the same panel.
+#
+# Every floor is a worst-case string MEASURED in the live DOM against the
+# rendered font, not computed from an assumed advance. That distinction earned
+# its keep: a first pass sized three of these tracks from arithmetic, they came
+# out 7-17px short, and the shortfall was invisible because none of the strings
+# that overflow them was on screen the day it was measured.
+#
+#   BOOK   80px  "CAPTURED" is the widest chip on the page. The chips
+#                ``break-words`` as a backstop, and this floor is what stops
+#                that backstop ever firing: a folded chip would be the one
+#                two-line cell in a panel of one-line rows.
+#   SYMBOL  66px "GOOGL" at 18px bold on .08em tracking — 61.2px measured.
+#   STRAT   52px the head label "STRAT" binds, not the value: the services emit
+#                two- and three-letter codes (PCS / CCS / IC), 25.2px.
+#   EXPIRY 180px ⚠ "2026-08-28 · 0DTE" is 173.4px, NOT the 163.2px of the
+#                "· 10d" shape that happened to be on screen. Every credit
+#                spread reaches 0DTE on its expiration day, and "· 365d" is the
+#                same width — so the common case is 10px narrower than the case
+#                that matters. Sizing on what was visible would have clipped
+#                this column on exactly the morning it was being read hardest.
+#   ENTRY,
+#   MARK    66px "$12.45" at 17px, 61.2px.
+#   STRIKES 158px "24000.0/23950.0" — an index strike pair, 153px. An equity
+#                pair ("1200.0/1195.0", 132.6px) is not the worst case.
+#   QTY     44px "125" at 17px is 30.6px; the label is the binding half.
+#   UNREAL 118px "-$12,345.00" is 112.2px. The driver's own max_loss_total runs
+#                to four figures, so five-figure P&L is a real row, not a
+#                hypothetical one.
+#   FLAG    72px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
+#
+# The fr WEIGHTS are set so no track sits ON its floor at the width this page is
+# read at: measured at 2381px every one clears with 3-11px of slack, which is
+# what stops a single character of drift becoming a clipped cell.
+POS_GRID = ("grid grid-cols-[80px_minmax(66px,0.8fr)_minmax(52px,0.6fr)_"
+            "minmax(180px,2fr)_minmax(66px,0.8fr)_minmax(66px,0.8fr)_"
+            "minmax(158px,1.8fr)_minmax(44px,0.5fr)_minmax(118px,1.3fr)_"
+            f"minmax(72px,0.8fr)] {_GAP} w-full")
 
 # The type ladder. Every size is the reference design's own, multiplied by ~1.35
 # and rounded: the reference was authored against a ~1920px screen, and on the
@@ -1449,43 +1662,52 @@ def render():
         # re-derived whenever a track floor moves — which the ~1.35x type scale
         # just did to every one of them. Positions is the widest panel:
         #
-        #   843px  the nine ``POS_GRID`` minmax floors summed
-        #   + 80   eight 10px column gaps
+        #   902px  the TEN ``POS_GRID`` minmax floors summed
+        #   + 90   nine 10px column gaps
         #   +  8   the row's own px-1, both sides (``_ROW``)
         #   + 40   the panel's px-5, both sides (``_panel``)
         #   +  2   the card's 1px border, both sides
-        #   = 973px minimum for one panel
-        #   x2 + 20px gutter = 1966px of panel content
+        #   = 1042px minimum for one panel
+        #   x2 + 20px gutter = 2104px of panel content
+        #   + 164 of chrome (below)          = 2268px of LAYOUT width
+        #   + 15 for the classic scrollbar   = 2283px of innerWidth
+        #
+        # Positions is still the widest panel and by a wider margin than before
+        # — the Opportunity Board needs 968px. Going flat added a track, and
+        # sizing the three starved columns on their real worst cases (see
+        # ``POS_GRID``) cost another 70px, so the breakpoint moved 2160 -> 2300.
+        # That is the documented procedure, not a liberty: this number is
+        # ARITHMETIC and is re-derived whenever a track floor moves. 2300 leaves
+        # 17px over the 2283 the arithmetic demands, and the 2381px screen this
+        # page is read at clears it by 81px.
         #
         # The CHROME around that content was MEASURED in the live DOM, not
         # assumed, and it is nearly double what a guess would give: 68px for the
         # icon rail (`.q-page-container` padding-left) plus THREE stacked 16px
         # paddings — `.nicegui-content`, the shell's own page column, and this
-        # page's `p-4` — for 164px in total. So the LAYOUT width two columns
-        # need is 1966 + 164 = 2130px.
+        # page's `p-4` — for 164px in total.
         #
-        # The breakpoint is 2160, not 2130, for a reason that is easy to measure
+        # The +15 on the last line is the other thing that is easy to measure
         # and impossible to reason out: a media query here matches on
         # `window.innerWidth`, while the grid is laid out in
-        # `documentElement.clientWidth`, and this page is always tall enough to
-        # carry a classic scrollbar — so the layout is 15px NARROWER than the
-        # width the query fired on. A breakpoint set to the bare 2130 therefore
-        # switches to two columns at 2115px of actual layout.
+        # `documentElement.clientWidth`, and this page is tall enough to carry a
+        # classic scrollbar — so the layout is 15px NARROWER than the width the
+        # query fired on. A breakpoint set to the bare layout figure switches to
+        # two columns 15px too early, every time.
         #
-        # Both earlier values were measured wrong rather than argued wrong. 2100
+        # Every earlier value here was measured wrong rather than argued wrong,
+        # which is why the margin is now deliberate rather than tight. 2100
         # (chrome guessed at rail + one p-4) overflowed the Positions rows by
-        # 11px. 2140 looked clean only by luck: every one of the nine tracks sat
-        # exactly on its floor, 2.5px over the content box, and nothing clipped
-        # solely because the last cell holds a short "OK" chip — a row flagged
-        # RESCUE would have clipped. At 2160 the same worst case has ~7px of
-        # genuine slack.
+        # 11px. 2140 looked clean only by luck: every track sat exactly on its
+        # floor and nothing clipped solely because the last cell held a short
+        # "OK" chip — a row flagged RESCUE would have clipped.
         #
         # Below the breakpoint the page is ONE column, where a full-width panel
-        # carries far more than 973px and every grid fits with room to spare —
+        # carries far more than 1042px and every grid fits with room to spare —
         # the narrow layout is the comfortable one, and the two-up layout is the
         # one that has to be earned.
         with ui.element("div").classes(
-                "grid grid-cols-1 min-[2160px]:grid-cols-2 gap-5 w-full "
+                "grid grid-cols-1 min-[2300px]:grid-cols-2 gap-5 w-full "
                 "items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             # Both subtitles are DERIVED from their panel's row cap, because
@@ -1493,7 +1715,8 @@ def render():
             # both numbers have now moved.
             board_body = _panel("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}")
             flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
-            pos_body = _panel("POSITIONS", "PAPER · CLAUDE")
+            pos_body = _panel("POSITIONS", " · ".join(
+                b["source"] for b in BOOKS))
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -1770,29 +1993,36 @@ def render():
         pos_body.clear()
         paper_view = _view("options:paper_account")
         driver_view = _view("options:driver_paper_account")
+        captured_view = _view("options:captured")
         with pos_body:
-            if paper_view is None and driver_view is None:
+            if paper_view is None and driver_view is None \
+                    and captured_view is None:
                 ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
                 return
-            rows = position_rows(paper_view, driver_view)
+            rows = position_rows(paper_view, driver_view, captured_view)
+            # ⚠ The summary reads the FULL book; only the DRAW is capped. Moving
+            # this line below the slice would make the panel report the P&L and
+            # the at-risk count of whatever happened to fit on screen.
             summary = positions_summary(rows)
-            ui.label(summary_line(summary)).classes(
+            shown = rows[:POSITION_ROWS_N]
+            ui.label(summary_line(summary, len(shown))).classes(
                 f"text-[14px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
                 ui.label("No open positions.").classes(_PLACEHOLDER)
                 return
-            # Nine labels for nine tracks. STRATEGY sits under the symbol it
-            # describes and EXPIRY under the strikes it applies to, which is
-            # where each of them was already being read from anyway; ENTRY and
-            # MARK are the pair the unrealized figure is the difference of, so
-            # the row now shows its own arithmetic rather than only its result.
-            # The track ORDER is the reference's own — the widths dictate which
-            # reading can sit where, and the strikes need the 128px one.
+            # Ten labels for ten tracks, ONE line per row — the same move the
+            # board and the flow feed just made, and here it is what pays for
+            # the third book: a stacked row was 71px, a flat one 50px.
+            # STRATEGY has its own column instead of riding under the symbol,
+            # and EXPIRY carries its own countdown (see ``expiry_text``) instead
+            # of riding under the strikes. ENTRY and MARK are the pair the
+            # unrealized figure is the difference of, so the row shows its own
+            # arithmetic rather than only its result.
             _grid_head(POS_GRID,
-                       ("BOOK", "SYMBOL", "DTE", "ENTRY", "MARK", "STRIKES",
-                        "QTY", "UNREALIZED", "FLAG"))
-            for row in rows:
+                       ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
+                        "STRIKES", "QTY", "UNREALIZED", "FLAG"))
+            for row in shown:
                 _position_row(row)
 
     def _position_row(row):
@@ -1801,25 +2031,31 @@ def render():
         with el:
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
-            with _stack():
-                ui.label(row["symbol"]).classes(
-                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
-                ui.label(strategy_label(row["strategy"])).classes(
-                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
-            _cell(dte_text(row["dte"]))
+            ui.label(row["symbol"]).classes(
+                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+            ui.label(strategy_label(row["strategy"])).classes(
+                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
+            _cell(expiry_text(row))
             # Both are per-share option prices (0.21 / 0.39), not position
             # dollars — the same numbers the paper ledger quotes.
             _cell(fmt_money(row["entry_credit"]))
             _cell(fmt_money(row["current_value"]))
-            with _stack():
-                _cell(row["strikes"])
-                ui.label(row["expiration"] or _DASH).classes(
-                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
+            _cell(row["strikes"])
+            # An em-dash, never a 1: a captured signal was never sized, and a
+            # printed quantity would be this page inventing a position.
             _cell(_DASH if row["quantity"] is None else f"{row['quantity']:g}")
             _cell(fmt_money(row["unrealized_pnl"]),
                   signed_class(row["unrealized_pnl"]))
-            ui.label(row["flag"]).classes(
-                f"self-start {flag_chip_class(row['flag'])}")
+            # An untagged book gets the dash BARE, with no chip around it — the
+            # same rule the dealer row follows for an unknown regime. An
+            # outlined box holding an em-dash reads as a broken widget, and a
+            # box in the FLAG column reads as a verdict whatever is inside it.
+            if row["flag"] == UNTAGGED_FLAG:
+                ui.label(UNTAGGED_FLAG).classes(
+                    f"self-start text-[14px] {CON_TXT_FAINT}")
+            else:
+                ui.label(row["flag"]).classes(
+                    f"self-start {flag_chip_class(row['flag'])}")
         el.on("click", lambda _e, r=row: _open_position(r))
 
     # ── click-through ────────────────────────────────────────────────────────
@@ -1835,8 +2071,7 @@ def render():
     @guard
     def _open_position(row):
         """Each book has its own page; the source chip is what decides which."""
-        ui.navigate.to("/driver" if row.get("source") == CLAUDE_SOURCE
-                       else "/options/paper")
+        ui.navigate.to(POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
     painters = {"strip": _paint_strip, "dealer": _paint_dealer,
                 "board": _paint_board, "flow": _paint_flow,
