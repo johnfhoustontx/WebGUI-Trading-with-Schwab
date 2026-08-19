@@ -21,6 +21,8 @@ The widgets and wiring land later, and none of it belongs here.
 """
 import math
 
+from pages.options import flow as _flow
+
 # The four symbols the Desk watches. Deliberately short: the Desk is a glance,
 # and the Opportunity Board already exists for the full watchlist.
 DESK_SYMBOLS = ("$SPX", "SPY", "QQQ", "$NDX")
@@ -265,3 +267,23 @@ def opportunity_rows(matrix_view, limit=OPPORTUNITY_LIMIT):
             "net_prem_m": _finite(r.get("net_prem_m")),
         })
     return out
+
+
+# ── flow feed ────────────────────────────────────────────────────────────────
+FLOW_LIMIT = 5
+
+
+def flow_rows(flow_view, limit=FLOW_LIMIT):
+    """The newest ``limit`` flow alerts, newest first.
+
+    Delegates wholesale to ``pages.options.flow.alert_rows`` — it already
+    reverses the service's oldest-first list, formats the clock time and the
+    per-type detail line, and picks the tone class. Re-deriving any of that here
+    would give the Desk a second, drifting copy of the Flow Alerts page.
+
+    Note what the rows deliberately do NOT say: which side INITIATED. Schwab
+    exposes no time-and-sales tape to this app, so "call side, 4.4x OI" is the
+    whole of what is known — ``flow_alerts.alert_text`` carries the same
+    restraint ("No buy/sell claim"), and the Desk must not add one by paraphrase.
+    """
+    return _flow.alert_rows(flow_view)[:max(0, int(limit))]

@@ -248,3 +248,43 @@ def test_opportunity_rows_is_empty_for_a_missing_view():
     assert d.opportunity_rows(None) == []
     assert d.opportunity_rows({}) == []
     assert d.opportunity_rows({"rows": ["junk", None]}) == []
+
+
+# ── flow_rows ────────────────────────────────────────────────────────────────
+def _alert(i, **over):
+    a = {"id": f"a{i}", "ts": 1_700_000_000 + i, "symbol": "SPY",
+         "type": "uoa", "side": "call", "strike": 500.0, "volume": 4000,
+         "oi": 900, "vol_oi": 4.4, "premium": 2.1e6, "expiry": "2026-08-21",
+         "dte": 3, "text": f"alert {i}"}
+    a.update(over)
+    return a
+
+
+def test_flow_rows_takes_the_newest_five_newest_first():
+    view = {"alerts": [_alert(i) for i in range(9)]}   # service appends oldest-first
+    rows = d.flow_rows(view)
+    assert [r["id"] for r in rows] == ["a8", "a7", "a6", "a5", "a4"]
+
+
+def test_flow_rows_delegates_to_the_flow_pages_own_builder():
+    """The Desk composes; it never re-formats. If these two ever diverge, the
+    Desk's feed is contradicting the page it links to."""
+    from pages.options import flow
+    view = {"alerts": [_alert(i) for i in range(3)]}
+    assert d.flow_rows(view) == flow.alert_rows(view)[:5]
+
+
+def test_flow_rows_never_claims_a_buy_or_sell_side():
+    """Schwab gives this app no time-and-sales tape, so nothing here knows who
+    initiated. ``flow_alerts.alert_text``'s own docstring says: no buy/sell
+    claim — and the Desk must not add one by paraphrase."""
+    rows = d.flow_rows({"alerts": [{"type": "uoa", "side": "call", "symbol": "SPY",
+                                    "ts": 1, "id": "a", "text": "x"}]})
+    blob = " ".join(str(v) for v in rows[0].values()).lower()
+    assert "buy" not in blob and "sell" not in blob
+
+
+def test_flow_rows_is_empty_for_a_missing_view():
+    assert d.flow_rows(None) == []
+    assert d.flow_rows({}) == []
+    assert d.flow_rows({"alerts": "nonsense"}) == []
