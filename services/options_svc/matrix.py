@@ -135,13 +135,24 @@ def iv_regime(iv_series, now_ts, lookback_s=_IV_LOOKBACK_S):
     rel_change = (iv_now - iv_ref) / iv_ref over the trailing lookback window
     (ref = the last sample at/before the cutoff, else the first sample).
 
-    This is the axis the app does NOT yet emit: whether ATM IV is *rising* or
-    *falling*. The vol-crush squeeze (positive gamma + IV collapsing) and the
-    negative-gamma cascade (below flip + IV spiking) both hinge on it. Feed it a
-    per-snapshot ATM-IV series -- a new forward-only ``atm_iv`` column on the
-    ``snapshots`` table (the poll already computes ATM IV via the engine's
-    ``_get_atm_iv``; the DB stores only ``rr_25d`` skew, which is signed and can
-    cross zero, so it is NOT a substitute here). Never raises.
+    The axis is whether ATM IV is *rising* or *falling*. The vol-crush squeeze
+    (positive gamma + IV collapsing) and the negative-gamma cascade (below flip +
+    IV spiking) both hinge on it, so without this input ``dealer_regime`` cannot
+    reach either label and collapses to mostly ``neutral``.
+
+    Fed from the forward-only ``atm_iv`` column on the ``snapshots`` table, which
+    the poll writes every cycle (``gex_collector`` -> ``iv_analysis.extract_atm_iv``)
+    and ``gex_history_db.load_atm_iv_series`` reads back. Rows written before the
+    column existed come back as ``(ts, None)`` and are skipped. (The DB also stores
+    ``rr_25d`` skew, which is signed and can cross zero, so it is NOT a substitute.)
+
+    ⚠ This docstring previously said ATM IV was "the axis the app does NOT yet
+    emit" -- true when written, stale since 2026-08-13 when the column landed.
+    Measured 2026-08-18: 162,566 of 162,598 ``gex`` rows carry a non-null
+    ``atm_iv`` (100.0%) across 92 symbols. The stale claim was believed twice and
+    cost a real column each time, so: verify against the DB, not the prose.
+
+    Never raises.
     """
     pts = [(t, s) for t, s in iv_series if s is not None]
     if len(pts) < 2:
