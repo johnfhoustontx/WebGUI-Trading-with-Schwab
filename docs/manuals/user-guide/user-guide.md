@@ -438,9 +438,9 @@ for that symbol.
 
 ## Market Dashboard
 
-**Route:** `/market`. **This is the app's landing page** — opening
-`http://127.0.0.1:8500` redirects here. It is also the group's first tab, so
-clicking **Trend & Sentiment** in the rail lands here.
+**Route:** `/market`. It is the **Trend & Sentiment** group's first tab, so clicking
+that rail item lands here. (The app's landing page is the **Desk** — opening
+`http://127.0.0.1:8500` redirects there.)
 
 A live wall of about 48 macro instruments in framed panels — volatility, options
 sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
@@ -449,11 +449,13 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.
 - **Tile colour means risk-on (green) / risk-off (red) / no data (grey)**, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
   shade **red when they rise**.
-- Four frames — **Top 10**, **Sector SPDR**, **Thematic** and **Countries** —
-  re-order themselves by the day's move. Every other frame keeps its curated order
-  on purpose.
+- Five frames — **Broad-Market ETF**, **Top 10**, **Sector SPDR**, **Thematic** and
+  **Countries** — re-order themselves by the day's move. Every other frame keeps its
+  curated order on purpose.
 - The **top rail** carries a clock, an advancing/declining breadth meter, and an
-  **A/B skin toggle** that is remembered.
+  **A/B skin toggle** that is remembered. The meter counts the four **stock** frames
+  only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
+  not counted as a decline.
 - Tiles **flash** when their value changes.
 
 Updates about every 3 seconds during market hours, 15 seconds outside them, and 60
@@ -769,11 +771,12 @@ Signals the system has "captured" to track over time, with live re-pricing.
 
 - **Action buttons:** Reload, **Refresh marks (live)** (re-price all open
   signals), **Close selected** (enter an exit value and reason).
-- **Table:** Symbol, Strategy, Mode, Opened, Expiration, DTE, Entry Credit, Entry
-  Risk, P&L (green/red), Entry Score, Current Score, **Score Drift**, Grade, and a
-  color-coded **Recommendation** (green TAKE_PROFIT / red CUT / amber HOLD).
-- Click a row for its detail panel (entry vs current score, recommendation,
-  unrealized P&L).
+- **Table:** a color-coded **Rec** (green TAKE_PROFIT / red CUT / amber HOLD),
+  Symbol, Strat, Mode, Opened, Exp, DTE, Credit, **Cur Price** (what the spread
+  costs to close now), Risk, P&L (green/red) and Grade. It opens **newest capture
+  first**; click any column heading to re-sort it.
+- Click a row for its detail panel; the clicked row is also the one **Close
+  selected** acts on.
 - When a tracked signal hits a stop or target, the page raises a notification.
 
 ## Paper Ledger

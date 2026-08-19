@@ -694,7 +694,7 @@ intensity scales with the size of the move.
 | **Currency** | $DXY (via UUP) | Dollar strength — generally a headwind for equities and commodities. |
 | **Cash Index** | SPX, NDX | The indices themselves, each with a call/put premium subline. |
 | **Equity Index Futures** | /ES, /NQ | The overnight tape, when cash is closed. |
-| **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | RSP and QQEW are *equal-weighted* — compare them to SPY and QQQ to see if the move is broad or driven by a few giants. |
+| **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
 | **Sector SPDR** | The eleven S&P sectors | Ranked by the day's move. |
 | **Thematic / Industry ETF** | Semis, biotech, software, retail, oil… | Ranked. |
@@ -702,14 +702,20 @@ intensity scales with the size of the move.
 | **Fixed Income / Credit** | TLT, HYG, LQD | HYG weak while equities rally is a classic warning. |
 | **Crypto / Alternatives**, **Countries** | | Countries is ranked. |
 
-**Four frames re-rank themselves** by the day's move — Top 10, Sector SPDR, Thematic,
-and Countries — so leaders and laggards are always at the ends. **Every other frame
-keeps its curated order on purpose**: SPY/DIA/QQQ/IWM in that sequence, VIX before its
-tenors. That layout is itself information.
+**Five frames re-rank themselves** by the day's move — Broad-Market ETF, Top 10,
+Sector SPDR, Thematic, and Countries — so leaders and laggards are always at the ends.
+**Every other frame keeps its curated order on purpose**: VIX before its tenors, the
+cash indices paired with their futures. That layout is itself information.
 
 **The top rail** carries a live clock, a session indicator, an advancing/declining
 **breadth meter**, and an **A/B skin toggle** (Instrument or Heat Lattice). Tiles
 **flash** when their value changes.
+
+**What the breadth meter counts.** The four *stock* frames only — Broad-Market ETF,
+Top 10, Sector SPDR and Thematic / Industry — so a bid VIX, a stronger dollar or a
+rallying Treasury does not register as a decline, and the meter reads the equity tape
+rather than the whole risk complex. The BIG10 composite is skipped, since it is the
+average of the ten mega-caps already counted beside it.
 
 **Premium sublines.** Index, broad-ETF and mega-cap tiles carry a small "Call 37%" /
 "Put 11%" line — that name's dollar-weighted call-versus-put premium. A dash means the
@@ -1776,8 +1782,11 @@ time, re-pricing it and telling you whether it worked — without committing to 
 | **P&L** | The paper result if you had taken it. |
 | **GRADE** | Quality at capture — **Good** or **Marginal**. |
 
+The table opens **newest capture first**; click any column heading to re-sort it.
+
 **Refresh marks (live)** re-prices everything against current chains. **Close selected**
-records an exit.
+records an exit — click a row first to pick it, which also loads it into the detail
+panel on the right.
 
 **Auto-management** (Settings toggle, on by default) raises the stop to break-even after
 +50%, defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules or

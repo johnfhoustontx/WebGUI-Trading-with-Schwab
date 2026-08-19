@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-18</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-19</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -86,6 +86,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#navigation-groups">Navigation groups</a></li>
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
+<li><a href="#desk">Desk</a></li>
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
@@ -418,6 +419,62 @@ weak), and when in the day to reach for it. It opens with a one-page summary of
 the whole app.</p>
 </blockquote>
 <hr />
+<h2 id="desk">Desk</h2>
+<p><strong>Route:</strong> <code>/desk</code> — and the app's <strong>home page</strong>, so plain
+<code>http://127.0.0.1:8500</code> lands here. In the rail it is pinned on its own above the
+section captions.</p>
+<p>One screen aggregating the most useful element of every other page, laid out as
+the four questions you ask in order: <em>what is the market doing · where is the
+structure · what should I act on · what am I holding.</em></p>
+<p><strong>The panels, top to bottom:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Panel</th>
+<th>What it gives you</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Top strip</strong></td>
+<td>Clock, <strong>VIX</strong> and its band, the <strong>market regime</strong> word, and two dials showing <strong>Day / Week / Month</strong> for sentiment and trend</td>
+</tr>
+<tr>
+<td><strong>Dealer Positioning</strong></td>
+<td>One row each for <strong>$SPX, SPY, QQQ, $NDX</strong> — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip</td>
+</tr>
+<tr>
+<td><strong>Opportunity Board</strong></td>
+<td>The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag</td>
+</tr>
+<tr>
+<td><strong>Live Flow Alerts</strong></td>
+<td>The five newest unusual-options events</td>
+</tr>
+<tr>
+<td><strong>Positions</strong></td>
+<td>Your paper trades and Claude's together, with live marks and an <strong>OK / Watch / At risk / Rescue</strong> flag</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Clicking any row</strong> opens the page it came from, already set to that symbol — a
+dealer row opens Dealer Positioning on that symbol, a position opens the Paper
+Ledger or Claude Trades.</p>
+<p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
+<p><strong>Three things that will look like faults and are not:</strong></p>
+<ul>
+<li><strong>After the close the walls vanish and the panel greys out with a timestamp.</strong>
+  Index option open interest reads 0 overnight, which would otherwise produce
+  confident-looking walls that are pure noise. The panel is telling you it is
+  showing the last reading it trusts.</li>
+<li><strong>Flow alerts say "call" or "put", never "bought" or "sold".</strong> Schwab publishes
+  no time-and-sales tape, so nobody — including this app — can honestly tell you
+  which side initiated.</li>
+<li><strong>The top strip shows VIX but not SPX or QQQ.</strong> Those sit in the panel directly
+  below with more context; showing them twice from two separately-updating sources
+  could briefly display two different prices for the same symbol.</li>
+</ul>
+<hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
 <p>The four rail entries in this section establish the conditions a trade would be
 taken in. Nothing here proposes a trade.</p>
@@ -588,9 +645,9 @@ every row as "something large happened here", then use price and gamma to decide
 direction.</p>
 </blockquote>
 <h2 id="market-dashboard">Market Dashboard</h2>
-<p><strong>Route:</strong> <code>/market</code>. <strong>This is the app's landing page</strong> — opening
-<code>http://127.0.0.1:8500</code> redirects here. It is also the group's first tab, so
-clicking <strong>Trend &amp; Sentiment</strong> in the rail lands here.</p>
+<p><strong>Route:</strong> <code>/market</code>. It is the <strong>Trend &amp; Sentiment</strong> group's first tab, so clicking
+that rail item lands here. (The app's landing page is the <strong>Desk</strong> — opening
+<code>http://127.0.0.1:8500</code> redirects there.)</p>
 <p>A live wall of about 48 macro instruments in framed panels — volatility, options
 sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
 ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p>
@@ -598,11 +655,13 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p
 <li><strong>Tile colour means risk-on (green) / risk-off (red) / no data (grey)</strong>, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
   shade <strong>red when they rise</strong>.</li>
-<li>Four frames — <strong>Top 10</strong>, <strong>Sector SPDR</strong>, <strong>Thematic</strong> and <strong>Countries</strong> —
-  re-order themselves by the day's move. Every other frame keeps its curated order
-  on purpose.</li>
+<li>Five frames — <strong>Broad-Market ETF</strong>, <strong>Top 10</strong>, <strong>Sector SPDR</strong>, <strong>Thematic</strong> and
+  <strong>Countries</strong> — re-order themselves by the day's move. Every other frame keeps its
+  curated order on purpose.</li>
 <li>The <strong>top rail</strong> carries a clock, an advancing/declining breadth meter, and an
-  <strong>A/B skin toggle</strong> that is remembered.</li>
+  <strong>A/B skin toggle</strong> that is remembered. The meter counts the four <strong>stock</strong> frames
+  only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
+  not counted as a decline.</li>
 <li>Tiles <strong>flash</strong> when their value changes.</li>
 </ul>
 <p>Updates about every 3 seconds during market hours, 15 seconds outside them, and 60
@@ -877,11 +936,12 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 <ul>
 <li><strong>Action buttons:</strong> Reload, <strong>Refresh marks (live)</strong> (re-price all open
   signals), <strong>Close selected</strong> (enter an exit value and reason).</li>
-<li><strong>Table:</strong> Symbol, Strategy, Mode, Opened, Expiration, DTE, Entry Credit, Entry
-  Risk, P&amp;L (green/red), Entry Score, Current Score, <strong>Score Drift</strong>, Grade, and a
-  color-coded <strong>Recommendation</strong> (green TAKE_PROFIT / red CUT / amber HOLD).</li>
-<li>Click a row for its detail panel (entry vs current score, recommendation,
-  unrealized P&amp;L).</li>
+<li><strong>Table:</strong> a color-coded <strong>Rec</strong> (green TAKE_PROFIT / red CUT / amber HOLD),
+  Symbol, Strat, Mode, Opened, Exp, DTE, Credit, <strong>Cur Price</strong> (what the spread
+  costs to close now), Risk, P&amp;L (green/red) and Grade. It opens <strong>newest capture
+  first</strong>; click any column heading to re-sort it.</li>
+<li>Click a row for its detail panel; the clicked row is also the one <strong>Close
+  selected</strong> acts on.</li>
 <li>When a tracked signal hits a stop or target, the page raises a notification.</li>
 </ul>
 <h2 id="paper-ledger">Paper Ledger</h2>

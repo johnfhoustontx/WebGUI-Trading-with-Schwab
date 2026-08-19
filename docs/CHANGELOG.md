@@ -4,7 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-18 (**The Desk — a single-screen home page, and the first
+**Last updated:** 2026-08-19 (**Market Dashboard: breadth off the equity tape, a
+ranked broad-market frame, and a guaranteed newest-first Captured table.**
+- **The advance/decline meter counted the whole board, which made it close to
+  meaningless.** By the board's risk polarity a bid VIX, a stronger dollar and a
+  rallying Treasury are all *declines* — so on a genuine risk-off session the macro
+  hedges cancelled the equity selling out and the meter sat near even on exactly the
+  days it should read hardest. Measured against the live payload the day it shipped:
+  **19 adv / 43 dec** whole-board versus **12 / 20** across the equity frames, i.e. 23
+  of the 43 declines came from instruments that are not stocks. `BREADTH_CATEGORIES`
+  is now Broad-Market ETF · Top 10 · Sector SPDR · Thematic / Industry ETF (35 tiles),
+  pinned by a test against `symbols.CATEGORY_ORDER` so a typo cannot silently count
+  nothing. The BIG10 basket is skipped — it is the average of the ten constituents
+  beside it in the same frame, so counting it double-counts the mega-caps.
+- **Broad-Market ETF became the fifth leaderboard frame.** Its curated
+  SPY/DIA/QQQ/IWM-then-equal-weights order was chosen to read as a fixed layout, and
+  CLAUDE.md, the route doc and a test all recorded that as deliberate. But the six are
+  peers of each other — large vs mega vs small cap, cap- vs equal-weighted — so which
+  leads on the day is the single most useful thing the frame can say, and a fixed
+  order hides it. One tuple entry; `compute.rank_tiles` already did the work.
+- **Captured Signals is now sorted newest-first rather than incidentally so.** The
+  service happened to return the 32 open signals in that order, so this changes
+  nothing visible today and everything about whether it stays true. The sort **parses**
+  `first_seen_ts` instead of comparing the strings: the stored UTC offset shifts with
+  DST (`-05:00` summer, `-06:00` winter), so two identical wall-clock texts can be an
+  hour apart as instants — and the displayed `Opened` column is truncated to the
+  minute besides, so it cannot be the sort key. Undated signals trail in service order
+  via a stable sort, so a pair of them never jitters between the 2 s repaints.
+- **Docs.** `page_help.py`'s Captured entry still described the **Entry / Current /
+  Drift score columns**, which `captured_columns` dropped some time ago — corrected in
+  the same pass, per the standing rule that the hover guides rot first.)
+
+**Prior — 2026-08-18** (**The Desk — a single-screen home page, and the first
 Tier-2 change the webgui has needed in a while.**
 - **What shipped.** `/desk`, pinned alone at the top of the rail and now the target of
   `/`. It aggregates the highest glance-value element of every page into the four
