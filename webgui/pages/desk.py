@@ -28,8 +28,8 @@ import bus_client
 from nicegui import run, ui
 
 from pages import console as _K
+from pages import console_cards as _CC
 from pages import console_regime as _CR
-from pages import rings as _rings
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import header as _hdr
@@ -38,16 +38,28 @@ from pages.options.matrix import signal_class as _signal_class
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
                                  CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
-                                 CONSOLE_DISPLAY, CONSOLE_FONT_HEAD_HTML,
-                                 CONSOLE_KEYFRAMES_CSS, CONSOLE_PAGE,
-                                 CONSOLE_RULE)
+                                 CONSOLE_DISPLAY, CONSOLE_DIVIDER,
+                                 CONSOLE_FONT_HEAD_HTML, CONSOLE_KEYFRAMES_CSS,
+                                 CONSOLE_PAGE, CONSOLE_RULE)
+# ``_TREND_SHORT`` is private only in the sense that /sentiment owns it. It is
+# the vocabulary the console's Trend pill prints, and the Desk shows the SAME
+# pill — copying the five words here is exactly the drift this page exists to
+# avoid, so it is imported rather than restated.
+from pages.sentiment import _TREND_SHORT as _TREND_WORDS
 from pages.sentiment import sentiment_arcs as _sentiment_arcs
 from pages.sentiment import trend_arcs as _trend_arcs
 from pages.ui_guard import guard, guard_async
+from shared import market_calendar as _cal
 
 # The four symbols the Desk watches. Deliberately short: the Desk is a glance,
 # and the Opportunity Board already exists for the full watchlist.
 DESK_SYMBOLS = ("$SPX", "SPY", "QQQ", "$NDX")
+
+# The trading clock, not the host's — and it sits up here rather than with the
+# rest of the display vocabulary because ``countdown_facts`` is a PURE builder
+# that needs it. Every session BOUND still comes from ``market_calendar``; this
+# is only the zone a naive datetime is read in, which is that module's rule too.
+_CT = ZoneInfo("America/Chicago")
 
 
 def _finite(v):
@@ -292,10 +304,28 @@ def opportunity_rows(matrix_view, limit=OPPORTUNITY_LIMIT):
 
 
 # ── flow feed ────────────────────────────────────────────────────────────────
-FLOW_LIMIT = 5
+# How many alerts the panel carries. It is a CONSTANT rather than a literal at
+# the call site because the tests assert against it: the count and the assertion
+# have to move together, and a bare 5 in both places is how they stop doing so.
+#
+# Nine, not five. The rows became ONE line each (see ``_flow_row``), which took
+# a row from 71px to 50px measured — so the same panel now carries nearly twice
+# the feed for the height it already had.
+#
+# ⚠ The obvious rule — "pick the count that squares the Flow panel off against
+# the Positions panel it shares a grid row with" — does not survive measurement,
+# and it is worth writing down why. Positions is DATA-length (both paper books'
+# open trades; three of them the day this was measured, for a 269px body), while
+# this is a CONSTANT. At three positions the matching count is five, i.e. no
+# increase at all, and at ten it would be fifteen. So the two can only agree by
+# accident. The panels themselves are always the same height — `items-stretch`
+# guarantees that — and the question is only which one carries the void.
+# Nine puts it in Positions, which is the right place for it: a book grows
+# through the week, where the alert feed is capped by definition.
+FLOW_ROWS_N = 9
 
 
-def flow_rows(flow_view, limit=FLOW_LIMIT):
+def flow_rows(flow_view, limit=FLOW_ROWS_N):
     """The newest ``limit`` flow alerts, newest first.
 
     Delegates wholesale to ``pages.options.flow.alert_rows`` — it already
@@ -473,12 +503,108 @@ def regime_display(regime_view):
     }
 
 
+# ── the Sentiment / Trend hero pills ─────────────────────────────────────────
+# The Desk's two score cards are the Market Regime Console's own cards, so their
+# hero pills must read the SAME words off the SAME payload. ``sentiment_arcs`` /
+# ``trend_arcs`` already carry the three meter values; these two carry the word
+# beside the hero number, which is the only other thing the compact card shows.
+def sentiment_pill_text(live, snaps):
+    """'CAUTIOUS 4.45' — the composite's bias word and its total score.
+
+    ``live`` wins over the newest backfill snapshot, exactly as ``/sentiment``'s
+    own ``_apply`` picks its headline, so the pill can never name a different
+    session than the Day meter beside it.
+
+    ONE deviation from that page, deliberate: it formats the total through a
+    ``_safe_float`` that defaults to **0.0**, so a composite published without a
+    score reads "CAUTIOUS 0.00" — a maximally bearish number nobody measured.
+    Here a missing total drops the number and keeps the word. An absent bias
+    prints nothing at all rather than a filler.
+    """
+    if not isinstance(snaps, list):
+        snaps = []
+    latest = live or (snaps[-1] if snaps else None)
+    comp = latest.get("composite") if isinstance(latest, dict) else None
+    comp = comp if isinstance(comp, dict) else {}
+    bias = str(comp.get("bias") or "").strip().upper()
+    if not bias:
+        return ""
+    total = _finite(comp.get("total_score"))
+    return bias if total is None else f"{bias} {total:.2f}"
+
+
+def trend_pill_text(derived):
+    """'RESILIENT' — the Day horizon's short trend-state word.
+
+    Straight off ``pages.sentiment._TREND_SHORT``, which is the map the console's
+    own Trend pill uses. An unknown or absent state prints nothing: the five
+    words are readings, and there is no sixth one meaning "no reading".
+    """
+    d = derived if isinstance(derived, dict) else {}
+    trend = d.get("trend") if isinstance(d.get("trend"), dict) else {}
+    return str(_TREND_WORDS.get(trend.get("state")) or "").upper()
+
+
+def _arc_value(arcs, i):
+    """The i-th arc's 0-100 value, or None.
+
+    ``sentiment_arcs``/``trend_arcs`` always return three entries, so this is a
+    guard rather than a branch anyone expects to take — but the hero delta is
+    decoration on a card whose numbers are elsewhere, and it must degrade to no
+    delta rather than take the strip down with an IndexError."""
+    try:
+        return arcs[i].get("value")
+    except (IndexError, KeyError, AttributeError, TypeError):
+        return None
+
+
+# ── the session countdown ────────────────────────────────────────────────────
+# What the clock counts to, and what it calls itself. Two states only: the
+# session is open, or it is not — there is no third reading a trader acts on.
+COUNTDOWN_LABELS = {"to_close": "TO CLOSE", "to_open": "TO OPEN"}
+
+
+def countdown_facts(now):
+    """``{"label", "text", "state"}`` — time to the close, or to the next open.
+
+    A wall clock says what a trader already knows. What is worth a tile is how
+    much session is left: inside regular hours this counts down to the cash
+    close, outside them it counts down to the next open.
+
+    **Every session bound comes from ``shared.market_calendar``** — this
+    function contains no time literal and no holiday list, which is the whole
+    point of that module. ``mins_to_close`` is what decides which branch runs
+    (it returns None outside the regular session, so the two states cannot
+    disagree with ``is_regular_hours``), and ``next_regular_open`` rolls weekends
+    and holidays forward through the shared NYSE calendar.
+
+    ``now`` may be naive; it is then read as CT, the app's trading clock and the
+    same rule ``market_calendar`` applies to its own inputs.
+    """
+    mins = _cal.mins_to_close(now)
+    if mins is not None:
+        return {"label": COUNTDOWN_LABELS["to_close"],
+                "text": _hms(mins * 60.0), "state": "to_close"}
+    ct = now.astimezone(_CT) if now.tzinfo else now.replace(tzinfo=_CT)
+    return {"label": COUNTDOWN_LABELS["to_open"],
+            "text": _hms((_cal.next_regular_open(ct) - ct).total_seconds()),
+            "state": "to_open"}
+
+
+def _hms(seconds):
+    """'3:07:12' — hours UNBOUNDED, because a Friday-evening countdown to
+    Monday's open is 65 hours and wrapping it at 24 would be a lie. Never
+    negative: the two callers cannot produce one, and a leading '-' on a
+    countdown would read as a clock fault rather than as an edge case."""
+    total = max(0, int(_finite(seconds) or 0.0))
+    return f"{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
 # ── display vocabulary ───────────────────────────────────────────────────────
 # Everything below is the RENDER layer: formatters, the finite class maps the
 # Tailwind-first standard requires, and ``render()``. The pure builders above
 # never reach into it.
 _DASH = "—"
-_CT = ZoneInfo("America/Chicago")            # the trading clock, not the host's
 _C = CONSOLE_COLORS                          # raw hexes, for chips and markers
 
 
@@ -565,6 +691,22 @@ def flip_text(row):
         return _DASH
     sub = flip_sub_text(row)
     return f"{level} · {sub}" if sub else level
+
+
+def flow_kind_text(row):
+    """'Unusual activity · Call' — the alert kind and the side it fired on.
+
+    One cell, because the flow rows are one line each now and the side is a
+    qualifier on the kind rather than a reading of its own. "Call"/"Put" names
+    which side of the book moved and NOT who initiated: Schwab publishes no
+    time-and-sales tape to this app. A row with no side prints the kind alone
+    rather than a dangling separator."""
+    r = row if isinstance(row, dict) else {}
+    kind = str(r.get("kind") or "").strip()
+    side = str(r.get("side") or "").strip()
+    if not kind:
+        return side or _DASH
+    return f"{kind} · {side}" if side else kind
 
 
 def strategy_label(s):
@@ -725,7 +867,6 @@ _REGION_VIEWS = {
 
 POLL_SEC = 2.0
 CLOCK_SEC = 1.0
-RING_PX = 150
 
 # ── the reference design's own palette ───────────────────────────────────────
 # The supplied design carries a THREE-STEP text ladder — symbol, then spot, then
@@ -824,8 +965,12 @@ DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
 BOARD_GRID = ("grid grid-cols-[88px_minmax(182px,2fr)_minmax(86px,1fr)_"
               "minmax(74px,1fr)_minmax(68px,1fr)_minmax(110px,1fr)] "
               f"{_GAP} w-full")
-FLOW_GRID = ("grid grid-cols-[68px_minmax(208px,3fr)_minmax(104px,1fr)] "
-             f"{_GAP} w-full")
+# Four tracks now, not three: the flow rows went flat (one line per alert), so
+# DETAIL takes a column of its own instead of riding under the symbol. The 3fr
+# weight is still on DETAIL because it is the only cell here that can be long —
+# the other three are a clock time, a ticker, and a two-word kind.
+FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
+             f"minmax(158px,2fr)] {_GAP} w-full")
 POS_GRID = ("grid grid-cols-[68px_minmax(234px,2fr)_minmax(52px,1fr)_"
             "minmax(62px,1fr)_minmax(62px,1fr)_minmax(166px,2fr)_"
             f"minmax(42px,1fr)_minmax(99px,1fr)_minmax(58px,1fr)] {_GAP} w-full")
@@ -836,8 +981,9 @@ POS_GRID = ("grid grid-cols-[68px_minmax(234px,2fr)_minmax(52px,1fr)_"
 # comfortable reading size. The RATIOS between the steps are the reference's and
 # must stay that way — the three-tier hierarchy (value / qualifier / label) is
 # what makes a nine-column row scannable, and flattening it by scaling one step
-# and not another would cost more than the small type did.
-_EYEBROW = f"text-[13px] tracking-[.22em] {CON_TXT_DIM}"
+# and not another would cost more than the small type did. (The ladder's top
+# step, a 13px eyebrow, went with the strip that used it — the strip tiles carry
+# their own, smaller one; see ``_STRIP_EYEBROW``.)
 # Column labels get a step MORE than the ladder gives (11px -> 12px) and a
 # brighter hex (see ``REF_HEAD_TXT``): at 8px on .2em tracking they were the one
 # thing on the page that could not be read at all, and a label nobody can read
@@ -870,6 +1016,151 @@ _ALL_VIX_BG = " ".join(sorted({_hdr.regime_badge_class(b) for b in _VIX_BANDS}))
 _ALL_STATE_TEXT = " ".join(sorted({CON_POS, CON_NEG, CON_WARN, CON_TXT,
                                    CON_TXT_MUTED}))
 _ALL_DOT_BG = f"bg-[{_C['warning']}] bg-[{_C['positive']}] con-pulse"
+
+
+# ── the compact Sentiment / Trend cards ──────────────────────────────────────
+# These are the Market Regime Console's own two cards at roughly 62% of its type
+# scale, with the footer (model-confidence meter, verdict block, the two
+# "→" links) dropped: the Desk is a glance surface and the whole card already
+# click-throughs to /sentiment, where all three live at full size.
+#
+# They are built HERE rather than by calling ``console_cards.render_*`` because
+# every size in that module is baked into its class strings — a 76px hero, an
+# 18px meter track, a 20px card padding — and this strip has to fit inside ~90px
+# in total. Parameterising them would put a size argument on a page nobody asked
+# to change. What IS shared is everything that decides a NUMBER or a COLOUR:
+# ``console.meter_row`` (band, fill gradient, marker tint, the no-read hatch),
+# ``console_cards.hero_parts`` and ``console_cards.delta_parts``. So the two
+# renderings can differ in size and in nothing else — which is the only kind of
+# divergence this page can afford.
+#
+# The size ladder, console -> Desk: title 19->12, meta 10->8, hero 76->46,
+# kicker 10->8, pill 12->9, meter label 10->8, meter track 18->11, meter value
+# 17->11, ruler mark 9.5->8. Every one of those is ~60-65% EXCEPT the four
+# already at 9.5-10px, which stop at 8: below that a wide-tracked cap label is
+# not small, it is unreadable, and the point of keeping the console's anatomy is
+# that the reader can still read it.
+#
+# ``leading-none`` is on every text class here, not decoration: a Tailwind
+# arbitrary ``text-[Npx]`` sets the font SIZE only and leaves line-height to the
+# app-wide `[typography]` rule, so without it each of these lines would carry
+# ~50% of inherited leading and the strip would overshoot its height budget by
+# more than the type scale saved.
+_CARD_TITLE = (f"{CONSOLE_DISPLAY} text-[12px] leading-none font-bold "
+               f"tracking-[.16em] {CON_TXT}")
+_CARD_META = f"text-[8px] leading-none tracking-[.18em] {CON_TXT_DIM}"
+_CARD_HERO = "text-[46px] font-semibold leading-[.85] tracking-[-.02em]"
+_CARD_KICKER = f"text-[8px] leading-none tracking-[.24em] {CON_TXT_MUTED}"
+_CARD_DELTA = "text-[9px] leading-none whitespace-nowrap"
+_METER_LABEL = (f"w-[34px] shrink-0 text-[8px] leading-none tracking-[.18em] "
+                f"{CON_TXT_MUTED}")
+_METER_VALUE = "w-[24px] shrink-0 text-right text-[11px] leading-none font-medium"
+_RULER_MARK = f"text-[8px] leading-none {CON_TXT_FAINT}"
+
+# The strip's own vocabulary. Its eyebrows sit at 10px rather than the 13px the
+# panels' type ladder gives: a strip tile is one reading, so its label has no
+# column of numbers to compete with and does not need the panels' weight.
+_STRIP_EYEBROW = f"text-[10px] leading-none tracking-[.22em] {CON_TXT_DIM}"
+_STRIP_VALUE = f"text-[28px] leading-none tabular-nums {CON_TXT}"
+# Each strip tile is its own console card. The strip used to be ONE card holding
+# everything, which meant a card inside a card once the score cards arrived —
+# and, more practically, its own padding on top of theirs, which is height this
+# strip does not have.
+#
+# ⚠ NO `h-full` here, and that was measured rather than reasoned: `height:100%`
+# against the row's INDEFINITE height is not `auto`, and `align-items: stretch`
+# only stretches an item whose cross size IS auto — so the one class that looks
+# like it squares the tiles off is exactly what stops the strip doing it (81 /
+# 92 / 92 / 84 / 81 with it, 92 across without). The tiles stretch because the
+# ROW says `items-stretch`; each score card then fills its own holder with
+# `flex-1`, which works because a holder in a COLUMN flex container has a
+# definite main axis. `mt-auto` on a tile's last row depends on this too.
+_TILE = f"{CONSOLE_CARD} rounded-none px-[10px] py-[9px] gap-[6px]"
+
+
+def _compact_pill(hexv):
+    """The hero pill, in ``console_cards.pill_classes``' shape at Desk scale.
+
+    Same border/fill/text relationship, smaller box: an outlined word, not a
+    filled badge. The alpha is written as Tailwind's ``/[0.16]`` opacity form
+    rather than the console's 8-digit hex — the two render identically and this
+    one needs no extra import."""
+    return (f"border border-[{hexv}]/[0.45] bg-[{hexv}]/[0.16] "
+            f"px-[6px] py-[1px] text-[9px] leading-none tracking-[.14em] "
+            f"whitespace-nowrap text-[{hexv}]")
+
+
+def _mount_meter(row):
+    """One Day/Week/Month meter: label · track · value.
+
+    Every decision in ``row`` — the band, the fill gradient, the marker tint,
+    whether it is a NO READ hatch — was already made by ``console.meter_row``.
+    This only sizes it."""
+    with ui.row().classes("items-center gap-2 w-full flex-nowrap"):
+        ui.label(row["label"]).classes(_METER_LABEL)
+        with ui.element("div").classes(f"flex-1 h-[11px] {_K.track_classes()}"):
+            if row["no_read"]:
+                # A hatch, never an empty track: "the instrument is absent" and
+                # "the value is zero" must not look the same on a 0-100 scale.
+                ui.element("div").classes(f"absolute inset-0 {_K.NO_READ_HATCH}")
+            else:
+                ui.element("div").classes(
+                    f"absolute left-0 top-0 bottom-0 "
+                    f"{_K.width_class(row['pct'])} {row['fill']} {row['glow']}")
+                ui.element("div").classes(
+                    f"absolute w-[2px] -top-[2px] -bottom-[2px] "
+                    f"{_K.left_class(row['pct'])} {row['marker']}")
+        ui.label(row["text"]).classes(f"{_METER_VALUE} text-[{row['hex']}]")
+
+
+def _mount_ruler():
+    """The 0/25/50/75/100 rule under the meter stack. The two spacers match the
+    meter row's label and value columns, so the ticks line up with the TRACK
+    rather than with the row."""
+    with ui.row().classes("items-center gap-2 w-full flex-nowrap"):
+        ui.element("div").classes("w-[34px] shrink-0")
+        with ui.row().classes(
+                f"flex-1 justify-between border-t {CONSOLE_DIVIDER} pt-[3px]"):
+            for mark in _K.RULER_MARKS:
+                ui.label(str(mark)).classes(_RULER_MARK)
+        ui.element("div").classes("w-[24px] shrink-0")
+
+
+def _compact_card(title, arcs, pill_text, delta):
+    """One compact score card: head · hero · three meters, in a console frame.
+
+    The hero and the meters sit SIDE BY SIDE, where the console stacks them.
+    That is the whole height saving: stacked, the two blocks are ~39px and ~54px
+    and the card cannot fit the strip's budget; side by side the card is as tall
+    as the taller of them. Nothing is dropped to buy it.
+    """
+    arcs = list(arcs or [])
+    text, hexv = _CC.hero_parts(arcs[0].get("value") if arcs else None)
+    with ui.column().classes(f"{_TILE} w-full flex-1 cursor-pointer") as card:
+        with ui.row().classes("items-baseline justify-between w-full gap-3"):
+            ui.label(title).classes(_CARD_TITLE)
+            ui.label("SCALE 0—100").classes(_CARD_META)
+        with ui.row().classes("items-end gap-4 w-full flex-nowrap"):
+            with ui.row().classes("items-end gap-2 shrink-0"):
+                ui.label(text).classes(f"{_CARD_HERO} text-[{hexv}]")
+                with ui.column().classes("gap-[5px]"):
+                    ui.label("DAY READ").classes(_CARD_KICKER)
+                    with ui.row().classes("items-center gap-[6px]"):
+                        if pill_text:
+                            ui.label(pill_text).classes(_compact_pill(hexv))
+                        if delta:
+                            arrow, dtext, dhex = delta
+                            ui.label(f"{arrow} {dtext}").classes(
+                                f"{_CARD_DELTA} text-[{dhex}]")
+            # `min-w-0` so the meter column can actually shrink: a grid/flex
+            # item's automatic minimum is its content, and without it the ruler's
+            # five marks would hold the card wider than its track.
+            with ui.column().classes("flex-1 min-w-0 gap-[3px]"):
+                for arc in arcs:
+                    _mount_meter(_K.meter_row(arc.get("caption", ""),
+                                              arc.get("value")))
+                _mount_ruler()
+    card.on("click", lambda _e: ui.navigate.to("/sentiment"))
 
 
 def _panel(title, subtitle=""):
@@ -1032,45 +1323,56 @@ def render():
         # prices for one symbol on one screen. $VIX is excluded from the matrix
         # universe by design and so can never appear as a dealer row, which is
         # why it is the one quote that belongs up here.
-        with ui.row().classes(
-                f"{CONSOLE_CARD} w-full items-center gap-8 px-5 py-4 "
-                f"flex-wrap"):
-            with ui.column().classes("gap-1"):
-                ui.label("SESSION").classes(_EYEBROW)
-                clock_lbl = ui.label(_DASH).classes(
-                    f"text-[30px] leading-none tabular-nums {CON_TXT}")
-            with ui.column().classes("gap-1"):
-                ui.label("VIX").classes(_EYEBROW)
-                with ui.row().classes("items-center gap-2"):
-                    vix_lbl = ui.label(_DASH).classes(
-                        f"text-[30px] leading-none tabular-nums {CON_TXT}")
-                    # color=None drops Quasar's bg-primary so the mapped
-                    # bg-[...] class is what actually paints.
-                    vix_badge = ui.badge("", color=None).classes(
-                        "text-[13px] tracking-[.14em]")
-            with ui.column().classes("gap-1 min-w-[190px]"):
-                ui.label("MARKET REGIME").classes(_EYEBROW)
+        # FIVE tiles, and the ORDER is the argument the strip makes. The
+        # countdown owns the left edge because it is the temporal anchor —
+        # everything else on the page is a reading taken AT some point in the
+        # session, and how much session is left is what says whether a reading
+        # is still actionable. The two score cards take the flexible middle
+        # because they are the only tiles whose content scales with width. VIX
+        # and MARKET REGIME are grouped at the right end, regime outermost:
+        # both answer "what is the tape doing", they qualify each other (a
+        # regime word means something different at VIX 15 than at VIX 30), and
+        # the regime is the coarsest read on the strip, so it terminates it.
+        #
+        # The strip is a plain row now, not a card of its own: five console
+        # cards inside a sixth would be a frame around frames, and its padding
+        # would be height this strip cannot spare.
+        with ui.row().classes("w-full items-stretch gap-4 flex-wrap"):
+            with ui.column().classes(f"{_TILE} w-[168px] shrink-0"):
+                # The caption is part of the READING here, not a static label:
+                # "TO CLOSE" and "TO OPEN" count to different things, so it is a
+                # handle the clock tick rewrites rather than a fixed word.
+                clock_cap = ui.label(COUNTDOWN_LABELS["to_open"]).classes(
+                    _STRIP_EYEBROW)
+                clock_lbl = ui.label(_DASH).classes(_STRIP_VALUE)
+                # Feed freshness lives with the clock: both answer "is what I am
+                # looking at current", and the pair reads as one status block.
+                with ui.row().classes("items-center gap-2 mt-auto"):
+                    fresh_dot = ui.element("div").classes(
+                        "w-[8px] h-[8px] rounded-full shrink-0")
+                    fresh_lbl = ui.label(_DASH).classes(
+                        f"text-[11px] leading-none tracking-[.1em] "
+                        f"{CON_TXT_MUTED}")
+            # Both score cards are REBUILT on repaint rather than updated cell
+            # by cell — the console's own choice, and for the same reason: the
+            # card carries no interactive state, and threading a dozen element
+            # handles through the painter buys nothing.
+            sent_box = ui.column().classes("flex-1 min-w-[440px] gap-0")
+            trend_box = ui.column().classes("flex-1 min-w-[440px] gap-0")
+            with ui.column().classes(f"{_TILE} w-[140px] shrink-0"):
+                ui.label("VIX").classes(_STRIP_EYEBROW)
+                vix_lbl = ui.label(_DASH).classes(_STRIP_VALUE)
+                # color=None drops Quasar's bg-primary so the mapped
+                # bg-[...] class is what actually paints.
+                vix_badge = ui.badge("", color=None).classes(
+                    "self-start text-[10px] leading-none tracking-[.14em] "
+                    "mt-auto")
+            with ui.column().classes(f"{_TILE} w-[236px] shrink-0"):
+                ui.label("MARKET REGIME").classes(_STRIP_EYEBROW)
                 regime_lbl = ui.label(_DASH).classes(
-                    f"text-[30px] leading-none font-semibold {CON_TXT}")
+                    f"text-[28px] leading-none font-semibold {CON_TXT}")
                 regime_sub = ui.label("").classes(
-                    f"text-[13px] {CON_TXT_MUTED}")
-            ui.space()
-            with ui.row().classes("items-center gap-2"):
-                fresh_dot = ui.element("div").classes(
-                    "w-[8px] h-[8px] rounded-full shrink-0")
-                fresh_lbl = ui.label(_DASH).classes(
-                    f"text-[14px] tracking-[.14em] {CON_TXT_MUTED}")
-            with ui.row().classes("items-start gap-6"):
-                with ui.column().classes("items-center gap-1"):
-                    # Distinct uids: ``ring_svg`` namespaces the SVG root DOM id
-                    # with them, and these two rings share a page.
-                    sent_ring = ui.html(
-                        _rings.ring_svg([], uid="desk-sent", size=RING_PX))
-                    ui.label("SENTIMENT").classes(_EYEBROW)
-                with ui.column().classes("items-center gap-1"):
-                    trend_ring = ui.html(
-                        _rings.ring_svg([], uid="desk-trend", size=RING_PX))
-                    ui.label("TREND").classes(_EYEBROW)
+                    f"text-[11px] leading-none mt-auto {CON_TXT_MUTED}")
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
         # the order the page argues: structure, then what to act on, then what is
@@ -1121,7 +1423,10 @@ def render():
                 "items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             board_body = _panel("OPPORTUNITY BOARD", "HOTTEST FIVE")
-            flow_body = _panel("LIVE FLOW ALERTS", "NEWEST FIVE")
+            # The subtitle is DERIVED from the row cap, because the two used to
+            # be a word and a number written down separately — and the number
+            # just moved.
+            flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
             pos_body = _panel("POSITIONS", "PAPER · CLAUDE")
 
     # ── painters ─────────────────────────────────────────────────────────────
@@ -1171,18 +1476,31 @@ def render():
 
         comp = _mapping("sentiment:composite")
         hist = _mapping("sentiment:history")
-        # Both ring builders are the /sentiment page's own, and both index into
+        # Both arc builders are the /sentiment page's own, and both index into
         # what they are handed, so the shape is checked HERE rather than there —
         # a string ``snaps`` would otherwise be iterated one character at a time.
         snaps = hist.get("snaps")
+        snaps = snaps if isinstance(snaps, list) else []
         derived = comp.get("derived")
-        sent_ring.content = _rings.ring_svg(
-            _sentiment_arcs(comp.get("live"),
-                            snaps if isinstance(snaps, list) else []),
-            uid="desk-sent", size=RING_PX)
-        trend_ring.content = _rings.ring_svg(
-            _trend_arcs(derived if isinstance(derived, dict) else {}),
-            uid="desk-trend", size=RING_PX)
+        derived = derived if isinstance(derived, dict) else {}
+        live = comp.get("live")
+
+        sent_arcs = _sentiment_arcs(live, snaps)
+        sent_box.clear()
+        with sent_box:
+            # Day vs WEEK on Sentiment, Day vs MONTH on Trend — the console's own
+            # pairing, kept because each names the horizon that horizon's card
+            # is actually judged against.
+            _compact_card("MARKET SENTIMENT", sent_arcs,
+                          sentiment_pill_text(live, snaps),
+                          _CC.delta_parts(_arc_value(sent_arcs, 0),
+                                          _arc_value(sent_arcs, 1), "WEEK"))
+        t_arcs = _trend_arcs(derived)
+        trend_box.clear()
+        with trend_box:
+            _compact_card("MARKET TREND", t_arcs, trend_pill_text(derived),
+                          _CC.delta_parts(_arc_value(t_arcs, 0),
+                                          _arc_value(t_arcs, 2), "MONTH"))
 
     def _paint_dealer():
         dealer_body.clear()
@@ -1350,15 +1668,20 @@ def render():
             if not rows:
                 ui.label("No alerts today.").classes(_PLACEHOLDER)
                 return
-            # Three labels for three tracks. DETAIL rides under the symbol it
-            # describes and the side under the kind it qualifies ("Unusual
-            # activity / Call"), which leaves the whole flexible track for the
-            # detail line — the only cell here long enough to be truncated. It
-            # is still "Call"/"Put", never bought/sold: Schwab publishes no
+            # Four labels for four tracks, ONE line per alert. Every other panel
+            # here stacks a qualifier under its value because it is short of
+            # WIDTH; this panel is not — three of its five fields are a clock
+            # time, a ticker and a two-word kind — so stacking bought nothing
+            # and cost a line of height per alert. Flat, the same panel carries
+            # nearly twice as many alerts (see ``FLOW_ROWS_N``).
+            #
+            # SIDE rides with KIND in the last track ("Unusual activity ·
+            # Call"), which is where it was already being read from. It is
+            # still "Call"/"Put", never bought/sold: Schwab publishes no
             # time-and-sales tape to this app, so nobody here knows who
             # initiated. DETAIL carries the premium the alert fired on, in the
             # Flow Alerts page's own wording.
-            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "KIND"))
+            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "DETAIL", "KIND"))
             for row in rows:
                 _flow_row(row)
 
@@ -1368,19 +1691,18 @@ def render():
         with el:
             ui.label(row["time"] or _DASH).classes(
                 f"text-[14px] tabular-nums {CON_TXT_MUTED}")
-            with _stack():
-                ui.label(row["symbol"]).classes(
-                    f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
-                ui.label(row["detail"] or row["text"] or _DASH).classes(
-                    f"{_SUB} truncate w-full {CON_TXT_MUTED}")
+            ui.label(row["symbol"]).classes(
+                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+            # `min-w-0` is what lets `truncate` bite: a grid item's automatic
+            # minimum is its content, so without it a long detail line widens
+            # the track past the panel instead of ellipsing inside it.
+            ui.label(row["detail"] or row["text"] or _DASH).classes(
+                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
             # finite (type, side) map — borrowed here rather than re-derived,
             # and shared by the kind and the side it qualifies.
-            with _stack():
-                ui.label(row["kind"]).classes(
-                    f"text-[13px] leading-[1.2] {row['_tone_class']}")
-                ui.label(row["side"] or _DASH).classes(
-                    f"{_SUB} {row['_tone_class']}")
+            ui.label(flow_kind_text(row)).classes(
+                f"text-[13px] min-w-0 truncate {row['_tone_class']}")
         el.on("click", lambda _e: ui.navigate.to("/options/flow"))
 
     def _paint_positions():
@@ -1469,7 +1791,16 @@ def render():
 
     @guard
     def _tick_clock():
-        clock_lbl.text = datetime.now(_CT).strftime("%H:%M:%S")
+        """How much session is left — not what time it is.
+
+        Both the caption and the value move, because outside regular hours this
+        counts to the next OPEN and inside them to the CLOSE, and a value
+        without its caption would be ambiguous by exactly the amount that
+        matters. No reactive colour: the caption already carries the state, and
+        a second signal on a 1 s tick is churn."""
+        facts = countdown_facts(datetime.now(_CT))
+        clock_cap.text = facts["label"]
+        clock_lbl.text = facts["text"]
 
     @guard_async
     async def _poll():

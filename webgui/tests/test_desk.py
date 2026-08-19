@@ -4,6 +4,7 @@ Every builder here takes plain dicts and returns plain dicts, so the whole
 screen's arithmetic is testable without a browser — the same shape
 ``pages/market.py`` proved out.
 """
+import datetime
 import pathlib
 
 from pages import desk as d
@@ -256,10 +257,22 @@ def _alert(i, **over):
     return a
 
 
-def test_flow_rows_takes_the_newest_five_newest_first():
-    view = {"alerts": [_alert(i) for i in range(9)]}   # service appends oldest-first
+def test_flow_rows_takes_the_newest_n_newest_first():
+    """Asserted against ``FLOW_ROWS_N``, never a bare literal: the panel's row
+    cap and this expectation have to move together, and two independent numbers
+    are exactly how they stop doing so."""
+    n = d.FLOW_ROWS_N
+    view = {"alerts": [_alert(i) for i in range(n + 4)]}  # service is oldest-first
     rows = d.flow_rows(view)
-    assert [r["id"] for r in rows] == ["a8", "a7", "a6", "a5", "a4"]
+    assert [r["id"] for r in rows] == [f"a{i}" for i in range(n + 3, 3, -1)]
+    assert len(rows) == n
+
+
+def test_flow_rows_caps_at_the_row_count_the_panel_advertises():
+    """The panel subtitle reads "NEWEST {FLOW_ROWS_N}", so a cap that did not
+    match it would make the card lie about itself."""
+    view = {"alerts": [_alert(i) for i in range(d.FLOW_ROWS_N * 3)]}
+    assert len(d.flow_rows(view)) == d.FLOW_ROWS_N
 
 
 def test_flow_rows_delegates_to_the_flow_pages_own_builder():
@@ -267,7 +280,27 @@ def test_flow_rows_delegates_to_the_flow_pages_own_builder():
     Desk's feed is contradicting the page it links to."""
     from pages.options import flow
     view = {"alerts": [_alert(i) for i in range(3)]}
-    assert d.flow_rows(view) == flow.alert_rows(view)[:5]
+    assert d.flow_rows(view) == flow.alert_rows(view)[:d.FLOW_ROWS_N]
+
+
+def test_flow_kind_text_joins_the_kind_and_the_side_it_fired_on():
+    assert d.flow_kind_text({"kind": "Unusual activity", "side": "Call"}) == \
+        "Unusual activity · Call"
+
+
+def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
+    """A dangling ' · ' reads as a cell that failed to render."""
+    assert d.flow_kind_text({"kind": "Crossover", "side": ""}) == "Crossover"
+    assert d.flow_kind_text({"kind": "", "side": "Put"}) == "Put"
+    assert d.flow_kind_text({}) == "—"
+    assert d.flow_kind_text(None) == "—"
+
+
+def test_flow_kind_text_never_claims_who_initiated():
+    """Call/Put names the side of the book that moved. Schwab publishes no
+    time-and-sales tape to this app, so nobody here knows who bought it."""
+    blob = d.flow_kind_text({"kind": "Big delta", "side": "Call"}).lower()
+    assert "buy" not in blob and "sell" not in blob
 
 
 def test_flow_rows_never_claims_a_buy_or_sell_side():
@@ -657,13 +690,119 @@ def test_the_page_mounts_no_highcharts():
     assert "ui.highchart" not in src
 
 
-def test_the_two_rings_use_distinct_uids():
-    """``ring_svg`` namespaces the SVG root DOM id with ``uid``, and these two
-    rings share a page — identical uids would make them collide."""
+# ── the compact Sentiment / Trend cards ──────────────────────────────────────
+def test_sentiment_pill_prefers_live_over_the_newest_snapshot():
+    """The console's own headline rule. A pill naming a different session than
+    the Day meter beside it would be the Desk contradicting itself."""
+    live = {"composite": {"bias": "Cautious", "total_score": 4.45}}
+    snaps = [{"composite": {"bias": "Long", "total_score": 7.1}}]
+    assert d.sentiment_pill_text(live, snaps) == "CAUTIOUS 4.45"
+    assert d.sentiment_pill_text(None, snaps) == "LONG 7.10"
+
+
+def test_sentiment_pill_drops_the_number_rather_than_printing_a_zero():
+    """/sentiment's own formatter defaults a missing total to 0.0 and prints
+    "CAUTIOUS 0.00" — a maximally bearish score nobody measured. This page never
+    prints a reading it did not read."""
+    assert d.sentiment_pill_text({"composite": {"bias": "Cautious"}}, []) == \
+        "CAUTIOUS"
+    assert d.sentiment_pill_text(
+        {"composite": {"bias": "Cautious", "total_score": float("nan")}}, []
+    ) == "CAUTIOUS"
+
+
+def test_sentiment_pill_is_empty_without_a_bias():
+    assert d.sentiment_pill_text(None, []) == ""
+    assert d.sentiment_pill_text(None, None) == ""
+    assert d.sentiment_pill_text("nonsense", "nonsense") == ""
+    assert d.sentiment_pill_text({"composite": {"total_score": 5.0}}, []) == ""
+
+
+def test_trend_pill_uses_the_sentiment_pages_own_state_vocabulary():
+    """Imported, not restated — the five words are /sentiment's, and a sixth
+    copy here is exactly the drift this page exists to avoid."""
+    from pages import sentiment as S
+    for state, word in S._TREND_SHORT.items():
+        assert d.trend_pill_text({"trend": {"state": state}}) == word.upper()
+
+
+def test_trend_pill_is_empty_for_an_unknown_or_absent_state():
+    """The five words are readings; there is no sixth meaning 'no reading'."""
+    assert d.trend_pill_text({"trend": {"state": "wat"}}) == ""
+    assert d.trend_pill_text({}) == ""
+    assert d.trend_pill_text(None) == ""
+    assert d.trend_pill_text({"trend": "nonsense"}) == ""
+
+
+def test_the_compact_cards_reuse_the_consoles_own_hero_and_delta():
+    """Size is the ONLY thing the Desk's cards change. Every number and every
+    colour still comes from ``console_cards``/``console``, so the two renderings
+    cannot say different things about one payload."""
     src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
            ).read_text(encoding="utf-8")
-    assert src.count('uid="desk-sent"') == 2      # the seed + the repaint
-    assert src.count('uid="desk-trend"') == 2
+    assert "_CC.hero_parts" in src
+    assert "_CC.delta_parts" in src
+    assert "_K.meter_row" in src
+    # …and it must not have grown a private copy of the band arithmetic.
+    assert "score_band" not in src
+
+
+# ── countdown_facts ──────────────────────────────────────────────────────────
+def _ct(y, m, day, hh, mm, ss=0):
+    from zoneinfo import ZoneInfo
+    return datetime.datetime(y, m, day, hh, mm, ss,
+                             tzinfo=ZoneInfo("America/Chicago"))
+
+
+def test_countdown_counts_to_the_open_before_the_bell():
+    # Wednesday 2026-08-19, regular session 08:30-15:00 CT.
+    assert d.countdown_facts(_ct(2026, 8, 19, 7, 0)) == {
+        "label": "TO OPEN", "text": "1:30:00", "state": "to_open"}
+
+
+def test_countdown_counts_to_the_close_during_the_session():
+    assert d.countdown_facts(_ct(2026, 8, 19, 12, 0, 30)) == {
+        "label": "TO CLOSE", "text": "2:59:30", "state": "to_close"}
+
+
+def test_countdown_counts_to_tomorrows_open_after_the_close():
+    assert d.countdown_facts(_ct(2026, 8, 19, 16, 0)) == {
+        "label": "TO OPEN", "text": "16:30:00", "state": "to_open"}
+
+
+def test_countdown_rolls_a_weekend_to_mondays_open():
+    """Hours are UNBOUNDED for exactly this case — 44 hours, not 20 with the
+    day silently dropped."""
+    assert d.countdown_facts(_ct(2026, 8, 22, 12, 0)) == {
+        "label": "TO OPEN", "text": "44:30:00", "state": "to_open"}
+
+
+def test_countdown_rolls_a_holiday_to_the_next_trading_day():
+    """Labor Day 2026 is Monday 7 Sep: the countdown must name Tuesday's open,
+    not a bell that never rings. The holiday comes from the shared NYSE
+    calendar — this page carries no holiday list of its own."""
+    from shared import market_calendar as mc
+    assert mc.is_trading_day(datetime.date(2026, 9, 7)) is False
+    assert d.countdown_facts(_ct(2026, 9, 7, 8, 0)) == {
+        "label": "TO OPEN", "text": "24:30:00", "state": "to_open"}
+
+
+def test_countdown_reads_a_naive_datetime_as_central():
+    """The app's trading clock, and ``market_calendar``'s own rule for a naive
+    input — so the two cannot disagree about which session a moment is in."""
+    naive = datetime.datetime(2026, 8, 19, 12, 0)
+    assert d.countdown_facts(naive)["text"] == "3:00:00"
+
+
+def test_countdown_takes_every_session_bound_from_the_shared_calendar():
+    """No time literal and no holiday list on this page: move the configured
+    regular session and the countdown moves with it."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    assert "_cal.mins_to_close" in src
+    assert "_cal.next_regular_open" in src
+    for literal in ("08:30", "15:00", "16:00"):
+        assert literal not in src
 
 
 # ── render() smoke ───────────────────────────────────────────────────────────
@@ -681,18 +820,6 @@ def _rendered_texts():
     return [getattr(e, "text", None)
             for key, e in ui.context.client.elements.items()
             if key not in before]
-
-
-def _rendered_html():
-    """The raw content of every ``ui.html`` fragment ``render()`` just added."""
-    from nicegui import ui
-    from pages import desk
-
-    before = set(ui.context.client.elements)
-    desk.render()
-    return [getattr(e, "content", "")
-            for key, e in ui.context.client.elements.items()
-            if key not in before and hasattr(e, "content")]
 
 
 def _seed_bus(monkeypatch, data):
@@ -746,7 +873,9 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     assert desk.WAITING_OPTIONS not in texts
     assert "$SPX" in texts                       # a dealer row AND a board row
     assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
-    assert "Unusual activity" in texts           # the flow kind
+    # The flow kind, now carrying the side it fired on in the same cell — the
+    # rows are one line each, so the side is a qualifier rather than a column.
+    assert "Unusual activity · Call" in texts
     assert "AT RISK" in texts                    # the position flag
     assert any(t.startswith("OPEN 1 ·") for t in texts)
     assert "Rallying" in texts                   # the regime word in the strip
@@ -762,13 +891,36 @@ def test_render_never_puts_a_buy_or_sell_word_on_the_flow_feed(monkeypatch):
     assert "bought" not in blob and "sold" not in blob
 
 
-def test_render_mounts_two_rings_with_distinct_dom_ids(monkeypatch):
-    """``ring_svg`` namespaces the SVG root id with ``uid``, and these two rings
-    share a page — identical uids would make them collide."""
+def test_render_mounts_both_score_cards_with_the_consoles_own_anatomy(monkeypatch):
+    """Head, hero and the three meters — the console card minus its footer. The
+    two SCALE 0—100 metas are what prove there are two cards, not one."""
+    payloads = _full_payloads()
+    payloads["sentiment:composite"] = {
+        "live": {"composite": {"bias": "Cautious", "total_score": 4.45}},
+        "derived": {"trend": {"state": "lack_of_bearishness", "score": 39.0,
+                              "confidence": 0.8}},
+    }
+    _seed_bus(monkeypatch, payloads)
+    texts = [t for t in _rendered_texts() if t]
+    assert "MARKET SENTIMENT" in texts and "MARKET TREND" in texts
+    assert texts.count("SCALE 0—100") == 2
+    assert texts.count("DAY READ") == 2
+    assert "CAUTIOUS 4.45" in texts               # the sentiment hero pill
+    assert "RESILIENT" in texts                   # the trend hero pill
+    # Three meters per card, each captioned by ``console.meter_row``.
+    for caption in ("DAY", "WEEK", "MONTH"):
+        assert texts.count(caption) == 2
+
+
+def test_render_drops_the_console_card_footers(monkeypatch):
+    """The Desk is a glance surface and the whole card click-throughs to
+    /sentiment, where the confidence meter, the verdict block and these two
+    links all live at full size."""
     _seed_bus(monkeypatch, _full_payloads())
-    html = " ".join(_rendered_html())
-    assert 'id="ring-desk-sent"' in html
-    assert 'id="ring-desk-trend"' in html
+    texts = [t for t in _rendered_texts() if t]
+    assert "MODEL CONFIDENCE" not in texts
+    assert "COMPONENTS →" not in texts
+    assert "TREND DETAIL →" not in texts
 
 
 def test_render_survives_junk_in_every_view(monkeypatch):

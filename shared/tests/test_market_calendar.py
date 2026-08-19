@@ -227,6 +227,48 @@ def test_mins_to_close_converts_a_non_ct_datetime():
     assert mc.mins_to_close(utc) == 120.0
 
 
+def test_next_regular_open_is_today_when_the_open_is_still_ahead():
+    # 2026-08-17 is a Monday. Before 08:30 CT the next open is today's.
+    assert mc.next_regular_open(_ct(2026, 8, 17, 6, 45)) == _ct(2026, 8, 17, 8, 30)
+
+
+def test_next_regular_open_rolls_to_tomorrow_once_the_open_has_passed():
+    # Strictly after: mid-session and post-close both answer the NEXT day, so a
+    # countdown can never stall on the instant it just passed.
+    assert mc.next_regular_open(_ct(2026, 8, 17, 8, 30)) == _ct(2026, 8, 18, 8, 30)
+    assert mc.next_regular_open(_ct(2026, 8, 17, 12, 0)) == _ct(2026, 8, 18, 8, 30)
+    assert mc.next_regular_open(_ct(2026, 8, 17, 16, 0)) == _ct(2026, 8, 18, 8, 30)
+
+
+def test_next_regular_open_skips_the_weekend():
+    # Friday evening and Saturday both answer Monday -- the roll goes through
+    # next_trading_day, so it is the calendar's answer, not a +1 day.
+    assert mc.next_regular_open(_ct(2026, 8, 21, 17, 0)) == _ct(2026, 8, 24, 8, 30)
+    assert mc.next_regular_open(_ct(2026, 8, 22, 12, 0)) == _ct(2026, 8, 24, 8, 30)
+
+
+def test_next_regular_open_skips_a_holiday():
+    # Labor Day 2026 is Monday 7 Sep, so Sunday answers Tuesday the 8th -- and
+    # the holiday itself answers the same, rather than its own dead open.
+    assert mc.is_trading_day(date(2026, 9, 7)) is False
+    assert mc.next_regular_open(_ct(2026, 9, 6, 12, 0)) == _ct(2026, 9, 8, 8, 30)
+    assert mc.next_regular_open(_ct(2026, 9, 7, 6, 0)) == _ct(2026, 9, 8, 8, 30)
+
+
+def test_next_regular_open_converts_a_non_ct_datetime():
+    # 11:00 UTC on a summer weekday == 06:00 CT -> today's open is still ahead.
+    utc = dt.datetime(2026, 8, 17, 11, 0, tzinfo=dt.timezone.utc)
+    assert mc.next_regular_open(utc) == _ct(2026, 8, 17, 8, 30)
+
+
+def test_next_regular_open_reads_the_configured_regular_start(monkeypatch):
+    """It adds no time literal of its own -- move sessions.regular.start and the
+    answer moves with it, exactly as ``session_at`` does."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(9, 5), dt.time(15, 0)))
+    assert mc.next_regular_open(_ct(2026, 8, 17, 6, 0)) == _ct(2026, 8, 17, 9, 5)
+
+
 def test_is_extended_hours_only_after_activation():
     assert mc.is_extended_hours(_ct(2026, 8, 17, 7, 0)) is True
     assert mc.is_extended_hours(_ct(2026, 8, 14, 7, 0)) is False

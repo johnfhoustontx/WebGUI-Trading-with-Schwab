@@ -427,6 +427,28 @@ def mins_to_close(now):
     return (datetime.combine(ct.date(), end, tzinfo=CT) - ct).total_seconds() / 60.0
 
 
+def next_regular_open(now) -> datetime:
+    """The next regular-session OPEN strictly after ``now``, CT-aware.
+
+    The mirror of ``mins_to_close``, and here for the same reason: it reads the
+    SAME ``sessions.regular`` start ``session_at`` does, so a countdown to the
+    open cannot drift from the predicate that says whether the session is open.
+    It carries no time literal and no holiday list of its own.
+
+    Weekends and holidays roll forward through ``next_trading_day``, so the
+    answer is always a real open. ``now`` at or after today's open (or on a
+    non-trading day) goes to the NEXT trading day's open -- strictly after, so
+    a caller looping on this can never stall on the instant it just passed. A
+    naive ``now`` is treated as CT, matching every other predicate here.
+    """
+    ct = _ct_of(now)
+    start, _end = _session_bounds("regular")
+    today_open = datetime.combine(ct.date(), start, tzinfo=CT)
+    if is_trading_day(ct.date()) and ct < today_open:
+        return today_open
+    return datetime.combine(next_trading_day(ct.date()), start, tzinfo=CT)
+
+
 def is_extended_hours(now) -> bool:
     """True during GTH or Curb -- so always False before the activation date."""
     return session_at(now) in (Session.GTH, Session.CURB)
