@@ -77,3 +77,95 @@ def structure_positions(spot, flip, put_wall, call_wall):
     # missing (or non-finite) flip costs the tick, not the whole bar.
     return {"put_wall": 0.0, "call_wall": 100.0, "spot": _pct(s),
             "flip": _pct(flip)}
+
+
+# ── dealer positioning rows ──────────────────────────────────────────────────
+# ONE regime word, ONE source. ``gex_regime`` (spot vs the flip) is the only
+# input; ``net_gex`` is displayed as a magnitude beside it and must never reach
+# this map. The two can legitimately disagree — a symbol can sit above its flip
+# while net GEX prints negative — and a row that made two conflicting regime
+# claims would be the /sentiment/sectors-vs-/sentiment/rotation bug reproduced
+# inside a single line of text.
+REGIME_WORDS = {"above": "LONG GAMMA · PINS", "below": "SHORT GAMMA · RUNS",
+                "na": "—"}
+_NO_REGIME = "—"
+
+
+def regime_word(gex_regime):
+    """The dealer-regime headline for a matrix row's ``gex_regime``."""
+    return REGIME_WORDS.get(gex_regime, _NO_REGIME)
+
+
+def _walls_trustworthy(net_gex, stale):
+    """Whether this row's call/put walls may be shown at all.
+
+    Two ways they cannot be. **Stale**: the collector has stopped, so the walls
+    describe some earlier tape. **net GEX present-but-exactly-zero**: index
+    option open interest reads 0 after hours, which yields an all-zero GEX grid,
+    and the wall picked out of an all-zero grid is an artefact of the argmax tie-
+    break — an arbitrary strike wearing the authority of a level. Absent net GEX
+    is NOT that signature (the symbol simply doesn't publish the figure), so it
+    keeps its walls.
+    """
+    if stale:
+        return False
+    return not (net_gex is not None and net_gex == 0.0)
+
+
+def dealer_rows(matrix_view, stale):
+    """Dealer-positioning rows for ``DESK_SYMBOLS``, in that order.
+
+    ``matrix_view`` is the ``cache:options:matrix`` payload. Symbols the matrix
+    does not carry are simply absent — the Desk never invents a row. Total over a
+    missing / malformed view.
+    """
+    rows = (matrix_view or {}).get("rows") if isinstance(matrix_view, dict) else None
+    if not isinstance(rows, list):
+        return []
+    # First row per symbol wins; the matrix publishes one row per symbol, so a
+    # duplicate is a producer bug and taking the later one would hide it.
+    by_symbol = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("symbol") not in by_symbol:
+            by_symbol[r.get("symbol")] = r
+
+    out = []
+    for sym in DESK_SYMBOLS:
+        r = by_symbol.get(sym)
+        if r is None:
+            continue
+        spot, flip = _finite(r.get("spot")), _finite(r.get("flip"))
+        net_gex = _finite(r.get("net_gex"))
+        show_walls = _walls_trustworthy(net_gex, stale)
+        call_wall = _finite(r.get("call_wall")) if show_walls else None
+        put_wall = _finite(r.get("put_wall")) if show_walls else None
+        side, dist = _flip_read(spot, flip)
+        out.append({
+            "symbol": sym,
+            "spot": spot,
+            "day_pct": _finite(r.get("day_pct")),
+            "flip": flip,
+            "flip_distance": dist,
+            "flip_side": side,
+            "call_wall": call_wall,
+            "put_wall": put_wall,
+            "net_gex": net_gex,
+            "regime_word": regime_word(r.get("gex_regime")),
+            "structure": structure_positions(spot, flip, put_wall, call_wall),
+            "stale": bool(stale),
+        })
+    return out
+
+
+def _flip_read(spot, flip):
+    """``(side, distance_pct)`` — which side of the flip spot sits on, and how far.
+
+    The distance is a MAGNITUDE in percent of the flip level (so $SPX and SPY are
+    comparable at a glance); the side carries the sign. ``(None, None)`` whenever
+    either input is missing or non-finite — a flip side is a claim about dealer
+    hedging, and there is no honest one to make without both numbers.
+    """
+    if spot is None or flip is None or flip == 0:
+        return None, None
+    return ("above" if spot >= flip else "below",
+            round(abs(spot - flip) / abs(flip) * 100.0, 4))

@@ -67,3 +67,120 @@ def test_structure_positions_refuses_non_finite_inputs_rather_than_pinning_a_wal
 def test_structure_positions_never_raises_on_junk():
     assert d.structure_positions("x", None, "y", "z") is None
     assert d.structure_positions({}, [], object(), 105.0) is None
+
+
+# ── dealer_rows ──────────────────────────────────────────────────────────────
+def _mrow(sym, **over):
+    """One ``cache:options:matrix`` row, in the shape options_svc publishes."""
+    row = {"symbol": sym, "spot": 6712.81, "day_pct": 0.31,
+           "trend_state": "up", "trend_dir": 0.42,
+           "call_accel": "hot", "put_accel": "flat",
+           "pc_ratio": 0.87, "net_prem_m": 12.4,
+           "call_prem": 3e6, "put_prem": 8e5,
+           "flip": 6680.0, "gex_regime": "above",
+           "n_signals": 3, "n_alerts": 2, "signal": "buy",
+           "signal_strength": 2, "hotness": 94, "eth_eligible": False,
+           "call_wall": 6800.0, "put_wall": 6600.0, "net_gex": 1.42e9,
+           "atm_iv": 13.4, "iv_state": "stable",
+           "dealer_regime": "delta_wall_pin"}
+    row.update(over)
+    return row
+
+
+def test_dealer_rows_selects_and_orders_the_desk_symbols():
+    view = {"rows": [_mrow("QQQ"), _mrow("AAPL"), _mrow("$SPX")]}
+    assert [r["symbol"] for r in d.dealer_rows(view, stale=False)] == ["$SPX", "QQQ"]
+
+
+def test_dealer_rows_regime_word_comes_only_from_gex_regime():
+    above = d.dealer_rows({"rows": [_mrow("$SPX", gex_regime="above", net_gex=-5.0)]},
+                          stale=False)[0]
+    assert above["regime_word"] == "LONG GAMMA · PINS"
+    below = d.dealer_rows({"rows": [_mrow("$SPX", gex_regime="below")]}, stale=False)[0]
+    assert below["regime_word"] == "SHORT GAMMA · RUNS"
+
+
+def test_dealer_rows_regime_word_is_a_dash_when_the_side_is_unknown():
+    for regime in ("na", None, "", "sideways"):
+        row = d.dealer_rows({"rows": [_mrow("$SPX", gex_regime=regime)]},
+                            stale=False)[0]
+        assert row["regime_word"] == "—"
+
+
+def test_dealer_rows_net_gex_is_carried_but_never_names_the_regime():
+    """The magnitude is displayed; the WORD is ``gex_regime``'s alone.
+
+    They can legitimately disagree, and printing two conflicting regime claims
+    in one row is the sectors-vs-rotation bug all over again."""
+    row = d.dealer_rows({"rows": [_mrow("$SPX", gex_regime="below", net_gex=9.9e9)]},
+                        stale=False)[0]
+    assert row["net_gex"] == 9.9e9
+    assert row["regime_word"] == "SHORT GAMMA · RUNS"
+
+
+def test_dealer_rows_withhold_walls_when_stale():
+    row = d.dealer_rows({"rows": [_mrow("$SPX")]}, stale=True)[0]
+    assert row["call_wall"] is None and row["put_wall"] is None
+    assert row["structure"] is None
+    assert row["stale"] is True
+    # The spot / flip read still stands — only the WALLS are untrustworthy.
+    assert row["spot"] == 6712.81 and row["flip"] == 6680.0
+
+
+def test_dealer_rows_withhold_walls_on_the_all_zero_grid_signature():
+    """Index option OI reads 0 after hours → an all-zero GEX grid → ARBITRARY
+    walls. A withheld wall is honest; a confident wrong one is not."""
+    row = d.dealer_rows({"rows": [_mrow("$SPX", net_gex=0.0)]}, stale=False)[0]
+    assert row["call_wall"] is None and row["put_wall"] is None
+    assert row["structure"] is None
+
+
+def test_dealer_rows_keeps_walls_when_net_gex_is_merely_absent():
+    """Absent ≠ zero. A symbol that simply doesn't publish net GEX has not
+    exhibited the all-zero-grid signature, so its walls are still usable."""
+    row = d.dealer_rows({"rows": [_mrow("$SPX", net_gex=None)]}, stale=False)[0]
+    assert row["call_wall"] == 6800.0 and row["put_wall"] == 6600.0
+    assert row["structure"] is not None
+
+
+def test_dealer_rows_flip_side_and_distance():
+    above = d.dealer_rows({"rows": [_mrow("$SPX", spot=6700.0, flip=6600.0)]},
+                          stale=False)[0]
+    assert above["flip_side"] == "above"
+    # A percent-of-flip magnitude, so $SPX and SPY compare at a glance.
+    assert abs(above["flip_distance"] - 100.0 / 6600.0 * 100.0) < 1e-3
+    below = d.dealer_rows({"rows": [_mrow("$SPX", spot=6500.0, flip=6600.0)]},
+                          stale=False)[0]
+    assert below["flip_side"] == "below"
+    assert below["flip_distance"] > 0        # a magnitude; the SIDE carries sign
+
+
+def test_dealer_rows_flip_side_is_none_without_a_usable_flip():
+    row = d.dealer_rows({"rows": [_mrow("$SPX", flip=None)]}, stale=False)[0]
+    assert row["flip_side"] is None and row["flip_distance"] is None
+
+
+def test_dealer_rows_never_pins_a_flip_side_on_a_nan():
+    row = d.dealer_rows({"rows": [_mrow("$SPX", flip=float("nan"))]}, stale=False)[0]
+    assert row["flip"] is None and row["flip_side"] is None
+    assert row["flip_distance"] is None
+
+
+def test_dealer_rows_is_empty_for_a_missing_view():
+    assert d.dealer_rows(None, stale=False) == []
+    assert d.dealer_rows({}, stale=False) == []
+    assert d.dealer_rows({"rows": "nonsense"}, stale=False) == []
+
+
+def test_dealer_rows_tolerates_a_row_missing_every_new_key():
+    rows = d.dealer_rows({"rows": [{"symbol": "$SPX"}]}, stale=False)
+    assert rows[0]["symbol"] == "$SPX" and rows[0]["structure"] is None
+    assert rows[0]["regime_word"] == "—"
+    assert rows[0]["call_wall"] is None and rows[0]["net_gex"] is None
+
+
+def test_dealer_rows_keeps_the_first_row_per_symbol_and_skips_junk():
+    view = {"rows": ["junk", None, _mrow("SPY", spot=1.0), _mrow("SPY", spot=2.0)]}
+    rows = d.dealer_rows(view, stale=False)
+    assert [r["symbol"] for r in rows] == ["SPY"]
+    assert rows[0]["spot"] == 1.0
