@@ -273,16 +273,6 @@ def hotness(n_signals, n_alerts, signal_strength):
     return 2 * n_signals + 2 * n_alerts + 3 * signal_strength
 
 
-def _nearest_wall_dist_pct(spot, top_pos, top_neg):
-    """|spot - nearest net-delta wall| / spot * 100; None when unavailable."""
-    if spot is None or spot <= 0:
-        return None
-    walls = [w for w in (top_pos, top_neg) if w is not None]
-    if not walls:
-        return None
-    return min(abs(spot - w) / spot * 100.0 for w in walls)
-
-
 def dealer_regime_from_rows(rows, atm_rows, now_ts, close_ts):
     """Assemble the ``dealer_regime`` inputs from stored gex-view rows and label.
 
@@ -304,7 +294,11 @@ def dealer_regime_from_rows(rows, atm_rows, now_ts, close_ts):
     spot, flip, top_pos, top_neg = last[1], last[2], last[3], last[4]
     t_state, _ = intraday_trend([(r[0], r[1]) for r in rows], now_ts)
     iv_state, _ = iv_regime(atm_rows, now_ts)
-    wall_dist_pct = _nearest_wall_dist_pct(spot, top_pos, top_neg)
+    # ``top_pos``/``top_neg`` are the largest positive / most-negative net-GEX
+    # strikes — the walls — so this is the same "nearest of the two" question
+    # ``_wall_dist_pct`` answers for the matrix rows. One helper, so the
+    # non-finite guard cannot exist on only one of the two paths.
+    wall_dist_pct = _wall_dist_pct(spot, top_pos, top_neg)
     mins = (close_ts - now_ts) / 60.0 if close_ts is not None else None
     if mins is not None and mins < 0:
         mins = None

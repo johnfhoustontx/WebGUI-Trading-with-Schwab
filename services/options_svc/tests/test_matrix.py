@@ -389,6 +389,24 @@ def test_dealer_regime_from_rows_after_close_disables_time_gates():
     assert out["mins_to_close"] is None
     assert out["regime"] == "neutral"
 
+def test_dealer_regime_from_rows_withholds_wall_dist_on_nonfinite_inputs():
+    # The stored spot and strike columns can arrive non-finite from a broken
+    # quote, and nan does not announce itself: it survives `is not None`,
+    # compares False against _PIN_PROX_PCT, and serialises as the invalid JSON
+    # literal NaN. A missing reading must degrade to None, never to a value.
+    atm = [(0, 0.20), (900, 0.201)]                    # stable
+    nan_spot = _rows([(0, 105.0, 100.0), (900, float("nan"), 100.0)],
+                     top_pos=105.0, top_neg=95.0)
+    out = m.dealer_regime_from_rows(nan_spot, atm, now_ts=900, close_ts=900 + 3600)
+    assert out["wall_dist_pct"] is None
+
+    # A non-finite WALL is discarded like a missing one — its finite sibling
+    # still wins, rather than poisoning the pair.
+    nan_wall = _rows([(0, 105.0, 100.0), (900, 105.0, 100.0)],
+                     top_pos=float("nan"), top_neg=95.0)
+    out = m.dealer_regime_from_rows(nan_wall, atm, now_ts=900, close_ts=900 + 3600)
+    assert out["wall_dist_pct"] == 9.524       # |105 - 95| / 105 * 100
+
 
 # ---- wall distance ----
 def test_wall_dist_pct_picks_the_NEAREST_wall():
