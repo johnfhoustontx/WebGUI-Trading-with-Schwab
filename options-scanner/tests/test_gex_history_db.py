@@ -492,6 +492,38 @@ def test_latest_grid_row_is_none_when_symbol_or_view_has_no_rows(tmp_path, monke
     assert db.latest_grid_row(conn, "SPY", "charm") is None    # other view
 
 
+def test_latest_grid_row_decodes_exactly_one_grid(tmp_path, monkeypatch):
+    """The PERFORMANCE contract, pinned — not just the return value.
+
+    ``load_date_with_grid(...)[-1]`` returns a byte-identical result with
+    identical date bounding, view filtering and newest-row semantics, so every
+    other test here passes against it unchanged. The ONLY observable difference
+    is that it decodes the whole session's grids instead of one — which is the
+    entire reason this function exists, and a hotspot this repo has watched
+    recur. Counting the decodes is what makes that regression visible.
+    """
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    for i in range(5):
+        db.insert_snapshot(
+            conn, "SPY", "gex", _make_summary(now - 60 * (4 - i), float(i)),
+            {100.0 + i: {"call": 1.0, "put": -1.0, "net": float(i)}}, 1)
+
+    calls = []
+    real = db._decode_grid
+    monkeypatch.setattr(db, "_decode_grid",
+                        lambda raw: (calls.append(1), real(raw))[1])
+    row = db.latest_grid_row(conn, "SPY", "gex")
+
+    # ASCII in the message: it is read in a Windows console, which mangles an em dash.
+    assert len(calls) == 1, (
+        "latest_grid_row must decode exactly ONE grid. A whole-session loader "
+        f"would be behaviourally identical but far more expensive (decoded {len(calls)})")
+    assert row[3] == {104.0: {"call": 1.0, "put": -1.0, "net": 4.0}}   # the newest
+
+
 def test_latest_grid_row_is_date_bounded(tmp_path, monkeypatch):
     """Date-bounded like its siblings: today's query cannot see yesterday's row,
     and an explicit ``date`` reaches the prior session (gamma persistence)."""
