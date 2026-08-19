@@ -1355,7 +1355,7 @@ option chain. This is where you find out what a trade actually risks before you 
 | **IV %** | The volatility assumption. Higher IV = pricier options and wider swings. |
 | **IV Δ %** | A shock applied on top, for stress-testing. |
 | **Price** | Override the underlying price. |
-| **Rate %** | The risk-free rate. Barely matters at short expiries. |
+| **Rate %** | The risk-free rate, defaulting to the app-wide **4.5%**. A fixed assumption, not a live Treasury yield. Barely matters at short expiries — half a point of rate moves a 0DTE option by about 0.2% — but it is the least accurate input on multi-week structures. |
 | **Number of strikes** | How many real chain strikes the heat map spans (default 24, centred on spot). |
 
 **IV Update** implies the volatility **from the traded contract's mark**, the way

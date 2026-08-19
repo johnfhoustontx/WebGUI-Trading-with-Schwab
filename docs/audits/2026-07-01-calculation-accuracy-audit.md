@@ -21,7 +21,7 @@
 | C4 VWAP → session-anchored | High | **FIXED** | Resets each session. |
 | C5 RS return-ratio → parity | High | **FIXED** | `technical.py` + `analysis_lib/sector_analysis.py` (2 occurrences). |
 | C6 simulator expiry 16:00 ET tz | Med | **FIXED** | Shared `expiry_time_to_years`; 0DTE 15:30 was collapsing to intrinsic-only. |
-| C7 single-source `r`; document `q=0` | Med | **FIXED** | `RISK_FREE_RATE=0.045` everywhere; q=0 documented in BSM docstrings. |
+| C7 single-source `r`; document `q=0` | Med | **FIXED (2026-08-19 — see note)** | `q=0` documented in BSM docstrings on 2026-07-01. The single-source half was **marked fixed prematurely**: the calculator, the simulator and `compute.calc_iv` were converged onto `options_calculator.RISK_FREE_RATE`, but `gamma_tool` kept five `0.045` literals, `options_svc.compute`'s projection band a sixth, and `backtest_0dte` its own `RISK_FREE = 0.04` — so the exact divergence C7 names (0.045 vs 0.04) survived this row for seven weeks. All six now import the constant, and a source-level guard in `test_expiry_time_rate_consistency.py` fails on a seventh. |
 | C8 two PoP conventions | Med | **FIXED (labeled)** | Documented distinctly; intentionally not unified (would shift tuned gates). |
 | C9 term-GEX ×0.01 units | Med | **FIXED** | Was 100× off; nearest-expiry-relative documented. |
 | C10 swing payoff per-share vs ×100 | Med | **FIXED** | Normalized to per-contract ×100; `_normalize_credit` capital bug fixed. |

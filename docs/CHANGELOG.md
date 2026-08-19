@@ -59,6 +59,54 @@ ranked broad-market frame, and a guaranteed newest-first Captured table.**
   summary on every publish (a close changes the day's closed count as it happens), and
   a source-level test pins the single remaining `cache_set(CACHE_CAPTURED,` call site.)
 
+**Prior — 2026-08-19** (**One risk-free rate, and a CVE baseline of zero — both found
+by auditing the unmerged branches rather than the code.**
+- **Why this happened at all.** Auditing the three unmerged branches (see the previous
+  entry) turned up a July `config-consolidation` branch whose calendar phase had shipped
+  but whose smaller items never did. Two were worth taking.
+- **The rate.** `options_calculator.RISK_FREE_RATE = 0.045` was already canonical, and
+  the calculator, simulator and `compute.calc_iv` already imported it. Three places did
+  not: `gamma_tool` carried **five** `0.045` literals, `options_svc.compute`'s projection
+  band a sixth, and `backtest_0dte` its own **`RISK_FREE = 0.04`**. Only the backtest
+  actually diverged. Measured on an SPX-like put (6800/6750, 15% vol): **0.23%** of the
+  option price at 0DTE, 0.33% at 1 DTE, 0.69% at 7 DTE — so never a pricing problem, but
+  a comparability one, since the backtest exists to be read against the live scanner's
+  credits and was quietly pricing on a different curve.
+- **⚠ Two artefacts both asserted this was already done.** The 2026-07-01 accuracy audit
+  closed finding **C7 ("single-source `r`")** as **FIXED**, and
+  `test_expiry_time_rate_consistency.py`'s docstring claimed "a single `RISK_FREE_RATE`
+  source of truth" — while the exact 0.045-vs-0.04 divergence C7 names survived in
+  `backtest_0dte` for seven more weeks. The test only checked the three modules that had
+  been converted, so **the guard was as narrow as the claim was broad**. It now also
+  covers `gamma_tool` and the backtest, reads `project_exposure_forward`'s DEFAULT off
+  the signature (a default binds at import, invisible to a module-level value check), and
+  adds a **source-level** guard that fails on a seventh literal. The audit row is
+  corrected in place rather than left reading FIXED.
+- **The dependencies.** `pip-audit` reported **31 advisories across four packages**;
+  it now reports none. pillow 12.2.0→12.3.0 (13), setuptools 65.5.0→**83.0.0** (4),
+  aiohttp 3.14.1→**3.14.3** (3, then a fourth surfaced at 3.14.2), cryptography
+  49.0.0→50.0.0 (1).
+- **`setuptools` is newly PINNED, not merely bumped** — and that is the transferable
+  lesson. Unpinned, the lockfile said nothing about it, so the audited version differed
+  between this machine and the CI runner; a four-CVE package sat unnoticed inside a
+  lockfile whose entire purpose is reproducibility. **Pin what the audit can see, not
+  only what the app imports.** (The July branch proposed 78.1.1, which is now itself
+  below the fix line for PYSEC-2026-3447.)
+- **cryptography 49→50 was the only real risk**, since prod's proxy holds the Schwab
+  OAuth session and no unit test proves that stack still loads. Checked before promoting:
+  authlib + its requests integration, `schwab.auth`, `schwab.client`, oauthlib and
+  requests_oauthlib all import cleanly; RSA sign/verify and a PKCS8 PEM round-trip both
+  work; schwab-proxy's own 98 tests pass. The only upper bound on cryptography anywhere
+  is `curl_cffi<47.0`, which lives in its **dev and test extras** and is not installed.
+- **CI is deliberately left non-blocking.** `docs/CI.md` invited flipping the `audit` job
+  to blocking "once the baseline is clean", and that condition is now met — but flipping
+  means a newly-disclosed transitive CVE halts merges, which is an operator decision, not
+  an automatic consequence of clearing the baseline. The flip is one line whenever wanted.
+- **Every suite in the repo was re-measured on the new pins** and the CLAUDE.md Tests
+  section now carries all of them. The five previously marked *unverified* had drifted
+  badly (driver_svc 162→239, `shared/bus` 15→25); four suites — market_svc, `shared/tests`,
+  `tests`, `tools/tests` — had never been listed at all.)
+
 **Prior — 2026-08-19** (**`promote.bat` half-completed a live promotion, and the fix
 for it had been written four days earlier on a branch nobody merged.**
 - **The defect.** `call stop_all.bat` and `call start_all_wt.bat nowindow` are bare

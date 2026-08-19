@@ -102,6 +102,10 @@ failures, so its job is `soft` and the following are deselected:
 
   (A `freeze` captures the whole venv, so the lock also contains the dev tooling —
   `ruff`, `pip-audit` — which is harmless for CI installs.)
+
+  ⚠ Use **`pip freeze --all`**. Plain `pip freeze` omits `setuptools`, which the lock
+  pins deliberately (`pip-audit` audits the environment, not just the imports), so a
+  plain regeneration silently drops that pin.
 - **`requirements-dev.txt`** — CI/local tooling only (`ruff`, `pre-commit`, `pip-audit`,
   `pytest-cov`).
 
@@ -110,7 +114,15 @@ failures, so its job is `soft` and the following are deselected:
 The `audit` job runs `pip-audit` against `requirements.lock`. It is
 **`continue-on-error: true`** initially — a freshly-disclosed transitive CVE should
 surface for review, not halt all development. Flip it to blocking once the baseline is
-clean. Run it locally with:
+clean.
+
+**That condition is now met (2026-08-19):** the baseline went from 31 advisories to
+zero, so the flip is a one-line change (drop `continue-on-error` from the `audit` job)
+whenever you want the gate. It is deliberately **left non-blocking** — flipping it means
+a CVE disclosed against a transitive dependency halts merges until someone bumps it, and
+that trade-off is an operator decision, not a consequence of clearing the baseline.
+
+Run it locally with:
 
 ```powershell
 .venv\Scripts\python -m pip_audit

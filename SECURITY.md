@@ -34,6 +34,12 @@ All eight servers bind **`127.0.0.1`** (verified) — the loopback bind is the p
 - **Memurai/Redis has no password** — any local process can read the cache or inject commands
   on `cmd:*`. **Mitigation:** set a Memurai `requirepass`.
 - **Dependencies:** pin via `requirements.lock`; `pip-audit` runs in CI (currently non-blocking).
+  **The CVE baseline was cleared on 2026-08-19** — it stood at **31 advisories across four
+  packages** (pillow 13, setuptools 4, aiohttp 3+1, cryptography 1) and now reports none.
+  `setuptools` is **pinned** as of that date; while it was unpinned the lockfile said nothing
+  about it, so the audited version differed between a developer machine and the CI runner —
+  which is how a four-CVE package sat unnoticed in a lockfile whose purpose is reproducibility.
+  **Pin anything the audit can see, not just what the app imports.**
 
 ## The autonomous driver
 

@@ -1002,6 +1002,20 @@ market    = 8215
 passthrough), loaded by `services/options_svc/commission.py` (used by the Rescue
 candidate menu). **Rule: don't hard-code commission rates** — add them here.
 
+`options-scanner/options_calculator.py` holds **`RISK_FREE_RATE = 0.045`**, the single
+source for the pricing `r` used by the calculator, the simulator, `gamma_tool`,
+`options_svc.compute` (`calc_iv` + the projection band) and `backtest_0dte`. **Rule:
+import it; never re-declare a rate literal.** It is code, not TOML, because every
+consumer is a pricing module that already imports `options_calculator` — a config round
+trip would buy nothing. ⚠ This rule is written down because the codebase *thought* it
+already held: the 2026-07-01 accuracy audit closed finding **C7 ("single-source `r`")**
+as FIXED, and `test_expiry_time_rate_consistency.py` documented "a single `RISK_FREE_RATE`
+source of truth" — while `gamma_tool` still carried five `0.045` literals and
+`backtest_0dte` its own `RISK_FREE = 0.04`. The test only ever checked the three modules
+that had been converted, so the claim and the guard were both narrower than they read.
+A **source-level** guard in that file now fails on any new rate literal in the pricing
+modules, which is the part a value check cannot do.
+
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
 speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
@@ -1566,15 +1580,27 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 > `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest …`
 
 ```powershell
-# from the repo root, one service at a time
-.venv\Scripts\python -m pytest services\sentiment_svc   # 279 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc     # 1148 passed / 0 fail (2026-08-18)
-.venv\Scripts\python -m pytest services\portfolio_svc   # 27
-.venv\Scripts\python -m pytest services\trade_svc       # 56
-.venv\Scripts\python -m pytest services\driver_svc      # 162
-.venv\Scripts\python -m pytest shared\bus               # 15
-.venv\Scripts\python -m pytest shared\contracts         # 37 (no app-dir imports — safe together)
+# from the repo root, one service at a time. ALL of these were re-measured
+# 2026-08-19 on the post-dependency-refresh venv — see the note below.
+.venv\Scripts\python -m pytest services\sentiment_svc  # 293 passed / 1 documented-baseline fail
+.venv\Scripts\python -m pytest services\options_svc    # 1177
+.venv\Scripts\python -m pytest services\portfolio_svc  # 32
+.venv\Scripts\python -m pytest services\trade_svc      # 74
+.venv\Scripts\python -m pytest services\driver_svc     # 239
+.venv\Scripts\python -m pytest services\market_svc     # 73
+.venv\Scripts\python -m pytest shared\bus              # 25
+.venv\Scripts\python -m pytest shared\contracts        # 49 (no app-dir imports — safe together)
+.venv\Scripts\python -m pytest shared\tests            # 89
+.venv\Scripts\python -m pytest tests                   # 69  (env profiles + launcher guards)
+.venv\Scripts\python -m pytest tools\tests             # 816
 ```
+
+**Every count above is a 2026-08-19 measurement.** The five this file previously
+flagged as *unverified — measure your own baseline* (portfolio_svc, trade_svc,
+driver_svc, `shared/bus`, `shared/contracts`) were all measured that day and had
+drifted far from their written values (driver_svc 162 → 239, `shared/bus` 15 → 25),
+which is exactly what an unverified number does. `market_svc`, `shared/tests`,
+`tests` and `tools/tests` were never listed here at all.
 
 **Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
 read them as a regression:**
@@ -1625,19 +1651,21 @@ as well as the failed set.** A count-only comparison reads as stable while a
 different test silently does not run — which is the same trap as the 2026-08-09
 incident, one layer down.
 
-The remaining per-service counts in the block above are indicative, not pinned.
-Current, all three re-measured **2026-08-18** on `claude/dashboard-key-elements`:
-**webgui 1842 green**, **options_svc 1148 green**, **options-scanner 1454 passed /
-11 failed / 2–3 skipped**. (webgui was 1826 on 2026-08-17 after the four
-sentiment-screen rebuilds and the dead-code cleanup — the count FELL from 1912 because
-~86 tests were deleted with the subjects they pinned (the Highcharts scatter/ribbon/RRG
-builders and the stranded `pages/sentiment.py` helpers), which is the one situation where
-a dropping count is the healthy signal.) **sentiment_svc 279 passed / 1 failed** (the
-documented `test_daily_history_wins_over_session_latch`), last measured
-**2026-08-14** on the ring-graphics branch. portfolio_svc,
-trade_svc, driver_svc, `shared/bus` and `shared/contracts` have **not** been
-re-measured since they were first written down — treat those five as unverified
-and measure your own baseline before trusting them.
+The counts in the block above are indicative, not pinned. **All of them were
+re-measured 2026-08-19** on `claude/market-dashboard-updates`, after the dependency
+refresh (pillow / setuptools / aiohttp / cryptography) — so they are a post-bump
+baseline, which is the useful thing to compare a suspected dependency regression
+against. The three large suites: **webgui 1986 green**, **options_svc 1177 green**,
+**options-scanner 1470 passed / 11 failed / 2 skipped**. Also **schwab-proxy 98**
+(worth its own line — it is the only suite that exercises the Schwab OAuth stack, so
+it is the one that would catch a `cryptography` bump going wrong).
+
+(webgui was 1826 on 2026-08-17 after the four sentiment-screen rebuilds and the
+dead-code cleanup — the count FELL from 1912 because ~86 tests were deleted with the
+subjects they pinned (the Highcharts scatter/ribbon/RRG builders and the stranded
+`pages/sentiment.py` helpers), which is the one situation where a dropping count is
+the healthy signal.) **sentiment_svc reads 293 passed / 1 failed** — the documented
+`test_daily_history_wins_over_session_latch`.
 
 ## External processes (not in this repo)
 

@@ -80,6 +80,14 @@ all apps). `requirements.lock` is a fully-pinned, byte-identical environment
 tooling (`ruff`, `pre-commit`, `pip-audit`, `pytest-cov`) and is **not needed to
 run** the app.
 
+⚠ **Regenerate the lock with `pip freeze --all`, not plain `pip freeze`.** The lock
+pins **`setuptools`** even though nothing imports it at runtime, because `pip-audit`
+audits the whole environment and an unpinned setuptools is a package whose version
+differs between a developer machine and the CI runner — which is how four CVEs sat
+unnoticed there until 2026-08-19. Plain `pip freeze` **omits setuptools by default**
+(verified), so regenerating the lock that way silently drops the pin and quietly
+reopens the gap.
+
 Load-bearing runtime packages:
 
 | Package | Role |
@@ -1145,6 +1153,18 @@ d2 = d1 - σ·√T
 (`N` = standard-normal CDF, `n` = its PDF.) At/after expiration (T ≤ 0), price is
 intrinsic value and second-order Greeks are 0.
 
+**`r` is `options_calculator.RISK_FREE_RATE = 0.045`, static, and it is the single
+source** — the calculator, the simulator, `gamma_tool`, `options_svc.compute`
+(`calc_iv` and the forward projection band) and `backtest_0dte` all import it rather
+than declaring their own. It is a **fixed assumption, not a live rate**: nothing fetches
+a Treasury yield, so a real move in short rates does not reach the model until this
+constant is edited. That is a defensible simplification for the horizons this app trades
+— at 0DTE a half-point of rate is worth about **0.23%** of the option price (measured on
+a 6800/6750 SPX-like put at 15% vol; 0.33% at 1 DTE, 0.69% at 7 DTE) — but it is an
+assumption, and on multi-week swing structures it is the least accurate input in the
+model. **`q = 0`**: no dividend yield, which matters most for SPY/SPX at roughly a 1.3%
+annual yield on longer-dated positions.
+
 ## Spread metrics and P&L grid
 
 `calc_summary(legs, strategy, spot, r, iv, T)` returns credit/debit, max
@@ -1408,6 +1428,7 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Constant / set | Value | Where |
 |----------------|-------|-------|
 | Composite weights | vix 0.20, put_call 0.20, breadth 0.20, rotation 0.15, sector_perf 0.25 | `scoring/__init__.py:WEIGHTS` |
+| Risk-free rate `r` | 0.045, static (single source; `q`=0, no dividend) | `options_calculator.py:RISK_FREE_RATE` |
 | VIX sub-weights | term 0.50, vix1d 0.33, slope 0.17 | `scoring/__init__.py:VIX_SUB_WEIGHTS` |
 | Trend weights | price 0.45, breadth 0.25, sector 0.20, vix 0.10 | `intraday_trend.py:TREND_WEIGHTS` |
 | Put/Call thresholds | (1.3,1)(1.1,2)(0.9,5)(0.7,8)(0.0,10) | `put_call.py:PC_THRESHOLDS` |

@@ -2112,7 +2112,7 @@ option chain. This is where you find out what a trade actually risks before you 
 </tr>
 <tr>
 <td><strong>Rate %</strong></td>
-<td>The risk-free rate. Barely matters at short expiries.</td>
+<td>The risk-free rate, defaulting to the app-wide <strong>4.5%</strong>. A fixed assumption, not a live Treasury yield. Barely matters at short expiries — half a point of rate moves a 0DTE option by about 0.2% — but it is the least accurate input on multi-week structures.</td>
 </tr>
 <tr>
 <td><strong>Number of strikes</strong></td>
