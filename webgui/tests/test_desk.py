@@ -9,13 +9,9 @@ import pathlib
 from pages import desk as d
 
 
-# ── Tailwind-first guard (house standard; the shared guard file is not ours to
-# edit right now, so the Desk carries its own copy of the same assertion) ─────
-def test_desk_module_has_no_inline_style():
-    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
-           ).read_text(encoding="utf-8")
-    assert ".style(" not in src, "desk.py still uses .style()"
-    assert ":style=" not in src, "desk.py still uses a Vue :style= slot binding"
+# The Tailwind-first guard for this module now lives with every other page's, in
+# ``test_no_inline_style.py``'s ``PHASE_8_FILES``. One guard, not two — a second
+# copy is a second thing to forget.
 
 
 # ── structure_positions ──────────────────────────────────────────────────────
@@ -492,3 +488,297 @@ def test_desk_regime_display_withholds_a_non_finite_confidence():
 def test_desk_regime_display_survives_a_missing_view():
     assert d.regime_display(None)["word"] == "Unclear"
     assert d.regime_display("nonsense")["word"] == "Unclear"
+
+
+# ── formatters ───────────────────────────────────────────────────────────────
+# The render layer's own pure surface. It is small, but every one of these is a
+# place a "no reading" can be dressed up as a reading, which is the failure mode
+# this whole page is built to avoid.
+def test_formatters_render_an_em_dash_for_every_kind_of_no_reading():
+    """None / NaN / inf / junk must ALL read as absent — never as 0.
+
+    A zero is a claim. "$0.00 unrealized" and "0.00% day" are readings a trader
+    would act on, and neither is what an unpublished field means."""
+    for junk in (None, float("nan"), float("inf"), float("-inf"), "x", {}, [],
+                 True):
+        for fn in (d.fmt_price, d.fmt_signed_pct, d.fmt_gex, d.fmt_money,
+                   d.fmt_net_prem, d.fmt_iv, d.fmt_ratio, d.fmt_hotness):
+            assert fn(junk) == "—", (fn.__name__, junk)
+
+
+def test_fmt_price_and_pct_shapes():
+    assert d.fmt_price(6712.81) == "6,712.81"
+    assert d.fmt_signed_pct(0.31) == "+0.31%"
+    assert d.fmt_signed_pct(-1.2) == "-1.20%"
+    # A genuine zero IS a reading and prints as one, signed.
+    assert d.fmt_signed_pct(0.0) == "+0.00%"
+
+
+def test_fmt_gex_scales_and_always_carries_a_sign():
+    assert d.fmt_gex(1.42e9) == "+1.42B"
+    assert d.fmt_gex(-5.4e8) == "-540M"
+    assert d.fmt_gex(-2_000) == "-2K"
+    assert d.fmt_gex(7) == "+7"
+
+
+def test_fmt_money_puts_the_minus_outside_the_dollar_sign():
+    assert d.fmt_money(110.0) == "$110.00"
+    assert d.fmt_money(-40.0) == "-$40.00"
+
+
+def test_fmt_net_prem_scales_exactly_once():
+    """``net_prem_m`` arrives ALREADY in millions. Scaling it again here is the
+    classic way this column starts printing a plausible thousand-fold error."""
+    assert d.fmt_net_prem(12.4) == "+12.4M"
+    assert d.fmt_net_prem(-8.1) == "-8.1M"
+
+
+def test_flip_text_drops_the_side_word_when_the_side_is_unknown():
+    row = d.dealer_rows({"rows": [_mrow("$SPX", spot=6700.0, flip=6600.0)]},
+                        stale=False)[0]
+    assert d.flip_text(row).startswith("6,600.00 · 1.5")
+    assert d.flip_text(row).endswith("% above")
+    # No flip at all -> an em-dash, not a bare "above".
+    noflip = d.dealer_rows({"rows": [_mrow("$SPX", flip=None)]}, stale=False)[0]
+    assert d.flip_text(noflip) == "—"
+    # A level with no usable side prints the level alone — never a default side,
+    # which would be a claim about dealer hedging nothing supports.
+    assert d.flip_text({"flip": 100.0, "flip_side": None,
+                        "flip_distance": None}) == "100.00"
+
+
+def test_strategy_and_dte_text():
+    assert d.strategy_label("put_credit_spread") == "PUT CREDIT SPREAD"
+    assert d.strategy_label(None) == "—"
+    assert d.dte_text(0) == "0DTE"
+    assert d.dte_text(32) == "32d"
+    assert d.dte_text(None) == "—"
+
+
+def test_summary_line_reads_the_three_numbers_the_header_promises():
+    line = d.summary_line({"open": 4, "unrealized": 90.0, "at_risk": 2})
+    assert line == "OPEN 4 · UNREALIZED $90.00 · AT RISK 2"
+    # An empty book still reads as a book, not as a broken one.
+    assert d.summary_line(d.positions_summary([])) == \
+        "OPEN 0 · UNREALIZED $0.00 · AT RISK 0"
+
+
+# ── class maps ───────────────────────────────────────────────────────────────
+def test_every_class_map_covers_its_whole_finite_domain_distinctly():
+    """The styling standard's rule: a data-driven colour maps from a KNOWN
+    finite set to static classes. If two states share a class the reader cannot
+    tell them apart, which for the position flags is the difference between a
+    healthy trade and one that needs rescuing."""
+    regimes = [d.regime_word(k) for k in ("above", "below")]
+    assert len(set(d.regime_chip_class(w) for w in regimes)) == 2
+    flags = list(d.POSITION_FLAGS.values())
+    assert len(set(d.flag_chip_class(f) for f in flags)) == len(set(flags))
+    assert d.source_chip_class(d.PAPER_SOURCE) != \
+        d.source_chip_class(d.CLAUDE_SOURCE)
+    ivs = ("spiking", "collapsing", "stable", "na")
+    assert len(set(d.iv_state_class(s) for s in ivs)) == len(ivs)
+
+
+def test_unknown_states_fall_back_to_a_neutral_class_rather_than_a_verdict():
+    """An unrecognised state must not borrow either verdict's colour."""
+    assert d.regime_chip_class("—") == d.CHIP_MUTED
+    assert d.regime_chip_class("nonsense") == d.CHIP_MUTED
+    assert d.flag_chip_class("nonsense") == d.CHIP_MUTED
+    assert d.iv_state_class("nonsense") == d.iv_state_class("na")
+    assert d.flip_side_class(None) == d.flip_side_class("nonsense")
+
+
+def test_signed_class_treats_a_missing_number_as_missing_not_as_flat():
+    assert d.signed_class(1.0) != d.signed_class(-1.0)
+    assert d.signed_class(None) == d.signed_class(0.0)     # both are "no move"
+    assert d.signed_class(float("nan")) == d.signed_class(None)
+    assert d.signed_class(1.0) != d.signed_class(None)
+
+
+def test_no_class_map_emits_an_inline_style_or_a_var_arbitrary():
+    """Two separate traps in one assertion. ``.style()`` is banned outright, and
+    the bundled Tailwind JIT does NOT generate an arbitrary class containing
+    ``var(...)`` — such a class silently produces no rule at all, so the colour
+    just never appears and nothing fails."""
+    every = ([d.CHIP_POS, d.CHIP_NEG, d.CHIP_NEG_STRONG, d.CHIP_WARN,
+              d.CHIP_ACCENT, d.CHIP_MUTED]
+             + [d.flag_chip_class(f) for f in d.POSITION_FLAGS.values()]
+             + [d.iv_state_class(s) for s in ("spiking", "stable", "na")])
+    for cls in every:
+        assert "var(" not in cls
+        assert "style" not in cls
+
+
+# ── the poll contract ────────────────────────────────────────────────────────
+def test_every_region_only_depends_on_views_the_page_actually_polls():
+    """A region wired to a view outside ``VIEWS`` would never repaint: the poll
+    would not be watching the counter that moves it."""
+    assert set(d.VIEWS) == set(d.VIEWS)          # no duplicates in the tuple
+    assert len(d.VIEWS) == len(set(d.VIEWS))
+    for region, deps in d._REGION_VIEWS.items():
+        assert set(deps) <= set(d.VIEWS), region
+
+
+def test_every_polled_view_feeds_at_least_one_region():
+    """The mirror of the test above: a view nothing reads is a Redis read on
+    every tick, all day, for a number that never reaches the screen."""
+    used = set()
+    for deps in d._REGION_VIEWS.values():
+        used.update(deps)
+    assert used == set(d.VIEWS)
+
+
+def test_the_dealer_panel_repaints_when_freshness_moves_not_only_the_matrix():
+    """``gex_status`` GATES the walls (see ``_walls_trustworthy``). A dealer
+    panel wired to the matrix alone would keep showing walls after the collector
+    died, because the matrix version does not move when the feed stops."""
+    assert "options:gex_status" in d._REGION_VIEWS["dealer"]
+
+
+def test_the_top_strip_carries_no_index_quote_view():
+    """Deliberate: the Dealer Positioning panel shows $SPX/SPY/QQQ with more
+    context, and the two would come from different cache keys with independent
+    version counters — a 2-second window could genuinely show two different
+    prices for one symbol on one screen. $VIX rides ``options:header`` because
+    it is excluded from the matrix universe and so can never be a dealer row."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    # ``prices`` is the header payload's quote map. Reading that key is the one
+    # way this rule gets broken, and it is a one-line change away at all times.
+    assert '"prices"' not in src and "'prices'" not in src
+
+
+def test_the_page_mounts_no_highcharts():
+    """Deliberate: nothing on this page is a time series, and this app's chart
+    element collapses when it mounts hidden, has no ResizeObserver, and loses
+    in-place updates the moment the stock module loads."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    assert "ui.highchart" not in src
+
+
+def test_the_two_rings_use_distinct_uids():
+    """``ring_svg`` namespaces the SVG root DOM id with ``uid``, and these two
+    rings share a page — identical uids would make them collide."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    assert src.count('uid="desk-sent"') == 2      # the seed + the repaint
+    assert src.count('uid="desk-trend"') == 2
+
+
+# ── render() smoke ───────────────────────────────────────────────────────────
+# ``render()`` is otherwise unexercised: /desk has no route yet, so no shell
+# smoke test reaches it. These build the page against the auto-index client and
+# read the text back out — enough to catch a bad name, a stale handle, or (the
+# one that matters) a cold service rendering as a confident zero.
+def _rendered_texts():
+    """Every label text ``render()`` just added, in build order."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [getattr(e, "text", None)
+            for key, e in ui.context.client.elements.items()
+            if key not in before]
+
+
+def _rendered_html():
+    """The raw content of every ``ui.html`` fragment ``render()`` just added."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [getattr(e, "content", "")
+            for key, e in ui.context.client.elements.items()
+            if key not in before and hasattr(e, "content")]
+
+
+def _seed_bus(monkeypatch, data):
+    import bus_client
+    monkeypatch.setattr(bus_client, "read_full",
+                        lambda v: (data.get(v), 1 if v in data else None))
+    monkeypatch.setattr(bus_client, "read", lambda v: data.get(v))
+
+
+def _full_payloads():
+    return {
+        "options:header": {"vix": 14.2, "vix_regime": {"label": "Normal"}},
+        "sentiment:regime": {"label": "Rallying", "committed_label": "trending",
+                             "confidence": 0.71, "direction": 1},
+        "sentiment:composite": {"live": None, "derived": {}},
+        "sentiment:history": {"snaps": []},
+        "options:gex_status": _status(),
+        "options:matrix": {"rows": [_mrow("$SPX")]},
+        "options:flow_alerts": {"alerts": [_alert(1)]},
+        "options:paper_account": {"positions": [_pos("p1",
+                                                     rescue_state="tested")]},
+        "options:driver_paper_account": {"positions": []},
+    }
+
+
+def test_render_gives_every_panel_its_own_placeholder_when_nothing_is_published():
+    """One dead service must not blank the page — and a blank box is worse than
+    a placeholder, because it looks like a rendering bug rather than a cold
+    feed. Four panels, four placeholders."""
+    from pages import desk
+    texts = _rendered_texts()
+    assert texts.count(desk.WAITING_OPTIONS) == 4
+
+
+def test_render_with_nothing_published_prints_no_reading_it_did_not_read():
+    """The failure this whole page is built to avoid. With every view cold there
+    must be no live-feed claim, no zeroed position count, and no $0.00 P&L —
+    each of which is a statement a trader could act on."""
+    texts = [t for t in _rendered_texts() if t]
+    assert not any(t.startswith("Live") for t in texts)
+    assert not any(t.startswith("OPEN ") for t in texts)
+    assert not any("$0.00" in t for t in texts)
+    # The freshness read says so in as many words, rather than staying silent.
+    assert any("unknown" in t.lower() for t in texts)
+
+
+def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
+    _seed_bus(monkeypatch, _full_payloads())
+    from pages import desk
+    texts = [t for t in _rendered_texts() if t]
+    assert desk.WAITING_OPTIONS not in texts
+    assert "$SPX" in texts                       # a dealer row AND a board row
+    assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
+    assert "Unusual activity" in texts           # the flow kind
+    assert "AT RISK" in texts                    # the position flag
+    assert any(t.startswith("OPEN 1 ·") for t in texts)
+    assert "Rallying" in texts                   # the regime word in the strip
+    assert "14.20" in texts and "Normal" in texts    # VIX and its band
+
+
+def test_render_never_puts_a_buy_or_sell_word_on_the_flow_feed(monkeypatch):
+    """Schwab publishes no time-and-sales tape to this app, so nobody here knows
+    who initiated. The alert rows say Call/Put and stop there; the Desk must not
+    add a side by paraphrase, in a column header or anywhere else."""
+    _seed_bus(monkeypatch, {"options:flow_alerts": {"alerts": [_alert(1)]}})
+    blob = " ".join(t for t in _rendered_texts() if t).lower()
+    assert "bought" not in blob and "sold" not in blob
+
+
+def test_render_mounts_two_rings_with_distinct_dom_ids(monkeypatch):
+    """``ring_svg`` namespaces the SVG root id with ``uid``, and these two rings
+    share a page — identical uids would make them collide."""
+    _seed_bus(monkeypatch, _full_payloads())
+    html = " ".join(_rendered_html())
+    assert 'id="ring-desk-sent"' in html
+    assert 'id="ring-desk-trend"' in html
+
+
+def test_render_survives_junk_in_every_view(monkeypatch):
+    """Every payload here is the wrong SHAPE, not merely empty. A page that
+    aggregates nine services will meet this eventually — a half-written cache
+    key, an older writer, a service mid-restart."""
+    from pages import desk
+    _seed_bus(monkeypatch, {v: "nonsense" for v in desk.VIEWS})
+    texts = [t for t in _rendered_texts() if t]
+    # It degrades to the empty state rather than raising — but note it does NOT
+    # degrade to the *waiting* state, because a malformed payload is not an
+    # absent one and the page cannot tell the difference from here.
+    assert "No open positions." in texts
