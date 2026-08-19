@@ -5,6 +5,8 @@ I/O orchestration lives in services/options_svc/compute.build_matrix.
 """
 from __future__ import annotations
 
+import math
+
 # ---- tunable thresholds ----
 _TREND_LOOKBACK_S = 900        # 15 min recent-move window
 _TREND_MILD = 0.0012           # 0.12% move → mild trend
@@ -160,6 +162,50 @@ def iv_regime(iv_series, now_ts, lookback_s=_IV_LOOKBACK_S):
     else:
         state = "stable"
     return (state, rel)
+
+
+def _wall_dist_pct(spot, call_wall, put_wall):
+    """|spot - NEAREST wall| / spot * 100, or None when it cannot be known.
+
+    Feeds ``dealer_regime``'s ``delta_wall_pin`` gate. Returns None -- never 0.0
+    -- when no wall is available: 0.0 reads as "spot is exactly ON the wall", the
+    maximally pin-like value, so degrading to it would fabricate the strongest
+    possible signal out of missing data.
+
+    A non-finite input is treated as MISSING, not as a number. ``nan <= 0`` and
+    ``nan > 0`` are both False, so a plain positivity guard waves a NaN through
+    and the arithmetic yields nan -- which then survives every ``is not None``
+    check downstream, compares False against every threshold, and serialises as
+    the invalid JSON literal ``NaN``. Same clamp-to-the-extreme trap that bit
+    ``sentiment_svc`` twice. Never raises.
+    """
+    try:
+        if spot is None or not math.isfinite(spot) or spot <= 0:
+            return None
+        dists = [abs(spot - w) for w in (call_wall, put_wall)
+                 if w is not None and math.isfinite(w) and w > 0]
+        if not dists:
+            return None
+        return round(min(dists) / spot * 100.0, 3)
+    except Exception:
+        return None
+
+
+def _latest_atm_iv(iv_series):
+    """Last finite positive ATM-IV level from [(ts, atm_iv)], else None.
+
+    ``atm_iv`` is forward-only, so legacy/early rows come back as (ts, None). A
+    non-finite sample is skipped like a null one rather than returned: ``inf``
+    passes ``> 0`` and would be handed on as a real -- and maximal -- IV reading.
+    Never raises.
+    """
+    try:
+        for _ts, iv in reversed(list(iv_series or ())):
+            if iv is not None and math.isfinite(iv) and iv > 0:
+                return round(float(iv), 2)
+    except Exception:
+        pass
+    return None
 
 
 def dealer_regime(spot, flip, iv_state, trend_state, mins_to_close,

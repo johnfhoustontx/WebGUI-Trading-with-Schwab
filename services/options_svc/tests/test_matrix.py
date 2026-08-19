@@ -388,3 +388,57 @@ def test_dealer_regime_from_rows_after_close_disables_time_gates():
     out = m.dealer_regime_from_rows(rows, atm, now_ts=900, close_ts=300)
     assert out["mins_to_close"] is None
     assert out["regime"] == "neutral"
+
+
+# ---- wall distance ----
+def test_wall_dist_pct_picks_the_NEAREST_wall():
+    # call wall 2% up, put wall 5% down -> 2.0
+    assert m._wall_dist_pct(100.0, call_wall=102.0, put_wall=95.0) == 2.0
+
+def test_wall_dist_pct_is_none_when_no_wall_is_known():
+    # None, NOT 0.0 — 0.0 means "spot is exactly ON the wall", the maximally
+    # pin-like value, so a missing wall would fabricate the strongest signal.
+    assert m._wall_dist_pct(100.0, None, None) is None
+
+def test_wall_dist_pct_tolerates_one_missing_side():
+    assert m._wall_dist_pct(100.0, call_wall=None, put_wall=97.0) == 3.0
+
+def test_wall_dist_pct_is_none_without_a_usable_spot():
+    assert m._wall_dist_pct(None, 102.0, 98.0) is None
+    assert m._wall_dist_pct(0.0, 102.0, 98.0) is None
+
+def test_wall_dist_pct_is_none_on_a_NONFINITE_spot_or_wall():
+    # A NaN is NOT a usable spot, and it does not announce itself: `nan <= 0` is
+    # False, so an ordinary positivity guard waves it straight through and the
+    # arithmetic yields nan/nan -> nan. That nan then reads as a NUMBER to every
+    # caller — it survives `is not None`, it JSON-serialises as the invalid
+    # literal NaN, and it compares False against every threshold silently. This
+    # is the same trap as the documented `min(hi, nan) -> hi` clamp: an absent
+    # reading must degrade to None, never to a value. Same for inf, which
+    # arrives from the same broken-quote paths and is equally uncomparable.
+    assert m._wall_dist_pct(float("nan"), 102.0, 98.0) is None
+    assert m._wall_dist_pct(float("inf"), 102.0, 98.0) is None
+    # A nonfinite WALL is discarded like a missing one; a finite sibling still wins.
+    assert m._wall_dist_pct(100.0, float("nan"), 97.0) == 3.0
+    assert m._wall_dist_pct(100.0, float("nan"), float("nan")) is None
+
+# ---- latest ATM IV ----
+def test_latest_atm_iv_takes_the_last_non_null_sample():
+    assert m._latest_atm_iv([(1, 12.0), (2, 13.5), (3, None)]) == 13.5
+
+def test_latest_atm_iv_is_none_when_every_sample_is_null():
+    # atm_iv is forward-only: rows written before the column existed come back
+    # as (ts, None).
+    assert m._latest_atm_iv([(1, None), (2, None)]) is None
+    assert m._latest_atm_iv([]) is None
+    assert m._latest_atm_iv(None) is None
+
+def test_latest_atm_iv_skips_NONFINITE_samples():
+    # `nan > 0` is False, so a positivity gate already rejects NaN here — but
+    # `inf > 0` is True, so inf would sail through and be returned as a real IV
+    # level. Both are "no reading", and an IV of inf is the maximal one, exactly
+    # the fabricated-extreme failure this pair of helpers exists to avoid. A
+    # nonfinite sample is skipped, not fatal: an earlier good sample still wins.
+    assert m._latest_atm_iv([(1, float("nan"))]) is None
+    assert m._latest_atm_iv([(1, float("inf"))]) is None
+    assert m._latest_atm_iv([(1, 12.0), (2, float("nan"))]) == 12.0
