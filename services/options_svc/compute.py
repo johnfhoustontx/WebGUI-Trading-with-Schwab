@@ -3226,7 +3226,7 @@ def project_gex_grid(eng, chain, spot, now):
         marks = _future_marks_ct(now)
         if not marks:
             return empty
-        from options_calculator import bs_gamma
+        from options_calculator import RISK_FREE_RATE, bs_gamma
         ct = _PROJ_CT_TZ
         call_map = chain.get("callExpDateMap", {})
         put_map = chain.get("putExpDateMap", {})
@@ -3235,7 +3235,7 @@ def project_gex_grid(eng, chain, spot, now):
         pk, pdte = eng._find_nearest_exp_key(put_map, today)
         dtes = [d for d in (cdte, pdte) if d is not None]
         dte = min(dtes) if dtes else 0
-        r = 0.045
+        r = RISK_FREE_RATE
         t_now = _T_at(dte, now.astimezone(ct))
         t_future = [_T_at(dte, m) for m in marks]
         grid = {}

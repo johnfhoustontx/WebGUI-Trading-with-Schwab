@@ -9,6 +9,8 @@ C8 — the calculator's PoP functions are documented as risk-neutral LOGNORMAL
 """
 from datetime import date, datetime
 import math
+import pathlib
+import re
 
 import numpy as np
 import pandas as pd
@@ -44,6 +46,81 @@ def test_fetch_snapshot_uses_shared_rate():
     snap = fetch_snapshot(client, "SPY", date(2026, 6, 30))
     assert snap.r == RISK_FREE_RATE
     assert snap.r != 0.04
+
+
+def test_backtest_uses_the_shared_rate_not_its_own_004():
+    """The 0DTE backtest priced at 0.04 while everything live priced at 0.045.
+
+    Found 2026-08-19. Numerically tiny for 0DTE (the rate term is ~nil at
+    T<1day), but it made backtested credits and the live scanner's credits
+    incomparable on principle, which is the whole point of the backtest.
+    """
+    import backtest_0dte
+    assert backtest_0dte.RISK_FREE == RISK_FREE_RATE
+    assert backtest_0dte.RISK_FREE != 0.04
+
+
+def test_gamma_tool_prices_at_the_shared_rate():
+    """gamma_tool carried the rate as five separate 0.045 literals — the same
+    VALUE, so nothing drifted yet, but five places to miss on the day the rate
+    is changed."""
+    import gamma_tool
+    assert gamma_tool.RISK_FREE_RATE == RISK_FREE_RATE
+
+
+def test_project_exposure_forward_defaults_to_the_shared_rate():
+    """A default ARGUMENT binds at import, so a literal there is invisible to a
+    value check on the module — it has to be read off the signature."""
+    import inspect
+
+    import gamma_tool
+    sig = inspect.signature(gamma_tool.GammaEngine.project_exposure_forward)
+    assert sig.parameters["r"].default == RISK_FREE_RATE
+
+
+# ── C7b: no module may carry its own rate literal ───────────────────────────
+# The value checks above pass the moment each module imports the constant, but
+# they cannot see a SIXTH literal added later. This reads the source instead, so
+# a new `r = 0.045` fails here rather than silently re-forking the rate.
+_RATE_OWNER = "options_calculator.py"
+_RATE_ASSIGN = re.compile(
+    r"^\s*(?:r|rate|RISK_FREE|RISK_FREE_RATE)\s*=\s*0\.0\d+", re.MULTILINE)
+_RATE_DEFAULT = re.compile(r"(?<![A-Za-z_])(?:r|rate)\s*=\s*0\.0\d+\s*[,)]")
+
+
+def _rate_scanned_files():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    files = [root / "options-scanner" / "gamma_tool.py",
+             root / "options-scanner" / "backtest_0dte.py",
+             root / "options-scanner" / "options_simulator" / "data.py",
+             root / "services" / "options_svc" / "compute.py"]
+    missing = [f for f in files if not f.exists()]
+    assert not missing, f"the guard points at files that moved: {missing}"
+    return files
+
+
+def test_no_module_outside_options_calculator_carries_a_rate_literal():
+    offenders = []
+    for path in _rate_scanned_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for pat in (_RATE_ASSIGN, _RATE_DEFAULT):
+            for m in pat.finditer(text):
+                line = text.count(chr(10), 0, m.start()) + 1
+                offenders.append(f"{path.name}:{line}: {m.group(0).strip()}")
+    joined = (chr(10) + "  ").join(offenders)
+    assert not offenders, (
+        f"the risk-free rate lives ONLY in {_RATE_OWNER} as RISK_FREE_RATE; "
+        f"import it instead of re-declaring:  {joined}")
+
+
+def test_the_rate_guard_would_actually_catch_a_re_fork():
+    """A guard nobody has seen fail is a guard nobody knows works."""
+    assert _RATE_ASSIGN.search("    r = 0.045  # risk-free rate")
+    assert _RATE_ASSIGN.search("RISK_FREE = 0.04")
+    assert _RATE_DEFAULT.search("def f(self, view, T, r=0.045):")
+    # and it must not fire on the legitimate import-and-use forms
+    assert not _RATE_ASSIGN.search("    r = RISK_FREE_RATE  # risk-free rate")
+    assert not _RATE_DEFAULT.search("def f(self, view, T, r=RISK_FREE_RATE):")
 
 
 # ── C6: 16:00 ET expiry settlement, calculator-consistent T ──────────────────

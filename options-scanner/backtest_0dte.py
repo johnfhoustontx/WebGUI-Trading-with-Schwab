@@ -51,7 +51,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from repo_paths import PROXY_URL
 
-from options_calculator import bs_price, bs_delta
+from options_calculator import RISK_FREE_RATE, bs_price, bs_delta
 
 log = logging.getLogger("backtest_0dte")
 
@@ -61,7 +61,10 @@ log = logging.getLogger("backtest_0dte")
 
 TRADING_DAYS_PER_YEAR = 252
 SESSION_HOURS = 6.5
-RISK_FREE = 0.04
+# Single source (options_calculator). Was a local 0.04 while every live path
+# priced at 0.045 — numerically tiny at 0DTE, but it made backtested credits
+# and the scanner's credits incomparable, which is the backtest's whole job.
+RISK_FREE = RISK_FREE_RATE
 
 # --- Schwab futures-options costs ---
 # Commission is the EXACT Schwab published rate: $2.25 per contract per side.
