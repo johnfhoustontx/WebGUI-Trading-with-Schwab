@@ -100,16 +100,49 @@ def test_descriptor_line_prefers_skew_else_description():
     assert market.descriptor_line({}) == ""
 
 
-# ── breadth counts across the whole board ────────────────────────────────────
-def test_breadth_counts_across_all_tiles():
+# ── breadth counts over the four equity frames ───────────────────────────────
+def test_breadth_counts_only_the_equity_frames():
+    # The rail's advance/decline is a read on the EQUITY tape, so it counts only
+    # the four stock frames — a red VIX or a bid Treasury is not a decline.
     payload = {"categories": [
-        {"tiles": [{"color_state": "risk_on_strong"},
+        {"category": "Broad-Market ETF",
+         "tiles": [{"color_state": "risk_on_strong"},
                    {"color_state": "risk_on_mild"},
                    {"color_state": "flat"}]},
-        {"tiles": [{"color_state": "risk_off_mild"},
+        {"category": "Sector SPDR",
+         "tiles": [{"color_state": "risk_off_mild"},
                    {"color_state": "no_data"}]},
+        {"category": "Volatility",       # excluded frame
+         "tiles": [{"color_state": "risk_off_strong"},
+                   {"color_state": "risk_on_strong"}]},
+        {"category": "Fixed Income / Credit ETF",   # excluded frame
+         "tiles": [{"color_state": "risk_off_strong"}]},
     ]}
     assert market.breadth_counts(payload) == (2, 1)
+
+
+def test_breadth_categories_are_the_four_requested_and_real_frames():
+    from services.market_svc import symbols
+    assert market.BREADTH_CATEGORIES == (
+        "Broad-Market ETF", "Top 10", "Sector SPDR", "Thematic / Industry ETF")
+    # a typo here would silently count nothing at all
+    assert set(market.BREADTH_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
+
+
+def test_breadth_counts_skip_the_basket_composite():
+    # BIG10 is the AVERAGE of the ten constituents sitting beside it in the same
+    # frame — counting it too would double-count the mega-caps.
+    payload = {"categories": [{"category": "Top 10", "tiles": [
+        {"color_state": "risk_on_strong", "basket": True},
+        {"color_state": "risk_on_strong"},
+        {"color_state": "risk_off_mild"},
+    ]}]}
+    assert market.breadth_counts(payload) == (1, 1)
+
+
+def test_breadth_counts_ignore_an_unnamed_category():
+    assert market.breadth_counts(
+        {"categories": [{"tiles": [{"color_state": "risk_on_strong"}]}]}) == (0, 0)
 
 
 def test_flex_class_is_proportional_arbitrary():

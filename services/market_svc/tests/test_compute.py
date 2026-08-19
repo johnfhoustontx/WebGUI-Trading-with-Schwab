@@ -302,18 +302,27 @@ def test_ranked_frames_put_no_data_tiles_last():
                          "XLK", "XLP", "XLRE", "XLV", "XLY"]
 
 
-def test_unranked_frames_keep_symbol_map_order():
-    # Broad-Market ETF is deliberately NOT a leaderboard: its curated order
-    # (SPY/DIA/QQQ/IWM then the equal-weights) is meaningful, so a big QQQ move
-    # must not reshuffle it.
-    d = compute.build_dashboard(_pct_raw({"SPY": -1.0, "QQQ": 2.0}),
+def test_broad_market_frame_ranked_desc_by_day_pct():
+    # Broad-Market ETF became a leaderboard on 2026-08-19: the frame reads
+    # strongest-first, so a big QQQ move DOES move it to the head.
+    d = compute.build_dashboard(_pct_raw({"SPY": -1.0, "QQQ": 2.0, "IWM": 0.5}),
                                 sector_pcr=None, proxy_up=True)
-    assert _frame(d, "Broad-Market ETF") == ["SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW"]
+    frame = _frame(d, "Broad-Market ETF")
+    assert frame[:3] == ["QQQ", "IWM", "SPY"]
+    assert sorted(frame) == sorted(["SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW"])
 
 
-def test_ranked_frames_are_exactly_the_four_requested():
+def test_unranked_frames_keep_symbol_map_order():
+    # Cash Index pairs with Equity Index Futures and Volatility reads VIX then
+    # its tenors — those orders ARE the information, so they never rank.
+    d = compute.build_dashboard(_pct_raw({"$SPX": -1.0, "$NDX": 2.0}),
+                                sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Cash Index") == ["SPX", "NDX"]
+
+
+def test_ranked_frames_are_exactly_the_five_requested():
     from services.market_svc import symbols
-    assert symbols.SORTED_CATEGORIES == ("Top 10", "Sector SPDR",
+    assert symbols.SORTED_CATEGORIES == ("Broad-Market ETF", "Top 10", "Sector SPDR",
                                          "Thematic / Industry ETF", "Countries")
     # every ranked category is a real frame (a typo would silently rank nothing)
     assert set(symbols.SORTED_CATEGORIES) <= set(symbols.CATEGORY_ORDER)

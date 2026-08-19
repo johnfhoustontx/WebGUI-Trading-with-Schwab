@@ -28,17 +28,23 @@ CATEGORY_ORDER = [
 
 # Frames rendered as a LEADERBOARD: their tiles are emitted ranked by day
 # %-change (descending), so the strongest name sits top-left and the rank is
-# readable at a glance. These are the peer-comparison frames — one sector/theme/
-# country against its siblings — where the curated order carries no meaning.
+# readable at a glance. These are the peer-comparison frames — one index/sector/
+# theme/country against its siblings — where the curated order carries no meaning.
 #
-# Every OTHER frame keeps its symbol-map order, deliberately: Broad-Market ETF
-# reads SPY/DIA/QQQ/IWM then the equal-weights, Volatility reads VIX then its
-# tenors, Cash Index pairs with Futures. Ranking those would destroy a layout
-# that IS the information.
+# Broad-Market ETF joined the leaderboards on 2026-08-19. Its old curated order
+# (SPY/DIA/QQQ/IWM then the equal-weights) was chosen to read as a fixed layout,
+# but the six ARE peers of each other — large vs mega vs small cap, cap-weighted
+# vs equal-weighted — so which one leads on the day is the single most useful
+# thing the frame can say, and a fixed order hides it.
+#
+# Every OTHER frame keeps its symbol-map order, deliberately: Volatility reads
+# VIX then its tenors, Cash Index pairs with Futures. Ranking those would
+# destroy a layout that IS the information.
 #
 # A basket tile (BIG10) is pinned leftmost within its frame — see
 # compute.rank_tiles.
-SORTED_CATEGORIES = ("Top 10", "Sector SPDR", "Thematic / Industry ETF", "Countries")
+SORTED_CATEGORIES = ("Broad-Market ETF", "Top 10", "Sector SPDR",
+                     "Thematic / Industry ETF", "Countries")
 
 
 def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False):

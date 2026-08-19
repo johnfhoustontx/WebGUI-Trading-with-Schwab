@@ -15,6 +15,8 @@ version changes; a second watch on ``options:captured_flags`` surfaces stop/targ
 hits via ``ui.notify`` when they land. The close dialog stays client-side (input
 collection only). Graceful-empty when the service is cold.
 """
+from datetime import datetime
+
 import bus_client
 from pages import busy as _busy
 from nicegui import ui
@@ -138,10 +140,43 @@ def captured_columns():
     return cols
 
 
+def _captured_at(sig):
+    """The capture instant as a POSIX timestamp, or None when it can't be read.
+
+    Parsed rather than string-compared: ``first_seen_ts`` carries a UTC offset
+    that shifts with DST (-05:00 in summer, -06:00 in winter), so two identical
+    wall-clock strings are an hour apart as instants. ``.timestamp()`` resolves
+    an aware value against its own offset and a naive one against local time,
+    which is the right reading for both.
+    """
+    ts = (sig or {}).get("first_seen_ts")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts)).timestamp()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def sort_newest_first(signals):
+    """PURE: open signals ordered newest capture first (the table's default).
+
+    Signals with no readable timestamp trail the dated ones in the order the
+    service gave them — ``sorted`` is stable, so an undated pair never jitters
+    between the 2 s repaints.
+    """
+    dated = [(t, i, s) for i, s in enumerate(signals or [])
+             if (t := _captured_at(s)) is not None]
+    undated = [s for s in signals or [] if _captured_at(s) is None]
+    dated.sort(key=lambda x: (-x[0], x[1]))
+    return [s for _, _, s in dated] + undated
+
+
 def captured_rows(signals):
-    """Display rows from the open-signals view (cache:options:captured)."""
+    """Display rows from the open-signals view (cache:options:captured), newest
+    capture first (see ``sort_newest_first``)."""
     rows = []
-    for s in signals or []:
+    for s in sort_newest_first(signals):
         rows.append({
             "id": s.get("signal_id"),
             "recommendation": s.get("recommendation") or "HOLD",

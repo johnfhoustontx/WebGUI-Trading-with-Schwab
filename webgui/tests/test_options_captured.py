@@ -204,6 +204,53 @@ def test_opened_column_present_and_populated():
     assert row["opened"] == "2026-06-17 13:49"
 
 
+# ── default order: newest capture first ──────────────────────────────────────
+def _sig(sid, ts):
+    return {"signal_id": sid, "first_seen_ts": ts}
+
+
+def test_captured_rows_default_to_newest_first():
+    rows = captured.captured_rows([
+        _sig("old", "2026-06-15T09:31:00.000000-05:00"),
+        _sig("new", "2026-06-17T13:49:49.898534-05:00"),
+        _sig("mid", "2026-06-16T15:02:11.000000-05:00"),
+    ])
+    assert [r["id"] for r in rows] == ["new", "mid", "old"]
+
+
+def test_captured_rows_order_by_the_full_timestamp_not_the_display_minute():
+    # ``opened`` is truncated to HH:MM, so two captures inside one minute display
+    # identically — the sort must still separate them by the stored seconds.
+    rows = captured.captured_rows([
+        _sig("first", "2026-06-17T13:49:01.000000-05:00"),
+        _sig("second", "2026-06-17T13:49:59.000000-05:00"),
+    ])
+    assert [r["id"] for r in rows] == ["second", "first"]
+
+
+def test_captured_rows_sort_respects_the_utc_offset():
+    # Same wall-clock text, different offsets: -06:00 is the LATER instant.
+    rows = captured.captured_rows([
+        _sig("cdt", "2026-06-17T13:00:00-05:00"),
+        _sig("cst", "2026-06-17T13:00:00-06:00"),
+    ])
+    assert [r["id"] for r in rows] == ["cst", "cdt"]
+
+
+def test_captured_rows_put_undated_signals_last_in_given_order():
+    rows = captured.captured_rows([
+        _sig("no_ts", None),
+        _sig("bad_ts", "not-a-timestamp"),
+        _sig("dated", "2026-06-15T09:31:00.000000-05:00"),
+    ])
+    assert [r["id"] for r in rows] == ["dated", "no_ts", "bad_ts"]
+
+
+def test_captured_rows_handle_no_signals():
+    assert captured.captured_rows([]) == []
+    assert captured.captured_rows(None) == []
+
+
 def test_exit_value_default_uses_current_value():
     """The close dialog pre-fills its Exit value with the signal's current price."""
     assert captured.exit_value_default({"current_value": 0.234}) == 0.23

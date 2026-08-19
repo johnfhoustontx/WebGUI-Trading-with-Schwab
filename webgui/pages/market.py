@@ -230,11 +230,31 @@ def tile_signature(t):
     return (tx["last"], tx["change"])
 
 
+# The frames the rail's advance/decline reads (2026-08-19). The meter is a
+# breadth read on the EQUITY tape, so it counts only the four stock frames.
+# Counting the whole board made it meaningless: a bid VIX, a stronger dollar and
+# a rallying Treasury are all "declines" by the board's risk polarity, so a
+# genuine risk-off session showed the macro hedges cancelling the equity selling
+# out and the meter sat near even on exactly the days it should read hardest.
+# Names must match ``market_svc.symbols.CATEGORY_ORDER`` — a test pins that.
+BREADTH_CATEGORIES = (
+    "Broad-Market ETF", "Top 10", "Sector SPDR", "Thematic / Industry ETF")
+
+
 def breadth_counts(payload):
-    """(advancing, declining) across every tile on the board, by direction."""
+    """(advancing, declining) across the equity frames, by direction.
+
+    Composite BASKET tiles (BIG10) are skipped: a basket is the average of the
+    ten constituents sitting beside it in the same frame, so counting it too
+    would double-count the mega-caps.
+    """
     up = dn = 0
     for cat in payload.get("categories", []):
+        if cat.get("category") not in BREADTH_CATEGORIES:
+            continue
         for t in cat.get("tiles", []):
+            if t.get("basket"):
+                continue
             d = tile_direction(t)
             if d == "up":
                 up += 1
@@ -324,6 +344,10 @@ def render():
             # BELOW the value. It used to sit between them, which offset this
             # block's numbers a whole bar-height below the clock.
             with ui.column().classes("gap-[7px] min-w-[190px]"):
+                # The scope is not visible in the numbers, so it is on hover:
+                # the meter reads the equity frames only (see BREADTH_CATEGORIES).
+                ui.tooltip("Advancing / declining across the equity frames: "
+                           + ", ".join(BREADTH_CATEGORIES))
                 with ui.row().classes("justify-between w-full gap-6"):
                     ui.label("ADVANCING").classes(_LBL)
                     ui.label("DECLINING").classes(_LBL)

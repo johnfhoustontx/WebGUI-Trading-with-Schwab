@@ -267,11 +267,15 @@ engine's positions live on **Paper Account**.
 
 Market Scanner signals you're **tracking over time** to see whether they're working.
 
-- **Entry vs Current Score / Drift** — is the setup getting better or worse since
-  you saved it?
-- **Recommendation** — green = take profit, red = cut, amber = hold.
-- **Refresh marks** re-prices everything live; you're alerted when a stop or target
-  is hit.
+- **Newest first** — the table opens with your most recently captured signal at
+  the top. Click any column heading to re-sort it.
+- **Rec** — green = take profit, red = cut, amber = hold.
+- **Credit vs Cur Price** — what you took in against what it would cost to close
+  now; **P&L** is the difference, green in profit and red in loss.
+- **Refresh marks (live)** re-prices everything against fresh chains; you're
+  alerted when a stop or target is hit.
+- Click a row to load it into the **detail panel** on the right, and to pick it
+  for **Close selected**.
 """,
     "/options/portfolio": """
 **Paper Account — the simple version**
@@ -507,11 +511,15 @@ A live grid of macro tickers, grouped into framed panels by category.
   for that name; the **BIG10** tile (in the Top 10 frame) shows the net of its 10
   members (the Mag-7 plus AVGO/PLTR/AMD). A dash means that name isn't in the
   collected universe.
-- **Ranked frames** — **Top 10**, **Sector SPDR**, **Thematic / Industry** and
-  **Countries** re-order themselves by the day's move, biggest gainer first, so
-  the leaders and laggards are always at the ends. Every other frame keeps its
-  curated order (SPY/DIA/QQQ/IWM; VIX before its tenors) because that layout is
-  itself information.
+- **Ranked frames** — **Broad-Market ETF**, **Top 10**, **Sector SPDR**,
+  **Thematic / Industry** and **Countries** re-order themselves by the day's
+  move, biggest gainer first, so the leaders and laggards are always at the ends.
+  Every other frame keeps its curated order (VIX before its tenors; the cash
+  indexes paired with their futures) because that layout is itself information.
+- **Advancing / Declining** (top rail) — a breadth count across those same
+  ranked **stock** frames only, so a bid VIX or a rallying Treasury doesn't count
+  as a decline. The BIG10 tile is skipped, since it's the average of the ten
+  mega-caps already counted beside it.
 - **Skin toggle** (top right) switches between the two board looks; your choice
   is remembered.
 - **Auto-updates** every ~3 seconds during market hours, ~15 outside them —
