@@ -45,6 +45,41 @@ displays show that same drift three ways:
 
 
 HELP_MD: dict[str, str] = {
+    "/desk": """
+**Desk — the simple version**
+
+The **home page**. One screen answering, top to bottom, the four questions you ask
+in order: *what is the market doing · where is the structure · what should I act
+on · what am I holding.*
+
+- **Top strip** — the clock, **VIX** and its band, the **market regime** word
+  (Rallying / Balanced / Whipsaw / Stressed…), and two dials showing **Day / Week
+  / Month** for market **sentiment** and market **trend**. These are the same
+  numbers the Sentiment page shows — the Desk never computes its own.
+- **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
+  **gamma flip** and how far price sits from it, the **call and put walls**, and
+  net gamma exposure. The little bar shows where price sits **between the two
+  walls**. *Long gamma · pins* means dealer hedging tends to **hold** price near
+  those walls; *short gamma · runs* means it **amplifies** moves instead.
+- **Opportunity Board** — the five hottest names right now, with what makes each
+  one interesting, its at-the-money implied volatility and whether that is rising
+  or falling, and a setup tag when one is active.
+- **Live Flow Alerts** — the five newest unusual-options events. Note these show
+  **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
+  tape, so nobody can honestly say which side traded.
+- **Positions** — your open paper trades and Claude's, together, with the live
+  mark and profit or loss, and a flag: **OK**, **Watch**, **At risk**, **Rescue**.
+  The header totals open trades, unrealised profit and loss, and how many need
+  attention.
+
+**Click any row** to open the page it came from, already set to that symbol.
+Nothing on this page places or changes a trade.
+
+⚠ **After the close the walls are hidden, not zeroed.** Index option open interest
+reads 0 overnight, which would otherwise produce confident-looking walls that are
+pure noise. A greyed panel with a timestamp means "this is the last good reading",
+not "the market is flat".
+""",
     "/options/scanner": """
 **Market Scanner — the simple version**
 
