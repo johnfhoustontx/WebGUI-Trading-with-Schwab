@@ -147,9 +147,10 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **13 items** — 10 in three captioned sections plus a
-bottom-pinned **`SYSTEM_RAIL`** block (**System Status**, **Settings**, **Stop
-All Services**) — and the active group's
+the left drawer holds **14 items** — a top-pinned **Desk** (the landing page, in a
+**caption-less leading `NAV_SECTIONS` block**, 2026-08-18), 10 in three captioned
+sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
+**Settings**, **Stop All Services**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with
 `.compact-tabs` small padding — q-tab min-height 30px — clicking a tab
@@ -169,11 +170,18 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 `/market`.
 
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
-`NAV_SECTIONS` is a list of `(caption, entries)` — **MARKETS** (Dealer
+`NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
+(Desk) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
-standalone rail page (`_nav_link`). Entries reference their group/page **by name**
+standalone rail page (`_nav_link`). **A caption of `None` means render NO header
+at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
+it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its pages get
+a bare one-crumb breadcrumb since no section sits above them. ⚠ `first=(_i == 0)`
+in that loop is consequently **never True**, which is deliberate: the first
+*visible* caption keeps its `mt-4`, and that gap is what separates MARKETS from the
+Desk row above it. Entries reference their group/page **by name**
 via `_sec_group`/`_sec_page`, so `_NAV_GROUPS` / `OPTIONS_RAIL` / `FLAT_NAV` stay
 the single source of every label + icon and **a typo raises at import** rather
 than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
@@ -213,7 +221,7 @@ this app's Highcharts have no ResizeObserver, so a reflow on every hover would
 leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
 only the icon is visible when collapsed, **the icon is the affordance** (the
 `icon` arg is live again — the earlier colored-dot indicator is retired; a test
-guards that the 13 drawer icons stay non-empty + mutually distinct). Labels/title
+guards that the 14 drawer icons stay non-empty + mutually distinct). Labels/title
 clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
 264px of content raising a scrollbar in the rail. **Section captions cross-fade to
 HAIRLINES in the rail** (2026-08-16): `.nav-sep` is the exact INVERSE of the
@@ -262,8 +270,10 @@ Routes:
 
 | Route | Page | Status |
 |-------|------|--------|
-| `/` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. [Detail](docs/webgui-routes.md) | built |
-| `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. [Detail](docs/webgui-routes.md) | built |
+| `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
+| `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper+driver Positions with rescue flags. Tier-1 reader of **9 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
+| `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. [Detail](docs/webgui-routes.md) | built |
+| `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals | built |
@@ -1001,7 +1011,9 @@ See the "App theme — dark-navy 'dashboard'" section. **Five sections are page-
 languages, NOT the app-wide palette and NOT surfaced in Settings → Appearance:**
 `[flow]` (the Options Flow console panels, the `/options/gamma` Flow + Net Prem
 subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
-`[console]` (Market Regime Console, `/sentiment` only), `[macro]` (the Macro Board
+`[console]` (Market Regime Console on `/sentiment`, **and the Desk** since
+2026-08-18 — the two share the vocabulary rather than the Desk growing a `[desk]`
+section of its own), `[macro]` (the Macro Board
 redesign, `/market` only), `[sectors]` (the Sector & Industry heat grid,
 `/sentiment/sectors` only) and `[rotation]` (the Sector Rotation board,
 `/sentiment/rotation` only). Each has matching `theme.py` builders
