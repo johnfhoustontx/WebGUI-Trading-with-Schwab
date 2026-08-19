@@ -5,7 +5,55 @@ Moved out 2026-08-16: the table there is the index, this file is the detail. Tex
 verbatim from that table. **Durable invariants belong here; dated shipping narrative belongs
 in [CHANGELOG.md](CHANGELOG.md).**
 
-## `/`
+## `/desk`
+
+**Desk — the app's HOME page (NEW 2026-08-18).** `/` redirects here (it pointed at
+`/market` from 2026-08-16, and at the Market Scanner before that). Pinned ALONE at
+the top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the mirror
+of the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`.
+
+A single-screen aggregate of the highest glance-value element of each page, laid out
+as the four questions a session opens with, in order: **top strip** (clock · VIX +
+band · Market Regime word · Day/Week/Month **Sentiment** and **Trend** rings ·
+honest freshness indicator) → **Dealer Positioning** (`$SPX`/`SPY`/`QQQ`/`$NDX`:
+spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, call
+and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
+hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**
+(newest 5) → **Positions** (paper + driver merged, with `rescue_state` flags and an
+`OPEN n · UNREALIZED $x · AT RISK m` header). Panels sit in a **2×2 grid**
+(`lg:grid-cols-2` — **not `xl`**, which is 1280px and silently collapses a 1265px
+window to one column). Read-only + **click-through**: every row opens its owning page
+already set to that symbol, reusing the one-shot `handoff.send_to_gamma` stash.
+
+Tier-1 reader of **nine** views on **ONE batched 2 s `read_versions`** (cheap `:ver`
+probes in a single pipelined round-trip; payloads deserialize only for views that
+moved) — this page is open all day, so that matters. **No Highcharts at all**,
+deliberately: nothing here is a time series, and the chart element collapses when it
+mounts hidden, has no ResizeObserver, and loses in-place updates under the stock
+module.
+
+**Four invariants worth knowing before editing it:**
+- **Every number is produced by the pure function its owning page uses**
+  (`sentiment_arcs`/`trend_arcs`, `rings.ring_svg`, `flow.alert_rows`,
+  `console_regime.regime_name`, `paper`'s DTE helper). The Desk composes; it never
+  restates arithmetic. A drift guard test pins the regime word against
+  `console_regime`'s. This exists because `/sentiment/sectors` and
+  `/sentiment/rotation` already print opposite verdicts for exactly that reason.
+- **One regime word, one source.** The pins/runs chip derives from `gex_regime`
+  (spot vs flip) alone; net GEX is a magnitude beside it and may legitimately
+  disagree, but never asserts a second regime word.
+- **Walls are WITHHELD, not zeroed, when untrustworthy** — `stale`, or `net_gex`
+  present-and-zero. Verified live 2026-08-18: index OI zeroes overnight, so `$SPX`
+  published `put_wall=3000` against spot 7785 and `$NDX` `put_wall=14000` against
+  spot 30046 while both carried `net_gex == 0.0` exactly. Both were suppressed;
+  SPY/QQQ kept their real walls.
+- **The structure bar is positioned divs with runtime `left-[{pct}%]`, not SVG** —
+  a scaled `viewBox` would need `vector-effect: non-scaling-stroke`, which DOMPurify
+  strips, smearing strokes while the server-side string stays perfectly correct.
+
+Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md).
+
+## `/options/scanner`
 
 Options · Market Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **Since 2026-08-06 the ENGINE only emits non-Weak candidates scoring ≥ 50** (`scanner_engine.SINGLE_LEG_MIN_SCORE` / `SINGLE_LEG_EXCLUDED_GRADES`, cut before the per-symbol cap) — an empty Directional tab now means "nothing cleared the bar", not a failure, and long CALLS largely vanish because the documented unbounded-profit R:R artifact scores them ~14 points below long puts. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]]))
 

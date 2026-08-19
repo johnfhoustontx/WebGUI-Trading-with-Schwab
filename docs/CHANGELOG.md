@@ -4,7 +4,73 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-18 (**Momentum's Align panel now lists the names, not just
+**Last updated:** 2026-08-18 (**The Desk — a single-screen home page, and the first
+Tier-2 change the webgui has needed in a while.**
+- **What shipped.** `/desk`, pinned alone at the top of the rail and now the target of
+  `/`. It aggregates the highest glance-value element of every page into the four
+  questions a session opens with: *what is the market doing · where is the structure ·
+  what should I act on · what am I holding.* Nine cache views, ONE batched 2 s
+  `read_versions`, read-only with click-through to the owning page. **No Highcharts
+  anywhere** — nothing on it is a time series, and a permanently-open page is the last
+  place you want an element that collapses when it mounts hidden. Detail in
+  [webgui-routes.md](webgui-routes.md#desk); design in
+  [`plans/2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md).
+- **The Tier-2 half.** `cache:options:matrix` rows gained `call_wall`, `put_wall`,
+  `net_gex`, `atm_iv`, `iv_state` and `dealer_regime`. All six come from data
+  `build_matrix` already had in hand — `net_total` was literally already in the loaded
+  row tuple — and all degrade to `None`/`"na"`, never `0`. Additive, so `MatrixSnapshot`
+  needed no contract change. This was necessary because `cache:options:gamma` holds
+  **one symbol at a time and is mutated by whichever Gamma page is open**, so a second
+  page reading it is a race; the Desk needs four symbols at once.
+- **A new one-row grid loader, because the obvious call was a trap.**
+  `gex_history_db.latest_grid_row` exists so the matrix build does not reach for
+  `load_date_with_grid(...)[-1]`, which decodes EVERY grid in the session. Running that
+  per symbol per minute across ~45 symbols would have re-created the documented largest
+  CPU burn in the options service. A test pins the decode count at exactly one: an
+  independent review showed the whole-session version is otherwise **behaviourally
+  indistinguishable** to the suite.
+- **`iv_regime`'s docstring was five days stale, and it cost two columns.** It said ATM
+  IV was *"the axis the app does NOT yet emit"*. The `atm_iv` column landed 2026-08-13;
+  measured 2026-08-18 it is **100% populated — 162,566 of 162,598 `gex` rows, 92
+  symbols**. That claim was believed twice — once by a codebase search, once by this
+  design's first draft, which dropped the IV column on its authority — before one
+  `COUNT(*)` settled it. So the Opportunity Board carries IV level **and direction**,
+  and `dealer_regime` can reach all six of its labels instead of collapsing to mostly
+  `neutral` (`gamma_cascade` and `vanna_squeeze` are exactly the two that need this
+  axis). **Verify against the data, not the prose.**
+- **Three NaN bugs, all in sketches that read as correct.** `min(hi, nan)` returning
+  `hi` is documented here; the same class kept reappearing wearing different clothes.
+  `_wall_dist_pct(nan, …)` returned `nan` because `nan <= 0` is False and
+  `round(nan, 3)` does not raise, so the `except` never fired — a float that survives
+  `is not None` and serialises as invalid JSON. `_latest_atm_iv` rejected NaN only *by
+  accident* (`nan > 0` is False) while letting `inf` through as a real IV level. And in
+  `structure_positions`, `max(0.0, nan)` returns **`0.0`** — argument order decides —
+  which would have drawn spot **exactly on the put wall**, the most alarming thing that
+  bar can say, out of missing data. All three are now guarded at the call site and
+  pinned by tests.
+- **`gamma_walls` filters `None` out of its pair**, so a one-sided chain returns a
+  ONE-element list and the prescribed `walls[0]`/`walls[1]` unpacking would have filed a
+  **call** wall as a **put** wall, silently, for every such symbol. Now classified
+  against spot instead, with a one-sided-grid test.
+- **Verified live in dev, and the off-hours case is not hypothetical.** On real 2026-08-15
+  data the two index symbols published `net_gex == 0.0` **exactly** (overnight OI zeroing)
+  with absurd walls to match — `$SPX put_wall=3000` against spot 7785, `$NDX
+  put_wall=14000` against spot 30046 — while SPY and QQQ carried real values. End-to-end
+  through the real cache and the real page, both index rows withheld their walls and both
+  ETFs kept theirs. That exact-zero is what the suppression turns on, so it was worth
+  confirming rather than assuming.
+- **CLAUDE.md's test baselines were stale and one was self-contradictory** (the command
+  block claimed 2 options_svc failures twenty lines above a section saying "none"). Now
+  measured: webgui **1842**, options_svc **1148**, options-scanner **1454/11**. Also
+  recorded a **second** source of that suite's skip drift, which the file attributed
+  solely to `test_gex_collector*`: three Tk-dependent tests race on root creation and
+  **whichever loses self-skips, a different one each run** — so the skipped SET must be
+  compared, not just its count.
+)
+
+---
+
+**Prior — 2026-08-18** (**Momentum's Align panel now lists the names, not just
 the count.**
 - **The gap.** Section 2's green panel printed *"24 stocks whose industry and sector both
   confirm — the highest-conviction rows on the page, take these to Trade Analyzer"* and
