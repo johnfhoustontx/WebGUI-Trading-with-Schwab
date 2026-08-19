@@ -288,3 +288,89 @@ def test_flow_rows_is_empty_for_a_missing_view():
     assert d.flow_rows(None) == []
     assert d.flow_rows({}) == []
     assert d.flow_rows({"alerts": "nonsense"}) == []
+
+
+# ── position_rows / positions_summary ────────────────────────────────────────
+def _pos(pid, **over):
+    p = {"position_id": pid, "symbol": "SPY", "strategy": "put_credit_spread",
+         "short_strike": 600.0, "long_strike": 595.0, "call_short": None,
+         "call_long": None, "width": 5.0, "expiration": "2026-09-19",
+         "quantity": 2, "entry_credit": 1.35, "current_value": 0.80,
+         "unrealized_pnl": 110.0, "status": "OPEN", "rescue_state": "ok",
+         "heat": 12}
+    p.update(over)
+    return p
+
+
+def test_position_rows_merges_both_accounts_with_a_source_chip():
+    rows = d.position_rows({"positions": [_pos("p1")]},
+                           {"positions": [_pos("c1")]})
+    assert [r["source"] for r in rows] == ["PAPER", "CLAUDE"]
+    assert [r["position_id"] for r in rows] == ["p1", "c1"]
+
+
+def test_position_rows_excludes_closed_positions():
+    view = {"positions": [_pos("open"), _pos("shut", status="CLOSED"),
+                          _pos("gone", status="EXPIRED")]}
+    assert [r["position_id"] for r in d.position_rows(view, None)] == ["open"]
+
+
+def test_position_rows_maps_the_rescue_state_to_a_flag():
+    flags = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
+             "critical": "RESCUE"}
+    for state, word in flags.items():
+        row = d.position_rows({"positions": [_pos("p", rescue_state=state)]},
+                              None)[0]
+        assert row["flag"] == word, state
+    # An unknown / missing state falls back to the healthy word rather than
+    # inventing an alarm.
+    assert d.position_rows({"positions": [_pos("p", rescue_state=None)]},
+                           None)[0]["flag"] == "OK"
+
+
+def test_position_rows_dte_uses_the_paper_pages_own_helper():
+    """Same helper, same answer — the Desk must not carry a second calendar."""
+    from pages.options import paper
+    row = d.position_rows({"positions": [_pos("p", expiration="2026-09-19")]},
+                          None)[0]
+    assert row["dte"] == paper._dte_from_expiration("2026-09-19")
+
+
+def test_position_rows_dte_is_none_for_an_unparseable_expiration():
+    row = d.position_rows({"positions": [_pos("p", expiration="soon")]}, None)[0]
+    assert row["dte"] is None
+
+
+def test_position_rows_is_empty_for_missing_views():
+    assert d.position_rows(None, None) == []
+    assert d.position_rows({}, {}) == []
+    assert d.position_rows({"positions": "nonsense"}, None) == []
+
+
+def test_positions_summary_counts_open_unrealized_and_at_risk():
+    rows = d.position_rows({"positions": [
+        _pos("a", unrealized_pnl=110.0, rescue_state="ok"),
+        _pos("b", unrealized_pnl=-40.0, rescue_state="watch"),
+        _pos("c", unrealized_pnl=25.5, rescue_state="tested"),
+        _pos("d", unrealized_pnl=-5.5, rescue_state="critical"),
+    ]}, None)
+    s = d.positions_summary(rows)
+    assert s["open"] == 4
+    assert abs(s["unrealized"] - 90.0) < 1e-9
+    # WATCH is a heads-up, not a position in trouble; counting it would inflate
+    # the one number on this card that is supposed to prompt action.
+    assert s["at_risk"] == 2
+
+
+def test_positions_summary_of_nothing_is_zeroed_not_none():
+    assert d.positions_summary([])["open"] == 0
+    assert d.positions_summary([])["unrealized"] == 0.0
+    assert d.positions_summary(None)["at_risk"] == 0
+
+
+def test_positions_summary_skips_a_non_finite_pnl_rather_than_poisoning_the_total():
+    rows = d.position_rows({"positions": [
+        _pos("a", unrealized_pnl=50.0),
+        _pos("b", unrealized_pnl=float("nan")),
+    ]}, None)
+    assert d.positions_summary(rows)["unrealized"] == 50.0

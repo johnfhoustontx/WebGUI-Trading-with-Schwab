@@ -22,6 +22,7 @@ The widgets and wiring land later, and none of it belongs here.
 import math
 
 from pages.options import flow as _flow
+from pages.options import paper as _paper
 
 # The four symbols the Desk watches. Deliberately short: the Desk is a glance,
 # and the Opportunity Board already exists for the full watchlist.
@@ -287,3 +288,93 @@ def flow_rows(flow_view, limit=FLOW_LIMIT):
     restraint ("No buy/sell claim"), and the Desk must not add one by paraphrase.
     """
     return _flow.alert_rows(flow_view)[:max(0, int(limit))]
+
+
+# ── open positions (both paper books) ────────────────────────────────────────
+# rescue_state → the flag word the card prints. WATCH is deliberately a separate
+# word from AT RISK: it means "keep an eye on it", and folding it in would blunt
+# the only word on this card meant to make the reader do something.
+POSITION_FLAGS = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
+                  "critical": "RESCUE"}
+_DEFAULT_FLAG = "OK"
+
+# The rescue states that genuinely mean "this trade is in trouble" — the same
+# pair ``paper._AT_RISK_STATES`` highlights.
+AT_RISK_STATES = ("tested", "critical")
+
+# Account views the Desk merges, and the chip each one's rows wear. Two separate
+# paper books with two separate P&Ls, so a row that did not say which it came
+# from would be unactionable.
+PAPER_SOURCE, CLAUDE_SOURCE = "PAPER", "CLAUDE"
+
+# The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
+# treated as open, matching ``paper_adjust``'s own default.
+_CLOSED_STATUSES = ("CLOSED", "EXPIRED")
+
+
+def position_flag(rescue_state):
+    """The flag word for a position's ``rescue_state`` (healthy when unknown)."""
+    return POSITION_FLAGS.get(rescue_state, _DEFAULT_FLAG)
+
+
+def _is_open(p):
+    return (p.get("status") or "OPEN").upper() not in _CLOSED_STATUSES
+
+
+def position_rows(paper_view, driver_view):
+    """Open positions from BOTH paper accounts, each tagged with its source.
+
+    Reads the *account* views, not the paper ledger: the ledger carries no live
+    mark, so an unrealized P&L taken from it would be entry-time arithmetic
+    wearing a live label.
+    """
+    out = []
+    for view, source in ((paper_view, PAPER_SOURCE), (driver_view, CLAUDE_SOURCE)):
+        positions = (view or {}).get("positions") if isinstance(view, dict) else None
+        if not isinstance(positions, list):
+            continue
+        for p in positions:
+            if not isinstance(p, dict) or not _is_open(p):
+                continue
+            sk, lk = p.get("short_strike"), p.get("long_strike")
+            out.append({
+                "source": source,
+                "position_id": p.get("position_id"),
+                "symbol": p.get("symbol", ""),
+                "strategy": p.get("strategy", ""),
+                "short_strike": _finite(sk),
+                "long_strike": _finite(lk),
+                "strikes": f"{sk}/{lk}" if sk is not None else "—",
+                "width": _finite(p.get("width")),
+                "expiration": p.get("expiration", ""),
+                # The paper page's own helper — one calendar for the whole app.
+                "dte": _paper._dte_from_expiration(p.get("expiration")),
+                "quantity": _finite(p.get("quantity")),
+                "entry_credit": _finite(p.get("entry_credit")),
+                "current_value": _finite(p.get("current_value")),
+                "unrealized_pnl": _finite(p.get("unrealized_pnl")),
+                "rescue_state": p.get("rescue_state"),
+                "heat": _finite(p.get("heat")),
+                "flag": position_flag(p.get("rescue_state")),
+            })
+    return out
+
+
+def positions_summary(rows):
+    """``{"open": n, "unrealized": float, "at_risk": n}`` over ``position_rows``.
+
+    ``at_risk`` counts TESTED + CRITICAL only. A non-finite P&L is skipped rather
+    than summed — ``float('nan') + x`` is NaN, so one bad mark would erase the
+    whole book's total and print it as a dash.
+    """
+    rows = [r for r in (rows or []) if isinstance(r, dict)]
+    total = 0.0
+    for r in rows:
+        pnl = _finite(r.get("unrealized_pnl"))
+        if pnl is not None:
+            total += pnl
+    return {
+        "open": len(rows),
+        "unrealized": round(total, 2),
+        "at_risk": sum(1 for r in rows if r.get("rescue_state") in AT_RISK_STATES),
+    }
