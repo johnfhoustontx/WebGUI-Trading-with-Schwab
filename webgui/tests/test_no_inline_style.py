@@ -134,8 +134,12 @@ def test_sentiment_pages_have_no_inline_style():
 # method / Vue `:style=` binding), so the guard — which checks `.style(`/`:style=`
 # — correctly passes. (status.py keeps its Quasar `ui.icon().props(color=…)` props,
 # out of scope.)
+# The Desk joins them: its structure bar and hotness bar are absolutely-
+# positioned runtime percentage arbitraries (the documented continuous-value
+# exception), and its rings are a raw ``ui.html()`` SVG string built by
+# ``pages/rings.py`` — the out-of-scope case, not an inline style.
 PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
-                 "eod.py", "market.py", "ticker.py"]
+                 "eod.py", "market.py", "ticker.py", "desk.py"]
 
 
 def test_utility_pages_have_no_inline_style():
