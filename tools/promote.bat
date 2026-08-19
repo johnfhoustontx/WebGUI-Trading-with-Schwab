@@ -121,18 +121,30 @@ echo requirements.lock changed - reinstalling...
 :restart
 echo Restarting...
 call start_all_wt.bat nowindow
-REM --- The launcher now REFUSES to start onto occupied ports, so the restart can
-REM     legitimately decline - which means "Promoted." is no longer safe to print
-REM     unconditionally. The realistic cause is a process that survived stop_all:
-REM     :wait_port_free above waits on the proxy and the web GUI, and stop_all
-REM     kills the web GUI LAST, so the six service ports it killed earlier are
-REM     free by then unless one genuinely refused to die. Saying so beats leaving
-REM     prod down under a message claiming success.
+
+REM --- Judge the restart on EVIDENCE - whether the stack ANSWERS - and not on the
+REM     launcher's errorlevel. That errorlevel was the test here until 2026-08-19,
+REM     and it was wrong in BOTH directions on consecutive promotes:
+REM
+REM       * the launcher never ran at all (cmd could not resolve a bare .bat name
+REM         because NoDefaultCurrentDirectoryInExePath was set in the caller's
+REM         environment) and promote said nothing alarming while prod sat stopped;
+REM       * the launcher started all eight processes and THEN returned non-zero,
+REM         because a timeout/pause inside it hit "Input redirection is not
+REM         supported" under a non-interactive stdin - and promote announced
+REM         "Prod is now STOPPED" over a completely healthy stack.
+REM
+REM     A batch file's exit code reports whether its last console operation
+REM     succeeded, which is not the question being asked. check_stack_up.py asks
+REM     the stack: an HTTP probe per port, retried to a deadline, port set taken
+REM     from stop_all._targets() so the starter, the stopper and the verifier
+REM     cannot disagree about what this environment owns. HTTP rather than a TCP
+REM     connect on purpose - a process whose accept loop has died stays bound and
+REM     still completes a handshake, which has hidden a dead UI here before.
+"%PY%" "%CD%\tools\check_stack_up.py"
 if errorlevel 1 (
     echo.
-    echo The restart REFUSED - see the message above. Prod is now STOPPED.
-    echo Most likely something survived stop_all.bat and still holds a port.
-    echo Run  stop_all.bat  again, then  start_all_wt.bat  by hand.
+    echo The restart did not come up - see the ports listed above.
     pause
     exit /b 1
 )
