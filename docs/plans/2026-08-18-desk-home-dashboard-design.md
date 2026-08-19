@@ -42,10 +42,11 @@ permanently-empty columns.
 | Flow alerts, newest first | `cache:options:flow_alerts` + the existing `flow.alert_rows()` |
 | Position mark + unrealized | `cache:options:paper_account` — `current_value`, `unrealized_pnl` |
 | OK / TRIM / AT RISK / RESCUE flags | `rescue_state` ∈ `ok`/`watch`/`tested`/`critical` + `heat` 0–100 |
+| IV level + IV direction | `snapshots.atm_iv` + `matrix.iv_regime()` — see [the stale-docstring correction](#the-stale-docstring-that-nearly-cost-two-columns) |
 | **call wall / put wall per symbol** | **only on `cache:options:gamma`, which is SINGLE-SYMBOL** |
 | **net GEX per symbol** | **same** |
 | **setup tag** (MOMENTUM / BREAKOUT / …) | `dealer_regime()` is written and tested but **publishes to nothing** |
-| **IV / RV / edge (`+7.4v`)** | **does not exist.** `iv_regime()` is dead code — the `atm_iv` column it needs is never emitted |
+| **RV, and "edge" (IV − RV, `+7.4v`)** | **does not exist** — there is no realized-vol series anywhere |
 | **Vol/OI per symbol** | **does not exist** — only per-contract on `uoa` alerts |
 | **BUY / SELL on flow** | **structurally impossible** — Schwab gives no time-&-sales tape |
 
@@ -53,6 +54,39 @@ The last three are dropped, not stubbed. A dash reads as *temporarily missing*;
 these were never there. The panels show real columns instead — and for flow, the
 call/put side, which is all the data can honestly support. `alert_text`'s own
 docstring is explicit: *"No buy/sell claim."*
+
+### The stale-docstring that nearly cost two columns
+
+`matrix.iv_regime()` carries a docstring saying ATM IV is *"the axis the app does
+NOT yet emit"*, and describing the `atm_iv` snapshots column as something that
+would have to be added. **That is out of date.** The column exists
+(`gex_history_db.py:91`), is written on every poll
+(`gex_collector.py:397` — `iv_analysis.extract_atm_iv(chain)`), and has its own
+loader (`load_atm_iv_series`, `:658`).
+
+Measured against the live prod DB on 2026-08-18: **162,566 of 162,598 `gex` rows
+carry a non-null `atm_iv` (100.0%), across 92 symbols, collecting since
+2026-08-13** — five days after the docstring was written. Latest samples: `$SPX`
+9.25, `QQQ` 15.91, `$NDX` 15.58.
+
+Two consequences, both material:
+
+1. **The Opportunity Board gets a real IV column** — level *and* direction
+   (`spiking` / `collapsing` / `stable`), which is more decision-useful than the
+   supplied design's static IV/RV pair, because direction is what actually
+   distinguishes the setups.
+2. **`dealer_regime()` can fire all six labels.** Without an IV state it
+   collapses: `below flip` can only ever return `neutral`, and `vanna_squeeze`
+   becomes unreachable — so the two most valuable labels, `gamma_cascade` and
+   `vanna_squeeze`, are *exactly* the ones that need this axis. Publishing the
+   tag without IV would have shipped a mostly-`neutral` column.
+
+**The lesson, which is the reason this is written down:** a docstring is not
+evidence about the state of the data. This one was believed twice — once by the
+codebase search that reported `iv_regime` as dead, and once by the first draft of
+this design, which dropped the IV column on its authority. It took one read-only
+`COUNT(*)` against the live DB to settle. Query the data, not the prose. The
+`atm_iv` docstring in `iv_regime()` is corrected as part of this work.
 
 ## The decisions worth recording
 
@@ -120,7 +154,7 @@ rather than crushes on narrow viewports).
 |---|---|
 | **① Top strip** — clock · VIX + regime band · Market Regime label + committed direction · Sentiment ring · Trend ring · freshness | full width |
 | **② Dealer Positioning** — `$SPX` `SPY` `QQQ` `$NDX`: spot + day %, gamma flip + signed distance, structure map, call wall, put wall, net GEX, regime chip | top-left |
-| **③ Opportunity Board** — top 5 by hotness: score + mini bar, symbol, composed rationale, signal strength, P/C, net premium, setup tag | top-right |
+| **③ Opportunity Board** — top 5 by hotness: score + mini bar, symbol, composed rationale, IV level + direction, signal strength, P/C, net premium, setup tag | top-right |
 | **④ Live Flow Alerts** — newest 5: time, kind chip, symbol + detail, premium | bottom-left |
 | **⑤ Positions** — paper + driver merged, open only: source chip, strikes, DTE, qty, entry, mark, unrealized, flag | bottom-right |
 
@@ -170,18 +204,29 @@ Each panel degrades **independently**; one dead service never blanks the page.
 
 ## The one Tier-2 change
 
-`services/options_svc/matrix.py::build_rows` already loads the `gex_history` row to
-derive `flip`, and **`net_total` is already in that row tuple**. So the change emits
-four more keys per row:
+`build_matrix` (`compute.py:2795-2815`) already opens a read-only `gex_history`
+connection and, per symbol, calls `load_flow_series` + `latest_flip` into
+`raw[sym] = {"series": …, "flip": …}`, which the pure `matrix.build_rows` turns
+into rows. The change extends that same loop and that same pure function to emit
+six more keys per row:
 
 | key | source |
 |---|---|
-| `call_wall` / `put_wall` | the grid `build_rows` already reads |
-| `net_gex` | `net_total`, already in the loaded row tuple |
-| `dealer_regime` | the existing, already-tested `dealer_regime()` that today publishes nowhere |
+| `call_wall` / `put_wall` | the stored GEX grid, via the existing `gamma_walls()` |
+| `net_gex` | `net_total`, **already in the loaded snapshot row tuple** |
+| `atm_iv` | the last non-null sample from `load_atm_iv_series` |
+| `iv_state` | `iv_regime()` over that series — `spiking` / `collapsing` / `stable` / `na` |
+| `dealer_regime` | the existing, already-tested `dealer_regime()` that today publishes nowhere — now with the IV axis it needs, plus `wall_dist_pct` from the new walls, so all six labels are reachable |
 
-Rows are `list[dict]` inside `MatrixSnapshot`, so **no contract change**. An absent
-grid degrades to `None`, never `0` — the distinction the off-hours case depends on.
+Rows are `list[dict]` inside `MatrixSnapshot`, so **no contract change**. Every new
+key degrades to `None` (or `"na"`) when its source is absent, **never `0`** — the
+distinction the off-hours case depends on, and the reason the degraded-row branch
+of `build_rows` must be extended too, not just the happy path.
+
+Note the walls and the IV axis are mutually reinforcing rather than independent:
+`delta_wall_pin` needs `wall_dist_pct`, which needs the walls; `gamma_cascade` and
+`vanna_squeeze` need `iv_state`. Shipping either half alone would leave
+`dealer_regime` mostly returning `neutral`.
 
 This is the documented exception to webgui-only work: *"only when no clean state
 exists, refactor the Tier-2 source to emit one."* The alternative designs were
@@ -229,6 +274,8 @@ rail order. Tier-2: `services/options_svc` tests for the four new row keys and t
 
 ## Out of scope
 
-No inline actions. No IV / RV / edge. No new theme section. The dealer symbol set is
+No inline actions. **No RV, and therefore no "edge" column** — IV level and
+direction ship, but IV−RV needs a realized-vol series that does not exist and is
+not worth building for one column. No new theme section. The dealer symbol set is
 a module constant `("$SPX", "SPY", "QQQ", "$NDX")` — making it a user setting is a
 later increment, not v1.
