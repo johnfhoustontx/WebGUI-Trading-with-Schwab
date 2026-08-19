@@ -1649,6 +1649,60 @@ def gamma_walls(vname, data, spot):
 _WALL_VIEWS = frozenset({"GEX", "DEX"})
 
 
+def _matrix_dealer_levels(gh, conn, symbol, session_date):
+    """{'call_wall','put_wall','net_gex'} for one symbol from its NEWEST grid.
+
+    Uses ``latest_grid_row`` (one row, one decode) rather than
+    ``load_date_with_grid`` — the latter decodes every grid for the session, and
+    running that per symbol per minute is the hotspot the incremental
+    gamma_snapshot memo exists to avoid.
+
+    The walls are SPLIT BY SPOT, not by position in ``gamma_walls``' list.
+    ``gamma_walls`` returns ``[put_wall, call_wall]`` but FILTERS None out of the
+    pair, so a chain with strikes on only one side of spot comes back as a
+    single-element list whose side is ambiguous — indexing it would file a call
+    wall as a put wall, silently, for every such symbol. The picker's own
+    contract is the disambiguator: the put wall is strictly BELOW spot, the call
+    wall strictly ABOVE.
+
+    Every value degrades to None, never 0.0: index OI reads 0 after hours, so an
+    all-zero grid produces ARBITRARY walls, and the Desk withholds a wall it
+    cannot trust rather than printing a confident wrong one. ``net_gex`` is the
+    stored ``net_total`` COLUMN — a whole-chain aggregate computed at insert, NOT
+    reconstructable from the grid, which may be cropped and rounded. Never raises.
+    """
+    blank = {"call_wall": None, "put_wall": None, "net_gex": None}
+    try:
+        row = gh.latest_grid_row(conn, symbol, "gex", session_date)
+        if not row:
+            return blank
+        _ts, spot, net_total, grid = row
+        walls = gamma_walls("GEX", {"gex": grid}, spot) or []
+        call_wall = next((w for w in walls if w > spot), None)
+        put_wall = next((w for w in walls if w < spot), None)
+        return {"call_wall": call_wall, "put_wall": put_wall,
+                "net_gex": net_total}
+    except Exception:
+        log.debug("matrix dealer levels failed for %s", symbol, exc_info=True)
+        return blank
+
+
+def _matrix_iv_series(gh, conn, symbol, session_date):
+    """The symbol's intraday ATM-IV series, or ``[]``. Never raises.
+
+    Guarded on its OWN, not inside the caller's per-symbol try, because
+    ``atm_iv`` is a forward-only COLUMN: a ``gex_history.db`` written before it
+    existed raises on this query alone while ``load_flow_series`` /
+    ``latest_flip`` still work. Sharing a guard would let a brand-new additive
+    field blank the flip and series that work today.
+    """
+    try:
+        return gh.load_atm_iv_series(conn, symbol, session_date) or []
+    except Exception:
+        log.debug("matrix atm-iv series failed for %s", symbol, exc_info=True)
+        return []
+
+
 def _level_track(rows, vname):
     """Per-snapshot flip / call-wall / put-wall levels, parallel 1:1 with ``rows``.
 
@@ -2804,10 +2858,14 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
             try:
                 series = gh.load_flow_series(conn, sym, session_date)
                 flip = gh.latest_flip(conn, sym, "gex", session_date)
-                raw[sym] = {"series": series, "flip": flip}
+                iv_series = _matrix_iv_series(gh, conn, sym, session_date)
+                levels = _matrix_dealer_levels(gh, conn, sym, session_date)
+                raw[sym] = {"series": series, "flip": flip,
+                            "iv_series": iv_series, **levels}
             except Exception:
                 log.debug("build_matrix: read failed for %s", sym, exc_info=True)
-                raw[sym] = {"series": [], "flip": None}
+                raw[sym] = {"series": [], "flip": None, "iv_series": [],
+                            "call_wall": None, "put_wall": None, "net_gex": None}
     finally:
         try:
             conn.close()
@@ -2816,8 +2874,14 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
 
     try:
         import services.options_svc.matrix as mx
+        from shared import market_calendar as _mc   # local: scheduler imports this module
+
+        # Minutes to the 4pm-ET cash close, read from the calendar module that
+        # owns the session bounds — never a window constant of our own. None
+        # off-hours, which correctly disarms the time-gated dealer setups.
         rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts,
-                             eth_symbols=_matrix_eth_symbols())
+                             eth_symbols=_matrix_eth_symbols(),
+                             mins_to_close=_mc.mins_to_close(_dt.datetime.now(_mc.CT)))
         rows.sort(key=lambda r: r["hotness"], reverse=True)
         # Dollar-weighted market-wide net call/put PREMIUM skew over the same raw
         # blobs — a market-money read consumed by the sentiment tiles. Additive.

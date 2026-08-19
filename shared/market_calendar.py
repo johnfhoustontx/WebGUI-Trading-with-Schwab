@@ -404,6 +404,29 @@ def is_regular_hours(now) -> bool:
     return session_at(now) is Session.REGULAR
 
 
+def mins_to_close(now):
+    """Minutes remaining in the regular session (to 15:00 CT = 4pm ET cash
+    close), or ``None`` when ``now`` is outside it.
+
+    Reads the SAME ``sessions.regular`` bound ``session_at`` does, so the count
+    cannot drift from the predicate that says whether the session is open --
+    which is why this lives here and not in a caller. It adds no constant of
+    its own.
+
+    ``None`` rather than 0.0 or a negative outside RTH: this gates the
+    time-of-day dealer setups (the charm grind and the late pin), and 0.0 reads
+    as "the close is upon us", so degrading to it would leave the last-hour
+    setups armed all weekend. 15:00 itself is INSIDE the regular session
+    (REGULAR owns the minute it shares with the curb open), so the final
+    reading is exactly 0.0 and the result is never negative.
+    """
+    if not is_regular_hours(now):
+        return None
+    ct = _ct_of(now)
+    _start, end = _session_bounds("regular")
+    return (datetime.combine(ct.date(), end, tzinfo=CT) - ct).total_seconds() / 60.0
+
+
 def is_extended_hours(now) -> bool:
     """True during GTH or Curb -- so always False before the activation date."""
     return session_at(now) in (Session.GTH, Session.CURB)

@@ -3834,10 +3834,11 @@ class _RecConn:
     def close(self): self.closed = True
 
 
-def _fake_gh(flow_series=None, flip=100.0, conn=None):
+def _fake_gh(flow_series=None, flip=100.0, conn=None, grid_row=None, iv_series=None):
     series = flow_series if flow_series is not None else [
         (0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
         (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+    ivs = iv_series if iv_series is not None else []
 
     class FakeGH:
         @staticmethod
@@ -3846,7 +3847,104 @@ def _fake_gh(flow_series=None, flip=100.0, conn=None):
         def load_flow_series(c, symbol, d=None): return series
         @staticmethod
         def latest_flip(c, symbol, view="gex", date=None): return flip
+        @staticmethod
+        def latest_grid_row(c, symbol, view="gex", date=None): return grid_row
+        @staticmethod
+        def load_atm_iv_series(c, symbol, d=None): return ivs
     return FakeGH
+
+
+# --- dealer levels for the matrix rows (walls / net GEX) ---------------------
+# The grid below is deliberately lopsided so put and call are distinguishable:
+# 95 carries the big PUT exposure below spot, 105 the big CALL exposure above.
+_LEVEL_GRID = {
+    95.0:  {"call": 1.0,   "put": -900.0, "net": -899.0},   # put wall  (< spot)
+    100.0: {"call": 50.0,  "put": -60.0,  "net": -10.0},
+    105.0: {"call": 800.0, "put": -2.0,   "net": 798.0},    # call wall (> spot)
+}
+
+
+def test_matrix_dealer_levels_keeps_gamma_walls_PUT_FIRST_ordering():
+    """gamma_walls returns ``[put_wall, call_wall]`` -- put FIRST.
+
+    Inverting this is silent and catastrophic: every symbol's walls swap, and
+    the Desk's structure map mirrors with nothing to flag it. Pinned against an
+    unambiguous grid rather than the positional convention, so a change in
+    gamma_walls' ORDER fails here instead of shipping.
+    """
+    from services.options_svc import compute
+    gh = _fake_gh(grid_row=(1_700_000_000, 100.0, 1_420_000_000.0, _LEVEL_GRID))
+    out = compute._matrix_dealer_levels(gh, object(), "SPY", None)
+    assert out["put_wall"] == 95.0
+    assert out["call_wall"] == 105.0
+
+
+def test_matrix_dealer_levels_reads_net_gex_from_the_stored_COLUMN():
+    """net_total is a whole-chain aggregate computed at insert -- NOT derivable
+    from the (croppable, rounded) grid. Summing the grid's ``net`` values here
+    would give -101.0, a number three orders of magnitude off."""
+    from services.options_svc import compute
+    gh = _fake_gh(grid_row=(1_700_000_000, 100.0, 1_420_000_000.0, _LEVEL_GRID))
+    out = compute._matrix_dealer_levels(gh, object(), "SPY", None)
+    assert out["net_gex"] == 1_420_000_000.0
+
+
+def test_matrix_dealer_levels_classifies_a_ONE_SIDED_grid_by_spot():
+    """gamma_walls FILTERS None out of its pair, so a grid with strikes on only
+    one side of spot returns a single-element list whose side is ambiguous
+    positionally. Indexing it would file a call wall as a put wall."""
+    from services.options_svc import compute
+    above_only = {105.0: {"call": 800.0, "put": -2.0, "net": 798.0}}
+    gh = _fake_gh(grid_row=(1_700_000_000, 100.0, 5.0, above_only))
+    out = compute._matrix_dealer_levels(gh, object(), "SPY", None)
+    assert out["call_wall"] == 105.0
+    assert out["put_wall"] is None
+
+
+def test_matrix_dealer_levels_blank_on_no_row_or_a_raising_reader():
+    # None, never 0.0: index OI reads 0 after hours, so an all-zero grid yields
+    # ARBITRARY walls and the Desk withholds rather than printing a wrong one.
+    from services.options_svc import compute
+    blank = {"call_wall": None, "put_wall": None, "net_gex": None}
+    assert compute._matrix_dealer_levels(_fake_gh(grid_row=None), object(),
+                                         "SPY", None) == blank
+
+    class Boom:
+        @staticmethod
+        def latest_grid_row(*a, **k): raise RuntimeError("db gone")
+    assert compute._matrix_dealer_levels(Boom, object(), "SPY", None) == blank
+
+
+def test_matrix_iv_series_survives_a_missing_atm_iv_column():
+    """atm_iv is a forward-only COLUMN: a gex_history.db predating it raises on
+    this query alone while every other loader works. Guarded separately so a
+    new additive field can never blank the flip/series that work today."""
+    from services.options_svc import compute
+
+    class Boom:
+        @staticmethod
+        def load_atm_iv_series(*a, **k): raise RuntimeError("no such column")
+    assert compute._matrix_iv_series(Boom, object(), "SPY", None) == []
+
+
+def test_build_matrix_threads_dealer_levels_and_iv_into_the_rows(monkeypatch):
+    from services.options_svc import compute
+    conn = _RecConn()
+    gh = _fake_gh(conn=conn,
+                  grid_row=(1_700_000_000, 100.0, 1_420_000_000.0, _LEVEL_GRID),
+                  iv_series=[(0, 12.0), (900, 13.5)])
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: gh)
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-07-20",
+                               session_date="2026-07-20", now_ts=900)
+    r = out["rows"][0]
+    assert r["put_wall"] == 95.0 and r["call_wall"] == 105.0
+    assert r["net_gex"] == 1_420_000_000.0
+    assert r["atm_iv"] == 13.5
+    assert r["iv_state"] == "spiking"
+    assert r["dealer_regime"] in ("gamma_cascade", "vanna_squeeze",
+                                 "delta_wall_pin", "charm_grind", "neutral")
+    assert conn.closed is True
 
 
 def test_build_matrix_assembles_rows(monkeypatch):

@@ -203,6 +203,30 @@ def test_is_regular_hours_matches_session_at():
     assert mc.is_regular_hours(_ct(2026, 8, 17, 7, 0)) is False
 
 
+def test_mins_to_close_counts_down_to_the_regular_close():
+    # The regular session ends 15:00 CT == 16:00 ET, the cash close.
+    assert mc.mins_to_close(_ct(2026, 8, 17, 14, 0)) == 60.0
+    assert mc.mins_to_close(_ct(2026, 8, 17, 8, 30)) == 390.0
+    # 15:00 is INSIDE the regular session (it owns the minute it shares with
+    # the curb open), so the last reading is 0.0 -- not None, and never negative.
+    assert mc.mins_to_close(_ct(2026, 8, 17, 15, 0)) == 0.0
+
+
+def test_mins_to_close_is_none_outside_the_regular_session():
+    # None, NOT 0.0 or a negative: it gates the afternoon/late dealer setups,
+    # and 0.0 would read as "the close is upon us" all weekend long.
+    assert mc.mins_to_close(_ct(2026, 8, 17, 7, 0)) is None    # GTH
+    assert mc.mins_to_close(_ct(2026, 8, 17, 15, 5)) is None   # curb
+    assert mc.mins_to_close(_ct(2026, 8, 22, 12, 0)) is None   # Saturday
+    assert mc.mins_to_close(_ct(2026, 9, 7, 12, 0)) is None    # Labor Day
+
+
+def test_mins_to_close_converts_a_non_ct_datetime():
+    # 18:00 UTC on a summer weekday == 13:00 CT -> two hours left.
+    utc = dt.datetime(2026, 8, 17, 18, 0, tzinfo=dt.timezone.utc)
+    assert mc.mins_to_close(utc) == 120.0
+
+
 def test_is_extended_hours_only_after_activation():
     assert mc.is_extended_hours(_ct(2026, 8, 17, 7, 0)) is True
     assert mc.is_extended_hours(_ct(2026, 8, 14, 7, 0)) is False
