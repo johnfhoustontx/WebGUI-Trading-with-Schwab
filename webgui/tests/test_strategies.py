@@ -91,3 +91,29 @@ def test_strategy_label():
     assert S.strategy_label("IC") == "Condor — iron"
     assert S.strategy_label("DIAGONAL_PUT") == "Diagonal — put"
     assert S.strategy_label("WHat") == "WHat"   # unknown → itself
+
+
+def test_every_template_has_tags_and_a_blurb():
+    # The guard that matters: a strategy added to STRATEGY_TEMPLATES without
+    # tags/blurb would render a bare frame with no thesis, and nothing else
+    # would fail.
+    for code in S.STRATEGY_TEMPLATES:
+        assert S.strategy_tags(code), f"{code} has no tags"
+        assert S.strategy_blurb(code), f"{code} has no blurb"
+
+
+def test_tags_lead_with_the_cash_flow_direction():
+    assert S.strategy_tags("PCS")[0] == "CREDIT"
+    assert S.strategy_tags("VERT_CALL_DEBIT")[0] == "DEBIT"
+
+
+def test_tags_state_the_leg_count_matching_the_template():
+    for code, specs in S.STRATEGY_TEMPLATES.items():
+        n = len(specs)
+        assert f"{n} LEG" in S.strategy_tags(code) or f"{n} LEGS" in S.strategy_tags(code), \
+            f"{code}: leg-count tag does not match its {n}-leg template"
+
+
+def test_unknown_code_degrades_and_does_not_raise():
+    assert S.strategy_tags("NOPE") == []
+    assert S.strategy_blurb("NOPE") == ""
