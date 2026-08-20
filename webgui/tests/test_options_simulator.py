@@ -241,3 +241,139 @@ def test_sim_snapshot_roundtrips_via_page_state():
     snap = ps.snapshot(vals, sim._SIM_KEYS)
     assert "junk" not in snap and snap["dt"] == 7.0
     assert ps.merge_restore(snap, sim._SIM_DEFAULTS)["symbol"] == "AAPL"
+
+
+# -- the leg editor's CARD layout ---------------------------------------------
+# The Simulator mounts the SHARED leg editor in ``layout="card"`` while keeping
+# the app-wide dark navy — the near-black CALC_* language belongs to the
+# Calculator alone. Everything below asserts against the MOUNTED element tree
+# rather than the call site's source: a source grep passes on a call that never
+# renders, and it cannot see which palette actually reached the DOM.
+
+_SIM_META = {
+    "symbol": "SPY", "spot": 450.0, "n_contracts": 12,
+    "expiries": ["2026-06-26", "2026-07-03"],
+    "strikes": {e: {"call": [445.0, 450.0, 455.0], "put": [445.0, 450.0, 455.0]}
+                for e in ("2026-06-26", "2026-07-03")},
+}
+
+
+def _sim_container():
+    """Render the Simulator over a warm sim_meta; return the mount container."""
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    with ui.card() as container:
+        sim.render()
+    return container
+
+
+def _leg_cards(container):
+    return [e for e in container.descendants() if "leg-card" in e._classes]
+
+
+def _labels(el):
+    from nicegui import ui
+    return [e.text for e in el.descendants() if isinstance(e, ui.label)]
+
+
+def _sim_buttons(container):
+    from nicegui import ui
+    return [e for e in container.descendants() if isinstance(e, ui.button)]
+
+
+def _fire_click(el):
+    # snapshot: the handler re-renders, which deletes elements and mutates the
+    # listener registry mid-iteration
+    for listener in list(el._event_listeners.values()):
+        if listener.type == "click":
+            listener.handler(None)
+
+
+def test_simulator_mounts_the_leg_editor_as_cards_not_rows():
+    """The page really renders the card layout — the ``leg-card`` hook is present
+    and neither row-mode artefact (the ``leg-row`` line, the ``leg-head`` header)
+    survives. Seeded PCS = two legs, so two cards."""
+    container = _sim_container()
+    assert len(_leg_cards(container)) == 2
+    assert not [e for e in container.descendants() if "leg-row" in e._classes]
+    assert not [e for e in container.descendants() if "leg-head" in e._classes]
+
+
+def test_simulator_cards_carry_the_eyebrow_captions():
+    """The card's own captions replace the row header the page used to pass."""
+    card = _leg_cards(_sim_container())[0]
+    txt = _labels(card)
+    for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY", "DELTA"):
+        assert cap in txt, cap
+
+
+def test_simulator_keeps_the_default_navy_card_palette():
+    """No ``tokens`` — the Simulator stays app-wide dark navy. This is the
+    regression that would otherwise be invisible: a later Calculator restyle
+    must not repaint this page, so the assertion is against
+    ``DEFAULT_CARD_TOKENS`` (and the absence of the CALC_* language), not
+    against whatever the Calculator happens to use today."""
+    from pages.options import leg_editor as LE
+    from pages.options import theme
+
+    cards = _leg_cards(_sim_container())
+    for tok in ("frame", "accent_short"):        # PCS leg 1 is the short put
+        for cls in LE.DEFAULT_CARD_TOKENS[tok].split():
+            assert cls in cards[0]._classes, cls
+    for cls in LE.DEFAULT_CARD_TOKENS["accent_long"].split():
+        assert cls in cards[1]._classes, cls     # leg 2 is the long put
+    calc = " ".join([theme.CALC_EDGE_ACCENT, theme.CALC_EDGE_POS,
+                     theme.CALC_EDGE_NEG, theme.CALC_FRAME]).split()
+    joined = " ".join(c for card in cards for c in card._classes)
+    for cls in set(calc) - {"border-l-2", "relative"}:   # geometry is shared
+        assert cls not in joined.split(), cls
+
+
+def test_simulator_cards_have_no_premium_cell():
+    """``show_premium=False`` survives the switch — the simulator prices each leg
+    off the chain's IV, so a manual premium input would be a lie. The PREMIUM
+    track is COLLAPSED, not left as a hole, so DELTA keeps its own caption."""
+    from nicegui import ui
+    from pages.options import leg_editor as LE
+
+    card = _leg_cards(_sim_container())[0]
+    assert "PREMIUM" not in _labels(card)
+    assert len([e for e in card.descendants() if isinstance(e, ui.number)]) == 1  # qty only
+    grids = [c for e in card.descendants() for c in e._classes if c.startswith("grid-cols-")]
+    no_prem = [c for c in LE._CARD_ROW2_COLS_NO_PREMIUM.split() if c.startswith("grid-cols-")][0]
+    full = [c for c in LE._CARD_ROW2_COLS.split() if c.startswith("grid-cols-")][0]
+    assert no_prem in grids and full not in grids
+
+
+def test_simulator_delta_reads_an_em_dash_with_no_chain_greeks():
+    """No ``delta_for``: ``sim_meta`` carries spot/expiries/strikes and no greeks,
+    so the card must show an em-dash — never a confident 0.00."""
+    card = _leg_cards(_sim_container())[0]
+    txt = _labels(card)
+    assert "\u2014" in txt
+    assert "+0.00" not in txt and "-0.00" not in txt
+
+
+def test_simulator_floors_the_leg_count_at_one():
+    """``min_legs`` is left at the default 1. Both removes are live at the seeded
+    two legs (today's behaviour); the LAST leg locks — a zero-leg simulator
+    enqueues nothing (``_current_params`` returns None) and silently freezes the
+    charts on a stale sweep, which is worse than a disabled ✕ with a tooltip."""
+    container = _sim_container()
+    removes = [b for b in _sim_buttons(container) if "leg-remove" in b._classes]
+    assert len(removes) == 2 and all(b.enabled for b in removes)
+    _fire_click(removes[0])
+    left = [b for b in _sim_buttons(container) if "leg-remove" in b._classes]
+    assert len(left) == 1 and not left[0].enabled
+
+
+def test_simulator_card_footer_offers_add_leg_and_no_reset():
+    """``on_reset`` stays None: the strategy picker already re-seeds the template
+    on every pick, so a RESET TO TEMPLATE button would be a second control for
+    the same act — a Calculator affordance, not one this page asked for."""
+    labels = [b.text for b in _sim_buttons(_sim_container())]
+    assert "ADD LEG" in labels
+    assert "RESET TO TEMPLATE" not in labels
