@@ -440,16 +440,21 @@ def test_build_tree_nests_industries_and_stocks_under_their_parents():
     levels = {
         "sector": [_row(1.0, 0.1, symbol="XLV", label="Health Care")],
         "industry": [_row(1.0, 0.2, symbol="XBI", label="Biotech",
+                          sector="Health Care"),
+                     _row(0.5, 0.2, symbol="IHI", label="Devices",
                           sector="Health Care")],
         "stock": [_row(1.0, 0.3, symbol="AMGN", sector="Health Care",
                        industry="Biotech")],
     }
     tree = B.build_tree(levels)
     assert [s["label"] for s in tree] == ["Health Care"]
-    assert [i["label"] for i in tree[0]["industries"]] == ["Biotech"]
+    assert [i["label"] for i in tree[0]["industries"]] == ["Biotech", "Devices"]
     assert [k["symbol"] for k in tree[0]["industries"][0]["stocks"]] == ["AMGN"]
-    # Both list keys exist on every sector, placed stocks or not, so the page
-    # iterates them without a guard per node.
+    # Every list key exists on every node, children or not, so the page iterates
+    # them with no guard per node — at BOTH levels, not just the sector. Devices
+    # is the reachable case: 3 of 69 industries held no admitted member stock on
+    # 2026-08-19.
+    assert tree[0]["industries"][1]["stocks"] == []
     assert tree[0]["orphan_stocks"] == []
 
 
@@ -497,6 +502,17 @@ def test_build_tree_keys_an_industry_by_its_sector_and_name_together():
     tree = B.build_tree(levels)
     assert [k["symbol"] for k in tree[0]["industries"][0]["stocks"]] == ["ISRG"]
     assert [k["symbol"] for k in tree[1]["industries"][0]["stocks"]] == ["ROK"]
+
+
+def test_build_tree_returns_one_node_per_sector_row_not_one_per_label():
+    """The ordered list, not the lookup index keyed on ``label``. Sector labels
+    are unique in the live payload (11 of 11 on 2026-08-19) and unique upstream
+    by construction — ``_momentum_universe`` builds them from a dict keyed on the
+    name — so returning the index reads as identical right up until that stops
+    holding, and then it drops a row the headline is still counting."""
+    dup = [_row(2.0, 0.1, symbol="XLV", label="Dup"),
+           _row(1.0, 0.1, symbol="XLE", label="Dup")]
+    assert [s["symbol"] for s in B.build_tree({"sector": dup})] == ["XLV", "XLE"]
 
 
 def test_build_tree_orders_sectors_strongest_first():
@@ -553,6 +569,22 @@ def test_build_tree_returns_nodes_that_carry_their_row_and_leave_it_untouched():
     assert node["symbol"] == "XLV" and node["score"] == 0.8
     assert node["raw"] == row["raw"]
     assert "industries" not in row and "orphan_stocks" not in row
+
+
+def test_build_tree_copies_child_rows_too_not_only_the_sectors():
+    """The copy invariant reads for all three levels and a sector-only fixture
+    sees none of it — the blind spot the ordering test above names for itself. An
+    industry node built by mutating its row hands /sentiment/momentum a row grown
+    a ``stocks`` key; one rebuilt from scratch drops ``participation``, which is
+    the breadth bar's whole input and which only the upper two levels carry."""
+    industry = _row(1.0, 0.1, symbol="XBI", label="Bio", sector="HC",
+                    participation=0.5)
+    stock = _row(1.0, 0.1, symbol="AMGN", sector="HC", industry="Bio", score=0.6)
+    tree = B.build_tree({"sector": [_row(1.0, 0.1, symbol="XLV", label="HC")],
+                         "industry": [industry], "stock": [stock]})
+    kid = tree[0]["industries"][0]
+    assert kid["participation"] == 0.5 and kid["stocks"][0]["score"] == 0.6
+    assert "stocks" not in industry and kid["stocks"][0] is not stock
 
 
 def test_build_tree_drops_a_null_row_but_still_refuses_a_different_document():
