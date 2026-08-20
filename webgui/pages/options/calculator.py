@@ -359,20 +359,72 @@ def max_loss_estimate(legs):
     return round(-worst, 2) if worst < 0 else 0.0
 
 
-def matrix_pct_of_max(pnl, max_profit):
-    """A matrix cell's P&L as a percentage of the structure's MAX RETURN.
+def usable_denominator(v):
+    """``v`` as a strictly positive finite denominator, else ``None``.
 
-    Replaces the service's ``pnl_pct`` (a share of premium received) so the
-    column reads directly against the MAX RETURN tile above the matrix.
+    Refuses the uncapped sentinel above all: ``999999`` is a placeholder, not a
+    figure, and dividing by it paints ``+0.0%`` down a whole column — a fake
+    measurement stated confidently on every row."""
+    f = _finite(v)
+    return f if (f is not None and f > 0 and not is_unlimited(f)) else None
 
-    ``None`` — an em-dash, never a 0.0% that would read like a measurement —
-    when there is no max return to divide by, INCLUDING the uncapped sentinel:
-    there is no percentage of an unlimited return."""
+
+def matrix_pct_of(pnl, denominator):
+    """A matrix cell's P&L as a percentage of ``denominator``.
+
+    ``None`` — an em-dash, never a ``0.0%`` that would read like a measurement —
+    when either side is unusable. Which denominator applies is ``matrix_basis``'s
+    decision, taken ONCE per render; this function only divides."""
     p = _finite(pnl)
-    m = _finite(max_profit)
-    if p is None or m is None or m <= 0 or is_unlimited(m):
-        return None
-    return p / m * 100.0
+    d = usable_denominator(denominator)
+    return None if p is None or d is None else p / d * 100.0
+
+
+# The three bases, one shape. The heading is PART of the basis rather than a
+# separate decision: a percentage whose denominator the reader has to infer is
+# worse than no percentage at all. ``matrix_basis`` fills the denominator in for
+# the first two; the third has none by definition.
+MATRIX_BASIS_MAX = {"kind": "max", "denominator": None, "heading": "% MAX"}
+MATRIX_BASIS_COST = {"kind": "cost", "denominator": None, "heading": "% COST"}
+MATRIX_BASIS_NONE = {"kind": "none", "denominator": None, "heading": "%"}
+
+
+def matrix_basis(summary):
+    """What the matrix's ``%`` column is a percentage OF: ``{kind, denominator,
+    heading}``, resolved once per render from the service's summary.
+
+    Three cases, in order:
+
+    * **max** — a real capped max return. The column reads directly against the
+      MAX RETURN tile above the matrix. For a credit structure this is exactly
+      the service's old ``pnl_pct`` (its ``max_profit`` IS the entry credit), so
+      those screens are numerically unchanged.
+    * **cost** — no capped return (a long call's ``max_profit`` is the uncapped
+      sentinel), but the position was BOUGHT, so what it cost is an honest
+      denominator and "+125% of cost" is the figure a trader wants. The debit
+      comes from ``entry_credit`` — negative for a debit, and the same figure
+      the ENTRY DEBIT tile shows, so the column and the tile agree by
+      construction. (``net_premium(legs)`` computes the identical quantity
+      page-side; the summary's is preferred because it is the tile's own
+      number.)
+    * **none** — neither. Em-dash cells under a bare ``%``: no basis, no claim.
+
+    ⚠ On the generic NUMERIC path (any structure the analytic summaries do not
+    cover — debit verticals, butterflies, calendars) the service's ``max_profit``
+    is ``max(pnl)`` over ITS OWN price grid, not a closed-form cap. Correct, but
+    surprising: widen that grid and the denominator can move, so the same cell
+    can read a different ``% MAX``. The analytic paths (PCS/CCS/IC and the
+    singles) return a true cap and do not drift.
+    """
+    s = summary or {}
+    cap = usable_denominator(s.get("max_profit"))
+    if cap is not None:
+        return dict(MATRIX_BASIS_MAX, denominator=cap)
+    credit = _finite(s.get("entry_credit"))
+    cost = usable_denominator(-credit) if credit is not None else None
+    if cost is not None:
+        return dict(MATRIX_BASIS_COST, denominator=cost)
+    return dict(MATRIX_BASIS_NONE)
 
 
 # ── the P&L matrix ───────────────────────────────────────────────────────────
@@ -418,7 +470,7 @@ def _matrix_pct_text(pct):
     return f"{pct:+.1f}%"
 
 
-def matrix_cell_facts(pnl, max_profit, g_max, g_min):
+def matrix_cell_facts(pnl, basis, g_max, g_min):
     """One matrix cell: ``{dollars, pct, bg, fg, alpha}``.
 
     Tint magnitude is relative to the grid's OWN extremes, and to each SIDE's
@@ -431,9 +483,11 @@ def matrix_cell_facts(pnl, max_profit, g_max, g_min):
     sentinel. The dollar figure printed in the same cell carries the absolute
     magnitude; the tint carries the shape.
 
-    ``pct`` is a share of MAX RETURN (``matrix_pct_of_max``), so the column reads
-    directly against the MAX RETURN tile above the matrix — an em-dash, never a
-    ``0.0%``, when there is no max return to divide by.
+    ``pct`` is a percentage of whatever ``matrix_basis`` resolved — max return,
+    or cost for a position with no capped return — and an em-dash, never a
+    ``0.0%``, when it resolved neither. The basis dict is passed whole rather
+    than as a bare denominator so the cells and the heading above them cannot
+    come from different decisions.
     """
     p = _finite(pnl)
     if p is None:
@@ -446,22 +500,28 @@ def matrix_cell_facts(pnl, max_profit, g_max, g_min):
     alpha = round(_MATRIX_ALPHA_FLOOR + ratio * _MATRIX_ALPHA_SPAN, 3)
     return {
         "dollars": f"{p:+,.0f}",
-        "pct": _matrix_pct_text(matrix_pct_of_max(p, max_profit)),
+        "pct": _matrix_pct_text(matrix_pct_of(p, (basis or {}).get("denominator"))),
         "bg": f"rgba({_MATRIX_PROFIT_RGB if profit else _MATRIX_LOSS_RGB},{alpha})",
         "fg": _MATRIX_PROFIT_FG if profit else _MATRIX_LOSS_FG,
         "alpha": alpha,
     }
 
 
-def matrix_headers(eval_labels):
+def matrix_headers(eval_labels, basis=None):
     """Column headings; the LAST column is the expiry and is flagged so the page
-    can colour it amber (the design's one emphasised column)."""
+    can colour it amber (the design's one emphasised column).
+
+    Each date column heads a ``$`` and a percentage sub-column, and the
+    percentage's heading is ``basis["heading"]`` — the column always names what
+    it is a percentage of. No basis means no claim: a bare ``%``."""
     labels = list(eval_labels or [])
     last = len(labels) - 1
+    pct = (basis or {}).get("heading") or MATRIX_BASIS_NONE["heading"]
     # No special case for the "Now" column: ``.upper()`` already renders it
     # "NOW $", and a branch that cannot change the output is a branch that
     # cannot be tested.
-    return [{"label": f"{str(lab).strip()} $".upper(), "expiry": i == last}
+    return [{"label": f"{str(lab).strip()} $".upper(), "pct_label": pct,
+             "expiry": i == last}
             for i, lab in enumerate(labels)]
 
 
@@ -562,19 +622,24 @@ def _render_summary(box, summary):
         tile("Prob of Profit", f"{summary.get('pop', 0):.1f}%", "#bdbdbd")
 
 
-def matrix_html(eval_labels, pnl_data, spot, max_profit):
+def matrix_html(eval_labels, pnl_data, spot, summary):
     """The P&L matrix as ONE raw HTML fragment ("" when there is nothing to draw).
 
     Raw HTML rather than NiceGUI components on purpose — a few hundred cells
     built with ``.classes()`` would be a few hundred Vue elements — which is the
     repo's documented out-of-scope case for the Tailwind-first rule, so the
     inline ``style=`` attributes below are the intended form here.
+
+    ``summary`` is the service's summary payload; the ``%`` column's basis is
+    resolved from it ONCE here, so every cell and the heading above them share
+    one meaning.
     """
+    basis = matrix_basis(summary)
     rows = grid_rows(pnl_data)
     # ``eval_labels`` arrive pre-formatted (MM/DD strings) from the service;
     # ``eval_date_labels`` is harmless here (it str()'s strings) and keeps the
     # page robust if date objects are ever passed.
-    headers = matrix_headers(eval_date_labels(eval_labels))
+    headers = matrix_headers(eval_date_labels(eval_labels), basis)
     if not rows or not headers:
         return ""
     g_max, g_min = grid_extremes(pnl_data)
@@ -590,7 +655,7 @@ def matrix_html(eval_labels, pnl_data, spot, max_profit):
         cell = (f'position:sticky;top:0;z-index:2;background:{MATRIX_HEAD_BG};'
                 f'border-bottom:1px solid {MATRIX_HEAD_RULE};color:{fg};{head_style}')
         ths.append(f'<th style="{cell}">{h["label"]}</th>'
-                   f'<th style="{cell}">% MAX</th>')
+                   f'<th style="{cell}">{h["pct_label"]}</th>')
 
     trs = []
     for i, r in enumerate(rows):
@@ -605,7 +670,7 @@ def matrix_html(eval_labels, pnl_data, spot, max_profit):
                f'font-weight:600;'
                f'{row_style}">{price:,.2f}</td>']
         for c in r["cells"]:
-            fact = matrix_cell_facts(c["pnl"], max_profit, g_max, g_min)
+            fact = matrix_cell_facts(c["pnl"], basis, g_max, g_min)
             cell = f'background:{fact["bg"]};color:{fact["fg"]};{row_style}'
             tds.append(f'<td style="{cell}">{fact["dollars"]}</td>'
                        f'<td style="{cell}">{fact["pct"]}</td>')
@@ -622,11 +687,11 @@ def matrix_html(eval_labels, pnl_data, spot, max_profit):
             f'<tbody>{"".join(trs)}</tbody></table></div>')
 
 
-def _render_grid(box, eval_labels, pnl_data, spot, max_profit=None):
+def _render_grid(box, eval_labels, pnl_data, spot, summary=None):
     from nicegui import ui
 
     box.clear()
-    html = matrix_html(eval_labels, pnl_data, spot, max_profit)
+    html = matrix_html(eval_labels, pnl_data, spot, summary)
     with box:
         if not html:
             ui.label("No P&L data.").classes("opacity-60")
@@ -1115,8 +1180,7 @@ def render():
         summary = result.get("summary") or {}
         _render_summary(summary_box, summary)
         _render_grid(grid_box, result.get("eval_labels") or [],
-                     result.get("pnl_data") or [], spot,
-                     summary.get("max_profit"))
+                     result.get("pnl_data") or [], spot, summary)
 
     def _apply_iv(res):
         """Fill the IV field from a ``calc_iv`` result (implied from the mark)."""

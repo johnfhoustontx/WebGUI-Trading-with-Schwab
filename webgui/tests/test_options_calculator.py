@@ -795,7 +795,9 @@ def test_matrix_html_gives_a_long_call_real_percentages_not_em_dashes():
     body = html.split("</thead>")[1]
     assert "+22.5%" in body         # the +90 cell against a 400 cost
     assert "-75.0%" in body         # …and the -300 cell
-    assert "—" not in body
+    # The ONLY em-dashes left are the two belonging to the one cell that
+    # genuinely carries no P&L — not a column-wide "no basis" wipe.
+    assert body.count("—") == 2
 
 
 def test_matrix_html_heads_the_percentage_column_with_its_own_basis():
