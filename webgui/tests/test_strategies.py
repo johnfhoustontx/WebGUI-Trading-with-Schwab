@@ -100,6 +100,9 @@ def test_every_template_has_tags_and_a_blurb():
     for code in S.STRATEGY_TEMPLATES:
         assert S.strategy_tags(code), f"{code} has no tags"
         assert S.strategy_blurb(code), f"{code} has no blurb"
+    # And the other direction: a facts entry whose template was renamed or
+    # removed would quietly render "0 LEGS" rather than fail.
+    assert set(S._STRATEGY_FACTS) == set(S.STRATEGY_TEMPLATES)
 
 
 def test_tags_lead_with_the_cash_flow_direction():
