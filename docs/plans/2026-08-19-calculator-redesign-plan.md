@@ -59,10 +59,10 @@ and render it as such, never as a number and never as a percentage denominator.
 `REGIME_DISPLAY` across four tiers:
 
 ```python
-# Mirror of options_calculator.UNLIMITED (999999) — a magic placeholder the
-# service returns verbatim for an uncapped max_profit (LONG_CALL) or max_loss
-# (NAKED_CALL). Tier-1 may not import that module, so the value is restated
-# here; keep the two in step.
+# Mirror of the scanner's options-calculator UNLIMITED (999999) — a magic
+# placeholder the service returns verbatim for an uncapped max_profit
+# (LONG_CALL) or max_loss (NAKED_CALL). Tier-1 may not import that module, so
+# the value is restated here; keep the two in step.
 UNLIMITED = 999999
 
 
@@ -70,6 +70,8 @@ def is_unlimited(v):
     """Whether a summary figure is the service's uncapped sentinel."""
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v == UNLIMITED
 ```
+
+⚠ **Write that comment WITHOUT the bare module token.** `webgui/tests/test_options_calculator.py::test_calculator_holds_no_engine_imports` is a substring guard on the Tier-1 no-engine-imports rule, and it trips on the literal name even inside a comment. The fix is to reword the comment — **never** to relax the guard.
 
 **The reference design** is unpacked at `C:/Users/john_/AppData/Local/Temp/claude/D--WebGUI-Trading-with-Schwab--claude-worktrees-inspiring-sinoussi-b1cc78/cad3bc3f-8cf0-4798-aa5a-75471fb99d96/scratchpad/design_body.html` — the markup and its logic. Consult it for exact geometry and colours; **do not port its Black-Scholes or its mock `MKT`/`EXPIRIES` data.**
 
@@ -692,34 +694,24 @@ def position_delta(delta, side):
 
 def net_premium(legs):
     """Net cash at entry in dollars: positive = credit received, negative = debit
-    paid. Missing premium/qty count as zero rather than blocking the readout."""
-    total = 0.0
-    for leg in legs or []:
-        prem = leg.get("premium") or 0
-        qty = int(leg.get("qty", 1) or 1)
-        sign = 1 if leg.get("side") == "short" else -1
-        total += sign * float(prem) * qty * 100
-    return total
+    paid. ``None`` while ANY leg is unpriced — a fresh template carries
+    ``premium: None`` on every leg, and "$0" would state a figure the page does
+    not have. No legs at all IS zero: no position, no cash."""
+    # (See the shipped implementation — this returns None on an unpriced leg.)
 
 
 def max_loss_estimate(legs):
-    """The ③ LEGS strip's max-loss figure — the design's own arithmetic.
+    """Worst case at expiration, in dollars.
 
-    A net credit risks the widest same-type strike spread less the credit; a net
-    debit risks the debit. This is the header STRIP only; the authoritative
-    MAX RISK tile comes from the service's summary."""
-    net = net_premium(legs)
-    if net <= 0:
-        return abs(net)
-    widths = []
-    for otype in ("put", "call"):
-        ks = [float(l["strike"]) for l in legs or []
-              if l.get("option_type") == otype and l.get("strike") is not None]
-        if len(ks) > 1:
-            widths.append(max(ks) - min(ks))
-    width = max(widths) if widths else 0.0
-    qty = max([int(l.get("qty", 1) or 1) for l in legs or []] or [1])
-    return width * 100 * qty - net
+    ⚠ SUPERSEDED DRAFT REMOVED. The width-of-the-widest-spread heuristic
+    originally drafted here is WRONG: it returns a NEGATIVE max loss for a naked
+    single, and mis-scales a net-credit ratio spread via max(qty). What shipped
+    instead is the minimum of the EXPIRATION PAYOFF over {0} u strikes — exact,
+    because a vanilla portfolio at one expiry is piecewise-linear with corners
+    only at the strikes. Verified against a brute-force payoff scan for eleven
+    structures. Returns None where no honest number exists: net-short call
+    quantity (unbounded above), a short leg outliving a long, or a missing
+    price/strike."""
 
 
 def matrix_pct_of_max(pnl, max_profit):
@@ -1197,6 +1189,8 @@ Widget placement:
 - **① STRATEGY** — the existing `strategy_menu.build_strategy_menu(...)` (pass `boxed=True`; give its popup the `strat-menu-calc` class), then a `flex-wrap` row of tag chips from `S.strategy_tags(code)`, then the `S.strategy_blurb(code)` paragraph. Rebuild the chips and blurb inside the existing `strategy_sel.on_value_change` handler.
 - **② SYMBOL** — `symbol_in`, a spot readout, then `price_in` / `iv_in` / `rate_in` / `ivchg_in` / `contracts_in` / `nstrikes_in` / `expiry_sel` as labelled cells, then LOAD CHAIN + IV UPDATE, then the scan bar (`animate-[scan_1.1s_linear_infinite]`, hidden via `set_visibility` when not loading) and the status line.
 - **③ LEGS** — the frame's right-hand strip shows `{n} LEGS`, `NET {net}` coloured by sign, `MAX LOSS {…}` in amber, recomputed in the editor's `on_change` from `net_premium` / `max_loss_estimate`. `leg_box` mounts the card editor with `layout="card"`, `tokens=` the `CALC_*` set, `delta_for=` a closure over the cached chain, `min_legs=2`, `on_reset=_seed_template`.
+
+  ⚠ **`net_premium` and `max_loss_estimate` both return `None`, and the strip must render an em-dash when they do.** As shipped in Task 3: `net_premium` is `None` while ANY leg is unpriced — and `build_default_legs` sets `premium: None`, so that is the state of every fresh template before Fetch Premiums. `max_loss_estimate` is `None` when the loss is genuinely unbounded (net-short calls) or undecidable (a short leg outliving a long). Printing `$0` in either case states a number the page does not have. It also returns real, large figures — a naked put on a 660 strike is `65,700` — so format the strip compactly rather than letting it overflow the frame.
 - **Actions** — a `grid-cols-2` of FETCH PREMIUMS · CALCULATE · EXPECTED MOVE · COPY TO SIMULATOR, plus the status line spanning both columns.
 - **Right column below ②** — `metrics_box` + `grid_box`, both `set_visibility(False)` until a result lands, with a dashed empty panel shown in their place. Its copy comes from `chain_status_facts`: *AWAITING CHAIN* before load, *AWAITING CALCULATION* after.
 
