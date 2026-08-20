@@ -99,3 +99,49 @@ def test_btn_class_override_replaces_the_navy_token():
     for tok in theme.STRATEGY_BTN.split():
         if tok not in theme.CALC_STRATEGY_BTN.split():
             assert tok not in classes, f"navy token {tok} leaked through"
+
+
+def _texts(root):
+    """Every label text mounted under ``root``."""
+    stack, out = [root], []
+    while stack:
+        el = stack.pop()
+        text = getattr(el, "text", None)
+        if isinstance(text, str):
+            out.append(text)
+        for slot in getattr(el, "slots", {}).values():
+            stack.extend(slot.children)
+    return out
+
+
+def test_the_strategy_caption_is_rendered_by_default():
+    """The third override, and the third to default to today's behaviour: the
+    Simulator and Rescue have no other label for this control, so the caption
+    has to stay unless a page says otherwise."""
+    with ui.card() as root:
+        SM.build_strategy_menu(value="PCS")
+    assert "Strategy" in _texts(root)
+    with ui.card() as boxed_root:
+        SM.build_strategy_menu(value="PCS", boxed=True)
+    assert "Strategy" in _texts(boxed_root)
+
+
+def test_caption_false_drops_the_word_and_nothing_else():
+    """The Calculator's ① STRATEGY frame chip already says it; a caption above
+    the picker says it twice, one line apart."""
+    with ui.card() as root:
+        sm = SM.build_strategy_menu(value="PCS", boxed=True, caption=False)
+    assert "Strategy" not in _texts(root)
+    # the trigger itself is untouched — it still labels the current selection
+    assert sm.button.text == "Credit spread — put"
+    assert "strategy-menu-btn" in sm.button.classes
+
+
+def test_the_class_default_matches_the_factory_default():
+    """``build_strategy_menu`` passes ``caption`` through explicitly, so the
+    class's own default is only reachable by constructing ``StrategyMenu``
+    directly — which is public. Flipping it there would strip the caption for
+    that caller alone, and every factory-routed test would stay green."""
+    with ui.card() as root:
+        SM.StrategyMenu(value="PCS")
+    assert "Strategy" in _texts(root)

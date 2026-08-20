@@ -1067,6 +1067,7 @@ def render():
         "iv_ver": None,       # last-seen calc_iv cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
         "calc_dte": None,     # horizon of the last enqueued compute (metric cards)
+        "calc_symbol": None,  # symbol the on-screen result belongs to (stale check)
         "spot": None,         # last loaded chain price (the ② SYMBOL readout)
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
@@ -1134,7 +1135,7 @@ def render():
                 strat_frame = _frame("① STRATEGY", gap="gap-3")
                 with strat_frame.box:
                     strategy_sel = strategy_menu.build_strategy_menu(
-                        value="PCS", classes="w-full", boxed=True,
+                        value="PCS", classes="w-full", boxed=True, caption=False,
                         btn_class=CALC_STRATEGY_BTN, menu_class="strat-menu-calc")
                     tags_box = ui.row().classes("flex-wrap gap-2 w-full")
                     blurb_lbl = ui.label("").classes(
@@ -1295,7 +1296,13 @@ def render():
         show_premium=True, on_change=lambda: (_capture(), _sync_legs()),
         spot_getter=lambda: float(price_in.value or 0),
         layout="card", tokens=_LEG_TOKENS, delta_for=_delta_for,
-        min_legs=2, on_reset=lambda: _seed_template())
+        # A floor of ONE, not the mock's two. The mock locks at two because its
+        # own buildLegs PADS a single-leg spec with a synthetic opposite leg;
+        # this app does not pad, and ships four genuine single-leg templates
+        # (LONG_CALL / LONG_PUT / NAKED_CALL / NAKED_PUT), so a two-leg floor
+        # would make those unreachable by hand. One still holds: a zero-leg
+        # calculator has nothing to price.
+        min_legs=1, on_reset=lambda: _seed_template())
 
     def _scale_leg_qty(factor):
         """Multiply every leg's qty by ``factor`` (RATIO-preserving) and re-render —
@@ -1523,6 +1530,13 @@ def render():
             # flight. (The Load button still force-reloads once loading clears — it
             # bypasses should_load, unlike the Trade page's button-through-dedup.)
             return
+        # A result belongs to the symbol it was computed for. Loading a
+        # DIFFERENT one would leave that symbol's cards and matrix on screen
+        # under a pill announcing this one — the page stating two symbols at
+        # once. Reloading the SAME symbol keeps them: that is a refresh, which
+        # is also what the restore-on-navigation path does.
+        if state.get("result") is not None and sym != state.get("calc_symbol"):
+            state["result"] = None
         state["last_loaded"] = sym
         if show_wait:
             state["loading"] = True
@@ -1664,6 +1678,7 @@ def render():
         state["calc_spot"] = spot
         # The result payload carries no horizon of its own — see max_dte_from_legs.
         state["calc_dte"] = max_dte_from_legs(params["legs"])
+        state["calc_symbol"] = (symbol_in.value or "").strip().upper()
         bus_client.request("options", {"type": "calc_compute", "args": params})
         ui.notify("Calculating…", type="info")
 

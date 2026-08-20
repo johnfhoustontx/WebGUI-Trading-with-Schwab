@@ -16,12 +16,14 @@ them this SKIPS with the reason rather than failing — a harness that cannot
 collect is not a page that is broken.
 """
 import asyncio
+import inspect
 
 import pytest
 from nicegui import ui
 
 import bus_client
 from pages.options import calculator as calc
+from pages.options import handoff
 
 _EXPIRY = "2026-08-28"
 
@@ -94,6 +96,15 @@ def page(monkeypatch):
     # client for a toast. Nothing under test depends on the notification.
     monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
     bus_client.reset()
+    # ⚠ Both of these are MODULE-level and survive a render, by design — the
+    # single-user snapshot restores the last inputs across navigation, and the
+    # handoff stash carries a signal in from another page. Left alone they also
+    # leak BETWEEN TESTS: a test that types a symbol writes it into _LAST_CALC,
+    # and the next render restores it. Under random ordering that is a failure
+    # that moves around.
+    calc._LAST_CALC.clear()
+    for key in handoff._pending:
+        handoff._pending[key] = None
     with ui.card() as root:
         calc.render()
     return root, _polls(root)
@@ -206,3 +217,92 @@ def test_the_two_chain_dependent_frames_light_up_only_once_it_lands(page):
     assert _wearing(root, T.CALC_FRAME_IDLE) == []
     assert _wearing(root, off_chip) == []
     assert len(_wearing(root, T.CALC_FRAME)) == 4
+
+
+def _click(root, label):
+    """Invoke a button's click handler by its label, inside the page's slot.
+
+    `load_symbol` creates a timeout timer and `do_calc` notifies, both of which
+    need a slot context."""
+    for el in _walk(root):
+        if getattr(el, "text", None) == label:
+            for listener in getattr(el, "_event_listeners", {}).values():
+                if listener.type == "click":
+                    # NiceGUI wraps an on_click in a one-arg lambda; a handler
+                    # attached with .on() keeps its own arity.
+                    arity = len(inspect.signature(listener.handler).parameters)
+                    with root:
+                        listener.handler(*((None,) if arity else ()))
+                    return
+    raise AssertionError(f"no button labelled {label!r}")
+
+
+def _symbol_input(root):
+    """The TICKER field — the page's only ui.input."""
+    inputs = [el for el in _walk(root) if isinstance(el, ui.input)]
+    assert len(inputs) == 1, f"expected one text input, found {len(inputs)}"
+    return inputs[0]
+
+
+def _calculate_spy(root, polls):
+    """Chain -> CALCULATE -> a result, through the real handlers."""
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    _click(root, "CALCULATE")          # attributes the result to SPY
+    bus_client.bus().cache_set("cache:options:calc_result", _result_payload(
+        {"entry_credit": 180.0, "max_loss": 320.0, "max_profit": 180.0,
+         "return_on_risk": 56.3, "breakevens": [658.2], "pop": 71.4}))
+    _drive(root, polls)
+    assert "ENTRY CREDIT" in _texts(root)
+
+
+def test_a_two_leg_template_can_still_be_edited_down_to_one(page):
+    # The mock locks removal at two legs because its own buildLegs PADS a
+    # single-leg spec with a synthetic opposite leg. This app does not pad — it
+    # ships four real single-leg templates — so a two-leg floor would make those
+    # unreachable by hand. The floor itself stays: nothing to price at zero.
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+
+    removes = [el for el in _walk(root) if "leg-remove" in getattr(el, "_classes", [])]
+    assert len(removes) == 2, "the PCS default template is two legs"
+    assert all(el.enabled for el in removes)
+
+
+def test_loading_a_different_symbol_drops_the_previous_symbols_numbers(page):
+    # Old cards + an old matrix under a pill reading LOADING CHAIN is the page
+    # stating one symbol's numbers while announcing another's.
+    root, polls = page
+    _calculate_spy(root, polls)
+
+    _symbol_input(root).value = "QQQ"
+    _click(root, "LOAD CHAIN")
+    texts = _texts(root)
+
+    assert "ENTRY CREDIT" not in texts
+    assert "658.20" not in texts
+    assert "AWAITING CHAIN" in texts
+    assert "LOADING CHAIN" in texts
+
+
+def test_reloading_the_same_symbol_keeps_the_result_on_screen(page):
+    # A refresh, not a new subject — and the restore-on-navigation path does
+    # exactly this, so wiping here would blank the screen on every return visit.
+    root, polls = page
+    _calculate_spy(root, polls)
+
+    _click(root, "LOAD CHAIN")
+    texts = _texts(root)
+
+    assert "ENTRY CREDIT" in texts
+    assert "658.20" in texts
+    assert not [t for t in texts if t.startswith("AWAITING")]
+
+
+def test_the_page_names_the_strategy_step_once(page):
+    # The ① STRATEGY frame chip already says it; the shared picker's own caption
+    # would repeat the word one line below.
+    root, _polls = page
+    assert "Strategy" not in _texts(root)
+    assert "① STRATEGY" in _texts(root)

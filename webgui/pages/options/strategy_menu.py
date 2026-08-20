@@ -19,7 +19,7 @@ class StrategyMenu:
     """Cascading Strategy picker with a ui.select-compatible interface."""
 
     def __init__(self, value="PCS", *, classes="", boxed=False,
-                 menu_class=None, btn_class=None):
+                 menu_class=None, btn_class=None, caption=True):
         self._value = value
         self._handlers = []
 
@@ -35,7 +35,13 @@ class StrategyMenu:
         menu_cls = ("strat-menu-navy" if boxed else "") if menu_class is None else menu_class
 
         with ui.column().classes("gap-0 " + classes):
-            ui.label("Strategy").classes("text-xs opacity-60")
+            # ``caption=False`` for a page that already names the control in its
+            # own chrome (the Calculator's ① STRATEGY frame chip), where the
+            # caption would say the word twice one line apart. Defaults to True,
+            # so the Simulator and Rescue — which have no other label for this
+            # control — are byte-identical.
+            if caption:
+                ui.label("Strategy").classes("text-xs opacity-60")
             # ``boxed`` (Calculator): drop the Quasar outline + color so a page can
             # style the button like its input boxes (the outline forces a transparent
             # background that page CSS can't override). Default keeps the outline look.
@@ -93,7 +99,7 @@ class StrategyMenu:
 
 
 def build_strategy_menu(value="PCS", *, classes="", boxed=False,
-                        menu_class=None, btn_class=None):
+                        menu_class=None, btn_class=None, caption=True):
     """Mount a cascading Strategy picker and return its ui.select-compatible handle.
 
     ``boxed=True`` renders an input-box-styled trigger (for the Calculator's dark
@@ -102,6 +108,10 @@ def build_strategy_menu(value="PCS", *, classes="", boxed=False,
     ``btn_class`` / ``menu_class`` override the trigger skin and the class put on
     every (body-teleported) popup — a page with its own palette passes both, e.g.
     ``btn_class=theme.CALC_STRATEGY_BTN, menu_class="strat-menu-calc"``. Leaving
-    them ``None`` reproduces the ``boxed`` defaults exactly."""
+    them ``None`` reproduces the ``boxed`` defaults exactly.
+
+    ``caption=False`` drops the small "Strategy" label above the trigger, for a
+    page whose own chrome already names the control."""
     return StrategyMenu(value, classes=classes, boxed=boxed,
-                        menu_class=menu_class, btn_class=btn_class)
+                        menu_class=menu_class, btn_class=btn_class,
+                        caption=caption)
