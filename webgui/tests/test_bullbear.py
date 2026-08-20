@@ -342,3 +342,60 @@ def test_headline_counts_unreadable_rows_in_its_denominator():
     the unscored ones would inflate the fraction on exactly the thinnest days."""
     assert "1 of 3" in B.headline(B.quadrant_counts(
         [_row(1.0, 0.1), _row(None, None), _row(None, None)]), "sectors")
+
+
+# ── participation: the breadth bar ───────────────────────────────────────────
+def test_breadth_width_is_a_percentage_of_the_track():
+    """A whole percent, so the caller sets one Tailwind width and no CSS has to
+    round it. Zero is a width, not an absence — a sector nothing confirms owns
+    the empty bar."""
+    assert B.breadth_width(0.0) == 0
+    assert B.breadth_width(0.5) == 50
+    assert B.breadth_width(1.0) == 100
+    assert B.breadth_width(0.9623) == 96
+
+
+def test_breadth_width_is_none_when_there_is_no_participation_to_show():
+    """Stock rows carry None — a single name has no constituents to confirm it.
+    That must render nothing, since a zero-width bar is the render a genuine 0.0
+    already owns and it says "no breadth", not "not applicable"."""
+    assert B.breadth_width(None) is None
+
+
+def test_breadth_width_reads_a_share_through_num_not_a_second_guard():
+    """Rejecting what float() cannot read and coercing what it can are one
+    policy, and it is _num's. Unreachable today — the cascade emits floats — but
+    a hand-rolled guard here passes both halves of the row above while quietly
+    discarding what quadrant() on the same row would have read."""
+    assert B.breadth_width("x") is None
+    assert B.breadth_width("0.5") == 50
+
+
+def test_breadth_width_refuses_a_share_outside_zero_to_one():
+    """Participation is above/usable, so out of range is a payload bug. Clamping
+    it renders 1.4 as the full bar meaning "every member confirms" — the inverted
+    verdict this bar exists to draw, stated confidently and unfalsifiably.
+    Rendering nothing is honest, and unlike raising it costs only the one row."""
+    assert B.breadth_width(1.4) is None
+    assert B.breadth_width(-0.2) is None
+    assert B.breadth_is_thin(1.4) is False and B.breadth_is_thin(-0.2) is False
+
+
+def test_breadth_is_thin_flags_a_move_its_members_do_not_confirm():
+    """The two live rows the threshold was read off, 2026-08-19: Real Estate was
+    rising on 0.23 while Energy sat flat on 0.96. A map that paints those the same
+    green hides the only thing separating a fragile advance from a broad one."""
+    assert B.breadth_is_thin(0.23) is True
+    assert B.breadth_is_thin(0.96) is False    # documentary: 0.34 binds it tighter
+    assert B.breadth_is_thin(0.34) is False
+    assert B.breadth_is_thin(None) is False    # a stock row is not a thin one
+
+
+def test_breadth_is_thin_at_exactly_a_third_since_ties_go_to_the_cautious_side():
+    """The only case <= decides — 0.33 and 0.34 sit strictly either side of the
+    constant, so the plan's boundary would pass under < as well. One of three
+    usable constituents reaches it exactly (short-history members are skipped, not
+    counted below), and flagging it is quadrant()'s tie rule one level down. It
+    also pins the threshold at a third rather than a tidied 0.33, under which a
+    genuine one-of-three would read as broad."""
+    assert B.breadth_is_thin(1 / 3) is True

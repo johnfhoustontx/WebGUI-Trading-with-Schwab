@@ -130,3 +130,36 @@ def headline(counts, noun):
     if not total:
         return ""
     return f"{counts['rising_leading']} of {total} {noun} rising and leading"
+
+
+# At or below this share a move is thin — ties to the cautious side, as
+# quadrant() reads them. A judgement, not a fitted number: measured 2026-08-19,
+# Real Estate was RISING on 0.23 while Energy sat flat on 0.96, a third splits.
+THIN_PARTICIPATION = 1.0 / 3.0
+
+
+def _share(v):
+    """``v`` as a 0..1 share, or None for anything that is not one.
+
+    Out of range is a payload bug, not a reading to clamp back into view:
+    participation is ``above/usable``, and a clamped 1.4 draws the full bar
+    meaning "every member confirms" — this bar's own verdict, inverted silently.
+    """
+    p = _num(v)
+    return p if p is not None and 0.0 <= p <= 1.0 else None
+
+
+def breadth_width(participation):
+    """A share -> its whole-percent bar width, or None when there is no bar.
+
+    None rather than 0 for a stock row: one name has no constituents, and the
+    empty bar belongs to a genuine 0.0, which says "nothing confirms".
+    """
+    p = _share(participation)
+    return None if p is None else round(p * 100)
+
+
+def breadth_is_thin(participation):
+    """True when too few constituents confirm the move to trust it."""
+    p = _share(participation)
+    return p is not None and p <= THIN_PARTICIPATION
