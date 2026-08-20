@@ -1,11 +1,19 @@
 """Options strategy Calculator page (Tier-3 reader).
 
-Faithful port of the Tk calculator's two visuals: a colored summary-tile panel
-(``calc_summary``) and a colored P&L heatmap grid (``calc_spread_pnl``: price ×
-eval-date pairs of $ and %).
+A three-step screen: ① STRATEGY and ③ LEGS fill a fixed 424 px input column with
+the action grid under them; ② SYMBOL, six metric cards and the P&L matrix
+(``calc_spread_pnl``: price × eval-date pairs of $ and %) fill the results
+column beside it. The palette is the page-scoped ``[calc]`` language
+(``.calc-v3``), not the app-wide dark navy.
+
+Everything the screen shows beyond the service's own payload — the per-leg
+delta, the ③ LEGS net/max-loss strip, the status pill, the matrix ``%`` column,
+the metric cards — is derived HERE by a pure function over payloads
+``options_svc`` already caches. **No Tier-2 change**: ``calc_load`` /
+``calc_compute`` / ``calc_iv`` keep their contracts.
 
 This page holds **no engine call**: the symbol quote + option-chain fetch and the
-options-calculator math (summary tiles + P&L grid) live in
+options-calculator math (the summary + the P&L grid) live in
 ``services/options_svc/compute`` (``calc_load_symbol``/``calc_compute``). The
 option chain is a plain JSON dict, so it round-trips through the bus cache; the
 page keeps its PURE chain-extractors (``extract_atm_iv``/``extract_premium``/
@@ -17,19 +25,26 @@ Interaction model:
   populates price/range/expiries/strikes from the cached chain dict.
 * **IV** / **Fetch premiums** operate LOCALLY on the cached chain (no command).
 * **Calculate** → enqueue ``calc_compute`` with the form params; a version-poll on
-  ``options:calc_result`` repaints the summary tiles + P&L grid from the cached
+  ``options:calc_result`` repaints the metric cards + P&L matrix from the cached
   ``{summary, eval_labels, pnl_data}``.
 
 Pure transforms (banding, grid mapping, formatting, chain extractors) are
 unit-tested; ``render()`` wires the form + visuals.
 """
+import datetime as dt
 import math
+from types import SimpleNamespace
 
 from .inputs import select_all_on_focus, should_load
-# Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
-# the look never drifts). Kept under its historical name here.
-from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, BTN, BTN_PRIMARY, LABEL,
-                    TXT_POS, TXT_NEG, TXT_NEUTRAL, TILE_3D)
+# The page-scoped ``[calc]`` language (scope hook ``.calc-v3``) — this screen's
+# own near-black palette, deliberately NOT the app-wide dark navy the Simulator
+# and Trade share under ``.calc-v2``.
+from .theme import (THEME, CALC_CSS, CALC_KEYFRAMES_CSS, CALC_FONT_HEAD_HTML,
+                    CALC_MONO, CALC_PAGE, CALC_FRAME, CALC_FRAME_IDLE, CALC_CHIP,
+                    CALC_TILE, CALC_BTN, CALC_BTN_PRIMARY, CALC_STRATEGY_BTN,
+                    CALC_EYEBROW, CALC_BODY, CALC_MUTED, CALC_DIM,
+                    CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
+                    CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN)
 from . import page_state as _ps
 
 # Persisted (single-user) Calculator input snapshot — survives navigation + browser
@@ -542,6 +557,254 @@ def chain_status_facts(loading, symbol, chain):
     return {"state": "idle", "label": "AWAITING SYMBOL", "hint": "NOT LOADED"}
 
 
+def results_panel_facts(status, has_result):
+    """The dashed placeholder's copy, or ``None`` once a result is on screen.
+
+    ``{label, hint}``. The screen has TWO waits and they need different actions
+    from the reader — a chain that has not been fetched, and a structure that
+    has not been priced — so the panel names which one it is. Derived from
+    ``chain_status_facts`` rather than written twice, so the placeholder and the
+    status pill can never disagree about which phase the page is in.
+    """
+    if has_result:
+        return None
+    if (status or {}).get("state") == "ready":
+        return {"label": "AWAITING CALCULATION",
+                "hint": "press CALCULATE to price the structure across the price "
+                        "ladder and every date between now and expiry"}
+    return {"label": "AWAITING CHAIN",
+            "hint": "pick a strategy, type a ticker, then tab out — the chain loads "
+                    "and legs resolve to real strikes before anything can be priced"}
+
+
+def chain_line(status, symbol, expiry_count, strike_count):
+    """The ② SYMBOL frame's one-line footer, under the scan bar.
+
+    Says what the page is doing, or — once loaded — how much of a chain it got,
+    which is the number that explains a leg whose strike will not snap where the
+    user expects."""
+    state = (status or {}).get("state")
+    if state == "loading":
+        sym = (symbol or "").strip().upper()
+        return f"fetching option chain · {sym}" if sym else "fetching option chain"
+    if state == "ready":
+        return (f"{int(strike_count or 0)} strikes · "
+                f"{int(expiry_count or 0)} expiries")
+    return "tab out of the symbol field to load the chain"
+
+
+def tag_tone(tag, first):
+    """Tone for one ① STRATEGY tag chip: ``pos`` / ``warn`` / ``muted``.
+
+    Only the FIRST chip is coloured, and only ever by cash-flow direction —
+    ``strategy_tags`` guarantees that chip is CREDIT or DEBIT. Every descriptor
+    behind it is neutral: colouring "BULLISH" green would read as an opinion the
+    page has not formed."""
+    if not first:
+        return "muted"
+    return "pos" if tag == "CREDIT" else "warn"
+
+
+def matrix_note_text(pnl_data, basis):
+    """The P&L MATRIX frame's right-hand note.
+
+    Names the percentage basis in words, because ``% MAX`` fits a column heading
+    and does not explain itself anywhere else on the screen."""
+    heading = (basis or {}).get("heading") or MATRIX_BASIS_NONE["heading"]
+    words = {MATRIX_BASIS_MAX["heading"]: "% of max return",
+             MATRIX_BASIS_COST["heading"]: "% of cost"}.get(heading,
+                                                            "no percentage basis")
+    return f"PRICE × DATE · {len(pnl_data or [])} ROWS · {words.upper()}"
+
+
+def compact_money(v, signed=False):
+    """A dollar figure for the ③ LEGS strip, or an em-dash for no reading.
+
+    K/M suffixes past 100k. The strip carries three readings inside a 424 px
+    frame, and ``max_loss_estimate`` returns REAL large figures — a naked put on
+    a 660 strike is 65,700, and one on $NDX is millions — so an unabbreviated
+    figure pushes the other two readings out of the frame rather than merely
+    looking wide."""
+    f = _finite(v)
+    if f is None:
+        return "—"
+    sign = "-" if f < 0 else ("+" if signed else "")
+    a = abs(f)
+    if a >= 1_000_000:
+        return f"{sign}${a / 1e6:,.2f}M"
+    if a >= 100_000:
+        return f"{sign}${a / 1e3:,.0f}K"
+    return f"{sign}${a:,.0f}"
+
+
+def leg_strip_facts(legs):
+    """The ③ LEGS frame's header strip: ``{count, net, net_tone, max_loss}``.
+
+    ⚠ Both figures are ``None`` in ordinary use and must read as em-dashes:
+    ``net_premium`` while ANY leg is unpriced (which is every fresh template,
+    since ``build_default_legs`` sets ``premium: None``), and
+    ``max_loss_estimate`` when the loss is unbounded or undecidable. ``NET $0``
+    over an unpriced structure would state a figure the page does not have.
+    """
+    n = len(legs or [])
+    net = net_premium(legs)
+    tone = "dim" if net is None else ("pos" if net >= 0 else "neg")
+    return {"count": f"{n} LEG" if n == 1 else f"{n} LEGS",
+            "net": f"NET {compact_money(net, signed=True)}",
+            "net_tone": tone,
+            "max_loss": f"MAX LOSS {compact_money(max_loss_estimate(legs))}"}
+
+
+# ── the six metric cards ─────────────────────────────────────────────────────
+# The accent vocabulary is a FINITE set the page maps onto CALC_EDGE_* / CALC_*
+# classes — the documented alternative to a runtime-built colour. ``dim`` is the
+# no-reading tone: a card with nothing in it makes no colour claim either.
+METRIC_ACCENTS = ("pos", "neg", "accent", "warn", "dim")
+
+_EM_DASH = "—"
+
+
+def _dollars(v):
+    """A summary dollar figure as text.
+
+    ``"Unlimited"`` for the service's uncapped sentinel — never ``$999,999`` —
+    and an em-dash for no reading. The SIGN is kept: on the generic numeric
+    path ``max_profit`` is ``max(pnl)`` over the service's own price grid and
+    can be negative (a structure that loses everywhere), and rendering that as a
+    positive figure would invert the reading."""
+    if is_unlimited(v):
+        return "Unlimited"
+    f = _finite(v)
+    if f is None:
+        return _EM_DASH
+    return f"-${abs(f):,.0f}" if f < 0 else f"${f:,.0f}"
+
+
+def max_dte_from_legs(legs, today=None):
+    """Calendar days from ``today`` to the LAST leg's expiry, or ``None``.
+
+    The result payload carries ``eval_labels`` (MM/DD strings with no year) and
+    no horizon of its own, so the metric cards' "at Nd expiry" and their per-day
+    return are dated from the legs the compute was enqueued with — which is
+    where ``calc_compute`` takes its own horizon from too. A leg with no
+    parseable expiry contributes nothing; NO leg with one yields ``None``, so
+    the cards render an em-dash rather than a guessed horizon. Floored at 0: an
+    expiry already past is today's expiry, not a negative number of days."""
+    today = today or dt.date.today()
+    days = []
+    for leg in legs or []:
+        try:
+            days.append((dt.date.fromisoformat(str(leg.get("expiry"))) - today).days)
+        except (TypeError, ValueError):
+            continue
+    return max(max(days), 0) if days else None
+
+
+def _position_note(legs):
+    """"N contracts · M legs" for the ENTRY card, or an em-dash for no legs."""
+    rows = list(legs or [])
+    if not rows:
+        return _EM_DASH
+    qty = max(int(_leg_qty(l) or 1) for l in rows)
+    n = len(rows)
+    return (f"{qty} contract{'' if qty == 1 else 's'} · "
+            f"{n} leg{'' if n == 1 else 's'}")
+
+
+def metric_cards(summary, legs, spot, max_dte):
+    """The six results cards as ``{label, value, sub, accent}`` dicts.
+
+    Order is the design's: ENTRY CREDIT/DEBIT · MAX RISK · MAX RETURN · RETURN
+    ON RISK · BREAKEVEN(S) · PROB OF PROFIT. Always six, so the grid never
+    reflows between renders.
+
+    Every value degrades to an em-dash rather than to a zero. ``{}`` is "not
+    calculated yet", and a screen of ``$0`` / ``0.0%`` reads as a measured
+    result — the failure mode this whole redesign is written against.
+
+    Three arguments beyond the summary, each load-bearing: ``legs`` sizes the
+    ENTRY card's sub-line (contracts × legs — the only place the position size
+    is stated), ``spot`` is what the breakeven distance is measured FROM, and
+    ``max_dte`` dates the horizon (see ``max_dte_from_legs`` — the payload
+    carries none).
+    """
+    s = summary or {}
+    mp, ml = s.get("max_profit"), s.get("max_loss")
+
+    # 1 — ENTRY CREDIT / DEBIT. The sign picks the label, so the figure is
+    # unsigned; with no reading the label stays CREDIT but claims nothing.
+    credit = _finite(s.get("entry_credit"))
+    if credit is None:
+        entry = {"label": "ENTRY CREDIT", "value": _EM_DASH, "sub": _EM_DASH,
+                 "accent": "dim"}
+    else:
+        entry = {"label": "ENTRY CREDIT" if credit >= 0 else "ENTRY DEBIT",
+                 "value": _dollars(abs(credit)), "sub": _position_note(legs),
+                 "accent": "pos" if credit >= 0 else "accent"}
+
+    # 2 — MAX RISK.
+    risk_val = _dollars(ml)
+    risk = {"label": "MAX RISK", "value": risk_val,
+            "sub": ("unbounded above the short strike" if is_unlimited(ml)
+                    else "worst case at expiry"),
+            "accent": "dim" if risk_val == _EM_DASH else "neg"}
+
+    # 3 — MAX RETURN.
+    ret_val = _dollars(mp)
+    if is_unlimited(mp):
+        ret_sub = "no upside cap"
+    elif _finite(max_dte) is None:
+        ret_sub = "at expiry"
+    else:
+        ret_sub = f"at {int(max_dte)}d expiry"
+    ret = {"label": "MAX RETURN", "value": ret_val, "sub": ret_sub,
+           "accent": "dim" if ret_val == _EM_DASH else "pos"}
+
+    # 4 — RETURN ON RISK. There is no ratio when either side is uncapped, and
+    # the service already sends 0.0 in that case — which would read as a
+    # measured zero return rather than as "not defined".
+    ror = _finite(s.get("return_on_risk"))
+    if ror is None or is_unlimited(mp) or is_unlimited(ml):
+        ror_card = {"label": "RETURN ON RISK", "value": _EM_DASH, "sub": _EM_DASH,
+                    "accent": "dim"}
+    else:
+        dte = _finite(max_dte)
+        ror_card = {
+            "label": "RETURN ON RISK", "value": f"{ror:.1f}%",
+            # max(dte, 1): a 0-DTE structure earns its whole return today, so
+            # the per-day figure IS the return — not a division by zero.
+            "sub": (f"{ror / max(dte, 1.0):.2f}% per day" if dte is not None
+                    else _EM_DASH),
+            "accent": "warn"}
+
+    # 5 — BREAKEVEN(S), with the first crossing's distance from spot.
+    bes = [_finite(b) for b in (s.get("breakevens") or [])]
+    bes = [b for b in bes if b is not None]
+    sp = _finite(spot)
+    if not bes:
+        be = {"label": "BREAKEVEN(S)", "value": _EM_DASH,
+              "sub": "no crossing in range", "accent": "dim"}
+    else:
+        be = {"label": "BREAKEVEN(S)",
+              "value": " / ".join(f"{b:,.2f}" for b in bes),
+              "sub": (f"{(bes[0] / sp - 1) * 100:+.2f}% from spot"
+                      if sp else _EM_DASH),
+              "accent": "accent"}
+
+    # 6 — PROB OF PROFIT. Risk-neutral lognormal with drift r (the service's
+    # ``_estimate_pop``); naming the model is what stops it reading as a forecast.
+    pop = _finite(s.get("pop"))
+    if pop is None:
+        pop_card = {"label": "PROB OF PROFIT", "value": _EM_DASH, "sub": _EM_DASH,
+                    "accent": "dim"}
+    else:
+        pop_card = {"label": "PROB OF PROFIT", "value": f"{pop:.1f}%",
+                    "sub": "lognormal · risk-neutral drift",
+                    "accent": "pos" if pop >= 60 else ("warn" if pop >= 45 else "neg")}
+
+    return [entry, risk, ret, ror_card, be, pop_card]
+
+
 def chain_expiries(chain):
     """Sorted unique expiry strings (YYYY-MM-DD) from an option-chain payload."""
     out = set()
@@ -584,42 +847,89 @@ _CENTER_SPOT_JS = """
 """
 
 
-# Summary-tile color palette → Tailwind text token. The hexes are a finite set
-# (positive / negative / neutral) chosen in ``_render_summary``; map them to the
-# shared theme tokens so the tiles carry no inline-style color.
-_TILE_COLOR_CLASSES = {
-    "#66bb6a": TXT_POS,
-    "#ef5350": TXT_NEG,
-    "#bdbdbd": TXT_NEUTRAL,
+# ── the page's own class vocabulary ──────────────────────────────────────────
+# The [calc] token set covers the surfaces this screen shares with itself; the
+# handful below are one-off geometries of THIS page (a rule under the title, a
+# 2 px scan track, a dashed placeholder, the frames' label chip) that no other
+# screen has and that would only bloat the shared vocabulary. They are built
+# from the SAME ``config/theme.toml`` [calc] colours, so the page still follows
+# the palette knob-for-knob.
+_C = THEME["calc"]
+
+_TITLE_TEXT = f"text-[{_C['bright']}]"
+_TITLE_RULE = f"border-b border-b-[{_C['edge_idle']}]"
+_STRIP_GROUND = f"bg-[{_C['chip_bg']}] px-1.5"          # a chip row over the border
+_SCAN_TRACK = f"bg-[{_C['tile_a']}]"
+_EMPTY_PANEL = (f"border border-dashed border-[{_C['edge_idle']}] "
+                f"bg-[{_C['frame_b']}] rounded-[3px]")
+
+# The numbered frames' label chip. Active is the design's muted cyan — a lighter
+# step of the [calc] `accent` family that the shared vocabulary has no knob for;
+# idle is the configured `label`. Two states, two STATIC classes.
+_CHIP_ON = "text-[#8fc6d6]"
+_CHIP_TEXT = {"on": _CHIP_ON, "off": f"text-[{_C['label']}]"}
+_CHIP_SWAP = " ".join(_CHIP_TEXT.values())
+
+# The title-bar status pill. It carries ONE colour class and paints its dot and
+# its border from it via `bg-current` / `border-current`, so the three parts can
+# never drift apart.
+_PILL_TEXT = {"ready": CALC_POS, "loading": CALC_WARN, "idle": CALC_MUTED}
+_PILL_SWAP = " ".join(dict.fromkeys(_PILL_TEXT.values()))
+
+# tone -> class, for the ③ LEGS strip, the SPOT readout and the ① STRATEGY tag
+# chips. ``_TONE_SWAP`` is the whole set as one string, for the documented
+# ``.classes(remove=…, add=…)`` swap that stops repeated repaints stacking
+# conflicting text-[…] classes. It extends the theme's own ``CALC_STATE_TEXT``
+# rather than restating it, so it follows the [calc] config for free — ``muted``
+# is the one tone this page needs that the shared state set does not carry.
+_TONE_TEXT = {"pos": CALC_POS, "neg": CALC_NEG, "accent": CALC_ACCENT,
+              "warn": CALC_WARN, "dim": CALC_DIM, "muted": CALC_MUTED}
+_TONE_SWAP = " ".join(dict.fromkeys(CALC_STATE_TEXT.split() + [CALC_MUTED]))
+
+# metric-card accent -> its left edge + its value colour. Every key of
+# ``METRIC_ACCENTS`` has an entry: a missing one would raise mid-render.
+_METRIC_EDGE = {"pos": CALC_EDGE_POS, "neg": CALC_EDGE_NEG,
+                "accent": CALC_EDGE_ACCENT, "warn": CALC_EDGE_WARN,
+                "dim": f"border-l-2 border-l-[{_C['dim']}]"}
+
+# The shared leg editor's card palette, repainted in [calc]. The GEOMETRY is the
+# editor's; only the colours enter from here, which is how the Simulator keeps
+# the app-wide navy while mounting the same card.
+_LEG_TOKENS = {
+    "frame": f"border border-[{_C['edge_idle']}] rounded-[2px] bg-[{_C['frame_b']}]",
+    "eyebrow": (f"text-[8px] tracking-[.14em] text-[{_C['label']}] "
+                f"whitespace-nowrap truncate"),
+    # Side -> accent, the design's cyan long / green short.
+    "accent_long": f"border-l-2 border-l-[{_C['accent']}]",
+    "accent_short": f"border-l-2 border-l-[{_C['pos']}]",
+    "num": f"text-[10px] text-[{_C['label']}]",
+    "delta": f"text-[11px] text-[{_C['txt']}] whitespace-nowrap",
+    "remove": (f"text-[10px] text-[{_C['btn_txt']}] border "
+               f"border-[{_C['btn_edge']}] rounded-[2px]"),
+    "remove_off": (f"text-[10px] text-[{_C['off_txt']}] border "
+                   f"border-[{_C['off_edge']}] rounded-[2px] cursor-not-allowed"),
+    "add": (f"text-[9px] tracking-[.18em] text-[{_C['accent_txt']}] border "
+            f"border-dashed border-[{_C['btn_edge']}] rounded-[2px]"),
+    "reset": (f"text-[9px] tracking-[.18em] text-[{_C['muted']}] border "
+              f"border-[{_C['off_edge']}] rounded-[2px]"),
 }
 
 
-def tile_color_class(color):
-    """Map a summary-tile hex color → its Tailwind text token (neutral fallback)."""
-    return _TILE_COLOR_CLASSES.get(color, TXT_NEUTRAL)
-
-
-def _render_summary(box, summary):
+def _render_metrics(box, summary, legs, spot, max_dte):
+    """Paint the six metric cards into ``box`` (a CSS grid)."""
     from nicegui import ui
-
-    def tile(label, value, color):
-        with ui.card().classes(f"p-2 min-w-[110px] {TILE_3D}"):
-            ui.label(label).classes("text-xs opacity-60")
-            ui.label(value).classes(f"text-base font-bold {tile_color_class(color)}")
 
     box.clear()
     with box:
-        credit = summary.get("entry_credit", 0) or 0
-        if credit >= 0:
-            tile("Entry Credit", f"${credit:,.2f}", "#66bb6a")
-        else:
-            tile("Entry Debit", f"${abs(credit):,.2f}", "#ef5350")
-        tile("Max Risk", f"${summary.get('max_loss', 0):,.2f}", "#ef5350")
-        tile("Max Return", f"${summary.get('max_profit', 0):,.2f}", "#66bb6a")
-        tile("Return on Risk", f"{summary.get('return_on_risk', 0):.1f}%", "#bdbdbd")
-        bes = summary.get("breakevens") or []
-        tile("Breakeven(s)", " / ".join(f"{b:,.2f}" for b in bes) or "—", "#bdbdbd")
-        tile("Prob of Profit", f"{summary.get('pop', 0):.1f}%", "#bdbdbd")
+        for card in metric_cards(summary, legs, spot, max_dte):
+            accent = card["accent"]
+            with ui.column().classes(f"{CALC_TILE} {_METRIC_EDGE[accent]} "
+                                     f"min-w-0 gap-1.5 px-3 pt-2.5 pb-3"):
+                ui.label(card["label"]).classes(CALC_EYEBROW)
+                ui.label(card["value"]).classes(
+                    f"text-[17px] font-bold truncate {_TONE_TEXT[accent]}")
+                ui.label(card["sub"]).classes(
+                    f"{CALC_DIM} text-[9px] leading-snug break-words")
 
 
 def matrix_html(eval_labels, pnl_data, spot, summary):
@@ -715,14 +1025,16 @@ def strikes_window(strikes, spot, n):
 
 
 def render():
-    """Build the Calculator page: inputs form + summary tiles + P&L heatmap.
+    """Build the Calculator page: the three numbered steps + the results column.
+
+    ① STRATEGY · ③ LEGS and the action grid fill a fixed 424 px input column;
+    ② SYMBOL, the six metric cards and the P&L matrix fill the results column
+    beside it.
 
     No engine call here — ``load`` enqueues ``calc_load`` and ``Calculate``
     enqueues ``calc_compute``; version-polls on the two cache views paint the
-    chain selectors and the summary/grid. IV + Fetch premiums run the pure
+    chain selectors and the metrics/matrix. IV + Fetch premiums run the pure
     chain-extractors LOCALLY on the cached chain dict."""
-    import datetime as dt
-
     from nicegui import ui, run
 
     import bus_client
@@ -731,10 +1043,17 @@ def render():
 
     from . import handoff
     from . import leg_editor
+    from . import strategies as S
     from . import strategy_menu
     from . import overlay as _overlay
 
-    ui.add_css(QUASAR_INTERNAL_CSS)
+    # This page's own language (.calc-v3), never the app-wide navy scope the
+    # Simulator and Trade share (see the module header for which that is).
+    # ``add_head_html`` during a page build is client-scoped, so the mono face is
+    # requested here and on no other route.
+    if CALC_FONT_HEAD_HTML:
+        ui.add_head_html(CALC_FONT_HEAD_HTML)
+    ui.add_css(CALC_CSS + CALC_KEYFRAMES_CSS)
 
     # Full-screen wait overlay shown while a user-initiated Load is in flight.
     wait = _overlay.build_loading_overlay()
@@ -747,6 +1066,8 @@ def render():
         "result_ver": None,   # last-seen calc_result cache version
         "iv_ver": None,       # last-seen calc_iv cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
+        "calc_dte": None,     # horizon of the last enqueued compute (metric cards)
+        "spot": None,         # last loaded chain price (the ② SYMBOL readout)
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
         "restoring": False,   # True while restoring a persisted snapshot (suppress enqueues)
@@ -756,62 +1077,178 @@ def render():
         "chain_fetching": False,  # in-flight guard for the off-loop big-chain read
     }
 
-    # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
-    # keep their names. LEFT = input section (inputs card + Load/IV/Calculate stack,
-    # legs, bottom actions); RIGHT = the P&L matrix, which h-scrolls so it never
-    # overlaps the inputs. ───────────────────────────────────────────────────────
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        ui.label("Options Strategy Calculator").classes(f"text-h6 {LABEL}")
-        with ui.row().classes("items-end gap-4 flex-wrap"):
-            strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
-            symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
-        with ui.row().classes("w-full items-start gap-4 no-wrap"):
-            # LEFT: input section (fixed width so the legs table never collides with
-            # the matrix beside it).
-            with ui.column().classes("shrink-0 gap-4 w-[720px]"):
-                with ui.row().classes("w-full items-start gap-4 no-wrap"):
-                    with ui.column().classes(f"{CARD} flex-1 min-w-0 gap-3"):
-                        with ui.row().classes("items-end gap-4 flex-wrap"):
-                            expiry_sel = ui.select([], label="Expiry").classes("w-40")
-                            contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-28")
-                            iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
-                        with ui.row().classes("items-end gap-4 flex-wrap"):
-                            price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-32")
-                            rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
-                            ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
-                        with ui.row().classes("items-end gap-4 flex-wrap"):
-                            # The P&L grid spans ±N real chain strikes around spot
-                            # (replaces the old Range min/max/%). See ``strikes_window``.
-                            nstrikes_in = ui.number("Number of strikes", value=24, min=1,
-                                                    max=200, format="%.0f").classes("w-40") \
-                                .tooltip("Strikes shown either side of spot in the P&L grid")
-                    with ui.column().classes("shrink-0 gap-3 w-[170px]"):
-                        ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol(show_wait=True)) \
-                            .props("no-caps").classes(f"{BTN} w-full").tooltip("Load price + expiries/strikes")
-                        ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
-                            .props("no-caps").classes(f"{BTN} w-full").tooltip("Fetch / imply IV for the expiry")
-                        ui.button("Calculate", icon="calculate", color=None, on_click=lambda: do_calc()) \
-                            .props("no-caps").classes(f"{BTN_PRIMARY} w-full")
-                # Legs card (header-table editor)
-                with ui.column().classes(f"{CARD} w-full gap-2"):
-                    leg_box = ui.column().classes("gap-2 w-full")
-                # Bottom action buttons
-                with ui.row().classes("items-center gap-3 flex-wrap"):
-                    ui.button("Fetch Premiums", icon="download", color=None, on_click=lambda: fetch_premiums()) \
-                        .props("no-caps").classes(BTN).tooltip("Fill leg premiums from the chain")
-                    ui.button("Expected Move", icon="show_chart", color=None, on_click=lambda: send_to_em()) \
-                        .props("no-caps").classes(BTN).tooltip("Chart the expected move for these legs")
-                    ui.button("Copy to Simulator", icon="science", color=None,
+    # ── the numbered-frame helper ────────────────────────────────────────────
+    def _frame(chip_text, *, note=False, gap="gap-3"):
+        """A numbered frame: the label chip sits ON the border line.
+
+        Pure Tailwind — a ``relative`` frame plus an ``absolute -top-1.5`` chip
+        painted in the page's own ground, which is what interrupts the border
+        rather than a notch. The chip row is absolutely positioned, so it is not
+        a flex item and the frame's gap never applies to it."""
+        box = ui.column().classes(f"{CALC_FRAME} w-full min-w-0 {gap} px-3 pt-5 pb-3")
+        with box:
+            row = ui.row().classes("absolute -top-1.5 left-3 right-3 items-center "
+                                   "justify-between gap-2.5 min-w-0")
+            with row:
+                chip = ui.label(chip_text).classes(f"{CALC_CHIP} {_CHIP_ON} shrink-0")
+                note_lbl = None
+                if note:
+                    note_lbl = ui.label("").classes(
+                        f"{_STRIP_GROUND} {CALC_MUTED} text-[8px] tracking-[.16em] "
+                        f"whitespace-nowrap truncate min-w-0")
+        return SimpleNamespace(box=box, row=row, chip=chip, note=note_lbl)
+
+    def _cell(caption, basis):
+        """A captioned ② SYMBOL cell — the eyebrow over its own control."""
+        col = ui.column().classes(f"gap-1 min-w-0 {basis}")
+        with col:
+            ui.label(caption).classes(f"{CALC_EYEBROW} truncate")
+        return col
+
+    # ── the three-step layout (page-scoped, .calc-v3) ────────────────────────
+    # LEFT  = the 424 px input column: ① STRATEGY, ③ LEGS, the action grid.
+    # RIGHT = ② SYMBOL over the six metric cards over the P&L matrix; min-w-0 so
+    #         the matrix h-scrolls inside its frame instead of pushing the inputs.
+    with ui.column().classes(f"calc-v3 {CALC_PAGE} {CALC_MONO} w-full gap-[15px]"):
+        # TITLE BAR — the name, and the live chain-status pill.
+        with ui.row().classes(f"w-full items-center justify-between gap-2.5 "
+                              f"pb-2.5 {_TITLE_RULE}"):
+            ui.label("STRATEGY CALCULATOR").classes(
+                f"text-[14px] font-bold tracking-[.13em] {_TITLE_TEXT} whitespace-nowrap")
+            # ONE colour class on the pill; the dot and the border take it from
+            # `currentColor`, so the three parts cannot drift apart.
+            status_pill = ui.row().classes(
+                f"items-center gap-2 px-[11px] py-1 border border-current "
+                f"rounded-[2px] shrink-0 {_PILL_TEXT['idle']}")
+            with status_pill:
+                ui.element("div").classes(
+                    "w-1.5 h-1.5 rounded-full bg-current shrink-0 "
+                    "animate-[blip_1.6s_ease-in-out_infinite]")
+                status_lbl = ui.label("AWAITING SYMBOL").classes(
+                    "text-[9px] tracking-[.2em] whitespace-nowrap")
+
+        with ui.row().classes("w-full items-start gap-[18px] no-wrap"):
+            # ── LEFT: the 424 px input column ────────────────────────────────
+            with ui.column().classes("shrink-0 grow-0 w-[424px] min-w-[380px] gap-[15px]"):
+                # ① STRATEGY
+                strat_frame = _frame("① STRATEGY", gap="gap-3")
+                with strat_frame.box:
+                    strategy_sel = strategy_menu.build_strategy_menu(
+                        value="PCS", classes="w-full", boxed=True,
+                        btn_class=CALC_STRATEGY_BTN, menu_class="strat-menu-calc")
+                    tags_box = ui.row().classes("flex-wrap gap-2 w-full")
+                    blurb_lbl = ui.label("").classes(
+                        f"{CALC_BODY} text-[11px] leading-relaxed w-full")
+
+                # ③ LEGS — the chip row carries the live count / net / max-loss strip.
+                legs_frame = _frame("③ LEGS", gap="gap-2")
+                with legs_frame.row:
+                    with ui.row().classes("items-center gap-2 min-w-0 shrink "
+                                          f"overflow-hidden {_STRIP_GROUND}"):
+                        legcount_lbl = ui.label("").classes(
+                            f"{CALC_MUTED} text-[8px] tracking-[.14em] whitespace-nowrap")
+                        net_lbl = ui.label("").classes(
+                            f"{CALC_DIM} text-[8px] tracking-[.14em] whitespace-nowrap")
+                        maxloss_lbl = ui.label("").classes(
+                            f"{CALC_WARN} text-[8px] tracking-[.14em] truncate min-w-0")
+                with legs_frame.box:
+                    leg_box = ui.column().classes("gap-2 w-full min-w-0")
+
+                # ACTIONS — two columns, with the status line spanning both.
+                with ui.element("div").classes("grid grid-cols-2 gap-2 w-full"):
+                    ui.button("FETCH PREMIUMS", color=None,
+                              on_click=lambda: fetch_premiums()) \
+                        .props("no-caps unelevated").classes(f"{CALC_BTN} w-full h-[34px]") \
+                        .tooltip("Fill leg premiums from the chain")
+                    ui.button("CALCULATE", color=None, on_click=lambda: do_calc()) \
+                        .props("no-caps unelevated") \
+                        .classes(f"{CALC_BTN_PRIMARY} w-full h-[34px]")
+                    ui.button("EXPECTED MOVE", color=None, on_click=lambda: send_to_em()) \
+                        .props("no-caps unelevated").classes(f"{CALC_BTN} w-full h-[34px]") \
+                        .tooltip("Chart the expected move for these legs")
+                    ui.button("COPY TO SIMULATOR", color=None,
                               on_click=lambda: handoff.send_to_simulator(
                                   leg_editor.legs_to_payload(
                                       (symbol_in.value or "").replace("$", "").upper(),
                                       editor.get_legs(), keep_premium=False))) \
-                        .props("no-caps").classes(BTN).tooltip("Open these legs in the Simulator")
-            # RIGHT: P&L matrix. min-w-0 + the grid's own overflow lets it h-scroll
-            # instead of pushing into the inputs.
-            with ui.column().classes(f"{CARD} flex-1 min-w-0 gap-3 self-stretch"):
-                summary_box = ui.row().classes("gap-3 flex-wrap")
-                grid_box = ui.column().classes("w-full")
+                        .props("no-caps unelevated").classes(f"{CALC_BTN} w-full h-[34px]") \
+                        .tooltip("Open these legs in the Simulator")
+                    action_lbl = ui.label("").classes(
+                        f"col-span-2 {CALC_MUTED} text-[9px] tracking-[.14em]")
+
+            # ── RIGHT: the results column ────────────────────────────────────
+            with ui.column().classes("flex-1 min-w-0 gap-[13px]"):
+                # ② SYMBOL — the market readout. Three rows rather than one
+                # wrapping row: nine cells plus two buttons cannot fit one line
+                # at any realistic width, and an explicit break lands the wrap
+                # where the design draws it instead of wherever the browser does.
+                sym_frame = _frame("② SYMBOL", note=True, gap="gap-2.5")
+                with sym_frame.box:
+                    with ui.row().classes("w-full items-end gap-2 flex-wrap"):
+                        with _cell("TICKER", "shrink-0 grow-0 basis-[118px]"):
+                            symbol_in = select_all_on_focus(
+                                ui.input(value="SPY").classes("w-full")
+                                .props('spellcheck=false input-class="!text-[16px] '
+                                       '!font-bold !tracking-[.12em] uppercase"'))
+                        with _cell("SPOT", "shrink-0 grow-0 basis-[120px]"):
+                            spot_lbl = ui.label("———").classes(
+                                f"text-[16px] font-medium truncate {CALC_DIM}")
+                        with _cell("PRICE", "flex-[1_1_88px] max-w-[132px]"):
+                            price_in = ui.number(value=100.0, format="%.2f").classes("w-full")
+                        with _cell("IV %", "flex-[1_1_88px] max-w-[132px]"):
+                            iv_in = ui.number(value=20.0, format="%.1f").classes("w-full")
+                        with _cell("RATE %", "flex-[1_1_88px] max-w-[132px]"):
+                            rate_in = ui.number(value=4.5, format="%.2f").classes("w-full")
+                        with _cell("IV Δ %", "flex-[1_1_88px] max-w-[132px]"):
+                            ivchg_in = ui.number(value=0.0, format="%.1f").classes("w-full")
+                    with ui.row().classes("w-full items-end gap-2 flex-wrap"):
+                        with _cell("CONTRACTS", "flex-[1_1_88px] max-w-[132px]"):
+                            contracts_in = ui.number(value=1, min=1, max=100,
+                                                     format="%.0f").classes("w-full")
+                        with _cell("STRIKES", "flex-[1_1_88px] max-w-[132px]"):
+                            # The P&L grid spans ±N real chain strikes around spot.
+                            nstrikes_in = ui.number(value=24, min=1, max=200,
+                                                    format="%.0f").classes("w-full") \
+                                .tooltip("Strikes shown either side of spot in the P&L grid")
+                        with _cell("EXPIRY", "flex-[1_1_150px] max-w-[200px]"):
+                            # Kept against the mock, which has per-leg expiry only:
+                            # this drives calc_compute's ``expiry`` argument and the
+                            # apply_expiry propagation onto every leg.
+                            expiry_sel = ui.select([]).classes("w-full")
+                    with ui.row().classes("w-full items-center gap-2.5 flex-wrap"):
+                        ui.button("LOAD CHAIN", color=None,
+                                  on_click=lambda: load_symbol(show_wait=True)) \
+                            .props("no-caps unelevated").classes(f"{CALC_BTN} px-3") \
+                            .tooltip("Load price + expiries/strikes")
+                        ui.button("IV UPDATE", color=None, on_click=lambda: fetch_iv()) \
+                            .props("no-caps unelevated").classes(f"{CALC_BTN} px-3") \
+                            .tooltip("Fetch / imply IV for the expiry")
+                        with ui.element("div").classes(
+                                f"relative shrink-0 w-[84px] h-0.5 overflow-hidden "
+                                f"{_SCAN_TRACK}"):
+                            scan_bar = ui.element("div").classes(
+                                f"absolute inset-y-0 left-0 w-[34%] {CALC_ACCENT} "
+                                f"bg-gradient-to-r from-transparent via-current "
+                                f"to-transparent animate-[scan_1.1s_linear_infinite]")
+                        chain_lbl = ui.label("").classes(
+                            f"{CALC_MUTED} text-[9px] tracking-[.12em] truncate "
+                            f"min-w-0 flex-1")
+
+                # The dashed placeholder, and the two panels it stands in for.
+                empty_panel = ui.column().classes(
+                    f"w-full items-center justify-center gap-2.5 min-h-[420px] "
+                    f"{_EMPTY_PANEL}")
+                with empty_panel:
+                    empty_lbl = ui.label("").classes(
+                        f"{CALC_BODY} text-[12px] tracking-[.22em] whitespace-nowrap")
+                    empty_hint = ui.label("").classes(
+                        f"{CALC_DIM} text-[10px] leading-relaxed text-center max-w-[420px]")
+
+                metrics_box = ui.element("div").classes(
+                    "grid grid-cols-[repeat(auto-fit,minmax(148px,1fr))] gap-2.5 w-full")
+                matrix_frame = _frame("P&L MATRIX", note=True, gap="gap-0")
+                with matrix_frame.box:
+                    grid_box = ui.column().classes("w-full min-w-0")
 
     # ── editable multi-leg editor (shared with the Simulator) ────────────────
     # Strike/expiry options come from the cached chain; the editor owns the legs
@@ -831,10 +1268,34 @@ def render():
     def _expiries_for():
         return chain_expiries(state.get("chain") or {})
 
+    def _delta_for(leg):
+        """The leg card's DELTA cell: position delta from the cached chain, or None.
+
+        ⚠ Deliberately NOT wrapped in try/except — this runs inside the leg
+        editor's ``_render``, so an exception here propagates out of the page
+        build and leaves a blank screen. The closure is TOTAL instead: no chain,
+        no strike, an unknown option type or a strike the chain does not carry
+        all return ``None``, and the cell renders an em-dash. Falls back to the
+        cross-expiry match so a leg dated off the loaded ladder still reads."""
+        chain = state.get("chain")
+        strike = leg.get("strike")
+        otype = leg.get("option_type")
+        if not chain or otype not in ("call", "put"):
+            return None
+        if isinstance(strike, bool) or not isinstance(strike, (int, float)):
+            return None
+        expiry = leg.get("expiry") or None
+        d = extract_delta(chain, otype, float(strike), expiry)
+        if d is None and expiry is not None:
+            d = extract_delta(chain, otype, float(strike))
+        return position_delta(d, leg.get("side"))
+
     editor = leg_editor.build_leg_editor(
         leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=True, on_change=lambda: _capture(), header=True,
-        spot_getter=lambda: float(price_in.value or 0))
+        show_premium=True, on_change=lambda: (_capture(), _sync_legs()),
+        spot_getter=lambda: float(price_in.value or 0),
+        layout="card", tokens=_LEG_TOKENS, delta_for=_delta_for,
+        min_legs=2, on_reset=lambda: _seed_template())
 
     def _scale_leg_qty(factor):
         """Multiply every leg's qty by ``factor`` (RATIO-preserving) and re-render —
@@ -848,6 +1309,7 @@ def render():
         for leg in legs:
             leg["qty"] = max(1, round(int(leg.get("qty", 1) or 1) * factor))
         editor.set_legs(legs)
+        _sync_legs()          # set_legs does not fire on_change
 
     def _seed_template():
         """Apply the selected template (legs = its ratios) then scale by the current
@@ -856,6 +1318,7 @@ def render():
             return
         editor.apply_template(strategy_sel.value)
         _scale_leg_qty(max(1, int(contracts_in.value or 1)))
+        _sync_legs()
 
     # ── persist + restore full UI state across navigation (single-user) ───────
     def _capture():
@@ -896,10 +1359,87 @@ def render():
         finally:
             state["restoring"] = False
 
+    # ── display sync (pure facts in, widget text/classes out) ────────────────
+    # Four repaints, each fed by one of the pure functions above so the screen
+    # cannot state something the helpers did not compute. All are idempotent, so
+    # calling one after any leg/chain change is always safe.
+    @guard
+    def _sync_strategy():
+        """① STRATEGY — the tag chips and the one-line thesis for the picked code."""
+        code = strategy_sel.value
+        tags_box.clear()
+        with tags_box:
+            for i, tag in enumerate(S.strategy_tags(code)):
+                ui.label(tag).classes(
+                    f"px-2 py-0.5 rounded-[2px] border border-current text-[9px] "
+                    f"tracking-[.14em] whitespace-nowrap "
+                    f"{_TONE_TEXT[tag_tone(tag, first=i == 0)]}")
+        blurb_lbl.text = S.strategy_blurb(code)
+
+    @guard
+    def _sync_legs():
+        """③ LEGS — the count / net / max-loss strip, and the action-grid note."""
+        legs = editor.get_legs()
+        facts = leg_strip_facts(legs)
+        legcount_lbl.text = facts["count"]
+        net_lbl.text = facts["net"]
+        net_lbl.classes(remove=_TONE_SWAP, add=_TONE_TEXT[facts["net_tone"]])
+        maxloss_lbl.text = facts["max_loss"]
+        ready = _has_contracts(state.get("chain"))
+        if not ready:
+            action_lbl.text = "load a chain before pricing"
+        elif any(l.get("strike") is None for l in legs) or not legs:
+            action_lbl.text = "pick every leg strike to calculate"
+        else:
+            action_lbl.text = "ready to calculate"
+
+    @guard
+    def _sync_results():
+        """The results column — the panels, or the dashed placeholder naming which
+        wait it is. ONE decision point, so the copy cannot be written twice."""
+        status = chain_status_facts(state.get("loading"), symbol_in.value,
+                                    state.get("chain"))
+        facts = results_panel_facts(status, bool(state.get("result")))
+        empty_panel.set_visibility(facts is not None)
+        metrics_box.set_visibility(facts is None)
+        matrix_frame.box.set_visibility(facts is None)
+        if facts is not None:
+            empty_lbl.text = facts["label"]
+            empty_hint.text = facts["hint"]
+
+    @guard
+    def _sync_status():
+        """The title-bar pill, the ②/③ frame accents, the scan bar and the hint."""
+        status = chain_status_facts(state.get("loading"), symbol_in.value,
+                                    state.get("chain"))
+        phase = status["state"]
+        status_pill.classes(remove=_PILL_SWAP, add=_PILL_TEXT[phase])
+        status_lbl.text = status["label"]
+        sym_frame.note.text = status["hint"]
+        scan_bar.set_visibility(phase == "loading")
+        spot = state.get("spot")
+        spot_lbl.text = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "———"
+        spot_lbl.classes(remove=_TONE_SWAP,
+                         add=_TONE_TEXT["pos" if spot else "dim"])
+        exps = _expiries_for()
+        strikes = set(_strikes_for(expiry_sel.value, "call")) \
+            | set(_strikes_for(expiry_sel.value, "put"))
+        chain_lbl.text = chain_line(status, symbol_in.value, len(exps), len(strikes))
+        # An idle/loading page is not a loaded chain: the two frames that depend
+        # on one drop to the muted edge until it lands.
+        live = phase == "ready"
+        for frame in (sym_frame, legs_frame):
+            frame.box.classes(remove=CALC_FRAME_IDLE if live else CALC_FRAME,
+                              add=CALC_FRAME if live else CALC_FRAME_IDLE)
+            frame.chip.classes(remove=_CHIP_SWAP,
+                               add=_CHIP_TEXT["on" if live else "off"])
+        _sync_results()
+
     # Seed the default template (PCS). Tolerates empty strikes/expiries pre-load.
     _seed_template()
     strategy_sel.on_value_change(
-        lambda e: None if state.get("restoring") else (_seed_template(), _capture()))
+        lambda e: None if state.get("restoring")
+        else (_seed_template(), _capture(), _sync_strategy()))
 
     @guard
     def _on_contracts_change():
@@ -961,6 +1501,7 @@ def render():
             else:
                 missing.append(f"{leg['option_type']} @ {strike:g}")
         editor.set_legs(legs)
+        _sync_legs()
         if filled:
             ui.notify(f"Filled {filled} premium(s).", type="positive")
         if missing:
@@ -988,6 +1529,7 @@ def render():
             wait.show(f"Loading {sym}…")
             ui.timer(_overlay.LOAD_TIMEOUT_SEC, _load_timeout, once=True)
         bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+        _sync_status()
         ui.notify(f"Loading {sym}…", type="info")
 
     @guard
@@ -998,6 +1540,7 @@ def render():
             state["loading"] = False
             wait.hide()
             state["last_loaded"] = None
+            _sync_status()
 
     @guard
     def _symbol_submit():
@@ -1119,6 +1662,8 @@ def render():
             ui.notify(f"Calc failed: {exc}", type="negative")
             return
         state["calc_spot"] = spot
+        # The result payload carries no horizon of its own — see max_dte_from_legs.
+        state["calc_dte"] = max_dte_from_legs(params["legs"])
         bus_client.request("options", {"type": "calc_compute", "args": params})
         ui.notify("Calculating…", type="info")
 
@@ -1139,6 +1684,7 @@ def render():
         wait.hide()
         state["chain"] = cc.get("chain")
         if cc.get("price"):
+            state["spot"] = round(cc["price"], 2)
             price_in.value = round(cc["price"], 2)
         exps = chain_expiries(state["chain"] or {})
         state["applying"] = True
@@ -1165,6 +1711,8 @@ def render():
             _seed_template()   # re-seed (template ratios × Contracts), snap strikes
         else:
             editor.refresh_options()
+        _sync_legs()
+        _sync_status()
         if cc.get("symbol") is not None:
             price = cc.get("price")
             msg = f"{cc['symbol']}: {len(exps)} expiries" + (f", {price:.2f}" if price else "")
@@ -1173,14 +1721,18 @@ def render():
     def _apply_result(result):
         state["result"] = result or None
         if not result:
+            _sync_results()
             return
         spot = state.get("calc_spot")
         if spot is None:
             spot = float(price_in.value or 0)
         summary = result.get("summary") or {}
-        _render_summary(summary_box, summary)
-        _render_grid(grid_box, result.get("eval_labels") or [],
-                     result.get("pnl_data") or [], spot, summary)
+        pnl_data = result.get("pnl_data") or []
+        _render_metrics(metrics_box, summary, editor.get_legs(), spot,
+                        state.get("calc_dte"))
+        _render_grid(grid_box, result.get("eval_labels") or [], pnl_data, spot, summary)
+        matrix_frame.note.text = matrix_note_text(pnl_data, matrix_basis(summary))
+        _sync_results()
 
     def _apply_iv(res):
         """Fill the IV field from a ``calc_iv`` result (implied from the mark)."""
@@ -1324,3 +1876,11 @@ def render():
     if not _pending and not _legs_in and _LAST_CALC:
         _restore(_LAST_CALC)
         load_symbol()
+
+    # First paint of the derived readouts. LAST, so it reflects whatever the
+    # handoff / restore paths above settled on — ``_restore`` in particular
+    # writes the widgets under the restoring guard, which suppresses every
+    # change handler that would otherwise have painted them.
+    _sync_strategy()
+    _sync_legs()
+    _sync_status()
