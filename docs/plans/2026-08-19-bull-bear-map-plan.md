@@ -654,10 +654,6 @@ Expected: FAIL — no attribute `bullbear_symbols`
 
 BULLBEAR_LEVELS = ("sector", "industry", "stock")
 
-# sentiment_svc/compute.py has NO _PROJ_CT_TZ (that constant is options_svc's) —
-# verified. CT matches how the cascade dates its own session.
-_BULLBEAR_TZ = ZoneInfo("America/Chicago")   # add the import if absent
-
 
 def bullbear_symbols(levels):
     """Every distinct symbol across the three levels, order preserved.
@@ -808,7 +804,7 @@ def bullbear_view(momentum) -> dict:
     quoted_at = None
     try:
         quotes = _bullbear_quotes(bullbear_symbols(levels))
-        quoted_at = _dt.datetime.now(_BULLBEAR_TZ).isoformat(timespec="seconds")
+        quoted_at = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
     except Exception:  # noqa: BLE001 — the tree is still worth showing.
         log.exception("bullbear live quotes degraded → nightly tree only")
         quotes = {}
@@ -821,7 +817,12 @@ def bullbear_view(momentum) -> dict:
     }
 ```
 
-> **Verified, so do not re-derive:** `services/sentiment_svc/compute.py` already defines `import datetime as _dt` (line 19) and `log = logging.getLogger(__name__)` (line 29) — reuse both. It does **not** define `_PROJ_CT_TZ`; that constant belongs to `options_svc`, hence the local `_BULLBEAR_TZ`. And `services/_proxy.py` exposes **only `health()`** — quote calls go through `_proxy.schwab_client.get_quotes(list)`, which this same module already uses at lines ~245 and ~265.
+> **Verified against the source, so do not re-derive any of this:**
+>
+> - `services/sentiment_svc/compute.py` defines `import datetime as _dt` (line 19) and `log = logging.getLogger(__name__)` (line 29). Reuse both.
+> - It does **not** import `ZoneInfo` and has **no** CT constant — `_PROJ_CT_TZ` belongs to `options_svc`. Do not add one. **Stamp `quoted_at` exactly the way the momentum payload stamps its sibling `computed_at`** at line 2075: `datetime.now().astimezone().isoformat()`. The two timestamps render side by side on the page ("scores as of X, quotes Y"), so they must be produced the same way or they can format differently.
+> - `services/_proxy.py` exposes `schwab_client = SchwabProxyClient(PROXY_URL)` (line 37) — the SchwabClient-compatible one, which is what `get_quotes` lives on. `_proxy` itself has no `get_quotes`. This module already calls `_proxy.schwab_client.get_quotes(list(...))` at lines ~245 and ~265.
+> - Sentiment publishes **some** views through typed contracts (`CompositeSnapshot`, `RegimeState`) but momentum has none. `cache:sentiment:bullbear` derives from momentum and is likewise a loosely-shaped read-only dict — no contract, matching its source.
 
 **Step 4: Run to verify it passes**
 
