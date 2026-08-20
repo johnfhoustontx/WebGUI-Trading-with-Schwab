@@ -323,6 +323,7 @@ OPTIONS_CHILDREN = [
 SENTIMENT_CHILDREN = [
     ("/market", "Market Dashboard", "dashboard"),
     ("/sentiment", "Sentiment", "insights"),
+    ("/sentiment/bullbear", "Bull / Bear Map", "account_tree"),
     ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
     ("/sentiment/rrg", "RRG", "scatter_plot"),
@@ -747,6 +748,7 @@ _TAB_COLOR = {
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
     "/options/rescue": "#ef5350",         # Rescue — red
     "/sentiment": "#5c6bc0",              # Sentiment — indigo
+    "/sentiment/bullbear": "#651fff",     # Bull / Bear Map — violet
     "/sentiment/sectors": "#7986cb",      # Sector & Industry — indigo light
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
     "/sentiment/rrg": "#a1887f",          # RRG — brown light
@@ -2093,6 +2095,13 @@ def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
         from pages import sentiment
         sentiment.render()
+
+
+@ui.page("/sentiment/bullbear")
+def sentiment_bullbear_page() -> None:
+    with _layout("/sentiment/bullbear", "Bull / Bear Map"):
+        from pages import sentiment_bullbear
+        sentiment_bullbear.render()
 
 
 @ui.page("/sentiment/sectors")

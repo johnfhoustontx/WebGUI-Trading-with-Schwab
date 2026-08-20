@@ -375,6 +375,33 @@ heat band you read down the page rather than a table you read across.
   tabs show them properly.
 - **Refresh** re-pulls the data (it also refreshes on its own).
 """,
+    "/sentiment/bullbear": """
+**Bull / Bear Map — the simple version**
+
+Where the market is strong and weak, as a tree: eleven sectors, the industries
+inside each, and the stocks inside those. Click a row to open the level below it.
+
+- **"Bullish" is two facts, not one**, and this page never merges them.
+  **Trend** asks whether price is genuinely rising. **vs SPY** asks whether it is
+  beating the index. A name can do one without the other.
+- **The quadrant chip** is those two facts combined. **Rising · Leading** is
+  unambiguous strength; **Falling · Lagging** unambiguous weakness.
+  **Falling · Leading** is the one to watch — it is going DOWN, just less than
+  the index, and a screen that ranks only on relative strength calls it a buy.
+  **No reading** means the cascade could not score that row; it is not neutral.
+- **The headline counts rather than judges.** "5 of 11 sectors rising and
+  leading" is arithmetic about the rows on screen. There is deliberately **no
+  risk-on / risk-off verdict here** — the **Sector Rotation** tab owns that.
+- **Breadth** is the share of a group's members confirming the move. A sector
+  rising on a quarter of its constituents is a fragile advance, and the bar turns
+  red to say so. **Stocks have no breadth bar** — a stock has no members. A dash
+  means no reading at all, which is not the same as 0%.
+- **Two clocks, and they mean different things.** Trend, vs SPY and Breadth come
+  from **last night's** cascade — momentum needs months of history, so there is
+  no intraday version of them. Only **Today** is live. If the quote line says
+  quotes are unavailable, only the Today column is affected.
+- **Refresh** re-pulls the live quotes and republishes the map.
+""",
     "/sentiment/rotation": """
 **Sector Rotation — the simple version**
 

@@ -494,6 +494,44 @@ updates on its own about every two minutes whether or not the page is open; pres
 > runner-up. A 10-point lead is a real reading; a 0.2-point lead means the headline
 > was very nearly a coin toss.
 
+## Bull / Bear Map
+
+**Route:** `/sentiment/bullbear`.
+
+Where the market is strong and weak, as a tree you open one level at a time:
+eleven sectors, the industries inside each, then the stocks inside those.
+
+- **The page keeps two questions apart.** **Trend** is whether price is genuinely
+  rising — the annualised slope of a regression through months of closes, scaled
+  by how well the line fits. **vs SPY** is whether it is beating the index. A name
+  can do either without the other, and no number here blends them.
+- **The quadrant chip** names both at once. **Rising · Leading** is unambiguous
+  strength, **Falling · Lagging** unambiguous weakness, **Rising · Lagging** is
+  going up more slowly than the index — and **Falling · Leading** is the one
+  worth learning. It is falling, just less than the index, which is exactly the
+  row a relative-strength-only screen paints as a buy.
+- **No reading** means the cascade could not score that row (too short or too
+  thin a price series). It is an absence, not a neutral verdict.
+- **The headline is a count, not a verdict.** "5 of 11 sectors rising and
+  leading" describes the rows on screen. There is deliberately no risk-on /
+  risk-off call here — **Sector Rotation** owns that read.
+- **The chips under the headline** are the full distribution. All four quadrants
+  stay on screen even at zero, because an empty trap bucket is itself worth
+  knowing. A fifth **No reading** chip appears only when something is unscored.
+- **Breadth** is the share of a group's members confirming its move. A sector
+  rising on a quarter of its constituents is a fragile advance and the bar turns
+  red to say so. **Stock rows have no bar** — a stock has no members — and a dash
+  means no reading at all, which is not the same as 0%.
+- **Two clocks, and they date different things.** Trend, vs SPY and Breadth come
+  from **last night's** cascade; momentum needs months of history, so there is no
+  intraday version of them. Only **Today** is live, refreshed every ~30 seconds
+  from one batched quote call. If the quote line reports quotes unavailable, only
+  the Today column is affected — the scores below it are fine.
+- **Click a sector** to build its industries, **an industry** to build its
+  stocks. Nothing below the sector level is loaded until you ask for it, and
+  more than one can be open at a time.
+- **Refresh** re-pulls the quotes and republishes the map.
+
 ## Sector & Industry
 
 **Route:** `/sentiment/sectors`.

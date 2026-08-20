@@ -913,6 +913,92 @@ can genuinely change within a session — the share table shows that happening.
 
 ---
 
+## Bull / Bear Map
+
+*Menu: MARKETS → Trend & Sentiment → Bull / Bear Map · Route `/sentiment/bullbear`*
+
+### What it is
+
+A three-level tree — sector, industry, stock — answering one question directly:
+where is the market bullish, and where is it bearish. It exists because "bullish" is
+**two facts, not one**, and every other rotation screen in this app collapses them.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `sentiment_svc` (:8210), `cache:sentiment:bullbear` |
+| Scores | The nightly momentum cascade, 16:20 CT — 11 sectors, ~69 industries, ~296 stocks |
+| Day moves | One batched `/quotes` call, republished about every 30 seconds during the session |
+| Refresh | Re-pulls quotes and republishes; the scores are untouched until the next cascade |
+
+### Reading the screen
+
+**Trend** is `momentum.trend_strength`: the annualised exponential-regression slope of
+log(close), scaled by R². It is **signed and absolute** — positive means price is
+genuinely rising, with no benchmark involved. **vs SPY** is `momentum.relative_strength`:
+excess return against the index, **signed and relative**. The page shows both, side by
+side, and produces no combined score at any point.
+
+| Quadrant | Reading |
+|---|---|
+| **Rising · Leading** | Unambiguous strength. The real bullish bucket. |
+| **Rising · Lagging** | Going up, but the index is going up faster. |
+| **Falling · Leading** | The trap. Down, but down less than the index — the row a relative-strength-only screen calls a buy. |
+| **Falling · Lagging** | Unambiguous weakness. |
+| **No reading** | The cascade could not score it. An absence, not a neutral. |
+
+Ties go to the cautious side: a dead-flat trend is not "rising", and a zero excess is
+not "leading".
+
+**Breadth** is participation — the share of a group's constituents confirming its move.
+It is a third and independent dimension, drawn beside the quadrant rather than folded
+into it, and it separates two rows that look identical on trend alone. Sector and
+industry rows carry it; **stock rows do not**, because a stock has no constituents, and
+a dash there is the absence of a reading rather than 0%.
+
+**The headline counts, it does not judge.** "5 of 11 sectors rising and leading" is an
+arithmetic fact about the rows on screen. There is **deliberately no risk-on / risk-off
+verdict on this page**: [Sector & Industry](#sector-industry) and
+[Sector Rotation](#sector-rotation) already print such verdicts from quantities that are
+not commensurable, and can therefore contradict each other. A reader may disagree with
+what a count implies; they cannot disagree with the count.
+
+**The two clocks are not decoration.** *Scores as of* dates the cascade, *Quotes* dates
+the day-move column. When the quote call fails the page says so and still renders the
+tree — the cost is one column, not the page.
+
+**Expansion is lazy.** The default screen is eleven sector rows; industries build when
+you open a sector and stocks when you open an industry, so several hundred rows are never
+all on screen at once. More than one branch can be open at a time.
+
+### Why it matters
+
+The market-wide picture differs by level, and a single blended score averages that away.
+Measured on 2026-08-19: 5 of 11 sectors were constructive while 105 of 296 stocks were in
+outright decline — and 19 stocks plus one industry sat in the falling-but-leading bucket
+that a relative-only screen would have painted bullish.
+
+**Where it is weak.** The scores are nightly and cannot be otherwise — trend and relative
+strength need months of history, so there is no such thing as an intraday reading of them.
+The live layer answers only the narrower question of whether today is confirming last
+night's map. Breadth is unweighted, so a sector's bar counts a micro-cap the same as a
+mega-cap.
+
+### When to use it
+
+Before picking where to put a position: a defined-risk credit spread in a Rising · Leading
+sector with broad participation is a materially different bet from the same structure in a
+Falling · Leading one. Also whenever [Momentum](#momentum) or [RRG](#rrg) ranks something
+highly and you want to know whether it is actually going up.
+
+### Related pages
+
+[Momentum](#momentum) · [RRG](#rrg) · [Sector Rotation](#sector-rotation) ·
+[Sector & Industry](#sector-industry).
+
+---
+
 ## Sector & Industry
 
 *Menu: MARKETS → Trend & Sentiment → Sector & Industry · Route `/sentiment/sectors`*
