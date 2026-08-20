@@ -1,38 +1,22 @@
 """Bull / Bear Map (/sentiment/bullbear) — where the market is strong and weak.
 
-Tier-1 reader: no engine imports, no proxy calls, no compute. It reads one view,
-``cache:sentiment:bullbear`` — the nightly momentum cascade merged with a single
-batched live quote call by ``services/sentiment_svc/compute.bullbear_view`` — and
-formats it.
-
-**Two axes, never blended.** Each row shows its absolute trend and its excess
-return vs SPY as separate marks beside the quadrant they combine to, so the row
-that is falling while still beating the index reads as exactly that. The
-arithmetic, the ordering and the colour vocabulary are pure in
-``pages/bullbear.py``; this module is widgets, wiring, and the two things only a
-page knows — the unit those axes display in, and which element repaints when.
+Tier-1 reader over one view, ``cache:sentiment:bullbear`` — the nightly momentum
+cascade merged with one batched quote call by
+``services/sentiment_svc/compute.bullbear_view``. The arithmetic, ordering and
+colours are pure in ``pages/bullbear.py``; this module holds widgets, wiring, and
+the two things only a page knows: the unit the score axes display in, and which
+element repaints when.
 
 **Two clocks, two repaint paths, and they are the same distinction.** The scores
-are last night's cascade; the day-moves are seconds old. So a version change
-carrying only new quotes reprices the day cells and the quote clock IN PLACE. It
-does not rebuild the tree, which would collapse whatever the reader had opened —
-and at a ~30 s publish cadence that would be a collapse every half minute. Only
-``scores_signature`` moving rebuilds.
+are last night's cascade, the day-moves seconds old, so a version change carrying
+only new quotes reprices the day cells IN PLACE — rebuilding would collapse every
+branch the reader had opened, twice a minute. Only ``scores_signature`` rebuilds.
 
 **No regime verdict, anywhere.** ``/sentiment/sectors`` and ``/sentiment/rotation``
-already print opposite risk-on/risk-off headlines from quantities that are not
-commensurable (CLAUDE.md records +0.37 reading "Risk-on" beside −1.52 reading
-"Risk-off" on 2026-08-17). This page adds no third one: its headline is a count
-of the rows on screen, which a reader may interpret against but cannot dispute.
-The payload carries ``regime`` and this module never reads it.
-
-**Why ``ui.expansion`` and not a hand-rolled toggle.** Both fit; the expansion
-brings the open/close state, the keyboard affordance and the animation for free,
-and its ``on_value_change`` is the natural place to build children on first open.
-The price is one ``ui.add_css`` block for Quasar-internal DOM — ``.q-item``'s
-padding and ``.nicegui-expansion-content``'s ``align-items: flex-start`` would
-otherwise indent every child row out of the column grid — which is precisely the
-documented escape hatch, and nothing else on this page needs raw CSS.
+already print opposite risk-on/risk-off headlines off quantities that are not
+commensurable (CLAUDE.md: +0.37 "Risk-on" beside −1.52 "Risk-off", 2026-08-17).
+This page counts the rows on screen and stops; the payload carries ``regime`` and
+this module never reads it.
 See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
 import datetime
@@ -64,26 +48,19 @@ ORPHANS = "Not in a scored industry"
 def as_percent(fraction):
     """A cascade fraction -> a signed percent string, or the absent marker.
 
-    ``raw.trend`` and ``raw.excess`` are stored as FRACTIONS —
-    ``sentiment-dashboard/scoring/momentum.trend_strength`` returns
-    ``exp(slope*252)-1`` scaled by R², and ``relative_strength`` returns a
-    difference of two ``_pct_return`` values — while ``day_pct`` is already a
-    percent. This x100 is the only unit conversion on the page and it belongs to
-    exactly these two columns.
-
-    Guarding None alone is enough because the only caller feeds it
-    ``B.row_axes``, which yields None or a finite float and nothing else.
+    ``raw.trend`` and ``raw.excess`` are FRACTIONS (in
+    ``sentiment-dashboard/scoring/momentum``, ``exp(slope*252)-1`` scaled by R²
+    and a difference of two ``_pct_return`` values) while ``day_pct`` is already
+    a percent. Guarding None suffices: the only caller feeds ``B.row_axes``.
     """
     return B.NO_READING if fraction is None else B.signed_pct(fraction * 100.0)
 
 
 def day_tone(day_pct):
-    """The Today cell's tone, decided on the digits ``signed_pct`` will print.
+    """The Today cell's tone, read off the digits ``signed_pct`` will print.
 
-    Reading the raw float instead would paint a cell green while the number
-    beside it reads "0.00%" — ``B.signed_pct`` signs the ROUNDED value for that
-    same reason, so deriving the tone from its output is what keeps the two from
-    ever disagreeing.
+    Taking the raw float would paint a cell green while the number beside it
+    reads "0.00%"; deriving it from the formatter stops the two disagreeing.
     """
     return {"+": "up", "-": "down"}.get(B.signed_pct(day_pct)[:1], "flat")
 
@@ -91,9 +68,9 @@ def day_tone(day_pct):
 def headline_line(sector_rows):
     """The count headline, pluralised here because ``B.headline`` will not.
 
-    That function renders ``noun`` verbatim and says so — it would happily emit
-    "1 of 1 sectors". Its empty string on an empty payload is deliberate too, and
-    the page substitutes :data:`WAITING` rather than leaving a blank strip.
+    It renders ``noun`` verbatim and would emit "1 of 1 sectors". Its empty
+    string on an empty payload is deliberate too — ``_rebuild`` substitutes
+    :data:`WAITING` rather than leave a blank strip.
     """
     counts = B.quadrant_counts(sector_rows)
     total = sum(counts.values())
@@ -103,11 +80,10 @@ def headline_line(sector_rows):
 def distribution(counts):
     """The count strip: the four quadrants always, ``unknown`` only when real.
 
-    The four stay even at zero, because an EMPTY trap bucket is itself a reading
-    — drop it and a reader cannot tell "nothing is falling but leading" from
-    "that bucket was not counted". ``unknown`` is not a fifth quadrant but the
-    absence of one, so a standing "0 No reading" chip would be noise on every
-    normal day while a hidden non-zero one would hide missing data.
+    The four stay at zero because an EMPTY trap bucket is itself a reading — drop
+    it and "nothing is falling but leading" is indistinguishable from "that
+    bucket was not counted". ``unknown`` is the absence of a quadrant, not a
+    fifth, so it earns a chip only when something really went unscored.
     """
     out = [(q, counts.get(q, 0)) for q in B.QUADRANTS if q != "unknown"]
     if counts.get("unknown"):
@@ -118,10 +94,9 @@ def distribution(counts):
 def _clock_time(stamp):
     """The wall-clock time out of an ISO stamp, or the stamp verbatim.
 
-    ``compute.bullbear_view`` writes ``datetime.now().astimezone().isoformat()``,
-    so the date is today's and only the time earns the space. An unparseable
-    stamp renders raw: showing the reader what was published beats claiming
-    nothing was.
+    ``compute.bullbear_view`` stamps ``now().astimezone().isoformat()``, so the
+    date is today's and only the time earns the space; an unparseable stamp
+    renders raw, since showing what was published beats claiming nothing was.
     """
     try:
         return datetime.datetime.fromisoformat(str(stamp)).strftime("%H:%M:%S")
@@ -133,9 +108,9 @@ def clocks(payload):
     """``(scores line, quotes line)`` — two clocks, dating two different things.
 
     They fail separately as well as tick separately: ``compute.bullbear_view``
-    leaves ``quoted_at`` None when the quote call raised and publishes the tree
-    anyway, so a None there costs the day-move column and nothing else. Saying
-    "stale" instead would send a reader away from scores that are perfectly good.
+    leaves ``quoted_at`` None when the quote call raised and ships the tree
+    regardless, so a None there costs one column. Calling the page stale would
+    send a reader away from scores that are perfectly good.
     """
     payload = payload or {}
     date = payload.get("session_date")
@@ -147,9 +122,9 @@ def clocks(payload):
 def day_map(levels):
     """``{(level, symbol): day_pct}`` — the live layer, flattened.
 
-    Keyed by level AND symbol because an industry ETF is usually a scored stock
-    too (``compute.bullbear_symbols`` dedups the quote call for exactly that
-    reason), so a symbol on its own would let one row's move overwrite another's.
+    Keyed by level AND symbol: an industry ETF is usually a scored stock too
+    (``compute.bullbear_symbols`` dedups the quote call for that reason), so a
+    symbol alone lets one row's move overwrite another's.
     """
     out = {}
     for level in LEVELS:
@@ -163,11 +138,10 @@ def day_map(levels):
 def scores_signature(payload):
     """What must move before the tree is rebuilt rather than repriced.
 
-    The two score clocks plus the sector level's own axes — the axes because a
-    rescore that lands on the same ``computed_at`` still has to redraw, and the
-    sector level alone because all three levels come out of ONE cascade
-    (``compute.bullbear_view`` copies ``momentum["levels"]`` wholesale), so they
-    cannot move independently of each other.
+    The two score clocks plus the sector axes — the axes because a rescore
+    landing on the same ``computed_at`` must still redraw, sector-only because
+    all three levels come out of ONE cascade (``compute.bullbear_view`` copies
+    ``momentum["levels"]`` wholesale).
     """
     payload = payload or {}
     rows = (payload.get("levels") or {}).get("sector") or []
@@ -177,9 +151,8 @@ def scores_signature(payload):
 
 
 # ── the look ─────────────────────────────────────────────────────────────────
-# One column template for all three levels: a sector, an industry and a stock
-# must line up, because comparing a row against its parent is the reason the tree
-# nests at all. Indent lives inside the first cell, never in the template.
+# One column template for all three levels — comparing a row against its parent
+# is the reason the tree nests. Indent lives in the first cell, not the template.
 GRID = ("grid grid-cols-[minmax(190px,2.4fr)_150px_92px_92px_88px"
         "_minmax(120px,1fr)] w-full items-center")
 MIN_W = "min-w-[880px]"
@@ -198,8 +171,8 @@ _BTN = (f"{_MONO} {NT['caption']} border {NE['btn_edge']} bg-transparent "
 _DAY_TXT = {tone: TONE[tone]["txt"] for tone in ("up", "down", "flat")}
 _DAY_TXT_ALL = " ".join(dict.fromkeys(_DAY_TXT.values()))
 
-# Breadth fill: thin takes the risk-off hue, because a rising row on a quarter of
-# its constituents is the qualifier this bar exists to draw.
+# Breadth fill: thin takes the risk-off hue — a row rising on a quarter of its
+# constituents is the qualifier this bar exists to draw.
 _BREADTH_FILL = {True: TONE["down"]["fill"], False: TONE["up"]["fill"]}
 
 # The headline slot carries either the count or the reason there is none.
@@ -215,11 +188,10 @@ _NAME_TXT = {"sector": f"{NT['body']} text-[14px] font-semibold",
              "industry": f"{NT['caption']} text-[12.5px]",
              "stock": f"{NT['rail']} text-[12px]"}
 
-# The ONE escape hatch (CLAUDE.md): Quasar-internal DOM that ``.classes()``
-# cannot reach. ``.q-item`` is the expansion's header wrapper and carries 8/16px
-# of its own padding; ``.nicegui-expansion-content`` is a flex column with
-# ``align-items: flex-start`` and a gap. Left alone, both push child rows out of
-# the column grid the whole page is read across.
+# The ONE escape hatch (CLAUDE.md): Quasar-internal DOM ``.classes()`` cannot
+# reach. ``.q-item`` pads the expansion header 8/16px and
+# ``.nicegui-expansion-content`` is a flex column with ``align-items:flex-start``
+# — left alone, both push child rows out of the column grid.
 _BULLBEAR_CSS = """
 .bullbear .q-item { padding: 0; min-height: 0; }
 .bullbear .nicegui-expansion-content { padding: 0; gap: 0; align-items: stretch; }
@@ -255,20 +227,15 @@ def render():
 
         with ui.column().classes("w-full gap-2.5 px-7 pb-6"):
             headline_lbl = ui.label("").classes(_HEADLINE[True])
-            # Naming the level is not decoration: the design measured 5 of 11
-            # sectors constructive on a day when 105 of 296 stocks were in
-            # outright decline, so a count without its level is a different
-            # claim depending on where you read it.
             sub_lbl = ui.label(
                 "Counted at sector level. Expand a sector for the industries "
                 "inside it, an industry for its stocks — each level counts "
                 "separately.").classes(f"{NT['ghost']} text-[12.5px] leading-snug")
             dist_box = ui.row().classes("flex-wrap gap-1.5 pt-1")
 
-        # The wait scrim mounts on the SCROLL wrapper, not on ``rows_box``:
-        # ``_rebuild`` clears that box, which would take the scrim with it. The
-        # wrapper also keeps a floor height, so the spinner has somewhere to land
-        # on the cold cache — which is exactly when Refresh gets pressed.
+        # The scrim mounts here, not on ``rows_box``, which ``_rebuild`` clears
+        # — taking the scrim with it. The floor height gives it somewhere to land
+        # on a cold cache, which is when Refresh gets pressed.
         scroll_box = ui.element("div").classes(
             "w-full overflow-x-auto px-7 min-h-[96px]")
         with scroll_box:
@@ -284,12 +251,9 @@ def render():
                         ui.label(text).classes(f"{_CAPTION} {align}")
                 rows_box = ui.column().classes("w-full gap-0")
 
-        # Outside the scroller: a footnote that slid sideways with the grid would
-        # be unreadable at the width the grid needs. Trend is annualised over
-        # months and vs SPY is an excess return over its own shorter lookback
-        # (``scoring/momentum.trend_strength`` / ``relative_strength``); the two
-        # window lengths are deliberately NOT printed, being producer constants
-        # this Tier-1 page cannot verify.
+        # Outside the scroller — a footnote sliding sideways is unreadable. The
+        # window lengths (``scoring/momentum.TREND_WINDOW`` / ``RS_WINDOW``) are
+        # deliberately unprinted: producer constants this page cannot verify.
         ui.label(
             "Trend is the annualised slope of a regression through months of "
             "closes, scaled by how well the line fits. vs SPY is the excess "
@@ -310,10 +274,10 @@ def render():
         share = B.row_participation(node)
         width = B.breadth_width(share)
         if width is None:
-            # No track AT ALL, which is not the same drawing as an empty one: a
-            # stock row carries no participation, and a sector whose members were
-            # all unusable carries None too. An empty groove would claim that
-            # nothing confirms the move, a reading neither row supports.
+            # No track AT ALL — a different drawing from an empty one. A stock
+            # has no constituents, and a sector whose members were all unusable
+            # has no reading; an empty groove would claim of both that nothing
+            # confirms.
             ui.label(B.NO_READING).classes(f"{_MONO} {NT['ghost']} text-[11px]")
             return
         with ui.row().classes("items-center no-wrap gap-2.5 w-full pr-2"):
@@ -321,9 +285,9 @@ def render():
                     f"h-1.5 flex-1 min-w-0 {NB['track']} rounded-full "
                     "overflow-hidden"):
                 # The documented continuous-value exception: 0..100 is 101
-                # classes, so this one is built at runtime. It is set once —
-                # breadth is a nightly number, and the live reprice below never
-                # touches it — so there is no prior width to remove.
+                # classes, so this one is runtime-built. Set once (breadth is
+                # nightly), so unlike the day tone there is nothing to
+                # ``remove=``.
                 ui.element("div").classes(
                     f"h-full rounded-full {_BREADTH_FILL[B.breadth_is_thin(share)]}"
                     f" w-[{width}%]")
@@ -366,11 +330,10 @@ def render():
             f"{indent} py-2.5 border-b {NE['hair']}")
 
     # ── lazy expansion ──────────────────────────────────────────────────────
-    # Children are built INSIDE the expand handler, so the default screen is the
-    # eleven sector rows and the 376-row tree never all exists at once. A body
-    # that already has children has been built before, which is the cache: a
-    # re-open only re-shows it. Every branch adds at least one child (a note when
-    # there is nothing else), so that check can never read as "not yet built".
+    # Children build INSIDE the expand handler, so the default screen is eleven
+    # sector rows and the 376-row tree never exists at once. A body with children
+    # was filled before — that is the cache — and every branch adds at least one
+    # (a note where there is nothing else) so an empty branch cannot misread.
     def _panel(node, level):
         panel = ui.expansion(str(node.get("label") or "")).classes("w-full")
         with panel.add_slot("header"):
@@ -401,8 +364,7 @@ def render():
         if orphans:
             # ``build_tree`` files a stock here when its industry was never
             # scored — 10 of 296 on 2026-08-19. Dropping them would quietly
-            # shrink the sector; filing them under an invented industry would be
-            # worse.
+            # shrink the sector.
             _note(ORPHANS, _ROW_INDENT["industry"])
             for stock in orphans:
                 _mark_row(stock, "stock", leaf=True)
@@ -432,9 +394,8 @@ def render():
         rows_box.clear()
         dist_box.clear()
         levels = (state["payload"] or {}).get("levels") or {}
-        # Counts come from the BUILT tree, not the raw level, so the headline is
-        # a fact about the rows on screen — which is the claim the design makes
-        # for it — and cannot count a row the grid dropped.
+        # Counts come from the BUILT tree, so the headline is a fact about the
+        # rows on screen — the design's claim for it — not about rows it dropped.
         sectors = B.build_tree(levels)
         line = headline_line(sectors)
         headline_lbl.text = line or WAITING
@@ -479,8 +440,8 @@ def render():
 
     @guard
     def _maybe_repaint():
-        # The cheap ``:ver`` probe, not the envelope — an unchanged version must
-        # cost one small GET and no deserialize, on every open tab, every 2 s.
+        # The cheap ``:ver`` probe: an unchanged version costs one small GET and
+        # no deserialize, per open tab, every 2 s.
         if bus_client.read_version(VIEW) == state["ver"]:
             return
         _read()
