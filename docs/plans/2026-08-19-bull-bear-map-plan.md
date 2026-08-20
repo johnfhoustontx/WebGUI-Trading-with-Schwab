@@ -823,6 +823,7 @@ def bullbear_view(momentum) -> dict:
 > - It does **not** import `ZoneInfo` and has **no** CT constant — `_PROJ_CT_TZ` belongs to `options_svc`. Do not add one. **Stamp `quoted_at` exactly the way the momentum payload stamps its sibling `computed_at`** at line 2075: `datetime.now().astimezone().isoformat()`. The two timestamps render side by side on the page ("scores as of X, quotes Y"), so they must be produced the same way or they can format differently.
 > - `services/_proxy.py` exposes `schwab_client = SchwabProxyClient(PROXY_URL)` (line 37) — the SchwabClient-compatible one, which is what `get_quotes` lives on. `_proxy` itself has no `get_quotes`. This module already calls `_proxy.schwab_client.get_quotes(list(...))` at lines ~245 and ~265.
 > - Sentiment publishes **some** views through typed contracts (`CompositeSnapshot`, `RegimeState`) but momentum has none. `cache:sentiment:bullbear` derives from momentum and is likewise a loosely-shaped read-only dict — no contract, matching its source.
+> - ⚠ **A contract here would not merely be unnecessary, it would REJECT the payload.** `MomentumSnapshot` (`shared/contracts/sentiment.py:73-88`) makes `session_date: str` **required** and validates exactly-three-list levels. `bullbear_view` is deliberately pinned to return `session_date=None` on a cold cache, so a `BullBearSnapshot` mirroring its sibling would refuse the very output the function is tested to produce. If someone later "adds the missing contract" for consistency, that is the trap.
 
 **Step 4: Run to verify it passes**
 
