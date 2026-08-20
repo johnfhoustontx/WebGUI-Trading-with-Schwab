@@ -3,6 +3,8 @@
 Two axes, never blended: absolute trend (raw.trend) and relative strength
 (raw.excess). See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
+from decimal import Decimal
+
 from pages import bullbear as B
 
 
@@ -43,28 +45,46 @@ def test_quadrant_is_unknown_when_either_axis_is_non_finite():
 
 
 def test_quadrant_rejects_booleans_even_though_bool_is_an_int():
-    """bool subclasses int, so True passes every numeric guard — isfinite(True)
-    is True and True > 0 is True — and would render as a rising trend. A
-    boolean in a regression-slope field is a malformed payload, not a reading."""
+    """bool subclasses int, so True passes every numeric guard — float(True) is
+    1.0 and True > 0 is True — and would render as a rising trend. A boolean in
+    a regression-slope field is a malformed payload, not a reading."""
     assert B.quadrant(True, True) == "unknown"
     assert B.quadrant(False, 0.1) == "unknown"
     assert B.quadrant(0.5, True) == "unknown"
 
 
+def test_quadrant_coerces_a_numeric_string_rather_than_discarding_it():
+    """_num is shared verbatim with sector_heat/rotation_view/rrg_view/
+    momentum_view, which read these same payload fields, so it coerces what
+    float() can read. The cascade emits floats, so this is unreachable today —
+    it is pinned because two notions of "is this a reading" between adjacent
+    screens is how they end up disagreeing about identical data."""
+    assert B.quadrant("0.5", 0.1) == "rising_leading"
+    assert B.quadrant(0.5, "-0.1") == "rising_lagging"
+    assert B.quadrant(Decimal("0.5"), Decimal("0.1")) == "rising_leading"
+
+
 def test_quadrant_is_unknown_for_a_value_that_is_not_a_number():
     """A malformed payload must not raise inside a page build. Degrading to
     unknown is honest rather than masking: it renders the absence instead of
-    inventing a plausible number, which is the distinction that matters."""
-    assert B.quadrant("0.5", 0.1) == "unknown"
-    assert B.quadrant(0.5, "-0.1") == "unknown"
+    inventing a plausible number, which is the distinction that matters.
+    Decimal("sNaN") is the one that bites — float() raises ValueError on it
+    rather than returning nan, so a TypeError-only guard lets it through."""
+    assert B.quadrant("abc", 0.1) == "unknown"
+    assert B.quadrant(0.5, "abc") == "unknown"
     assert B.quadrant({}, []) == "unknown"
+    assert B.quadrant(Decimal("sNaN"), 0.1) == "unknown"
+    assert B.quadrant(0.5, Decimal("NaN")) == "unknown"
 
 
 def test_quadrant_only_ever_returns_a_member_of_quadrants():
     """QUADRANTS is the vocabulary the labels and the Tailwind class palette
     will be keyed by, so the tuple and the function must not drift apart."""
+    # Membership alone would pass an implementation that returned "unknown" for
+    # everything; the tests above are what pin each bucket as reachable.
+    assert len(set(B.QUADRANTS)) == len(B.QUADRANTS)
     values = (0.5, -0.5, 0.0, -0.0, 1, None, float("nan"), float("inf"),
-              float("-inf"), True, False, "x", [])
+              float("-inf"), True, False, "x", "0.5", Decimal("sNaN"), [])
     for trend in values:
         for excess in values:
             assert B.quadrant(trend, excess) in B.QUADRANTS
