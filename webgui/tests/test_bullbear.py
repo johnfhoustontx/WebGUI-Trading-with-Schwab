@@ -258,10 +258,14 @@ def test_the_lookups_degrade_rather_than_raise_on_an_impossible_key():
 
 
 # ── the headline: counts, not a verdict ──────────────────────────────────────
-def _row(trend, excess):
-    """Only ``raw`` is read, so a row is only ``raw`` — a fuller fixture would
-    imply fields the counter consults."""
-    return {"raw": {"trend": trend, "excess": excess}}
+def _row(trend, excess, **fields):
+    """``raw``, plus whatever top-level fields the case under test is about.
+
+    The counter reads only ``raw``. The tree also reads ``label``/``sector``/
+    ``industry``, which are SIBLINGS of ``raw`` rather than entries in it
+    (services/sentiment_svc/compute.py, ``_momentum_score_level``).
+    """
+    return {"raw": {"trend": trend, "excess": excess}, **fields}
 
 
 def test_quadrant_counts_bucket_every_row_exactly_once():
@@ -415,3 +419,154 @@ def test_breadth_is_thin_brackets_the_threshold_at_a_third():
     assertion is what bounds the constant from above — 1/3 alone allows 0.35."""
     assert B.breadth_is_thin(1 / 3) is True
     assert B.breadth_is_thin(0.34) is False
+
+
+def test_row_participation_reads_the_share_not_the_within_level_zscore():
+    """The name is used twice in one row and the wrong one fails silently.
+    ``row["participation"]`` is the 0..1 share; ``row["components"]
+    ["participation"]`` is a within-level z-score, signed and unbounded
+    (services/sentiment_svc/compute.py, ``_momentum_score_level``). Read through
+    components, every negative row loses its bar and the rest draw a plausible
+    wrong one — no exception to notice."""
+    row = {"raw": {}, "participation": 0.25,
+           "components": {"participation": -1.8}}
+    assert B.row_participation(row) == 0.25
+    assert B.breadth_width(B.row_participation(row)) == 25
+    assert B.row_participation(None) is None and B.row_participation({}) is None
+
+
+# ── the tree: sector -> industry -> stock ────────────────────────────────────
+def test_build_tree_nests_industries_and_stocks_under_their_parents():
+    levels = {
+        "sector": [_row(1.0, 0.1, symbol="XLV", label="Health Care")],
+        "industry": [_row(1.0, 0.2, symbol="XBI", label="Biotech",
+                          sector="Health Care")],
+        "stock": [_row(1.0, 0.3, symbol="AMGN", sector="Health Care",
+                       industry="Biotech")],
+    }
+    tree = B.build_tree(levels)
+    assert [s["label"] for s in tree] == ["Health Care"]
+    assert [i["label"] for i in tree[0]["industries"]] == ["Biotech"]
+    assert [k["symbol"] for k in tree[0]["industries"][0]["stocks"]] == ["AMGN"]
+    # Both list keys exist on every sector, placed stocks or not, so the page
+    # iterates them without a guard per node.
+    assert tree[0]["orphan_stocks"] == []
+
+
+def test_build_tree_keeps_a_stock_whose_industry_has_no_row_of_its_own():
+    """The ordinary case, not a curiosity. compute.py builds industry_entries
+    only for industries whose ETF cleared ``_momentum_admit``, while every member
+    stock is scored regardless — so one illiquid industry ETF strands its whole
+    membership, which still rolls up to the sector and must not vanish."""
+    levels = {
+        "sector": [_row(1.0, 0.1, symbol="XLV", label="Health Care")],
+        "industry": [],
+        "stock": [_row(1.0, 0.3, symbol="AMGN", sector="Health Care",
+                       industry="Cannabis")],
+    }
+    tree = B.build_tree(levels)
+    assert tree[0]["industries"] == []
+    assert [k["symbol"] for k in tree[0]["orphan_stocks"]] == ["AMGN"]
+
+
+def test_build_tree_drops_a_row_whose_parent_sector_is_unknown():
+    """A row naming a sector with no sector row cannot be placed, and inventing a
+    bucket for it would put a phantom row in the counts. BOTH child levels are
+    given one, because each takes that decision on its own. Reached rather than
+    hypothetical: compute.py maps a stock in no scored industry to ``("", "")``,
+    and no sector row is ever labelled ``""``."""
+    levels = {"sector": [],
+              "industry": [_row(1.0, 0.2, symbol="XBI", label="Biotech",
+                                sector="Nowhere")],
+              "stock": [_row(1.0, 0.3, symbol="ZZZ", sector="Nowhere",
+                             industry="Biotech")]}
+    assert B.build_tree(levels) == []
+
+
+def test_build_tree_keys_an_industry_by_its_sector_and_name_together():
+    """An industry name is unique only within its sector — the cascade keys them
+    ``(sector, industry)`` throughout (sectors_ref.constituents_by_industry). A
+    name-only key files both sectors' constituents under whichever row was
+    inserted last."""
+    levels = {"sector": [_row(2.0, 0.1, symbol="XLV", label="HC"),
+                         _row(1.0, 0.1, symbol="XLI", label="Ind")],
+              "industry": [_row(1.0, 0.1, symbol="A", label="Robotics", sector="HC"),
+                           _row(1.0, 0.1, symbol="B", label="Robotics", sector="Ind")],
+              "stock": [_row(1.0, 0.1, symbol="ISRG", sector="HC", industry="Robotics"),
+                        _row(1.0, 0.1, symbol="ROK", sector="Ind", industry="Robotics")]}
+    tree = B.build_tree(levels)
+    assert [k["symbol"] for k in tree[0]["industries"][0]["stocks"]] == ["ISRG"]
+    assert [k["symbol"] for k in tree[1]["industries"][0]["stocks"]] == ["ROK"]
+
+
+def test_build_tree_orders_sectors_strongest_first():
+    levels = {"sector": [_row(-1.0, -0.1, symbol="XLU", label="Utilities"),
+                         _row(2.0, 0.5, symbol="XLV", label="Health Care"),
+                         _row(0.5, 0.1, symbol="XLF", label="Financials")],
+              "industry": [], "stock": []}
+    assert [s["label"] for s in B.build_tree(levels)] == \
+        ["Health Care", "Financials", "Utilities"]
+
+
+def test_build_tree_orders_industries_and_stocks_strongest_first_too():
+    """The sector ordering test leaves both child levels unpinned — an
+    implementation that sorts only the top level passes it, and a mis-ordered
+    list is least visible at the depth carrying the most rows."""
+    levels = {"sector": [_row(1.0, 0.1, symbol="XLV", label="HC")],
+              "industry": [_row(0.1, 0.1, symbol="A", label="Weak", sector="HC"),
+                           _row(2.0, 0.1, symbol="B", label="Strong", sector="HC")],
+              "stock": [_row(0.1, 0.1, symbol="LOW", sector="HC", industry="Strong"),
+                        _row(2.0, 0.1, symbol="HIGH", sector="HC", industry="Strong"),
+                        _row(0.5, 0.1, symbol="MID", sector="HC", industry="Gone"),
+                        _row(3.0, 0.1, symbol="TOP", sector="HC", industry="Gone")]}
+    tree = B.build_tree(levels)
+    assert [i["label"] for i in tree[0]["industries"]] == ["Strong", "Weak"]
+    assert [k["symbol"] for k in tree[0]["industries"][0]["stocks"]] == ["HIGH", "LOW"]
+    assert [k["symbol"] for k in tree[0]["orphan_stocks"]] == ["TOP", "MID"]
+
+
+def test_build_tree_puts_unscored_sectors_last():
+    levels = {"sector": [_row(None, None, symbol="XLU", label="Utilities"),
+                         _row(-1.0, -0.1, symbol="XLE", label="Energy")],
+              "industry": [], "stock": []}
+    assert [s["label"] for s in B.build_tree(levels)] == ["Energy", "Utilities"]
+
+
+def test_build_tree_sorts_a_non_finite_trend_as_unscored_rather_than_raising():
+    """A bare float() here would let a NaN sort unpredictably — every comparison
+    against it is False — and would let a signalling Decimal raise inside
+    sorted(). Both are what _num exists to prevent."""
+    levels = {"sector": [_row(float("nan"), 0.1, symbol="A", label="A"),
+                         _row(Decimal("sNaN"), 0.1, symbol="B", label="B"),
+                         _row(1.0, 0.1, symbol="C", label="C")],
+              "industry": [], "stock": []}
+    assert [s["label"] for s in B.build_tree(levels)] == ["C", "A", "B"]
+
+
+def test_build_tree_returns_nodes_that_carry_their_row_and_leave_it_untouched():
+    """The nesting keys are the tree's, not the payload's. /sentiment/momentum
+    renders that same cached read, so a node built by mutating the row in place
+    would hand the other page rows that had grown an ``industries`` list — and a
+    node rebuilt from scratch would drop every field the row came with."""
+    row = _row(1.0, 0.1, symbol="XLV", label="HC", score=0.8)
+    node = B.build_tree({"sector": [row]})[0]
+    assert node["symbol"] == "XLV" and node["score"] == 0.8
+    assert node["raw"] == row["raw"]
+    assert "industries" not in row and "orphan_stocks" not in row
+
+
+def test_build_tree_drops_a_null_row_but_still_refuses_a_different_document():
+    """``_raw``'s split, one level up: a null in a JSON array is a row we do not
+    have and can be no node here — it names neither itself nor a parent — so it
+    takes the same path as an unplaceable row. A non-dict row is a different
+    document and still raises, through the same ``_raw`` the sort key reads."""
+    levels = {"sector": [None, _row(1.0, 0.1, symbol="XLV", label="HC")],
+              "industry": [None], "stock": [None]}
+    assert [s["label"] for s in B.build_tree(levels)] == ["HC"]
+    with pytest.raises(AttributeError):
+        B.build_tree({"sector": ["XLV"]})
+
+
+def test_build_tree_handles_an_empty_payload():
+    assert B.build_tree({}) == []
+    assert B.build_tree(None) == []

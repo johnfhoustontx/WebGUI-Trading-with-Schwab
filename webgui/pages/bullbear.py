@@ -154,6 +154,19 @@ def _share(v):
     return p if p is not None and 0.0 <= p <= 1.0 else None
 
 
+def row_participation(row):
+    """A row's participation share — the top-level field, a SIBLING of ``raw``.
+
+    ``participation`` names two quantities in one row and the wrong one fails
+    silently: ``row["participation"]`` is the raw 0..1 share, while
+    ``row["components"]["participation"]`` is a within-level z-score, signed and
+    unbounded (``sentiment_svc.compute._momentum_score_level`` sets both). Fed
+    to ``breadth_width`` it costs every negative row its bar and draws a
+    plausible wrong one for the rest. A None row is tolerated as ``_raw`` does.
+    """
+    return (row or {}).get("participation")
+
+
 def breadth_width(participation):
     """A share -> its whole-percent bar width, or None when there is no bar.
 
@@ -169,3 +182,73 @@ def breadth_is_thin(participation):
     """True when too few constituents confirm the move to trust it."""
     p = _share(participation)
     return p is not None and p <= THIN_PARTICIPATION
+
+
+# ── the tree: sector -> industry -> stock ────────────────────────────────────
+def _sort_key(row):
+    """Strongest first, unscored last, otherwise stable in the given order.
+
+    Ranks on ``raw.trend`` rather than the cascade's blended ``score``, so the
+    order runs on the same axis the map colours by and no row can sit above a
+    greener one. Through ``_num``, because ``sorted`` is exactly where a NaN
+    orders unpredictably and a ``Decimal("sNaN")`` raises.
+    """
+    trend = _num(_raw(row).get("trend"))
+    return (1, 0.0) if trend is None else (0, -trend)
+
+
+def _level(levels, name):
+    """One level's rows, strongest first, with nulls dropped.
+
+    ``_raw``'s split, one level up. A null in a JSON array is a row we do not
+    have, and here it can be no node at all — it names neither itself nor a
+    parent — so it takes the same path as a row whose parent is unknown. A
+    non-dict row is a different document and still raises, through the ``_raw``
+    the sort key reads.
+    """
+    return sorted((r for r in levels.get(name) or [] if r is not None),
+                  key=_sort_key)
+
+
+def build_tree(levels):
+    """``levels{sector,industry,stock}`` -> nested sectors, strongest first.
+
+    Each sector gains ``industries`` (each with its own ``stocks``) and
+    ``orphan_stocks`` — constituents whose industry has no row of its own, which
+    is ordinary: ``sentiment_svc.compute`` scores an industry only when its ETF
+    cleared ``_momentum_admit``, while every member stock is scored regardless.
+
+    A row naming a parent that does not exist is DROPPED rather than filed under
+    an invented bucket, which would put a phantom row in the counts. Reached:
+    that same module maps a stock in no scored industry to ``("", "")``.
+
+    Nodes are shallow copies, so the tree's keys never land on the caller's rows
+    — ``/sentiment/momentum`` renders the same cached read; the nested ``raw``
+    and ``components`` are shared with it and never written.
+    """
+    levels = levels or {}
+    by_sector, out = {}, []
+    for row in _level(levels, "sector"):
+        node = dict(row, industries=[], orphan_stocks=[])
+        by_sector[row.get("label")] = node
+        out.append(node)
+
+    # Keyed on (sector, label): an industry name is unique only within its
+    # sector, and the cascade keys them that way throughout.
+    by_industry = {}
+    for row in _level(levels, "industry"):
+        parent = by_sector.get(row.get("sector"))
+        if parent is None:
+            continue
+        node = dict(row, stocks=[])
+        parent["industries"].append(node)
+        by_industry[(row.get("sector"), row.get("label"))] = node
+
+    for row in _level(levels, "stock"):
+        parent = by_sector.get(row.get("sector"))
+        if parent is None:
+            continue
+        industry = by_industry.get((row.get("sector"), row.get("industry")))
+        bucket = industry["stocks"] if industry else parent["orphan_stocks"]
+        bucket.append(dict(row))
+    return out
