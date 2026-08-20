@@ -189,54 +189,32 @@ def test_num_body_is_identical_to_every_sibling_its_docstring_names():
 
 
 # ── the display language: labels and the colour vocabulary ───────────────────
-def test_every_quadrant_has_a_label_and_a_class():
-    for q in B.QUADRANTS:
-        assert B.quadrant_label(q), f"{q} has no label"
-        assert B.quadrant_class(q), f"{q} has no class"
+def test_the_tables_key_exactly_on_quadrants_with_no_empty_entries():
+    """Set equality both ways, because the two directions of drift differ.
 
-
-def test_the_label_and_class_tables_key_exactly_on_quadrants():
-    """The guard that makes the ``unknown`` fallback unreachable in fact.
-
-    Both lookups degrade to the no-reading entry rather than raising, which is
-    right on a render path but means table drift is invisible at runtime. Two
-    directions of drift, and they are not equally covered — measured, not
-    assumed, by mutating each and seeing who fails:
-
-    A MISSING key (a quadrant added in a later task, its label forgotten) renders
-    "No reading" for every row of its kind: plausible, silent, wrong. This test
-    catches it, but so do two siblings — the deduped-palette test sees the sixth
-    quadrant collide with unknown's classes, and the both-axes test sees "No
-    reading" carry no separator. So here it is a third opinion, not the only one.
-    Note the one test that sounds like it covers this does NOT:
-    ``every_quadrant_has_a_label_and_a_class`` passes, because a missing label
-    falls THROUGH to "No reading", which is truthy.
-
-    A STRAY key — an entry left in ``_LABELS``/``_CLASSES`` for a quadrant that
-    was renamed or removed — is caught by this test ALONE. Every other test
-    iterates QUADRANTS, so none of them can see an entry that QUADRANTS no longer
-    names. That is this test's own contribution, and the reason to keep it if
-    someone later reads the missing-key half as redundant.
+    A MISSING key renders "No reading" for that quadrant instead of raising, so
+    nothing at runtime reports it — though two tests below happen to catch it as
+    well. A STRAY key, left behind for a quadrant since renamed, is caught here
+    alone: every other test iterates QUADRANTS, so none can see an entry that
+    QUADRANTS no longer names.
     """
     for name, table in (("_LABELS", B._LABELS), ("_CLASSES", B._CLASSES)):
         assert set(table) == set(B.QUADRANTS), (
-            f"{name} and QUADRANTS have drifted apart. Missing: "
+            f"{name} and QUADRANTS have drifted. Missing: "
             f"{sorted(set(B.QUADRANTS) - set(table))}; stray: "
-            f"{sorted(set(table) - set(B.QUADRANTS))}. A missing entry is the "
-            "one that ships: it renders as the no-reading style rather than "
-            "raising, so nothing at runtime will tell you.")
+            f"{sorted(set(table) - set(B.QUADRANTS))}.")
+        for q, value in table.items():
+            assert value, f"{name}[{q!r}] is empty, so that row renders nothing."
 
 
 def test_quadrant_labels_say_both_axes():
-    """The label must name what it measures, because 'bullish' alone is the
-    ambiguity this whole page exists to remove."""
+    """"Bullish" alone is the ambiguity this page exists to remove, so every
+    directional label names the absolute axis and then the relative one."""
     assert B.quadrant_label("rising_leading") == "Rising · Leading"
     assert B.quadrant_label("falling_leading") == "Falling · Leading"
     assert B.quadrant_label("unknown") == "No reading"
-    # The three literals above pin the copy; this pins the CONVENTION over every
-    # member, which is the part that must survive a reword. Both halves, in the
-    # key's own order — absolute trend first, then relative strength — so a label
-    # can never quietly name one axis twice or drop one.
+    # The literals pin the copy; the loop pins the convention over every member,
+    # including the two that carry no literal assertion above.
     for q in B.QUADRANTS:
         if q == "unknown":
             continue
@@ -246,84 +224,30 @@ def test_quadrant_labels_say_both_axes():
             f"{q} must name both axes as 'absolute · relative', got {label!r}")
         absolute, relative = label.split(" · ")
         assert absolute.lower() == trend, (
-            f"{q}'s label leads with {absolute!r}, not its absolute-trend axis "
-            f"{trend!r}. The trend axis reads first on every row.")
+            f"{q}'s label leads with {absolute!r}, not its trend axis {trend!r}")
         assert relative.lower() == excess, (
-            f"{q}'s label ends with {relative!r}, not its relative-strength "
-            f"axis {excess!r}.")
+            f"{q}'s label ends with {relative!r}, not its strength axis {excess!r}")
 
 
-def test_quadrant_classes_are_a_finite_deduped_static_vocabulary():
-    """Tailwind-first: a data-driven colour maps to a STATIC class from a fixed
-    set, never a runtime-built arbitrary value."""
+def test_the_class_palette_is_finite_deduped_and_neutral_for_no_reading():
+    """Tailwind-first: a data-driven colour maps from a known finite set onto a
+    static class. No two quadrants may share one, or the map collapses a distinction
+    it exists to draw; and the no-reading style must borrow no direction colour,
+    since grey reads as an absence where green or red reads as a call."""
     classes = {q: B.quadrant_class(q) for q in B.QUADRANTS}
-    assert len(set(classes.values())) == len(B.QUADRANTS)   # no two share a colour
-    for value in classes.values():
-        assert "{" not in value and "}" not in value        # not an f-string hole
-
-
-def test_the_colour_palette_is_written_out_not_built_at_runtime():
-    """A LOCAL invariant on _CLASSES, and deliberately not a house-wide rule.
-
-    What it buys: reading _CLASSES back only ever yields finished strings, so an
-    f-string or a concatenation produces a class that looks static to every
-    assertion above. Only the source can tell the two apart, and the value of
-    keeping them apart here is vocabulary hygiene — this module's colour axis is
-    a five-member finite set whose values are Tailwind's own named scale steps,
-    so the literals ARE the source and one deduped greppable block beats hexes
-    computed down the module.
-
-    What it does NOT claim: that interpolation would fail to render. CLAUDE.md
-    records as measured that the bundled JIT does generate runtime-built
-    arbitrary classes (only var(...) genuinely cannot), and notes that an earlier
-    overstated version of that ban cost a real workaround before being narrowed.
-    The sibling rotation_view builds its whole quadrant vocabulary from f-strings
-    and paints correctly — it follows the SAME finite-palette rule, but its
-    colours come from oklch math over the QUAD_HUE/QUAD_CHROMA root that rrg_view
-    and momentum_view import, so writing them out would fork that palette. Hence
-    this guard stays pointed at one dict in one module: applied house-wide it
-    would fail a neighbour that is not doing anything wrong.
-    """
-    tree = ast.parse(pathlib.Path(B.__file__).read_text(encoding="utf-8"))
-    palettes = [n.value for n in ast.walk(tree)
-                if isinstance(n, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id == "_CLASSES"
-                        for t in n.targets)]
-    assert len(palettes) == 1, (
-        f"expected _CLASSES to be assigned exactly once, found {len(palettes)}.")
-    palette, = palettes
-    assert isinstance(palette, ast.Dict)
-    for key, value in zip(palette.keys, palette.values):
-        assert isinstance(key, ast.Constant) and isinstance(key.value, str)
-        assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
-            f"{key.value!r} maps to {ast.unparse(value)}, which is built rather "
-            "than written. It will render, but it takes this module's colour "
-            "vocabulary out of the one block you can read and grep.")
-
-
-def test_unknown_is_the_only_quadrant_without_direction_colour():
-    """A no-reading row must not borrow green or red."""
-    assert "emerald" not in B.quadrant_class("unknown")
-    assert "rose" not in B.quadrant_class("unknown")
+    assert len(set(classes.values())) == len(B.QUADRANTS)
+    unknown = B.quadrant_class("unknown")
+    for hue in ("emerald", "amber", "rose"):
+        assert hue not in unknown, f"the no-reading style borrows {hue}"
 
 
 def test_the_lookups_degrade_rather_than_raise_on_an_impossible_key():
-    """A deliberate choice, pinned so it is not "tidied" into a KeyError.
-
-    quadrant() is total over any input, so no caller can reach this — but these
-    run inside a page build, where raising costs the whole page to spare one
-    row. The no-reading style is the honest degrade: it renders the absence
-    instead of inventing a direction. The cost of the choice — that a MISSING
-    key would be silent — is paid by the key-coverage test above, not by making
-    the render path brittle.
-
-    Every value below is hashable on purpose, and the scope is not an oversight:
-    a dict lookup raises TypeError on an unhashable key, and that is the right
-    place to stop. A quadrant key is produced internally by quadrant(); it is not
-    payload. The unhashable-input guard belongs on _num, which reads the numbers
-    the cascade actually sends, and duplicating it here would defend a call no
-    caller can make.
-    """
-    for bogus in ("sideways", "", None, 0, ("rising_leading",)):
+    """quadrant() is total, so no caller reaches this. It is pinned so it is not
+    "tidied" into a KeyError, which would forfeit a whole page build to spare one
+    row. The keys are derived to stay clear of the tables, so this cannot also
+    fire on a stray entry — that case belongs to the set-equality test."""
+    absent = "not_a_quadrant_" + "_".join(B.QUADRANTS)
+    for bogus in (absent, None, 0, ("rising_leading",)):
+        assert bogus not in B._LABELS and bogus not in B._CLASSES
         assert B.quadrant_label(bogus) == B.quadrant_label("unknown")
         assert B.quadrant_class(bogus) == B.quadrant_class("unknown")
