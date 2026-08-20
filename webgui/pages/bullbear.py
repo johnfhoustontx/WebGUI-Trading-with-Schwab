@@ -74,12 +74,21 @@ _LABELS = {
     "unknown": "No reading",
 }
 
-# A fixed, finite palette of STATIC classes, per the house Tailwind-first rule: a
-# data-driven colour maps from a known finite set onto a written-out class, never
-# an interpolated one. That rule has teeth here rather than being style policy —
-# the bundled browser JIT generates nothing for a class it cannot find in the
-# source, so a runtime-built colour renders as NO colour, silently and only in
-# the browser. The ramp runs emerald (rising and leading — strength on both axes)
+# A fixed, finite palette of static classes, per the house Tailwind-first rule
+# that a data-driven colour maps from a known finite set onto a written-out
+# class. The reason is vocabulary hygiene — one deduped, greppable set of colours
+# instead of magic hexes scattered down the module — and NOT that the alternative
+# fails to render. NiceGUI bundles the Tailwind browser JIT, and CLAUDE.md records
+# as a measured finding that it DOES generate a runtime-built arbitrary class;
+# the sibling rotation_view builds its entire quadrant vocabulary from f-strings
+# and paints correctly. Literals are right HERE because these are Tailwind's own
+# named scale steps, so the literals are the source and interpolating them would
+# add indirection over nothing. rotation_view interpolates because its colours
+# are computed by oklch math from the QUAD_HUE/QUAD_CHROMA root that rrg_view and
+# momentum_view import, where typing them out would copy that palette into a
+# second place and let the three screens drift apart. Same rule, opposite
+# spelling, because the source of the colour differs.
+# The ramp runs emerald (rising and leading — strength on both axes)
 # through a dimmed emerald and amber for the two mixed states to rose (weak on
 # both). Amber, the caution colour, is deliberately the falling-but-leading one:
 # it is the trap quadrant, the row a relative-strength-only screen calls a buy.

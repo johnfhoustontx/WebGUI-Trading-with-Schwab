@@ -199,12 +199,24 @@ def test_the_label_and_class_tables_key_exactly_on_quadrants():
     """The guard that makes the ``unknown`` fallback unreachable in fact.
 
     Both lookups degrade to the no-reading entry rather than raising, which is
-    right on a render path but means a MISSING key is invisible at runtime: add a
-    quadrant in a later task, forget its label, and every row of that new kind
-    renders "No reading" — plausible, silent and wrong, the exact shape of bug a
-    degrade-quietly guard is known to mask. So the drift is caught here, where it
-    is free and names the offender, instead of at page build. The test above
-    cannot do it: a missing label falls THROUGH to "No reading", which is truthy.
+    right on a render path but means table drift is invisible at runtime. Two
+    directions of drift, and they are not equally covered — measured, not
+    assumed, by mutating each and seeing who fails:
+
+    A MISSING key (a quadrant added in a later task, its label forgotten) renders
+    "No reading" for every row of its kind: plausible, silent, wrong. This test
+    catches it, but so do two siblings — the deduped-palette test sees the sixth
+    quadrant collide with unknown's classes, and the both-axes test sees "No
+    reading" carry no separator. So here it is a third opinion, not the only one.
+    Note the one test that sounds like it covers this does NOT:
+    ``every_quadrant_has_a_label_and_a_class`` passes, because a missing label
+    falls THROUGH to "No reading", which is truthy.
+
+    A STRAY key — an entry left in ``_LABELS``/``_CLASSES`` for a quadrant that
+    was renamed or removed — is caught by this test ALONE. Every other test
+    iterates QUADRANTS, so none of them can see an entry that QUADRANTS no longer
+    names. That is this test's own contribution, and the reason to keep it if
+    someone later reads the missing-key half as redundant.
     """
     for name, table in (("_LABELS", B._LABELS), ("_CLASSES", B._CLASSES)):
         assert set(table) == set(B.QUADRANTS), (
@@ -250,31 +262,43 @@ def test_quadrant_classes_are_a_finite_deduped_static_vocabulary():
         assert "{" not in value and "}" not in value        # not an f-string hole
 
 
-def test_the_palette_is_string_literals_in_source_not_built_at_runtime():
-    """The house Tailwind-first rule, enforced where a value check cannot reach.
+def test_the_colour_palette_is_written_out_not_built_at_runtime():
+    """A LOCAL invariant on _CLASSES, and deliberately not a house-wide rule.
 
-    Reading ``_CLASSES`` back only ever yields finished strings, so an f-string,
-    a concatenation or a ``.format`` call would produce a class that LOOKS static
-    to every assertion above while defeating the rule outright — Tailwind's JIT
-    emits nothing for a class it cannot see, so the colour silently does not
-    render. Only the source can tell the two apart.
+    What it buys: reading _CLASSES back only ever yields finished strings, so an
+    f-string or a concatenation produces a class that looks static to every
+    assertion above. Only the source can tell the two apart, and the value of
+    keeping them apart here is vocabulary hygiene — this module's colour axis is
+    a five-member finite set whose values are Tailwind's own named scale steps,
+    so the literals ARE the source and one deduped greppable block beats hexes
+    computed down the module.
+
+    What it does NOT claim: that interpolation would fail to render. CLAUDE.md
+    records as measured that the bundled JIT does generate runtime-built
+    arbitrary classes (only var(...) genuinely cannot), and notes that an earlier
+    overstated version of that ban cost a real workaround before being narrowed.
+    The sibling rotation_view builds its whole quadrant vocabulary from f-strings
+    and paints correctly — it follows the SAME finite-palette rule, but its
+    colours come from oklch math over the QUAD_HUE/QUAD_CHROMA root that rrg_view
+    and momentum_view import, so writing them out would fork that palette. Hence
+    this guard stays pointed at one dict in one module: applied house-wide it
+    would fail a neighbour that is not doing anything wrong.
     """
     tree = ast.parse(pathlib.Path(B.__file__).read_text(encoding="utf-8"))
     palettes = [n.value for n in ast.walk(tree)
                 if isinstance(n, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id in ("_CLASSES", "_LABELS")
+                and any(isinstance(t, ast.Name) and t.id == "_CLASSES"
                         for t in n.targets)]
-    assert len(palettes) == 2, (
-        f"expected _LABELS and _CLASSES to each be assigned exactly once, "
-        f"found {len(palettes)} such assignments.")
-    for palette in palettes:
-        assert isinstance(palette, ast.Dict)
-        for key, value in zip(palette.keys, palette.values):
-            assert isinstance(key, ast.Constant) and isinstance(key.value, str)
-            assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
-                f"{key.value!r} maps to {ast.unparse(value)}, which is built "
-                "rather than written. Tailwind cannot see a class it does not "
-                "find in the source.")
+    assert len(palettes) == 1, (
+        f"expected _CLASSES to be assigned exactly once, found {len(palettes)}.")
+    palette, = palettes
+    assert isinstance(palette, ast.Dict)
+    for key, value in zip(palette.keys, palette.values):
+        assert isinstance(key, ast.Constant) and isinstance(key.value, str)
+        assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
+            f"{key.value!r} maps to {ast.unparse(value)}, which is built rather "
+            "than written. It will render, but it takes this module's colour "
+            "vocabulary out of the one block you can read and grep.")
 
 
 def test_unknown_is_the_only_quadrant_without_direction_colour():
