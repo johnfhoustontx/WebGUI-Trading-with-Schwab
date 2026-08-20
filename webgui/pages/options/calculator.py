@@ -170,11 +170,13 @@ def extract_atm_iv(chain, spot, expiry=None):
     return None if best is None else best * 100.0
 
 
-def extract_premium(chain, option_type, strike, expiry=None):
-    """Premium for one leg (mark, else bid/ask mid) from the chain.
+def _find_contract(chain, option_type, strike, expiry=None):
+    """The first chain contract matching one leg: call/put map, strike within
+    0.51, and — when ``expiry`` is given — that expiry only. None if not found.
 
-    Matches the strike within 0.51 in the call/put map for ``option_type``.
-    When ``expiry`` is given, only that expiry is considered. None if not found.
+    The shared walk behind ``extract_premium`` and ``extract_delta``, so the
+    premium and the delta on one leg row are always read off the SAME contract
+    and can never come from different strikes.
     """
     if not isinstance(chain, dict) or not isinstance(strike, (int, float)):
         return None
@@ -191,16 +193,220 @@ def extract_premium(chain, option_type, strike, expiry=None):
             except (ValueError, TypeError):
                 continue
             if abs(sk - strike) < 0.51 and isinstance(contracts, list) and contracts:
-                c = contracts[0]
-                mark = c.get("mark")
-                if mark and mark > 0:
-                    return mark
-                bid = c.get("bid", 0) or 0
-                ask = c.get("ask", 0) or 0
-                if bid > 0 and ask > 0:
-                    return (bid + ask) / 2.0
-                return None
+                return contracts[0]
     return None
+
+
+def extract_premium(chain, option_type, strike, expiry=None):
+    """Premium for one leg (mark, else bid/ask mid) from the chain.
+
+    Matches the strike within 0.51 in the call/put map for ``option_type``.
+    When ``expiry`` is given, only that expiry is considered. None if not found.
+    """
+    c = _find_contract(chain, option_type, strike, expiry)
+    if c is None:
+        return None
+    mark = c.get("mark")
+    if mark and mark > 0:
+        return mark
+    bid = c.get("bid", 0) or 0
+    ask = c.get("ask", 0) or 0
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    return None
+
+
+# ── the redesign's page-side readouts ────────────────────────────────────────
+# Everything the rebuilt screen shows beyond today's page — the per-leg delta,
+# the ③ LEGS strip, the matrix % column, the status pill — is derived HERE, from
+# payloads options_svc already caches. No Tier-2 change; no second pricing model.
+
+# Mirror of ``options_calculator.UNLIMITED`` (999999) — a magic placeholder the
+# service returns VERBATIM for an uncapped max_profit (LONG_CALL) or max_loss
+# (NAKED_CALL). It is NOT infinity: divide by it and every matrix cell reads
+# +0.0%; format it and the tile reads "$999,999". Tier-1 may not import that
+# module, so the value is restated here; keep the two in step.
+UNLIMITED = 999999
+
+# Past this, a "delta" is the chain's missing-greek SENTINEL rather than a
+# reading: Schwab sends -999.0 for a greek it does not have, and a real option
+# delta never leaves [-1, 1]. ``options_svc.flow_alerts.detect_big_delta`` drops
+# the same contracts for the same reason.
+_DELTA_LIMIT = 1.0
+
+# Contracts per option — the multiplier on every dollar figure below.
+_SHARES_PER_CONTRACT = 100
+
+
+def is_unlimited(v):
+    """Whether a summary figure is the service's uncapped sentinel."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == UNLIMITED
+
+
+def _finite(v):
+    """``v`` as a float when it is a real finite number, else None.
+
+    Bools are rejected: ``True`` is not a premium, and ``isinstance(True, int)``
+    would otherwise let one through as 1.0."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) else None
+
+
+def _leg_qty(leg):
+    """A leg's contract count as a float, or None when it is unusable.
+
+    A missing or falsy qty means one contract (the page's long-standing
+    ``int(leg.get("qty", 1) or 1)`` convention); junk means None, so the caller
+    degrades to an em-dash rather than pricing an unknown size."""
+    return _finite(leg.get("qty", 1) or 1)
+
+
+def extract_delta(chain, option_type, strike, expiry=None):
+    """Per-contract delta for one leg from the cached chain, or ``None``.
+
+    Reads the chain's OWN ``delta`` (the field ``flow_alerts`` uses), so this is
+    market delta rather than a second pricing model living in Tier 1.
+
+    ⚠ Returns ``None`` — never ``0.0`` — when the contract carries no usable
+    delta. Index option chains read hollow outside regular hours, and a ``0.00``
+    on an otherwise live-looking row is a confident wrong number. A genuine
+    ``0.0`` (a far out-of-the-money contract) IS kept; what is rejected is the
+    missing-greek sentinel, i.e. anything outside ``[-1, 1]``.
+    """
+    c = _find_contract(chain, option_type, strike, expiry)
+    d = _finite(c.get("delta")) if isinstance(c, dict) else None
+    if d is None or abs(d) > _DELTA_LIMIT:
+        return None
+    return d
+
+
+def position_delta(delta, side):
+    """Contract delta signed for the POSITION: a short leg inverts it.
+
+    PER CONTRACT — deliberately not multiplied by ``qty``. The leg row shows it
+    beside its own QTY cell, and this is the number that compares directly with
+    a broker's chain. An aggregate would be ``sum(position_delta(d, side) * qty)``
+    and belongs in its own function, not folded in here."""
+    if isinstance(delta, bool) or not isinstance(delta, (int, float)):
+        return None
+    return -delta if side == "short" else delta
+
+
+def net_premium(legs):
+    """Net cash at entry in dollars: positive = credit received, negative = paid.
+
+    ``None`` when any leg is unpriced. Legs arrive with ``premium=None`` until
+    Fetch premiums runs, and counting those as zero would print "NET $0" over a
+    position whose cash is simply not known yet. No legs is a true ``0.0``."""
+    total = 0.0
+    for leg in legs or []:
+        prem = _finite(leg.get("premium"))
+        qty = _leg_qty(leg)
+        if prem is None or qty is None or qty < 0:
+            return None
+        sign = 1 if leg.get("side") == "short" else -1
+        total += sign * prem * qty * _SHARES_PER_CONTRACT
+    return round(total, 2)
+
+
+def _short_outlives_long(legs):
+    """True when a SHORT leg expires LATER than a long one (a reverse calendar).
+
+    The single-date payoff below would model that short as settled while it is
+    still live, and report an uncovered credit as riskless."""
+    shorts = [str(l.get("expiry")) for l in legs or []
+              if l.get("side") == "short" and l.get("expiry")]
+    longs = [str(l.get("expiry")) for l in legs or []
+             if l.get("side") != "short" and l.get("expiry")]
+    return bool(shorts and longs and max(shorts) > min(longs))
+
+
+def max_loss_estimate(legs):
+    """The ③ LEGS strip's max-loss figure, in dollars, or ``None``.
+
+    The MINIMUM of the position's expiration payoff. That curve is piecewise
+    linear with corners only at the strikes, so evaluating ``net_premium`` plus
+    intrinsic value at ``{0} ∪ strikes`` finds the true minimum exactly — no
+    pricing model, no width heuristic. It is therefore right for every structure
+    the templates build: it charges an iron condor ONE side rather than both,
+    reads a 1-2-1 butterfly's risk as the debit despite the middle leg's qty 2,
+    and gives a lone short put its real ``strike × 100 − credit``.
+
+    ``None`` — an em-dash — rather than a wrong dollar figure when:
+
+    * a leg is unpriced or has no strike (nothing to evaluate);
+    * the net call quantity is SHORT, so loss grows without bound above the
+      last strike (a naked call, a call ratio credit);
+    * a short leg outlives a long one, which this single-date model cannot see.
+
+    ⚠ Every leg is settled at ONE date. For the templates' calendars/diagonals
+    (short front, long back) that is the standard convention and gives the right
+    answer — the back leg's residual value only helps — but it is an assumption,
+    not a valuation. The authoritative MAX RISK tile still comes from the
+    service's summary; this is the header strip.
+    """
+    net = net_premium(legs)
+    if net is None:
+        return None
+    rows = []
+    for leg in legs or []:
+        strike = _finite(leg.get("strike"))
+        qty = _leg_qty(leg)
+        if strike is None or qty is None or qty < 0:
+            return None
+        rows.append(("call" if leg.get("option_type") == "call" else "put",
+                     1 if leg.get("side") != "short" else -1, qty, strike))
+    if not rows:
+        return 0.0
+    if _short_outlives_long(legs):
+        return None
+    if sum(sign * qty for kind, sign, qty, _k in rows if kind == "call") < 0:
+        return None
+
+    def _payoff(spot):
+        v = 0.0
+        for kind, sign, qty, strike in rows:
+            intrinsic = max(spot - strike, 0.0) if kind == "call" else max(strike - spot, 0.0)
+            v += sign * qty * _SHARES_PER_CONTRACT * intrinsic
+        return net + v
+
+    worst = min(_payoff(s) for s in [0.0] + [r[3] for r in rows])
+    return round(-worst, 2) if worst < 0 else 0.0
+
+
+def matrix_pct_of_max(pnl, max_profit):
+    """A matrix cell's P&L as a percentage of the structure's MAX RETURN.
+
+    Replaces the service's ``pnl_pct`` (a share of premium received) so the
+    column reads directly against the MAX RETURN tile above the matrix.
+
+    ``None`` — an em-dash, never a 0.0% that would read like a measurement —
+    when there is no max return to divide by, INCLUDING the uncapped sentinel:
+    there is no percentage of an unlimited return."""
+    p = _finite(pnl)
+    m = _finite(max_profit)
+    if p is None or m is None or m <= 0 or is_unlimited(m):
+        return None
+    return p / m * 100.0
+
+
+def chain_status_facts(loading, symbol, chain):
+    """The title-bar status pill + the ② SYMBOL frame's hint.
+
+    ``{state, label, hint}`` where state is ``idle`` / ``loading`` / ``ready``.
+    An EMPTY chain dict is ``idle``, not ``ready`` — a chain that arrived
+    carrying nothing is not a loaded chain, and colouring the frame for it would
+    announce data the page does not have."""
+    if loading:
+        return {"state": "loading", "label": "LOADING CHAIN", "hint": "···"}
+    if _has_contracts(chain):
+        sym = (symbol or "").strip().upper()
+        return {"state": "ready",
+                "label": f"CHAIN LOADED · {sym}" if sym else "CHAIN LOADED",
+                "hint": "LIVE"}
+    return {"state": "idle", "label": "AWAITING SYMBOL", "hint": "NOT LOADED"}
 
 
 def chain_expiries(chain):

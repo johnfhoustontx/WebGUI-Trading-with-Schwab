@@ -160,7 +160,11 @@ def test_calculator_holds_no_engine_imports():
     the page must no longer import the proxy or any options-scanner engine."""
     import inspect
 
-    src = inspect.getsource(calc)
+    # Comment LINES are excluded: the page legitimately names the module it
+    # mirrors ``UNLIMITED`` from, and a comment cannot import anything. Every
+    # executable line — imports included — is still checked in full.
+    src = "\n".join(ln for ln in inspect.getsource(calc).splitlines()
+                    if not ln.lstrip().startswith("#"))
     for forbidden in ("scanner_engine", "options_calculator", "import proxy",
                       "OPTIONS_SCANNER", "_ensure_engine_path"):
         assert forbidden not in src, f"calculator.py still references {forbidden!r}"
