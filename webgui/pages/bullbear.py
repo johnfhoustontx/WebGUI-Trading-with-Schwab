@@ -58,3 +58,68 @@ def quadrant(trend, excess):
     if trend > 0:
         return "rising_leading" if excess > 0 else "rising_lagging"
     return "falling_leading" if excess > 0 else "falling_lagging"
+
+
+# The label names BOTH axes, always, because one word is the ambiguity this page
+# exists to remove: "Falling / Leading" is a symbol whose price is dropping while
+# it still beats SPY — losing money more slowly than the index — and any wording
+# that collapses the two axes into a single verdict paints exactly that row as
+# strength. The axes read in the key's own order, absolute trend then relative
+# strength, so the eye finds the same quantity in the same place on every row.
+_LABELS = {
+    "rising_leading": "Rising · Leading",
+    "rising_lagging": "Rising · Lagging",
+    "falling_leading": "Falling · Leading",
+    "falling_lagging": "Falling · Lagging",
+    "unknown": "No reading",
+}
+
+# A fixed, finite palette of STATIC classes, per the house Tailwind-first rule: a
+# data-driven colour maps from a known finite set onto a written-out class, never
+# an interpolated one. That rule has teeth here rather than being style policy —
+# the bundled browser JIT generates nothing for a class it cannot find in the
+# source, so a runtime-built colour renders as NO colour, silently and only in
+# the browser. The ramp runs emerald (rising and leading — strength on both axes)
+# through a dimmed emerald and amber for the two mixed states to rose (weak on
+# both). Amber, the caution colour, is deliberately the falling-but-leading one:
+# it is the trap quadrant, the row a relative-strength-only screen calls a buy.
+# Unknown takes slate so a scoreless row cannot borrow a direction — grey reads
+# as an absence, whereas green or red reads as a call the data never made.
+_CLASSES = {
+    "rising_leading": "text-emerald-300 bg-emerald-400/15 border-emerald-400/30",
+    "rising_lagging": "text-emerald-200/80 bg-emerald-400/5 border-emerald-400/15",
+    "falling_leading": "text-amber-300 bg-amber-400/10 border-amber-400/25",
+    "falling_lagging": "text-rose-300 bg-rose-400/15 border-rose-400/30",
+    "unknown": "text-slate-400 bg-slate-400/10 border-slate-400/20",
+}
+
+
+def quadrant_label(q):
+    """A quadrant key -> its display name, degrading to the no-reading label.
+
+    The fallback is unreachable from the intended caller — ``quadrant`` is total
+    and only ever returns a member of QUADRANTS — and it is still a quiet degrade
+    rather than a KeyError, because this runs inside a page build, where raising
+    forfeits the whole page to spare one row. "No reading" is the honest thing to
+    render for a key that means nothing: it shows the absence instead of picking
+    a direction, which is the same trade ``_num`` makes one layer down.
+
+    The cost of degrading quietly is real, though, and is NOT waved away here: a
+    quadrant added to QUADRANTS without a label would render "No reading" for
+    every row of its kind — plausible, silent, wrong. That is paid for at test
+    time, where ``test_the_label_and_class_tables_key_exactly_on_quadrants``
+    fails by name, rather than by making the render path brittle at runtime.
+    """
+    return _LABELS.get(q, _LABELS["unknown"])
+
+
+def quadrant_class(q):
+    """A quadrant key -> its chip classes, degrading to the no-reading style.
+
+    Total, and guarded at test time, for the reasons set out on
+    ``quadrant_label``. Note both lookups are total over any *hashable* key and
+    no further: a quadrant key is produced internally by ``quadrant``, unlike the
+    payload numbers ``quadrant`` itself takes, which arrive from the cascade and
+    so earn the fuller guard in ``_num``.
+    """
+    return _CLASSES.get(q, _CLASSES["unknown"])
