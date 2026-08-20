@@ -1092,6 +1092,14 @@ def test_expansion_is_lazy_so_the_default_screen_is_eleven_rows():
 
 **Step 2–4:** implement the expansion handlers using `ui.expansion`, building children on first open and caching the built rows so a re-open does not rebuild. Verify the guard passes.
 
+> **Verified against the installed NiceGUI 3.13.0, so do not re-derive:**
+> - `ui.expansion(text, *, caption, icon, group, value=False, on_value_change=...)` — `on_value_change` is a constructor kwarg **and** a method (it inherits `ValueElement`). `value` defaults to `False`, so panels start closed, which is what makes the default screen 11 rows.
+> - `group=` gives accordion behaviour — only one open at a time. **Do not use it here**: a reader comparing two sectors wants both open.
+> - ⚠ **`sentiment_momentum.py:351` is NOT the pattern to copy.** It creates its container inside the expansion at page-build and merely *fills* it on repaint, so every row exists in the DOM from the start. That is the opposite of what this task needs. Build the children inside the `on_value_change` handler.
+> - Wrap the handler in `pages.ui_guard.guard` like every other callback here — an expand arriving after the tab is closed otherwise raises.
+>
+> **Desk repaint pattern for Task 11** (`desk.py:2080`): `_paint(payloads)` merges changed views into `state["data"]`, then calls only the painters whose `_REGION_VIEWS` deps intersect the changed set. Add `"bullbear": ("sentiment:bullbear",)` and a `_paint_bullbear()` to `painters` — do not repaint the strip on unrelated ticks.
+
 **Step 5: Commit**
 
 ```bash
