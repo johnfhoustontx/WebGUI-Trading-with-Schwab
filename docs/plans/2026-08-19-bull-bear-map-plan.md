@@ -385,6 +385,25 @@ git commit -m "feat(bullbear): participation breadth bar with a thin-move flag"
 
 ## Task 5: Build the tree (sector → industry → stock)
 
+> ### ⚠ Two participation traps, found by the Task 4 review — read before writing
+>
+> **1. `participation` is at the row TOP LEVEL, not inside `raw`.** `quadrant_counts`
+> reaches trend/excess through `_raw(row)`, but `row["participation"]` is a sibling of
+> `raw`, not a child (confirmed at `services/sentiment_svc/compute.py:1993-1995` — it is
+> *not* duplicated into `raw`). `_raw` tolerates a `None` row; a bare
+> `row.get("participation")` on a `None` row raises `AttributeError`. The tree walks rows
+> from three levels, so give participation its own accessor with the same tolerance
+> rather than letting each call site improvise.
+>
+> **2. `participation` names TWO different quantities in the same payload, and the wrong
+> one fails silently.** `row["participation"]` is the raw 0..1 share. But
+> `row["components"]["participation"]` is a **within-level z-score**
+> (`compute.py:1976-1988`) — signed and unbounded. Feed that to `breadth_width` and
+> `_share` returns `None` for every negative value and a plausible-but-wrong percentage
+> for anything that happens to land in [0, 1]. No exception, no empty render, just a
+> quietly wrong bar. Name this trap in the accessor's docstring.
+
+
 **Files:**
 - Modify: `webgui/pages/bullbear.py`
 - Test: `webgui/tests/test_bullbear.py`
@@ -956,6 +975,16 @@ Create `webgui/pages/sentiment_bullbear.py` with `render()` that:
 - states which level the headline counts, since `noun` renders **verbatim** and the caller
   owns pluralisation (`B.headline` will happily emit "1 of 1 sectors"),
 - renders one row per sector: label, quadrant chip (`B.quadrant_class`), trend, vs-SPY, live day-move, breadth bar,
+  — ⚠ the breadth bar is the documented **continuous-value exception** to the fixed-palette
+  rule, not the rule itself: 0-100 is 101 possible `w-[N%]` classes, so it must use the
+  runtime arbitrary-value form reset via `.classes(remove=prev, add=new)`, per CLAUDE.md's
+  `flex-[{w}_1_0%]` precedent. And `breadth_width` returns an **`int`** deliberately —
+  `w-[50.0%]` is a class the Tailwind JIT will not generate.
+  — ⚠ `width is None` (render no track at all) must be handled **distinctly** from
+  `width == 0` (render an empty track). That distinction is the whole reason the function
+  returns `None`, and a truthiness check at the call site collapses it. Pin it with a test.
+- **Add `sentiment_bullbear.py` to `webgui/tests/test_no_inline_style.py` by hand** — that
+  guard is an explicit file list, not a glob, so a new page silently escapes it otherwise.
 - version-polls every 2 s via `ui.timer` and repaints only on a version change,
 - wraps every timer/handler in `pages.ui_guard.guard`.
 
