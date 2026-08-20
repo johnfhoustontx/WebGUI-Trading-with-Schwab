@@ -160,11 +160,7 @@ def test_calculator_holds_no_engine_imports():
     the page must no longer import the proxy or any options-scanner engine."""
     import inspect
 
-    # Comment LINES are excluded: the page legitimately names the module it
-    # mirrors ``UNLIMITED`` from, and a comment cannot import anything. Every
-    # executable line — imports included — is still checked in full.
-    src = "\n".join(ln for ln in inspect.getsource(calc).splitlines()
-                    if not ln.lstrip().startswith("#"))
+    src = inspect.getsource(calc)
     for forbidden in ("scanner_engine", "options_calculator", "import proxy",
                       "OPTIONS_SCANNER", "_ensure_engine_path"):
         assert forbidden not in src, f"calculator.py still references {forbidden!r}"
@@ -420,6 +416,16 @@ def test_max_loss_estimate_for_a_1_2_1_butterfly_is_the_debit():
             {"option_type": "call", "side": "long", "strike": 665, "premium": 1.2, "qty": 1}]
     assert calc.net_premium(legs) == -120.0
     assert calc.max_loss_estimate(legs) == 120.0
+
+
+def test_max_loss_estimate_for_a_net_credit_ratio_spread_is_the_naked_leg():
+    # The case a strike-width estimate cannot see: two short puts against one
+    # long leaves a naked put underneath, so the risk is the uncovered strike
+    # down to zero (~$66k), not the 5-wide spread (~$520) the strikes suggest.
+    legs = [{"option_type": "put", "side": "short", "strike": 660, "premium": 3.0, "qty": 2},
+            {"option_type": "put", "side": "long", "strike": 655, "premium": 1.2, "qty": 1}]
+    assert calc.net_premium(legs) == 480.0
+    assert calc.max_loss_estimate(legs) == 66020.0     # 2*660*100 - 655*100 - 480
 
 
 def test_max_loss_estimate_for_a_calendar_is_the_debit():

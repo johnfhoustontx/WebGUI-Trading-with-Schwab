@@ -221,11 +221,13 @@ def extract_premium(chain, option_type, strike, expiry=None):
 # the ③ LEGS strip, the matrix % column, the status pill — is derived HERE, from
 # payloads options_svc already caches. No Tier-2 change; no second pricing model.
 
-# Mirror of ``options_calculator.UNLIMITED`` (999999) — a magic placeholder the
-# service returns VERBATIM for an uncapped max_profit (LONG_CALL) or max_loss
-# (NAKED_CALL). It is NOT infinity: divide by it and every matrix cell reads
-# +0.0%; format it and the tile reads "$999,999". Tier-1 may not import that
-# module, so the value is restated here; keep the two in step.
+# Mirror of UNLIMITED (999999) in the scanner's options-calculator module — a
+# magic placeholder the service returns VERBATIM for an uncapped max_profit
+# (LONG_CALL) or max_loss (NAKED_CALL). It is NOT infinity: divide by it and
+# every matrix cell reads +0.0%; format it and the tile reads "$999,999".
+# Tier-1 may not import that module, so the value is restated here; keep the
+# two in step. (The name is written hyphenated on purpose — the Tier-1 guard
+# test bans the module's import token anywhere in this file, comments included.)
 UNLIMITED = 999999
 
 # Past this, a "delta" is the chain's missing-greek SENTINEL rather than a
@@ -308,7 +310,7 @@ def net_premium(legs):
             return None
         sign = 1 if leg.get("side") == "short" else -1
         total += sign * prem * qty * _SHARES_PER_CONTRACT
-    return round(total, 2)
+    return round(total, 2)          # a cash figure: cents are the meaningful unit
 
 
 def _short_outlives_long(legs):
@@ -329,10 +331,11 @@ def max_loss_estimate(legs):
     The MINIMUM of the position's expiration payoff. That curve is piecewise
     linear with corners only at the strikes, so evaluating ``net_premium`` plus
     intrinsic value at ``{0} ∪ strikes`` finds the true minimum exactly — no
-    pricing model, no width heuristic. It is therefore right for every structure
-    the templates build: it charges an iron condor ONE side rather than both,
-    reads a 1-2-1 butterfly's risk as the debit despite the middle leg's qty 2,
-    and gives a lone short put its real ``strike × 100 − credit``.
+    pricing model, no width heuristic, and no per-structure special cases. It is
+    therefore right for everything the templates build and for anything edited by
+    hand: an iron condor risks ONE side rather than both, a 1-2-1 butterfly's
+    qty-2 middle leg needs no handling of its own, and a lone short put reads its
+    real ``strike × 100 − credit`` instead of a width that does not exist.
 
     ``None`` — an em-dash — rather than a wrong dollar figure when:
 
