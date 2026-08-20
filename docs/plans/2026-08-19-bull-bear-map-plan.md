@@ -446,6 +446,18 @@ def test_build_tree_puts_unscored_sectors_last():
     assert [s["label"] for s in B.build_tree(levels)] == ["Energy", "Utilities"]
 
 
+def test_build_tree_sorts_a_non_finite_trend_as_unscored_rather_than_raising():
+    """A bare float() here would let a NaN sort unpredictably — every comparison
+    against it is False — and would let a signalling Decimal raise inside
+    sorted(). Both are what _num exists to prevent."""
+    from decimal import Decimal
+    levels = {"sector": [_row(float("nan"), 0.1, symbol="A", label="A"),
+                         _row(Decimal("sNaN"), 0.1, symbol="B", label="B"),
+                         _row(1.0, 0.1, symbol="C", label="C")],
+              "industry": [], "stock": []}
+    assert [s["label"] for s in B.build_tree(levels)] == ["C", "A", "B"]
+
+
 def test_build_tree_handles_an_empty_payload():
     assert B.build_tree({}) == []
     assert B.build_tree(None) == []
@@ -464,9 +476,14 @@ def _sort_key(row):
     Sorting on ``raw.trend`` rather than the cascade's blended ``score`` keeps
     the ordering on the same axis the map colours by — a row cannot appear above
     a greener one.
+
+    Goes through ``_num``: a bare ``float(trend)`` would let a NaN sort
+    unpredictably (every comparison against it is False) and would let a
+    ``Decimal("sNaN")`` raise *inside* ``sorted()``, which is the exact class of
+    bug ``_num`` exists to prevent.
     """
-    trend = ((row or {}).get("raw") or {}).get("trend")
-    return (1, 0.0) if trend is None else (0, -float(trend))
+    trend = _num(((row or {}).get("raw") or {}).get("trend"))
+    return (1, 0.0) if trend is None else (0, -trend)
 
 
 def build_tree(levels):
