@@ -23,6 +23,7 @@ REFRESH_INTERVAL_SEC = 120
 TREND_INTERVAL_SEC = 900   # 15 minutes — directional Market Trend recompute cadence
 REGIME_INTERVAL_MIN = 5    # 5 minutes — blended market-regime recompute cadence
 ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this cadence
+BULLBEAR_PUBLISH_SEC = 30     # publish cache:sentiment:bullbear at this cadence
 
 # ── Off-hours refresh gating (P4) ────────────────────────────────────────────
 # The 120 s refresh used to run UNCONDITIONALLY 24/7 — ~30-40 proxy→Schwab calls
@@ -73,6 +74,21 @@ def refresh_due(now, last_slot):
         return (True, last_slot)
     slot = (now.date().isoformat(), now.hour, now.minute // _OFFHOURS_INTERVAL_MIN)
     return (slot != last_slot, slot)
+
+
+def bullbear_due(now, last_slot):
+    """(should_publish, slot) — the gate on the Bull/Bear live day-move publish.
+
+    Deliberately delegating to ``refresh_due`` rather than restating it: the two
+    want the same answer (every tick in RTH, once per off-hours slot) and should
+    not drift apart. Its own slot variable, so the two loops never share state.
+
+    Unlike ``_order_flow_publish_loop``, which republishes an in-process consumer's
+    state for free, this costs one Schwab ``/quotes`` call per tick. The design
+    doc budgets ~780 a day at the RTH cadence and says it "throttles off-hours
+    like every other poller"; ungated it would be ~2,880, spent re-reading a
+    frozen tape."""
+    return refresh_due(now, last_slot)
 
 
 def sectors_due(now, last_slot):
@@ -175,7 +191,12 @@ async def loop(bus):
     of_stop = None
     of_opt_stop = None
     of_task = None
+    bb_task = None
     try:
+        # Created FIRST: start_consumer is the statement that can realistically
+        # raise here, and the map has nothing to do with order-flow — it must not
+        # lose its publish loop because a streaming consumer failed to start.
+        bb_task = asyncio.create_task(_bullbear_publish_loop(bus, loop_))
         of_stop = order_flow_consumer.start_consumer(bus)
         of_opt_stop = order_flow_consumer.start_option_consumer(bus)
         of_task = asyncio.create_task(_order_flow_publish_loop(bus, loop_))
@@ -216,6 +237,28 @@ async def loop(bus):
             of_opt_stop.set()
         if of_task is not None:
             of_task.cancel()
+        if bb_task is not None:
+            bb_task.cancel()
+
+
+async def _bullbear_publish_loop(bus, loop_):
+    """Publish ``cache:sentiment:bullbear`` every ~30 s off the event loop.
+
+    Its own loop, like the order-flow one, so a publish failure can never break
+    the composite refresh cadence — and so the map's fast cadence is not gated
+    behind the 120 s composite tick."""
+    slot = None
+    while True:
+        await asyncio.sleep(BULLBEAR_PUBLISH_SEC)
+        due, slot = bullbear_due(_market_now(), slot)
+        if not due:
+            continue
+        try:
+            await loop_.run_in_executor(None, handlers.publish_bullbear, bus)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — best-effort publish.
+            log.debug("bullbear publish tick failed", exc_info=True)
 
 
 async def _order_flow_publish_loop(bus, loop_):

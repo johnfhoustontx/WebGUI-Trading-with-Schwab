@@ -13,7 +13,9 @@ import datetime as _dt
 import pytest
 
 from services import _proxy
-from services.sentiment_svc import compute
+from services.sentiment_svc import compute, handlers, scheduler
+from shared.bus import Bus
+from shared.contracts.envelope import Command
 
 
 def test_bullbear_symbols_covers_all_three_levels_deduped():
@@ -176,3 +178,99 @@ def test_bullbear_view_does_not_swallow_a_malformed_momentum_tree(monkeypatch):
     monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
     with pytest.raises(Exception):
         compute.bullbear_view({"levels": {"sector": ["XLV"]}})
+
+
+# --- publish + schedule (handlers / scheduler) --------------------------------
+
+def _bus_with_momentum(levels=None, **extra):
+    bus = Bus(fake=True)
+    payload = {"session_date": "2026-08-19", "regime": {"state": "risk_on"},
+               "levels": levels if levels is not None
+               else {"sector": [{"symbol": "XLV"}]}}
+    bus.cache_set(handlers.CACHE_MOMENTUM, dict(payload, **extra))
+    return bus
+
+
+def test_publish_bullbear_caches_the_view_and_publishes_its_version(monkeypatch):
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}})
+    bus = _bus_with_momentum()
+    sub = bus.subscribe(handlers.EVENT_BULLBEAR)
+    handlers.publish_bullbear(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+    env = bus.cache_get(handlers.CACHE_BULLBEAR)
+    assert env.payload["levels"]["sector"][0]["day_pct"] == 1.5
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_bullbear_survives_a_cold_momentum_cache(monkeypatch):
+    """The map's poll starts before the first nightly cascade on a fresh install.
+    It must publish an empty tree, not raise into the scheduler."""
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes", lambda s: {})
+    bus = Bus(fake=True)
+    handlers.publish_bullbear(bus)
+    payload = bus.cache_get(handlers.CACHE_BULLBEAR).payload
+    assert payload["levels"] == {"sector": [], "industry": [], "stock": []}
+
+
+def test_publish_bullbear_does_not_bump_the_version_when_nothing_moved(monkeypatch):
+    """``quoted_at`` moves on EVERY successful build, so a payload carrying a
+    fresh one is never equal to the stored one and ``skip_unchanged`` could never
+    fire — measured 1, 2, 3 over three static ticks. Off-hours that is the whole
+    cost the flag exists to prevent: 374 frozen quotes waking every open tab."""
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}})
+    bus = _bus_with_momentum()
+    versions = [handlers.publish_bullbear(bus) or bus.cache_get(
+        handlers.CACHE_BULLBEAR).version for _ in range(3)]
+    assert versions == [versions[0]] * 3
+
+
+def test_publish_bullbear_does_bump_when_a_day_move_actually_changes(monkeypatch):
+    """The other half of the throttle: holding ``quoted_at`` must not freeze a
+    view whose numbers really moved."""
+    pct = [1.5]
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": pct[0]}})
+    bus = _bus_with_momentum()
+    handlers.publish_bullbear(bus)
+    first = bus.cache_get(handlers.CACHE_BULLBEAR).version
+    pct[0] = 2.5
+    handlers.publish_bullbear(bus)
+    assert bus.cache_get(handlers.CACHE_BULLBEAR).version > first
+
+
+def test_publish_bullbear_keeps_quoted_at_moving_while_the_data_moves(monkeypatch):
+    """Carried forward ONLY on a skip. On a real change ``quoted_at`` must be the
+    fresh stamp, or it would read as a "last changed" clock that never changes."""
+    pct = [1.5]
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": pct[0]}})
+    bus = _bus_with_momentum()
+    handlers.publish_bullbear(bus)
+    first = bus.cache_get(handlers.CACHE_BULLBEAR).payload["quoted_at"]
+    pct[0] = 2.5
+    handlers.publish_bullbear(bus)
+    assert bus.cache_get(handlers.CACHE_BULLBEAR).payload["quoted_at"] > first
+
+
+def test_refresh_bullbear_command_is_dispatched(monkeypatch):
+    bus = Bus(fake=True)
+    calls = []
+    monkeypatch.setattr(handlers, "publish_bullbear", lambda b: calls.append(b))
+    handlers.handle_command(bus, Command(type="refresh_bullbear"))
+    assert calls == [bus]
+
+
+def test_bullbear_is_due_every_tick_during_rth_but_throttled_off_hours():
+    """RTH every ~30 s is the ~780 /quotes calls a day the design costs. Off-hours
+    the tape is frozen, and an ungated loop would spend 2,100 more re-reading it."""
+    rth = _dt.datetime(2026, 8, 19, 10, 0, tzinfo=scheduler._CT)
+    due, slot = scheduler.bullbear_due(rth, None)
+    assert due is True
+    assert scheduler.bullbear_due(rth, slot)[0] is True   # EVERY tick, not once
+    night = _dt.datetime(2026, 8, 19, 22, 0, tzinfo=scheduler._CT)
+    due, slot = scheduler.bullbear_due(night, None)
+    assert due is True                                  # first off-hours tick fires
+    assert scheduler.bullbear_due(night, slot)[0] is False

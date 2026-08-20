@@ -195,6 +195,7 @@ CACHE_INTRADAY = "cache:sentiment:intraday_history"
 CACHE_REGIME = "cache:sentiment:regime"
 CACHE_REGIME_HISTORY = "cache:sentiment:regime_history"
 CACHE_MOMENTUM = "cache:sentiment:momentum"
+CACHE_BULLBEAR = "cache:sentiment:bullbear"
 
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
@@ -202,6 +203,7 @@ EVENT_ROTATION = "events:sentiment:rotation"
 EVENT_INTRADAY = "events:sentiment:intraday_history"
 EVENT_REGIME = "events:sentiment:regime"
 EVENT_MOMENTUM = "events:sentiment:momentum"
+EVENT_BULLBEAR = "events:sentiment:bullbear"
 
 
 # --- 2-min intraday sentiment+trend series ------------------------------------
@@ -776,13 +778,50 @@ def refresh_momentum(bus, session_date=None, force=False) -> None:
     bus.publish(EVENT_MOMENTUM, {"version": version})
 
 
+# --- Bull / Bear Map (live day-moves over the nightly tree) -------------------
+
+def _unchanged_but_for_the_stamp(stored, fresh) -> bool:
+    """Are these two bullbear payloads equal ignoring ``quoted_at``?"""
+    return ({k: v for k, v in stored.items() if k != "quoted_at"}
+            == {k: v for k, v in fresh.items() if k != "quoted_at"})
+
+
+def publish_bullbear(bus) -> None:
+    """Publish ``cache:sentiment:bullbear`` — the nightly tree plus live moves.
+
+    Reads the momentum view from the BUS rather than recomputing it: the cascade
+    is a multi-minute nightly job and this poll runs every ~30 s.
+
+    ``quoted_at`` is stamped on every successful build, so a fresh payload is
+    never equal to the stored one and ``skip_unchanged`` could NOT fire — measured
+    versions 1, 2, 3 across three ticks of identical quotes. That defeats the
+    whole point off-hours, when the tape is frozen and an unchanged payload would
+    still wake every open tab twice a minute. So when nothing but the stamp moved,
+    the STORED stamp is carried forward and ``cache_set`` short-circuits as
+    designed. ``quoted_at`` then means "when the moves last CHANGED" — the same
+    thing the envelope's own ``ts`` means — while ``{key}:ts``, which cache_set
+    refreshes even on a skip, still answers "when did the publisher last confirm
+    this", so the Status board cannot read the poller as dead.
+    """
+    env = bus.cache_get(CACHE_MOMENTUM)
+    payload = compute.bullbear_view(env.payload if env is not None else None)
+    current = bus.cache_get(CACHE_BULLBEAR)
+    if current is not None and _unchanged_but_for_the_stamp(current.payload, payload):
+        payload["quoted_at"] = current.payload.get("quoted_at")
+    bus.cache_set(CACHE_BULLBEAR, payload,
+                  event=EVENT_BULLBEAR, skip_unchanged=True)
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:sentiment`` command. ``refresh`` → full refresh,
     ``refresh_rotation`` → rotation-only refresh, ``refresh_momentum`` → a
-    forced momentum recompute (the page's manual button); else no-op."""
+    forced momentum recompute (the page's manual button), ``refresh_bullbear``
+    → an immediate day-move republish; else no-op."""
     if command.type == "refresh":
         refresh(bus, with_sectors=True)
     elif command.type == "refresh_rotation":
         refresh_rotation(bus)
     elif command.type == "refresh_momentum":
         refresh_momentum(bus, force=True)
+    elif command.type == "refresh_bullbear":
+        publish_bullbear(bus)
