@@ -257,6 +257,29 @@ def test_the_lookups_degrade_rather_than_raise_on_an_impossible_key():
         assert B.quadrant_class(bogus) == B.quadrant_class("unknown")
 
 
+def test_signed_pct_signs_a_move_but_leaves_a_flat_tape_unsigned():
+    """"+0.00%" claims a rise the digits deny, and the sign is the only part of
+    the string a reader takes at a glance — so it is decided on the ROUNDED
+    value. -0.0 and a move too small to show are both real: the first arrives
+    from float arithmetic, the second whenever a quote ticks a hundredth. Two
+    decimals because merge_live passes netPercentChange through (-0.5578)."""
+    assert B.signed_pct(1.25) == "+1.25%"
+    assert B.signed_pct(-0.5578) == "-0.56%"
+    assert B.signed_pct(0) == "0.00%" and B.signed_pct(-0.0) == "0.00%"
+    assert B.signed_pct(-0.004) == "0.00%" and B.signed_pct(0.004) == "0.00%"
+
+
+def test_signed_pct_shows_a_dash_when_there_is_no_quote():
+    """merge_live leaves day_pct None on a missing quote and the dash is what
+    holds that apart from a flat tape — the same distinction breadth_width draws
+    between None and 0. Through _num, so a bool that would otherwise print
+    "+1.00%" out of a malformed payload is refused here too."""
+    assert B.signed_pct(None) == B.NO_READING
+    assert B.signed_pct("x") == B.NO_READING
+    assert B.signed_pct(True) == B.NO_READING
+    assert B.signed_pct(float("nan")) == B.NO_READING
+
+
 # ── the headline: counts, not a verdict ──────────────────────────────────────
 def _row(trend, excess, **fields):
     """``raw``, plus whatever top-level fields the case under test is about.
@@ -302,6 +325,16 @@ def test_raw_refuses_a_row_that_is_not_a_mapping():
     assert B._raw(None) == {} and B._raw({"raw": None}) == {}
     with pytest.raises(AttributeError):
         B._raw("SPY")
+
+
+def test_row_axes_reads_both_axes_through_the_same_policy_as_quadrant():
+    """The pair Tasks 9 and 11 need — the map prints both numbers per row, the
+    Desk strip buckets each sector. Hand-rolled at either call site it drifts
+    from _raw: a numeric string would print uncoerced, and a row with no raw
+    block would raise where the counter treats it as a reading we lack."""
+    assert B.row_axes({"raw": {"trend": "0.5", "excess": -0.1}}) == (0.5, -0.1)
+    assert B.row_axes({}) == (None, None) and B.row_axes(None) == (None, None)
+    assert B.quadrant(*B.row_axes(_row(1.0, 0.1))) == "rising_leading"
 
 
 def test_headline_is_empty_when_there_is_nothing_to_count():
@@ -465,7 +498,6 @@ def test_build_tree_keeps_a_stock_whose_industry_has_no_row_of_its_own():
     membership, which still rolls up to the sector and must not vanish."""
     levels = {
         "sector": [_row(1.0, 0.1, symbol="XLV", label="Health Care")],
-        "industry": [],
         "stock": [_row(1.0, 0.3, symbol="AMGN", sector="Health Care",
                        industry="Cannabis")],
     }
@@ -504,12 +536,27 @@ def test_build_tree_keys_an_industry_by_its_sector_and_name_together():
     assert [k["symbol"] for k in tree[1]["industries"][0]["stocks"]] == ["ROK"]
 
 
+def test_by_strength_orders_bare_rows_exactly_as_the_tree_orders_sectors():
+    """One ordering, two callers. The Desk strip sorts sectors without building
+    a tree, and two screens showing the same sectors in different orders is a
+    defect neither can display — /sentiment/sectors and /sentiment/rotation
+    already print contradictory verdicts for a neighbouring reason."""
+    rows = [_row(-1.0, -0.1, symbol="XLU", label="U"), None,
+            _row(2.0, 0.5, symbol="XLV", label="V"),
+            _row(None, None, symbol="XLE", label="E")]
+    assert [r["label"] for r in B.by_strength(rows)] == ["V", "U", "E"]
+    assert [s["label"] for s in B.build_tree({"sector": rows})] == ["V", "U", "E"]
+
+
 def test_build_tree_returns_one_node_per_sector_row_not_one_per_label():
     """The ordered list, not the lookup index keyed on ``label``. Sector labels
     are unique in the live payload (11 of 11 on 2026-08-19) and unique upstream
     by construction — ``_momentum_universe`` builds them from a dict keyed on the
     name — so returning the index reads as identical right up until that stops
-    holding, and then it drops a row the headline is still counting."""
+    holding, and then it drops a row the headline is still counting. Children of
+    a duplicated label would attach to whichever row was inserted LAST, which —
+    sectors sorting strongest-first — is the WEAKER of the two; unreachable, so
+    it is recorded here rather than pinned."""
     dup = [_row(2.0, 0.1, symbol="XLV", label="Dup"),
            _row(1.0, 0.1, symbol="XLE", label="Dup")]
     assert [s["symbol"] for s in B.build_tree({"sector": dup})] == ["XLV", "XLE"]
@@ -518,8 +565,7 @@ def test_build_tree_returns_one_node_per_sector_row_not_one_per_label():
 def test_build_tree_orders_sectors_strongest_first():
     levels = {"sector": [_row(-1.0, -0.1, symbol="XLU", label="Utilities"),
                          _row(2.0, 0.5, symbol="XLV", label="Health Care"),
-                         _row(0.5, 0.1, symbol="XLF", label="Financials")],
-              "industry": [], "stock": []}
+                         _row(0.5, 0.1, symbol="XLF", label="Financials")]}
     assert [s["label"] for s in B.build_tree(levels)] == \
         ["Health Care", "Financials", "Utilities"]
 
@@ -543,8 +589,7 @@ def test_build_tree_orders_industries_and_stocks_strongest_first_too():
 
 def test_build_tree_puts_unscored_sectors_last():
     levels = {"sector": [_row(None, None, symbol="XLU", label="Utilities"),
-                         _row(-1.0, -0.1, symbol="XLE", label="Energy")],
-              "industry": [], "stock": []}
+                         _row(-1.0, -0.1, symbol="XLE", label="Energy")]}
     assert [s["label"] for s in B.build_tree(levels)] == ["Energy", "Utilities"]
 
 
@@ -554,8 +599,7 @@ def test_build_tree_sorts_a_non_finite_trend_as_unscored_rather_than_raising():
     sorted(). Both are what _num exists to prevent."""
     levels = {"sector": [_row(float("nan"), 0.1, symbol="A", label="A"),
                          _row(Decimal("sNaN"), 0.1, symbol="B", label="B"),
-                         _row(1.0, 0.1, symbol="C", label="C")],
-              "industry": [], "stock": []}
+                         _row(1.0, 0.1, symbol="C", label="C")]}
     assert [s["label"] for s in B.build_tree(levels)] == ["C", "A", "B"]
 
 

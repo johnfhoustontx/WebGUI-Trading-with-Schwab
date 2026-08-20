@@ -10,6 +10,10 @@ Participation — the share of a group's constituents confirming a move — is a
 third, INDEPENDENT dimension: a confidence qualifier drawn beside the quadrant,
 never folded into it. Sector and industry rows carry it; stock rows do not.
 
+The rule the module's two halves split on: DEGRADE where the fallback honestly
+signals absence — "No reading", slate, an em dash — and RAISE where it would be
+a confident false statement, as a count of zero is in ``headline``.
+
 Everything here is pure so it can be pinned by ``tests/test_bullbear.py``
 without a browser; ``pages/sentiment_bullbear.py`` holds only widgets and wiring.
 See docs/plans/2026-08-19-bull-bear-map-design.md.
@@ -57,6 +61,7 @@ def quadrant(trend, excess):
     return "falling_leading" if excess > 0 else "falling_lagging"
 
 
+# ── the display language: labels, colours, formatting ───────────────────────
 # The label names BOTH axes because one word is the ambiguity this page exists to
 # remove: "Falling / Leading" is a symbol dropping while it still beats SPY, and
 # any single-word verdict paints exactly that row as strength. Absolute axis
@@ -87,10 +92,7 @@ _CLASSES = {
 def quadrant_label(q):
     """A quadrant key -> its display name; an unrecognised key degrades.
 
-    The module's rule, since its two halves differ: degrade where the fallback
-    honestly signals absence — "No reading", slate — and raise where it would be
-    a confident false statement, as a count of zero is in ``headline``. Table
-    drift is caught instead by
+    Drift between the tables and QUADRANTS is caught instead by
     ``test_the_tables_key_exactly_on_quadrants_with_no_empty_entries``.
     """
     return _LABELS.get(q, _LABELS["unknown"])
@@ -101,12 +103,43 @@ def quadrant_class(q):
     return _CLASSES.get(q, _CLASSES["unknown"])
 
 
+# ── rows, counts and the headline ────────────────────────────────────────────
+# A cell with no reading. An em dash, since absent and unchanged differ.
+NO_READING = "—"
+
+
+def signed_pct(v):
+    """A percent -> ``"+1.25%"`` / ``"-0.56%"``, or NO_READING when absent.
+
+    The sign is decided on the ROUNDED value, so anything displaying as zero
+    renders unsigned: "+0.00%" claims a rise the digits deny, and -0.0 formats
+    as "-0.00%" unless folded. ``merge_live`` passes ``day_pct`` through in
+    percent units and leaves it None on a missing quote — hence the dash.
+    """
+    pct = _num(v)
+    if pct is None:
+        return NO_READING
+    pct = round(pct, 2) + 0.0    # +0.0 folds -0.0 onto 0.0
+    return f"{pct:.2f}%" if pct == 0 else f"{pct:+.2f}%"
+
+
 def _raw(row):
     """A row's ``raw`` block. Shape must be right, contents may be null: a None
     row or a null ``raw`` is a reading we do not have, while a non-dict row is a
     different document and raises rather than being half-rendered.
     """
     return (row or {}).get("raw") or {}
+
+
+def row_axes(row):
+    """A row's ``(trend, excess)``, both through ``_num`` — quadrant()'s input.
+
+    Public because the map renders both numbers per row and the Desk strip calls
+    ``quadrant`` per sector; without it two page modules hand-roll
+    ``(row.get("raw") or {}).get("trend")`` and drift from ``_raw``'s policy.
+    """
+    raw = _raw(row)
+    return _num(raw.get("trend")), _num(raw.get("excess"))
 
 
 def quadrant_counts(rows):
@@ -119,8 +152,7 @@ def quadrant_counts(rows):
     """
     counts = {q: 0 for q in QUADRANTS}
     for row in rows or []:
-        raw = _raw(row)
-        counts[quadrant(raw.get("trend"), raw.get("excess"))] += 1
+        counts[quadrant(*row_axes(row))] += 1
     return counts
 
 
@@ -138,6 +170,7 @@ def headline(counts, noun):
     return f"{counts['rising_leading']} of {total} {noun} rising and leading"
 
 
+# ── participation: the breadth bar ───────────────────────────────────────────
 # At or below this share a move is thin — ties to the cautious side, as
 # quadrant() reads them. A judgement, not a fitted number: measured 2026-08-19,
 # Real Estate was RISING on 0.23 while Energy sat flat on 0.96, a third splits.
@@ -158,11 +191,10 @@ def row_participation(row):
     """A row's participation share — the top-level field, a SIBLING of ``raw``.
 
     ``participation`` names two quantities in one row and the wrong one fails
-    silently: ``row["participation"]`` is the raw 0..1 share, while
-    ``row["components"]["participation"]`` is a within-level z-score, signed and
-    unbounded (``sentiment_svc.compute._momentum_score_level`` sets both). Fed
-    to ``breadth_width`` it costs every negative row its bar and draws a
-    plausible wrong one for the rest. A None row is tolerated as ``_raw`` does.
+    silently: this is the raw 0..1 share, while ``components["participation"]``
+    is a within-level z-score, signed and unbounded (both set by
+    ``sentiment_svc.compute._momentum_score_level``) — fed to ``breadth_width``
+    the z-score costs every negative row its bar and mis-draws the rest.
     """
     return (row or {}).get("participation")
 
@@ -188,26 +220,28 @@ def breadth_is_thin(participation):
 def _sort_key(row):
     """Strongest first, unscored last, otherwise stable in the given order.
 
-    Ranks on ``raw.trend`` rather than the cascade's blended ``score``, so the
-    order runs on the same axis the map colours by and no row can sit above a
-    greener one. Through ``_num``, because ``sorted`` is exactly where a NaN
-    orders unpredictably and a ``Decimal("sNaN")`` raises.
+    Ranks on ``raw.trend`` rather than the blended ``score``, so the order runs
+    on the axis the map colours by and no row sits above a greener one. Through
+    ``_num``: ``sorted`` is where a NaN orders unpredictably and sNaN raises.
     """
     trend = _num(_raw(row).get("trend"))
     return (1, 0.0) if trend is None else (0, -trend)
 
 
-def _level(levels, name):
-    """One level's rows, strongest first, with nulls dropped.
+def by_strength(rows):
+    """Any level's rows, strongest first, with nulls dropped -> a new list.
 
-    ``_raw``'s split, one level up. A null in a JSON array is a row we do not
-    have, and here it can be no node at all — it names neither itself nor a
-    parent — so it takes the same path as a row whose parent is unknown. A
-    non-dict row is a different document and still raises, through the ``_raw``
-    the sort key reads.
+    Public so the Desk strip can order sectors without building a tree: two
+    screens ordering the same rows differently is a defect neither shows. A null
+    names neither itself nor a parent, so it goes the way of a row whose parent
+    is unknown; a non-dict row still raises, through ``_raw`` in the sort key.
     """
-    return sorted((r for r in levels.get(name) or [] if r is not None),
-                  key=_sort_key)
+    return sorted((r for r in rows or [] if r is not None), key=_sort_key)
+
+
+def _level(levels, name):
+    """One named level of a payload, ordered by :func:`by_strength`."""
+    return by_strength(levels.get(name))
 
 
 def build_tree(levels):
@@ -217,14 +251,13 @@ def build_tree(levels):
     ``orphan_stocks`` — constituents (5 of 296 on 2026-08-19) whose industry has
     no row, since ``sentiment_svc.compute`` scores an industry only when its ETF
     cleared ``_momentum_admit`` while every member stock is scored regardless.
+    A row naming a parent that does not exist is DROPPED, never filed under an
+    invented bucket that would put a phantom row in the counts — that module
+    maps a stock in no scored industry to ``("", "")``, 10 of 296 that day.
 
-    A row naming a parent that does not exist is DROPPED rather than filed under
-    an invented bucket, which would put a phantom row in the counts. Measured
-    the same day: 10 of 296 stocks, every one mapped to ``("", "")`` by it.
-
-    Nodes are shallow copies, so the tree's keys never land on the caller's rows
-    — ``/sentiment/momentum`` renders the same cached read; the nested ``raw``
-    and ``components`` are shared with it and never written.
+    Nodes are shallow copies: Task 10 rebuilds the tree per lazy expansion off
+    the same ``levels`` (a mutating build would accumulate ``industries`` across
+    rebuilds), and one page build may pass these rows to ``quadrant_counts``.
     """
     levels = levels or {}
     by_sector, out = {}, []
@@ -233,8 +266,7 @@ def build_tree(levels):
         by_sector[row.get("label")] = node
         out.append(node)
 
-    # Keyed on (sector, label): an industry name is unique only within its
-    # sector, and the cascade keys them that way throughout.
+    # (sector, label): an industry name is unique only within its sector.
     by_industry = {}
     for row in _level(levels, "industry"):
         parent = by_sector.get(row.get("sector"))
