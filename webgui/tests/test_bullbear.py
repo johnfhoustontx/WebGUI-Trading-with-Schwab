@@ -3,6 +3,10 @@
 Two axes, never blended: absolute trend (raw.trend) and relative strength
 (raw.excess). See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
+import ast
+import difflib
+import pathlib
+import re
 from decimal import Decimal
 
 from pages import bullbear as B
@@ -88,3 +92,97 @@ def test_quadrant_only_ever_returns_a_member_of_quadrants():
     for trend in values:
         for excess in values:
             assert B.quadrant(trend, excess) in B.QUADRANTS
+
+
+# ── the claim that bullbear._num is the house helper ─────────────────────────
+# ``bullbear._num``'s docstring asserts in prose that its body is byte-identical
+# to four siblings. Nothing enforces prose, and this repo has already paid for
+# that: the 2026-07-01 audit closed "single-source r" as FIXED and
+# test_expiry_time_rate_consistency documented "a single RISK_FREE_RATE source
+# of truth" while gamma_tool still carried five 0.045 literals and
+# backtest_0dte its own RISK_FREE = 0.04 — two artefacts asserting a property
+# neither checked, and the divergence survived seven weeks under a green suite.
+_PAGES = pathlib.Path(B.__file__).resolve().parent
+
+
+def _num_ast(module_name):
+    """The ``_num`` function node in ``pages/<module_name>.py``."""
+    path = _PAGES / f"{module_name}.py"
+    assert path.exists(), (
+        f"{path} does not exist, so bullbear._num's docstring names a module "
+        "that is gone. Update the docstring and this guard together."
+    )
+    found = [n for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+             if isinstance(n, ast.FunctionDef) and n.name == "_num"]
+    assert len(found) == 1, (
+        f"expected exactly one _num in {path.name}, found {len(found)}. If it "
+        "was renamed or removed, bullbear._num's docstring still claims to "
+        "match it — update both."
+    )
+    return found[0]
+
+
+def _num_body(module_name):
+    """``_num``'s statements as normalised source, with the docstring stripped.
+
+    Docstrings legitimately differ — rrg_view and momentum_view carry none at
+    all, and bullbear deliberately keeps a fuller rationale — so only the
+    executable body is compared. ``ast.unparse`` normalises formatting, which
+    makes this a digest in every respect that matters while staying printable
+    in a failure message; a hexdigest could only say "different".
+    """
+    body = _num_ast(module_name).body
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    assert body, f"{module_name}._num has no body beyond its docstring."
+    return [ast.unparse(stmt) for stmt in body]
+
+
+def _siblings_named_in_the_docstring():
+    """The modules bullbear._num's own docstring claims to be identical to.
+
+    Read out of the prose instead of hardcoded here, so that editing the claim
+    without editing the guard fails loudly rather than leaving this test
+    checking a stale list — which is the failure mode it exists to prevent.
+    """
+    doc = ast.get_docstring(_num_ast("bullbear")) or ""
+    m = re.search(r"Byte-identical to the ``_num`` in(.+?), the sibling modules",
+                  doc, re.S)
+    assert m, (
+        "bullbear._num's docstring no longer makes its byte-identical claim in "
+        "the form this guard parses. If the wording changed, update the regex; "
+        "if the claim is gone, delete it and this test together."
+    )
+    return tuple(re.findall(r"``(\w+)``", m.group(1)))
+
+
+def test_num_body_is_identical_to_every_sibling_its_docstring_names():
+    """The prose claim inside bullbear._num, actually enforced.
+
+    A shared helper that drifts is worse than four honest copies: the Bull/Bear
+    map and the Sector Heat grid read the same payload fields, so two notions of
+    "is this a reading" is how adjacent screens come to disagree about identical
+    data — and the docstring would still be telling the next reader they cannot.
+    """
+    siblings = _siblings_named_in_the_docstring()
+    # Not a vacuous pass: the claim names four modules, and a typo or a rename
+    # must fail here rather than silently comparing against nothing.
+    assert siblings == ("sector_heat", "rotation_view", "rrg_view",
+                        "momentum_view"), (
+        f"bullbear._num's docstring now names {siblings}. That is a change to "
+        "the claim itself — confirm the new list is right, then update this "
+        "expectation."
+    )
+    mine = _num_body("bullbear")
+    for name in siblings:
+        theirs = _num_body(name)
+        assert mine == theirs, (
+            f"bullbear._num has diverged from {name}._num, which its docstring "
+            "claims to be byte-identical to. Either restore the shared body, "
+            "or — if the divergence is deliberate — amend that docstring so it "
+            "stops claiming an identity that no longer holds.\n"
+            + "\n".join(difflib.unified_diff(
+                theirs, mine, fromfile=f"{name}._num", tofile="bullbear._num",
+                lineterm="")))
