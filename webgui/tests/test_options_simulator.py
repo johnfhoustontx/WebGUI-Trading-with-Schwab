@@ -306,7 +306,7 @@ def test_simulator_cards_carry_the_eyebrow_captions():
     """The card's own captions replace the row header the page used to pass."""
     card = _leg_cards(_sim_container())[0]
     txt = _labels(card)
-    for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY", "DELTA"):
+    for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY"):
         assert cap in txt, cap
 
 
@@ -356,12 +356,15 @@ def test_simulator_cards_have_no_premium_cell():
     assert no_prem in grids and full not in grids
 
 
-def test_simulator_delta_reads_an_em_dash_with_no_chain_greeks():
-    """No ``delta_for``: ``sim_meta`` carries spot/expiries/strikes and no greeks,
-    so the card must show an em-dash — never a confident 0.00."""
+def test_simulator_shows_no_delta_cell_at_all():
+    """``sim_meta`` is spot/expiries/strikes with no greeks and the service keeps
+    the ChainSnapshot in-process, so this page can NEVER read a delta. It passes
+    no ``delta_for``, and the card drops the cell rather than captioning a column
+    of em-dashes that reads as broken. Certainly never a confident 0.00."""
     card = _leg_cards(_sim_container())[0]
     txt = _labels(card)
-    assert "\u2014" in txt
+    assert "DELTA" not in txt
+    assert "\u2014" not in txt
     assert "+0.00" not in txt and "-0.00" not in txt
 
 
@@ -385,3 +388,13 @@ def test_simulator_card_footer_offers_add_leg_and_no_reset():
     labels = [b.text for b in _sim_buttons(_sim_container())]
     assert "ADD LEG" in labels
     assert "RESET TO TEMPLATE" not in labels
+
+
+def test_simulator_card_is_width_capped_in_its_flex_grow_column():
+    """The legs column is ``flex-grow min-w-[340px]`` - on a desktop that is
+    ~800px, and an uncapped ``w-full`` card would stretch its two ``fr`` tracks
+    to ~700px each. The cap lives on the card itself (see leg_editor), so this
+    asserts it actually arrives on the mounted page."""
+    from pages.options import leg_editor as LE
+    for card in _leg_cards(_sim_container()):
+        assert LE._CARD_MAX_W in card._classes

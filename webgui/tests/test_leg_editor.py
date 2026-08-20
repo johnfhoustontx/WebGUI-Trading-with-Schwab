@@ -248,7 +248,7 @@ def test_card_layout_numbers_its_legs_zero_padded():
 
 
 def test_card_layout_carries_the_eyebrow_captions():
-    _, container = _card([_leg()])
+    _, container = _card([_leg()], delta_for=lambda leg: 0.5)
     txt = _labels(container)
     for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY", "PREMIUM", "DELTA"):
         assert cap in txt
@@ -272,16 +272,21 @@ def test_card_layout_shows_the_delta_the_page_supplies():
     assert seen[0]["strike"] == 736                    # coerced, not raw
 
 
-def test_card_layout_renders_an_em_dash_when_no_delta_source_is_given():
-    _, container = _card([_leg()])
+def test_card_layout_renders_an_em_dash_when_the_source_has_no_reading():
+    """A LIVE source with a hole for this leg (index chains read hollow outside
+    regular hours) keeps the cell and blanks it. An ABSENT source is a different
+    thing entirely - the cell is dropped; see the collapse test below."""
+    _, container = _card([_leg()], delta_for=lambda leg: None)
     assert "\u2014" in _labels(container)
+    assert "DELTA" in _labels(container)
 
 
 def test_card_layout_omits_the_premium_cell_and_collapses_its_column():
     """With no premium the PREMIUM column is dropped from the grid template, so
     DELTA stays in the last cell instead of sliding under the wrong caption."""
-    _, on = _card([_leg(premium=2.4)])
-    _, off = _card([_leg(premium=2.4)], show_premium=False)
+    d = lambda leg: 0.5
+    _, on = _card([_leg(premium=2.4)], delta_for=d)
+    _, off = _card([_leg(premium=2.4)], show_premium=False, delta_for=d)
     assert "PREMIUM" in _labels(on) and "PREMIUM" not in _labels(off)
     assert len([e for e in on.descendants() if isinstance(e, ui.number)]) == 2
     assert len([e for e in off.descendants() if isinstance(e, ui.number)]) == 1
@@ -391,8 +396,9 @@ def test_row_layout_is_still_the_default_and_builds_no_cards():
 def test_card_classes_are_spaceless_tailwind_arbitraries():
     """A Tailwind arbitrary value cannot contain a space - one silently
     generates no rule at all."""
-    for src in list(LE.DEFAULT_CARD_TOKENS.values()) + [
-            LE._CARD_ROW1_COLS, LE._CARD_ROW2_COLS, LE._CARD_ROW2_COLS_NO_PREMIUM]:
+    for src in (list(LE.DEFAULT_CARD_TOKENS.values())
+                + list(LE._CARD_ROW2_GRIDS.values())
+                + [LE._CARD_ROW1_COLS, LE._CARD_MAX_W]):
         for arb in re.findall(r"\[[^\]]*\]", src):
             assert " " not in arb, src
 
@@ -479,3 +485,58 @@ def test_card_strike_ladder_resyncs_when_the_expiry_flips():
     _select_over(container, list(_EXPS)).value = _EXPS[1]
     assert _strike_select(container)._values == per_expiry[_EXPS[1]]
     assert ed.get_legs()[0]["strike"] in per_expiry[_EXPS[1]]
+
+
+# -- the DELTA cell collapses when the page has no delta source ---------------
+# Same argument the PREMIUM track already made one column over: a captioned cell
+# that can NEVER hold a value reads as broken, not as not-applicable. The
+# Simulator is exactly that case - ``sim_meta`` carries no greeks, so its DELTA
+# would be an em-dash for the life of the page.
+
+def test_card_drops_the_delta_cell_when_no_delta_source_is_given():
+    _, container = _card([_leg()])
+    txt = _labels(container)
+    assert "DELTA" not in txt
+    assert "\u2014" not in txt          # not a blank cell - no cell
+    assert "STRIKE" in txt and "QTY" in txt
+
+
+def test_card_row2_grid_covers_every_premium_delta_combination():
+    """Four static templates, one per combination - a finite set of literal class
+    strings, never a runtime-built arbitrary value."""
+    grids = LE._CARD_ROW2_GRIDS
+    assert set(grids) == {(True, True), (True, False), (False, True), (False, False)}
+    assert len(set(grids.values())) == 4, "two combinations share a template"
+    for (prem, delta), cls in grids.items():
+        tracks = _grid_token(cls)[len("grid-cols-["):-1].split("_")
+        assert len(tracks) == 2 + int(prem) + int(delta), (prem, delta, tracks)
+
+
+def test_card_renders_the_grid_template_matching_what_it_shows():
+    """The rendered template is the ALIGNMENT contract - captions and cells share
+    one track list, so a mismatch slides a value under the wrong caption."""
+    d = lambda leg: 0.5
+    cases = {
+        (True, True): _card([_leg()], show_premium=True, delta_for=d)[1],
+        (True, False): _card([_leg()], show_premium=True)[1],
+        (False, True): _card([_leg()], show_premium=False, delta_for=d)[1],
+        (False, False): _card([_leg()], show_premium=False)[1],
+    }
+    for key, container in cases.items():
+        grids = [c for e in container.descendants()
+                 for c in e._classes if c.startswith("grid-cols-")]
+        want = _grid_token(LE._CARD_ROW2_GRIDS[key])
+        assert want in grids, key
+        for other, cls in LE._CARD_ROW2_GRIDS.items():
+            if other != key:
+                assert _grid_token(cls) not in grids, (key, other)
+
+
+def test_card_caps_its_own_width():
+    """The card's track list is drawn for a ~424px column. Left to stretch across
+    an 800px one (the Simulator's flex-grow column) the two ``fr`` tracks absorb
+    ~700px each and the strike select renders wider than the chart beside it. The
+    cap rides the CARD, not a page's column, so every page that mounts it - the
+    Calculator's narrower column included, where it is inert - inherits it."""
+    _, container = _card([_leg()])
+    assert LE._CARD_MAX_W in _cards(container)[0]._classes

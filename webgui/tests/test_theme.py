@@ -298,3 +298,72 @@ def test_knob_label_humanizes_keys():
     assert theme.knob_label("blue_top") == "Blue top"
     assert theme.knob_label("page_bg1") == "Page background 1"
     assert theme.knob_label("drawer_bg") == "Drawer background"
+
+
+# -- the card leg layout under .calc-v2 ---------------------------------------
+
+def _decls(css, selector):
+    """Declaration blocks of every rule whose selector LIST contains ``selector``."""
+    import re
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)   # comments carry selectors' words
+    out = []
+    for chunk in css.split("}"):
+        if "{" not in chunk:
+            continue
+        sel, _, body = chunk.partition("{")
+        if selector in [s.strip() for s in sel.replace("\n", " ").split(",")]:
+            out.append(body)
+    return out
+
+
+def test_quasar_css_compacts_the_leg_card_cells():
+    """The Simulator mounts the leg editor's CARD layout under ``.calc-v2``.
+
+    Without a ``.leg-card`` rule its cells fall through to the generic
+    ``.q-field__control`` above (min-height 40px, 8px radius) — roughly 2.5x the
+    intended card height, with rounded fields sitting inside a 2px-radius card
+    frame. The row layout has had its own compaction since it shipped
+    (``.leg-row``); the card needs the sibling."""
+    css = theme.build_quasar_css(theme._DEFAULTS)
+    blocks = _decls(css, ".calc-v2 .leg-card .q-field__control")
+    assert blocks, ".calc-v2 .leg-card .q-field__control rule missing"
+    body = " ".join(blocks).replace(" ", "")
+    assert "min-height:28px" in body
+    assert "border-radius:2px" in body, "8px fields inside a 2px card frame"
+
+
+def test_leg_card_rule_follows_the_generic_control_rule():
+    """Author order matters as much as the rule existing: the compaction is an
+    override of the generic boxed input declared above it."""
+    css = theme.build_quasar_css(theme._DEFAULTS)
+    assert css.index(".calc-v2 .leg-card .q-field__control") > \
+        css.index(".calc-v2 .q-field__control{")
+
+
+def test_the_generic_boxed_input_is_left_alone():
+    """Compact the CARD, not every field in the app — the rest of the Simulator
+    (symbol, look-back, the Trade page) keeps the 40px boxed input."""
+    body = " ".join(_decls(theme.build_quasar_css(theme._DEFAULTS),
+                           ".calc-v2 .q-field__control")).replace(" ", "")
+    assert "min-height:40px" in body
+
+
+def test_both_card_scopes_share_one_geometry():
+    """``.calc-v2`` and ``.calc-v3`` paint the card in different palettes but must
+    stay the same SHAPE — that is the whole premise of a shared widget whose
+    colours enter as tokens."""
+    navy = " ".join(_decls(theme.build_quasar_css(theme._DEFAULTS),
+                           ".calc-v2 .leg-card .q-field__control")).replace(" ", "")
+    calc = " ".join(_decls(theme.build_calc_css(theme._DEFAULTS),
+                           ".calc-v3 .leg-card .q-field__control")).replace(" ", "")
+    assert "min-height:28px" in navy and "min-height:28px" in calc
+
+
+def test_leg_card_rules_carry_no_hardcoded_hex():
+    """``build_quasar_css`` contains not one literal hex — every colour comes from
+    the palette. The card rules are geometry only, so they add none."""
+    import re
+    css = theme.build_quasar_css(theme._DEFAULTS)
+    card_rules = [c for c in css.split("}") if ".leg-card" in c]
+    assert card_rules
+    assert not re.findall(r"#[0-9a-fA-F]{3,8}", " ".join(card_rules))
