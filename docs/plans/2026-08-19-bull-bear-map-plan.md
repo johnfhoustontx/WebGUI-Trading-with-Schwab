@@ -385,6 +385,18 @@ git commit -m "feat(bullbear): participation breadth bar with a thin-move flag"
 
 ## Task 5: Build the tree (sector → industry → stock)
 
+> **⚠ Correction to an earlier draft of this task, verified at the source twice.**
+> This plan originally attributed `orphan_stocks` to the four duplicate-ETF
+> industries (MJ, XRT, BETZ, VEGI). **That mechanism cannot produce an orphan
+> stock.** `_momentum_universe:1838` puts those industries in `orphans`, *not* in
+> `universe["industries"]`, and `industry_of:2106` is built only from the latter —
+> so a stock whose sole industry is a duplicate-ETF orphan resolves to `("", "")`
+> and is dropped entirely, appearing in no row and no count. The real and common
+> source is the admission gate, described in `build_tree`'s docstring below.
+>
+> Recorded because the wrong version was written into a test docstring on this
+> plan's authority, and was caught only by reading the producer.
+
 > ### ⚠ Two participation traps, found by the Task 4 review — read before writing
 >
 > **1. `participation` is at the row TOP LEVEL, not inside `raw`.** `quadrant_counts`
@@ -509,10 +521,12 @@ def build_tree(levels):
     """levels{sector,industry,stock} -> nested sectors, strongest first.
 
     Each sector gains ``industries`` (each with its own ``stocks``) plus
-    ``orphan_stocks`` — constituents whose industry has no row of its own. Four
-    of the workbook's industries name an ETF another industry already owns, so
-    the cascade reports them as orphans; their stocks still belong to the sector
-    and dropping them would silently shrink the tree.
+    ``orphan_stocks`` — constituents whose industry has no row of its own. The
+    source is the ADMISSION GATE: ``compute.py:2126`` builds ``industry_entries``
+    only ``for i in universe["industries"] if i["etf"] in admitted``, while
+    ``stock_entries`` at ``:2114`` admits every member regardless — so an
+    industry ETF under the dollar-volume floor strands its whole membership at
+    the sector level, and dropping them would silently shrink the tree.
 
     A row naming a parent that does not exist is DROPPED rather than placed in an
     invented bucket, which would put a phantom row into the counts.
