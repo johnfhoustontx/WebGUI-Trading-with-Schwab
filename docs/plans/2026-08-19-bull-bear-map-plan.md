@@ -947,6 +947,14 @@ Create `webgui/pages/sentiment_bullbear.py` with `render()` that:
 - reads `bus_client.read_full("sentiment:bullbear")`, graceful-empty when cold,
 - shows the **two clocks** ("scores as of <session_date>, quotes <quoted_at>"),
 - renders `B.headline(B.quadrant_counts(levels["sector"]), "sectors")` plus the full count distribution,
+  — ⚠ **`headline` returns `""` on an empty payload, by design.** Task 3 made it suppress
+  rather than render "0 of 0 sectors rising and leading", which read as a confidently
+  bearish tape when the truth was that nothing had been published. That means this page
+  MUST carry a real cold-cache empty state; rendering the headline unconditionally yields
+  a blank strip with no explanation. This is a cross-task dependency currently held only
+  by a docstring, so pin it with a test here.
+- states which level the headline counts, since `noun` renders **verbatim** and the caller
+  owns pluralisation (`B.headline` will happily emit "1 of 1 sectors"),
 - renders one row per sector: label, quadrant chip (`B.quadrant_class`), trend, vs-SPY, live day-move, breadth bar,
 - version-polls every 2 s via `ui.timer` and repaints only on a version change,
 - wraps every timer/handler in `pages.ui_guard.guard`.
