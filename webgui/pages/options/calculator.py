@@ -73,26 +73,6 @@ def _summary_strategy(strategy_code, legs, dirty):
     return S.summary_code(strategy_code, legs)
 
 
-def _band(frac):
-    """Map a 0..1 magnitude fraction to a 1..5 shade band."""
-    frac = max(0.0, min(1.0, frac))
-    return max(1, min(5, math.ceil(frac / 0.2)))
-
-
-def pnl_cell_class(value, g_max, g_min):
-    """CSS class for a P&L cell: p1..p5 (profit), l1..l5 (loss), or neutral.
-
-    Shade intensity is relative to the grid's global max-profit / max-loss.
-    """
-    if not isinstance(value, (int, float)) or value == 0:
-        return "neutral"
-    if value > 0:
-        frac = value / g_max if isinstance(g_max, (int, float)) and g_max > 0 else 0.0
-        return f"p{_band(frac)}"
-    frac = value / g_min if isinstance(g_min, (int, float)) and g_min < 0 else 0.0
-    return f"l{_band(frac)}"
-
-
 def grid_extremes(pnl_data):
     """(global_max, global_min) over every P&L value in the grid."""
     vals = [p for r in (pnl_data or []) for p in (r.get("pnl") or [])
@@ -395,6 +375,96 @@ def matrix_pct_of_max(pnl, max_profit):
     return p / m * 100.0
 
 
+# ── the P&L matrix ───────────────────────────────────────────────────────────
+# The heat ramp is a DATA-DRIVEN colour map — the one category ``config/theme.toml``
+# deliberately keeps out of the palette (see the note in its ``[calc]`` header) —
+# so it lives here beside the renderer rather than in ``theme.py``. The two hues
+# ARE the ``[calc]`` ``pos``/``neg`` signal colours; the text tones are their
+# light ends, and the spot amber is ``[calc]`` ``warn``.
+_MATRIX_PROFIT_RGB = "45,212,167"       # #2dd4a7
+_MATRIX_LOSS_RGB = "251,95,124"         # #fb5f7c
+_MATRIX_PROFIT_FG = "#b8f5e4"
+_MATRIX_LOSS_FG = "#ffd0d9"
+_MATRIX_EMPTY_FG = "#6f8598"            # [calc] `dim` — a cell with no reading
+
+MATRIX_SPOT = "#f5b841"                 # the spot row, and the expiry heading
+MATRIX_HEAD_BG = "#080d13"              # the sticky header + price-column ground
+MATRIX_HEAD_RULE = "#22303e"            # under the header, and the outer frame
+MATRIX_ROW_RULE = "rgba(19,31,43,.7)"   # between price rows
+MATRIX_LABEL_FG = "#7189a0"             # a heading that is not the expiry
+MATRIX_VOID = "#05070a"                 # behind an untinted (missing) cell
+MATRIX_PRICE_FG = "#eaf2f9"             # the price ladder itself
+
+# The alpha ramp: a floor, so the weakest cell still reads as tinted rather than
+# as no data; and a ceiling well under 1, so the figure printed ON the tint stays
+# legible at full saturation.
+_MATRIX_ALPHA_FLOOR = 0.10
+_MATRIX_ALPHA_SPAN = 0.42
+
+# Past this a percentage has stopped being a reading and is only blowing the
+# column open. It is the LOSS side that gets there: a credit spread risks a
+# multiple of its max return, and a naked put ~200x.
+_MATRIX_PCT_LIMIT = 999
+
+
+def _matrix_pct_text(pct):
+    """A matrix percentage as text: an em-dash for no reading, clamped at ±999%."""
+    if pct is None:
+        return "—"
+    if pct > _MATRIX_PCT_LIMIT:
+        return f">{_MATRIX_PCT_LIMIT}%"
+    if pct < -_MATRIX_PCT_LIMIT:
+        return f"<-{_MATRIX_PCT_LIMIT}%"
+    return f"{pct:+.1f}%"
+
+
+def matrix_cell_facts(pnl, max_profit, g_max, g_min):
+    """One matrix cell: ``{dollars, pct, bg, fg, alpha}``.
+
+    Tint magnitude is relative to the grid's OWN extremes, and to each SIDE's
+    extreme separately, so the best and the worst cell on screen both saturate.
+    The two alternatives are worse: one shared scale would wash the profit zone
+    of every credit structure out to nothing (the risk is routinely several times
+    the reward), and scaling against the summary's max profit / max risk would
+    leave a narrow price window — one that never reaches the wings — a uniform
+    faint blur, and is not even available when ``max_profit`` is the uncapped
+    sentinel. The dollar figure printed in the same cell carries the absolute
+    magnitude; the tint carries the shape.
+
+    ``pct`` is a share of MAX RETURN (``matrix_pct_of_max``), so the column reads
+    directly against the MAX RETURN tile above the matrix — an em-dash, never a
+    ``0.0%``, when there is no max return to divide by.
+    """
+    p = _finite(pnl)
+    if p is None:
+        return {"dollars": "—", "pct": "—", "bg": "transparent",
+                "fg": _MATRIX_EMPTY_FG, "alpha": 0.0}
+    profit = p >= 0
+    scale = _finite(g_max) if profit else _finite(g_min)
+    scale = abs(scale) if scale else 0.0
+    ratio = min(abs(p) / scale, 1.0) if scale > 0 else 0.0
+    alpha = round(_MATRIX_ALPHA_FLOOR + ratio * _MATRIX_ALPHA_SPAN, 3)
+    return {
+        "dollars": f"{p:+,.0f}",
+        "pct": _matrix_pct_text(matrix_pct_of_max(p, max_profit)),
+        "bg": f"rgba({_MATRIX_PROFIT_RGB if profit else _MATRIX_LOSS_RGB},{alpha})",
+        "fg": _MATRIX_PROFIT_FG if profit else _MATRIX_LOSS_FG,
+        "alpha": alpha,
+    }
+
+
+def matrix_headers(eval_labels):
+    """Column headings; the LAST column is the expiry and is flagged so the page
+    can colour it amber (the design's one emphasised column)."""
+    labels = list(eval_labels or [])
+    last = len(labels) - 1
+    # No special case for the "Now" column: ``.upper()`` already renders it
+    # "NOW $", and a branch that cannot change the output is a branch that
+    # cannot be tested.
+    return [{"label": f"{str(lab).strip()} $".upper(), "expiry": i == last}
+            for i, lab in enumerate(labels)]
+
+
 def chain_status_facts(loading, symbol, chain):
     """The title-bar status pill + the ② SYMBOL frame's hint.
 
@@ -439,17 +509,6 @@ def chain_strikes(chain, expiry, option_type):
 def _has_contracts(chain):
     return bool(chain and (chain.get("callExpDateMap") or chain.get("putExpDateMap")))
 
-
-# class -> (background, foreground) for the heatmap cells (dark palette).
-_CELL_COLORS = {
-    "p1": ("#0d2814", "#81c784"), "p2": ("#12381b", "#a5d6a7"),
-    "p3": ("#184d23", "#c8e6c9"), "p4": ("#1f5f2a", "#e8f5e9"),
-    "p5": ("#2e7d32", "#ffffff"),
-    "l1": ("#2a1414", "#ef9a9a"), "l2": ("#3a1a1a", "#ef5350"),
-    "l3": ("#4d1f1f", "#ff8a80"), "l4": ("#6b1f1f", "#ffcdd2"),
-    "l5": ("#8b0000", "#ffffff"),
-    "neutral": ("#2a2a2a", "#bdbdbd"),
-}
 
 # Scroll the P&L grid so the current-spot row sits in the MIDDLE of the scroll
 # viewport (the grid is spot-centered but opens scrolled to the top, hiding spot).
@@ -503,50 +562,75 @@ def _render_summary(box, summary):
         tile("Prob of Profit", f"{summary.get('pop', 0):.1f}%", "#bdbdbd")
 
 
-def _render_grid(box, eval_labels, pnl_data, spot):
-    from nicegui import ui
+def matrix_html(eval_labels, pnl_data, spot, max_profit):
+    """The P&L matrix as ONE raw HTML fragment ("" when there is nothing to draw).
 
-    box.clear()
+    Raw HTML rather than NiceGUI components on purpose — a few hundred cells
+    built with ``.classes()`` would be a few hundred Vue elements — which is the
+    repo's documented out-of-scope case for the Tailwind-first rule, so the
+    inline ``style=`` attributes below are the intended form here.
+    """
     rows = grid_rows(pnl_data)
-    if not rows:
-        with box:
-            ui.label("No P&L data.").classes("opacity-60")
-        return
-    g_max, g_min = grid_extremes(pnl_data)
     # ``eval_labels`` arrive pre-formatted (MM/DD strings) from the service;
-    # ``eval_date_labels`` is harmless here (str()'s strings) and keeps the page
-    # robust if date objects are ever passed.
-    labels = eval_date_labels(eval_labels)
-    cur_idx = min(range(len(rows)), key=lambda i: abs((rows[i]["price"] or 0) - spot))
+    # ``eval_date_labels`` is harmless here (it str()'s strings) and keeps the
+    # page robust if date objects are ever passed.
+    headers = matrix_headers(eval_date_labels(eval_labels))
+    if not rows or not headers:
+        return ""
+    g_max, g_min = grid_extremes(pnl_data)
+    spot_idx = min(range(len(rows)),
+                   key=lambda i: abs((rows[i]["price"] or 0) - (spot or 0)))
 
-    th = ['<th style="position:sticky;left:0;top:0;background:#141a30;z-index:2;'
-          'padding:4px 8px;">Price</th>']
-    for lab in labels:
-        th.append(f'<th style="position:sticky;top:0;background:#141a30;padding:4px 8px;">{lab} $</th>'
-                  f'<th style="position:sticky;top:0;background:#141a30;padding:4px 8px;">%</th>')
+    head_style = "text-align:right;padding:6px 10px;font-size:9px;letter-spacing:.18em;"
+    ths = [f'<th style="position:sticky;left:0;top:0;z-index:3;'
+           f'background:{MATRIX_HEAD_BG};border-bottom:1px solid {MATRIX_HEAD_RULE};'
+           f'color:{MATRIX_LABEL_FG};{head_style}">PRICE</th>']
+    for h in headers:
+        fg = MATRIX_SPOT if h["expiry"] else MATRIX_LABEL_FG
+        cell = (f'position:sticky;top:0;z-index:2;background:{MATRIX_HEAD_BG};'
+                f'border-bottom:1px solid {MATRIX_HEAD_RULE};color:{fg};{head_style}')
+        ths.append(f'<th style="{cell}">{h["label"]}</th>'
+                   f'<th style="{cell}">% MAX</th>')
 
     trs = []
     for i, r in enumerate(rows):
-        pbg = "#ffd54f" if i == cur_idx else "#2a2a2a"
-        pfg = "#000000" if i == cur_idx else "#e0e0e0"
+        at_spot = i == spot_idx
+        rule = MATRIX_SPOT if at_spot else MATRIX_ROW_RULE
+        row_style = (f'border-top:1px solid {rule};text-align:right;padding:3px 10px;'
+                     + (f'border-bottom:1px solid {rule};' if at_spot else ''))
         price = r["price"] if isinstance(r["price"], (int, float)) else 0.0
-        cells = [f'<td style="position:sticky;left:0;background:{pbg};color:{pfg};'
-                 f'text-align:right;padding:2px 8px;font-family:monospace;font-weight:bold;">'
-                 f'{price:,.2f}</td>']
+        tds = [f'<td style="position:sticky;left:0;z-index:1;'
+               f'background:{MATRIX_SPOT if at_spot else MATRIX_HEAD_BG};'
+               f'color:{MATRIX_VOID if at_spot else MATRIX_PRICE_FG};'
+               f'font-weight:600;'
+               f'{row_style}">{price:,.2f}</td>']
         for c in r["cells"]:
-            bg, fg = _CELL_COLORS[pnl_cell_class(c["pnl"], g_max, g_min)]
-            style = (f'background:{bg};color:{fg};text-align:right;padding:2px 8px;'
-                     f'font-family:monospace;')
-            cells.append(f'<td style="{style}">{fmt_dollar(c["pnl"])}</td>')
-            cells.append(f'<td style="{style}">{fmt_pct(c["pnl_pct"])}</td>')
-        tr_open = '<tr id="calc-spot-row">' if i == cur_idx else "<tr>"
-        trs.append(tr_open + "".join(cells) + "</tr>")
+            fact = matrix_cell_facts(c["pnl"], max_profit, g_max, g_min)
+            cell = f'background:{fact["bg"]};color:{fact["fg"]};{row_style}'
+            tds.append(f'<td style="{cell}">{fact["dollars"]}</td>'
+                       f'<td style="{cell}">{fact["pct"]}</td>')
+        tr = '<tr id="calc-spot-row">' if at_spot else "<tr>"
+        trs.append(tr + "".join(tds) + "</tr>")
 
-    html = ('<div id="calc-grid-scroll" style="max-height:480px;overflow:auto;border:1px solid #333;">'
-            '<table style="border-collapse:collapse;font-size:12px;">'
-            f'<thead><tr>{"".join(th)}</tr></thead>'
+    return (f'<div id="calc-grid-scroll" style="max-height:480px;overflow:auto;'
+            f'border:1px solid {MATRIX_HEAD_RULE};border-radius:3px;'
+            f'background:{MATRIX_VOID};">'
+            f'<table style="border-collapse:collapse;font-size:11px;'
+            f"font-family:'JetBrains Mono',ui-monospace,monospace;"
+            f'font-variant-numeric:tabular-nums;">'
+            f'<thead><tr>{"".join(ths)}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table></div>')
+
+
+def _render_grid(box, eval_labels, pnl_data, spot, max_profit=None):
+    from nicegui import ui
+
+    box.clear()
+    html = matrix_html(eval_labels, pnl_data, spot, max_profit)
     with box:
+        if not html:
+            ui.label("No P&L data.").classes("opacity-60")
+            return
         ui.html(html).classes("w-full")
         # Centre the spot row in the viewport once the DOM has painted.
         ui.timer(0.12, lambda: ui.run_javascript(_CENTER_SPOT_JS), once=True)
@@ -1028,9 +1112,11 @@ def render():
         spot = state.get("calc_spot")
         if spot is None:
             spot = float(price_in.value or 0)
-        _render_summary(summary_box, result.get("summary") or {})
+        summary = result.get("summary") or {}
+        _render_summary(summary_box, summary)
         _render_grid(grid_box, result.get("eval_labels") or [],
-                     result.get("pnl_data") or [], spot)
+                     result.get("pnl_data") or [], spot,
+                     summary.get("max_profit"))
 
     def _apply_iv(res):
         """Fill the IV field from a ``calc_iv`` result (implied from the mark)."""

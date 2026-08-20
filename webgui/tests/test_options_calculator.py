@@ -1,23 +1,8 @@
 """Tests for the Calculator pure transforms (banding, grid mapping, formatting)."""
 import datetime as dt
+import re
 
 from pages.options import calculator as calc
-
-
-def test_pnl_cell_class_neutral_for_zero():
-    assert calc.pnl_cell_class(0, 100, -100) == "neutral"
-    assert calc.pnl_cell_class(None, 100, -100) == "neutral"
-
-
-def test_pnl_cell_class_profit_bands():
-    assert calc.pnl_cell_class(100, 100, -100) == "p5"
-    assert calc.pnl_cell_class(10, 100, -100) == "p1"
-    assert calc.pnl_cell_class(50, 100, -100) == "p3"
-
-
-def test_pnl_cell_class_loss_bands():
-    assert calc.pnl_cell_class(-100, 100, -100) == "l5"
-    assert calc.pnl_cell_class(-10, 100, -100) == "l1"
 
 
 def test_grid_rows_shapes_price_and_cell_pairs():
@@ -536,12 +521,17 @@ def test_matrix_cell_facts_uses_the_loss_hue_below_zero():
 
 
 def test_matrix_cell_facts_scales_each_side_on_its_own_extreme():
-    # Profit is measured against g_max and loss against g_min, so BOTH ends of
-    # the grid saturate. A shared scale would wash out the profit zone of every
-    # credit structure, where the risk is several times the reward.
-    best = calc.matrix_cell_facts(100.0, 180.0, g_max=100.0, g_min=-900.0)
-    worst = calc.matrix_cell_facts(-900.0, 180.0, g_max=100.0, g_min=-900.0)
-    assert best["alpha"] == worst["alpha"]
+    # Profit is measured against g_max and loss against g_min. A shared scale
+    # would wash out the profit zone of every credit structure, where the risk
+    # is several times the reward. Both cells here sit HALF way to their own
+    # extreme and must therefore tint identically — comparing the two EXTREMES
+    # would not show it, since a shared scale clamps both to 1.0 as well.
+    half_up = calc.matrix_cell_facts(50.0, 180.0, g_max=100.0, g_min=-900.0)
+    half_down = calc.matrix_cell_facts(-450.0, 180.0, g_max=100.0, g_min=-900.0)
+    assert half_up["alpha"] == half_down["alpha"]
+    # …and neither is saturated, so the assertion above is about the scale.
+    assert half_up["alpha"] < calc.matrix_cell_facts(
+        100.0, 180.0, g_max=100.0, g_min=-900.0)["alpha"]
 
 
 def test_matrix_cell_facts_clamps_a_cell_beyond_the_grid_extreme():
@@ -555,8 +545,18 @@ def test_matrix_cell_facts_survives_a_degenerate_grid():
     # An all-zero grid has no extreme to scale against; the ramp must not divide
     # by it, and the alpha must stay a legal CSS value.
     flat = calc.matrix_cell_facts(0.0, 180.0, g_max=0.0, g_min=0.0)
-    assert 0.0 <= flat["alpha"] <= 1.0
+    assert 0.0 < flat["alpha"] <= 1.0
     assert flat["dollars"] == "+0"
+
+
+def test_matrix_cell_facts_never_renders_a_real_reading_as_no_reading():
+    # The ramp carries a floor: the faintest REAL cell must still be tinted, or
+    # a genuine $0 is indistinguishable from a cell that carries no P&L at all.
+    missing = calc.matrix_cell_facts(None, 180.0, g_max=1e9, g_min=-1e9)
+    for pnl in (0.0, 0.4, -0.4):
+        cell = calc.matrix_cell_facts(pnl, 180.0, g_max=1e9, g_min=-1e9)
+        assert cell["alpha"] > missing["alpha"], pnl
+        assert cell["bg"] != missing["bg"], pnl
 
 
 def test_matrix_cell_pct_is_a_share_of_max_return():
@@ -638,21 +638,47 @@ def test_matrix_html_marks_the_spot_row_amber():
     # Scoped to the spot row: the expiry header is amber too, so a bare
     # "the colour appears somewhere" assertion could not fail.
     assert calc.MATRIX_SPOT == "#f5b841"
-    assert calc.MATRIX_SPOT in _spot_row(html)
-    assert "450.00" in _spot_row(html)
+    row = _spot_row(html)
+    assert "450.00" in row
+    # Both marks, asserted separately: the price cell's amber ground and the
+    # amber rule around the row would otherwise each hide the other's loss.
+    assert f"background:{calc.MATRIX_SPOT}" in row
+    assert f"border-top:1px solid {calc.MATRIX_SPOT}" in row
+    assert f"border-bottom:1px solid {calc.MATRIX_SPOT}" in row
     body_before_spot = html.split("</thead>")[1].split('<tr id="calc-spot-row"')[0]
     assert calc.MATRIX_SPOT not in body_before_spot
+
+
+def _header_cells(html):
+    """The <th> elements of the fragment, in order.
+
+    ⚠ NOT ``head.split("<th")`` — that also splits on ``<thead>`` and shifts
+    every index by one, which is how the "these columns are NOT amber"
+    assertions below were once pointed at markup that could never be amber.
+    """
+    head = html[html.index("<thead>"):html.index("</thead>")]
+    return re.findall(r"<th\b.*?</th>", head)
 
 
 def test_matrix_html_colours_only_the_expiry_header_amber():
     html = calc.matrix_html(["Now", "08/21", "Exp"], _matrix_data(),
                             spot=450.0, max_profit=180.0)
-    head = html[html.index("<thead>"):html.index("</thead>")]
-    cells = head.split("<th")
-    assert calc.MATRIX_SPOT in cells[-2]          # the expiry $ column
-    assert calc.MATRIX_SPOT in cells[-1]          # …and its % column
-    assert calc.MATRIX_SPOT not in cells[1]       # PRICE
-    assert calc.MATRIX_SPOT not in cells[2]       # NOW $
+    cells = _header_cells(html)
+    assert len(cells) == 7                        # PRICE + 3 columns x ($, %)
+    assert "PRICE" in cells[0] and "NOW $" in cells[1] and "EXP $" in cells[5]
+    assert calc.MATRIX_SPOT in cells[5]           # the expiry $ column
+    assert calc.MATRIX_SPOT in cells[6]           # …and its % column
+    assert calc.MATRIX_SPOT not in cells[0]       # PRICE
+    assert calc.MATRIX_SPOT not in cells[1]       # NOW $
+    assert calc.MATRIX_SPOT not in cells[2]       # …and its % column
+
+
+def test_matrix_html_names_the_percentage_column_after_its_denominator():
+    # The column changed meaning (share of premium received -> share of MAX
+    # RETURN). A bare "%" heading would still read as the old one.
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert [c for c in _header_cells(html) if ">% MAX<" in c]
+    assert not [c for c in _header_cells(html) if ">%<" in c]
 
 
 def test_matrix_html_prints_the_percentage_against_max_return():
