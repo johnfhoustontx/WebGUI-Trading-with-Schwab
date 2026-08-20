@@ -20,6 +20,7 @@ this module never reads it.
 See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
 import datetime
+from time import monotonic
 
 import bus_client
 from nicegui import ui
@@ -39,9 +40,19 @@ WAITING = ("Waiting for the sentiment service — no map has been published yet.
 NO_SCORES = "Scores not yet computed"
 NO_QUOTES = ("Live quotes unavailable — the day-move column is empty. The "
              "scores, quadrants and breadth below are unaffected.")
+NOTHING_CHANGED = "Refreshed — the map was already current."
 NO_INDUSTRIES = "No scored industries in this sector"
 NO_STOCKS = "No scored member stocks"
 ORPHANS = "Not in a scored industry"
+
+# How long a Refresh may still be in flight. It has to be a clock, because on a
+# frozen tape there is no ack to wait for: ``handlers.publish_bullbear`` carries
+# the STORED ``quoted_at`` forward when only the stamp moved, so
+# ``cache_set(skip_unchanged=True)`` short-circuits and nothing on the bus moves
+# — not the version, not ``{key}:ts``. Sized for the round trip (consume the
+# command, one batched /quotes, publish) with room to spare, since dismissing
+# before the data can arrive would say "finished" while the work is still running.
+REFRESH_WAIT_SEC = 8.0
 
 
 # ── formatting and repaint arithmetic (pure, so the tests need no browser) ───
@@ -200,7 +211,8 @@ _BULLBEAR_CSS = """
 
 
 def render():
-    state = {"payload": None, "ver": None, "days": {}, "cells": [], "sig": None}
+    state = {"payload": None, "ver": None, "days": {}, "cells": [], "sig": None,
+             "refresh_until": None}
 
     ui.add_head_html(ROTATION_FONT_HEAD_HTML)
     ui.add_css(_BULLBEAR_CSS)
@@ -413,6 +425,7 @@ def render():
                 _sector_panel(node)
 
     def _paint():
+        state["refresh_until"] = None
         map_busy.hide()
         scores, quotes = clocks(state["payload"])
         scores_lbl.text = scores
@@ -436,13 +449,29 @@ def render():
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_bullbear"})
         ui.notify("Refresh requested")
+        state["refresh_until"] = monotonic() + REFRESH_WAIT_SEC
         map_busy.show()
+
+    def _expire_refresh():
+        """Lower the scrim once a Refresh can no longer be in flight.
+
+        Without this the only thing that lowers it is a repaint, so a refresh
+        that legitimately changes nothing leaves the scrim up for the whole
+        ``busy.BUSY_TIMEOUT_SEC`` backstop — 30 s of "working" on the frozen tape
+        that is exactly when a reader presses Refresh to ask why nothing moves.
+        """
+        until = state["refresh_until"]
+        if until is not None and monotonic() >= until:
+            state["refresh_until"] = None
+            map_busy.hide()
+            ui.notify(NOTHING_CHANGED)
 
     @guard
     def _maybe_repaint():
         # The cheap ``:ver`` probe: an unchanged version costs one small GET and
         # no deserialize, per open tab, every 2 s.
         if bus_client.read_version(VIEW) == state["ver"]:
+            _expire_refresh()
             return
         _read()
         _paint()

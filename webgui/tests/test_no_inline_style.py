@@ -111,11 +111,14 @@ def test_sentiment_pages_have_no_inline_style():
                # trail layer, a raw `ui.html()` SVG string — the documented
                # out-of-scope case, same as pages/rings.py.
                "rrg_view.py",
-               # The Bull / Bear Map. Its only runtime-built class is the
-               # breadth bar's `w-[N%]` — the documented continuous-value
-               # exception — and its one `ui.add_css` block reaches Quasar's
-               # expansion internals, which `.classes()` cannot.
-               "sentiment_bullbear.py",
+               # The Bull / Bear Map and its pure display language. The map's
+               # only runtime-built class is the breadth bar's `w-[N%]` — the
+               # documented continuous-value exception — and its one
+               # `ui.add_css` block reaches Quasar's expansion internals, which
+               # `.classes()` cannot. The pure module is clean today; it joins
+               # the guard so it stays that way, as its four 2026-08-17 siblings
+               # (sector_heat / rotation_view / rrg_view / momentum_view) do.
+               "sentiment_bullbear.py", "bullbear.py",
                # The Momentum page's guided layout. Its diverging component
                # bars and rank chart are runtime percentage arbitraries; the
                # rank lines are a raw `ui.html()` SVG string.

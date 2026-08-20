@@ -15,6 +15,7 @@ from nicegui.elements.expansion import Expansion
 
 from pages import bullbear as B
 from pages import sentiment_bullbear as P
+from pages.rotation_view import NT, TONE
 
 ROUTE = "/sentiment/bullbear"
 
@@ -116,7 +117,7 @@ def test_the_page_imports_nothing_below_tier_one():
     got = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     got |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
             for a in n.names}
-    assert got <= {"datetime", "bus_client", "nicegui", "pages",
+    assert got <= {"datetime", "time", "bus_client", "nicegui", "pages",
                    "pages.options.theme", "pages.rotation_view", "pages.ui_guard"}
 
 
@@ -280,10 +281,40 @@ def test_a_breadth_width_is_always_a_whole_percent(monkeypatch):
         assert re.fullmatch(r"w-\[\d{1,3}%\]", cls), cls
 
 
+def _bars(elements):
+    """Every breadth-bar FILL element the render just emitted, in build order."""
+    return [e for e in elements if any(
+        c.startswith("w-[") and c.endswith("%]") for c in getattr(e, "_classes", []))]
+
+
 def _fills(elements):
     """Every breadth-bar width class the render just emitted."""
-    return [c for e in elements for c in getattr(e, "_classes", [])
+    return [c for e in _bars(elements) for c in e._classes
             if c.startswith("w-[") and c.endswith("%]")]
+
+
+def _by_text(elements, prefix):
+    return next(e for e in elements
+                if str(getattr(e, "text", "") or "").startswith(prefix))
+
+
+def _grid(elements):
+    """The scrolling column that holds the header row and every sector row."""
+    return next(e for e in elements if P.MIN_W in e._classes)
+
+
+def _scrim(elements):
+    """The wait scrim — the element ``build_busy`` hangs its spinner in."""
+    return next(e for e in elements
+                if isinstance(e, ui.spinner)).parent_slot.parent
+
+
+def _click_refresh(elements):
+    """Press Refresh. NiceGUI wraps an ``on_click`` in a one-arg lambda taking
+    the click args, so the stored handler is not the zero-arg one passed in."""
+    button = next(e for e in elements if isinstance(e, ui.button))
+    next(listener.handler for listener in button._event_listeners.values()
+         if listener.type == "click")(None)
 
 
 def test_the_poll_tick_is_free_when_the_version_has_not_moved(monkeypatch):
@@ -330,7 +361,10 @@ def test_the_page_is_registered_and_guarded_against_inline_style():
     tests = pathlib.Path(__file__).resolve().parent
     assert ROUTE in (tests / "test_shell.py").read_text(encoding="utf-8")
     guard_src = (tests / "test_no_inline_style.py").read_text(encoding="utf-8")
-    assert "sentiment_bullbear.py" in guard_src
+    # Quoted, because a bare "bullbear.py" is a substring of the page's own
+    # filename and would pass while the pure module went unguarded.
+    for quoted in ('"sentiment_bullbear.py"', '"bullbear.py"'):
+        assert quoted in guard_src, quoted
 
 
 # ── lazy expansion ───────────────────────────────────────────────────────────
@@ -487,3 +521,102 @@ def test_a_rebuilt_tree_stops_repricing_the_rows_it_replaced(monkeypatch):
     monkeypatch.setattr(bus_client, "read_full", lambda _v: (rescored, 2))
     _timer(els).callback()
     assert dropped.text == "-0.22%"
+
+
+# ── colour, tone and visibility ──────────────────────────────────────────────
+# The layer the first review found unpinned: ten of eleven surviving mutants were
+# colour, tone, visibility or spinner state. On this page that is the argument
+# itself, not decoration — the amber trap quadrant, the red thin-breadth bar.
+def test_a_thin_breadth_bar_is_the_risk_off_hue_and_a_broad_one_the_risk_on(monkeypatch):
+    """The polarity IS the qualifier. Inverted, a sector rising on a quarter of
+    its constituents renders as a broadly confirmed advance — the one reading
+    the design, the page help and both manuals all promise this bar prevents."""
+    thin, broad = _bars(_render(monkeypatch, _payload()))
+    assert TONE["down"]["fill"] in thin._classes      # Real Estate, 0.23
+    assert TONE["up"]["fill"] in broad._classes       # Energy, 0.96
+
+
+def test_the_breadth_polarity_holds_at_industry_level_too(monkeypatch):
+    """A sector-only pin would miss an industry bar drawn from the other map."""
+    broad, thin = _bars(_open(_render(monkeypatch, _payload()), "Energy"))
+    assert TONE["up"]["fill"] in broad._classes       # Oil & Gas E&P, 0.50
+    assert TONE["down"]["fill"] in thin._classes      # Oil Services, nothing confirms
+
+
+def test_repricing_a_day_cell_replaces_its_tone_instead_of_stacking_one(monkeypatch):
+    """The documented reason the ``remove=``/``add=`` idiom exists: two competing
+    ``text-[…]`` classes on one element resolve by stylesheet order, not by which
+    was added last, so a cell that went green stays green going down."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    cell = _by_text(els, "+0.41%")                    # Energy, up
+    flipped = _payload()
+    flipped["levels"]["sector"][0]["day_pct"] = -0.41
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (flipped, 2))
+    _timer(els).callback()
+    assert TONE["down"]["txt"] in cell._classes
+    assert TONE["up"]["txt"] not in cell._classes
+
+
+def test_the_quotes_line_turns_warning_when_the_call_failed_and_calm_again_after(monkeypatch):
+    """A missing day-move column that reads in the same calm grey as a healthy
+    clock is a failure the reader has no reason to look for."""
+    import bus_client
+    els = _render(monkeypatch, _payload(quoted_at=None))
+    line = _by_text(els, "Live quotes")
+    assert TONE["down"]["txt"] in line._classes
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (_payload(), 2))
+    _timer(els).callback()
+    assert TONE["down"]["txt"] not in line._classes and NT["ghost"] in line._classes
+
+
+def test_the_subtitle_and_the_grid_appear_only_once_there_are_rows(monkeypatch):
+    """Under the WAITING message, a subtitle explaining how to expand sectors and
+    a column header over no rows both read as a rendering fault rather than a
+    cold service."""
+    cold = _render(monkeypatch, None)
+    assert _by_text(cold, "Counted at sector").visible is False
+    assert _grid(cold).visible is False
+    warm = _render(monkeypatch, _payload())
+    assert _by_text(warm, "Counted at sector").visible is True
+    assert _grid(warm).visible is True
+
+
+# ── the Refresh scrim ────────────────────────────────────────────────────────
+def test_refresh_raises_the_scrim_and_a_landing_repaint_lowers_it(monkeypatch):
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    assert _scrim(els).visible is False
+    _click_refresh(els)
+    assert _scrim(els).visible is True
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (_payload(quoted_at=None), 2))
+    _timer(els).callback()
+    assert _scrim(els).visible is False
+
+
+def test_a_refresh_that_changes_nothing_stops_waiting_on_its_own(monkeypatch):
+    """``handlers.publish_bullbear`` carries the stored ``quoted_at`` forward when
+    only the stamp moved, so ``cache_set(skip_unchanged=True)`` short-circuits and
+    nothing on the bus moves. Off-hours that is every Refresh — and off-hours is
+    when a reader presses it wondering why the map will not update."""
+    els = _render(monkeypatch, _payload())
+    now = [1000.0]
+    monkeypatch.setattr(P, "monotonic", lambda: now[0])
+    _click_refresh(els)
+    _timer(els).callback()
+    assert _scrim(els).visible is True                 # it could still land
+    now[0] += P.REFRESH_WAIT_SEC
+    _timer(els).callback()
+    assert _scrim(els).visible is False
+
+
+def test_the_expiry_only_fires_for_a_refresh_that_was_actually_asked_for(monkeypatch):
+    """An ordinary unchanged tick must not announce a refresh nobody requested."""
+    els = _render(monkeypatch, _payload())
+    monkeypatch.setattr(P, "monotonic", lambda: 1e9)
+    _timer(els).callback()
+    assert _scrim(els).visible is False
+    assert P.NOTHING_CHANGED not in _texts(els)
