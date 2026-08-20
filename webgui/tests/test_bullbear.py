@@ -270,9 +270,9 @@ def test_signed_pct_signs_a_move_but_leaves_a_flat_tape_unsigned():
 
 
 def test_signed_pct_shows_a_dash_when_there_is_no_quote():
-    """merge_live leaves day_pct None on a missing quote and the dash is what
-    holds that apart from a flat tape — the same distinction breadth_width draws
-    between None and 0. Through _num, so a bool that would otherwise print
+    """merge_live yields None only for a symbol the proxy OMITS — one returned
+    with junk percent fields yields 0.0 — so the dash marks an absent quote and
+    NOT every absent reading. Through _num, so a bool that would otherwise print
     "+1.00%" out of a malformed payload is refused here too."""
     assert B.signed_pct(None) == B.NO_READING
     assert B.signed_pct("x") == B.NO_READING

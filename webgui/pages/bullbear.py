@@ -112,9 +112,9 @@ def signed_pct(v):
     """A percent -> ``"+1.25%"`` / ``"-0.56%"``, or NO_READING when absent.
 
     The sign is decided on the ROUNDED value, so anything displaying as zero
-    renders unsigned: "+0.00%" claims a rise the digits deny, and -0.0 formats
-    as "-0.00%" unless folded. ``merge_live`` passes ``day_pct`` through in
-    percent units and leaves it None on a missing quote — hence the dash.
+    renders unsigned — "+0.00%" and "-0.00%" both claim a move the digits deny.
+    ``merge_live`` yields None only for a symbol the proxy OMITS; one returned
+    with junk fields yields 0.0, so a flat cell is no proof of a flat tape.
     """
     pct = _num(v)
     if pct is None:
