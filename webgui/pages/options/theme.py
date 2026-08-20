@@ -441,6 +441,20 @@ def build_quasar_css(theme):
 .calc-v2 .leg-row .q-field__marginal{{min-height:32px;padding-top:0;padding-bottom:0;}}
 .calc-v2 .leg-row .q-field__append{{padding-left:0;}}
 .calc-v2 .leg-row .q-field__native{{font-size:13px;}}
+/* Leg CARDS — the card layout's two compact grid rows per leg (the Simulator
+   mounts it; the row rules above never match it). Geometry MIRRORS
+   ``.calc-v3 .leg-card`` in build_calc_css — the two scopes paint one shape in
+   two palettes, which is the premise of a shared widget whose colours enter as
+   tokens. Without these the cells fall through to the generic control above:
+   40px tall and 8px-rounded, ~2.5x the intended card height with rounded fields
+   inside a 2px-radius frame. Radius is restated here (it is NOT in the .calc-v3
+   block) because THIS scope's generic control is 8px, where that one is already
+   2px. Sizes only — no colour, so build_quasar_css stays hex-free. */
+.calc-v2 .leg-card .q-field__control{{min-height:28px;padding:0 7px;border-radius:2px;}}
+.calc-v2 .leg-card .q-field__control .q-field__native,
+.calc-v2 .leg-card .q-field__marginal{{min-height:28px;padding-top:0;padding-bottom:0;}}
+.calc-v2 .leg-card .q-field__append{{padding-left:0;}}
+.calc-v2 .leg-card .q-field__native{{font-size:11px;letter-spacing:.08em;}}
 /* Centered strike value in the leg table. */
 .calc-v2 .leg-strike .q-field__native{{justify-content:center;text-align:center;}}
 /* Tabs (Simulator) — light labels, accent indicator, transparent panels so the

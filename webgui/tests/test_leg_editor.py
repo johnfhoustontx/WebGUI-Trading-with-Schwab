@@ -501,35 +501,66 @@ def test_card_drops_the_delta_cell_when_no_delta_source_is_given():
     assert "STRIKE" in txt and "QTY" in txt
 
 
-def test_card_row2_grid_covers_every_premium_delta_combination():
-    """Four static templates, one per combination - a finite set of literal class
-    strings, never a runtime-built arbitrary value."""
+# The four track widths, written down HERE rather than read back out of
+# ``_CARD_ROW2_GRIDS`` - a test that looks the answer up in the table it is
+# checking follows a mistake in that table instead of catching it. (Measured:
+# swapping the two 3-track templates left an earlier version of this test green,
+# because both have three tracks and it never asked WHICH three.)
+_TRACKS = {"strike": "minmax(0,1.25fr)", "qty": "46px",
+           "premium": "minmax(0,1fr)", "delta": "44px"}
+
+
+def _expected_tracks(show_premium, show_delta):
+    out = [_TRACKS["strike"], _TRACKS["qty"]]
+    if show_premium:
+        out.append(_TRACKS["premium"])
+    if show_delta:
+        out.append(_TRACKS["delta"])
+    return out
+
+
+def _row2_tracks(container):
+    """The RENDERED row-2 track list (row 1 is the 72px/78px caption grid)."""
+    grids = [c for e in container.descendants() for c in e._classes
+             if c.startswith("grid-cols-[")]
+    row2 = [g for g in grids if g.startswith("grid-cols-[" + _TRACKS["strike"])]
+    assert len(row2) == 1, grids
+    return row2[0][len("grid-cols-["):-1].split("_")
+
+
+def test_card_row2_tracks_match_the_cells_it_renders():
+    """The grid template IS the alignment contract: captions and cells share one
+    track list, in order, so a wrong list slides a value under the wrong caption.
+    Asserted per combination against the literal widths above."""
+    d = lambda leg: 0.5
+    cases = [
+        (True, True, _card([_leg()], show_premium=True, delta_for=d)[1]),
+        (True, False, _card([_leg()], show_premium=True)[1]),
+        (False, True, _card([_leg()], show_premium=False, delta_for=d)[1]),
+        (False, False, _card([_leg()], show_premium=False)[1]),
+    ]
+    for prem, delta, container in cases:
+        assert _row2_tracks(container) == _expected_tracks(prem, delta), (prem, delta)
+
+
+def test_card_row2_tracks_are_one_per_caption():
+    """A track count that outruns the captions is the hole this collapse exists
+    to prevent - counted on the render, not on the template."""
+    d = lambda leg: 0.5
+    for prem, delta in ((True, True), (True, False), (False, True), (False, False)):
+        kw = {"show_premium": prem}
+        if delta:
+            kw["delta_for"] = d
+        _, container = _card([_leg()], **kw)
+        caps = [t for t in _labels(container)
+                if t in ("STRIKE", "QTY", "PREMIUM", "DELTA")]
+        assert len(caps) == len(_row2_tracks(container)) == 2 + int(prem) + int(delta)
+
+
+def test_card_row2_grid_table_holds_four_distinct_templates():
     grids = LE._CARD_ROW2_GRIDS
     assert set(grids) == {(True, True), (True, False), (False, True), (False, False)}
     assert len(set(grids.values())) == 4, "two combinations share a template"
-    for (prem, delta), cls in grids.items():
-        tracks = _grid_token(cls)[len("grid-cols-["):-1].split("_")
-        assert len(tracks) == 2 + int(prem) + int(delta), (prem, delta, tracks)
-
-
-def test_card_renders_the_grid_template_matching_what_it_shows():
-    """The rendered template is the ALIGNMENT contract - captions and cells share
-    one track list, so a mismatch slides a value under the wrong caption."""
-    d = lambda leg: 0.5
-    cases = {
-        (True, True): _card([_leg()], show_premium=True, delta_for=d)[1],
-        (True, False): _card([_leg()], show_premium=True)[1],
-        (False, True): _card([_leg()], show_premium=False, delta_for=d)[1],
-        (False, False): _card([_leg()], show_premium=False)[1],
-    }
-    for key, container in cases.items():
-        grids = [c for e in container.descendants()
-                 for c in e._classes if c.startswith("grid-cols-")]
-        want = _grid_token(LE._CARD_ROW2_GRIDS[key])
-        assert want in grids, key
-        for other, cls in LE._CARD_ROW2_GRIDS.items():
-            if other != key:
-                assert _grid_token(cls) not in grids, (key, other)
 
 
 def test_card_caps_its_own_width():

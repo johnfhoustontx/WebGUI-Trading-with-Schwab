@@ -13,7 +13,9 @@ Two layouts over that one model:
 ``layout="card"``  the redesign's two-line card — eyebrow captions over
                    TYPE/SIDE/EXPIRY then STRIKE/QTY/PREMIUM/DELTA, a left accent
                    bar coloured by side, and a remove button that locks at a
-                   ``min_legs`` floor.
+                   ``min_legs`` floor. PREMIUM and DELTA each COLLAPSE their
+                   track when the page supplies no source for them, so no
+                   caption ever sits over a cell that cannot hold a value.
 
 The card's GEOMETRY is shared; its COLOURS are not. Both pages will mount the
 card, but the Calculator paints it in the near-black ``CALC_*`` language while
@@ -110,17 +112,36 @@ DEFAULT_CARD_TOKENS = {
     "reset": "text-[9px] tracking-[.18em] text-[#8aa0b4] border border-[#2c3b4b] rounded-[2px]",
 }
 
-# The two grid templates ARE the card's alignment contract: captions and cells
+# The grid templates ARE the card's alignment contract: captions and cells
 # share one track list, so a caption can never drift off the cell under it.
 _CARD_ROW1_COLS = "grid grid-cols-[72px_78px_minmax(0,1fr)] gap-x-2 gap-y-0.5 items-center w-full"
-_CARD_ROW2_COLS = ("grid grid-cols-[minmax(0,1.25fr)_46px_minmax(0,1fr)_44px] "
-                   "gap-x-2 gap-y-0.5 items-center w-full")
-# ``show_premium=False`` COLLAPSES the premium track rather than leaving a hole:
-# a 4-track grid fed 3 cells would slide DELTA under the PREMIUM caption, which
-# is worse than a narrower card. The two templates are a finite set of static
-# class strings — never a runtime-built one.
-_CARD_ROW2_COLS_NO_PREMIUM = ("grid grid-cols-[minmax(0,1.25fr)_46px_44px] "
-                              "gap-x-2 gap-y-0.5 items-center w-full")
+# An omitted cell COLLAPSES its track rather than leaving a hole: a 4-track grid
+# fed 3 cells would slide the next value under the wrong caption, which is worse
+# than a narrower card. PREMIUM goes when the page prices legs itself; DELTA goes
+# when the page passes no ``delta_for`` — a captioned column that can NEVER hold
+# a value reads as broken rather than as not-applicable, and on the Simulator
+# (``sim_meta`` carries no greeks) it never can. Four combinations, four STATIC
+# class strings — a finite set, never a runtime-built arbitrary value.
+_CARD_ROW2_TAIL = "gap-x-2 gap-y-0.5 items-center w-full"
+_CARD_ROW2_COLS = f"grid grid-cols-[minmax(0,1.25fr)_46px_minmax(0,1fr)_44px] {_CARD_ROW2_TAIL}"
+_CARD_ROW2_COLS_NO_PREMIUM = f"grid grid-cols-[minmax(0,1.25fr)_46px_44px] {_CARD_ROW2_TAIL}"
+_CARD_ROW2_COLS_NO_DELTA = f"grid grid-cols-[minmax(0,1.25fr)_46px_minmax(0,1fr)] {_CARD_ROW2_TAIL}"
+_CARD_ROW2_COLS_MINIMAL = f"grid grid-cols-[minmax(0,1.25fr)_46px] {_CARD_ROW2_TAIL}"
+_CARD_ROW2_GRIDS = {
+    # (show_premium, show_delta) -> the row-2 track list
+    (True, True): _CARD_ROW2_COLS,
+    (False, True): _CARD_ROW2_COLS_NO_PREMIUM,
+    (True, False): _CARD_ROW2_COLS_NO_DELTA,
+    (False, False): _CARD_ROW2_COLS_MINIMAL,
+}
+
+# The track list above is drawn for a ~424px column (the Calculator's). Left to
+# stretch across the Simulator's ``flex-grow min-w-[340px]`` column — ~800px on
+# a desktop — the two ``fr`` tracks absorb ~700px each and the card renders a
+# 700px-wide select showing "450.0". The cap rides the CARD rather than a page's
+# column, because "this geometry wants ≤440px" is a fact about the card, not
+# about any one host; in a narrower column it is simply inert.
+_CARD_MAX_W = "max-w-[440px]"
 
 
 _LAYOUTS = ("row", "card")
@@ -179,7 +200,9 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
 
     ``layout="card"`` swaps the single-line row for the two-line card; ``tokens``
     overrides its palette (see ``card_tokens``), ``delta_for(leg)`` supplies the
-    per-leg delta the card shows, ``min_legs`` floors the remove button and
+    per-leg delta the card shows — omit it and the DELTA cell collapses, exactly
+    as ``show_premium=False`` collapses PREMIUM — ``min_legs`` floors the remove
+    button and
     ``on_reset`` adds a RESET TO TEMPLATE button beside ADD LEG. All five are
     inert in row mode."""
     # A typo here would silently render the WRONG screen with nothing to see it:
@@ -246,7 +269,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         # long, the same default the rest of the module uses.
         accent = tk["accent_short"] if leg.get("side") == "short" else tk["accent_long"]
         with ui.element("div").classes(
-                f"leg-card {tk['frame']} {accent} w-full flex items-stretch gap-2 px-2 py-1.5"):
+                f"leg-card {tk['frame']} {accent} w-full {_CARD_MAX_W} "
+                f"flex items-stretch gap-2 px-2 py-1.5"):
             ui.label(f"{i + 1:02d}").classes(f"{tk['num']} shrink-0 w-5 pt-1")
             with ui.element("div").classes("flex-1 min-w-0 flex flex-col gap-1"):
                 with ui.element("div").classes(_CARD_ROW1_COLS):
@@ -261,13 +285,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                         .on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
                     ui.select(exps, value=e_val).props("dense options-dense").classes("w-full") \
                         .on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
-                cols = _CARD_ROW2_COLS if show_premium else _CARD_ROW2_COLS_NO_PREMIUM
-                with ui.element("div").classes(cols):
+                show_delta = delta_for is not None
+                with ui.element("div").classes(
+                        _CARD_ROW2_GRIDS[(bool(show_premium), show_delta)]):
                     ui.label("STRIKE").classes(tk["eyebrow"])
                     ui.label("QTY").classes(tk["eyebrow"])
                     if show_premium:
                         ui.label("PREMIUM").classes(tk["eyebrow"])
-                    ui.label("DELTA").classes(f"{tk['eyebrow']} text-right")
+                    if show_delta:
+                        ui.label("DELTA").classes(f"{tk['eyebrow']} text-right")
                     sw = ui.select(s_opts, value=s_val).props("dense options-dense") \
                         .classes("w-full leg-strike")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
@@ -278,8 +304,12 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                         ui.number(value=leg.get("premium") or 0.0, format="%.2f") \
                             .props("dense").classes("w-full") \
                             .on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
-                    ui.label(delta_text(delta_for(leg) if delta_for else None)) \
-                        .classes(f"{tk['delta']} text-right")
+                    if show_delta:
+                        # A source that returns None for THIS leg still gets a
+                        # cell — an em-dash is "no reading now", which is not the
+                        # same claim as having no source at all.
+                        (ui.label(delta_text(delta_for(leg)))
+                         .classes(f"{tk['delta']} text-right"))
             _card_remove(i)
         return sw
 

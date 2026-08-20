@@ -350,10 +350,14 @@ def test_simulator_cards_have_no_premium_cell():
     card = _leg_cards(_sim_container())[0]
     assert "PREMIUM" not in _labels(card)
     assert len([e for e in card.descendants() if isinstance(e, ui.number)]) == 1  # qty only
+    # With no premium AND no delta source this page renders the 2-track row:
+    # STRIKE + QTY, both captions over their own cell.
     grids = [c for e in card.descendants() for c in e._classes if c.startswith("grid-cols-")]
-    no_prem = [c for c in LE._CARD_ROW2_COLS_NO_PREMIUM.split() if c.startswith("grid-cols-")][0]
-    full = [c for c in LE._CARD_ROW2_COLS.split() if c.startswith("grid-cols-")][0]
-    assert no_prem in grids and full not in grids
+    want = [c for c in LE._CARD_ROW2_COLS_MINIMAL.split() if c.startswith("grid-cols-")][0]
+    assert want in grids
+    for other in (LE._CARD_ROW2_COLS, LE._CARD_ROW2_COLS_NO_PREMIUM,
+                  LE._CARD_ROW2_COLS_NO_DELTA):
+        assert [c for c in other.split() if c.startswith("grid-cols-")][0] not in grids
 
 
 def test_simulator_shows_no_delta_cell_at_all():
