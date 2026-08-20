@@ -405,9 +405,19 @@ def render():
     def _expiries_for():
         return (state.get("meta") or {}).get("expiries") or []
 
+    # ``layout="card"`` — the shared two-line leg card, in the app-wide dark navy:
+    # NO ``tokens``, so the near-black CALC_* language stays the Calculator's alone.
+    # ``header`` is dropped with it (the card carries its own eyebrow captions), and
+    # no ``delta_for`` is passed — ``sim_meta`` is spot/expiries/strikes with no
+    # greeks, so DELTA reads an em-dash rather than a made-up 0.00.
+    # ``min_legs`` stays at the default 1: a zero-leg simulator enqueues nothing
+    # (``_current_params`` returns None) and silently freezes the charts on the
+    # previous sweep, so the last ✕ is better locked than live. ``on_reset`` stays
+    # None — the strategy picker already re-seeds the template on every pick.
     editor = leg_editor.build_leg_editor(
         legs_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=False, on_change=lambda: (_on_legs_changed(), _capture()), header=True,
+        show_premium=False, on_change=lambda: (_on_legs_changed(), _capture()),
+        layout="card",
         spot_getter=lambda: (state.get("meta") or {}).get("spot") or 0)
 
     # Seed the default template (PCS) so a cold page shows the strategy's legs

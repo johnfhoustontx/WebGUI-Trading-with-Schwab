@@ -325,11 +325,19 @@ def test_simulator_keeps_the_default_navy_card_palette():
             assert cls in cards[0]._classes, cls
     for cls in LE.DEFAULT_CARD_TOKENS["accent_long"].split():
         assert cls in cards[1]._classes, cls     # leg 2 is the long put
-    calc = " ".join([theme.CALC_EDGE_ACCENT, theme.CALC_EDGE_POS,
-                     theme.CALC_EDGE_NEG, theme.CALC_FRAME]).split()
-    joined = " ".join(c for card in cards for c in card._classes)
-    for cls in set(calc) - {"border-l-2", "relative"}:   # geometry is shared
-        assert cls not in joined.split(), cls
+    # Nothing on the card may come from the Calculator's vocabulary that is not
+    # ALREADY part of the shared default. Subtracting the defaults (rather than
+    # hand-listing the overlap) keeps this honest when the two languages happen
+    # to agree — ``CALC_EDGE_POS`` and the navy ``accent_short`` are the same
+    # green today, and that coincidence is not a palette leak.
+    shared = {c for v in LE.DEFAULT_CARD_TOKENS.values() for c in v.split()}
+    calc = {c for name in dir(theme) if name.startswith("CALC_")
+            for c in str(getattr(theme, name)).split()
+            if c.startswith(("bg-[", "text-[", "border-[", "border-l-["))}
+    on_card = {c for card in cards for c in card._classes}
+    assert calc, "no CALC_* palette found to compare against"
+    for cls in calc - shared:
+        assert cls not in on_card, cls
 
 
 def test_simulator_cards_have_no_premium_cell():
