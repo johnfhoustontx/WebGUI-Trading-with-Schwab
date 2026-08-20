@@ -279,6 +279,35 @@ def extract_delta(chain, option_type, strike, expiry=None):
     return d
 
 
+def leg_delta(chain, leg):
+    """One leg's POSITION delta from the cached chain, or ``None``.
+
+    TOTAL by construction — no chain, no strike, an unknown option type or a
+    strike the chain does not carry all return ``None``, and the leg card's
+    DELTA cell renders an em-dash. It runs inside the leg editor's ``_render``,
+    where an exception would propagate out of the page build and leave a blank
+    screen, so it must not raise rather than being wrapped in a try/except.
+
+    ⚠ Reads the leg's OWN expiry and does NOT fall back to a cross-expiry
+    match. ``extract_delta`` returns ``None`` both for "no such contract" and
+    for "the contract carries Schwab's -999.0 sentinel", so a fallback cannot
+    tell them apart — and ``_find_contract`` answers with the FIRST expiry in
+    dict order carrying that strike. A December leg would silently render
+    August's delta. (The fallback bought nothing either: ``leg_editor._render``
+    coerces every leg's expiry into ``expiries_for()`` before the body reads it,
+    so a leg dated off the loaded ladder cannot reach here.)
+    """
+    leg = leg or {}
+    strike = leg.get("strike")
+    otype = leg.get("option_type")
+    if not chain or otype not in ("call", "put"):
+        return None
+    if isinstance(strike, bool) or not isinstance(strike, (int, float)):
+        return None
+    d = extract_delta(chain, otype, float(strike), leg.get("expiry") or None)
+    return position_delta(d, leg.get("side"))
+
+
 def position_delta(delta, side):
     """Contract delta signed for the POSITION: a short leg inverts it.
 
@@ -306,6 +335,49 @@ def net_premium(legs):
         sign = 1 if leg.get("side") == "short" else -1
         total += sign * prem * qty * _SHARES_PER_CONTRACT
     return round(total, 2)          # a cash figure: cents are the meaningful unit
+
+
+def net_call_quantity(legs):
+    """Net LONG call contracts across the position (shorts negative), or ``None``.
+
+    The one number that decides both unbounded ends of an expiration payoff,
+    because only calls stay linear above the last strike:
+
+    * **negative** — net short calls, so LOSS grows without bound above the last
+      strike (a naked call, a call ratio credit). ``max_loss_estimate`` refuses.
+    * **positive** — net long calls, so PROFIT does (a long call, a backspread).
+      ``profit_uncapped_above`` says so; see the note there for why the page has
+      to work this out for itself.
+
+    ``None`` when any call leg's qty is unusable — the caller then claims
+    nothing rather than reading a junk leg as zero."""
+    total = 0.0
+    for leg in legs or []:
+        if leg.get("option_type") != "call":
+            continue
+        qty = _leg_qty(leg)
+        if qty is None or qty < 0:
+            return None
+        total += -qty if leg.get("side") == "short" else qty
+    return total
+
+
+def profit_uncapped_above(legs):
+    """Whether the position's profit grows without bound above the last strike.
+
+    ⚠ This exists because the SUMMARY cannot be trusted to say so. The service
+    routes an untouched single-leg template through the analytic summary, which
+    returns the ``UNLIMITED`` sentinel for a long call — but the moment any leg
+    is edited the strategy becomes ``CUSTOM`` and it routes through the GENERIC
+    numeric path, whose ``max_profit`` is ``max(pnl)`` over a price grid that
+    stops at 1.5x spot. That figure is the grid's edge, not a cap: measured on
+    SPY 668 with a 670 call, the same position reads "Unlimited" untouched and
+    "$32,780 at 30d expiry" after a nudge. Printing the second is exactly the
+    confidently-stated wrong number this screen is written against.
+
+    The legs decide it, so both routings land on one screen."""
+    n = net_call_quantity(legs)
+    return n is not None and n > 0
 
 
 def _short_outlives_long(legs):
@@ -360,7 +432,8 @@ def max_loss_estimate(legs):
         return 0.0
     if _short_outlives_long(legs):
         return None
-    if sum(sign * qty for kind, sign, qty, _k in rows if kind == "call") < 0:
+    net_calls = net_call_quantity(legs)
+    if net_calls is None or net_calls < 0:
         return None
 
     def _payoff(spot):
@@ -404,9 +477,10 @@ MATRIX_BASIS_COST = {"kind": "cost", "denominator": None, "heading": "% COST"}
 MATRIX_BASIS_NONE = {"kind": "none", "denominator": None, "heading": "%"}
 
 
-def matrix_basis(summary):
+def matrix_basis(summary, legs=None):
     """What the matrix's ``%`` column is a percentage OF: ``{kind, denominator,
-    heading}``, resolved once per render from the service's summary.
+    heading}``, resolved once per render from the service's summary and the legs
+    it was computed from.
 
     Three cases, in order:
 
@@ -430,9 +504,17 @@ def matrix_basis(summary):
     surprising: widen that grid and the denominator can move, so the same cell
     can read a different ``% MAX``. The analytic paths (PCS/CCS/IC and the
     singles) return a true cap and do not drift.
+
+    ⚠ Where that grid edge is not merely imprecise but WRONG — a net-long-call
+    structure, whose profit has no cap at all — ``legs`` overrides the summary
+    and the column falls through to ``% COST`` (see ``profit_uncapped_above``).
+    Without it, editing one strike on a long call swaps the whole matrix from
+    ``% COST`` to a ``% MAX`` measured against a fabricated denominator, and the
+    heading asserts that denominator on every row. ``legs`` defaults to ``None``
+    — no legs, no override, and the summary decides as before.
     """
     s = summary or {}
-    cap = usable_denominator(s.get("max_profit"))
+    cap = None if profit_uncapped_above(legs) else usable_denominator(s.get("max_profit"))
     if cap is not None:
         return dict(MATRIX_BASIS_MAX, denominator=cap)
     credit = _finite(s.get("entry_credit"))
@@ -701,11 +783,23 @@ def max_dte_from_legs(legs, today=None):
 
 
 def _position_note(legs):
-    """"N contracts · M legs" for the ENTRY card, or an em-dash for no legs."""
+    """"N contracts · M legs" for the ENTRY card, or an em-dash for no legs.
+
+    ``N`` is the SMALLEST leg quantity, which is the position size rather than
+    the biggest leg's ratio. ``_scale_leg_qty`` takes the page's Contracts count
+    onto the legs by multiplying the whole set — a 1-2-1 butterfly at Contracts
+    3 becomes 3-6-3 — and every template's smallest leg is 1, so the minimum
+    reads the Contracts value back exactly. The maximum reported "6 contracts"
+    beside a CONTRACTS field showing 3, and this note is the ONLY place the
+    position size appears, so nothing on screen corroborated it.
+
+    Taken from the LEGS and not from the Contracts widget on purpose: the legs
+    are what the ENTRY CREDIT above it was priced from, and the widget goes
+    stale the moment a leg qty is edited by hand."""
     rows = list(legs or [])
     if not rows:
         return _EM_DASH
-    qty = max(int(_leg_qty(l) or 1) for l in rows)
+    qty = min(int(_leg_qty(l) or 1) for l in rows)
     n = len(rows)
     return (f"{qty} contract{'' if qty == 1 else 's'} · "
             f"{n} leg{'' if n == 1 else 's'}")
@@ -742,16 +836,27 @@ def metric_cards(summary, legs, spot, max_dte):
                  "value": _dollars(abs(credit)), "sub": _position_note(legs),
                  "accent": "pos" if credit >= 0 else "accent"}
 
-    # 2 — MAX RISK.
-    risk_val = _dollars(ml)
+    # 2 — MAX RISK. A ZERO is refused as hard as a missing figure: on the
+    # generic numeric path max_loss is |min(pnl)| over a grid spanning only
+    # [0.5x, 1.5x] spot, floored at 0 — so 0.0 means "the grid never reached the
+    # loss", not "there is no risk". Live: a far-OTM short put returns
+    # max_loss 0.0 while the ③ LEGS strip, which solves the payoff exactly,
+    # reads $29,965 for the same legs. "$0" in red under "worst case at expiry"
+    # is the most dangerous number this page could print.
+    zero_risk = _finite(ml) == 0.0
+    risk_val = _EM_DASH if zero_risk else _dollars(ml)
+    no_risk_reading = risk_val == _EM_DASH
     risk = {"label": "MAX RISK", "value": risk_val,
-            "sub": ("unbounded above the short strike" if is_unlimited(ml)
-                    else "worst case at expiry"),
-            "accent": "dim" if risk_val == _EM_DASH else "neg"}
+            "sub": (_EM_DASH if no_risk_reading else
+                    ("unbounded above the short strike" if is_unlimited(ml)
+                     else "worst case at expiry")),
+            "accent": "dim" if no_risk_reading else "neg"}
 
-    # 3 — MAX RETURN.
-    ret_val = _dollars(mp)
-    if is_unlimited(mp):
+    # 3 — MAX RETURN. ``profit_uncapped_above`` overrides the summary for a
+    # net-long-call structure the generic path capped at its own grid edge.
+    uncapped_up = is_unlimited(mp) or profit_uncapped_above(legs)
+    ret_val = "Unlimited" if uncapped_up else _dollars(mp)
+    if uncapped_up:
         ret_sub = "no upside cap"
     elif _finite(max_dte) is None:
         ret_sub = "at expiry"
@@ -762,9 +867,14 @@ def metric_cards(summary, legs, spot, max_dte):
 
     # 4 — RETURN ON RISK. There is no ratio when either side is uncapped, and
     # the service already sends 0.0 in that case — which would read as a
-    # measured zero return rather than as "not defined".
+    # measured zero return rather than as "not defined". A ZERO max_loss is the
+    # third such case (``calc_summary``'s own guard is ``max_loss in (0,
+    # UNLIMITED) or max_profit == UNLIMITED``, and the generic path's
+    # ``if max_loss > 0 else 0.0`` does the same) — the card was printing that
+    # 0.0 as "0.0% / 0.00% per day". An uncapped upside kills it too: the
+    # 7804.8% a grid edge over a debit produces has no numerator.
     ror = _finite(s.get("return_on_risk"))
-    if ror is None or is_unlimited(mp) or is_unlimited(ml):
+    if ror is None or uncapped_up or zero_risk or is_unlimited(ml):
         ror_card = {"label": "RETURN ON RISK", "value": _EM_DASH, "sub": _EM_DASH,
                     "accent": "dim"}
     else:
@@ -932,7 +1042,7 @@ def _render_metrics(box, summary, legs, spot, max_dte):
                     f"{CALC_DIM} text-[9px] leading-snug break-words")
 
 
-def matrix_html(eval_labels, pnl_data, spot, summary):
+def matrix_html(eval_labels, pnl_data, spot, summary, legs=None):
     """The P&L matrix as ONE raw HTML fragment ("" when there is nothing to draw).
 
     Raw HTML rather than NiceGUI components on purpose — a few hundred cells
@@ -940,11 +1050,11 @@ def matrix_html(eval_labels, pnl_data, spot, summary):
     repo's documented out-of-scope case for the Tailwind-first rule, so the
     inline ``style=`` attributes below are the intended form here.
 
-    ``summary`` is the service's summary payload; the ``%`` column's basis is
-    resolved from it ONCE here, so every cell and the heading above them share
-    one meaning.
+    ``summary`` is the service's summary payload and ``legs`` the position it
+    was computed from; the ``%`` column's basis is resolved from the pair ONCE
+    here, so every cell and the heading above them share one meaning.
     """
-    basis = matrix_basis(summary)
+    basis = matrix_basis(summary, legs)
     rows = grid_rows(pnl_data)
     # ``eval_labels`` arrive pre-formatted (MM/DD strings) from the service;
     # ``eval_date_labels`` is harmless here (it str()'s strings) and keeps the
@@ -953,8 +1063,13 @@ def matrix_html(eval_labels, pnl_data, spot, summary):
     if not rows or not headers:
         return ""
     g_max, g_min = grid_extremes(pnl_data)
-    spot_idx = min(range(len(rows)),
-                   key=lambda i: abs((rows[i]["price"] or 0) - (spot or 0)))
+    # No spot, no marked row. ``spot`` degrades to 0.0 when the chain carries no
+    # underlying price (index chains read hollow off-hours), and the nearest row
+    # to zero is the LOWEST price on the ladder — which the amber rule would
+    # then present as today's price.
+    sp = _finite(spot)
+    spot_idx = (None if sp is None or sp <= 0 else
+                min(range(len(rows)), key=lambda i: abs((rows[i]["price"] or 0) - sp)))
 
     head_style = "text-align:right;padding:6px 10px;font-size:9px;letter-spacing:.18em;"
     ths = [f'<th style="position:sticky;left:0;top:0;z-index:3;'
@@ -997,11 +1112,11 @@ def matrix_html(eval_labels, pnl_data, spot, summary):
             f'<tbody>{"".join(trs)}</tbody></table></div>')
 
 
-def _render_grid(box, eval_labels, pnl_data, spot, summary=None):
+def _render_grid(box, eval_labels, pnl_data, spot, summary=None, legs=None):
     from nicegui import ui
 
     box.clear()
-    html = matrix_html(eval_labels, pnl_data, spot, summary)
+    html = matrix_html(eval_labels, pnl_data, spot, summary, legs)
     with box:
         if not html:
             ui.label("No P&L data.").classes("opacity-60")
@@ -1270,26 +1385,12 @@ def render():
         return chain_expiries(state.get("chain") or {})
 
     def _delta_for(leg):
-        """The leg card's DELTA cell: position delta from the cached chain, or None.
+        """The leg card's DELTA cell, against the currently cached chain.
 
-        ⚠ Deliberately NOT wrapped in try/except — this runs inside the leg
-        editor's ``_render``, so an exception here propagates out of the page
-        build and leaves a blank screen. The closure is TOTAL instead: no chain,
-        no strike, an unknown option type or a strike the chain does not carry
-        all return ``None``, and the cell renders an em-dash. Falls back to the
-        cross-expiry match so a leg dated off the loaded ladder still reads."""
-        chain = state.get("chain")
-        strike = leg.get("strike")
-        otype = leg.get("option_type")
-        if not chain or otype not in ("call", "put"):
-            return None
-        if isinstance(strike, bool) or not isinstance(strike, (int, float)):
-            return None
-        expiry = leg.get("expiry") or None
-        d = extract_delta(chain, otype, float(strike), expiry)
-        if d is None and expiry is not None:
-            d = extract_delta(chain, otype, float(strike))
-        return position_delta(d, leg.get("side"))
+        A one-line binding of the pure ``leg_delta`` — which is where the rules
+        (and the reason there is no cross-expiry fallback) are documented, and
+        where they can be tested without building a page."""
+        return leg_delta(state.get("chain"), leg)
 
     editor = leg_editor.build_leg_editor(
         leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
@@ -1743,10 +1844,11 @@ def render():
             spot = float(price_in.value or 0)
         summary = result.get("summary") or {}
         pnl_data = result.get("pnl_data") or []
-        _render_metrics(metrics_box, summary, editor.get_legs(), spot,
-                        state.get("calc_dte"))
-        _render_grid(grid_box, result.get("eval_labels") or [], pnl_data, spot, summary)
-        matrix_frame.note.text = matrix_note_text(pnl_data, matrix_basis(summary))
+        legs = editor.get_legs()
+        _render_metrics(metrics_box, summary, legs, spot, state.get("calc_dte"))
+        _render_grid(grid_box, result.get("eval_labels") or [], pnl_data, spot,
+                     summary, legs)
+        matrix_frame.note.text = matrix_note_text(pnl_data, matrix_basis(summary, legs))
         _sync_results()
 
     def _apply_iv(res):

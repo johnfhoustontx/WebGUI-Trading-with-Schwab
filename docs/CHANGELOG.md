@@ -59,6 +59,33 @@ screen — and three readouts it could always have derived but never did.**
   cards render **`Unlimited`** where the service returns its `999999` sentinel, never
   `$999,999`. Same family as the `_clamp(nan) → hi` trap already documented here: a
   missing input that renders as a confident number.
+- **The final review found four more places the screen stated a figure it could not
+  stand behind, and all four are now em-dashes or `Unlimited`.** (1) RETURN ON RISK
+  covered only two of the engine's three zeroing conditions, so a `max_loss` of `0.0`
+  printed `0.0%` / `0.00% per day`; MAX RISK printed `$0` in red beside it while the
+  ③ LEGS strip read $29,965 for the same legs — out of the numeric path a zero max
+  loss means the grid never reached the loss. (2) The per-leg DELTA fell back to a
+  cross-expiry match when its own contract had none, and since `extract_delta` cannot
+  tell "absent" from "sentinel", a December leg rendered August's delta. (3) The ENTRY
+  card's position note took the LARGEST leg qty, so a 1-2-1 butterfly read "2 contracts"
+  beside a CONTRACTS field showing 1 — and it is the only place position size appears,
+  so nothing corroborated it. (4) The generic path's `max_profit` is `max(pnl)` at the
+  grid edge, which for a net-long-call structure is not a cap at all: the same long call
+  read `Unlimited` / `% COST` untouched and `$32,780 at 30d expiry` / `% MAX` — with
+  `RETURN ON RISK 7804.8%` — once any strike was nudged and the routing flipped to
+  `CUSTOM`. The legs now decide it (`profit_uncapped_above`, the mirror of the
+  net-short-call test `max_loss_estimate` already ran), so both routings land on one
+  screen. **Four instances of one rule**, and the fourth was inherited from `main`
+  rather than introduced — the new self-naming `% MAX` heading is what turned a quietly
+  odd number into an explicit claim.
+- **Five tests in this series could not fail, and the fifth was caught by mutating it.**
+  Both tests pinning the position note used uniform leg quantities, so `max` → `min`
+  left the suite green. In the same pass the new integration file's timer collector —
+  which `pytest.skip`ped unless it found exactly three timers — was changed to select
+  the three polls **by name**: adding any unrelated render-time timer turned all ten of
+  those tests into silent skips, which is the options-scanner failure mode recorded
+  further down this file. Verified by adding a fourth timer: ten skips before, ten
+  passes after.
 - **Max loss is exact, not a width heuristic.** The expiration payoff is piecewise
   linear with corners only at the strikes, so evaluating net premium plus intrinsic over
   `{0} ∪ strikes` finds the true minimum — no per-structure special cases. An iron
