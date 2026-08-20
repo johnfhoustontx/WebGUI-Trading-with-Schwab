@@ -331,3 +331,159 @@ def test_the_page_is_registered_and_guarded_against_inline_style():
     assert ROUTE in (tests / "test_shell.py").read_text(encoding="utf-8")
     guard_src = (tests / "test_no_inline_style.py").read_text(encoding="utf-8")
     assert "sentiment_bullbear.py" in guard_src
+
+
+# ── lazy expansion ───────────────────────────────────────────────────────────
+# Pinned behaviourally rather than by the plan's ``"on_value_change" in src``
+# grep: that string is present whichever way the children are built, so it
+# cannot tell a lazy page from an eager one. Counting what is in the DOM can.
+def test_the_default_screen_carries_sector_rows_and_nothing_below_them(monkeypatch):
+    """376 rows in the DOM would make every repaint expensive and every open
+    sector pointless."""
+    texts = _texts(_render(monkeypatch, _payload()))
+    assert "Energy" in texts
+    for deeper in ("Oil & Gas E&P", "Oil Services", "XOM", "SLB"):
+        assert deeper not in texts
+
+
+def test_opening_a_sector_builds_its_industries_but_not_their_stocks(monkeypatch):
+    els = _render(monkeypatch, _payload())
+    texts = _texts(_open(els, "Energy"))
+    assert "Oil & Gas E&P" in texts and "Oil Services" in texts
+    assert "XOM" not in texts          # one more click away
+
+
+def test_opening_an_industry_builds_its_stocks(monkeypatch):
+    els = _render(monkeypatch, _payload())
+    opened = _open(els, "Energy")
+    assert "XOM" in _texts(_open(opened, "Oil & Gas E&P"))
+
+
+def test_reopening_a_sector_builds_nothing_a_second_time(monkeypatch):
+    """The cache: a body that already has children has been filled before, and a
+    re-open only re-shows it."""
+    els = _render(monkeypatch, _payload())
+    assert _texts(_open(els, "Energy"))
+    _panels(els)["Energy"].value = False
+    assert _open(els, "Energy") == []
+
+
+def test_two_sectors_can_be_open_at_once(monkeypatch):
+    """No ``group=``: accordion behaviour would close Energy the moment you
+    opened Real Estate, and comparing two sectors is the point of the tree."""
+    els = _render(monkeypatch, _payload())
+    for panel in _panels(els).values():
+        assert "group" not in panel._props
+
+
+def test_an_industry_with_no_member_stocks_says_so(monkeypatch):
+    """Real: 3 of 69 industries held no admitted member stock on 2026-08-19, so
+    an empty panel is a state and must not look like a broken one."""
+    els = _render(monkeypatch, _payload())
+    opened = _open(_open(els, "Energy"), "Oil Services")
+    assert P.NO_STOCKS in _texts(opened)
+
+
+def test_a_sector_with_no_scored_industries_says_so(monkeypatch):
+    payload = _payload()
+    payload["levels"]["industry"] = []
+    payload["levels"]["stock"] = []
+    els = _render(monkeypatch, payload)
+    assert P.NO_INDUSTRIES in _texts(_open(els, "Energy"))
+
+
+def test_an_orphan_stock_is_shown_under_its_sector_and_labelled(monkeypatch):
+    """``build_tree`` files a stock here when its industry was never scored — 10
+    of 296 that day. Dropping them would quietly shrink the sector."""
+    texts = _texts(_open(_render(monkeypatch, _payload()), "Energy"))
+    assert P.ORPHANS in texts and "SLB" in texts
+
+
+def test_a_stock_row_carries_the_marks_but_no_breadth_track(monkeypatch):
+    """Participation is None on every stock row — a stock has no constituents —
+    and that is not zero breadth."""
+    els = _render(monkeypatch, _payload())
+    built = _open(_open(els, "Energy"), "Oil & Gas E&P")
+    texts = _texts(built)
+    assert "+3.00%" in texts and "+2.00%" in texts and "+0.50%" in texts
+    assert _fills(built) == [] and B.NO_READING in texts
+    # And no chevron: a leaf offering to open is a lie about the tree's depth.
+    assert not [e for e in built if e._props.get("name") == "chevron_right"]
+
+
+def test_an_industry_row_keeps_its_breadth_track(monkeypatch):
+    """The bar is not a sector-only ornament: ``momentum.participation`` is set
+    on industry rows too, and a thin industry is the same warning."""
+    assert _fills(_open(_render(monkeypatch, _payload()), "Energy")) \
+        == ["w-[50%]", "w-[0%]"]
+
+
+def test_children_built_later_show_the_CURRENT_day_move(monkeypatch):
+    """The tree survives a quotes-only republish, so a node opened afterwards
+    would otherwise render the move frozen into it at build time."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    moved = _payload()
+    moved["levels"]["stock"][0]["day_pct"] = 3.3
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (moved, 2))
+    _timer(els).callback()
+    assert "+3.30%" in _texts(_open(_open(els, "Energy"), "Oil & Gas E&P"))
+
+
+def test_a_quotes_only_republish_reprices_without_closing_an_open_sector(monkeypatch):
+    """At a ~30 s publish cadence, rebuilding on every version change would
+    collapse the reader's open branches twice a minute."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    opened = _open(els, "Energy")
+    moved = _payload()
+    moved["levels"]["industry"][0]["day_pct"] = -4.5
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (moved, 2))
+    _timer(els).callback()
+    assert _panels(els)["Energy"].value is True
+    assert "-4.50%" in _texts(opened)
+
+
+def test_a_new_cascade_rebuilds_the_tree(monkeypatch):
+    """The other half: new scores mean new rows, new order and new counts, so
+    the tree must be rebuilt rather than repriced."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    _open(els, "Energy")
+    rescored = _payload(session_date="2026-08-20")
+    rescored["levels"]["sector"] = rescored["levels"]["sector"][:1]
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (rescored, 2))
+    before = set(ui.context.client.elements)
+    _timer(els).callback()
+    fresh = [e for k, e in ui.context.client.elements.items() if k not in before]
+    assert list(_panels(fresh)) == ["Energy"]
+    assert _panels(fresh)["Energy"].value is False
+
+
+def test_the_chevron_follows_the_panel(monkeypatch):
+    """The only affordance saying a row opens — the header slot replaces
+    Quasar's own expand icon, so nothing else points down."""
+    els = _render(monkeypatch, _payload())
+    icons = [e for e in els if getattr(e, "icon", None) or
+             e._props.get("name") in ("chevron_right", "expand_more")]
+    _open(els, "Energy")
+    names = [e._props.get("name") for e in icons]
+    assert names.count("expand_more") == 1 and names.count("chevron_right") == 2
+
+
+def test_a_rebuilt_tree_stops_repricing_the_rows_it_replaced(monkeypatch):
+    """The day-cell registry is rebuilt with the tree. Keeping the old entries
+    would have every later tick write into elements no longer on the page — a
+    registry growing by one whole tree per nightly cascade."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    dropped = next(e for e in els if getattr(e, "text", None) == "-0.22%")
+    rescored = _payload(session_date="2026-08-20")
+    rescored["levels"]["sector"] = rescored["levels"]["sector"][:1]
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (rescored, 2))
+    _timer(els).callback()
+    assert dropped.text == "-0.22%"
