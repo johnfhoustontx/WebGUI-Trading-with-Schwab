@@ -84,6 +84,71 @@ def strategy_label(code):
     return code
 
 
+# Tag chips + a one-line thesis per strategy — the (1) STRATEGY frame's copy.
+# The FIRST tag is always the cash-flow direction (CREDIT/DEBIT), which is what
+# the frame colours; the leg-count tag is DERIVED from the template, never typed.
+# Every direction below was read off STRATEGY_TEMPLATES, not assumed: the long
+# condors and butterflies are net DEBITS (the long wings sit outside the shorts),
+# the calendars/diagonals are debits (the back leg costs more than the front).
+_STRATEGY_FACTS = {
+    "LONG_CALL":  ("DEBIT",  ["DIRECTIONAL", "BULLISH"],
+                   "Buy a call outright. Unlimited upside, the whole premium at risk, and time decay works against you every day."),
+    "LONG_PUT":   ("DEBIT",  ["DIRECTIONAL", "BEARISH"],
+                   "Buy a put outright. Pays on a downside move; the premium is the entire loss if it never comes."),
+    "NAKED_CALL": ("CREDIT", ["UNDEFINED RISK", "BEARISH"],
+                   "Sell an out-of-the-money call with nothing behind it. Collects premium against unlimited upside risk."),
+    "NAKED_PUT":  ("CREDIT", ["ENTRY", "BULLISH"],
+                   "Sell an out-of-the-money put. Keeps the credit if spot holds above the strike, or takes assignment at the strike less the credit."),
+    "PCS": ("CREDIT", ["DEFINED RISK", "BULLISH"],
+            "Sell the put nearer the money, buy one further out-of-the-money. Collects credit; max loss is the strike width less the credit."),
+    "CCS": ("CREDIT", ["DEFINED RISK", "BEARISH"],
+            "Sell the call nearer the money, buy one further out. Keeps the credit if spot stays below the short strike into expiry."),
+    "VERT_PUT_DEBIT":  ("DEBIT", ["DEFINED RISK", "BEARISH"],
+                        "Buy the at-the-money put and sell one further out-of-the-money to finance it. Bearish, with the payoff capped at the strike width."),
+    "VERT_CALL_DEBIT": ("DEBIT", ["DEFINED RISK", "BULLISH"],
+                        "Buy the at-the-money call and sell one further out to finance it. The cheapest way to express a measured upside move."),
+    "IC": ("CREDIT", ["RANGE", "THETA"],
+           "Short strangle wrapped in long wings. Wants spot to finish between the two short strikes."),
+    "CONDOR_CALL": ("DEBIT", ["RANGE", "THETA"],
+                    "All-call condor: long the outer strikes, short the two in the middle. Pays most if spot finishes between the short strikes."),
+    "CONDOR_PUT": ("DEBIT", ["RANGE", "THETA"],
+                   "All-put condor. The same range thesis as the call condor, built on strikes at and below spot."),
+    "BUTTERFLY_CALL": ("DEBIT", ["PIN", "THETA"],
+                       "1-2-1 call butterfly. Cheap and narrow: it pays most when spot finishes on the middle strike."),
+    "BUTTERFLY_PUT": ("DEBIT", ["PIN", "THETA"],
+                      "1-2-1 put butterfly. The put-side mirror of the call butterfly, with the same single-strike target."),
+    "IRON_BUTTERFLY": ("CREDIT", ["PIN", "THETA"],
+                       "Sell the at-the-money call and put, buy a wing either side. The biggest credit of the range trades, and the narrowest profit zone."),
+    "CALENDAR_CALL": ("DEBIT", ["TERM STRUCTURE", "THETA"],
+                      "Sell the near-expiry call, buy the same strike further out. Collects the front leg's faster decay while the back leg keeps its value."),
+    "CALENDAR_PUT": ("DEBIT", ["TERM STRUCTURE", "THETA"],
+                     "The put-side calendar. Same term-structure thesis, put strikes."),
+    "DIAGONAL_CALL": ("DEBIT", ["TERM STRUCTURE", "BULLISH"],
+                      "A call calendar with the short leg pushed out of the money: front-expiry decay plus an upside lean."),
+    "DIAGONAL_PUT": ("DEBIT", ["TERM STRUCTURE", "BEARISH"],
+                     "A put calendar with the short leg pushed below spot: front-expiry decay plus a downside lean."),
+}
+
+
+def strategy_tags(code):
+    """Tag chips for a strategy: [cash-flow, leg count, …descriptors].
+
+    The leg-count chip is derived from ``STRATEGY_TEMPLATES`` so it can never
+    disagree with the legs the template actually builds. [] for an unknown code."""
+    facts = _STRATEGY_FACTS.get(code)
+    if not facts:
+        return []
+    flow, extra, _blurb = facts
+    n = len(STRATEGY_TEMPLATES.get(code) or [])
+    return [flow, f"{n} LEG" if n == 1 else f"{n} LEGS"] + list(extra)
+
+
+def strategy_blurb(code):
+    """One-line thesis for a strategy, or "" for an unknown code."""
+    facts = _STRATEGY_FACTS.get(code)
+    return facts[2] if facts else ""
+
+
 # Strategy codes the calculator can summarize ANALYTICALLY (exact legacy path).
 _ANALYTIC_CODES = {"PCS", "CCS", "IC", "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"}
 
