@@ -9,6 +9,8 @@ import pathlib
 import re
 from decimal import Decimal
 
+import pytest
+
 from pages import bullbear as B
 
 
@@ -269,16 +271,41 @@ def test_quadrant_counts_bucket_every_row_exactly_once():
 
 
 def test_quadrant_counts_report_every_bucket_even_when_empty():
-    """A missing key would make the headline read "3 of 11" against a
-    distribution the caller has to guard key by key."""
+    """A missing key raises on the headline's numerator, and leaves every other
+    caller guarding key by key. It cannot move the denominator — an absent bucket
+    contributes nothing to sum() — so reporting all five is what makes the
+    distribution readable without a guard per lookup."""
     counts = B.quadrant_counts([_row(1.0, 0.1)])
     assert set(counts) == set(B.QUADRANTS)
     assert counts["falling_lagging"] == 0
 
 
 def test_quadrant_counts_of_nothing_is_all_zero():
-    assert B.quadrant_counts([]) == {q: 0 for q in B.QUADRANTS}
+    """A cold cache and a published-but-empty list are the two shapes of absence.
+    They take the same path, so this is one claim asserted over both spellings."""
     assert B.quadrant_counts(None) == {q: 0 for q in B.QUADRANTS}
+    assert B.quadrant_counts([]) == {q: 0 for q in B.QUADRANTS}
+
+
+def test_raw_refuses_a_row_that_is_not_a_mapping():
+    """Shape must be right, contents may be null. None in an array is routine
+    JSON and a null ``raw`` is a row the cascade could not score; a string where
+    an object belongs means a different document, and rendering part of it is
+    guessing. Widening to isinstance(row, dict) would promise a totality nothing
+    else at the container level promises."""
+    assert B._raw(None) == {} and B._raw({"raw": None}) == {}
+    with pytest.raises(AttributeError):
+        B._raw("SPY")
+
+
+def test_headline_is_empty_when_there_is_nothing_to_count():
+    """"0 of 0 sectors rising and leading" reads as a maximally bearish tape
+    where nothing was in fact published — the invented reading this module
+    rejects everywhere else (NaN degrades to unknown; unknown takes slate).
+    momentum_view:301 suppresses the same "N of M" shape. The page module owns
+    the cold-cache state, so handing it an absence is what lets it."""
+    assert B.headline(B.quadrant_counts([]), "sectors") == ""
+    assert B.headline(B.quadrant_counts(None), "sectors") == ""
 
 
 def test_quadrant_counts_treat_a_row_with_no_raw_block_as_unknown():
@@ -295,7 +322,19 @@ def test_headline_states_a_count_not_a_regime_word():
                                          _row(-1.0, -0.1)]), "sectors")
     assert "2 of 3" in text and "sectors" in text
     for banned in ("risk-on", "risk-off", "bullish regime", "bearish regime"):
-        assert banned.lower() not in text.lower()
+        assert banned not in text.lower()
+
+
+def test_headline_raises_rather_than_reporting_a_confident_zero():
+    """The asymmetry with quadrant_label/quadrant_class is deliberate, and this
+    is what holds it. Those degrade because a bad key costs one row its chip;
+    headline must not, because .get(..., 0) would print "0 of 11 sectors rising
+    and leading" from a dict that never reported its rising bucket — a wrong
+    number carrying the authority this page claims precisely because a count
+    cannot be argued with. Tidying it to .get for symmetry fails here. The dict
+    is sparse but populated: {} is now a legitimate empty payload."""
+    with pytest.raises(KeyError):
+        B.headline({"rising_lagging": 2, "falling_lagging": 1}, "sectors")
 
 
 def test_headline_counts_unreadable_rows_in_its_denominator():

@@ -81,7 +81,9 @@ _CLASSES = {
 def quadrant_label(q):
     """A quadrant key -> its display name; an unrecognised key degrades.
 
-    Degrades rather than raising because this runs inside a page build. Table
+    The module's rule, since its two halves differ: degrade where the fallback
+    honestly signals absence — "No reading", slate — and raise where it would be
+    a confident false statement, as a count of zero is in ``headline``. Table
     drift is caught instead by
     ``test_the_tables_key_exactly_on_quadrants_with_no_empty_entries``.
     """
@@ -91,6 +93,14 @@ def quadrant_label(q):
 def quadrant_class(q):
     """A quadrant key -> its chip classes; an unrecognised key degrades."""
     return _CLASSES.get(q, _CLASSES["unknown"])
+
+
+def _raw(row):
+    """A row's ``raw`` block. Shape must be right, contents may be null: a None
+    row or a null ``raw`` is a reading we do not have, while a non-dict row is a
+    different document and raises rather than being half-rendered.
+    """
+    return (row or {}).get("raw") or {}
 
 
 def quadrant_counts(rows):
@@ -103,18 +113,20 @@ def quadrant_counts(rows):
     """
     counts = {q: 0 for q in QUADRANTS}
     for row in rows or []:
-        raw = (row or {}).get("raw") or {}
+        raw = _raw(row)
         counts[quadrant(raw.get("trend"), raw.get("excess"))] += 1
     return counts
 
 
 def headline(counts, noun):
-    """"5 of 11 sectors rising and leading" — a fact, deliberately not a verdict.
+    """"5 of 11 sectors rising and leading" — a fact, deliberately not a verdict
+    (see the design doc), and empty when there is nothing to count.
 
-    /sentiment/sectors and /sentiment/rotation derive risk-on/risk-off words from
-    non-commensurable quantities and were measured printing opposite ones on the
-    same day; a count cannot join that argument. Not ``.get(..., 0)`` for the same
-    reason — a missing key would render a confident "0 of 11" over rising rows.
+    "0 of 0 sectors rising and leading" would state a maximally bearish tape
+    where in fact nothing was published. ``noun`` renders verbatim, so the caller
+    owns pluralisation. On the numerator not degrading, see ``quadrant_label``.
     """
-    return (f"{counts['rising_leading']} of {sum(counts.values())} "
-            f"{noun} rising and leading")
+    total = sum(counts.values())
+    if not total:
+        return ""
+    return f"{counts['rising_leading']} of {total} {noun} rising and leading"
