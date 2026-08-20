@@ -354,17 +354,21 @@ def breadth_width(participation):
     None (not 0) for a stock row: one name has no constituents, and a zero-width
     bar would read as 'no breadth' rather than 'not applicable'.
     """
-    if not isinstance(participation, (int, float)) or isinstance(participation, bool):
-        return None
-    return int(round(max(0.0, min(1.0, float(participation))) * 100))
+    p = _num(participation)
+    return None if p is None else int(round(max(0.0, min(1.0, p)) * 100))
 
 
 def breadth_is_thin(participation):
     """True when a move is carried by too few constituents to trust."""
-    if not isinstance(participation, (int, float)) or isinstance(participation, bool):
-        return False
-    return float(participation) <= THIN_PARTICIPATION
+    p = _num(participation)
+    return p is not None and p <= THIN_PARTICIPATION
 ```
+
+> **Reuse `_num` from Task 1 — do not re-implement the numeric guard.** An earlier
+> draft of this task inlined `not isinstance(p, (int, float)) or isinstance(p, bool)`
+> twice, which would have forked the house idiom two tasks after Task 1 converged on
+> it. `_num` already rejects `None`, bools and non-finite values and coerces the rest,
+> which is exactly the test both functions need.
 
 **Step 4: Run to verify it passes**
 
