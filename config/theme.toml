@@ -309,35 +309,36 @@ font_url = "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;50
 # Scope hook is `.calc-v3` — never `.calc-v2`, which is the shared dark-navy
 # scope. NOT here, on purpose: the P&L heatmap's green/red cell ramp, a
 # data-driven map of the category CLAUDE.md excludes from the config palette.
-void      = "#05070a"          # page ground, the outer stop of the radial glow
-glow      = "#0b1a24"          # inner stop of that radial gradient
-frame_a   = "#0b1118"          # numbered-frame fill, top of a 180deg gradient
-frame_b   = "#06090d"          # …and its bottom stop
-edge      = "#26505c"          # active frame border, and the strategy popup's
-edge_idle = "#1d2937"          # idle frame border — a frame with nothing in it
-chip_bg   = "#06080b"          # the frame's label chip, knocked out of the edge
-tile_a    = "#0d141c"          # summary-tile fill, top of a 180deg gradient
-tile_b    = "#070b0f"          # …and its bottom stop
-tile_edge = "#1d2937"          # tile hairline
-input_bg  = "#0a1219"          # boxed q-field fill
+void       = "#05070a"         # page ground, the outer stop of the radial glow
+glow       = "#0b1a24"         # inner stop of that radial gradient
+frame_a    = "#0b1118"         # numbered-frame fill, top of a 180deg gradient
+frame_b    = "#06090d"         # …and its bottom stop
+edge       = "#26505c"         # active frame border, and the strategy popup's
+edge_idle  = "#1d2937"         # idle frame border — a frame with nothing in it
+chip_bg    = "#06080b"         # the frame's label chip, knocked out of the edge
+tile_a     = "#0d141c"         # summary-tile fill, top of a 180deg gradient
+tile_b     = "#070b0f"         # …and its bottom stop
+tile_edge  = "#1d2937"         # tile hairline
+input_bg   = "#0a1219"         # boxed q-field fill, and the Strategy trigger box
 input_edge = "#2a3846"         # boxed q-field hairline (focus ring = accent)
-bright    = "#eaf2f9"          # headline values
-txt       = "#cfdae8"          # page base text
-soft      = "#dce7f3"          # input + menu-item text
-label     = "#7189a0"          # eyebrows and q-field labels
-muted     = "#8aa0b4"          # secondary annotation
-body      = "#93a8bb"          # running prose
-dim       = "#6f8598"          # least-emphasis figures
-pos       = "#2dd4a7"          # profit / credit
-neg       = "#fb5f7c"          # loss / debit
-accent    = "#22d3ee"          # the primary signal colour: focus, primary button
-warn      = "#f5b841"          # caution — near a breakeven, a stale quote
-btn_bg    = "#111b25"          # secondary button fill (also the menu hover)
-btn_edge  = "#3a5060"          # secondary button hairline
-btn_txt   = "#d3e0ec"          # secondary button label
-off_bg    = "#101720"          # disabled button fill
-off_edge  = "#26313d"          # disabled button hairline
-off_txt   = "#5c6d7e"          # disabled button label
-# One face, loaded page-scoped: JetBrains Mono is what makes tabular-nums align
-# the matrix columns optically — a system fallback is a visible downgrade.
+bright     = "#eaf2f9"         # headline values
+txt        = "#cfdae8"         # page base text
+soft       = "#dce7f3"         # input, trigger and menu-item text
+label      = "#7189a0"         # eyebrows and q-field labels
+muted      = "#8aa0b4"         # secondary annotation
+body       = "#93a8bb"         # running prose
+dim        = "#6f8598"         # least-emphasis figures
+icon       = "#4a6070"         # q-field append/prepend icons
+icon_soft  = "#5b7f8c"         # Strategy trigger + popup chevrons
+pos        = "#2dd4a7"         # profit / credit
+neg        = "#fb5f7c"         # loss / debit
+accent     = "#22d3ee"         # primary signal: focus ring, primary button fill+border
+warn       = "#f5b841"         # caution — near a breakeven, a stale quote
+accent_txt = "#c8f4fd"         # label ON the accent fill; too light to read as accent
+btn_bg     = "#111b25"         # secondary button fill (also the menu hover)
+btn_edge   = "#3a5060"         # secondary button hairline
+btn_txt    = "#d3e0ec"         # secondary button label
+off_bg     = "#101720"         # disabled button fill
+off_edge   = "#26313d"         # disabled button hairline
+off_txt    = "#5c6d7e"         # disabled button label
 font_url = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"

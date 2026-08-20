@@ -18,9 +18,21 @@ from .theme import STRATEGY_BTN
 class StrategyMenu:
     """Cascading Strategy picker with a ui.select-compatible interface."""
 
-    def __init__(self, value="PCS", *, classes="", boxed=False):
+    def __init__(self, value="PCS", *, classes="", boxed=False,
+                 menu_class=None, btn_class=None):
         self._value = value
         self._handlers = []
+
+        # ``btn_class`` / ``menu_class`` let a page substitute its OWN skin for
+        # the two surfaces this widget owns, without forking it. Both default to
+        # exactly what ``boxed`` produced before they existed, so every existing
+        # call site is byte-identical; only an explicit value overrides.
+        btn_cls = (STRATEGY_BTN if boxed else "") if btn_class is None else btn_class
+        # The menu popups are teleported to <body> (outside any page wrapper), so
+        # a page can't reach them with scoped CSS — the hook has to be put on the
+        # menu here. A page-scoped CSS rule whose class nothing carries is dead,
+        # and no test of the CSS STRING can see that.
+        menu_cls = ("strat-menu-navy" if boxed else "") if menu_class is None else menu_class
 
         with ui.column().classes("gap-0 " + classes):
             ui.label("Strategy").classes("text-xs opacity-60")
@@ -30,15 +42,11 @@ class StrategyMenu:
             if boxed:
                 self.button = ui.button(S.strategy_label(value), color=None) \
                     .props("no-caps icon-right=arrow_drop_down dense") \
-                    .classes(f"w-full strategy-menu-btn {STRATEGY_BTN}")
+                    .classes(f"w-full strategy-menu-btn {btn_cls}".strip())
             else:
                 self.button = ui.button(S.strategy_label(value)) \
                     .props("no-caps outline icon-right=arrow_drop_down dense") \
-                    .classes("w-full strategy-menu-btn")
-            # The menu popups are teleported to <body> (outside any page wrapper), so
-            # a page can't reach them with scoped CSS. In ``boxed`` mode we tag every
-            # menu with ``strat-menu-navy`` for the page to theme globally.
-            menu_cls = "strat-menu-navy" if boxed else ""
+                    .classes(f"w-full strategy-menu-btn {btn_cls}".strip())
             with self.button:
                 # Top-level menu opens under the button; each family row carries a
                 # nested submenu that Quasar opens to the side on hover.
@@ -84,9 +92,16 @@ class StrategyMenu:
                 handler()        # tolerate a no-arg handler
 
 
-def build_strategy_menu(value="PCS", *, classes="", boxed=False):
+def build_strategy_menu(value="PCS", *, classes="", boxed=False,
+                        menu_class=None, btn_class=None):
     """Mount a cascading Strategy picker and return its ui.select-compatible handle.
 
     ``boxed=True`` renders an input-box-styled trigger (for the Calculator's dark
-    theme); the default keeps the outline-button look."""
-    return StrategyMenu(value, classes=classes, boxed=boxed)
+    theme); the default keeps the outline-button look.
+
+    ``btn_class`` / ``menu_class`` override the trigger skin and the class put on
+    every (body-teleported) popup — a page with its own palette passes both, e.g.
+    ``btn_class=theme.CALC_STRATEGY_BTN, menu_class="strat-menu-calc"``. Leaving
+    them ``None`` reproduces the ``boxed`` defaults exactly."""
+    return StrategyMenu(value, classes=classes, boxed=boxed,
+                        menu_class=menu_class, btn_class=btn_class)

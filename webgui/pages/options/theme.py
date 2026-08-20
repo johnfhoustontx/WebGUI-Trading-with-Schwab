@@ -273,7 +273,9 @@ _DEFAULTS = {
         "input_bg": "#0a1219", "input_edge": "#2a3846",
         "bright": "#eaf2f9", "txt": "#cfdae8", "soft": "#dce7f3",
         "label": "#7189a0", "muted": "#8aa0b4", "body": "#93a8bb", "dim": "#6f8598",
+        "icon": "#4a6070", "icon_soft": "#5b7f8c",
         "pos": "#2dd4a7", "neg": "#fb5f7c", "accent": "#22d3ee", "warn": "#f5b841",
+        "accent_txt": "#c8f4fd",
         "btn_bg": "#111b25", "btn_edge": "#3a5060", "btn_txt": "#d3e0ec",
         "off_bg": "#101720", "off_edge": "#26313d", "off_txt": "#5c6d7e",
         "font_url": ("https://fonts.googleapis.com/css2"
@@ -1067,6 +1069,14 @@ def build_calc_tokens(theme):
     """
     c = theme["calc"]
     frame_bg = f"bg-[linear-gradient(180deg,{c['frame_a']},{c['frame_b']})]"
+    # The finite state palette behind the page's data-driven label colours,
+    # mapped from a known state onto a static class (the documented alternative
+    # to a runtime-built arbitrary value). CALC_STATE_TEXT is the whole set as
+    # ONE class string, for .classes(remove=CALC_STATE_TEXT, add=CALC_POS) — so
+    # repeated repaints can't stack conflicting text-[…] classes. It is derived
+    # here rather than written down so it always follows the config, exactly as
+    # its app-wide sibling STATE_TEXT_CLASSES does.
+    state_txt = [f"text-[{c[k]}]" for k in ("pos", "neg", "accent", "warn", "dim")]
     return {
         "CALC_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
         "CALC_PAGE": (
@@ -1085,32 +1095,39 @@ def build_calc_tokens(theme):
         "CALC_INPUT": f"bg-[{c['input_bg']}] border border-[{c['input_edge']}] rounded-[2px]",
         "CALC_BTN": (f"bg-[{c['btn_bg']}] border border-[{c['btn_edge']}] "
                      f"text-[{c['btn_txt']}] rounded-[2px] text-[9px] tracking-[.16em]"),
-        "CALC_BTN_PRIMARY": (f"bg-[rgba(34,211,238,.22)] border border-[{c['accent']}] "
-                             f"text-[#c8f4fd] rounded-[2px] text-[9px] tracking-[.16em]"),
+        # The accent expanded to a 22% fill via _alpha_hex, NOT a hand-written
+        # rgba: the fill, the border and the label all have to follow the one
+        # `accent` knob, or editing it moves the border and leaves the button
+        # half-recoloured — worse than no knob at all.
+        "CALC_BTN_PRIMARY": (f"bg-[{_alpha_hex(c['accent'], .22)}] "
+                             f"border border-[{c['accent']}] text-[{c['accent_txt']}] "
+                             f"rounded-[2px] text-[9px] tracking-[.16em]"),
         "CALC_BTN_OFF": (f"bg-[{c['off_bg']}] border border-[{c['off_edge']}] "
                          f"text-[{c['off_txt']}] rounded-[2px] text-[9px] tracking-[.16em] "
                          f"cursor-not-allowed"),
+        # The Strategy picker's trigger. ``boxed=True`` otherwise paints the navy
+        # STRATEGY_BTN token onto it and build_calc_css sets no competing
+        # background, so the trigger would render navy on the near-black page —
+        # the page passes this as build_strategy_menu(..., btn_class=…).
+        "CALC_STRATEGY_BTN": (f"bg-[{c['input_bg']}] hover:border-[{c['accent']}] "
+                              f"border border-[{c['input_edge']}] text-[{c['soft']}] "
+                              f"rounded-[2px] font-normal"),
         "CALC_EYEBROW": f"text-[8px] tracking-[.18em] text-[{c['label']}] whitespace-nowrap",
         "CALC_VALUE": f"text-[{c['bright']}] font-medium",
         "CALC_SOFT": f"text-[{c['soft']}]",
         "CALC_BODY": f"text-[{c['body']}]",
         "CALC_MUTED": f"text-[{c['muted']}]",
-        "CALC_DIM": f"text-[{c['dim']}]",
-        "CALC_POS": f"text-[{c['pos']}]",
-        "CALC_NEG": f"text-[{c['neg']}]",
-        "CALC_ACCENT": f"text-[{c['accent']}]",
-        "CALC_WARN": f"text-[{c['warn']}]",
+        "CALC_DIM": state_txt[4],
+        "CALC_POS": state_txt[0],
+        "CALC_NEG": state_txt[1],
+        "CALC_ACCENT": state_txt[2],
+        "CALC_WARN": state_txt[3],
+        "CALC_STATE_TEXT": " ".join(state_txt),
         "CALC_EDGE_POS": f"border-l-2 border-l-[{c['pos']}]",
         "CALC_EDGE_NEG": f"border-l-2 border-l-[{c['neg']}]",
         "CALC_EDGE_ACCENT": f"border-l-2 border-l-[{c['accent']}]",
         "CALC_EDGE_WARN": f"border-l-2 border-l-[{c['warn']}]",
     }
-
-
-# The finite state->class maps behind the two data-driven colours the page sets
-# at runtime. Mapping a known state onto a static class is the documented
-# alternative to a runtime-built arbitrary value.
-CALC_STATE_TEXT = ("CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN", "CALC_DIM")
 
 
 def build_calc_css(theme):
@@ -1132,13 +1149,13 @@ def build_calc_css(theme):
 .calc-v3 .q-field__native,.calc-v3 .q-field__native input,
 .calc-v3 .q-field__native span{{color:{c['soft']}!important;font-size:12px;}}
 .calc-v3 .q-field__append .q-icon,.calc-v3 .q-field__prepend .q-icon{{
-  color:#4a6070;font-size:14px;
+  color:{c['icon']};font-size:14px;
 }}
 /* Strategy picker trigger internals. */
 .calc-v3 .strategy-menu-btn .q-btn__content{{
   justify-content:space-between;flex:1;text-transform:none;
 }}
-.calc-v3 .strategy-menu-btn .q-icon{{color:#5b7f8c;}}
+.calc-v3 .strategy-menu-btn .q-icon{{color:{c['icon_soft']};}}
 /* Leg CARD cells — two compact grid rows per leg. */
 .calc-v3 .leg-card .q-field__control{{min-height:28px;padding:0 7px;}}
 .calc-v3 .leg-card .q-field__control .q-field__native,
@@ -1155,7 +1172,7 @@ def build_calc_css(theme):
 .strat-menu-calc .q-item__label{{color:{c['soft']};}}
 .strat-menu-calc .q-item:hover,.strat-menu-calc .q-item--active,
 .strat-menu-calc .q-item.q-manuallyfocused{{background:{c['btn_bg']}!important;}}
-.strat-menu-calc .q-icon{{color:#5b7f8c;}}
+.strat-menu-calc .q-icon{{color:{c['icon_soft']};}}
 """
 
 
@@ -1302,6 +1319,7 @@ CALC_INPUT = _CALC_TOKENS["CALC_INPUT"]
 CALC_BTN = _CALC_TOKENS["CALC_BTN"]
 CALC_BTN_PRIMARY = _CALC_TOKENS["CALC_BTN_PRIMARY"]
 CALC_BTN_OFF = _CALC_TOKENS["CALC_BTN_OFF"]
+CALC_STRATEGY_BTN = _CALC_TOKENS["CALC_STRATEGY_BTN"]
 CALC_EYEBROW = _CALC_TOKENS["CALC_EYEBROW"]
 CALC_VALUE = _CALC_TOKENS["CALC_VALUE"]
 CALC_SOFT = _CALC_TOKENS["CALC_SOFT"]
@@ -1312,6 +1330,7 @@ CALC_POS = _CALC_TOKENS["CALC_POS"]
 CALC_NEG = _CALC_TOKENS["CALC_NEG"]
 CALC_ACCENT = _CALC_TOKENS["CALC_ACCENT"]
 CALC_WARN = _CALC_TOKENS["CALC_WARN"]
+CALC_STATE_TEXT = _CALC_TOKENS["CALC_STATE_TEXT"]
 CALC_EDGE_POS = _CALC_TOKENS["CALC_EDGE_POS"]
 CALC_EDGE_NEG = _CALC_TOKENS["CALC_EDGE_NEG"]
 CALC_EDGE_ACCENT = _CALC_TOKENS["CALC_EDGE_ACCENT"]
