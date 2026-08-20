@@ -274,11 +274,12 @@ def test_calc_snapshot_roundtrips_via_page_state():
     assert ps.merge_restore(snap, calc._CALC_DEFAULTS)["num_strikes"] == 30
 
 
-def test_tile_color_class_maps_palette():
-    from pages.options import theme
-    assert calc.tile_color_class("#66bb6a") == theme.TXT_POS
-    assert calc.tile_color_class("#ef5350") == theme.TXT_NEG
-    assert calc.tile_color_class("#bdbdbd") == theme.TXT_NEUTRAL
+def test_the_retired_summary_tile_helpers_are_gone():
+    # The three-hex summary-tile palette existed only for ``_render_summary``,
+    # which the six metric cards replaced outright. Left behind it would be dead
+    # code with a test pinning nothing the page renders.
+    for dead in ("tile_color_class", "_TILE_COLOR_CLASSES", "_render_summary"):
+        assert not hasattr(calc, dead), dead
 
 
 # ── the redesign's page-side readouts ────────────────────────────────────────
@@ -843,3 +844,356 @@ def test_the_retired_band_helpers_are_gone():
     # old helpers had no other caller.
     for dead in ("pnl_cell_class", "_band", "_CELL_COLORS", "matrix_pct_of_max"):
         assert not hasattr(calc, dead), dead
+
+
+# ── the six metric cards, and the rest of the rebuilt screen's pure surface ──
+
+def test_metric_cards_lead_with_credit_or_debit():
+    credit = calc.metric_cards({"entry_credit": 180.0, "max_loss": 320.0,
+                                "max_profit": 180.0, "return_on_risk": 56.3,
+                                "breakevens": [658.2], "pop": 71.4},
+                               legs=[], spot=668.41, max_dte=9)
+    assert credit[0]["label"] == "ENTRY CREDIT"
+    assert credit[0]["accent"] == "pos"
+
+    debit = calc.metric_cards({"entry_credit": -400.0}, legs=[], spot=100.0, max_dte=9)
+    assert debit[0]["label"] == "ENTRY DEBIT"
+    assert debit[0]["accent"] == "accent"
+
+
+def test_metric_card_values_carry_the_dollar_figures():
+    cards = calc.metric_cards({"entry_credit": 180.0, "max_loss": 320.0,
+                               "max_profit": 180.0, "return_on_risk": 56.3,
+                               "breakevens": [658.2], "pop": 71.4},
+                              legs=[], spot=668.41, max_dte=9)
+    by_label = {c["label"]: c["value"] for c in cards}
+    assert by_label["ENTRY CREDIT"] == "$180"
+    assert by_label["MAX RISK"] == "$320"
+    assert by_label["MAX RETURN"] == "$180"
+    assert by_label["RETURN ON RISK"] == "56.3%"
+    assert by_label["BREAKEVEN(S)"] == "658.20"
+    assert by_label["PROB OF PROFIT"] == "71.4%"
+
+
+def test_metric_cards_keep_the_designs_order():
+    labels = [c["label"] for c in calc.metric_cards({}, legs=[], spot=0, max_dte=0)]
+    assert labels == ["ENTRY CREDIT", "MAX RISK", "MAX RETURN",
+                      "RETURN ON RISK", "BREAKEVEN(S)", "PROB OF PROFIT"]
+
+
+def test_unlimited_max_return_reads_as_unlimited_not_as_a_number():
+    # $999,999 is the service's placeholder, not a dollar figure. Printing it
+    # would be a wrong number stated confidently.
+    cards = calc.metric_cards({"max_profit": calc.UNLIMITED}, legs=[], spot=1.0, max_dte=9)
+    ret = next(c for c in cards if c["label"] == "MAX RETURN")
+    assert ret["value"] == "Unlimited"
+
+
+def test_unlimited_max_risk_reads_as_unlimited():
+    cards = calc.metric_cards({"max_loss": calc.UNLIMITED}, legs=[], spot=1.0, max_dte=9)
+    risk = next(c for c in cards if c["label"] == "MAX RISK")
+    assert risk["value"] == "Unlimited"
+
+
+def test_return_on_risk_is_an_em_dash_when_either_side_is_uncapped():
+    # calc_summary already zeroes return_on_risk in this case; a bare "0.0%"
+    # would read as a measured zero return rather than "not defined".
+    cards = calc.metric_cards({"max_profit": calc.UNLIMITED, "return_on_risk": 0.0},
+                              legs=[], spot=1.0, max_dte=9)
+    ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
+    assert ror["value"] == "—"
+
+    uncapped_loss = calc.metric_cards({"max_loss": calc.UNLIMITED, "return_on_risk": 12.0},
+                                      legs=[], spot=1.0, max_dte=9)
+    ror2 = next(c for c in uncapped_loss if c["label"] == "RETURN ON RISK")
+    assert ror2["value"] == "—"
+
+
+def test_metric_cards_are_always_six_and_accent_from_a_finite_set():
+    cards = calc.metric_cards({}, legs=[], spot=0, max_dte=0)
+    assert len(cards) == 6
+    assert {c["accent"] for c in cards} <= {"pos", "neg", "accent", "warn", "dim"}
+
+
+def test_metric_cards_degrade_to_em_dashes_never_to_zeroes():
+    # An empty summary is "not calculated yet", not "$0 risk on a 0% return".
+    for card in calc.metric_cards({}, legs=[], spot=0, max_dte=0):
+        assert card["value"] == "—", card["label"]
+        assert card["accent"] == "dim", card["label"]
+
+
+def test_metric_cards_accents_stay_inside_the_page_map():
+    # The page maps ``accent`` onto CALC_EDGE_* / CALC_* classes through a dict
+    # lookup — an accent word with no entry would raise mid-render.
+    cards = calc.metric_cards({"entry_credit": -1.0, "max_loss": 2.0, "max_profit": 3.0,
+                               "return_on_risk": 4.0, "breakevens": [5.0], "pop": 6.0},
+                              legs=[], spot=10.0, max_dte=3)
+    for card in cards:
+        assert card["accent"] in calc.METRIC_ACCENTS
+
+
+def test_return_on_risk_card_reports_a_per_day_figure():
+    cards = calc.metric_cards({"return_on_risk": 56.0}, legs=[], spot=1.0, max_dte=7)
+    ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
+    assert "8.00% per day" in ror["sub"]
+
+
+def test_return_on_risk_per_day_does_not_divide_by_zero():
+    cards = calc.metric_cards({"return_on_risk": 56.0}, legs=[], spot=1.0, max_dte=0)
+    ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
+    assert "per day" in ror["sub"]
+    assert "56.00% per day" in ror["sub"]
+
+
+def test_return_on_risk_sub_is_an_em_dash_without_a_horizon():
+    # No dated legs -> no per-day figure, rather than one computed against an
+    # invented horizon of a single day.
+    cards = calc.metric_cards({"return_on_risk": 56.0}, legs=[], spot=1.0, max_dte=None)
+    ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
+    assert ror["value"] == "56.0%"
+    assert ror["sub"] == "—"
+
+
+def test_breakeven_card_reports_distance_from_spot():
+    cards = calc.metric_cards({"breakevens": [658.2]}, legs=[], spot=668.41, max_dte=9)
+    be = next(c for c in cards if c["label"] == "BREAKEVEN(S)")
+    assert "-1.53%" in be["sub"]
+
+
+def test_breakeven_card_without_a_crossing():
+    cards = calc.metric_cards({"breakevens": []}, legs=[], spot=668.41, max_dte=9)
+    be = next(c for c in cards if c["label"] == "BREAKEVEN(S)")
+    assert be["value"] == "—"
+
+
+def test_breakeven_card_lists_both_crossings():
+    cards = calc.metric_cards({"breakevens": [640.0, 700.0]}, legs=[], spot=668.41, max_dte=9)
+    be = next(c for c in cards if c["label"] == "BREAKEVEN(S)")
+    assert be["value"] == "640.00 / 700.00"
+
+
+def test_breakeven_distance_needs_a_spot_to_measure_from():
+    cards = calc.metric_cards({"breakevens": [658.2]}, legs=[], spot=0, max_dte=9)
+    be = next(c for c in cards if c["label"] == "BREAKEVEN(S)")
+    assert be["sub"] == "—"
+
+
+def test_entry_card_sub_counts_contracts_and_legs():
+    legs = [{"side": "short", "premium": 3.0, "qty": 10},
+            {"side": "long", "premium": 1.2, "qty": 10}]
+    cards = calc.metric_cards({"entry_credit": 1800.0}, legs=legs, spot=668.41, max_dte=9)
+    assert cards[0]["sub"] == "10 contracts · 2 legs"
+
+
+def test_entry_card_sub_is_singular_for_one_contract_and_one_leg():
+    cards = calc.metric_cards({"entry_credit": 180.0},
+                              legs=[{"side": "short", "premium": 1.8, "qty": 1}],
+                              spot=1.0, max_dte=9)
+    assert cards[0]["sub"] == "1 contract · 1 leg"
+
+
+def test_max_return_keeps_the_sign_of_a_losing_structure():
+    # The generic NUMERIC summary's max_profit is max(pnl) over its own grid and
+    # CAN be negative. Printing it as "$300" would invert the reading.
+    cards = calc.metric_cards({"max_profit": -300.0}, legs=[], spot=1.0, max_dte=9)
+    ret = next(c for c in cards if c["label"] == "MAX RETURN")
+    assert ret["value"] == "-$300"
+
+
+def test_prob_of_profit_accent_follows_the_reading():
+    def _pop_accent(v):
+        cards = calc.metric_cards({"pop": v}, legs=[], spot=1.0, max_dte=9)
+        return next(c for c in cards if c["label"] == "PROB OF PROFIT")["accent"]
+    assert _pop_accent(71.4) == "pos"
+    assert _pop_accent(50.0) == "warn"
+    assert _pop_accent(20.0) == "neg"
+
+
+# ── the horizon the metric cards are dated against ──────────────────────────
+
+def test_max_dte_from_legs_takes_the_last_expiry():
+    legs = [{"expiry": "2026-08-21"}, {"expiry": "2026-08-28"}]
+    assert calc.max_dte_from_legs(legs, today=dt.date(2026, 8, 19)) == 9
+
+
+def test_max_dte_from_legs_floors_a_past_expiry_at_zero():
+    legs = [{"expiry": "2026-08-01"}]
+    assert calc.max_dte_from_legs(legs, today=dt.date(2026, 8, 19)) == 0
+
+
+def test_max_dte_from_legs_is_none_without_a_usable_expiry():
+    # The result payload carries MM/DD eval labels and no horizon of its own, so
+    # an unparseable expiry means no per-day figure — not a guessed one.
+    assert calc.max_dte_from_legs([], today=dt.date(2026, 8, 19)) is None
+    assert calc.max_dte_from_legs([{"expiry": None}], today=dt.date(2026, 8, 19)) is None
+    assert calc.max_dte_from_legs([{"expiry": "next week"}],
+                                  today=dt.date(2026, 8, 19)) is None
+
+
+def test_max_dte_from_legs_ignores_the_junk_and_keeps_the_rest():
+    legs = [{"expiry": "not a date"}, {"expiry": "2026-08-28"}]
+    assert calc.max_dte_from_legs(legs, today=dt.date(2026, 8, 19)) == 9
+
+
+# ── the ③ LEGS strip ────────────────────────────────────────────────────────
+
+def test_compact_money_renders_an_em_dash_for_no_reading():
+    assert calc.compact_money(None) == "—"
+    assert calc.compact_money("junk") == "—"
+
+
+def test_compact_money_keeps_small_figures_exact():
+    assert calc.compact_money(320.0) == "$320"
+    assert calc.compact_money(-400.0) == "-$400"
+    assert calc.compact_money(180.0, signed=True) == "+$180"
+    assert calc.compact_money(-400.0, signed=True) == "-$400"
+
+
+def test_compact_money_abbreviates_past_the_frame_width():
+    # A naked put on a 660 strike is $65,700 and a naked NDX put is millions —
+    # the ③ LEGS strip has ~130px for this, beside two other readings.
+    assert calc.compact_money(65_700.0) == "$65,700"
+    assert calc.compact_money(120_000.0) == "$120K"
+    assert calc.compact_money(2_488_000.0) == "$2.49M"
+    assert calc.compact_money(-2_488_000.0, signed=True) == "-$2.49M"
+
+
+def test_compact_money_zero_is_a_reading_not_a_blank():
+    assert calc.compact_money(0.0) == "$0"
+
+
+def test_leg_strip_facts_reads_the_legs():
+    legs = [{"option_type": "put", "side": "short", "strike": 660, "premium": 3.0, "qty": 1},
+            {"option_type": "put", "side": "long", "strike": 655, "premium": 1.2, "qty": 1}]
+    facts = calc.leg_strip_facts(legs)
+    assert facts["count"] == "2 LEGS"
+    assert facts["net"] == "NET +$180"
+    assert facts["net_tone"] == "pos"
+    assert facts["max_loss"] == "MAX LOSS $320"
+
+
+def test_leg_strip_facts_em_dashes_an_unpriced_template():
+    # build_default_legs sets premium=None on every leg, so this is the state of
+    # every fresh template before Fetch Premiums. "NET $0" would state a figure
+    # the page does not have.
+    legs = [{"option_type": "put", "side": "short", "strike": 660, "premium": None, "qty": 1},
+            {"option_type": "put", "side": "long", "strike": 655, "premium": None, "qty": 1}]
+    facts = calc.leg_strip_facts(legs)
+    assert facts["net"] == "NET —"
+    assert facts["net_tone"] == "dim"
+    assert facts["max_loss"] == "MAX LOSS —"
+
+
+def test_leg_strip_facts_em_dashes_an_unbounded_loss():
+    legs = [{"option_type": "call", "side": "short", "strike": 700, "premium": 2.0, "qty": 1}]
+    facts = calc.leg_strip_facts(legs)
+    assert facts["count"] == "1 LEG"
+    assert facts["net"] == "NET +$200"
+    assert facts["max_loss"] == "MAX LOSS —"
+
+
+def test_leg_strip_facts_marks_a_debit_negative():
+    legs = [{"option_type": "call", "side": "long", "strike": 670, "premium": 4.0, "qty": 1}]
+    facts = calc.leg_strip_facts(legs)
+    assert facts["net"] == "NET -$400"
+    assert facts["net_tone"] == "neg"
+
+
+def test_leg_strip_facts_on_no_legs():
+    facts = calc.leg_strip_facts([])
+    assert facts["count"] == "0 LEGS"
+    assert facts["net"] == "NET +$0"
+
+
+# ── the two derived copy lines ──────────────────────────────────────────────
+
+def test_results_panel_names_which_wait_it_is():
+    idle = calc.chain_status_facts(loading=False, symbol="", chain=None)
+    before = calc.results_panel_facts(idle, has_result=False)
+    assert before["label"] == "AWAITING CHAIN"
+
+    ready = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
+    after = calc.results_panel_facts(ready, has_result=False)
+    assert after["label"] == "AWAITING CALCULATION"
+    assert after["hint"] != before["hint"]
+
+
+def test_results_panel_is_none_once_a_result_lands():
+    ready = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
+    assert calc.results_panel_facts(ready, has_result=True) is None
+
+
+def test_results_panel_while_loading_still_awaits_the_chain():
+    busy = calc.chain_status_facts(loading=True, symbol="SPY", chain=None)
+    assert calc.results_panel_facts(busy, has_result=False)["label"] == "AWAITING CHAIN"
+
+
+def test_chain_line_says_what_to_do_next():
+    idle = calc.chain_status_facts(loading=False, symbol="", chain=None)
+    assert "tab out" in calc.chain_line(idle, "", 0, 0)
+
+    busy = calc.chain_status_facts(loading=True, symbol="SPY", chain=None)
+    assert calc.chain_line(busy, "SPY", 0, 0) == "fetching option chain · SPY"
+
+    ready = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
+    assert calc.chain_line(ready, "SPY", 6, 48) == "48 strikes · 6 expiries"
+
+
+def test_matrix_note_names_the_percentage_basis():
+    data = _matrix_data()
+    assert calc.matrix_note_text(data, calc.matrix_basis({"max_profit": 180.0})) \
+        == f"PRICE × DATE · {len(data)} ROWS · % OF MAX RETURN"
+    assert "% OF COST" in calc.matrix_note_text(
+        data, calc.matrix_basis({"max_profit": calc.UNLIMITED, "entry_credit": -400.0}))
+    assert "NO PERCENTAGE BASIS" in calc.matrix_note_text(data, calc.matrix_basis({}))
+
+
+def test_tag_tone_colours_only_the_cash_flow_chip():
+    assert calc.tag_tone("CREDIT", first=True) == "pos"
+    assert calc.tag_tone("DEBIT", first=True) == "warn"
+    assert calc.tag_tone("CREDIT", first=False) == "muted"
+    assert calc.tag_tone("2 LEGS", first=False) == "muted"
+
+
+# ── the rebuilt screen ──────────────────────────────────────────────────────
+
+def test_render_wears_the_calc_v3_scope_and_not_the_shared_navy_one():
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert "calc-v3" in src
+    assert "calc-v2" not in src, "the Calculator must not restyle the Simulator scope"
+    assert "QUASAR_INTERNAL_CSS" not in src, "that block is scoped .calc-v2"
+
+
+def test_render_mounts_the_card_leg_editor_with_the_calc_palette():
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert 'layout="card"' in src
+    assert "delta_for=" in src, "the DELTA column collapses without a source"
+    assert "min_legs=" in src
+    assert "on_reset=" in src
+
+
+def test_render_keeps_the_top_level_expiry_inside_the_applying_guard():
+    # Programmatic expiry writes must not fire _on_expiry_change, or the legs are
+    # re-propagated mid-load. The design drops the top-level Expiry; the real page
+    # needs it for calc_compute's expiry argument.
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert src.count('state["applying"] = True') == 2
+    assert src.count('state["applying"] = False') == 2
+    assert "expiry_sel" in src
+
+
+def test_render_preserves_every_wired_behaviour():
+    import inspect
+    src = inspect.getsource(calc.render)
+    for fn in ("def _capture", "def _restore", "def _seed_template", "def _scale_leg_qty",
+               "def _on_contracts_change", "def _on_expiry_change", "def fetch_premiums",
+               "def load_symbol", "def _load_timeout", "def _symbol_submit",
+               "def fetch_iv", "def do_calc", "def send_to_em", "def _apply_chain",
+               "def _apply_result", "def _apply_iv", "async def _poll_chain",
+               "def _poll_result", "def _poll_iv", "def _prefill"):
+        assert fn in src, f"render() lost {fn!r}"
+    assert "take_pending_calculator()" in src
+    assert "take_pending_calculator_legs()" in src
