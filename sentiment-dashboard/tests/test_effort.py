@@ -169,3 +169,17 @@ def test_confidence_scales_with_bars():
     lo = score_effort(_bars(n=12)).confidence
     hi = score_effort(_bars(n=25)).confidence
     assert 0.0 < lo < hi <= 1.0
+
+
+def test_num_rejects_non_finite_values():
+    """`_num` is the parsing guard: a NaN or inf is not a usable number and must
+    read as missing, so `_clean` drops the bar. Without this a single NaN field
+    reached `_clamp`, which returns its HIGH bound for NaN -- one bad bar pinned
+    the sub-signal to its maximum at UNCHANGED confidence. Mirrors the sibling
+    guard in scoring/order_flow.py.
+    """
+    from math import inf, nan
+    from scoring.effort import _num
+    assert _num(nan) is None
+    assert _num(inf) is None and _num(-inf) is None
+    assert _num("3.5") == 3.5 and _num(2) == 2.0 and _num(None) is None

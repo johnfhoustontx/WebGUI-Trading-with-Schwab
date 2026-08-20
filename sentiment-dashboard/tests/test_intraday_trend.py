@@ -162,3 +162,41 @@ def test_commit_state_needs_two_reads_to_flip():
     assert committed == "range"
     committed, hist = commit_state("bull_trend", hist, committed)
     assert committed == "bull_trend"
+
+
+# ── NaN hardening (2026-08-20) ──────────────────────────────────────
+# A NaN survives `is not None` and `not x`, then `_clamp(nan, lo, hi)` returns
+# the HIGH bound (min(hi, nan) is hi), so an absent reading rendered as a
+# confident MAXIMUM one. These pin the missing-input policy each function
+# already declares for None.
+
+def test_score_vix_context_treats_a_nan_vix_as_no_reading():
+    """A NaN VIX passed `not vix` and `vix <= 0`, then clamped to the top of
+    every band: measured score 70.0 at confidence 1.0 -- a confidently bullish
+    trend read produced from no data at all."""
+    from math import nan
+    from scoring.intraday_trend import score_vix_context
+    r = score_vix_context(nan, 0.0, None, None)
+    assert r.score == 50.0 and r.confidence == 0.0
+
+
+def test_score_vix_context_treats_a_nan_change_as_no_reading():
+    from math import nan
+    from scoring.intraday_trend import score_vix_context
+    r = score_vix_context(18.0, nan, None, None)
+    assert r.score == 50.0 and r.confidence == 0.0
+
+
+def test_score_breadth_dir_drops_a_nan_component_instead_of_maxing_it():
+    """NaN net_ad clamped to +1 at weight 0.4 -> score 100.0 (maximum bullish
+    breadth). It must drop out exactly as None does."""
+    from math import nan
+    from scoring.intraday_trend import score_breadth_dir
+    assert score_breadth_dir(nan, None, 0, 0) == score_breadth_dir(None, None, 0, 0)
+
+
+def test_score_sector_participation_drops_a_nan_spread():
+    from math import nan
+    from scoring.intraday_trend import score_sector_participation
+    assert (score_sector_participation(5, 11, nan)
+            == score_sector_participation(5, 11, None))

@@ -125,9 +125,14 @@ def test_the_rate_guard_would_actually_catch_a_re_fork():
 
 # ── C6: 16:00 ET expiry settlement, calculator-consistent T ──────────────────
 
-def test_expiry_time_to_years_settles_at_1600_naive():
-    """3 hours before the 16:00 close on expiry day → ~3/24/365 years."""
-    ref = datetime(2026, 6, 30, 13, 0, 0)   # naive wall clock, 1pm on expiry day
+def test_expiry_time_to_years_settles_at_1600_et_from_a_naive_ct_ref():
+    """3 hours before the 16:00 ET close on expiry day -> ~3/24/365 years.
+
+    The ref is naive, which this project reads as CENTRAL: 12:00 CT = 13:00 ET.
+    (Was written as a naive 13:00 expecting 3h, which silently asserted the
+    naive clock was Eastern -- the bug fixed 2026-08-20.)
+    """
+    ref = datetime(2026, 6, 30, 12, 0, 0)   # 12:00 CT = 13:00 ET on expiry day
     T = expiry_time_to_years(ref, date(2026, 6, 30))
     assert T == pytest.approx(3.0 / 24.0 / 365.0, rel=1e-6)
 
@@ -138,7 +143,7 @@ def test_expiry_time_to_years_zero_after_close():
 
 
 def test_expiry_time_to_years_multiday():
-    ref = datetime(2026, 6, 30, 16, 0, 0)   # exactly at close, 3 days before expiry
+    ref = datetime(2026, 6, 30, 15, 0, 0)   # 15:00 CT = 16:00 ET, exactly at close
     T = expiry_time_to_years(ref, date(2026, 7, 3))
     assert T == pytest.approx(3.0 / 365.0, rel=1e-6)
 
@@ -171,11 +176,16 @@ def _snap_with_history(prices, as_of):
                          contracts=[], price_history=pd.Series(prices, index=ts))
 
 
-def test_replay_T_uses_1600_not_1500():
-    """At 15:30 on expiry day, T reflects 0.5h-to-16:00, NOT a negative/zero
-    (which the old naive hour=15 produced — 15:30 was already 'past' the 15:00
-    close). The last bar's theo price must carry residual time value."""
-    as_of = datetime(2026, 6, 30, 15, 30, 0)
+def test_replay_T_uses_the_1600_et_close():
+    """At 14:30 CT = 15:30 ET on expiry day, T reflects 0.5h-to-the-close and the
+    last bar carries residual time value.
+
+    This test previously used a naive 15:30 and called it 15:30 ET, which is what
+    pinned the one-hour overstatement in place: against a CT clock that instant is
+    30 minutes PAST the close, and Replay was showing live premium on a dead
+    option. 14:30 CT is the instant it meant to describe.
+    """
+    as_of = datetime(2026, 6, 30, 14, 30, 0)
     snap = _snap_with_history(np.full(5, 100.0), as_of)
     contract = ContractRow(strike=100.0, kind="call", bid=1.0, ask=1.1, mid=1.05,
                            iv=0.30, expiry=date(2026, 6, 30))
@@ -191,7 +201,7 @@ def test_replay_T_uses_1600_not_1500():
 
 
 def test_ivshock_T_uses_1600():
-    as_of = datetime(2026, 6, 30, 15, 0, 0)   # exactly 1h to the 16:00 close
+    as_of = datetime(2026, 6, 30, 14, 0, 0)   # 14:00 CT = 15:00 ET, 1h to close
     snap = ChainSnapshot(spot=100.0, as_of=as_of, r=RISK_FREE_RATE, contracts=[],
                          price_history=pd.Series(dtype=float))
     contract = ContractRow(strike=100.0, kind="call", bid=1.0, ask=1.1, mid=1.05,
@@ -248,3 +258,43 @@ def test_expiry_close_hour_stays_1600_et_despite_curb_trading():
     exp = date(2026, 8, 21)                              # a Friday expiry
     assert expiry_time_to_years(datetime(2026, 8, 21, 16, 0, tzinfo=et), exp) == 0.0
     assert expiry_time_to_years(datetime(2026, 8, 21, 16, 10, tzinfo=et), exp) == 0.0
+
+
+# ── 2026-08-20: naive wall-clock is CENTRAL, not Eastern ─────────────────────
+# Every naive producer feeding this helper is CT: options_simulator/data.py
+# explicitly does .tz_convert("America/Chicago").tz_localize(None) on the price
+# history, and `as_of=datetime.now()` is host-local on a CT machine. Settling a
+# naive ref at a naive 16:00 therefore measured to 16:00 CT = 17:00 ET, an hour
+# PAST the real close, so Replay and IV-shock priced every bar with T + 1 hour.
+
+def test_naive_ref_is_interpreted_as_central_time():
+    """13:00 naive is 13:00 CT = 14:00 ET, so 2 hours remain to the 16:00 ET
+    close -- not the 3 the ET reading gave."""
+    ref = datetime(2026, 6, 30, 13, 0, 0)
+    T = expiry_time_to_years(ref, date(2026, 6, 30))
+    assert T == pytest.approx(2.0 / 24.0 / 365.0, rel=1e-6)
+
+
+def test_naive_1500_is_exactly_the_close():
+    """15:00 CT IS 16:00 ET: the option is dead, T must be 0."""
+    assert expiry_time_to_years(datetime(2026, 6, 30, 15, 0, 0),
+                                date(2026, 6, 30)) == 0.0
+
+
+def test_naive_after_1500_is_zero_not_residual_time_value():
+    """15:30 CT is half an hour PAST the close. The old basis reported 0.5h of
+    remaining life here, so Replay showed live time value on a dead option."""
+    assert expiry_time_to_years(datetime(2026, 6, 30, 15, 30, 0),
+                                date(2026, 6, 30)) == 0.0
+
+
+@pytest.mark.parametrize("hour, minute", [(9, 0), (12, 30), (14, 59)])
+def test_naive_and_aware_paths_agree_on_the_same_instant(hour, minute):
+    """The invariant that makes the two branches coherent: a naive CT wall-clock
+    and the tz-aware datetime denoting the SAME instant must yield the same T."""
+    from zoneinfo import ZoneInfo
+    naive = datetime(2026, 6, 30, hour, minute, 0)
+    aware = naive.replace(tzinfo=ZoneInfo("America/Chicago"))
+    exp = date(2026, 6, 30)
+    assert expiry_time_to_years(naive, exp) == pytest.approx(
+        expiry_time_to_years(aware, exp), rel=1e-9)

@@ -5275,6 +5275,34 @@ def time_to_expiry_years(now_dt, expiry_date):
     return _year_fraction(now_dt, _expiry_settlement(expiry_date))
 
 
+_SIM_MIN_DAYS = 0.01   # sweep-stability floor (~14 min), not a time convention
+
+
+def _leg_days_to_expiry(expiry, elapsed=0.0, now=None):
+    """DAYS to ``expiry``'s 16:00 ET close after ``elapsed`` days from ``now``.
+
+    Fractional and intraday-aware: a 0-DTE leg at 11:00 ET returns 5/24, not the
+    ``_SIM_MIN_DAYS`` floor. The What-if sweep previously used whole-day
+    ``(exp - today).days``, which pinned EVERY 0-DTE leg (and its P/L baseline)
+    at 0.01 days regardless of the hours actually left -- a 4.6x understatement
+    at five hours to the close, and inconsistent with the Replay and IV-shock
+    engines on the same page (fixed 2026-08-20).
+
+    Tolerates a string ``expiry`` (test doubles use strings); an unparseable one
+    degrades to the elapsed-only floor, as before.
+    """
+    import datetime as dt
+
+    if isinstance(expiry, str):
+        try:
+            expiry = dt.date.fromisoformat(expiry[:10])
+        except ValueError:
+            return max(float(elapsed), _SIM_MIN_DAYS)
+    now = now or dt.datetime.now(_MARKET_TZ)
+    days_now = time_to_expiry_years(now, expiry) * 365.0
+    return max(days_now - float(elapsed), _SIM_MIN_DAYS)
+
+
 def calc_iv(spot, strike, option_type, mark, expiry, rate=None, now=None) -> dict:
     """Imply IV (percent) from an option ``mark`` at the intraday time-to-expiry.
 
@@ -5504,19 +5532,10 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
         resolved.append((c, sign, int(leg.get("qty", 1))))
     pos = seng.Position.from_legs(resolved, label=f"{snap.symbol} {len(resolved)}-leg")
 
-    today = _dt.date.today()
-
     def _days_after(c, elapsed):
-        """Each leg's days-to-expiry after ``elapsed`` days from now (>=0.01).
-        Tolerates a string or date ``expiry`` (test doubles use strings)."""
-        exp = c.expiry
-        if isinstance(exp, str):
-            try:
-                exp = _dt.date.fromisoformat(exp[:10])
-            except ValueError:
-                return max(float(elapsed), 0.01)
-        dte_now = max((exp - today).days, 0)
-        return max(dte_now - float(elapsed), 0.01)
+        """Each leg's days-to-expiry after ``elapsed`` days from now. Intraday-
+        aware via the shared settlement convention -- see _leg_days_to_expiry."""
+        return _leg_days_to_expiry(c.expiry, elapsed)
 
     s_range = np.linspace(snap.spot * 0.8, snap.spot * 1.2, 81)
     whatif_eng = seng.WhatIfEngine(snap)

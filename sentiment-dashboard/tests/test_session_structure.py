@@ -128,3 +128,17 @@ def test_missing_keys_do_not_raise():
     bars = _rising_above_vwap()
     bars[3] = {"high": 100.0, "close": 100.5}   # missing low/volume -> dropped
     assert isinstance(score_session_structure(bars), SessionStructure)
+
+
+def test_num_rejects_non_finite_values():
+    """`_num` is the parsing guard: a NaN or inf is not a usable number and must
+    read as missing, so `_clean` drops the bar. Without this a single NaN field
+    reached `_clamp`, which returns its HIGH bound for NaN -- one bad bar pinned
+    the sub-signal to its maximum at UNCHANGED confidence. Mirrors the sibling
+    guard in scoring/order_flow.py.
+    """
+    from math import inf, nan
+    from scoring.session_structure import _num
+    assert _num(nan) is None
+    assert _num(inf) is None and _num(-inf) is None
+    assert _num("3.5") == 3.5 and _num(2) == 2.0 and _num(None) is None

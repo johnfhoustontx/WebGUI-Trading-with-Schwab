@@ -5334,3 +5334,52 @@ def test_build_gamma_read_hedge_fields_none_without_0dte():
     neg = compute.build_gamma_read("$SPX", 7723.0, {}, {}, {"hedge_pressure": -5e8},
                                    {}, {}, {})
     assert neg.hedge_direction == "sell"
+
+
+# ── What-if intraday DTE (2026-08-20) ───────────────────────────────────────
+
+def test_leg_days_to_expiry_counts_intraday_hours_for_a_0dte_leg():
+    """The What-if sweep took whole-day DTE (`(exp - today).days`) floored at
+    0.01 days, so EVERY 0-DTE leg priced at T = 14 minutes no matter how many
+    hours actually remained -- at 10:00 CT with 5 hours left that understates an
+    ATM value by sqrt(0.2083/0.01) = 4.6x, and the What-if P/L is measured
+    against that same wrong baseline.
+
+    This is the convention the Calculator already uses (calendar hours to the
+    16:00 ET close / 365); the What-if is now on it too.
+    """
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+    days = compute._leg_days_to_expiry(dt.date(2026, 6, 30), 0.0, now=now)
+    assert days == pytest.approx(5.0 / 24.0, rel=1e-6)
+
+
+def test_leg_days_to_expiry_includes_todays_fraction_for_a_multiday_leg():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+    days = compute._leg_days_to_expiry(dt.date(2026, 7, 5), 0.0, now=now)
+    assert days == pytest.approx(5.0 + 5.0 / 24.0, rel=1e-6)
+
+
+def test_leg_days_to_expiry_subtracts_elapsed_and_floors():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert compute._leg_days_to_expiry(dt.date(2026, 7, 5), 3.0, now=now) == (
+        pytest.approx(2.0 + 5.0 / 24.0, rel=1e-6))
+    # elapsed past the expiry floors rather than going negative
+    assert compute._leg_days_to_expiry(dt.date(2026, 7, 5), 99.0, now=now) == 0.01
+
+
+def test_leg_days_to_expiry_tolerates_a_string_expiry():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert compute._leg_days_to_expiry("2026-06-30", 0.0, now=now) == pytest.approx(
+        compute._leg_days_to_expiry(dt.date(2026, 6, 30), 0.0, now=now))

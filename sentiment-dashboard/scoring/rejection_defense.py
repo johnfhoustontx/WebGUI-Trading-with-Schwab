@@ -43,9 +43,12 @@ def _mean(xs):
 
 def _num(x):
     try:
-        return float(x)
+        v = float(x)
     except (TypeError, ValueError):
         return None
+    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
+        return None
+    return v
 
 
 def _clean(bar):

@@ -124,16 +124,24 @@ def score_complex(term_result: ScoreResult,
     the legacy 15/10/5 composite weights, normalized to 1.0 within the
     combined 30% VIX Complex slot).
 
-    The resulting confidence is the same weighted blend of the
-    sub-confidences. A sub-component with ``score == 0`` (undefined)
-    contributes 0 to both numerators.
+    An undefined sub-component (``score == 0``) DROPS OUT: the score is
+    renormalized over the weight actually present, matching ``composite.blend``
+    and every other blend in this package. Before 2026-08-20 it contributed a
+    zero to the numerator with no change to the denominator, which dragged the
+    published score toward 1 whenever $VIX1D was unavailable (routine off-hours).
+
+    The confidence is deliberately NOT renormalized -- it stays the weighted sum
+    of the sub-confidences, so a reading resting on fewer components is
+    down-weighted by the top-level composite exactly as before.
     """
     w_term = VIX_SUB_WEIGHTS["term"]
     w_v1d = VIX_SUB_WEIGHTS["vix1d"]
     w_slope = VIX_SUB_WEIGHTS["slope"]
-    raw = (w_term * term_result.score
-           + w_v1d * vix1d_result.score
-           + w_slope * slope_result.score)
+    present = [(w, r) for w, r in ((w_term, term_result),
+                                   (w_v1d, vix1d_result),
+                                   (w_slope, slope_result)) if r.score > 0]
+    den = sum(w for w, _ in present)
+    raw = (sum(w * r.score for w, r in present) / den) if den > 0 else 0.0
     conf = (w_term * term_result.confidence
             + w_v1d * vix1d_result.confidence
             + w_slope * slope_result.confidence)

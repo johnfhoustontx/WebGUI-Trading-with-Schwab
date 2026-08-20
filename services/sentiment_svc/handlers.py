@@ -303,12 +303,16 @@ def _record_market_state(trend):
         log.exception("market state record failed")
 
 
-def _is_rth_now() -> bool:
-    """Mon-Fri 08:30-15:00 CT (mirrors the page's is_rth)."""
-    now = _dt.datetime.now(_ZI("America/Chicago"))
-    if now.weekday() >= 5:
-        return False
-    return (8, 30) <= (now.hour, now.minute) < (15, 0)
+def _is_rth_now(now=None) -> bool:
+    """Mon-Fri, NOT a holiday, 08:30 <= t < 15:00 CT.
+
+    Delegates to :func:`scheduler._is_rth` -- the one gate, holiday-aware via
+    ``shared/market_calendar`` and exclusive at the 15:00 close. This used to
+    hand-roll a weekday + clock test with NO holiday check while its docstring
+    claimed to mirror the scheduler, so intraday recording and regime publishing
+    ran through every NYSE holiday (fixed 2026-08-20).
+    """
+    return scheduler._is_rth(now or _dt.datetime.now(_ZI("America/Chicago")))
 
 
 def _intraday_values(live, trend):

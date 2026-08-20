@@ -873,10 +873,11 @@ has its own design/plan pair under `docs/plans/`. **Add new work to those, not t
 — see the maintenance banner at the top.
 
 **A NaN clamps to the HIGH bound, so "no reading" renders as an EXTREME reading —
-the trap behind two separate bugs in `sentiment_svc/compute.py`.** Every
+the trap behind FIVE separate bugs, across two tiers.** Every
 `scoring/*` module defines its own private `_clamp(v, lo, hi) = max(lo, min(hi, v))`,
 and `min(hi, nan)` returns **`hi`**. So an unguarded non-finite indicator does not
-degrade — it pins the maximum. It bit the SECTOR sub-score first
+degrade — it pins the maximum. In `sentiment_svc/compute.py` it bit the SECTOR
+sub-score first
 (`score_sector_participation(5, 11, nan)` → 67.27 at confidence **1.0**, maximum
 cyclical leadership), fixed by `_finite_pcts`; then the PRICE sub-score, where an
 all-NaN read scored **92.50 at confidence 1.0** through `compute_intraday_trend`
@@ -884,6 +885,26 @@ all-NaN read scored **92.50 at confidence 1.0** through `compute_intraday_trend`
 — a data outage rendering as a confident buy signal, fixed 2026-08-17 by
 **`_finite_score_price`**, the single guarded wrapper BOTH price call sites go
 through. Both filters share `_as_finite`.
+
+**An audit on 2026-08-20 found the same trap still open in FOUR more scorers**, so
+treat the guarded list as evidence of where someone has looked, never as evidence
+that the surface is covered. Two distinct holes, each fixed at its own layer:
+- **`_num` was not the guard it looked like.** `effort`, `rejection_defense` and
+  `session_structure` each define a `_num` whose contract is "a usable number or
+  `None`" — but they only caught `TypeError`/`ValueError`, so a **NaN passed
+  straight through** while a `None` was caught. One NaN volume in a 30-day tail
+  pinned effort's `updown_vol` **0.0039 → 1.0** (maximum motivated buying) at
+  **unchanged confidence 1.0**. The sibling `order_flow._num` had rejected
+  non-finites all along; the three now match it. This is completing a parsing
+  guard, **not** the `_clamp` shortcut banned below.
+- **`is not None` does not mean "present".** `intraday_trend`'s scorers each declare
+  their own missing-input policy (drop the component, or return confidence 0) and
+  tested it with `x is not None` / `not x` — both of which a NaN survives.
+  Measured: `score_vix_context(nan, …)` returned **70.0 at confidence 1.0**, a
+  confidently bullish trend read from no data, and `score_breadth_dir(nan, …)`
+  returned **100.0**, maximum bullish breadth. They now run inputs through a local
+  `_finite()` first, which extends each function's OWN stated policy rather than
+  overriding a caller's intent.
 
 **Do not "fix" this in `_clamp` itself** — it looks like the one-line cure and is
 not. `_clamp` is **duplicated nine times** across `sentiment-dashboard/scoring/`
@@ -895,6 +916,32 @@ inside the primitive — a NaN reaching `_clamp(50 + 50*direction, 0, 100)` mean
 reaching `_clamp(n_timeframes/3, 0, 1)` means "confidence 0", not the midpoint 0.5.
 **Only the caller knows what a missing input implies**, which is why the guard
 belongs at the call site. When you add a new scorer call, filter its inputs there.
+
+**`shared/analysis_lib/technical.calculate_adx` was wrong for years, and a
+characterization test pinned the wrong value in place (fixed 2026-08-20).** Its
+`-DM` was built from `|delta_low|` rather than the signed `-delta_low`, so a
+*rising* low was booked as downward movement; the direction gate `minus_dm < 0`
+was tautological; and the `-DM` branch compared against an **already-filtered**
+`plus_dm` (the line above reassigned it), so a tie zeroed the up-move and then
+handed the bar to the down side. Measured on a realistic mixed tape: **76.58 vs a
+textbook 32.5**. A dead-flat series read **ADX 100** — maximum trend strength —
+which is why the regime classifier leaned Trending on exactly the tapes that are
+not trending. Clean one-sided trends coincidentally still read ~100 (the DI sides
+invert but the magnitude survives), which is how it went unnoticed.
+
+**Two lessons worth more than the fix.** (1) `test_adx_uses_wilder_smoothing`
+pinned `47.0052` — the buggy output — because a characterization test records
+what the code *does*, and only a test written against an INDEPENDENT reference
+records what it *should*. The replacements are property-based (a flat tape is not
+a trend; mirroring a series cannot change trend STRENGTH) plus an equivalence
+against `trade_svc.compute._adx_series`, which had the formula right the whole
+time. (2) The 2026-07-01 audit closed a finding claiming "+DM/-DM rule & DX were
+already correct; only smoothing changed" — that claim was simply false, and it
+bought three more weeks of a wrong needle. ⚠ The two implementations **seed
+differently on purpose** (`calculate_adx` drops the leading NaN and uses an SMA
+seed, the TOS/TradingView convention; `_adx_series` uses `ewm`'s own warmup), so
+they agree only once warmup has decayed — identical at 250 bars, 0.70 apart at 60.
+Compare them on a long series or not at all.
 
 **⚠ Known open issue — Sector & Industry and Sector Rotation can print OPPOSITE
 regime verdicts (not fixed; found 2026-08-17).** The two adjacent tabs each
@@ -1034,6 +1081,41 @@ source of truth" — while `gamma_tool` still carried five `0.045` literals and
 that had been converted, so the claim and the guard were both narrower than they read.
 A **source-level** guard in that file now fails on any new rate literal in the pricing
 modules, which is the part a value check cannot do.
+
+**A TZ-NAIVE datetime in this project means CENTRAL time, and getting that wrong
+cost an hour of phantom option value on three screens (fixed 2026-08-20).**
+`options_simulator/data.py` builds its price-history index with
+`.tz_convert("America/Chicago").tz_localize(None)` — the documented project-wide
+convention — and `as_of=datetime.now()` is host-local on the CT box. But
+`options_calculator.expiry_time_to_years`'s naive branch settled against a **naive
+16:00**, i.e. 16:00 CT = **17:00 ET**, an hour past the real close. Every Replay
+bar and IV-shock theo priced with **T + 1 hour** (a 0-DTE ATM at 14:00 CT showed
+$5.80 against a true $4.10, and options still carried time value 30 minutes after
+they were dead). The naive branch now **localizes to `NAIVE_WALLCLOCK_TZ`** so
+both branches resolve to the one settlement instant, 16:00 America/New_York.
+
+⚠ **This was introduced by a "fix".** Audit item C6 moved that branch from
+`hour=15` to `hour=16` and wrote tests asserting a naive 13:00 leaves three hours
+— which silently asserts the naive clock is Eastern. The pre-C6 `hour=15` had been
+**correct for CT input all along**. The lesson is in the test shape: a test over a
+naive datetime cannot state which zone it means, so it pins whatever the code
+does. The guard that actually holds is
+`test_naive_and_aware_paths_agree_on_the_same_instant` — a naive CT wall-clock and
+the tz-aware datetime for the same instant must return the same T.
+
+**Two more time-basis bugs shared that root and are fixed with it.**
+`_leg_expiry_years` (the Calculator's P&L grid) hand-rolled its own
+`datetime(y, m, d, 16)` against a naive `now()`, so the grid's "Now" column
+disagreed with the summary tiles above it and the T=0 "Exp" column printed ~$4/share
+of time value instead of the kinked payoff; it now delegates to
+`expiry_time_to_years`. And the Simulator's **What-if** sweep took whole-day DTE
+(`(exp - today).days`) floored at 0.01 days, so every 0-DTE leg — and the P/L
+baseline it is measured against — priced at T ≈ 14 minutes no matter how many
+hours remained: a **4.6× understatement** at five hours to the close, on the same
+page whose other two engines were intraday-aware. It now calls the new
+`compute._leg_days_to_expiry`. **Rule: never compute a time-to-expiry inline.
+There is one settlement instant (16:00 ET) and one helper per tier —
+`options_calculator.expiry_time_to_years` and `options_svc.compute.time_to_expiry_years`.**
 
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
@@ -1607,10 +1689,10 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
-.venv\Scripts\python -m pytest services\sentiment_svc  # 293 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1177
+.venv\Scripts\python -m pytest services\sentiment_svc  # 321 passed / 1 documented-baseline fail
+.venv\Scripts\python -m pytest services\options_svc    # 1181
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
-.venv\Scripts\python -m pytest services\trade_svc      # 74
+.venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239
 .venv\Scripts\python -m pytest services\market_svc     # 73
 .venv\Scripts\python -m pytest shared\bus              # 25
@@ -1620,7 +1702,9 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv\Scripts\python -m pytest tools\tests             # 816
 ```
 
-**Every count above is a 2026-08-19 measurement.** The five this file previously
+**Every count above is a 2026-08-20 measurement** -- the accuracy-audit batch (ADX,
+put charm, the CT/ET time basis, the VIX blend, the NaN guards) added tests to five
+suites. **The five this file previously
 flagged as *unverified — measure your own baseline* (portfolio_svc, trade_svc,
 driver_svc, `shared/bus`, `shared/contracts`) were all measured that day and had
 drifted far from their written values (driver_svc 162 → 239, `shared/bus` 15 → 25),
@@ -1649,8 +1733,8 @@ read them as a regression:**
   `test_apply_sector_perf_renders_from_merged_map`), failing with
   `ModuleNotFoundError: No module named 'sentiment_dashboard'`. They test the old
   **Tk UI entrypoint, which this repo deliberately never copied** (see the folder
-  map), so they can never pass here. Suite reads **487 passed / 2 failed**;
-  first measured 2026-08-14.
+  map), so they can never pass here. Suite reads **496 passed / 2 failed**
+  (2026-08-20; 487 on 2026-08-14, before the NaN-guard and VIX-blend tests).
 - **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
   reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
@@ -1680,8 +1764,9 @@ The counts in the block above are indicative, not pinned. **All of them were
 re-measured 2026-08-19** on `claude/market-dashboard-updates`, after the dependency
 refresh (pillow / setuptools / aiohttp / cryptography) — so they are a post-bump
 baseline, which is the useful thing to compare a suspected dependency regression
-against. The three large suites: **webgui 1986 green**, **options_svc 1177 green**,
-**options-scanner 1470 passed / 11 failed / 2 skipped**. Also **schwab-proxy 98**
+against. The three large suites, re-measured **2026-08-20**: **webgui 2309 green**
+(1986 on 08-19; the Bull/Bear map landed in between), **options_svc 1181 green**,
+**options-scanner 1486 passed / 11 failed / 3 skipped**. Also **schwab-proxy 98**
 (worth its own line — it is the only suite that exercises the Schwab OAuth stack, so
 it is the one that would catch a `cryptography` bump going wrong).
 
@@ -1689,7 +1774,7 @@ it is the one that would catch a `cryptography` bump going wrong).
 dead-code cleanup — the count FELL from 1912 because ~86 tests were deleted with the
 subjects they pinned (the Highcharts scatter/ribbon/RRG builders and the stranded
 `pages/sentiment.py` helpers), which is the one situation where a dropping count is
-the healthy signal.) **sentiment_svc reads 293 passed / 1 failed** — the documented
+the healthy signal.) **sentiment_svc reads 321 passed / 1 failed** — the documented
 `test_daily_history_wins_over_session_latch`.
 
 ## External processes (not in this repo)

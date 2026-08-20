@@ -378,6 +378,21 @@ breakpoints 0.80 / 0.88 / 0.98 / 1.05 / 1.15.
 **Term slope** — `score_term_slope(vix9d, vix)` on `slope = vix9d / vix`:
 breakpoints 0.85 / 0.92 / 1.00 / 1.05.
 
+**Merging the three** — an undefined sub-score (`score == 0`, e.g. `$VIX1D` absent
+off-hours) **drops out** and the rest are renormalized over the weight actually
+present, the same shape as the Put/Call blend below:
+
+```
+score      = Σ(w · s  for present subs) / Σ(w for present subs)   # clamp 1..10
+confidence = Σ(w · c  over ALL THREE subs)                        # NOT renormalized
+```
+
+The confidence is deliberately left un-normalized: with `$VIX1D` missing it reads
+0.67, which is how the top-level composite down-weights a thinner reading. Before
+2026-08-20 the *score* was not renormalized either, so a missing sub contributed a
+zero and dragged the published value toward 1 — term 6 + slope 8 printed **4**
+where the two present components average **6.5**.
+
 ## Put/Call
 
 **File:** `scoring/put_call.py`
@@ -832,16 +847,29 @@ RSI = 100 - 100 / (1 + avg_gain/avg_loss)
 
 Defaults to 50.0 on insufficient data. Reference bands: oversold 30, overbought 70.
 
-**ADX** — `calculate_adx(df, period=14)`:
+**ADX** — `calculate_adx(df, period=14)`. Wilder's directional movement, then
+Wilder smoothing (RMA, `alpha = 1/period`) at every stage:
 
 ```
-+DI = 100 · EMA(+DM, 14) / EMA(TR, 14)
--DI = 100 · EMA(-DM, 14) / EMA(TR, 14)
-DX  = 100 · |+DI - -DI| / (+DI + -DI)
-ADX = EMA(DX, 14)
+up   = high - high[-1]            # signed
+down = low[-1] - low              # signed: a RISING low is a NEGATIVE down-move
++DM  = up    if (up > down   and up > 0)   else 0
+-DM  = down  if (down > up   and down > 0) else 0
++DI  = 100 · RMA(+DM, 14) / RMA(TR, 14)
+-DI  = 100 · RMA(-DM, 14) / RMA(TR, 14)
+DX   = 100 · |+DI - -DI| / (+DI + -DI)
+ADX  = RMA(DX, 14)
 ```
 
-(TR = true range; +DM/−DM = directional movement.) >25 ≈ strong trend.
+(TR = true range.) >25 ≈ strong trend; an inside day yields **neither** +DM nor -DM.
+
+⚠ The two comparisons above are against the **raw** `up`/`down`, and `down` carries
+its sign. Until 2026-08-20 this function used `|Δlow|`, which books every up-day as
+downward movement too, and compared `-DM` against an already-filtered `+DM`. It read
+**76.6 where the true value is 32.5** on a realistic tape, and a **dead-flat series
+read ADX 100**. ADX feeds the Day trend needle, the Week/Month structural arcs, the
+regime classifier's *trending* tells and the Trade page's momentum block, so readings
+recorded before that date are not comparable with ones after it.
 
 **MACD** — `calculate_macd(df, fast=12, slow=26, signal=9)`:
 
@@ -1188,7 +1216,12 @@ shifts IV at every point for shock scenarios. With `per_leg_expiry=True` each le
 priced at **its own** time-to-expiry per column (`t_leg = leg_T0 − elapsed`), so a
 **calendar/diagonal** shows the back leg retaining value at the front-leg expiry;
 legs that omit an `expiry` fall back to the column `T` (single-expiry output is
-byte-identical to the legacy path).
+byte-identical to the legacy path). Each leg's `leg_T0` comes from
+`_leg_expiry_years`, which settles at **16:00 America/New_York** via the shared
+`expiry_time_to_years` — the same instant the summary tiles and the simulator use.
+(It previously built its own naive 4pm against a host-local clock, which on the CT
+box resolved to 17:00 ET: the grid carried an extra hour of time value in every
+cell, and the T=0 "Exp" column showed premium instead of the kinked payoff.)
 
 ## Simulator engines
 
@@ -1202,8 +1235,13 @@ builds one from resolved contracts.
 
 - **What-if** (`WhatIfEngine`) — sweeps an 81-point ±20% price range. The service
   `compute.sim_run` advances **each leg by `Δt` elapsed days from now**
-  (`t_leg = max(leg_DTE − Δt, …)`), so same-expiry structures decay together while a
-  **calendar** decays each leg on its own clock.
+  (`t_leg = max(leg_DTE − Δt, …)` via `compute._leg_days_to_expiry`), so same-expiry
+  structures decay together while a **calendar** decays each leg on its own clock.
+  `leg_DTE` is **fractional and intraday-aware** — calendar hours to the 16:00 ET
+  close / 365, the same convention as the Calculator. (Until 2026-08-20 it used
+  whole-day `(expiry − today).days` floored at 0.01 days, so a 0-DTE leg priced at
+  T ≈ 14 minutes however many hours were left — and the P/L baseline it is measured
+  against used that same wrong T.)
 - **IV shock** (`IVShockEngine`) — compares the position at base IV vs `IV × mult`
   (each leg already priced at its own expiry).
 - **Replay** (`ReplayEngine.full_trace`) — steps the position bar-by-bar along the

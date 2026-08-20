@@ -4,7 +4,81 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**The Bull / Bear Map — "bullish" is two facts, and this
+**Last updated:** 2026-08-20 (**Accuracy audit, batch 1 — five wrong numbers on live
+screens, and in three of the five a TEST was holding the bug in place.**
+- **What this was.** A four-agent audit across calculation accuracy, compactness and
+  efficiency. This entry covers the batch-1 remediation: everything ranked Critical or
+  High for *accuracy*, plus one correctness item the compactness agent surfaced. The
+  efficiency pass found **no** High-tier findings — the 2026-07-18/19 remediation held,
+  and the post-08-01 Desk / Bull-Bear / sector work is structurally clean.
+- **CRITICAL — `calculate_adx` misattributed directional movement.** `-DM` was built from
+  `|delta_low|` instead of the signed `-delta_low`, the direction gate `minus_dm < 0` was
+  tautological, and the `-DM` branch compared against an already-filtered `plus_dm`.
+  Measured **76.58 where the textbook value is 32.5**, and a **dead-flat tape read ADX
+  100** — maximum trend strength — which is exactly the bias the regime classifier was
+  showing toward Trending. Reach: the live Day trend needle, the Week/Month structural
+  arcs, `regime_evidence`'s `adx`/`adx_rising` tells, and the Trade page. `trade_svc`'s
+  own `_adx_series` had the formula right the whole time. Details + the two lessons in
+  [CLAUDE.md](../CLAUDE.md).
+- **HIGH — put charm carried a spurious `+ r*exp(-r*T)`.** With q=0 put charm *is* call
+  charm (put delta differs by a constant), so every put strike was biased by **+0.0449**
+  — ~+$575M of phantom charm on one 20k-OI SPX wing strike, and ~$8-10B on the net-charm
+  total. `bs_charm` had never been pinned by a single test; it now has an identity test
+  and a finite-difference test on both sides.
+- **HIGH — a naive datetime meant CENTRAL, and three time helpers read it as EASTERN.**
+  Replay and IV-shock priced every bar with **T + 1 hour** (0-DTE ATM $5.80 vs a true
+  $4.10, and live premium shown 30 minutes after expiry); the Calculator's P&L grid
+  hand-rolled the same mistake, so its "Now" column disagreed with its own summary tiles
+  and the "Exp" column printed ~$4/share instead of the kinked payoff; and the What-if
+  sweep used whole-day DTE floored at 0.01 days, pricing every 0-DTE leg — and its P/L
+  baseline — at T ~ 14 minutes regardless of hours left (**4.6x** understatement at five
+  hours to the close). ⚠ **The one-hour error was introduced by audit item C6**, which
+  moved the branch from `hour=15` to `hour=16` and wrote tests asserting a naive clock
+  was Eastern; the pre-C6 value had been correct for CT input all along. The naive branch
+  now localizes to `NAIVE_WALLCLOCK_TZ` and the two callers delegate to the shared
+  helpers (`expiry_time_to_years`, the new `compute._leg_days_to_expiry`).
+- **HIGH — the VIX Complex blend did not renormalize.** An undefined sub-component added
+  0 to the numerator with no change to the denominator, dragging the score toward 1
+  whenever `$VIX1D` was missing (routine off-hours): term 6 + slope 8 published **4**
+  where the present components average **6.5**. VIX Complex is 20% of the composite. The
+  *confidence* deliberately still falls to 0.67 — that is how the top-level composite
+  down-weights a thinner reading.
+- **HIGH — four more scorers still had the NaN-clamps-to-the-HIGH-bound trap.** Measured:
+  `score_vix_context(nan, ...)` returned **70.0 at confidence 1.0** — a confidently
+  bullish trend read from no data — and `score_breadth_dir(nan, ...)` returned **100.0**,
+  maximum bullish breadth. Separately, `effort`/`rejection_defense`/`session_structure`
+  each had a `_num` that caught `None` but passed NaN straight through, so one NaN volume
+  pinned effort's `updown_vol` **0.0039 -> 1.0** at unchanged confidence. Two different
+  layers, two different fixes — neither is the banned `_clamp` shortcut.
+- **Plus one correctness item from the compactness pass:** `sentiment_svc.handlers._is_rth_now`
+  tested weekday + clock with **no holiday check**, while its docstring claimed to mirror
+  `scheduler._is_rth`, which has one. Intraday recording and regime publishing ran through
+  every NYSE holiday. It now delegates to the one gate.
+- **The meta-finding, and the reason three of these survived so long: a test was holding
+  the bug.** `test_adx_uses_wilder_smoothing` pinned `47.0052` — the buggy output — because
+  a characterization test records what the code *does*; `test_replay_T_uses_1600_not_1500`
+  pinned the one-hour overstatement; and the 2026-07-01 audit had closed a finding
+  asserting the +DM/-DM rule "was already correct". The replacements are **property-based
+  or cross-implementation**: a flat tape is not a trend, mirroring a series cannot change
+  trend *strength*, a naive CT wall-clock must agree with its own tz-aware instant, and
+  put charm must equal call charm. Those are claims about the world, and no amount of
+  re-running the wrong code makes them pass.
+- **Verification.** All suites at or above their documented baselines with **no new
+  failures**: webgui 2309, options_svc 1181, options-scanner 1486 (the documented 11-fail
+  set, node-for-node), sentiment_svc 321 + the 1 documented, sentiment-dashboard 496 + the
+  2 documented Tk, trade_svc 77, driver_svc 239, market_svc 73, portfolio_svc 32,
+  shared 89/25/49, tests 69. Ruff clean. One test fixture moved deliberately:
+  `_range_bars`' seed 59 -> 8, because with the corrected ADX seed 59 sat at the 93rd
+  percentile of its own generator's distribution (the generator is unchanged).
+- **Still open** (batch 2/3, not started): the `cache:options:gamma` payload regrown to
+  **4.65 MB** with a comment still claiming "<1 MB", an unbounded `closed_positions` list
+  in the driver account view, a 30-second full-deserialize of the 304 KB momentum payload,
+  ~13,500 lines of provably dead code (`shared/analysis_lib` is ~85% dead; the Tk remnants
+  drag **tkinter + matplotlib into headless options_svc**), and the medium-tier accuracy
+  items (`AGG_WEIGHTS` summing to 1.30, `market_svc.classify._num`'s silent 0.0, the RRG
+  "momentum" axis that actually measures acceleration).
+
+**Prior —** 2026-08-20 (**The Bull / Bear Map — "bullish" is two facts, and this
 screen refuses to blend them, refuses to add a third regime verdict, and had four of its
 upstream assumptions turn out wrong on contact with the producer.**
 - **What shipped.** `/sentiment/bullbear`, a new **third tab** of the Trend & Sentiment

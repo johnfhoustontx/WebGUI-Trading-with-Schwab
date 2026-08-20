@@ -36,6 +36,16 @@ RISK_FREE_RATE = 0.045
 # 16:00 US/Eastern so the calculator and the simulator compute an IDENTICAL T.
 EXPIRY_CLOSE_HOUR_ET = 16  # 4:00pm ET
 
+# The zone a TZ-NAIVE wall-clock is understood to be in. Every naive producer in
+# this project is CENTRAL: options_simulator/data.py builds its price-history
+# index with .tz_convert("America/Chicago").tz_localize(None) ("project-wide
+# convention"), and `as_of=datetime.now()` is host-local on the CT deployment
+# box. Settling a naive ref against a naive 16:00 measured to 16:00 CT = 17:00
+# ET -- an hour past the real close -- so Replay/IV-shock carried T + 1h on every
+# bar and showed live time value on already-dead options. (Corrected 2026-08-20;
+# the pre-C6 `hour=15` had been right for CT input all along.)
+NAIVE_WALLCLOCK_TZ = "America/Chicago"
+
 # DIVIDEND-YIELD ASSUMPTION (q = 0): every Black-Scholes routine here assumes a
 # ZERO continuous dividend yield. This slightly OVERSTATES call value and
 # UNDERSTATES put value for dividend-paying names (SPX/SPY carry ~1.3% annualized),
@@ -51,22 +61,21 @@ def expiry_time_to_years(ref_dt, expiry_date):
     convention — both tools then produce an IDENTICAL time-to-expiry, which
     matters most at 0DTE where T is acutely sensitive to the settlement hour.
 
-    ``ref_dt`` may be tz-aware or tz-naive. When aware, the settlement is built in
-    America/New_York and the two aware datetimes subtract correctly across zones.
-    When naive (the simulator's ``as_of``/history index are naive wall-clock), the
-    settlement is a naive 16:00 so both sides compare on the same wall-clock basis
-    (never mixing aware/naive, which would raise TypeError).
+    ``ref_dt`` may be tz-aware or tz-naive. Either way there is exactly ONE
+    settlement instant -- 16:00 America/New_York on the expiry date. A naive
+    ``ref_dt`` is localized to :data:`NAIVE_WALLCLOCK_TZ` (Central, the project's
+    naive convention) rather than compared against a naive settlement, so the two
+    branches return an identical T for the same instant. A naive 15:00 is
+    therefore exactly the close, and 15:30 is past it.
     """
     import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZoneInfo
 
-    if getattr(ref_dt, "tzinfo", None) is not None:
-        from zoneinfo import ZoneInfo as _ZoneInfo
-        settlement = _dt.datetime(expiry_date.year, expiry_date.month,
-                                  expiry_date.day, EXPIRY_CLOSE_HOUR_ET, 0, 0,
-                                  tzinfo=_ZoneInfo("America/New_York"))
-    else:
-        settlement = _dt.datetime(expiry_date.year, expiry_date.month,
-                                  expiry_date.day, EXPIRY_CLOSE_HOUR_ET, 0, 0)
+    settlement = _dt.datetime(expiry_date.year, expiry_date.month,
+                              expiry_date.day, EXPIRY_CLOSE_HOUR_ET, 0, 0,
+                              tzinfo=_ZoneInfo("America/New_York"))
+    if getattr(ref_dt, "tzinfo", None) is None:
+        ref_dt = ref_dt.replace(tzinfo=_ZoneInfo(NAIVE_WALLCLOCK_TZ))
     return max((settlement - ref_dt).total_seconds(), 0.0) / (365.0 * 86400.0)
 
 #############################################
@@ -225,10 +234,11 @@ def bs_charm(S, K, T, r, sigma, option_type):
 
     charm_call = -pdf_d1 * (2.0 * r * T - d2 * sigma * sqrt_T) / (2.0 * T * sigma * sqrt_T)
 
-    if option_type == "call":
-        return charm_call
-    else:
-        return charm_call + r * math.exp(-r * T)
+    # With no dividend yield, put delta = call delta - 1. That -1 is a CONSTANT,
+    # so it contributes nothing to d(delta)/d(time): put charm == call charm.
+    # (A `+ r*exp(-r*T)` term here would be a forward-delta/Black-model artifact
+    # -- it biased every put strike by +0.0449 at r=4.5%, T=30d, until 2026-08-20.)
+    return charm_call
 
 
 def bs_vanna(S, K, T, r, sigma, option_type="call"):
@@ -900,8 +910,15 @@ def generate_price_range(spot, pct=0.05):
 
 def _leg_expiry_years(leg, expiry_date=None):
     """Leg's CURRENT (now) time-to-expiry in years from its own ``expiry``
-    (4pm-close convention, /365, never negative). None if the leg has no
-    ``expiry`` (caller then falls back to the column T)."""
+    (16:00 ET settlement, /365, never negative). None if the leg has no
+    ``expiry`` (caller then falls back to the column T).
+
+    Delegates to :func:`expiry_time_to_years` so the Calculator's P&L grid uses
+    the SAME settlement instant as the summary tiles and the simulator. It used
+    to build its own ``datetime(y, m, d, 16)`` against a naive host-local
+    ``now()``, which on the CT box measured to 17:00 ET -- an hour of phantom
+    time value in every cell, including the T=0 "Exp" column (fixed 2026-08-20).
+    """
     import datetime as _dt
     e = leg.get("expiry")
     if not e:
@@ -910,9 +927,7 @@ def _leg_expiry_years(leg, expiry_date=None):
         d = _dt.date.fromisoformat(str(e))
     except (TypeError, ValueError):
         return None
-    close = _dt.datetime(d.year, d.month, d.day, 16)
-    now = _dt.datetime.now()
-    return max((close - now).total_seconds(), 0.0) / (365 * 86400)
+    return expiry_time_to_years(_dt.datetime.now(), d)
 
 
 def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,

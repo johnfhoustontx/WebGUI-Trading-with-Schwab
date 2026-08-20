@@ -17,6 +17,20 @@ class TrendSub:
     interp: str = ""
 
 
+def _finite(x):
+    """A usable number, else None. A NaN survives `is not None` and `not x`, and
+    `_clamp(nan, lo, hi)` returns the HIGH bound -- so without this an absent
+    reading renders as a confident MAXIMUM one (a NaN VIX scored 70/conf 1.0, a
+    NaN advance-decline scored 100). Missing means missing."""
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if (v != v or v in (float("inf"), float("-inf"))) else v
+
+
 def _clamp(v, lo, hi):
     # Always float so TrendSub.score is uniformly float (it gets JSON-serialized).
     return float(max(lo, min(hi, v)))
@@ -41,13 +55,15 @@ def score_breadth_dir(net_ad, pct_above_50, new_highs, new_lows) -> TrendSub:
     """net_ad = (advn-decn)/(advn+decn) in [-1,1]; pct_above_50 in [0,100];
     H/L counts. Missing inputs lower confidence; all-missing -> neutral/0 conf."""
     comps, weights = [], []
+    net_ad, pct_above_50 = _finite(net_ad), _finite(pct_above_50)
     if net_ad is not None:
         comps.append(_clamp(net_ad, -1, 1)); weights.append(0.4)
     if pct_above_50 is not None:
         comps.append(_clamp((pct_above_50 - 50.0) / 50.0, -1, 1)); weights.append(0.4)
-    hl_total = (new_highs or 0) + (new_lows or 0)
+    hl_total = (_finite(new_highs) or 0) + (_finite(new_lows) or 0)
     if hl_total > 0:
-        comps.append(_clamp(((new_highs or 0) - (new_lows or 0)) / hl_total, -1, 1))
+        comps.append(_clamp(((_finite(new_highs) or 0) - (_finite(new_lows) or 0))
+                            / hl_total, -1, 1))
         weights.append(0.2)
     if not weights:
         return TrendSub(score=50.0, confidence=0.0)
@@ -63,6 +79,7 @@ def score_sector_participation(n_green, n_total, cyc_def_spread) -> TrendSub:
     if not n_total:
         return TrendSub(score=50.0, confidence=0.0)
     participation = (n_green / n_total - 0.5) * 2.0
+    cyc_def_spread = _finite(cyc_def_spread)
     lead = _clamp(cyc_def_spread, -1, 1) if cyc_def_spread is not None else 0.0
     direction = 0.6 * participation + 0.4 * lead
     return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
@@ -70,7 +87,9 @@ def score_sector_participation(n_green, n_total, cyc_def_spread) -> TrendSub:
 
 
 def score_vix_context(vix, vix_change_pct, vix1d, vix9d) -> TrendSub:
-    if not vix or vix <= 0:
+    vix, vix_change_pct = _finite(vix), _finite(vix_change_pct)
+    vix1d = _finite(vix1d)
+    if not vix or vix <= 0 or vix_change_pct is None:
         return TrendSub(score=50.0, confidence=0.0)
     lvl = _clamp((20.0 - vix) / 10.0, -1, 1)
     chg = _clamp(-vix_change_pct / 5.0, -1, 1)

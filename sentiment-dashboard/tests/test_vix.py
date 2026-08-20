@@ -156,3 +156,33 @@ def test_score_complex_partial_confidence_blends():
     slope = vix.ScoreResult(score=5, confidence=0.0, interp="")
     r = vix.score_complex(term, v1d, slope)
     assert r.confidence == pytest.approx(0.50 * 1.0 + 0.33 * 0.5 + 0.17 * 0.0)
+
+
+def test_score_complex_renormalizes_over_present_sub_components():
+    """A missing sub must DROP OUT, not contribute a zero.
+
+    Until 2026-08-20 an undefined sub added 0 to the numerator with no change to
+    the denominator, dragging the score toward 1. With term=6 and slope=8 and
+    $VIX1D absent (routine off-hours) that published 4 -- a "stress" reading --
+    where the two components actually present average 6.5.
+
+    Every other blend in this codebase (composite.blend, momentum.blend,
+    market_regime._wavg) renormalizes over the present weight; this now matches.
+    """
+    term = vix.ScoreResult(score=6, confidence=1.0, interp="")
+    v1d = vix.ScoreResult(score=0, confidence=0.0, interp="")     # undefined
+    slope = vix.ScoreResult(score=8, confidence=1.0, interp="")
+    r = vix.score_complex(term, v1d, slope)
+    # (0.50*6 + 0.17*8) / (0.50 + 0.17) = 4.36 / 0.67 = 6.507
+    assert r.score == 7
+
+
+def test_score_complex_confidence_still_falls_when_a_sub_is_missing():
+    """Renormalizing the SCORE must not renormalize the CONFIDENCE: the whole
+    point of the confidence is to tell the top-level composite that this reading
+    rests on less evidence, so it stays the un-normalized weighted sum."""
+    term = vix.ScoreResult(score=6, confidence=1.0, interp="")
+    v1d = vix.ScoreResult(score=0, confidence=0.0, interp="")
+    slope = vix.ScoreResult(score=8, confidence=1.0, interp="")
+    r = vix.score_complex(term, v1d, slope)
+    assert r.confidence == pytest.approx(0.50 + 0.17)

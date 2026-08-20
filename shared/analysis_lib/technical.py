@@ -173,12 +173,16 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
     low = df['low']
     close = df['close']
     
-    # Calculate +DM and -DM
-    plus_dm = high.diff()
-    minus_dm = low.diff().abs() * -1
-    
-    plus_dm = plus_dm.where((plus_dm > minus_dm.abs()) & (plus_dm > 0), 0)
-    minus_dm = minus_dm.abs().where((minus_dm.abs() > plus_dm) & (minus_dm < 0), 0)
+    # Wilder's directional movement. -DM is built from the SIGNED low move
+    # (-delta_low), never |delta_low|: a RISING low is upward movement, so
+    # taking the magnitude books every up-day as downward movement too. Both
+    # sides are compared against the RAW up/down moves (not against an
+    # already-filtered series), so an inside day correctly yields neither.
+    up = high.diff()
+    down = -low.diff()
+
+    plus_dm = up.where((up > down) & (up > 0), 0.0).fillna(0.0)
+    minus_dm = down.where((down > up) & (down > 0), 0.0).fillna(0.0)
     
     # True Range
     tr = pd.concat([

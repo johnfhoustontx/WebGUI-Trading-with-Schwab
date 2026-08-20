@@ -1272,3 +1272,38 @@ def test_crisis_check_fires_on_vix1d_spike(monkeypatch):
     assert env.payload["raw"]["crisis"] >= 0.7
     assert any("VIX1D" in e for e in env.payload["evidence"])
     _reset_regime()
+
+
+# ── _is_rth_now must honour the NYSE holiday calendar (2026-08-20) ──────────
+
+def test_is_rth_now_is_false_on_a_market_holiday():
+    """`_is_rth_now` tested weekday + clock only, so intraday recording and
+    regime publishing ran all day on NYSE holidays. Its own docstring claimed it
+    mirrored `scheduler._is_rth`, which HAS the holiday check -- the two silently
+    disagreed on ~9 days a year. `shared/market_calendar` is the single source.
+    """
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    ct = ZoneInfo("America/Chicago")
+    christmas = dt.datetime(2026, 12, 25, 10, 0, tzinfo=ct)   # Friday, closed
+    assert handlers._is_rth_now(now=christmas) is False
+
+
+def test_is_rth_now_still_true_on_a_normal_session():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    ct = ZoneInfo("America/Chicago")
+    assert handlers._is_rth_now(now=dt.datetime(2026, 6, 30, 10, 0, tzinfo=ct)) is True
+
+
+def test_is_rth_now_keeps_the_exclusive_1500_close():
+    """The 15:00 CT close stays EXCLUSIVE -- see scheduler._is_rth's warning and
+    the equivalence tests it names."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    ct = ZoneInfo("America/Chicago")
+    assert handlers._is_rth_now(now=dt.datetime(2026, 6, 30, 15, 0, tzinfo=ct)) is False
+    assert handlers._is_rth_now(now=dt.datetime(2026, 6, 30, 14, 59, tzinfo=ct)) is True

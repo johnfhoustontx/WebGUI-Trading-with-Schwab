@@ -80,3 +80,31 @@ def test_eval_times_overrides_calendar_day_path():
                            eval_times=[3.0 / 24 / 365])
     # Single column, priced at the supplied intraday T (positive time value at K-ish).
     assert all(len(r["pnl"]) == 1 for r in rows)
+
+
+# ── _leg_expiry_years must use the ONE settlement convention (2026-08-20) ────
+
+def test_leg_expiry_years_matches_the_canonical_helper():
+    """`_leg_expiry_years` built its own `datetime(y, m, d, 16)` against a naive
+    host-local `now()`. On the CT deployment box that measured to 16:00 CT =
+    17:00 ET, so the Calculator's P&L grid priced every leg with T + 1 hour --
+    disagreeing with the summary tiles (which use the correct ET-aware T) and
+    printing phantom time value in the T=0 "Exp" column.
+
+    There is one settlement convention and one helper; this pins them together.
+    """
+    from options_calculator import _leg_expiry_years, expiry_time_to_years
+
+    for days in (0, 1, 5, 30):
+        d = dt.date.today() + dt.timedelta(days=days)
+        leg = {"expiry": d.isoformat()}
+        expected = expiry_time_to_years(dt.datetime.now(), d)
+        # 1 second of tolerance: the two `now()` reads are microseconds apart.
+        assert _leg_expiry_years(leg) == pytest.approx(
+            expected, abs=1.0 / (365.0 * 86400.0))
+
+
+def test_leg_expiry_years_is_zero_for_an_expiry_already_past():
+    from options_calculator import _leg_expiry_years
+    past = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    assert _leg_expiry_years({"expiry": past}) == 0.0
