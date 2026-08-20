@@ -104,3 +104,287 @@ def test_apply_expiry_propagates_to_all_legs():
         ed.apply_expiry("2026-06-26")     # propagate to ALL legs (literal, per design)
     legs = ed.get_legs()
     assert all(l["expiry"] == "2026-06-26" for l in legs)
+
+
+# -- the card layout (Calculator redesign, Task 4) ----------------------------
+# The card is the SHARED geometry; the palette enters as an argument so the
+# Calculator can pass its near-black CALC_* tokens while the Simulator keeps the
+# app-wide dark navy.
+import re
+
+from nicegui import ui
+
+
+def test_default_tokens_cover_every_key_the_card_renders():
+    # A missing token key would raise mid-render, on a page that looks fine in
+    # every test that never mounts it.
+    for key in ("frame", "eyebrow", "accent_long", "accent_short",
+                "num", "delta", "remove", "remove_off", "add", "reset"):
+        assert key in LE.DEFAULT_CARD_TOKENS
+        assert isinstance(LE.DEFAULT_CARD_TOKENS[key], str)
+
+
+def test_card_tokens_merge_over_the_defaults():
+    merged = LE.card_tokens({"accent_long": "border-l-[#123456]"})
+    assert merged["accent_long"] == "border-l-[#123456]"
+    assert merged["frame"] == LE.DEFAULT_CARD_TOKENS["frame"]   # untouched
+
+
+def test_card_tokens_ignores_unknown_keys():
+    assert "bogus" not in LE.card_tokens({"bogus": "x"})
+
+
+def test_card_tokens_ignores_blank_and_non_string_overrides():
+    """A page that computes a token and gets "" back must not blank the card."""
+    merged = LE.card_tokens({"frame": "  ", "eyebrow": None, "num": 7})
+    assert merged["frame"] == LE.DEFAULT_CARD_TOKENS["frame"]
+    assert merged["eyebrow"] == LE.DEFAULT_CARD_TOKENS["eyebrow"]
+    assert merged["num"] == LE.DEFAULT_CARD_TOKENS["num"]
+
+
+def test_card_tokens_defaults_survive_a_mutated_return():
+    """The merge returns a copy - a caller stashing and editing it must not
+    poison every later card."""
+    LE.card_tokens()["frame"] = "wrecked"
+    assert LE.DEFAULT_CARD_TOKENS["frame"] != "wrecked"
+
+
+def test_can_remove_respects_the_min_legs_floor():
+    assert LE.can_remove(3, min_legs=2) is True
+    assert LE.can_remove(2, min_legs=2) is False
+    assert LE.can_remove(1, min_legs=1) is False
+    assert LE.can_remove(2, min_legs=0) is True
+
+
+def test_can_remove_treats_a_missing_floor_as_no_floor():
+    assert LE.can_remove(1, min_legs=None) is True
+    assert LE.can_remove(0, min_legs=None) is False
+
+
+def test_delta_text_formats_signed_two_places():
+    assert LE.delta_text(-0.31) == "-0.31"
+    assert LE.delta_text(0.44) == "+0.44"
+    assert LE.delta_text(0.0) == "+0.00"
+
+
+def test_delta_text_renders_an_em_dash_for_no_reading():
+    assert LE.delta_text(None) == "\u2014"
+    assert LE.delta_text("junk") == "\u2014"
+
+
+def test_delta_text_rejects_booleans():
+    """``isinstance(True, int)`` would otherwise print '+1.00' for a flag."""
+    assert LE.delta_text(True) == "\u2014"
+    assert LE.delta_text(False) == "\u2014"
+
+
+# -- card rendering -----------------------------------------------------------
+
+_STRIKES = [735, 736, 737, 738]
+_EXPS = ["2026-06-23", "2026-06-26"]
+
+
+def _leg(**kw):
+    base = {"option_type": "call", "side": "long", "strike": 736,
+            "expiry": _EXPS[0], "qty": 1, "premium": None}
+    base.update(kw)
+    return base
+
+
+def _card(legs, **kw):
+    """Mount a card-layout editor over ``legs``; returns (handle, container)."""
+    kw.setdefault("strikes_for", lambda exp, otype: list(_STRIKES))
+    kw.setdefault("expiries_for", lambda: list(_EXPS))
+    kw.setdefault("show_premium", True)
+    with ui.card() as container:
+        ed = LE.build_leg_editor(container, layout="card", **kw)
+        ed.set_legs(legs)
+    return ed, container
+
+
+def _labels(container):
+    return [e.text for e in container.descendants() if isinstance(e, ui.label)]
+
+
+def _cards(container):
+    return [e for e in container.descendants() if "leg-card" in e._classes]
+
+
+def _buttons(container):
+    return [e for e in container.descendants() if isinstance(e, ui.button)]
+
+
+def _fire_click(el):
+    for listener in el._event_listeners.values():
+        if listener.type == "click":
+            listener.handler(None)
+
+
+def test_card_layout_coerces_out_of_options_values_like_the_row_layout():
+    """The card renderer must run the SAME coercion pass the row renderer does -
+    ``ui.select`` raises ValueError on a value absent from its options, and a leg
+    copied in from the Simulator routinely carries one."""
+    ed, _ = _card([
+        _leg(strike=737.5),                            # not one of the strikes
+        _leg(side="short", strike=999, expiry="2099-12-31"),   # expiry absent too
+    ])   # must NOT raise
+    legs = ed.get_legs()
+    assert legs[0]["strike"] in _STRIKES
+    assert legs[1]["strike"] in _STRIKES
+    assert legs[1]["expiry"] == _EXPS[0]           # coerced value written back
+
+
+def test_card_layout_numbers_its_legs_zero_padded():
+    _, container = _card([_leg(), _leg(side="short")])
+    txt = _labels(container)
+    assert "01" in txt and "02" in txt
+
+
+def test_card_layout_carries_the_eyebrow_captions():
+    _, container = _card([_leg()])
+    txt = _labels(container)
+    for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY", "PREMIUM", "DELTA"):
+        assert cap in txt
+
+
+def test_card_layout_shows_the_delta_the_page_supplies():
+    """The Calculator composes ``position_delta(extract_delta(...), side)`` in its
+    own closure and hands the editor one number per leg."""
+    seen = []
+
+    def delta_for(leg):
+        seen.append(dict(leg))
+        return -0.31 if leg["side"] == "long" else 0.44
+
+    _, container = _card([_leg(option_type="put"),
+                          _leg(option_type="put", side="short", strike=735)],
+                         delta_for=delta_for)
+    txt = _labels(container)
+    assert "-0.31" in txt and "+0.44" in txt
+    assert seen and seen[0]["option_type"] == "put"    # the whole leg is handed over
+    assert seen[0]["strike"] == 736                    # coerced, not raw
+
+
+def test_card_layout_renders_an_em_dash_when_no_delta_source_is_given():
+    _, container = _card([_leg()])
+    assert "\u2014" in _labels(container)
+
+
+def test_card_layout_omits_the_premium_cell_and_collapses_its_column():
+    """With no premium the PREMIUM column is dropped from the grid template, so
+    DELTA stays in the last cell instead of sliding under the wrong caption."""
+    _, on = _card([_leg(premium=2.4)])
+    _, off = _card([_leg(premium=2.4)], show_premium=False)
+    assert "PREMIUM" in _labels(on) and "PREMIUM" not in _labels(off)
+    assert len([e for e in on.descendants() if isinstance(e, ui.number)]) == 2
+    assert len([e for e in off.descendants() if isinstance(e, ui.number)]) == 1
+    grids_on = [c for e in on.descendants() for c in e._classes if c.startswith("grid-cols-")]
+    grids_off = [c for e in off.descendants() for c in e._classes if c.startswith("grid-cols-")]
+    assert LE._CARD_ROW2_COLS in grids_on
+    assert LE._CARD_ROW2_COLS_NO_PREMIUM in grids_off
+    assert LE._CARD_ROW2_COLS not in grids_off
+
+
+def test_card_accent_maps_the_side_from_a_finite_set():
+    tk = LE.card_tokens()
+    _, container = _card([_leg(), _leg(side="short")])
+    cards = _cards(container)
+    assert len(cards) == 2
+    assert tk["accent_long"].split()[-1] in cards[0]._classes
+    assert tk["accent_short"].split()[-1] in cards[1]._classes
+    assert tk["accent_short"].split()[-1] not in cards[0]._classes
+
+
+def test_card_tokens_override_reaches_the_rendered_card():
+    _, container = _card([_leg()],
+                         tokens={"accent_long": "border-l-[#123456]"})
+    assert "border-l-[#123456]" in _cards(container)[0]._classes
+
+
+def _remove_buttons(container):
+    return [e for e in _buttons(container) if "leg-remove" in e._classes]
+
+
+def test_card_remove_is_live_above_the_floor_and_locked_at_it():
+    tk = LE.card_tokens()
+    _, above = _card([_leg(), _leg()], min_legs=1)
+    _, at = _card([_leg()], min_legs=1)
+    live = _remove_buttons(above)
+    assert len(live) == 2 and all(b.enabled for b in live)
+    assert tk["remove"].split()[0] in live[0]._classes
+    locked = _remove_buttons(at)
+    assert len(locked) == 1 and not locked[0].enabled
+    assert tk["remove_off"].split()[0] in locked[0]._classes
+
+
+def test_card_remove_floor_defaults_to_one_leg():
+    _, at = _card([_leg()])
+    assert not _remove_buttons(at)[0].enabled
+
+
+def test_card_remove_honours_a_higher_floor():
+    _, at = _card([_leg(), _leg()], min_legs=2)
+    assert all(not b.enabled for b in _remove_buttons(at))
+
+
+def test_card_remove_drops_the_leg_when_it_is_live():
+    ed, container = _card([_leg(), _leg(side="short")], min_legs=1)
+    _fire_click(_remove_buttons(container)[0])
+    assert [l["side"] for l in ed.get_legs()] == ["short"]
+
+
+def test_card_footer_offers_reset_only_when_a_handler_is_given():
+    _, without = _card([_leg()])
+    _, with_reset = _card([_leg()], on_reset=lambda: None)
+    assert "ADD LEG" in [b.text for b in _buttons(without)]
+    assert "RESET TO TEMPLATE" not in [b.text for b in _buttons(without)]
+    assert "RESET TO TEMPLATE" in [b.text for b in _buttons(with_reset)]
+
+
+def test_card_reset_button_calls_the_handler():
+    hits = []
+    _, container = _card([_leg()], on_reset=lambda: hits.append(1))
+    btn = [b for b in _buttons(container) if b.text == "RESET TO TEMPLATE"][0]
+    _fire_click(btn)
+    assert hits == [1]
+
+
+def test_card_add_leg_appends_a_leg():
+    ed, container = _card([_leg()])
+    btn = [b for b in _buttons(container) if b.text == "ADD LEG"][0]
+    _fire_click(btn)
+    assert len(ed.get_legs()) == 2
+
+
+def test_card_layout_renders_with_no_legs():
+    ed, container = _card([])
+    assert not _cards(container)
+    assert "ADD LEG" in [b.text for b in _buttons(container)]
+    assert ed.get_legs() == []
+
+
+def test_card_layout_ignores_the_row_header():
+    """``header`` belongs to the row table; a card carries its own eyebrows."""
+    _, container = _card([_leg()], header=True)
+    assert not [e for e in container.descendants() if "leg-head" in e._classes]
+
+
+def test_row_layout_is_still_the_default_and_builds_no_cards():
+    with ui.card() as container:
+        ed = LE.build_leg_editor(container,
+                                 strikes_for=lambda exp, otype: list(_STRIKES),
+                                 expiries_for=lambda: list(_EXPS),
+                                 show_premium=True, header=True)
+        ed.set_legs([_leg()])
+    assert not _cards(container)
+    assert [e for e in container.descendants() if "leg-row" in e._classes]
+    assert [e for e in container.descendants() if "leg-head" in e._classes]
+
+
+def test_card_classes_are_spaceless_tailwind_arbitraries():
+    """A Tailwind arbitrary value cannot contain a space - one silently
+    generates no rule at all."""
+    for src in list(LE.DEFAULT_CARD_TOKENS.values()) + [
+            LE._CARD_ROW1_COLS, LE._CARD_ROW2_COLS, LE._CARD_ROW2_COLS_NO_PREMIUM]:
+        for arb in re.findall(r"\[[^\]]*\]", src):
+            assert " " not in arb, src
