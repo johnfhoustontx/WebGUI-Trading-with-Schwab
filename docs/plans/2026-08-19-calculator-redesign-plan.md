@@ -36,6 +36,41 @@ Expected: **1986 passed** (2026-08-19 baseline), no failures.
 
 **Read first:** `webgui/pages/options/theme.py` (the `[sectors]` / `[rotation]` builders are the pattern you copy), `webgui/pages/options/leg_editor.py`, `webgui/pages/options/calculator.py`.
 
+### ⚠ The `UNLIMITED` sentinel — read before Task 3
+
+`options-scanner/options_calculator.py:24` defines **`UNLIMITED = 999999`**, a magic
+placeholder — *not* infinity. `calc_summary` returns it verbatim:
+
+| structure | field | value |
+|---|---|---|
+| `LONG_CALL` | `max_profit` | `999999` |
+| `NAKED_CALL` | `max_loss` | `999999` |
+
+So a naive `pnl / max_profit` on a long call yields ~0.0% for **every** cell, painting
+`+0.0%` down the whole matrix — a confident fake measurement of exactly the kind this
+redesign exists to avoid — and the MAX RETURN tile would read `$999,999`.
+
+**Every task that touches `max_profit` / `max_loss` must treat `999999` as "unlimited"**
+and render it as such, never as a number and never as a percentage denominator.
+
+⚠ The webgui is Tier-1 and imports **only** `nicegui` + `shared.bus` + `shared.contracts`
+— it may **not** import `options_calculator`. So declare the sentinel locally in
+`calculator.py` with a comment naming its source, the same way the repo already mirrors
+`REGIME_DISPLAY` across four tiers:
+
+```python
+# Mirror of options_calculator.UNLIMITED (999999) — a magic placeholder the
+# service returns verbatim for an uncapped max_profit (LONG_CALL) or max_loss
+# (NAKED_CALL). Tier-1 may not import that module, so the value is restated
+# here; keep the two in step.
+UNLIMITED = 999999
+
+
+def is_unlimited(v):
+    """Whether a summary figure is the service's uncapped sentinel."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == UNLIMITED
+```
+
 **The reference design** is unpacked at `C:/Users/john_/AppData/Local/Temp/claude/D--WebGUI-Trading-with-Schwab--claude-worktrees-inspiring-sinoussi-b1cc78/cad3bc3f-8cf0-4798-aa5a-75471fb99d96/scratchpad/design_body.html` — the markup and its logic. Consult it for exact geometry and colours; **do not port its Black-Scholes or its mock `MKT`/`EXPIRIES` data.**
 
 ---
@@ -574,6 +609,20 @@ def test_matrix_pct_of_max_is_none_without_a_positive_max():
     assert C.matrix_pct_of_max(None, 180.0) is None
 
 
+def test_matrix_pct_of_max_refuses_the_unlimited_sentinel():
+    # A long call's max_profit comes back as the 999999 placeholder. Dividing by
+    # it would paint +0.0% down the entire matrix — a fake measurement on every
+    # cell. There is no percentage of an uncapped return.
+    assert C.matrix_pct_of_max(90.0, C.UNLIMITED) is None
+
+
+def test_is_unlimited_identifies_only_the_sentinel():
+    assert C.is_unlimited(999999) is True
+    assert C.is_unlimited(999998) is False
+    assert C.is_unlimited(None) is False
+    assert C.is_unlimited(True) is False        # bool is an int subclass
+
+
 def test_chain_status_facts_reports_the_three_phases():
     idle = C.chain_status_facts(loading=False, symbol="", chain=None)
     assert idle["label"] == "AWAITING SYMBOL" and idle["hint"] == "NOT LOADED"
@@ -1042,6 +1091,29 @@ def test_metric_cards_lead_with_credit_or_debit():
     debit = C.metric_cards({"entry_credit": -400.0}, legs=[], spot=100.0, max_dte=9)
     assert debit[0]["label"] == "ENTRY DEBIT"
     assert debit[0]["accent"] == "accent"
+
+
+def test_unlimited_max_return_reads_as_unlimited_not_as_a_number():
+    # $999,999 is the service's placeholder, not a dollar figure. Printing it
+    # would be a wrong number stated confidently.
+    cards = C.metric_cards({"max_profit": C.UNLIMITED}, legs=[], spot=1.0, max_dte=9)
+    ret = next(c for c in cards if c["label"] == "MAX RETURN")
+    assert ret["value"] == "Unlimited"
+
+
+def test_unlimited_max_risk_reads_as_unlimited():
+    cards = C.metric_cards({"max_loss": C.UNLIMITED}, legs=[], spot=1.0, max_dte=9)
+    risk = next(c for c in cards if c["label"] == "MAX RISK")
+    assert risk["value"] == "Unlimited"
+
+
+def test_return_on_risk_is_an_em_dash_when_either_side_is_uncapped():
+    # calc_summary already zeroes return_on_risk in this case; a bare "0.0%"
+    # would read as a measured zero return rather than "not defined".
+    cards = C.metric_cards({"max_profit": C.UNLIMITED, "return_on_risk": 0.0},
+                           legs=[], spot=1.0, max_dte=9)
+    ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
+    assert ror["value"] == "—"
 
 
 def test_metric_cards_are_always_six_and_accent_from_a_finite_set():
