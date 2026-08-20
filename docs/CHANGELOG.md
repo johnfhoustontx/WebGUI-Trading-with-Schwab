@@ -4,7 +4,105 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-19 (**Market Dashboard: breadth off the equity tape, a
+**Last updated:** 2026-08-19 (**The Options Strategy Calculator rebuilt to a three-step
+screen — and three readouts it could always have derived but never did.**
+- **What shipped.** `/options/calculator` rebuilt from a supplied design: ① STRATEGY and
+  ③ LEGS fill a fixed 424 px input column with the action grid under them, while
+  ② SYMBOL, six metric cards and the P&L matrix fill the results column beside it. The
+  design arrived as a `.dc.html` component shipping its own Black-Scholes and a mock
+  chain, because it had to run standalone; **none of that is ported.** The page stays a
+  Tier-1 reader — same three commands (`calc_load` / `calc_compute` / `calc_iv`), same
+  three cache views, **no Tier-2 change at all**. Detail in
+  [webgui-routes.md](webgui-routes.md#optionscalculator); design + plan in
+  [`plans/2026-08-19-calculator-redesign-design.md`](plans/2026-08-19-calculator-redesign-design.md)
+  / [`-plan.md`](plans/2026-08-19-calculator-redesign-plan.md).
+- **A sixth page-scoped theme language, `[calc]`.** Near-black ground, cyan/green/amber
+  signals, JetBrains Mono — deliberately unlike the app-wide navy the Simulator and
+  Trade wear. Scope hook is **`.calc-v3`**, never `.calc-v2`, and a test pins that:
+  restyling `.calc-v2` from here would silently reskin two other pages. Same shape as
+  `[console]` / `[macro]` / `[sectors]` / `[rotation]` — TOML knobs, Tailwind
+  class-string tokens out of a builder, degrade-to-defaults so it can never break
+  startup. The heatmap's green/red cell ramp stays OUT of the config, being a
+  data-driven map — the category CLAUDE.md already excludes.
+- **The theme shipped decorative, and a review caught it.** Six `.strat-menu-calc` rules
+  had no element carrying that class (Quasar teleports the menu popup to `<body>`, so
+  the hook has to be applied at construction), and `boxed=True` paints the *navy*
+  `STRATEGY_BTN` onto the trigger, which `build_calc_css` never contests — so the
+  picker and its popup would both have rendered app-navy on a near-black page.
+  `strategy_menu` gained `menu_class` / `btn_class` (and later `caption`), each
+  defaulting to exactly the previous behaviour, so the Simulator and Rescue are
+  byte-identical. **A page-scoped CSS rule whose class nothing carries is dead, and no
+  test of the CSS *string* can see that.** In the same pass `CALC_STATE_TEXT` was found
+  to hold token NAMES while its only possible caller is `Element.classes(remove=…)`,
+  which takes classes — as shipped it could not do its job.
+- **The matrix `%` column changed meaning, and now names its own basis.** It was a share
+  of *premium received*. It is now **`% MAX`** — of the summary's `max_profit` — when
+  that is a real capped return; **`% COST`**, of the debit paid, when it is not but the
+  position was bought; and a bare **`%`** over em-dashes when neither exists. The
+  heading is part of the basis rather than a separate decision, because *a percentage
+  whose denominator the reader has to infer is worse than no percentage at all*. For a
+  credit structure `% MAX` is numerically identical to the old column (`max_profit` IS
+  the entry credit), so those screens did not move. ⚠ on the generic numeric path
+  `max_profit` is `max(pnl)` over the service's own grid, not a closed-form cap — widen
+  the grid and the denominator can move; the analytic paths do not drift.
+- **Three new readouts, all derived page-side from payloads already in the cache.**
+  Per-leg **delta**, read from the chain's own `delta` field — the one `flow_alerts`
+  reads, so it is market delta rather than a second pricing model living in Tier 1;
+  a **NET / MAX LOSS strip** on the ③ LEGS frame; and the chain **status pill**.
+- **Every one of them had to be taught to say nothing.** Delta renders an em-dash, never
+  `0.00`, for anything outside `[-1, 1]` — Schwab's `-999.0` missing-greek sentinel —
+  and index chains read hollow outside regular hours, so that is the *ordinary* case.
+  `net_premium` is `None` while any leg is unpriced, which is every fresh template
+  before Fetch Premiums; `NET $0` over an unpriced structure would state a figure the
+  page does not have. `max_loss_estimate` is `None` when the loss is unbounded or when a
+  short leg outlives a long one, which its single-date model cannot see. And the six
+  cards render **`Unlimited`** where the service returns its `999999` sentinel, never
+  `$999,999`. Same family as the `_clamp(nan) → hi` trap already documented here: a
+  missing input that renders as a confident number.
+- **Max loss is exact, not a width heuristic.** The expiration payoff is piecewise
+  linear with corners only at the strikes, so evaluating net premium plus intrinsic over
+  `{0} ∪ strikes` finds the true minimum — no per-structure special cases. An iron
+  condor correctly risks ONE side, a 1-2-1 butterfly's qty-2 middle leg needs no
+  handling of its own, and a lone short put reads its real `strike × 100 − credit`
+  instead of a width that does not exist.
+- **The shared leg editor gained a card layout, and the Simulator took it too.** The
+  GEOMETRY is shared; the palette enters as `tokens`, so the Calculator paints it
+  `[calc]` near-black while the Simulator stays app-navy and `leg_editor` imports no
+  page's theme constants. An omitted cell **collapses its track** rather than leaving a
+  hole — a 4-track grid fed 3 cells slides the next value under the wrong caption — so
+  the Simulator, whose `sim_meta` carries no greeks, gets no DELTA column at all rather
+  than a captioned column that can never hold a value. Rescue keeps the row table.
+  Along the way the Simulator's leg removal acquired a **1-leg floor** where row mode
+  allowed zero: a zero-leg simulator enqueues nothing and silently freezes its charts on
+  the previous sweep, so a locked ✕ with a tooltip beats an inert page.
+- **The mock's two-leg floor was an artifact, and copying it removed real
+  functionality.** The design locks removal at two because its own `buildLegs` pads a
+  single-leg spec with a synthetic opposite leg. This app does not pad — it ships four
+  genuine single-leg templates, and this same redesign wrote tags and a thesis for all
+  four — so the floor is ONE. **The top-level Expiry was kept for the mirror-image
+  reason:** the mock has per-leg expiry only, but the real page's top-level Expiry drives
+  `calc_compute`'s `expiry` argument and the `apply_expiry` propagation to every leg, so
+  dropping it would have deleted working behaviour to match a mockup that never had to
+  call a service. It moved into the ② SYMBOL readout row instead.
+- **A result belongs to the symbol it was computed for.** Loading a *different* symbol
+  now drops the on-screen result so the panels fall back to the placeholder; reloading
+  the *same* one keeps it, which is what the restore-on-navigation path does on every
+  return visit, so an always-clear would blank the screen there. The bug predates this
+  redesign — the new status pill is what made it self-contradicting, leaving one
+  symbol's cards and matrix under a pill announcing another's.
+- **Two module-level stashes were leaking between tests.** `_LAST_CALC` and the handoff
+  stash both survive a render by design, so one test typing a symbol had the next
+  render restore it — a failure that moves around under random ordering. The fixture
+  clears both.
+- **Docs.** `page_help.py`'s Calculator entry described the old layout, per the standing
+  rule that the hover guides rot first; the User Guide additionally still listed **Range
+  min / max and Range %**, controls replaced by the Number-of-strikes input some time
+  before this redesign, and both manuals described the leg editor as a table of rows.
+  All corrected, along with the route doc and CLAUDE.md's `[calc]` entry.)
+
+---
+
+**Prior — 2026-08-19** (**Market Dashboard: breadth off the equity tape, a
 ranked broad-market frame, and a guaranteed newest-first Captured table.**
 - **The advance/decline meter counted the whole board, which made it close to
   meaningless.** By the board's risk polarity a bid VIX, a stronger dollar and a

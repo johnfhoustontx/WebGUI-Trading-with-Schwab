@@ -278,7 +278,7 @@ Routes:
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
-| `/options/calculator` | Calculator — summary tiles + P&L heatmap over real chain strikes, multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/calculator` | Calculator — a three-step screen (① STRATEGY / ② SYMBOL / ③ LEGS) over six metric cards + the P&L matrix on real chain strikes, in its own `[calc]` palette. Multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — multi-strategy single-symbol scan (directional / spreads / neutral) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
 | `/options/simulator` | Simulator — Replay / What-if / IV-shock over the shared multi-leg builder; persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
@@ -310,12 +310,18 @@ the symbol tab-out/Enter Load trigger), **`overlay.py`** (the shared full-screen
 plus a shared `LOAD_TIMEOUT_SEC` backstop; both the Calculator + Simulator show it
 centered while a symbol Loads/Fetches), **`strategies.py`** (PURE shared
 strategy/leg model — the normalized leg dict + `STRATEGY_TEMPLATES`/`STRATEGY_GROUPS`
-+ `build_default_legs` + analytic-vs-numeric `summary_code`; imported by **both** the
++ `build_default_legs` + analytic-vs-numeric `summary_code` + `strategy_tags`/
+`strategy_blurb`; imported by **both** the
 Calculator and Simulator so templates never drift), **`leg_editor.py`** (the shared
-**editable multi-leg-table widget** both pages mount — `state['legs']` is the source
-of truth, each page injects its own `strikes_for`/`expiries_for` + `show_premium`;
-`apply_expiry(expiry)` propagates the Calculator's top-level Expiry to **all** legs;
-the header table drops the "Actions" label and renders **compact `leg-row` cells**),
+**editable multi-leg widget** every leg-building page mounts — `state['legs']` is the
+source of truth, each page injects its own `strikes_for`/`expiries_for` +
+`show_premium`; `apply_expiry(expiry)` propagates the Calculator's top-level Expiry to
+**all** legs. **TWO layouts over that one model:** `layout="card"` — the Calculator +
+Simulator — a two-line card whose GEOMETRY is shared while its palette enters as
+`tokens` (Calculator `[calc]` near-black, Simulator app-navy); `delta_for` /
+`show_premium` each COLLAPSE their track when the page has no source for them, and
+`min_legs` floors the remove button at 1. `layout="row"`, the original single-line
+table, is now mounted only by **Rescue**),
 and **`handoff.py`** (cross-page
 signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
@@ -1021,7 +1027,7 @@ modules, which is the part a value check cannot do.
 speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
-See the "App theme — dark-navy 'dashboard'" section. **Five sections are page-scoped
+See the "App theme — dark-navy 'dashboard'" section. **Six sections are page-scoped
 languages, NOT the app-wide palette and NOT surfaced in Settings → Appearance:**
 `[flow]` (the Options Flow console panels, the `/options/gamma` Flow + Net Prem
 subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
@@ -1029,10 +1035,13 @@ subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
 2026-08-18 — the two share the vocabulary rather than the Desk growing a `[desk]`
 section of its own), `[macro]` (the Macro Board
 redesign, `/market` only), `[sectors]` (the Sector & Industry heat grid,
-`/sentiment/sectors` only) and `[rotation]` (the Sector Rotation board,
-`/sentiment/rotation` only). Each has matching `theme.py` builders
-(`build_console_*` / `build_macro_*` / `build_sector_*` / `build_rotation_*`); the
-first three are injected via that page's ONE `ui.add_css` escape-hatch block.
+`/sentiment/sectors` only), `[rotation]` (the Sector Rotation board,
+`/sentiment/rotation` only) and `[calc]` (the Options Strategy Calculator,
+`/options/calculator` only — scope hook **`.calc-v3`**, never `.calc-v2`, which is
+the shared dark-navy scope the Simulator and Trade wear). Each has matching
+`theme.py` builders (`build_console_*` / `build_macro_*` / `build_sector_*` /
+`build_rotation_*` / `build_calc_*`); `[flow]`, `[console]`, `[macro]` and `[calc]`
+are injected via that page's ONE `ui.add_css` escape-hatch block.
 **`[sectors]` and `[rotation]` are the two that prove the rule holds** — a heat
 grid and a diverging gauge are nothing but colour and measurement, and both need
 **no `ui.add_css` at all**, only tokens and a font `<link>`. Their colour ramps

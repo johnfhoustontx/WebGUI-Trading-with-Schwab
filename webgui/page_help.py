@@ -116,20 +116,39 @@ family for it — directional, spreads, and neutral.
     "/options/calculator": """
 **Calculator — the simple version**
 
-Shows the profit/loss of an options trade **before** you place it — any
-**multi-leg** structure.
+Shows what an options trade makes or loses **before** you place it — any
+**multi-leg** structure. Work down the three numbered boxes on the left; the
+results appear on the right.
 
-- **Strategy** — pick a template (single, vertical, **iron condor**, **butterfly**,
-  **calendar/diagonal**…) and the **leg editor** fills in. Add, remove, or edit legs
-  freely — each has its own strike, **expiry**, and quantity. **Load**/**Fetch** pull
-  live prices.
-- **IV %, IV Δ, Rate** — volatility and interest assumptions. Higher IV = pricier
-  options and wider P&L swings.
-- **Calculate** builds the **summary tiles** (max risk/return, breakeven,
-  probability) and a **heat map** of P&L by price (rows) and date (columns) —
-  green = profit, red = loss. Calendars price each leg at its own expiry.
-- **Copy to Simulator** sends the exact legs across. Widening strikes raises the
-  credit you collect but also the max loss.
+- **① Strategy** — pick a template (single, vertical, **iron condor**,
+  **butterfly**, **calendar/diagonal**…). The chips say whether it takes in a
+  **credit** or costs a **debit**, how many legs it has, and its lean; the line
+  under them is the trade's thesis in one sentence.
+- **② Symbol** — type a ticker and tab out (or press **Load chain**). The pill
+  top-right says whether a chain is loaded. **Price, IV %, IV Δ, Rate,
+  Contracts, Strikes** and **Expiry** live here — Expiry sets *every* leg's
+  expiry. Higher IV = pricier options and wider P&L swings. **IV Update** works
+  the volatility back out of the traded contract's own price, the way
+  ThinkorSwim does.
+- **③ Legs** — one card per leg: type, side, expiry, strike, quantity, premium,
+  and the leg's **delta** from the chain. The strip on the frame keeps a running
+  **leg count, net premium and max loss**. A dash means *not known yet*, not
+  zero: premiums are blank until you press **Fetch Premiums**, and delta is
+  blank whenever the chain carries no Greeks — normal outside market hours.
+- **Calculate** fills the **six cards** — entry credit/debit, max risk, max
+  return, return on risk, breakeven(s), probability of profit — and the **P&L
+  matrix** under them: one row per real strike, one column per date from **Now**
+  (today's mark-to-market) to **Exp** (the payoff at expiration), green = profit,
+  red = loss, spot row in amber. Calendars price each leg at its own expiry.
+- Each date column shows **dollars and a percentage**, and the heading says what
+  the percentage is *of*: **% MAX** (of the most the trade can make) when the
+  payoff is capped, **% COST** (of what you paid) when it isn't, and a plain
+  **%** with dashes when neither applies.
+- **Unlimited** on a card is real, not an error — a long call's upside and a
+  naked call's risk have no cap.
+- Loading a **different** symbol clears the cards and matrix; reloading the same
+  one keeps them. **Copy to Simulator** sends the exact legs across. Widening
+  strikes raises the credit you collect but also the max loss.
 """,
     "/options/gamma": """
 **Dealer Positioning — the simple version**

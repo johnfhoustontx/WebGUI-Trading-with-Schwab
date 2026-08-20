@@ -1183,7 +1183,7 @@ still match that template, else to the generic one (via `strategies.summary_code
 
 `calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range, expiry_date, iv_adjustment=0, per_leg_expiry=False)`
 re-prices every leg via Black-Scholes at each (price point × evaluation date) and
-sums P&L into the grid that drives the Calculator heat map. An `iv_adjustment`
+sums P&L into the grid that drives the Calculator's P&L matrix. An `iv_adjustment`
 shifts IV at every point for shock scenarios. With `per_leg_expiry=True` each leg is
 priced at **its own** time-to-expiry per column (`t_leg = leg_T0 − elapsed`), so a
 **calendar/diagonal** shows the back leg retaining value at the front-leg expiry;

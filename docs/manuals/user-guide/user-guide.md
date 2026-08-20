@@ -620,42 +620,76 @@ watches the autonomous trader.
 
 **Route:** `/options/calculator`.
 
-An options P&L calculator for **any multi-leg structure**, with a price/time heat map.
+An options P&L calculator for **any multi-leg structure**, with a price/time matrix.
+The screen is three numbered steps down a fixed left-hand column — **① Strategy**,
+**② Symbol**, **③ Legs** — with the results (six metric cards over the P&L matrix)
+in the column beside them. It wears its own near-black palette rather than the
+app-wide navy.
 
 **Inputs:**
 
-- **Strategy** — a template menu grouped into **Singles** (long/naked call/put),
-  **Verticals** (PCS/CCS credit + call/put debit spreads), **Condors** (iron condor +
-  all-call/all-put condor), **Butterflies** (call/put long 1-2-1 + iron butterfly), and
-  **Calendars** (call/put calendar + diagonal). Picking one fills the leg editor with
-  sensible at-the-money strikes.
-- **Symbol** and **spot price**, plus a **Load** button that pulls the live chain,
-  current price, a price range, and the list of expirations.
-- **Expiry**, **Contracts**, **IV %** (with an **IV** button that reads the
-  at-the-money IV from the chain), an **IV Δ %** shock, and a **Rate %**.
-- An **editable leg editor** — one row per leg with **Type** (call/put), **Side**
-  (long/short), **Strike**, **Expiry**, and **Qty**, plus **Add leg** and a remove
-  button. Each leg carries its **own expiry** (so **calendars/diagonals** price each
-  leg on its own clock) and its own quantity (so a 1-2-1 butterfly body trades at 2×).
-  **Fetch Premiums** fills each leg's premium from the chain.
-- **Range min / max** and **Range %** controlling the heat map's price span.
+- **① Strategy** — a cascading menu of templates: **Single** (long/short call/put),
+  **Credit spread** and **Debit spread** (call/put), **Condor** (iron, all-call,
+  all-put), **Butterfly** (call, put, iron), **Calendar** and **Diagonal** (call/put).
+  Picking one fills the leg editor with sensible at-the-money strikes. Underneath,
+  tag chips say whether the structure takes in a **credit** or costs a **debit**, how
+  many legs it has, and its lean (bullish, range, pin, defined risk…), followed by a
+  one-line description of what the trade is betting on. Only the credit/debit chip is
+  coloured — the rest are descriptions, not recommendations.
+- **② Symbol** — type a ticker and press Enter or tab out (or press **Load chain**);
+  a full-screen wait overlay shows while the chain loads. The pill in the title bar
+  reads **AWAITING SYMBOL** → **LOADING CHAIN** → **CHAIN LOADED · SYM**, and the
+  line under the buttons reports how many strikes and expiries arrived. The same
+  frame holds **Spot**, **Price**, **IV %**, **Rate %**, **IV Δ %**, **Contracts**,
+  **Strikes** (how many real chain strikes either side of spot the matrix spans,
+  default 24) and **Expiry**. The top-level **Expiry** propagates to *every* leg.
+  **IV Update** implies the volatility from the traded contract's own mark, the way
+  ThinkorSwim does, falling back to the chain's at-the-money volatility before you
+  have picked a strike.
+- **③ Legs** — an editable **card per leg**: **Type** (call/put), **Side**
+  (long/short), **Expiry**, **Strike**, **Qty**, **Premium**, and the leg's **Delta**
+  read straight from the option chain. **Add leg**, **Reset to template**, and a
+  remove ✕ that locks at the last leg. Each leg carries its **own expiry** (so
+  **calendars/diagonals** price each leg on its own clock) and its own quantity (so a
+  1-2-1 butterfly body trades at 2×). **Fetch Premiums** fills each leg's premium
+  from the chain.
+- The frame's header strip keeps a running **leg count**, **net premium** and **max
+  loss**. All three update as you edit. A **dash** there means *not known yet* rather
+  than zero — net premium is blank until every leg is priced, and max loss is blank
+  when the loss has no bound (a naked call) or cannot be settled on one date.
+  **Delta** shows a dash the same way whenever the chain carries no Greeks, which is
+  normal outside regular trading hours.
 
 **Outputs (after pressing Calculate):**
 
-- **Summary tiles** — entry credit/debit, max risk, max return, return-on-risk %,
-  break-even(s), and probability of profit. The credit-spread/iron-condor metrics use
-  the exact closed-form formulas; **butterflies, calendars, and other structures** are
-  measured numerically off the value-at-expiration curve (max profit/loss + every
-  break-even crossing).
-- A **P&L heat map** — rows are price points, columns are evaluation dates, each
-  cell shows the dollar P&L and % return, shaded green (profit) to red (loss). The
-  current spot row is highlighted.
+- **Six metric cards**, always in this order: **Entry credit/debit** (with the
+  position size beneath it), **Max risk**, **Max return**, **Return on risk** (with a
+  per-day figure), **Breakeven(s)** (with the first crossing's distance from spot),
+  and **Probability of profit**. The credit-spread/iron-condor and single-leg metrics
+  use the exact closed-form formulas; **butterflies, calendars, and other structures**
+  are measured numerically off the value-at-expiration curve (max profit/loss + every
+  break-even crossing). A card reads **Unlimited** where there genuinely is no cap —
+  a long call's upside, a naked call's risk — and a **dash** where there is no
+  reading at all, never a misleading `$0`.
+- A **P&L matrix** — rows are real chain strikes around spot, columns are evaluation
+  dates running from **Now** (the trade's current mark-to-market) to **Exp** (the
+  payoff at expiration). Each cell shows the dollar P&L and a percentage, shaded
+  green (profit) to red (loss). Your spot row is picked out in amber and scrolled
+  into view.
+- **What the percentage is a percentage of is written in the column heading.**
+  **% MAX** means a share of the most the structure can make; **% COST** means a
+  share of what you paid, and appears when the payoff has no cap to measure against;
+  a plain **%** over dashes means neither applies. (It used to be a share of the
+  premium received — for a credit spread that is the same number, because the credit
+  *is* the maximum return.)
 
 If you arrived here via **Send to Calculator** from a signal table, the form is
 pre-filled and the calculation runs automatically. **Copy to Simulator** sends the
 current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
-brings them back), so you can move a structure between P&L tiles and the
-scenario/Greeks views without re-entering it.
+brings them back), so you can move a structure between the P&L cards and the
+scenario/Greeks views without re-entering it. Loading a **different** symbol clears
+the cards and matrix — they belonged to the old symbol; reloading the **same** one
+keeps them.
 
 ## Simulator
 
@@ -665,9 +699,11 @@ Re-prices a **multi-leg** option position under different scenarios using
 Black-Scholes. Start by entering a **Symbol** and pressing **Fetch snapshot**, then
 pick a **Strategy** (the same template menu as the Calculator — singles, verticals,
 condors, butterflies, calendars/diagonals) and adjust the **legs** in the editor —
-each row has **Type** (call/put), **Side** (long/short), **Strike**, **Expiry**, and
-**Qty**, with **Add leg** / remove. Every tab below operates on the **netted**
-position (all legs summed). Three tabs:
+one **card** per leg with **Type** (call/put), **Side** (long/short), **Expiry**,
+**Strike** and **Qty**, plus **Add leg** and a remove ✕ that locks at the last leg
+(a position with no legs has nothing to simulate). The Simulator's snapshot carries
+no Greeks, so its leg cards show no Delta column — the Calculator's do. Every tab
+below operates on the **netted** position (all legs summed). Three tabs:
 
 - **Replay** (default) — re-prices the position along the underlying's recent price
   path and shows a **six-panel stack** (price plus Delta, Gamma, Theta, Vega, Rho).
@@ -680,8 +716,8 @@ position (all legs summed). Three tabs:
 - **IV Shock** — an **IV multiplier** slider compares the position at base IV vs
   shocked IV across Price, Delta, Gamma, Theta, and Vega.
 
-**Copy to Calculator** sends the current legs to the Calculator for the P&L tiles +
-heat map (the Calculator's **Copy to Simulator** brings them back).
+**Copy to Calculator** sends the current legs to the Calculator for the metric cards
++ P&L matrix (the Calculator's **Copy to Simulator** brings them back).
 
 ## Market Scanner
 

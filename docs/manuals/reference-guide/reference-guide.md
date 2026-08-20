@@ -1332,19 +1332,32 @@ option chain. This is where you find out what a trade actually risks before you 
 
 ### Reading the screen
 
-**The workflow is: symbol → strategy → legs → Calculate.**
+**The screen is three numbered steps.** ① STRATEGY and ③ LEGS run down a fixed
+left-hand column; ② SYMBOL, the six metric cards and the P&L matrix fill the column
+beside them. The page wears its own near-black palette rather than the app-wide navy —
+that is deliberate, not a theming accident.
 
-1. **Symbol** — type it and press Enter, or just tab out of the field. A full-screen
-   wait overlay shows while the chain loads (30-second timeout).
-2. **Strategy** — a cascading menu of templates: singles, verticals (credit and debit),
-   iron condors, butterflies (long and iron), calendars and diagonals. Picking one fills
-   the leg editor.
-3. **Legs** — the editable table below. Each leg has its own **type** (put/call),
-   **side** (long/short), **expiry**, **strike**, **quantity** and **premium**. Add or
-   remove legs freely. Per-leg expiry is what makes **calendars price correctly** —
-   each leg is valued at its own time to expiration.
+1. **① Strategy** — a cascading menu of templates: singles, verticals (credit and
+   debit), iron condors, butterflies (long and iron), calendars and diagonals. Picking
+   one fills the leg editor. Tag chips below name the cash-flow direction (**credit**
+   or **debit**), the leg count and the lean; only the credit/debit chip is coloured,
+   because the rest are descriptions rather than opinions. A one-line thesis says what
+   the structure is betting on.
+2. **② Symbol** — type it and press Enter, or just tab out of the field. A full-screen
+   wait overlay shows while the chain loads (30-second timeout), and the pill in the
+   title bar reads AWAITING SYMBOL → LOADING CHAIN → CHAIN LOADED · SYM. All the
+   scalar inputs live in this frame, and the line under them reports how many strikes
+   and expiries the chain actually carried — which is what explains a leg whose strike
+   will not snap where you expect.
+3. **③ Legs** — one editable **card** per leg. Each has its own **type** (put/call),
+   **side** (long/short), **expiry**, **strike**, **quantity**, **premium**, and its
+   **delta** read from the chain. Add or remove legs freely; the last one is locked,
+   because a calculator with no legs has nothing to price. Per-leg expiry is what
+   makes **calendars price correctly** — each leg is valued at its own time to
+   expiration. The strip on the frame keeps a running **leg count, net premium and max
+   loss** as you edit.
 4. **Fetch Premiums** pulls live marks for the legs you have built.
-5. **Calculate** produces the summary tiles and the heat map.
+5. **Calculate** produces the six metric cards and the P&L matrix.
 
 **The other inputs:**
 
@@ -1356,22 +1369,43 @@ option chain. This is where you find out what a trade actually risks before you 
 | **IV Δ %** | A shock applied on top, for stress-testing. |
 | **Price** | Override the underlying price. |
 | **Rate %** | The risk-free rate, defaulting to the app-wide **4.5%**. A fixed assumption, not a live Treasury yield. Barely matters at short expiries — half a point of rate moves a 0DTE option by about 0.2% — but it is the least accurate input on multi-week structures. |
-| **Number of strikes** | How many real chain strikes the heat map spans (default 24, centred on spot). |
+| **Strikes** | How many real chain strikes the matrix spans (default 24, centred on spot). |
 
 **IV Update** implies the volatility **from the traded contract's mark**, the way
 ThinkorSwim does — it solves backwards from the actual price rather than using the
 chain's published figure. Before you have picked a strike it falls back to at-the-money
 chain volatility.
 
-**The summary tiles** give max risk, max return, breakeven and probability of profit.
+**The six metric cards** are, in order: entry credit/debit (with the position size
+under it), max risk, max return, return on risk (with a per-day figure), breakeven(s)
+(with the first crossing's distance from spot), and probability of profit.
 
-**The heat map** is the centrepiece: rows are underlying prices (real chain strikes
-around spot), columns are dates. Green is profit, red is loss.
+> **A dash is a real reading, and so is "Unlimited".** Nothing on this screen prints a
+> `$0` it has not measured. A card reads **Unlimited** where the payoff genuinely has
+> no cap — a long call's upside, a naked call's risk — and a **dash** where there is no
+> number to give: no calculation yet, or a ratio that is not defined because one side
+> is uncapped. The same rule governs the ③ LEGS strip (net premium is blank until every
+> leg is priced; max loss is blank when the loss is unbounded) and the per-leg
+> **delta**, which is blank whenever the chain carries no Greeks — routine outside
+> regular hours, and the usual state of index chains overnight. A confident `0.00`
+> there would be a wrong number rather than a missing one.
+
+**The matrix** is the centrepiece: rows are underlying prices (real chain strikes
+around spot), columns are dates. Green is profit, red is loss, and your spot row is
+picked out in amber and scrolled into view.
 
 > **The first column is "Now" and the last is "Exp".** "Now" is the trade's current
 > mark-to-market value; "Exp" is the payoff at expiration. This distinction matters
 > enormously for 0-DTE, where an earlier version showed only the expiration payoff
 > everywhere and so hid the entire intraday behaviour of the trade.
+
+Each date column carries dollars **and a percentage**, and **the heading says what the
+percentage is a percentage of.** **% MAX** is a share of the most the structure can
+make. **% COST** is a share of what you paid, and appears when the payoff has no cap
+to measure against — a long call, for instance, where "+125% of cost" is the figure
+you actually want. A plain **%** over dashes means neither basis exists. Before
+2026-08-19 the column was a share of the *premium received*; for a credit spread that
+is the identical number, because the credit **is** the maximum return.
 
 **Copy to Simulator** sends the exact legs across. **Expected Move** charts them.
 
@@ -1382,7 +1416,7 @@ the width you risk. Everything else — probability, breakeven, Greeks — follo
 those. This page shows all of it against real strikes rather than round numbers, which
 is the difference between a trade you can actually fill and one you cannot.
 
-The heat map's second value is *time*. A credit spread that is profitable at expiration
+The matrix's second axis is *time*. A credit spread that is profitable at expiration
 can be deeply underwater three days in, and that intermediate red is what forces people
 out of trades that would have worked. Seeing it in advance changes your stop placement.
 
@@ -1401,8 +1435,13 @@ and a position.
   first and *then* the legs apply. If you set legs before a chain exists, the strike
   ladder is empty and the strikes get wiped — the app handles this for you, but it is
   why there is a brief pause on hand-off.
-- Widening the strikes raises the credit **and** the max loss. The tiles show both;
+- Widening the strikes raises the credit **and** the max loss. The cards show both;
   check the ratio, not just the credit.
+- **Loading a different symbol clears the cards and the matrix.** They belonged to the
+  symbol they were calculated for, and leaving them on screen under a status pill
+  naming a new one would state two symbols at once. Reloading the *same* symbol is a
+  refresh and keeps them — which is also what happens every time you navigate back to
+  the page, since it restores and re-loads on its own.
 
 ### Related pages
 
@@ -1433,8 +1472,12 @@ changes.
 
 ### Reading the screen
 
-Fetch a snapshot for a symbol, pick a **Strategy**, adjust the **legs** — the controls
-and the strategy sit side by side in one panel. Then use the three subtabs:
+Fetch a snapshot for a symbol, pick a **Strategy**, adjust the **legs** — one card per
+leg, the same widget the Calculator uses, in this page's navy rather than the
+Calculator's near-black; the controls and the strategy sit side by side in one panel.
+The snapshot carries no Greeks, so the cards here show no per-leg delta, and the last
+leg cannot be removed (a position with no legs leaves the charts frozen on the previous
+sweep). Then use the three subtabs:
 
 **Replay.** Re-prices the whole netted position along the underlying's recent actual
 price path. Stacked panels show price plus the five Greeks, with a scrub cursor.

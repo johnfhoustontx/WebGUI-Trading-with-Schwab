@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Technical Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-19</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1749,7 +1749,7 @@ function when the strategy code is one of the seven closed-form cases and the le
 still match that template, else to the generic one (via <code>strategies.summary_code</code>).</p>
 <p><code>calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range, expiry_date, iv_adjustment=0, per_leg_expiry=False)</code>
 re-prices every leg via Black-Scholes at each (price point × evaluation date) and
-sums P&amp;L into the grid that drives the Calculator heat map. An <code>iv_adjustment</code>
+sums P&amp;L into the grid that drives the Calculator's P&amp;L matrix. An <code>iv_adjustment</code>
 shifts IV at every point for shock scenarios. With <code>per_leg_expiry=True</code> each leg is
 priced at <strong>its own</strong> time-to-expiry per column (<code>t_leg = leg_T0 − elapsed</code>), so a
 <strong>calendar/diagonal</strong> shows the back leg retaining value at the front-leg expiry;
