@@ -2177,3 +2177,54 @@ def compute_momentum(session_date=None, conn=None, client=None):
     if not payload["regime"]:
         payload["regime"] = _momentum_regime_block(momentum_regime.classify([]))
     return payload
+
+
+# --- Bull / Bear Map (cache:sentiment:bullbear) -------------------------------
+# The nightly cascade above already scores all three levels with their parent
+# links. This adds only the live layer: ONE batched /quotes call for every
+# distinct symbol, merged onto a COPY of the cached rows.
+# See docs/plans/2026-08-19-bull-bear-map-design.md.
+
+BULLBEAR_LEVELS = ("sector", "industry", "stock")
+
+
+def bullbear_symbols(levels):
+    """Every distinct symbol across the three levels, order preserved.
+
+    Deduped because an industry ETF is usually a scored stock as well, and the
+    batched quote call should ask for it once.
+    """
+    out, seen = [], set()
+    for name in BULLBEAR_LEVELS:
+        for row in (levels or {}).get(name) or []:
+            symbol = (row or {}).get("symbol")
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                out.append(symbol)
+    return out
+
+
+def merge_live(levels, quotes):
+    """Attach ``day_pct`` to a COPY of every row.
+
+    Copies rather than mutates: ``levels`` comes from the cached momentum
+    payload, which /sentiment/momentum renders too — a live field written into
+    it would leak into that page and into the next merge. A shallow copy is
+    enough because nothing here writes below the top level.
+
+    ``quotes`` is the flattened mapping ``SchwabProxyClient.get_quotes`` returns
+    (schwab-proxy/proxy_client.py:284) — ``{symbol: {"change_pct": ..., ...}}``,
+    no nested ``quote`` envelope. A symbol the proxy left out leaves ``day_pct``
+    None, which renders as a dash; defaulting to 0.0 would render as
+    "unchanged", a different and false claim.
+    """
+    merged = {}
+    for name in BULLBEAR_LEVELS:
+        rows = []
+        for row in (levels or {}).get(name) or []:
+            copy = dict(row or {})
+            pct = ((quotes or {}).get(copy.get("symbol")) or {}).get("change_pct")
+            copy["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
+            rows.append(copy)
+        merged[name] = rows
+    return merged
