@@ -1067,12 +1067,14 @@ def build_rotation_font_head_html(theme):
 
 
 # ── Options Strategy Calculator (/options/calculator) helpers ────────────────
-# Page-scoped like [console] / [macro] / [sectors] / [rotation], and the only
-# one of the five that needs an ``ui.add_css`` escape-hatch of its own: this
-# page mounts q-fields, the leg editor and the teleported strategy popup, none
-# of which component ``.classes()`` can reach. Scope hook is ``.calc-v3`` —
-# deliberately NOT ``.calc-v2``, which is the app-wide dark-navy scope the
-# Simulator and Trade pages share.
+# Page-scoped like [flow] / [console] / [macro] / [sectors] / [rotation]. Like
+# the first three of those it needs an ``ui.add_css`` escape-hatch of its own
+# (``[sectors]`` and ``[rotation]`` need none — a heat grid and a diverging
+# gauge are nothing but colour and measurement): this page mounts q-fields, the
+# leg editor and the teleported strategy popup, none of which component
+# ``.classes()`` can reach. Scope hook is ``.calc-v3`` — deliberately NOT
+# ``.calc-v2``, which is the app-wide dark-navy scope the Simulator and Trade
+# pages share.
 def build_calc_tokens(theme):
     """Tailwind class-string vocabulary for the Strategy Calculator.
 
