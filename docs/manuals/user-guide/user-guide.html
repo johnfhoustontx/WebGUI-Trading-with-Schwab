@@ -95,6 +95,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#flow-alerts">Flow Alerts</a></li>
 <li><a href="#market-dashboard">Market Dashboard</a></li>
 <li><a href="#sentiment">Sentiment</a></li>
+<li><a href="#bull-bear-map">Bull / Bear Map</a></li>
 <li><a href="#sector-industry">Sector &amp; Industry</a></li>
 <li><a href="#sector-rotation">Sector Rotation</a></li>
 <li><a href="#rrg">RRG</a></li>
@@ -697,6 +698,45 @@ The app prefers to say nothing over stating a confident wrong number.</p>
 runner-up. A 10-point lead is a real reading; a 0.2-point lead means the headline
 was very nearly a coin toss.</p>
 </blockquote>
+<h2 id="bull-bear-map">Bull / Bear Map</h2>
+<p><strong>Route:</strong> <code>/sentiment/bullbear</code>.</p>
+<p>Where the market is strong and weak, as a tree you open one level at a time:
+eleven sectors, the industries inside each, then the stocks inside those.</p>
+<ul>
+<li><strong>The page keeps two questions apart.</strong> <strong>Trend</strong> is whether price is genuinely
+  rising — the annualised slope of a regression through months of closes, scaled
+  by how well the line fits. <strong>vs SPY</strong> is whether it is beating the index. A name
+  can do either without the other, and no number here blends them.</li>
+<li><strong>The quadrant chip</strong> names both at once. <strong>Rising · Leading</strong> is unambiguous
+  strength, <strong>Falling · Lagging</strong> unambiguous weakness, <strong>Rising · Lagging</strong> is
+  going up more slowly than the index — and <strong>Falling · Leading</strong> is the one
+  worth learning. It is falling, just less than the index, which is exactly the
+  row a relative-strength-only screen paints as a buy.</li>
+<li><strong>No reading</strong> means the cascade could not score that row (too short or too
+  thin a price series). It is an absence, not a neutral verdict.</li>
+<li><strong>The headline is a count, not a verdict.</strong> "5 of 11 sectors rising and
+  leading" describes the rows on screen. There is deliberately no risk-on /
+  risk-off call here — <strong>Sector Rotation</strong> owns that read.</li>
+<li><strong>The chips under the headline</strong> are the full distribution. All four quadrants
+  stay on screen even at zero, because an empty trap bucket is itself worth
+  knowing. A fifth <strong>No reading</strong> chip appears only when something is unscored.</li>
+<li><strong>Breadth</strong> is the share of a group's members confirming its move. A sector
+  rising on a quarter of its constituents is a fragile advance and the bar turns
+  red to say so. <strong>Stock rows have no bar</strong> — a stock has no members — and a dash
+  means no reading at all, which is not the same as 0%.</li>
+<li><strong>Two clocks, and they date different things.</strong> Trend, vs SPY and Breadth come
+  from <strong>last night's</strong> cascade; momentum needs months of history, so there is no
+  intraday version of them. Only <strong>Today</strong> is live, refreshed every ~30 seconds
+  from one batched quote call <strong>whenever the market is open — including the
+  extended-hours and curb sessions, not just the regular one</strong>. Once the tape is
+  genuinely closed it throttles to about once every 5 minutes, which costs
+  nothing, because closed quotes do not move. If the quote line reports quotes
+  unavailable, only the Today column is affected — the scores below it are fine.</li>
+<li><strong>Click a sector</strong> to build its industries, <strong>an industry</strong> to build its
+  stocks. Nothing below the sector level is loaded until you ask for it, and
+  more than one can be open at a time.</li>
+<li><strong>Refresh</strong> re-pulls the quotes and republishes the map.</li>
+</ul>
 <h2 id="sector-industry">Sector &amp; Industry</h2>
 <p><strong>Route:</strong> <code>/sentiment/sectors</code>.</p>
 <p>A heat grid for the eleven S&amp;P sectors, each expandable into its industries.</p>

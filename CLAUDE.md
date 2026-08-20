@@ -285,6 +285,7 @@ Routes:
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
+| `/sentiment/bullbear` | Bull / Bear Map — a lazily-expanding sector → industry → stock tree showing absolute trend and relative strength vs SPY as **separate** marks (never blended) plus a live day-move, with participation as a third breadth axis beside the quadrant. ⚠ **Falling · Leading is the trap** a relative-only screen calls a buy. Headline is quadrant **counts**, never a regime verdict; `payload["regime"]` is never read. Reader of `cache:sentiment:bullbear`. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/sectors` | Sector & Industry — a magnitude-forward **heat grid**: Day/Week/Month as three flush filled tiles, intensity normalised **per column** on that column's own p90, plus P/C and expandable industries. Sortable; RRG dropped. Reader of `cache:sentiment:sectors`. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/rotation` | Sector Rotation — verdict strip (regime · **diverging spread gauge** on a −3…+3 scale with both ±threshold triggers · the spread and how far past its trigger it sits), a **weight-proportional flow band**, and four quadrant panels. Quadrant map table + rotating-from/into lists retired. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/rrg` | RRG — **hand-drawn** relative-rotation plot (markers over an SVG trail layer, quadrant washes, fixed crosshair); **marker AREA = S&P weight**, trail = the **last 5 readings** resampled along a Catmull-Rom spline and labelled with the **sector name**. Domain is computed + symmetric about 100. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
@@ -855,6 +856,14 @@ TDD pure functions; smoke-verify `render()` with a screenshot.
   retried `MAX_RETRIES`× with backoff, flooding `errors.log` (~99% of all ERRORs)
   and wasting ~0.75 s/fetch. If you see a `D:\Trading With Schwab` source-repo proxy
   still on `:8100`, it may not have this fix.
+- **`schwab_client.get_quotes` returns a FLATTENED mapping, not Schwab's raw envelope**
+  — `{symbol: {"last", "change", "change_pct", "high", "low", "volume"}}`
+  (`schwab-proxy/proxy_client.py`), with **no nested `"quote"` key**. Reading
+  `q["quote"]["netPercentChange"]` yields `None` for *every* symbol with no exception
+  and no empty render, and a unit test written against an invented fixture will pass
+  while the live column is entirely blank. ⚠ `_extract_change_pct` also falls through
+  to a literal **`0.0`** when every percent field is missing or zero, so a `0.00%` cell
+  is not proof of a flat tape — only an OMITTED symbol is a real absence.
 
 **Feature history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md), not here.** The
 per-feature build narratives that used to sit in this section — what shipped, the pieces,
@@ -905,7 +914,11 @@ than caused it. ⚠ **Do NOT "align the thresholds": the two numbers are not
 commensurable.** A real fix is a product decision — either the sectors header
 reads the same `assessment.headline` the rotation page does, or its line stops
 calling itself a *regime* and says what it actually measures (today's
-cyclical-vs-defensive return spread). Compare the Market Regime direction axis
+cyclical-vs-defensive return spread). **`/sentiment/bullbear` is the standing
+precedent for a new screen: it declines to add a third headline and counts its own
+rows instead** ("5 of 11 sectors rising and leading"), and never reads
+`payload["regime"]` — a reader may disagree with what a count implies, but not with
+the count. Compare the Market Regime direction axis
 below, which solves the same class of problem by naming a direction only when two
 independent reads agree.
 
@@ -1035,8 +1048,11 @@ subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
 2026-08-18 — the two share the vocabulary rather than the Desk growing a `[desk]`
 section of its own), `[macro]` (the Macro Board
 redesign, `/market` only), `[sectors]` (the Sector & Industry heat grid,
-`/sentiment/sectors` only), `[rotation]` (the Sector Rotation board,
-`/sentiment/rotation` only) and `[calc]` (the Options Strategy Calculator,
+`/sentiment/sectors` only), `[rotation]` (the rotation-flavoured screens —
+`/sentiment/rotation`, `/sentiment/rrg`, `/sentiment/momentum` and
+`/sentiment/bullbear`, which share `ROTATION_TOKENS` + `rotation_view`'s
+`NT`/`NE`/`NB`/`TONE` rather than each growing a section of its own) and `[calc]`
+(the Options Strategy Calculator,
 `/options/calculator` only — scope hook **`.calc-v3`**, never `.calc-v2`, which is
 the shared dark-navy scope the Simulator and Trade wear). Each has matching
 `theme.py` builders (`build_console_*` / `build_macro_*` / `build_sector_*` /

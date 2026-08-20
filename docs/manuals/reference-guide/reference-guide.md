@@ -929,7 +929,7 @@ where is the market bullish, and where is it bearish. It exists because "bullish
 |---|---|
 | Service | `sentiment_svc` (:8210), `cache:sentiment:bullbear` |
 | Scores | The nightly momentum cascade, 16:20 CT — 11 sectors, ~69 industries, ~296 stocks |
-| Day moves | One batched `/quotes` call, republished about every 30 seconds during the session |
+| Day moves | One batched `/quotes` call covering every symbol at once, republished about every 30 seconds while the tape is open — **any** open session, extended hours and curb included — and throttled to once every 5 minutes once it is genuinely closed |
 | Refresh | Re-pulls quotes and republishes; the scores are untouched until the next cascade |
 
 ### Reading the screen

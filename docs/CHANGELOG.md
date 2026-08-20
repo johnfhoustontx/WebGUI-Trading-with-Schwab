@@ -4,7 +4,123 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-19 (**The Options Strategy Calculator rebuilt to a three-step
+**Last updated:** 2026-08-20 (**The Bull / Bear Map — "bullish" is two facts, and this
+screen refuses to blend them, refuses to add a third regime verdict, and had four of its
+upstream assumptions turn out wrong on contact with the producer.**
+- **What shipped.** `/sentiment/bullbear`, a new **third tab** of the Trend & Sentiment
+  group (`SENTIMENT_CHILDREN` is now seven; the rail is unchanged at 14 items, since
+  this is a tab and not a rail page), plus an **eleven-chip sector strip on the Desk**
+  that clicks through to it. `sentiment_svc` publishes ONE new view,
+  `cache:sentiment:bullbear`, merging the nightly momentum cascade with one batched
+  quote call; Tier 1 renders a lazily-expanding sector → industry → stock tree. **No
+  Highcharts** — it is a tree, and that also dodges the documented mount-hidden collapse
+  trap. Detail in [webgui-routes.md](webgui-routes.md#sentimentbullbear); design + plan
+  in [`plans/2026-08-19-bull-bear-map-design.md`](plans/2026-08-19-bull-bear-map-design.md)
+  / [`-plan.md`](plans/2026-08-19-bull-bear-map-plan.md).
+- **The organising idea: two axes, never blended.** Every row shows absolute trend
+  (`raw.trend`, the annualised exp-regression slope of log(close) scaled by R² — signed,
+  benchmark-free) and relative strength vs SPY (`raw.excess`) as **separate marks**, plus
+  a live day-move. Their four combinations are the map, and the fourth is the reason the
+  page exists: **Falling · Leading — down, but down less than the index — is precisely
+  the row a relative-strength-only screen paints as a buy.** Measured on the 2026-08-19
+  payload, 19 stocks and 1 industry sat in that bucket. The quadrant chip names BOTH
+  axes, because one word is the ambiguity being removed; ties go the cautious way (a flat
+  trend is not "rising", a zero excess is not "leading"); and a missing axis renders
+  **No reading**, an absence rather than a neutral verdict.
+- **Participation is a third, independent dimension, drawn beside the quadrant and never
+  folded into it.** It is the share of a group's constituents confirming the move, and it
+  separates two rows that look identical on trend alone — 2026-08-19: Energy flat on
+  **0.96** participating, Real Estate rising on **0.23**. At or below a third the move is
+  flagged thin and the bar switches to the down hue. Stock rows carry no bar at all,
+  which draws differently from an empty one: no track is "no constituents", an empty
+  track is "nothing confirms".
+- **Deliberately NO regime headline — the page's central design decision.** CLAUDE.md
+  already records `/sentiment/sectors` and `/sentiment/rotation` printing OPPOSITE
+  risk-on/risk-off verdicts from non-commensurable quantities (measured 2026-08-17:
+  `+0.37` rendering "Risk-on" beside `−1.52` rendering "Risk-off"). This page does not add
+  a third. Its headline is **quadrant counts** — "5 of 11 sectors rising and leading" —
+  arithmetic about the rows on screen, not interpretation, and `payload["regime"]` is
+  never read by either the page or the Desk strip. `bullbear.headline` returns **`""`** on
+  an empty payload rather than "0 of 0 sectors rising and leading", which would state a
+  maximally bearish tape nobody measured — so the cold-cache state is a real message
+  naming the nightly cascade, not a fabricated count. The count strip keeps all four
+  quadrants **even at zero**, because an empty trap bucket is itself a reading.
+- **Two clocks, deliberately, and they fail separately as well as tick separately.**
+  `computed_at`/`session_date` date the SCORES (last night's cascade — trend and relative
+  strength need months of history, so there is no intraday version of them); `quoted_at`
+  dates the day-moves. `quoted_at` is `None` when the live quote call raised, and
+  `compute.bullbear_view` ships the tree anyway: the cost is one column, not the page. A
+  malformed tree by contrast RAISES, since an all-None day-move column would hide it.
+  Page-side the same distinction is two repaint paths — a version carrying only new quotes
+  **reprices the day cells in place**, because rebuilding would collapse every branch the
+  reader had opened, twice a minute.
+- **One batched `/quotes` call covers all 374 distinct symbols** (11 sectors + 69
+  industries + 296 stocks, deduped because an industry ETF is usually a scored stock
+  too) — verified against the running proxy that 374 come back in a single call, so this
+  is one request per poll and not one per name. The publish is gated on **whether the
+  tape is open, not on RTH** (`scheduler.bullbear_due`): every ~30 s tick in any open
+  session including GTH and curb, throttled to once per 5 min on a genuinely closed tape.
+  Sharing `refresh_due`'s 15-minute off-hours gate would have been a false economy — that
+  knob was sized for the 120 s composite refresh at 30–40 proxy calls a run, ~35× this
+  one's cost, and it would have left the Today column fifteen minutes stale through
+  exactly the extended sessions a reader most wants current.
+- **The tree expands lazily**, so 376 rows are never all in the DOM: the default screen is
+  eleven sector rows, industries build on a sector expand and stocks on an industry
+  expand. Every branch adds at least one child — a note where there is nothing else — so
+  the "already built" check can never misread. Both empty states are real, not
+  hypothetical: 3 of 69 industries held no admitted member stock on 2026-08-19, and 10 of
+  296 stocks resolved to no scored industry at all.
+- **⚠ Correction to commit `a2f596d`'s message, which overstates what it did.** Its body
+  says the commit is "the tests that pin it, plus **the two defects they turned up**" — a
+  leaf row offered a chevron it could not honour, and `_rebuild` keeping the previous
+  tree's day-cell registry. **That is false, and the record needs to be straight: the
+  commit changed exactly one file, `webgui/tests/test_sentiment_bullbear.py`, +156 lines
+  and zero deletions.** Both items were already correct in the page as shipped by the
+  preceding commit `3fc8c67` — `_mark_row(node, level, leaf)` already suppressed the
+  chevron for a leaf, and `_rebuild` already opened with `state["cells"] = []`. They were
+  **coverage gaps closed by new tests, not defects found**. This matters because CLAUDE.md
+  already carries a scar from exactly this class of overstatement: the 2026-07-01 accuracy
+  audit closed finding C7 ("single-source `r`") as FIXED while five `0.045` literals sat
+  in `gamma_tool` and a separate `RISK_FREE = 0.04` in `backtest_0dte` for another seven
+  weeks. **A future session must not read that commit and infer this page shipped broken.**
+- **The session's through-line: four upstream assumptions in the plan were wrong on
+  contact with the producer, and every one had been reasoned plausibly from the consumer
+  side.** (1) **The quote shape** — `schwab_client.get_quotes` returns a **FLATTENED**
+  `{symbol: {"change_pct": …}}` mapping (`schwab-proxy/proxy_client.py`), not the raw
+  Schwab `{"quote": {…}}` envelope the plan's fixture invented; shipped, all 374 rows
+  would have carried `day_pct=None` silently **while the plan's own test passed**, because
+  the test asserted against the same invented shape. (2) **`participation` names two
+  different quantities in one row** — `row["participation"]` is the 0..1 share this page
+  wants, `row["components"]["participation"]` is a within-level **z-score**, signed and
+  unbounded (both set by `compute._momentum_score_level`); the wrong one costs every
+  negative row its bar and mis-draws the rest, with no exception and no blank render.
+  (3) **The orphan mechanism** — the plan attributed `orphan_stocks` to the four
+  duplicate-ETF industries, which cannot produce one: `_momentum_universe` puts those in
+  `orphans` rather than `universe["industries"]`, and `industry_of` is built only from the
+  latter, so such a stock resolves to `("", "")` and is dropped from every row and count.
+  The real source is the admission gate. That wrong version had already been written into
+  a test docstring on the plan's authority before reading the producer caught it.
+  (4) **A `ZoneInfo` the module does not import** — the plan's `quoted_at` stamp assumed a
+  CT constant that belongs to `options_svc`, not to `sentiment_svc/compute`; the stamp now
+  mirrors how the momentum payload produces its sibling `computed_at`, since the two
+  render side by side and would otherwise format differently. **The lesson to carry: a
+  green test over a fixture you wrote yourself is a test of your assumption, not of the
+  producer.** Where a doc or a test claims something about upstream behaviour, name the
+  module it was read in.
+- **Docs.** New `/sentiment/bullbear` section in
+  [webgui-routes.md](webgui-routes.md#sentimentbullbear); the route-table row in CLAUDE.md;
+  `webgui/page_help.py`; `## Bull / Bear Map` in both the User Guide and the Reference
+  Guide, with the manuals rebuilt to HTML + `.docx`. Two durable invariants were also
+  corrected in CLAUDE.md in place: the flattened-`get_quotes` trap above is now recorded
+  under the proxy environment quirks, and `[rotation]`'s scope note — which read
+  "`/sentiment/rotation` only" and had **already** been stale since the 2026-08-17
+  rebuilds put RRG and Momentum on the same tokens — now names all four screens that
+  share it. The 30-second cadence line in both manuals gained the closed-tape throttle it
+  was missing.)
+
+---
+
+**Prior — 2026-08-19** (**The Options Strategy Calculator rebuilt to a three-step
 screen — and three readouts it could always have derived but never did.**
 - **What shipped.** `/options/calculator` rebuilt from a supplied design: ① STRATEGY and
   ③ LEGS fill a fixed 424 px input column with the action grid under them, while

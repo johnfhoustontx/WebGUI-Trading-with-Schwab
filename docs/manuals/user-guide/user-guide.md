@@ -525,8 +525,11 @@ eleven sectors, the industries inside each, then the stocks inside those.
 - **Two clocks, and they date different things.** Trend, vs SPY and Breadth come
   from **last night's** cascade; momentum needs months of history, so there is no
   intraday version of them. Only **Today** is live, refreshed every ~30 seconds
-  from one batched quote call. If the quote line reports quotes unavailable, only
-  the Today column is affected — the scores below it are fine.
+  from one batched quote call **whenever the market is open — including the
+  extended-hours and curb sessions, not just the regular one**. Once the tape is
+  genuinely closed it throttles to about once every 5 minutes, which costs
+  nothing, because closed quotes do not move. If the quote line reports quotes
+  unavailable, only the Today column is affected — the scores below it are fine.
 - **Click a sector** to build its industries, **an industry** to build its
   stocks. Nothing below the sector level is loaded until you ask for it, and
   more than one can be open at a time.

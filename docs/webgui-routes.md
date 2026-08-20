@@ -97,6 +97,114 @@ Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expecte
 
 Sentiment — nav group **Trend & Sentiment** since 2026-07-11 (three-column top: a **Market Sentiment ring** + a **Market Trend ring** + the **Signals** tile stack. **Since 2026-08-14 the four semicircular Highcharts gauges are TWO concentric SVG rings**, each carrying **Day / Week / Month** on one dial — `webgui/pages/rings.py:ring_svg`, mounted with `ui.html` and updated via `el.content`; the Sentiment ring's arcs are the live composite / 5-session mean / full-history mean (`sentiment_arcs`), the Trend ring's are `derived.trend` / `derived.trend_7d` / `derived.trend_30d_ago` (`trend_arcs`). **A horizon with no usable reading draws its track only + an em-dash** — the thing a needle structurally cannot say; see the ring-graphics section below for why that keys on CONFIDENCE, not key presence. **The Today trend reading's state label + regime badge show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 arc value is unchanged** (still the direction score); the **structural Week/Month arcs deliberately KEEP the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; the **Signals column is a 1×4 vertical stack of glowing tiles** (BIAS / SIGNAL / YESTERDAY / CHANGE, each icon + letter-spaced label + neon `text-shadow` value + hairline-and-dot rule + footer descriptor), with the service's **velocity + divergence lines restored beneath it**; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Balanced → Rallying · 60%", hidden when stable), **⚠ SUPERSEDED the same day by the Market Regime Console** (see the CHANGELOG entry): the three-column ring/tile top region and the Market Regime expander described in the rest of this row were REPLACED by a single-screen console — header · Sentiment/Trend/Signals cards · regime block (confidence dial + diagnostic tags + ranked share table + callout strip) · footer, in `webgui/pages/console*.py`, scoped by the `[console]` palette in `config/theme.toml`. What survives below it: the Daily Sentiment & Trend intraday graphs, the status bar, Refresh, and the Components / Trend Detail popups. The ranked panel below is now rendered BY the console's share table; the description of its logic still holds. Prior text — the classifier's evidence chips, and — **since 2026-08-14, replacing the percent-stacked area chart** — a **ranked membership panel** (`webgui/pages/regime_mix.py:regime_mix_svg`, one inline SVG mounted with `ui.html` + updated via `el.content`, the `rings.py` idiom): one row per regime sorted by current share, each with a bar scaled to **the leader** and a sparkline scaled to **its own** range, a change-since-session-open column, and a footer naming the leader's **margin over the runner-up** plus the session's tightest. The stack was the wrong encoding and the live numbers said so — measured 2026-08-14 over 78 samples, the widest swing all day was 9pp, Breakout sat at exactly 0.000 while holding a fifth of the legend, and percent-stacking then *guarantees* the bands fill the height, so the day's two real events (the lead changing hands out of a **0.2pp** gap; Stressed rising from zero to 7.5pp) were both sub-pixel. The margin is a **new** signal: `unclear` measures evidence strength, not how close the top two are, so at 0.2pp the committed label was very nearly a coin toss and nothing said so. Ranking deliberately gives up the old fixed order's stable reading position — with five rows a lead change is rare and is the most interesting thing that happens, so the ORDER is signal; ties break on `REGIME_ORDER` so identical data cannot jitter. `REGIME_ORDER`/`_LABELS`/`_COLORS` moved to that module (re-exported from `sentiment` for its headline helpers). The panel is **width-capped** (`max-w-[720px]`) because a viewBox scales the TEXT too — uncapped at the full ~1100px content width a 13px label renders at ~22px. Reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells)
 
+## `/sentiment/bullbear`
+
+Bull / Bear Map — **new 2026-08-19**, the third tab of the **Trend & Sentiment** group
+(after Market Dashboard and Sentiment) and the target of the Desk's eleven-chip sector
+strip; design doc: [bull-bear-map](plans/2026-08-19-bull-bear-map-design.md). Tier-1
+reader of ONE view, `cache:sentiment:bullbear`. **The organising idea is that "bullish"
+is two facts, not one, and every other rotation screen in this app collapses them.**
+Each row shows **Trend** (`raw.trend` — the annualised exponential-regression slope of
+log(close) scaled by R², signed, absolute, benchmark-free) and **vs SPY** (`raw.excess`
+— excess return against the index, signed, relative) as **separate marks that are never
+blended into a score**, plus a live **Today** move. Both cascade axes are FRACTIONS
+(`sentiment-dashboard/scoring/momentum`) while `day_pct` is already a percent — the page
+scales the first two by 100 in `sentiment_bullbear.as_percent` and the third not at all,
+which is the kind of unit mismatch that renders plausibly rather than failing. Their
+four combinations are the map: **Rising · Leading** (unambiguous strength), **Rising ·
+Lagging** (going up, index going up faster), **Falling · Leading** — ⚠ **the trap: down,
+but down less, which is exactly the row a relative-strength-only screen paints as a
+buy** (measured on the 2026-08-19 payload: 19 stocks and 1 industry sat there) — and
+**Falling · Lagging**. A missing axis yields **No reading**, a fifth bucket that is the
+ABSENCE of a quadrant rather than a neutral one; ties go the cautious way (a flat trend
+is not rising, a zero excess is not leading). The chip **names both axes**, because one
+word is precisely the ambiguity the page exists to remove.
+
+**Participation is a third, independent dimension** — the share of a group's
+constituents confirming the move — drawn as a breadth bar BESIDE the quadrant and never
+folded into it, because it separates two rows identical on trend alone (2026-08-19:
+Energy flat on 0.96 participating, Real Estate rising on 0.23). At or below **one
+third** the move is thin and **the bar switches to the down hue** to say so — a
+judgement, not a fitted number. Sector and industry rows carry it; **stock rows have
+none at all**, and that draws differently from an empty bar: no track means "no
+constituents / no reading", an empty track means "nothing confirms". ⚠ `participation`
+names TWO quantities in the same payload and the wrong one fails silently —
+`row["participation"]` is the 0..1 share this page wants, while
+`row["components"]["participation"]` is a within-level **z-score**, signed and
+unbounded (both written by `services/sentiment_svc/compute._momentum_score_level`); fed
+to `breadth_width` the z-score costs every negative row its bar and mis-draws the rest,
+with no exception and no blank render. `bullbear.row_participation` exists to be the one
+accessor that knows this.
+
+**There is deliberately NO regime headline, and that is the page's central design
+decision.** `/sentiment/sectors` and `/sentiment/rotation` already print opposite
+risk-on/risk-off verdicts from quantities that are not commensurable (recorded as a
+known issue in [CLAUDE.md](../CLAUDE.md); measured 2026-08-17, `+0.37` rendering
+"Risk-on" beside `−1.52` rendering "Risk-off"). This page will not add a third: its
+headline is **quadrant counts** — "5 of 11 sectors rising and leading" — arithmetic
+about the rows on screen, not interpretation. The payload carries `regime` and neither
+`sentiment_bullbear.py` nor the Desk strip ever reads it. `bullbear.headline` returns
+**`""`** on an empty payload rather than "0 of 0 sectors rising and leading", which
+would state a maximally bearish tape nobody measured — so the page has a real
+cold-cache state, substituting a line that names the nightly 16:20 CT cascade into the
+same slot and hiding the grid. The count strip below keeps all four quadrants **even at
+zero** (an empty trap bucket is itself a reading; drop it and "nothing is falling but
+leading" is indistinguishable from "that bucket was not counted") and shows the fifth
+**No reading** chip only when something really went unscored.
+
+**Two clocks, deliberately, and they fail separately as well as tick separately.**
+`computed_at` / `session_date` date the SCORES (last night's cascade — trend and
+relative strength need months of history, so there is no intraday version of them);
+`quoted_at` dates the day-moves (now). `quoted_at` is **`None` when the live quote call
+raised**, and `services/sentiment_svc/compute.bullbear_view` ships the tree anyway: the
+cost is one column, not the page, and the page says so rather than calling itself stale.
+A malformed tree by contrast RAISES, because an all-None day-move column would hide it.
+Tier 2 merges the nightly cascade (11 sectors, 69 industries, 296 stocks on 2026-08-19)
+with **ONE batched `/quotes` call** covering all 374 distinct symbols — verified against
+the running proxy that 374 return in a single call — deduped because an industry ETF is
+usually a scored stock too. ⚠ `schwab_client.get_quotes` returns a **FLATTENED**
+`{symbol: {"change_pct": …}}` mapping (`schwab-proxy/proxy_client.py`), NOT a nested
+`{"quote": {…}}` envelope; reading the envelope shape yields `day_pct=None` for every
+one of the 374 rows, silently. An omitted symbol leaves `day_pct` None → an em dash,
+never `0.0`, which would claim "unchanged" — but the converse does not hold, since
+`SchwabProxyClient._extract_change_pct` falls through to a literal `0.0`, so a `0.00%`
+cell is no proof of a flat tape. Publish cadence is `scheduler.bullbear_due`: **every
+~30 s tick whenever the tape is in ANY open session** (regular, GTH or curb — gated on
+`market_calendar.session_at`, NOT on RTH, since extended hours are live and a 15-minute
+off-hours gate would leave the Today column that stale through exactly the sessions a
+reader most wants current), throttled to **once per 5 minutes on a genuinely closed
+tape**, where the quotes are frozen and `cache_set(skip_unchanged=True)` drops the write
+anyway — the closed tick buys only the `{key}:ts` freshness stamp.
+
+**The tree expands lazily** — the default screen is eleven sector rows; industries build
+on a sector expand and stocks on an industry expand, so all 376 rows are never in the
+DOM at once. A body that already has children was filled before (that is the cache), and
+every branch adds **at least one** child — a note where there is nothing else — so the
+"already built" check can never misread; real states it must draw include an industry
+with no admitted member stock (3 of 69) and `orphan_stocks`, constituents whose industry
+was never scored (10 of 296), filed under the sector rather than dropped. ⚠ that orphan
+mechanism is the ADMISSION GATE, not the four duplicate-ETF industries: `compute.
+_momentum_universe` puts those in `orphans` rather than `universe["industries"]`, and
+`industry_of` is built only from the latter, so a stock whose sole industry is one of
+them resolves to `("", "")` and `build_tree` drops it from every row and every count.
+No `group=` on the expansions: accordion behaviour would close one sector as another
+opened, and comparing two sectors is the point of the tree. **Two repaint paths for the
+two clocks**: a version change carrying only new quotes **reprices the day cells in
+place**, since rebuilding would collapse every branch the reader had opened, twice a
+minute — only `scores_signature` (the two score stamps plus the sector symbols and axes)
+rebuilds, and it resets the day-cell registry first, or later ticks write into elements
+no longer on the page. Polling is the cheap `:ver` probe every 2 s. **Refresh** enqueues
+`refresh_bullbear` on `cmd:sentiment` and raises a scrim bounded by a **clock**
+(`REFRESH_WAIT_SEC`, 8 s) rather than an ack — on a frozen tape `handlers.
+publish_bullbear` carries the stored `quoted_at` forward, `skip_unchanged`
+short-circuits, and nothing on the bus moves at all, so there is nothing to wait for.
+**No Highcharts** (it is a tree, and that also dodges the documented mount-hidden
+collapse trap). Pure display arithmetic in `webgui/pages/bullbear.py`
+(`tests/test_bullbear.py`, browser-free); `webgui/pages/sentiment_bullbear.py` is
+widgets and wiring only. The Desk's sector strip reuses that same module's decisions —
+`by_strength` ordering, `quadrant`, `breadth_width`, `signed_pct` — so the strip and the
+page it links to cannot list the same sectors differently.
+
 ## `/sentiment/sectors`
 
 Sector & Industry Performance — **rebuilt 2026-08-17 as a magnitude-forward heat grid** from a supplied design (README + two screenshots); design doc: [sector-heat-grid](plans/2026-08-17-sector-heat-grid-design.md). Tier-1 reader of `cache:sentiment:sectors`, unchanged. **Day / Week / Month are three adjacent filled tiles flush to the right edge**, so the colour band is continuous across a row and down the page and each figure sits *inside* its tile — magnitude is the primary encoding, not a green/red sign on a plain number. **Intensity is normalised per column** against that column's own spread across sectors **and** all industries (whether or not they are expanded — so opening a sector never repaints the rows above it). **⚠ The scale is the column's 90th percentile, NOT its maximum, and that is a deliberate departure from the reference design**: that prototype normalises on the max, which works on its *synthetic* industry placeholders because they cluster near their sectors, but real industry ETFs have a fat right tail — measured live over the 81-row set, one +27.5% Month reading against a 3.2% median pinned all eleven sectors into 4 of the 13 steps, i.e. destroyed the very property ("a column always uses its full range") the design exists to get. On p90 every column spends all thirteen steps; the handful above it saturate. **Below a per-horizon flat band a cell reads neutral** — ±0.50% Day, ±1.00% Week, ±1.50% Month, widening with the horizon so a quiet month doesn't glow merely because a month drifts further than a day. **The ramp is oklch** (L 0.175→0.300, C 0.022→0.110, hue 158 up / 22 down; flat `oklch(0.155 0.004 90)`), authored in that space because "one step brighter" is one step brighter to the *eye* there, and the grid lives at the dark end where an sRGB interpolation bunches; the figure's colour lifts with its tile's intensity. It is **stepped into 13 static classes, not continuous**, per the Tailwind-first rule on data-driven colour. **66px sector rows** carry a **rank line** under the name (`RANK 1 OF 11 · DAY`) that follows the active sort; industries render the same tiles at **34px** behind a hairline indent rule. **Day / Week / Month headers sort** (click to switch, click again to reverse; default Day descending) and the rank line restates itself accordingly. **P/C stays a plain number** tinted amber above 1.5 — it is a ratio, not a percentage change, so a heat tile would invite reading it as a fourth timeframe. **The RRG quadrant column was dropped**: `/sentiment/rrg` and `/sentiment/rotation` show that read properly, and a one-word quadrant beside a colour band had the same misreading problem. Header carries an eyebrow stamp (`MARKET STRUCTURE · AUG 17, 2026 · 16:00 ET`, rendered Eastern from the cache's UTC `sector_at`; `AWAITING DATA` rather than an invented "now" on a cold cache) and a regime line (dot + headline + `cyclicals -0.41% vs defensives -0.66%`, on the thresholds the deleted `sentiment.rotation_banner` used. ⚠ **This line can contradict the Sector Rotation tab, and often does** — it reads `sector.rotation.day_spread` (cyclical minus defensive daily *% return*, bands ±0.3/±1.0) while that page reads `assessment.headline.spread` (mean *RS-momentum* spread, threshold ±1.5). Measured live 2026-08-17: **+0.37 → "Risk-on regime" here, −1.52 → "Risk-off" there.** Pre-existing — the old table did the same — and recorded as a known issue in CLAUDE.md). Typography is Instrument Sans for names + JetBrains Mono `tabular-nums` for every figure, loaded page-scoped from `[sectors].font_url`. The grid sits in an `overflow-x-auto` wrapper at `min-w-[860px]` so the band never tears away from its row. Pure transforms in `webgui/pages/sector_heat.py` (`tests/test_sector_heat.py`); the page is widgets + wiring only, and **needs no `ui.add_css` block at all**
