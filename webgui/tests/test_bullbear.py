@@ -1,7 +1,9 @@
 """Pure display language for the Bull / Bear Map (/sentiment/bullbear).
 
 Two axes, never blended: absolute trend (raw.trend) and relative strength
-(raw.excess). See docs/plans/2026-08-19-bull-bear-map-design.md.
+(raw.excess). Participation is a third, independent dimension drawn beside the
+quadrant rather than folded into it.
+See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
 import ast
 import difflib

@@ -4,7 +4,13 @@ Two axes, NEVER blended. ``raw.trend`` is the annualised exp-regression slope of
 log(close) scaled by R^2 — signed, absolute, benchmark-free. ``raw.excess`` is
 excess return vs SPY — signed, relative. Their four combinations are the map, and
 the fourth (falling but leading) is precisely what a relative-only screen paints
-bullish. Everything here is pure so it can be pinned by ``tests/test_bullbear.py``
+bullish.
+
+Participation — the share of a group's constituents confirming a move — is a
+third, INDEPENDENT dimension: a confidence qualifier drawn beside the quadrant,
+never folded into it. Sector and industry rows carry it; stock rows do not.
+
+Everything here is pure so it can be pinned by ``tests/test_bullbear.py``
 without a browser; ``pages/sentiment_bullbear.py`` holds only widgets and wiring.
 See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
