@@ -99,6 +99,20 @@ Sentiment — nav group **Trend & Sentiment** since 2026-07-11 (three-column top
 
 ## `/sentiment/bullbear`
 
+> ⚠ **The map is EMPTY for the first ~3 minutes after a `sentiment_svc` restart, and
+> that is not a fault.** `scheduler.loop()` awaits the startup
+> `handlers.refresh(bus, with_sectors=True)` *before* creating `bb_task`, and that
+> refresh takes minutes (measured 2026-08-20 in prod: service up 13:54:21, first
+> self-driven bullbear publish ~13:58). Until then `cache:sentiment:bullbear` does
+> not exist at all and the page shows its cold-cache state.
+>
+> Diagnosing this: the key being **absent** looks identical to a published-but-empty
+> tree if you read it as `env.payload if env else {}` — check the TTL
+> (`-2` = missing) rather than the payload. And a failing tick is invisible at INFO,
+> since `_bullbear_publish_loop` logs at `log.debug`; call `handlers.publish_bullbear`
+> directly to see the real error.
+
+
 Bull / Bear Map — **new 2026-08-19**, the third tab of the **Trend & Sentiment** group
 (after Market Dashboard and Sentiment) and the target of the Desk's eleven-chip sector
 strip; design doc: [bull-bear-map](plans/2026-08-19-bull-bear-map-design.md). Tier-1
