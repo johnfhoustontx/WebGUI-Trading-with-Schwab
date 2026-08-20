@@ -2228,3 +2228,58 @@ def merge_live(levels, quotes):
             rows.append(copy)
         merged[name] = rows
     return merged
+
+
+def _bullbear_quotes(symbols):
+    """One batched ``/quotes`` call for every symbol.
+
+    Measured 2026-08-19: all 374 come back in a SINGLE call, so this is one
+    request per poll and not one per name.
+    """
+    from services import _proxy
+
+    if not symbols:
+        return {}
+    return _proxy.schwab_client.get_quotes(list(symbols)) or {}
+
+
+def bullbear_view(momentum) -> dict:
+    """Merge the nightly cascade with live quotes -> cache:sentiment:bullbear.
+
+    TWO clocks on purpose: ``session_date``/``computed_at`` date the SCORES
+    (last night's cascade), ``quoted_at`` dates the day-moves (now).
+
+    ``momentum`` is handed in rather than read here because this module holds no
+    bus at all — every cache key and every ``cache_set`` lives in handlers.py.
+    ``handlers.publish_bullbear`` reads ``cache:sentiment:momentum`` and passes
+    the payload down, and ``Bus.cache_get`` (shared/bus/client.py) re-parses the
+    envelope on every read, so the rows below are this call's own objects and
+    ``merge_live``'s shallow copy is enough.
+
+    ONLY the quote call degrades: a dead proxy costs the day-move column, and
+    ``quoted_at`` None is the tell that the moves are absent rather than flat —
+    the nightly tree is still worth publishing. A malformed tree deliberately
+    raises instead, because an all-None day-move column would hide it.
+    """
+    momentum = momentum or {}
+    # Not normalized to the three level names here: bullbear_symbols and
+    # merge_live each iterate BULLBEAR_LEVELS themselves, so a cold or partial
+    # cache already yields all three keys, empty.
+    levels = momentum.get("levels") or {}
+    symbols = bullbear_symbols(levels)
+    quoted_at = None
+    try:
+        quotes = _bullbear_quotes(symbols)
+        quoted_at = _dt.datetime.now().astimezone().isoformat()
+    except Exception as exc:  # noqa: BLE001 — best-effort; the tree still ships.
+        # One line, not a traceback: this publishes every 30 s, so a sustained
+        # proxy outage would otherwise flood errors.log with ~2,900 stacks a day.
+        log.warning("bullbear: live quotes failed, nightly tree only (%r)", exc)
+        quotes = {}
+    return {
+        "session_date": momentum.get("session_date"),
+        "computed_at": momentum.get("computed_at"),
+        "quoted_at": quoted_at,
+        "regime": momentum.get("regime"),
+        "levels": merge_live(levels, quotes),
+    }

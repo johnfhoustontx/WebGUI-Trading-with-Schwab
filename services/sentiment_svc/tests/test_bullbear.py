@@ -8,7 +8,11 @@ no ``{"quote": {...}}`` envelope — a fixture inventing one would leave every
 row's ``day_pct`` None while this suite stayed green.
 """
 import copy
+import datetime as _dt
 
+import pytest
+
+from services import _proxy
 from services.sentiment_svc import compute
 
 
@@ -65,3 +69,106 @@ def test_merge_live_leaves_the_cached_momentum_payload_untouched():
     before = copy.deepcopy(levels)
     compute.merge_live(levels, {"XLV": {"change_pct": 1.0}})
     assert levels == before
+
+
+class _RecordingClient:
+    """Stand-in for ``services._proxy.schwab_client``; records every ask."""
+
+    def __init__(self, result=None):
+        self.asked = []
+        self.result = result or {}
+
+    def get_quotes(self, symbols):
+        self.asked.append(list(symbols))
+        return self.result
+
+
+def test_bullbear_quotes_forwards_the_symbol_list_to_the_shared_proxy_client(
+        monkeypatch):
+    """The one test pinning the wiring to the real client — everything below
+    stubs ``_bullbear_quotes`` out."""
+    client = _RecordingClient({"XLV": {"change_pct": 1.0}})
+    monkeypatch.setattr(_proxy, "schwab_client", client)
+    assert compute._bullbear_quotes(["XLV", "AMGN"]) == {"XLV": {"change_pct": 1.0}}
+    assert client.asked == [["XLV", "AMGN"]]
+
+
+def test_bullbear_quotes_does_not_ask_the_proxy_for_an_empty_symbol_list(
+        monkeypatch):
+    """A cold cascade has no symbols, and ``/quotes?symbols=`` is a wasted call."""
+    client = _RecordingClient()
+    monkeypatch.setattr(_proxy, "schwab_client", client)
+    assert compute._bullbear_quotes([]) == {}
+    assert client.asked == []
+
+
+def test_bullbear_view_carries_the_nightly_tree_and_the_live_moves(monkeypatch):
+    monkeypatch.setattr(compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 2.0}})
+    nightly = {"session_date": "2026-08-19",
+               "computed_at": "2026-08-19T16:20:00-05:00",
+               "regime": {"state": "risk_on"},
+               "levels": {"sector": [{"symbol": "XLV"}]}}
+    view = compute.bullbear_view(nightly)
+    assert view["session_date"] == "2026-08-19"
+    assert view["computed_at"] == nightly["computed_at"]
+    assert view["regime"] == {"state": "risk_on"}
+    assert view["levels"]["sector"][0]["day_pct"] == 2.0
+
+
+def test_bullbear_view_stamps_quoted_at_now_and_offset_aware(monkeypatch):
+    """Two clocks on purpose: ``computed_at`` dates last night's SCORES,
+    ``quoted_at`` the day-moves taken just now. Stamped exactly the way
+    ``compute_momentum`` stamps ``computed_at`` — the page renders the pair side
+    by side, so one formatter has to read both."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
+    view = compute.bullbear_view({"computed_at": "2026-08-19T16:20:00-05:00"})
+    stamped = _dt.datetime.fromisoformat(view["quoted_at"])
+    assert stamped.tzinfo is not None
+    assert abs((_dt.datetime.now().astimezone() - stamped).total_seconds()) < 60
+
+
+def test_bullbear_view_asks_for_quotes_once_for_every_distinct_symbol(monkeypatch):
+    """Measured 374 symbols returning in a SINGLE call; a per-row fetch would be
+    374 proxy round-trips every 30 s."""
+    calls = []
+    monkeypatch.setattr(compute, "_bullbear_quotes",
+                        lambda s: calls.append(list(s)) or {})
+    compute.bullbear_view({"levels": {
+        "sector": [{"symbol": "XLV"}],
+        "stock": [{"symbol": "XLV"}, {"symbol": "AMGN"}]}})
+    assert calls == [["XLV", "AMGN"]]
+
+
+def test_bullbear_view_degrades_to_the_nightly_tree_when_the_quote_call_fails(
+        monkeypatch):
+    """A dead proxy costs the day-move column and nothing else. Raising instead
+    would publish no view at all and lose a perfectly good nightly tree."""
+    def _boom(symbols):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute, "_bullbear_quotes", _boom)
+    view = compute.bullbear_view({"session_date": "2026-08-19",
+                                  "levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["quoted_at"] is None           # the tell: moves absent, not flat
+    assert view["session_date"] == "2026-08-19"
+    assert view["levels"]["sector"][0]["day_pct"] is None
+
+
+def test_bullbear_view_on_a_cold_momentum_cache_yields_an_empty_tree(monkeypatch):
+    """The map's 30 s poll starts before the first nightly cascade on a fresh
+    install. All three levels must be present and empty — the page indexes them
+    by name."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
+    view = compute.bullbear_view(None)
+    assert view["session_date"] is None
+    assert view["levels"] == {"sector": [], "industry": [], "stock": []}
+
+
+def test_bullbear_view_does_not_swallow_a_malformed_momentum_tree(monkeypatch):
+    """The degrade wraps the QUOTE CALL only. A shape drift in the cascade's own
+    payload is a real bug, and hiding it behind an all-None day-move column is
+    the exact failure mode this feature already nearly shipped once."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
+    with pytest.raises(AttributeError):
+        compute.bullbear_view({"levels": {"sector": ["XLV"]}})
