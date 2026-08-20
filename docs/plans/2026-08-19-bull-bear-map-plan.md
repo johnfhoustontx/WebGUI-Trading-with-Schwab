@@ -603,9 +603,8 @@ def test_merge_live_attaches_the_day_move_to_every_level():
     levels = {"sector": [{"symbol": "XLV", "raw": {}}],
               "industry": [{"symbol": "XBI", "raw": {}}],
               "stock": [{"symbol": "AMGN", "raw": {}}]}
-    quotes = {"XLV": {"quote": {"netPercentChange": 1.25}},
-              "XBI": {"quote": {"netPercentChange": -0.5}},
-              "AMGN": {"quote": {"netPercentChange": 0.0}}}
+    quotes = {"XLV": {"change_pct": 1.25}, "XBI": {"change_pct": -0.5},
+              "AMGN": {"change_pct": 0.0}}
     merged = compute.merge_live(levels, quotes)
     assert merged["sector"][0]["day_pct"] == 1.25
     assert merged["industry"][0]["day_pct"] == -0.5
@@ -618,6 +617,16 @@ def test_merge_live_leaves_day_pct_none_when_the_quote_is_missing():
     levels = {"sector": [{"symbol": "XLV", "raw": {}}]}
     assert compute.merge_live(levels, {})["sector"][0]["day_pct"] is None
     assert compute.merge_live(levels, {"XLV": {}})["sector"][0]["day_pct"] is None
+
+
+def test_merge_live_reads_the_shape_schwab_client_actually_returns():
+    """Guard against the bug this plan originally shipped: a fixture inventing a
+    nested {"quote": {...}} envelope, which get_quotes never produces. Every
+    day_pct would have been None, silently, under a green suite."""
+    levels = {"sector": [{"symbol": "XLV", "raw": {}}]}
+    real = {"XLV": {"last": 174.7, "change": -0.98, "change_pct": -0.5578,
+                    "high": 175.19, "low": 173.63, "volume": 4546574}}
+    assert compute.merge_live(levels, real)["sector"][0]["day_pct"] == -0.5578
 
 
 def test_merge_live_does_not_mutate_the_cached_momentum_payload():
@@ -681,8 +690,7 @@ def merge_live(levels, quotes):
         rows = []
         for row in (levels or {}).get(name) or []:
             copy = dict(row or {})
-            quote = ((quotes or {}).get(copy.get("symbol")) or {}).get("quote") or {}
-            pct = quote.get("netPercentChange")
+            pct = ((quotes or {}).get(copy.get("symbol")) or {}).get("change_pct")
             copy["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
             rows.append(copy)
         merged[name] = rows
@@ -764,6 +772,24 @@ def _bullbear_quotes(symbols):
     if not symbols:
         return {}
     return _proxy.schwab_client.get_quotes(list(symbols)) or {}
+
+
+# ⚠ VERIFIED SHAPE, do not guess: schwab_client.get_quotes returns a FLATTENED
+# {symbol: {"last", "change", "change_pct", "high", "low", "volume"}} — NOT the
+# raw Schwab {"quote": {...}} envelope. Read it as ``["change_pct"]``.
+#
+# An earlier draft of this plan read ``["quote"]["netPercentChange"]``. That
+# would have yielded day_pct=None for all 374 rows — the whole live column dead,
+# no error — and the plan's own test would have PASSED, because its fixture
+# invented the nested shape. Confirmed against the running proxy 2026-08-19:
+# XLV -> {"last": 174.7, "change": -0.98, "change_pct": -0.55783242, ...}.
+#
+# Using the client's ``change_pct`` is also more correct than the raw field:
+# ``proxy_client._extract_change_pct`` falls back across netPercentChange /
+# netPercentChangeInDouble / regularMarketPercentChangeInDouble and finally
+# derives from last-vs-close, which is what makes an INDEX, an EQUITY and a
+# FUTURE comparable. Reading one raw field would misreport whichever asset
+# types do not carry it.
 
 
 def bullbear_view(momentum) -> dict:
