@@ -1001,7 +1001,21 @@ def sentiment_bullbear_page() -> None:
         sentiment_bullbear.render()
 ```
 
-Add a badge colour entry alongside the other `/sentiment/*` routes if that map requires every route.
+**Nav touchpoints, all verified against `webgui/main.py` and `test_shell.py` — this is the
+complete list, so nothing else needs hunting:**
+
+| what | where | required? |
+|---|---|---|
+| the tab | `SENTIMENT_CHILDREN`, **index 2** | yes |
+| the route | a `@ui.page` beside the other `/sentiment/*` pages | yes |
+| favicon colour | `main._TAB_COLOR` (line ~735) | **optional but do it** — the lookup is `.get(active, "#42a5f5")`, and that default is `/options/scanner`'s exact blue, so skipping it ships a colliding favicon. Pick a hue visually apart from the 24 already in the map; no test enforces distinctness, which is why it has already slipped once (`/portfolio` and `/sentiment/momentum` share `#9ccc65`). |
+| route list | the `expected` tuple at `test_shell.py:14` | yes |
+| Tailwind guard | `test_no_inline_style.py` — an explicit **file list**, not a glob | yes |
+
+**Three existing assertions that a new TAB does NOT break — do not "fix" them:**
+- `test_shell.py:629` `assert len(items) == 14` counts **drawer** items. Trend & Sentiment is one drawer entry however many tabs it has, so 14 stays 14.
+- `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled` walks `NAV_SECTIONS` groups and standalone rail pages, not group children.
+- `test_group_children_maps_routes_to_their_group:97` compares against `main.SENTIMENT_CHILDREN` itself, so it follows the list.
 
 Create `webgui/pages/sentiment_bullbear.py` with `render()` that:
 - reads `bus_client.read_full("sentiment:bullbear")`, graceful-empty when cold,
