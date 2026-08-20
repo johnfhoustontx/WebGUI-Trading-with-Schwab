@@ -112,8 +112,19 @@ All three levels carry a live day-move. This sounded like the expensive option a
 is not: **`/quotes` batches, and all 374 distinct symbols return in a single call**
 — verified against the running proxy at 100, 200 and 374 symbols.
 
-At a ~30 s RTH cadence that is roughly **780 calls/day** against a current baseline
-of ~68–76k/day: about 1%. Off-hours throttles like every other poller.
+At a ~30 s cadence that is roughly **1,200 calls/day** against a current baseline of
+~68–76k/day: about 1.6%.
+
+⚠ **This figure was ~780 when the design was written, and the implementation
+deliberately raised it.** The draft throttled off-hours by delegating to
+`refresh_due`, whose 15-minute interval was tuned for the composite refresh — a
+poller costing 30–40 Schwab calls per run against this one's **one**. Since the
+reason to throttle is cost, and the costs differ by ~35×, the gate now keys on
+`market_calendar.session_at`: **every open session publishes every tick, GTH and
+curb included**, and only a closed tape throttles (`BULLBEAR_CLOSED_INTERVAL_MIN`
+= 5 min, half the Status page's 600 s staleness threshold so the poller cannot
+read as dead). The extra ~420 calls buy a current Today column through exactly
+the extended-hours sessions where a reader wants one — live since 2026-08-17.
 
 The **scores** stay nightly regardless — momentum needs months of history, so there
 is no such thing as an intraday `raw.trend`. The live layer answers a narrower and
