@@ -74,11 +74,27 @@ def _texts(root):
             if isinstance(getattr(el, "text", None), str) and _visible(el)]
 
 
+# The three version polls, BY NAME. Identity, not arithmetic: an earlier form
+# asserted the page held exactly three timers, so adding any fourth timer at
+# render time would have turned all nine tests in this file into silent skips —
+# the failure mode CLAUDE.md records from the options-scanner suite, where two
+# real regressions hid behind two tests flipping to skipped. ``@guard`` is
+# ``functools.wraps``-based, so the callback keeps the closure's ``__name__``.
+_POLL_NAMES = ("_poll_chain", "_poll_result", "_poll_iv")
+
+
 def _polls(root):
     timers = [el for el in _walk(root) if isinstance(el, ui.timer)]
-    if len(timers) != 3:
-        pytest.skip(f"cannot collect the three version polls (found {len(timers)})")
-    return timers
+    if not timers:
+        # No timer at all reachable through the element tree is a HARNESS
+        # failure (NiceGUI moved its internals), not a broken page.
+        pytest.skip("cannot collect any ui.timer from the page")
+    by_name = {getattr(t.callback, "__name__", ""): t for t in timers}
+    missing = [n for n in _POLL_NAMES if n not in by_name]
+    assert not missing, (
+        f"render() no longer registers {missing} as ui.timer callbacks — "
+        f"the page paints nothing. Found: {sorted(by_name)}")
+    return [by_name[n] for n in _POLL_NAMES]
 
 
 def _drive(root, polls):

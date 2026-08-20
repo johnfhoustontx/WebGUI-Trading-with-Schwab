@@ -2,6 +2,8 @@
 import datetime as dt
 import re
 
+import pytest
+
 from pages.options import calculator as calc
 
 
@@ -1197,3 +1199,190 @@ def test_render_preserves_every_wired_behaviour():
         assert fn in src, f"render() lost {fn!r}"
     assert "take_pending_calculator()" in src
     assert "take_pending_calculator_legs()" in src
+
+
+# -- the final review's four stated-wrong-number paths ------------------------
+# Each of these renders a figure the page cannot actually stand behind. They are
+# grouped because they share one failure mode: a placeholder, a grid edge or a
+# neighbouring contract's reading, printed as though it were a measurement.
+
+# The reviewer's live repro against the engine's GENERIC numeric path: a far-OTM
+# short put whose loss never appears inside its [0.5x, 1.5x] spot price grid, so
+# ``max_loss`` comes back 0.0 and ``return_on_risk`` with it.
+_ZERO_LOSS_SUMMARY = {"entry_credit": 35.0, "max_profit": 35.0, "max_loss": 0.0,
+                      "return_on_risk": 0.0}
+
+
+def test_return_on_risk_refuses_a_zero_max_loss():
+    # 0.0 / 0.0 is not "no return"; the engine zeroes return_on_risk on THREE
+    # conditions and a zero max_loss is the third.
+    ror = next(c for c in calc.metric_cards(_ZERO_LOSS_SUMMARY, legs=[], spot=668.41,
+                                            max_dte=9)
+               if c["label"] == "RETURN ON RISK")
+    assert ror["value"] == "—"
+    assert ror["sub"] == "—"
+    assert ror["accent"] == "dim"
+
+
+def test_max_risk_refuses_a_zero_max_loss():
+    # "$0" in red under "worst case at expiry" is the strongest claim on the
+    # screen. A zero out of the numeric path means the grid never reached the
+    # loss -- the (3) LEGS strip reads $29,965 for the same position.
+    risk = next(c for c in calc.metric_cards(_ZERO_LOSS_SUMMARY, legs=[], spot=668.41,
+                                             max_dte=9)
+                if c["label"] == "MAX RISK")
+    assert risk["value"] == "—"
+    assert risk["sub"] == "—"
+    assert risk["accent"] == "dim"
+
+
+def test_a_real_max_loss_is_still_a_figure():
+    # The guard above must not swallow every reading with it.
+    risk = next(c for c in calc.metric_cards({"max_loss": 320.0}, legs=[], spot=1.0,
+                                             max_dte=9)
+                if c["label"] == "MAX RISK")
+    assert risk["value"] == "$320"
+    assert risk["sub"] == "worst case at expiry"
+    assert risk["accent"] == "neg"
+
+
+_TWO_EXPIRY_CHAIN = {"callExpDateMap": {
+    "2026-08-21:1": {"660.0": [{"delta": 0.05}]},
+    "2026-12-18:120": {"660.0": [{"delta": -999.0}]}}}
+
+
+def test_leg_delta_never_borrows_another_expirys_reading():
+    # The December contract carries Schwab's missing-greek sentinel. Reading the
+    # August contract instead prints "+0.05" against a leg that is not it.
+    leg = {"option_type": "call", "side": "long", "strike": 660.0,
+           "expiry": "2026-12-18"}
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, leg) is None
+
+
+def test_leg_delta_reads_the_legs_own_expiry():
+    leg = {"option_type": "call", "side": "long", "strike": 660.0,
+           "expiry": "2026-08-21"}
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, leg) == pytest.approx(0.05)
+
+
+def test_leg_delta_signs_a_short_leg_for_the_position():
+    leg = {"option_type": "call", "side": "short", "strike": 660.0,
+           "expiry": "2026-08-21"}
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, leg) == pytest.approx(-0.05)
+
+
+def test_leg_delta_is_total_on_junk():
+    assert calc.leg_delta(None, {"option_type": "call", "strike": 660.0}) is None
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, {"option_type": "swap", "strike": 660.0}) is None
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, {"option_type": "call", "strike": None}) is None
+    assert calc.leg_delta(_TWO_EXPIRY_CHAIN, {"option_type": "call", "strike": True}) is None
+
+
+# A 1-2-1 butterfly at Contracts = 1. The middle leg's qty is a RATIO, not a
+# position size -- ``_scale_leg_qty`` multiplies the whole set, so the position
+# size is the smallest leg, and every template's smallest leg is 1.
+_BUTTERFLY_1 = [{"side": "long", "qty": 1, "option_type": "call", "strike": 660.0},
+                {"side": "short", "qty": 2, "option_type": "call", "strike": 665.0},
+                {"side": "long", "qty": 1, "option_type": "call", "strike": 670.0}]
+_BUTTERFLY_3 = [dict(l, qty=l["qty"] * 3) for l in _BUTTERFLY_1]
+
+
+def test_entry_card_sub_counts_the_position_not_its_biggest_leg():
+    cards = calc.metric_cards({"entry_credit": -120.0}, legs=_BUTTERFLY_1,
+                              spot=665.0, max_dte=9)
+    assert cards[0]["sub"] == "1 contract · 3 legs"
+
+
+def test_entry_card_sub_round_trips_the_contracts_input():
+    # Contracts = 3 scales 1-2-1 to 3-6-3; the note must read the 3 back, not 6.
+    cards = calc.metric_cards({"entry_credit": -360.0}, legs=_BUTTERFLY_3,
+                              spot=665.0, max_dte=9)
+    assert cards[0]["sub"] == "3 contracts · 3 legs"
+
+
+# SPY 668, a 670 call bought for 4.20, 30 DTE. Untouched it routes analytic
+# (max_profit = the uncapped sentinel); nudge any leg and it routes generic,
+# where max_profit is max(pnl) at the grid edge -- 1.5x spot, not a cap.
+_LONG_CALL_LEGS = [{"option_type": "call", "side": "long", "strike": 670.0,
+                    "qty": 1, "premium": 4.20, "expiry": "2026-09-18"}]
+_LONG_CALL_GENERIC = {"entry_credit": -420.0, "max_profit": 32780.0,
+                      "max_loss": 420.0, "return_on_risk": 7804.76}
+_LONG_CALL_ANALYTIC = {"entry_credit": -420.0, "max_profit": calc.UNLIMITED,
+                       "max_loss": 420.0, "return_on_risk": 0.0}
+
+
+def test_net_call_quantity_reads_the_uncapped_side():
+    assert calc.net_call_quantity(_LONG_CALL_LEGS) == 1.0
+    assert calc.net_call_quantity(_BUTTERFLY_1) == 0.0
+    assert calc.net_call_quantity([{"option_type": "call", "side": "short", "qty": 1}]) == -1.0
+    assert calc.net_call_quantity([{"option_type": "put", "side": "long", "qty": 5}]) == 0.0
+    assert calc.net_call_quantity([{"option_type": "call", "side": "long", "qty": "x"}]) is None
+
+
+def test_profit_is_uncapped_above_only_for_a_net_long_call():
+    assert calc.profit_uncapped_above(_LONG_CALL_LEGS) is True
+    assert calc.profit_uncapped_above(_BUTTERFLY_1) is False
+    # a naked call is uncapped in LOSS, not in profit
+    assert calc.profit_uncapped_above([{"option_type": "call", "side": "short",
+                                        "qty": 1}]) is False
+    assert calc.profit_uncapped_above([]) is False
+    assert calc.profit_uncapped_above(None) is False
+
+
+def test_max_return_is_unlimited_for_a_net_long_call_on_the_generic_path():
+    # $32,780 is where the service's price grid stopped, not a cap. The same
+    # position reads "Unlimited" when the analytic path prices it.
+    cards = calc.metric_cards(_LONG_CALL_GENERIC, legs=_LONG_CALL_LEGS,
+                              spot=668.0, max_dte=30)
+    ret = next(c for c in cards if c["label"] == "MAX RETURN")
+    assert ret["value"] == "Unlimited"
+    assert ret["sub"] == "no upside cap"
+
+
+def test_return_on_risk_is_an_em_dash_against_an_uncapped_upside():
+    # 7804.8% is the grid edge over the debit; the ratio has no numerator.
+    ror = next(c for c in calc.metric_cards(_LONG_CALL_GENERIC, legs=_LONG_CALL_LEGS,
+                                            spot=668.0, max_dte=30)
+               if c["label"] == "RETURN ON RISK")
+    assert ror["value"] == "—"
+
+
+def test_matrix_basis_refuses_a_grid_edge_as_a_cap():
+    basis = calc.matrix_basis(_LONG_CALL_GENERIC, _LONG_CALL_LEGS)
+    assert basis["kind"] == "cost"
+    assert basis["heading"] == "% COST"
+    assert basis["denominator"] == pytest.approx(420.0)
+
+
+def test_matrix_basis_routes_the_analytic_long_call_the_same_way():
+    # The two routings must land on ONE screen.
+    generic = calc.matrix_basis(_LONG_CALL_GENERIC, _LONG_CALL_LEGS)
+    analytic = calc.matrix_basis(_LONG_CALL_ANALYTIC, _LONG_CALL_LEGS)
+    assert generic == analytic
+
+
+def test_matrix_basis_keeps_max_for_a_genuinely_capped_call_structure():
+    # A debit vertical is net-flat in calls: its cap is real.
+    legs = [{"option_type": "call", "side": "long", "strike": 670.0, "qty": 1},
+            {"option_type": "call", "side": "short", "strike": 675.0, "qty": 1}]
+    basis = calc.matrix_basis({"max_profit": 200.0, "entry_credit": -300.0}, legs)
+    assert basis["kind"] == "max"
+    assert basis["denominator"] == pytest.approx(200.0)
+
+
+def test_matrix_html_heads_an_uncapped_generic_result_with_cost():
+    html = calc.matrix_html(["Now", "09/18"],
+                            [{"price": 660.0, "pnl": [-100.0, -420.0]},
+                             {"price": 700.0, "pnl": [2000.0, 2580.0]}],
+                            668.0, _LONG_CALL_GENERIC, _LONG_CALL_LEGS)
+    assert "% COST" in html
+    assert "% MAX" not in html
+
+
+def test_matrix_html_marks_no_row_at_all_without_a_spot():
+    # spot degrades to 0.0 off-hours; the lowest price row is not spot.
+    html = calc.matrix_html(["Now"],
+                            [{"price": 660.0, "pnl": [1.0]},
+                             {"price": 670.0, "pnl": [2.0]}],
+                            0.0, {})
+    assert 'id="calc-spot-row"' not in html
