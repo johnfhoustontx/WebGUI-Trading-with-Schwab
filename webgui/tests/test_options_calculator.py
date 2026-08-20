@@ -518,3 +518,190 @@ def test_chain_status_facts_does_not_claim_ready_on_an_empty_chain():
     # "loaded", and saying so would paint the frame green over no data.
     facts = calc.chain_status_facts(loading=False, symbol="SPY", chain={})
     assert facts["state"] == "idle"
+
+
+# ── the P&L matrix: % of max return, on the design's palette ─────────────────
+
+def test_matrix_cell_facts_tints_by_magnitude_against_the_grid_extremes():
+    hot = calc.matrix_cell_facts(100.0, 180.0, g_max=100.0, g_min=-50.0)
+    cool = calc.matrix_cell_facts(10.0, 180.0, g_max=100.0, g_min=-50.0)
+    assert hot["bg"].startswith("rgba(45,212,167,")
+    assert cool["bg"].startswith("rgba(45,212,167,")
+    assert hot["alpha"] > cool["alpha"]
+
+
+def test_matrix_cell_facts_uses_the_loss_hue_below_zero():
+    cell = calc.matrix_cell_facts(-40.0, 180.0, g_max=100.0, g_min=-50.0)
+    assert cell["bg"].startswith("rgba(251,95,124,")
+
+
+def test_matrix_cell_facts_scales_each_side_on_its_own_extreme():
+    # Profit is measured against g_max and loss against g_min, so BOTH ends of
+    # the grid saturate. A shared scale would wash out the profit zone of every
+    # credit structure, where the risk is several times the reward.
+    best = calc.matrix_cell_facts(100.0, 180.0, g_max=100.0, g_min=-900.0)
+    worst = calc.matrix_cell_facts(-900.0, 180.0, g_max=100.0, g_min=-900.0)
+    assert best["alpha"] == worst["alpha"]
+
+
+def test_matrix_cell_facts_clamps_a_cell_beyond_the_grid_extreme():
+    over = calc.matrix_cell_facts(500.0, 180.0, g_max=100.0, g_min=-50.0)
+    at = calc.matrix_cell_facts(100.0, 180.0, g_max=100.0, g_min=-50.0)
+    assert over["alpha"] == at["alpha"]
+    assert 0.0 < over["alpha"] <= 1.0
+
+
+def test_matrix_cell_facts_survives_a_degenerate_grid():
+    # An all-zero grid has no extreme to scale against; the ramp must not divide
+    # by it, and the alpha must stay a legal CSS value.
+    flat = calc.matrix_cell_facts(0.0, 180.0, g_max=0.0, g_min=0.0)
+    assert 0.0 <= flat["alpha"] <= 1.0
+    assert flat["dollars"] == "+0"
+
+
+def test_matrix_cell_pct_is_a_share_of_max_return():
+    cell = calc.matrix_cell_facts(90.0, 180.0, g_max=100.0, g_min=-50.0)
+    assert cell["pct"] == "+50.0%"
+
+
+def test_matrix_cell_pct_is_an_em_dash_without_a_max_return():
+    cell = calc.matrix_cell_facts(90.0, 0.0, g_max=100.0, g_min=-50.0)
+    assert cell["pct"] == "—"
+
+
+def test_matrix_cell_pct_is_an_em_dash_for_the_unlimited_sentinel():
+    # A long call's max_profit is the 999999 placeholder. A percentage of an
+    # uncapped return does not exist; +0.0% on every cell would be a fake
+    # measurement stated confidently.
+    cell = calc.matrix_cell_facts(90.0, calc.UNLIMITED, g_max=100.0, g_min=-50.0)
+    assert cell["pct"] == "—"
+    assert cell["dollars"] == "+90"          # the dollar figure is still real
+
+
+def test_matrix_cell_pct_clamps_at_both_ends_not_just_the_top():
+    # The overflow that actually happens is the LOSS side: a credit spread's max
+    # loss is routinely several times its max return, and a naked put's is
+    # hundreds of times. "-21,900.0%" would blow the column width open.
+    assert calc.matrix_cell_facts(-40000.0, 180.0, g_max=180.0,
+                                  g_min=-40000.0)["pct"] == "<-999%"
+    assert calc.matrix_cell_facts(400000.0, 180.0, g_max=400000.0,
+                                  g_min=-50.0)["pct"] == ">999%"
+
+
+def test_matrix_cell_facts_renders_a_missing_pnl_as_an_em_dash():
+    for junk in (None, "", float("nan"), float("inf")):
+        cell = calc.matrix_cell_facts(junk, 180.0, g_max=100.0, g_min=-50.0)
+        assert cell["dollars"] == "—", junk
+        assert cell["pct"] == "—", junk
+        assert cell["bg"] == "transparent", junk
+        assert cell["alpha"] == 0.0, junk
+
+
+def test_matrix_cell_facts_rejects_a_bool_pnl():
+    # ``bool`` is an ``int`` subclass, so an unguarded isinstance check would
+    # price ``True`` as a $1 profit.
+    assert calc.matrix_cell_facts(True, 180.0, g_max=100.0, g_min=-50.0)["dollars"] == "—"
+
+
+def test_matrix_headers_flag_the_expiry_column():
+    hdrs = calc.matrix_headers(["Now", "08/21", "08/23", "Exp"])
+    assert [h["expiry"] for h in hdrs] == [False, False, False, True]
+    assert hdrs[0]["label"] == "NOW $"
+    assert hdrs[1]["label"] == "08/21 $"
+
+
+def test_matrix_headers_on_an_empty_grid():
+    assert calc.matrix_headers([]) == []
+    assert calc.matrix_headers(None) == []
+
+
+def test_matrix_headers_on_a_single_column_flags_it():
+    assert calc.matrix_headers(["Now"]) == [{"label": "NOW $", "expiry": True}]
+
+
+# ── the rendered matrix fragment ─────────────────────────────────────────────
+
+def _matrix_data():
+    return [{"price": 440.0, "pnl": [-120.0, -300.0], "pnl_pct": [0, 0]},
+            {"price": 450.0, "pnl": [10.0, 90.0], "pnl_pct": [0, 0]},
+            {"price": 460.0, "pnl": [60.0, None], "pnl_pct": [0, 0]}]
+
+
+def _spot_row(html):
+    """The one <tr> carrying the spot-row id, sliced out of the fragment."""
+    start = html.index('<tr id="calc-spot-row"')
+    return html[start:html.index("</tr>", start)]
+
+
+def test_matrix_html_marks_the_spot_row_amber():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    # Scoped to the spot row: the expiry header is amber too, so a bare
+    # "the colour appears somewhere" assertion could not fail.
+    assert calc.MATRIX_SPOT == "#f5b841"
+    assert calc.MATRIX_SPOT in _spot_row(html)
+    assert "450.00" in _spot_row(html)
+    body_before_spot = html.split("</thead>")[1].split('<tr id="calc-spot-row"')[0]
+    assert calc.MATRIX_SPOT not in body_before_spot
+
+
+def test_matrix_html_colours_only_the_expiry_header_amber():
+    html = calc.matrix_html(["Now", "08/21", "Exp"], _matrix_data(),
+                            spot=450.0, max_profit=180.0)
+    head = html[html.index("<thead>"):html.index("</thead>")]
+    cells = head.split("<th")
+    assert calc.MATRIX_SPOT in cells[-2]          # the expiry $ column
+    assert calc.MATRIX_SPOT in cells[-1]          # …and its % column
+    assert calc.MATRIX_SPOT not in cells[1]       # PRICE
+    assert calc.MATRIX_SPOT not in cells[2]       # NOW $
+
+
+def test_matrix_html_prints_the_percentage_against_max_return():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert "+50.0%" in html          # the 90.0 cell against a 180 max return
+    assert "+90" in html
+
+
+def test_matrix_html_renders_a_missing_cell_as_an_em_dash():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert ">+0<" not in html and ">+0.0%<" not in html
+    assert ">—<" in html
+
+
+def test_matrix_html_percentages_are_em_dashes_under_the_unlimited_sentinel():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0,
+                            max_profit=calc.UNLIMITED)
+    assert "%" not in html.split("</thead>")[1]
+    assert "+90" in html            # the dollars are untouched
+
+
+def test_matrix_html_uses_tabular_figures():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert "tabular-nums" in html
+
+
+def test_matrix_html_carries_the_scroll_and_spot_anchors():
+    # ``_CENTER_SPOT_JS`` looks these two ids up by name; losing either leaves
+    # the grid opening scrolled away from spot.
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert 'id="calc-grid-scroll"' in html and 'id="calc-spot-row"' in html
+    assert "calc-grid-scroll" in calc._CENTER_SPOT_JS
+    assert "calc-spot-row" in calc._CENTER_SPOT_JS
+
+
+def test_matrix_html_on_an_empty_grid_is_empty():
+    assert calc.matrix_html([], [], spot=450.0, max_profit=180.0) == ""
+    assert calc.matrix_html(["Now"], None, spot=450.0, max_profit=180.0) == ""
+
+
+def test_matrix_html_wears_the_designs_grounds_not_the_old_navy():
+    html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, max_profit=180.0)
+    assert "#141a30" not in html and "#2a2a2a" not in html
+    assert calc.MATRIX_HEAD_BG in html and calc.MATRIX_HEAD_RULE in html
+    assert calc.MATRIX_ROW_RULE in html
+
+
+def test_the_retired_band_helpers_are_gone():
+    # ``matrix_cell_facts`` replaced the p1..p5/l1..l5 class ramp outright; the
+    # old helpers had no other caller.
+    for dead in ("pnl_cell_class", "_band", "_CELL_COLORS"):
+        assert not hasattr(calc, dead), dead
