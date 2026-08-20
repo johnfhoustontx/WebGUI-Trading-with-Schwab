@@ -215,9 +215,16 @@ def _buttons(container):
 
 
 def _fire_click(el):
-    for listener in el._event_listeners.values():
+    # snapshot: the handler re-renders, which deletes elements and mutates the
+    # listener registry mid-iteration
+    for listener in list(el._event_listeners.values()):
         if listener.type == "click":
             listener.handler(None)
+
+
+def _grid_token(const):
+    """The ``grid-cols-[...]`` utility out of one of the card's class strings."""
+    return [c for c in const.split() if c.startswith("grid-cols-")][0]
 
 
 def test_card_layout_coerces_out_of_options_values_like_the_row_layout():
@@ -280,9 +287,9 @@ def test_card_layout_omits_the_premium_cell_and_collapses_its_column():
     assert len([e for e in off.descendants() if isinstance(e, ui.number)]) == 1
     grids_on = [c for e in on.descendants() for c in e._classes if c.startswith("grid-cols-")]
     grids_off = [c for e in off.descendants() for c in e._classes if c.startswith("grid-cols-")]
-    assert LE._CARD_ROW2_COLS in grids_on
-    assert LE._CARD_ROW2_COLS_NO_PREMIUM in grids_off
-    assert LE._CARD_ROW2_COLS not in grids_off
+    assert _grid_token(LE._CARD_ROW2_COLS) in grids_on
+    assert _grid_token(LE._CARD_ROW2_COLS_NO_PREMIUM) in grids_off
+    assert _grid_token(LE._CARD_ROW2_COLS) not in grids_off
 
 
 def test_card_accent_maps_the_side_from_a_finite_set():
