@@ -20,6 +20,7 @@ card, but the Calculator paints it in the near-black ``CALC_*`` language while
 the Simulator keeps the app-wide dark navy — so the palette enters as the
 ``tokens`` argument and this module imports no page's theme constants.
 """
+import math
 from types import SimpleNamespace
 
 from nicegui import ui
@@ -122,13 +123,19 @@ _CARD_ROW2_COLS_NO_PREMIUM = ("grid grid-cols-[minmax(0,1.25fr)_46px_44px] "
                               "gap-x-2 gap-y-0.5 items-center w-full")
 
 
+_LAYOUTS = ("row", "card")
+
+
 def card_tokens(overrides=None):
     """``DEFAULT_CARD_TOKENS`` with known keys overridden. Unknown keys are
     ignored, so a typo cannot silently introduce a token nothing reads; blank and
     non-string values are ignored too, so a page whose own token computed to ""
-    degrades to the default look rather than to an unstyled element."""
+    degrades to the default look rather than to an unstyled element. A
+    non-mapping ``overrides`` is ignored outright rather than raising."""
     out = dict(DEFAULT_CARD_TOKENS)
-    for k, v in (overrides or {}).items():
+    if not isinstance(overrides, dict):
+        overrides = {}
+    for k, v in overrides.items():
         if k in out and isinstance(v, str) and v.strip():
             out[k] = v
     return out
@@ -148,8 +155,17 @@ def delta_text(delta):
 
     Never renders 0.00 for a missing delta — see ``calculator.extract_delta``:
     index chains read hollow outside regular hours, and a confident ``0.00`` on
-    an otherwise live-looking leg is a wrong number rather than a blank one."""
+    an otherwise live-looking leg is a wrong number rather than a blank one.
+
+    ⚠ NaN and the infinities are readings too, and format as ``+nan`` / ``+inf``
+    rather than raising. That is the same class of trap as the CLAUDE.md
+    ``_clamp(nan)`` section — a missing input rendering as a confident value —
+    so a non-finite float is an em-dash, not a number. Unreachable from the
+    Calculator (its ``extract_delta`` already filters non-finite), but this is a
+    public helper and the Simulator will supply its own ``delta_for``."""
     if not isinstance(delta, (int, float)) or isinstance(delta, bool):
+        return "—"
+    if not math.isfinite(delta):
         return "—"
     return f"{delta:+.2f}"
 
@@ -166,6 +182,12 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     per-leg delta the card shows, ``min_legs`` floors the remove button and
     ``on_reset`` adds a RESET TO TEMPLATE button beside ADD LEG. All five are
     inert in row mode."""
+    # A typo here would silently render the WRONG screen with nothing to see it:
+    # both layouts are valid renders of the same state, so neither the page nor
+    # any test would report a failure.
+    if layout not in _LAYOUTS:
+        raise ValueError(f"unknown leg-editor layout {layout!r}; "
+                         f"expected one of {sorted(_LAYOUTS)}")
     state = {"legs": [], "dirty": False}
 
     def _set_field(i, field, value):
@@ -178,16 +200,20 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         on_change()
 
     def _sync_row_strikes(i):
+        # ``_strike_widget`` is registered unconditionally by _render for every
+        # leg, so it is present here by construction — this deliberately does NOT
+        # guard on its absence. The old ``if w is not None`` made a forgotten
+        # registration a SILENT no-op, i.e. exactly the stale-ladder →
+        # ``ValueError: Invalid value`` failure this widget exists to prevent.
         leg = state["legs"][i]
         opts = strikes_for(leg.get("expiry"), leg.get("option_type")) or []
-        w = leg.get("_strike_widget")
-        if w is not None:
-            w.options = opts
-            if opts and w.value not in opts:
-                spot = spot_getter() or 0
-                w.value = min(opts, key=lambda s: abs(s - spot)) if spot else opts[0]
-                state["legs"][i]["strike"] = w.value
-            w.update()
+        w = leg["_strike_widget"]
+        w.options = opts
+        if opts and w.value not in opts:
+            spot = spot_getter() or 0
+            w.value = min(opts, key=lambda s: abs(s - spot)) if spot else opts[0]
+            state["legs"][i]["strike"] = w.value
+        w.update()
 
     card = layout == "card"
     tk = card_tokens(tokens)
@@ -205,7 +231,6 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 .classes("w-40").on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
             sw = ui.select(s_opts, value=s_val, label=lab("Strike")).classes("w-24 leg-strike")
             sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
-            leg["_strike_widget"] = sw
             ui.number(lab("Qty"), value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
                 .classes("w-16").on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))
             if show_premium:
@@ -213,6 +238,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
             ui.button(icon="delete", on_click=lambda e, i=i: _remove(i)) \
                 .props("flat dense round").classes("w-10").tooltip("Remove leg")
+        return sw
 
     def _card_body(i, leg, exps, e_val, s_opts, s_val, _lab):
         # Side → accent, mapped from the finite {long, short} set to a fixed
@@ -245,7 +271,6 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     sw = ui.select(s_opts, value=s_val).props("dense options-dense") \
                         .classes("w-full leg-strike")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
-                    leg["_strike_widget"] = sw
                     ui.number(value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
                         .props("dense").classes("w-full") \
                         .on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))
@@ -256,6 +281,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     ui.label(delta_text(delta_for(leg) if delta_for else None)) \
                         .classes(f"{tk['delta']} text-right")
             _card_remove(i)
+        return sw
 
     def _card_remove(i):
         live = can_remove(len(state["legs"]), min_legs)
@@ -309,13 +335,23 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 #
                 # ⚠ This pass lives HERE, above the layout dispatch, and not in
                 # either body — the two layouts physically cannot drift on it,
-                # and a third layout inherits it for free.
+                # and a third layout inherits it for free. Same for the
+                # ``_strike_widget`` registration below.
                 e_val = coerce_choice(leg.get("expiry"), exps)
                 leg["expiry"] = e_val
                 s_opts = strikes_for(e_val, leg.get("option_type")) or []
                 s_val = coerce_strike(leg.get("strike"), s_opts)
                 leg["strike"] = s_val
-                body(i, leg, exps, e_val, s_opts, s_val, lab)
+                sw = body(i, leg, exps, e_val, s_opts, s_val, lab)
+                # Registered HERE, not in either body, for the same reason the
+                # coercion above lives here: two copies of one assignment is a
+                # drift surface, and this one degrades SILENTLY — the strike
+                # select just keeps a stale ladder after a type/expiry flip,
+                # which is the ValueError this widget exists to prevent.
+                if sw is None:
+                    raise RuntimeError("leg body returned no strike widget - "
+                                       "_strike_widget could not be registered")
+                leg["_strike_widget"] = sw
             if card:
                 _card_footer()
             else:

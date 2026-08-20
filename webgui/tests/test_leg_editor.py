@@ -395,3 +395,87 @@ def test_card_classes_are_spaceless_tailwind_arbitraries():
             LE._CARD_ROW1_COLS, LE._CARD_ROW2_COLS, LE._CARD_ROW2_COLS_NO_PREMIUM]:
         for arb in re.findall(r"\[[^\]]*\]", src):
             assert " " not in arb, src
+
+
+# -- review follow-ups --------------------------------------------------------
+
+def test_delta_text_rejects_non_finite_readings():
+    """A NaN formats as '+nan' and an infinity as '+inf' - a confident-looking
+    string where there is no reading, which is the whole failure mode this
+    helper exists to prevent (see the CLAUDE.md _clamp(nan) section)."""
+    assert LE.delta_text(float("nan")) == "\u2014"
+    assert LE.delta_text(float("inf")) == "\u2014"
+    assert LE.delta_text(float("-inf")) == "\u2014"
+
+
+def test_card_tokens_degrades_on_a_non_mapping():
+    assert LE.card_tokens(["accent_long"]) == LE.DEFAULT_CARD_TOKENS
+    assert LE.card_tokens("frame") == LE.DEFAULT_CARD_TOKENS
+
+
+def test_build_leg_editor_rejects_an_unknown_layout():
+    """Both layouts are valid renders of the same state, so a typo would put the
+    WRONG screen on the page with nothing anywhere reporting a failure."""
+    import pytest
+    with ui.card() as container:
+        with pytest.raises(ValueError, match="crd"):
+            LE.build_leg_editor(container, layout="crd",
+                                strikes_for=lambda exp, otype: list(_STRIKES),
+                                expiries_for=lambda: list(_EXPS), show_premium=True)
+
+
+# -- the _strike_widget registration ------------------------------------------
+# Its absence degrades SILENTLY: the strike select simply keeps the previous
+# ladder, and the next edit hands ``ui.select`` a value outside its options -
+# the ValueError this whole widget exists to prevent. Pinned per layout,
+# behaviourally, rather than by asserting that an assignment exists.
+
+_LADDERS = {"call": [735, 736, 737], "put": [10, 11, 12]}
+
+
+def _ladder_editor(layout):
+    with ui.card() as container:
+        ed = LE.build_leg_editor(
+            container, layout=layout,
+            strikes_for=lambda exp, otype: list(_LADDERS.get(otype or "call", [])),
+            expiries_for=lambda: list(_EXPS), show_premium=True)
+        ed.set_legs([_leg()])
+    return ed, container
+
+
+def _select_over(container, values):
+    return [e for e in container.descendants()
+            if isinstance(e, ui.select) and e._values == values][0]
+
+
+def _strike_select(container):
+    return [e for e in container.descendants()
+            if isinstance(e, ui.select) and "leg-strike" in e._classes][0]
+
+
+def test_card_strike_ladder_resyncs_when_the_type_flips():
+    ed, container = _ladder_editor("card")
+    _select_over(container, ["call", "put"]).value = "put"
+    assert _strike_select(container)._values == _LADDERS["put"]
+    assert ed.get_legs()[0]["strike"] in _LADDERS["put"]
+
+
+def test_row_strike_ladder_resyncs_when_the_type_flips():
+    """Row mode shares the hoisted registration - and rescue.py mounts it too."""
+    ed, container = _ladder_editor("row")
+    _select_over(container, ["call", "put"]).value = "put"
+    assert _strike_select(container)._values == _LADDERS["put"]
+    assert ed.get_legs()[0]["strike"] in _LADDERS["put"]
+
+
+def test_card_strike_ladder_resyncs_when_the_expiry_flips():
+    per_expiry = {_EXPS[0]: [735, 736, 737], _EXPS[1]: [10, 11, 12]}
+    with ui.card() as container:
+        ed = LE.build_leg_editor(
+            container, layout="card",
+            strikes_for=lambda exp, otype: list(per_expiry.get(exp, [])),
+            expiries_for=lambda: list(_EXPS), show_premium=True)
+        ed.set_legs([_leg()])
+    _select_over(container, list(_EXPS)).value = _EXPS[1]
+    assert _strike_select(container)._values == per_expiry[_EXPS[1]]
+    assert ed.get_legs()[0]["strike"] in per_expiry[_EXPS[1]]
