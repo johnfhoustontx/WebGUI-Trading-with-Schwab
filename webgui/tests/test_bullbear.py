@@ -251,3 +251,55 @@ def test_the_lookups_degrade_rather_than_raise_on_an_impossible_key():
         assert bogus not in B._LABELS and bogus not in B._CLASSES
         assert B.quadrant_label(bogus) == B.quadrant_label("unknown")
         assert B.quadrant_class(bogus) == B.quadrant_class("unknown")
+
+
+# ── the headline: counts, not a verdict ──────────────────────────────────────
+def _row(trend, excess):
+    """Only ``raw`` is read, so a row is only ``raw`` — a fuller fixture would
+    imply fields the counter consults."""
+    return {"raw": {"trend": trend, "excess": excess}}
+
+
+def test_quadrant_counts_bucket_every_row_exactly_once():
+    rows = [_row(1.0, 0.1), _row(1.0, -0.1), _row(-1.0, 0.1),
+            _row(-1.0, -0.1), _row(None, None)]
+    counts = B.quadrant_counts(rows)
+    assert counts == {"rising_leading": 1, "rising_lagging": 1,
+                      "falling_leading": 1, "falling_lagging": 1, "unknown": 1}
+
+
+def test_quadrant_counts_report_every_bucket_even_when_empty():
+    """A missing key would make the headline read "3 of 11" against a
+    distribution the caller has to guard key by key."""
+    counts = B.quadrant_counts([_row(1.0, 0.1)])
+    assert set(counts) == set(B.QUADRANTS)
+    assert counts["falling_lagging"] == 0
+
+
+def test_quadrant_counts_of_nothing_is_all_zero():
+    assert B.quadrant_counts([]) == {q: 0 for q in B.QUADRANTS}
+    assert B.quadrant_counts(None) == {q: 0 for q in B.QUADRANTS}
+
+
+def test_quadrant_counts_treat_a_row_with_no_raw_block_as_unknown():
+    """A row too thin to score arrives without ``raw``, or with None in it. That
+    is a reading the cascade does not have, not a page build to abandon."""
+    assert B.quadrant_counts([{}, {"raw": None}, None])["unknown"] == 3
+
+
+def test_headline_states_a_count_not_a_regime_word():
+    """Guard for the design decision. /sentiment/sectors and /sentiment/rotation
+    already print contradictory risk-on/risk-off verdicts from incommensurable
+    quantities; this page reports arithmetic instead."""
+    text = B.headline(B.quadrant_counts([_row(1.0, 0.1), _row(1.0, 0.1),
+                                         _row(-1.0, -0.1)]), "sectors")
+    assert "2 of 3" in text and "sectors" in text
+    for banned in ("risk-on", "risk-off", "bullish regime", "bearish regime"):
+        assert banned.lower() not in text.lower()
+
+
+def test_headline_counts_unreadable_rows_in_its_denominator():
+    """"1 of 3", not "1 of 2". The denominator is the rows on screen; dropping
+    the unscored ones would inflate the fraction on exactly the thinnest days."""
+    assert "1 of 3" in B.headline(B.quadrant_counts(
+        [_row(1.0, 0.1), _row(None, None), _row(None, None)]), "sectors")

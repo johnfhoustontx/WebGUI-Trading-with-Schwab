@@ -91,3 +91,30 @@ def quadrant_label(q):
 def quadrant_class(q):
     """A quadrant key -> its chip classes; an unrecognised key degrades."""
     return _CLASSES.get(q, _CLASSES["unknown"])
+
+
+def quadrant_counts(rows):
+    """{quadrant: n} over rows, every bucket present even at zero.
+
+    Indexes directly rather than defensively. quadrant() is total, so a KeyError
+    here means that invariant broke — where a setdefault would answer with a
+    sixth bucket nobody named and a distribution that no longer sums to what the
+    headline claims.
+    """
+    counts = {q: 0 for q in QUADRANTS}
+    for row in rows or []:
+        raw = (row or {}).get("raw") or {}
+        counts[quadrant(raw.get("trend"), raw.get("excess"))] += 1
+    return counts
+
+
+def headline(counts, noun):
+    """"5 of 11 sectors rising and leading" — a fact, deliberately not a verdict.
+
+    /sentiment/sectors and /sentiment/rotation derive risk-on/risk-off words from
+    non-commensurable quantities and were measured printing opposite ones on the
+    same day; a count cannot join that argument. Not ``.get(..., 0)`` for the same
+    reason — a missing key would render a confident "0 of 11" over rising rows.
+    """
+    return (f"{counts['rising_leading']} of {sum(counts.values())} "
+            f"{noun} rising and leading")
