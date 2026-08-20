@@ -261,6 +261,24 @@ _DEFAULTS = {
                      "?family=Instrument+Sans:wght@400;500;600;700"
                      "&family=JetBrains+Mono:wght@400;500;600&display=swap"),
     },
+    # The Options Strategy Calculator's own language: a near-black ground with
+    # cyan/green/amber signal colours and a mono face, deliberately unlike the
+    # app-wide dark navy. Page-scoped (.calc-v3) — NOT surfaced in
+    # Settings → Appearance, and not the app palette.
+    "calc": {
+        "void": "#05070a", "glow": "#0b1a24",
+        "frame_a": "#0b1118", "frame_b": "#06090d",
+        "edge": "#26505c", "edge_idle": "#1d2937", "chip_bg": "#06080b",
+        "tile_a": "#0d141c", "tile_b": "#070b0f", "tile_edge": "#1d2937",
+        "input_bg": "#0a1219", "input_edge": "#2a3846",
+        "bright": "#eaf2f9", "txt": "#cfdae8", "soft": "#dce7f3",
+        "label": "#7189a0", "muted": "#8aa0b4", "body": "#93a8bb", "dim": "#6f8598",
+        "pos": "#2dd4a7", "neg": "#fb5f7c", "accent": "#22d3ee", "warn": "#f5b841",
+        "btn_bg": "#111b25", "btn_edge": "#3a5060", "btn_txt": "#d3e0ec",
+        "off_bg": "#101720", "off_edge": "#26313d", "off_txt": "#5c6d7e",
+        "font_url": ("https://fonts.googleapis.com/css2"
+                     "?family=JetBrains+Mono:wght@400;500;700&display=swap"),
+    },
 }
 
 
@@ -1032,6 +1050,139 @@ def build_rotation_font_head_html(theme):
     )
 
 
+# ── Options Strategy Calculator (/options/calculator) helpers ────────────────
+# Page-scoped like [console] / [macro] / [sectors] / [rotation], and the only
+# one of the five that needs an ``ui.add_css`` escape-hatch of its own: this
+# page mounts q-fields, the leg editor and the teleported strategy popup, none
+# of which component ``.classes()`` can reach. Scope hook is ``.calc-v3`` —
+# deliberately NOT ``.calc-v2``, which is the app-wide dark-navy scope the
+# Simulator and Trade pages share.
+def build_calc_tokens(theme):
+    """Tailwind class-string vocabulary for the Strategy Calculator.
+
+    Namespaced ``CALC_*`` so a calculator token can never be mistaken for one
+    of the app-wide dark-navy tokens — this page keeps its own near-black
+    ground. ⚠ Every ``[...]`` arbitrary value uses ``_`` for spaces: a Tailwind
+    arbitrary value containing a real space generates NO rule at all, silently.
+    """
+    c = theme["calc"]
+    frame_bg = f"bg-[linear-gradient(180deg,{c['frame_a']},{c['frame_b']})]"
+    return {
+        "CALC_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
+        "CALC_PAGE": (
+            f"text-[{c['txt']}] tracking-[.02em] p-4 rounded-[3px] "
+            f"bg-[radial-gradient(1100px_560px_at_14%_-12%,"
+            f"{c['glow']}_0%,{c['void']}_62%)]"
+        ),
+        # The numbered frames. The label chip is positioned by the page
+        # (relative frame + absolute -top-1.5 chip) — CALC_CHIP is the chip skin.
+        "CALC_FRAME": f"relative rounded-[3px] border border-[{c['edge']}] {frame_bg}",
+        "CALC_FRAME_IDLE": f"relative rounded-[3px] border border-[{c['edge_idle']}] {frame_bg}",
+        "CALC_CHIP": (f"px-1.5 bg-[{c['chip_bg']}] text-[9px] tracking-[.2em] "
+                      f"font-bold whitespace-nowrap"),
+        "CALC_TILE": (f"rounded-[3px] border border-[{c['tile_edge']}] "
+                      f"bg-[linear-gradient(180deg,{c['tile_a']},{c['tile_b']})]"),
+        "CALC_INPUT": f"bg-[{c['input_bg']}] border border-[{c['input_edge']}] rounded-[2px]",
+        "CALC_BTN": (f"bg-[{c['btn_bg']}] border border-[{c['btn_edge']}] "
+                     f"text-[{c['btn_txt']}] rounded-[2px] text-[9px] tracking-[.16em]"),
+        "CALC_BTN_PRIMARY": (f"bg-[rgba(34,211,238,.22)] border border-[{c['accent']}] "
+                             f"text-[#c8f4fd] rounded-[2px] text-[9px] tracking-[.16em]"),
+        "CALC_BTN_OFF": (f"bg-[{c['off_bg']}] border border-[{c['off_edge']}] "
+                         f"text-[{c['off_txt']}] rounded-[2px] text-[9px] tracking-[.16em] "
+                         f"cursor-not-allowed"),
+        "CALC_EYEBROW": f"text-[8px] tracking-[.18em] text-[{c['label']}] whitespace-nowrap",
+        "CALC_VALUE": f"text-[{c['bright']}] font-medium",
+        "CALC_SOFT": f"text-[{c['soft']}]",
+        "CALC_BODY": f"text-[{c['body']}]",
+        "CALC_MUTED": f"text-[{c['muted']}]",
+        "CALC_DIM": f"text-[{c['dim']}]",
+        "CALC_POS": f"text-[{c['pos']}]",
+        "CALC_NEG": f"text-[{c['neg']}]",
+        "CALC_ACCENT": f"text-[{c['accent']}]",
+        "CALC_WARN": f"text-[{c['warn']}]",
+        "CALC_EDGE_POS": f"border-l-2 border-l-[{c['pos']}]",
+        "CALC_EDGE_NEG": f"border-l-2 border-l-[{c['neg']}]",
+        "CALC_EDGE_ACCENT": f"border-l-2 border-l-[{c['accent']}]",
+        "CALC_EDGE_WARN": f"border-l-2 border-l-[{c['warn']}]",
+    }
+
+
+# The finite state->class maps behind the two data-driven colours the page sets
+# at runtime. Mapping a known state onto a static class is the documented
+# alternative to a runtime-built arbitrary value.
+CALC_STATE_TEXT = ("CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN", "CALC_DIM")
+
+
+def build_calc_css(theme):
+    """Quasar-internal escape-hatch CSS for the Calculator, scoped ``.calc-v3``.
+
+    Reaches only the DOM component ``.classes()`` cannot: the boxed q-field
+    control and its leg-card variants, and the body-mounted cascading strategy
+    popup (``.strat-menu-calc``, which is teleported OUT of the scope)."""
+    c = theme["calc"]
+    return f"""
+/* Boxed inputs — the design's flat dark field. */
+.calc-v3 .q-field__control{{
+  background:{c['input_bg']};border:1px solid {c['input_edge']};border-radius:2px;
+  padding:0 7px;min-height:30px;
+}}
+.calc-v3 .q-field__control:before,.calc-v3 .q-field__control:after{{border:0!important;}}
+.calc-v3 .q-field--focused .q-field__control{{border-color:{c['accent']};}}
+.calc-v3 .q-field__label{{color:{c['label']};font-size:8px;letter-spacing:.14em;}}
+.calc-v3 .q-field__native,.calc-v3 .q-field__native input,
+.calc-v3 .q-field__native span{{color:{c['soft']}!important;font-size:12px;}}
+.calc-v3 .q-field__append .q-icon,.calc-v3 .q-field__prepend .q-icon{{
+  color:#4a6070;font-size:14px;
+}}
+/* Strategy picker trigger internals. */
+.calc-v3 .strategy-menu-btn .q-btn__content{{
+  justify-content:space-between;flex:1;text-transform:none;
+}}
+.calc-v3 .strategy-menu-btn .q-icon{{color:#5b7f8c;}}
+/* Leg CARD cells — two compact grid rows per leg. */
+.calc-v3 .leg-card .q-field__control{{min-height:28px;padding:0 7px;}}
+.calc-v3 .leg-card .q-field__control .q-field__native,
+.calc-v3 .leg-card .q-field__marginal{{min-height:28px;padding-top:0;padding-bottom:0;}}
+.calc-v3 .leg-card .q-field__append{{padding-left:0;}}
+.calc-v3 .leg-card .q-field__native{{font-size:11px;letter-spacing:.08em;}}
+.calc-v3 .leg-strike .q-field__native{{justify-content:center;text-align:center;font-size:12px;}}
+/* Cascading strategy popup — teleported to <body>, so NOT under .calc-v3. */
+.strat-menu-calc.q-menu{{
+  background:{c['frame_a']}!important;border:1px solid {c['edge']};
+  box-shadow:0 10px 28px rgba(0,0,0,.6);border-radius:3px;
+}}
+.strat-menu-calc .q-item,.strat-menu-calc .q-item__section,
+.strat-menu-calc .q-item__label{{color:{c['soft']};}}
+.strat-menu-calc .q-item:hover,.strat-menu-calc .q-item--active,
+.strat-menu-calc .q-item.q-manuallyfocused{{background:{c['btn_bg']}!important;}}
+.strat-menu-calc .q-icon{{color:#5b7f8c;}}
+"""
+
+
+CALC_KEYFRAMES_CSS = """
+@keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes scan{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+"""
+
+
+def build_calc_font_head_html(theme):
+    """``<link>``s for the calculator's mono face, or "" when unset.
+
+    JetBrains Mono is what makes ``tabular-nums`` align the matrix columns
+    optically; the system fallback is a visible downgrade, not a neutral one."""
+    try:
+        url = str(theme["calc"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
+
+
 def build_sector_font_head_html(theme):
     """``<link>``s for the grid's two faces (``[sectors].font_url``), or "".
 
@@ -1138,3 +1289,32 @@ SECTOR_FONT_HEAD_HTML = build_sector_font_head_html(THEME)  # "" when no url
 # ── Sector Rotation board (/sentiment/rotation) page-scoped exports ──────────
 ROTATION_TOKENS = build_rotation_tokens(THEME)
 ROTATION_FONT_HEAD_HTML = build_rotation_font_head_html(THEME)  # "" when no url
+
+# ── Options Strategy Calculator — page-scoped language (.calc-v3) ────────────
+_CALC_TOKENS = build_calc_tokens(THEME)
+CALC_MONO = _CALC_TOKENS["CALC_MONO"]
+CALC_PAGE = _CALC_TOKENS["CALC_PAGE"]
+CALC_FRAME = _CALC_TOKENS["CALC_FRAME"]
+CALC_FRAME_IDLE = _CALC_TOKENS["CALC_FRAME_IDLE"]
+CALC_CHIP = _CALC_TOKENS["CALC_CHIP"]
+CALC_TILE = _CALC_TOKENS["CALC_TILE"]
+CALC_INPUT = _CALC_TOKENS["CALC_INPUT"]
+CALC_BTN = _CALC_TOKENS["CALC_BTN"]
+CALC_BTN_PRIMARY = _CALC_TOKENS["CALC_BTN_PRIMARY"]
+CALC_BTN_OFF = _CALC_TOKENS["CALC_BTN_OFF"]
+CALC_EYEBROW = _CALC_TOKENS["CALC_EYEBROW"]
+CALC_VALUE = _CALC_TOKENS["CALC_VALUE"]
+CALC_SOFT = _CALC_TOKENS["CALC_SOFT"]
+CALC_BODY = _CALC_TOKENS["CALC_BODY"]
+CALC_MUTED = _CALC_TOKENS["CALC_MUTED"]
+CALC_DIM = _CALC_TOKENS["CALC_DIM"]
+CALC_POS = _CALC_TOKENS["CALC_POS"]
+CALC_NEG = _CALC_TOKENS["CALC_NEG"]
+CALC_ACCENT = _CALC_TOKENS["CALC_ACCENT"]
+CALC_WARN = _CALC_TOKENS["CALC_WARN"]
+CALC_EDGE_POS = _CALC_TOKENS["CALC_EDGE_POS"]
+CALC_EDGE_NEG = _CALC_TOKENS["CALC_EDGE_NEG"]
+CALC_EDGE_ACCENT = _CALC_TOKENS["CALC_EDGE_ACCENT"]
+CALC_EDGE_WARN = _CALC_TOKENS["CALC_EDGE_WARN"]
+CALC_CSS = build_calc_css(THEME)
+CALC_FONT_HEAD_HTML = build_calc_font_head_html(THEME)
