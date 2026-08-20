@@ -1038,6 +1038,17 @@ Create `webgui/pages/sentiment_bullbear.py` with `render()` that:
   — ⚠ `width is None` (render no track at all) must be handled **distinctly** from
   `width == 0` (render an empty track). That distinction is the whole reason the function
   returns `None`, and a truthiness check at the call site collapses it. Pin it with a test.
+- ⚠ **A `day_pct` of `0.0` does NOT reliably mean "unchanged".** `proxy_client._extract_change_pct`
+  (line 246) returns **0.0**, not `None`, when every percent field is missing or zero — it only
+  falls back to deriving from last-vs-close when it has both. So for a symbol the proxy returns
+  with junk fields, "no data" arrives as a genuine-looking flat day. The clean `None`/`0.0`
+  distinction holds for a symbol the proxy **omits**, not for one it returns badly. Do not write
+  a docstring claiming the page can always tell them apart.
+- **Use the pure module's public accessors — do NOT hand-roll them.** `bullbear.row_axes(row)`
+  → `(trend, excess)`, `bullbear.row_participation(row)`, `bullbear.by_strength(rows)` for the
+  module's ordering, and its signed-percent formatter for the day-move column. Task 11's Desk
+  strip must use `by_strength` too: without it the strip and the map can silently order the same
+  sectors differently, which is this repo's signature defect.
 - **Add `sentiment_bullbear.py` to `webgui/tests/test_no_inline_style.py` by hand** — that
   guard is an explicit file list, not a glob, so a new page silently escapes it otherwise.
 - version-polls every 2 s via `ui.timer` and repaints only on a version change,
