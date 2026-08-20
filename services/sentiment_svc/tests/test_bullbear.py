@@ -168,7 +168,11 @@ def test_bullbear_view_on_a_cold_momentum_cache_yields_an_empty_tree(monkeypatch
 def test_bullbear_view_does_not_swallow_a_malformed_momentum_tree(monkeypatch):
     """The degrade wraps the QUOTE CALL only. A shape drift in the cascade's own
     payload is a real bug, and hiding it behind an all-None day-move column is
-    the exact failure mode this feature already nearly shipped once."""
+    the exact failure mode this feature already nearly shipped once.
+
+    The property is "does not swallow", so the type is deliberately unpinned — a
+    guard refactor that changes AttributeError to ValueError is not a regression
+    of anything this test is about."""
     monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
-    with pytest.raises(AttributeError):
+    with pytest.raises(Exception):
         compute.bullbear_view({"levels": {"sector": ["XLV"]}})

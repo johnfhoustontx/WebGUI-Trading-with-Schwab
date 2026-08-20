@@ -2222,10 +2222,10 @@ def merge_live(levels, quotes):
     for name in BULLBEAR_LEVELS:
         rows = []
         for row in (levels or {}).get(name) or []:
-            copy = dict(row or {})
-            pct = ((quotes or {}).get(copy.get("symbol")) or {}).get("change_pct")
-            copy["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
-            rows.append(copy)
+            out_row = dict(row or {})
+            pct = ((quotes or {}).get(out_row.get("symbol")) or {}).get("change_pct")
+            out_row["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
+            rows.append(out_row)
         merged[name] = rows
     return merged
 
@@ -2251,10 +2251,8 @@ def bullbear_view(momentum) -> dict:
 
     ``momentum`` is handed in rather than read here because this module holds no
     bus at all — every cache key and every ``cache_set`` lives in handlers.py.
-    ``handlers.publish_bullbear`` reads ``cache:sentiment:momentum`` and passes
-    the payload down, and ``Bus.cache_get`` (shared/bus/client.py) re-parses the
-    envelope on every read, so the rows below are this call's own objects and
-    ``merge_live``'s shallow copy is enough.
+    ``merge_live``'s shallow copy is safe whatever the caller hands over, cached
+    or freshly computed, because nothing here writes below the top level.
 
     ONLY the quote call degrades: a dead proxy costs the day-move column, and
     ``quoted_at`` None is the tell that the moves are absent rather than flat —
@@ -2264,7 +2262,10 @@ def bullbear_view(momentum) -> dict:
     momentum = momentum or {}
     # Not normalized to the three level names here: bullbear_symbols and
     # merge_live each iterate BULLBEAR_LEVELS themselves, so a cold or partial
-    # cache already yields all three keys, empty.
+    # cache already yields all three keys, empty. The one input that WOULD need
+    # it is a level held as a generator — bullbear_symbols would exhaust it and
+    # merge_live would then see zero rows — which cannot arrive through
+    # Bus.cache_get, since JSON yields lists.
     levels = momentum.get("levels") or {}
     symbols = bullbear_symbols(levels)
     quoted_at = None
@@ -2272,8 +2273,9 @@ def bullbear_view(momentum) -> dict:
         quotes = _bullbear_quotes(symbols)
         quoted_at = _dt.datetime.now().astimezone().isoformat()
     except Exception as exc:  # noqa: BLE001 — best-effort; the tree still ships.
-        # One line, not a traceback: this publishes every 30 s, so a sustained
-        # proxy outage would otherwise flood errors.log with ~2,900 stacks a day.
+        # One line, not a traceback: at the design's ~30 s RTH cadence
+        # (~780 calls/day, throttled off-hours) a sustained proxy outage would
+        # otherwise put hundreds of stacks a day into errors.log.
         log.warning("bullbear: live quotes failed, nightly tree only (%r)", exc)
         quotes = {}
     return {
