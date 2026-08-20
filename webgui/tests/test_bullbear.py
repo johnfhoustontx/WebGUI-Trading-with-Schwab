@@ -348,37 +348,51 @@ def test_headline_counts_unreadable_rows_in_its_denominator():
 def test_breadth_width_is_a_percentage_of_the_track():
     """A whole percent, so the caller sets one Tailwind width and no CSS has to
     round it. Zero is a width, not an absence — a sector nothing confirms owns
-    the empty bar."""
+    the empty bar. The type is pinned because == cannot see it: 50.0 == 50, so a
+    tidy to round(p * 100, 0) stays green on every line below while the page
+    emits w-[50.0%], for which the bundled Tailwind JIT generates no rule."""
     assert B.breadth_width(0.0) == 0
     assert B.breadth_width(0.5) == 50
     assert B.breadth_width(1.0) == 100
     assert B.breadth_width(0.9623) == 96
+    assert isinstance(B.breadth_width(0.5), int)
 
 
 def test_breadth_width_is_none_when_there_is_no_participation_to_show():
-    """Stock rows carry None — a single name has no constituents to confirm it.
-    That must render nothing, since a zero-width bar is the render a genuine 0.0
-    already owns and it says "no breadth", not "not applicable"."""
+    """Two upstream causes, and both are named because only one is obvious: a
+    stock row carries no participation (one name has no constituents), and
+    momentum.participation returns None when usable == 0 — sentiment_svc filters
+    members to the admitted set, so a SECTOR row can carry None too. Both render
+    nothing; the zero-width bar belongs to a genuine 0.0."""
     assert B.breadth_width(None) is None
 
 
 def test_breadth_width_reads_a_share_through_num_not_a_second_guard():
     """Rejecting what float() cannot read and coercing what it can are one
-    policy, and it is _num's. Unreachable today — the cascade emits floats — but
-    a hand-rolled guard here passes both halves of the row above while quietly
-    discarding what quadrant() on the same row would have read."""
+    policy, and it is _num's. The bool assertion is what carries this test's
+    name: it is the SOLE behavioural difference _num makes here, since the 0..1
+    range check already eats NaN and inf. Without it a hand-rolled float() guard
+    passes every other line while breadth_width(True) returns 100 — a full bar
+    asserting "every member confirms" from a malformed payload, and quadrant()
+    has a dedicated bool test for the same reason on the same field."""
     assert B.breadth_width("x") is None
     assert B.breadth_width("0.5") == 50
+    assert B.breadth_width(True) is None
 
 
 def test_breadth_width_refuses_a_share_outside_zero_to_one():
-    """Participation is above/usable, so out of range is a payload bug. Clamping
-    it renders 1.4 as the full bar meaning "every member confirms" — the inverted
-    verdict this bar exists to draw, stated confidently and unfalsifiably.
-    Rendering nothing is honest, and unlike raising it costs only the one row."""
+    """momentum.participation is above/usable with 0 <= above <= usable, so this
+    is unreachable through the real producer: defence-in-depth against a contract
+    change, costing one row its bar, and nobody will notice when it fires. It
+    refuses rather than clamps because the two are not both silent degrades —
+    None is a silent absence, while 1.4 clamped to 100 draws the full bar and
+    asserts "every constituent confirms": maximally confident, exactly inverted,
+    and indistinguishable from a real reading."""
     assert B.breadth_width(1.4) is None
     assert B.breadth_width(-0.2) is None
-    assert B.breadth_is_thin(1.4) is False and B.breadth_is_thin(-0.2) is False
+    # Only -0.2 binds _share here; 1.4 exceeds the threshold anyway, so it reads
+    # False under a _num-only implementation too.
+    assert B.breadth_is_thin(-0.2) is False
 
 
 def test_breadth_is_thin_flags_a_move_its_members_do_not_confirm():
@@ -386,16 +400,16 @@ def test_breadth_is_thin_flags_a_move_its_members_do_not_confirm():
     rising on 0.23 while Energy sat flat on 0.96. A map that paints those the same
     green hides the only thing separating a fragile advance from a broad one."""
     assert B.breadth_is_thin(0.23) is True
-    assert B.breadth_is_thin(0.96) is False    # documentary: 0.34 binds it tighter
-    assert B.breadth_is_thin(0.34) is False
+    assert B.breadth_is_thin(0.96) is False
     assert B.breadth_is_thin(None) is False    # a stock row is not a thin one
 
 
-def test_breadth_is_thin_at_exactly_a_third_since_ties_go_to_the_cautious_side():
-    """The only case <= decides — 0.33 and 0.34 sit strictly either side of the
-    constant, so the plan's boundary would pass under < as well. One of three
-    usable constituents reaches it exactly (short-history members are skipped, not
-    counted below), and flagging it is quadrant()'s tie rule one level down. It
-    also pins the threshold at a third rather than a tidied 0.33, under which a
-    genuine one-of-three would read as broad."""
+def test_breadth_is_thin_brackets_the_threshold_at_a_third():
+    """Together these bound the constant to [1/3, 0.34). The lower assertion is
+    the only case <= decides, and it is reachable: momentum.participation skips
+    short-history members rather than counting them below, so one of three usable
+    constituents lands on it exactly. Flagging it is quadrant()'s tie rule one
+    level down, and a tidied 0.33 would read that row as broad. The upper
+    assertion is what bounds the constant from above — 1/3 alone allows 0.35."""
     assert B.breadth_is_thin(1 / 3) is True
+    assert B.breadth_is_thin(0.34) is False

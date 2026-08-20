@@ -141,9 +141,8 @@ THIN_PARTICIPATION = 1.0 / 3.0
 def _share(v):
     """``v`` as a 0..1 share, or None for anything that is not one.
 
-    Out of range is a payload bug, not a reading to clamp back into view:
-    participation is ``above/usable``, and a clamped 1.4 draws the full bar
-    meaning "every member confirms" — this bar's own verdict, inverted silently.
+    ``momentum.participation`` is ``above/usable``, so out of range is a broken
+    contract, not a reading — and a clamped 1.4 would draw the full bar.
     """
     p = _num(v)
     return p if p is not None and 0.0 <= p <= 1.0 else None
@@ -152,8 +151,9 @@ def _share(v):
 def breadth_width(participation):
     """A share -> its whole-percent bar width, or None when there is no bar.
 
-    None rather than 0 for a stock row: one name has no constituents, and the
-    empty bar belongs to a genuine 0.0, which says "nothing confirms".
+    Two upstream causes, not one: a stock row carries no participation at all,
+    and ``momentum.participation`` returns None when no member is usable, so a
+    sector can too. The empty bar belongs to a genuine 0.0 — "nothing confirms".
     """
     p = _share(participation)
     return None if p is None else round(p * 100)
