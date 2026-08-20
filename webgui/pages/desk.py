@@ -3,9 +3,9 @@ every other page, so the morning read is a single glance rather than a tour.
 
 Tier-1 reader: it consumes ``cache:options:matrix``, ``cache:options:paper_account``,
 ``cache:options:driver_paper_account``, ``cache:options:captured``,
-``cache:options:flow_alerts``, ``cache:options:gex_status`` and
-``cache:sentiment:regime`` and renders them. No engine imports, no Schwab calls,
-no arithmetic of its own. Every one of them is polled in the SINGLE batched
+``cache:options:flow_alerts``, ``cache:options:gex_status``,
+``cache:sentiment:regime`` and ``cache:sentiment:bullbear`` and renders them.
+No engine imports, no Schwab calls, no arithmetic of its own. Every one of them is polled in the SINGLE batched
 ``read_versions`` in ``_poll`` — see ``VIEWS``.
 
 **The load-bearing principle: the Desk composes, it never restates.** Every
@@ -29,9 +29,14 @@ from zoneinfo import ZoneInfo
 import bus_client
 from nicegui import run, ui
 
+from pages import bullbear as _bb
 from pages import console as _K
 from pages import console_cards as _CC
 from pages import console_regime as _CR
+# The map page, for its ONE sentence. ``headline_line`` is the count line
+# /sentiment/bullbear prints, pluralisation and empty-payload rule included —
+# imported rather than restated, for the reason at the top of this file.
+from pages import sentiment_bullbear as _bbmap
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import header as _hdr
@@ -593,6 +598,96 @@ def positions_summary(rows):
     }
 
 
+# ── the Bull / Bear sector strip ─────────────────────────────────────────────
+# ALL ELEVEN sectors, not the extremes. The reading this strip gives is the
+# DISTRIBUTION — how much of the market is rising, how much is leading, and how
+# many sit in the trap quadrant (falling but still beating SPY, the row a
+# relative-strength screen calls a buy) — and that reading is exactly what a
+# trim destroys: "the two strongest and the two weakest" answers a different
+# question while looking like it answered this one, and picking WHICH to keep is
+# a ranking judgement the strip has no business making.
+#
+# The layout does not argue against it either, and that was arithmetic rather
+# than optimism: eleven chips on their ``min-w-[124px]`` floor plus ten 8px gaps
+# is 1444px, where the panel grid immediately below already demands 2104px of
+# content width before it will go two-up. Below that breakpoint the page is one
+# column and the strip wraps to two rows, which is the same graceful floor every
+# panel here takes.
+BULLBEAR_ROUTE = "/sentiment/bullbear"
+
+# Its own message, NOT ``WAITING_OPTIONS``: these scores come from a NIGHTLY
+# cascade rather than a 30 s poll, so "not published yet" means something a
+# reader can act on (wait for tonight) that the generic line does not. Wording
+# follows ``sentiment_bullbear.WAITING``.
+WAITING_BULLBEAR = ("Waiting for the sentiment service — the Bull / Bear map is "
+                    "built by the nightly cascade at 16:20 CT.")
+
+
+def _bullbear_rows(bullbear_view):
+    """The payload's sector rows, ordered strongest-first and null-free.
+
+    Shape-guarded at BOTH levels because ``render()`` seeds every view at build
+    time: a half-written key, an older writer or a service caught mid-restart
+    can put a non-dict in either position, and ``or {}`` would pass a truthy
+    malformed payload straight through to the first ``.get``.
+
+    Ordering is ``bullbear.by_strength`` — the map's own — so the strip and the
+    page it links to can never list the same sectors in different orders.
+    """
+    view = bullbear_view if isinstance(bullbear_view, dict) else {}
+    levels = view.get("levels")
+    levels = levels if isinstance(levels, dict) else {}
+    return _bb.by_strength(levels.get("sector"))
+
+
+def bullbear_chips(bullbear_view):
+    """One chip per scored sector — everything the strip draws, as plain dicts.
+
+    Every DECISION here belongs to ``pages/bullbear.py``: the ordering, the
+    quadrant, the breadth width and its thin threshold, and the day-move
+    formatting. This function picks the sector level out of the payload and
+    names the fields; it computes nothing.
+
+    ``payload["regime"]`` is deliberately never read. ``/sentiment/sectors`` and
+    ``/sentiment/rotation`` already print OPPOSITE risk-on/risk-off headlines
+    off quantities that are not commensurable (CLAUDE.md, 2026-08-17); the map
+    answers that by counting rows and stopping, and a strip pointing at it under
+    a verdict word would reopen the same hole one screen earlier.
+
+    ``day_text`` separates "the proxy did not return this symbol" (a dash) from
+    "the proxy returned it" — NOT from "unchanged". ``compute.merge_live``
+    (services/sentiment_svc/compute.py) leaves ``day_pct`` None only for an
+    omitted symbol, and ``SchwabProxyClient._extract_change_pct``
+    (schwab-proxy/proxy_client.py) falls through to a literal ``0.0`` when every
+    percent field is missing or zero. So "0.00%" is not proof of a flat tape.
+    """
+    out = []
+    for row in _bullbear_rows(bullbear_view):
+        share = _bb.row_participation(row)
+        out.append({
+            "label": str(row.get("label") or row.get("symbol") or ""),
+            "symbol": str(row.get("symbol") or ""),
+            "quadrant": _bb.quadrant(*_bb.row_axes(row)),
+            "day_text": _bb.signed_pct(row.get("day_pct")),
+            # None ("no reading at all") and 0 ("nothing confirms") are two
+            # different drawings, so this stays the raw None rather than being
+            # folded to 0 — see ``_bullbear_breadth``.
+            "breadth": _bb.breadth_width(share),
+            "thin": _bb.breadth_is_thin(share),
+        })
+    return out
+
+
+def bullbear_headline(bullbear_view):
+    """The map's own count sentence, over the same rows the chips draw.
+
+    ``sentiment_bullbear.headline_line`` handles the pluralisation and returns
+    "" on an empty payload — where "0 of 0 sectors rising and leading" would
+    state a maximally bearish tape that nobody measured.
+    """
+    return _bbmap.headline_line(_bullbear_rows(bullbear_view))
+
+
 # ── freshness ────────────────────────────────────────────────────────────────
 # How old the last GEX snapshot may be before the Desk stops calling the feed
 # live. The collector runs on a ONE-MINUTE cadence, and a slot legitimately runs
@@ -1064,7 +1159,8 @@ def signed_class(v):
 VIEWS = ("options:header", "sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:paper_account",
-         "options:driver_paper_account", "options:captured")
+         "options:driver_paper_account", "options:captured",
+         "sentiment:bullbear")
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -1075,6 +1171,10 @@ _REGION_VIEWS = {
     # The dealer panel reads gex_status too: freshness is what GATES its walls.
     "dealer": ("options:matrix", "options:gex_status"),
     "board": ("options:matrix",),
+    # ONE view, and the strip must not repaint on any other: its scores move
+    # once a NIGHT and its day-moves at the service's own quote cadence, so a
+    # 2 s header bump rebuilding eleven chips is pure churn.
+    "bullbear": ("sentiment:bullbear",),
     "flow": ("options:flow_alerts",),
     "positions": ("options:paper_account", "options:driver_paper_account",
                   "options:captured"),
@@ -1283,6 +1383,30 @@ _PLACEHOLDER = f"text-[15px] {CON_TXT_MUTED} py-4"
 # quiet market — which is the whole reason this page must never print a zero it
 # did not read.
 WAITING_OPTIONS = "Waiting for the options service…"
+
+# ── the Bull / Bear chip ─────────────────────────────────────────────────────
+# The chip's frame. Its COLOUR is not here: ``bullbear.quadrant_class`` supplies
+# text, background and border from its own five-literal palette, and the chip's
+# inner labels inherit that text colour rather than setting one — so the strip
+# and the map cannot colour the same quadrant differently.
+_BB_CHIP = ("flex-1 min-w-[124px] border rounded-[2px] px-[8px] py-[6px] "
+            "gap-[5px] cursor-pointer")
+_BB_NAME = "text-[13px] font-semibold leading-none min-w-0 truncate"
+_BB_QUAD = "text-[10px] leading-none tracking-[.1em] opacity-80 truncate"
+# The day move is deliberately NOT coloured by its sign: ``signed_pct`` prints
+# the sign already, and a second green/red inside a chip that is itself green or
+# red would be two colour languages on one 124px box — on two different clocks
+# (last night's cascade vs this morning's quote), which can legitimately
+# disagree and would then read as a rendering fault.
+_BB_DAY = f"text-[12px] leading-none tabular-nums shrink-0 {CON_TXT_MUTED}"
+
+# The breadth groove. Two static classes: a move confirmed by too few of a
+# sector's constituents takes the negative hue, which is the whole qualifier the
+# bar draws — ``sentiment_bullbear._BREADTH_FILL`` makes the same call in that
+# page's palette, and a strip that painted a thin move like a broad one would be
+# the softer of the two screens on exactly the point they share.
+_BB_FILL = {True: f"bg-[{_C['negative']}]", False: f"bg-[{_C['positive']}]"}
+_BB_TRACK = f"h-[3px] w-full rounded-full overflow-hidden bg-[{_C['line']}]/[0.35]"
 
 # The VIX band badge is repainted in place, so its previous background has to be
 # removed explicitly or the classes stack and the first band painted wins
@@ -1653,6 +1777,22 @@ def render():
                 regime_sub = ui.label("").classes(
                     f"text-[11px] leading-none mt-auto {CON_TXT_MUTED}")
 
+        # ── the Bull / Bear sector strip ─────────────────────────────────────
+        # It sits between the TOP STRIP and the panels, and that position is
+        # the argument: the tiles above read the market as one thing (clock,
+        # two composite scores, VIX, regime), the panels below are per-symbol,
+        # and this is the one band saying which PARTS the composite above is
+        # made of. Full width and one tile tall — eleven chips is a row, not a
+        # panel.
+        with ui.column().classes(f"{_TILE} w-full gap-[8px]"):
+            with ui.row().classes("items-baseline w-full gap-4 flex-wrap"):
+                ui.label("BULL / BEAR MAP").classes(_STRIP_EYEBROW)
+                # The count line, not a verdict — and it is the MAP's sentence,
+                # so the two screens cannot report different counts.
+                bb_headline = ui.label("").classes(
+                    f"text-[13px] leading-none {CON_TXT_MUTED}")
+            bb_box = ui.row().classes("w-full items-stretch gap-2 flex-wrap")
+
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
         # the order the page argues: structure, then what to act on, then what is
         # already on. `items-stretch` so the two panels of a row square off at
@@ -1790,6 +1930,54 @@ def render():
             _compact_card("MARKET TREND", t_arcs, trend_pill_text(derived),
                           _CC.delta_parts(_arc_value(t_arcs, 0),
                                           _arc_value(t_arcs, 2), "MONTH"))
+
+    def _paint_bullbear():
+        view = _view("sentiment:bullbear")
+        bb_headline.text = bullbear_headline(view)
+        chips = bullbear_chips(view)
+        bb_box.clear()
+        with bb_box:
+            if not chips:
+                ui.label(WAITING_BULLBEAR).classes(_PLACEHOLDER)
+                return
+            for chip in chips:
+                _bullbear_chip(chip)
+
+    def _bullbear_chip(chip):
+        el = ui.column().classes(
+            f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
+        with el:
+            with ui.row().classes(
+                    "items-baseline justify-between w-full gap-2 flex-nowrap"):
+                ui.label(chip["label"]).classes(_BB_NAME)
+                ui.label(chip["day_text"]).classes(_BB_DAY)
+            # Both axes named, always — "Falling · Leading" is the whole reason
+            # the map exists, and one word for it would be the ambiguity back.
+            ui.label(_bb.quadrant_label(chip["quadrant"])).classes(_BB_QUAD)
+            _bullbear_breadth(chip)
+        el.on("click", lambda _e: _open_map())
+
+    def _bullbear_breadth(chip):
+        """The participation groove — how much of the sector confirms the move.
+
+        A bar rather than only the thin/not-thin flag: the flag cannot separate
+        34% (just over the line) from 96%, and participation is an INDEPENDENT
+        third dimension rather than a tiebreak on the quadrant.
+        """
+        width = chip["breadth"]
+        if width is None:
+            # NO groove at all, which is a different drawing from an empty one:
+            # a sector whose members were all unusable has no reading, where an
+            # empty groove would state that nothing confirms. The spacer keeps
+            # the chip the same height as the ones beside it.
+            ui.element("div").classes("h-[3px] w-full")
+            return
+        with ui.element("div").classes(_BB_TRACK):
+            # The documented continuous-value exception — 0..100 is 101 classes,
+            # so this one arbitrary value is built at runtime. Set once per
+            # repaint on a freshly cleared box, so there is nothing to remove.
+            ui.element("div").classes(
+                f"h-full rounded-full w-[{width}%] {_BB_FILL[chip['thin']]}")
 
     def _paint_dealer():
         dealer_body.clear()
@@ -2069,13 +2257,20 @@ def render():
         _handoff.send_to_gamma(symbol)
 
     @guard
+    def _open_map():
+        """The strip is a pointer, not a second map: every industry and stock
+        inside a sector lives one click away, and none of them is on this
+        page."""
+        ui.navigate.to(BULLBEAR_ROUTE)
+
+    @guard
     def _open_position(row):
         """Each book has its own page; the source chip is what decides which."""
         ui.navigate.to(POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
-    painters = {"strip": _paint_strip, "dealer": _paint_dealer,
-                "board": _paint_board, "flow": _paint_flow,
-                "positions": _paint_positions}
+    painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
+                "dealer": _paint_dealer, "board": _paint_board,
+                "flow": _paint_flow, "positions": _paint_positions}
 
     def _paint(payloads):
         """Merge the changed views in, then repaint only what depends on them."""

@@ -942,6 +942,111 @@ def test_no_class_map_emits_an_inline_style_or_a_var_arbitrary():
         assert "style" not in cls
 
 
+# ── the Bull / Bear sector strip ─────────────────────────────────────────────
+def _brow(symbol, label, trend, excess, **over):
+    """One ``levels.sector`` row, in the shape ``compute.merge_live`` writes."""
+    return {"symbol": symbol, "label": label,
+            "raw": {"trend": trend, "excess": excess}, **over}
+
+
+def test_desk_reads_the_bullbear_view():
+    """Polled, wired, and wired to that view ALONE. A view missing from
+    ``VIEWS`` is never probed; a region missing from ``_REGION_VIEWS`` never
+    repaints when it moves; and a region carrying a SECOND dependency rebuilds
+    eleven chips on every 2 s header bump, on a page that stays open all day for
+    scores that change once a night."""
+    assert "sentiment:bullbear" in d.VIEWS
+    assert d._REGION_VIEWS["bullbear"] == ("sentiment:bullbear",)
+
+
+def test_desk_reads_the_bullbear_axes_through_the_maps_own_accessor():
+    """``bullbear.row_axes`` is public precisely so two page modules do not each
+    hand-roll ``(row.get("raw") or {}).get("trend")`` and drift from ``_raw``'s
+    policy — which is the only thing deciding whether a null ``raw`` degrades
+    and a non-dict row raises. A hand-rolled pair is output-equivalent TODAY,
+    which is exactly why no behaviour test can hold this and a source one must.
+    """
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    assert "_bb.row_axes(" in src
+    # ``raw`` is the block ``_raw`` owns, and reaching for it by name is the one
+    # way this gets hand-rolled. (A bare "trend" would false-positive: the
+    # composite payload has a ``derived.trend`` of its own, read by the pill.)
+    assert '"raw"' not in src and "'raw'" not in src
+
+
+def test_desk_bullbear_strip_shows_every_sector():
+    chips = d.bullbear_chips({"levels": {"sector": [
+        _brow("XLV", "Health Care", 1.0, 0.1, participation=0.75, day_pct=0.4),
+        _brow("XLU", "Utilities", -1.0, -0.1, participation=0.16,
+              day_pct=-0.2)]}})
+    assert [c["label"] for c in chips] == ["Health Care", "Utilities"]
+    assert [c["symbol"] for c in chips] == ["XLV", "XLU"]
+    assert [c["quadrant"] for c in chips] == ["rising_leading", "falling_lagging"]
+    assert [c["thin"] for c in chips] == [False, True]      # 0.16 participation
+
+
+def test_desk_bullbear_strip_is_empty_when_the_view_is_cold():
+    """Four cold shapes. The third is the one that raises rather than degrades:
+    ``render()`` seeds every view at build, and a service caught mid-restart
+    publishes a payload of the wrong SHAPE, not an absent one."""
+    assert d.bullbear_chips(None) == []
+    assert d.bullbear_chips({}) == []
+    assert d.bullbear_chips("nonsense") == []
+    assert d.bullbear_chips({"levels": "nonsense"}) == []
+    assert d.bullbear_chips({"levels": {"sector": []}}) == []
+
+
+def test_desk_bullbear_strip_orders_sectors_exactly_as_the_map_does():
+    """Two screens ordering the same rows differently is a defect neither shows
+    — the documented /sentiment/sectors-vs-/sentiment/rotation failure one level
+    down. Asserted against ``bullbear.by_strength`` itself rather than against a
+    hand-written order that happens to agree today."""
+    from pages import bullbear as B
+    rows = [_brow("A", "Alpha", 0.1, 0.2), _brow("B", "Beta", 0.9, -0.3),
+            _brow("C", "Gamma", None, 0.5), _brow("D", "Delta", 0.5, 0.0)]
+    chips = d.bullbear_chips({"levels": {"sector": rows}})
+    assert [c["label"] for c in chips] == [r["label"] for r in B.by_strength(rows)]
+    assert [c["label"] for c in chips][0] == "Beta"   # …and it really re-sorts
+
+
+def test_desk_bullbear_breadth_keeps_no_track_apart_from_an_empty_one():
+    """``breadth_width`` answers None for "there is no reading" and 0 for
+    "nothing confirms" — two different drawings. A truthiness check at the call
+    site collapses exactly the distinction the function exists to draw."""
+    rows = [_brow("A", "Absent", 1.0, 1.0),
+            _brow("B", "Zero", 1.0, 1.0, participation=0.0),
+            _brow("C", "Full", 1.0, 1.0, participation=1.0)]
+    chips = d.bullbear_chips({"levels": {"sector": rows}})
+    assert [c["breadth"] for c in chips] == [None, 0, 100]
+    assert [c["thin"] for c in chips] == [False, True, False]
+
+
+def test_desk_bullbear_day_move_separates_absent_from_returned_not_from_flat():
+    """``compute.merge_live`` (services/sentiment_svc/compute.py) leaves
+    ``day_pct`` None only for a symbol the proxy OMITTED; one it returned with
+    no usable percent field yields 0.0, because
+    ``SchwabProxyClient._extract_change_pct`` (schwab-proxy/proxy_client.py)
+    falls through to a literal 0.0. So the dash means "not returned", and
+    "0.00%" is not proof of a flat tape."""
+    rows = [_brow("A", "Absent", 1.0, 1.0),
+            _brow("B", "Flat", 1.0, 1.0, day_pct=0.0),
+            _brow("C", "Up", 1.0, 1.0, day_pct=0.4)]
+    chips = d.bullbear_chips({"levels": {"sector": rows}})
+    assert [c["day_text"] for c in chips] == ["—", "0.00%", "+0.40%"]
+
+
+def test_desk_bullbear_strip_degrades_a_row_it_cannot_score():
+    """Three broken shapes, because a mutant misses at the level nobody was
+    thinking about: a null row, a row with neither ``raw`` nor a label, and a
+    NaN axis — the app's documented trap, since every comparison against NaN is
+    False and an unguarded one falls straight through to the falling branch."""
+    rows = [None, {"symbol": "B"}, _brow("N", "Nan", float("nan"), 0.5)]
+    chips = d.bullbear_chips({"levels": {"sector": rows}})
+    assert [c["label"] for c in chips] == ["B", "Nan"]   # label falls back
+    assert [c["quadrant"] for c in chips] == ["unknown", "unknown"]
+
+
 # ── the poll contract ────────────────────────────────────────────────────────
 def test_every_region_only_depends_on_views_the_page_actually_polls():
     """A region wired to a view outside ``VIEWS`` would never repaint: the poll
@@ -1122,6 +1227,35 @@ def _rendered_texts():
             if key not in before]
 
 
+def _rendered_classes():
+    """Every class string ``render()`` just mounted. Some readings are drawn
+    rather than written — a groove that is absent, empty or full says three
+    different things and carries no text at all."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [" ".join(e._classes)
+            for key, e in ui.context.client.elements.items() if key not in before]
+
+
+def _click_handlers():
+    """Every click handler ``render()`` just wired, in build order.
+
+    Text alone cannot see a click-through, and a chip that draws but navigates
+    nowhere is exactly the regression a smoke test should catch."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [listener.handler
+            for key, el in ui.context.client.elements.items() if key not in before
+            for listener in el._event_listeners.values()
+            if listener.type == "click"]
+
+
 def _seed_bus(monkeypatch, data):
     import bus_client
     monkeypatch.setattr(bus_client, "read_full",
@@ -1234,3 +1368,90 @@ def test_render_survives_junk_in_every_view(monkeypatch):
     # degrade to the *waiting* state, because a malformed payload is not an
     # absent one and the page cannot tell the difference from here.
     assert "No open positions." in texts
+
+
+# ── the Bull / Bear sector strip, mounted ────────────────────────────────────
+def _bullbear_payload():
+    return {
+        "session_date": "2026-08-19",
+        "quoted_at": "2026-08-20T09:31:02-05:00",
+        # The verdict block ``compute.bullbear_view`` copies out of the nightly
+        # cascade. Present in every real payload, printed by nothing.
+        "regime": {"state": "suppressed", "label": "Suppressed",
+                   "description": "Momentum-crash risk — the biggest losers "
+                                  "rip hardest here."},
+        "levels": {"sector": [
+            _brow("XLK", "Technology", 0.42, 0.11, participation=0.8,
+                  day_pct=1.2),
+            _brow("XLU", "Utilities", -0.2, 0.05, participation=0.2,
+                  day_pct=-0.3)]},
+    }
+
+
+def test_render_mounts_a_chip_per_sector_over_the_maps_own_count_sentence(
+        monkeypatch):
+    """The sentence is ``sentiment_bullbear.headline_line`` — the map's own,
+    pluralisation included — so the two screens cannot report different counts
+    off one payload."""
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _bullbear_payload()})
+    texts = [t for t in _rendered_texts() if t]
+    assert "Technology" in texts and "Utilities" in texts
+    assert "Rising · Leading" in texts and "Falling · Leading" in texts
+    assert "1 of 2 sectors rising and leading" in texts
+    assert "+1.20%" in texts and "-0.30%" in texts
+
+
+def test_render_never_prints_the_bullbear_regime_verdict(monkeypatch):
+    """The payload carries ``regime`` and this strip must not read it.
+    /sentiment/sectors and /sentiment/rotation already print OPPOSITE
+    risk-on/risk-off headlines off quantities that are not commensurable
+    (CLAUDE.md, 2026-08-17); the map answers that by counting rows and stopping,
+    and a strip that pointed at it under a verdict would reopen it."""
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _bullbear_payload()})
+    blob = " ".join(t for t in _rendered_texts() if t).lower()
+    assert "suppressed" not in blob and "momentum-crash" not in blob
+    assert "risk-on" not in blob and "risk-off" not in blob
+
+
+def test_render_gives_the_bullbear_strip_its_own_cold_message():
+    """A cold sentiment service is a different outage from a cold options one,
+    so it must not borrow that placeholder — and it must not count to zero:
+    ``B.headline`` returns "" on an empty payload precisely because "0 of 0
+    sectors rising and leading" states a maximally bearish tape nobody read."""
+    texts = [t for t in _rendered_texts() if t]
+    assert d.WAITING_BULLBEAR in texts
+    assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
+    assert not any("rising and leading" in t for t in texts)
+
+
+def test_render_wires_every_bullbear_chip_through_to_the_map(monkeypatch):
+    """A chip is a pointer — the strip carries eleven sectors, the map under it
+    carries the industries and stocks inside each. A chip that draws but does
+    not navigate is the one failure a text-only smoke test cannot see. The two
+    /sentiment clicks are the score cards, and they are what proves this counts
+    only the chips."""
+    from nicegui import ui
+    routes = []
+    monkeypatch.setattr(ui.navigate, "to", lambda r, *a, **k: routes.append(r))
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _bullbear_payload()})
+    for handler in _click_handlers():
+        handler(None)
+    assert routes.count("/sentiment/bullbear") == 2
+    assert routes.count("/sentiment") == 2
+
+
+def test_render_draws_no_breadth_groove_where_there_is_no_reading(monkeypatch):
+    """Three sectors, three different drawings — and none of them is text, so
+    this is the one assertion that can see the distinction ``breadth_width``
+    exists to draw. A sector whose members were all unusable gets NO groove; one
+    where nothing confirms gets an empty groove; a broad one gets a filled bar.
+    Collapsing the first two is the documented trap."""
+    _seed_bus(monkeypatch, {"sentiment:bullbear": {"levels": {"sector": [
+        _brow("A", "NoRead", 1.0, 1.0),
+        _brow("B", "Empty", 1.0, 1.0, participation=0.0),
+        _brow("C", "Broad", 1.0, 1.0, participation=0.8)]}}})
+    classes = _rendered_classes()
+    grooves = [c for c in classes if "rounded-full" in c and "overflow-hidden" in c]
+    assert len(grooves) == 2                                   # not three
+    assert [c for c in classes if "w-[0%]" in c]                # empty ≠ absent
+    assert [c for c in classes if "w-[80%]" in c]
