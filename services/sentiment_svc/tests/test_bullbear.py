@@ -7,6 +7,7 @@ Every quote fixture below uses the FLATTENED shape
 no ``{"quote": {...}}`` envelope — a fixture inventing one would leave every
 row's ``day_pct`` None while this suite stayed green.
 """
+import asyncio
 import copy
 import datetime as _dt
 
@@ -241,18 +242,27 @@ def test_publish_bullbear_does_bump_when_a_day_move_actually_changes(monkeypatch
     assert bus.cache_get(handlers.CACHE_BULLBEAR).version > first
 
 
+_ANCIENT = "2000-01-01T00:00:00+00:00"
+
+
 def test_publish_bullbear_keeps_quoted_at_moving_while_the_data_moves(monkeypatch):
     """Carried forward ONLY on a skip. On a real change ``quoted_at`` must be the
-    fresh stamp, or it would read as a "last changed" clock that never changes."""
+    fresh stamp, or it would read as a "last changed" clock that never changes.
+
+    Checked against a planted sentinel rather than against a second wall-clock
+    reading: ``datetime.now()`` is ~1 ms granular on Windows, so two back-to-back
+    publishes can legitimately stamp the identical string and an ``a > b`` form
+    of this test FLAKES (observed once in a full run, then 8/8 green alone)."""
     pct = [1.5]
     monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
                         lambda s: {"XLV": {"change_pct": pct[0]}})
     bus = _bus_with_momentum()
     handlers.publish_bullbear(bus)
-    first = bus.cache_get(handlers.CACHE_BULLBEAR).payload["quoted_at"]
-    pct[0] = 2.5
+    stored = bus.cache_get(handlers.CACHE_BULLBEAR).payload
+    bus.cache_set(handlers.CACHE_BULLBEAR, dict(stored, quoted_at=_ANCIENT))
+    pct[0] = 2.5                                   # a REAL change, so no skip
     handlers.publish_bullbear(bus)
-    assert bus.cache_get(handlers.CACHE_BULLBEAR).payload["quoted_at"] > first
+    assert bus.cache_get(handlers.CACHE_BULLBEAR).payload["quoted_at"] != _ANCIENT
 
 
 def test_refresh_bullbear_command_is_dispatched(monkeypatch):
@@ -263,14 +273,104 @@ def test_refresh_bullbear_command_is_dispatched(monkeypatch):
     assert calls == [bus]
 
 
-def test_bullbear_is_due_every_tick_during_rth_but_throttled_off_hours():
-    """RTH every ~30 s is the ~780 /quotes calls a day the design costs. Off-hours
-    the tape is frozen, and an ungated loop would spend 2,100 more re-reading it."""
-    rth = _dt.datetime(2026, 8, 19, 10, 0, tzinfo=scheduler._CT)
-    due, slot = scheduler.bullbear_due(rth, None)
-    assert due is True
-    assert scheduler.bullbear_due(rth, slot)[0] is True   # EVERY tick, not once
+def test_bullbear_publishes_every_tick_through_every_open_session():
+    """GTH (07:00) and curb (15:10) move the tape just as RTH does, and extended
+    hours are live since 2026-08-17. A gate keyed on RTH alone would leave the
+    Today column stale exactly when a reader is watching it most closely."""
+    for hh, mm in ((7, 0), (10, 0), (15, 10)):
+        now = _dt.datetime(2026, 8, 19, hh, mm, tzinfo=scheduler._CT)
+        due, slot = scheduler.bullbear_due(now, None)
+        assert due is True, f"{hh}:{mm:02d} not due"
+        assert scheduler.bullbear_due(now, slot)[0] is True   # every tick, not once
+
+
+def test_bullbear_throttles_only_once_the_tape_is_closed():
     night = _dt.datetime(2026, 8, 19, 22, 0, tzinfo=scheduler._CT)
     due, slot = scheduler.bullbear_due(night, None)
-    assert due is True                                  # first off-hours tick fires
+    assert due is True                            # the first closed tick still fires
     assert scheduler.bullbear_due(night, slot)[0] is False
+    later = night + _dt.timedelta(minutes=scheduler.BULLBEAR_CLOSED_INTERVAL_MIN)
+    assert scheduler.bullbear_due(later, slot)[0] is True
+
+
+def test_bullbear_closed_cadence_stays_inside_the_status_board_threshold():
+    """A frozen tape publishes byte-identical payloads that skip_unchanged drops,
+    so a closed tick buys only ``{key}:ts`` freshness — and webgui/pages/status.py
+    flags a scheduled view stale at _STALE_AFTER_SEC = 600. Reusing the composite
+    refresh's 15 min here would sit past that; the number is duplicated rather
+    than imported because a service must not import Tier-1."""
+    assert scheduler.BULLBEAR_CLOSED_INTERVAL_MIN * 60 <= 300
+
+
+# --- scheduler task lifecycle -------------------------------------------------
+# Driven with a bare asyncio loop rather than pytest-asyncio, which is NOT in
+# this venv. Both properties below are load-bearing and were previously unpinned:
+# a surviving mutant moved the task creation back after start_consumer, and
+# another dropped the cancel entirely (a task leak on teardown).
+
+def _run_scheduler_briefly(monkeypatch, start_consumer=lambda bus: None):
+    """Start ``scheduler.loop``, let it spawn its side tasks, then cancel it.
+
+    Returns the ordered start/cancel events its two side loops recorded.
+    """
+    events = []
+
+    def _side(name):
+        async def _task(bus, loop_):
+            events.append(f"{name}:started")
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                events.append(f"{name}:cancelled")
+                raise
+        return _task
+
+    monkeypatch.setattr(handlers, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "refresh_rotation", lambda *a, **k: None)
+    monkeypatch.setattr(scheduler.order_flow_consumer, "start_consumer", start_consumer)
+    monkeypatch.setattr(scheduler.order_flow_consumer, "start_option_consumer",
+                        lambda bus: None)
+    monkeypatch.setattr(scheduler, "_bullbear_publish_loop", _side("bullbear"))
+    monkeypatch.setattr(scheduler, "_order_flow_publish_loop", _side("orderflow"))
+
+    async def _drive():
+        task = asyncio.create_task(scheduler.loop(Bus(fake=True)))
+        for _ in range(100):                      # bounded: the startup awaits are stubs
+            await asyncio.sleep(0.01)
+            if events:
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        for _ in range(100):                      # let the finally-block cancels land
+            await asyncio.sleep(0.01)
+            if any(e.endswith(":cancelled") for e in events):
+                break
+        # Snapshot from INSIDE the loop: asyncio.run cancels whatever is still
+        # pending as it closes, so a list read after it returns would show the
+        # task as cancelled even if loop()'s finally never touched it — which
+        # silently made this a test of asyncio.run rather than of the scheduler.
+        return list(events)
+
+    return asyncio.run(_drive())
+
+
+def test_scheduler_starts_the_bullbear_loop_before_the_order_flow_consumer(monkeypatch):
+    """``start_consumer`` is the statement in that ``try`` that can realistically
+    raise, and the map has nothing to do with order-flow — it must not lose its
+    publish loop because a streaming consumer failed to start."""
+    def _boom(bus):
+        raise RuntimeError("stream refused")
+
+    events = _run_scheduler_briefly(monkeypatch, start_consumer=_boom)
+    assert "bullbear:started" in events
+    assert "orderflow:started" not in events      # proves the raise really landed
+
+
+def test_scheduler_cancels_the_bullbear_loop_on_shutdown(monkeypatch):
+    """Without the cancel in the ``finally`` the task leaks on teardown, and
+    nothing else in the suite would notice."""
+    events = _run_scheduler_briefly(monkeypatch)
+    assert "bullbear:cancelled" in events

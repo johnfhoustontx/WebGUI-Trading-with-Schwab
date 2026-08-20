@@ -24,6 +24,11 @@ TREND_INTERVAL_SEC = 900   # 15 minutes — directional Market Trend recompute c
 REGIME_INTERVAL_MIN = 5    # 5 minutes — blended market-regime recompute cadence
 ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this cadence
 BULLBEAR_PUBLISH_SEC = 30     # publish cache:sentiment:bullbear at this cadence
+# Closed-tape throttle for that publish. Its OWN knob, not
+# _OFFHOURS_INTERVAL_MIN: see bullbear_due for the cost asymmetry. Held well
+# under status.py's 600 s staleness threshold, which is all a closed tick
+# is for.
+BULLBEAR_CLOSED_INTERVAL_MIN = 5
 
 # ── Off-hours refresh gating (P4) ────────────────────────────────────────────
 # The 120 s refresh used to run UNCONDITIONALLY 24/7 — ~30-40 proxy→Schwab calls
@@ -79,16 +84,33 @@ def refresh_due(now, last_slot):
 def bullbear_due(now, last_slot):
     """(should_publish, slot) — the gate on the Bull/Bear live day-move publish.
 
-    Deliberately delegating to ``refresh_due`` rather than restating it: the two
-    want the same answer (every tick in RTH, once per off-hours slot) and should
-    not drift apart. Its own slot variable, so the two loops never share state.
+    Gated on whether the TAPE IS OPEN, not on RTH, and deliberately NOT delegating
+    to ``refresh_due``. The reason to throttle is cost, and these two pollers'
+    costs are ~35x apart: ``_OFFHOURS_INTERVAL_MIN`` was sized for the 120 s
+    composite refresh at 30-40 proxy->Schwab calls a run (its justification is the
+    "Off-hours refresh gating (P4)" comment at the top of this module), where this
+    one costs a single batched ``/quotes``. So the two want the same answer during
+    RTH and different answers outside it, and sharing a gate would be a false
+    economy dressed as drift protection.
 
-    Unlike ``_order_flow_publish_loop``, which republishes an in-process consumer's
-    state for free, this costs one Schwab ``/quotes`` call per tick. The design
-    doc budgets ~780 a day at the RTH cadence and says it "throttles off-hours
-    like every other poller"; ungated it would be ~2,880, spent re-reading a
-    frozen tape."""
-    return refresh_due(now, last_slot)
+    Concretely: extended hours are live (``config/sessions.toml``,
+    ``extended_hours_from = 2026-08-17``), and a 15-minute off-hours gate would
+    leave the Today column that stale right through GTH and curb — the sessions a
+    reader most wants current. Every OPEN session therefore publishes on every
+    tick; only a genuinely closed tape throttles.
+
+    ``BULLBEAR_CLOSED_INTERVAL_MIN`` can be generous because a closed tick buys
+    almost nothing: the quotes are frozen, so the payload is byte-identical and
+    ``cache_set(skip_unchanged=True)`` drops it without a version bump. What it
+    does buy is the ``{key}:ts`` freshness stamp, and session-open latency is
+    unaffected — the gate flips on the next 30 s tick whatever the slot says.
+
+    Pure so the gate is unit-testable; the loop owns the clock."""
+    if mc.session_at(now) is not mc.Session.CLOSED:
+        return (True, last_slot)
+    slot = (now.date().isoformat(), now.hour,
+            now.minute // BULLBEAR_CLOSED_INTERVAL_MIN)
+    return (slot != last_slot, slot)
 
 
 def sectors_due(now, last_slot):
