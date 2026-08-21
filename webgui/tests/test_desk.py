@@ -9,13 +9,7 @@ import datetime
 import inspect
 import pathlib
 import re
-
 from pages import desk as d
-
-
-# The Tailwind-first guard for this module now lives with every other page's, in
-# ``test_no_inline_style.py``'s ``PHASE_8_FILES``. One guard, not two — a second
-# copy is a second thing to forget.
 
 
 # ── structure_positions ──────────────────────────────────────────────────────
@@ -1836,3 +1830,146 @@ def test_the_step_clamp_cannot_produce_a_negative_class():
     # the fix is free (apply the floor last) and the comment beside it claims
     # the clamp is airtight, so it should be.
     assert d.glow_step(started=100.0, now=100.0, steps=0) >= 0
+
+
+# ── arrival detection: what glows, and what gets said ────────────────────────
+# These are the feature's whole decision layer, and they are module-level
+# functions taking their state explicitly precisely so this block can exist —
+# a closure inside ``render()`` is reachable only from a browser.
+def _arr_flow(rid, symbol="SPY", kind="Crossover", side="Calls over"):
+    return {"id": rid, "symbol": symbol, "kind": kind, "side": side}
+
+
+def _arr_pos(pid, symbol="SPY", flag="OK", strategy="put_credit_spread"):
+    return {"position_id": pid, "symbol": symbol, "flag": flag,
+            "strategy": strategy}
+
+
+def test_arrival_state_starts_silent_and_empty():
+    """``first`` being True IS the silent-first-paint mechanism.
+
+    Built by a shared helper rather than a dict literal in ``render`` so this
+    test exercises the state the page actually starts from — a hand-rolled copy
+    here could not catch the flag being dropped there.
+    """
+    s = d.arrival_state()
+    assert s["first"] is True
+    assert s["glow"] == {} and s["speak"] == []
+    assert s["seen_flow"] == set() and s["seen_pos"] == set()
+    assert s["pos_flags"] == {}
+
+
+def test_the_first_paint_announces_nothing_and_lights_nothing():
+    """Navigating to the Desk must not squawk the whole backlog at you."""
+    s = d.arrival_state()
+    said = d.fold_flow_arrivals(s, [_arr_flow("a"), _arr_flow("b")], now=100.0)
+    assert said is None
+    assert s["glow"] == {}
+    # ...but the backlog IS recorded, so the next arrival is the only new one.
+    assert s["seen_flow"] == {"a", "b"}
+
+
+def test_the_first_paint_is_dark_for_positions_too():
+    s = d.arrival_state()
+    assert d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0) is None
+    assert s["glow"] == {}
+    assert s["seen_pos"] == {"p1"} and s["pos_flags"] == {"p1": "OK"}
+
+
+def test_the_second_paint_glows_and_speaks_the_new_alert():
+    s = d.arrival_state()
+    d.fold_flow_arrivals(s, [_arr_flow("a")], now=100.0)
+    s["first"] = False
+    said = d.fold_flow_arrivals(s, [_arr_flow("b"), _arr_flow("a")], now=200.0)
+    assert said == "S P Y. Crossover alert, calls over."
+    assert s["glow"] == {"b": (d.GLOW_NEW, 200.0)}
+
+
+def test_a_burst_is_one_sentence_naming_the_newest_and_counting_the_rest():
+    """The feed is newest-first, so ``[0]`` is the one to say out loud."""
+    s = d.arrival_state()
+    s["first"] = False
+    rows = [_arr_flow("c", "QQQ"), _arr_flow("b", "AMD"), _arr_flow("a", "SPY")]
+    said = d.fold_flow_arrivals(s, rows, now=100.0)
+    assert said.startswith("Q Q Q.")
+    assert said.endswith("Plus 2 more.")
+    assert set(s["glow"]) == {"a", "b", "c"}
+
+
+def test_an_unchanged_feed_says_nothing_on_the_next_paint():
+    s = d.arrival_state()
+    s["first"] = False
+    d.fold_flow_arrivals(s, [_arr_flow("a")], now=100.0)
+    assert d.fold_flow_arrivals(s, [_arr_flow("a")], now=101.0) is None
+
+
+def test_an_alert_with_no_ticker_glows_but_is_never_announced():
+    """``flow_phrase({})`` is "Flow alert." — a squawk that refuses to say what.
+
+    Worse than silence: it makes the reader look for something the sentence
+    declines to name. The row still lights, because the panel prints whatever
+    the alert does carry.
+    """
+    s = d.arrival_state()
+    s["first"] = False
+    assert d.fold_flow_arrivals(s, [_arr_flow("a", symbol="")], now=100.0) is None
+    assert s["glow"] == {"a": (d.GLOW_NEW, 100.0)}
+    # A symbol of pure punctuation spells to nothing, so it counts as absent —
+    # ``spell`` is the test, not a truthiness check on the raw field.
+    s2 = d.arrival_state()
+    s2["first"] = False
+    assert d.fold_flow_arrivals(s2, [_arr_flow("z", symbol="$$")], now=1.0) is None
+
+
+def test_a_new_position_glows_and_speaks():
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0)
+    assert said == "S P Y. New position, put credit spread."
+    assert s["glow"] == {"p1": (d.GLOW_NEW, 100.0)}
+
+
+def test_a_flag_change_glows_amber_but_says_nothing():
+    """A position ALREADY in the book changing state is not an arrival."""
+    s = d.arrival_state()
+    d.fold_position_arrivals(s, [_arr_pos("p1", flag="OK")], now=100.0)
+    s["first"] = False
+    said = d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=200.0)
+    assert said is None
+    assert s["glow"] == {"p1": (d.GLOW_FLAG, 200.0)}
+
+
+def test_a_brand_new_position_never_takes_the_flag_glow_as_well():
+    # ``flag_changes`` already declines a first sighting; the ``setdefault`` is
+    # the second half of that, so an arrival keeps its cyan.
+    s = d.arrival_state()
+    s["first"] = False
+    d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=100.0)
+    assert s["glow"]["p1"][0] == d.GLOW_NEW
+
+
+def test_the_folds_survive_a_malformed_row():
+    """Rows arrive off a cache read, so a non-dict must not take the paint down."""
+    s = d.arrival_state()
+    s["first"] = False
+    assert d.fold_flow_arrivals(s, ["junk", None, _arr_flow("a")], now=1.0)
+    s2 = d.arrival_state()
+    s2["first"] = False
+    assert d.fold_position_arrivals(s2, ["junk", _arr_pos("p1")], now=1.0)
+
+
+def test_the_glow_needs_no_repaint_timer_of_its_own():
+    """The browser animates the LIVE element for free; the class only matters at
+    REBUILD time, which is what ``glow_step`` computes. A 1 s timer on the
+    landing page would be 86,400 no-op repaints a day."""
+    assert inspect.getsource(d.render).count("ui.timer(") == 2   # clock + poll
+
+
+def test_the_paint_uses_one_clock_for_detection_pruning_and_drawing():
+    """Two ``time.monotonic()`` calls in one paint can prune a glow and then be
+    asked to draw it."""
+    src = inspect.getsource(d.render)
+    paint = src[src.index("    def _paint(payloads):"):]
+    paint = paint[:paint.index("\n    @guard\n")]
+    assert paint.count("time.monotonic()") == 1
+

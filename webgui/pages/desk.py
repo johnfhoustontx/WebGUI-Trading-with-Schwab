@@ -23,10 +23,12 @@ screen is testable without a browser; ``render()`` at the foot is widgets and
 wiring only.
 """
 import math
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
+import voice as _voice
 from nicegui import run, ui
 
 from pages import bullbear as _bb
@@ -1353,6 +1355,99 @@ def prune_glows(glow, now):
     return glow
 
 
+# ── arrival detection ────────────────────────────────────────────────────────
+# The whole decision layer of the feature — what lights up, what gets said, and
+# how many arrivals one sentence stands for — as module-level functions taking
+# their state explicitly, rather than as closures inside ``render()``. That is
+# the only reason any of it is testable: a closure is reachable from a browser
+# and from nowhere else, and every rule below is one a plain dict can exercise.
+# ``render()`` keeps the parts that genuinely need a page: reading the cache and
+# painting.
+#
+# ``now`` is passed IN rather than read here, so ONE ``time.monotonic()`` can
+# serve both folds, ``prune_glows`` and every ``glow_classes`` call in a single
+# paint. Two clocks in one paint can prune a glow and then be asked to draw it.
+
+
+def arrival_state():
+    """The arrival-tracking half of the page state.
+
+    A builder rather than a dict literal in ``render`` so the tests start from
+    the state the page actually starts from. ``first`` is the entire mechanism
+    behind the silent, dark first paint — navigating to the Desk must not
+    announce the day's alert backlog or light every row — and a hand-rolled copy
+    in a test could not catch it being dropped.
+
+    ``seen_flow``/``seen_pos`` are REPLACED each paint (see ``id_set``);
+    ``glow`` maps a row id to its ``(kind, started_monotonic)``; ``speak`` is
+    the queue ``_paint`` fills and the poll drains.
+    """
+    return {"seen_flow": set(), "seen_pos": set(), "pos_flags": {},
+            "glow": {}, "first": True, "speak": []}
+
+
+def _utterance(row, phrase, extra):
+    """``phrase(row, extra)``, or None when the row carries no ticker.
+
+    ``voice.flow_phrase({})`` is "Flow alert." — a squawk that tells the reader
+    something happened and then refuses to say what, which is worse than
+    silence. ``spell`` is the right test rather than a truthiness check on the
+    raw field, because it is exactly what decides whether a ticker survives into
+    the sentence: a symbol of pure punctuation spells to "".
+    """
+    if not isinstance(row, dict) or not _voice.spell(row.get("symbol")):
+        return None
+    return phrase(row, extra=extra)
+
+
+def fold_flow_arrivals(state, rows, now):
+    """Fold new flow alerts into the glow map; return the utterance, or None.
+
+    Runs over the FULL alert list, not the nine rows the panel draws. A burst of
+    ten would otherwise push arrivals off the bottom unseen, and they would
+    announce themselves later, when the list shortened.
+
+    ONE sentence per paint however many arrived: the newest is named and the
+    rest are counted ("Plus 2 more"). Six sentences queued back to back is a
+    minute of talking over a moving tape.
+    """
+    ids = new_ids(rows, state["seen_flow"])
+    state["seen_flow"] = id_set(rows)
+    if state["first"] or not ids:
+        return None
+    for rid in ids:
+        state["glow"][rid] = (GLOW_NEW, now)
+    newest = next((r for r in rows
+                   if isinstance(r, dict) and r.get("id") == ids[0]), None)
+    return _utterance(newest, _voice.flow_phrase, len(ids) - 1)
+
+
+def fold_position_arrivals(state, rows, now):
+    """The same, across the three books — plus the SILENT flag-change glow.
+
+    A flag moving (OK -> AT RISK -> RESCUE) glows amber but never speaks: a
+    position already in the book changing state is not something that was absent
+    a moment ago, and the panel's own FLAG column already prints the new word.
+    ``setdefault`` is what keeps an arrival cyan — ``flag_changes`` declines a
+    first sighting, and this is the other half of that.
+    """
+    ids = new_ids(rows, state["seen_pos"], key="position_id")
+    moved = flag_changes(rows, state["pos_flags"])
+    state["seen_pos"] = id_set(rows, key="position_id")
+    state["pos_flags"] = flag_map(rows)
+    if state["first"]:
+        return None
+    for rid in ids:
+        state["glow"][rid] = (GLOW_NEW, now)
+    for rid in moved:
+        state["glow"].setdefault(rid, (GLOW_FLAG, now))
+    if not ids:
+        return None
+    newest = next((r for r in rows if isinstance(r, dict)
+                   and r.get("position_id") == ids[0]), None)
+    return _utterance(newest, _voice.position_phrase, len(ids) - 1)
+
+
 # The ONE escape hatch this page is already allowed (it injects
 # CONSOLE_KEYFRAMES_CSS beside this). A keyframes animation cannot be a utility
 # class, and ``--neon`` is a plain custom property inside a real stylesheet —
@@ -1959,7 +2054,9 @@ def render():
 
     # ``data`` holds the LAST payload seen for every view, because the poll hands
     # over only the ones that moved and most regions read more than one view.
-    state = {"versions": {}, "data": {}}
+    # ``glow_now`` is the ONE clock a paint runs on — set by ``_paint`` before it
+    # calls a painter, so detection, pruning and drawing cannot disagree.
+    state = {"versions": {}, "data": {}, "glow_now": 0.0, **arrival_state()}
 
     # ``DESK_FONT`` where the console pages carry ``CONSOLE_DISPLAY``: this page
     # is nine columns of numbers, so the body face is the monospace and the
@@ -2392,8 +2489,16 @@ def render():
                 _flow_row(row)
 
     def _flow_row(row):
+        # The glow class is applied at BUILD time and never touched again on a
+        # live element. Changing ``animation-delay`` on a running animation
+        # re-anchors its start, and the glow visibly jumps; both painters
+        # ``.clear()`` and rebuild, which is the path the resume trick is
+        # designed for (see the ``GLOW_SEC`` notes). ``state["glow_now"]`` is the
+        # paint's single clock — not a fresh ``monotonic()`` per row.
         el = ui.element("div").classes(
-            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            + glow_classes(state["glow"].get(row.get("id")),
+                           state["glow_now"]))
         with el:
             ui.label(row["time"] or _DASH).classes(
                 f"text-[11px] tabular-nums {CON_TXT_MUTED}")
@@ -2448,8 +2553,11 @@ def render():
                 _position_row(row)
 
     def _position_row(row):
+        # Rebuild-time only, same as the flow row above — never updated in place.
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            + glow_classes(state["glow"].get(row.get("position_id")),
+                           state["glow_now"]))
         with el:
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
@@ -2506,10 +2614,40 @@ def render():
                 "dealer": _paint_dealer, "board": _paint_board,
                 "flow": _paint_flow, "positions": _paint_positions}
 
+    # ── arrival detection ────────────────────────────────────────────────────
+    # Thin: read the cache, build the rows, hand them to the module-level fold.
+    # Everything that DECIDES anything lives up there, where a test can reach it.
+    def _detect_flow(now):
+        # ``_flow.alert_rows``, not ``flow_rows`` — the FULL list, not the nine
+        # the panel draws. A burst of ten would otherwise push arrivals off the
+        # bottom unseen and announce them later, when the list shortened.
+        rows = _flow.alert_rows(_view("options:flow_alerts"))
+        return fold_flow_arrivals(state, rows, now)
+
+    def _detect_positions(now):
+        rows = position_rows(_view("options:paper_account"),
+                             _view("options:driver_paper_account"),
+                             _view("options:captured"))
+        return fold_position_arrivals(state, rows, now)
+
     def _paint(payloads):
         """Merge the changed views in, then repaint only what depends on them."""
         state["data"].update(payloads)
         changed = set(payloads)
+        state["speak"] = []
+        # ONE clock for the whole paint. Two would let ``prune_glows`` drop an
+        # entry that ``glow_classes`` is then asked to draw, or the reverse.
+        now = time.monotonic()
+        state["glow_now"] = now
+        # Detection FIRST: the painters read ``state["glow"]``, so a row has to
+        # be marked before the paint that is supposed to draw it lit.
+        for region, detect in (("flow", _detect_flow),
+                               ("positions", _detect_positions)):
+            if changed.intersection(_REGION_VIEWS[region]):
+                said = detect(now)
+                if said:
+                    state["speak"].append(said)
+        prune_glows(state["glow"], now)
         for region, deps in _REGION_VIEWS.items():
             if changed.intersection(deps):
                 painters[region]()
@@ -2557,5 +2695,10 @@ def render():
         state["versions"][view] = version
     _tick_clock()
     _paint(seed)
+    # Everything on screen at first paint is history, not an arrival. Clearing
+    # the flag AFTER the seed paint is what makes it so — the folds have just
+    # recorded the whole backlog into ``seen_*`` without glowing or speaking a
+    # line of it, so the next poll can only report genuine movement.
+    state["first"] = False
     ui.timer(CLOCK_SEC, _tick_clock)
     ui.timer(POLL_SEC, _poll)
