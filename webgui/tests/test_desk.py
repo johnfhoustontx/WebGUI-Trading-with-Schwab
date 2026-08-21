@@ -9,7 +9,31 @@ import datetime
 import inspect
 import pathlib
 import re
+
+import pytest
+import voice
 from pages import desk as d
+
+
+@pytest.fixture(autouse=True)
+def _no_synthesis_over_the_network(monkeypatch):
+    """NO test may reach the edge-tts endpoint.
+
+    render() warms the flow-clip cache on its first build, and prewarm
+    is a daemon thread that synthesizes over the network and writes mp3s under
+    webgui/data/voice — a live call and an on-disk side effect from a smoke
+    test that only wanted to read some labels back. ensure is stubbed for
+    the same reason. The _PREWARMED latch is reset per test so the order
+    tests run in cannot decide which one exercises the prewarm path.
+    """
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: None)
+    monkeypatch.setattr(voice, "ensure", lambda *a, **k: None)
+    monkeypatch.setitem(d._PREWARMED, "done", False)
+
+
+# The Tailwind-first guard for this module now lives with every other page's, in
+# ``test_no_inline_style.py``'s ``PHASE_8_FILES``. One guard, not two — a second
+# copy is a second thing to forget.
 
 
 # ── structure_positions ──────────────────────────────────────────────────────
@@ -1958,6 +1982,74 @@ def test_the_folds_survive_a_malformed_row():
     assert d.fold_position_arrivals(s2, ["junk", _arr_pos("p1")], now=1.0)
 
 
+# ── the speak gate ───────────────────────────────────────────────────────────
+_WEEKDAY = datetime.datetime(2026, 8, 19, 10, 0, tzinfo=d._CT)   # a Wednesday
+_SUNDAY = datetime.datetime(2026, 8, 23, 10, 0, tzinfo=d._CT)
+
+
+def test_the_enable_switch_silences_the_desk():
+    assert d.should_speak({"voice_enabled": False}, _WEEKDAY) is False
+    assert d.should_speak({}, _WEEKDAY) is False
+    assert d.should_speak({"voice_enabled": True}, _WEEKDAY) is True
+
+
+def test_the_market_hours_gate_is_honoured_on_the_speak_path():
+    """The Settings card promises "Uses the existing market-hours gate above."
+
+    It is the SAME ``alerts.in_market_hours`` the scanner chime goes through —
+    one setting, not a second voice-only copy of the idea.
+    """
+    on = {"voice_enabled": True, "alert_market_hours_only": True}
+    assert d.should_speak(on, _WEEKDAY) is True
+    assert d.should_speak(on, _SUNDAY) is False
+    # Gate off: a Sunday backtest session still speaks.
+    off = {"voice_enabled": True, "alert_market_hours_only": False}
+    assert d.should_speak(off, _SUNDAY) is True
+
+
+def test_speak_volume_clamps_a_hand_edited_settings_file():
+    # settings.json is hand-editable and never validated on read.
+    assert d.speak_volume({"voice_volume": 1.7}) == 1.0
+    assert d.speak_volume({"voice_volume": -3}) == 0.0
+    assert d.speak_volume({"voice_volume": 0.5}) == 0.5
+
+
+def test_speak_volume_falls_back_rather_than_raising_inside_a_timer():
+    """A bare ``float("loud")`` raises on the poll path — one tab, no audio, and
+    a traceback a user never sees. And a NaN must not pin the MAXIMUM: the
+    documented ``min(1.0, nan) == 1.0`` trap would answer a missing reading with
+    full volume."""
+    for junk in ("loud", None, object(), float("nan"), True, {}):
+        v = d.speak_volume({"voice_volume": junk})
+        assert 0.0 <= v <= 1.0
+    assert d.speak_volume({}) == d.DEFAULT_VOICE_VOLUME
+    assert d.speak_volume(None) == d.DEFAULT_VOICE_VOLUME
+
+
+# ── the browser side ─────────────────────────────────────────────────────────
+def test_the_desk_speaks_through_its_own_audio_element():
+    """Not ``alert-audio``: a scanner chime must not cut an announcement off."""
+    assert "desk-voice" in d.DESK_VOICE_JS
+    assert "alert-audio" not in d.DESK_VOICE_JS
+
+
+def test_a_dead_clip_cannot_wedge_the_queue_for_the_life_of_the_tab():
+    """``onended`` alone stalls forever on a 404 — nothing ever ends."""
+    assert "el.onerror = next" in d.DESK_VOICE_JS
+
+
+def test_a_blocked_autoplay_reports_itself_instead_of_failing_silently():
+    """``play()`` just rejects; nothing appears in any log. Without this the
+    feature looks broken on every fresh tab."""
+    assert "emitEvent('desk_voice_blocked'" in d.DESK_VOICE_JS
+    assert ".catch(" in d.DESK_VOICE_JS
+
+
+def test_a_blocked_queue_is_dropped_rather_than_replayed_later():
+    # Holding a backlog would announce a stale burst the moment audio unlocks.
+    assert "v.q.length = 0" in d.DESK_VOICE_JS
+
+
 def test_the_glow_needs_no_repaint_timer_of_its_own():
     """The browser animates the LIVE element for free; the class only matters at
     REBUILD time, which is what ``glow_step`` computes. A 1 s timer on the
@@ -1973,3 +2065,102 @@ def test_the_paint_uses_one_clock_for_detection_pruning_and_drawing():
     paint = paint[:paint.index("\n    @guard\n")]
     assert paint.count("time.monotonic()") == 1
 
+
+# ── the prewarm ──────────────────────────────────────────────────────────────
+def test_prewarm_symbols_reads_the_watchlist_off_the_matrix():
+    view = {"rows": [{"symbol": "SPY"}, {"symbol": "AMD"}, {"symbol": "SPY"}]}
+    assert d.prewarm_symbols(view) == ["SPY", "AMD"]
+
+
+def test_prewarm_symbols_drops_anything_that_is_not_a_symbol():
+    # The payload is a cache read. A blank would warm the ticker-less sentence
+    # that nothing is allowed to speak in the first place.
+    view = {"rows": [{"symbol": ""}, {"symbol": None}, "junk", {},
+                     {"symbol": "  "}, {"symbol": "SPY"}]}
+    assert d.prewarm_symbols(view) == ["SPY"]
+    assert d.prewarm_symbols(None) == []
+    assert d.prewarm_symbols({"rows": None}) == []
+
+
+def test_the_prewarm_is_skipped_while_spoken_alerts_are_off(monkeypatch):
+    """...and the latch stays OPEN, so switching them on later still warms."""
+    calls = []
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(d.app_settings, "load", lambda: {"voice_enabled": False})
+    d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
+    assert calls == []
+    assert d._PREWARMED["done"] is False
+
+
+def test_the_prewarm_runs_once_per_process(monkeypatch):
+    calls = []
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    seed = {"options:matrix": {"rows": [{"symbol": "SPY"}]}}
+    d._prewarm_clips(seed)
+    d._prewarm_clips(seed)
+    assert calls == [(["SPY"], "v")]
+
+
+def test_a_broken_prewarm_cannot_break_the_page_build(monkeypatch):
+    """It runs during ``render()``. A cold cache must cost the prewarm, not the
+    Desk."""
+    def _boom(*_a, **_k):
+        raise OSError("no cache directory")
+    monkeypatch.setattr(voice, "prewarm", _boom)
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
+
+
+# ── render() wiring for the voice ────────────────────────────────────────────
+def _rendered_elements():
+    """Every element ``render()`` just added, in build order."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [e for key, e in ui.context.client.elements.items()
+            if key not in before]
+
+
+def test_render_mounts_the_desks_own_audio_element():
+    """Its own, not ``main.py``'s shared ``alert-audio``: a scanner chime fires
+    from the app-wide watcher on every page, this one included, and sharing one
+    element would let it cut an announcement off mid-sentence."""
+    html = [getattr(e, "content", "") or "" for e in _rendered_elements()]
+    assert any('id="desk-voice"' in h for h in html)
+
+
+def test_render_hides_the_unlock_prompt_until_the_browser_complains():
+    """A tab that was never going to need it must never show it."""
+    btn = [e for e in _rendered_elements()
+           if getattr(e, "text", None) == "ENABLE SPOKEN ALERTS"]
+    assert len(btn) == 1
+    assert "hidden" in btn[0]._classes          # NiceGUI's display:none class
+
+
+def test_render_subscribes_to_the_blocked_autoplay_event():
+    src = inspect.getsource(d.render)
+    assert "ui.on(VOICE_BLOCKED_EVENT" in src
+    assert "unlock_btn.on_click" in src
+
+
+def test_the_poll_speaks_only_after_the_paint():
+    """The row must already be lit when the sentence starts, and synthesis can
+    take a second."""
+    src = inspect.getsource(d.render)
+    poll = src[src.index("    async def _poll():"):]
+    assert poll.index("_paint(payloads)") < poll.index("await _speak_pending()")
+
+
+def test_synthesis_never_runs_on_the_event_loop():
+    """``voice.ensure`` blocks ~850 ms on a cache miss, and the loop is shared by
+    every page in the app."""
+    src = inspect.getsource(d.render)
+    for line in src.splitlines():
+        if "_voice.ensure" in line:
+            assert "run.io_bound" in line
+    assert src.count("_voice.ensure") == 2      # the poll, and the unlock button

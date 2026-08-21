@@ -22,11 +22,20 @@ The arithmetic is module-level pure functions over plain dicts, so the whole
 screen is testable without a browser; ``render()`` at the foot is widgets and
 wiring only.
 """
+import json
+import logging
 import math
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+# ``alerts`` for its ONE market-hours predicate. The Settings card promises the
+# spoken alerts obey "the existing market-hours gate above", so this page must
+# read the SAME ``alert_market_hours_only`` setting through the SAME function
+# the scanner chime does — a second, voice-only copy of the idea is how two
+# gates end up disagreeing about when the market is open.
+import alerts as _alerts
+import app_settings
 import bus_client
 import voice as _voice
 from nicegui import run, ui
@@ -1448,6 +1457,148 @@ def fold_position_arrivals(state, rows, now):
     return _utterance(newest, _voice.position_phrase, len(ids) - 1)
 
 
+# ── the speak gate ───────────────────────────────────────────────────────────
+# ``app_settings``' own default, restated as the fallback for a value that will
+# not parse. Not 1.0: a settings file somebody hand-edited into nonsense should
+# land on the volume they were last offered, never on the loudest one.
+DEFAULT_VOICE_VOLUME = 0.8
+
+
+def should_speak(settings, now):
+    """Whether a queued phrase may be spoken at ``now`` (a tz-aware datetime).
+
+    Deliberately the same shape as ``alerts.should_alert`` and going through the
+    same ``in_market_hours``: the Settings card tells the user the spoken alerts
+    "use the existing market-hours gate above", so there is ONE gate and one
+    setting, not a voice-only second copy that can drift out of step with the
+    chime's.
+    """
+    s = settings or {}
+    if not s.get("voice_enabled"):
+        return False
+    if s.get("alert_market_hours_only") and not _alerts.in_market_hours(now):
+        return False
+    return True
+
+
+def speak_volume(settings):
+    """``voice_volume`` clamped to 0..1, falling back rather than raising.
+
+    The clamp is ``main.play_alert``'s, character for character. What differs is
+    the PARSE in front of it, and it has to: this runs on the 2 s poll path
+    inside a timer callback, and ``settings.json`` is hand-editable and never
+    validated on read — a bare ``float("loud")`` there is a traceback the user
+    never sees on a page that then has no audio. ``fmt.num`` is the house
+    coercion and also refuses a NaN, which matters for the documented reason:
+    ``max(0.0, min(1.0, nan))`` is **1.0**, so the trap would answer a missing
+    reading with FULL volume.
+    """
+    v = _finite((settings or {}).get("voice_volume"))
+    if v is None:
+        return DEFAULT_VOICE_VOLUME
+    return max(0.0, min(1.0, v))
+
+
+# ── the browser side ─────────────────────────────────────────────────────────
+# The Desk speaks through its OWN audio element, not ``main.py``'s shared
+# ``alert-audio``. Sharing one element means whichever source assigns ``src``
+# last wins, so a scanner chime — which fires from the app-wide 2 s watcher on
+# every page, this one included — would cut an announcement off mid-sentence.
+# Two elements cost nothing and cannot collide.
+#
+# A QUEUE rather than a bare play, because a burst can yield several clips and
+# ``play()`` on an element already playing restarts it. ``el.onerror = next`` is
+# the line that is easy to leave out and expensive to omit: with only
+# ``onended``, one 404 — a clip evicted from the cache, a service restarted
+# mid-flight — leaves ``busy`` true forever and the tab never speaks again.
+#
+# A blocked autoplay CLEARS the queue rather than holding it. Audio unlocks on
+# the user's next click, which may be minutes later, and a backlog replayed then
+# would announce a market that has moved on.
+DESK_VOICE_JS = """
+window.__deskVoice = window.__deskVoice || {q: [], busy: false};
+window.__deskSpeak = function (urls, vol) {
+  const v = window.__deskVoice;
+  const el = document.getElementById('desk-voice');
+  if (!el) return;
+  urls.forEach(u => v.q.push(u));
+  if (v.busy) return;
+  const next = () => {
+    if (!v.q.length) { v.busy = false; return; }
+    v.busy = true;
+    el.src = v.q.shift();
+    el.volume = vol;
+    el.play().catch(() => {
+      v.q.length = 0; v.busy = false;
+      emitEvent('desk_voice_blocked', {});
+    });
+  };
+  el.onended = next;
+  el.onerror = next;
+  next();
+};
+"""
+
+# The event the JS above emits when the browser refuses to play. NiceGUI's
+# ``emitEvent`` is a plain global (nicegui.js is a classic ``<script defer>``),
+# and ``ui.on`` subscribes on the CLIENT's layout — so this is per-tab, not
+# process-wide, and a second Desk build cannot pile up handlers.
+VOICE_BLOCKED_EVENT = "desk_voice_blocked"
+
+# The phrase the unlock button speaks. It confirms audibly that the unlock
+# worked, which a silent button could not.
+VOICE_UNLOCK_PHRASE = "Spoken alerts on."
+
+# Once per PROCESS, not once per page build: the clip cache is on disk and
+# shared by every tab, so a second prewarm would re-walk a warm cache for
+# nothing. Only a run that actually prewarms sets the latch — with the feature
+# switched off there is nothing to warm, and turning it on later should still
+# get the benefit.
+_PREWARMED = {"done": False}
+
+
+def prewarm_symbols(matrix_view):
+    """The symbols to warm the flow-clip cache for, de-duplicated, in order.
+
+    The matrix carries one row per WATCHLIST symbol, which is the same universe
+    the flow alerts fire on — so this is the set of first-synthesis pauses the
+    prewarm can actually remove. Anything that is not a usable symbol string is
+    dropped rather than warmed: the payload is a cache read, and a blank would
+    only synthesize the ticker-less sentence nothing is allowed to speak.
+    """
+    rows = (matrix_view or {}).get("rows") if isinstance(matrix_view, dict) else None
+    out = []
+    for row in rows or ():
+        sym = row.get("symbol") if isinstance(row, dict) else None
+        if isinstance(sym, str) and sym.strip() and sym not in out:
+            out.append(sym)
+    return out
+
+
+def _prewarm_clips(seed):
+    """Warm the flow-phrase clip cache in the background. Never raises.
+
+    Wrapped whole, because this runs during the page BUILD: a cold cache, an
+    unreadable data directory or a malformed matrix payload must cost the
+    prewarm and not the Desk. ``voice.prewarm`` is itself fire-and-forget on a
+    daemon thread and swallows its own synthesis failures, so the guard here is
+    for the two lines in front of it.
+    """
+    if _PREWARMED["done"]:
+        return
+    try:
+        settings = app_settings.load()
+        if not settings.get("voice_enabled"):
+            return          # nothing to warm, and the latch stays open so
+                            # switching it on later still gets the benefit
+        _PREWARMED["done"] = True
+        _voice.prewarm(prewarm_symbols(seed.get("options:matrix")),
+                       settings.get("voice_name"))
+    except Exception:  # noqa: BLE001 — a cold cache must never break the build.
+        logging.getLogger("webgui").warning(
+            "Desk voice prewarm failed", exc_info=True)
+
+
 # The ONE escape hatch this page is already allowed (it injects
 # CONSOLE_KEYFRAMES_CSS beside this). A keyframes animation cannot be a utility
 # class, and ``--neon`` is a plain custom property inside a real stylesheet —
@@ -2051,6 +2202,11 @@ def render():
     # class — and folding them into one call would only hide which is which.
     ui.add_css(CONSOLE_KEYFRAMES_CSS)
     ui.add_css(DESK_NEON_CSS)
+    # The player and its queue. ``ui.html`` is main.py's own idiom for the
+    # shared chime element, so the ``<audio preload>`` pair is already known to
+    # survive NiceGUI's DOMPurify pass.
+    ui.add_head_html(f"<script>{DESK_VOICE_JS}</script>")
+    ui.html('<audio id="desk-voice" preload="auto"></audio>')
 
     # ``data`` holds the LAST payload seen for every view, because the poll hands
     # over only the ones that moved and most regions read more than one view.
@@ -2066,6 +2222,23 @@ def render():
     # winner up to stylesheet order.
     with ui.column().classes(
             f"{CONSOLE_PAGE} {DESK_FONT} w-full gap-4 p-4"):
+        # ── the autoplay unlock ──────────────────────────────────────────────
+        # Browsers refuse audio until the document has been interacted with, and
+        # the refusal is COMPLETELY SILENT — ``play()`` rejects and nothing
+        # appears in any log. With no affordance the feature simply looks broken
+        # on every fresh tab, which is the worst of the three possible states
+        # (working / off / apparently-broken).
+        #
+        # Hidden until the JS reports a block, so a tab that was never going to
+        # need it never shows it. ``set_visibility(False)`` is ``display:none``,
+        # which a flex ``gap`` skips entirely — the hidden row costs no height.
+        # The click that dismisses it IS the gesture that unblocks audio.
+        unlock_btn = ui.button("ENABLE SPOKEN ALERTS", icon="volume_up",
+                               color=None).props("no-caps dense").classes(
+            f"self-start text-[11px] tracking-[.14em] px-3 "
+            f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
+        unlock_btn.set_visibility(False)
+
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO SPX/QQQ quote. The Dealer Positioning panel
         # below shows those same symbols with far more context, and the two
@@ -2652,6 +2825,64 @@ def render():
             if changed.intersection(deps):
                 painters[region]()
 
+    @guard_async
+    async def _speak_pending():
+        """Turn the phrases ``_paint`` queued into clips and play them.
+
+        Synthesis is BLOCKING (~850 ms on a cache miss), so it goes through
+        ``run.io_bound`` — never on the event loop, which every page shares.
+        The queue is taken and cleared FIRST: an ``await`` below can outlive
+        this tick, and a phrase left in the queue would be spoken twice.
+        """
+        phrases, state["speak"] = state["speak"], []
+        if not phrases:
+            return
+        settings = app_settings.load()
+        if not should_speak(settings, datetime.now(_CT)):
+            return
+        urls = []
+        for text in phrases:
+            url = await run.io_bound(_voice.ensure, text,
+                                     settings.get("voice_name"))
+            # ``ensure`` never raises; None is "no clip", and the row has
+            # already glowed, so a dead synthesis endpoint costs the sentence
+            # and nothing else.
+            if url:
+                urls.append(url)
+        if not urls:
+            return
+        # ``json.dumps`` rather than an f-string join: the URLs are
+        # ``voice.clip_url``'s "/voice/<sha1>.mp3" and could not carry a quote,
+        # but the escaping should not depend on knowing that.
+        ui.run_javascript(
+            f"window.__deskSpeak({json.dumps(urls)}, {speak_volume(settings)})")
+
+    @guard
+    def _voice_blocked(_e=None):
+        """The browser refused to play. Offer the gesture that fixes it."""
+        unlock_btn.set_visibility(True)
+
+    @guard_async
+    async def _unlock_voice(_e=None):
+        """Hide the prompt and say one line, so the unlock is audibly confirmed.
+
+        The click itself is what unblocks audio — user activation is sticky for
+        the document, so the ``await`` below does not cost it. Any other click
+        on the page unlocks it too; this button exists because nothing TELLS the
+        user that.
+        """
+        unlock_btn.set_visibility(False)
+        settings = app_settings.load()
+        url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
+                                 settings.get("voice_name"))
+        if url:
+            ui.run_javascript(
+                f"window.__deskSpeak({json.dumps([url])}, "
+                f"{speak_volume(settings)})")
+
+    ui.on(VOICE_BLOCKED_EVENT, _voice_blocked)
+    unlock_btn.on_click(_unlock_voice)
+
     @guard
     def _tick_clock():
         """How much session is left — not what time it is.
@@ -2683,6 +2914,9 @@ def render():
             payloads[v] = await run.io_bound(bus_client.read, v)
             state["versions"][v] = vers.get(v)
         _paint(payloads)
+        # After the paint, never before: the row must already be lit when the
+        # sentence starts, and synthesis can take a second.
+        await _speak_pending()
 
     # First paint: seed every version so the first poll reports only genuine
     # movement, and paint every region once — including the ones whose view is
@@ -2700,5 +2934,6 @@ def render():
     # recorded the whole backlog into ``seen_*`` without glowing or speaking a
     # line of it, so the next poll can only report genuine movement.
     state["first"] = False
+    _prewarm_clips(seed)
     ui.timer(CLOCK_SEC, _tick_clock)
     ui.timer(POLL_SEC, _poll)
