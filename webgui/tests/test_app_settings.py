@@ -81,3 +81,27 @@ def test_net_prem_defaults_exist():
     assert app_settings.DEFAULTS["gamma_netprem_group"] == "indices"
     assert app_settings.DEFAULTS["gamma_netprem_mode"] == "dollars"
     assert app_settings.DEFAULTS["gamma_netprem_symbols"] == ["$SPX", "SPY", "QQQ"]
+
+
+# ── Desk spoken alerts ──────────────────────────────────────────────────────
+def test_voice_settings_have_defaults():
+    """The three Desk voice keys ship with usable values (speech ON by default)."""
+    d = app_settings.DEFAULTS
+    assert d["voice_enabled"] is True
+    assert d["voice_name"] == "en-US-AriaNeural"
+    assert 0.0 <= d["voice_volume"] <= 1.0
+
+
+def test_the_default_voice_is_one_we_offer():
+    """The default must be selectable in the Settings dropdown — a name that is
+    not in ``voice.VOICES`` would render an empty select and synthesize clips
+    nobody can reproduce by picking a voice."""
+    import voice
+    assert app_settings.DEFAULTS["voice_name"] in voice.VOICES
+
+
+def test_there_is_no_second_market_hours_switch():
+    """Spoken alerts honour ``alert_market_hours_only``; a ``voice_``-prefixed
+    market-hours key would be two switches for one decision — a drift hazard,
+    not a feature."""
+    assert "voice_market_hours_only" not in app_settings.DEFAULTS

@@ -14,6 +14,13 @@ DEFAULTS = {
     "alert_min_score": 0,            # only alert on signals with score >= this
     "desktop_notifications": False,
     "flow_alerts_enabled": True,     # put/call premium crossover + unusual-activity toasts
+    # Desk spoken alerts. There is deliberately NO voice_market_hours_only key:
+    # the existing alert_market_hours_only gate is honoured instead, because two
+    # market-hours switches sitting beside each other is a drift hazard, not a
+    # feature.
+    "voice_enabled": True,           # speak new Desk flow alerts + positions
+    "voice_name": "en-US-AriaNeural",  # see voice.VOICES
+    "voice_volume": 0.8,             # 0.0–1.0
     "captured_autoclose_enabled": True,  # auto-manage captured signals (break-even trail + auto-close)
     "manual_paper_lifecycle_enabled": False,  # opt-in: manual paper account break-even lifecycle (experimental)
     "ticker_enabled": True,          # bottom market-summary marquee on every page
