@@ -1601,11 +1601,26 @@ VOICE_UNLOCK_PHRASE = "Spoken alerts on."
 # shared by every tab, so a second prewarm would re-walk a warm cache for
 # nothing. Only a run that actually prewarms sets the latch — with the feature
 # switched off there is nothing to warm, and turning it on later should still
-# get the benefit.
+# get the benefit, and a run that RAISED warmed nothing either, so the next
+# build is entitled to try again. (Pinned by
+# ``test_a_failed_prewarm_leaves_the_latch_open_for_the_next_build``.)
 _PREWARMED = {"done": False}
 
+# How many symbols the prewarm will warm. UNCAPPED this is the whole watchlist —
+# ~30 rows × the 8 ``voice.FLOW_CAUSES`` = ~240 SERIAL synthesis calls at a
+# measured 0.9-2.4 s each, i.e. 3.6 to 9.6 minutes of continuous network on the
+# first Desk open, repeated whenever the voice changes (it is part of the clip
+# cache key) or the clip directory is cleared. Eight is 64 phrases, ~1-2.5 min.
+#
+# Eight of THESE eight, specifically: ``options_svc`` sorts the matrix rows by
+# HOTNESS, descending, server-side, so the head of the list is the set most
+# likely to actually produce a flow alert and the tail buys close to nothing.
+# Do not raise this without checking that ordering still holds — the cap is only
+# defensible because it is a cap on a ranked list.
+PREWARM_SYMBOLS_MAX = 8
 
-def prewarm_symbols(matrix_view):
+
+def prewarm_symbols(matrix_view, limit=PREWARM_SYMBOLS_MAX):
     """The symbols to warm the flow-clip cache for, de-duplicated, in order.
 
     The matrix carries one row per WATCHLIST symbol, which is the same universe
@@ -1613,6 +1628,10 @@ def prewarm_symbols(matrix_view):
     prewarm can actually remove. Anything that is not a usable symbol string is
     dropped rather than warmed: the payload is a cache read, and a blank would
     only synthesize the ticker-less sentence nothing is allowed to speak.
+
+    Capped at ``limit`` — see ``PREWARM_SYMBOLS_MAX`` for why the cap exists and
+    why the truncation is at the CHEAP end of the list rather than arbitrary.
+    The cap lives here, in the pure function, so it is unit-testable.
     """
     rows = (matrix_view or {}).get("rows") if isinstance(matrix_view, dict) else None
     out = []
@@ -1620,6 +1639,8 @@ def prewarm_symbols(matrix_view):
         sym = row.get("symbol") if isinstance(row, dict) else None
         if isinstance(sym, str) and sym.strip() and sym not in out:
             out.append(sym)
+            if len(out) >= limit:
+                break
     return out
 
 

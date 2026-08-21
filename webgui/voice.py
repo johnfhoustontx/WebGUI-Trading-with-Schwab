@@ -136,6 +136,15 @@ URL_PREFIX = "/voice"
 # pins a worker thread.
 SYNTH_TIMEOUT_SEC = 20.0
 
+# ...but 20 s is a BACKGROUND budget, and there is one caller for whom it is
+# wildly wrong. The Desk's poll awaits its speak step before it can sleep, so a
+# synthesis that waits is a Desk that fetches nothing — 20 s × the two phrases
+# one paint can queue is FORTY SECONDS of a landing page that has stopped
+# updating, to gain a clip nobody is waiting on. 3 s is comfortably past the
+# 2.4 s slowest measured synthesis and caps that worst case at ~6 s. The prewarm
+# keeps the long budget: it is on a daemon thread, where waiting costs nobody.
+LIVE_SYNTH_TIMEOUT_SEC = 3.0
+
 # Abandoned ``*.part`` files older than this are swept at prewarm. A daemon
 # prewarm thread killed at interpreter shutdown never runs its ``finally``, and
 # CACHE_DIR is SERVED at /voice — nothing else would ever remove them.
@@ -145,10 +154,39 @@ _PART_MAX_AGE_SEC = 3600.0
 # every two seconds would otherwise write 43,200 identical tracebacks a day.
 _WARNED = {"done": False}
 
+# A short-lived breaker over the SYNTHESIS CALL ONLY. Bounding one call is not
+# enough on its own: a burst of two phrases against a dead endpoint pays the
+# timeout twice, and the next burst pays it again, every time. After a failure
+# the endpoint is left alone for a minute, so a genuine outage costs one stutter
+# rather than one per burst — and a minute is short enough that a transient blip
+# heals itself without anybody restarting anything.
+#
+# Deliberately NOT wrapped around the whole of ``ensure``: a cache HIT touches
+# no network and must always be served, and a per-phrase failure that is not the
+# endpoint's fault (a lone surrogate in one payload) must not silence every
+# other phrase for a minute.
+BREAKER_SEC = 60.0
+_BREAKER = {"until": 0.0}
+
 
 def reset_warning():
     """Re-arm the one-shot failure warning (test helper)."""
     _WARNED["done"] = False
+
+
+def reset_breaker():
+    """Close the synthesis breaker (test helper).
+
+    Tests MUST call this between a failing case and a succeeding one, or the
+    first test's tripped breaker silently suppresses the second's synthesis —
+    a cross-test dependency that would look like a flake.
+    """
+    _BREAKER["until"] = 0.0
+
+
+def _breaker_open(now=None):
+    """Whether a recent synthesis failure is still being backed off."""
+    return (time.monotonic() if now is None else now) < _BREAKER["until"]
 
 
 def clip_name(text, voice_name=None, rate=RATE):
@@ -176,8 +214,11 @@ def clip_url(text, voice_name=None, rate=RATE):
     return f"{URL_PREFIX}/{clip_name(text, voice_name, rate)}"
 
 
-def _synthesize(text, voice_name, rate, dest):
+def _synthesize(text, voice_name, rate, dest, timeout=None):
     """Write ONE mp3 to ``dest``. Raises on any failure — ``ensure`` degrades.
+
+    ``timeout`` defaults to ``SYNTH_TIMEOUT_SEC``; the Desk's live path passes
+    the much shorter ``LIVE_SYNTH_TIMEOUT_SEC`` (see that constant for why).
 
     Writes to a per-process, per-thread temp name and then renames, so a reader
     can never be handed a half-written clip and two concurrent synthesis calls
@@ -193,10 +234,12 @@ def _synthesize(text, voice_name, rate, dest):
 
     tmp = dest.with_name(f"{dest.name}.{os.getpid()}.{threading.get_ident()}.part")
 
+    budget = SYNTH_TIMEOUT_SEC if timeout is None else timeout
+
     async def _run():
         await asyncio.wait_for(
             edge_tts.Communicate(text, voice_name, rate=rate).save(str(tmp)),
-            SYNTH_TIMEOUT_SEC)
+            budget)
 
     try:
         asyncio.run(_run())
@@ -230,7 +273,7 @@ def _usable(path):
         return False
 
 
-def ensure(text, voice_name=None, rate=RATE, warn=True):
+def ensure(text, voice_name=None, rate=RATE, warn=True, timeout=None):
     """Local URL for the phrase's clip, synthesizing on a miss. ``None`` on failure.
 
     BLOCKING on a miss — measured end-to-end at ~0.9-2.4 s for a Desk-length
@@ -240,6 +283,12 @@ def ensure(text, voice_name=None, rate=RATE, warn=True):
     ``warn=False`` opts out of the one-shot failure warning. The prewarm passes
     it: that warning slot belongs to the live path, which is the one a user can
     actually hear go quiet.
+
+    ``timeout`` bounds the synthesis call for THIS caller only; ``None`` takes
+    the background ``SYNTH_TIMEOUT_SEC``. It is deliberately per-call and not a
+    module setting, because the two callers want opposite things — see
+    ``LIVE_SYNTH_TIMEOUT_SEC``. The parameter is keyword-friendly and last, so
+    every existing three-positional-argument call site is untouched.
     """
     text = str(text or "").strip()
     if not text:
@@ -253,10 +302,18 @@ def ensure(text, voice_name=None, rate=RATE, warn=True):
         url = f"{URL_PREFIX}/{dest.name}"
         if _usable(dest):
             return url
+        if _breaker_open():
+            return None     # the endpoint failed within the last BREAKER_SEC;
+                            # paying the timeout again proves nothing
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _synthesize(text, voice_name, rate, dest)
-        if not _usable(dest):
-            raise OSError("synthesis produced no audio")
+        try:
+            _synthesize(text, voice_name, rate, dest, timeout)
+            if not _usable(dest):
+                raise OSError("synthesis produced no audio")
+        except Exception:
+            _BREAKER["until"] = time.monotonic() + BREAKER_SEC
+            raise
+        _BREAKER["until"] = 0.0
         return url
     except Exception:  # noqa: BLE001 — every failure mode is the same: silence.
         # Losing a race is not a failure. Two threads can synthesize the same
@@ -265,6 +322,9 @@ def ensure(text, voice_name=None, rate=RATE, warn=True):
         # winner's clip has an open handle on it. A good clip now exists — serve
         # it rather than go silent and burn the warning on a success.
         if dest is not None and _usable(dest):
+            # ...and close the breaker again: a clip exists, so the endpoint is
+            # demonstrably alive and this failure was the race, not an outage.
+            _BREAKER["until"] = 0.0
             return f"{URL_PREFIX}/{dest.name}"
         if warn and not _WARNED["done"]:
             _WARNED["done"] = True

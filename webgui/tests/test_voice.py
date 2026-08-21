@@ -21,6 +21,21 @@ import pytest
 import voice
 
 
+@pytest.fixture(autouse=True)
+def _breaker_closed():
+    """Every test starts with the synthesis breaker CLOSED.
+
+    ``ensure`` backs the endpoint off for ``BREAKER_SEC`` after a failure, and
+    the breaker is module state — so a test that deliberately fails synthesis
+    would silently suppress the synthesis of every test that ran within the next
+    minute, in whatever order the run happened to pick. That is a cross-test
+    dependency that presents as a flake, so it is closed before AND after.
+    """
+    voice.reset_breaker()
+    yield
+    voice.reset_breaker()
+
+
 # ── spell ────────────────────────────────────────────────────────────────────
 def test_spell_separates_the_letters_of_a_ticker():
     assert voice.spell("SPY") == "S P Y"
@@ -200,7 +215,7 @@ def test_ensure_synthesizes_once_then_serves_the_cached_file(tmp_path, monkeypat
     monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
     calls = []
 
-    def _fake(text, voice_name, rate, dest):
+    def _fake(text, voice_name, rate, dest, timeout=None):
         calls.append(text)
         dest.write_bytes(b"ID3fake")
 
@@ -235,7 +250,8 @@ def test_ensure_does_not_serve_a_zero_byte_clip(tmp_path, monkeypatch):
     dest = tmp_path / voice.clip_name("hello")
     dest.write_bytes(b"")
     monkeypatch.setattr(voice, "_synthesize",
-                        lambda t, v, r, d: d.write_bytes(b"ID3real"))
+                        lambda t, v, r, d, timeout=None:
+                        d.write_bytes(b"ID3real"))
     assert voice.ensure("hello") is not None
     assert dest.read_bytes() == b"ID3real"
 
@@ -253,7 +269,7 @@ def test_ensure_degrades_to_silence_when_synthesis_times_out(tmp_path, monkeypat
     """
     monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
 
-    def _hang(text, voice_name, rate, dest):
+    def _hang(text, voice_name, rate, dest, timeout=None):
         raise asyncio.TimeoutError()
 
     monkeypatch.setattr(voice, "_synthesize", _hang)
@@ -287,7 +303,7 @@ def test_ensure_serves_a_clip_that_a_lost_replace_race_already_wrote(
     monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
     dest = tmp_path / voice.clip_name("hello")
 
-    def _lost_the_race(text, voice_name, rate, d):
+    def _lost_the_race(text, voice_name, rate, d, timeout=None):
         d.write_bytes(b"ID3winner")            # the OTHER thread got there first
         raise PermissionError(5, "Access is denied")
 
@@ -305,11 +321,122 @@ def test_ensure_warns_only_once_per_process(tmp_path, monkeypatch, caplog):
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no net")))
     voice.reset_warning()
     with caplog.at_level(logging.WARNING, logger="webgui"):
-        assert voice.ensure("one") is None
-        assert voice.ensure("two") is None
-        assert voice.ensure("three") is None
+        # The breaker is re-closed between calls ON PURPOSE: it would suppress
+        # calls two and three on its own, and then this test would pass without
+        # the one-shot latch it is meant to be about.
+        for phrase in ("one", "two", "three"):
+            voice.reset_breaker()
+            assert voice.ensure(phrase) is None
     warnings = [r for r in caplog.records if "voice synthesis" in r.message]
     assert len(warnings) == 1
+
+
+# ── the per-call synthesis budget, and the breaker over it ───────────────────
+def test_the_live_path_can_pass_a_shorter_budget_than_the_prewarm(
+        tmp_path, monkeypatch):
+    """One module-wide timeout cannot serve both callers. The prewarm is on a
+    daemon thread where waiting is free; the Desk's poll AWAITS its speak step,
+    so 20 s there is 20 s of a landing page that fetches nothing."""
+    seen = []
+
+    def _fake(text, voice_name, rate, dest, timeout=None):
+        seen.append(timeout)
+        dest.write_bytes(b"ID3fake")
+
+    monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(voice, "_synthesize", _fake)
+    voice.ensure("live", timeout=voice.LIVE_SYNTH_TIMEOUT_SEC)
+    voice.ensure("background")
+    assert seen == [voice.LIVE_SYNTH_TIMEOUT_SEC, None]  # None = SYNTH_TIMEOUT_SEC
+    assert voice.LIVE_SYNTH_TIMEOUT_SEC < voice.SYNTH_TIMEOUT_SEC
+
+
+def test_synthesize_honours_a_per_call_budget_over_the_module_default(
+        monkeypatch, tmp_path):
+    """The parameter has to reach ``asyncio.wait_for``, not merely be accepted."""
+    monkeypatch.setattr(voice, "SYNTH_TIMEOUT_SEC", 30.0)
+
+    class _Hang:
+        def __init__(self, *a, **k):
+            pass
+
+        async def save(self, path):
+            await asyncio.sleep(30)
+
+    monkeypatch.setitem(sys.modules, "edge_tts",
+                        types.SimpleNamespace(Communicate=_Hang))
+    with pytest.raises(asyncio.TimeoutError):
+        voice._synthesize("hi", voice.DEFAULT_VOICE, voice.RATE,
+                          tmp_path / "x.mp3", 0.05)
+
+
+def test_ensure_backs_a_failing_endpoint_off_instead_of_paying_the_timeout_again(
+        tmp_path, monkeypatch):
+    """Bounding ONE call is not enough. A two-phrase burst pays the timeout
+    twice, and the next burst pays it again — every burst, all day. After a
+    failure the endpoint is left alone for ``BREAKER_SEC``."""
+    calls = []
+    monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(voice, "_synthesize",
+                        lambda *a, **k: calls.append(1) or
+                        (_ for _ in ()).throw(OSError("endpoint gone")))
+    voice.reset_warning()
+    assert voice.ensure("first") is None
+    assert voice.ensure("second") is None
+    assert voice.ensure("third") is None
+    assert len(calls) == 1          # one attempt, not three timeouts
+
+
+def test_the_breaker_expires_so_a_transient_outage_heals_itself(
+        tmp_path, monkeypatch):
+    """A minute, not forever — nobody should have to restart the web GUI to get
+    their spoken alerts back after a blip."""
+    monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(voice, "_synthesize",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("blip")))
+    voice.reset_warning()
+    assert voice.ensure("first") is None
+    assert voice._breaker_open() is True
+    assert voice._breaker_open(now=voice._BREAKER["until"] + 1) is False
+    assert voice.BREAKER_SEC == 60.0
+
+    def _works(text, voice_name, rate, dest, timeout=None):
+        dest.write_bytes(b"ID3fake")
+
+    monkeypatch.setattr(voice, "_synthesize", _works)
+    voice.reset_breaker()
+    assert voice.ensure("second") is not None
+    assert voice._breaker_open() is False    # ...and success closes it again
+
+
+def test_the_breaker_never_stands_between_a_caller_and_a_CACHED_clip(
+        tmp_path, monkeypatch):
+    """A cache hit touches no network. Backing one off would silence phrases the
+    prewarm already paid for, which is the whole point of the prewarm."""
+    monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
+    (tmp_path / voice.clip_name("warm")).write_bytes(b"ID3warm")
+    monkeypatch.setattr(voice, "_synthesize",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("gone")))
+    voice.reset_warning()
+    assert voice.ensure("cold") is None          # trips the breaker
+    assert voice.ensure("warm") == voice.clip_url("warm")
+
+
+def test_a_lost_replace_race_does_not_leave_the_breaker_tripped(
+        tmp_path, monkeypatch):
+    """A clip exists, so the endpoint is demonstrably alive — that failure was
+    the documented rename race, not an outage, and must not cost the next
+    phrase a minute of silence."""
+    monkeypatch.setattr(voice, "CACHE_DIR", tmp_path)
+
+    def _lost(text, voice_name, rate, d, timeout=None):
+        d.write_bytes(b"ID3winner")
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(voice, "_synthesize", _lost)
+    voice.reset_warning()
+    assert voice.ensure("hello") == voice.clip_url("hello")
+    assert voice._breaker_open() is False
 
 
 def test_synthesize_timeout_is_bounded_and_cancels_the_request(monkeypatch, tmp_path):

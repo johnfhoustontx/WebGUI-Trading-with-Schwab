@@ -2122,6 +2122,33 @@ def test_prewarm_symbols_drops_anything_that_is_not_a_symbol():
     assert d.prewarm_symbols({"rows": None}) == []
 
 
+def test_the_prewarm_is_capped_at_the_head_of_the_hotness_ranking():
+    """UNCAPPED this is the whole watchlist — ~30 symbols × the 8
+    ``voice.FLOW_CAUSES`` = ~240 SERIAL synthesis calls at a measured 0.9-2.4 s
+    each: 3.6 to 9.6 MINUTES of continuous network on first Desk open, repeated
+    whenever the voice changes (it is part of the clip cache key).
+
+    Truncating is only defensible because ``options_svc`` sorts the matrix rows
+    by HOTNESS descending, server-side — so the kept head is the set most likely
+    to fire a flow alert. The order is therefore load-bearing, not incidental,
+    and the cap keeps the FIRST N.
+    """
+    view = {"rows": [{"symbol": f"S{i}"} for i in range(30)]}
+    got = d.prewarm_symbols(view)
+    assert len(got) == d.PREWARM_SYMBOLS_MAX == 8
+    assert got == [f"S{i}" for i in range(8)]        # the head, not a sample
+    # 8 symbols x 8 causes: about a minute and a half, not nine.
+    assert len(voice.prewarm_texts(got)) == 64
+
+
+def test_the_prewarm_cap_counts_usable_symbols_not_rows():
+    """A run of junk rows in front must not eat the budget — the cap is on what
+    actually gets warmed."""
+    rows = [{"symbol": ""}, "junk", {}, {"symbol": None}]
+    rows += [{"symbol": f"S{i}"} for i in range(12)]
+    assert d.prewarm_symbols({"rows": rows}) == [f"S{i}" for i in range(8)]
+
+
 def test_the_prewarm_is_skipped_while_spoken_alerts_are_off(monkeypatch):
     """...and the latch stays OPEN, so switching them on later still warms."""
     calls = []
