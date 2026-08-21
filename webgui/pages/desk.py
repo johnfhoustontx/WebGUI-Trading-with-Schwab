@@ -1452,9 +1452,14 @@ def fold_position_arrivals(state, rows, now):
         state["glow"].setdefault(rid, (GLOW_FLAG, now))
     if not ids:
         return None
-    newest = next((r for r in rows if isinstance(r, dict)
-                   and r.get("position_id") == ids[0]), None)
-    return _utterance(newest, _voice.position_phrase, len(ids) - 1)
+    # NOT "newest". ``fold_flow_arrivals`` names ``ids[0]`` the newest and is
+    # entitled to: its feed arrives newest-first. ``position_rows`` sorts by
+    # URGENCY, so ``ids[0]`` here is the most urgent of the new arrivals, which
+    # happens to be the better one to name out loud — but the variable must not
+    # assert an ordering the source does not have.
+    most_urgent = next((r for r in rows if isinstance(r, dict)
+                        and r.get("position_id") == ids[0]), None)
+    return _utterance(most_urgent, _voice.position_phrase, len(ids) - 1)
 
 
 # ── the speak gate ───────────────────────────────────────────────────────────
@@ -3045,6 +3050,13 @@ def render():
     # the flag AFTER the seed paint is what makes it so — the folds have just
     # recorded the whole backlog into ``seen_*`` without glowing or speaking a
     # line of it, so the next poll can only report genuine movement.
+    #
+    # KNOWN BEHAVIOUR, not a bug: a service that was COLD at seed time and
+    # publishes its first backlog a moment later reads as N arrivals — one
+    # sentence naming the most notable and "plus 14 more". That is what the
+    # flag can promise, and it is defensible: those rows genuinely are new to
+    # this tab, and the alternative (a second, time-based quiet period) would
+    # also swallow a real burst that happened to land during it.
     state["first"] = False
     _prewarm_clips(seed)
     ui.timer(CLOCK_SEC, _tick_clock)

@@ -2102,7 +2102,13 @@ def test_the_paint_uses_one_clock_for_detection_pruning_and_drawing():
     asked to draw it."""
     src = inspect.getsource(d.render)
     paint = src[src.index("    def _paint(payloads):"):]
-    paint = paint[:paint.index("\n    @guard\n")]
+    # ⚠ NO trailing newline in the anchor. ``"\n    @guard\n"`` does not match
+    # ``@guard_async``, which is what actually follows ``_paint`` — so the slice
+    # silently widened to cover ``_speak_pending`` too, and a ``time.monotonic()``
+    # added THERE would fail this test with a message naming the wrong function.
+    # As a prefix, ``"\n    @guard"`` matches both decorators.
+    paint = paint[:paint.index("\n    @guard")]
+    assert "async def _speak_pending" not in paint     # the slice really stops
     assert paint.count("time.monotonic()") == 1
 
 
@@ -2343,8 +2349,8 @@ def test_the_poll_speaks_only_after_the_paint():
 
 
 def test_synthesis_never_runs_on_the_event_loop():
-    """``voice.ensure`` blocks ~850 ms on a cache miss, and the loop is shared by
-    every page in the app."""
+    """``voice.ensure`` blocks a measured 0.9-2.4 s on a cache miss, and the loop
+    is shared by every page in the app."""
     src = inspect.getsource(d.render)
     for line in src.splitlines():
         if "_voice.ensure" in line:
