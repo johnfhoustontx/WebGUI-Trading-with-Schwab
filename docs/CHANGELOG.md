@@ -4,7 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Second-pass audit, batch 1 — a rescue action that
+**Last updated:** 2026-08-20 (**Second-pass batch 2 — the first deletion stranded
+5,600 more lines, and four calculations that flattered themselves.**
+- **The dead-code deletion cascaded.** Batch 3's removal of the Tk window and the
+  legacy CLI left **1,848 lines unreachable inside the still-live `gamma_tool.py`**
+  — the Explain-text family, the drift-pressure panels, the full Analyze prompt,
+  the slot/today's-path helpers and every matplotlib/Tk remnant. Verified with an
+  independent AST reachability run (roots = production callers + module-level code):
+  51 dead defs of 83, and the same 9 live entry points the audit found. Dynamic
+  access (`getattr`) and string references were checked separately — none. With
+  `theme.py`, `event_calendar.py`, `html_render.py`, `options_simulator/ai_prompt.py`,
+  two broken `tools/` scripts and their tests: **5,624 lines across 34 files**.
+- **Two side effects worth more than the lines.** `gamma_tool` now imports with
+  **zero** tkinter/matplotlib modules (verified in a fresh interpreter), and the
+  options-scanner permanent-failure baseline shrank **11 → 8**: `test_key_levels_doc`
+  asserted a `docs/KEY_LEVELS.md` that does not exist in this repo. The Tk-root
+  skip race also lost 2 of its 3 racing files, so `skipped` is a stable 2 rather
+  than a random 2-or-3.
+- ⚠ **Deleting from a live module is not a bulk operation.** Nine test files mixed
+  live and dead subjects and had to be pruned test-by-test rather than removed; a
+  cleanup regex whose `\s*` crossed newlines ate the opening of two parenthesised
+  imports (caught by the suite, restored). Every claim was re-derived locally
+  before anything was removed.
+- **IC probability was the better leg, not both.** `pop_pct = min(put, call)` — but
+  an iron condor loses if EITHER short breaches and the two breaches are DISJOINT,
+  so it is `put + call − 100`, floored at 0. Two 20-delta shorts read **80%**
+  against a true **~60%**, inflating `calc_expected_pnl`'s EV and the scoring PoP
+  factor for every IC the scanner has ever ranked.
+- **The width selector overrode the account risk cap.** `if contracts <
+  CONTRACT_ROUND_TO: contracts = CONTRACT_ROUND_TO` ran AFTER the cap, and
+  `calc_contracts_for_target` already applies that same minimum — so the repeat
+  could only ever raise size past the limit. On a $1,000 account at 5% ($50 budget)
+  a $51-max-loss spread sized to **5 contracts = $255 = 25.5% of the account**.
+  Extracted as `size_contracts`; a cap that leaves no room now returns no
+  selection. ⚠ The existing `test_risk_cap_limits_contracts` asserted
+  `result is not None` — it had enshrined the override it was named for.
+- **A missing $DECN quote fabricated maximum-bullish breadth.** `(advn/decn) if
+  (advn and decn) else (inf if advn else None)` could not distinguish `decn == 0`
+  (a real 10/10 tape) from the symbol being ABSENT from the batch, and `inf` maps
+  to breadth score **10**. `inf` is now reserved for a genuine zero; either symbol
+  missing reads None. (`advn == 0` with decliners stays a real 0.0 — an extreme
+  bearish tape is data, not an absence.)
+- **The portfolio "execution" grade was graded on hindsight.** `entry_pct` was
+  computed over the closes SINCE entry, so a position that rose made its own entry
+  the window minimum (grade A) and one that fell made it the maximum (F) — a
+  near-monotone function of the subsequent return, which made the 15%-weighted
+  execution dimension a re-weighted copy of the 35%-weighted return dimension and
+  the stated 35/25/25/15 split behave like ~50/25/25. Now judged against
+  `slice_before` — the 60 sessions of range actually on offer at the fill —
+  dropping out (and reweighting) when that history is absent.
+- **Verification.** options_svc 1200, options-scanner 1172 + the documented 8,
+  webgui 2328, sentiment-dashboard 495 + the documented 2, sentiment_svc 325 + the
+  documented 1, portfolio-analyzer 194, portfolio_svc 32, trade_svc 77, market_svc
+  77, shared 93. Ruff clean tree-wide.
+- **Still open** (batch 3): the webgui efficiency debt — the 2 s watcher's ungated
+  237 KB reads, the Desk's 11 on-loop seed reads, `/eod`'s on-loop build — plus the
+  accumulated first-pass Mediums (pcr duplication, the `tools/` holiday literals,
+  the 22-page poll idiom, ~60 formatter clones, the rescue triplication and the
+  compute.py split).
+
+**Prior —** 2026-08-20 (**Second-pass audit, batch 1 — a rescue action that
 could never be applied, a crash tape that read bullish, and the biggest key in Redis.**
 - **Context.** After the day's three audit batches were promoted, the full audit was
   re-run. All ten morning fixes verified independently (no regressions); this entry is

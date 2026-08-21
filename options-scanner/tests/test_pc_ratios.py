@@ -1,7 +1,7 @@
 """Tests for chain-native put/call OI and volume ratios."""
 import pytest
 
-from gamma_tool import calc_pc_ratios, build_analysis_dict, build_explain_text, GammaEngine
+from gamma_tool import calc_pc_ratios, build_analysis_dict, GammaEngine
 
 EXP = "2099-12-31:5"
 
@@ -56,17 +56,3 @@ def test_analysis_dict_includes_pc_ratios():
                                  expected_move=40.0, chain=chain)
     assert "pc_ratios" in result
     assert result["pc_ratios"]["pc_oi"] == pytest.approx(3.0)
-
-
-def test_explain_gex_shows_pc_ratio():
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "pc_ratios": {"pc_oi": 1.4, "pc_volume": 0.9},
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)
-    assert "P/C OI" in text

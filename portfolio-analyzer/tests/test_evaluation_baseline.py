@@ -124,7 +124,13 @@ def test_compute_baseline_full():
     assert b["spy_ret"] == pytest.approx(412 / 400 - 1)
     assert b["ann_vol"] is not None
     assert b["atr"] is not None
-    assert b["entry_pct"] is not None
+    # entry_pct needs EXECUTION_LOOKBACK (60) sessions of PRE-entry history to
+    # judge the entry against the range on offer at the time; this fixture has 4,
+    # so the execution dimension correctly drops out and _composite reweights.
+    # (It asserted `is not None` until 2026-08-20, when entry_pct was measured
+    # over the post-entry window and therefore always had a value — which is
+    # exactly the bug: it was grading the subsequent move, not the entry.)
+    assert b["entry_pct"] is None
 
 
 def test_compute_baseline_no_entry_uses_position_avg_price_no_window_stats():
@@ -160,3 +166,69 @@ def test_compute_baseline_garbage_entry_date_does_not_raise():
     assert b["peak_close"] is None
     assert b["sector_ret"] is None and b["spy_ret"] is None
     assert b["ann_vol"] is None and b["entry_pct"] is None
+
+
+# ── the execution grade must measure ENTRY, not what happened after ─────────
+# `entry_pct` was computed over `slice_since(df, entry_date)` — the closes SINCE
+# entry — so a position that rose made its own entry the window minimum
+# (pct ~ 0 -> grade A) and one that fell made it the maximum (F). That made the
+# 15%-weighted "execution" dimension a near-monotone function of the 35%-weighted
+# return dimension: the stated 35/25/25/15 split behaved like ~50/25/25.
+
+def _df(closes, start="2026-01-01"):
+    import pandas as pd
+    c = [float(x) for x in closes]
+    return pd.DataFrame({"datetime": pd.date_range(start, periods=len(c)),
+                         "close": c,
+                         "high": [x + 1.0 for x in c],
+                         "low": [x - 1.0 for x in c]})
+
+
+def test_slice_before_returns_only_pre_entry_rows():
+    from src.evaluation import slice_before
+    df = _df(range(100, 120))                      # 2026-01-01 .. 2026-01-20
+    out = slice_before(df, "2026-01-11", lookback=5)
+    assert len(out) == 5
+    assert out["close"].tolist() == [105.0, 106.0, 107.0, 108.0, 109.0]
+
+
+def test_slice_before_is_none_without_enough_history():
+    from src.evaluation import slice_before
+    assert slice_before(_df(range(100, 103)), "2026-01-01", lookback=5) is None
+    assert slice_before(None, "2026-01-11", lookback=5) is None
+
+
+def test_entry_grade_is_independent_of_what_happened_after_entry():
+    """The same entry, in the same pre-entry range, must grade identically
+    whether the position then doubled or halved."""
+    from src.evaluation import compute_baseline
+    pre = [90 + (i % 20) for i in range(60)]       # 60 sessions before entry
+    rose = _df(pre + [110, 130, 160])
+    fell = _df(pre + [110, 95, 70])
+    holding = {"symbol": "T"}
+    entry = {"avg_price": 92.0, "entry_date": "2026-03-02"}
+    a = compute_baseline(holding, rose, None, None, entry)["entry_pct"]
+    b = compute_baseline(holding, fell, None, None, entry)["entry_pct"]
+    assert a == b
+
+
+def test_a_low_entry_in_its_own_pre_entry_range_grades_well():
+    from src.evaluation import _grade_execution, compute_baseline
+    pre = [90 + (i % 20) for i in range(60)]
+    df = _df(pre + [110, 95, 70])                  # fell after entry
+    base = compute_baseline({"symbol": "T"}, df, None, None,
+                            {"avg_price": 90.5, "entry_date": "2026-03-02"})
+    # bought near the bottom of the pre-entry range -> good execution, even
+    # though the trade went on to lose money (that is the RETURN dimension)
+    assert base["entry_pct"] < 0.15
+    assert _grade_execution(base["entry_pct"]) > 3.4
+
+
+def test_a_high_entry_grades_poorly_even_if_the_trade_worked_out():
+    from src.evaluation import _grade_execution, compute_baseline
+    pre = [90 + (i % 20) for i in range(60)]
+    df = _df(pre + [110, 130, 160])                # rose after entry
+    base = compute_baseline({"symbol": "T"}, df, None, None,
+                            {"avg_price": 108.5, "entry_date": "2026-03-02"})
+    assert base["entry_pct"] > 0.85
+    assert _grade_execution(base["entry_pct"]) < 0.6

@@ -95,13 +95,28 @@ class TestSelectBestWidth:
         assert result is None
 
     def test_risk_cap_limits_contracts(self):
-        """When a tiny account forces the risk cap below the target size, the
-        function still returns a selection (not None) — the cap just reduces
-        E[PnL] but narrow widths can still win."""
+        """An account too small to afford ONE contract inside its risk limit gets
+        no selection at all.
+
+        This asserted `result is not None` until 2026-08-20, which enshrined the
+        override it was meant to document: a $1,000 account at 5% has a $50
+        budget, the fixture's max loss is $51/contract (n_risk = 0), and the old
+        code answered by forcing the 5-contract minimum — $255 risked, 25.5% of
+        the account, 5x the stated cap. Refusing is what a risk cap means.
+        """
         opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.10})
         result = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
                                    trade_type="0-DTE", min_cr_pct=0.05,
                                    account_size=1000, max_risk_pct=0.05)
+        assert result is None
+
+    def test_an_account_that_can_afford_one_contract_still_selects(self):
+        """The refusal is about affordability, not about small accounts: raise the
+        budget just past one contract and the same fixture selects again."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.10})
+        result = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                   trade_type="0-DTE", min_cr_pct=0.05,
+                                   account_size=100_000, max_risk_pct=0.05)
         assert result is not None
 
     def test_candidate_widths_constants(self):
@@ -2214,3 +2229,91 @@ class TestIvSurfacedOntoSignals:
         assert sigs
         for s in sigs:
             json.dumps({k: s[k] for k in self.NEW_FIELDS})
+
+
+class TestIronCondorProbability:
+    """An IC loses if EITHER short breaches. The two breaches are DISJOINT
+    (price cannot finish below the put short and above the call short), so
+    P(win) = P(put ok) + P(call ok) - 1, not min(...).
+
+    `min()` reports the better of the two legs and so overstates every IC:
+    two 20-delta shorts (each ~80% single-sided) read 80% where the true
+    two-sided figure is ~60%. That inflates the two-point EV in
+    calc_expected_pnl and the PoP factor in scoring (fixed 2026-08-20).
+    """
+
+    @staticmethod
+    def _legs(put_pop, call_pop):
+        base = {"symbol": "TEST", "expiration": "2026-04-19", "dte": 0,
+                "short_mark": 1.50, "long_mark": 0.50, "width": 5,
+                "credit": 1.00, "max_loss": 4.00, "rr_pct": 25.0,
+                "net_theta": -0.03, "trade_type": "0-DTE",
+                "underlying_price": 530.0}
+        pcs = {**base, "type": "PCS", "short_strike": 520, "long_strike": 515,
+               "pop_pct": put_pop, "short_delta": -0.20, "breakeven": 519.0}
+        ccs = {**base, "type": "CCS", "short_strike": 540, "long_strike": 550,
+               "pop_pct": call_pop, "short_delta": 0.20, "breakeven": 541.0}
+        return pcs, ccs
+
+    def test_two_sided_pop_is_not_the_better_leg(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(80.0, 80.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 60.0        # 80 + 80 - 100, not min() == 80
+
+    def test_asymmetric_legs_combine(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(90.0, 70.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 60.0        # 90 + 70 - 100
+
+    def test_pop_floors_at_zero_never_negative(self):
+        """Two coin-flip shorts leave no two-sided edge; a negative probability
+        would be nonsense and would flip the EV sign downstream."""
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(40.0, 40.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 0.0
+
+    def test_a_near_certain_pair_stays_high(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(97.0, 96.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 93.0
+
+
+class TestWidthSelectionRespectsTheRiskCap:
+    """`select_best_width` sizes to the profit target then caps by the account
+    risk limit — but it re-applied the 5-contract minimum AFTER that cap, so a
+    binding cap was silently overridden upward.
+
+    `calc_contracts_for_target` already enforces the multiple-of-5 minimum; the
+    repeat after the cap was pure override. On a $10k account at 5% the cap is
+    $500 = 1 contract of a $4 max-loss spread; forcing 5 puts $2,000 (20% of the
+    account) at risk — 4x the stated limit (fixed 2026-08-20).
+    """
+
+    def test_a_binding_risk_cap_is_not_overridden_upward(self):
+        from scanner_engine import calculate_position_size, size_contracts
+        # $10k account, 5% cap = $500; a $4-max-loss spread costs $400/contract
+        n_risk = calculate_position_size(4.0, 10_000, 0.05)
+        assert n_risk == 1                      # the cap genuinely binds below 5
+        assert size_contracts(10, n_risk) == 1  # was 5
+
+    def test_position_never_risks_more_than_the_cap_allows(self):
+        from scanner_engine import calculate_position_size, size_contracts
+        for account, ml in ((10_000, 4.0), (25_000, 9.0), (50_000, 2.5),
+                            (100_000, 4.0), (5_000, 15.0)):
+            n_risk = calculate_position_size(ml, account, 0.05)
+            risked = size_contracts(calc_target := 25, n_risk) * ml * 100
+            assert risked <= account * 0.05 + 1e-9, (account, ml, n_risk)
+
+    def test_a_generous_account_still_gets_the_five_minimum(self):
+        """The minimum is not removed — it just cannot exceed the cap."""
+        from scanner_engine import size_contracts
+        assert size_contracts(1, 50) == 5      # tiny target, ample risk room
+
+    def test_the_cap_binds_before_the_target_when_it_is_tighter(self):
+        from scanner_engine import size_contracts
+        assert size_contracts(40, 12) == 12
+
+    def test_zero_risk_room_sizes_to_nothing(self):
+        from scanner_engine import size_contracts
+        assert size_contracts(10, 0) == 0
+        assert size_contracts(10, -1) == 0

@@ -55,8 +55,7 @@ def test_engine_entry_points_survive_without_gui():
 import gamma_tool as gt
 for name in ("GammaEngine", "get_gex_walls", "calc_dex_from_chain", "get_dex_walls",
              "get_directional_walls", "build_analysis_dict", "calc_flip_point",
-             "build_summary_prompt_bundled", "draw_term_heatmap",
-             "build_chart_style_vars"):
+             "build_summary_prompt_bundled"):
     assert hasattr(gt, name), name
 print("ok")
 """

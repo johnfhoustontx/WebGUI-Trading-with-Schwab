@@ -1,7 +1,7 @@
 """Tests for the 0DTE/7DTE gamma-acceleration ratio."""
 import pytest
 
-from gamma_tool import calc_gamma_acceleration, build_analysis_dict, build_explain_text, GammaEngine
+from gamma_tool import calc_gamma_acceleration, build_analysis_dict, GammaEngine
 
 
 def _exp(gamma_oi_pairs):
@@ -86,17 +86,3 @@ def test_analysis_dict_includes_gamma_acceleration():
                                  expected_move=40.0, chain=chain)
     assert "gamma_acceleration" in result
     assert result["gamma_acceleration"]["ratio"] == pytest.approx(2.0)
-
-
-def test_explain_gex_shows_gamma_acceleration():
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "gamma_acceleration": 2.5,
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)
-    assert "Gamma acceleration" in text

@@ -1796,11 +1796,11 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
 .venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1189
+.venv\Scripts\python -m pytest services\options_svc    # 1200
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239
-.venv\Scripts\python -m pytest services\market_svc     # 73
+.venv\Scripts\python -m pytest services\market_svc     # 77
 .venv\Scripts\python -m pytest shared\bus              # 25
 .venv\Scripts\python -m pytest shared\contracts        # 49 (no app-dir imports — safe together)
 .venv\Scripts\python -m pytest shared\tests            # 89
@@ -1820,14 +1820,16 @@ which is exactly what an unverified number does. `market_svc`, `shared/tests`,
 **Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
 read them as a regression:**
 
-- **options-scanner** — **11**, not the "~2" this line claimed until 2026-08-09.
-  Re-measured 2026-08-20 at **11 failed / 1371 passed / 3 skipped**. The set, which
-  is what you compare (never the count — see below):
+- **options-scanner** — **8** since 2026-08-20 (was 11 for months, and "~2" in a
+  line that was simply wrong until 2026-08-09). Re-measured at **8 failed / 1172
+  passed / 2 skipped**. The set, which is what you compare (never the count —
+  see below):
   `test_gex_collector.py` ×5 (`test_next_boundary_*` ×4, `test_main_skips_before_market_open`),
-  `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`,
-  `test_key_levels_doc.py` ×3, and
-  `test_scanner_engine.py::TestEarningsAvoidance` ×2. **Re-confirmed 2026-08-15**
-  (1439 passed / 11 failed / 2 skipped) — same set, unchanged.
+  `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`, and
+  `test_scanner_engine.py::TestEarningsAvoidance` ×2. The `test_key_levels_doc.py`
+  ×3 that used to sit here asserted the existence of `options-scanner/docs/
+  KEY_LEVELS.md`, a file that does not exist in this repo; the test file went with
+  the 2026-08-20 dead-code sweep, which is why the baseline shrank.
 - **options_svc** — **none as of 2026-08-18** (**1148 passed**, re-measured on
   `claude/dashboard-key-elements`). The 2 date-relative `test_expected_move`
   failures previously listed here now pass — they depend on the run date, so
@@ -1854,13 +1856,14 @@ and diff the node IDs name-by-name. It nearly bit again on 2026-08-09, when
 options-scanner's passed/skipped drifted 1351/2 → 1370/3 across a change while the
 failure count sat unmoved at 11.
 
-**That drift has TWO independent sources, not one** (the second measured
-2026-08-18). The first is the timing-dependent `test_gex_collector*` group. The
-second is a trio of Tk-dependent tests — `test_chart_style_vars.py:38`,
-`test_gex_dex.py:182`, `test_theme.py:130` — which race on Tk root creation:
-**whichever loses self-skips, and it is a DIFFERENT one each run.** Six no-op
-runs of just those three gave `34 passed` / `33 passed, 1 skipped` at random. So
-`1453/3` and `1454/2` are both healthy readings of an unchanged tree.
+**That drift had TWO independent sources** (the second measured 2026-08-18), and
+one of them is now gone. The first is the timing-dependent `test_gex_collector*`
+group. The second was a trio of Tk-dependent tests — `test_chart_style_vars.py`,
+`test_gex_dex.py:182`, `test_theme.py` — racing on Tk root creation, where
+**whichever lost self-skipped, a DIFFERENT one each run**. Two of those three
+files were deleted on 2026-08-20 (they tested `build_chart_style_vars` and
+`options-scanner/theme.py`, both dead), leaving only `test_gex_dex`'s Tk block —
+so the skipped count is now a stable **2**, not a random 2-or-3.
 
 ⚠ Because the *identity* of the skipping test varies, **compare the skipped SET
 as well as the failed set.** A count-only comparison reads as stable while a
@@ -1873,10 +1876,12 @@ refresh (pillow / setuptools / aiohttp / cryptography) — so they are a post-bu
 baseline, which is the useful thing to compare a suspected dependency regression
 against. The three large suites, re-measured **2026-08-20** after the dead-code
 trim: **webgui 2320 green** (1986 on 08-19; the Bull/Bear map landed in between),
-**options_svc 1189 green**, **options-scanner 1371 passed / 11 failed / 3
-skipped** — that suite FELL by ~115 because the tests were deleted along with
-their subjects (the legacy CLI + Tk remnants), which is the one case where a
-dropping count is the healthy signal. Also **schwab-proxy 98**
+**options_svc 1200 green**, **options-scanner 1172 passed / 8 failed / 2
+skipped** — that suite has now FALLEN twice for the same healthy reason: tests
+deleted along with their subjects (the legacy CLI + Tk remnants on 2026-08-20
+morning, then ~1,850 lines of `gamma_tool` interior + four whole modules that
+evening). A dropping count is the one case where the drop is the good news; the
+failing SET is what you compare, and it shrank 11 → 8. Also **schwab-proxy 98**
 (worth its own line — it is the only suite that exercises the Schwab OAuth stack, so
 it is the one that would catch a `cryptography` bump going wrong).
 

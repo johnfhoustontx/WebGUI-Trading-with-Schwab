@@ -7,7 +7,6 @@ from gamma_tool import (
     get_directional_walls,
     get_oi_walls,
     build_analysis_dict,
-    build_explain_text,
     GammaEngine,
 )
 
@@ -104,24 +103,6 @@ def test_analysis_dict_includes_walls_block():
     assert set(result["walls"].keys()) == {"gex", "oi"}
     assert result["walls"]["oi"]["call_wall"] == 5850.0
     assert result["walls"]["oi"]["put_wall"] == 5750.0
-
-
-# ── Explain wiring ──
-
-def test_explain_gex_shows_directional_walls():
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "walls": {"gex": {"call_wall": 5850.0, "put_wall": 5750.0},
-                  "oi": {"call_wall": 5860.0, "put_wall": 5740.0}},
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)
-    assert "Call wall" in text and "Put wall" in text
-    assert "OI" in text  # OI-basis comparison line present
 
 
 # ── max_pct bound (tail-strike rejection) ──

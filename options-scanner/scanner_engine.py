@@ -1071,7 +1071,14 @@ def build_iron_condors(spreads, max_n=3):
                     "spread_bid": round(p.get("spread_bid", 0) + c.get("spread_bid", 0), 2),
                     "spread_ask": round(p.get("spread_ask", 0) + c.get("spread_ask", 0), 2),
                     "rr_pct": round(cr / ml * 100, 1),
-                    "pop_pct": round(min(p["pop_pct"], c["pop_pct"]), 1),
+                    # An IC loses if EITHER short breaches, and the two breaches
+                    # are DISJOINT (price cannot finish below the put short AND
+                    # above the call short), so the two-sided probability is
+                    # P(put ok) + P(call ok) - 1 -- floored at 0. This was
+                    # min(...) until 2026-08-20, which reports the BETTER leg:
+                    # two 20-delta shorts read 80% against a true ~60%, inflating
+                    # calc_expected_pnl's EV and the scoring PoP factor.
+                    "pop_pct": round(max(0.0, p["pop_pct"] + c["pop_pct"] - 100.0), 1),
                     "short_delta": round(p["short_delta"] + c["short_delta"], 4),
                     "net_theta": round(p["net_theta"] + c["net_theta"], 3),
                     "breakeven": f"{p['breakeven']}/{c['breakeven']}",
@@ -1158,6 +1165,27 @@ def _entry_credit(short, lo, width):
     return fill_model.realistic_vertical_fill(sb, sa, lb, la, "SELL_TO_OPEN")
 
 
+def size_contracts(n_target, n_risk):
+    """Contracts to trade: the profit-target size, capped by the account risk
+    limit, floored at CONTRACT_ROUND_TO only where the cap leaves room.
+
+    ⚠ The floor must never RAISE the size past ``n_risk``. Until 2026-08-20 this
+    was a bare ``if contracts < CONTRACT_ROUND_TO: contracts = CONTRACT_ROUND_TO``
+    applied AFTER the cap, so a binding cap was silently overridden: on a $10k
+    account at 5% the cap is $500 = 1 contract of a $4-max-loss spread, and
+    forcing 5 risks $2,000 — 4x the stated limit. (``calc_contracts_for_target``
+    already applies the same minimum, so the repeat only ever overrode risk.)
+
+    ``n_risk <= 0`` means the cap allows nothing; the caller drops the candidate.
+    """
+    if n_risk <= 0:
+        return 0
+    contracts = min(n_target, n_risk)
+    if contracts < CONTRACT_ROUND_TO:
+        contracts = min(CONTRACT_ROUND_TO, n_risk)
+    return contracts
+
+
 def select_best_width(short, opts, side, strike_increment, trade_type,
                       min_cr_pct, account_size=100000, max_risk_pct=0.05):
     """Select the width that maximizes expected total dollar P&L.
@@ -1222,9 +1250,9 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         # Contract sizing: hit profit target on a win, bounded by risk cap.
         n_target = calc_contracts_for_target(credit)
         n_risk = calculate_position_size(ml, account_size, max_risk_pct)
-        contracts = min(n_target, n_risk) if n_risk > 0 else n_target
-        if contracts < CONTRACT_ROUND_TO:
-            contracts = CONTRACT_ROUND_TO
+        contracts = size_contracts(n_target, n_risk)
+        if contracts <= 0:
+            continue   # the risk cap leaves no room for this width
 
         # Expected total $P&L at the sized position.
         e_pnl = (credit * pop - ml * (1 - pop)) * contracts * 100

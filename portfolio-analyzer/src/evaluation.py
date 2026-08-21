@@ -66,10 +66,43 @@ def latest_atr(df, period: int = 14):
     return float(tr.iloc[-period:].mean())
 
 
+# Trailing sessions of PRE-entry history the execution grade judges an entry
+# against — "was this a good price, given the range on offer at the time".
+EXECUTION_LOOKBACK = 60
+
+
+def slice_before(df, entry_date: str, lookback: int = EXECUTION_LOOKBACK):
+    """The last ``lookback`` rows STRICTLY BEFORE ``entry_date``; None if there
+    are fewer than that many (an entry with no prior range cannot be graded).
+
+    ⚠ The counterpart to :func:`slice_since`, and the two must not be confused:
+    grading an entry against the closes that came AFTER it makes the grade a
+    function of the subsequent return, not of the entry (see entry_percentile).
+    """
+    if df is None or entry_date is None or not len(df):
+        return None
+    import pandas as pd
+    try:
+        cutoff = pd.Timestamp(entry_date)
+    except ValueError:
+        return None
+    out = df[df["datetime"] < cutoff]
+    if len(out) < lookback:
+        return None
+    return out.iloc[-lookback:]
+
+
 def entry_percentile(entry_price, df):
     """Where ``entry_price`` sits in the [min, max] of closes (0=low, 1=high).
 
     Clamped to [0, 1]; None when inputs are missing or the range is degenerate.
+
+    ⚠ ``df`` must be the PRE-entry window (:func:`slice_before`). Passed the
+    post-entry window it measures the subsequent move rather than the entry: a
+    position that rose makes its own entry the minimum (0.0 -> grade A) and one
+    that fell makes it the maximum (F), which turned the 15%-weighted execution
+    dimension into a re-weighted copy of the 35%-weighted return dimension
+    (fixed 2026-08-20).
     """
     if entry_price is None or df is None or not len(df):
         return None
@@ -124,7 +157,9 @@ def compute_baseline(holding: dict, stock_df, sector_df, spy_df, entry) -> dict:
         "peak_close": float(window["close"].max()) if window is not None else None,
         "sector_ret": window_return(sector_df, entry_date) if entry_date else None,
         "spy_ret": window_return(spy_df, entry_date) if entry_date else None,
-        "entry_pct": entry_percentile(entry_price, window),
+        # Judged against the range available AT ENTRY, never the window since.
+        "entry_pct": entry_percentile(entry_price,
+                                      slice_before(stock_df, entry_date)),
     }
 
 
@@ -171,7 +206,8 @@ def _grade_risk(sharpe):
 
 
 def _grade_execution(entry_pct):
-    """Entry near the window low = good. 0.25 -> bought bottom quartile."""
+    """Entry near the low of its PRE-ENTRY range = good. 0.25 -> bought the
+    bottom quartile of the 60 sessions leading up to the fill."""
     if entry_pct is None:
         return None
     return min(4.0, max(0.0, 4.0 * (1.0 - entry_pct)))

@@ -1,7 +1,7 @@
 """Tests for the OI concentration (Herfindahl) scalar."""
 import pytest
 
-from gamma_tool import calc_oi_concentration, build_analysis_dict, build_explain_text, GammaEngine
+from gamma_tool import calc_oi_concentration, build_analysis_dict, GammaEngine
 
 EXP = "2099-12-31:5"
 
@@ -63,17 +63,3 @@ def test_analysis_dict_includes_oi_concentration():
                                  expected_move=40.0, chain=chain)
     assert "oi_concentration" in result
     assert result["oi_concentration"]["hhi"] == pytest.approx(1.0)
-
-
-def test_explain_gex_shows_oi_concentration():
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "oi_concentration": {"hhi": 0.22, "n_strikes": 12},
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)
-    assert "OI concentration" in text

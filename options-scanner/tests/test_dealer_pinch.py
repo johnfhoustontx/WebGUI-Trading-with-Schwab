@@ -182,32 +182,3 @@ def test_build_analysis_dict_pinch_none_without_chain():
     gex = GammaEngine().calc_from_chain(chain)
     result = build_analysis_dict(gex, "gex", "$SPX", dte=2, expected_move=40.0)
     assert result["dealer_pinch"] is None
-
-
-# ── pinch status-flag formatter (pure, gamma_tool) ──
-
-def test_pinch_flag_text_armed():
-    from gamma_tool import pinch_flag_text
-    state = {
-        "armed": True, "regime": "PIN", "confidence": 72.0,
-        "node": {"strike": 5800.0},
-        "conditions": {"c1": True, "c2": True, "c3a": True, "c3b": True},
-    }
-    text, _color = pinch_flag_text(state)
-    assert "PIN" in text and "5,800" in text and "72%" in text
-
-
-def test_pinch_flag_text_watching_counts():
-    from gamma_tool import pinch_flag_text
-    state = {
-        "armed": False, "regime": "WATCHING", "confidence": 0.0,
-        "node": {"strike": 5800.0},
-        "conditions": {"c1": True, "c2": True, "c3a": False, "c3b": None},
-    }
-    text, _color = pinch_flag_text(state)
-    assert "watching" in text.lower() and "2/4" in text
-
-
-def test_pinch_flag_text_none():
-    from gamma_tool import pinch_flag_text
-    assert pinch_flag_text(None) == ("", None)
