@@ -1670,3 +1670,84 @@ def test_flag_map_keys_positions_by_id():
     rows = [{"position_id": "p1", "flag": "OK"}, {"position_id": None,
                                                   "flag": "RESCUE"}]
     assert d.flag_map(rows) == {"p1": "OK"}
+
+
+# ── the neon glow ────────────────────────────────────────────────────────────
+def test_glow_step_starts_at_zero():
+    assert d.glow_step(started=100.0, now=100.0) == 0
+
+
+def test_glow_step_advances_one_class_per_second():
+    assert d.glow_step(started=100.0, now=103.4) == 3
+    assert d.glow_step(started=100.0, now=109.9) == 9
+
+
+def test_glow_step_never_exceeds_the_last_class():
+    # A rounding slip that returned 10 would emit desk-neon-10, a class with no
+    # rule behind it — the animation would restart instead of finishing.
+    assert d.glow_step(started=100.0, now=109.999999) == d.GLOW_STEPS - 1
+
+
+def test_glow_step_is_none_once_expired():
+    assert d.glow_step(started=100.0, now=110.0) is None
+    assert d.glow_step(started=100.0, now=999.0) is None
+
+
+def test_glow_step_is_none_for_a_row_that_never_glowed():
+    assert d.glow_step(started=None, now=100.0) is None
+
+
+def test_glow_classes_name_a_hue_and_a_resume_point():
+    cls = d.glow_classes(("new", 100.0), now=103.0)
+    assert "desk-neon" in cls and "desk-neon-new" in cls and "desk-neon-3" in cls
+
+
+def test_glow_classes_are_empty_once_expired():
+    assert d.glow_classes(("new", 100.0), now=120.0) == ""
+    assert d.glow_classes(None, now=120.0) == ""
+
+
+def test_every_glow_step_class_has_a_rule_behind_it():
+    # The resume trick is silent when it breaks: a missing rule just restarts
+    # the animation, which looks like a glow that never expires.
+    css = d.DESK_NEON_CSS.replace(" ", "")
+    for i in range(d.GLOW_STEPS):
+        assert f".desk-neon-{i}{{" in css
+
+
+def test_both_glow_hues_have_a_rule():
+    assert ".desk-neon-new" in d.DESK_NEON_CSS
+    assert ".desk-neon-flag" in d.DESK_NEON_CSS
+
+
+def test_the_animation_runs_for_the_advertised_ten_seconds():
+    assert d.GLOW_SEC == 10.0
+    assert f"deskNeon {d.GLOW_SEC:g}s" in d.DESK_NEON_CSS
+
+
+def test_the_step_rules_come_after_the_shorthand_that_would_reset_them():
+    """THE trick, and the one thing about it a reader would not guess.
+
+    ``animation: deskNeon 10s linear forwards`` is a SHORTHAND, so it resets
+    every ``animation-*`` longhand it does not name — ``animation-delay``
+    included, back to 0s. ``.desk-neon`` and ``.desk-neon-3`` are both a single
+    class, so specificity cannot break the tie and SOURCE ORDER decides: put the
+    step rules first and every glow silently restarts from full brightness on
+    each repaint, which is the exact bug the negative delay exists to prevent.
+    """
+    css = d.DESK_NEON_CSS
+    shorthand = css.index(".desk-neon {")
+    for i in range(d.GLOW_STEPS):
+        assert css.index(f".desk-neon-{i} ") > shorthand
+
+
+def test_the_glow_map_drops_only_expired_entries():
+    glow = {"a": ("new", 100.0), "b": ("flag", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
+    assert glow == {"b": ("flag", 108.0)}       # mutates the caller's map
+
+
+def test_glow_step_survives_a_nonsense_timestamp():
+    # Page state is a plain dict; a wedged entry must go dark, never raise on
+    # the paint path.
+    assert d.glow_step(started="soon", now=100.0) is None

@@ -1251,6 +1251,111 @@ CALL_HEX = "#2dd4a7"                   # the call wall, and its marker on the ma
 PUT_HEX = "#fb5f7c"                    # the put wall, and its marker
 FLIP_HEX = "#f5b841"                   # the gamma flip tick
 SPOT_HEX = "#22d3ee"                   # the spot dot
+
+# ── the 10-second neon glow ──────────────────────────────────────────────────
+# ⚠ THE NON-OBVIOUS PART. ``_paint_positions`` calls ``pos_body.clear()`` and
+# rebuilds every row, and it runs whenever the paper account re-prices — which
+# is constant during market hours. A REBUILT ELEMENT RESTARTS ITS CSS ANIMATION
+# FROM ZERO, so the naive implementation glows forever: every repaint resets the
+# decay and the row never goes dark.
+#
+# The fix is a whole-second NEGATIVE ``animation-delay``, which starts an
+# animation partway through. The glow's START TIME lives in page state keyed by
+# row id; the row wears ``desk-neon-N`` where N is how many seconds have already
+# elapsed, so a rebuilt element RESUMES rather than restarts.
+#
+# Ten fixed classes rather than a computed ``[animation-delay:-3.2s]``: the
+# styling standard's finite-set rule. The cost is one second of granularity on
+# a ten-second decay, which is invisible.
+GLOW_SEC = 10.0
+GLOW_STEPS = 10
+
+# The two things worth glowing about, and nothing else. NEW is the cyan the
+# structure map already uses for spot; FLAG is the amber it uses for the flip —
+# both already mean "look here" on this page.
+GLOW_NEW = "new"
+GLOW_FLAG = "flag"
+
+
+def glow_step(started, now, span=GLOW_SEC, steps=GLOW_STEPS):
+    """Which ``desk-neon-N`` class a glow started at ``started`` wears at ``now``.
+
+    ``None`` once it has expired, or if it has not begun. Both are the same
+    answer to the caller — do not glow — and collapsing them here keeps the
+    check at the call site to one branch.
+    """
+    if started is None:
+        return None
+    try:
+        elapsed = float(now) - float(started)
+    except (TypeError, ValueError):
+        return None
+    if elapsed < 0 or elapsed >= span:
+        return None
+    # ``min`` is not belt-and-braces: float division at the very top of the
+    # range can yield exactly ``steps``, and ``desk-neon-10`` has no rule behind
+    # it — the animation would silently restart instead of finishing.
+    return min(steps - 1, max(0, int(elapsed / span * steps)))
+
+
+def glow_classes(entry, now):
+    """The class string for a glowing row, or ``''``.
+
+    ``entry`` is the ``(kind, started)`` tuple held in page state, or ``None``.
+    """
+    if not entry:
+        return ""
+    kind, started = entry
+    step = glow_step(started, now)
+    if step is None:
+        return ""
+    return f"desk-neon desk-neon-{kind} desk-neon-{step}"
+
+
+def prune_glows(glow, now):
+    """Drop expired entries. Mutates and returns ``glow``.
+
+    Called once per paint. Without it the map grows for the life of the tab —
+    small, but it is also the only thing that makes the map's size mean
+    something when debugging.
+    """
+    for rid in [k for k, v in glow.items() if glow_step(v[1], now) is None]:
+        glow.pop(rid, None)
+    return glow
+
+
+# The ONE escape hatch this page is already allowed (it injects
+# CONSOLE_KEYFRAMES_CSS beside this). A keyframes animation cannot be a utility
+# class, and ``--neon`` is a plain custom property inside a real stylesheet —
+# NOT a Tailwind arbitrary value, which is where the documented ``var(...)``
+# JIT limitation bites.
+#
+# ⚠ ORDER IS LOAD-BEARING, and it is the whole trick. ``animation:`` is a
+# SHORTHAND, so it resets every ``animation-*`` longhand it does not name —
+# ``animation-delay`` back to 0s included. ``.desk-neon`` and ``.desk-neon-3``
+# are both one class, so specificity cannot break the tie and SOURCE ORDER
+# decides: the step rules must come LAST, or every repaint silently restarts the
+# glow at full brightness and the row never goes dark. Pinned by
+# ``test_the_step_rules_come_after_the_shorthand_that_would_reset_them``.
+_NEON_STEPS_CSS = "\n".join(
+    f".desk-neon-{i} {{ animation-delay: -{i}s; }}" for i in range(GLOW_STEPS))
+
+DESK_NEON_CSS = f"""
+@keyframes deskNeon {{
+  0%   {{ box-shadow: inset 0 0 0 1px var(--neon), 0 0 18px -2px var(--neon);
+          background-color: rgba(255,255,255,.055); }}
+  65%  {{ box-shadow: inset 0 0 0 1px var(--neon), 0 0 11px -5px var(--neon);
+          background-color: rgba(255,255,255,.022); }}
+  100% {{ box-shadow: inset 0 0 0 0 transparent, 0 0 0 0 transparent;
+          background-color: transparent; }}
+}}
+.desk-neon {{ animation: deskNeon {GLOW_SEC:g}s linear forwards;
+              border-radius: 3px; }}
+.desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
+.desk-neon-{GLOW_FLAG} {{ --neon: {FLIP_HEX}; }}
+{_NEON_STEPS_CSS}
+"""
+
 # The reference design's BODY face. It is a monospace, which is the whole point
 # on a screen that is nine columns of numbers: JetBrains Mono's figures are
 # fixed-width by construction, so a price column stays a column without
@@ -1799,6 +1904,9 @@ def render():
     # The console vocabulary's ONE escape hatch: a keyframes animation cannot be
     # expressed as a utility class.
     ui.add_css(CONSOLE_KEYFRAMES_CSS)
+    # The 10-second arrival glow. Same justification as the line above: a
+    # keyframes animation cannot be expressed as a utility class.
+    ui.add_css(DESK_NEON_CSS)
 
     # ``data`` holds the LAST payload seen for every view, because the poll hands
     # over only the ones that moved and most regions read more than one view.
