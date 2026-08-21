@@ -4,7 +4,55 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
+**Last updated:** 2026-08-20 (**Second-pass audit, batch 1 — a rescue action that
+could never be applied, a crash tape that read bullish, and the biggest key in Redis.**
+- **Context.** After the day's three audit batches were promoted, the full audit was
+  re-run. All ten morning fixes verified independently (no regressions); this entry is
+  the remediation of the second pass's High tier + the round-3 NaN cluster.
+- **HIGH — `roll_out`/`roll_down_out` could NEVER pass the stale-price guard, and the
+  bypass overstated equity.** The two builders emitted only the 2 reopening legs in
+  `est_fill_legs` while their `net_cash` included the close debit (−cv) — so
+  `paper_adjust._reprice_candidate_net`, which reprices the legs uniformly, read even
+  IDENTICAL quotes as drift equal to the whole close cost (measured 187% vs the 15%
+  tolerance): every live apply refused with "prices moved — re-review". And with
+  repricing unavailable (off-hours), `apply_roll` booked the old spread's close at the
+  entry-credit scratch, so the close debit never hit cash — equity overstated by
+  `(cv − entry_credit)·100·qty`. **Fix: every roll candidate now carries the CLOSE pair
+  ahead of its reopen pair** (`rescue._close_pair`), priced live with a cv-split
+  fallback (BUY-back = cv, sell = 0.0) when the old legs are unpriceable — which also
+  fixes the second-pass Low where `roll_down`'s 0.0-coalesced close legs booked a
+  CREDIT to close a tested spread. The legacy 2-leg shape still applies (cached
+  boards), pinned by test. ⚠ The `_leg` docstring claimed est_fill_legs prices were
+  "display-only"; they were load-bearing in two places. Corrected.
+- **HIGH — `blend_trend` turned a saturated max-bear sub-score into neutral.**
+  `scores.get(k, 50.0) or 50.0` — a score of exactly 0.0 is falsy, and 0.0 is the
+  ENTIRE clamped crash-tape region of `score_price`. Measured: the most bearish
+  possible tape blended **36.5** where one tick off the floor blended **14.0**, a
+  22.5-point bullish jump at confidence 1.0, feeding the Day gauge, both structural
+  horizons and the classifier's direction axis. Now only absence (or non-finite)
+  means neutral; the fix is continuous at the floor by test.
+- **HIGH — `cache:options:calc_chain` was 8.77 MB, 53% of ALL prod Redis string
+  bytes.** The raw 20-expiry chain, ~40 fields/contract, no TTL, forever. The pages
+  read five contract fields; `thin_calc_chain` cuts to that whitelist at publish:
+  **8.77 → 0.68 MB (−92%)** measured on the real prod payload, extractors verified
+  unchanged. Fields cut, strikes kept — the leg builder legitimately offers far wings.
+- **NaN round 3** (`flow_skew._as_float`, `_pick_nearest_delta`, `profile_shape._num`):
+  non-finites rejected, and an IV must now be **positive** — Schwab's `-999`
+  uncomputable-IV sentinel no longer wins the 25Δ risk-reversal pick. One audit claim
+  was REFUTED on reproduction: `detect_uoa` never emitted NaN rows — `int(nan)` raises
+  into its broad `except`, an accidental save now pinned by tests so it cannot be
+  removed silently.
+- **Verification.** options_svc 1200, options-scanner 1379 + the documented 11,
+  webgui 2328, sentiment-dashboard 491 + the documented 2, sentiment_svc 325 + the
+  documented 1. Ruff clean. All counts grew only by the new tests; failing sets
+  compared name-for-name.
+- **Second-pass items still open** (not in this batch): the ~5,200 lines of dead code
+  stranded in `gamma_tool.py` + friends (with the 11→8 baseline shrink), IC PoP
+  `min()` vs `pop_put+pop_call−100`, the width-selector risk-cap override, the missing-
+  `$DECN` breadth fabrication, the portfolio execution grade, the 2 s watcher's
+  ungated 237 KB reads, and the Desk's on-loop seed.
+
+**Prior —** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
 fixing it was overstated by a factor of ten.**
 - **The defect was real at the function level.** `sector_rotation_assessment.
   compute_rs_momentum` subtracted ROC's OWN rolling mean before normalizing, which

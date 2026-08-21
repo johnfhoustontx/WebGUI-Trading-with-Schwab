@@ -2747,7 +2747,11 @@ def test_calc_load_returns_chain_price_range(monkeypatch):
     assert out["price"] == 450.0
     assert out["range_lo"] == 450.0 * 0.95
     assert out["range_hi"] == 450.0 * 1.05
-    assert out["chain"] == chain
+    # The chain is THINNED at publish since 2026-08-20 (see thin_calc_chain):
+    # structure preserved, contracts cut to the five page-read fields, absent
+    # maps normalized to {}.
+    assert out["chain"] == {"putExpDateMap": {},
+                            "callExpDateMap": {"2026-06-19:4": {"450.0": [{"mark": 1.0}]}}}
     assert seen["qsyms"] == ["SPY"]  # quote fetched for the API symbol
 
 
@@ -5383,3 +5387,73 @@ def test_leg_days_to_expiry_tolerates_a_string_expiry():
     now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
     assert compute._leg_days_to_expiry("2026-06-30", 0.0, now=now) == pytest.approx(
         compute._leg_days_to_expiry(dt.date(2026, 6, 30), 0.0, now=now))
+
+
+# ── calc_chain slimming (2026-08-20) ────────────────────────────────────────
+# Measured in prod: cache:options:calc_chain was 8.77 MB — 53% of ALL Redis
+# string bytes — because calc_load_symbol cached the raw 20-expiry Schwab chain
+# with ~40 fields per contract. The Calculator/Rescue pages read exactly FIVE
+# contract fields (volatility, mark, bid, ask, delta) plus the two expiry maps'
+# structure. Same pattern the gamma crop fixed in June, one key over.
+
+def _fat_contract(**over):
+    c = {"putCall": "PUT", "symbol": "SPXW_082126P6000", "description": "SPX Aug",
+         "bid": 1.0, "ask": 1.2, "last": 1.1, "mark": 1.1, "bidSize": 5,
+         "askSize": 7, "lastSize": 1, "highPrice": 2.0, "lowPrice": 0.9,
+         "openPrice": 1.5, "closePrice": 1.3, "totalVolume": 500, "tradeDate": None,
+         "quoteTimeInLong": 1, "tradeTimeInLong": 1, "netChange": -0.2,
+         "volatility": 22.5, "delta": -0.25, "gamma": 0.01, "theta": -0.5,
+         "vega": 0.1, "rho": -0.01, "openInterest": 1000, "timeValue": 1.1,
+         "theoreticalOptionValue": 1.1, "theoreticalVolatility": 22.0,
+         "strikePrice": 6000.0, "expirationDate": "2026-08-21T20:00:00Z",
+         "daysToExpiration": 1, "expirationType": "W", "lastTradingDay": 1,
+         "multiplier": 100.0, "settlementType": "P", "deliverableNote": "",
+         "percentChange": -15.0, "markChange": -0.2, "markPercentChange": -15.0,
+         "intrinsicValue": 0.0, "extrinsicValue": 1.1, "inTheMoney": False,
+         "mini": False, "nonStandard": False, "pennyPilot": True}
+    c.update(over)
+    return c
+
+
+def test_thin_calc_chain_keeps_only_the_fields_the_pages_read():
+    chain = {"symbol": "$SPX", "status": "SUCCESS", "underlyingPrice": 6400.0,
+             "putExpDateMap": {"2026-08-21:1": {"6000.0": [_fat_contract()]}},
+             "callExpDateMap": {"2026-08-21:1": {"6400.0": [
+                 _fat_contract(putCall="CALL", delta=0.5)]}}}
+    out = compute.thin_calc_chain(chain)
+    put = out["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
+    assert put == {"bid": 1.0, "ask": 1.2, "mark": 1.1,
+                   "volatility": 22.5, "delta": -0.25}
+    call = out["callExpDateMap"]["2026-08-21:1"]["6400.0"][0]
+    assert call["delta"] == 0.5
+    # structure the pages iterate is intact; the bulk top-level keys are gone
+    assert set(out) == {"putExpDateMap", "callExpDateMap"}
+
+
+def test_thin_calc_chain_is_null_safe():
+    assert compute.thin_calc_chain(None) is None
+    assert compute.thin_calc_chain({}) == {"putExpDateMap": {}, "callExpDateMap": {}}
+    # a malformed strike entry degrades to an empty list, never raises
+    out = compute.thin_calc_chain({"putExpDateMap": {"e": {"100.0": "junk"}},
+                                   "callExpDateMap": {}})
+    assert out["putExpDateMap"]["e"]["100.0"] == []
+
+
+def test_calc_load_symbol_publishes_the_thinned_chain(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def __init__(self, data): self._d = data
+        def json(self): return self._d
+
+    fat = {"putExpDateMap": {"2026-08-21:1": {"6000.0": [_fat_contract()]}},
+           "callExpDateMap": {}, "status": "SUCCESS"}
+    quote = {"$SPX": {"quote": {"lastPrice": 6400.0}}}
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: _Resp(quote))
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _Resp(fat))
+    cc = compute.calc_load_symbol("SPX")
+    contract = cc["chain"]["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
+    assert "gamma" not in contract and "description" not in contract
+    assert contract["mark"] == 1.1
+    assert cc["price"] == 6400.0

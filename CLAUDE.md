@@ -914,7 +914,23 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   **unchanged confidence 1.0**. The sibling `order_flow._num` had rejected
   non-finites all along; the three now match it. This is completing a parsing
   guard, **not** the `_clamp` shortcut banned below.
-- **`is not None` does not mean "present".** `intraday_trend`'s scorers each declare
+- **A second-pass audit the same evening found the trap in THREE more places**,
+  which is the strongest argument yet for treating the guarded list as a map of
+  where someone has looked: `flow_skew._as_float` passed NaN (a NaN delta seeded
+  `best_dist = nan`, and every later `dist < nan` is False — the NaN contract's
+  IV won the 25Δ pick permanently) and accepted Schwab's **`volatility = -999`**
+  sentinel as a usable IV; and `profile_shape._num` let one NaN volume flip a
+  profile's shape and inflate `balance_strength` **15×**. Same fix as the
+  siblings. `detect_uoa` turned out to be accidentally safe — NaN passes its
+  floors but `int(nan)` raises into the broad `except` — and that accident is
+  now pinned by tests so it cannot be un-fixed silently.
+- **`is not None` does not mean "present", and neither does `or default`.**
+  `blend_trend`'s `scores.get(k, 50.0) or 50.0` replaced a score of exactly
+  **0.0** with neutral 50 — and 0.0 is not a corner: `score_price` clamps to
+  [0,100], so the ENTIRE saturated crash-tape region lands on it. The most
+  bearish possible tape blended **36.5** where one tick off the floor blended
+  14.0, at confidence 1.0 (fixed 2026-08-20 evening; only absence means
+  neutral). `intraday_trend`'s scorers each declare
   their own missing-input policy (drop the component, or return confidence 0) and
   tested it with `x is not None` / `not x` — both of which a NaN survives.
   Measured: `score_vix_context(nan, …)` returned **70.0 at confidence 1.0**, a
@@ -1637,6 +1653,16 @@ only the visible view's, on demand, cached per gamma version
   stale history is benign (append-only for the session), across symbols it would
   draw one symbol's heatmap under another's bars. A view the snapshot lacks is
   published EMPTY, never skipped, for the same reason.
+
+**The same class, next key over (2026-08-20 evening):** `cache:options:calc_chain`
+was **8.77 MB — 53% of ALL prod Redis string bytes** — because `calc_load_symbol`
+cached the raw 20-expiry Schwab chain, ~40 fields per contract, no TTL. The
+Calculator/Rescue pages read exactly FIVE contract fields (`bid`/`ask`/`mark`/
+`volatility`/`delta`) plus the two expiry maps' structure, so
+`compute.thin_calc_chain` now cuts contracts to that whitelist at publish:
+**8.77 MB → 0.68 MB (−92%)**, measured on the real prod payload, page extractors
+verified unchanged on the thinned dict. Fields were cut rather than strikes —
+the leg builder legitimately offers far wings, so the strike ladder stays whole.
 
 **Two more unbounded-growth fixes from the same audit.** `driver_account_view`
 published **every closed trade ever** (160 rows / 158 KB of a 224 KB payload,

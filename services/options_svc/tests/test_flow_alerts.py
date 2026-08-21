@@ -362,3 +362,45 @@ def test_big_delta_should_push_defensive():
     assert flow_alerts.big_delta_should_push(None, cfg) is False
     assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.5}, {}) is False    # no big_delta cfg
     assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.5}, None) is False
+
+
+# ── NaN chain fields must never emit an alert row (2026-08-20) ──────────────
+# These PIN behaviour that is already correct, because the protection is
+# ACCIDENTAL: a NaN volume/OI passes every floor comparison (nan < x is False),
+# and the row is saved only because int(nan) raises into the broad
+# `except Exception`. If anyone removes the int() casts or reorders the block,
+# NaN premiums would silently win the sort — so the invariant gets pinned here.
+
+def _uoa_cfg():
+    return {"uoa": {"k": 2.0, "vol_floor": 10, "premium_floor": 1000, "top_n": 5}}
+
+
+def _chain_with(contract):
+    return {"putExpDateMap": {"2026-08-21:1": {"6000.0": [contract]}},
+            "callExpDateMap": {}}
+
+
+def test_detect_uoa_drops_a_nan_volume_row():
+    from math import nan
+    out = flow_alerts.detect_uoa("$SPX", _chain_with(
+        {"totalVolume": nan, "openInterest": 100, "bid": 1.0, "ask": 1.2}),
+        _uoa_cfg())
+    assert out == []
+
+
+def test_detect_uoa_drops_a_nan_open_interest_row():
+    from math import nan
+    out = flow_alerts.detect_uoa("$SPX", _chain_with(
+        {"totalVolume": 500, "openInterest": nan, "bid": 1.0, "ask": 1.2}),
+        _uoa_cfg())
+    assert out == []
+
+
+def test_detect_uoa_nan_mark_falls_back_to_bid_ask():
+    """A NaN `mark` field is guarded by _mark's `> 0` check and falls back to the
+    bid/ask mid — the row survives with a REAL premium."""
+    from math import nan
+    out = flow_alerts.detect_uoa("$SPX", _chain_with(
+        {"totalVolume": 500, "openInterest": 100, "mark": nan,
+         "bid": 1.0, "ask": 1.2}), _uoa_cfg())
+    assert len(out) == 1 and out[0]["premium"] == 55000.0

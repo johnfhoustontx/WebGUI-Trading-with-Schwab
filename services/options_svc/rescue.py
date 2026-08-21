@@ -247,13 +247,43 @@ def _add_days(expiry, n) -> str:
 
 
 def _leg(side, right, strike, expiry, qty, price):
-    # est_fill_legs prices are display-only (the economics use ``cv`` / the
-    # guarded ns/nl/etc., not these per-leg values). Coalesce a missing
-    # (unpriceable, illiquid) leg price to 0.0 so the RescueLeg contract — whose
-    # ``price`` is a non-Optional float — can always be constructed. A None here
-    # otherwise raises a pydantic ValidationError that sinks the WHOLE advisory.
+    # ⚠ est_fill_legs prices are LOAD-BEARING, not display-only (that claim was
+    # corrected 2026-08-20): paper_adjust._reprice_candidate_net reprices these
+    # legs for the stale-price guard, and apply_roll's _pair_debit books the
+    # close from them. Builders must therefore never hand this helper a None for
+    # a leg the apply path reads — roll close pairs go through _close_pair, which
+    # substitutes the mark's cv-split instead. The 0.0 coalesce remains only as
+    # the last-resort contract guard (RescueLeg.price is a non-Optional float;
+    # a None would raise a pydantic ValidationError and sink the WHOLE advisory).
     return {"side": side, "right": right, "strike": strike, "expiry": expiry,
             "qty": qty, "price": float(price) if price is not None else 0.0}
+
+
+def _close_pair(position, mark, price_leg, right):
+    """The two legs that CLOSE the current spread — [BUY old_short, SELL old_long]
+    at the current expiry — priced live, else split from the mark's ``cv``.
+
+    Every roll candidate carries these AHEAD of its reopen pair, so (a) the
+    stale-price guard reprices the same legs the stored ``net_cash`` was built
+    from (it used to see only the reopen pair, making even unchanged quotes read
+    as drift equal to the whole close debit — no roll_out could ever be applied),
+    and (b) ``apply_roll`` books a REAL exit debit instead of the entry-credit
+    scratch fallback that overstated equity by ``(cv − entry_credit)·100·qty``.
+
+    When either old leg is unpriceable, BOTH carry the cv-split — the BUY-back at
+    ``cv``, the sell at 0.0 — so the pair debit is exactly the ``cv`` the
+    economics used. Never the old 0.0/0.0 coalesce, which ``_pair_debit`` read as
+    a real zero-cost close (fixed 2026-08-20).
+    """
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    os_px = price_leg(sym, expiry, right, position["short_strike"])
+    ol_px = price_leg(sym, expiry, right, position["long_strike"])
+    if os_px is None or ol_px is None:
+        os_px, ol_px = mark.get("current_value") or 0.0, 0.0
+    return [_leg("BUY", right, position["short_strike"], expiry, qty, os_px),
+            _leg("SELL", right, position["long_strike"], expiry, qty, ol_px)]
 
 
 def build_close(position, mark, price_leg, ctx) -> dict | None:
@@ -510,11 +540,7 @@ def build_roll_down(position, mark, price_leg, ctx) -> dict | None:
         "new_width": w,
         "new_expiry": expiry,
         "dte_after": mark.get("dte"),
-        "est_fill_legs": [
-            _leg("BUY", right, position["short_strike"], expiry, qty,
-                 price_leg(sym, expiry, right, position["short_strike"])),
-            _leg("SELL", right, position["long_strike"], expiry, qty,
-                 price_leg(sym, expiry, right, position["long_strike"])),
+        "est_fill_legs": _close_pair(position, mark, price_leg, right) + [
             _leg("SELL", right, new_short, expiry, qty, ns),
             _leg("BUY", right, new_long, expiry, qty, nl),
         ],
@@ -562,7 +588,7 @@ def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
         "new_width": w,
         "new_expiry": new_expiry,
         "dte_after": (mark.get("dte") or 0) + 30,
-        "est_fill_legs": [
+        "est_fill_legs": _close_pair(position, mark, price_leg, right) + [
             _leg("SELL", right, position["short_strike"], new_expiry, qty, ns),
             _leg("BUY", right, position["long_strike"], new_expiry, qty, nl),
         ],
@@ -614,7 +640,7 @@ def build_roll_down_out(position, mark, price_leg, ctx) -> dict | None:
         "new_width": w,
         "new_expiry": new_expiry,
         "dte_after": (mark.get("dte") or 0) + 30,
-        "est_fill_legs": [
+        "est_fill_legs": _close_pair(position, mark, price_leg, right) + [
             _leg("SELL", right, new_short, new_expiry, qty, ns),
             _leg("BUY", right, new_long, new_expiry, qty, nl),
         ],

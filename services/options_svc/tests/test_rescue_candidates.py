@@ -289,3 +289,85 @@ def test_futures_hedge_advisory_for_index():
     assert c["commission"] == rescue.futures_commission(16)
     assert c["net_cash"] == round(-c["commission"], 2)
     assert c["gross_cash"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# roll_out / roll_down_out carry the CLOSE pair too (2026-08-20)
+#
+# These two used to emit only the 2 reopening legs while net_cash included the
+# close debit (-cv). paper_adjust reprices est_fill_legs uniformly, so even
+# UNCHANGED quotes read as drift equal to the whole close cost (measured 187%
+# vs the 15% tolerance) -> every live apply refused with "prices moved". And
+# when repricing was unavailable the apply fell back to closing the old spread
+# at scratch, overstating equity by (cv - entry_credit) x 100 x qty.
+# --------------------------------------------------------------------------- #
+
+def _keyed_pricer(prices):
+    """price_leg keyed by (expiry, strike)."""
+    def _pl(sym, expiry, right, strike):
+        return prices.get((str(expiry), float(strike)))
+    return _pl
+
+
+def test_roll_out_emits_the_close_pair_first_at_the_old_expiry():
+    pl = _keyed_pricer({("2026-07-17", 100.0): 3.00, ("2026-07-17", 95.0): 0.50,
+                        ("2026-08-16", 100.0): 4.20, ("2026-08-16", 95.0): 1.70})
+    c = rescue.build_roll_out(_pos(), _mark(current_value=2.50), pl, ctx={})
+    legs = c["est_fill_legs"]
+    assert [(g["side"], g["strike"], g["expiry"]) for g in legs] == [
+        ("BUY", 100.0, "2026-07-17"),   # close: buy back the old short
+        ("SELL", 95.0, "2026-07-17"),   # close: sell the old long
+        ("SELL", 100.0, "2026-08-16"),  # reopen
+        ("BUY", 95.0, "2026-08-16"),
+    ]
+    assert legs[0]["price"] == 3.00 and legs[1]["price"] == 0.50
+
+
+def test_roll_out_leg_reprice_matches_its_own_net_cash():
+    """The stale guard's basis: repricing est_fill_legs with the SAME pricer that
+    built the candidate must land on net_cash (leg-based close ~ cv). Pre-fix the
+    two differed by the entire close debit."""
+    prices = {("2026-07-17", 100.0): 3.00, ("2026-07-17", 95.0): 0.50,
+              ("2026-08-16", 100.0): 4.20, ("2026-08-16", 95.0): 1.70}
+    pl = _keyed_pricer(prices)
+    c = rescue.build_roll_out(_pos(), _mark(current_value=2.50), pl, ctx={})
+    gross = 0.0
+    for g in c["est_fill_legs"]:
+        sign = 1.0 if g["side"] == "SELL" else -1.0
+        gross += sign * g["price"] * 100 * g["qty"]
+    assert round(gross - c["commission"], 2) == c["net_cash"]
+
+
+def test_roll_down_out_emits_the_close_pair_too():
+    prices = {("2026-07-17", 100.0): 3.00, ("2026-07-17", 95.0): 0.50,
+              ("2026-08-16", 95.0): 2.10, ("2026-08-16", 90.0): 0.90}
+    c = rescue.build_roll_down_out(_pos(), _mark(current_value=2.50),
+                                   _keyed_pricer(prices), ctx={})
+    legs = c["est_fill_legs"]
+    assert len(legs) == 4
+    assert legs[0]["side"] == "BUY" and legs[0]["expiry"] == "2026-07-17"
+    gross = sum((1.0 if g["side"] == "SELL" else -1.0) * g["price"] * 100
+                for g in legs)
+    assert round(gross - c["commission"], 2) == c["net_cash"]
+
+
+def test_roll_out_close_pair_falls_back_to_the_marks_cv_split():
+    """Old legs unpriceable (illiquid/off-hours): the close pair carries the
+    mark's cv on the BUY-back and 0.0 on the sell, so the pair debit IS cv —
+    the exact number net_cash used — never a fabricated 0.0-0.0 scratch."""
+    pl = _keyed_pricer({("2026-08-16", 100.0): 4.20, ("2026-08-16", 95.0): 1.70})
+    c = rescue.build_roll_out(_pos(), _mark(current_value=2.50), pl, ctx={})
+    legs = c["est_fill_legs"]
+    assert legs[0]["price"] == 2.50 and legs[1]["price"] == 0.0
+
+
+def test_roll_down_close_pair_uses_the_cv_split_when_unpriceable():
+    """The 4-leg roll_down had the same hole one layer down: _leg coalesced an
+    unpriceable close leg to 0.0, and paper_adjust's _pair_debit read that as a
+    REAL price — booking a credit-to-close when only the long was priceable."""
+    prices = {("2026-07-17", 95.0): 2.10, ("2026-07-17", 90.0): 0.90}
+    # old short (100) unpriceable; new strikes 95/90 priceable
+    c = rescue.build_roll_down(_pos(), _mark(current_value=2.50),
+                               _keyed_pricer(prices), ctx={})
+    legs = c["est_fill_legs"]
+    assert legs[0]["price"] == 2.50 and legs[1]["price"] == 0.0

@@ -116,8 +116,14 @@ def blend_trend(scores, confs, weights=None):
     weights = weights or TREND_WEIGHTS
     num = den = 0.0
     for k, w in weights.items():
-        c = float(confs.get(k, 0.0) or 0.0)
-        s = float(scores.get(k, 50.0) or 50.0)
+        c = _finite(confs.get(k)) or 0.0
+        # Only ABSENCE means neutral. `scores.get(k, 50.0) or 50.0` used to
+        # replace a score of exactly 0.0 with 50 -- and 0.0 is the entire
+        # saturated crash-tape region of score_price (clamped to [0,100]), so
+        # the most bearish possible tape blended 22.5 points BULLISH of one
+        # tick off the floor, at unchanged confidence (fixed 2026-08-20).
+        s = _finite(scores.get(k))
+        s = 50.0 if s is None else s
         num += w * s * c
         den += w * c
     if den <= 0:

@@ -5244,6 +5244,43 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
 # fns).
 
 
+# The five contract fields the Calculator/Rescue pages actually read (verified
+# against every `.get("...")` on a contract dict in both pages). Everything else
+# in Schwab's ~40-field contract dicts was dead weight: the raw 20-expiry chain
+# cached 8.77 MB — 53% of ALL prod Redis string bytes — with no TTL (2026-08-20).
+_CALC_CONTRACT_FIELDS = ("bid", "ask", "mark", "volatility", "delta")
+
+
+def thin_calc_chain(chain):
+    """The two expiry maps with each contract cut to `_CALC_CONTRACT_FIELDS`.
+
+    Keeps exactly the structure the pages iterate — `{put,call}ExpDateMap` →
+    expiry key → strike key → [contracts] — and nothing else. Cutting FIELDS
+    rather than cropping STRIKES is deliberate: the leg builder legitimately
+    offers far wings (a user hedging with a 10-delta teenie), so the strike
+    ladder must stay whole; no page reads any other per-contract field or any
+    other top-level key. None passes through (the degrade path). Junk-tolerant:
+    a malformed strike entry becomes an empty list, never a raise.
+    """
+    if chain is None:
+        return None
+    out = {}
+    for map_key in ("putExpDateMap", "callExpDateMap"):
+        exp_out = {}
+        for exp_key, strikes in ((chain.get(map_key) or {}) or {}).items():
+            strike_out = {}
+            for strike_key, contracts in (strikes or {}).items():
+                if not isinstance(contracts, list):
+                    strike_out[strike_key] = []
+                    continue
+                strike_out[strike_key] = [
+                    {f: c.get(f) for f in _CALC_CONTRACT_FIELDS if f in c}
+                    for c in contracts if isinstance(c, dict)]
+            exp_out[exp_key] = strike_out
+        out[map_key] = exp_out
+    return out
+
+
 def calc_load_symbol(symbol) -> dict:
     """Fetch the quote + option chain for ``symbol`` → JSON-safe loader payload.
 
@@ -5272,7 +5309,7 @@ def calc_load_symbol(symbol) -> dict:
 
     lo, hi = oc.generate_price_range(price) if price else (0.0, 0.0)
     return {"symbol": symbol, "api": api, "price": price,
-            "range_lo": lo, "range_hi": hi, "chain": chain}
+            "range_lo": lo, "range_hi": hi, "chain": thin_calc_chain(chain)}
 
 
 # Strategy codes the analytic ``calc_summary`` handles exactly; everything else
