@@ -83,5 +83,10 @@ customtkinter>=5.2       # dark-themed Tk widgets for the always-on-top NQ deale
                          #   entrypoint — and the whole test suite — runs without it installed.
                          #   Pulls in darkdetect. Tk itself ships with CPython.
 
+# --- Spoken alerts (NEW: Desk page audio) ---
+edge-tts>=7.0             # Microsoft neural TTS for the Desk's spoken alerts — no API key.
+                          #   Pulls only aiohttp (already required) + tabulate. webgui/voice.py
+                          #   guards the import — absent it, the Desk simply does not speak.
+
 # --- Testing (P, O, S, D) ---
 pytest

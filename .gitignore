@@ -68,6 +68,9 @@ webgui/data/eod/
 # `git status --porcelain` by design. app_settings._load_from_disk falls back to
 # DEFAULTS when the file is absent, so an untracked file costs nothing.
 webgui/data/settings.json
+# Generated text-to-speech clip cache for the Desk's spoken alerts. Regenerated
+# on demand by webgui/voice.py; nothing here is worth versioning.
+webgui/data/voice/
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
