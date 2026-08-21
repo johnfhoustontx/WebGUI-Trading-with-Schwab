@@ -4,6 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-20 (**A streaming HTML mirror of the Desk — `/desk/live`
++ `/desk/stream`.**
+- **Why a second screen at all.** `/desk` is a NiceGUI page: a websocket, a Vue runtime
+  and a live client connection per tab. That is right for the screen you click through
+  and wrong for the second monitor, the wall display or the phone — all of which want a
+  page that survives a laptop sleeping with nothing to reconnect but an HTTP request.
+  `webgui/desk_stream.py` serves the same screen as ONE static document plus a
+  `text/event-stream`.
+- **The rule that shaped it: the mirror COMPOSES, it never restates.** Every number
+  comes out of a builder `/desk` itself calls — `dealer_rows`, `opportunity_rows`,
+  `flow_rows`, `position_rows`/`positions_summary`/`summary_line`, `freshness_facts`,
+  `countdown_facts`, `bullbear_chips`, every `fmt_*`. `snapshot()` is PURE and returns
+  display-ready **strings**, so the client JS holds no formatting logic to drift with and
+  the whole mirror is unit-tested without a browser or Redis. A mirror that re-derived so
+  much as a rounding rule would be a second screen quietly disagreeing with the first —
+  the `/sentiment/sectors`-vs-`/sentiment/rotation` bug, reproduced on purpose.
+- **Two cadences, not one.** `clock` every second (the countdown moves every second, and
+  it doubles as the SSE keep-alive — an idle event stream gets dropped by proxies, and a
+  frozen countdown looks exactly like frozen data); `desk` only when a cache version
+  actually moves, probed on the Desk's own 2 s `read_versions` batch. Pushing the whole
+  screen once a second would be ~50x the bytes to animate one tile. The countdown is
+  computed SERVER-side deliberately: every session bound comes from
+  `shared.market_calendar`, and a JS countdown would need its own NYSE calendar.
+- **The one genuinely new thing, and its guard.** The page modules express a data-driven
+  colour as a fixed Tailwind class, which this document cannot render (it ships no
+  Tailwind). `tw_hex()` resolves those finite maps — `flow._TONE`, `bullbear._CLASSES`,
+  `matrix._SIGNAL_CLASS`, `header._REGIME_BG` — against a name→hex table, and returns
+  **None** for a colour it does not know rather than guessing. That is what lets
+  `test_every_flow_tone_the_flow_page_can_stamp_resolves_to_a_real_hex` fail when a new
+  alert type appears, instead of the mirror silently painting it in a fallback hue. ⚠ Key
+  coverage alone would have been VACUOUS there — `FLOW_TONE_HEX` is built *from*
+  `flow._TONE` — so the assertion is on the hex being non-None.
+- **Verified live** (worktree, throwaway harness on :9700, read-only against prod's
+  cache): 4 dealer rows, 6 board rows, 9 flow alerts, 8 of 39 positions with the
+  `SHOWING 8` clause present, 11 Bull/Bear chips, the clock ticking off the stream, the
+  stale-feed path withholding walls with "Walls withheld — GEX feed stale · 366m ago",
+  the structure map's four marks placed, no overflow at 800px or 1920px. **+33 tests**
+  (webgui 2320 -> 2353, all green).
+- **The panel grid is ALWAYS 2x2** — a deliberate DIVERGENCE from `/desk`, which goes
+  one-column below ~2104px. This screen gets pinned to a display and read from across a
+  room, so a layout that reflowed on width would move every panel somewhere the eye does
+  not expect. `minmax(0, 1fr)` is the load-bearing half (a grid item's automatic minimum
+  is its content, so a bare `1fr` lets the tables push the PAGE wider instead of
+  shrinking), `table-layout: fixed` makes the truncating cells actually ellipsize, and
+  each panel body carries `overflow-x: auto` as the floor — a column too narrow even for
+  the truncated table scrolls its own TABLE, never the page.
+
 **Last updated:** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
 fixing it was overstated by a factor of ten.**
 - **The defect was real at the function level.** `sector_rotation_assessment.

@@ -18,7 +18,9 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
+from fastapi import Request  # noqa: E402
+from fastapi.responses import (HTMLResponse, RedirectResponse,  # noqa: E402
+                               StreamingResponse)
 from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
@@ -29,6 +31,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 import alerts  # noqa: E402
 import app_settings  # noqa: E402
 import bus_client  # noqa: E402
+import desk_stream  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
@@ -281,6 +284,32 @@ def _serve_eod_file(date: str, which: str = "summary"):
             "<h1>No report for that date — click Generate first.</h1>",
             status_code=404)
     return HTMLResponse(path.read_text(encoding="utf-8"))
+
+
+# ── Desk — the standalone streaming mirror (/desk/live + /desk/stream) ────────
+# Raw routes rather than a second ``@ui.page``: the whole point of this screen is
+# that it carries NO NiceGUI runtime, so a wall display, a phone or a sleeping
+# laptop reconnects with an HTTP request instead of a websocket. The document is
+# static and every number arrives over the event stream — see webgui/desk_stream.py.
+@app.get(desk_stream.PAGE_ROUTE)
+def _serve_desk_live():
+    """The Desk mirror document — self-contained, so its own <style> applies."""
+    return HTMLResponse(desk_stream.document())
+
+
+@app.get(desk_stream.STREAM_ROUTE)
+def _serve_desk_stream(request: Request):
+    """The Desk as server-sent events: ``desk`` on change, ``clock`` every second.
+
+    ``X-Accel-Buffering: no`` and the disabled cache are what stop a proxy (or a
+    browser's own buffering heuristics) holding frames back until some buffer
+    fills — an event stream that arrives in bursts is indistinguishable from a
+    frozen page, which is the one failure this screen exists to avoid.
+    """
+    return StreamingResponse(
+        desk_stream.event_stream(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/manuals/file")
