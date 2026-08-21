@@ -49,3 +49,46 @@ def more_tail(n):
     except (TypeError, ValueError):
         return ""
     return f"Plus {n} more." if n > 0 else ""
+
+
+def _sentence(symbol, body, extra):
+    """``'S P Y. <body>.'`` plus the burst tail. The shared shape of both phrases."""
+    parts = []
+    sym = spell(symbol)
+    if sym:
+        parts.append(f"{sym}.")
+    parts.append(f"{body}.")
+    tail = more_tail(extra)
+    if tail:
+        parts.append(tail)
+    return " ".join(parts)
+
+
+def flow_phrase(row, extra=0):
+    """``'S P Y. Crossover alert, calls over.'``
+
+    ``kind`` and ``side`` are read straight off the row that
+    ``pages.options.flow.alert_rows`` built, so the spoken words are the SAME
+    words the panel prints. That is not tidiness — the Desk's governing rule is
+    that it composes and never re-derives, and a spoken vocabulary drifting
+    from the printed one would be the documented sectors-vs-rotation bug in a
+    new place.
+    """
+    d = row if isinstance(row, dict) else {}
+    kind = str(d.get("kind") or "Flow").strip() or "Flow"
+    side = str(d.get("side") or "").strip()
+    body = f"{kind} alert" + (f", {side.lower()}" if side else "")
+    return _sentence(d.get("symbol"), body, extra)
+
+
+def position_phrase(row, extra=0):
+    """``'S P Y. New position, put credit spread.'``
+
+    Only ever spoken for a position that is genuinely NEW to the book. A flag
+    change (OK -> AT RISK -> RESCUE) glows but stays silent, by decision — see
+    the design doc.
+    """
+    d = row if isinstance(row, dict) else {}
+    strat = str(d.get("strategy") or "").replace("_", " ").strip().lower()
+    body = f"New position, {strat}" if strat else "New position"
+    return _sentence(d.get("symbol"), body, extra)
