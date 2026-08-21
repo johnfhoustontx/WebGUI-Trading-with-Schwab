@@ -1722,23 +1722,63 @@ def test_both_glow_hues_have_a_rule():
 
 def test_the_animation_runs_for_the_advertised_ten_seconds():
     assert d.GLOW_SEC == 10.0
-    assert f"deskNeon {d.GLOW_SEC:g}s" in d.DESK_NEON_CSS
+    assert "animation-name: deskNeon;" in d.DESK_NEON_CSS
+    assert f"animation-duration: {d.GLOW_SEC:g}s;" in d.DESK_NEON_CSS
 
 
-def test_the_step_rules_come_after_the_shorthand_that_would_reset_them():
+def _base_neon_rule():
+    """The body of the ``.desk-neon`` rule — the base the step rules refine."""
+    css = d.DESK_NEON_CSS
+    start = css.index(".desk-neon {")
+    return css[start:css.index("}", start)]
+
+
+def test_the_base_rule_declares_no_delay_for_a_step_rule_to_out_order():
     """THE trick, and the one thing about it a reader would not guess.
 
-    ``animation: deskNeon 10s linear forwards`` is a SHORTHAND, so it resets
-    every ``animation-*`` longhand it does not name — ``animation-delay``
-    included, back to 0s. ``.desk-neon`` and ``.desk-neon-3`` are both a single
-    class, so specificity cannot break the tie and SOURCE ORDER decides: put the
-    step rules first and every glow silently restarts from full brightness on
-    each repaint, which is the exact bug the negative delay exists to prevent.
+    ``.desk-neon`` and ``.desk-neon-3`` are both a single class, so specificity
+    cannot break the tie between them — whichever declares ``animation-delay``
+    LAST in source order wins. The base rule therefore must not declare one at
+    all, and in particular must not use the ``animation:`` SHORTHAND, which
+    resets every ``animation-*`` longhand it does not name (``animation-delay``
+    back to 0s included) whether the author meant it or not.
+
+    Written as a shorthand it happens to work only because the step rules are
+    concatenated last in the f-string — an invariant nothing but string order
+    holds up, whose failure mode is a glow that never expires and so is
+    indistinguishable from the feature not having been built. Longhands make it
+    structural: the step rule wins wherever it sits in the file.
     """
-    css = d.DESK_NEON_CSS
-    shorthand = css.index(".desk-neon {")
+    base = _base_neon_rule()
+    assert "animation:" not in base           # the resetting shorthand
+    assert "animation-delay" not in base
     for i in range(d.GLOW_STEPS):
-        assert css.index(f".desk-neon-{i} ") > shorthand
+        assert f".desk-neon-{i} {{ animation-delay:" in d.DESK_NEON_CSS
+
+
+def test_the_glow_does_not_fill_forwards_over_the_rows_hover():
+    """``animation-fill-mode: forwards`` would kill the row's hover cue.
+
+    Animation declarations outrank normal author declarations (CSS Cascade
+    §6.6.2), so an element still applying the 100% keyframe —
+    ``background-color: transparent`` — beats the row's ``hover:bg-…`` for as
+    long as the class stays on it. That is until the next rebuild: seconds
+    during market hours, but the rest of the session for an alert arriving at
+    15:59, on a row that is ``cursor-pointer`` and click-navigates. The cue
+    dies on exactly the row the user was just told to look at.
+
+    ``forwards`` buys nothing here: the 100% keyframe (transparent, no shadow)
+    IS the row's author default, so dropping it gives an identical end state
+    with no snap. It looks like an obvious improvement, hence this test.
+    """
+    assert "forwards" not in d.DESK_NEON_CSS
+
+
+def test_the_zero_step_delay_is_not_written_as_negative_zero():
+    # ``-0s`` is valid and behaves identically; it just reads as a generator
+    # artifact in a stylesheet a human will open.
+    assert ".desk-neon-0 { animation-delay: 0s; }" in d.DESK_NEON_CSS
+    assert "-0s" not in d.DESK_NEON_CSS
 
 
 def test_the_glow_map_drops_only_expired_entries():
@@ -1751,3 +1791,48 @@ def test_glow_step_survives_a_nonsense_timestamp():
     # Page state is a plain dict; a wedged entry must go dark, never raise on
     # the paint path.
     assert d.glow_step(started="soon", now=100.0) is None
+
+
+def test_glow_step_goes_dark_on_a_nan_instead_of_raising():
+    """A NaN is the one bad value that survives the ``float()`` coercion.
+
+    ``float('nan')`` raises nothing, so the try/except cannot catch it, and
+    EVERY comparison against a NaN is False — so the obvious range guard
+    (``if elapsed < 0 or elapsed >= span``) is False on both halves and waves it
+    through to ``int(nan)``, which raises ValueError. That raise lands on the
+    paint path, inside ``prune_glows``, which runs this over every entry in the
+    map: one wedged timestamp takes down a whole panel repaint, not one row.
+    """
+    nan = float("nan")
+    assert d.glow_step(started=0.0, now=nan) is None
+    assert d.glow_step(started=nan, now=5.0) is None
+    assert d.glow_step(started=0.0, now=5.0, span=nan) is None
+
+
+def test_the_glow_map_survives_a_nan_timestamp():
+    # The reason the line above matters: prune runs mid-paint over every entry.
+    glow = {"a": ("new", float("nan")), "b": ("flag", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
+
+
+def test_glow_classes_refuses_a_hue_with_no_rule_behind_it():
+    """An unknown kind must paint nothing, not a half-glow.
+
+    ``desk-neon-<typo>`` leaves ``--neon`` unset, and a ``box-shadow`` naming an
+    undefined custom property is invalid at computed-value time — BOTH shadow
+    declarations drop. The row would flash a background and never glow, which
+    looks like a rendering quirk rather than a wiring bug. GLOW_NEW/GLOW_FLAG
+    exist precisely so there is a finite set to check against.
+    """
+    assert d.glow_classes(("nwe", 100.0), now=103.0) == ""
+    assert d.glow_classes((None, 100.0), now=103.0) == ""
+    for kind in (d.GLOW_NEW, d.GLOW_FLAG):
+        assert d.glow_classes((kind, 100.0), now=103.0) != ""
+
+
+def test_the_step_clamp_cannot_produce_a_negative_class():
+    # ``min(steps - 1, max(0, …))`` undoes its own floor when ``steps`` is 0 and
+    # emits ``desk-neon--1``. Unreachable today — nothing passes ``steps`` — but
+    # the fix is free (apply the floor last) and the comment beside it claims
+    # the clamp is airtight, so it should be.
+    assert d.glow_step(started=100.0, now=100.0, steps=0) >= 0

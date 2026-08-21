@@ -1275,6 +1275,7 @@ GLOW_STEPS = 10
 # both already mean "look here" on this page.
 GLOW_NEW = "new"
 GLOW_FLAG = "flag"
+GLOW_KINDS = (GLOW_NEW, GLOW_FLAG)
 
 
 def glow_step(started, now, span=GLOW_SEC, steps=GLOW_STEPS):
@@ -1290,12 +1291,27 @@ def glow_step(started, now, span=GLOW_SEC, steps=GLOW_STEPS):
         elapsed = float(now) - float(started)
     except (TypeError, ValueError):
         return None
-    if elapsed < 0 or elapsed >= span:
+    # ⚠ INVERTED ON PURPOSE — do not "clean this up" to
+    # ``if elapsed < 0 or elapsed >= span``. Every comparison against a NaN is
+    # False, so that spelling is False on BOTH halves and waves a NaN through to
+    # ``int(nan)``, which raises ValueError — on the paint path, inside
+    # ``prune_glows``, which runs this over every entry in the map: one wedged
+    # timestamp takes down a whole panel repaint rather than one row. Written
+    # this way round the NaN makes the ``not`` True and lands on the safe answer.
+    # (Same family as the ``min(hi, nan) == hi`` trap CLAUDE.md documents, where
+    # a missing reading rendered as a maximum one. NaN does not degrade; it has
+    # to be caught by name.)
+    if not (0 <= elapsed < span):
         return None
-    # ``min`` is not belt-and-braces: float division at the very top of the
-    # range can yield exactly ``steps``, and ``desk-neon-10`` has no rule behind
-    # it — the animation would silently restart instead of finishing.
-    return min(steps - 1, max(0, int(elapsed / span * steps)))
+    # The ``min`` is DEFENSIVE, not observed. For it to fire, the float division
+    # at the very top of the range would have to round up to exactly ``steps``,
+    # and it does not — checked over the 500 consecutive doubles below each of
+    # eight spans plus 2M random samples, never once. It stays because it is
+    # free, because a loosened range check above would make it load-bearing, and
+    # because ``desk-neon-10`` has no rule behind it, so the failure it guards
+    # is silent (the animation restarts instead of finishing). The floor is
+    # applied LAST so a nonsense ``steps`` cannot yield ``desk-neon--1``.
+    return max(0, min(steps - 1, int(elapsed / span * steps)))
 
 
 def glow_classes(entry, now):
@@ -1306,6 +1322,13 @@ def glow_classes(entry, now):
     if not entry:
         return ""
     kind, started = entry
+    # A kind outside the finite set is a WIRING bug, and an unguarded one is
+    # invisible: ``desk-neon-<typo>`` leaves ``--neon`` unset, and a
+    # ``box-shadow`` naming an undefined custom property is invalid at
+    # computed-value time, so BOTH shadow declarations drop. The row gets the
+    # background flash and no glow at all. Paint nothing instead.
+    if kind not in GLOW_KINDS:
+        return ""
     step = glow_step(started, now)
     if step is None:
         return ""
@@ -1330,15 +1353,30 @@ def prune_glows(glow, now):
 # NOT a Tailwind arbitrary value, which is where the documented ``var(...)``
 # JIT limitation bites.
 #
-# ⚠ ORDER IS LOAD-BEARING, and it is the whole trick. ``animation:`` is a
-# SHORTHAND, so it resets every ``animation-*`` longhand it does not name —
+# ⚠ THE BASE RULE USES LONGHANDS, DELIBERATELY. ``animation:`` is a SHORTHAND,
+# so it resets every ``animation-*`` longhand it does not name —
 # ``animation-delay`` back to 0s included. ``.desk-neon`` and ``.desk-neon-3``
-# are both one class, so specificity cannot break the tie and SOURCE ORDER
-# decides: the step rules must come LAST, or every repaint silently restarts the
-# glow at full brightness and the row never goes dark. Pinned by
-# ``test_the_step_rules_come_after_the_shorthand_that_would_reset_them``.
+# are both one class, so specificity cannot break that tie and SOURCE ORDER
+# would decide it: with a shorthand the whole resume trick rests on the step
+# rules happening to be concatenated last in the f-string below, and its failure
+# mode is a glow that never expires — indistinguishable from the feature never
+# having been built. Spelled as longhands, ``.desk-neon`` never declares a delay
+# at all, so the step rule wins wherever it sits. Pinned by
+# ``test_the_base_rule_declares_no_delay_for_a_step_rule_to_out_order``.
+#
+# No ``animation-fill-mode: forwards`` either, and that is not an oversight:
+# animation declarations outrank normal author declarations (CSS Cascade
+# §6.6.2), so an element still applying the 100% keyframe
+# (``background-color: transparent``) would beat the row's ``hover:bg-…`` for as
+# long as the class stayed on it — the rest of the session for an alert arriving
+# at 15:59, on a row that is ``cursor-pointer`` and click-navigates. It buys
+# nothing anyway: that 100% keyframe IS the row's author default, so the end
+# state is identical without it.
 _NEON_STEPS_CSS = "\n".join(
-    f".desk-neon-{i} {{ animation-delay: -{i}s; }}" for i in range(GLOW_STEPS))
+    # ``-0s`` is valid and behaves identically, but it reads as a generator
+    # artifact in a stylesheet a human will open.
+    f".desk-neon-{i} {{ animation-delay: {'0s' if i == 0 else f'-{i}s'}; }}"
+    for i in range(GLOW_STEPS))
 
 DESK_NEON_CSS = f"""
 @keyframes deskNeon {{
@@ -1349,7 +1387,9 @@ DESK_NEON_CSS = f"""
   100% {{ box-shadow: inset 0 0 0 0 transparent, 0 0 0 0 transparent;
           background-color: transparent; }}
 }}
-.desk-neon {{ animation: deskNeon {GLOW_SEC:g}s linear forwards;
+.desk-neon {{ animation-name: deskNeon;
+              animation-duration: {GLOW_SEC:g}s;
+              animation-timing-function: linear;
               border-radius: 3px; }}
 .desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
 .desk-neon-{GLOW_FLAG} {{ --neon: {FLIP_HEX}; }}
