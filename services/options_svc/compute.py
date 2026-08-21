@@ -6639,6 +6639,70 @@ def compute_rescue(position_id, source: str = "paper") -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _spec_float(spec, key, required):
+    """``(value, error)`` for a float field of an ad-hoc rescue spec.
+
+    THE one copy: defined byte-for-byte inside three separate ad-hoc validators
+    until 2026-08-20. Blank/whitespace counts as missing so an empty form field
+    reports "required" rather than "must be a number".
+    """
+    raw = spec.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return (None, f"{key} is required") if required else (None, None)
+    try:
+        return float(raw), None
+    except (TypeError, ValueError):
+        return None, f"{key} must be a number"
+
+
+def _assemble_advisory(pos, mark, engine_mark, *, price_leg, gex,
+                       candidates_fn, risk_fn, position_id, source,
+                       symbol, strategy) -> dict:
+    """Regime context → engine → validated ``RescueAdvisory`` dict.
+
+    The shared tail of the three ad-hoc advisory builders, which were structural
+    clones differing by exactly TWO lines — which candidates function and which
+    risk function. Injecting those two is the whole difference, so a new strategy
+    family now needs a mark builder and nothing else (consolidated 2026-08-20).
+
+    Every candidate is forced to ``apply_kind="advisory"``: an ad-hoc board
+    describes a trade the paper book does not hold, so there is nothing to apply
+    to. Fully defensive → ``{"error": "..."}``; never raises.
+    """
+    try:
+        regime = _rescue_regime()
+        cands = candidates_fn(pos, engine_mark, price_leg, gex, regime)
+        risk = risk_fn(pos, engine_mark, gex, regime)
+
+        context = []
+        if cands and cands[0].get("context"):
+            context = list(cands[0]["context"])
+
+        valid = []
+        for c in cands:
+            try:
+                c = {**c, "apply_kind": "advisory", "applies": False}
+                valid.append(RescueCandidate(**c))
+            except Exception:
+                continue
+
+        adv = RescueAdvisory(
+            position_id=position_id,
+            source=source,
+            symbol=symbol,
+            strategy=strategy,
+            state=risk.get("state", "ok"),
+            heat=risk.get("heat", 0.0),
+            mark=RescueMark(**mark),
+            context=context,
+            candidates=valid,
+            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
+        )
+        return adv.model_dump()
+    except Exception as e:  # noqa: BLE001 — the board must render an error, not 500
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 def _advisory_from_single(pos, *, source: str = "adhoc",
                           position_id="adhoc") -> dict:
     """Rescue-advisory core for a SINGLE-option position (long / naked call/put).
@@ -6699,39 +6763,12 @@ def _advisory_from_single(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _single_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_single_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_single_candidates, risk_fn=_assess_single_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6748,19 +6785,10 @@ def _adhoc_single(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        strike, err = _flt("short_strike", True)
+        strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:
@@ -6865,39 +6893,12 @@ def _advisory_from_debit(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _debit_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_debit_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_debit_candidates, risk_fn=_assess_debit_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6914,23 +6915,14 @@ def _adhoc_debit(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        long_strike, err = _flt("long_strike", True)
+        long_strike, err = _spec_float(spec, "long_strike", True)
         if err:
             return {"error": err}
-        short_strike, err = _flt("short_strike", True)
+        short_strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
         # entry_credit is SIGNED (NEGATIVE = debit paid); do NOT reject a negative.
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:
@@ -7032,39 +7024,12 @@ def _advisory_from_range(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _range_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_range_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_range_candidates, risk_fn=_assess_range_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7178,28 +7143,19 @@ def compute_rescue_adhoc(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        short_strike, err = _flt("short_strike", True)
+        short_strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
-        long_strike, err = _flt("long_strike", True)
+        long_strike, err = _spec_float(spec, "long_strike", True)
         if err:
             return {"error": err}
-        call_short, err = _flt("call_short", strategy == "IC")
+        call_short, err = _spec_float(spec, "call_short", strategy == "IC")
         if err:
             return {"error": err}
-        call_long, err = _flt("call_long", strategy == "IC")
+        call_long, err = _spec_float(spec, "call_long", strategy == "IC")
         if err:
             return {"error": err}
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:

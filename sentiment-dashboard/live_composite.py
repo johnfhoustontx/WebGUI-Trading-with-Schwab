@@ -206,26 +206,7 @@ def reset_pcr_cache():
     _PCR_CACHE.update(ts=0.0, pcr=None)
 
 
-def _pcr_from_chain(chain):
-    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume."""
-    if not chain:
-        return None
-    pv = cv = 0
-    for strikes in (chain.get("putExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    pv += v
-    for strikes in (chain.get("callExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    cv += v
-    return round(pv / cv, 3) if cv > 0 else None
-
+from scoring.put_call import pcr_from_chain as _pcr_from_chain  # noqa: E402
 
 def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None):
     """Compute the live intraday composite snapshot (backfill-snapshot shaped)."""

@@ -111,27 +111,7 @@ def commit_trend_regime(spy_closes, lookback_days=trend_regime.HYSTERESIS_DAYS +
     return result, (committed or result.state), days
 
 
-def pcr_from_chain(chain):
-    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume. Ported from source
-    sentiment_dashboard.py:2939-2953."""
-    if not chain:
-        return None
-    pv = cv = 0
-    for strikes in (chain.get("putExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    pv += v
-    for strikes in (chain.get("callExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    cv += v
-    return round(pv / cv, 3) if cv > 0 else None
-
+from scoring.put_call import pcr_from_chain  # noqa: E402  (the ONE copy)
 
 def _pct_change_n(closes, n):
     """%-change from n sessions ago to last close, or None. Mirrors source

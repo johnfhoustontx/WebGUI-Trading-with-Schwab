@@ -1246,12 +1246,20 @@ GTH collection can't silently move the Gamma display flip, and
 gate — flipping it to inclusive re-opens a checkpoint slot at 15:30 ET inside the
 no-new-entries window. See the 2026-08-02 "Last updated" entry.
 
+**The version-gate poll idiom is `webgui/pages/view_watch.watch_view(view, on_change)`**
+— seed the version, probe the cheap `{key}:ver` on a timer, repaint only when it
+moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing
+the canonical shape) were converted 2026-08-20, the rest have genuinely different
+shapes. ⚠ It deliberately does NOT swallow repaint errors — only the
+deleted-client case, via `ui_guard`. Anything else propagates so NiceGUI logs it.
+
 **`shared/market_calendar.py` is the single source of truth for the NYSE calendar**
 (holidays **derived algorithmically** — no yearly edit) **and session/window
 predicates**. Ten duplicated holiday sets and fourteen hardcoded window constants
 were consolidated onto it. **Do not add a new holiday literal or window constant
-anywhere** — add it here, or to `config/sessions.toml`. The one site left outside
-it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
+anywhere** — add it here, or to `config/sessions.toml`. The two `tools/` copies went on 2026-08-20 (their justifying comment named the
+wrong module — market_calendar pulls in no heavy deps, measured). The one site
+left outside it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
 2026-07-08, only `RISK_LIMITS` is still read), deliberately exempt.
 `shared/` is a namespace package, so
 `from shared.market_calendar import ...` resolves once the repo root is on
@@ -1812,7 +1820,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
 .venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1209
+.venv\Scripts\python -m pytest services\options_svc    # 1214
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239

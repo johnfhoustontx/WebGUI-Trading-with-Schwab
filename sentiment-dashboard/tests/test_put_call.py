@@ -127,3 +127,43 @@ def test_score_sector_weighted_cap_weighting():
     # blended ≈ 1.11 → falls in the 1.1–1.3 band → score=2 (or just
     # above). Either way, materially better than the simple-avg case.
     assert r.score >= 2
+
+
+# ── the chain-summing helper lives here, once (2026-08-20) ─────────────────
+
+def test_pcr_from_chain_sums_put_and_call_volume():
+    """This was duplicated byte-for-byte in `services/sentiment_svc/compute.py`
+    and `sentiment-dashboard/live_composite.py` — two copies feeding the SAME
+    composite, so a threshold tweak in one would silently diverge the live
+    P/C from the sector table's."""
+    from scoring.put_call import pcr_from_chain
+    chain = {
+        "putExpDateMap": {"2026-09-18:30": {"100.0": [{"totalVolume": 300}],
+                                            "105.0": [{"totalVolume": 200}]}},
+        "callExpDateMap": {"2026-09-18:30": {"100.0": [{"totalVolume": 250}]}},
+    }
+    assert pcr_from_chain(chain) == 2.0
+
+
+def test_pcr_from_chain_none_without_call_volume():
+    from scoring.put_call import pcr_from_chain
+    assert pcr_from_chain(None) is None
+    assert pcr_from_chain({}) is None
+    assert pcr_from_chain({"putExpDateMap": {"e": {"1": [{"totalVolume": 5}]}},
+                           "callExpDateMap": {}}) is None
+
+
+def test_pcr_from_chain_ignores_non_positive_volume():
+    from scoring.put_call import pcr_from_chain
+    chain = {"putExpDateMap": {"e": {"1": [{"totalVolume": 0}, {"totalVolume": 10}]}},
+             "callExpDateMap": {"e": {"1": [{"totalVolume": None}, {"totalVolume": 5}]}}}
+    assert pcr_from_chain(chain) == 2.0
+
+
+def test_both_tiers_use_the_same_helper():
+    """The two former copies must now BE the one function, not merely agree."""
+    from scoring.put_call import pcr_from_chain
+    import live_composite
+    from services.sentiment_svc import compute
+    assert compute.pcr_from_chain is pcr_from_chain
+    assert live_composite._pcr_from_chain is pcr_from_chain

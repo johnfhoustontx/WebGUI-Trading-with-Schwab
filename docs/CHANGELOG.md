@@ -4,7 +4,60 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Second-pass batch 3 — one 10 GB/day win, and one
+**Last updated:** 2026-08-20 (**Batch 4 — consolidation: one calendar, one P/C,
+one advisory core, one poll idiom, and a contract that finally validates.**
+- **The `tools/` holiday literals are gone.** `flow_delta_instrumentation.py` and
+  `nq_signal.py` each carried a hardcoded 2026-2027 NYSE frozenset — silently wrong
+  from 2028 — justified by a comment claiming an import would drag `compute` and
+  `handlers` in. That named the wrong module: `shared/market_calendar` is
+  deliberately import-light (**measured: no pandas/numpy/redis/fastapi at all**) and
+  derives holidays algorithmically. Both now import it; verified against 2028-2030
+  dates the literals never covered. `nq_signal.is_trading_day` also accepts a `date`
+  OR a `datetime` — callers pass both, and taking only one is how a session gate
+  silently stops gating.
+- **`pcr_from_chain` was two byte-identical copies** feeding the SAME composite
+  (`sentiment_svc/compute.py` and `live_composite.py`), so a threshold tweak in one
+  would have diverged the live P/C from the sector table's. Homed in
+  `scoring/put_call.py`; a test asserts both tiers now reference the same function
+  object, not merely agree.
+- **The three ad-hoc rescue builders shared a 30-line tail differing by exactly TWO
+  lines** — which candidates function, which risk function. Injecting those two is
+  the whole difference, so `_assemble_advisory` now owns regime → engine →
+  validated `RescueAdvisory`, and a new strategy family needs a mark builder and
+  nothing else. The `_flt` spec validator, defined byte-for-byte three times, is now
+  the module-level `_spec_float`.
+- **The version-gate poll idiom is a helper now** (`pages/view_watch.watch_view`):
+  seed the version, probe the cheap `:ver`, repaint only on movement, hang it on a
+  timer. **Converted 4 of the 22 pages** — the sentiment screens that share the
+  canonical shape. The rest (Gamma's coalesced `read_versions`, the Calculator's
+  three timers, Rescue's four) are genuinely different shapes and were left alone;
+  a blanket regex sweep is exactly how the decorator above `_maybe_repaint` gets
+  orphaned, which happened on the first attempt and was caught by ruff.
+- ⚠ **One test of the new helper asserted the wrong thing and was corrected.** It
+  originally required `watch_view` to swallow ANY repaint exception. That is the
+  degrade-guard antipattern this repo bans — NiceGUI logs and keeps ticking anyway.
+  It now asserts a real error PROPAGATES and only the deleted-client case is
+  absorbed, which is what `ui_guard` is for.
+- **`MomentumSnapshot` finally validates something.** The contract carried real
+  validators (chiefly `_exactly_three_levels`) and NOTHING used them — the publisher
+  shipped a raw dict, so it was documentation rather than enforcement. Wired in at
+  the publish site: a ragged cascade now leaves the last good snapshot up instead of
+  blanking the Bull/Bear map and the momentum page.
+- **Verified live in dev, not just green:** republished `cache:sentiment:rotation`
+  with a doctored spread and watched `/sentiment/rotation` repaint **−1.69 → −2.55
+  with no reload**, then restored from the engine and watched it pick up **−1.32**
+  on its own. `webgui.err.log` stayed empty throughout.
+- **Verification.** options_svc 1214, webgui 2341, options-scanner 1172 + the
+  documented 8, sentiment-dashboard 502 + the documented 2, sentiment_svc 328 + the
+  documented 1, tools 819, driver_svc 239, portfolio-analyzer 197, market_svc 77,
+  trade_svc 77, portfolio_svc 32, shared 93/28/49, tests 69. Ruff clean tree-wide.
+- **Left for a later pass, deliberately:** the ~60 formatter clones (a mechanical
+  sweep across many pages, pure tidiness, real regression surface — the same shape
+  of risk that just orphaned a decorator), `handle_command`'s 35-branch elif chain,
+  the color-helper spread, and the remaining 18 poll sites. The `compute.py` split
+  (7,354 lines) remains its own decision.
+
+**Prior —** 2026-08-20 (**Second-pass batch 3 — one 10 GB/day win, and one
 "fix" the measurement told me not to ship.**
 - **The watcher was moving 10.2 GB/day/tab.** `_watcher_compute` read
   `options:scan` (148 KB) + `options:flow_alerts` (90 KB) **unconditionally** on

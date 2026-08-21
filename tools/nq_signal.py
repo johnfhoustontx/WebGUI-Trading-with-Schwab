@@ -88,23 +88,27 @@ STOP_ATR_MULT = 1.2
 # and correctly lives here rather than on the Instrument spec.
 MIN_REWARD_RISK = 1.5
 
-# Market holidays — kept in sync with services/*/scheduler.py _HOLIDAYS.
-HOLIDAYS = {
-    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
-    _date(2026, 11, 26), _date(2026, 12, 25),
-    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
-    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
-    _date(2027, 11, 25), _date(2027, 12, 24),
-}
+# Market holidays come from the ONE source, `shared/market_calendar`, which
+# derives them algorithmically — so this needs no yearly edit and is correct past
+# 2027. It replaced a hardcoded 2026-2027 frozenset whose comment justified the
+# copy by claiming an import would drag heavy modules in; measured, the shared
+# module pulls in no pandas/numpy/redis/fastapi at all (2026-08-20).
+from shared.market_calendar import is_trading_day as _is_trading_day  # noqa: E402
 
 
 #############################################
 # TIME / SESSION HELPERS
 #############################################
 
-def is_trading_day(now) -> bool:
-    return now.weekday() < 5 and now.date() not in HOLIDAYS
+def is_trading_day(when) -> bool:
+    """True on a weekday that is not an NYSE full-closure holiday.
+
+    Accepts a ``date`` or a ``datetime`` — callers here pass both, and taking
+    only one of them is how a session gate silently stops gating.
+    """
+    import datetime as _dt
+    d = when.date() if isinstance(when, _dt.datetime) else when
+    return _is_trading_day(d)
 
 
 def session_phase(now):

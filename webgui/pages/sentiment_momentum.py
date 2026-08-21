@@ -29,6 +29,7 @@ from pages.options.theme import (
     ROTATION_FONT_HEAD_HTML, ROTATION_TOKENS as _T,
 )
 from pages.rotation_view import NB, NE, NT
+from pages.view_watch import watch_view
 from pages.ui_guard import guard
 
 VIEW = "sentiment:momentum"
@@ -749,16 +750,9 @@ def render(level="industry"):
         ui.notify("Recompute requested")
         mom_busy.show()
 
-    @guard
-    def _maybe_repaint():
-        ver = bus_client.read_version(VIEW)
-        if ver == state["ver"]:
-            return
-        state["ver"] = ver
-        _read()
-        _apply()
-
-    state["ver"] = bus_client.read_version(VIEW)
     _read()
     _apply()
-    ui.timer(2.0, _maybe_repaint)
+    # Version-gated repaint + seed, in one line (pages/view_watch.py).
+    # This idiom -- probe :ver, compare, re-read, repaint, hang it on a
+    # 2 s timer -- was written out longhand on 22 pages.
+    watch_view(VIEW, lambda: (_read(), _apply()))

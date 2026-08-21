@@ -1307,3 +1307,45 @@ def test_is_rth_now_keeps_the_exclusive_1500_close():
     ct = ZoneInfo("America/Chicago")
     assert handlers._is_rth_now(now=dt.datetime(2026, 6, 30, 15, 0, tzinfo=ct)) is False
     assert handlers._is_rth_now(now=dt.datetime(2026, 6, 30, 14, 59, tzinfo=ct)) is True
+
+
+# ── the momentum contract actually validates the payload (2026-08-20) ──────
+
+def test_momentum_publish_validates_against_its_contract():
+    """`MomentumSnapshot` existed with real validators and NOTHING used it — the
+    publisher shipped a raw dict. Its `_exactly_three_levels` check is precisely
+    the guard for the documented ragged-levels trap, so wiring it in is the
+    difference between the contract being documentation and being enforcement."""
+    import pytest
+    from shared.contracts.sentiment import MomentumSnapshot
+
+    bad = {"session_date": "2026-08-20", "levels": {"sector": [], "industry": []}}
+    with pytest.raises(Exception):
+        MomentumSnapshot(**bad)          # missing the 'stock' level
+
+
+def test_refresh_momentum_publishes_a_validated_payload(monkeypatch):
+    good = {"schema": 1, "computed_at": "2026-08-20T21:00:00Z",
+            "session_date": "2026-08-20", "regime": {"state": "risk_on"},
+            "levels": {"sector": [{"symbol": "XLK"}], "industry": [], "stock": []},
+            "rank_history": {}, "excluded": []}
+    monkeypatch.setattr(handlers.compute, "compute_momentum", lambda **k: good)
+    bus = Bus(fake=True)
+    handlers._MOMENTUM["session"] = None
+    handlers.refresh_momentum(bus, session_date="2026-08-20", force=True)
+    p = bus.cache_get(handlers.CACHE_MOMENTUM).payload
+    assert set(p["levels"]) == {"sector", "industry", "stock"}
+    assert p["session_date"] == "2026-08-20"
+
+
+def test_a_malformed_momentum_payload_is_not_published(monkeypatch, caplog):
+    """A cascade that produces a ragged tree must NOT reach the cache: the
+    bullbear map and the momentum page both read those three levels, and a
+    missing one renders as an empty screen rather than an error."""
+    bad = {"session_date": "2026-08-20",
+           "levels": {"sector": [], "industry": []}}      # no 'stock'
+    monkeypatch.setattr(handlers.compute, "compute_momentum", lambda **k: bad)
+    bus = Bus(fake=True)
+    handlers._MOMENTUM["session"] = None
+    handlers.refresh_momentum(bus, session_date="2026-08-20", force=True)
+    assert bus.cache_get(handlers.CACHE_MOMENTUM) is None   # nothing published
