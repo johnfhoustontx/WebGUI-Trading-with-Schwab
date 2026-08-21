@@ -497,7 +497,7 @@ def new_ids(rows, seen, key="id"):
     """
     out = []
     for r in rows or ():
-        rid = (r or {}).get(key) if isinstance(r, dict) else None
+        rid = r.get(key) if isinstance(r, dict) else None
         if rid is None or rid in seen or rid in out:
             continue
         out.append(rid)
@@ -511,12 +511,18 @@ def id_set(rows, key="id"):
     position that closes and reopens really is a new position. An ever-growing
     set would also never shrink on a page left open for days.
     """
-    return {(r or {}).get(key) for r in rows or ()
-            if isinstance(r, dict) and (r or {}).get(key) is not None}
+    ids = (r.get(key) for r in rows or () if isinstance(r, dict))
+    return {rid for rid in ids if rid is not None}
 
 
 def flag_map(rows):
-    """``{position_id: flag}`` — the previous-state map ``flag_changes`` reads."""
+    """``{position_id: flag}`` — the previous-state map ``flag_changes`` reads.
+
+    The id field is hardcoded where ``new_ids``/``id_set`` take a ``key=``, and
+    that is the intended asymmetry: those two run over the flow feed as well,
+    which keys on ``id``, while a FLAG is a positions-only idea and there is no
+    second caller for this pair to generalise for.
+    """
     return {r["position_id"]: r.get("flag") for r in rows or ()
             if isinstance(r, dict) and r.get("position_id") is not None}
 
@@ -1941,11 +1947,14 @@ def render():
     # The reference's BODY face, loaded alongside the console's display face
     # rather than instead of it — the panel titles still want Rajdhani.
     ui.add_head_html(DESK_FONT_HEAD_HTML)
-    # The console vocabulary's ONE escape hatch: a keyframes animation cannot be
-    # expressed as a utility class.
+    # TWO ``ui.add_css`` calls, deliberately. The Tailwind-first standard allows
+    # "a single documented block PER THEME", and these are two vocabularies, not
+    # one split in half: ``CONSOLE_KEYFRAMES_CSS`` is the shared console
+    # language (``/sentiment`` injects the same constant), while
+    # ``DESK_NEON_CSS`` is this page's own arrival glow. Both qualify for the
+    # hatch for the same reason — a keyframes animation cannot be a utility
+    # class — and folding them into one call would only hide which is which.
     ui.add_css(CONSOLE_KEYFRAMES_CSS)
-    # The 10-second arrival glow. Same justification as the line above: a
-    # keyframes animation cannot be expressed as a utility class.
     ui.add_css(DESK_NEON_CSS)
 
     # ``data`` holds the LAST payload seen for every view, because the poll hands
