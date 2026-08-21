@@ -2181,6 +2181,125 @@ def test_a_broken_prewarm_cannot_break_the_page_build(monkeypatch):
     d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
 
 
+def test_a_failed_prewarm_leaves_the_latch_open_for_the_next_build(monkeypatch):
+    """The latch means "this process has warmed the cache". A run that RAISED
+    warmed nothing, so setting it before the call would trade the whole feature
+    for one transient — permanently, for the life of the process, on the
+    strength of a single unreadable payload. Either behaviour is defensible;
+    this pins the one the ``_PREWARMED`` comment claims."""
+    calls = []
+
+    def _boom(*_a, **_k):
+        raise OSError("no cache directory")
+
+    monkeypatch.setattr(voice, "prewarm", _boom)
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    seed = {"options:matrix": {"rows": [{"symbol": "SPY"}]}}
+    d._prewarm_clips(seed)
+    assert d._PREWARMED["done"] is False
+    # ...and the next build gets its chance.
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    d._prewarm_clips(seed)
+    assert calls == [(["SPY"], "v")]
+    assert d._PREWARMED["done"] is True
+
+
+# ── speak_phrases: the gate WIRING, not just the gate ────────────────────────
+# ⚠ WHY THESE EXIST. ``should_speak`` and ``speak_volume`` were thoroughly unit
+# tested while every test of the code that CALLS them was a source scrape
+# (``inspect.getsource``). Deleting ``if not should_speak(...): return`` from the
+# speak path left the whole suite green — so the market-hours gate the Settings
+# card promises was, in practice, unguarded. A source scrape cannot see a line
+# that is not there. These call the real function and assert on what came out.
+def _spoke(phrases, settings, urls=None, now=_WEEKDAY):
+    """Run the speak path with a fake synthesizer; return (js, texts_synthesized)."""
+    import asyncio
+    seen = []
+    supply = list(urls if urls is not None else
+                  [f"/voice/{i}.mp3" for i in range(len(phrases))])
+
+    async def _synth(text):
+        seen.append(text)
+        return supply.pop(0) if supply else None
+
+    js = asyncio.run(d.speak_phrases(phrases, settings, _synth, now=now))
+    return js, seen
+
+
+_SPEAK_ON = {"voice_enabled": True, "voice_volume": 0.5}
+
+
+def test_the_speak_path_actually_speaks_when_the_gates_allow_it():
+    js, seen = _spoke(["S P Y. Crossover alert."], _SPEAK_ON)
+    assert seen == ["S P Y. Crossover alert."]
+    assert js == 'window.__deskSpeak(["/voice/0.mp3"], 0.5)'
+
+
+def test_the_market_hours_gate_really_silences_the_speak_path():
+    """Not just ``should_speak`` in isolation — the CALL. This is the test whose
+    absence let the gate be deleted with the suite green."""
+    on = dict(_SPEAK_ON, alert_market_hours_only=True)
+    js, seen = _spoke(["S P Y. Crossover alert."], on, now=_SUNDAY)
+    assert js is None
+    assert seen == []           # and nothing was synthesized, either
+
+
+def test_the_enable_switch_really_silences_the_speak_path():
+    js, seen = _spoke(["S P Y. Crossover alert."], {"voice_enabled": False})
+    assert js is None and seen == []
+
+
+def test_the_volume_that_reaches_the_browser_is_the_CLAMPED_one():
+    """``speak_volume`` clamping in isolation proves nothing if the raw settings
+    value is what gets interpolated into the JS."""
+    js, _ = _spoke(["a"], {"voice_enabled": True, "voice_volume": 9.9})
+    assert js.endswith(", 1.0)")
+    js, _ = _spoke(["a"], {"voice_enabled": True, "voice_volume": "loud"})
+    assert js.endswith(f", {d.DEFAULT_VOICE_VOLUME})")
+
+
+def test_a_phrase_that_would_not_synthesize_is_skipped_not_spoken_as_a_gap():
+    """``ensure`` returns None on failure. The row has already glowed, so a dead
+    endpoint costs the sentence and nothing else — but it must not put a null
+    into the URL list the browser is handed."""
+    js, seen = _spoke(["first", "second"], _SPEAK_ON,
+                      urls=[None, "/voice/b.mp3"])
+    assert seen == ["first", "second"]
+    assert js == 'window.__deskSpeak(["/voice/b.mp3"], 0.5)'
+    # ...and if NOTHING synthesized there is no call at all.
+    js, _ = _spoke(["first"], _SPEAK_ON, urls=[None])
+    assert js is None
+
+
+def test_an_empty_queue_never_reaches_the_browser_or_the_synthesizer():
+    """The common case, 43,200 times a day: a poll that painted nothing to say.
+    It must not load settings' worth of work, and must never emit JS."""
+    js, seen = _spoke([], _SPEAK_ON)
+    assert js is None and seen == []
+
+
+def test_the_urls_are_json_encoded_not_string_joined():
+    js, _ = _spoke(["a", "b"], _SPEAK_ON,
+                   urls=['/voice/x".mp3', "/voice/y.mp3"])
+    import json
+    assert json.loads(js[js.index("(") + 1:js.rindex(",")]) == \
+        ['/voice/x".mp3', "/voice/y.mp3"]
+
+
+def test_the_live_synthesis_budget_is_short_enough_to_keep_the_poll_alive():
+    """``_poll`` AWAITS the speak step, and NiceGUI's timer awaits its callback
+    before sleeping — so a hung endpoint at ``voice``'s 20 s background budget
+    froze the landing page for 40 s (a paint can queue two phrases). The live
+    path must pass its own, much shorter, budget."""
+    assert voice.LIVE_SYNTH_TIMEOUT_SEC <= 3.0
+    assert voice.LIVE_SYNTH_TIMEOUT_SEC > 2.4    # the slowest measured synthesis
+    src = inspect.getsource(d.render)
+    assert "timeout=_voice.LIVE_SYNTH_TIMEOUT_SEC" in src
+    # 2 phrases x the budget, and no worse.
+    assert 2 * voice.LIVE_SYNTH_TIMEOUT_SEC <= 6.0
+
+
 # ── render() wiring for the voice ────────────────────────────────────────────
 def _rendered_elements():
     """Every element ``render()`` just added, in build order."""

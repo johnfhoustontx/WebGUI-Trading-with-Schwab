@@ -1499,6 +1499,42 @@ def speak_volume(settings):
     return max(0.0, min(1.0, v))
 
 
+async def speak_phrases(phrases, settings, synth, now=None):
+    """The whole speak path: gate, synthesize, and return the JS — or ``None``.
+
+    Module-level and taking its synthesizer as an argument, for one reason: a
+    closure inside ``render()`` can only be tested by scraping its SOURCE, and
+    a source scrape cannot see a gate that has been deleted. ``should_speak``
+    and ``speak_volume`` each had thorough unit tests while the lines that CALL
+    them had none — removing ``if not should_speak(...): return`` left the whole
+    suite green, so the market-hours promise the Settings card makes was
+    unguarded. This is the same extraction, and for the same reason, that
+    ``fold_flow_arrivals``/``fold_position_arrivals`` already got.
+
+    ``synth`` is an async ``text -> url or None``; the caller owns the off-loop
+    hop and the per-call timeout budget. Returning the JS rather than running it
+    keeps every ``ui`` call in ``render()``.
+    """
+    if not phrases:
+        return None
+    if not should_speak(settings, datetime.now(_CT) if now is None else now):
+        return None
+    urls = []
+    for text in phrases:
+        url = await synth(text)
+        # ``ensure`` never raises; None is "no clip", and the row has already
+        # glowed, so a dead synthesis endpoint costs the sentence and nothing
+        # else.
+        if url:
+            urls.append(url)
+    if not urls:
+        return None
+    # ``json.dumps`` rather than an f-string join: the URLs are
+    # ``voice.clip_url``'s "/voice/<sha1>.mp3" and could not carry a quote, but
+    # the escaping should not depend on knowing that.
+    return f"window.__deskSpeak({json.dumps(urls)}, {speak_volume(settings)})"
+
+
 # ── the browser side ─────────────────────────────────────────────────────────
 # The Desk speaks through its OWN audio element, not ``main.py``'s shared
 # ``alert-audio``. Sharing one element means whichever source assigns ``src``
@@ -1652,6 +1688,13 @@ def _prewarm_clips(seed):
     prewarm and not the Desk. ``voice.prewarm`` is itself fire-and-forget on a
     daemon thread and swallows its own synthesis failures, so the guard here is
     for the two lines in front of it.
+
+    The latch is set AFTER the launch, not before, so that the code says what
+    the comment on ``_PREWARMED`` says: a run that raised warmed nothing, and
+    permanently disabling the prewarm for the rest of the process on the
+    strength of one unreadable payload would trade a whole feature for a
+    transient. Page builds are synchronous on the event loop, so there is no
+    second caller to race the window this opens.
     """
     if _PREWARMED["done"]:
         return
@@ -1660,9 +1703,9 @@ def _prewarm_clips(seed):
         if not settings.get("voice_enabled"):
             return          # nothing to warm, and the latch stays open so
                             # switching it on later still gets the benefit
-        _PREWARMED["done"] = True
         _voice.prewarm(prewarm_symbols(seed.get("options:matrix")),
                        settings.get("voice_name"))
+        _PREWARMED["done"] = True
     except Exception:  # noqa: BLE001 — a cold cache must never break the build.
         logging.getLogger("webgui").warning(
             "Desk voice prewarm failed", exc_info=True)
@@ -2898,33 +2941,33 @@ def render():
     async def _speak_pending():
         """Turn the phrases ``_paint`` queued into clips and play them.
 
-        Synthesis is BLOCKING (~850 ms on a cache miss), so it goes through
-        ``run.io_bound`` — never on the event loop, which every page shares.
-        The queue is taken and cleared FIRST: an ``await`` below can outlive
-        this tick, and a phrase left in the queue would be spoken twice.
+        Synthesis is BLOCKING (measured ~0.9-2.4 s on a cache miss), so it goes
+        through ``run.io_bound`` — never on the event loop, which every page
+        shares. The queue is taken and cleared FIRST: an ``await`` below can
+        outlive this tick, and a phrase left in the queue would be spoken twice.
+
+        ⚠ THE TIMEOUT IS THE LOAD-BEARING ARGUMENT HERE. ``_poll`` awaits this,
+        and NiceGUI's timer awaits its callback before sleeping — so every
+        second spent in here is a second the Desk fetches no quotes, no
+        positions and no flow. With ``voice``'s own 20 s budget and a paint that
+        can queue two phrases, a hung TTS endpoint froze the landing page for
+        FORTY SECONDS. ``LIVE_SYNTH_TIMEOUT_SEC`` caps the worst case at ~6 s,
+        and the endpoint is only re-tried about once a minute after a failure
+        (``voice``'s breaker), so a dead endpoint is a one-off stutter rather
+        than a stutter on every burst. The prewarm keeps the long budget: it is
+        on a daemon thread where waiting costs nobody anything.
         """
         phrases, state["speak"] = state["speak"], []
-        if not phrases:
-            return
         settings = app_settings.load()
-        if not should_speak(settings, datetime.now(_CT)):
-            return
-        urls = []
-        for text in phrases:
-            url = await run.io_bound(_voice.ensure, text,
-                                     settings.get("voice_name"))
-            # ``ensure`` never raises; None is "no clip", and the row has
-            # already glowed, so a dead synthesis endpoint costs the sentence
-            # and nothing else.
-            if url:
-                urls.append(url)
-        if not urls:
-            return
-        # ``json.dumps`` rather than an f-string join: the URLs are
-        # ``voice.clip_url``'s "/voice/<sha1>.mp3" and could not carry a quote,
-        # but the escaping should not depend on knowing that.
-        ui.run_javascript(
-            f"window.__deskSpeak({json.dumps(urls)}, {speak_volume(settings)})")
+
+        async def _synth(text):
+            return await run.io_bound(_voice.ensure, text,
+                                      settings.get("voice_name"),
+                                      timeout=_voice.LIVE_SYNTH_TIMEOUT_SEC)
+
+        js = await speak_phrases(phrases, settings, _synth)
+        if js:
+            ui.run_javascript(js)
 
     @guard
     def _voice_blocked(_e=None):
