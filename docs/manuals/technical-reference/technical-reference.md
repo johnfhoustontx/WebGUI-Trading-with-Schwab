@@ -473,6 +473,25 @@ RS_momentum     = 100 · RS_today / RS_(20 bars ago)
 Quadrants: **Leading** (strength≥100, mom≥100), **Weakening** (≥100, <100),
 **Lagging** (<100, <100), **Improving** (<100, ≥100).
 
+⚠ **A SECOND RRG engine exists and it is the one behind the RRG plot and the
+rotation headline.** `sector_rotation_assessment` (used by
+`compute.rotation_assessment()` → `cache:sentiment:rotation`, read by
+`/sentiment/rrg` and `/sentiment/rotation`) normalizes differently:
+
+```
+RS          = 100 · sector_close / benchmark_close
+RS-Ratio    = 100 + (RS  − SMA(RS, 10))  / rolling_std(RS, 60)
+RS-Momentum = 100 + ROC / rolling_std(ROC, 60)     # ROC = RS-Ratio − RS-Ratio[-10]
+```
+
+The `compute_rrg_quadrants` figures above feed `/sentiment/sectors` and
+`/sentiment/momentum` instead. Until 2026-08-20 the assessment's RS-Momentum also
+subtracted ROC's own rolling mean, which differentiates twice — it measured
+ACCELERATION rather than rate, and inverted the sign (a steadily rising RS-Ratio
+read 99.70). On real data the correction moved 1 of 11 sector quadrants and left
+the risk-on/off headline agreeing on 91% of sessions; the corrected spread's wider
+tail means `RISK_THRESHOLD` fires on ~10% of sessions rather than ~6%.
+
 ### How the rotation screens draw those numbers
 
 Display geometry only — none of this feeds a score. All of it is pure and lives in

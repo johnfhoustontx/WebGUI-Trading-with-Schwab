@@ -960,6 +960,33 @@ seed, the TOS/TradingView convention; `_adx_series` uses `ewm`'s own warmup), so
 they agree only once warmup has decayed — identical at 250 bars, 0.70 apart at 60.
 Compare them on a long series or not at all.
 
+**⚠ There are TWO RRG implementations with DIFFERENT momentum definitions, and
+only one of them was wrong (found + half-fixed 2026-08-20).** Know which you are
+looking at before touching either:
+
+| engine | momentum formula | feeds |
+|---|---|---|
+| `scoring/rotation.compute_rrg_quadrants` | `100 · RS_today / RS_(20 bars ago)` — a rate; always was correct | `/sentiment/sectors`, `/sentiment/momentum` (via `compute.py`'s sector/industry builders) |
+| `sector_rotation_assessment.compute_rs_momentum` | `100 + ROC / rolling_std(ROC)` — **was** `(ROC − mean(ROC)) / std` | `/sentiment/rrg`, `/sentiment/rotation` (via `rotation_assessment()` → `cache:sentiment:rotation`) |
+
+The second subtracted ROC's **own rolling mean** before normalizing, which
+differentiates twice: it measured the ACCELERATION of relative strength, not its
+rate. Isolated on a controlled RS-Ratio series the sign came out **inverted** — a
+steadily rising ratio read 99.70 ("weakening"), a steadily falling one 100.96
+("strengthening"). Fixed by dropping that term.
+
+⚠ **The real-data impact was far smaller than that inversion suggests, and the
+synthetic evidence that first exposed it was misleading.** Deterministic ramp
+series have degenerate rolling statistics; measured against two years of live SPY
++ the eleven sector ETFs, the old and new formulas agreed on **10 of 11 sector
+quadrants** and on the risk-on/risk-off headline for **91% of sessions**, and
+**neither** correlated with forward 20-bar excess return (−0.06 vs −0.04). Treat
+it as a correctness-and-meaning fix, never as an edge. **If you are ever tempted
+to characterise a rotation change from synthetic series, don't — fetch real bars
+through the proxy.** One live consequence: the corrected spread has a slightly
+wider tail (|spread| p90 1.35 → 1.51), so `RISK_THRESHOLD` (±1.5) now fires on
+~10% of sessions where it used to fire on ~6%.
+
 **⚠ Known open issue — Sector & Industry and Sector Rotation can print OPPOSITE
 regime verdicts (not fixed; found 2026-08-17).** The two adjacent tabs each
 render a "risk-on / risk-off" headline from a **different quantity on a different

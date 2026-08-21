@@ -1,17 +1,18 @@
-"""DOCUMENTS the RS-Momentum axis's present semantics. It does not bless them.
+"""RS-Momentum must measure the RATE of change of relative strength, not its
+acceleration — i.e. the axis must mean what its own comment and the RRG quadrant
+names say it means.
 
-`compute_rs_momentum` subtracts ROC's own rolling mean, so the axis measures the
-ACCELERATION of relative strength rather than its rate — which means a sector
-steadily beating the benchmark lands in "Weakening" and one steadily trailing it
-lands in "Improving". That is a real defect (measured 2026-08-20), left in place
-because correcting it re-assigns every quadrant on three pages and moves the
-risk-on/risk-off headline with them — a product decision, not a bug fix.
+Until 2026-08-20 `compute_rs_momentum` subtracted ROC's OWN rolling mean before
+normalizing, differentiating a second time. Isolated on a controlled RS-Ratio
+series the sign came out INVERTED: a steadily rising RS-Ratio read 99.70
+("weakening") and a steadily falling one read 100.96 ("strengthening").
 
-⚠ These tests exist so the behaviour cannot drift SILENTLY, and so that changing
-it is a deliberate act with a visible diff. They are named for what they are.
-Batch 1 of this audit was a lesson in what happens when a characterization test is
-mistaken for a specification: `test_adx_uses_wilder_smoothing` pinned a broken
-formula's output for months. Do not read a passing test here as "working".
+⚠ Scale note, because it matters for reading these tests: on REAL sector data the
+practical effect was far smaller than that inversion suggests — measured over two
+years of SPY + the eleven sector ETFs, the two formulas agreed on 10 of 11 sector
+quadrants and on the risk-on/risk-off headline for 91% of sessions, and NEITHER
+predicted forward excess return. This is a correctness-and-meaning fix, not an
+edge improvement. Do not expect the screens to change much.
 """
 import numpy as np
 import pandas as pd
@@ -19,41 +20,56 @@ import pytest
 
 import sector_rotation_assessment as S
 
-_N = 300
-_IDX = pd.RangeIndex(_N)
-_BENCH = pd.Series(100 + np.arange(_N) * 0.05, index=_IDX)
+_N = 200
 
 
-def _quadrant(sector):
-    rr = S.compute_rs_ratio(sector, _BENCH)
-    rm = S.compute_rs_momentum(rr)
-    return S.classify_quadrant(rr.iloc[-1], rm.iloc[-1]), rr.iloc[-1], rm.iloc[-1]
+def _ratio_series(slope, seed=3, noise=0.15):
+    """An RS-Ratio series with a controlled slope and mild noise.
+
+    Noise is required, not decoration: the normalizer divides by a rolling std of
+    ROC, and a perfectly straight line has zero ROC variance -> NaN.
+    """
+    rng = np.random.default_rng(seed)
+    return pd.Series(100 + slope * np.arange(_N) + rng.normal(0, noise, _N),
+                     index=pd.RangeIndex(_N))
 
 
-def test_KNOWN_DEFECT_steady_outperformance_is_labelled_weakening():
-    """A sector beating the benchmark at a CONSTANT rate. A reader of the words
-    would expect "Leading"; the acceleration axis reports "Weakening"."""
-    q, rr, rm = _quadrant(_BENCH * (1 + np.linspace(0, 0.30, _N)))
-    assert rr > 100.0            # it IS out-performing...
-    assert rm < 100.0            # ...but the momentum axis reads negative
-    assert q == "Weakening"
+def test_rising_relative_strength_reads_above_100():
+    """The documented semantic: RS-Momentum > 100 means strengthening."""
+    assert S.compute_rs_momentum(_ratio_series(+0.05)).iloc[-1] > 100.0
 
 
-def test_KNOWN_DEFECT_steady_underperformance_is_labelled_improving():
-    q, rr, rm = _quadrant(_BENCH * (1 - np.linspace(0, 0.25, _N)))
-    assert rr < 100.0 and rm > 100.0
-    assert q == "Improving"
+def test_falling_relative_strength_reads_below_100():
+    assert S.compute_rs_momentum(_ratio_series(-0.05)).iloc[-1] < 100.0
 
 
-def test_only_accelerating_outperformance_reaches_leading():
-    q, rr, rm = _quadrant(_BENCH * (1 + 0.30 * np.linspace(0, 1, _N) ** 2))
-    assert q == "Leading"
+def test_a_flat_relative_strength_reads_about_100():
+    mom = S.compute_rs_momentum(_ratio_series(0.0)).iloc[-1]
+    assert 100.0 == pytest.approx(mom, abs=1.0)
 
 
-def test_rs_ratio_itself_is_sound():
-    """The RS-Ratio axis is fine — it tracks relative strength as advertised. Only
-    the momentum axis is at issue, which is why this is a semantics question and
-    not a rewrite."""
-    _, out_rr, _ = _quadrant(_BENCH * (1 + np.linspace(0, 0.30, _N)))
-    _, under_rr, _ = _quadrant(_BENCH * (1 - np.linspace(0, 0.25, _N)))
-    assert out_rr > 100.0 > under_rr
+def test_momentum_is_the_normalized_roc_with_no_second_de_meaning():
+    """Pin the formula itself: 100 + ROC / rolling_std(ROC). Subtracting ROC's own
+    rolling mean here (what the old code did) differentiates twice and is what
+    inverted the sign."""
+    rr = _ratio_series(+0.05)
+    roc = rr - rr.shift(S.MOM_WINDOW)
+    expected = 100.0 + roc / roc.rolling(S.NORM_WINDOW).std()
+    got = S.compute_rs_momentum(rr)
+    assert got.iloc[-1] == pytest.approx(float(expected.iloc[-1]), abs=1e-9)
+
+
+def test_a_steadily_outperforming_sector_is_not_called_weakening():
+    """End-to-end through the quadrant classifier, from PRICES rather than a
+    hand-built ratio: the case that made this worth fixing."""
+    bench = pd.Series(100 + np.arange(300) * 0.05, index=pd.RangeIndex(300))
+    sector = bench * (1 + np.linspace(0, 0.30, 300))
+    rr = S.compute_rs_ratio(sector, bench)
+    mom = S.compute_rs_momentum(rr)
+    assert rr.iloc[-1] > 100.0                                  # it IS out-performing
+    assert S.classify_quadrant(rr.iloc[-1], mom.iloc[-1]) == "Leading"
+
+
+def test_momentum_degrades_to_none_on_insufficient_data():
+    assert S.compute_rs_momentum(None) is None
+    assert S.compute_rs_momentum(pd.Series([1.0, 2.0])) is None

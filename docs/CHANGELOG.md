@@ -4,7 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Audit batch 3 — 20,105 lines deleted, and the
+**Last updated:** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
+fixing it was overstated by a factor of ten.**
+- **The defect was real at the function level.** `sector_rotation_assessment.
+  compute_rs_momentum` subtracted ROC's OWN rolling mean before normalizing, which
+  differentiates a second time: it measured the ACCELERATION of relative strength, not
+  its rate. Isolated on a controlled RS-Ratio series the sign came out **inverted** — a
+  steadily rising ratio read **99.70** ("weakening"), a steadily falling one **100.96**
+  ("strengthening"). Dropping the term restores `100 + ROC / rolling_std(ROC)`, the
+  standard construction and the one the code's own comment claimed.
+- ⚠ **The evidence I first reported was measured on DETERMINISTIC synthetic series, and
+  it did not survive contact with real bars.** Deterministic ramps have degenerate
+  rolling statistics. Re-measured against two years of live SPY + the eleven sector ETFs
+  through the proxy: the old and new formulas agree on **10 of 11 sector quadrants
+  today**, agree on the risk-on/risk-off headline for **91% of the last 374 sessions**,
+  and **neither** correlates with forward 20-bar excess return (−0.060 vs −0.040). The
+  dramatic "steady out-performance is called Weakening" table was an artefact of the
+  test series, not a description of the screens. Corrected here because the earlier
+  entry and the hand-off both overstated it.
+- ⚠ **And the blast radius was narrower than stated.** There are **two** RRG engines.
+  `scoring/rotation.compute_rrg_quadrants` (momentum = `RS_today / RS_20-bars-ago`, a
+  proper rate) was already correct and feeds `/sentiment/sectors` and
+  `/sentiment/momentum` — both **unaffected**. Only `/sentiment/rrg` and
+  `/sentiment/rotation`, which read the assessment, move. Worth knowing before touching
+  either engine; the table is now in CLAUDE.md.
+- **Live consequence to expect:** the corrected spread has a slightly wider tail
+  (|spread| p90 1.35 → 1.51), so the ±1.5 `RISK_THRESHOLD` fires on ~10% of sessions
+  where it used to fire on ~6%. Verified live after the fix: defensives (XLP/XLU/XLV/
+  XLRE) all Leading, XLK Lagging, headline −1.69 → risk-off — a coherent defensive
+  rotation.
+- **Method note worth keeping:** the useful test here was not a bigger synthetic, it was
+  fetching real bars through the proxy and asking whether the two formulas actually
+  disagree, and whether either predicts anything. Both answers were "barely". A
+  correctness fix can be right and still not matter much, and saying so is part of the
+  report.
+- **Verification.** sentiment-dashboard 485 + the documented 2, sentiment_svc 325 + the
+  documented 1, webgui 2320. Ruff clean. `test_rs_momentum_semantics.py` was rewritten
+  from documenting the defect to pinning the corrected semantics, and carries the
+  real-data scale note so nobody reads the sign inversion as a claim about the screens.
+
+**Prior —** 2026-08-20 (**Audit batch 3 — 20,105 lines deleted, and the
 `shared/analysis_lib` init that was breaking its own package.**
 - **The headline: `shared/analysis_lib` was an abandoned Tk APPLICATION wearing a
   library's name.** ~9,600 of its 11,406 lines — the "Blueprint Analyzer" GUI, its
