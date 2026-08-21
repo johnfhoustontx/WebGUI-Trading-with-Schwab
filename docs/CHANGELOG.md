@@ -4,7 +4,59 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Second-pass batch 2 — the first deletion stranded
+**Last updated:** 2026-08-20 (**Second-pass batch 3 — one 10 GB/day win, and one
+"fix" the measurement told me not to ship.**
+- **The watcher was moving 10.2 GB/day/tab.** `_watcher_compute` read
+  `options:scan` (148 KB) + `options:flow_alerts` (90 KB) **unconditionally** on
+  every 2 s tick, per open tab — 43,200 ticks/day of transfer and JSON parse for
+  views that change a handful of times an hour. New `bus_client.read_gated(view,
+  memo)` pays a tiny `:ver` probe instead. **Measured against prod: 3.16 ms →
+  0.32 ms per tick (−90%); 10.2 GB → 0.7 MB moved, 2.3 min → 0.2 min of CPU, per
+  tab per day.**
+- ⚠ **`read_gated` does NOT gate a versionless key.** First cut skipped the
+  payload read whenever `:ver` was absent, which would make a pre-upgrade key
+  permanently invisible; second cut memoized it, which is worse — a memo keyed on
+  `None` has no invalidation signal and would serve that first payload forever.
+  It gates only when there is a version to gate on. A shell test caught both.
+- ⚠ **M7 was measured and REJECTED — the audit's estimate was ~10x high.** The
+  Desk's 11-view seed was reported as "~50-100 ms of loop block"; measured against
+  prod it is **10.7 ms**, only 6.2 ms of it parse. Deferring it off-loop buys ~10 ms
+  and costs a fill-in flash on the landing page. Pipelining the round-trips is
+  *slower* (**12.34 ms vs 11.25 ms** — on localhost the round-trips are free and the
+  pipeline setup is not). Both attempts were written, measured, and reverted rather
+  than shipped; `/eod`'s on-loop build falls to the same arithmetic. **No change.**
+- **Accuracy Lows.** Closing an IRON CONDOR is four legs, not two —
+  `commission_for(2, ...)` understated every IC close by $0.65 x 2 x qty against
+  the adjustments it is ranked against (`_close_legs`). `score_vix_context` fed an
+  absent `$VIX1D` in as a literal 0 and still claimed confidence 1.0, structurally
+  shrinking the sub-score's deflection 20% — and `$VIX1D` does not quote for this
+  account, so that was a standing bias, not an outage case; it now renormalizes
+  over the terms present and carries the absence in the confidence (0.8), the same
+  split `vix.score_complex` got this morning. And `annualize_return` refuses below
+  `MIN_ANNUALIZE_DAYS` (21): a first-day +2% annualized to ~14,500% and a −2% to
+  −99%, driving BOTH the Sharpe-like risk grade and capital efficiency, so a new
+  position's first wiggle swung two of four dimensions between A and F on noise.
+- **Bounded growth.** `_SIM_SNAPSHOTS` (a full ChainSnapshot per symbol ever
+  fetched, ~1-10 MB for $SPX/$NDX, no eviction) is capped at 4 with re-fetch
+  moving a symbol to newest, so the one you are actively simulating is never the
+  one evicted. And `cache_set` gained a `ttl` — applied to the payload AND its
+  `:ver`/`:ts` side keys, since an un-expired counter outlives its payload as an
+  orphan — used by the per-position rescue boards (37 in prod, one per rescued
+  trade forever, no delete API on the bus). The rolling rescue SUMMARY does not
+  expire.
+- **The prod `cache:test:dot:ver` key: investigated, not a live leak.** Its payload
+  key is gone (an orphan `:ver` counter, 1 byte), no writer exists anywhere in the
+  current tree, and `Bus()` selects fakeredis under pytest — so it predates
+  something already removed. Left in place rather than mutating prod Redis.
+- **Stale comments corrected**: three `~14 MB` references to `cache:options:gamma`
+  in gamma.py, which is 0.4 MB since the history split — and that number is what
+  justifies the in-flight guard, so a future reader would mis-size the tradeoff.
+- **Verification.** options_svc 1209, webgui 2334, sentiment-dashboard 498 + the
+  documented 2, sentiment_svc 325 + the documented 1, options-scanner 1172 + the
+  documented 8, portfolio-analyzer 197, driver_svc 239, market_svc 77, trade_svc
+  77, portfolio_svc 32, shared 93/49, tests 69. Ruff clean tree-wide.
+
+**Prior —** 2026-08-20 (**Second-pass batch 2 — the first deletion stranded
 5,600 more lines, and four calculations that flattered themselves.**
 - **The dead-code deletion cascaded.** Batch 3's removal of the Tk window and the
   legacy CLI left **1,848 lines unreachable inside the still-live `gamma_tool.py`**

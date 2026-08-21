@@ -291,6 +291,13 @@ CACHE_EM_CHAIN = "cache:options:em_chain"
 EVENT_EM_CHAIN = "events:options:em_chain"
 
 CACHE_RESCUE = "cache:options:rescue"            # per-id: f"{CACHE_RESCUE}:{position_id}"
+# Per-position boards are TRANSIENT: one key per rescued position, written on
+# demand and never deleted (the bus has no delete API), so they accumulated one
+# per rescued trade forever — 37 in prod, including boards for long-closed
+# trades. A board prices live legs, so it is stale within minutes; 6h simply
+# outlives any realistic review session and the key then goes away by itself.
+# The rescue SUMMARY beside it is a single rolling key and is NOT expired.
+RESCUE_BOARD_TTL_SEC = 6 * 3600
 CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
 EVENT_RESCUE = "events:options:rescue"
 EVENT_RESCUE_SUMMARY = "events:options:rescue_summary"
@@ -1562,7 +1569,7 @@ def run_rescue(bus, position_id, source: str = "paper") -> None:
     ``cache:options:rescue:<position_id>`` (the string signal_id works as a key)."""
     adv = compute.compute_rescue(position_id, source)
     key = f"{CACHE_RESCUE}:{position_id}"
-    version = bus.cache_set(key, adv)
+    version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 
@@ -1576,7 +1583,7 @@ def run_rescue_adhoc(bus, spec) -> None:
     ``cache:options:rescue:adhoc`` key (advisory-only, so no Apply flow)."""
     adv = compute.compute_rescue_adhoc(spec)
     key = f"{CACHE_RESCUE}:adhoc"
-    version = bus.cache_set(key, adv)
+    version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": "adhoc"})
 
 
@@ -1613,7 +1620,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
                     "position_id": position_id,
                 },
             }
-            version = bus.cache_set(key, adv)
+            version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
             bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
             return
 
@@ -1637,7 +1644,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
                    if isinstance(adv, dict) else "advisory unavailable"}
         adv["apply_result"] = result
 
-        version = bus.cache_set(key, adv)
+        version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
     except Exception as e:
         # Never let a bad apply kill the consumer; surface the error to the GUI.
@@ -1646,7 +1653,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
             "error": f"{type(e).__name__}: {e}",
             "apply_result": {"ok": False, "error": str(e), "position_id": position_id},
         }
-        version = bus.cache_set(key, adv)
+        version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 

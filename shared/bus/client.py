@@ -97,6 +97,7 @@ class Bus:
         payload: dict,
         event: str | None = None,
         skip_unchanged: bool = False,
+        ttl: int | None = None,
     ) -> int:
         """Write ``payload`` under ``key`` and return its version.
 
@@ -108,6 +109,14 @@ class Bus:
         version-poller into a needless repaint. The ``{key}:ts`` freshness stamp
         IS still refreshed — see the comment at the short-circuit for why a
         publisher whose data legitimately stops moving must not look dead.
+
+        ``ttl`` — seconds after which the key expires, applied to the payload AND
+        its ``:ver``/``:ts`` side keys (an un-expired counter would outlive its
+        payload as an orphan). Refreshed on every write, so a view that is still
+        being republished never expires under a reader. For per-entity keys that
+        accumulate one-per-thing forever — the per-position rescue boards write
+        one key per rescued trade and the bus has no delete API, so 37 had piled
+        up in prod including boards for long-closed trades (2026-08-20).
 
         ``event`` — when given, the change event ``{"version": …}`` is published
         on that channel **as part of the same write** (pipelined with the
@@ -137,6 +146,11 @@ class Bus:
                 # touch ``:ver``, so the version-pollers this flag exists to protect
                 # still see nothing and still do not repaint.
                 self._r.set(f"{key}:ts", datetime.now(timezone.utc).isoformat())
+                if ttl is not None:
+                    # A skipped publish still means "this is current" — renew the
+                    # whole family or a static-but-live view expires mid-session.
+                    for k in (key, f"{key}:ver", f"{key}:ts"):
+                        self._r.expire(k, ttl)
                 return current.version
         version = self._r.incr(f"{key}:ver")
         env = CacheEnvelope(
@@ -152,6 +166,9 @@ class Bus:
         pipe = self._r.pipeline()
         pipe.set(key, env.to_json())
         pipe.set(f"{key}:ts", env.ts)
+        if ttl is not None:
+            for k in (key, f"{key}:ver", f"{key}:ts"):
+                pipe.expire(k, ttl)
         if event is not None:
             pipe.publish(event, json.dumps({"version": version}))
         pipe.execute()

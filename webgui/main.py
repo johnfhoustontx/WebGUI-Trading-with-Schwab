@@ -784,6 +784,21 @@ def _favicon_link(color: str) -> str:
 # flat drawer links); _group_badge_refs maps group label->(badge, member paths)
 # for the drawer group items (badge = sum of member counts).
 _NAV_BADGES: dict[str, int] = {}
+# Version-gated payload memos for the 2 s watcher. `options:scan` (148 KB) and
+# `options:flow_alerts` (90 KB) were read+parsed on EVERY tick per open tab —
+# ~43,200 ticks/day x 237 KB is ~10 GB/day/tab for views that change a handful of
+# times an hour. read_gated pays a tiny :ver probe instead (2026-08-20).
+_WATCH_SCAN_MEMO: dict = {}
+_WATCH_FLOW_MEMO: dict = {}
+
+
+def reset_watcher_memos() -> None:
+    """Drop the watcher's payload memos (test helper; also safe after a manual
+    cache edit)."""
+    _WATCH_SCAN_MEMO.clear()
+    _WATCH_FLOW_MEMO.clear()
+
+
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
     # Captured badge: the SET of acknowledged captured signal ids (not a version),
@@ -1319,8 +1334,11 @@ def _watcher_compute():
     System Status nav item reflects the current unhealthy count regardless of the
     chime gate.
     """
-    scan = bus_client.read("options:scan") or {}   # read ONCE; passed to badges below
-    flow_view = bus_client.read("options:flow_alerts")
+    # Version-gated: a tick where neither view moved costs two tiny :ver probes
+    # and no JSON parsing (see reset_watcher_memos). `scan` is read ONCE here and
+    # passed to the badge helpers below.
+    scan = bus_client.read_gated("options:scan", _WATCH_SCAN_MEMO)[0] or {}
+    flow_view = bus_client.read_gated("options:flow_alerts", _WATCH_FLOW_MEMO)[0]
     keys = alerts.scanner_keys(scan)
     s = app_settings.load()                        # in-memory cached (no disk hit)
     now = _dt.datetime.now(tz=_CT)

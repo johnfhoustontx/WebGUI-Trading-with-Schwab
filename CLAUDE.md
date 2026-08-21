@@ -1629,6 +1629,22 @@ for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other pe
 republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
 unconditionally — opt them in the same way if they prove chatty.
 
+**Measure before you optimise a localhost read — twice now the estimate was the
+bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop
+block"; measured against prod it is **10.7 ms**, only 6.2 ms of it JSON parse.
+Deferring it off-loop buys ~10 ms and costs a fill-in flash on the landing page,
+and **pipelining the round-trips is SLOWER** (12.34 vs 11.25 ms — on localhost the
+round-trips are nearly free and the pipeline setup is not). Both were written,
+measured and reverted. The lever that IS real is the *cadence*: the app-wide 2 s
+watcher read `options:scan` + `options:flow_alerts` (237 KB) ungated on every
+tick per tab — **3.16 ms → 0.32 ms, 10.2 GB → 0.7 MB moved per tab per day** —
+via `bus_client.read_gated(view, memo)`, a `:ver`-probe-then-deserialize helper.
+⚠ `read_gated` deliberately does **not** gate a key with no `:ver`: a memo keyed
+on `None` has no invalidation signal and would serve its first payload forever,
+so versionless keys keep the old always-read behaviour. **Rule: a per-navigation
+read of a few hundred KB on localhost is single-digit milliseconds — optimise the
+thing that runs 43,200 times a day, not the thing that runs once per click.**
+
 **A cropped payload is not a BOUNDED payload — split what the reader doesn't read
 (2026-08-20).** `cache:options:gamma` was cropped in 2026-06 to a ±display-window
 strike range, and the comment recording that said it cut the key to "well under
@@ -1796,7 +1812,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
 .venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1200
+.venv\Scripts\python -m pytest services\options_svc    # 1209
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239

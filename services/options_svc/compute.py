@@ -5507,7 +5507,28 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
 # into the process, keeping the combined pytest run clean.
 
 # symbol -> ChainSnapshot object (in-process; never serialized whole).
+#
+# BOUNDED: a snapshot holds thousands of contract objects (~1-10 MB for
+# $SPX/$NDX), and this held one per symbol ever fetched for the whole process
+# lifetime — the only module-level cache here with no eviction. Single-user, so
+# it grew slowly, but unbounded is unbounded (capped 2026-08-20). Insertion order
+# is the age order (dicts preserve it), and a re-fetch MOVES a symbol to the end
+# so the one you are actively simulating is never the one evicted.
+SIM_SNAPSHOT_LIMIT = 4
 _SIM_SNAPSHOTS: dict = {}
+
+
+def reset_sim_snapshots() -> None:
+    """Drop every cached simulator snapshot (test helper / manual reset)."""
+    _SIM_SNAPSHOTS.clear()
+
+
+def _stash_sim_snapshot(symbol, snap) -> None:
+    """Cache ``snap`` under ``symbol``, evicting the oldest past the cap."""
+    _SIM_SNAPSHOTS.pop(symbol, None)          # re-insert so it counts as newest
+    _SIM_SNAPSHOTS[symbol] = snap
+    while len(_SIM_SNAPSHOTS) > SIM_SNAPSHOT_LIMIT:
+        _SIM_SNAPSHOTS.pop(next(iter(_SIM_SNAPSHOTS)))
 
 # Equity/index option contract multiplier (shares per contract). The simulator
 # engine prices in per-share × qty units; ×100 converts the What-if curve to a
@@ -5560,7 +5581,7 @@ def sim_fetch(symbol: str) -> dict:
     from options_simulator import data as sdata
 
     snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol)
-    _SIM_SNAPSHOTS[symbol] = snap
+    _stash_sim_snapshot(symbol, snap)
     exps = expiries_of(snap)
     return {
         "symbol": snap.symbol,

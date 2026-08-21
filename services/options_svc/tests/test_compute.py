@@ -5457,3 +5457,38 @@ def test_calc_load_symbol_publishes_the_thinned_chain(monkeypatch):
     assert "gamma" not in contract and "description" not in contract
     assert contract["mark"] == 1.1
     assert cc["price"] == 6400.0
+
+
+# ── the simulator snapshot cache is bounded (2026-08-20) ───────────────────
+
+def test_sim_snapshots_evicts_the_oldest_beyond_the_cap():
+    """`_SIM_SNAPSHOTS` held a full ChainSnapshot (thousands of contract objects
+    for $SPX/$NDX, ~1-10 MB each) per symbol ever fetched, for the process
+    lifetime — the one module-level cache with no eviction at all. Single-user,
+    so it grew slowly; unbounded is still unbounded."""
+    compute.reset_sim_snapshots()
+    try:
+        for i in range(compute.SIM_SNAPSHOT_LIMIT + 3):
+            compute._stash_sim_snapshot(f"SYM{i}", {"n": i})
+        assert len(compute._SIM_SNAPSHOTS) == compute.SIM_SNAPSHOT_LIMIT
+        # the OLDEST went, the newest stayed
+        assert "SYM0" not in compute._SIM_SNAPSHOTS
+        assert f"SYM{compute.SIM_SNAPSHOT_LIMIT + 2}" in compute._SIM_SNAPSHOTS
+    finally:
+        compute.reset_sim_snapshots()
+
+
+def test_sim_snapshots_refresh_keeps_a_symbol_recent():
+    """Re-fetching a symbol must renew it, not leave it at its original age —
+    otherwise the symbol you are actively simulating is the one evicted."""
+    compute.reset_sim_snapshots()
+    try:
+        compute._stash_sim_snapshot("KEEP", {"v": 1})
+        for i in range(compute.SIM_SNAPSHOT_LIMIT - 1):
+            compute._stash_sim_snapshot(f"X{i}", {"n": i})
+        compute._stash_sim_snapshot("KEEP", {"v": 2})     # touched again
+        compute._stash_sim_snapshot("NEW", {"n": 99})     # forces one eviction
+        assert "KEEP" in compute._SIM_SNAPSHOTS
+        assert compute._SIM_SNAPSHOTS["KEEP"] == {"v": 2}
+    finally:
+        compute.reset_sim_snapshots()

@@ -259,6 +259,18 @@ def _leg(side, right, strike, expiry, qty, price):
             "qty": qty, "price": float(price) if price is not None else 0.0}
 
 
+def _close_legs(position) -> int:
+    """Option legs it takes to CLOSE this position.
+
+    A vertical is two (buy back the short, sell the long); an IRON CONDOR is
+    four, because it is a put spread AND a call spread. `commission_for(2, ...)`
+    was charged unconditionally until 2026-08-20, understating every IC close by
+    $0.65 x 2 x qty and making the close look cheaper than it is against the
+    adjustment alternatives it is ranked against.
+    """
+    return 4 if position.get("strategy") == "IC" else 2
+
+
 def _close_pair(position, mark, price_leg, right):
     """The two legs that CLOSE the current spread — [BUY old_short, SELL old_long]
     at the current expiry — priced live, else split from the mark's ``cv``.
@@ -293,7 +305,7 @@ def build_close(position, mark, price_leg, ctx) -> dict | None:
     if cv is None:
         return None
     gross = -round(cv * 100 * qty, 2)
-    commission = commission_for(2, sym, qty)
+    commission = commission_for(_close_legs(position), sym, qty)
     return {
         "action": "close",
         "label": "Close now (systematic stop)",
@@ -327,7 +339,7 @@ def build_partial_close(position, mark, price_leg, ctx) -> dict | None:
     close_qty = qty // 2
     remaining = qty - close_qty
     gross = -round(cv * 100 * close_qty, 2)
-    commission = commission_for(2, sym, close_qty)
+    commission = commission_for(_close_legs(position), sym, close_qty)
     new_max_loss = round(old_ml * remaining / qty, 2)
     # realized P&L locked in on the CLOSED fraction only.
     _pnl = mark.get("unrealized_pnl")

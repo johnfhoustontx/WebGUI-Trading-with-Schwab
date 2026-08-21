@@ -371,3 +371,38 @@ def test_roll_down_close_pair_uses_the_cv_split_when_unpriceable():
                                _keyed_pricer(prices), ctx={})
     legs = c["est_fill_legs"]
     assert legs[0]["price"] == 2.50 and legs[1]["price"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Closing an IRON CONDOR is four legs, not two (2026-08-20)
+# --------------------------------------------------------------------------- #
+
+def test_close_charges_four_legs_for_an_iron_condor():
+    """`commission_for(2, ...)` is right for a vertical — buy back the short,
+    sell the long. An IC has BOTH a put spread and a call spread, so closing it
+    is four legs; charging two understated the cost by $0.65 x 2 x qty and made
+    every IC close look cheaper than it is."""
+    ic = _pos(strategy="IC", quantity=3)
+    c = rescue.build_close(ic, _mark(current_value=2.50), _flat_pricer, ctx={})
+    assert c["commission"] == round(4 * 3 * 0.65, 4)
+
+
+def test_close_still_charges_two_legs_for_a_vertical():
+    for strat in ("PCS", "CCS"):
+        c = rescue.build_close(_pos(strategy=strat, quantity=3),
+                               _mark(current_value=2.50), _flat_pricer, ctx={})
+        assert c["commission"] == round(2 * 3 * 0.65, 4), strat
+
+
+def test_partial_close_charges_four_legs_for_an_iron_condor():
+    ic = _pos(strategy="IC", quantity=4)
+    c = rescue.build_partial_close(ic, _mark(current_value=2.50), _flat_pricer, ctx={})
+    assert c is not None
+    closed_qty = 4 // 2
+    assert c["commission"] == round(4 * closed_qty * 0.65, 4)
+
+
+def test_close_net_cash_reflects_the_higher_ic_commission():
+    ic = _pos(strategy="IC", quantity=3)
+    c = rescue.build_close(ic, _mark(current_value=2.50), _flat_pricer, ctx={})
+    assert c["net_cash"] == round(c["gross_cash"] - c["commission"], 2)

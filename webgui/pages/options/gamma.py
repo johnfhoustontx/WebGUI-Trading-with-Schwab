@@ -1895,7 +1895,8 @@ def render():
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
-    # (cache:options:gamma is ~14 MB) can't pile up across 2 s poll ticks.
+    # (cache:options:gamma, ~0.4 MB since the 2026-08-20 history split, plus the
+    # visible view's ~1.1 MB history key) can't pile up across 2 s poll ticks.
     # state["netprem"] is the (separate, ~500 KB) cache:options:net_premium payload
     # with its own in-flight guard — it is symbol-independent, so it is NOT part of
     # the gamma snapshot and must not share the big snapshot's ``fetching`` latch.
@@ -2223,7 +2224,7 @@ def render():
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
         _reflow_charts()
 
-    # Inline wait for the chart region: a symbol change refetches a ~14 MB
+    # Inline wait for the chart region: a symbol change refetches a ~1.5 MB
     # snapshot, and until it lands the panels still show the PREVIOUS symbol,
     # which is worse than showing nothing — it looks like live data for a
     # symbol you are no longer on.
@@ -2552,7 +2553,8 @@ def render():
         # Repaint only when the bus cache version changes (the service bumps it
         # when a requested gamma_refresh finishes). The version compare is done by
         # the caller off the cheap :ver probe; the actual snapshot payload
-        # (cache:options:gamma is ~14 MB — a big blocking GET + JSON parse) is read
+        # (cache:options:gamma is ~0.4 MB since the history split — still a blocking
+        # GET + JSON parse, and the visible view's history follows it) is read
         # OFF the event loop via run.io_bound so it never blocks other clients.
         if version == seen["gamma"] or state.get("fetching"):
             # Unchanged, or a prior big read is still in flight — don't stack them.

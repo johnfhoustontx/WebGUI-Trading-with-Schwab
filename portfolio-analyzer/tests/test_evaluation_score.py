@@ -125,3 +125,34 @@ def test_grade_letter_scale():
     assert grade_letter(0.5) == "D"
     assert grade_letter(0.4) == "F"
     assert grade_letter(None) is None
+
+
+# ── annualizing a two-day-old position (2026-08-20) ────────────────────────
+
+def test_annualized_return_is_not_extrapolated_from_a_handful_of_days():
+    """`(1 + r) ** (252 / trading_days)` with trading_days floored at 1 turns a
+    first-day +2% into ~14,500% annualized and a -2% into -99%. That number feeds
+    the Sharpe-like ratio (risk grade) AND capital_raw (capital grade), so a
+    brand-new position's first wiggle swung two of the four dimensions between A
+    and F on noise.
+
+    Below MIN_ANNUALIZE_DAYS the extrapolation is not meaningful, so it is not
+    made: the dimension drops out and _composite reweights — the mechanism the
+    scorecard already uses for every other absent input.
+    """
+    from src.evaluation import MIN_ANNUALIZE_DAYS, annualize_return
+    assert annualize_return(0.02, 1) is None
+    assert annualize_return(0.02, MIN_ANNUALIZE_DAYS - 1) is None
+
+
+def test_annualized_return_computes_once_the_window_is_long_enough():
+    from src.evaluation import MIN_ANNUALIZE_DAYS, annualize_return
+    out = annualize_return(0.10, MIN_ANNUALIZE_DAYS)
+    assert out == pytest.approx((1.10) ** (252 / MIN_ANNUALIZE_DAYS) - 1)
+
+
+def test_annualize_return_guards_total_loss_and_missing_inputs():
+    from src.evaluation import annualize_return
+    assert annualize_return(None, 60) is None
+    assert annualize_return(0.10, None) is None
+    assert annualize_return(-1.0, 60) is None      # (1 + r) <= 0

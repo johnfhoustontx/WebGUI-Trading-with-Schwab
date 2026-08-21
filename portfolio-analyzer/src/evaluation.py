@@ -92,6 +92,32 @@ def slice_before(df, entry_date: str, lookback: int = EXECUTION_LOOKBACK):
     return out.iloc[-lookback:]
 
 
+# Below this many trading days, annualizing a holding-period return is not a
+# measurement — it is an extrapolation of noise. A first-day +2% annualizes to
+# ~14,500% and a -2% to -99%, and that number drives BOTH the Sharpe-like risk
+# grade and capital efficiency, so a new position's first wiggle swung two of the
+# four dimensions between A and F (2026-08-20). ~1 month of sessions.
+MIN_ANNUALIZE_DAYS = 21
+
+
+def annualize_return(total_return, trading_days):
+    """Annualized return on the 252-day basis, or None when it would be an
+    extrapolation rather than a measurement.
+
+    None (rather than a clamped number) so the dimension DROPS OUT and
+    ``_composite`` reweights — the mechanism the scorecard already uses for every
+    other absent input, and honest about the fact that a two-day-old position
+    simply has no annual return yet.
+    """
+    if total_return is None or not trading_days:
+        return None
+    if trading_days < MIN_ANNUALIZE_DAYS:
+        return None
+    if (1 + total_return) <= 0:
+        return None
+    return (1 + total_return) ** (TRADING_DAYS / trading_days) - 1
+
+
 def entry_percentile(entry_price, df):
     """Where ``entry_price`` sits in the [min, max] of closes (0=low, 1=high).
 
@@ -264,9 +290,7 @@ def evaluate_portfolio(model: dict, baselines: dict) -> dict:
         # Annualize on the TRADING-day (252) basis so this ratio's numerator
         # shares a basis with annualized volatility (sqrt(252)); the Sharpe-like
         # ratio below (ann_return / ann_vol) is then scale-consistent.
-        ann_return = None
-        if total_return is not None and trading_days and (1 + total_return) > 0:
-            ann_return = (1 + total_return) ** (TRADING_DAYS / trading_days) - 1
+        ann_return = annualize_return(total_return, trading_days)
 
         vs_sector = (total_return - b["sector_ret"]
                      if total_return is not None and b.get("sector_ret") is not None

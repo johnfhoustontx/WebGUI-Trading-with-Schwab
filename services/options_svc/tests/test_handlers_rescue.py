@@ -395,3 +395,36 @@ def test_handle_command_dispatches_rescue_apply(monkeypatch):
         type="rescue_apply",
         args={"position_id": "5", "candidate": {"action": "narrow"}}))
     assert seen == {"pid": 5, "cand": {"action": "narrow"}}
+
+
+# ── per-position rescue boards expire (2026-08-20) ─────────────────────────
+
+def test_rescue_board_is_written_with_a_ttl():
+    """One key per rescued position, forever, and the bus has no delete API — 37
+    had accumulated in prod including boards for trades closed long ago. A board
+    is stale within minutes (it prices live legs), so it carries a TTL."""
+    import re
+    import inspect
+
+    from services.options_svc import handlers
+    src = inspect.getsource(handlers)
+    board_writes = re.findall(r"bus\.cache_set\(key,\s*adv[^)]*\)", src)
+    assert board_writes, "no per-id rescue board writes found"
+    for w in board_writes:
+        assert "RESCUE_BOARD_TTL_SEC" in w, w
+
+
+def test_rescue_board_ttl_is_generous_enough_to_outlive_a_review():
+    from services.options_svc import handlers
+    assert 15 * 60 <= handlers.RESCUE_BOARD_TTL_SEC <= 24 * 3600
+
+
+def test_the_rescue_summary_does_not_expire():
+    """The SUMMARY is a single rolling key the nav badge reads — it must not
+    vanish; only the per-position boards are transient."""
+    import inspect
+
+    from services.options_svc import handlers
+    src = inspect.getsource(handlers._publish_rescue_summary) \
+        if hasattr(handlers, "_publish_rescue_summary") else ""
+    assert "RESCUE_BOARD_TTL_SEC" not in src

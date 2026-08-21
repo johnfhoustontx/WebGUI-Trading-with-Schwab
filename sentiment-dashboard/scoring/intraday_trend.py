@@ -91,12 +91,21 @@ def score_vix_context(vix, vix_change_pct, vix1d, vix9d) -> TrendSub:
     vix1d = _finite(vix1d)
     if not vix or vix <= 0 or vix_change_pct is None:
         return TrendSub(score=50.0, confidence=0.0)
-    lvl = _clamp((20.0 - vix) / 10.0, -1, 1)
-    chg = _clamp(-vix_change_pct / 5.0, -1, 1)
-    term = _clamp((vix - vix1d) / 2.0, -1, 1) if vix1d else 0.0
-    direction = 0.4 * lvl + 0.4 * chg + 0.2 * term
+    # Renormalize over the terms PRESENT rather than feeding a missing one in as
+    # a literal 0: a zero is a real "neutral" reading, and substituting it for an
+    # absence structurally shrank the deflection from 50 by the missing term's
+    # weight while still claiming confidence 1.0. $VIX1D does not quote for this
+    # account, so that was a standing 20% shrink, not an outage case. The absence
+    # is carried by the CONFIDENCE instead — the same split vix.score_complex
+    # uses (both fixed 2026-08-20).
+    parts = [(0.4, _clamp((20.0 - vix) / 10.0, -1, 1)),
+             (0.4, _clamp(-vix_change_pct / 5.0, -1, 1))]
+    if vix1d:
+        parts.append((0.2, _clamp((vix - vix1d) / 2.0, -1, 1)))
+    den = sum(w for w, _ in parts)
+    direction = sum(w * v for w, v in parts) / den
     return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
-                    confidence=1.0)
+                    confidence=round(den, 3))
 
 
 def vol_confidence_factor(vix_change_pct) -> float:
