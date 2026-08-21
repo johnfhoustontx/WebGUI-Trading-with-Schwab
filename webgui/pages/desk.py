@@ -1515,35 +1515,83 @@ def speak_volume(settings):
 # A blocked autoplay CLEARS the queue rather than holding it. Audio unlocks on
 # the user's next click, which may be minutes later, and a backlog replayed then
 # would announce a market that has moved on.
+#
+# The event the JS below emits when the browser refuses to play. NiceGUI's
+# ``emitEvent`` is a plain global (nicegui.js is a classic ``<script defer>``),
+# and ``ui.on`` subscribes on the CLIENT's layout — so this is per-tab, not
+# process-wide, and a second Desk build cannot pile up handlers. It is declared
+# ABOVE the script and substituted into it: three untied copies of an event name
+# (here, in the JS, in the test) means renaming the constant leaves ``ui.on``
+# subscribed to a name nothing emits — the unlock button silently dead, with
+# every test green. ``.replace`` rather than an f-string because the script is
+# almost entirely CSS-style braces, every one of which would need doubling.
+VOICE_BLOCKED_EVENT = "desk_voice_blocked"
+
+# ⚠ TWO FAILURE MODES LOOK ALIKE FROM JAVASCRIPT AND MUST NOT BE CONFLATED.
+# Assigning ``el.src`` a clip that 404s runs the HTML "dedicated media source
+# failure steps": the element fires ``error`` AND every pending ``play()``
+# promise rejects with a **NotSupportedError**. A genuine autoplay block instead
+# rejects with **NotAllowedError** and fires no ``error`` at all. Catching every
+# rejection as a block was wrong in three ways at once: the queue was truncated
+# mid-burst, ``busy`` stopped tracking what was actually playing (both handlers
+# ran for the one clip), and — worst — the user was shown "ENABLE SPOKEN ALERTS"
+# for what is really a missing file, a dead end whose button does nothing
+# audible. So the ``catch`` discriminates on the DOMException name, and anything
+# that is not an autoplay block falls through to ``done()`` like any other
+# playback failure.
+#
+# The TOKEN is the other half of that. A 404 delivers BOTH signals for the same
+# attempt, so without it the queue would advance twice on one clip. ``v.token``
+# is stamped when an attempt starts and invalidated by whichever signal arrives
+# first; the loser sees a stale stamp and returns. Do not "simplify" either of
+# these back into a bare ``catch(() => next())``.
+#
+# The Python tests below can only READ this string, so both halves were also
+# verified by EXECUTING it against a fake media element. Measured on the
+# previous version, queue ["bad", "good1", "good2"] with "bad" 404ing: "good2"
+# was never played and one ``desk_voice_blocked`` fired. With this version both
+# good clips play and no event fires. That is the regression the greps are
+# standing in for.
+#
+# KNOWN GAP, accepted: a media element that stalls without ever firing ``ended``
+# or ``error`` leaves ``busy`` true for the life of the tab. The clips are local
+# files served by this same process, which makes it very unlikely, and a
+# ``timeupdate`` watchdog is disproportionate to that.
 DESK_VOICE_JS = """
-window.__deskVoice = window.__deskVoice || {q: [], busy: false};
+window.__deskVoice = window.__deskVoice || {q: [], busy: false, token: 0};
 window.__deskSpeak = function (urls, vol) {
   const v = window.__deskVoice;
   const el = document.getElementById('desk-voice');
   if (!el) return;
   urls.forEach(u => v.q.push(u));
+  // A mid-burst volume change is IGNORED: every clip after the first plays at
+  // the volume the call that started the burst was given. Deliberate — the
+  // alternative is reaching past this guard to re-set el.volume on a clip
+  // already sounding, and burst integrity is worth more than a slider that
+  // takes effect a few seconds late.
   if (v.busy) return;
   const next = () => {
     if (!v.q.length) { v.busy = false; return; }
     v.busy = true;
+    const attempt = ++v.token;
+    // Retire THIS attempt, once. See the token note above the script.
+    const done = () => { if (attempt !== v.token) return; v.token++; next(); };
+    el.onended = done;
+    el.onerror = done;
     el.src = v.q.shift();
     el.volume = vol;
-    el.play().catch(() => {
-      v.q.length = 0; v.busy = false;
-      emitEvent('desk_voice_blocked', {});
+    el.play().catch(err => {
+      if (err && err.name === 'NotAllowedError') {
+        v.q.length = 0; v.busy = false; v.token++;
+        emitEvent('__VOICE_BLOCKED_EVENT__', {});
+        return;
+      }
+      done();
     });
   };
-  el.onended = next;
-  el.onerror = next;
   next();
 };
-"""
-
-# The event the JS above emits when the browser refuses to play. NiceGUI's
-# ``emitEvent`` is a plain global (nicegui.js is a classic ``<script defer>``),
-# and ``ui.on`` subscribes on the CLIENT's layout — so this is per-tab, not
-# process-wide, and a second Desk build cannot pile up handlers.
-VOICE_BLOCKED_EVENT = "desk_voice_blocked"
+""".replace("__VOICE_BLOCKED_EVENT__", VOICE_BLOCKED_EVENT)
 
 # The phrase the unlock button speaks. It confirms audibly that the unlock
 # worked, which a silent button could not.

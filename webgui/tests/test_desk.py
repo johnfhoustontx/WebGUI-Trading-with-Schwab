@@ -2035,19 +2035,59 @@ def test_the_desk_speaks_through_its_own_audio_element():
 
 def test_a_dead_clip_cannot_wedge_the_queue_for_the_life_of_the_tab():
     """``onended`` alone stalls forever on a 404 — nothing ever ends."""
-    assert "el.onerror = next" in d.DESK_VOICE_JS
+    assert "el.onerror = done" in d.DESK_VOICE_JS
+    assert "el.onended = done" in d.DESK_VOICE_JS
 
 
 def test_a_blocked_autoplay_reports_itself_instead_of_failing_silently():
     """``play()`` just rejects; nothing appears in any log. Without this the
     feature looks broken on every fresh tab."""
-    assert "emitEvent('desk_voice_blocked'" in d.DESK_VOICE_JS
+    assert f"emitEvent('{d.VOICE_BLOCKED_EVENT}'" in d.DESK_VOICE_JS
     assert ".catch(" in d.DESK_VOICE_JS
+
+
+def test_the_blocked_event_name_is_the_constant_and_not_a_third_copy():
+    """Renaming ``VOICE_BLOCKED_EVENT`` must not leave ``ui.on`` subscribed to a
+    name nothing emits — the unlock button silently dead, every test green. The
+    placeholder must also be fully substituted, or the JS emits a literal
+    ``__VOICE_BLOCKED_EVENT__`` that no handler is listening for."""
+    assert "__VOICE_BLOCKED_EVENT__" not in d.DESK_VOICE_JS
+    assert d.DESK_VOICE_JS.count(f"'{d.VOICE_BLOCKED_EVENT}'") == 1
+
+
+def test_only_a_real_autoplay_block_is_reported_as_one():
+    """A 404 clip rejects ``play()`` too — with **NotSupportedError**, per the
+    HTML "dedicated media source failure steps", which ALSO fire ``error``.
+    Treating every rejection as a block truncated the queue, desynced ``busy``,
+    and showed the user an unlock button that fixes nothing."""
+    assert "err.name === 'NotAllowedError'" in d.DESK_VOICE_JS
+    # ...and everything else retires the attempt like any playback failure.
+    blocked = d.DESK_VOICE_JS.index("NotAllowedError")
+    assert "done();" in d.DESK_VOICE_JS[blocked:]
+
+
+def test_one_clip_cannot_advance_the_queue_twice():
+    """A 404 delivers BOTH the ``error`` event and the ``play()`` rejection for
+    the same attempt. Without the token, ``done`` would run twice: two clips
+    consumed for one played, and ``busy`` no longer describing reality."""
+    js = d.DESK_VOICE_JS
+    assert "const attempt = ++v.token;" in js
+    assert "if (attempt !== v.token) return;" in js
 
 
 def test_a_blocked_queue_is_dropped_rather_than_replayed_later():
     # Holding a backlog would announce a stale burst the moment audio unlocks.
     assert "v.q.length = 0" in d.DESK_VOICE_JS
+
+
+def test_the_known_gaps_in_the_play_queue_stay_written_down():
+    """Two accepted limitations, both recorded so they are not re-discovered as
+    bugs: a mid-burst volume change only takes effect on the NEXT burst, and a
+    media element that stalls without ``ended`` or ``error`` wedges ``busy``."""
+    src = inspect.getsource(d)
+    head = src[:src.index("DESK_VOICE_JS = ")]
+    assert "KNOWN GAP" in head
+    assert "volume change is IGNORED" in d.DESK_VOICE_JS
 
 
 def test_the_glow_needs_no_repaint_timer_of_its_own():
