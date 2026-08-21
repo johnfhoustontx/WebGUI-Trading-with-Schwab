@@ -4,7 +4,51 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Batch 4 — consolidation: one calendar, one P/C,
+**Last updated:** 2026-08-20 (**The tidiness sweep — measured first, and it was a
+third the size claimed.**
+- **The estimate was wrong, so the sweep started with a measurement.** The audit
+  reported "~60 formatter clones, 200-300 lines". Grouping webgui page functions by
+  NORMALISED AST BODY — identical code, not merely identical names — gives
+  **11 clone groups / 32 defs / ~123 removable lines**. The gap is entirely
+  same-named functions that differ (six distinct colour helpers all called some
+  variant of "lerp"), which is why the count needed deriving rather than trusting.
+- **`pages/fmt.py` is the shared numeric vocabulary now.** `num` (the strict "is
+  this a real reading" coercion) had **six** byte-identical copies whose own
+  docstring recorded the fact; `clamp` had three, `round_or_none` four, and the
+  permissive `float_or` four more under three different names and three different
+  defaults. All aliased, so no call site changed.
+- ⚠ **`num` and `float_or` are deliberately different and the tests say so.**
+  `float_or` preserves whatever `float()` produced — including NaN and bool —
+  because it is a coercion with a fallback; `num` answers None for both because it
+  answers "is this a reading". After a day of NaN findings, collapsing them into
+  one permissive helper would have been the wrong tidy-up, so the divergence is
+  pinned by a test that asserts it.
+- **A test that asserted the duplication was replaced by one that asserts the
+  fix.** `test_num_body_is_identical_to_every_sibling_its_docstring_names` compared
+  six bodies because prose claims aren't enforced (it cites the RISK_FREE_RATE
+  incident by name). With the copies gone, identity replaces comparison: the pages
+  do not merely AGREE, they are the same object.
+- **`rescue_highlight` + `_AT_RISK_STATES`** moved beside the `heat_border_class`
+  they already delegated to, removing three copies of each.
+- **The 35-branch `elif` chain was NOT converted to a dispatch registry** — the
+  bodies are heterogeneous (2 to 20 lines), so it is 35 extractions and 35 chances
+  to mis-pass an argument, for no behaviour change. Its real hazard was the 43-line
+  docstring restating every branch in prose: **`gamma_history`, `rescue_adhoc` and
+  `sim_replay` were already implemented and undocumented.** Documented, and two
+  tests now fail on drift in either direction — adding a branch without a line is a
+  red suite.
+- **L6 (the "colour-helper spread") is largely a false positive.** Of the six,
+  `sector_heat._lerp(pair, f)` interpolates SCALARS, `_hex_rgb`/`_mix`/`_rgba` are
+  three different conversions, and `gauge._lerp` vs `svg._lerp_color` differ by a
+  clamp that is a real behavioural difference. Nothing merged; reported instead.
+- **Stopped at 7 groups / 16 defs / ~41 lines remaining, deliberately.** Every one
+  is a 2-copy group of 3-8 lines spanning different packages, and the clearest
+  (`pnl_color`/`pnl_class`) would mean relocating palette constants used 11 times
+  in `paper.py` to save 8 lines in `driver.py`. Diminishing returns, measured.
+- **Verification.** webgui 2358, options_svc 1216, sentiment_svc 328 + the
+  documented 1, tools 819, shared 93. Ruff clean tree-wide.
+
+**Prior —** 2026-08-20 (**Batch 4 — consolidation: one calendar, one P/C,
 one advisory core, one poll idiom, and a contract that finally validates.**
 - **The `tools/` holiday literals are gone.** `flow_delta_instrumentation.py` and
   `nq_signal.py` each carried a hardcoded 2026-2027 NYSE frozenset — silently wrong

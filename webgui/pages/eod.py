@@ -25,7 +25,12 @@ from zoneinfo import ZoneInfo
 import bus_client
 from nicegui import ui
 
+from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
 from pages.options.theme import BTN, BTN_PRIMARY
+
+def _num(v, default=None):
+    return float_or(v, default)
+
 
 # Where generated standalone reports are archived (under the gitignored data dir).
 ARCHIVE_ROOT = Path(__file__).resolve().parents[1] / "data" / "eod"
@@ -78,13 +83,6 @@ def wrap_document(fragment: str, css: str, title: str) -> str:
         f"<title>{escape(title)}</title><style>{css}</style></head>"
         f"<body style=\"background:#1e1e1e;margin:0;padding:1.2rem\">{fragment}</body></html>"
     )
-
-
-def _num(v, default=None):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
 
 
 def _money(v) -> str:

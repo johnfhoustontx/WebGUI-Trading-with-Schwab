@@ -1696,9 +1696,19 @@ def handle_command(bus, command) -> None:
     symbol) → expirations + strike ladders for the Expected Move dropdowns;
     ``rescue`` (args
     position_id) → compute the ranked rescue advisory for one paper position, cache
-    per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
-    approved candidate against the paper position (stale-price guarded), refresh the
-    paper view + re-cache the advisory; else no-op."""
+    per-id + publish; ``rescue_adhoc`` (args = a user-defined trade spec) → the same
+    ranked advisory for a trade the paper book does not hold (advisory-only, cached
+    under the ``:adhoc`` id); ``rescue_apply`` (args position_id, candidate) →
+    execute the approved candidate against the paper position (stale-price guarded),
+    refresh the paper view + re-cache the advisory; ``sim_replay`` (args symbol/legs)
+    → step the position along the underlying's recent path, cache the six-panel
+    trace + publish; ``gamma_history`` (args symbol, date) → build the standalone
+    intraday history report, cache the HTML + publish; else no-op.
+
+    ⚠ This list IS the API the GUI codes against, and prose drifts:
+    ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
+    from here until 2026-08-20. Two tests in test_handlers.py now fail on drift in
+    either direction, so adding a branch without a line here is a red suite."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":

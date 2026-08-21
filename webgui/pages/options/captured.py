@@ -18,13 +18,15 @@ collection only). Graceful-empty when the service is cold.
 from datetime import datetime
 
 import bus_client
+from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
 
 from . import detail, handoff
-from .rescue import heat_border_class
+from .rescue import AT_RISK_STATES as _AT_RISK_STATES
+from .rescue import heat_border_class, rescue_highlight, rescue_highlight
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
                     BTN_3D_DANGER, BTN_PRIMARY, EYEBROW, LABEL)
 
@@ -32,21 +34,6 @@ from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
 # *account* positions, so captured rows usually carry NO rescue_state — this
 # highlight is therefore a safe no-op here unless a signal is explicitly flagged.
-_AT_RISK_STATES = ("tested", "critical")
-
-
-def rescue_highlight(state, heat):
-    """Left-border Tailwind classes for an at-risk row, or '' (no tint) otherwise.
-
-    Defensive: a missing/None ``state`` (the common case for captured signals)
-    yields no highlight, so this never changes the look of normal rows. The class
-    set comes from the shared ``heat_border_class`` (rescue.py)."""
-    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
-
-
-def _round(value, ndigits=2):
-    return round(value, ndigits) if isinstance(value, (int, float)) else value
-
 
 REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
 # Profit/loss cell colors (green in profit, red in loss).

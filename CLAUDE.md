@@ -1246,6 +1246,16 @@ GTH collection can't silently move the Gamma display flip, and
 gate — flipping it to inclusive re-opens a checkpoint slot at 15:30 ET inside the
 no-new-entries window. See the 2026-08-02 "Last updated" entry.
 
+**`webgui/pages/fmt.py` is the shared numeric vocabulary** — `num` (strict: a real
+reading or None, rejecting NaN AND bool, since `float(True)` is 1.0), `float_or`
+(permissive: coerce with a fallback, NaN passes through), `clamp`,
+`round_or_none`, `fixed`, `signed_pct`. ⚠ **`num` and `float_or` differ on
+purpose and a test pins it**: use `num` for anything feeding a comparison, a
+colour or a direction; use `float_or` when you have a sensible fallback and the
+value is about to be formatted. `num` alone had SIX byte-identical copies before
+2026-08-20. Options table helpers (`rescue_highlight`, `AT_RISK_STATES`) live in
+`pages/options/rescue.py` beside `heat_border_class`.
+
 **The version-gate poll idiom is `webgui/pages/view_watch.watch_view(view, on_change)`**
 — seed the version, probe the cheap `{key}:ver` on a timer, repaint only when it
 moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing
@@ -1820,7 +1830,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
 .venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1214
+.venv\Scripts\python -m pytest services\options_svc    # 1216
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239

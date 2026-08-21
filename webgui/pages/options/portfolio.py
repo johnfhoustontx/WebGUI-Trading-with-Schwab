@@ -14,13 +14,15 @@ sentiment code; the page does no engine call). A fetch-free version-poll
 the service is cold / no account exists yet).
 """
 import bus_client
+from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
 
 from .perf_charts import equity_curve_figure, excursion_text
-from .rescue import heat_border_class
+from .rescue import AT_RISK_STATES as _AT_RISK_STATES
+from .rescue import heat_border_class, rescue_highlight, rescue_highlight
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BTN, BTN_3D_DANGER,
                     BTN_PRIMARY)
 
@@ -28,21 +30,6 @@ from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BTN, BTN_3D_DANGER,
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
 # handlers._apply_rescue_overlay, so the highlight is live here (unlike the
 # paper-trades ledger / captured views, where the overlay is absent).
-_AT_RISK_STATES = ("tested", "critical")
-
-
-def rescue_highlight(state, heat):
-    """Left-border Tailwind classes for an at-risk row's symbol cell, or '' (no
-    tint) otherwise.
-
-    Defensive: a missing/None ``state`` yields no highlight, so healthy rows look
-    unchanged. The class set comes from the shared ``heat_border_class`` (rescue.py)."""
-    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
-
-
-def _round(value, ndigits=2):
-    return round(value, ndigits) if isinstance(value, (int, float)) else value
-
 
 def _money(v):
     return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"

@@ -14,6 +14,7 @@ Split deliberately: the geometry and class decisions are PURE functions, unit
 tested; the ``mount_*`` helpers are the thin NiceGUI wrappers the cards call, so
 the meters cannot drift between the Sentiment and Trend cards.
 """
+from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
 from pages.options import theme
 from pages.options.theme import CONSOLE_ALPHA, console_glow
 
@@ -62,10 +63,6 @@ def _safe(v):
     except (TypeError, ValueError):
         return None
     return None if f != f or f in (float("inf"), float("-inf")) else f
-
-
-def _clamp(v, lo, hi):
-    return max(lo, min(hi, v))
 
 
 def _hex_rgb(value):

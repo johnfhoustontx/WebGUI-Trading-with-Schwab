@@ -510,3 +510,22 @@ def test_render_graceful_empty_cache():
     bus_client.reset()  # fresh empty fakeredis cache (no service writes)
     with ui.card():
         rescue.render()  # must not raise (builds tabs, board + ad-hoc leg editor)
+
+
+# ── rescue_highlight lives beside heat_border_class, once (2026-08-20) ─────
+
+def test_rescue_highlight_tints_only_at_risk_rows():
+    from pages.options.rescue import AT_RISK_STATES, heat_border_class, rescue_highlight
+    for state in AT_RISK_STATES:
+        assert rescue_highlight(state, 60) == heat_border_class(60)
+    for state in (None, "", "ok", "healthy", "closed"):
+        assert rescue_highlight(state, 60) == ""
+
+
+def test_the_three_tables_share_one_rescue_highlight():
+    """captured / paper / portfolio each carried a byte-identical wrapper and its
+    own _AT_RISK_STATES tuple, all delegating to the same heat_border_class."""
+    from pages.options import captured, paper, portfolio
+    from pages.options.rescue import rescue_highlight
+    for mod in (captured, paper, portfolio):
+        assert mod.rescue_highlight is rescue_highlight, mod.__name__

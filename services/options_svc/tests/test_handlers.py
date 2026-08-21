@@ -2610,3 +2610,38 @@ def test_refresh_gamma_clears_history_keys_for_views_the_snapshot_lacks(monkeypa
     monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: thin)
     handlers.refresh_gamma(bus, "SPY")
     assert bus.cache_get("cache:options:gamma_hist_vanna").payload["rows"] == []
+
+
+# ── the command list cannot silently drift from the code (2026-08-20) ──────
+
+def test_every_implemented_command_is_documented():
+    """`handle_command` carried a 43-line docstring restating all 35 branches in
+    prose — and prose drifts: `gamma_history`, `rescue_adhoc` and `sim_replay`
+    were implemented and undocumented when this guard was added. The docstring is
+    the API surface the GUI codes against, so the drift is now a test failure
+    rather than something you find by reading."""
+    import ast
+    import inspect
+    import re
+
+    src = inspect.getsource(handlers.handle_command)
+    fn = ast.parse(src.lstrip()).body[0]
+    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    documented = set(re.findall(r"``([a-z_]+)``", ast.get_docstring(fn) or ""))
+    missing = implemented - documented
+    assert not missing, f"implemented but undocumented: {sorted(missing)}"
+
+
+def test_no_command_is_documented_that_does_not_exist():
+    import ast
+    import inspect
+    import re
+
+    src = inspect.getsource(handlers.handle_command)
+    fn = ast.parse(src.lstrip()).body[0]
+    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    doc = ast.get_docstring(fn) or ""
+    # names in the "``name`` ->" position are command claims
+    claimed = set(re.findall(r"``([a-z_]+)``(?=[^\n]{0,80}?→)", doc))
+    ghosts = claimed - implemented
+    assert not ghosts, f"documented but not implemented: {sorted(ghosts)}"

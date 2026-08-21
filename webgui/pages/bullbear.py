@@ -20,30 +20,10 @@ See docs/plans/2026-08-19-bull-bear-map-design.md.
 """
 import math
 
+from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
+
 QUADRANTS = ("rising_leading", "rising_lagging",
              "falling_leading", "falling_lagging", "unknown")
-
-
-def _num(v):
-    """``v`` as a float, or None for anything that isn't a real reading.
-
-    ``bool`` is rejected ahead of the coercion because it subclasses ``int``:
-    ``float(True)`` is 1.0, so a boolean would sail through every numeric guard
-    and render as a rising trend. NaN is rejected because it is the one that
-    ships silently — ``None`` announces itself with a TypeError, while every
-    comparison against NaN returns False, so an unguarded NaN trend falls through
-    to the falling branch and paints a scoreless row as confidently bearish.
-
-    Byte-identical to the ``_num`` in ``sector_heat`` / ``rotation_view`` /
-    ``rrg_view`` / ``momentum_view``, the sibling modules over this same payload.
-    """
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def quadrant(trend, excess):

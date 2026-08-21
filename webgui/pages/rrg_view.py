@@ -34,6 +34,7 @@ Three departures from the supplied design, each forced by real data:
 """
 import math
 
+from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
 from pages.rotation_view import (  # noqa: F401 — the shared palette, deliberately
     NB, NE, NT, QUAD_CHROMA, QUAD_HUE, TONE, fmt_mom, fmt_spread,
@@ -45,16 +46,6 @@ from pages.rotation_view import (  # noqa: F401 — the shared palette, delibera
 # design's four segments want, and it is the horizon over which a rotation is
 # still legible as a direction rather than a scribble.
 TAIL_POINTS = 5
-
-
-def _num(v):
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def tail_points(sector, n=TAIL_POINTS):

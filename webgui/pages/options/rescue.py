@@ -93,6 +93,21 @@ def heat_border_class(heat):
     return f"border-l-4 border-[{c}] bg-[{c}]/[.13]"
 
 
+
+# Row states the tables tint. Identical tuple in captured/paper/portfolio until
+# 2026-08-20, alongside three byte-identical copies of the wrapper below.
+AT_RISK_STATES = ("tested", "critical")
+
+
+def rescue_highlight(state, heat):
+    """Left-border Tailwind classes for an at-risk row, or '' (no tint).
+
+    Defensive: a missing/None ``state`` — the common case for captured signals —
+    yields no highlight, so normal rows look unchanged.
+    """
+    return heat_border_class(heat) if state in AT_RISK_STATES else ""
+
+
 def cash_class(value):
     """Tailwind ``text-[<hex>]`` class for a credit/debit value by sign:
     positive green · negative red · zero/missing neutral. Mirrors ``cash_text``."""

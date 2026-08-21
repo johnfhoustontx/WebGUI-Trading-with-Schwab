@@ -37,6 +37,7 @@ from pages import console_regime as _CR
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
+from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import header as _hdr
@@ -74,24 +75,6 @@ DESK_SYMBOLS = ("$SPX", "SPY", "$NDX", "QQQ")
 # that needs it. Every session BOUND still comes from ``market_calendar``; this
 # is only the zone a naive datetime is read in, which is that module's rule too.
 _CT = ZoneInfo("America/Chicago")
-
-
-def _finite(v):
-    """``float(v)`` when it is a real, finite number — otherwise ``None``.
-
-    This is the guard the app's documented NaN trap demands. ``min(hi, nan)``
-    returns ``hi`` and ``max(lo, nan)`` returns ``lo`` (every comparison against
-    NaN is False, so the running value survives), so an unguarded non-finite
-    value does not degrade to "no reading" — it PINS a bound and renders as a
-    confident extreme. Filter at the call site; never trust a clamp to notice.
-    """
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 # ── structure map ────────────────────────────────────────────────────────────
