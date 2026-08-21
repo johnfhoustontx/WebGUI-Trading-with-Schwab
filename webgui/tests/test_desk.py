@@ -1603,3 +1603,70 @@ def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
             if isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)
             and v.value.id.endswith("_GRID")}
     assert heads == rows and len(heads) == 4
+
+
+# ── arrival detection ────────────────────────────────────────────────────────
+def test_new_ids_reports_only_rows_not_seen_before():
+    rows = [{"id": "c"}, {"id": "b"}, {"id": "a"}]
+    assert d.new_ids(rows, {"a", "b"}) == ["c"]
+
+
+def test_new_ids_preserves_row_order_so_the_newest_is_first():
+    # ``flow.alert_rows`` is newest-first, and the newest new row is the one
+    # that gets spoken. Order is load-bearing, not incidental.
+    rows = [{"id": "c"}, {"id": "b"}, {"id": "a"}]
+    assert d.new_ids(rows, set()) == ["c", "b", "a"]
+
+
+def test_new_ids_counts_a_duplicated_id_once():
+    rows = [{"id": "a"}, {"id": "a"}]
+    assert d.new_ids(rows, set()) == ["a"]
+
+
+def test_new_ids_skips_rows_with_no_id():
+    assert d.new_ids([{"id": None}, {}, {"id": "a"}], set()) == ["a"]
+
+
+def test_new_ids_reads_the_key_the_caller_names():
+    # Positions key on position_id, flow on id. One function, not two.
+    rows = [{"position_id": "p1"}]
+    assert d.new_ids(rows, set(), key="position_id") == ["p1"]
+
+
+def test_new_ids_of_nothing_is_empty():
+    assert d.new_ids(None, set()) == []
+    assert d.new_ids([], {"a"}) == []
+
+
+def test_id_set_is_what_seen_is_replaced_with_each_paint():
+    # REPLACED, not unioned — see ``id_set``'s docstring. A row with no id is
+    # left out, matching ``new_ids``, so the two can never disagree about which
+    # rows exist.
+    rows = [{"id": "a"}, {"id": None}, {}, {"id": "b"}]
+    assert d.id_set(rows) == {"a", "b"}
+    assert d.id_set(None) == set()
+    assert d.id_set([{"position_id": "p1"}], key="position_id") == {"p1"}
+
+
+# ── flag changes ─────────────────────────────────────────────────────────────
+def test_flag_changes_reports_a_moved_flag():
+    rows = [{"position_id": "p1", "flag": "AT RISK"}]
+    assert d.flag_changes(rows, {"p1": "OK"}) == ["p1"]
+
+
+def test_flag_changes_ignores_an_unchanged_flag():
+    rows = [{"position_id": "p1", "flag": "OK"}]
+    assert d.flag_changes(rows, {"p1": "OK"}) == []
+
+
+def test_a_first_sighting_is_not_a_flag_change():
+    # It is an ARRIVAL, and new_ids already glows it. Counting it here too
+    # would give a brand-new row two overlapping glows.
+    rows = [{"position_id": "p1", "flag": "OK"}]
+    assert d.flag_changes(rows, {}) == []
+
+
+def test_flag_map_keys_positions_by_id():
+    rows = [{"position_id": "p1", "flag": "OK"}, {"position_id": None,
+                                                  "flag": "RESCUE"}]
+    assert d.flag_map(rows) == {"p1": "OK"}

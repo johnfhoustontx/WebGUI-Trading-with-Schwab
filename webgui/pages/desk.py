@@ -481,6 +481,65 @@ def position_flag(rescue_state, rescue_tagged=True):
     return POSITION_FLAGS.get(rescue_state, _DEFAULT_FLAG)
 
 
+# ── arrival + change detection ───────────────────────────────────────────────
+# Pure, so the whole "what is new on this screen" question is testable without
+# a browser. The page-state sets these read against are seeded SILENTLY on the
+# first paint — without that, navigating to the Desk announces the entire day's
+# alert list and lights every row, which is exactly the trap main.py's watcher
+# already documents for the scanner chime.
+def new_ids(rows, seen, key="id"):
+    """Ids in ``rows`` not already in ``seen``, IN ROW ORDER.
+
+    Row order is load-bearing: the flow feed is newest-first and the newest
+    arrival is the one that gets spoken, so the caller reads ``[0]``. A row with
+    no id is skipped rather than given a positional key — a synthetic key would
+    change identity on the next repaint and re-announce forever.
+    """
+    out = []
+    for r in rows or ():
+        rid = (r or {}).get(key) if isinstance(r, dict) else None
+        if rid is None or rid in seen or rid in out:
+            continue
+        out.append(rid)
+    return out
+
+
+def id_set(rows, key="id"):
+    """The ids present in ``rows`` — what ``seen`` is replaced with each paint.
+
+    REPLACED, not unioned: the flow list is day-scoped and rolling, and a
+    position that closes and reopens really is a new position. An ever-growing
+    set would also never shrink on a page left open for days.
+    """
+    return {(r or {}).get(key) for r in rows or ()
+            if isinstance(r, dict) and (r or {}).get(key) is not None}
+
+
+def flag_map(rows):
+    """``{position_id: flag}`` — the previous-state map ``flag_changes`` reads."""
+    return {r["position_id"]: r.get("flag") for r in rows or ()
+            if isinstance(r, dict) and r.get("position_id") is not None}
+
+
+def flag_changes(rows, prev):
+    """Position ids whose ``flag`` moved since ``prev``.
+
+    A FIRST SIGHTING is deliberately not a change — it is an arrival, and
+    ``new_ids`` already glows it. Counting it in both places would give a new
+    row two overlapping glows.
+    """
+    out = []
+    for r in rows or ():
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("position_id")
+        if rid is None or rid not in prev:
+            continue
+        if r.get("flag") != prev[rid]:
+            out.append(rid)
+    return out
+
+
 def _is_open(p):
     return (p.get("status") or "OPEN").upper() not in _CLOSED_STATUSES
 
