@@ -48,6 +48,19 @@ _STATIC_DIR = _REPO_ROOT / "webgui" / "static"
 if _STATIC_DIR.is_dir():
     app.add_static_files("/static", str(_STATIC_DIR))
 
+# Generated Desk voice clips at /voice. Created eagerly rather than guarded on
+# ``is_dir()`` like /static above: this directory is BUILT at runtime, so on a
+# fresh clone the guard would skip the mount and every clip would 404 until a
+# restart. See webgui/voice.py.
+_VOICE_DIR = _REPO_ROOT / "webgui" / "data" / "voice"
+try:
+    _VOICE_DIR.mkdir(parents=True, exist_ok=True)
+    app.add_static_files("/voice", str(_VOICE_DIR))
+except OSError:
+    logging.getLogger("webgui").warning(
+        "voice clip directory unavailable — Desk spoken alerts are off",
+        exc_info=True)
+
 _CT = _ZoneInfo("America/Chicago")
 
 
