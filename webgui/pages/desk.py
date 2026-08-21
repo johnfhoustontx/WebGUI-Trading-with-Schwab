@@ -253,21 +253,24 @@ _ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
 # worth writing down. Flow's neighbour is Positions, whose length is DATA (open
 # trades), so a constant can only match it by accident. This panel's neighbour is
 # Dealer Positioning, which is exactly ``len(DESK_SYMBOLS)`` rows — deterministic
-# — so the two genuinely can be squared off. Measured live at 2381px:
+# — so the two genuinely can be squared off. Re-measured live at 1920px, on the
+# reference-scale type ladder (the panel chrome is common to both, so only the
+# head and the rows are counted):
 #
-#   dealer   87px chrome + 27px column head + 4 x 71.4px rows = 399.6px
-#   board    87px chrome + 27px column head + N x 50px rows
+#   dealer   24px column head + 4 x 62.5px rows = 274px of content
+#   board    24px column head + N x 44px rows
 #
-#   N = 5 -> 364px (36px SHORT of the dealer, and no extra rows at all)
-#   N = 6 -> 414px (14px OVER)
+#   N = 5 -> 244px (30px SHORT of the dealer, and no extra rows at all)
+#   N = 6 -> 288px (14px OVER)
 #
 # `items-stretch` makes the two cards the same height either way, so this only
 # decides which panel carries the void — and six puts the smaller void in the
 # better place twice over. It is a third of a row, less than the panel's own
-# 16px bottom padding; and the dealer panel grows by a ~24px "walls withheld"
+# 16px bottom padding; and the dealer panel grows by a ~19px "walls withheld"
 # line whenever the GEX feed goes stale, which is most of the day, so six sits
-# BETWEEN the dealer's two heights (14px over the live one, 9px under the stale
-# one) rather than above both.
+# BETWEEN the dealer's two heights rather than above both. ⚠ The 14px survived
+# the whole ladder being rescaled 0.8x — both panels shrank together — but that
+# is luck, not invariance: re-measure it, do not re-derive it.
 BOARD_ROWS_N = 6
 
 
@@ -609,10 +612,10 @@ def positions_summary(rows):
 #
 # The layout does not argue against it either, and that was arithmetic rather
 # than optimism: eleven chips on their ``min-w-[124px]`` floor plus ten 8px gaps
-# is 1444px, where the panel grid immediately below already demands 2104px of
-# content width before it will go two-up. Below that breakpoint the page is one
-# column and the strip wraps to two rows, which is the same graceful floor every
-# panel here takes.
+# is 1444px, and the strip is a ``flex-wrap`` row — so below that it simply
+# wraps to two rows and keeps every sector. It is the one region on this page
+# that reflows rather than clips, which is why it needs no width budget of its
+# own (contrast the panel grid: see ``PANEL_BUDGET_PX``).
 BULLBEAR_ROUTE = "/sentiment/bullbear"
 
 # Its own message, NOT ``WAITING_OPTIONS``: these scores come from a NIGHTLY
@@ -1052,11 +1055,11 @@ def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
     """
     flow = "break-words leading-[1.3]" if wrap else "whitespace-nowrap"
     bg = "" if fill is None else f"bg-[{hexv}]/[{fill}]"
-    return (f"{pad} py-[2px] rounded-[2px] text-[11px] tracking-[{track}] {flow} "
+    return (f"{pad} py-[2px] rounded-[2px] text-[9px] tracking-[{track}] {flow} "
             f"border border-[{hexv}] {bg} text-[{hexv}] {weight}").strip()
 
 
-# The book and flag chips live in the 52px and 44px tracks, so they take the
+# The book and flag chips live in the panel's two tightest tracks, so they take the
 # compact tracking and padding; they also wrap, because "AT RISK" is two words
 # and "RESCUE" is one long one.
 _TIGHT = {"track": ".1em", "pad": "px-[5px]", "wrap": True}
@@ -1081,7 +1084,7 @@ CHIP_LABEL = _chip(_C["label"], **_TIGHT)
 # in a 96px track — but explicitly NOT its ``wrap``: a board row is one line by
 # construction now, and a chip that folded onto a second line would be the only
 # thing on the panel breaking that. It fits without folding — "VOL CRUSH", the
-# longest of the four tags, measures 80px against the track's 96px floor.
+# longest of the four tags, measures ~69px against the track's 77px floor.
 CHIP_SETUP = _chip(_C["accent"], track=".1em", pad="px-[5px]")
 
 # regime_word → chip. Only the two real readings are coloured; the em-dash
@@ -1237,9 +1240,9 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # head tuple and the row painter, or the labels silently slide one cell across
 # and every number on the panel starts reading as the wrong quantity.
 #
-# The widest panel (Positions) is what sets the page's two-column breakpoint —
-# see the panel wrapper in ``render``, which does that arithmetic from the
-# minmax floors below.
+# The widest panel (Positions) is what sets the page's MINIMUM SUPPORTED WIDTH
+# — see the panel wrapper in ``render``, which does that arithmetic from the
+# minmax floors below, and ``PANEL_BUDGET_PX`` for the budget they spend.
 # Every qualifier rides as a SECOND LINE inside its owner's cell rather than
 # taking a column of its own: the day % under spot, the flip distance under the
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
@@ -1247,36 +1250,77 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # ONE grid line — which is what puts the structure map beside its symbol instead
 # of on a tier of its own. `overflow-x-auto` was deliberately not used as the
 # fallback: a dashboard you scroll sideways to read defeats the page's purpose.
-_GAP = "gap-x-[10px] gap-y-0"
+_GAP = "gap-x-[8px] gap-y-0"
+
+# ── the width budget every track floor below is spent against ────────────────
+# The page is read at a 1920px window, and the four panels are a FIXED 2x2 (see
+# the note in ``render``), so each panel gets exactly half of what is left after
+# the app chrome and the grid gutter. That is the number every floor here has to
+# add up under — not a target, an upper bound: a CSS grid will not shrink a
+# track below its ``minmax()`` floor, so a panel whose floors oversubscribe this
+# does not reflow, it CLIPS.
+#
+# ``DESK_CHROME_PX`` is the MEASURED non-panel width — the icon rail's laid-out
+# 68px plus the page's own ``p-4`` and the drawer/page padding around it —
+# confirmed live at 1920 (a 1905px document less a 1741px panel grid). It is
+# written down rather than computed because there is nothing to compute it from.
+#
+# ⚠ The SCROLLBAR is subtracted, and that is not fussiness: this page is taller
+# than any window it is read in, so the classic scrollbar is ALWAYS there, and a
+# budget taken off ``innerWidth`` reads 868px where the panel really gets 860px.
+# Eight pixels is a third of the slack the tightest panel has.
+DESK_WINDOW_PX = 1920
+DESK_CHROME_PX = 164
+DESK_SCROLLBAR_PX = 15            # the classic Windows scrollbar, always shown
+PANEL_GUTTER_PX = 20              # the 2x2's ``gap-5``, between the two columns
+PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
+                   - PANEL_GUTTER_PX) // 2
+
+# What a panel spends before its first track: the card's 1px border both sides,
+# the panel's ``px-4`` both sides (``_panel``) and the row's own ``px-1`` both
+# sides (``_ROW``/``_grid_head``). The gaps are ``len(tracks) - 1`` x 8px on top.
+PANEL_PAD_PX = 2 + 32 + 8
+COL_GAP_PX = 8
+
 # Column widths are the reference design's, but every flexible track is
 # ``minmax(<reference px>, <weight>fr)`` rather than a bare pixel width with ONE
 # 1fr track soaking up the remainder.
 #
-# Why: the reference was authored against ~920px panels. Measured live at a
-# 2381px viewport the panels are ~1100px, and with a single 1fr track the
-# structure map rendered **502px wide** — it needs ~200 — which left a void
-# between the map and the wall columns and made the markers read as scattered
-# rather than as a scale. The map was CORRECT (put 0%, spot 26%, flip 46%,
-# call 100%); it was just stretched across half the panel.
+# Why: with a single 1fr track the structure map rendered **502px wide** — it
+# needs ~200 — which left a void between the map and the wall columns and made
+# the markers read as scattered rather than as a scale. The map was CORRECT (put
+# 0%, spot 26%, flip 46%, call 100%); it was just stretched across half the
+# panel. Weighting every track instead spreads the slack proportionally, so the
+# row fills at any width and no single cell balloons.
 #
-# Weighting every track instead spreads the slack proportionally, so the row
-# fills at any width and no single cell balloons.
+# **The floors are the reference's own pixels, at the reference's own scale.**
+# They were briefly carried at ~1.3x it, to stand under type scaled ~1.35x for a
+# 2381px screen (see the size ladder below) — and that pairing is right, a floor
+# is only meaningful relative to the text standing in it. But the page is read
+# at 1920px, which is the width the reference was authored for in the first
+# place, and at 1920 the scaled-up floors oversubscribed the budget above by
+# 174px on Positions, 100px on the Board and 44px on Dealer Positioning: three
+# of four panels clipped their rows. So the whole scaling was unwound — type and
+# floors together, at 0.8x, which lands both back within a rounding step of the
+# reference. The `fr` WEIGHTS are untouched throughout: the proportions were
+# always right, only the absolute floor moved.
 #
-# The minmax LOWER bounds are the reference's pixels SCALED BY ~1.3, because the
-# type on this page is scaled ~1.35 (see the size ladder below) and a floor is
-# only meaningful relative to the text standing in it. The reference was drawn
-# for ~1920px; measured on the 2381px screen this page is actually read at, its
-# 8-16px range was uncomfortably small. Leaving the floors at the reference's
-# own pixels while enlarging the text would have made every one of them a
-# CLIPPING width rather than a minimum. The `fr` WEIGHTS are untouched — the
-# proportions were right, only the absolute floor moved.
-#
-# The BOARD's first track additionally jumps 44px -> 68px before that scaling:
-# it holds the word SCORE on .2em tracking, which never fit 44px and only fits
-# less well at 12px.
-DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
-               "minmax(170px,2fr)_minmax(94px,1fr)_minmax(94px,1fr)_"
-               f"minmax(154px,1.5fr)] {_GAP} w-full")
+# ⚠ Three floors do NOT follow that 0.8x, and none of the three is bound by the
+# value under it. "GAMMA FLIP" (82px) and the BOARD's SCORE track (52px) are
+# bound by their column LABEL: a label on .2em tracking does not shrink as fast
+# as the data under it, and a label that clips turns a column of numbers into an
+# unlabelled column of numbers. "NET GEX / REGIME" (144px) is bound by neither —
+# it is the dealer REGIME CHIP, which measures 139px ("SHORT GAMMA · RUNS" on
+# .16em tracking) against a label needing 128px and a value needing 47px. That
+# one was found by MEASUREMENT, not arithmetic: at the 130px this track was
+# first given, the fr weights handed it 138.5px and the chip wrapped to two
+# lines by half a pixel — leaving two of the four dealer rows 13px taller than
+# the other two, which reads as a rendering fault rather than as a long word.
+# Chip ``wrap=True`` stays the genuine narrow-case backstop; it should not be
+# what happens at the width the page is read at.
+DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
+               "minmax(136px,2fr)_minmax(75px,1fr)_minmax(75px,1fr)_"
+               f"minmax(144px,1.5fr)] {_GAP} w-full")
 # Eight tracks now, not six: the board rows went flat (one line per symbol), so
 # WHY and SETUP take columns of their own instead of riding under the symbol and
 # the signal. The IV state rides INSIDE the ATM IV cell, on the same line — it
@@ -1286,30 +1330,28 @@ DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
 # WHY carries 5fr, far more than any other track, and that weight is what stops
 # it ellipsing. The longest rationale this page can build is three clauses —
 # "pinned at wall · below flip · strong downtrend", 46 characters — which is
-# 331px of JetBrains Mono at 12px (0.6em advance). Measured against the 2381px
-# viewport this page is read at, the weights hand WHY ~360px, so the worst case
-# clears with ~28px to spare. Its floor is 250px because the panel's total
-# minimum must stay UNDER the Positions panel's 973px, which is what sets the
-# page's two-column breakpoint: 848px of floors + 70px of gaps + 8px of row
-# padding + 40px of panel padding + 2px of border = 968px. Raising the floor
-# further would move the breakpoint, and the breakpoint belongs to Positions.
+# 276px of JetBrains Mono at 10px (0.6em advance). Its floor is 200px, and the
+# weights hand it well past that at the width the page is read at, so the worst
+# case never reaches the `truncate`.
 #
-# ATM IV's 144px is likewise a WORST CASE, not the common one: it holds the
-# value AND its state word on one line, and "100.0% collapsing" measures 139px.
-# The obvious 132px (which is what the common "57.6% collapsing" wants) fits
-# every symbol on the board today and truncates the first three-digit IV that
-# appears — the kind of column that looks correct until the one row that matters
-# arrives. The 12px it needed came out of SCORE, which is a fixed track holding
-# a two-digit number under a 48px label and had the slack to give.
-BOARD_GRID = ("grid grid-cols-[64px_minmax(96px,1fr)_minmax(250px,5fr)_"
-              "minmax(144px,1.2fr)_minmax(82px,1fr)_minmax(46px,0.8fr)_"
-              f"minmax(70px,1fr)_minmax(96px,1fr)] {_GAP} w-full")
+# ATM IV's 116px is likewise a WORST CASE, not the common one: it holds the
+# value AND its state word on one line, and "100.0% collapsing" measures ~113px
+# at the current ladder. The obvious ~106px (which is what the common "57.6%
+# collapsing" wants) fits every symbol on the board today and truncates the
+# first three-digit IV that appears — the kind of column that looks correct
+# until the one row that matters arrives.
+#
+# SCORE's 52px is the exception noted above: it holds a two-digit number, but
+# its LABEL is five caps on .2em tracking (~40px), and that is what binds it.
+BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
+              "minmax(116px,1.2fr)_minmax(66px,1fr)_minmax(37px,0.8fr)_"
+              f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
 # weight is still on DETAIL because it is the only cell here that can be long —
 # the other three are a clock time, a ticker, and a two-word kind.
-FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
-             f"minmax(158px,2fr)] {_GAP} w-full")
+FLOW_GRID = ("grid grid-cols-[54px_minmax(70px,1fr)_minmax(192px,4fr)_"
+             f"minmax(126px,2fr)] {_GAP} w-full")
 # Ten tracks now, not nine: the position rows went flat like the board's and the
 # flow's, so STRATEGY takes a column of its own instead of riding under the
 # symbol, and the expiry rides WITH the DTE it is the source of rather than
@@ -1317,66 +1359,76 @@ FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
 # and gets back a whole line of height per row — which is what pays for a third
 # book on the same panel.
 #
-# Every floor is a worst-case string MEASURED in the live DOM against the
-# rendered font, not computed from an assumed advance. That distinction earned
-# its keep: a first pass sized three of these tracks from arithmetic, they came
-# out 7-17px short, and the shortfall was invisible because none of the strings
-# that overflow them was on screen the day it was measured.
+# Every floor is a worst-case string against the RENDERED font, not an assumed
+# advance. That distinction earned its keep: a first pass sized three of these
+# tracks from arithmetic, they came out 7-17px short, and the shortfall was
+# invisible because none of the strings that overflow them was on screen the day
+# it was measured. The widths below are quoted at the current ladder (14px
+# symbol / 13px value / 11px secondary / 10px label / 9px chip); JetBrains Mono
+# advances 0.6em, so a size change moves every one of them proportionally.
 #
-#   BOOK   80px  "CAPTURED" is the widest chip on the page. The chips
+#   BOOK   64px  "CAPTURED" is the widest chip on the page. The chips
 #                ``break-words`` as a backstop, and this floor is what stops
 #                that backstop ever firing: a folded chip would be the one
 #                two-line cell in a panel of one-line rows.
-#   SYMBOL  66px "GOOGL" at 18px bold on .08em tracking — 61.2px measured.
-#   STRAT   52px the head label "STRAT" binds, not the value: the services emit
-#                two- and three-letter codes (PCS / CCS / IC), 25.2px.
-#   EXPIRY 180px ⚠ "2026-08-28 · 0DTE" is 173.4px, NOT the 163.2px of the
-#                "· 10d" shape that happened to be on screen. Every credit
-#                spread reaches 0DTE on its expiration day, and "· 365d" is the
-#                same width — so the common case is 10px narrower than the case
-#                that matters. Sizing on what was visible would have clipped
-#                this column on exactly the morning it was being read hardest.
+#   SYMBOL  53px "GOOGL" at 14px bold on .08em tracking — 47.6px.
+#   STRAT   42px the head label "STRAT" binds, not the value: the services emit
+#                two- and three-letter codes (PCS / CCS / IC).
+#   EXPIRY 144px ⚠ "2026-08-28 · 0DTE" is 132.6px, NOT the shorter "· 10d"
+#                shape that happened to be on screen. Every credit spread
+#                reaches 0DTE on its expiration day, and "· 365d" is the same
+#                width — so the common case is narrower than the case that
+#                matters. Sizing on what was visible would have clipped this
+#                column on exactly the morning it was being read hardest.
 #   ENTRY,
-#   MARK    66px "$12.45" at 17px, 61.2px.
-#   STRIKES 158px "24000.0/23950.0" — an index strike pair, 153px. An equity
-#                pair ("1200.0/1195.0", 132.6px) is not the worst case.
-#   QTY     44px "125" at 17px is 30.6px; the label is the binding half.
-#   UNREAL 118px "-$12,345.00" is 112.2px. The driver's own max_loss_total runs
+#   MARK    53px "$12.45" at 13px, 46.8px.
+#   STRIKES 126px "24000.0/23950.0" — an index strike pair, 117px. An equity
+#                pair ("1200.0/1195.0") is not the worst case.
+#   QTY     36px "125" at 13px is 23.4px; the label is the binding half.
+#   UNREAL  94px "-$12,345.00" is 85.8px. The driver's own max_loss_total runs
 #                to four figures, so five-figure P&L is a real row, not a
 #                hypothetical one.
-#   FLAG    72px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
+#   FLAG    60px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
 #
 # The fr WEIGHTS are set so no track sits ON its floor at the width this page is
-# read at: measured at 2381px every one clears with 3-11px of slack, which is
-# what stops a single character of drift becoming a clipped cell.
-POS_GRID = ("grid grid-cols-[80px_minmax(66px,0.8fr)_minmax(52px,0.6fr)_"
-            "minmax(180px,2fr)_minmax(66px,0.8fr)_minmax(66px,0.8fr)_"
-            "minmax(158px,1.8fr)_minmax(44px,0.5fr)_minmax(118px,1.3fr)_"
-            f"minmax(72px,0.8fr)] {_GAP} w-full")
+# read at, which is what stops a single character of drift becoming a clipped
+# cell. This is the panel that spends the budget hardest: its ten floors plus
+# nine gaps plus ``PANEL_PAD_PX`` are what decide the page's minimum supported
+# window, so a track widened here is a track that has to come from somewhere.
+POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
+            "minmax(144px,2fr)_minmax(53px,0.8fr)_minmax(53px,0.8fr)_"
+            "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
+            f"minmax(60px,0.8fr)] {_GAP} w-full")
 
-# The type ladder. Every size is the reference design's own, multiplied by ~1.35
-# and rounded: the reference was authored against a ~1920px screen, and on the
-# 2381px screen this page is read at, its 8-16px range sat well below
-# comfortable reading size. The RATIOS between the steps are the reference's and
-# must stay that way — the three-tier hierarchy (value / qualifier / label) is
-# what makes a nine-column row scannable, and flattening it by scaling one step
-# and not another would cost more than the small type did. (The ladder's top
-# step, a 13px eyebrow, went with the strip that used it — the strip tiles carry
-# their own, smaller one; see ``_STRIP_EYEBROW``.)
-# Column labels get a step MORE than the ladder gives (11px -> 12px) and a
+# The type ladder. Every size is 0.8x what this page briefly carried, which was
+# the reference design's own multiplied by ~1.35 for a 2381px screen. The page
+# is read at 1920px — the width the reference was authored for — so that scaling
+# was unwound rather than trimmed: squeezing columns until the text ellipsed
+# would have cost the reading, where returning to the scale the design was drawn
+# at costs nothing. The ladder now runs 14 / 13 / 12 / 11 / 10 / 9.
+#
+# The RATIOS between the steps are the reference's and must stay that way — the
+# three-tier hierarchy (value / qualifier / label) is what makes a nine-column
+# row scannable, and flattening it by scaling one step and not another would
+# cost more than the small type does. Scale the whole ladder or none of it.
+# (The ladder's top step, a 13px eyebrow, went with the strip that used it — the
+# strip tiles carry their own; see ``_STRIP_EYEBROW``.)
+#
+# Column labels still get a step MORE than the ladder gives (9px -> 10px) and a
 # brighter hex (see ``REF_HEAD_TXT``): at 8px on .2em tracking they were the one
 # thing on the page that could not be read at all, and a label nobody can read
 # turns nine columns of numbers into nine unlabelled columns of numbers. The
 # wide tracking stays — it is what separates a LABEL from the data under it now
-# that the size difference between them is smaller.
-_HEAD = f"text-[12px] tracking-[.2em] {REF_HEAD_TXT}"
+# that the size difference between them is smaller — and it is also why three
+# track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
+_HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
 _ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
-_VALUE = f"text-[17px] tabular-nums {CON_TXT}"
+_VALUE = f"text-[13px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
-_V_SPOT = f"text-[18px] tabular-nums {REF_TXT}"
-_V_FLIP = f"text-[18px] tabular-nums {REF_TXT_SOFT}"
-_SUB = "text-[12px] tabular-nums"          # a cell's second line
-_PLACEHOLDER = f"text-[15px] {CON_TXT_MUTED} py-4"
+_V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
+_V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
+_SUB = "text-[10px] tabular-nums"          # a cell's second line
+_PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
 # the same words for both would make a dead service indistinguishable from a
@@ -1571,16 +1623,16 @@ def _panel(title, subtitle=""):
 
     The head is built ONCE and the body is what each painter clears, so a
     repaint can neither duplicate the title nor strand a handle to it."""
-    with ui.column().classes(f"{CONSOLE_CARD} w-full px-5 pt-4 pb-4 gap-2"):
+    with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
         with ui.row().classes(
                 f"items-baseline justify-between w-full gap-4 border-b "
                 f"{CONSOLE_RULE} pb-2"):
             ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[24px] font-bold tracking-[.16em] "
+                f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
                 f"{CON_TXT}")
             if subtitle:
                 ui.label(subtitle).classes(
-                    f"text-[13px] tracking-[.2em] whitespace-nowrap "
+                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
                     f"{CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
     return body
@@ -1676,7 +1728,7 @@ def _structure_map(pos):
             # Named, because a lone amber hairline between two glowing walls is
             # not self-explanatory. `ml-[-6px]` half-centres it on the tick.
             ui.label("FLIP").classes(
-                f"absolute bottom-[-4px] ml-[-8px] text-[11px] "
+                f"absolute bottom-[-4px] ml-[-7px] text-[9px] "
                 f"text-[#4b6070] {_K.left_class(pos['flip'])}")
         if pos.get("spot") is not None:
             # A ring, not a dot: it has to read as a position ON the span
@@ -1798,32 +1850,38 @@ def render():
         # already on. `items-stretch` so the two panels of a row square off at
         # the same height instead of leaving a stepped edge between them.
         #
-        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). This was
-        # `grid-cols-1 min-[2300px]:grid-cols-2`, and that breakpoint was
-        # arithmetic rather than a guess — Positions is the widest panel:
+        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). It was
+        # `grid-cols-1 min-[2300px]:grid-cols-2`; with the breakpoint gone, that
+        # breakpoint's arithmetic became the page's MINIMUM SUPPORTED WIDTH.
+        # Positions is the panel that sets it:
         #
-        #   902px  the TEN ``POS_GRID`` minmax floors summed
-        #   + 90   nine 10px column gaps
+        #   725px  the TEN ``POS_GRID`` minmax floors summed
+        #   + 72   nine 8px column gaps (``_GAP``)
         #   +  8   the row's own px-1, both sides (``_ROW``)
-        #   + 40   the panel's px-5, both sides (``_panel``)
+        #   + 32   the panel's px-4, both sides (``_panel``)
         #   +  2   the card's 1px border, both sides
-        #   = 1042px minimum for one panel
-        #   x2 + 20px gutter = 2104px of panel content
-        #   + 164 of measured chrome            = 2268px of LAYOUT width
-        #   + 15 for the classic scrollbar      = 2283px of innerWidth
+        #   = 839px minimum for one panel      (the last three are PANEL_PAD_PX)
+        #   x2 + 20px gutter = 1698px of panel content
+        #   + 164 of measured chrome           = 1862px of LAYOUT width
+        #   + 15 for the classic scrollbar     = 1877px of innerWidth
         #
-        # ⚠ That arithmetic has NOT gone away — it is now the width below which
-        # this page stops fitting. A CSS grid will not shrink a track under its
-        # minmax() floor, so under ~2100px of panel content the Positions and
-        # Opportunity Board rows overflow their card instead of reflowing. The
-        # trade is deliberate: this page is read at 2381px, which clears 2283 by
-        # 81px, and at that width a layout that silently rearranges itself is
-        # worse than one that does not. Keep the sum above current when a track
-        # floor moves — it is now a MINIMUM SUPPORTED WIDTH, not a switch point.
+        # At the 1920px window this page is read at, ``PANEL_BUDGET_PX`` hands
+        # each panel 860px (measured: 861), so Positions clears its floor by
+        # 21px and the other three by more (Board 783px, Dealer 757px, Flow
+        # 508px). Measured live at 1920 and at 2560: no panel, and no cell in
+        # one, reports a horizontal overflow — and at exactly 1877 the panels
+        # measure 839px, so the sum above is the boundary rather than an
+        # estimate of it. **Below it the page clips**: a CSS grid will not shrink
+        # a track under its minmax() floor, so the rows overflow their card
+        # rather than reflowing. Measured at 1600 (701px panels): Positions over
+        # by 134px, the Board by 78, Dealer Positioning by 52; only Flow, with
+        # four tracks, still fits. Keep this sum current when a floor moves; it
+        # is the number the next track is sized against.
         #
         # `overflow-x-auto` is deliberately NOT the fallback — see the note above
         # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
-        # purpose. If the narrow case ever has to work, narrow the tracks.
+        # purpose. If the narrow case ever has to work, narrow the tracks — and
+        # the type standing in them, together (see the ladder above).
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
@@ -1974,7 +2032,7 @@ def render():
                 # a broken page; this reads as a stopped feed, which is true.
                 ui.label(
                     f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[13px] {CON_WARN} pb-1")
+                ).classes(f"text-[10px] {CON_WARN} pb-1")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
@@ -1996,7 +2054,7 @@ def render():
             f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             with _stack():
                 ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
                 ui.label(fmt_signed_pct(row["day_pct"])).classes(
@@ -2018,11 +2076,11 @@ def render():
             # and the tick standing for it are visibly one thing. The reference
             # puts an open-interest figure under each; this app publishes no
             # per-strike OI on a matrix row, so the second line is left out.
-            _cell(fmt_price(row["call_wall"]), f"text-[18px] text-[{CALL_HEX}]")
-            _cell(fmt_price(row["put_wall"]), f"text-[18px] text-[{PUT_HEX}]")
+            _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
+            _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
             with _stack():
                 ui.label(fmt_gex(row["net_gex"])).classes(
-                    f"text-[17px] font-medium tabular-nums "
+                    f"text-[13px] font-medium tabular-nums "
                     f"{signed_class(row['net_gex'])}")
                 # `self-start` so the chip shrinks to its words. Without it the
                 # chip stretches to the full 118px track and, on a row with no
@@ -2056,7 +2114,7 @@ def render():
             # ATM IV cell on the same line.
             #
             # SCORE rather than HOTNESS because the first track cannot hold
-            # seven letters of 12px caps on .2em tracking — and the panel's own
+            # seven letters of 10px caps on .2em tracking — and the panel's own
             # subtitle already says HOTTEST N, so nothing is lost.
             _grid_head(BOARD_GRID,
                        ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
@@ -2075,7 +2133,7 @@ def render():
         with el:
             _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             # A rationale is up to three clauses of ordinary words. Its track
             # carries by far the largest weight (see ``BOARD_GRID``) precisely
             # so this never ellipses at the width the page is read at; the
@@ -2084,13 +2142,13 @@ def render():
             ui.label(row["rationale"] or _DASH).classes(
                 f"{_SUB} min-w-0 truncate "
                 + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
-            # `items-baseline` so the 12px state word sits on the 17px value's
+            # `items-baseline` so the 10px state word sits on the 13px value's
             # baseline rather than floating mid-cap.
             with ui.row().classes(
                     "items-baseline gap-[6px] flex-nowrap min-w-0"):
                 _cell(fmt_iv(row["atm_iv"]))
                 ui.label(row["iv_state"]).classes(
-                    f"text-[12px] truncate {iv_state_class(row['iv_state'])}")
+                    f"text-[10px] truncate {iv_state_class(row['iv_state'])}")
             _cell(fmt_net_prem(row["net_prem_m"]),
                   signed_class(row["net_prem_m"]))
             _cell(fmt_ratio(row["pc_ratio"]))
@@ -2098,7 +2156,7 @@ def render():
             # dealer regime chip: a chip stretched to its track is a box around
             # a word rather than a label on it.
             ui.label(row["signal"].upper()).classes(
-                f"self-start px-[5px] py-[2px] rounded-[2px] text-[11px] "
+                f"self-start px-[5px] py-[2px] rounded-[2px] text-[9px] "
                 f"tracking-[.1em] whitespace-nowrap {_signal_class(row['signal'])}")
             # An empty setup tag renders NO chip: an empty cell reads as "no
             # setup", where a "NEUTRAL" chip would read as a finding.
@@ -2139,19 +2197,19 @@ def render():
             f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["time"] or _DASH).classes(
-                f"text-[14px] tabular-nums {CON_TXT_MUTED}")
+                f"text-[11px] tabular-nums {CON_TXT_MUTED}")
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             # `min-w-0` is what lets `truncate` bite: a grid item's automatic
             # minimum is its content, so without it a long detail line widens
             # the track past the panel instead of ellipsing inside it.
             ui.label(row["detail"] or row["text"] or _DASH).classes(
-                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
             # finite (type, side) map — borrowed here rather than re-derived,
             # and shared by the kind and the side it qualifies.
             ui.label(flow_kind_text(row)).classes(
-                f"text-[13px] min-w-0 truncate {row['_tone_class']}")
+                f"text-[10px] min-w-0 truncate {row['_tone_class']}")
         el.on("click", lambda _e: ui.navigate.to("/options/flow"))
 
     def _paint_positions():
@@ -2171,7 +2229,7 @@ def render():
             summary = positions_summary(rows)
             shown = rows[:POSITION_ROWS_N]
             ui.label(summary_line(summary, len(shown))).classes(
-                f"text-[14px] tracking-[.16em] pb-2 "
+                f"text-[11px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
                 ui.label("No open positions.").classes(_PLACEHOLDER)
@@ -2197,9 +2255,9 @@ def render():
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             ui.label(strategy_label(row["strategy"])).classes(
-                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             _cell(expiry_text(row))
             # Both are per-share option prices (0.21 / 0.39), not position
             # dollars — the same numbers the paper ledger quotes.
@@ -2217,7 +2275,7 @@ def render():
             # box in the FLAG column reads as a verdict whatever is inside it.
             if row["flag"] == UNTAGGED_FLAG:
                 ui.label(UNTAGGED_FLAG).classes(
-                    f"self-start text-[14px] {CON_TXT_FAINT}")
+                    f"self-start text-[11px] {CON_TXT_FAINT}")
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")

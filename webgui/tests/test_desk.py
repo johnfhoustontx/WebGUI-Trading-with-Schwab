@@ -4,8 +4,11 @@ Every builder here takes plain dicts and returns plain dicts, so the whole
 screen's arithmetic is testable without a browser — the same shape
 ``pages/market.py`` proved out.
 """
+import ast
 import datetime
+import inspect
 import pathlib
+import re
 
 from pages import desk as d
 
@@ -1491,3 +1494,112 @@ def test_desk_panels_do_not_scroll_sideways():
 
     from pages import desk
     assert "overflow-x-auto" not in inspect.getsource(desk._panel)
+
+
+# ── the 1920px width budget ──────────────────────────────────────────────────
+# A CSS grid never shrinks a track below its ``minmax()`` floor, so a panel
+# whose floors oversubscribe its share of the window CLIPS its rows instead of
+# reflowing — and `overflow-x-auto` is refused (see the test above). Three of
+# the four grids shipped over budget until the type ladder and the floors were
+# unwound together to the reference design's own scale; these are the guards
+# that make the next widened track fail HERE rather than on screen.
+def _floors(grid):
+    """The pixel floor of every track in a grid class string, in order."""
+    inner = grid.split("grid-cols-[", 1)[1].split("]", 1)[0]
+    out = []
+    for track in inner.split("_"):
+        m = (re.fullmatch(r"minmax\((\d+)px,[\d.]+fr\)", track)
+             or re.fullmatch(r"(\d+)px", track))
+        assert m, f"unparsed track {track!r}"
+        out.append(int(m.group(1)))
+    return out
+
+
+def _panel_width_needed(grid):
+    """What one panel must be given before this grid stops clipping."""
+    t = _floors(grid)
+    return sum(t) + (len(t) - 1) * d.COL_GAP_PX + d.PANEL_PAD_PX
+
+
+def _px(classes):
+    """The `text-[Npx]` size out of a Tailwind class string."""
+    return int(re.search(r"text-\[(\d+)px\]", classes).group(1))
+
+
+def _head_calls():
+    """Every ``_grid_head(GRID, (labels...))`` in ``render``, resolved."""
+    tree = ast.parse(inspect.getsource(d.render).lstrip())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_grid_head":
+            yield (getattr(d, node.args[0].id),
+                   [e.value for e in node.args[1].elts])
+
+
+def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
+    """The four panels are a fixed 2x2, so each gets half the window less the
+    chrome and the gutter. Over that, the row overflows its card."""
+    for name in ("DEALER_GRID", "BOARD_GRID", "FLOW_GRID", "POS_GRID"):
+        need = _panel_width_needed(getattr(d, name))
+        assert need <= d.PANEL_BUDGET_PX, (
+            f"{name} needs {need}px of the {d.PANEL_BUDGET_PX}px a panel gets")
+
+
+def test_the_panel_budget_subtracts_the_scrollbar_and_is_860px():
+    """Derived, so a chrome or gutter change moves it — and pinned at its value,
+    because 860 is what the grid comment's arithmetic is written against.
+
+    The scrollbar term is the half of this that is easy to drop: the page is
+    taller than any window it is read in, so it is always there, and leaving it
+    out reads 868px where the panel really gets 860."""
+    assert d.PANEL_BUDGET_PX == 860 == (
+        d.DESK_WINDOW_PX - d.DESK_SCROLLBAR_PX - d.DESK_CHROME_PX
+        - d.PANEL_GUTTER_PX) // 2
+
+
+def test_the_minimum_supported_window_above_the_grid_is_the_real_one():
+    """That arithmetic is load-bearing documentation — it is what the next
+    person sizes a track against — and nothing fails when it goes stale.
+    Positions is the widest panel, so its floors ARE the minimum."""
+    src = inspect.getsource(d.render)
+    need = _panel_width_needed(d.POS_GRID)
+    assert f"= {need}px minimum for one panel" in src
+    window = need * 2 + d.PANEL_GUTTER_PX + d.DESK_CHROME_PX + 15   # + scrollbar
+    assert f"{window}px of innerWidth" in src
+
+
+def test_every_column_label_fits_the_track_it_stands_over():
+    """Three floors here are LABEL-bound rather than value-bound: a label on
+    .2em tracking does not shrink with the data under it, and a clipped label
+    turns a column of numbers into an unlabelled column of numbers. JetBrains
+    Mono advances 0.6em, and CSS adds the .2em after every character."""
+    per_char = _px(d._HEAD) * 0.8
+    for grid, labels in _head_calls():
+        floors = _floors(grid)
+        assert len(labels) == len(floors), (labels, floors)
+        for label, floor in zip(labels, floors):
+            assert len(label) * per_char <= floor, (label, floor)
+
+
+def test_the_panel_type_ladder_stays_a_ladder():
+    """Value over qualifier is what makes a ten-column row scannable. Scaling
+    the ladder is allowed — it was scaled 0.8x to fit 1920 — but flattening it
+    is not, so this pins the ORDER and the label's readability step, never the
+    sizes themselves."""
+    price, value, sub = _px(d._V_SPOT), _px(d._VALUE), _px(d._SUB)
+    assert price > value > sub
+    assert _px(d._HEAD) >= sub          # the documented +1 step, never below it
+
+
+def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
+    """The identity of the two grid strings is the only thing keeping a label
+    over its column; if they drift, every number on the panel starts reading as
+    the wrong quantity. Row painters interpolate the grid into an f-string, so
+    the two uses are collected separately and compared."""
+    tree = ast.parse(inspect.getsource(d.render).lstrip())
+    heads = {n.args[0].id for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_grid_head"}
+    rows = {v.value.id for j in ast.walk(tree) if isinstance(j, ast.JoinedStr)
+            for v in j.values
+            if isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)
+            and v.value.id.endswith("_GRID")}
+    assert heads == rows and len(heads) == 4
