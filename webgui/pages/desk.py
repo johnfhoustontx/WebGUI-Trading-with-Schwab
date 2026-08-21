@@ -1798,9 +1798,9 @@ def render():
         # already on. `items-stretch` so the two panels of a row square off at
         # the same height instead of leaving a stepped edge between them.
         #
-        # The breakpoint is ARITHMETIC, not a Tailwind size name, and it is
-        # re-derived whenever a track floor moves — which the ~1.35x type scale
-        # just did to every one of them. Positions is the widest panel:
+        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). This was
+        # `grid-cols-1 min-[2300px]:grid-cols-2`, and that breakpoint was
+        # arithmetic rather than a guess — Positions is the widest panel:
         #
         #   902px  the TEN ``POS_GRID`` minmax floors summed
         #   + 90   nine 10px column gaps
@@ -1809,46 +1809,23 @@ def render():
         #   +  2   the card's 1px border, both sides
         #   = 1042px minimum for one panel
         #   x2 + 20px gutter = 2104px of panel content
-        #   + 164 of chrome (below)          = 2268px of LAYOUT width
-        #   + 15 for the classic scrollbar   = 2283px of innerWidth
+        #   + 164 of measured chrome            = 2268px of LAYOUT width
+        #   + 15 for the classic scrollbar      = 2283px of innerWidth
         #
-        # Positions is still the widest panel and by a wider margin than before
-        # — the Opportunity Board needs 968px. Going flat added a track, and
-        # sizing the three starved columns on their real worst cases (see
-        # ``POS_GRID``) cost another 70px, so the breakpoint moved 2160 -> 2300.
-        # That is the documented procedure, not a liberty: this number is
-        # ARITHMETIC and is re-derived whenever a track floor moves. 2300 leaves
-        # 17px over the 2283 the arithmetic demands, and the 2381px screen this
-        # page is read at clears it by 81px.
+        # ⚠ That arithmetic has NOT gone away — it is now the width below which
+        # this page stops fitting. A CSS grid will not shrink a track under its
+        # minmax() floor, so under ~2100px of panel content the Positions and
+        # Opportunity Board rows overflow their card instead of reflowing. The
+        # trade is deliberate: this page is read at 2381px, which clears 2283 by
+        # 81px, and at that width a layout that silently rearranges itself is
+        # worse than one that does not. Keep the sum above current when a track
+        # floor moves — it is now a MINIMUM SUPPORTED WIDTH, not a switch point.
         #
-        # The CHROME around that content was MEASURED in the live DOM, not
-        # assumed, and it is nearly double what a guess would give: 68px for the
-        # icon rail (`.q-page-container` padding-left) plus THREE stacked 16px
-        # paddings — `.nicegui-content`, the shell's own page column, and this
-        # page's `p-4` — for 164px in total.
-        #
-        # The +15 on the last line is the other thing that is easy to measure
-        # and impossible to reason out: a media query here matches on
-        # `window.innerWidth`, while the grid is laid out in
-        # `documentElement.clientWidth`, and this page is tall enough to carry a
-        # classic scrollbar — so the layout is 15px NARROWER than the width the
-        # query fired on. A breakpoint set to the bare layout figure switches to
-        # two columns 15px too early, every time.
-        #
-        # Every earlier value here was measured wrong rather than argued wrong,
-        # which is why the margin is now deliberate rather than tight. 2100
-        # (chrome guessed at rail + one p-4) overflowed the Positions rows by
-        # 11px. 2140 looked clean only by luck: every track sat exactly on its
-        # floor and nothing clipped solely because the last cell held a short
-        # "OK" chip — a row flagged RESCUE would have clipped.
-        #
-        # Below the breakpoint the page is ONE column, where a full-width panel
-        # carries far more than 1042px and every grid fits with room to spare —
-        # the narrow layout is the comfortable one, and the two-up layout is the
-        # one that has to be earned.
+        # `overflow-x-auto` is deliberately NOT the fallback — see the note above
+        # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
+        # purpose. If the narrow case ever has to work, narrow the tracks.
         with ui.element("div").classes(
-                "grid grid-cols-1 min-[2300px]:grid-cols-2 gap-5 w-full "
-                "items-stretch"):
+                "grid grid-cols-2 gap-5 w-full items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             # Both subtitles are DERIVED from their panel's row cap, because
             # each used to be a word and a number written down separately — and

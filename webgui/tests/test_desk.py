@@ -1455,3 +1455,39 @@ def test_render_draws_no_breadth_groove_where_there_is_no_reading(monkeypatch):
     assert len(grooves) == 2                                   # not three
     assert [c for c in classes if "w-[0%]" in c]                # empty ≠ absent
     assert [c for c in classes if "w-[80%]" in c]
+
+
+def test_desk_panel_grid_is_two_columns_at_every_width():
+    """The 2x2 is fixed, not responsive (2026-08-20, by request).
+
+    It was `grid-cols-1 min-[2300px]:grid-cols-2`. A responsive class here is
+    the regression: the layout would silently rearrange itself at the width
+    this page is actually read at, which is what the request removed.
+    """
+    import ast
+    import inspect
+
+    from pages import desk
+
+    # Read the STRING LITERALS, not the raw source: the comment above the grid
+    # quotes the old `grid-cols-1 min-[2300px]:grid-cols-2` value, and a
+    # substring check over the source matches that and fails on a correct file.
+    tree = ast.parse(inspect.getsource(desk.render).lstrip())
+    literals = [n.value for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    grids = [v for v in literals if "grid-cols" in v]
+    assert "grid grid-cols-2 gap-5 w-full items-stretch" in grids
+    for value in grids:
+        assert "grid-cols-1" not in value, f"panel grid went responsive: {value}"
+        assert "min-[" not in value, f"a width breakpoint came back: {value}"
+
+
+def test_desk_panels_do_not_scroll_sideways():
+    """`overflow-x-auto` is the tempting fix for the fixed 2x2 at narrow widths
+    and is deliberately refused — see the note above `_GAP`: a dashboard you
+    scroll sideways to read defeats the page's purpose. Pinned because the next
+    person to hit a clipped row will reach for it."""
+    import inspect
+
+    from pages import desk
+    assert "overflow-x-auto" not in inspect.getsource(desk._panel)
