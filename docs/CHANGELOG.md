@@ -4,7 +4,73 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Audit batch 2 — three unbounded payloads, and a
+**Last updated:** 2026-08-20 (**Audit batch 3 — 20,105 lines deleted, and the
+`shared/analysis_lib` init that was breaking its own package.**
+- **The headline: `shared/analysis_lib` was an abandoned Tk APPLICATION wearing a
+  library's name.** ~9,600 of its 11,406 lines — the "Blueprint Analyzer" GUI, its
+  agents, a `schwab_client` documented in-repo as **broken** — had no callers outside
+  each other, and `__init__.py` eagerly imported all of it. ⚠ **That eager init is
+  precisely WHY all four live consumers carry a `sys.path` bootstrap**: a plain
+  `from shared.analysis_lib import technical` *raised*, so every consumer imported the
+  module standalone to dodge the package. Verified by watching the new surface test
+  fail with a real `ImportError` from `schwab_client.py:27` before the deletion.
+  `technical`/`sector_analysis` now resolve `config` relatively under the package and
+  by bare name standalone, branched on `__package__` rather than `try/except` — so a
+  genuine error in `config.py` cannot fall through and silently bind ANOTHER app's
+  `config`, which is the exact cross-app collision the repo already documents.
+- **The headless service was importing a GUI toolkit.** `options_simulator/__init__.py`
+  eagerly imported its Tk window, so the first `sim_fetch` in `options_svc` pulled
+  **106 tkinter/matplotlib modules** in through the package init — defeating the
+  deliberately-lazy import at the call site. Measured in a subprocess before and after;
+  both guards (`test_simulator_headless.py`, `test_analysis_lib_surface.py`) probe a
+  FRESH interpreter, since an in-process `sys.modules` check is poisoned by test order.
+- **Deleted, with their tests and launchers:** the Blueprint Analyzer (11 modules +
+  `agents/`), `gamma_window_legacy.py`, `options_simulator/window.py`, and the legacy
+  CLI the user signed off — `eod_report.py`, `scanner.py`, both `notifier.py`s,
+  `backtest_0dte.py` — plus `ai_prompt_builder.py`, `trade_analyzer.py` (the dropped
+  Dash popup's engine), `execution.py` and `headless_snapshot.py`. **37 files, 20,105
+  lines**, against an audit estimate of ~13,500.
+- **KEPT, deliberately:** `validate_market_state.py`, `validate_new_symbols.py` and
+  `gex_direction_log.py`. They look like the same legacy cluster but they are research
+  harnesses that own a data artifact and answered a real question — `validate_market_state`
+  produced the five-state validation study, and `repo_paths` still exports its output
+  paths. The line drawn was "superseded product code" vs "a tool that answers a question".
+- **Two follow-on cleanups the deletion unlocked:** the four `shared/analysis_lib`
+  carve-outs in `pyproject.toml`'s ruff exclusion list existed only for the Tk modules,
+  so the package is linted like the rest of the stack again; and the dev/prod runbook's
+  known-limit about the two legacy notifiers sitting outside the notification gate is
+  now moot — they are gone.
+- ⚠ **One audit claim did NOT hold.** It said deleting `gamma_window_legacy.py` would
+  also remove the documented flaky Tk-root skip race. It does not: the three racing
+  tests (`test_chart_style_vars`, `test_gex_dex`, `test_theme`) import `gamma_tool` and
+  `theme`, both of which are live. The race is unchanged — options-scanner still reports
+  2-3 skipped at random.
+- **Medium accuracy items, same batch.** `AGG_WEIGHTS` sums to **1.30**, and the
+  "aggregate confidence" it returned was the raw weighted sum, so a fully-confident read
+  published **1.3** into `market_state_history_db` and every downstream consumer that
+  treats it as [0,1]. Now divided by the total weight; the SCORE is bit-identical (it
+  already divided by the same sum), and the existing `test_single_component_present` had
+  been pinning the broken value. And `market_svc.classify._num` coerced a missing
+  `lastPrice` to **0.0**, so a partially-populated quote rendered a real tile reading
+  "0.00" coloured flat — `normalize_quote` now returns None and falls into the `no_data`
+  path that already existed, needing no new branch downstream.
+- ⚠ **The RRG momentum axis is a REAL defect and was deliberately NOT fixed.** Measured:
+  a sector **steadily out-performing** the benchmark is classified **"Weakening"**, and
+  one **steadily under-performing** is classified **"Improving"** — only *acceleration*
+  reaches "Leading", because `compute_rs_momentum` subtracts ROC's own rolling mean.
+  Correcting it re-assigns every quadrant on `/sentiment/rrg`, `/sentiment/rotation` and
+  `/sentiment/momentum` and moves the cyclical−defensive risk-on/off headline with them
+  — a product decision, not a bug fix. The false comment claiming "RS-Momentum > 100
+  means strengthening" is corrected, and `test_rs_momentum_semantics.py` DOCUMENTS the
+  present behaviour under names that say so. Batch 1 was a lesson in characterization
+  tests being mistaken for specifications; that test file says outright it is not one.
+- **Verification.** webgui 2320, options_svc 1189, options-scanner 1371 + the documented
+  11, sentiment-dashboard 479 + the documented 2, sentiment_svc 325 + the documented 1,
+  driver_svc 239, market_svc 77, trade_svc 77, portfolio-analyzer 189, portfolio_svc 32,
+  schwab-proxy 98, shared 93/25/49, tests 69, tools 816. **Ruff clean across the whole
+  tree**, now including `shared/analysis_lib`.
+
+**Prior —** 2026-08-20 (**Audit batch 2 — three unbounded payloads, and a
 comment that had been lying about the biggest one for two months.**
 - **`cache:options:gamma` was 4.99 MB, not the "well under ~1 MB" its own comment
   claimed.** The 2026-06 crop bounds the STRIKE axis; the TIME axis keeps growing all

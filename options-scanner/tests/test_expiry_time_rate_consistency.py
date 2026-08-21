@@ -48,17 +48,6 @@ def test_fetch_snapshot_uses_shared_rate():
     assert snap.r != 0.04
 
 
-def test_backtest_uses_the_shared_rate_not_its_own_004():
-    """The 0DTE backtest priced at 0.04 while everything live priced at 0.045.
-
-    Found 2026-08-19. Numerically tiny for 0DTE (the rate term is ~nil at
-    T<1day), but it made backtested credits and the live scanner's credits
-    incomparable on principle, which is the whole point of the backtest.
-    """
-    import backtest_0dte
-    assert backtest_0dte.RISK_FREE == RISK_FREE_RATE
-    assert backtest_0dte.RISK_FREE != 0.04
-
 
 def test_gamma_tool_prices_at_the_shared_rate():
     """gamma_tool carried the rate as five separate 0.045 literals — the same
@@ -90,8 +79,11 @@ _RATE_DEFAULT = re.compile(r"(?<![A-Za-z_])(?:r|rate)\s*=\s*0\.0\d+\s*[,)]")
 
 def _rate_scanned_files():
     root = pathlib.Path(__file__).resolve().parents[2]
+    # backtest_0dte.py was in this list until 2026-08-20, when it was deleted with
+    # the rest of the superseded CLI tooling. The guard is narrower by exactly one
+    # file, not weaker: what it does is reject NEW rate literals in the pricing
+    # modules that remain.
     files = [root / "options-scanner" / "gamma_tool.py",
-             root / "options-scanner" / "backtest_0dte.py",
              root / "options-scanner" / "options_simulator" / "data.py",
              root / "services" / "options_svc" / "compute.py"]
     missing = [f for f in files if not f.exists()]

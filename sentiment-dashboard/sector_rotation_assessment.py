@@ -99,7 +99,26 @@ DEFENSIVE_ETFS = frozenset({"XLP", "XLU", "XLV", "XLRE"})
 RISK_THRESHOLD = 1.5
 
 # Quadrant → rotation direction. Clockwise: Improving → Leading → Weakening
-# → Lagging. RS-Momentum > 100 means strengthening regardless of RS-Ratio.
+# → Lagging.
+#
+# ⚠ KNOWN DEFECT, measured 2026-08-20 — this line used to read "RS-Momentum > 100
+# means strengthening regardless of RS-Ratio", which is FALSE as implemented.
+# `compute_rs_momentum` subtracts ROC's own rolling mean, so the axis measures
+# ACCELERATION of relative strength, not its rate. Measured on synthetic series:
+#
+#   steady out-performance        RS-Ratio 100.26  RS-Mom  99.68  -> "Weakening"
+#   out-performing, decelerating  RS-Ratio 100.25  RS-Mom  99.81  -> "Weakening"
+#   out-performing, accelerating  RS-Ratio 100.28  RS-Mom 100.18  -> "Leading"
+#   steady under-performance      RS-Ratio  99.74  RS-Mom 100.33  -> "Improving"
+#
+# So a sector that consistently beats the benchmark is painted **Weakening**, and
+# one that consistently trails it is painted **Improving**. A standard JdK RRG
+# normalizes the ROC itself; the extra mean-subtraction here differentiates once
+# more. NOT changed unilaterally: it would re-assign every quadrant on
+# /sentiment/rrg, /sentiment/rotation and /sentiment/momentum, and move the
+# cyclical−defensive RISK_THRESHOLD headline with them, which is a product
+# decision rather than a bug fix. See test_rs_momentum_semantics.py, which
+# DOCUMENTS the present behaviour rather than blessing it.
 QUADRANT_DIRECTION = {
     "Leading":   "INTO",   # RS-Ratio > 100, RS-Mom > 100
     "Improving": "INTO",   # RS-Ratio < 100, RS-Mom > 100

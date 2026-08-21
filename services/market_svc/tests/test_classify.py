@@ -63,3 +63,36 @@ def test_color_state_value_only_uses_sign_one_intensity():
     # a value-only internal (e.g. $TICK = +300) → mild risk-on, not "strong"
     assert C.color_state(300.0, polarity="normal", value_only=True) == "risk_on_mild"
     assert C.color_state(-300.0, polarity="normal", value_only=True) == "risk_off_mild"
+
+
+# ── an absent price is no data, not a price of zero (2026-08-20) ────────────
+
+def test_normalize_quote_returns_none_when_there_is_no_last_price():
+    """`_num` coerced anything unparseable to 0.0, so a symbol that arrived
+    WITHOUT a lastPrice rendered as a real tile reading "0.00" coloured flat --
+    indistinguishable from a genuinely unchanged market. The `no_data` path only
+    fired when the whole symbol was missing from the quote map.
+
+    Returning None routes it into that existing degrade path (compute._leg
+    already returns None -> the tile paints no_data), so no new branch is needed.
+    """
+    assert C.normalize_quote({"quote": {"netChange": 0.0}}) is None
+
+
+def test_normalize_quote_returns_none_for_a_nan_last_price():
+    assert C.normalize_quote({"quote": {"lastPrice": float("nan")}}) is None
+    assert C.normalize_quote({"quote": {"lastPrice": "n/a"}}) is None
+
+
+def test_normalize_quote_keeps_a_genuine_zero_change():
+    """The distinction that matters: a flat tape is data. Only the PRICE being
+    absent is an absence -- change/pct of exactly 0.0 stay 0.0."""
+    out = C.normalize_quote({"quote": {"lastPrice": 100.0, "netChange": 0.0,
+                                       "netPercentChange": 0.0, "closePrice": 100.0}})
+    assert out == (100.0, 0.0, 0.0)
+
+
+def test_normalize_quote_accepts_a_legitimately_zero_price():
+    """A zero price is unusual but not absent (some spreads/internals print 0)."""
+    out = C.normalize_quote({"quote": {"lastPrice": 0.0, "netChange": 0.0}})
+    assert out is not None and out[0] == 0.0

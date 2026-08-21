@@ -1182,9 +1182,10 @@ d2 = d1 - σ·√T
 intrinsic value and second-order Greeks are 0.
 
 **`r` is `options_calculator.RISK_FREE_RATE = 0.045`, static, and it is the single
-source** — the calculator, the simulator, `gamma_tool`, `options_svc.compute`
-(`calc_iv` and the forward projection band) and `backtest_0dte` all import it rather
-than declaring their own. It is a **fixed assumption, not a live rate**: nothing fetches
+source** — the calculator, the simulator, `gamma_tool` and `options_svc.compute`
+(`calc_iv` and the forward projection band) all import it rather than declaring their
+own. (`backtest_0dte` was in that list until 2026-08-20, when it was deleted with the
+rest of the superseded CLI tooling.) It is a **fixed assumption, not a live rate**: nothing fetches
 a Treasury yield, so a real move in short rates does not reach the model until this
 constant is edited. That is a defensible simplification for the horizons this app trades
 — at 0DTE a half-point of rate is worth about **0.23%** of the option price (measured on

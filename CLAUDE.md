@@ -85,7 +85,7 @@ schwab-proxy (:8100)  ──HTTP──>  webgui NiceGUI app (:8500)
                                        ├─ Portfolio page → portfolio-analyzer src (live)
                                        └─ Driver   page  → claude-driver orchestration
         │
-   shared/analysis_lib  ← shared library (schwab_client, market_data, technical, mtf…)
+   shared/analysis_lib  ← shared library (technical, sector_analysis, config)
 ```
 
 **The proxy must be running first.** All feature backends resolve their Schwab
@@ -132,7 +132,7 @@ open migration item. Full design:
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `claude-driver/`       | Legacy morning/intraday orchestration. The order-approval queue was REMOVED 2026-07-08; only `RISK_LIMITS` in `config.py` is still read. | superseded by `driver_svc` |
-| `shared/`              | `analysis_lib/` shared library + secret templates/values.   | library          |
+| `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
 
@@ -542,6 +542,23 @@ str(TRADE_ANALYZER))` then `import <engine>`. `webgui/conftest.py` already puts
 the repo root + `webgui` on `sys.path` for tests. The proxy client is
 `proxy.schwab_py_client` (schwab-py compatible) and `proxy.schwab_client`
 (SchwabClient compatible).
+
+**`shared/analysis_lib` is a LIBRARY of three modules, and that is now enforced
+(2026-08-20).** It used to be the abandoned **"Blueprint Analyzer" Tk app** —
+~9,600 of its 11,406 lines with no callers outside each other — and its
+`__init__.py` eagerly imported all of them, **including a `schwab_client`
+documented in-repo as broken**. That eager init is precisely *why* all four live
+consumers (`sentiment_svc.compute`, `trade_svc.compute`, `scoring.regime_evidence`,
+`portfolio-analyzer/src/sectors`) carry a `sys.path` bootstrap to import
+`technical` **standalone** and dodge the package: a plain
+`from shared.analysis_lib import technical` raised. The app is gone; the init
+imports only `config`/`sector_analysis`/`technical`, and those two modules resolve
+`config` **relatively when loaded as a package and by bare name when loaded
+standalone** — branched on `__package__`, deliberately *not* a `try/except`, so a
+real error inside `config.py` cannot fall through and silently bind another app's
+`config` (the very collision this section is about). The bootstraps still work and
+can go whenever their files are next touched.
+`shared/tests/test_analysis_lib_surface.py` fails if the app grows back.
 
 > **Cross-app module-name collisions (IMPORTANT, bitten us).** Putting multiple
 > app dirs on `sys.path` means same-named top-level modules clash process-wide
@@ -1458,10 +1475,7 @@ moved, restart).
 
 **Known limits (not defects) are listed in the runbook** — chiefly that dev is
 *quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan
-in dev still reaches Schwab through prod's proxy), that the legacy
-`options-scanner/notifier.py` + `sentiment-dashboard/notifier.py` sit outside the
-notification gate (dead from every service path — only their own tests import
-them — but runnable by hand), and that `options_svc`'s `driver_paper_create`
+in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
 handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
 
 ## Performance characteristics & known hotspots
@@ -1728,8 +1742,8 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
-.venv\Scripts\python -m pytest services\sentiment_svc  # 321 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1181
+.venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
+.venv\Scripts\python -m pytest services\options_svc    # 1189
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239
@@ -1754,7 +1768,7 @@ which is exactly what an unverified number does. `market_svc`, `shared/tests`,
 read them as a regression:**
 
 - **options-scanner** — **11**, not the "~2" this line claimed until 2026-08-09.
-  Re-measured that day at **11 failed / 1370 passed / 3 skipped**. The set, which
+  Re-measured 2026-08-20 at **11 failed / 1371 passed / 3 skipped**. The set, which
   is what you compare (never the count — see below):
   `test_gex_collector.py` ×5 (`test_next_boundary_*` ×4, `test_main_skips_before_market_open`),
   `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`,
@@ -1772,8 +1786,9 @@ read them as a regression:**
   `test_apply_sector_perf_renders_from_merged_map`), failing with
   `ModuleNotFoundError: No module named 'sentiment_dashboard'`. They test the old
   **Tk UI entrypoint, which this repo deliberately never copied** (see the folder
-  map), so they can never pass here. Suite reads **496 passed / 2 failed**
-  (2026-08-20; 487 on 2026-08-14, before the NaN-guard and VIX-blend tests).
+  map), so they can never pass here. Suite reads **479 passed / 2 failed**
+  (2026-08-20, after the legacy `notifier.py` and its ~20 tests were deleted;
+  it read 496 earlier the same day and 487 on 2026-08-14).
 - **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
   reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
@@ -1803,9 +1818,12 @@ The counts in the block above are indicative, not pinned. **All of them were
 re-measured 2026-08-19** on `claude/market-dashboard-updates`, after the dependency
 refresh (pillow / setuptools / aiohttp / cryptography) — so they are a post-bump
 baseline, which is the useful thing to compare a suspected dependency regression
-against. The three large suites, re-measured **2026-08-20**: **webgui 2309 green**
-(1986 on 08-19; the Bull/Bear map landed in between), **options_svc 1181 green**,
-**options-scanner 1486 passed / 11 failed / 3 skipped**. Also **schwab-proxy 98**
+against. The three large suites, re-measured **2026-08-20** after the dead-code
+trim: **webgui 2320 green** (1986 on 08-19; the Bull/Bear map landed in between),
+**options_svc 1189 green**, **options-scanner 1371 passed / 11 failed / 3
+skipped** — that suite FELL by ~115 because the tests were deleted along with
+their subjects (the legacy CLI + Tk remnants), which is the one case where a
+dropping count is the healthy signal. Also **schwab-proxy 98**
 (worth its own line — it is the only suite that exercises the Schwab OAuth stack, so
 it is the one that would catch a `cryptography` bump going wrong).
 
@@ -1813,7 +1831,7 @@ it is the one that would catch a `cryptography` bump going wrong).
 dead-code cleanup — the count FELL from 1912 because ~86 tests were deleted with the
 subjects they pinned (the Highcharts scatter/ribbon/RRG builders and the stranded
 `pages/sentiment.py` helpers), which is the one situation where a dropping count is
-the healthy signal.) **sentiment_svc reads 321 passed / 1 failed** — the documented
+the healthy signal.) **sentiment_svc reads 325 passed / 1 failed** — the documented
 `test_daily_history_wins_over_session_latch`.
 
 ## External processes (not in this repo)

@@ -17,9 +17,16 @@ import pandas as pd
 from typing import Optional, Dict, Tuple, List
 import logging
 
-from config import (
-    EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS
-)
+# `config` is imported RELATIVELY when this module is loaded as part of the
+# package, and by bare name when it is loaded standalone (several consumers put
+# shared/analysis_lib directly on sys.path and `import technical`). The branch is on
+# __package__ rather than a try/except so a genuine error inside config.py is NOT
+# swallowed into a fallback that would silently bind ANOTHER app's `config`
+# module -- exactly the cross-app collision documented in CLAUDE.md.
+if __package__:
+    from .config import (EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS)
+else:
+    from config import (EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS)
 
 logger = logging.getLogger(__name__)
 

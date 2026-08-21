@@ -40,11 +40,10 @@ extend-exclude = [
     "trade-analyzer",
     "portfolio-analyzer",
     "claude-driver",
-    # Legacy Tk/GUI modules under shared/ (not part of the clean 3-tier stack):
-    "shared/analysis_lib/gui_main.py",
-    "shared/analysis_lib/agents",
-    "shared/analysis_lib/mtf_analysis.py",
-    "shared/analysis_lib/blueprint_scorer.py",
+    # (The four "shared/analysis_lib" carve-outs that used to sit here were for
+    # gui_main / agents / mtf_analysis / blueprint_scorer -- the abandoned
+    # Blueprint Analyzer Tk app, deleted 2026-08-20. shared/analysis_lib is now
+    # three library modules and is linted like the rest of the 3-tier stack.)
 ]
 
 [tool.ruff.lint]

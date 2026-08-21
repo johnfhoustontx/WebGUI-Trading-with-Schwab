@@ -1,3 +1,6 @@
+import pytest
+
+from scoring import aggression
 from scoring.aggression import blend_aggression, AGG_WEIGHTS
 
 
@@ -39,8 +42,11 @@ def test_none_values_are_neutral_zero_conf():
 def test_single_component_present():
     s, c = blend_aggression({"skew": 0.4}, {"skew": 1.0})
     assert s > 0
-    # only skew's weight participates -> aggregate confidence == its weight
-    assert c == round(AGG_WEIGHTS["skew"], 3)
+    # Only skew's weight participates -> the aggregate confidence is skew's SHARE
+    # of the total weight. This asserted the raw weight (0.30) until 2026-08-20,
+    # which is where the out-of-range 1.3 came from: AGG_WEIGHTS sums to 1.30, so
+    # the raw sum is not a confidence.
+    assert c == round(AGG_WEIGHTS["skew"] / sum(AGG_WEIGHTS.values()), 3)
 
 
 def test_weights_need_not_sum_to_one():
@@ -70,3 +76,41 @@ def test_rejection_drops_out_at_zero_confidence():
         {"effort": 1.0, "rejection": 0.0})
     effort_only, _ = blend_aggression({"effort": 0.5}, {"effort": 1.0})
     assert dropped == effort_only
+
+
+# ── the aggregate confidence must be a confidence (2026-08-20) ──────────────
+
+def test_blend_aggression_confidence_never_exceeds_one():
+    """AGG_WEIGHTS sums to 1.30 -- `rejection` and `option_flow` were added
+    without rebalancing -- and the returned "aggregate confidence" was the raw
+    weighted sum, so a fully-confident read published 1.3. It is stored in
+    market_state_history_db and consumed as a [0,1] confidence everywhere else.
+
+    The SCORE was always fine (it divides by the same sum); only the confidence
+    escaped its range.
+    """
+    names = list(aggression.AGG_WEIGHTS)
+    full = aggression.blend_aggression({n: 1.0 for n in names},
+                                       {n: 1.0 for n in names})
+    assert full[1] == 1.0
+
+
+def test_blend_aggression_confidence_is_the_present_weight_share():
+    """Half the weight present at full confidence -> ~half confidence."""
+    conf = {"effort": 1.0, "skew": 1.0}          # 0.35 + 0.30 of 1.30
+    score, c = aggression.blend_aggression({"effort": 1.0, "skew": 1.0}, conf)
+    assert c == pytest.approx((0.35 + 0.30) / 1.30, abs=5e-4)
+    assert score == pytest.approx(1.0)           # score unchanged by the fix
+
+
+def test_blend_aggression_score_is_unchanged_by_the_confidence_fix():
+    """Regression pin: normalizing the confidence must not move the score, which
+    already divided by the same weight sum."""
+    comps = {"effort": 0.8, "skew": -0.4, "flow": 0.2, "order_flow": 1.0,
+             "rejection": -0.6, "option_flow": 0.5}
+    confs = {"effort": 1.0, "skew": 0.5, "flow": 0.8, "order_flow": 0.3,
+             "rejection": 1.0, "option_flow": 0.6}
+    num = sum(aggression.AGG_WEIGHTS[k] * comps[k] * confs[k] for k in comps)
+    den = sum(aggression.AGG_WEIGHTS[k] * confs[k] for k in comps)
+    assert aggression.blend_aggression(comps, confs)[0] == pytest.approx(
+        round(num / den, 3), abs=1e-9)

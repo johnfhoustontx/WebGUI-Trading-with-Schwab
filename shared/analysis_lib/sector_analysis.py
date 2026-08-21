@@ -22,7 +22,16 @@ from datetime import datetime
 import requests
 import pandas as pd
 
-from config import SECTORS, SECTOR_ETFS, STYLE_SECTOR_RULES
+# `config` is imported RELATIVELY when this module is loaded as part of the
+# package, and by bare name when it is loaded standalone (several consumers put
+# shared/analysis_lib directly on sys.path and `import sector_analysis`). The branch is on
+# __package__ rather than a try/except so a genuine error inside config.py is NOT
+# swallowed into a fallback that would silently bind ANOTHER app's `config`
+# module -- exactly the cross-app collision documented in CLAUDE.md.
+if __package__:
+    from .config import (SECTORS, SECTOR_ETFS, STYLE_SECTOR_RULES)
+else:
+    from config import (SECTORS, SECTOR_ETFS, STYLE_SECTOR_RULES)
 
 logger = logging.getLogger(__name__)
 

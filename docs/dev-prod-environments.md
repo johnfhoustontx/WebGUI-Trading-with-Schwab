@@ -299,23 +299,18 @@ start anyway and every fetch fails until prod is up.
 The Status page hides the Memurai restart button in dev for exactly this reason —
 if you restart it from prod, dev goes with it.
 
-**4. The legacy `notifier.py` modules** (`options-scanner/notifier.py`,
-`sentiment-dashboard/notifier.py`) sit **outside** the notification gate. They are
-dead from every service path — nothing but their own tests imports them — but
-running one by hand from a dev checkout would push for real.
-
-**5. `options_svc`'s `driver_paper_create` command handler is not env-guarded.**
+**4. `options_svc`'s `driver_paper_create` command handler is not env-guarded.**
 The producer is (`driver_svc.handlers.run_autonomous_cycle` early-returns), and
 the snapshot excludes `cmd:*`, so nothing can reach it today. Worst case is a fake
 trade in dev's own paper book, which prod never sees.
 
-**6. Dev's own behaviour cannot be verified by the test suite.** Under pytest,
+**5. Dev's own behaviour cannot be verified by the test suite.** Under pytest,
 `repo_paths` pins identity *and* topology to prod, so every `IS_DEV=True` branch
 is only ever exercised via monkeypatch. Confirming that dev really withholds the
 proxy and Memurai restart buttons, and shows the `DEV` chip, is a **manual check
 with the app running**.
 
-**7. The SQLite half of the snapshot has never been run for real.** The cutover
+**6. The SQLite half of the snapshot has never been run for real.** The cutover
 was performed on **2026-08-09** and `--redis-only` has run successfully against
 the live stack (263 of 272 keys, the nine `cmd:*` streams excluded, prod's copy
 untouched, `cache:driver:control` arriving disabled). The **file** half has not:

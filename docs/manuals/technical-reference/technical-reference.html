@@ -1747,9 +1747,10 @@ d2 = d1 - σ·√T
 <p>(<code>N</code> = standard-normal CDF, <code>n</code> = its PDF.) At/after expiration (T ≤ 0), price is
 intrinsic value and second-order Greeks are 0.</p>
 <p><strong><code>r</code> is <code>options_calculator.RISK_FREE_RATE = 0.045</code>, static, and it is the single
-source</strong> — the calculator, the simulator, <code>gamma_tool</code>, <code>options_svc.compute</code>
-(<code>calc_iv</code> and the forward projection band) and <code>backtest_0dte</code> all import it rather
-than declaring their own. It is a <strong>fixed assumption, not a live rate</strong>: nothing fetches
+source</strong> — the calculator, the simulator, <code>gamma_tool</code> and <code>options_svc.compute</code>
+(<code>calc_iv</code> and the forward projection band) all import it rather than declaring their
+own. (<code>backtest_0dte</code> was in that list until 2026-08-20, when it was deleted with the
+rest of the superseded CLI tooling.) It is a <strong>fixed assumption, not a live rate</strong>: nothing fetches
 a Treasury yield, so a real move in short rates does not reach the model until this
 constant is edited. That is a defensible simplification for the horizons this app trades
 — at 0DTE a half-point of rate is worth about <strong>0.23%</strong> of the option price (measured on
