@@ -982,6 +982,27 @@ def test_brand_assets_are_shipped():
     assert (main._STATIC_DIR / "img" / "neuralstrike-logo.jpg").is_file()
 
 
+def test_voice_clips_are_served_from_the_directory_voice_writes_to():
+    """``voice.clip_url`` hands the browser a URL nothing else validates.
+
+    Three things have to line up or every Desk clip 404s in silence: the mount
+    has to exist, its URL has to be the prefix ``clip_url`` builds, and the
+    directory it serves has to be the one ``voice.ensure`` writes into. The
+    mkdir is eager (not ``is_dir()``-guarded like /static) because this
+    directory is BUILT at runtime — on a fresh clone the guard would skip the
+    mount and clips would 404 until a restart.
+    """
+    from nicegui import app
+
+    import main
+    import voice
+
+    assert main._VOICE_DIR.resolve() == voice.CACHE_DIR.resolve()
+    assert main._VOICE_DIR.is_dir()
+    routes = {getattr(r, "path", "") for r in app.routes}
+    assert f"{voice.URL_PREFIX}/{{path:path}}" in routes
+
+
 def test_app_name_comes_from_brand_config():
     """Browser titles + the breadcrumb fallback derive from [brand], so renaming
     the app is a config edit, not a code hunt."""
