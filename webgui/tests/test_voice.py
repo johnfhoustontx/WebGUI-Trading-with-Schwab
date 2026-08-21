@@ -9,6 +9,7 @@ signature only, and skips when the package is absent.
 """
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 import pathlib
@@ -167,6 +168,13 @@ def test_clip_name_changes_with_the_voice():
     a = voice.clip_name("hello", voice_name="en-US-AriaNeural")
     b = voice.clip_name("hello", voice_name="en-US-BrianNeural")
     assert a != b
+
+
+def test_clip_name_changes_with_the_rate():
+    # The rate is in the key for the same reason the voice is: a clip spoken at
+    # the old speed is not the clip Settings now asks for, and the filename is
+    # the only place that difference can be recorded.
+    assert voice.clip_name("hello", rate="+0%") != voice.clip_name("hello", rate="+8%")
 
 
 def test_clip_name_hash_is_pinned_so_warmed_clips_are_never_orphaned():
@@ -375,6 +383,42 @@ def test_synthesize_cleanup_failure_does_not_mask_the_real_error(
 
     with pytest.raises(OSError, match="dropped mid-stream"):
         voice._synthesize("hi", voice.DEFAULT_VOICE, voice.RATE, tmp_path / "x.mp3")
+
+
+# ── the edge_tts contract ────────────────────────────────────────────────────
+def test_edge_tts_communicate_accepts_the_call_we_make():
+    """The one test that reads the INSTALLED package rather than a fake.
+
+    Both ``_synthesize`` tests inject a ``Communicate`` whose ``__init__(self,
+    *a, **k)`` swallows any signature, which is what makes them fast and
+    offline — and also what makes them blind. ``edge-tts>=7.0`` is an unpinned
+    floor, so a renamed ``rate`` kwarg upstream would leave this whole file
+    green while production went permanently silent behind a single warning.
+    Binding the real signature costs nothing and no network.
+    """
+    edge_tts = pytest.importorskip("edge_tts")
+    sig = inspect.signature(edge_tts.Communicate.__init__)
+    sig.bind(object(), "some text", voice.DEFAULT_VOICE, rate=voice.RATE)
+
+
+def test_importing_voice_does_not_import_edge_tts():
+    """The lazy import is the module's entire Tier-1 justification.
+
+    ``voice`` must stay importable on a machine that never installed
+    ``edge_tts`` — the webgui imports only ``nicegui`` + ``shared.bus`` +
+    ``shared.contracts``, and a hoisted top-level import would make an optional
+    speech package a hard dependency of the landing page. Same shape as
+    ``test_options_gamma.test_page_imports_no_engine_or_proxy``.
+    """
+    import importlib
+    for name in ("edge_tts", "voice"):
+        sys.modules.pop(name, None)
+    try:
+        importlib.import_module("voice")
+        assert "edge_tts" not in sys.modules
+    finally:
+        sys.modules.pop("voice", None)
+        importlib.import_module("voice")
 
 
 # ── prewarm ──────────────────────────────────────────────────────────────────
