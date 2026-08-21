@@ -4,7 +4,99 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**The tidiness sweep — measured first, and it was a
+**Last updated:** 2026-08-21 (**The Desk speaks — spoken arrival alerts + a
+10-second neon glow, and the two traps that make both of them work.**
+- **What shipped.** A new flow alert or a newly-opened position on `/desk` is now
+  **announced out loud** — ticker spelled squawk-style, then the cause ("S P Y.
+  Crossover alert, calls over.") — and the **row glows neon for 10 seconds**, so
+  the voice and the eye land on the same place. Nothing else changed: the page is
+  still read-only, still composes rather than re-derives, and the scanner chime is
+  untouched.
+- **`edge-tts`, and the alternatives were measured, not assumed.** Free Microsoft
+  neural voices, no API key, synthesized **server-side** and cached permanently on
+  disk. Windows SAPI was ruled out because this machine has **no Windows neural
+  voice installed** — `System.Speech` reports only the old David / Zira / Mark
+  concatenative voices — and browser `speechSynthesis` was ruled out for the same
+  reason one layer up: in Chrome on this box it falls back to those same SAPI
+  voices, so the feature's core quality would depend on which browser the launcher
+  happened to open. Default **`en-US-AriaNeural`** (picked from a listening test of
+  all six offered, not alphabetically), rate **+8%** — past about +15% the spelled
+  tickers slur. `webgui/voice.py`; `edge-tts>=7.0` added to `requirements.txt`.
+- **`big_delta` speaks, and that deliberately breaks the quiet-live rule.**
+  `alerts.py` excludes it from the chime/toast set because a *chime* carrying no
+  information is pure noise at that detector's frequency. An announcement that
+  names the ticker and the cause is not — the cost of ignoring it is zero. So all
+  **four** flow kinds speak. ⚠ Do not "fix" this into consistency with the chime
+  without revisiting the reasoning.
+- **What speaks vs what only glows.** A newly-opened position speaks. A position
+  whose **flag moves** (OK → AT RISK → RESCUE) glows **amber** and stays silent —
+  it was already in the book, and the FLAG column already prints the new word.
+  New rows glow **cyan**. A burst announces the **newest only, plus a count**
+  ("…Plus 5 more."), one utterance per panel per paint, so a tick is bounded at
+  two clips. Detection runs over the **full** alert list, not the five rows the
+  panel draws, or a burst's arrivals would announce themselves later when the list
+  shortened. First paint seeds every set **silently** — navigating to the Desk must
+  not read out the day's backlog.
+- ⚠ **TRAP 1 — a rebuilt element restarts its CSS animation from zero.**
+  `_paint_positions` clears and rebuilds every row whenever the paper account
+  re-prices, which is constant during market hours, so the naive glow **never
+  expires**: every repaint resets the decay. The fix is that the glow's start time
+  lives in page state keyed by row id, and each row wears one of **ten static
+  classes** `desk-neon-0…9` carrying a whole-second **negative `animation-delay`**,
+  so a rebuilt row **resumes** the animation instead of restarting it. Ten fixed
+  classes rather than a computed `[animation-delay:-3.2s]` — the styling standard's
+  finite-set rule; the cost is one second of granularity on a ten-second decay.
+- ⚠ **TRAP 2 — browser autoplay refusal is completely silent.** `play()` simply
+  rejects; nothing appears in any log, so a tab left alone announces nothing and the
+  feature looks broken rather than blocked. The rejection is now caught and surfaces
+  an **ENABLE SPOKEN ALERTS** chip in the Desk header, hidden until a block is
+  actually reported; the click that dismisses it *is* the gesture that unlocks
+  audio, and it speaks one line back so the unlock is audibly confirmed. A blocked
+  attempt **clears** the queue rather than holding it — audio may unlock minutes
+  later, and a backlog replayed then would announce a market that has moved on.
+- **Its own `<audio>` element, and a queue.** `desk-voice`, not `main.py`'s shared
+  `alert-audio`: whichever source assigns `src` last wins, so a scanner chime —
+  which fires from the app-wide watcher on **every** page, this one included — would
+  cut an announcement off mid-sentence. `el.onerror = next` sits beside
+  `el.onended` deliberately: with only the latter, one 404 leaves `busy` true
+  forever and the tab never speaks again.
+- **The cache.** `sha1(voice|rate|text)` → `webgui/data/voice/<hex>.mp3`, mounted at
+  **`/voice`**, **gitignored** (generated artefacts stay out of `static/`). Measured:
+  synthesis **~0.9–2.4 s** on a miss, **~110 µs** on a hit, **~22–28 KB** a clip. The
+  whole utterance including the burst tail is ONE clip, so the key is the full
+  sentence — two concatenated clips would make the cache `O(tickers + causes)`
+  instead of `O(tickers × causes)` at the cost of an audible seam. A background
+  **prewarm** (once per process, daemon thread, flow phrases only — eight causes per
+  watchlist symbol) warms it at startup; a position arrival is something you just
+  did, so paying first synthesis there costs nothing.
+- **Nothing on `voice.py`'s public surface raises, and that is categorical.** No
+  network, no `edge_tts`, an unwritable cache dir, a lone surrogate off a malformed
+  payload, a non-iterable symbol list — all degrade to `None`/`[]`, which the caller
+  reads as "no speech this tick". The row still glows, the chime is unaffected, and
+  the warning is logged **once per process**, not once per 2 s tick. The synthesis
+  wrapper carries its **own 20 s bound** (`asyncio.wait_for` inside the loop, so a
+  timeout genuinely cancels) because edge-tts's timeouts are per-operation — a
+  stream dribbling one chunk every 59 s trips neither.
+- **Settings.** A **Spoken alerts (Desk)** card: enable switch, the six en-US neural
+  voices, a volume slider, and a **Test voice** button that doubles as the audio
+  unlock. Three new `app_settings` keys — `voice_enabled` (True), `voice_name`
+  (`en-US-AriaNeural`), `voice_volume` (0.8). The existing
+  **`alert_market_hours_only`** gate is **honoured, not duplicated**: a desk that
+  talks at 3 a.m. is a bug, and a second market-hours switch beside the first is a
+  drift hazard.
+- **The spoken vocabulary is the printed one.** `flow_phrase` reads `kind`/`side`
+  straight off the row `flow.alert_rows` built, and `voice.FLOW_CAUSES` — restated
+  rather than imported, because `voice` must stay importable with no `pages` package
+  on the path — is pinned against `flow._TONE` by a test. A spoken vocabulary
+  drifting from the printed one would be the documented sectors-vs-rotation split in
+  a new place.
+- **Verification.** webgui **2470** green (was 2358), including 47 new `test_voice`
+  cases and the extended `test_desk`. Docs: CHANGELOG, `webgui-routes.md`,
+  `page_help.py`, the User Guide + Reference Guide, and a Constants Appendix entry in
+  the Technical Reference. Design:
+  [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
+
+**Prior —** 2026-08-20 (**The tidiness sweep — measured first, and it was a
 third the size claimed.**
 - **The estimate was wrong, so the sweep started with a measurement.** The audit
   reported "~60 formatter clones, 200-300 lines". Grouping webgui page functions by

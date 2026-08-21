@@ -75,6 +75,21 @@ on · what am I holding.*
 **Click any row** to open the page it came from, already set to that symbol.
 Nothing on this page places or changes a trade.
 
+**It talks to you.** When a new flow alert or a newly-opened position appears, the
+Desk says the ticker and the cause out loud — *"S P Y. Crossover alert, calls
+over."* — and that row **glows for ten seconds**, so your eye lands where the voice
+pointed. If several arrive at once it names the newest and counts the rest ("plus 5
+more"). A position that only changes **flag** — OK to At risk to Rescue — glows
+amber and stays **silent**: it was already there, and the flag column has already
+told you.
+
+⚠ **If you never hear anything, your browser is probably blocking sound.** Browsers
+refuse to play audio until you have clicked something on the page, and they do it
+without any warning. When that happens an **Enable spoken alerts** button appears at
+the top of the Desk — one click turns sound on for the rest of the session. The
+voice, the volume and the on/off switch live on the **Settings** page, and it
+follows the same *only during market hours* setting as the scanner chime.
+
 ⚠ **After the close the walls are hidden, not zeroed.** Index option open interest
 reads 0 overnight, which would otherwise produce confident-looking walls that are
 pure noise. A greyed panel with a timestamp means "this is the last good reading",

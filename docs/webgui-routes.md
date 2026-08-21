@@ -51,7 +51,46 @@ module.
   a scaled `viewBox` would need `vector-effect: non-scaling-stroke`, which DOMPurify
   strips, smearing strokes while the server-side string stays perfectly correct.
 
-Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md).
+**Spoken arrival alerts + the neon glow (2026-08-21).** A new **flow alert** or a
+**newly-opened position** is announced out loud — ticker spelled squawk-style, then
+the cause ("S P Y. Crossover alert, calls over.") — and its row glows **cyan for 10
+seconds**. A position whose **flag** moves (OK → AT RISK → RESCUE) glows **amber and
+stays silent**: it was already in the book, and the FLAG column already prints the
+new word. All **four** flow kinds speak, `big_delta` included — that deliberately
+diverges from `alerts.py`'s quiet-live exclusion, because the exclusion exists to
+stop an *information-free chime* at that frequency and an announcement naming the
+ticker and the cause is not one. A burst says the **newest only, plus a count**
+("…Plus 5 more."), **one utterance per panel per paint**, so a tick is bounded at two
+clips; detection runs over the **full** alert list, not the five rows drawn, or a
+burst's arrivals would announce themselves later when the list shortened. **First
+paint seeds all three sets silently** — navigating here must not read out the day's
+backlog or light every row.
+- **The glow RESUMES across repaints, it does not restart** — `_paint_positions`
+  rebuilds every row on each re-price, and **a rebuilt element restarts its CSS
+  animation from zero**, so the naive version glows forever. The start time lives in
+  page state keyed by row id and each row wears one of ten static classes
+  `desk-neon-0…9`, each carrying a whole-second **negative `animation-delay`**. Ten
+  fixed classes rather than a computed delay: the finite-set rule. ⚠ `GLOW_SEC` and
+  `GLOW_STEPS` must move together — `desk-neon-10` has no rule behind it, and the
+  failure mode is a silent restart.
+- **Clips are synthesized server-side by `webgui/voice.py` (`edge-tts`)** and cached
+  permanently as `sha1(voice|rate|text)` under `webgui/data/voice/` (gitignored),
+  served from the **`/voice`** static mount. ~0.9–2.4 s on a miss, ~110 µs on a hit,
+  ~22–28 KB a clip; a background prewarm warms the flow phrases at startup. Nothing
+  on `voice`'s public surface raises — a dead endpoint costs the sentence and
+  nothing else, and the row still glows.
+- **The page carries its OWN `<audio id="desk-voice">`**, not `main.py`'s shared
+  `alert-audio`, so a scanner chime (fired by the app-wide watcher on every page)
+  cannot cut an announcement off mid-sentence.
+- ⚠ **Browser autoplay refusal is completely silent** — `play()` rejects with
+  nothing in any log — so the header carries an **ENABLE SPOKEN ALERTS** chip, hidden
+  until a block is actually reported; the click that dismisses it *is* the unlocking
+  gesture. A blocked attempt **clears** the queue rather than holding it.
+- **Gated by `voice_enabled` and the EXISTING `alert_market_hours_only`** — there is
+  deliberately no second market-hours switch to drift out of step with the chime's.
+
+Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
+· [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
 ## `/options/scanner`
 

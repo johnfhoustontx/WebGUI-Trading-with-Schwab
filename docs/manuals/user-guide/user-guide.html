@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-20</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -462,7 +462,18 @@ structure · what should I act on · what am I holding.</em></p>
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
 Ledger or Claude Trades.</p>
 <p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
-<p><strong>Three things that will look like faults and are not:</strong></p>
+<p><strong>It announces arrivals out loud.</strong> When a new flow alert or a newly-opened position
+appears, the Desk speaks the ticker and the cause — <em>"S P Y. Crossover alert, calls
+over."</em> — and the row itself <strong>glows for ten seconds</strong>, so your eye lands where the
+voice pointed. Tickers are spelled letter by letter, squawk-box style. If several
+arrive together it names the newest and counts the rest ("plus 5 more") rather than
+reading out a list.</p>
+<p>A position that only changes <strong>flag</strong> — OK to At risk to Rescue — glows amber and
+stays <strong>silent</strong>. It was already in the book, and the flag column has already told
+you.</p>
+<p>Switch it off, change the voice or set its volume under <strong>Settings → Spoken alerts
+(Desk)</strong>. It obeys the same <em>only during market hours</em> setting as the scanner chime.</p>
+<p><strong>Four things that will look like faults and are not:</strong></p>
 <ul>
 <li><strong>After the close the walls vanish and the panel greys out with a timestamp.</strong>
   Index option open interest reads 0 overnight, which would otherwise produce
@@ -474,6 +485,11 @@ Ledger or Claude Trades.</p>
 <li><strong>The top strip shows VIX but not SPX or QQQ.</strong> Those sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol.</li>
+<li><strong>The Desk goes silent on a fresh tab, and an <em>Enable spoken alerts</em> button
+  appears.</strong> Browsers refuse to play audio until you have interacted with the page,
+  and they refuse silently — nothing is logged and no error is shown. That button is
+  the app telling you it was blocked. One click unlocks sound for the session; any
+  other click on the page unlocks it too, the button just says so.</li>
 </ul>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
@@ -1373,6 +1389,11 @@ Status and Stop All Services.</p>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
   hours</strong> toggle, and a <strong>minimum score to alert</strong>.</li>
+<li><strong>Spoken alerts (Desk)</strong> — the Desk announcing new flow alerts and newly-opened
+  positions out loud. An <strong>on/off</strong> switch, a <strong>Voice</strong> picker (six neural voices;
+  Aria is the default), a <strong>Volume</strong> slider, and a <strong>Test voice</strong> button. There is
+  deliberately no second market-hours toggle here: spoken alerts obey the <em>only
+  during market hours</em> switch in <strong>Scanner alerts</strong> above.</li>
 <li><strong>Desktop notifications</strong> — enable them and grant the browser permission.</li>
 <li><strong>Flow alerts</strong> — whether put/call premium crossovers and unusual activity alert
   you.</li>
@@ -1393,7 +1414,14 @@ Status and Stop All Services.</p>
   database and reports the before-and-after size.</li>
 </ul>
 <blockquote>
-<p>Clicking <strong>Test sound</strong> also unlocks browser audio for the session.</p>
+<p>Clicking <strong>Test sound</strong> — or <strong>Test voice</strong> — also unlocks browser audio for the
+session. Browsers block sound until you interact with the page, and they do it
+silently, so a Desk that never speaks is usually blocked rather than broken. The
+Desk shows an <strong>Enable spoken alerts</strong> button when that happens.</p>
+<p><strong>The first time a given phrase is spoken it takes a second or two to generate</strong>,
+because the clip is made on demand; after that it plays from a cache on your own
+machine and is instant. The app pre-generates the common flow phrases in the
+background at startup, so in practice you rarely hear the delay.</p>
 <p><strong>Turning the ticker off also stops the Claude calls behind it</strong>, so it is a cost
 control as well as a display setting.</p>
 <p><strong>Run Vacuum after hours.</strong> It locks the database for minutes, and the tool

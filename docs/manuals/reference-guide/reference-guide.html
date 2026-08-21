@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Reference Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-20</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -82,6 +82,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is">What it is</a></li>
 <li><a href="#when-to-open-it">When to open it</a></li>
 <li><a href="#the-panels">The panels</a></li>
+<li><a href="#spoken-arrivals">Spoken arrivals</a></li>
 <li><a href="#what-the-numbers-are-and-are-not_1">What the numbers are, and are not</a></li>
 </ul>
 </li>
@@ -613,6 +614,9 @@ Calculator, the Simulator — are deliberately absent, not overlooked.</p>
 <p>First thing, and whenever you have lost the thread. Every panel is a summary of a
 page that goes deeper, and <strong>clicking any row opens that page already set to the
 symbol you clicked</strong>.</p>
+<p>It is also the screen to <strong>leave open</strong>, because it is the only one that will
+interrupt you: new flow alerts and newly-opened positions are announced out loud and
+the arriving row glows for ten seconds (see <em>Spoken arrivals</em> below).</p>
 <h3 id="the-panels">The panels</h3>
 <p><strong>Top strip.</strong> The clock; <strong>VIX</strong> and its regime band; the <strong>market regime</strong> word
 (Rallying, Balanced, Whipsaw, Stressed…); and two dials showing <strong>Day / Week /
@@ -650,6 +654,30 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 <strong>OK</strong>, <strong>Watch</strong>, <strong>At risk</strong>, <strong>Rescue</strong>. The header totals open trades,
 unrealized P&amp;L, and how many need attention. <em>At risk</em> and <em>Rescue</em> are the two
 that count toward that total; <em>Watch</em> does not.</p>
+<h3 id="spoken-arrivals">Spoken arrivals</h3>
+<p>A <strong>new flow alert</strong> or a <strong>newly-opened position</strong> is announced in a synthetic
+human voice — the ticker spelled letter by letter, then the cause: <em>"S P Y.
+Crossover alert, calls over."</em> — and the row glows cyan for ten seconds. Tickers are
+always spelled rather than read as words, which is squawk-box convention and also
+the only rule that survives an unbounded symbol list: "SPY" read aloud as <em>spy</em> is
+actively misleading.</p>
+<p>Three rules are worth knowing, because each is a decision rather than an accident:</p>
+<ul>
+<li><strong>A flag change glows amber and says nothing.</strong> A position moving OK → At risk →
+  Rescue is not an <em>arrival</em>; it was already on the screen, and the flag column
+  already prints the new word. Only genuinely new rows speak.</li>
+<li><strong>All four flow detectors speak, large-delta included</strong> — even though the scanner
+  chime deliberately ignores that one. The reason the chime ignores it is that a
+  <em>chime</em> carrying no information is noise at that detector's frequency. An
+  announcement that names the ticker and the cause is not: if it does not concern
+  you, ignoring it costs nothing.</li>
+<li><strong>A burst names the newest and counts the rest</strong> — "…plus 5 more" — rather than
+  reading a list. Six sentences back to back is a minute of talking over a moving
+  tape.</li>
+</ul>
+<p>Everything about it is switchable under <em>Settings → Spoken alerts (Desk)</em>, and it
+obeys the <strong>same</strong> market-hours restriction as the scanner chime — there is
+deliberately no second switch to fall out of step with the first.</p>
 <h3 id="what-the-numbers-are-and-are-not_1">What the numbers are, and are not</h3>
 <ul>
 <li><strong>The Desk computes nothing of its own.</strong> Every figure is produced by the same
@@ -662,6 +690,11 @@ that count toward that total; <em>Watch</em> does not.</p>
   last reading I trust", not "the market is flat".</li>
 <li><strong>The freshness indicator reports the real collection state</strong>, including
   "unknown". It is not a decorative "live" light.</li>
+<li><strong>Silence is more often a blocked browser than a broken feature.</strong> Browsers refuse
+  to play audio until the page has been interacted with, and the refusal produces no
+  error anywhere. When it happens an <strong>Enable spoken alerts</strong> button appears at the
+  top of the Desk; one click unlocks sound for the session, and it speaks a line back
+  to confirm.</li>
 <li><strong>Nothing on this page can place, change, or close a trade.</strong> It reads and links.</li>
 </ul>
 <hr />
@@ -3547,8 +3580,14 @@ cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
 market hours, and set a <strong>minimum score to alert</strong> — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.</p>
 <blockquote>
-<p>Browsers block audio until you interact with the page. <strong>Test sound</strong> unlocks it.</p>
+<p>Browsers block audio until you interact with the page. <strong>Test sound</strong> — or <strong>Test
+voice</strong> — unlocks it.</p>
 </blockquote>
+<p><strong>Spoken alerts (Desk).</strong> Whether the Desk announces new flow alerts and
+newly-opened positions out loud, which of six neural voices does it, and how loud.
+<strong>Test voice</strong> speaks a sample and doubles as the audio unlock. Note what is <em>not</em>
+here: a market-hours toggle. Spoken alerts reuse the one in <strong>Scanner alerts</strong>, so
+the two can never disagree about when the app is allowed to make noise.</p>
 <p><strong>Desktop notifications.</strong> A toggle plus a permission grant.</p>
 <p><strong>Flow alerts.</strong> Whether put/call premium crossovers and unusual activity alert you.</p>
 <p><strong>Captured trade auto-management.</strong> Whether captured signals are actively managed —

@@ -287,7 +287,21 @@ Ledger or Claude Trades.
 
 **Nothing on this page can place or change a trade.** It reads and links only.
 
-**Three things that will look like faults and are not:**
+**It announces arrivals out loud.** When a new flow alert or a newly-opened position
+appears, the Desk speaks the ticker and the cause — *"S P Y. Crossover alert, calls
+over."* — and the row itself **glows for ten seconds**, so your eye lands where the
+voice pointed. Tickers are spelled letter by letter, squawk-box style. If several
+arrive together it names the newest and counts the rest ("plus 5 more") rather than
+reading out a list.
+
+A position that only changes **flag** — OK to At risk to Rescue — glows amber and
+stays **silent**. It was already in the book, and the flag column has already told
+you.
+
+Switch it off, change the voice or set its volume under **Settings → Spoken alerts
+(Desk)**. It obeys the same *only during market hours* setting as the scanner chime.
+
+**Four things that will look like faults and are not:**
 
 - **After the close the walls vanish and the panel greys out with a timestamp.**
   Index option open interest reads 0 overnight, which would otherwise produce
@@ -299,6 +313,11 @@ Ledger or Claude Trades.
 - **The top strip shows VIX but not SPX or QQQ.** Those sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol.
+- **The Desk goes silent on a fresh tab, and an *Enable spoken alerts* button
+  appears.** Browsers refuse to play audio until you have interacted with the page,
+  and they refuse silently — nothing is logged and no error is shown. That button is
+  the app telling you it was blocked. One click unlocks sound for the session; any
+  other click on the page unlocks it too, the button just says so.
 
 ---
 
@@ -1183,6 +1202,11 @@ Preferences, all saved on your machine (there is no login):
 - **Scanner alerts** — enable the audio alert, pick the sound (chime / bell /
   ping), a **Test sound** button, a **Volume** slider, an **only during market
   hours** toggle, and a **minimum score to alert**.
+- **Spoken alerts (Desk)** — the Desk announcing new flow alerts and newly-opened
+  positions out loud. An **on/off** switch, a **Voice** picker (six neural voices;
+  Aria is the default), a **Volume** slider, and a **Test voice** button. There is
+  deliberately no second market-hours toggle here: spoken alerts obey the *only
+  during market hours* switch in **Scanner alerts** above.
 - **Desktop notifications** — enable them and grant the browser permission.
 - **Flow alerts** — whether put/call premium crossovers and unusual activity alert
   you.
@@ -1202,7 +1226,15 @@ Preferences, all saved on your machine (there is no login):
 - **Maintenance** — **Vacuum GEX history DB** compacts the intraday options
   database and reports the before-and-after size.
 
-> Clicking **Test sound** also unlocks browser audio for the session.
+> Clicking **Test sound** — or **Test voice** — also unlocks browser audio for the
+> session. Browsers block sound until you interact with the page, and they do it
+> silently, so a Desk that never speaks is usually blocked rather than broken. The
+> Desk shows an **Enable spoken alerts** button when that happens.
+
+> **The first time a given phrase is spoken it takes a second or two to generate**,
+> because the clip is made on demand; after that it plays from a cache on your own
+> machine and is instant. The app pre-generates the common flow phrases in the
+> background at startup, so in practice you rarely hear the delay.
 
 > **Turning the ticker off also stops the Claude calls behind it**, so it is a cost
 > control as well as a display setting.

@@ -27,6 +27,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 
 | Menu page | Chapters that derive its numbers |
 |---|---|
+| **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
 | **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
 | **Flow Alerts** | *GEX / Gamma* (the premium series) · *Constants Appendix* (detector thresholds) |
@@ -1529,6 +1530,35 @@ the source; this table is a summary of them.
 > tasks fixed it. A 2-minute figure also silently corrupted the flow-alert spike
 > detector, which compares volume increments and reads a 2-minute delta as roughly
 > twice baseline.
+
+## Desk spoken alerts and the arrival glow
+
+Two Desk constants that are not derived from market data but are load-bearing, and
+both have a silent failure mode behind them.
+
+| Constant | Value | Where |
+|----------|-------|-------|
+| Glow span / steps | **10.0 s** over **10** classes (`desk-neon-0…9`) | `webgui/pages/desk.py:GLOW_SEC`, `GLOW_STEPS` |
+| Glow hues | cyan `#22d3ee` = new row · amber `#f5b841` = flag change | `desk.py:SPOT_HEX`, `FLIP_HEX` |
+| Default voice / rate | `en-US-AriaNeural` / `+8%` | `webgui/voice.py:DEFAULT_VOICE`, `RATE` |
+| Voice cache key | `sha1(voice \| rate \| full sentence)` → `webgui/data/voice/<hex>.mp3`, served at `/voice` | `voice.py:clip_name` |
+| Synthesis bound | **20 s** whole-call timeout; measured **~0.9–2.4 s** on a cache miss, **~110 µs** on a hit, ~22–28 KB a clip | `voice.py:SYNTH_TIMEOUT_SEC` |
+| Abandoned-temp sweep | `*.part` older than **3600 s**, swept at prewarm | `voice.py:_PART_MAX_AGE_SEC` |
+
+> **`GLOW_SEC` and `GLOW_STEPS` must move together.** The glow is a CSS animation,
+> and the Positions panel rebuilds every row on each re-price — **a rebuilt element
+> restarts its animation from zero**, so the obvious implementation glows forever.
+> The row instead wears one of `GLOW_STEPS` fixed classes carrying a whole-second
+> *negative* `animation-delay`, which starts the animation partway through, so a
+> rebuilt row **resumes**. Raise the span without adding classes and rows land on
+> `desk-neon-<n>` rules that do not exist — and the failure is silent, because a
+> missing delay rule means the animation simply restarts.
+
+> **The 20-second synthesis bound is the only thing bounding the whole call.**
+> `edge-tts` carries its own timeouts, but they are *per operation* (connect 10 s,
+> receive 60 s in 7.2.8) — a stream dribbling one chunk every 59 s trips neither, and
+> 60 s alone is three times this budget. Past 20 s the endpoint is gone rather than
+> slow, and waiting only pins a worker thread.
 
 ## Commissions
 

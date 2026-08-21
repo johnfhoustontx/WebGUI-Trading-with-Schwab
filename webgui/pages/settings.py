@@ -158,9 +158,10 @@ def render():
         v_vol = ui.slider(min=0, max=1, step=0.05, value=s["voice_volume"]).classes("w-64")
         v_vol.on_value_change(lambda e: app_settings.set("voice_volume", e.value))
 
-        ui.label("First synthesis of a phrase takes about a second; after that "
-                 "it plays from a local cache. Test voice also unlocks browser "
-                 "audio, which is blocked until you interact with the page.").classes(
+        ui.label("The first time a phrase is spoken it takes a second or two to "
+                 "generate; after that it plays from a local cache. Test voice "
+                 "also unlocks browser audio, which is blocked until you "
+                 "interact with the page.").classes(
                  "opacity-60 text-xs")
 
     with ui.card().classes("w-full max-w-2xl"):
@@ -451,8 +452,9 @@ def render():
     test.on_click(_test)
 
     # Test voice is its sibling, but it cannot reuse play_alert: the clip is
-    # synthesized on demand, and voice.ensure BLOCKS (~850 ms on a cache miss),
-    # so it has to cross run.io_bound before any of this touches the page.
+    # synthesized on demand, and voice.ensure BLOCKS (measured ~0.9-2.4 s on a
+    # cache miss), so it has to cross run.io_bound before any of this touches the
+    # page.
     @guard_async
     async def _test_voice():
         settings = app_settings.load()

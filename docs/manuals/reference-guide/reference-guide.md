@@ -191,6 +191,10 @@ First thing, and whenever you have lost the thread. Every panel is a summary of 
 page that goes deeper, and **clicking any row opens that page already set to the
 symbol you clicked**.
 
+It is also the screen to **leave open**, because it is the only one that will
+interrupt you: new flow alerts and newly-opened positions are announced out loud and
+the arriving row glows for ten seconds (see *Spoken arrivals* below).
+
 ### The panels
 
 **Top strip.** The clock; **VIX** and its regime band; the **market regime** word
@@ -238,6 +242,33 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
+### Spoken arrivals
+
+A **new flow alert** or a **newly-opened position** is announced in a synthetic
+human voice — the ticker spelled letter by letter, then the cause: *"S P Y.
+Crossover alert, calls over."* — and the row glows cyan for ten seconds. Tickers are
+always spelled rather than read as words, which is squawk-box convention and also
+the only rule that survives an unbounded symbol list: "SPY" read aloud as *spy* is
+actively misleading.
+
+Three rules are worth knowing, because each is a decision rather than an accident:
+
+- **A flag change glows amber and says nothing.** A position moving OK → At risk →
+  Rescue is not an *arrival*; it was already on the screen, and the flag column
+  already prints the new word. Only genuinely new rows speak.
+- **All four flow detectors speak, large-delta included** — even though the scanner
+  chime deliberately ignores that one. The reason the chime ignores it is that a
+  *chime* carrying no information is noise at that detector's frequency. An
+  announcement that names the ticker and the cause is not: if it does not concern
+  you, ignoring it costs nothing.
+- **A burst names the newest and counts the rest** — "…plus 5 more" — rather than
+  reading a list. Six sentences back to back is a minute of talking over a moving
+  tape.
+
+Everything about it is switchable under *Settings → Spoken alerts (Desk)*, and it
+obeys the **same** market-hours restriction as the scanner chime — there is
+deliberately no second switch to fall out of step with the first.
+
 ### What the numbers are, and are not
 
 - **The Desk computes nothing of its own.** Every figure is produced by the same
@@ -250,6 +281,11 @@ that count toward that total; *Watch* does not.
   last reading I trust", not "the market is flat".
 - **The freshness indicator reports the real collection state**, including
   "unknown". It is not a decorative "live" light.
+- **Silence is more often a blocked browser than a broken feature.** Browsers refuse
+  to play audio until the page has been interacted with, and the refusal produces no
+  error anywhere. When it happens an **Enable spoken alerts** button appears at the
+  top of the Desk; one click unlocks sound for the session, and it speaks a line back
+  to confirm.
 - **Nothing on this page can place, change, or close a trade.** It reads and links.
 
 ---
@@ -2571,7 +2607,14 @@ cosmetic: **API usage** and **Maintenance**.
 market hours, and set a **minimum score to alert** — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.
 
-> Browsers block audio until you interact with the page. **Test sound** unlocks it.
+> Browsers block audio until you interact with the page. **Test sound** — or **Test
+> voice** — unlocks it.
+
+**Spoken alerts (Desk).** Whether the Desk announces new flow alerts and
+newly-opened positions out loud, which of six neural voices does it, and how loud.
+**Test voice** speaks a sample and doubles as the audio unlock. Note what is *not*
+here: a market-hours toggle. Spoken alerts reuse the one in **Scanner alerts**, so
+the two can never disagree about when the app is allowed to make noise.
 
 **Desktop notifications.** A toggle plus a permission grant.
 
