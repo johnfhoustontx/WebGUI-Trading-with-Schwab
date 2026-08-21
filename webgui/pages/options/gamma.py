@@ -1836,6 +1836,38 @@ def symbol_options(cached):
     return out
 
 
+def history_key(view) -> str:
+    """Cache view holding one Gamma view's intraday history rows.
+
+    Each view's history is its OWN key rather than a field of the gamma snapshot:
+    measured in prod the four blobs were ~1.1 MB EACH against ~400 KB for the rest
+    of the payload, and this page draws one view at a time (2026-08-20).
+    """
+    return f"options:gamma_hist_{str(view).lower()}"
+
+
+def history_rows(payload, symbol):
+    """Rows out of a history payload, but ONLY if they belong to ``symbol``.
+
+    The snapshot and the history keys are separate writes, so a reader can pair a
+    new snapshot with an older history. Inside one symbol that is harmless -- the
+    rows are append-only for the session -- but across symbols it would draw one
+    symbol's heatmap beneath another's bars, so the stamp is checked and a
+    mismatch reads as "no history yet". ``symbol=None`` (before the first snapshot
+    lands) accepts whatever is there. Junk-tolerant; never raises.
+    """
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return []
+    if symbol:
+        stamped = payload.get("symbol")
+        if not stamped or str(stamped).upper() != str(symbol).upper():
+            return []
+    return rows
+
+
 def history_dates(cached):
     """Distinct briefing dates (newest first) from the cached gamma_briefings index.
 
@@ -1867,8 +1899,12 @@ def render():
     # state["netprem"] is the (separate, ~500 KB) cache:options:net_premium payload
     # with its own in-flight guard — it is symbol-independent, so it is NOT part of
     # the gamma snapshot and must not share the big snapshot's ``fetching`` latch.
+    # state["hist"] caches per-view history rows {view: rows}, each fetched from its
+    # OWN key on demand and CLEARED whenever the gamma version moves. The page draws
+    # one view at a time, so only the views actually looked at are ever paid for.
     state: dict = {"snap": None, "countdown": 120, "fetching": False,
-                   "netprem": None, "np_fetching": False, "np_bulk": False}
+                   "netprem": None, "np_fetching": False, "np_bulk": False,
+                   "hist": {}, "hist_fetching": False}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None,
             "netprem": None}
@@ -2404,7 +2440,7 @@ def render():
         # History rows first (index-6 grid dict needs its keys re-floated too): the
         # intraday spot path (index 1) feeds the shared y-range below.
         rows = []
-        for r in (entry.get("history") or []):
+        for r in (state.get("hist") or {}).get(view) or []:
             r = list(r)
             if len(r) > 6:
                 r[6] = _refloat_keys(r[6])
@@ -2534,8 +2570,28 @@ def render():
         if snap and want and (snap.get("symbol") or "").upper() != want:
             return
         state["snap"] = snap
+        # A new snapshot means new history rows; drop the per-view cache and pull
+        # back only the view actually on screen.
+        state["hist"] = {}
+        await _load_history(view_toggle.value)
         _render_view()
         chart_busy.hide()
+
+    async def _load_history(view):
+        """Fetch ``view``'s history rows off-loop, once per gamma version.
+
+        Mirrors _maybe_repaint_netprem: separate key, own in-flight guard, big read
+        via run.io_bound. Cached in state["hist"] so flipping back to a view the
+        user has already seen costs nothing."""
+        if not view or view in (state.get("hist") or {}) or state.get("hist_fetching"):
+            return
+        state["hist_fetching"] = True
+        try:
+            payload = await run.io_bound(bus_client.read, history_key(view))
+        finally:
+            state["hist_fetching"] = False
+        state.setdefault("hist", {})[view] = history_rows(
+            payload, (state.get("snap") or {}).get("symbol"))
 
     @guard_async
     async def _maybe_repaint_netprem(version):
@@ -2721,14 +2777,17 @@ def render():
     explain_btn.on_click(_request_explain)
     analyze_btn.on_click(_request_analyze)
 
-    @guard
-    def _on_view_change(e):
+    @guard_async
+    async def _on_view_change(e):
         # _sync_np_controls FIRST so the Net Prem block is shown/hidden before the
         # repaint (the checkbox visibility feeds nothing but the eye, but showing a
         # stale block for a frame reads as a glitch).
         _sync_np_controls()
         # ...and the symbol-scoped cluster hides/shows with the same switch.
         _sync_spot_controls()
+        # This view's history is its own key — fetch it the first time the user
+        # lands on the view (no-op once cached for this gamma version).
+        await _load_history(view_toggle.value)
         _render_view()
 
     view_toggle.on_value_change(_on_view_change)
@@ -2919,6 +2978,7 @@ def render():
         # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
         # A symbol handed over from the Flow Alerts tape WINS over the cached one —
         # it is an explicit request — and the refresh below moves the cache to it.
+        await _load_history(view_toggle.value)
         from .handoff import take_pending_gamma
         handoff_sym = take_pending_gamma()
         _set_symbol(handoff_sym or (state["snap"] or {}).get("symbol"))

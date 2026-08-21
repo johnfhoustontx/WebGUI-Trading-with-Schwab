@@ -132,7 +132,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
 <td><code>options_svc</code> :8211</td>
-<td><code>cache:options:gamma</code>, <code>:gamma_symbols</code>, <code>:net_premium</code>, <code>:gamma_analyze*</code>, <code>:gamma_briefings</code></td>
+<td><code>cache:options:gamma</code>, <code>:gamma_hist_*</code>, <code>:gamma_symbols</code>, <code>:net_premium</code>, <code>:gamma_analyze*</code>, <code>:gamma_briefings</code></td>
 </tr>
 <tr>
 <td><strong>Opportunity Board</strong></td>
@@ -599,7 +599,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 <tr>
 <td><code>gamma_refresh</code></td>
 <td><code>{symbol}</code></td>
-<td><code>cache:options:gamma</code></td>
+<td><code>cache:options:gamma</code> + <code>cache:options:gamma_hist_{view}</code></td>
 </tr>
 <tr>
 <td><code>gamma_explain</code></td>
@@ -1114,6 +1114,7 @@ cache:options:paper_analyze    events:options:paper_analyze
 cache:options:captured         events:options:captured
 cache:options:captured_flags   events:options:captured_flags
 cache:options:gamma            events:options:gamma
+cache:options:gamma_hist_gex | _charm | _dex | _vanna   (per-view intraday history)
 cache:options:gamma_explain    events:options:gamma_explain
 cache:options:gamma_analyze    events:options:gamma_analyze
 cache:options:gamma_symbols    events:options:gamma_symbols

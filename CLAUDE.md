@@ -1572,6 +1572,45 @@ for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other pe
 republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
 unconditionally — opt them in the same way if they prove chatty.
 
+**A cropped payload is not a BOUNDED payload — split what the reader doesn't read
+(2026-08-20).** `cache:options:gamma` was cropped in 2026-06 to a ±display-window
+strike range, and the comment recording that said it cut the key to "well under
+~1 MB". Measured in prod it was **4.99 MB**: the crop bounds the STRIKE axis, but
+the TIME axis keeps growing all session, so the four views' `history` blobs reach
+~1.1 MB **each** (376 rows by the close) against ~400 KB for everything else. The
+page draws ONE view at a time, so every open tab was deserializing four times what
+it could possibly paint, once a minute. Each view's history now lives in its own
+key (`handlers.gamma_history_key`, written by `_publish_gamma`); the page fetches
+only the visible view's, on demand, cached per gamma version
+(`gamma.history_key`/`history_rows`, mirroring the existing `netprem` pattern).
+- **Main payload 4.99 → 0.40 MB (−92%); page read per bump 4.99 → 1.65 MB (−67%).**
+- ⚠ **The write side does NOT improve during collection** — all four histories move
+  every minute, so it is the same bytes plus a little key overhead. The write win
+  appears only once collection stops, where the frozen histories now
+  `skip_unchanged` and the refresh costs 0.40 MB instead of 4.99 MB. Claiming a
+  uniform "75% both ways" would have been wrong; measure both directions.
+- **Ordering is load-bearing:** history keys are written BEFORE the main payload,
+  because the page reacts to the main key's version and then reads history — so
+  history-already-written is the only skew it can see. Every history payload
+  carries its **symbol**, and the reader refuses a mismatch: within one symbol a
+  stale history is benign (append-only for the session), across symbols it would
+  draw one symbol's heatmap under another's bars. A view the snapshot lacks is
+  published EMPTY, never skipped, for the same reason.
+
+**Two more unbounded-growth fixes from the same audit.** `driver_account_view`
+published **every closed trade ever** (160 rows / 158 KB of a 224 KB payload,
++~1 KB per trade forever) while `orders` beside it had had a `limit=100` all
+along. The rows are now capped at `DRIVER_CLOSED_LIMIT` — but the page's summary
+line is a **lifetime** count / win-rate / realized total, so capping alone would
+have silently misreported the driver's track record: `closed_totals` is computed
+over **every** closed row and carries `truncated`, which the summary line
+discloses ("showing the most recent N"). And `publish_bullbear` full-deserialized
+the 304 KB momentum payload (a **nightly** view) plus its own 190 KB output on
+every ~30 s tick; both are now version-gated memos (`handlers.reset_bullbear_memos`),
+taking the tick from three full deserializes to one. ⚠ That last one cannot reach
+zero: `cache_set(skip_unchanged=True)` must itself read the stored payload to
+decide whether to skip.
+
 **HIGH — webgui event-loop pressure (runs on *every* page):** *(FIXED 2026-06-19)*
 - The app-wide 2 s watcher now runs its blocking bus reads **off the event loop**
   (`main._tick` is async → `run.io_bound(_watcher_compute)`); `_watcher_compute`

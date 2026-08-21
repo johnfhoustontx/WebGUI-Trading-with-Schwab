@@ -174,6 +174,20 @@ EVENT_EOD_SUMMARY = "events:options:eod_summary"
 CACHE_GAMMA = "cache:options:gamma"
 EVENT_GAMMA = "events:options:gamma"
 
+# Each view's intraday history lives in its OWN key, not inline in CACHE_GAMMA.
+# Measured 2026-08-20 in prod: the main payload had regrown to 4.53 MB, of which
+# the four `history` blobs were ~4.59 MB (376 rows x cropped grid, ~1.1 MB each)
+# against ~400 KB of everything else. The page draws ONE view at a time, so every
+# publish serialized -- and every open tab deserialized -- 4x what it could use,
+# once a minute, all session. A new history row lands every minute so the payload
+# can never `skip_unchanged`; splitting is the only way to stop paying for it.
+GAMMA_HISTORY_VIEWS = ("GEX", "Charm", "DEX", "Vanna")
+
+
+def gamma_history_key(view: str) -> str:
+    """Cache key holding one view's intraday history rows."""
+    return f"cache:options:gamma_hist_{str(view).lower()}"
+
 CACHE_GAMMA_EXPLAIN = "cache:options:gamma_explain"
 EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
 
@@ -791,6 +805,31 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     snap = compute.gamma_snapshot(symbol)
     if snap is None:
         snap = {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
+    _publish_gamma(bus, snap, symbol)
+
+
+def _publish_gamma(bus, snap, symbol) -> None:
+    """Write the history keys FIRST, then the slim main payload, then publish.
+
+    That order matters: the page reacts to the MAIN key's version bump and then
+    reads the history it needs, so history-already-written is the only skew it can
+    observe. The reverse order would hand it a new snapshot pointing at rows that
+    have not landed yet. Within one symbol a stale history is benign anyway (the
+    rows are append-only for the session); across symbols it would be wrong, which
+    is why every history payload carries the symbol for the page to check.
+
+    A view the snapshot does not carry is published EMPTY rather than skipped --
+    leaving the previous symbol's rows in the key would let the page pair them
+    with this symbol's bars.
+    """
+    views = snap.get("views")
+    if isinstance(views, dict):
+        for view in set(GAMMA_HISTORY_VIEWS) | set(views):
+            entry = views.get(view)
+            rows = entry.pop("history", None) if isinstance(entry, dict) else None
+            bus.cache_set(gamma_history_key(view),
+                          {"symbol": symbol, "view": view, "rows": rows or []},
+                          skip_unchanged=True)
     version = bus.cache_set(CACHE_GAMMA, snap)
     bus.publish(EVENT_GAMMA, {"version": version})
 

@@ -484,6 +484,36 @@ def driver_shared_reads():
     return positions, snapshot
 
 
+# Rows published for the driver's closed-trade table. `orders` has been capped at
+# 100 all along; this list had NO bound and carried every closed trade ever --
+# measured 160 rows / 158 KB of a 224 KB payload, growing ~1 KB per trade forever
+# and re-serialized on every 5-min refresh (2026-08-20).
+#
+# The cap is on the ROW LIST only. The page's summary line is a LIFETIME count /
+# win-rate / realized total, so truncating rows without exact aggregates would
+# silently misreport the driver's track record -- `closed_totals` is therefore
+# computed over EVERY closed row, and carries `truncated` so the table can say so
+# rather than quietly showing a partial history.
+DRIVER_CLOSED_LIMIT = 400
+
+
+def _closed_totals(closed) -> dict:
+    """Exact lifetime aggregates over ALL closed rows (never the capped slice).
+
+    Counts only rows with a numeric ``realized_pnl``, matching the page's
+    ``closed_summary_text`` -- an unpriced row is not a win, not a loss, and not
+    part of the count.
+    """
+    priced = [c for c in (closed or [])
+              if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))
+              and not isinstance(c.get("realized_pnl"), bool)]
+    wins = sum(1 for c in priced if c["realized_pnl"] > 0)
+    losses = sum(1 for c in priced if c["realized_pnl"] < 0)
+    return {"count": len(priced), "wins": wins, "losses": losses,
+            "realized": round(sum(c["realized_pnl"] for c in priced), 2),
+            "truncated": len(closed or []) > DRIVER_CLOSED_LIMIT}
+
+
 def driver_account_view(all_positions=None, snapshot=None) -> dict:
     """Driver account snapshot + open positions (mirrors ``paper_account_view`` on
     the DRIVER db). No rescue overlay (that reads the manual account). Each
@@ -511,12 +541,15 @@ def driver_account_view(all_positions=None, snapshot=None) -> dict:
     try:
         if all_positions is None:
             all_positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
-        closed_positions = [p for p in all_positions
-                            if (p.get("status") or "").upper() != "OPEN"]
+        closed_all = [p for p in all_positions
+                      if (p.get("status") or "").upper() != "OPEN"]
+        closed_totals = _closed_totals(closed_all)
+        closed_positions = closed_all[:DRIVER_CLOSED_LIMIT]
     except Exception:
-        closed_positions = []
+        closed_positions, closed_totals = [], _closed_totals([])
     return {"snapshot": snapshot, "positions": positions, "orders": orders,
-            "closed_positions": closed_positions, "has_account": has_driver_account()}
+            "closed_positions": closed_positions, "closed_totals": closed_totals,
+            "has_account": has_driver_account()}
 
 
 def driver_account_perf(positions=None, snapshot=None) -> dict:
@@ -2325,7 +2358,14 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
 
     # Slim the payload: crop each view's per-strike grid + history grids to the
     # ±display-window strikes. flip/walls above were computed on the FULL grid, so
-    # they're unaffected. (Cut cache:options:gamma from ~14 MB → well under ~1 MB.)
+    # they're unaffected. (Cut cache:options:gamma from ~14 MB → ~5 MB by the close.)
+    #
+    # ⚠ This comment claimed "well under ~1 MB" until 2026-08-20, when the key was
+    # measured in prod at 4.99 MB — the crop bounds the STRIKE axis, but the time
+    # axis keeps growing all session (376 rows by the close), so the four history
+    # blobs reached ~1.1 MB each. They now live in their OWN keys and are stripped
+    # off at publish time — see handlers._publish_gamma / gamma_history_key. This
+    # function still returns them inline; the split is a publishing concern.
     _crop_gamma_views(views, spot)
 
     try:

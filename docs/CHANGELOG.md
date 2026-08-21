@@ -4,7 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**Accuracy audit, batch 1 — five wrong numbers on live
+**Last updated:** 2026-08-20 (**Audit batch 2 — three unbounded payloads, and a
+comment that had been lying about the biggest one for two months.**
+- **`cache:options:gamma` was 4.99 MB, not the "well under ~1 MB" its own comment
+  claimed.** The 2026-06 crop bounds the STRIKE axis; the TIME axis keeps growing all
+  session, so each view's `history` reaches ~1.1 MB by the close — **4.59 MB of history
+  against ~400 KB of everything else** — and the page draws ONE view at a time. Each
+  view's history moved to its own key (`gamma_history_key` / `_publish_gamma`), fetched
+  on demand by the page and cached per gamma version. **Main payload −92% (4.99 → 0.40
+  MB); page read per version bump −67% (4.99 → 1.65 MB).**
+- ⚠ **The write side does not improve during collection** and it would have been easy to
+  claim it did: all four histories move every minute, so publishing costs the same bytes
+  plus key overhead. The win appears once collection stops, where frozen histories
+  `skip_unchanged` and a refresh costs 0.40 MB instead of 4.99 MB. Measured both
+  directions rather than halving one and doubling it.
+- **Write ORDER is load-bearing**: history keys first, main payload second, because the
+  page reacts to the main key's version and then reads history — so history-already-
+  written is the only skew it can observe. Each history payload carries its **symbol**
+  and the reader refuses a mismatch (a stale history within one symbol is benign, since
+  the rows are append-only for the session; across symbols it would draw one symbol's
+  heatmap under another's bars). A view the snapshot lacks is published EMPTY, never
+  skipped, so the previous symbol's rows cannot linger.
+- **`driver_account_view` published every closed trade ever** — 160 rows / 158 KB of a
+  224 KB payload, growing ~1 KB per trade forever, while `orders` beside it had carried a
+  `limit=100` all along. ⚠ **The obvious fix was wrong:** that list feeds a **lifetime**
+  count / win-rate / realized total, so a bare "keep the last N" would have silently
+  misreported the driver's whole track record. The rows are capped at
+  `DRIVER_CLOSED_LIMIT`; `closed_totals` is computed over **every** closed row and
+  carries `truncated`, which the summary line now discloses ("showing the most recent
+  N") per the house no-silent-caps rule.
+- **`publish_bullbear` did three full JSON round-trips every ~30 s** for data that
+  changes once a night: the 304 KB momentum payload (134 KB of it `rank_history`, which
+  the builder never touches) plus its own 190 KB output, re-read for a timestamp
+  compare. Both are version-gated memos now (~2,880 ticks/day → one deserialize each
+  per change). ⚠ It cannot reach zero — `cache_set(skip_unchanged=True)` must read the
+  stored payload itself to decide whether to skip — so the test asserts the achievable
+  one read, not the tidy zero it was first written to expect.
+- **Verification.** webgui 2320, options_svc 1189, sentiment_svc 325 + the 1 documented,
+  driver_svc 239. Ruff clean. Payload figures measured against the live prod Redis (db 0),
+  read-only.
+- **Still open** (batch 3): ~13,500 lines of provably dead code — `shared/analysis_lib`
+  is ~85% dead and its eager `__init__` is *why* four live call sites do sys.path
+  gymnastics; the Tk remnants drag **tkinter + matplotlib into headless options_svc**.
+  Plus the medium-tier accuracy items (`AGG_WEIGHTS` summing to 1.30,
+  `market_svc.classify._num`'s silent 0.0, the RRG "momentum" axis that actually
+  measures acceleration).
+
+**Prior —** 2026-08-20 (**Accuracy audit, batch 1 — five wrong numbers on live
 screens, and in three of the five a TEST was holding the bug in place.**
 - **What this was.** A four-agent audit across calculation accuracy, compactness and
   efficiency. This entry covers the batch-1 remediation: everything ranked Critical or

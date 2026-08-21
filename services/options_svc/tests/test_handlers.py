@@ -2541,3 +2541,72 @@ def test_em_chain_command_caches_ladders(monkeypatch):
     assert env is not None
     assert env.payload == result
     assert msg is not None and msg.get("version") == env.version
+
+
+# ── gamma history split into sibling keys (2026-08-20) ──────────────────────
+# Measured in prod: cache:options:gamma had regrown to 4.53 MB, of which the FOUR
+# per-view `history` blobs were ~4.59 MB (~1.1 MB each, 376 rows) and everything
+# else ~400 KB. The page renders ONE view at a time, so every publish serialized
+# -- and every open tab deserialized -- 4x the history it could possibly draw.
+
+def _gamma_snapshot_with_history():
+    snap = _fake_gamma_snapshot()
+    snap["views"]["GEX"]["history"] = [[1, 5400.0, 0, 0, 0, 0, {"5400.0": 1.0}]]
+    snap["views"]["DEX"]["history"] = [[1, 5400.0, 0, 0, 0, 0, {"5400.0": 2.0}]]
+    return snap
+
+
+def test_refresh_gamma_moves_per_view_history_out_of_the_main_payload(monkeypatch):
+    snap = _gamma_snapshot_with_history()
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: snap)
+    bus = Bus(fake=True)
+    handlers.refresh_gamma(bus, "$SPX")
+
+    main = bus.cache_get("cache:options:gamma").payload
+    for view in ("GEX", "DEX"):
+        assert "history" not in main["views"][view], f"{view} history still inline"
+    # everything else the page needs is untouched
+    assert main["views"]["GEX"]["summary"]["flip"] == 5399.5
+    assert main["views"]["DEX"]["hedge"]["hedge_pressure"] == -5.0
+    assert main["spot"] == 5400.0 and main["term"] == {"expirations": [], "cells": {}}
+
+
+def test_refresh_gamma_publishes_each_views_history_to_its_own_key(monkeypatch):
+    snap = _gamma_snapshot_with_history()
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: snap)
+    bus = Bus(fake=True)
+    handlers.refresh_gamma(bus, "$SPX")
+
+    gex = bus.cache_get("cache:options:gamma_hist_gex").payload
+    assert gex["rows"] == [[1, 5400.0, 0, 0, 0, 0, {"5400.0": 1.0}]]
+    dex = bus.cache_get("cache:options:gamma_hist_dex").payload
+    assert dex["rows"] == [[1, 5400.0, 0, 0, 0, 0, {"5400.0": 2.0}]]
+
+
+def test_gamma_history_keys_carry_the_symbol_so_a_stale_one_is_detectable(monkeypatch):
+    """The main payload and the history keys are separate writes, so a reader can
+    momentarily pair a new snapshot with an older history. Within one symbol that
+    is benign (the rows are append-only for the session); ACROSS symbols it would
+    draw one symbol's heatmap under another's bars. The stamp lets the page refuse."""
+    snap = _gamma_snapshot_with_history()
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: snap)
+    bus = Bus(fake=True)
+    handlers.refresh_gamma(bus, "$SPX")
+    assert bus.cache_get("cache:options:gamma_hist_gex").payload["symbol"] == "$SPX"
+
+
+def test_refresh_gamma_clears_history_keys_for_views_the_snapshot_lacks(monkeypatch):
+    """A symbol with no Vanna book must not leave the PREVIOUS symbol's Vanna
+    history sitting in its key for the page to find."""
+    rich = _gamma_snapshot_with_history()
+    rich["views"]["Vanna"] = {"data": {}, "summary": {}, "walls": [], "flip": None,
+                              "history": [[1, 1.0, 0, 0, 0, 0, {"1.0": 9.0}]]}
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: rich)
+    bus = Bus(fake=True)
+    handlers.refresh_gamma(bus, "$SPX")
+    assert bus.cache_get("cache:options:gamma_hist_vanna").payload["rows"]
+
+    thin = _gamma_snapshot_with_history()          # no Vanna view at all
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: thin)
+    handlers.refresh_gamma(bus, "SPY")
+    assert bus.cache_get("cache:options:gamma_hist_vanna").payload["rows"] == []

@@ -274,3 +274,41 @@ def test_excursion_text():
 
 def test_render_is_callable():
     assert callable(driver.render)
+
+
+# ── the summary is a LIFETIME figure, the rows are capped (2026-08-20) ───────
+
+def test_closed_summary_text_prefers_the_services_exact_totals():
+    """options_svc now publishes only the newest DRIVER_CLOSED_LIMIT rows but
+    computes `closed_totals` over EVERY closed trade. The summary line is a
+    lifetime count / win-rate / realized total, so it must read the aggregate --
+    counting the truncated rows would understate the driver's whole track record."""
+    rows = [{"realized_pnl": 10.0}, {"realized_pnl": -4.0}]      # only 2 kept
+    totals = {"count": 500, "wins": 300, "losses": 200,
+              "realized": 1234.5, "truncated": True}
+    txt = driver.closed_summary_text(rows, totals)
+    assert "Closed: 500" in txt and "300W" in txt and "200L" in txt
+    assert "60% win" in txt
+    assert "1,234.50" in txt or "1234.50" in txt
+
+
+def test_closed_summary_text_falls_back_to_the_rows_without_totals():
+    """A snapshot published before the aggregate existed must still render."""
+    txt = driver.closed_summary_text([{"realized_pnl": 10.0}, {"realized_pnl": -4.0}])
+    assert "Closed: 2" in txt and "1W" in txt and "1L" in txt
+
+
+def test_closed_summary_text_says_so_when_the_table_is_truncated():
+    """No silent caps: if the table cannot show every trade the summary says how
+    many it IS showing, rather than letting the reader assume the table is whole."""
+    rows = [{"realized_pnl": 10.0}] * 400
+    totals = {"count": 460, "wins": 460, "losses": 0,
+              "realized": 4600.0, "truncated": True}
+    txt = driver.closed_summary_text(rows, totals)
+    assert "400" in txt and "showing" in txt.lower()
+
+
+def test_closed_summary_text_is_silent_about_truncation_when_there_is_none():
+    rows = [{"realized_pnl": 10.0}, {"realized_pnl": -4.0}]
+    totals = {"count": 2, "wins": 1, "losses": 1, "realized": 6.0, "truncated": False}
+    assert "showing" not in driver.closed_summary_text(rows, totals).lower()

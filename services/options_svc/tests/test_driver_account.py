@@ -333,3 +333,62 @@ def test_run_driver_manage_cycle_noop_without_account(tmp_path, monkeypatch):
                         lambda *a, **k: called.__setitem__("n", called["n"] + 1))
     compute.run_driver_manage_cycle()
     assert called["n"] == 0                    # gated off when no driver account
+
+
+# ── closed_positions is bounded, but the track record is NOT (2026-08-20) ────
+# Measured in prod: closed_positions was 160 rows / 158 KB of a 224 KB payload,
+# every closed trade ever, re-serialized on each 5-min refresh and growing ~1 KB
+# per trade forever. `orders` had a limit=100 all along; this list had none.
+
+def _closed_rows(n, realized=lambda i: 10.0):
+    """n synthetic closed rows, newest first (fetch_all_positions orders DESC)."""
+    return [{"position_id": n - i, "status": "CLOSED", "realized_pnl": realized(i),
+             "exit_ts": f"2026-06-{(i % 28) + 1:02d}T15:00:00"} for i in range(n)]
+
+
+def test_driver_account_view_caps_the_closed_position_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", tmp_path / "d.db")
+    rows = _closed_rows(compute.DRIVER_CLOSED_LIMIT + 50)
+    view = compute.driver_account_view(all_positions=rows, snapshot={})
+    assert len(view["closed_positions"]) == compute.DRIVER_CLOSED_LIMIT
+    # the NEWEST are the ones kept
+    assert view["closed_positions"][0]["position_id"] == rows[0]["position_id"]
+
+
+def test_driver_account_view_reports_exact_lifetime_totals_beyond_the_cap(tmp_path,
+                                                                          monkeypatch):
+    """The page's one-line summary is a LIFETIME count / win-rate / realized
+    total. Capping the rows without publishing exact aggregates would silently
+    misreport the driver's track record -- so the totals are computed over EVERY
+    closed row and only the row LIST is bounded."""
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", tmp_path / "d.db")
+    n = compute.DRIVER_CLOSED_LIMIT + 60
+    rows = _closed_rows(n, realized=lambda i: 10.0 if i % 2 == 0 else -4.0)
+    totals = compute.driver_account_view(all_positions=rows,
+                                         snapshot={})["closed_totals"]
+    wins = len([i for i in range(n) if i % 2 == 0])
+    assert totals["count"] == n
+    assert totals["wins"] == wins and totals["losses"] == n - wins
+    assert totals["realized"] == round(wins * 10.0 - (n - wins) * 4.0, 2)
+    assert totals["truncated"] is True
+
+
+def test_driver_account_view_totals_are_present_below_the_cap_too(tmp_path, monkeypatch):
+    """No special case: the page always reads the aggregate, so it must exist
+    whether or not the cap bit."""
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", tmp_path / "d.db")
+    totals = compute.driver_account_view(all_positions=_closed_rows(3),
+                                         snapshot={})["closed_totals"]
+    assert totals == {"count": 3, "wins": 3, "losses": 0,
+                      "realized": 30.0, "truncated": False}
+
+
+def test_driver_account_view_totals_skip_unpriced_rows(tmp_path, monkeypatch):
+    """A row with no realized_pnl is not a win, not a loss, and not counted --
+    matching closed_summary_text, which only counts priced trades."""
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", tmp_path / "d.db")
+    rows = _closed_rows(2) + [{"position_id": 99, "status": "CLOSED",
+                               "realized_pnl": None, "exit_ts": None}]
+    totals = compute.driver_account_view(all_positions=rows,
+                                         snapshot={})["closed_totals"]
+    assert totals["count"] == 2 and totals["realized"] == 20.0

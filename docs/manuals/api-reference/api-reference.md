@@ -19,7 +19,7 @@ keys that feed it. Menu order matches the rail.
 
 | Menu page | Service | Primary cache key(s) |
 |---|---|---|
-| **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
+| **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_hist_*`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts` |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary` |
@@ -236,7 +236,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `captured_reload` | — | `cache:options:captured` |
 | `captured_reprice` | — | `cache:options:captured` + `cache:options:captured_flags` |
 | `captured_close` | `{signal_id, exit_val, reason}` | `cache:options:captured` |
-| `gamma_refresh` | `{symbol}` | `cache:options:gamma` |
+| `gamma_refresh` | `{symbol}` | `cache:options:gamma` + `cache:options:gamma_hist_{view}` |
 | `gamma_explain` | `{symbol}` | `cache:options:gamma_explain` |
 | `gamma_analyze` | — | `cache:options:gamma_analyze` |
 | `sim_fetch` | `{symbol}` | `cache:options:sim_meta` |
@@ -483,6 +483,7 @@ cache:options:paper_analyze    events:options:paper_analyze
 cache:options:captured         events:options:captured
 cache:options:captured_flags   events:options:captured_flags
 cache:options:gamma            events:options:gamma
+cache:options:gamma_hist_gex | _charm | _dex | _vanna   (per-view intraday history)
 cache:options:gamma_explain    events:options:gamma_explain
 cache:options:gamma_analyze    events:options:gamma_analyze
 cache:options:gamma_symbols    events:options:gamma_symbols

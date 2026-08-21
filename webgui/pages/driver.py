@@ -167,19 +167,36 @@ def _strikes_text(p):
     return " · ".join(parts) or "—"
 
 
-def closed_summary_text(closed):
-    """One-line realized-performance summary from the driver account's closed trades."""
-    priced = [c for c in (closed or [])
-              if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))]
-    if not priced:
-        return ("No closed trades yet — the driver's realized P&L appears here as its "
-                "positions close (target / stop / expiry).")
-    wins = [c for c in priced if c["realized_pnl"] > 0]
-    losses = [c for c in priced if c["realized_pnl"] < 0]
-    realized = round(sum(c["realized_pnl"] for c in priced), 2)
-    wr = round(100 * len(wins) / len(priced))
-    return (f"Closed: {len(priced)} · {len(wins)}W–{len(losses)}L ({wr}% win) · "
+def closed_summary_text(closed, totals=None):
+    """One-line realized-performance summary for the driver's closed trades.
+
+    These are LIFETIME figures. options_svc publishes only the newest
+    ``DRIVER_CLOSED_LIMIT`` rows but computes ``closed_totals`` over every closed
+    trade, so the aggregate is preferred and the rows are only a fallback for a
+    snapshot published before it existed — counting the truncated rows would
+    understate the whole track record. When the table cannot show everything the
+    line says how many it IS showing, rather than letting the reader assume the
+    table is complete.
+    """
+    if isinstance(totals, dict) and totals.get("count"):
+        count, wins, losses = totals["count"], totals.get("wins", 0), totals.get("losses", 0)
+        realized = totals.get("realized", 0.0)
+    else:
+        priced = [c for c in (closed or [])
+                  if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))]
+        if not priced:
+            return ("No closed trades yet — the driver's realized P&L appears here as its "
+                    "positions close (target / stop / expiry).")
+        count = len(priced)
+        wins = len([c for c in priced if c["realized_pnl"] > 0])
+        losses = len([c for c in priced if c["realized_pnl"] < 0])
+        realized = round(sum(c["realized_pnl"] for c in priced), 2)
+    wr = round(100 * wins / count) if count else 0
+    text = (f"Closed: {count} · {wins}W–{losses}L ({wr}% win) · "
             f"Realized: {_money(realized)}")
+    if isinstance(totals, dict) and totals.get("truncated"):
+        text += f" · showing the most recent {len(closed or [])}"
+    return text
 
 
 def closed_trade_rows(closed):
@@ -924,7 +941,8 @@ def render():
         # trades (cache:options:driver_paper_account['closed_positions']), NOT the dead
         # legacy trade_log ledger. Rides the same 2s version-poll as the monitor.
         closed = (state["paper"] or {}).get("closed_positions") or []
-        perf_summary.text = closed_summary_text(closed)
+        perf_summary.text = closed_summary_text(
+            closed, (state["paper"] or {}).get("closed_totals"))
         perf_table.rows = closed_trade_rows(closed)
         perf_table.update()
 

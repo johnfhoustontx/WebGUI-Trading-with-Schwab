@@ -784,6 +784,48 @@ def refresh_momentum(bus, session_date=None, force=False) -> None:
 
 # --- Bull / Bear Map (live day-moves over the nightly tree) -------------------
 
+# Version-gated payload memos for the ~30 s bull/bear poll (mirrors
+# market_svc._NETPREM_CACHE). Both reads it used to make every tick were large and
+# almost always redundant: the momentum view is 304 KB from a NIGHTLY cascade
+# (134 KB of it `rank_history`, which the builder never touches), and the bullbear
+# view is 190 KB that this function itself had just written. ~2,880 ticks a day
+# were paying ~3 full JSON round-trips for data that changes once (2026-08-20).
+_MOMENTUM_MEMO: dict = {"ver": None, "payload": None}
+_BULLBEAR_MEMO: dict = {"ver": None, "payload": None}
+
+
+def reset_bullbear_memos() -> None:
+    """Drop both memos (test helper; also safe to call after a manual cache edit)."""
+    _MOMENTUM_MEMO.update(ver=None, payload=None)
+    _BULLBEAR_MEMO.update(ver=None, payload=None)
+
+
+def _read_momentum(bus):
+    """The momentum payload, deserialized only when its version has moved."""
+    ver = bus.cache_version(CACHE_MOMENTUM)
+    if ver is not None and ver == _MOMENTUM_MEMO["ver"]:
+        return _MOMENTUM_MEMO["payload"]
+    env = bus.cache_get(CACHE_MOMENTUM)
+    payload = env.payload if env is not None else None
+    _MOMENTUM_MEMO.update(ver=ver, payload=payload)
+    return payload
+
+
+def _stored_bullbear(bus):
+    """What is currently in CACHE_BULLBEAR, for the stamp compare.
+
+    This function is the only writer, so while the stored version still matches
+    what we last wrote the memo IS the stored payload and no read is needed. Any
+    other version (a restart, a snapshot restore, a manual edit) falls back to a
+    real read, so the memo can never serve something the cache disagrees with.
+    """
+    ver = bus.cache_version(CACHE_BULLBEAR)
+    if ver is not None and ver == _BULLBEAR_MEMO["ver"]:
+        return _BULLBEAR_MEMO["payload"]
+    env = bus.cache_get(CACHE_BULLBEAR)
+    return env.payload if env is not None else None
+
+
 def _unchanged_but_for_the_stamp(stored, fresh) -> bool:
     """Are these two bullbear payloads equal ignoring ``quoted_at``?"""
     return ({k: v for k, v in stored.items() if k != "quoted_at"}
@@ -807,13 +849,14 @@ def publish_bullbear(bus) -> None:
     refreshes even on a skip, still answers "when did the publisher last confirm
     this", so the Status board cannot read the poller as dead.
     """
-    env = bus.cache_get(CACHE_MOMENTUM)
-    payload = compute.bullbear_view(env.payload if env is not None else None)
-    current = bus.cache_get(CACHE_BULLBEAR)
-    if current is not None and _unchanged_but_for_the_stamp(current.payload, payload):
-        payload["quoted_at"] = current.payload.get("quoted_at")
-    bus.cache_set(CACHE_BULLBEAR, payload,
-                  event=EVENT_BULLBEAR, skip_unchanged=True)
+    momentum = _read_momentum(bus)
+    payload = compute.bullbear_view(momentum)
+    stored = _stored_bullbear(bus)
+    if stored is not None and _unchanged_but_for_the_stamp(stored, payload):
+        payload["quoted_at"] = stored.get("quoted_at")
+    version = bus.cache_set(CACHE_BULLBEAR, payload,
+                            event=EVENT_BULLBEAR, skip_unchanged=True)
+    _BULLBEAR_MEMO.update(ver=version, payload=payload)
 
 
 def handle_command(bus, command) -> None:

@@ -2040,3 +2040,52 @@ def test_hedge_panel_is_reflowed_with_the_other_two():
     ids = [ln for ln in src.splitlines() if "heat_plot.id" in ln]
     assert ids, "reflow id list not found"
     assert any("hedge_plot.id" in ln for ln in ids)
+
+
+# ── per-view history now lives in its own cache key (2026-08-20) ────────────
+
+def test_history_key_names_the_view_in_lower_case():
+    assert gamma.history_key("GEX") == "options:gamma_hist_gex"
+    assert gamma.history_key("Charm") == "options:gamma_hist_charm"
+    assert gamma.history_key("Vanna") == "options:gamma_hist_vanna"
+
+
+def test_history_rows_returns_the_rows_for_a_matching_symbol():
+    payload = {"symbol": "$SPX", "view": "GEX", "rows": [[1, 5400.0], [2, 5401.0]]}
+    assert gamma.history_rows(payload, "$SPX") == [[1, 5400.0], [2, 5401.0]]
+
+
+def test_history_rows_refuses_another_symbols_history():
+    """The main snapshot and the history keys are separate writes. A one-tick skew
+    within a symbol is benign (rows are append-only for the session), but pairing
+    SPY's heatmap rows with $SPX's bars would silently draw two symbols at once --
+    so the symbol stamp is checked, and a mismatch reads as no history."""
+    payload = {"symbol": "SPY", "view": "GEX", "rows": [[1, 500.0]]}
+    assert gamma.history_rows(payload, "$SPX") == []
+
+
+def test_history_rows_is_case_insensitive_about_the_symbol():
+    payload = {"symbol": "spy", "rows": [[1, 500.0]]}
+    assert gamma.history_rows(payload, "SPY") == [[1, 500.0]]
+
+
+def test_history_rows_degrades_to_empty_on_junk():
+    for bad in (None, {}, {"symbol": "$SPX"}, {"symbol": "$SPX", "rows": None}, "nope"):
+        assert gamma.history_rows(bad, "$SPX") == []
+
+
+def test_history_rows_accepts_any_symbol_when_none_is_requested():
+    """Before the first snapshot lands the page has no symbol to check against;
+    the rows are still the freshest thing available."""
+    payload = {"symbol": "$SPX", "rows": [[1, 5400.0]]}
+    assert gamma.history_rows(payload, None) == [[1, 5400.0]]
+
+
+def test_page_reads_each_views_history_off_loop_from_its_own_key():
+    """The four history blobs were ~1.1 MB EACH and the page draws one view at a
+    time. It must fetch only the visible view's, and off the event loop."""
+    src = inspect.getsource(gamma.render)
+    assert "run.io_bound(bus_client.read, history_key(" in src
+    assert 'entry.get("history")' not in src, "still reading history inline"
+    # switching subtabs must be able to fetch, so the handler is async + guarded
+    assert "async def _on_view_change" in src

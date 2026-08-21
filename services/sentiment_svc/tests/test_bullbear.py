@@ -374,3 +374,89 @@ def test_scheduler_cancels_the_bullbear_loop_on_shutdown(monkeypatch):
     nothing else in the suite would notice."""
     events = _run_scheduler_briefly(monkeypatch)
     assert "bullbear:cancelled" in events
+
+
+# --- version-gated payload memos (2026-08-20) ---------------------------------
+
+def _count_gets(bus):
+    """Wrap cache_get so a test can count full-payload deserializes per key."""
+    calls = {}
+    real = bus.cache_get
+
+    def _counting(key, *a, **k):
+        calls[key] = calls.get(key, 0) + 1
+        return real(key, *a, **k)
+
+    bus.cache_get = _counting
+    return calls
+
+
+def test_publish_bullbear_reads_the_momentum_payload_once_per_version(monkeypatch):
+    """The momentum view is a NIGHTLY cascade; this poll runs every ~30 s. Reading
+    it deserialized 304 KB (134 KB of which is `rank_history` the builder never
+    touches) ~2,880 times a day for data that changes once. Gate it on the cheap
+    :ver probe, the same trick as market_svc._NETPREM_CACHE."""
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}})
+    handlers.reset_bullbear_memos()
+    bus = _bus_with_momentum()
+    calls = _count_gets(bus)
+    for _ in range(3):
+        handlers.publish_bullbear(bus)
+    assert calls.get(handlers.CACHE_MOMENTUM) == 1
+
+
+def test_publish_bullbear_rereads_momentum_when_the_cascade_republishes(monkeypatch):
+    """The memo must not outlive its version, or a nightly recompute would never
+    reach the map."""
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}, "XLK": {"change_pct": 2.0}})
+    handlers.reset_bullbear_memos()
+    bus = _bus_with_momentum()
+    handlers.publish_bullbear(bus)
+    bus.cache_set(handlers.CACHE_MOMENTUM,
+                  {"session_date": "2026-08-20", "regime": {"state": "risk_off"},
+                   "levels": {"sector": [{"symbol": "XLK"}]}})
+    handlers.publish_bullbear(bus)
+    syms = [r["symbol"] for r in bus.cache_get(
+        handlers.CACHE_BULLBEAR).payload["levels"]["sector"]]
+    assert syms == ["XLK"]
+
+
+def test_publish_bullbear_does_not_reread_its_own_output_for_the_stamp(monkeypatch):
+    """The stamp compare re-read the 190 KB payload this function itself had just
+    written. It is the only writer, so while the stored version still matches the
+    memo that read is pure waste.
+
+    ONE read of the key per tick remains and cannot be removed here: it happens
+    inside ``cache_set(skip_unchanged=True)``, which must compare against what is
+    actually stored before deciding to skip, and must refresh ``{key}:ts`` either
+    way so the Status board cannot read a legitimately-static publisher as dead.
+    So the tick goes from three full deserializes (304 KB + 190 KB + 190 KB) to
+    one (190 KB).
+    """
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}})
+    handlers.reset_bullbear_memos()
+    bus = _bus_with_momentum()
+    handlers.publish_bullbear(bus)          # first write, memo cold
+    calls = _count_gets(bus)
+    for _ in range(3):
+        handlers.publish_bullbear(bus)
+    assert calls.get(handlers.CACHE_BULLBEAR) == 3      # cache_set's, not ours
+    assert calls.get(handlers.CACHE_MOMENTUM) is None   # ours is gone entirely
+
+
+def test_publish_bullbear_still_holds_the_stamp_through_the_memo(monkeypatch):
+    """Regression guard: the throttle in
+    test_publish_bullbear_does_not_bump_the_version_when_nothing_moved must keep
+    working when the comparison payload comes from the memo rather than a read."""
+    monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 1.5}})
+    handlers.reset_bullbear_memos()
+    bus = _bus_with_momentum()
+    versions = []
+    for _ in range(3):
+        handlers.publish_bullbear(bus)
+        versions.append(bus.cache_get(handlers.CACHE_BULLBEAR).version)
+    assert versions == [versions[0]] * 3
