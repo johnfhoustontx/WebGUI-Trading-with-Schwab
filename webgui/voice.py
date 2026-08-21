@@ -43,10 +43,19 @@ def more_tail(n):
 
     Deliberately says "more" and not "more alerts": positions share this tail,
     and one word that is right for both beats two that drift apart.
+
+    A ``bool`` is refused rather than counted. ``int(True)`` is 1, so a flag
+    that arrived where a count belongs would announce "Plus 1 more" — the same
+    ``float(True) == 1.0`` class of bug this repo has been bitten by before, and
+    the reason ``pages/fmt.py``'s ``num`` rejects bool explicitly. ``OverflowError``
+    is caught alongside the parsing errors because ``int(inf)`` raises it, and
+    the module's promise is that nothing here raises.
     """
+    if isinstance(n, bool):
+        return ""
     try:
         n = int(n or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return ""
     return f"Plus {n} more." if n > 0 else ""
 
