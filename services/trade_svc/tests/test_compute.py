@@ -5,6 +5,8 @@ synthetic OHLCV candles so nothing touches a live proxy. The synthetic series
 is a gentle uptrend with enough bars (300 daily / 200 intraday) to satisfy every
 indicator's lookback, so ``analyze`` exercises the full orchestration.
 """
+import datetime as _dt
+
 import pandas as pd
 import pytest
 
@@ -481,3 +483,39 @@ def test_analyze_leaves_the_squeeze_gate_quiet_without_short_interest(monkeypatc
     res = compute.analyze("AAPL")
     assert not any("squeeze" in g.lower()
                    for g in res["position_verdict"]["short_gates"])
+
+
+# ── direction clearance wiring (Phase 2, task 2.2) ───────────────────────────
+
+def test_analyze_carries_direction_clearance_for_both_sides(monkeypatch):
+    """The clearance block is what tells the page whether a bottom-band read is
+    a directional short or a relative one — it must reach the payload."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_regime", lambda: {
+        "committed_label": "trending", "label": "Softening", "direction": -1,
+        "as_of": _dt.datetime.now(_dt.timezone.utc).isoformat()})
+    res = compute.analyze("AAPL")
+    dc = res["direction_clearance"]
+    assert set(dc) == {"market", "long", "short"}
+    assert dc["short"]["state"] in {"cleared", "relative_only", "blocked"}
+    assert dc["short"]["reasons"]
+
+
+def test_analyze_survives_a_regime_the_bus_cannot_supply(monkeypatch):
+    """A sentiment outage must cost the clearance nuance, not the analysis —
+    and the short side must fall to relative_only, never to cleared."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_regime", lambda: None)
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []
+    assert res["direction_clearance"]["short"]["state"] == "relative_only"
+
+
+def test_read_regime_never_raises_when_the_bus_is_down(monkeypatch):
+    import services.trade_svc.compute as _c
+
+    def boom():
+        raise RuntimeError("memurai down")
+
+    monkeypatch.setattr(_c, "_bus", boom)
+    assert _c._read_regime() is None

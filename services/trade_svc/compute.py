@@ -674,6 +674,39 @@ def _enrich_short_interest(fundamentals, symbol, float_shares):
     return fundamentals
 
 
+_REGIME_KEY = "cache:sentiment:regime"
+
+
+def _read_regime():
+    """The sentiment service's committed market-regime payload, or None.
+
+    Tier-2 reading another domain's Tier-3 cache view — allowed, and the same
+    thing `driver_svc` does for its market context. Never raises: a sentiment
+    outage costs the clearance its nuance, not the user their analysis, and
+    :func:`market_filter.direction_clearance` treats a missing regime exactly
+    as it treats a stale one (conservatively)."""
+    try:
+        env = _bus().cache_get(_REGIME_KEY)
+        return env.payload if env else None
+    except Exception:
+        return None
+
+
+def _direction_clearance(spy):
+    """What the tape permits per side, for this analysis. Never raises.
+
+    On any failure it returns the clearance a missing regime and an unknown
+    trend produce — which is the conservative one (shorts relative-only), not
+    an absent block the page would have to interpret."""
+    from services.trade_svc import market_filter as _mf
+    try:
+        spy_close = spy["close"] if spy is not None and not spy.empty else None
+        return _mf.direction_clearance(spy_close, _read_regime())
+    except Exception:
+        _degrade.degraded("trade.direction_clearance")
+        return _mf.direction_clearance(None, None)
+
+
 def _squeeze_reason(fundamentals):
     """The short-side squeeze reason for these fundamentals, or None.
 
@@ -1033,6 +1066,7 @@ def analyze(symbol):
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
         "swing_model": swing_block,
+        "direction_clearance": _direction_clearance(spy),
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),

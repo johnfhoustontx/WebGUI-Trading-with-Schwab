@@ -235,14 +235,33 @@ cover)`, **AAPL** on `Above a rising 200-EMA`, **CVNA** on neither — 10.09% of
 float and 6.02 days to cover clear both legs, so it is shortable per these
 gates.
 
-### 2.2 Direction clearance
-- **Test** (`services/trade_svc/tests/test_compute.py`, pure helper): SPY above
-  a rising 200-DMA + neutral committed trend → long cleared, short
-  relative-only; SPY below + Softening → short cleared; a regime payload older
-  than one session → `"unknown"` → short relative-only (**conservative**, never
-  cleared); both sides always present in the output with reasons.
-- **Code**: a pure `direction_clearance(spy_close, regime, now)` +
-  a staleness-guarded bus read in `analyze`.
+### 2.2 Direction clearance ✅ DONE 2026-08-22
+`services/trade_svc/market_filter.py` — pure; `analyze` supplies the SPY series
+it already fetches plus a staleness-guarded read of `cache:sentiment:regime`.
+Three states per side (`cleared` / `relative_only` / `blocked`), **both sides
+always present with non-empty reasons**, because a blocked side WITH its reasons
+is a research finding while a missing side is an absence the reader must
+interpret.
+
+- **Everything fails conservative.** An unknown SPY trend, a missing regime and
+  a stale one all land the short side on `relative_only`. `spy_trend` returns
+  **None**, never False, when there is too little history — False would read as
+  "below the 200-DMA", which is one of the conditions that CLEARS a directional
+  short. Staleness is 96 h: enough for a weekend plus a holiday Monday,
+  deliberately not generous, because erring long is the dangerous direction.
+- **Longs are never `blocked`** — a long in a downtrend is a worse trade, not a
+  forbidden one, and the model still ranks cross-sectionally. Demote, don't block.
+- ⚠ **The structural read outranks the fast one, and live verification is what
+  taught us that.** The first implementation let a committed downward regime
+  clear directional shorts outright. Run against the real tape it returned SPY
+  *above a rising 200-DMA* → longs cleared, and *Softening* → shorts cleared:
+  both sides cleared, a contradiction on its face. The 200-DMA is a multi-week
+  structure while the committed direction comes from a 5-minute EMA slope and a
+  15-minute composite, so using the latter to authorise a **twenty-day**
+  directional short is the same horizon mismatch the audit criticised in the
+  legacy engine. A downward regime may now tip a structure that has stopped
+  rising; it may not override one that has not. The regime still shows in the
+  reasons either way, as context rather than permission.
 
 ### 2.3 Dealer/IV context
 - **Test**: a fresh matrix row yields the context; `net_gex == 0.0` (the
