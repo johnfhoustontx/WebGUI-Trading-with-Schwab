@@ -247,6 +247,18 @@ _DEFAULTS = {
         "driver_entry": {"tz": "America/New_York", "start": "09:45",
                          "end": "15:30", "end_exclusive": True},
     },
+    # Scheduled SLOT times: named clock marks a service fires once per day at,
+    # with a grace window so a missed tick or a mid-window start still fires.
+    # Kept beside [windows] because they are the same kind of thing (a named
+    # clock time), and two of these cost money per firing - each ``analyze`` slot
+    # is a paid Claude call.
+    "slots": {
+        "analyze": {"grace_min": 20, "premarket": "08:00", "open": "08:48",
+                    "midday": "11:30", "close": "15:15"},
+        "action_alert": {"grace_min": 20, "morning": "10:00", "midday": "13:00",
+                         "close": "15:00"},
+        "momentum": {"at": "16:20"},
+    },
     "alerts": {"fire_in_extended_hours": False},
 }
 
@@ -494,6 +506,45 @@ def _window_tz(win: dict):
     except Exception:
         log.warning("sessions.toml: bad window tz %r → CT", name)
         return CT
+
+
+_SLOT_GRACE_DEFAULT = 20
+
+
+def _slot_group(name: str) -> dict:
+    """Config block for slot group ``name``, merged over its default.
+
+    Raises ``KeyError`` for an unknown group -- a typo is a programming error,
+    not something to degrade quietly past (mirrors ``_window``).
+    """
+    dflt = _DEFAULTS["slots"][name]
+    over = load_config().get("slots", {})
+    over = over.get(name, {}) if isinstance(over, dict) else {}
+    return _merge(dflt, over if isinstance(over, dict) else {})
+
+
+def slot_times(name: str) -> dict:
+    """``{slot_name: time}`` for a slot group, in CT.
+
+    ``grace_min`` shares the table with the times and is excluded here -- taking
+    it for a slot would schedule a firing at a nonsense hour. A malformed time
+    falls back to its default rather than raising: a typo in one slot must not
+    stop a service from starting.
+    """
+    grp, dflt = _slot_group(name), _DEFAULTS["slots"][name]
+    return {k: _parse_time(v, dflt.get(k, "00:00"))
+            for k, v in grp.items() if k != "grace_min"}
+
+
+def slot_grace_min(name: str) -> int:
+    """Minutes after a slot's target within which it may still fire."""
+    raw = _slot_group(name).get("grace_min", _SLOT_GRACE_DEFAULT)
+    try:
+        return int(raw)
+    except Exception:
+        log.warning("sessions.toml: bad slots.%s.grace_min %r -> %d",
+                    name, raw, _SLOT_GRACE_DEFAULT)
+        return _SLOT_GRACE_DEFAULT
 
 
 def window_bounds(name: str):

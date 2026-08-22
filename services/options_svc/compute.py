@@ -49,6 +49,8 @@ from regime_filter import evaluate_regime  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
+from shared import driver_limits as _driver_limits  # noqa: E402
+from shared import scanner_config as _scanner_config  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
@@ -254,7 +256,7 @@ _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 # adds at most +6, so a Weak candidate tops out at 45 and can never clear 50.
 # Both are kept because they express DIFFERENT intents ("no low-scoring trades"
 # vs "no gate-failing trades") and either constant can move independently.
-SWING_MIN_SCORE = 50.0
+SWING_MIN_SCORE = _scanner_config.scores()["swing_min"]
 SWING_EXCLUDED_GRADES = ("Weak",)
 
 
@@ -690,12 +692,17 @@ def collect_eod_summary(now_ct=None) -> dict:
 
 # The driver account's per-trade risk cap for the PAPER SIZER on the open path.
 # Kept SEPARATE from the manual account's ``config_paper.MAX_RISK_PER_TRADE`` ($250)
-# so raising the driver's cap never changes the user's manual paper trades. Must match
-# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the guardrail's per-trade cap) so the
-# driver can't approve a qty the sizer then zeroes to RISK_TOO_HIGH. Raised to fund
+# so raising the driver's cap never changes the user's manual paper trades. It funds
 # liquid index/large-cap spreads ($SPX ~$700-1,150/contract, MU ~$400) that a $250
 # cap sized to 0 — the reason $SPX/MU picks logged "Executed" but never opened.
-_DRIVER_MAX_RISK_PER_TRADE = 3000.0
+#
+# Sourced from config/driver.toml via shared.driver_limits, which is also where
+# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the GUARDRAIL's cap) comes from. The
+# two must agree or the driver approves a quantity the sizer then zeroes to
+# RISK_TOO_HIGH — a quiet failure whose only symptom is a log line saying
+# "Executed" with nothing opened. They used to be two literals and a comment
+# asking future editors to keep them in step.
+_DRIVER_MAX_RISK_PER_TRADE = _driver_limits.per_trade_max_risk()
 
 
 def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> dict:

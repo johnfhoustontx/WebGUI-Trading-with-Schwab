@@ -50,7 +50,8 @@ _, _RTH_END_T = mc.window_bounds("market_snapshot")   # 15:00 CT
 
 # Momentum cascade: one nightly run, ~80 min after the 15:00 CT cash close so the
 # day's daily bars are settled at the proxy. See momentum_due.
-_MOMENTUM_AT = (16, 20)      # 16:20 CT
+_MOMENTUM_AT = ((lambda t: (t.hour, t.minute))(mc.slot_times("momentum")["at"]))
+# config/sessions.toml [slots.momentum]
 
 
 def _is_rth(now):

@@ -8,10 +8,25 @@ confusion between "the old rule-tree config" and "the new autonomous tunables".
 
 The **runtime-mutable** bits — whether autonomous mode is enabled and whether
 it has halted for the day — live in ``cache:driver:control`` (the
-``DriverControl`` contract), NOT here. This module holds only the fixed v1
-defaults.
+``DriverControl`` contract), NOT here.
+
+**The risk envelope itself is now ``config/driver.toml``**, read through
+``shared.driver_limits`` — edit the TOML and restart, no code change. It is read
+through the shared module rather than defined here because
+``services/options_svc/compute.py`` needs the same ``per_trade_max_risk`` and the
+two services cannot import each other; they used to hold the number twice.
 """
 import os
+import pathlib
+import sys
+
+# Repo root on sys.path so ``shared`` (PEP 420 namespace pkg) resolves when this
+# module is imported from a service started as a script.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from shared import driver_limits as _driver_limits  # noqa: E402
 
 
 def _resolve_model() -> str:
@@ -36,43 +51,43 @@ def _resolve_model() -> str:
     return "claude-opus-4-8"
 
 
-DAILY_TARGET = 500.0          # base bank-the-day threshold ($ net day P&L)
-# Cumulative MTD target band (2026-07-09): the banking target carries the $500/day
-# deficit/excess month-to-date, clamped to [floor, cap] — behind the pace it ratchets to
-# the cap (recover over days, never one reckless shot), ahead it eases to the floor (keep
-# a light day). The −$1,500 DAILY_LOSS_HALT + the per-trade caps are UNCHANGED, so this
-# only moves WHEN the day banks/stops, not how big any single trade can be.
-TARGET_CAP = 1000.0           # max ratcheted daily target (2x base)
-TARGET_FLOOR = 250.0          # min daily target when ahead of the MTD pace
-# ── AGGRESSIVE risk envelope ("Very Aggressive" profile, 2026-07-02, user choice) ──
-# Tuned to PRESS toward the $500/day target and tolerate real drawdown. Per-trade cap
-# funds the widest liquid $SPX (~$1,833/contract) with room to size up on smaller names;
-# must stay in sync with options_svc compute._DRIVER_MAX_RISK_PER_TRADE (the paper
-# sizer's cap on the open path). All values are for the $25k paper book.
-PER_TRADE_MAX_RISK = 3000.0   # max $ loss per single spread position (~12% of the book)
-DAILY_RISK_BUDGET = 12000.0   # cap on Σ open driver max-loss (~half the book deployable)
-MAX_CONCURRENT = 10           # max open driver positions
-MAX_TRADES_PER_CYCLE = 5      # max new trades per 30-min checkpoint
-VIX_MAX = 35.0               # no new entries above this VIX (spreads collect more premium in vol)
-# Daily-loss HALT: stop opening NEW trades once the day is down this much (management +
-# exits are unaffected). Raised from the legacy $250 — which halted after a single losing
-# $SPX — to 3x the $500 target so the driver absorbs losers and keeps pressing. This is
-# now the driver's OWN knob: compute._daily_max_loss() reads it here (legacy
-# config.RISK_LIMITS is only a fallback).
-DAILY_LOSS_HALT = 1500.0     # $ daily loss that halts new entries
-MENU_TOP_N = 15             # how many top-scored signals Claude sees
+# ── The risk envelope now lives in config/driver.toml ────────────────────────
+# Read through shared.driver_limits so options_svc resolves the SAME per-trade cap
+# (the two services cannot import each other, and they previously held 3000.0
+# twice with a comment asking future editors to keep them in step). These stay
+# module CONSTANTS resolved at import: the house contract for config is "edit the
+# TOML, restart the service", and a great deal of code reads settings.X directly.
+_T = _driver_limits.targets()
+_R = _driver_limits.risk()
+_D = _driver_limits.decision()
+
+DAILY_TARGET = float(_T["daily_target"])      # base bank-the-day threshold ($ net day P&L)
+TARGET_CAP = float(_T["target_cap"])          # max ratcheted daily target
+TARGET_FLOOR = float(_T["target_floor"])      # min daily target when ahead of MTD pace
+
+PER_TRADE_MAX_RISK = float(_R["per_trade_max_risk"])   # also read by options_svc
+DAILY_RISK_BUDGET = float(_R["daily_risk_budget"])
+MAX_CONCURRENT = int(_R["max_concurrent"])
+MAX_TRADES_PER_CYCLE = int(_R["max_trades_per_cycle"])
+VIX_MAX = float(_R["vix_max"])
+DAILY_LOSS_HALT = float(_R["daily_loss_halt"])
+
+MENU_TOP_N = int(_D["menu_top_n"])            # how many top-scored signals Claude sees
+CHECKPOINT_MIN = int(_D["checkpoint_min"])    # intraday re-evaluation cadence (minutes)
+MAX_TOKENS = int(_D["max_tokens"])
+
 # Directional gate (2026-07-09): hard-block the wrong-side credit spread (a CCS in an up
 # tape / a PCS in a down tape) in guardrails, keyed on the market_read's price-truth
 # posture. Ships INERT (False) — run_cycle forces posture "neutral" until this is flipped
 # after the offline backtest (validate_directional_gate.py) shows it would have blocked the
 # CCS loss bucket without nuking winners. See the design/plan 2026-07-09.
+# Deliberately NOT in driver.toml: a kill switch for unvalidated behaviour should
+# take a code change, not a config edit.
 DIRECTIONAL_GATE_ENABLED = False
 # Decision model (committed build default: Opus 4.8). Override per-deployment via the
 # DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
 # _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
 MODEL = _resolve_model()
-MAX_TOKENS = 2000
-CHECKPOINT_MIN = 30          # intraday re-evaluation cadence (minutes)
 
 
 def limits() -> dict:

@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/driver.toml — the autonomous driver's RISK ENVELOPE
+#
+#   Edit a value here, restart driver_svc AND options_svc, done. No code change.
+#   Anything you delete falls back to the built-in default in
+#   shared/driver_limits.py, so a partial file is fine and a typo degrades to the
+#   shipped value rather than taking a service down.
+#
+#   ⚠ [risk].per_trade_max_risk is read by BOTH driver_svc (the guardrails) and
+#     options_svc (the paper sizer's cap on the open path). They used to hold the
+#     number twice, kept in step by a comment. When those disagreed the failure
+#     was quiet: the driver approved a quantity the sizer then zeroed to
+#     RISK_TOO_HIGH, and the log read "Executed" while nothing opened.
+#
+#   The driver trades a $25k PAPER book. It is armed separately (cache:driver:control)
+#   and is suppressed entirely in dev by the autonomous_trading environment flag.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[targets]
+# Base bank-the-day threshold ($ net day P&L). The cumulative month-to-date band
+# carries each day's deficit/excess and clamps the live target to
+# [target_floor, target_cap]: behind the pace it ratchets UP (recover over days,
+# never in one reckless shot), ahead of it the target eases DOWN (take a light
+# day). This changes only WHEN a day banks or stops — never how large any single
+# trade may be.
+daily_target = 500.0
+target_cap   = 1000.0        # 2x base
+target_floor = 250.0
+
+[risk]
+# "Very Aggressive" profile (chosen 2026-07-02). Tuned to press toward the daily
+# target and tolerate real drawdown.
+#
+# per_trade_max_risk funds the widest liquid $SPX spread (~$1,833/contract) with
+# room to size up on smaller names. Dropping it below ~$1,900 will silently stop
+# $SPX picks from opening at all.
+per_trade_max_risk = 3000.0     # max $ loss on one spread (~12% of the book)
+daily_risk_budget  = 12000.0    # cap on Σ open driver max-loss (~half the book)
+max_concurrent       = 10       # max open driver positions
+max_trades_per_cycle = 5        # max new trades per 30-min checkpoint
+vix_max              = 35.0     # no NEW entries above this VIX
+
+# Halt NEW entries once the day is down this much. Management and exits are
+# unaffected. Set to 3x daily_target so the driver absorbs losers and keeps
+# pressing; the legacy $250 halted the day after a single losing $SPX.
+daily_loss_halt = 1500.0
+
+[decision]
+menu_top_n     = 15      # how many top-scored signals Claude is shown
+checkpoint_min = 30      # intraday re-evaluation cadence (minutes)
+max_tokens     = 2000
+
+# NOT here, on purpose:
+#   * the decision MODEL — it is per-deployment, not per-strategy. Override with
+#     the DRIVER_MODEL env var or a gitignored shared/driver_model.txt.
+#   * DIRECTIONAL_GATE_ENABLED — a kill switch for unvalidated behaviour, which
+#     should require a deliberate code change until its backtest clears it.

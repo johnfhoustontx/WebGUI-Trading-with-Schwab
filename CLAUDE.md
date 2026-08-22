@@ -98,8 +98,9 @@ The monorepo was re-tiered (strangler-fig) into three **physically separate** ti
 portfolio, trade, driver, market — and every page reads Redis. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
-153 non-test `webgui/**/*.py`): `nicegui` · `shared.bus` (never `redis` directly)
-· `shared.market_calendar` · `repo_paths` · `requests` — **only** for the
+153 non-test `webgui/**/*.py`, extended 2026-08-21): `nicegui` · `shared.bus`
+(never `redis` directly) · `shared.market_calendar` · `shared.symbols` ·
+`repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
 `sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
@@ -1227,6 +1228,54 @@ page whose other two engines were intraday-aware. It now calls the new
 `compute._leg_days_to_expiry`. **Rule: never compute a time-to-expiry inline.
 There is one settlement instant (16:00 ET) and one helper per tier —
 `options_calculator.expiry_time_to_years` and `options_svc.compute.time_to_expiry_years`.**
+
+**Four config files were extracted on 2026-08-21, and all four exist because the
+value was duplicated across modules that CANNOT import each other.** That is the
+test for whether a value belongs in a TOML here: a config file genuinely
+deduplicates a cross-tier constant, where moving a single-consumer constant just
+relocates it.
+
+| file | holds | read by |
+|---|---|---|
+| **`config/driver.toml`** | the autonomous driver's risk envelope — target band, per-trade + daily risk caps, VIX ceiling, loss halt, decision budget | `driver_svc.settings` (guardrails) **and** `options_svc.compute` (the paper sizer's cap) |
+| **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
+| **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
+| **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
+
+Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
+briefings, the thrice-daily action digest, and the nightly momentum cascade. They
+are named clock marks, the same thing `[windows]` already models, and **each
+`analyze` slot is a paid Claude call**, so the table is the direct control on
+that spend.
+
+**`shared/config_toml.py:toml_loader(path, defaults)` is the one loader.** It
+returns `(load, reset)` and encodes the contract every config file here follows:
+built-in defaults are the real values and the TOML only overrides · deep-merged
+so a file setting one key keeps every sibling · mtime-cached · **never raises**.
+`flow_alerts.py` and `market_calendar.py` still carry their own older copies of
+that logic; new config goes through the factory. ⚠ `load()` hands back the
+CACHED mapping, so **treat a config dict as read-only** — copying on every
+hot-path read would defeat the cache.
+
+⚠ **Two traps when wiring one of these.** (1) The consumers keep module-level
+CONSTANTS resolved at import (`MIN_IV_RANK = _scfg.min_iv_rank()`), matching the
+"edit + restart" contract — so a test that merely asserts `settings.X ==
+config.X` **proves nothing**, since the literal it replaced had the same value.
+The discriminating test monkeypatches the accessor and `importlib.reload`s the
+consumer. Every one of these extractions ships with that test, because the first
+draft of each passed green before the code was wired. (2) The shapes the engines
+index are preserved deliberately — `MIN_CREDIT_PCT["0-DTE"][regime]`,
+tuple delta bands, a tuple `SINGLE_LEG_EXCLUDED_GRADES`, tuple-of-dicts
+`netprem_groups` — TOML gives lists and flat tables, so the shared modules convert
+rather than making every call site change.
+
+**`shared/symbols.py` is now on the Tier-1 allow-list**, alongside
+`shared.market_calendar`. `webgui/pages/options/gamma.py` used to hold a
+deliberate byte-copy of `net_premium.GROUPS` under a comment explaining that Tier
+1 may not import `services.*`, with tests as the only thing keeping the two in
+step. **Reading a config FILE is not a `services` import** — and `theme.toml` is
+the standing precedent for Tier 1 doing exactly that — so the duplication is gone
+rather than merely policed.
 
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the

@@ -2327,3 +2327,53 @@ class TestWidthSelectionRespectsTheRiskCap:
         from scanner_engine import size_contracts
         assert size_contracts(10, 0) == 0
         assert size_contracts(10, -1) == 0
+
+
+# --- selection floors come from config/scanner.toml --------------------------
+
+class TestScannerConfigWiring:
+    """The IV-rank / credit / score floors were literals here with dated retune
+    comments; they now live in config/scanner.toml so they can be tuned without a
+    code edit. signal_recorder's capture floor reads the same file."""
+
+    @staticmethod
+    def _cfg():
+        import sys, pathlib
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+        from shared import scanner_config
+        return scanner_config
+
+    def test_engine_constants_match_the_config(self):
+        sc = self._cfg()
+        assert scanner_engine.MIN_IV_RANK == sc.min_iv_rank()
+        assert scanner_engine.MIN_CREDIT_PCT == sc.min_credit_pct()
+        assert scanner_engine.DIRECTIONAL_DELTA_RANGE == sc.directional_delta_range()
+        assert scanner_engine.DIRECTIONAL_MIN_CREDIT_PCT == sc.directional()["min_credit_pct"]
+        assert scanner_engine.DIRECTIONAL_MAX_RISK_PCT == sc.directional()["max_risk_pct"]
+        assert scanner_engine.SINGLE_LEG_MIN_SCORE == sc.single_leg()["min_score"]
+        assert scanner_engine.NEG_GEX_MIN_SCORE == sc.scores()["neg_gex_min"]
+        assert scanner_engine.GEX_STRONG_NEG == sc.scores()["gex_strong_neg"]
+
+    def test_recorder_capture_floor_matches_the_config(self):
+        import signal_recorder
+        assert signal_recorder.MIN_SCORE == self._cfg().scores()["capture_min"]
+
+    def test_excluded_grades_stays_a_TUPLE(self):
+        """TOML gives an array; the engine treats this as a tuple."""
+        assert isinstance(scanner_engine.SINGLE_LEG_EXCLUDED_GRADES, tuple)
+        assert scanner_engine.SINGLE_LEG_EXCLUDED_GRADES == ("Weak",)
+
+    def test_the_engine_actually_READS_the_config(self, monkeypatch):
+        """Equality proves nothing on its own - the literals matched the config
+        values before the extraction. Move the config, require the engine to
+        follow. Module constants resolve at import, so this reloads."""
+        import importlib
+        sc = self._cfg()
+        monkeypatch.setattr(sc, "min_iv_rank", lambda: {"0-DTE": 91, "SWING": 92})
+        try:
+            importlib.reload(scanner_engine)
+            assert scanner_engine.MIN_IV_RANK == {"0-DTE": 91, "SWING": 92}, \
+                "scanner_engine.py is not reading config/scanner.toml"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(scanner_engine)

@@ -4,6 +4,71 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-21 (**Audit batch 3 — four config files, and the test
+that proves a constant actually moved.**
+- **The selection rule for what became config.** Every one of the four exists
+  because the value was **duplicated across modules that cannot import each
+  other** — which is the difference between a config file that DEDUPLICATES a
+  constant and one that merely relocates it. Values with a single consumer stayed
+  in code.
+- **`config/driver.toml`** — the driver's risk envelope. `driver_svc.settings`
+  (guardrails) and `options_svc.compute` (the paper sizer) each held `3000.0`
+  under a comment reading "must stay in sync". When those disagree the failure is
+  silent and baffling: the driver approves a quantity the sizer then zeroes to
+  RISK_TOO_HIGH, and the log says "Executed" while nothing opened.
+- **`config/trade_mgmt.toml`** — the stop rules. `options_svc/rescue.py` opened
+  with "Mirror signal_recommender stop constants" and then restated four of them.
+  `rescue_thresholds()` now **derives** those four from `[stops]`, so the mirror
+  is structural rather than clerical; the TOML deliberately does not list them,
+  and a test fails if anyone adds them back (they would look authoritative and be
+  ignored).
+- **`config/scanner.toml`** — the selection floors, the block with dated
+  "2026-06-11 quality retune" comments in the source, and the documented reason
+  index names rarely fire. Read by `scanner_engine`, `signal_recorder` and
+  `options_svc/compute`.
+- **`config/symbols.toml`** — the traded universe, previously **four** literals:
+  the collector's poll list, the Net-Prem groups, the BIG10 basket, and a
+  byte-copy of the groups in Tier-1 `gamma.py` carrying a comment explaining that
+  Tier 1 may not import `services.*`. **Reading a config file is not a `services`
+  import** — `theme.toml` is the standing precedent — so `shared.symbols` joins
+  `shared.market_calendar` on the Tier-1 allow-list and the copy is gone rather
+  than policed. The API-budget warning that justified the collection list moved
+  into the TOML header, where someone about to add a ticker will actually read it.
+- **`config/sessions.toml` gained `[slots]`** rather than a fifth file: the
+  scheduled Claude briefings, the thrice-daily action digest and the nightly
+  momentum cascade are named clock marks, which is exactly what `[windows]`
+  already models. **Each `analyze` slot is a paid Claude call**, so that table is
+  the direct control on that spend — delete a line, drop a briefing.
+- **`shared/config_toml.py` — one loader instead of six.** `flow_alerts` and
+  `sessions` had each grown their own ~40 lines of mtime-cache + deep-merge +
+  degrade-to-defaults; adding four more files would have made six copies.
+  `toml_loader(path, defaults)` returns `(load, reset)`. ⚠ Documented rather than
+  over-promised: `load()` hands back the CACHED mapping, so a config dict is
+  **read-only by convention** — copying on every hot-path read would defeat the
+  cache. The test that first claimed otherwise was corrected to assert what
+  actually matters, which is that the module-level DEFAULTS can never be poisoned.
+- **The test shape is the transferable part.** A test asserting
+  `settings.PER_TRADE_MAX_RISK == driver_limits.per_trade_max_risk()` **passes
+  before the code is wired** — the literal it replaces has the same value. The
+  first draft of every one of these extractions was green against unwired code.
+  The discriminating test monkeypatches the accessor and `importlib.reload`s the
+  consumer, so it fails unless the module genuinely reads the file. Same family as
+  batch 1's stale fixtures: equality with a constant proves nothing about where
+  the constant came from.
+- **Shapes were preserved on purpose.** TOML yields lists and flat tables, but the
+  engines index `MIN_CREDIT_PCT["0-DTE"][regime]`, unpack tuple delta bands,
+  compare a tuple `SINGLE_LEG_EXCLUDED_GRADES` and iterate tuple-of-dict
+  `netprem_groups`. The shared modules convert at the boundary rather than making
+  every call site change — the extraction is invisible to the code that uses it,
+  and every value was verified byte-identical to the literal it replaced before
+  anything was committed.
+- Also worth recording: **`pytest services` over all six folders at once still
+  breaks** with 10 collection errors, exactly as CLAUDE.md's Tests section warns —
+  multiple hyphenated app dirs on `sys.path` re-trigger the `config`/`scoring`
+  collisions. Run them per folder.)
+
+---
+
 **Last updated:** 2026-08-21 (**Audit batch 2 — a swallowed exception now leaves a
 trace, and `/health` counts them.**
 - **The problem, measured.** An AST census of every `except Exception` in

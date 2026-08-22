@@ -13,27 +13,20 @@ from __future__ import annotations
 
 import math
 
-# The three selectable groups, in display order. This is the single source of
-# truth for membership + ordering — the page builds its tabs from it.
-GROUPS = (
-    {"key": "indices", "label": "Indices & Broad",
-     "symbols": ("$SPX", "$NDX", "BIG10", "SPY", "QQQ", "IWM", "DIA")},
-    {"key": "sectors", "label": "SPDR Sectors",
-     "symbols": ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
-                 "XLP", "XLRE", "XLU", "XLV", "XLY")},
-    {"key": "megacaps", "label": "Mega-caps",
-     "symbols": ("NVDA", "AVGO", "AAPL", "META", "MSFT",
-                 "TSLA", "PLTR", "AMZN", "GOOGL", "AMD")},
-)
+from shared import symbols as _shared_symbols
 
-# Composite pseudo-symbols: summed server-side from real tickers. BIG10 holds
-# the same set as the Mega-caps group above, in a different order (that one is
-# display order; this one mirrors market_svc/symbols.py's BIG10 basket, whose
-# membership this must match by design). Tests pin both relationships.
-BASKETS = {
-    "BIG10": ("NVDA", "MSFT", "GOOGL", "AMZN", "META",
-              "AAPL", "TSLA", "AVGO", "PLTR", "AMD"),
-}
+# The selectable groups + the composite baskets both come from
+# config/symbols.toml via shared.symbols. They used to be literals here AND a
+# byte-copy in webgui/pages/options/gamma.py (Tier 1 may not import services.*)
+# AND, for BIG10, a third copy in services/market_svc/symbols.py - three modules
+# that cannot import each other, kept in step only by tests. One file now feeds
+# all three; the Tier-1 rule bans importing services.*, not reading a config file.
+GROUPS = tuple(_shared_symbols.netprem_groups())
+
+# Composite pseudo-symbols: summed server-side from real tickers. BIG10 holds the
+# same members as the Mega-caps group above in a DIFFERENT order - that one is
+# display order, this one is basket composition.
+BASKETS = {"BIG10": _shared_symbols.big10()}
 
 
 def display_symbols() -> list:

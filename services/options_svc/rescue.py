@@ -9,20 +9,16 @@ See docs/plans/2026-06-21-rescue-tested-trades-design.md.
 from __future__ import annotations
 import datetime as _dt
 
-# Mirror signal_recommender stop constants so detection stays consistent with
-# the auto-close manage cycle.
-RESCUE_THRESHOLDS = {
-    "delta_warn": 0.30,
-    "delta_critical": 0.45,
-    "delta_drift": 0.12,
-    "money_warn_mult": 1.0,     # x entry credit (loss)
-    "money_tested_mult": 2.0,
-    "money_critical_mult": 3.0,
-    "dte_manage": 21,
-    "dte_urgent": 2,
-    "proximity_watch_pct": 0.03,    # underlying within 3% of short strike
-    "proximity_tested_pct": 0.01,
-}
+from shared import trade_mgmt as _trade_mgmt
+
+# The at-risk escalation map, from config/trade_mgmt.toml.
+#
+# Four of these (delta_critical, delta_drift, money_tested_mult, dte_urgent) are
+# DERIVED from the same [stops] table signal_recommender reads, so this board and
+# the auto-close manage cycle cannot disagree about what a tested position is.
+# They used to be hand-copied here under a comment asking future editors to
+# mirror them - which is a rule you can only break silently.
+RESCUE_THRESHOLDS = _trade_mgmt.rescue_thresholds()
 
 _STATES = ["ok", "watch", "tested", "critical"]
 

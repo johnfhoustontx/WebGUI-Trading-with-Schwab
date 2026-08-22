@@ -38,6 +38,32 @@ FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
 # to change a window.
 SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 
+# The autonomous driver's risk envelope (daily target band, per-trade + daily risk
+# caps, VIX ceiling, loss halt). Read by shared/driver_limits.py, which BOTH
+# driver_svc.settings and options_svc.compute use - they cannot import each other,
+# and the per-trade cap has to agree on both sides or the driver approves a size
+# the paper sizer then zeroes. Edit + restart both services.
+DRIVER_TOML = REPO_ROOT / "config" / "driver.toml"
+
+# Trade-management stop/target rules (take-profit fraction, stop multiple, delta
+# drift + hard ceiling, cut-DTE, the trail ladders). Read by shared/trade_mgmt.py,
+# which BOTH options-scanner/signal_recommender.py (the auto-manage cycle) and
+# services/options_svc/rescue.py (the at-risk detector) use, so the two cannot
+# drift apart. Edit + restart options_svc.
+TRADE_MGMT_TOML = REPO_ROOT / "config" / "trade_mgmt.toml"
+
+# Scanner selection floors - IV-rank minimums, per-VIX-regime credit floors,
+# directional delta band, score cutoffs. These are the knobs that decide whether a
+# signal fires at all (and the documented reason index names rarely do). Read by
+# shared/scanner_config.py. Edit + restart options_svc.
+SCANNER_TOML = REPO_ROOT / "config" / "scanner.toml"
+
+# The traded symbol universe: what GEX collection polls, the Net-Prem display
+# groups, and the BIG10 basket. Read by shared/symbols.py from all three tiers -
+# the same lists were previously duplicated in four modules and held together only
+# by tests. Adding a symbol has a real Schwab API-budget cost; see the file.
+SYMBOLS_TOML = REPO_ROOT / "config" / "symbols.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).

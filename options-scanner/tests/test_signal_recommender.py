@@ -583,3 +583,48 @@ def test_build_mark_default_no_ratchet_unchanged():
                                             current_short_delta=-0.10),
                           datetime.now(_TZ), be_level=2.60)
     assert mark["recommendation_code"] != "BREAKEVEN_STOP"
+
+
+# --- the stop rules come from config/trade_mgmt.toml -------------------------
+
+def test_module_constants_come_from_the_shared_config():
+    """These used to be literals here AND hand-mirrored in options_svc/rescue.py.
+    Both sides now read config/trade_mgmt.toml."""
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from shared import trade_mgmt
+
+    import signal_recommender as sr
+
+    st = trade_mgmt.stops()
+    assert sr.TP_FRAC == st["tp_frac"]
+    assert sr.STOP_MULT == st["stop_mult"]
+    assert sr.DELTA_DRIFT == st["delta_drift"]
+    assert sr.DELTA_HARD_CEILING == st["delta_hard_ceiling"]
+    assert sr.DELTA_ABS_FALLBACK == st["delta_abs_fallback"]
+    assert sr.CUT_DTE == st["cut_dte"]
+    assert sr.RECOVERY_DTE_MIN == st["recovery_dte_min"]
+    assert sr.RECOVERY_MIN_CUSHION == st["recovery_min_cushion"]
+    assert sr.DEFAULT_TRAIL_LADDER == trade_mgmt.default_trail_ladder()
+    assert sr.RATCHET_TRAIL_LADDER == trade_mgmt.ratchet_trail_ladder()
+
+
+def test_it_actually_READS_the_config_rather_than_agreeing_by_luck(monkeypatch):
+    """Equality alone proves nothing - the literals matched the config values
+    before the extraction too. Move the config and require the module to follow."""
+    import importlib
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from shared import trade_mgmt
+
+    import signal_recommender as sr
+
+    monkeypatch.setattr(trade_mgmt, "stops",
+                        lambda: {**trade_mgmt.DEFAULTS["stops"], "cut_dte": 99})
+    try:
+        importlib.reload(sr)
+        assert sr.CUT_DTE == 99, \
+            "signal_recommender.py is not reading config/trade_mgmt.toml"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(sr)
