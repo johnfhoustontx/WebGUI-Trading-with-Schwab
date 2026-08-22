@@ -4,8 +4,72 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phase 0. The swing
-model's refit is the headline, and it is not good news.**
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 and 1. The
+swing model's refit is the headline, and it is not good news.**
+
+**Phase 1** — three of four tasks; the fourth turned into a sourcing decision.
+- **The Investor verdict was silently running at HALF WEIGHT for every symbol
+  ever analyzed.** `valuation` is the mean of {P/E vs sector median, PEG}, but
+  `analyze()` passed `sector_pe_median=None` unconditionally, so
+  `score_pe_vs_sector` returned its missing-input 0 and the mean HALVED the
+  surviving PEG score — an excellent PEG scored +20 where it should score +40.
+  Fixed at both ends: the mean now averages only sub-scores whose **inputs** are
+  present (the availability test cannot be on the outputs, because `score_peg`
+  legitimately returns 0 for a PEG between 1 and 2), and a new
+  `compute.sector_pe_median()` computes a real median from the peers
+  `_SYMBOL_SECTOR` already names, memoized per sector per day. Measured live:
+  13 valid Technology P/Es, median **32.88**. MSFT's valuation now scores **35**
+  where the old halving gave 20; AAPL's is a genuine −5 (it trades above its
+  sector) rather than a structural 0.
+- **Schwab serves short interest as a 0.0 SENTINEL, not as data.** Both
+  `shortIntToFloat` and `shortIntDayToCover` are present in every
+  `/instruments` payload and populated for NO symbol — measured live, 0.0 for
+  AAPL, TSLA, **GME** and **CVNA** alike, while `peRatio`/`returnOnEquity` in
+  the same response were correct. A listed optionable equity with literally zero
+  short interest does not exist. Parsing it through would have disabled the
+  planned short-side squeeze gate for every symbol forever with nothing on
+  screen to say why — the documented "a 0.00% cell is not proof of a flat tape"
+  trap. It now maps to `None`, so absence reads as absence.
+- **⛔ No finviz (decision).** That finding promoted finviz from a convenience
+  for earnings dates into the **sole supplier of both the earnings gate and the
+  entire short side** — load-bearing scraping infrastructure. Declined; official
+  and licensed sources are under evaluation instead (FINRA, exchange
+  publications, vendor APIs, and the broker APIs Public.com / TradeStation /
+  moomoo). **The short side does not ship until that lands**: the squeeze gate
+  has no other supplier, and shorting crowded names unguarded is the exact tail
+  it exists to avoid. The earnings gate consequently stays dead for now — the
+  one Phase 1 goal that did not survive contact with the data.
+- **Two forward-accruing stores started**, because neither can be backfilled and
+  both pay in calendar time rather than effort. `rec_journal` records what the
+  MODEL SAID (composite, band, percentile, both verdicts, gates, artifact
+  version), keyed `(symbol, reading_date)` and upserted so a symbol analyzed
+  five times in an afternoon casts ONE vote in the IC rather than five — those
+  being exactly the names you were unsure about; its `fwd_5d/10d/20d` and
+  `labeled_at` columns exist from the first row so Phase 6's labeler is an
+  UPDATE, not a migration. `fundamentals_history` records the point-in-time
+  **inputs, not the score** — a score is recomputable from inputs under new
+  weights, inputs are not recoverable from a score — plus `sector_pe_median`,
+  since valuation is relative and the peer median moves too;
+  `margin_expanding` stays three-valued, because None means "the pair needed to
+  decide was absent" and collapsing it to 0 would invent a bearish reading out
+  of missing data.
+- **The pytest isolation guard is real and verified.** Both writers no-op under
+  `PYTEST_CURRENT_TEST` unless handed an explicit path: this repo has a
+  documented incident where a suite wrote into live data (the bus is fakeredis;
+  SQLite is not), and `analyze()` is exercised by many tests that know nothing
+  about these stores. A full 105-test run creates no `services/trade_svc/data/`
+  at all, while a real analyze writes both — verified end-to-end by enqueuing
+  `cmd:trade` against the running dev service.
+- Paths went into `repo_paths` per the no-hardcoded-paths rule
+  (`TRADE_SVC_DATA`, `REC_JOURNAL_DB`, `FUNDAMENTALS_HISTORY_DB`), with
+  `IV_HISTORY_DB` re-derived from the new directory constant.
+- ⚠ Still open in Phase 1: the nightly UNIVERSE sweep. Both stores currently
+  accrue only for symbols actually analyzed, and per the promotion freeze the
+  sweep must be a standalone scheduled script rather than a service scheduler
+  job — dev runs `schedulers: False`, so a service job would sit inert.
+- Suites: trade_svc **105**, trade-analyzer **259**.
+
+**Phase 0** follows.
 - **Program docs:** [design](plans/2026-08-22-trade-analyzer-longshort-design.md)
   + [plan](plans/2026-08-22-trade-analyzer-longshort-plan.md) — an audit of the
   Position (1–8 wk) and Investor (months+) verdicts turned into a six-phase
