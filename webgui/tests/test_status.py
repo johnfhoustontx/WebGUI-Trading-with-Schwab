@@ -428,3 +428,38 @@ def test_service_detail_tolerates_junk():
                  {"up": True, "degrades_total": "lots"},
                  {"up": True, "degrades_total": -3}):
         assert status.service_detail(junk) == "healthy"
+
+
+def test_schwab_auth_state_sees_a_REJECTED_refresh_token():
+    """Observed live 2026-08-22: the proxy answered `refresh_token_expired:
+    false` for over an hour — from a locally stamped expiry — while Schwab was
+    rejecting the token and no market data flowed. The Status page rendered
+    "authorized — token valid" throughout.
+
+    The proxy now reports Schwab's own verdict; the page has to read it, or the
+    blindness just moves one layer up."""
+    ok, note = status.auth_status({
+        "up": True, "has_token": True,
+        "refresh_token_expired": False,      # the stamp still says fine
+        "refresh_token_rejected": True,      # Schwab disagrees
+        "token_expired": True,
+    })
+    assert ok is False
+    assert "re-auth" in note.lower() or "reauth" in note.lower()
+
+
+def test_schwab_auth_state_unchanged_when_nothing_is_rejected():
+    ok, note = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "refresh_token_rejected": False, "token_expired": False,
+    })
+    assert ok is True and "authorized" in note.lower()
+
+
+def test_schwab_auth_state_tolerates_an_older_proxy_without_the_field():
+    """A proxy that predates the rejection field must not read as rejected."""
+    ok, _ = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "token_expired": False,
+    })
+    assert ok is True

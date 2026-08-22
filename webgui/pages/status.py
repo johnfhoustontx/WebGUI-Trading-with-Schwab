@@ -229,6 +229,13 @@ def auth_status(health):
         return (None, "proxy down — can't check authorization")
     if not health.get("has_token"):
         return (False, "no token — authorization required")
+    # Schwab REJECTING the token outranks our stamped expiry. Observed live
+    # 2026-08-22: the proxy reported refresh_token_expired False for over an
+    # hour — the stamp said 7 days left — while every refresh came back
+    # invalid_grant and no market data flowed. This card rendered "authorized"
+    # throughout. `.get` keeps an older proxy (no such field) reading as before.
+    if health.get("refresh_token_rejected"):
+        return (False, "refresh token rejected by Schwab — re-authorization required")
     if health.get("refresh_token_expired"):
         return (False, "refresh token expired — re-authorization required")
     if health.get("token_expired"):
