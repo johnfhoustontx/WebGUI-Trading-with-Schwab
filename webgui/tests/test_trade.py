@@ -479,3 +479,35 @@ def test_the_pooled_fit_says_so_rather_than_printing_a_key():
 def test_an_artifact_predating_regimes_shows_nothing_rather_than_a_guess():
     assert trade.swing_regime_note({"model_version": "2026-06-28"}) == ""
     assert trade.swing_regime_note(None) == ""
+
+
+# ── Phase 4: the card states the model's directional exposure ────────────────
+# Phase 4 measured this composite at cross-sectional IC +0.16 when the market's
+# forward 20 days were up and -0.11 when they were down, with the whole
+# asymmetry carried by the volatility factors — and the live artifact puts 48%
+# of its absolute weight there. A BUY from this model therefore skews toward
+# high-beta names, which is exposure that reverses in exactly the drawdown a
+# 1-8 week position cannot sit through. The card has to say so.
+
+def test_the_exposure_note_states_the_share():
+    note = trade.swing_exposure_note({"risk_share": 0.476})
+    assert "48%" in note or "47.6%" in note
+
+
+def test_a_material_share_carries_the_reversal_caveat():
+    note = trade.swing_exposure_note({"risk_share": 0.476})
+    assert "revers" in note.lower() or "falls" in note.lower()
+
+
+def test_a_small_share_reports_the_number_without_the_caveat():
+    note = trade.swing_exposure_note({"risk_share": 0.04})
+    assert note
+    assert "revers" not in note.lower() and "falls" not in note.lower()
+
+
+def test_an_unknown_share_says_nothing_rather_than_implying_zero():
+    """None means the factor registry was unreachable, not that the model has
+    no exposure. Printing '0%' there would be a confident wrong answer."""
+    assert trade.swing_exposure_note({"risk_share": None}) == ""
+    assert trade.swing_exposure_note({}) == ""
+    assert trade.swing_exposure_note(None) == ""

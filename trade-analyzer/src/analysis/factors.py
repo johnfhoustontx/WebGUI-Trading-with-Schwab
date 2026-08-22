@@ -52,11 +52,23 @@ def _ret(close: pd.Series, lookback: int, skip: int = 0) -> pd.Series:
     return end / start - 1.0
 
 
-FACTORS: dict = {}  # name -> {"fn", "direction", "needs_ref", "desc"}
+FACTORS: dict = {}  # name -> {"fn", "direction", "needs_ref", "desc", "family"}
+
+# What KIND of bet a factor's weight represents. `risk` is the load-bearing one:
+# Phase 4 measured the composite at cross-sectional IC +0.16 when the market's
+# forward 20 days were up and -0.11 when they were down, and the whole asymmetry
+# sits in these five. A consumer can only state that exposure if which factors
+# are volatility factors is written down ONCE, here, beside their definitions.
+FAMILIES = ("risk", "momentum", "relative", "other")
 
 
-def _register(name, fn, direction=1, needs_ref=False, desc=""):
-    FACTORS[name] = {"fn": fn, "direction": direction, "needs_ref": needs_ref, "desc": desc}
+def _register(name, fn, direction=1, needs_ref=False, desc="", family="other"):
+    FACTORS[name] = {"fn": fn, "direction": direction, "needs_ref": needs_ref,
+                     "desc": desc, "family": family}
+
+
+def family_of(name):
+    return (FACTORS.get(name) or {}).get("family", "other")
 
 
 def mom_12_1(df: pd.DataFrame) -> pd.Series:
@@ -190,21 +202,21 @@ def turnover(df: pd.DataFrame) -> pd.Series:
     return vol / vol.rolling(63, min_periods=63).mean()
 
 
-_register("mom_12_1", mom_12_1, desc="12-1 intermediate momentum")
-_register("mom_6_1", mom_6_1, desc="6-1 momentum")
-_register("pth", pth, desc="price / 252d high (anchoring)")
-_register("str_5d", str_5d, desc="short-term (5d) reversal, sign-corrected")
-_register("low_vol", low_vol, desc="-(60d realized vol)")
-_register("vol_adj_mom", vol_adj_mom, desc="3m return / realized vol")
-_register("trend_quality", trend_quality, desc="distance above 50/200 EMA stack")
-_register("rs_spy", rs_spy, needs_ref=True, desc="63d excess return vs SPY")
-_register("rs_sector", rs_sector, needs_ref=True, desc="63d excess return vs sector ETF")
-_register("turnover", turnover, desc="volume / 63d avg (conditioning var)")
-_register("max_effect", max_effect, desc="-(max 1d return over 21d) — lottery preference")
-_register("semivol", semivol, desc="-(60d downside semi-deviation)")
+_register("mom_12_1", mom_12_1, desc="12-1 intermediate momentum", family="momentum")
+_register("mom_6_1", mom_6_1, desc="6-1 momentum", family="momentum")
+_register("pth", pth, desc="price / 252d high (anchoring)", family="momentum")
+_register("str_5d", str_5d, desc="short-term (5d) reversal, sign-corrected", family="momentum")
+_register("low_vol", low_vol, desc="-(60d realized vol)", family="risk")
+_register("vol_adj_mom", vol_adj_mom, desc="3m return / realized vol", family="risk")
+_register("trend_quality", trend_quality, desc="distance above 50/200 EMA stack", family="momentum")
+_register("rs_spy", rs_spy, needs_ref=True, desc="63d excess return vs SPY", family="relative")
+_register("rs_sector", rs_sector, needs_ref=True, desc="63d excess return vs sector ETF", family="relative")
+_register("turnover", turnover, desc="volume / 63d avg (conditioning var)", family="other")
+_register("max_effect", max_effect, desc="-(max 1d return over 21d) — lottery preference", family="risk")
+_register("semivol", semivol, desc="-(60d downside semi-deviation)", family="risk")
 _register("downside_beta", downside_beta, needs_ref=True,
-          desc="-(beta on down-market days, 252d)")
-_register("below_200ema", below_200ema, desc="min(0, close/EMA200-1) — one-sided break")
+          desc="-(beta on down-market days, 252d)", family="risk")
+_register("below_200ema", below_200ema, desc="min(0, close/EMA200-1) — one-sided break", family="momentum")
 
 
 def compute_factor_frame(df, spy_close=None, sector_close=None) -> pd.DataFrame:

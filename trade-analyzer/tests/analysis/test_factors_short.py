@@ -134,3 +134,30 @@ class TestTheFrameStillBuilds:
         ref = F._close(_walk(600, drift=0.0004, seed=16))
         frame = F.compute_factor_frame(df, spy_close=ref, sector_close=ref)
         assert set(frame.columns) == set(F.FACTORS)
+
+
+# ── Factor families (Phase 4) ────────────────────────────────────────────────
+# The registry gained a `family` so consumers can ask what KIND of bet a weight
+# represents. It exists because Phase 4 measured the composite at IC +0.16 in up
+# markets and -0.11 in down markets, with the whole asymmetry carried by the
+# volatility factors — a property the card has to be able to state, and which it
+# can only state if "which factors are volatility factors" is written down once.
+
+class TestFactorFamilies:
+    def test_every_registered_factor_declares_a_family(self):
+        missing = [n for n, s in F.FACTORS.items() if not s.get("family")]
+        assert missing == []
+
+    def test_the_risk_family_is_exactly_the_volatility_factors(self):
+        risk = {n for n, s in F.FACTORS.items() if s["family"] == "risk"}
+        assert risk == {"low_vol", "vol_adj_mom", "semivol", "downside_beta",
+                        "max_effect"}
+
+    def test_families_come_from_a_closed_set(self):
+        assert {s["family"] for s in F.FACTORS.values()} <= set(F.FAMILIES)
+
+    def test_the_frame_builder_is_unaffected_by_the_new_metadata(self):
+        df = _walk(600, drift=0.0005, seed=21)
+        ref = F._close(_walk(600, drift=0.0004, seed=22))
+        frame = F.compute_factor_frame(df, spy_close=ref, sector_close=ref)
+        assert set(frame.columns) == set(F.FACTORS)

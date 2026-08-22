@@ -25,9 +25,21 @@ Weights are SIGNED (a negative-IC factor like low_vol carries a negative weight)
 so the composite is sum(weight * zscore). The BUY/HOLD/SELL verdict is taken from
 which calibration band the composite lands in (top band -> BUY, bottom -> SELL)."""
 import json
+import sys
+
 import numpy as np
-from repo_paths import SWING_MODEL
+from repo_paths import SWING_MODEL, TRADE_ANALYZER
 from services import _degrade
+
+# `trade-analyzer` has no package init and a hyphenated folder, so its dir goes
+# on sys.path — the same bootstrap `compute` performs. Done here too because
+# `_risk_share` reads the FACTORS registry for each factor's family, and this
+# module is imported directly by tests that never touch `compute`. Safe within
+# this service: trade_svc is its own process and imports only this app's `src`,
+# so the documented cross-app `src` collision with portfolio-analyzer cannot
+# arise here.
+if str(TRADE_ANALYZER) not in sys.path:
+    sys.path.insert(0, str(TRADE_ANALYZER))
 
 MIN_XSECTION = 5   # a cross-section thinner than this can't form stable 2/98
                    # quantiles -> fall back to the artifact norm (documented
@@ -100,6 +112,33 @@ def _percentile(idx, n_bands):
     if n_bands <= 0:
         return 50
     return int(round((idx + 0.5) / n_bands * 100))
+
+
+def _risk_share(weights):
+    """Share of the model's ABSOLUTE weight sitting on volatility factors.
+
+    Phase 4 measured this composite at cross-sectional IC **+0.16 when the
+    market's forward 20 days were up and -0.11 when they were down**, with the
+    whole asymmetry carried by the `risk`-family factors — so this number is how
+    much of the verdict is a directional bet on the market rather than a
+    cross-sectional read. The live artifact sits at 47.6%.
+
+    The SIGN is irrelevant: a tilt toward or away from volatility is exposure
+    either way. An unrecognised factor name counts as not-risk, so an artifact
+    from a future fit with new factors under-reports rather than over-reports.
+
+    None when the factor registry is unreachable — the page then says nothing
+    rather than printing a zero that would read as "no exposure"."""
+    try:
+        from src.analysis import factors as _f
+        total = sum(abs(v) for v in weights.values())
+        if not total:
+            return 0.0
+        risky = sum(abs(v) for k, v in weights.items()
+                    if _f.family_of(k) == "risk")
+        return risky / total
+    except Exception:
+        return None
 
 
 def _select_regime(artifact, regime):
@@ -175,6 +214,7 @@ def score_symbol(current_factors, universe_snapshot, artifact, regime=None):
             "contributions": sorted(contribs, key=lambda d: abs(d["contribution"]), reverse=True),
             "model_version": artifact.get("version"), "oos_ic": reg.get("oos_ic"),
             "regime_key": regime_key,
+            "risk_share": _risk_share(weights),
             "source": "validated",
         }
     except Exception:

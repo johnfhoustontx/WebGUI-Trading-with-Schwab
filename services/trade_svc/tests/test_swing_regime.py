@@ -96,3 +96,48 @@ class TestFallback:
 
     def test_an_artifact_with_no_regimes_map_at_all_still_degrades_cleanly(self):
         assert sm.score_symbol(CUR, None, {"version": "x"}, regime="trend") is None
+
+
+# ── Directional exposure (Phase 4) ───────────────────────────────────────────
+# Phase 4 measured this composite at cross-sectional IC +0.16 when the market's
+# forward 20 days were up and -0.11 when they were down, with the whole
+# asymmetry carried by the volatility factors. The live artifact puts 47.6% of
+# its absolute weight there. That is a property of the verdict the card has to
+# be able to state, so the scorer computes it rather than the page guessing.
+
+_RISKY = {
+    "weights": {"low_vol": -0.6, "mom_12_1": 0.4},
+    "factor_ic": {}, "norm": {"low_vol": {"mean": -0.02, "std": 0.01},
+                              "mom_12_1": {"mean": 0.0, "std": 0.1}},
+    "calibration": _ALL["calibration"], "oos_ic": 0.02,
+}
+
+
+class TestRiskShare:
+    def test_it_is_the_share_of_ABSOLUTE_weight_on_volatility_factors(self):
+        art = {"version": "x", "horizon": 20, "regimes": {"all": _RISKY}}
+        out = sm.score_symbol(CUR, None, art)
+        assert out["risk_share"] == pytest.approx(0.6)
+
+    def test_a_model_with_no_volatility_weight_reports_zero_not_None(self):
+        blk = copy.deepcopy(_RISKY)
+        blk["weights"] = {"mom_12_1": 1.0}
+        art = {"version": "x", "horizon": 20, "regimes": {"all": blk}}
+        out = sm.score_symbol(CUR, None, art)
+        assert out["risk_share"] == pytest.approx(0.0)
+
+    def test_the_SIGN_of_the_weight_does_not_matter(self):
+        """A model can tilt toward or away from volatility; either way that is
+        where its directional exposure sits."""
+        blk = copy.deepcopy(_RISKY)
+        blk["weights"] = {"low_vol": +0.6, "mom_12_1": 0.4}
+        art = {"version": "x", "horizon": 20, "regimes": {"all": blk}}
+        assert sm.score_symbol(CUR, None, art)["risk_share"] == pytest.approx(0.6)
+
+    def test_an_unrecognised_factor_name_does_not_count_as_risk(self):
+        blk = copy.deepcopy(_RISKY)
+        blk["weights"] = {"made_up": -0.6, "mom_12_1": 0.4}
+        blk["norm"]["made_up"] = {"mean": 0.0, "std": 1.0}
+        art = {"version": "x", "horizon": 20, "regimes": {"all": blk}}
+        out = sm.score_symbol(CUR, None, art)
+        assert out["risk_share"] == pytest.approx(0.0)

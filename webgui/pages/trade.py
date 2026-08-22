@@ -342,6 +342,35 @@ def swing_regime_note(sm):
     return f"scored on weights fitted for {_REGIME_WORDS.get(key, key)}"
 
 
+# A third of the model's weight on one directional exposure is material by any
+# reading; below that the number is worth stating but does not change how you
+# would hold the position.
+_EXPOSURE_CAVEAT_AT = 0.30
+
+
+def swing_exposure_note(sm):
+    """How much of this score is a bet on volatility. '' when unknown.
+
+    Phase 4 measured the composite at cross-sectional IC **+0.16 when the
+    market's forward 20 days were up and -0.11 when they were down**, with the
+    whole asymmetry carried by the volatility factors. So a high share here
+    means the verdict is substantially a directional bet on the market — which
+    reverses in exactly the drawdown a 1-8 week position cannot sit through.
+
+    A `risk_share` of None means the factor registry was unreachable, NOT that
+    the model has no exposure; printing "0%" there would be a confident wrong
+    answer, so the line is omitted instead."""
+    share = (sm or {}).get("risk_share")
+    if not isinstance(share, (int, float)) or isinstance(share, bool):
+        return ""
+    pct = f"{share:.0%}"
+    base = f"{pct} of this score's weight sits on volatility factors"
+    if share < _EXPOSURE_CAVEAT_AT:
+        return base + "."
+    return (base + " — historically that ranks high-beta names top, and it "
+            "reverses when the market falls.")
+
+
 def model_staleness(version, today=None, threshold_days=60):
     """A staleness nudge for the swing-model artifact, or '' when fresh/unparseable.
 
@@ -722,6 +751,12 @@ def render():
                         rnote = swing_regime_note(sm)
                         if rnote:
                             ui.label(rnote).classes("text-xs opacity-60")
+                        xnote = swing_exposure_note(sm)
+                        if xnote:
+                            ui.label(xnote).classes(
+                                "text-xs text-amber-9"
+                                if (sm.get("risk_share") or 0) >= _EXPOSURE_CAVEAT_AT
+                                else "text-xs opacity-60")
                         stale = model_staleness(meta["version"])
                         if stale:
                             ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
