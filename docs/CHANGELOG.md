@@ -4,7 +4,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 5.
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 6.
 The swing model's refit is the headline, and it is not good news: Phase 0 found
 the artifact 55 days stale and 44% of the measured edge gone on refresh, and
 Phase 4 found that what remains is a beta bet.**
@@ -121,6 +121,50 @@ Phase 4 found that what remains is a beta bet.**
   nothing in the app had ever said so.
 - Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
   options-scanner **1186**, schwab-proxy **104**.
+
+**Phase 6 — the feedback loop.** The journal has recorded what the model SAID
+since Phase 1; this records what happened next. Phase 4 decided the shape of all
+of it.
+- **The labeler is beta-aware, because otherwise it would lie.** The model's
+  measured edge IS beta, so a monitor scoring itself on the raw forward excess
+  would report health straight through any rising market. Each horizon stores
+  three numbers — raw excess, beta-adjusted, and the market's own move — added
+  to `rec_journal` by MIGRATION, since a store that cannot be backfilled must
+  never be recreated to gain a column. Horizons are TRADING bars, matching the
+  fit; unknown stays NULL, because an unmatured horizon is not a flat outcome
+  and an unmeasurable beta does not become 1.0.
+- **The monitor refuses two temptations.** It will not print an IC from a dozen
+  readings — that is no measurement, not a thin edge — and it will not compare
+  its POOLED correlation to the artifact's per-DATE cross-sectional OOS IC.
+  Those are different statistics, and printing them adjacent would manufacture a
+  decay finding out of a units mismatch. `decay` populates only from the
+  comparable statistic, which with sparse live readings usually means not at all.
+- **The refit runs monthly and reports what moved** — and was validated against
+  the two REAL reports: it reconstructs the Phase 0 finding unaided, *"-44%, the
+  measured edge fell by more than a quarter"*, which is precisely the change
+  that went unremarked for 55 days.
+- **The model paper book** follows the board's pools by the Trade Plan's rules,
+  honours the market filter (a relative-only short is held as a PAIR against
+  SPY) and declines gated names. Verified live: **13 positions, 6 long
+  directional and 7 short relative**. ⚠ It trades the UNDERLYING, a stated
+  deviation — a spread's theta and vega would make a book that lost money on
+  correct calls indistinguishable from one whose calls were wrong.
+- **Four bugs, three of them findable only by running it.** `score_symbol` never
+  returned `band`, so every journalled row carried NULL in a column
+  `journal_reading` had always written. `rec_journal.init_db`'s default argument
+  binds at DEFINITION, so monkeypatching the module attribute did nothing and
+  the first labeler tests opened the **real journal** — contained by the
+  worktree, which was luck. The book's tick built candidates from an empty price
+  map and fetched quotes afterwards, so it opened nothing while every unit test
+  passed (they all inject prices). And the card's new lines referenced a name
+  that does not exist in that scope, 500-ing the whole Trade page — **ruff's F82
+  catches that and is already in this repo's select list**, so the guard
+  existed; it just is not part of the test run.
+- **Still open:** Investor validation is BLOCKED (`fundamentals_history.db`
+  started 2026-08-22, needs ~2 quarters), and a third book in the EOD report is
+  deferred until the book has closed trades to report.
+- Suites: trade_svc **418** (with contracts), webgui **2619**, tools **837**;
+  ruff and pyright clean.
 
 **Phase 5 — the rank board.** The Analyze card answers "what about THIS name?";
 the board answers "of everything the model can see, what is best and worst right

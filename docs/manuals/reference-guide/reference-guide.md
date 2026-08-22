@@ -2338,6 +2338,26 @@ currently about half. That matters more here than anywhere else in the app: it m
 years, this ordering works when the market rises and inverts when it falls. Treat the
 board as a starting shortlist to research, never as a ranked buy list.
 
+### The model paper book
+
+Beneath the board, an isolated paper book follows the board's own pools so the
+model accrues a track record nobody has to place. It takes the ungated names
+from each pool, applies the Trade Plan's stop, target and 20-trading-day time
+stop, and splits its reporting by side.
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:model_book`, store `model_book.db` |
+| Trigger | The board's **Rebuild** advances it; otherwise it follows the board |
+| Scope | **Paper only**, and isolated from the Claude Trades book |
+
+⚠ Two things about what it measures. It trades the **underlying**, not the
+options structure the plan suggests — a spread's theta and vega would swamp the
+question of whether the ranking works, so a book that lost money on correct
+calls would look identical to one whose calls were wrong. And a **relative**
+short is held as a pair against SPY, because return-versus-the-index is what the
+model actually predicts.
+
 ### When to open it
 
 At the start of a research session, to pick what to analyze. Not as a signal in itself.

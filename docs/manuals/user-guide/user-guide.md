@@ -1077,6 +1077,26 @@ research, not as a ranked buy list.
 **Rebuild** forces a fresh scoring run; otherwise the board follows the daily
 universe snapshot.
 
+### The model paper book
+
+Below the board sits an isolated **paper book** that follows the board's own
+pools, so the model builds a track record without you placing anything. It opens
+the ungated names from each pool, applies the Trade Plan's stop, target and
+20-trading-day time stop, and reports **long and short separately** — a model
+carried entirely by its longs is a different thing from one that works on both
+sides.
+
+Two details worth knowing before reading its P&L:
+
+- It trades the **underlying stock**, not the options structure the Trade Plan
+  suggests. A spread's time decay and volatility swings would swamp the actual
+  question, which is whether the ranking works.
+- A **relative** short is held as a pair against SPY. The model predicts return
+  versus the index, so that is what the book measures; holding it outright would
+  be recording the market's direction instead.
+
+It is paper only, and separate from the Claude Trades book.
+
 ---
 
 ## Claude Trades

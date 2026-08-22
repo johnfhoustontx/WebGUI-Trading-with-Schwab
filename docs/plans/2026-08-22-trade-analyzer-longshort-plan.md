@@ -452,17 +452,72 @@ dropped it silently; a test now asserts every field the board sets survives it.
 
 ---
 
-## Phase 6 — feedback loop
+## Phase 6 — feedback loop ✅ SHIPPED 2026-08-22
 
-- **Labeler + monitor**: nightly fill of realized 5/10/20-day excess returns;
-  rolling live IC vs the artifact's OOS IC, **split long/short**; per-symbol
-  history on the card; a decay warning beside the staleness banner.
-- **Model paper book**: an isolated account (the driver-book pattern) trading
-  the P3 structures for cleared top/bottom-band names; results reported
-  long/short separately; a third book in the EOD report.
-- **Refit cadence**: monthly scheduled `.bat` (the fit stays un-importable by
-  services), dated archive, report diff against the prior fit.
-- **Investor validation** once `fundamentals_history.db` holds ~2 quarters.
+Phase 4 decided the shape of all of it: the model's measured edge IS beta, so a
+loop that scored itself on the raw forward excess would report health straight
+through any rising market and reproduce the illusion Phase 4 dismantled.
 
-**Exit:** live IC visible and moving; the model book holds positions on both
-sides; refits happen without being remembered.
+- [x] **Labeler** (`services/trade_svc/labeler.py` + `tools/label_journal.py`).
+      Fills realized returns THREE ways per horizon — raw excess, beta-adjusted,
+      and the market's own move — so the monitor can split up-market from down.
+      Horizons are TRADING bars, matching the fit. Unknown stays NULL: an
+      unmatured horizon is not a flat outcome, and an unmeasurable beta does not
+      become 1.0. A standalone script on a Windows scheduled task, because dev
+      runs `schedulers: False` and a service job would sit inert.
+      `rec_journal` gained the columns by **migration** — this store cannot be
+      backfilled, so it must never be recreated to gain one.
+- [x] **Live IC monitor** (`live_ic.py`). Refuses two temptations: it will not
+      print an IC from a dozen readings, and it will not compare its POOLED
+      correlation to the artifact's per-DATE cross-sectional OOS IC. Those are
+      different statistics; printing them adjacent would manufacture a decay
+      finding out of a units mismatch. `decay` populates only from the
+      comparable statistic, which with sparse live readings usually means not at
+      all — the honest state, not a gap to fill.
+- [x] **On the card**: the live reading, the up/down market split, the
+      beta-neutral IC, and a decay note beside the staleness banner.
+- [x] **Refit cadence** — `tools/refit_swing_model.bat` (monthly task; refuses
+      to run without the proxy) + `tools/diff_swing_report.py`. **Validated
+      against the two REAL reports:** it reconstructs the Phase 0 finding
+      unaided — *"-44%, the measured edge fell by more than a quarter"* — which
+      is exactly the change that went unremarked for 55 days.
+- [x] **Model paper book** (`model_book.py` + `model_book_store.py`). Follows
+      the board's pools by the Trade Plan's rules, honours the market filter (a
+      relative-only short is held as a PAIR against SPY), declines gated names,
+      and reports long/short separately. Verified live: **13 positions, 6 long
+      directional and 7 short relative**, time stop 2026-09-18.
+- [ ] **Investor validation — BLOCKED, not skipped.** `fundamentals_history.db`
+      began accruing 2026-08-22 and needs ~2 quarters. Nothing to build until
+      it has data.
+- [ ] **A third book in the EOD report** — deferred. The book has 13 open
+      positions and no closed ones, so an EOD section would be an empty table;
+      worth adding once it has realized trades to report.
+
+⚠ **Stated deviation:** the book trades the **UNDERLYING**, not the P3 options
+structure. The model predicts a 20-day excess return on the STOCK, and a
+spread's theta and vega would make a book that lost money on correct calls
+indistinguishable from one whose calls were wrong. The Trade Plan still tells a
+human which structure to use; this measures the signal underneath. Adding
+structure-level P&L is a follow-on, not a substitute.
+
+**Exit:** live IC visible (currently *"0 labelled readings, 20 needed"* — the
+journal is one day old, and saying so is the feature); the book holds positions
+on both sides; refits run on a schedule and report what moved.
+
+### Three bugs, two found only by running it
+
+- `score_symbol` never returned `band`, so every journalled row carried NULL in
+  a column `journal_reading` had always written. Cosmetic until the monitor
+  started grouping by it.
+- `rec_journal.init_db(db_path=DEFAULT_DB_PATH)` binds its default at
+  DEFINITION, so monkeypatching the module attribute did nothing and the first
+  labeler tests opened the **real journal**. Contained by the worktree, which
+  was luck rather than design. Now late-bound plus the repo's under-pytest guard.
+- The book's tick built candidates from an EMPTY price map and fetched quotes
+  afterwards, so every candidate was dropped for want of a price. Every unit
+  test passed — they all inject prices, so the fetch path was never exercised.
+- And a fourth on the page: the live-IC lines referenced `result`, a name that
+  does not exist in that scope, 500-ing the whole Trade page. **Ruff's F82
+  catches it and is already in this repo's select list** — the guard existed,
+  it just is not part of the test run. `ruff check .` before a live check is the
+  habit that closes the gap.
