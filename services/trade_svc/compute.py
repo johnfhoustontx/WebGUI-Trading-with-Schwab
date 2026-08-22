@@ -564,20 +564,21 @@ def run_model_book(board=None, prices=None, today=None, db_path=None):
             board = env.payload if env else None
 
         held = _store.open_symbols(conn)
-        wanted = [c for c in _mb.candidates(board, prices or {}, today=today)
-                  if c["symbol"] not in held]
         open_rows = [dict(r) for r in _store.positions(conn, status="open")]
+
+        # Quote FIRST, then build candidates. Building them from an empty price
+        # map drops every one of them for want of a price — which is exactly
+        # what a live tick did, silently, while every unit test passed: they all
+        # inject prices, so the fetch path was never exercised.
         need = sorted({r["symbol"] for r in open_rows}
-                      | {c["symbol"] for c in wanted} | {"SPY"})
+                      | set(_mb.wanted_symbols(board)) | {"SPY"})
         if prices is None:
             prices = _quotes_for(need)
 
+        wanted = [c for c in _mb.candidates(board, prices, today=today)
+                  if c["symbol"] not in held]
         for cand in wanted:
-            px = prices.get(cand["symbol"])
-            if px:
-                cand["entry"] = float(px)
-                cand["spy_entry"] = prices.get("SPY")
-                _store.open_position(conn, cand)
+            _store.open_position(conn, cand)
 
         for row in open_rows:
             px, spy = prices.get(row["symbol"]), prices.get("SPY")

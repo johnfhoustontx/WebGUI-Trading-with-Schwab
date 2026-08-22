@@ -53,6 +53,28 @@ def _add_trading_days(start, n):
     return d
 
 
+def wanted_symbols(board):
+    """The ungated pool symbols this board would trade — WITHOUT needing prices.
+
+    Exists because the tick has a chicken-and-egg problem: it cannot build
+    candidates until it has quotes, and it should not quote the whole universe
+    to find out which two names it needs. Splitting the selection from the
+    pricing is what lets it quote exactly the symbols involved."""
+    board = board or {}
+    if board.get("status") != _TRADEABLE_STATUS or board.get("thin_cross_section"):
+        return []
+    out = []
+    for row in (board.get("rows") or []):
+        side = row.get("pool")
+        if side not in ("long", "short"):
+            continue
+        if row.get("gated_long" if side == "long" else "gated_short"):
+            continue
+        if row.get("symbol"):
+            out.append(row["symbol"])
+    return out
+
+
 def candidates(board, prices, today=None, horizon=None):
     """Positions to open from today's board. Never raises."""
     board = board or {}

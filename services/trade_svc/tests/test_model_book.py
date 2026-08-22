@@ -261,3 +261,41 @@ class TestTheTick:
         from services.trade_svc import compute as C
         out = C.run_model_book(board=_board(), prices=PRICES, today=TODAY)
         assert out["positions"] == []
+
+
+class TestTheTickFetchesItsOwnPrices:
+    def test_a_tick_with_no_injected_prices_still_opens(self, tmp_path, monkeypatch):
+        """The bug live verification found. Candidates were built BEFORE the
+        quotes were fetched, so on the real path every one was dropped for want
+        of a price and the book stayed empty — while every unit test passed,
+        because they all inject prices."""
+        from services.trade_svc import compute as C
+        monkeypatch.setattr(C, "_quotes_for", lambda syms: dict(PRICES))
+        out = C.run_model_book(board=_board(), prices=None, today=TODAY,
+                               db_path=tmp_path / "book.db")
+        assert {p["symbol"] for p in out["positions"]} == {"AAA", "YYY"}
+
+    def test_it_quotes_only_the_symbols_involved(self, tmp_path, monkeypatch):
+        """Not the whole universe: the board has 78 rows and the book needs the
+        two it would trade plus SPY."""
+        from services.trade_svc import compute as C
+        asked = {}
+
+        def _q(syms):
+            asked["syms"] = set(syms)
+            return dict(PRICES)
+
+        monkeypatch.setattr(C, "_quotes_for", _q)
+        C.run_model_book(board=_board(), prices=None, today=TODAY,
+                         db_path=tmp_path / "book.db")
+        assert asked["syms"] == {"AAA", "YYY", "SPY"}
+        assert "BBB" not in asked["syms"]      # gated - never even quoted
+
+
+class TestWantedSymbols:
+    def test_it_names_the_ungated_pool_members(self):
+        assert set(mb.wanted_symbols(_board())) == {"AAA", "YYY"}
+
+    def test_a_broken_board_wants_nothing(self):
+        assert mb.wanted_symbols({"status": "legacy_snapshot"}) == []
+        assert mb.wanted_symbols(None) == []
