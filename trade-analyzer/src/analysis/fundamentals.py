@@ -21,6 +21,14 @@ class Fundamentals:
     last_eps_surprise: Optional[float] = None
     guidance: Optional[str] = None
     days_to_earnings: Optional[int] = None
+    # Short interest, in Schwab's own units: PERCENT of float, and days-to-cover.
+    # Deliberately NOT normalized to a fraction the way ``roe`` is — squeeze
+    # thresholds are naturally written in percent ("over 15% of float"), and the
+    # deep-dive engine already consumes these fields as percents. They feed the
+    # SHORT-side squeeze gate, never the fundamental read, so they are excluded
+    # from ``is_sufficient`` by design.
+    short_int_to_float: Optional[float] = None
+    short_int_day_to_cover: Optional[float] = None
 
     def is_sufficient(self) -> bool:
         """True if at least 3 of {pe_ratio, rev_growth_ttm, eps_growth_ttm, roe} are not None."""
@@ -36,6 +44,30 @@ def _parse_iso_date(s: str) -> date:
 def _pct_to_fraction(v):
     """Schwab change/margin fields are percents (12.76 -> 0.1276)."""
     return v / 100.0 if v is not None else None
+
+
+def _short_interest_or_none(v):
+    """Schwab's short-interest fields, with its 0.0 SENTINEL mapped to None.
+
+    Measured live 2026-08-22: ``shortIntToFloat`` and ``shortIntDayToCover`` are
+    present in every ``/instruments`` fundamental payload and populated for NO
+    symbol — 0.0 for AAPL, TSLA, GME and CVNA alike, while ``peRatio`` /
+    ``returnOnEquity`` / ``marketCapFloat`` in the same response are correct. A
+    listed, optionable US equity with literally zero short interest does not
+    exist, so 0.0 means "Schwab does not serve this", the same way
+    ``volatility = -999`` does on the chain.
+
+    Passing it through as a real reading would silently disable the short-side
+    squeeze gate for every symbol forever, with nothing on screen to say why.
+    A real source (finviz `Short Float` / `Short Ratio`) has to supply these.
+    Negatives are impossible too, so they degrade the same way."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
 
 
 def _roe_to_fraction(v):
@@ -132,6 +164,8 @@ def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamenta
         last_eps_surprise=last_eps_surprise,
         guidance=fund.get("guidanceDirection"),
         days_to_earnings=days_to_earnings,
+        short_int_to_float=_short_interest_or_none(fund.get("shortIntToFloat")),
+        short_int_day_to_cover=_short_interest_or_none(fund.get("shortIntDayToCover")),
     )
 
 

@@ -13,6 +13,14 @@ class TestFundamentalsDataclass:
     def test_is_sufficient_false_when_empty(self):
         assert Fundamentals().is_sufficient() is False
 
+    def test_short_interest_does_not_count_toward_sufficiency(self):
+        """``is_sufficient`` gates the Investor verdict on the four CORE
+        valuation/growth fields. Short interest feeds the SHORT-side squeeze
+        gate, not the fundamental read, so a symbol carrying only short
+        interest must still take the insufficient-data path."""
+        f = Fundamentals(short_int_to_float=30.0, short_int_day_to_cover=9.0)
+        assert f.is_sufficient() is False
+
 
 class TestParseSchwabFundamentals:
     def test_well_formed_payload(self):
@@ -39,6 +47,40 @@ class TestParseSchwabFundamentals:
         assert f.last_eps_surprise == 0.08
         assert f.guidance == "RAISED"
         assert f.days_to_earnings == 18
+
+    def test_short_interest_parses_as_percent_of_float(self):
+        """Schwab serves these in the SAME payload every analyze already
+        fetches — they were simply never read. Both stay in Schwab's units
+        (percent of float, and days), matching the deep-dive engine that
+        already consumes them, so squeeze thresholds read naturally."""
+        payload = {"fundamental": {"shortIntToFloat": 12.5,
+                                   "shortIntDayToCover": 4.2}}
+        f = parse_schwab_fundamentals(payload, as_of="2026-04-27")
+        assert f.short_int_to_float == 12.5
+        assert f.short_int_day_to_cover == 4.2
+
+    def test_short_interest_absent_stays_none(self):
+        f = parse_schwab_fundamentals({"fundamental": {}}, as_of="2026-04-27")
+        assert f.short_int_to_float is None
+        assert f.short_int_day_to_cover is None
+
+    def test_schwabs_zero_short_interest_is_a_SENTINEL_not_a_reading(self):
+        """Schwab ships both fields but populates NEITHER — measured live
+        2026-08-22: `shortIntToFloat` and `shortIntDayToCover` came back 0.0 for
+        AAPL, TSLA, **GME** and **CVNA** alike, while `peRatio`/`returnOnEquity`/
+        `marketCapFloat` in the same payload were correct. A listed, optionable
+        US equity with literally zero short interest does not exist, so 0.0 here
+        means "not served", exactly like Schwab's `volatility = -999`.
+
+        Letting it through as a real reading would silently disable the
+        short-side squeeze gate for EVERY symbol, forever, with nothing on
+        screen to say why — the repo's documented "a 0.00%% cell is not proof of
+        a flat tape" trap. The real source has to be finviz."""
+        payload = {"fundamental": {"shortIntToFloat": 0.0,
+                                   "shortIntDayToCover": 0.0}}
+        f = parse_schwab_fundamentals(payload, as_of="2026-04-27")
+        assert f.short_int_to_float is None
+        assert f.short_int_day_to_cover is None
 
     def test_margin_contracting(self):
         payload = {"fundamental": {"operatingMargin": 0.20, "operatingMarginYoy": 0.28}}

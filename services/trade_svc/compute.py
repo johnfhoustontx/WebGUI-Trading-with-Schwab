@@ -627,6 +627,58 @@ def _fetch_fundamentals(symbol):
         return Fundamentals()
 
 
+# ── sector P/E median (Phase 1) ──────────────────────────────────────────────
+# The Investor verdict's ``valuation`` component is the mean of {P/E vs the
+# sector median, PEG}. ``analyze`` passed ``sector_pe_median=None``
+# unconditionally, so ``score_pe_vs_sector`` returned its missing-input 0 for
+# every symbol — and averaging that structural 0 in HALVED the surviving PEG
+# score. The median is computed from the peers ``_SYMBOL_SECTOR`` already names.
+#
+# Memoized per (sector, day): a sector's median P/E moves on earnings, not on
+# the minute, so one fan-out per sector per day is the right cadence — without
+# it every analysis would re-fetch a dozen peers.
+_SECTOR_PE_CACHE = {}
+
+
+def reset_sector_pe_cache():
+    """Drop the memo (tests, and anything that needs a forced refetch)."""
+    _SECTOR_PE_CACHE.clear()
+
+
+def _sector_peers(sector_name):
+    return [s for s, (name, _etf) in _SYMBOL_SECTOR.items() if name == sector_name]
+
+
+def sector_pe_median(symbol):
+    """Median trailing P/E across ``symbol``'s sector peers, or None.
+
+    None means "no basis to compare against" — the Investor verdict then scores
+    valuation on PEG alone rather than averaging in a structural zero. Only
+    POSITIVE P/Es count: a loss-making peer reports a negative ratio, which is
+    not a valuation the median should be dragged by, and a peer with no
+    fundamentals contributes nothing rather than a zero. Never raises.
+    """
+    sect = resolve_sector(symbol)
+    name = sect.get("name")
+    if not name:
+        return None
+    today = _today_ct_str()
+    hit = _SECTOR_PE_CACHE.get(name)
+    if hit and hit[0] == today:
+        return hit[1]
+    try:
+        peers = _sector_peers(name)
+        results = parallel_map(_fetch_fundamentals, peers)
+        pes = [f.pe_ratio for f in results
+               if f is not None and f.pe_ratio is not None and f.pe_ratio > 0]
+        median = float(np.median(pes)) if pes else None
+    except Exception:
+        _degrade.degraded("trade.sector_pe_median")
+        return None
+    _SECTOR_PE_CACHE[name] = (today, median)
+    return median
+
+
 def _fundamentals_dict(f):
     """JSON-safe view of the fundamentals the page surfaces on the Investor card."""
     return {
@@ -769,7 +821,7 @@ def analyze(symbol):
     spy_close = spy["close"] if spy is not None and not spy.empty else None
     sect_close = sector_hist["close"] if sector_hist is not None else None
     inv_inputs = InvestorInputs(
-        fundamentals=fundamentals, sector_pe_median=None,
+        fundamentals=fundamentals, sector_pe_median=sector_pe_median(symbol),
         rs_vs_spy_3m=rs_percentile(sym_close, spy_close, 63),
         rs_vs_spy_6m=rs_percentile(sym_close, spy_close, 126),
         rs_vs_spy_12m=rs_percentile(sym_close, spy_close, 252),

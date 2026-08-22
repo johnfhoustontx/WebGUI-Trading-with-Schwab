@@ -221,3 +221,65 @@ def test_analyze_never_raises_on_client_explosion(monkeypatch):
     res = compute.analyze("AAPL")
     assert res["symbol"] == "AAPL"
     assert res["errors"]
+
+
+# ── sector P/E median (Phase 1) ──────────────────────────────────────────────
+
+class _PeerPEClient(FakeClient):
+    """Serves a P/E per symbol and counts how many fundamental fetches happen."""
+
+    def __init__(self, pes):
+        super().__init__()
+        self._pes = pes
+        self.fetches = 0
+
+    def get_fundamentals(self, symbol):
+        self.fetches += 1
+        pe = self._pes.get(symbol)
+        return {"peRatio": pe} if pe is not None else None
+
+
+def test_sector_pe_median_is_the_median_of_that_sectors_peers(monkeypatch):
+    """The Investor `valuation` component compares a symbol's P/E to its
+    SECTOR's median, but live ``analyze`` passed ``sector_pe_median=None``
+    unconditionally — so that half never scored, and averaging its structural 0
+    halved the surviving PEG score for every symbol ever analyzed.
+
+    The peers are the ones the static sector map already names."""
+    client = _PeerPEClient({"AAPL": 35.0, "MSFT": 30.0, "NVDA": 50.0, "AVGO": 40.0})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("AAPL") == 37.5      # median of 30/35/40/50
+
+
+def test_sector_pe_median_ignores_non_positive_and_missing(monkeypatch):
+    """A loss-making peer reports a negative P/E, which is not a valuation the
+    median should be dragged by; a peer with no fundamentals contributes
+    nothing rather than a zero."""
+    client = _PeerPEClient({"AAPL": 20.0, "MSFT": 30.0, "NVDA": -12.0, "AVGO": None})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("AAPL") == 25.0      # median of 20/30 only
+
+
+def test_sector_pe_median_is_memoized_per_sector(monkeypatch):
+    """One fan-out per sector per day — not one per analyze. Without the memo
+    every analysis would re-fetch a dozen peers to compute a number that moves
+    once a quarter."""
+    client = _PeerPEClient({"AAPL": 35.0, "MSFT": 30.0})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    compute.sector_pe_median("AAPL")
+    first = client.fetches
+    assert first > 1                                     # it really did fan out
+    compute.sector_pe_median("MSFT")                     # same sector
+    assert client.fetches == first                       # served from the memo
+
+
+def test_sector_pe_median_none_for_an_unmapped_symbol(monkeypatch):
+    """An unknown symbol has no sector, so there is no peer set — return None
+    (the Investor verdict then scores valuation on PEG alone) rather than a
+    median of everything."""
+    _patch(monkeypatch, _PeerPEClient({"ZZZZ": 11.0}))
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("ZZZZ") is None

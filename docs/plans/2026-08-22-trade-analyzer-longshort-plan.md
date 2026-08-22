@@ -3,7 +3,32 @@
 Companion to [`2026-08-22-trade-analyzer-longshort-design.md`](2026-08-22-trade-analyzer-longshort-design.md).
 TDD throughout: write the failing test, watch it fail for the right reason, then
 the minimal code. Every phase ends with the suite green, verified running in
-dev, docs + `page_help.py` updated in the same commit, then `promote.bat`.
+dev, and docs + `page_help.py` updated in the same commit.
+
+## ⛔ Promotion is deferred until Phase 4 completes (decision, 2026-08-22)
+
+**No `promote.bat` run until Phase 4 is done.** `main` stays where it is; work
+accumulates on `Using_Highcharts` and is verified in dev only. Three consequences
+this plan must absorb rather than discover later:
+
+1. **Dev runs with `schedulers: False`** (verified: `ENV_FLAGS`), so **any
+   scheduler-driven job written in a service will not run in dev** — it would sit
+   inert until promotion. That defeats the entire reason the accrual stores are
+   sequenced first (they pay in calendar time, not effort). **Therefore 1.4's
+   sweep is a standalone script driven by a Windows scheduled task, not a service
+   scheduler job** — it accrues under suppression, and the design is better
+   anyway (the fit script has the same never-import-from-a-service property).
+2. **Prod keeps the Phase-0 wall-side bug** for the duration. It only misfires
+   when a chain has strikes on one side of spot only, but Rescue is decision
+   support for real positions — a deliberate, accepted cost, not an oversight.
+3. **The promotion when it comes is large** (P1–P4 in one move), so the
+   `requirements.lock` dry-run against prod's venv (see 1.2) becomes *more*
+   important, not less, and deserves a rehearsal before the real run.
+
+⚠ "Phase 4 complete" means **the phase ran to a decision**, not that its
+acceptance gate passed. A failed gate — the Phase-0 artifact staying primary — is
+a completed Phase 4 with a documented negative result, and does not by itself
+extend the freeze.
 
 Test commands (worktrees have no venv — absolute path):
 

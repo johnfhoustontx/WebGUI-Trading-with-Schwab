@@ -192,11 +192,21 @@ class InvestorVerdict:
                 "gates_triggered": ["No fundamentals"],
             }
 
+        # Valuation averages only the sub-scores whose INPUTS are present. A
+        # missing input makes its primitive return 0, and averaging that
+        # structural 0 in HALVES the surviving sub-score — so an excellent PEG
+        # scored +20 instead of +40 whenever no sector median was supplied,
+        # which live ``analyze()`` never supplied. The availability test is on
+        # the inputs, not the outputs: ``score_peg`` legitimately returns 0 for
+        # a PEG between 1 and 2, so a 0 score cannot stand for "missing".
+        valuation_parts = []
+        if f.pe_ratio is not None and inp.sector_pe_median:
+            valuation_parts.append(score_pe_vs_sector(f.pe_ratio, inp.sector_pe_median))
+        if f.peg_ratio is not None:
+            valuation_parts.append(score_peg(f.peg_ratio))
+
         raw_scores = {
-            "valuation": _mean_int([
-                score_pe_vs_sector(f.pe_ratio, inp.sector_pe_median),
-                score_peg(f.peg_ratio),
-            ]),
+            "valuation": _mean_int(valuation_parts) if valuation_parts else 0,
             "growth_quality": _mean_int([
                 score_growth_metric(f.rev_growth_ttm),
                 score_growth_metric(f.eps_growth_ttm),
