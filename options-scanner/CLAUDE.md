@@ -12,73 +12,106 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Single-user, self-hosted, Windows-first intraday options-trading platform built around the Schwab API. It scans for 0-DTE and swing credit spreads on $SPX / SPY / QQQ, scores them, visualizes dealer gamma/charm/delta exposure with a forward-projection heatmap, manages paper trades, and emits an end-of-day markdown rollup. Ships two interfaces over the same Python core: a Tk desktop app and a FastAPI + React web app.
+**In THIS monorepo this folder is ENGINES ONLY.** It is the 0-DTE / swing
+credit-spread scanner, the GEX/charm/delta analytics, the options pricing math
+and the paper-trade store - imported by `services/options_svc`, which owns all
+scheduling and publishing. It has no UI and no entrypoint of its own.
 
-Python 3.11+. On this machine: `C:\Users\john_\AppData\Local\Programs\Python\Python311\python.exe`.
+The **Tk desktop app and the FastAPI + React web app described in older revisions
+of this file were never copied into this repo**, and neither were their
+entrypoints. Verified absent 2026-08-21: `dashboard.py`, `scanner.py`,
+`eod_report.py`, `notifier.py`, `ai_prompt_builder.py`, `gamma_window_legacy.py`,
+`server/`, `frontend/`. Read them in the source repo `D:\Trading With Schwab` if
+you need the reference. The NiceGUI webgui (`webgui/`, :8500) is the only
+interface now, and it reaches these engines only through `options_svc` over Redis.
+
+Python 3.11+. Use the repo-root venv: `..\.venv\Scripts\python.exe`.
 
 ## Commands
 
 ```powershell
-# Tk desktop (primary trader interface) — gamma tool launches as a Toplevel from here
-python dashboard.py
+# Manual GEX-collection fallback. The options service owns collection; run this
+# only when it is down. Honors the data/gex_collector.lock advisory lock.
+python gex_collector.py
 
-# Web stack
-uvicorn server.main:app --reload --port 8000
-cd frontend; npm install; npm run dev          # dev server on :5173
-cd frontend; npm run build                     # → frontend/dist/, served by FastAPI StaticFiles
-
-# Standalone scanners / tools
-python scanner.py                              # auto-loops 15 min, Mon–Fri 08:00–15:15 CT
-python scanner.py --once                       # one-shot (also: scan_once.bat)
-python gex_collector.py                        # 1-min GEX snapshots over collection_symbols() (index base + Top 20.xlsx watchlist) — MANUAL FALLBACK ONLY (the options service owns collection)
-python eod_report.py                           # today's EOD rollup
-python eod_report.py --date YYYY-MM-DD         # backfill any date
-
-# Tests
-pytest tests/ -v --tb=no -q                    # full suite — see baseline below
-pytest tests/test_scoring.py -v                # single file
-pytest tests/test_scoring.py::test_name -v     # single test
+# Tests (from inside this folder)
+..\.venv\Scripts\python -m pytest tests -q     # full suite - see baseline below
+..\.venv\Scripts\python -m pytest tests/test_scoring.py -v
 ```
 
-**Test baseline: 1329 passed, 11 failed, 2 skipped** (re-measured 2026-08-07 after the `test_dashboard_*` modules were made to skip deterministically; the count is now STABLE run-to-run — two consecutive full runs produced an IDENTICAL failing set. Was 1327/17/1 earlier that day, 1309/17/1 on 2026-08-06, 1286/17 on 2026-07-25; the passing count grows with intervening work.)
 
-> **Compare the failing SET, not the count** — this bit for real on 2026-08-07: a change introduced two genuine `TestScreenSpreadsStrikeValidity` regressions while two order-varying `test_dashboard_*` cases happened to move to skipped, holding the total at 17 and making a real break look like a clean run. **That specific trap is now closed** (see below), but the habit is still the right one. The remaining failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in three groups:
+**Test baseline: 1180 passed, 0 failed, 2 skipped** (re-measured 2026-08-21).
 
-- `tests/test_scanner_engine.py::TestEarningsAvoidance` — stale fixtures
-- `tests/test_dashboard_*` — **FIXED 2026-08-07, no longer in the failing set.** `dashboard.py` (the legacy Tk UI) was deliberately never copied into this monorepo, so these six tests could never pass. Each called `_tk_or_skip()` and imported `dashboard` only inside the test body, so the outcome depended on whether an earlier test had already built a Tk root — root fails → skip, root succeeds → `ModuleNotFoundError` → FAIL. That flip made the total swing 15↔17 and masked real regressions. Both modules now carry a **module-level `pytest.importorskip("dashboard")`**, which runs at COLLECTION and so skips deterministically. Kept rather than deleted: they still document the invariant for the source repo, where `dashboard.py` lives.
-- `tests/test_gex_collector*` — timing-dependent
-- `tests/test_key_levels_doc.py` — a missing doc file
+**There are no longer any expected failures.** The 8-11 that sat here for months
+were labelled "stale fixtures / timing-dependent / a missing doc file". On
+inspection every one was a **stale fixture pinning a constant that had moved**:
 
-**⚠ `pytest-randomly` is NOT installed in this venv** (verified 2026-08-07), so the `-p no:randomly` seen in older commands here has always been a no-op and the run order is pytest's deterministic default. The count used to vary anyway — that was Tk-root state inside a run, now fixed. When in doubt still measure your own baseline (`git stash` → run → `git stash pop`) rather than trusting this line. Compare the *set* of failing tests, not just the count.
+| was failing | why |
+|---|---|
+| `test_next_boundary_*` (4) | pinned a 2-minute cadence after `POLL_INTERVAL_MIN` went 2 -> 1 on 2026-07-11 |
+| `test_main_skips_before_market_open` | used 8:20/8:25 as "before the open" after the window moved 8:30 -> 8:00 CT |
+| `test_acquire_defers_when_fresh_other_owner` | +200s was inside the old `LOCK_TTL_SEC` of 240, outside the derived 120 |
+| `TestEarningsAvoidance` (2) | absolute 2026-05 dates drifted into the past - where three SIBLING tests also began passing for the wrong reason |
+| `test_per_leg_expiry_...` | its "far" back-leg expiry of 2026-08-21 arrived |
+| `test_key_levels_doc.py` (3) | asserted a doc file this repo never had; deleted with the dead code on 2026-08-20 |
 
-> This figure was **667 passed / 2 failed** for a long time and was badly stale — it was propagated into a plan doc in 2026-07 and nearly caused a real regression to be waved through as "pre-existing". If you notice it drifting again, fix it here.
+All are now **derived from the constant or relative to today**, so they cannot rot
+the same way again - the reasoning `gex_collector.py` already applies to
+`LOCK_TTL_SEC`. Nothing was xfail-ed to hide it. The 2 skips are the deterministic
+`test_dashboard_*` `importorskip`s described below.
 
-See [USER_GUIDE § Known issues](docs/USER_GUIDE.md#known-issues).
+> **Compare the failing SET, not the count.** This bit for real on 2026-08-07: a
+> change introduced two genuine `TestScreenSpreadsStrikeValidity` regressions while
+> two order-varying `test_dashboard_*` cases moved to skipped, holding the total
+> steady and making a real break look like a clean run. Both halves of that trap
+> are now closed - the dashboard tests skip at COLLECTION via a module-level
+> `pytest.importorskip("dashboard")`, and the baseline is green - but the habit is
+> still right: run with `-rf` and diff node IDs. A green baseline makes the
+> exit code trustworthy, which is the point.
+>
+> The 2026-08-21 pass is also the argument against a standing red baseline: once
+> "8 failures" is normal, a 9th (`test_per_leg_expiry_...`, which appeared the
+> morning of the audit) is invisible.
+
+**`pytest-randomly` is NOT installed in this venv** (verified 2026-08-07), so the
+`-p no:randomly` in older commands here has always been a no-op; run order is
+pytest's deterministic default.
+
 
 There is no lint/format step configured. Black-Scholes math, DB schemas, and scoring are TDD; UI changes are verified manually.
 
 ## Critical operational rules
 
-- **Never run two scanner orchestrators at once.** `scanner.py` (CLI) and `server/scanner_task.py` (the FastAPI background task) both call `scanner_engine.run_full_scan` and both write to `data/signals.db`. Running both simultaneously causes duplicate signals and Schwab token-refresh conflicts. Pick one per machine.
-- **Schwab client resolution:** every module that needs Schwab data first checks for SchwabProxy at `http://127.0.0.1:8100` (multi-tool token sharing, lives at `D:/AI_Based_Analysis/SchwabProxy`); falls back to direct `schwab-py` if absent. Don't bypass this — token refresh conflicts otherwise.
+- **`services/options_svc` is the only orchestrator.** It calls
+  `scanner_engine.run_full_scan` and writes `data/signals.db`. The CLI
+  (`scanner.py`) and FastAPI (`server/scanner_task.py`) orchestrators that used to
+  compete for that DB are not present in this repo.
+- **Schwab client resolution:** everything goes through schwab-proxy at
+  `repo_paths.PROXY_URL` (:8100). There is no direct-`schwab-py` fallback here -
+  the refresh token is a single rotating credential and two holders invalidate
+  each other's session.
+
 - **`data/` and `logs/` are git-ignored and regenerated at runtime.** Never check in `signals.db`, `gex_history.db`, `trades.db`, or anything in `data/reports/`.
-- **Settlement-time behavior matters.** EOD report auto-triggers at 15:00 CT inside `server/scanner_task.py` using a sentinel file to prevent double-runs; the GEX collector exits cleanly past STOP_HOUR (~15:20 CT). Don't add work that assumes processes are still polling after that.
+- **Settlement-time behavior matters.** The EOD rollup is built by the webgui `/eod` page and `services/options_svc`; the GEX collector exits cleanly past STOP_HOUR (~15:20 CT). Don't add work that assumes processes are still polling after that.
 
 ## Architecture (big picture)
 
-Five loosely-coupled subsystems share Schwab access + SQLite/JSON stores. No event bus — subsystems talk through shared stores and explicit function calls. Both interfaces (Tk, Web) pull from the same cores independently.
+Loosely-coupled engine subsystems share Schwab access (via the proxy) + SQLite/JSON stores. No event bus inside this folder - subsystems talk through shared stores and explicit function calls; `services/options_svc` drives them and publishes to Redis.
 
-1. **Scanner & signals** — `scanner_engine.py` (core), `scanner.py` / `server/scanner_task.py` (orchestrators), `scoring.py` (9-factor 0–100 composite: R:R, PoP, Theta, IV Rank, IV/HV, Vega, EM Buffer, Liquidity, Trend), `iv_analysis.py`, `signal_db.py` + `signal_recorder.py` (dedup by symbol/type/strikes/expiration), `signal_recommender.py` (HOLD/TAKE/CUT rules), `signal_repricer.py` (intrinsic at 0-DTE settlement; mid-mark for swings with per-`(symbol, expiration)` chain cache).
-2. **Gamma analytics** — `gamma_tool.py` is the **headless GEX/Charm/DEX/Vanna engine** (`GammaEngine`, `build_analysis_dict`, `calc_flip_point`, `fetch_symbol_analysis`, the bundled-prompt builders, `draw_term_heatmap`). **The legacy Tk window was split out to `gamma_window_legacy.py` on 2026-07-25** (`GammaWindow(tk.Toplevel)`: side-by-side bars + heatmap, forward-projection band, 0-DTE hedge-pressure panel, Chart Setup popup persisting 24 styleable elements to `data/chart_style.json`) — it is **parked/unused** (its `dashboard.py` entrypoint was never copied into the monorepo). **Do not re-add `tkinter`/`matplotlib` imports at module scope in `gamma_tool.py`**: they were being paid by every headless importer (`services/options_svc` ~10 lazy sites, `gex_collector`, `scanner_engine`) — measured **0.69 s → 0.207 s** and `sys.modules` 478 → 239 once removed, plus `matplotlib.use("TkAgg")` is no longer forced process-wide. `build_chart_style_vars` imports `tkinter` function-locally and `draw_term_heatmap` imports matplotlib function-locally for the same reason; `tests/test_gamma_tool_headless.py` pins this with a subprocess import probe. The per-strike snapshot collector writes every **1 min** (was 2 min; 2026-07-11) via `gex_history_db.py` over `gex_collector.collection_symbols()` (the index base `$SPX`/`$VIX`/`SPY`/`QQQ` ∪ the `Top 20.xlsx` watchlist; `poll_once(..., symbols=None)` defaults to it). **`poll_once` fetches the ~24 per-symbol chains CONCURRENTLY** (a `ThreadPoolExecutor`, `POLL_FETCH_WORKERS=6`; 2026-07-18) — the serial loop consumed 15–35 s of the 60 s slot and (measured) dropped ~37% of 1-min slots; engine compute + SQLite inserts stay on the calling thread (conn affinity + `engine._last_dte`). It also accepts an **`on_chain(symbol, chain)`** callback so the options service can reuse the just-fetched chain for the same tick's gamma snapshot instead of refetching it. **`gex_json` grids are stored as a COLUMNAR float32 blob** (2026-08-08; `_pack_columnar`/`_unpack_columnar` behind `_encode_grid`/`_decode_grid`): `b"G1"` + zlib(`<I` count + n float32 sorted strikes + n×3 float32 call/put/net). Measured **2.5× faster decode / 2.9× faster encode / 1.38× smaller** than the previous JSON-in-zlib — `json.loads` had been **68% of the whole read path** while SQLite itself was only 4% (which is also why a **PostgreSQL migration was evaluated and rejected — measured SLOWER** for this workload). **Shape-gated:** anything but three plain numbers per cell (nested dicts / strings / None / `bool` / a missing field) falls back to the JSON path, preserving the flexible-cell contract pinned by `test_gex_history_efficiency`; 100% of real cells are `{call, put, net}` floats. **float32 is safe** (values are already rounded to `_GRID_SIG_FIGS`=6 sig figs; max rel err 5.96e-08 over 471,657 real cells) **except that sub-1.18e-38 denormals flush to 0.0** — verified display-neutral across 600 real snapshots (0 wall disagreements, 0 display-significant cells lost; flip/walls/net_total live in their own columns computed from the full chain). Decoded values are plain Python floats, never numpy scalars (the grid is JSON-serialized into `cache:options:gamma`). **Forward-only** — readers accept all three formats (columnar BLOB + legacy compressed BLOB + legacy JSON TEXT). `connect()` sets **`PRAGMA mmap_size=1 GiB`** (`_MMAP_BYTES`) because one (symbol, view, session) read touches ~437 scattered pages (rows of one key land 360 rowids apart). **`WITHOUT ROWID` was measured and REJECTED** (59% larger, 4× slower writes — 1.3 KB blobs are its documented anti-pattern). The redundant `idx_snap_today` index (duplicate of the PK) is dropped, and the **term-structure chain polls every 5 min** (`TERM_POLL_INTERVAL_MIN`, not every 1-min slot). Flow-alert detectors read only the trailing rows via **`gex_history_db.load_flow_tail`** (2026-07-19). In the webgui monorepo the always-on options service owns this; standalone it can still auto-start inside the gamma tool. Only **one collector runs at a time**, enforced by an advisory file lock at `data/gex_collector.lock` (helpers in `gex_collector.py`). `gex_collector.py` remains as a **manual fallback** (run it standalone if the gamma tool isn't open); it stands down if the in-tool collector already owns the lock. The Task Scheduler job is **retired** — disable/delete the `GEX Collector` scheduled task. Math in `options_calculator.py` (`bs_delta`/`bs_charm`/`bs_gamma`, `calc_summary`). Collector health classifier in `gex_status.py`.
+1. **Scanner & signals** — `scanner_engine.py` (core; orchestrated by `services/options_svc`), `scoring.py` (9-factor 0–100 composite: R:R, PoP, Theta, IV Rank, IV/HV, Vega, EM Buffer, Liquidity, Trend), `iv_analysis.py`, `signal_db.py` + `signal_recorder.py` (dedup by symbol/type/strikes/expiration), `signal_recommender.py` (HOLD/TAKE/CUT rules), `signal_repricer.py` (intrinsic at 0-DTE settlement; mid-mark for swings with per-`(symbol, expiration)` chain cache).
+2. **Gamma analytics** — `gamma_tool.py` is the **headless GEX/Charm/DEX/Vanna engine** (`GammaEngine`, `build_analysis_dict`, `calc_flip_point`, `fetch_symbol_analysis`, the bundled-prompt builders, `draw_term_heatmap`). **The legacy Tk window (`gamma_window_legacy.py`) was DELETED on 2026-08-20** along with the rest of the dead UI code; the webgui `/options/gamma` page is its replacement. **Do not re-add `tkinter`/`matplotlib` imports at module scope in `gamma_tool.py`**: they were being paid by every headless importer (`services/options_svc` ~10 lazy sites, `gex_collector`, `scanner_engine`) — measured **0.69 s → 0.207 s** and `sys.modules` 478 → 239 once removed, plus `matplotlib.use("TkAgg")` is no longer forced process-wide. `build_chart_style_vars` imports `tkinter` function-locally and `draw_term_heatmap` imports matplotlib function-locally for the same reason; `tests/test_gamma_tool_headless.py` pins this with a subprocess import probe. The per-strike snapshot collector writes every **1 min** (was 2 min; 2026-07-11) via `gex_history_db.py` over `gex_collector.collection_symbols()` (the index base `$SPX`/`$VIX`/`SPY`/`QQQ` ∪ the `Top 20.xlsx` watchlist; `poll_once(..., symbols=None)` defaults to it). **`poll_once` fetches the ~24 per-symbol chains CONCURRENTLY** (a `ThreadPoolExecutor`, `POLL_FETCH_WORKERS=6`; 2026-07-18) — the serial loop consumed 15–35 s of the 60 s slot and (measured) dropped ~37% of 1-min slots; engine compute + SQLite inserts stay on the calling thread (conn affinity + `engine._last_dte`). It also accepts an **`on_chain(symbol, chain)`** callback so the options service can reuse the just-fetched chain for the same tick's gamma snapshot instead of refetching it. **`gex_json` grids are stored as a COLUMNAR float32 blob** (2026-08-08; `_pack_columnar`/`_unpack_columnar` behind `_encode_grid`/`_decode_grid`): `b"G1"` + zlib(`<I` count + n float32 sorted strikes + n×3 float32 call/put/net). Measured **2.5× faster decode / 2.9× faster encode / 1.38× smaller** than the previous JSON-in-zlib — `json.loads` had been **68% of the whole read path** while SQLite itself was only 4% (which is also why a **PostgreSQL migration was evaluated and rejected — measured SLOWER** for this workload). **Shape-gated:** anything but three plain numbers per cell (nested dicts / strings / None / `bool` / a missing field) falls back to the JSON path, preserving the flexible-cell contract pinned by `test_gex_history_efficiency`; 100% of real cells are `{call, put, net}` floats. **float32 is safe** (values are already rounded to `_GRID_SIG_FIGS`=6 sig figs; max rel err 5.96e-08 over 471,657 real cells) **except that sub-1.18e-38 denormals flush to 0.0** — verified display-neutral across 600 real snapshots (0 wall disagreements, 0 display-significant cells lost; flip/walls/net_total live in their own columns computed from the full chain). Decoded values are plain Python floats, never numpy scalars (the grid is JSON-serialized into `cache:options:gamma`). **Forward-only** — readers accept all three formats (columnar BLOB + legacy compressed BLOB + legacy JSON TEXT). `connect()` sets **`PRAGMA mmap_size=1 GiB`** (`_MMAP_BYTES`) because one (symbol, view, session) read touches ~437 scattered pages (rows of one key land 360 rowids apart). **`WITHOUT ROWID` was measured and REJECTED** (59% larger, 4× slower writes — 1.3 KB blobs are its documented anti-pattern). The redundant `idx_snap_today` index (duplicate of the PK) is dropped, and the **term-structure chain polls every 5 min** (`TERM_POLL_INTERVAL_MIN`, not every 1-min slot). Flow-alert detectors read only the trailing rows via **`gex_history_db.load_flow_tail`** (2026-07-19). The always-on options service owns collection. Only **one collector runs at a time**, enforced by an advisory file lock at `data/gex_collector.lock` (helpers in `gex_collector.py`); `gex_collector.py` remains as a **manual fallback** and stands down if the service already owns the lock. The Task Scheduler job is **retired** — disable/delete the `GEX Collector` scheduled task. Math in `options_calculator.py` (`bs_delta`/`bs_charm`/`bs_gamma`, `calc_summary`). Collector health classifier in `gex_status.py`.
 3. **Paper trading** — `paper_trader.py` + `trades_db.py` (UUID trade IDs, status transitions in place — rows are never deleted), `trade_analyzer.py` (live Greeks + data-quality flags for the Analyze popup). **Rescue apply primitives** live in `paper_adjust.py`: `apply_close`/`apply_partial_close`/`apply_narrow`/`apply_convert_ic`/`apply_convert_butterfly`/`apply_roll`/`apply_inverted` mutate the paper DB inside the existing cash/buying-power mechanism (reconciling reserved BP to the new max-loss + writing an audit row), and the `apply_adjustment` dispatcher re-prices the candidate legs and **aborts without mutation** if economics drifted past tolerance or the position isn't OPEN (the stale-price guard). `paper_account_db.py` backs this with a `position_adjustments` audit table + a `parent_position_id` column on `paper_positions` (for linked rolls), plus `insert_adjustment`/`list_adjustments`. The advisory engine + on-demand candidate menu that drive these live in the webgui options service (`services/options_svc/rescue.py`); see the root `CLAUDE.md` "Rescue tested trades" section.
-4. **Notifications & AI** — `notifier.py` (Windows toast + audio; pluggable for Telegram/Discord via stub slots in `signal_alert`), `ai_prompt_builder.py` (composes markdown prompts for pasting into Claude.ai — **no API calls**).
-5. **EOD reporting** — `eod_report.py` writes `data/reports/YYYY-MM-DD-eod-report.md`.
+4. **Notifications & AI** — not in this folder. `notifier.py` and `ai_prompt_builder.py` were deleted 2026-08-20; push notifications live in `shared/notify/` + `services/options_svc/push_notify.py`, and Claude calls are made by the services (see the root `CLAUDE.md`).
+5. **EOD reporting** — not in this folder. `eod_report.py` was deleted 2026-08-20; the rollup is the webgui `/eod` page, archiving to `webgui/data/eod/<date>/`.
 
-### Interfaces
+### Interface
 
-- **Tk desktop:** `dashboard.py` (`OptionsScannerApp(tk.Tk)`) is the trader hub; gamma tool is a separate `Toplevel` so both can be visible. A **Captured Signals** tab gives a live read of `signals.db` open signals (re-mark via `signal_repricer`, manual close via `signal_db.close_signal_manually`) — see [docs/plans/2026-05-26-captured-signals-tab-design.md](docs/plans/2026-05-26-captured-signals-tab-design.md).
-- **Web backend:** `server/main.py` with `server/routes/{quotes,scanner,signals,trades,calculator,auth}.py` + `server/websockets.py`. Scanner results are served from in-memory `scanner_state.latest_results` (not DB) for speed; DB is authoritative for history. Paper trades + gamma snapshots are always DB-backed.
-- **Frontend:** React + TypeScript + Vite in `frontend/`, talks REST + WebSockets to FastAPI.
+There is exactly one: the **NiceGUI webgui** (`webgui/`, :8500), which never
+imports this folder. It reads Redis cache views published by
+`services/options_svc`, which is the only thing that imports these engines. The
+Tk `dashboard.py` hub and the React/FastAPI stack described in older revisions do
+not exist here.
+
 
 ### Storage
 
@@ -123,7 +156,7 @@ nudge that can never flip a gated grade), fed the live state by the options-serv
 
 - **New Greek view** (e.g. Vanna): extend `GammaEngine` in `gamma_tool.py` mirroring `calc_charm_from_chain`, add the view string to `_set_view`/`_redraw`, add `bs_vanna` in `options_calculator.py`. The history-DB schema is view-string keyed — no migration needed.
 - **New scoring factor:** weight + math in `scoring.calc_composite_score`, thread through `scanner_engine.run_full_scan` so it shows in the dashboard detail panel, regression tests in `tests/test_scoring.py`.
-- **New REST endpoint:** drop a module in `server/routes/`, register in `server/main.py`, consume from React via `fetch`.
+- **New GUI-reachable data:** publish a cache view from `services/options_svc/handlers.py` and read it in a `webgui/pages/` module. Tier 1 never imports these engines.
 - **New scanner spread type** (e.g. iron condor): extend `scanner_engine`'s spread filter, add a `type` tag in the signal dict, add a table in the dashboard and a key in `signal_db`.
 - **New alert channel:** extend `notifier.Notifier`; `signal_alert` already has dispatcher stubs.
 
@@ -149,294 +182,26 @@ Small commits with conventional prefixes: `feat:`, `fix:`, `refactor:`, `chore:`
 - [docs/INSTALL.md](docs/INSTALL.md) — clean-machine install, Schwab OAuth, Task Scheduler setup
 - [docs/SIGNAL_TRACKING.md](docs/SIGNAL_TRACKING.md) — `signals.db` internals (predates ARCHITECTURE.md but still authoritative for the signal schema)
 
-
 ---
 
-## Options Simulator — Overview
+## Options Simulator
 
-Replays 2 days of live Schwab option chain data through a Black-Scholes simulation engine
-to visualize price decay, time decay, and all five Greeks interactively.
+`options_simulator/` is **three flat modules**, not the Dash application older
+revisions of this file described (there is no `viz/`, `engine/` or `data/`
+package here, and no plotly/dash/py_vollib/mibian dependency - the webgui charts
+with Highcharts):
 
-**Three simulation modes:**
-- **Replay mode** — scrub through actual 2-day history bar by bar; all Greeks update live
-- **What-if mode** — freeze time, sweep underlying price ±20%, show Delta/Gamma interaction
-- **IV shock mode** — spike or crush implied volatility; shows Vega dominance on IV crush
+| module | role |
+|---|---|
+| `engine.py` | Black-Scholes pricing + analytical Greeks; `Leg` / `Position` / `aggregate_position` for arbitrary multi-leg positions (each leg scaled by `sign * ratio`, so a butterfly body can trade 2x) |
+| `data.py` | option-chain history load for Replay. Builds its index with `.tz_convert("America/Chicago").tz_localize(None)` - **a tz-naive datetime in this project means CENTRAL time** |
+| `pnl.py` | P&L decomposition into delta / gamma / theta / vega contributions |
 
-> **Multi-leg (2026-06-23):** `options_simulator/engine.py` prices arbitrary
-> multi-leg positions — `Position(legs=[Leg(contract, sign, ratio), ...])` +
-> `aggregate_position` scale each leg's Greeks by `sign * ratio` (the `ratio`
-> field, default 1, lets a **butterfly body** trade at 2×; build via
-> `Position.from_legs([(contract, sign, ratio), ...], label)`). The webgui
-> Simulator + Calculator drive this with a shared strategy/leg editor (verticals,
-> condors, butterflies, **calendars/diagonals** with per-leg expiry). The
-> per-leg time treatment lives in the webgui options service
-> (`services/options_svc/compute.sim_run` — per-leg **elapsed** What-if decay —
-> and `calc_spread_pnl(per_leg_expiry=True)` / `calc_summary_generic`); see the
-> root `CLAUDE.md` "Multi-leg Simulator + Calculator" entry.
-
----
-
-## File Structure
-
-```
-options_simulator/
-├── data/
-│   ├── fetcher.py          # Schwab API pulls, snapshot scheduling
-│   └── cache.py            # Parquet/SQLite storage, keyed on (symbol, strike, expiry, ts)
-├── engine/
-│   ├── black_scholes.py    # Vectorized B-S pricing + analytical Greeks
-│   ├── simulator.py        # Replay runner, what-if + IV shock scenario logic
-│   └── pnl.py              # P&L decomposition: δΔS + ½γΔS² + θΔt + νΔσ
-├── viz/
-│   ├── surface.py          # 3D PnL surface (go.Surface: price × time → value)
-│   ├── greek_decay.py      # 5-panel subplot, one Greek per panel, shared time axis
-│   ├── chain_heatmap.py    # go.Heatmap: strikes × time, colored by Greek intensity
-│   └── dashboard.py        # Dash app, layout, dcc.Slider replay control
-├── tests/
-│   └── test_black_scholes.py
-├── main.py                 # Entry point
-└── requirements.txt
-```
-
----
-
-## Tech Stack
-
-| Layer | Library | Notes |
-|-------|---------|-------|
-| Data | `schwab-py` | Auth already configured in this project |
-| Greeks | `py_vollib_vectorized` | Numpy-native, fast batch recalculation |
-| Fallback Greeks | `mibian` | Simpler, good for single-contract checks |
-| Visualization | `plotly` + `dash` | Interactive, embeds cleanly in tkinter via thread |
-| Data storage | `pandas` + `pyarrow` | Parquet for option snapshots |
-| Scheduling | `schedule` or `apscheduler` | Snapshot every 1–5 min during market hours |
-
-**Python version:** `py -3.11` (matches rest of project)
-
----
-
-## Data Schema
-
-Option snapshot table — stored per (symbol, strike, expiry, timestamp):
-
-```python
-columns = [
-    "timestamp",        # datetime, UTC
-    "symbol",           # underlying ticker e.g. "SPY"
-    "strike",           # float
-    "expiry",           # date
-    "option_type",      # "call" | "put"
-    "underlying_price", # float — S at snapshot time
-    "bid", "ask", "mid",# floats
-    "iv",               # implied volatility (decimal, e.g. 0.22)
-    "delta",            # from Schwab or recalculated
-    "gamma",
-    "theta",            # per-day convention (negative for long)
-    "vega",             # per 1-vol-point
-    "rho",
-    "theo_price",       # Black-Scholes theoretical mid
-    "days_to_expiry",   # float (intraday granularity)
-]
-```
-
----
-
-## Simulation Engine — Key Logic
-
-### Black-Scholes Greeks (analytical)
-
-```python
-# engine/black_scholes.py
-"""
-Options Simulator - Black-Scholes Engine
-Version: 1.0.0
-Last Updated: 2025-05-23
-
-Version 1.0.0 Changes:
-- Initial implementation
-"""
-
-import numpy as np
-from scipy.stats import norm
-
-#############################################
-# BLACK-SCHOLES ANALYTICAL GREEKS
-#############################################
-
-def bs_greeks(S, K, T, r, sigma, option_type="call"):
-    """
-    Compute full Greek set analytically.
-
-    Args:
-        S: underlying price
-        K: strike price
-        T: time to expiry in years (e.g. 2/252 for 2 trading days)
-        r: risk-free rate (decimal)
-        sigma: implied volatility (decimal)
-        option_type: "call" or "put"
-
-    Returns:
-        dict with keys: price, delta, gamma, theta, vega, rho
-    """
-    if T <= 0:
-        return {"price": max(0, S - K) if option_type == "call" else max(0, K - S),
-                "delta": 0, "gamma": 0, "theta": 0, "vega": 0, "rho": 0}
-
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-
-    N  = norm.cdf
-    n  = norm.pdf
-
-    if option_type == "call":
-        price = S * N(d1)  - K * np.exp(-r * T) * N(d2)
-        delta = N(d1)
-        rho   = K * T * np.exp(-r * T) * N(d2) / 100
-    else:
-        price = K * np.exp(-r * T) * N(-d2) - S * N(-d1)
-        delta = N(d1) - 1
-        rho   = -K * T * np.exp(-r * T) * N(-d2) / 100
-
-    gamma = n(d1) / (S * sigma * np.sqrt(T))
-    theta = (-(S * n(d1) * sigma) / (2 * np.sqrt(T))
-             - r * K * np.exp(-r * T) * (N(d2) if option_type == "call" else N(-d2))) / 365
-    vega  = S * np.sqrt(T) * n(d1) / 100   # per 1 vol point
-
-    return {"price": price, "delta": delta, "gamma": gamma,
-            "theta": theta, "vega": vega, "rho": rho}
-```
-
-### P&L Decomposition
-
-For each time step, attribute P&L by Greek contribution:
-
-```python
-# pnl.py  — second-order Taylor expansion
-def decompose_pnl(greeks_t0, delta_S, delta_t_years, delta_sigma):
-    delta_pnl = greeks_t0["delta"] * delta_S
-    gamma_pnl = 0.5 * greeks_t0["gamma"] * delta_S ** 2
-    theta_pnl = greeks_t0["theta"] * delta_t_years * 365  # convert back to per-step
-    vega_pnl  = greeks_t0["vega"]  * delta_sigma * 100    # vega is per 1 vol point
-    rho_pnl   = greeks_t0["rho"]   * 0                    # rate rarely changes intraday
-    return {
-        "delta": delta_pnl,
-        "gamma": gamma_pnl,
-        "theta": theta_pnl,
-        "vega":  vega_pnl,
-        "rho":   rho_pnl,
-        "total": delta_pnl + gamma_pnl + theta_pnl + vega_pnl,
-    }
-```
-
----
-
-## Visualization Panels
-
-### 1. PnL Surface (`viz/surface.py`)
-- `go.Surface(x=price_range, y=time_axis, z=option_values_matrix)`
-- X axis: underlying price ± 10% from current
-- Y axis: timestamp (2-day window, 1-min bars)
-- Z axis: theoretical option price (Black-Scholes recalculated at each grid point)
-- Add scatter overlay showing the actual path taken
-
-### 2. Greek Decay Panel (`viz/greek_decay.py`)
-- `make_subplots(rows=5, shared_xaxes=True)`
-- Row 1: Delta — shows directional drift as S moves
-- Row 2: Gamma — spikes near ATM near expiry
-- Row 3: Theta — nonlinear decay, steeper final day
-- Row 4: Vega — drops as expiry approaches
-- Row 5: Rho — mostly flat for short-dated options
-- Vertical cursor line driven by replay slider
-
-### 3. Chain Heatmap (`viz/chain_heatmap.py`)
-- `go.Heatmap(x=timestamps, y=strikes, z=greek_matrix)`
-- Dropdown to select which Greek to color by
-- ATM strike highlighted as a horizontal line
-- Color scale: RdYlGn for Delta, Reds for Theta burn
-
-### 4. Risk Dashboard (`viz/dashboard.py`)
-- Summary cards: net delta exposure, gamma ($ per 1% move), daily theta burn, vega sensitivity
-- Replay `dcc.Slider` with `dcc.Interval` auto-advance
-- Scenario toggle: Replay / What-if / IV Shock
-
----
-
-## Schwab API — Data Fetcher Pattern
-
-```python
-# data/fetcher.py
-"""
-Options Simulator - Schwab Data Fetcher
-Version: 1.0.0
-Last Updated: 2025-05-23
-"""
-
-#############################################
-# OPTION CHAIN SNAPSHOT
-#############################################
-
-def fetch_option_chain(client, symbol: str, strikes_near_atm: int = 10) -> pd.DataFrame:
-    """
-    Pull option chain snapshot from Schwab API.
-    Returns tidy DataFrame with one row per contract.
-    """
-    resp = client.get_option_chain(
-        symbol,
-        contractType="ALL",
-        strikeCount=strikes_near_atm,
-        includeUnderlyingQuote=True,
-        strategy="SINGLE",
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return _parse_chain(data)
-```
-
----
-
-## Coding Conventions
-
-Follows `ninja-python-dev` standards:
-
-- **File headers:** Docstring with module name, version, date, changelog
-- **Section separators:** `#############################################`
-- **Classes:** `PascalCase` — `BlackScholesEngine`, `OptionSimulator`
-- **Methods/functions:** `snake_case` — `fetch_option_chain`, `run_replay`
-- **Constants:** `UPPER_SNAKE` — `TRADING_DAYS_PER_YEAR = 252`
-- **Private:** `_prefix` — `_parse_chain`, `_build_surface_matrix`
-- **Logging:** `logging.getLogger(__name__)` with file handler
-- **GUI threading:** data fetches always in background threads, never on main thread
-
----
-
-## Common Tasks for Claude Code
-
-**"Add a new Greek to the decay panel"**
-→ Edit `engine/black_scholes.py` `bs_greeks()` return dict, add row in `viz/greek_decay.py`
-
-**"Add a new simulation mode"**
-→ Add mode class in `engine/simulator.py`, wire toggle in `viz/dashboard.py`
-
-**"Fetch and cache a full 2-day snapshot"**
-→ See `data/fetcher.py` `fetch_option_chain()` → `data/cache.py` `save_snapshot()`
-
-**"Change the heatmap Greek"**
-→ Edit dropdown options in `viz/chain_heatmap.py`, update `z=` matrix source
-
-**"Debug wrong Greek values"**
-→ Cross-check `engine/black_scholes.py` `bs_greeks()` against known values:
-  SPY ATM call, S=500, K=500, T=0.01 (≈2.5 days), σ=0.20, r=0.05
-  Expected: delta≈0.52, gamma≈0.056, theta≈-0.18/day, vega≈0.28
-
----
-
-## Critical Rules
-
-1. **Always recalculate Greeks analytically** — don't rely solely on Schwab-provided Greeks for simulation (they are snapshots, not continuous)
-2. **Time convention** — `T` in years; `1 trading day = 1/252`; theta displayed as per-calendar-day
-3. **Vega convention** — per 1 volatility point (i.e., divide raw `∂V/∂σ` by 100)
-4. **Theta sign** — theta is **negative** for long options; store as negative, display as negative
-5. **IV from Schwab** — use `mark` price (mid of bid/ask) when solving for IV, not last price
-6. **Python version** — `py -3.11`
-7. **No blocking calls on Dash callbacks** — run fetches in `threading.Thread`, update via `dcc.Store`
-
+The three simulation modes (Replay, What-if, IV shock), the per-leg time
+treatment, and the shared strategy/leg editor all live in
+`services/options_svc/compute.py` (`sim_run`, `sim_replay`) and
+`webgui/pages/options/simulator.py`. **Never compute a time-to-expiry inline** -
+there is one settlement instant (16:00 ET) and one helper per tier
+(`options_calculator.expiry_time_to_years`,
+`services/options_svc/compute.time_to_expiry_years`). See the root `CLAUDE.md`
+"Multi-leg Simulator + Calculator" and time-basis entries.

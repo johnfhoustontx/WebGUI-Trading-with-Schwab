@@ -2645,3 +2645,42 @@ def test_no_command_is_documented_that_does_not_exist():
     claimed = set(re.findall(r"``([a-z_]+)``(?=[^\n]{0,80}?→)", doc))
     ghosts = claimed - implemented
     assert not ghosts, f"documented but not implemented: {sorted(ghosts)}"
+
+
+# --- the matrix contract gate ------------------------------------------------
+
+def test_publish_matrix_malformed_payload_logs_and_does_not_cache(monkeypatch, caplog):
+    """cache:options:matrix is documented (root CLAUDE.md route table + the
+    2026-07-20 design) as validated by MatrixSnapshot, but for a long time the
+    contract existed only in its own unit test - neither publish site used it.
+
+    ``rows`` typed as a str must fail the gate: log naming the contract, cache
+    nothing. The Opportunity Board and the Desk both read this view, so a
+    half-valid payload is two broken screens."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_matrix",
+                        lambda *a, **kw: {"date": "2026-08-21", "rows": "not-a-list"})
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_matrix(bus)           # must not raise
+
+    assert bus.cache_get("cache:options:matrix") is None, "must not cache"
+    assert any("MatrixSnapshot" in r.message for r in caplog.records), \
+        "a gate failure must log loudly, naming the contract"
+
+
+def test_publish_matrix_keeps_every_key_the_pages_read(monkeypatch):
+    """The gate caches model_dump(), so a key the contract forgets is a key the
+    pages silently lose. ``error`` is the one that matters - matrix.py renders it
+    in the status line - so it is asserted by name, not just by round-trip."""
+    bus = Bus(fake=True)
+    view = {"date": "2026-08-21", "session_date": "2026-08-21", "ts": "T",
+            "rows": [{"symbol": "SPY", "hotness": 3}],
+            "premium": {"net": 1.0}, "error": "matrix unavailable"}
+    monkeypatch.setattr(handlers.compute, "build_matrix", lambda *a, **kw: view)
+
+    handlers.publish_matrix(bus)
+
+    cached = bus.cache_get("cache:options:matrix").payload
+    assert cached == view
+    assert cached["error"] == "matrix unavailable"

@@ -22,7 +22,7 @@ from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
-from shared.contracts.options import NetPremiumSnapshot, ScanResult
+from shared.contracts.options import MatrixSnapshot, NetPremiumSnapshot, ScanResult
 
 log = logging.getLogger(__name__)
 
@@ -411,6 +411,33 @@ def refresh_header(bus) -> None:
         log.exception("refresh_matrix_spots after header degraded")
 
 
+def _cache_matrix(bus, view) -> None:
+    """Validate against MatrixSnapshot, then publish. The ONE way this view is
+    written - both publish sites go through here.
+
+    The constructor IS the gate, same shape as publish_net_premium: every field
+    defaults (so a payload cached before a field existed still validates),
+    pydantic drops extras, and a non-dict raises TypeError at the ** expansion.
+    Publishing hangs off ``else`` so "only a clean payload is cached" is
+    structural.
+
+    NOTE the caching of ``snap.model_dump()``: a top-level key the contract does
+    not declare is a key the pages LOSE. Verified 2026-08-21 against the live
+    prod payload (92 rows) - date/session_date/ts/rows/premium/error all survive
+    the round trip. ``error`` in particular is rendered by the Opportunity Board
+    status line, so adding a top-level key here means adding it to the contract
+    in the same commit.
+    """
+    try:
+        snap = MatrixSnapshot(**view)
+    except Exception:
+        log.exception("matrix payload could not be validated against "
+                      "MatrixSnapshot - NOT publishing (shape regression)")
+    else:
+        bus.cache_set(CACHE_MATRIX, snap.model_dump(), event=EVENT_MATRIX,
+                      skip_unchanged=True)
+
+
 def refresh_matrix_spots(bus) -> None:
     """Overlay live spot + day% onto the last-published matrix (best-effort).
 
@@ -431,7 +458,7 @@ def refresh_matrix_spots(bus) -> None:
             return
         raw = compute.matrix_quotes(symbols)
         view = compute.apply_live_spots(payload, raw)
-        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+        _cache_matrix(bus, view)
     except Exception:
         log.exception("refresh_matrix_spots degraded")
 
@@ -1010,7 +1037,7 @@ def publish_matrix(bus) -> None:
         flow_cooldowns = _cache_payload(bus, _FLOW_COOLDOWN_KEY)
         view = compute.build_matrix(
             scan_day, flow_cooldowns, today, session_date, now_ts)
-        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+        _cache_matrix(bus, view)
     except Exception:
         log.exception("publish_matrix degraded")
 

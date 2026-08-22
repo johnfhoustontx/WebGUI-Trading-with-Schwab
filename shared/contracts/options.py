@@ -1,3 +1,7 @@
+import datetime as _dt
+
+from pydantic import field_validator
+
 from .envelope import _Base
 
 
@@ -111,6 +115,22 @@ class MatrixSnapshot(_Base):
     rows: list[dict] = []              # heterogeneous per-symbol row dicts (see matrix.build_rows)
     premium: dict | None = None        # dollar-weighted net-premium skew (see matrix.market_premium_aggregate)
     error: str | None = None
+
+    @field_validator("date", "session_date", "ts", mode="before")
+    @classmethod
+    def _isoformat_dates(cls, v):
+        """Accept a date/datetime OBJECT and store its isoformat.
+
+        ``build_matrix`` passes ``session_date`` straight through from
+        ``scheduler.active_session_date()``, which returns a ``datetime.date``.
+        json.dumps stringified it on the way into Redis, so the wire format was
+        always a string and the ``str`` annotation read as correct - the
+        mismatch only surfaced once the payload was validated IN MEMORY.
+        Normalising rather than widening the annotation keeps one shape on both
+        sides of the bus, and keeps the cached bytes byte-identical to what the
+        un-gated publish wrote (which is what ``skip_unchanged`` compares).
+        """
+        return v.isoformat() if isinstance(v, _dt.date) else v
 
 
 class NetPremiumSnapshot(_Base):

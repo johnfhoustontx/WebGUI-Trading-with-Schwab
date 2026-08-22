@@ -95,8 +95,32 @@ client and market data through `http://127.0.0.1:8100`.
 
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
 **Redis (Memurai) backbone**. **All six domains are migrated** — sentiment, options,
-portfolio, trade, driver, market — so the webgui imports only `nicegui` + `shared.bus` +
-`shared.contracts`, and every page reads Redis. The shape:
+portfolio, trade, driver, market — and every page reads Redis. The shape:
+
+**The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
+153 non-test `webgui/**/*.py`): `nicegui` · `shared.bus` (never `redis` directly)
+· `shared.market_calendar` · `repo_paths` · `requests` — **only** for the
+`/health` fan-out the shell and Status page run · `fastapi.responses` for the
+report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
+`sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
+a hyphenated app folder (`webgui/proxy.py` held the last of it for two dead
+client singletons; `test_proxy.py` now guards it at source level). ⚠ The
+shorthand "only nicegui + shared.bus + shared.contracts" was repeated in several
+places and was wrong on the last term: **the webgui imports `shared.contracts`
+nowhere at all** — see the contracts note below.
+
+**Contracts are a WRITE-side gate on SOME views, not the typed API both tiers
+share.** The design says "both tiers import them; validated on write and read".
+Measured 2026-08-21: the webgui reads ~50 distinct cache views, `shared/contracts/`
+defines 18 models, and services validate at ~15 of 74 `cache_set` sites. Read-side
+validation does not exist. Treat a contract as a guarantee only for the views that
+actually construct one (`ScanResult`, `NetPremiumSnapshot`, `MatrixSnapshot`, …);
+for the rest the payload shape is whatever the builder last emitted. ⚠ Documenting
+a view as "validated by X" does not make it so — `cache:options:matrix` carried
+that claim in this file and its design doc while `MatrixSnapshot` was used only in
+its own unit test, from 2026-07-20 until it was actually wired on 2026-08-21.
+
+The shape:
 
 ```
 TIER 1 GUI         webgui/ NiceGUI (:8500) — render() only; reads Redis cache on
@@ -1403,10 +1427,10 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 > "Waiting for … service" placeholder. **Sentiment, the entire Options section,
 > Portfolio, Trade, and Driver are migrated** (`services/sentiment_svc`,
 > `services/options_svc`, `services/portfolio_svc`, `services/trade_svc`,
-> `services/driver_svc`) — **every page now reads Redis**; the webgui imports
-> ONLY `nicegui` + `shared.bus` + `shared.contracts` — no app engines, so the documented
-> `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
-> architecture" section.
+> `services/driver_svc`) — **every page now reads Redis**; the webgui imports no app
+> engines, so the documented `scoring`/`notifier` cross-app collision can no longer
+> occur. The exact allow-list (and why the familiar "+ `shared.contracts`" shorthand
+> is wrong) is in the "3-tier architecture" section.
 
 ## Environments (dev / prod)
 
@@ -1894,37 +1918,54 @@ drifted far from their written values (driver_svc 162 → 239, `shared/bus` 15 �
 which is exactly what an unverified number does. `market_svc`, `shared/tests`,
 `tests` and `tools/tests` were never listed here at all.
 
-**Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
-read them as a regression:**
+**There are no known baseline failures.** As of **2026-08-21** every suite in the
+repo runs clean:
 
-- **options-scanner** — **8** since 2026-08-20 (was 11 for months, and "~2" in a
-  line that was simply wrong until 2026-08-09). Re-measured at **8 failed / 1172
-  passed / 2 skipped**. The set, which is what you compare (never the count —
-  see below):
-  `test_gex_collector.py` ×5 (`test_next_boundary_*` ×4, `test_main_skips_before_market_open`),
-  `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`, and
-  `test_scanner_engine.py::TestEarningsAvoidance` ×2. The `test_key_levels_doc.py`
-  ×3 that used to sit here asserted the existence of `options-scanner/docs/
-  KEY_LEVELS.md`, a file that does not exist in this repo; the test file went with
-  the 2026-08-20 dead-code sweep, which is why the baseline shrank.
-- **options_svc** — **none as of 2026-08-18** (**1148 passed**, re-measured on
-  `claude/dashboard-key-elements`). The 2 date-relative `test_expected_move`
-  failures previously listed here now pass — they depend on the run date, so
-  expect them to return. ⚠ `test_flow_alert_window.py::
-  test_gth_signal_still_fires_at_the_open` is **FLAKY**: observed failing once in
-  a full run, then passing in isolation and in two subsequent full runs.
-- **sentiment-dashboard** — **2**, both in `tests/test_apply_sector_perf.py`
-  (`test_apply_sector_perf_merges_into_existing_quotes`,
-  `test_apply_sector_perf_renders_from_merged_map`), failing with
-  `ModuleNotFoundError: No module named 'sentiment_dashboard'`. They test the old
-  **Tk UI entrypoint, which this repo deliberately never copied** (see the folder
-  map), so they can never pass here. Suite reads **479 passed / 2 failed**
-  (2026-08-20, after the legacy `notifier.py` and its ~20 tests were deleted;
-  it read 496 earlier the same day and 487 on 2026-08-14).
-- **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
-  (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
-  reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
-  so it **predates** the dev/prod-environments branch; first documented 2026-08-08.
+| suite | reads |
+|---|---|
+| options-scanner | **1180 passed / 0 failed / 2 skipped** |
+| sentiment-dashboard | **507 passed / 0 failed / 1 skipped** |
+| sentiment_svc | **328 passed / 1 xfailed** |
+| options_svc | **1218 passed** |
+| trade_svc | **79 passed** |
+
+**The long-standing "8-11 permanent failures" were a fiction, and that cost
+more than the failures did.** Every one turned out to be a **stale fixture
+pinning a constant that had since moved** - a 2-minute collector cadence that
+became 1-minute, an 8:30 collection window that became 8:00, a `LOCK_TTL_SEC`
+that halved with it, and absolute 2026-05 dates that drifted into the past. They
+had been labelled "timing-dependent" and "stale fixtures - do not fix", so nobody
+looked. Two consequences worth remembering:
+
+1. **A red baseline hides new failures.** A 9th failure
+   (`test_calc_multileg.py::test_per_leg_expiry_back_leg_retains_value_at_front_expiry`,
+   whose "far" back-leg expiry of 2026-08-21 simply arrived) appeared the morning
+   of the audit and was invisible against an expected count of 8.
+2. **Three of the five `TestEarningsAvoidance` tests were PASSING for the wrong
+   reason** - once every fixture date is in the past, they all take the same
+   early-out. A green test over a stale fixture asserts nothing.
+
+Fixtures are now **derived from the constant or relative to today** wherever the
+subject is one (the reasoning `gex_collector.py` already applied to
+`LOCK_TTL_SEC`). Nothing was xfail-ed to paper over a failure. The two remaining
+**skips** and the one **xfail** are deliberate and named:
+
+- `options-scanner/tests/test_dashboard_*` (2 skips) and
+  `sentiment-dashboard/tests/test_apply_sector_perf.py` (1 skip) carry module-level
+  `pytest.importorskip`s for the Tk entrypoints **this fork deliberately never
+  copied** - they can only pass in the source repo.
+- `sentiment_svc/tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
+  is `xfail(strict=True)` over a **real open bug**: the `$VIX1D` session latch
+  beats the daily close, so `vix1d_prev` reads 18.0 where the true prior close is
+  10.0, inflating `vix1d_spike_pct`. `strict=True` means fixing it FAILS the run
+  until the marker is deleted - the xfail is a tracked bug, not a hidden one.
+
+⚠ Two known-flaky behaviours survive: `options_svc`'s
+`test_flow_alert_window.py::test_gth_signal_still_fires_at_the_open` was observed
+failing once in a full run then passing in isolation and twice more in full runs,
+and the date-relative `test_expected_move` cases depend on the run date. Neither
+is an expected failure - investigate rather than accept.
+
 
 **Compare the failing SET, not the count.** A matching total is not evidence of a
 clean run: this repo has a documented incident where two real regressions hid
@@ -1934,8 +1975,10 @@ options-scanner's passed/skipped drifted 1351/2 → 1370/3 across a change while
 failure count sat unmoved at 11.
 
 **That drift had TWO independent sources** (the second measured 2026-08-18), and
-one of them is now gone. The first is the timing-dependent `test_gex_collector*`
-group. The second was a trio of Tk-dependent tests — `test_chart_style_vars.py`,
+BOTH are now gone. The first was the `test_gex_collector*` group, recorded here
+for a month as "timing-dependent" when in fact it pinned a superseded
+`POLL_INTERVAL_MIN` — fixed 2026-08-21 by deriving the expectations from the
+constant. The second was a trio of Tk-dependent tests — `test_chart_style_vars.py`,
 `test_gex_dex.py:182`, `test_theme.py` — racing on Tk root creation, where
 **whichever lost self-skipped, a DIFFERENT one each run**. Two of those three
 files were deleted on 2026-08-20 (they tested `build_chart_style_vars` and

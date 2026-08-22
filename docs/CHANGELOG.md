@@ -4,6 +4,106 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-21 (**Audit batch 1 — the "permanent" test baseline was
+a fiction; NaN in the validation study; Tier-1 loses its last engine glue.**
+- **The 8-11 "permanent baseline failures" were all stale fixtures.** Every suite in
+  the repo now runs clean — options-scanner **1180/0/2**, sentiment-dashboard
+  **507/0/1**, sentiment_svc **328 + 1 xfail**, options_svc **1218/0**, trade_svc
+  **79/0**. They had been labelled "timing-dependent" and "stale fixtures — do not
+  fix", so nobody looked; on inspection each one pinned a constant that had since
+  moved. Four `test_next_boundary_*` pinned a 2-minute cadence after
+  `POLL_INTERVAL_MIN` went 2 → 1 on 2026-07-11;
+  `test_main_skips_before_market_open` used 8:20/8:25 as "before the open" after the
+  window moved 8:30 → 8:00 CT; `test_acquire_defers_when_fresh_other_owner` used
+  +200 s, inside the old `LOCK_TTL_SEC` of 240 and outside the derived 120; the two
+  `TestEarningsAvoidance` cases used absolute 2026-05 dates that drifted into the
+  past. All are now **derived from the constant or relative to today**, the same
+  reasoning `gex_collector.py` already applied to `LOCK_TTL_SEC`. **Nothing was
+  xfail-ed to hide a failure.**
+- **The two costs of a red baseline, both realised.** A **9th** failure
+  (`test_per_leg_expiry_back_leg_retains_value_at_front_expiry`, whose "far" back-leg
+  expiry of 2026-08-21 simply arrived) appeared the morning of the audit and was
+  invisible against an expected count of 8 — the exact failure mode the
+  "compare the SET, not the count" rule exists to catch, one level up: the rule was
+  being followed against a *stale* set. And **three of the five
+  `TestEarningsAvoidance` tests were PASSING for the wrong reason** — once every
+  fixture date is in the past they all take the same early-out, so a green test over
+  a stale fixture asserted nothing.
+- **The two genuinely-unpassable tests are now explicit**, not failures:
+  `test_apply_sector_perf.py` gets a module-level `importorskip` (it exercises the Tk
+  entrypoint this fork deliberately never copied), and the real `$VIX1D`
+  session-latch bug gets **`xfail(strict=True)`** — fixing it now FAILS the run until
+  the marker is removed, so the xfail is a tracked bug rather than a hidden one.
+- **`daily_direction._num` accepted NaN** where its six siblings reject it, so a NaN
+  bar close reached `_clamp` and pinned a bound. Measured: an **all-NaN close series
+  scored 66.67** — moderately bullish, from no data — and one NaN close dropped a
+  maximal uptrend 100.0 → 83.33. It leaked into the study's own metrics too:
+  `per_state_stats` reported `mean=nan` at `n=2`, and `ordinal_ic` ranked THROUGH the
+  NaN (0.9856 where the clean pairs give 1.0). **Offline-only** — the module feeds
+  `validate_market_state.py`, never a service or request path — so the blast radius
+  is the five-state validation study's numbers, not a live gauge. Same family as the
+  2026-08-20 round; the guarded list keeps proving to be a map of where someone has
+  looked.
+- **`cache:options:matrix` is now actually validated.** Root CLAUDE.md and the
+  2026-07-20 design both said `MatrixSnapshot` gated it; in fact the model was used
+  **only in its own unit test** while both publish sites wrote unvalidated — from
+  2026-07-20 until now. Both now go through one `_cache_matrix(bus, view)` helper.
+  ⚠ **Wiring it naively would have broken two screens**: the gate caches
+  `model_dump()`, so a top-level key the contract omits is a key the pages lose, and
+  `matrix.py` renders `payload["error"]` in its status line. Verified against the
+  **live prod payload (92 rows)** — zero keys lost — before switching it on.
+- **The gate immediately caught a real shape mismatch**: `session_date` is a
+  `datetime.date` OBJECT in memory (straight from `scheduler.active_session_date()`),
+  not the `str` the contract declared. `json.dumps` had been stringifying it on the
+  way into Redis, so the wire format was always right and the annotation looked
+  right — the mismatch could only surface once the payload was validated *in memory*.
+  `MatrixSnapshot` now normalises date/datetime to isoformat, keeping the cached
+  bytes byte-identical (which is what `skip_unchanged` compares).
+- **Tier 1 lost its last `sys.path` glue into a hyphenated app folder.**
+  `webgui/proxy.py` built `SchwabProxyClient` / `SchwabPyProxyClient` singletons at
+  import; **nothing had called them since the 3-tier migration** (every runtime use
+  is `health()` / `api_call_stats()`, both plain `requests.get`). Deleting them
+  completes "remove the last sys.path engine-glue from webgui" from the 3-tier plan.
+  A **source-level** guard in `test_proxy.py` keeps it gone — an attribute check
+  alone would not catch the sys.path insertion coming back.
+- **`trade_svc/deepdive/engine.py` lost its `--direct` mode** — it read `tokens.json`
+  itself and called Schwab's API host, bypassing the proxy. Unreachable in-service
+  (compute.py builds `SchwabClient()` with no args), but a credential-reading path
+  inside `services/` contradicts "the proxy is the only Schwab gateway", and the
+  refresh token is a single rotating credential. Its guard test parses the file with
+  **`ast` and strips docstrings** before checking, because the docstring explaining
+  the removal necessarily names the things being banned.
+- **`validate_directional_gate.py` no longer hard-codes `D:\WebGUI Trading with
+  Schwab`** — run from prod or a worktree it would silently resolve the *dev*
+  checkout's `repo_paths`, and therefore the dev DBs and ports.
+- **`yfinance` dropped** (declared in `requirements.txt` as "still imported by some
+  analysis paths"; **zero imports repo-wide** — its consumers went with the
+  2026-08-20 Blueprint deletion), along with its three orphaned transitives
+  `curl_cffi` / `multitasking` / `peewee`. ⚠ **`Flask` was NOT removed** despite the
+  audit flagging it as pip-freeze cruft: `pip show` says `Required-by: schwab-py`, so
+  it is a legitimate transitive of the Schwab SDK. Verify before pruning a lock.
+- **Two per-app `CLAUDE.md`s were describing codebases this repo does not have**, and
+  they auto-load into every session that edits those folders.
+  `options-scanner/CLAUDE.md` (470 → 207 lines) still opened "Ships two interfaces …
+  a Tk desktop app and a FastAPI + React web app" and gave commands for
+  `dashboard.py`, `scanner.py`, `eod_report.py`, `uvicorn server.main:app` and
+  `npm run dev` — **all eight of those paths verified absent**. Its appended "Options
+  Simulator" section described a Dash app with `viz/`/`engine/`/`data/` packages and
+  a plotly/dash/py_vollib/mibian stack; the real module is **three flat files** and
+  the app charts with Highcharts. `sentiment-dashboard/CLAUDE.md` still opened "A
+  tkinter desktop app" and named `D:\AI_Based_Analysis\shared\sentiment_bridge.json`
+  as the canonical bridge path.
+- **The Tier-1 import allow-list is now stated exactly**, because the familiar
+  shorthand was wrong on its last term: the webgui imports **`shared.contracts`
+  nowhere at all**. Measured across all 153 non-test webgui files — `nicegui`,
+  `shared.bus`, `shared.market_calendar`, `repo_paths`, `requests` (health only),
+  `fastapi.responses`, and the lazy `edge_tts`. Recorded alongside it: contracts are
+  a **write-side gate on ~15 of 74 `cache_set` sites**, not the typed API both tiers
+  share — ~50 views are read by the GUI, 18 models exist, and read-side validation
+  does not exist at all. Documenting a view as "validated by X" does not make it so.)
+
+---
+
 **Last updated:** 2026-08-21 (**The Desk speaks the CONTRACT, not just the cause.**
 - **What shipped.** The spoken alert now names the option. `uoa`/`big_delta` carry a
   strike and an expiry, so they say them — *"N D X. Unusual activity, 0-D T E 7 15

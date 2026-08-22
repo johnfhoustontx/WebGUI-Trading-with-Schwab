@@ -90,3 +90,24 @@ def test_net_premium_snapshot_survives_json_round_trip():
     assert back.session_date == "2026-08-05"
     assert back.series["SPY"] == [[1, 10.0, 4.0]]     # lists survive unchanged
     assert back.series["BIG10"] == [[2, 20.0, 8.0]]   # tuples normalize to lists
+
+
+def test_matrix_snapshot_normalises_date_objects():
+    """build_matrix passes ``session_date`` through from
+    ``scheduler.active_session_date()``, which returns a ``datetime.date``
+    OBJECT - json.dumps stringified it on the way into Redis, so the wire format
+    was always a string and the ``str`` annotation looked right. Validating the
+    IN-MEMORY payload exposed the mismatch, so the contract normalises instead of
+    rejecting: same wire format, and now the same shape on both sides."""
+    from datetime import date, datetime
+
+    from shared.contracts.options import MatrixSnapshot
+
+    m = MatrixSnapshot(date=date(2026, 8, 21),
+                       session_date=date(2026, 8, 21),
+                       ts=datetime(2026, 8, 21, 9, 15))
+    assert m.date == "2026-08-21"
+    assert m.session_date == "2026-08-21"
+    assert m.ts == "2026-08-21T09:15:00"
+    # plain strings still pass through untouched
+    assert MatrixSnapshot(session_date="2026-08-21").session_date == "2026-08-21"

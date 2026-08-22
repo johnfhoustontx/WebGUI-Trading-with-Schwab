@@ -58,8 +58,6 @@ logger = logging.getLogger(__name__)
 #############################################
 
 PROXY_BASE = PROXY_URL  # migrated: source the proxy base from repo_paths (:8100)
-DIRECT_BASE = 'https://api.schwabapi.com'
-MARKETDATA_PREFIX = '/marketdata/v1'
 
 # SchwabProxy mounts its routes at the root (/quotes, /chains, /pricehistory)
 # and its /quotes handler hardcodes fields=quote, which drops the fundamental
@@ -67,7 +65,6 @@ MARKETDATA_PREFIX = '/marketdata/v1'
 PASSTHROUGH_ROUTE = '/passthrough'
 PROXY_NATIVE_ROUTES = {'/quotes', '/chains', '/pricehistory'}
 
-TOKEN_PATH = None  # direct mode unused in-service (always proxy)
 DEFAULT_OUTPUT_DIR = Path('./reports')
 
 # Schwab uses -999.0 as a "no value" sentinel on greeks
@@ -87,70 +84,31 @@ REQUEST_TIMEOUT = 30
 #############################################
 
 class SchwabClient:
-    """Thin wrapper over the Schwab market data endpoints.
+    """Thin wrapper over the Schwab market data endpoints, via SchwabProxy.
 
-    Defaults to routing through SchwabProxy so this tool does not open a
-    second OAuth token lifecycle. Set direct=True to hit Schwab directly
-    using a bearer token read from tokens.json.
+    The proxy is the only Schwab gateway. This class used to carry a
+    ``direct=True`` mode that read tokens.json and called api.schwabapi.com
+    itself; it was unreachable in-service and opened a second OAuth token
+    lifecycle against a single rotating refresh token, so it went 2026-08-21.
+    ``tests/test_no_direct_schwab.py`` keeps it gone.
     """
 
-    def __init__(self, direct=False, base_url=None, path_prefix=MARKETDATA_PREFIX,
-                 token_path=TOKEN_PATH, proxy_native=False):
-        self.direct = direct
+    def __init__(self, base_url=None, proxy_native=False):
         self.proxy_native = proxy_native
-        self.base_url = (base_url or (DIRECT_BASE if direct else PROXY_BASE)).rstrip('/')
-        self.path_prefix = path_prefix.rstrip('/') if direct else ''
+        self.base_url = (base_url or PROXY_BASE).rstrip('/')
         self.session = requests.Session()
-
-        if direct:
-            token = self._load_token(token_path)
-            self.session.headers.update({'Authorization': f'Bearer {token}'})
-
         self.session.headers.update({'Accept': 'application/json'})
-
-    @staticmethod
-    def _load_token(token_path):
-        """Read the access token out of tokens.json"""
-        token_path = Path(token_path)
-        if not token_path.exists():
-            raise FileNotFoundError(
-                f'Token file not found: {token_path}. '
-                f'Run without --direct to route through SchwabProxy instead.'
-            )
-        with open(token_path, 'r') as fh:
-            payload = json.load(fh)
-
-        # tokens.json layouts vary; check the common shapes
-        for path in (('access_token',), ('token', 'access_token'),
-                     ('creation_timestamp', ), ('token_dictionary', 'access_token')):
-            node = payload
-            ok = True
-            for key in path:
-                if isinstance(node, dict) and key in node:
-                    node = node[key]
-                else:
-                    ok = False
-                    break
-            if ok and isinstance(node, str):
-                return node
-
-        raise KeyError(f'Could not locate access_token in {token_path}')
 
     def _build_request(self, endpoint, params):
         """Resolve the URL and query params for the active transport mode
 
-        Direct mode hits Schwab itself under /marketdata/v1.
-
-        Proxy mode routes through /passthrough, which forwards verbatim. The
+        Routes through the proxy's /passthrough, which forwards verbatim. The
         proxy's dedicated routes are avoided because /quotes pins fields=quote
         and there is no /instruments route at all.
 
         --proxy-native opts back into the dedicated routes where they exist.
         """
         params = {k: v for k, v in (params or {}).items() if v is not None}
-
-        if self.direct:
-            return f'{self.base_url}{self.path_prefix}{endpoint}', params
 
         if self.proxy_native and endpoint in PROXY_NATIVE_ROUTES:
             return f'{self.base_url}{endpoint}', params
@@ -161,7 +119,7 @@ class SchwabClient:
             if ',' in str(value):
                 raise ValueError(
                     f"Cannot send '{key}={value}' through /passthrough: the proxy "
-                    f'splits params on commas. Use --direct for this request.'
+                    f'splits params on commas.'
                 )
 
         query = {'endpoint': endpoint}
@@ -177,7 +135,7 @@ class SchwabClient:
         except requests.exceptions.ConnectionError:
             raise ConnectionError(
                 f'Could not reach {self.base_url}. '
-                f'Is SchwabProxy running on port 8100? Use --direct to bypass it.'
+                f'Is SchwabProxy running on port 8100?'
             )
 
         if resp.status_code == 401:
@@ -185,18 +143,16 @@ class SchwabClient:
                 'Schwab returned 401. The refresh token has likely expired '
                 '(Schwab refresh tokens are 7 days). Re-run the proxy OAuth flow.'
             )
-        if resp.status_code == 404 and not self.direct:
+        if resp.status_code == 404:
             raise ConnectionError(
                 f'Proxy returned 404 for {url}. Expected SchwabProxy to expose '
-                f'{PASSTHROUGH_ROUTE}. Check the proxy version, or use --direct.'
+                f'{PASSTHROUGH_ROUTE}. Check the proxy version.'
             )
         resp.raise_for_status()
         return resp.json()
 
     def check_health(self):
         """Preflight the proxy so token problems surface before any data call"""
-        if self.direct:
-            return None
         try:
             resp = self.session.get(f'{self.base_url}/health', timeout=10)
             resp.raise_for_status()
@@ -1733,11 +1689,7 @@ def parse_args():
     parser.add_argument('--from-date', default=None, help='Chain start expiry YYYY-MM-DD')
     parser.add_argument('--to-date', default=None, help='Chain end expiry YYYY-MM-DD')
     parser.add_argument('--no-options', action='store_true', help='Skip the option chain pull')
-    parser.add_argument('--direct', action='store_true',
-                        help='Bypass SchwabProxy and call api.schwabapi.com with tokens.json')
     parser.add_argument('--base-url', default=None, help='Override the base URL')
-    parser.add_argument('--path-prefix', default=MARKETDATA_PREFIX,
-                        help='Path prefix for --direct mode (default /marketdata/v1)')
     parser.add_argument('--proxy-native', action='store_true',
                         help="Use the proxy's own /quotes and /chains routes instead of "
                              '/passthrough. Note: its /quotes drops the fundamental block.')
@@ -1791,9 +1743,7 @@ def main():
     # ---- Client
     try:
         client = SchwabClient(
-            direct=args.direct,
             base_url=args.base_url,
-            path_prefix=args.path_prefix,
             proxy_native=args.proxy_native,
         )
     except Exception as exc:
@@ -1816,7 +1766,7 @@ def main():
         else:
             logger.info('Proxy healthy, token valid.')
 
-    if args.proxy_native and not args.direct:
+    if args.proxy_native:
         logger.warning('--proxy-native: the proxy pins fields=quote, so fundamentals '
                        'will be missing from this run.')
 

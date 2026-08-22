@@ -12,8 +12,13 @@ Run:  python services/driver_svc/validate_directional_gate.py
 import sys
 import sqlite3
 import datetime as dt
+import pathlib
 
-sys.path.insert(0, r"D:\WebGUI Trading with Schwab")
+# Resolve the repo root from THIS file, never a literal: a hard-coded D:\ path
+# makes an offline script run against whichever checkout it names rather than
+# the one it lives in - so run from prod or a worktree it would silently read
+# the dev checkout's repo_paths (and therefore the dev DBs and ports).
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER  # noqa: E402
 from services.driver_svc.guardrails import _side_blocked  # reuse the LIVE block rule  # noqa: E402
 

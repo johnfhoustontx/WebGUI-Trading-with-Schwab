@@ -51,9 +51,6 @@ openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.x
 # --- Windows desktop notifications (O, S) ---
 winotify                  # toast notifications (provides the `winotify` package)
 
-# --- Market data (optional / legacy) ---
-yfinance                  # still imported by some analysis paths; optional fallback data source
-
 # --- Scheduling (D) ---
 apscheduler==3.10.4
 
