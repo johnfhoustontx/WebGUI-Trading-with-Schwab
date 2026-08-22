@@ -4,7 +4,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 4.
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 5.
 The swing model's refit is the headline, and it is not good news: Phase 0 found
 the artifact 55 days stale and 44% of the measured edge gone on refresh, and
 Phase 4 found that what remains is a beta bet.**
@@ -121,6 +121,44 @@ Phase 4 found that what remains is a beta bet.**
   nothing in the app had ever said so.
 - Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
   options-scanner **1186**, schwab-proxy **104**.
+
+**Phase 5 — the rank board.** The Analyze card answers "what about THIS name?";
+the board answers "of everything the model can see, what is best and worst right
+now?" — the shortlist the single-symbol page was always missing.
+- **One code path, and threading it found a latent bug.** Every row is scored by
+  the same `score_symbol` the card calls, with the same basis AND the same
+  regime key. `_peer_block` had been scoring peers with NO regime while the
+  headline symbol was scored with one, then comparing their percentiles —
+  invisible only because the artifact carries a single regime today.
+- **Deciles come from TODAY's cross-section**, not the artifact's calibration
+  bands. Pinned by a test that hands the artifact ONE band, making every name
+  historically indistinguishable, and still requires the board to rank them.
+- **Gated rows are marked, never dropped**, and `gates_evaluated` is published
+  beside them — the board checks a SUBSET of the card's gates, so an unmarked
+  row must not read as "cleared everything". Its squeeze gate calls
+  `short_interest.squeeze_flag` with the float leg absent rather than
+  re-implementing the threshold, so board and card cannot drift.
+- ⚠ **The first live build returned zero rows, and that was a real bug.** The
+  cached universe snapshot was in the FLAT `{factor: [values]}` shape
+  `get_universe_snapshot` deliberately tolerates from older code — scoring works
+  against it, ranking cannot, because it has values but no symbol NAMES. On
+  screen that is indistinguishable from "the market offered nothing today". Now:
+  a `status` naming which kind of empty it is, a self-heal that rebuilds a legacy
+  snapshot once instead of waiting out the day, and a page that renders the
+  reason — or NOTHING for an unrecognised status, rather than guessing. A fourth
+  fix fell out of the third: `status` was in the builder and the page but not the
+  contract, so the projection dropped it silently between service and page.
+- **Verified live in dev** (78 names): 25 rows carry visible gates (NVDA
+  earnings in 4 days; ORCL earnings in 17 days *and* below its 200-EMA), and the
+  short pool renders as *"Express these RELATIVE… SPY above a rising 200-DMA"*.
+- **The live run demonstrates Phase 4 better than any table.** Long pool: MU,
+  INTC, AMD, AMAT, QCOM, CAT, AVGO, TXN. Short pool: TMO, DIS, BAC, PFE, V, ABT,
+  MA. The buy list is high-beta semiconductors and the sell list is defensives —
+  which is why the amber exposure line sits directly above the table.
+- Trade Analyzer became a nav GROUP (Analyze · Rank Board). The manuals guards
+  caught it immediately: both manuals gained a Rank Board section and the
+  renamed Analyze heading, and two stale nav tables were corrected.
+- Suites: trade_svc **346** (with contracts), webgui **2616**.
 
 **Phase 4 — the model refit, which turned into finding out what the model is.**
 - **The swing composite is a beta bet, not a cross-sectional edge.** Splitting

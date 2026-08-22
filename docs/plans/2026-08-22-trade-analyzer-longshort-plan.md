@@ -396,17 +396,59 @@ not by itself extend the promotion freeze.
 
 ---
 
-## Phase 5 — rank board
+## Phase 5 — rank board ✅ SHIPPED 2026-08-22
 
-- **Test**: scoring the snapshot produces one row per symbol with the same
-  composite the single-symbol path yields for that symbol (no second code path);
-  deciles are computed on the live cross-section; gate-disqualified rows are
-  marked, not dropped.
-- **Code**: `cache:trade:rank_board` (additive contract) + a board tab. Register
-  the route in `test_shell.py` and add the page to `test_no_inline_style.py`.
+- [x] **One code path.** Every row is scored by `swing_model.score_symbol` — the
+      same function the card calls, same basis, same regime key. Threading the
+      regime through fixed a latent bug on the way past: `_peer_block` scored
+      peers with NO regime while the headline symbol was scored with one, then
+      compared their percentiles. Invisible only because the artifact carries a
+      single regime today.
+- [x] **Deciles from the live cross-section**, not the artifact bands. Pinned by
+      a test that gives the artifact ONE band — every name historically
+      indistinguishable — and still requires the board to rank them.
+- [x] **Gate-disqualified rows marked, not dropped**, and `gates_evaluated`
+      published beside them: the board checks a SUBSET of the card's gates, so
+      an unmarked row must not read as "cleared everything". The squeeze gate
+      calls `short_interest.squeeze_flag` with the float leg absent rather than
+      re-implementing the threshold, so board and card cannot drift.
+- [x] `cache:trade:rank_board` + `RankBoard` contract + `/trade/board`.
+      Trade Analyzer became a nav GROUP (Analyze · Rank Board); registered in
+      `test_shell.py` and `test_no_inline_style.py`.
+- [x] **The Phase-4 disclosure travels with the board.** Ranking is where a
+      volatility tilt bites hardest, so `risk_share` is in the payload, not
+      something the page could forget to ask for.
 
-**Exit:** both deciles render with gates visibly disqualifying rows; an empty
-short pool in a strong uptrend renders as "market filter: relative-only".
+**Exit met, verified live in dev** (78 names, model 2026-08-22): both pools
+render, 25 rows carry visible gates (`NVDA` earnings in 4 days, `ORCL` earnings
+in 17 days + below its 200-EMA), and the short pool renders as
+*"Express these RELATIVE… SPY above a rising 200-DMA; regime read is stale"*.
+
+⚠ **Deliberate deviation:** the exit criterion said an empty short pool in an
+uptrend should render as relative-only. The board **populates** the pool and
+LABELS it relative instead — dropping it would hide a real research output, and
+the exit's intent was that the reason be visible, which it now is.
+
+**The live run is also a demonstration of the Phase-4 finding.** Long pool: MU,
+INTC, AMD, AMAT, QCOM, CAT, AVGO, TXN. Short pool: TMO, DIS, BAC, PFE, V, ABT,
+MA. The model's buy list is high-beta semiconductors and its sell list is
+defensives — the volatility tilt, legible at a glance, which is exactly why the
+amber exposure line sits above the table.
+
+### The bug the first live build found
+
+The cached universe snapshot was in the shape `get_universe_snapshot`
+deliberately tolerates from older code — the FLAT `{factor: [values]}` basis.
+Scoring works against it and its docstring says so; **ranking cannot**, because
+the flat basis has values but no symbol NAMES. The board returned zero rows,
+which on screen is indistinguishable from "the market offered nothing today".
+
+Fixed three ways: a `status` field naming which kind of empty it is, a
+self-heal that rebuilds a legacy snapshot once rather than waiting out the day,
+and a page that renders the reason (and renders NOTHING for an unrecognised
+status rather than guessing). A fourth fix came out of the third — `status` was
+in the builder and the page but not the contract, so the handler's projection
+dropped it silently; a test now asserts every field the board sets survives it.
 
 ---
 
