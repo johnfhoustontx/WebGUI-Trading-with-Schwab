@@ -51,6 +51,12 @@ _FIELDS = {
     "fundamentals_available": False,
     "timestamp": None,
     "errors": [],
+    # Two-sided reads. Additive and optional; a compute result that predates
+    # them (or a degraded one that omits them) projects to None and the page's
+    # builders no-op.
+    "direction_clearance": None,
+    "dealer_context": None,
+    "peers": None,
 }
 
 

@@ -265,3 +265,100 @@ def test_humanize_reason_swaps_leading_key():
     assert trade.humanize_reason("Insufficient fundamental data") == "Insufficient fundamental data"
     assert trade.humanize_reason("") == ""
     assert trade.humanize_reason(None) is None
+
+
+
+
+# ── two-sided reads (Phase 2, task 2.5) ──────────────────────────────────────
+
+class TestClearanceRows:
+    def test_both_sides_render_even_when_one_is_blocked(self):
+        """A blocked side WITH its reasons is a research finding. Rendering
+        only the permitted side would make the reader infer the absence."""
+        dc = {"market": {"summary": "SPY above a rising 200-DMA"},
+              "long": {"state": "cleared", "reasons": ["SPY above a rising 200-DMA"]},
+              "short": {"state": "relative_only",
+                        "reasons": ["SPY above a rising 200-DMA",
+                                    "committed direction is Softening"]}}
+        rows = trade.clearance_rows(dc)
+        assert [r["side"] for r in rows] == ["Long", "Short"]
+        assert rows[1]["state"] == "relative only"
+        assert len(rows[1]["reasons"]) == 2
+
+    def test_absent_clearance_renders_nothing_rather_than_a_placeholder(self):
+        assert trade.clearance_rows(None) == []
+        assert trade.clearance_rows({}) == []
+
+    def test_each_state_maps_to_a_finite_palette_class(self):
+        """Data-driven colours map to a FIXED set of static Tailwind classes,
+        never a runtime-built arbitrary value (the house rule)."""
+        seen = {trade.clearance_text_class(s)
+                for s in ("cleared", "relative_only", "blocked", "nonsense", None)}
+        assert seen <= set(trade.CLEARANCE_TEXT_CLASSES)
+
+
+class TestDealerRows:
+    def test_a_collected_fresh_row_yields_readable_fields(self):
+        ctx = {"collected": True, "stale": False, "gamma_regime": "above",
+               "regime_words": "long gamma — dealers damp moves",
+               "setup_words": "Grind — charm drift into the close",
+               "flip": 306.5, "call_wall": 315.0, "put_wall": 300.0,
+               "call_wall_pct": 1.71, "put_wall_pct": -3.13,
+               "atm_iv": 27.4, "iv_state": "stable", "net_gex": 4.12e8,
+               "summary": "long gamma · call wall 315"}
+        rows = trade.dealer_rows(ctx)
+        labels = {r["label"] for r in rows}
+        assert "Gamma regime" in labels and "Call wall" in labels
+        cw = next(r for r in rows if r["label"] == "Call wall")
+        assert "315" in cw["value"] and "+1.7" in cw["value"]
+
+    def test_an_uncollected_symbol_yields_no_rows(self):
+        assert trade.dealer_rows({"collected": False, "summary": "Not collected"}) == []
+        assert trade.dealer_rows(None) == []
+
+    def test_suppressed_walls_are_simply_absent_not_shown_as_none(self):
+        """Off-hours the walls are withheld deliberately. Printing 'None' would
+        read as a level."""
+        ctx = {"collected": True, "stale": False, "gamma_regime": "above",
+               "regime_words": "long gamma", "setup_words": "",
+               "flip": 306.5, "call_wall": None, "put_wall": None,
+               "call_wall_pct": None, "put_wall_pct": None,
+               "atm_iv": None, "iv_state": "na", "net_gex": 0.0, "summary": "x"}
+        labels = {r["label"] for r in trade.dealer_rows(ctx)}
+        assert "Call wall" not in labels and "Put wall" not in labels
+
+
+class TestPeerRow:
+    PEERS = {"sector": "Technology", "rank": 3, "n": 5,
+             "strongest": {"symbol": "NVDA", "score": 91},
+             "weakest": {"symbol": "INTC", "score": 12},
+             "above": {"symbol": "AVGO", "score": 74},
+             "below": {"symbol": "MSFT", "score": 66},
+             "ranked": [{"symbol": "NVDA", "score": 91}]}
+
+    def test_names_the_placement_in_words(self):
+        line = trade.peer_line(self.PEERS, "AAPL")
+        assert "3rd of 5" in line and "Technology" in line
+
+    def test_absent_peers_render_nothing(self):
+        assert trade.peer_line(None, "AAPL") == ""
+        assert trade.peer_line({"ranked": []}, "AAPL") == ""
+
+    def test_peer_chips_carry_every_named_peer(self):
+        chips = trade.peer_chips(self.PEERS, "AAPL")
+        syms = {c["symbol"] for c in chips}
+        assert {"NVDA", "AVGO", "MSFT", "INTC"} <= syms
+        assert all(c["role"] for c in chips)
+
+
+class TestShortGateRows:
+    def test_short_gates_render_separately_from_long_ones(self):
+        v = {"gates_triggered": ["Below 200EMA: cannot be BUY"],
+             "short_gates": ["Squeeze risk (17.1 days to cover): cannot be SELL"]}
+        assert trade.gate_rows(v) == ["Below 200EMA: cannot be BUY"]
+        assert trade.short_gate_rows(v) == [
+            "Squeeze risk (17.1 days to cover): cannot be SELL"]
+
+    def test_a_verdict_without_short_gates_is_fine(self):
+        assert trade.short_gate_rows({"gates_triggered": []}) == []
+        assert trade.short_gate_rows(None) == []

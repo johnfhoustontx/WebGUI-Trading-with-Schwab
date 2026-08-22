@@ -593,3 +593,114 @@ def test_earnings_enrichment_is_skipped_under_pytest_by_default(monkeypatch):
     _patch(monkeypatch, Client())
     compute._fetch_fundamentals("AAPL")
     assert opened == [], f"enrichment opened the real store: {opened}"
+
+
+# ── dealer context wiring (Phase 2, task 2.3) ────────────────────────────────
+
+def test_analyze_carries_dealer_context(monkeypatch):
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_matrix_row", lambda sym: (
+        {"symbol": sym, "spot": 120.0, "flip": 118.0, "call_wall": 125.0,
+         "put_wall": 115.0, "net_gex": 4.1e8, "atm_iv": 27.4,
+         "iv_state": "stable", "gex_regime": "above",
+         "dealer_regime": "charm_grind"},
+        _dt.datetime.now(_dt.timezone.utc).isoformat()))
+    ctx = compute.analyze("AAPL")["dealer_context"]
+    assert ctx["collected"] is True and ctx["stale"] is False
+    assert ctx["call_wall"] == 125.0
+    assert "long gamma" in ctx["summary"].lower()
+
+
+def test_analyze_says_not_collected_for_a_symbol_outside_the_universe(monkeypatch):
+    """Most symbols a user types are NOT in the ~93-name gamma universe. That
+    must read as 'not collected', never as absent levels the reader has to
+    interpret."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_matrix_row", lambda sym: (None, None))
+    ctx = compute.analyze("ZZZZ")["dealer_context"]
+    assert ctx["collected"] is False
+    assert "not collected" in ctx["summary"].lower()
+
+
+def test_dealer_context_survives_a_bus_outage(monkeypatch):
+    _patch(monkeypatch, FakeClient())
+
+    def boom():
+        raise RuntimeError("memurai down")
+
+    monkeypatch.setattr(compute, "_bus", boom)
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []
+    assert res["dealer_context"]["collected"] is False
+
+
+# ── per-symbol snapshot + sector peers (Phase 2, task 2.4) ───────────────────
+
+def test_the_universe_snapshot_keeps_symbol_identity(monkeypatch):
+    """The snapshot was `{factor: [values]}` — it computed every symbol's
+    factors daily and then THREW THE NAMES AWAY. Keeping them is the single
+    change that turns a one-symbol scorer into a ranking, and it powers the
+    peer lines on the single-symbol card before any board exists."""
+    monkeypatch.setattr(compute, "_swing_universe", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr(compute, "_symbol_factor_row",
+                        lambda s: {"mom_6_1": 1.0 if s == "AAPL" else 0.5,
+                                   "low_vol": -0.02})
+    snap = compute.build_universe_factor_snapshot()
+    assert set(snap["by_symbol"]) == {"AAPL", "MSFT"}
+    assert snap["by_symbol"]["AAPL"]["mom_6_1"] == 1.0
+
+
+def test_the_flat_basis_is_DERIVED_and_unchanged(monkeypatch):
+    """The scorer consumes `{factor: [values]}`. That must come out of the new
+    shape byte-identically, so the scoring path provably does not move."""
+    monkeypatch.setattr(compute, "_swing_universe", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr(compute, "_symbol_factor_row",
+                        lambda s: {"mom_6_1": 1.0 if s == "AAPL" else 0.5,
+                                   "low_vol": -0.02})
+    snap = compute.build_universe_factor_snapshot()
+    flat = compute.flat_basis(snap)
+    assert sorted(flat["mom_6_1"]) == [0.5, 1.0]
+    assert sorted(flat["low_vol"]) == [-0.02, -0.02]
+
+
+def test_a_legacy_flat_snapshot_still_scores(monkeypatch):
+    """A cached payload written before this change has no `by_symbol`. It must
+    keep working rather than silently scoring every symbol off nothing."""
+    legacy = {"mom_6_1": [0.5, 1.0], "low_vol": [-0.02, -0.02]}
+    assert compute.flat_basis(legacy) == legacy
+
+
+class TestSectorPeers:
+    SNAP = {"by_symbol": {
+        "AAPL": {"mom_6_1": 0.5}, "MSFT": {"mom_6_1": 0.4},
+        "NVDA": {"mom_6_1": 0.9}, "INTC": {"mom_6_1": -0.8},
+        "JPM": {"mom_6_1": 0.7},
+    }}
+
+    def _scores(self):
+        return {"AAPL": 70, "MSFT": 66, "NVDA": 91, "INTC": 12, "JPM": 80}
+
+    def test_ranks_within_the_sector_only(self, monkeypatch):
+        peers = compute.sector_peers("AAPL", self.SNAP, self._scores())
+        names = [p["symbol"] for p in peers["ranked"]]
+        assert "JPM" not in names            # Financials, not Technology
+        assert names[0] == "NVDA"            # strongest first
+
+    def test_names_the_strongest_weakest_and_neighbours(self, monkeypatch):
+        peers = compute.sector_peers("AAPL", self.SNAP, self._scores())
+        assert peers["strongest"]["symbol"] == "NVDA"
+        assert peers["weakest"]["symbol"] == "INTC"
+        assert peers["above"]["symbol"] == "NVDA"
+        assert peers["below"]["symbol"] == "MSFT"
+        assert peers["sector"] == "Technology"
+
+    def test_a_symbol_with_no_sector_yields_nothing_rather_than_everything(self):
+        """An unmapped symbol has no peer set. Ranking it against the whole
+        universe would invent a comparison that does not exist."""
+        peers = compute.sector_peers("ZZZZ", self.SNAP, self._scores())
+        assert peers["ranked"] == [] and peers["sector"] == ""
+
+    def test_the_strongest_peer_can_BE_the_analyzed_symbol(self):
+        peers = compute.sector_peers("NVDA", self.SNAP, self._scores())
+        assert peers["strongest"]["symbol"] == "NVDA"
+        assert peers["above"] is None        # nothing ranks above it

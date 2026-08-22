@@ -340,6 +340,139 @@ def model_staleness(version, today=None, threshold_days=60):
             f"fit_swing_model.py to refresh the weights.")
 
 
+# ── two-sided reads (Phase 2) ───────────────────────────────────────────────
+# Pure builders for the three additive blocks `trade_svc` now publishes. Each
+# no-ops on an absent block, so a payload cached before they existed renders
+# exactly as it did.
+
+# Data-driven colour maps to a FIXED finite set of static Tailwind classes —
+# never a runtime-built arbitrary value (the Tailwind-first house rule).
+CLEARANCE_TEXT_CLASSES = (_BUY_TEXT, _HOLD_TEXT, _SELL_TEXT)
+_CLEARANCE_TEXT = {"cleared": _BUY_TEXT,
+                   "relative_only": _HOLD_TEXT,
+                   "blocked": _SELL_TEXT}
+
+
+def clearance_text_class(state):
+    """Tailwind text-[…] class for a clearance state.
+
+    An unknown state falls back to the amber HOLD colour rather than a green
+    that would read as permission."""
+    return _CLEARANCE_TEXT.get(state, _HOLD_TEXT)
+
+
+def clearance_rows(clearance):
+    """One row per SIDE — always both, each with its reasons.
+
+    Rendering only the permitted side would make the reader infer the absence;
+    a blocked side WITH its reasons is a research finding."""
+    if not clearance:
+        return []
+    rows = []
+    for key, label in (("long", "Long"), ("short", "Short")):
+        side = (clearance or {}).get(key)
+        if not side:
+            continue
+        state = side.get("state") or ""
+        rows.append({
+            "side": label,
+            "state": state.replace("_", " "),
+            "state_key": state,
+            "text_class": clearance_text_class(state),
+            "reasons": list(side.get("reasons") or []),
+        })
+    return rows
+
+
+def _wall_value(level, pct):
+    if level is None:
+        return None
+    return "%g" % level if pct is None else "%g (%+.1f%%)" % (level, pct)
+
+
+def dealer_rows(context):
+    """Label/value rows for the dealer-positioning block, or [].
+
+    A withheld wall is simply ABSENT rather than rendered as ``None`` — a
+    printed None reads as a level. Off-hours (index OI zero) and stale
+    payloads both land there by design."""
+    if not context or not context.get("collected"):
+        return []
+    rows = []
+    if context.get("regime_words"):
+        rows.append({"label": "Gamma regime", "value": context["regime_words"]})
+    if context.get("setup_words"):
+        rows.append({"label": "Setup", "value": context["setup_words"]})
+    if context.get("flip") is not None:
+        rows.append({"label": "Flip", "value": "%g" % context["flip"]})
+    cw = _wall_value(context.get("call_wall"), context.get("call_wall_pct"))
+    if cw:
+        rows.append({"label": "Call wall", "value": cw})
+    pw = _wall_value(context.get("put_wall"), context.get("put_wall_pct"))
+    if pw:
+        rows.append({"label": "Put wall", "value": pw})
+    if context.get("atm_iv") is not None:
+        iv = "%.1f%%" % context["atm_iv"]
+        state = context.get("iv_state")
+        if state and state != "na":
+            iv += " (%s)" % state
+        rows.append({"label": "ATM IV", "value": iv})
+    return rows
+
+
+def _ordinal(n):
+    if n is None:
+        return ""
+    if 10 <= (n % 100) <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def peer_line(peers, symbol):
+    """"3rd of 5 in Technology" — where this name sits among its peers.
+
+    This answers the question single-stock research should end on: is this the
+    best vehicle for the thesis? Empty when there is no peer set."""
+    if not peers or not peers.get("ranked"):
+        return ""
+    rank, n, sector = peers.get("rank"), peers.get("n"), peers.get("sector")
+    if not rank or not n or not sector:
+        return ""
+    return f"{_ordinal(rank)} of {n} in {sector}"
+
+
+def peer_chips(peers, symbol):
+    """The named peers — strongest, immediate neighbours, weakest — as chips."""
+    if not peers or not peers.get("ranked"):
+        return []
+    sym = (symbol or "").strip().upper()
+    out, seen = [], set()
+    for key, role in (("strongest", "strongest"), ("above", "just above"),
+                      ("below", "just below"), ("weakest", "weakest")):
+        p = peers.get(key)
+        if not p or p.get("symbol") in seen or p.get("symbol") == sym:
+            continue
+        seen.add(p["symbol"])
+        out.append({"symbol": p["symbol"], "role": role,
+                    "score": p.get("score")})
+    return out
+
+
+def gate_rows(verdict):
+    """Long-side gates — "why isn't this a BUY?"."""
+    return list((verdict or {}).get("gates_triggered") or [])
+
+
+def short_gate_rows(verdict):
+    """Short-side gates, kept SEPARATE from the long ones.
+
+    A short-only constraint in the shared list prints "cannot be SELL" on every
+    strong BUY, which is noise rather than a reason."""
+    return list((verdict or {}).get("short_gates") or [])
+
+
 _BREAKDOWN_COLS = [
     {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
     {"name": "weight", "label": "Weight", "field": "weight"},
@@ -443,8 +576,13 @@ def render():
                      else "").classes("opacity-70")
         for r in verdict.get("top_reasons", []):
             ui.label(f"• {humanize_reason(r)}").classes("text-sm opacity-80")
-        for g in verdict.get("gates_triggered", []):
+        for g in gate_rows(verdict):
             ui.label(f"⛔ {g}").classes("text-xs text-[#c62828]")
+        # Short-side gates render SEPARATELY and in the warning colour, not the
+        # red of a long-side block: they explain why this is not a SHORT, which
+        # on a strong BUY is context rather than a constraint on what you asked.
+        for g in short_gate_rows(verdict):
+            ui.label(f"↓ {g}").classes("text-xs text-[#f9a825] opacity-80")
         rows = breakdown_rows(verdict)
         if rows:
             with ui.expansion("Factor breakdown").classes("w-full"):
@@ -528,6 +666,62 @@ def render():
             if strength.get("in_confirmed_downtrend"):
                 ui.label("Confirmed downtrend").classes("text-xs text-[#c62828]")
 
+    def _clearance_strip(clearance):
+        """What the tape permits, per side — both always shown.
+
+        A blocked side with its reasons is a research finding; showing only the
+        permitted one would make the reader infer the absence."""
+        rows = clearance_rows(clearance)
+        if not rows:
+            return
+        with ui.card().classes(f"{CARD} w-full"):
+            summary = ((clearance or {}).get("market") or {}).get("summary")
+            with ui.row().classes("w-full items-center justify-between gap-3 "
+                                  "flex-wrap"):
+                ui.label("Market state").classes(EYEBROW)
+                if summary:
+                    ui.label(summary).classes("text-xs opacity-80")
+            for r in rows:
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.label(r["side"]).classes(f"{EYEBROW} w-12 shrink-0")
+                    ui.label(r["state"]).classes(
+                        f"text-xs text-weight-medium w-28 shrink-0 {r['text_class']}")
+                    ui.label(" · ".join(r["reasons"])).classes(
+                        "text-xs opacity-70")
+
+    def _dealer_card(context):
+        """Dealer positioning + IV. Context only — it reaches no verdict."""
+        rows = dealer_rows(context)
+        if not rows:
+            note = (context or {}).get("summary")
+            if note and not (context or {}).get("collected"):
+                with ui.card().classes(f"{CARD} flex-1 min-w-[200px]"):
+                    ui.label("Dealer positioning").classes(EYEBROW)
+                    ui.label(note).classes("text-xs opacity-60")
+            return
+        with ui.card().classes(f"{CARD} flex-1 min-w-[240px]"):
+            ui.label("Dealer positioning").classes(EYEBROW)
+            for r in rows:
+                with ui.row().classes("items-center gap-2 w-full justify-between"):
+                    ui.label(r["label"]).classes("text-xs opacity-70")
+                    ui.label(r["value"]).classes("text-xs text-weight-medium")
+
+    def _peers_strip(peers, symbol):
+        """Where this name sits among its sector peers — the question
+        single-stock research should end on: is this the best vehicle?"""
+        line = peer_line(peers, symbol)
+        chips = peer_chips(peers, symbol)
+        if not line and not chips:
+            return
+        with ui.row().classes("w-full items-center gap-3 flex-wrap"):
+            if line:
+                ui.label(line).classes(f"{EYEBROW}")
+            for c in chips:
+                with ui.row().classes("items-baseline gap-1 rounded px-2 py-0.5 "
+                                      "bg-[#10162c] border border-[#2a3358]"):
+                    ui.label(c["symbol"]).classes("text-xs text-weight-medium")
+                    ui.label(c["role"]).classes("text-[10px] opacity-60")
+
     def _render_results():
         res = state["result"]
         results_top.clear()
@@ -545,6 +739,7 @@ def render():
                     ui.icon("warning")
                     ui.label("; ".join(res["errors"]))
             _header(res)
+            _clearance_strip(res.get("direction_clearance"))
         has_verdict = bool(res.get("position_verdict") or res.get("investor_verdict"))
         verdict_row.set_visibility(has_verdict)
         if has_verdict:
@@ -560,6 +755,8 @@ def render():
                     _sector_card(res.get("sector"))
                     if res.get("fundamentals_available"):
                         _fundamentals_card(res.get("fundamentals"))
+                    _dealer_card(res.get("dealer_context"))
+                _peers_strip(res.get("peers"), res.get("symbol"))
                 if not res.get("fundamentals_available"):
                     ui.label("Fundamentals unavailable for this symbol — the "
                              "Investor verdict degrades to HOLD on insufficient "

@@ -35,3 +35,24 @@ class TradeAnalysis(_Base):
     errors: list = []
     markov: dict | None = None
     swing_model: dict | None = None
+
+    # ── two-sided reads (2026-08-22) ────────────────────────────────────────
+    # All ADDITIVE and all optional: a payload written before they existed
+    # validates unchanged, and the page's builders no-op when they are absent.
+    #
+    # ``direction_clearance`` — what the tape permits per side (cleared /
+    # relative_only / blocked, each with reasons). The swing model predicts
+    # excess return vs SPY, so a bottom-band name is predicted to LAG, not to
+    # fall; this is what stops that being read as a directional short.
+    #
+    # ``dealer_context`` — the symbol's row from the options matrix (gamma
+    # regime, flip, walls, ATM IV), joined for context only. It reaches no
+    # verdict: positioning gates and informs in this codebase, and only the
+    # IC-tested harness grants weight.
+    #
+    # ``peers`` — where the symbol sits among its SECTOR peers in today's
+    # cross-section, which is the question single-stock research should end on:
+    # is this the best vehicle for the thesis?
+    direction_clearance: dict | None = None
+    dealer_context: dict | None = None
+    peers: dict | None = None

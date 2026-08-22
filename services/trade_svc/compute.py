@@ -507,19 +507,128 @@ def _swing_universe():
 
 
 def build_universe_factor_snapshot():
-    """Assemble {factor: [values across the universe]} from the latest per-symbol
-    factor rows (NaN/missing dropped). Fetches concurrently; never raises."""
-    snapshot = {}
+    """``{"by_symbol": {symbol: {factor: value}}}`` for the whole universe.
+
+    ⚠ This used to return the FLAT ``{factor: [values]}`` the scorer consumes —
+    it computed every symbol's factors daily and then threw the NAMES away.
+    Keeping them is the single change that turns a one-symbol scorer into a
+    ranking: it powers the sector-peer lines on the single-symbol card, and
+    later the rank board, at no extra fetch cost.
+
+    The flat basis is DERIVED from this by :func:`flat_basis`, so the scoring
+    path provably does not move. Fetches concurrently; never raises."""
+    by_symbol = {}
     try:
         results = parallel_map(lambda s: (s, _symbol_factor_row(s)),
                                _swing_universe())
-        for _sym, row in results:
-            for factor, value in (row or {}).items():
-                if value is not None and np.isfinite(value):
-                    snapshot.setdefault(factor, []).append(value)
+        for sym, row in results:
+            clean = {f: v for f, v in (row or {}).items()
+                     if v is not None and np.isfinite(v)}
+            if clean:
+                by_symbol[sym] = clean
     except Exception:
         return {}
-    return snapshot
+    # An empty result stays FALSY: the caller writes the cache only `if
+    # snapshot`, and a truthy {"by_symbol": {}} would cache a snapshot of
+    # nothing for the rest of the day.
+    return {"by_symbol": by_symbol} if by_symbol else {}
+
+
+def flat_basis(snapshot):
+    """``{factor: [values]}`` — what the scorer cross-sections against.
+
+    Accepts both shapes: the new ``{"by_symbol": …}`` and a LEGACY flat payload
+    cached before that change. A cached snapshot outliving a deploy must keep
+    scoring rather than silently cross-sectioning against nothing."""
+    if not isinstance(snapshot, dict):
+        return {}
+    by_symbol = snapshot.get("by_symbol")
+    if not isinstance(by_symbol, dict):
+        return snapshot          # legacy flat payload, already the right shape
+    out = {}
+    for row in by_symbol.values():
+        for factor, value in (row or {}).items():
+            out.setdefault(factor, []).append(value)
+    return out
+
+
+def _peer_block(symbol, snapshot, artifact, swing_block):
+    """Sector-peer placement for the analyzed symbol, or None.
+
+    Scores every peer in the snapshot through the SAME scorer the symbol went
+    through, so the ranking and the headline percentile come from one code path
+    — a second scoring path would drift. Never raises."""
+    from services.trade_svc import swing_model as _swing
+    try:
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
+        if not by_symbol or not artifact:
+            return None
+        basis = flat_basis(snapshot)
+        sym = (symbol or "").strip().upper()
+        sect = resolve_sector(sym).get("name")
+        if not sect:
+            return None
+        scores = {}
+        for peer, row in by_symbol.items():
+            if resolve_sector(peer).get("name") != sect:
+                continue
+            scored = _swing.score_symbol(row, basis, artifact)
+            if scored and scored.get("percentile") is not None:
+                scores[peer] = scored["percentile"]
+        if swing_block and swing_block.get("percentile") is not None:
+            scores[sym] = swing_block["percentile"]
+        if len(scores) < 2:
+            return None
+        return sector_peers(sym, snapshot, scores)
+    except Exception:
+        _degrade.degraded("trade.peer_block")
+        return None
+
+
+def sector_peers(symbol, snapshot, scores):
+    """Where ``symbol`` sits among its SECTOR peers in today's cross-section.
+
+    ``scores`` maps symbol -> percentile (or composite). Returns the ranked
+    peer list plus the strongest, the weakest and the immediate neighbours —
+    the lines that answer "is this the best vehicle for the thesis?", which is
+    the question single-stock research should end on.
+
+    An unmapped symbol yields an EMPTY peer set rather than the whole universe:
+    ranking a name against companies it shares nothing with would invent a
+    comparison that does not exist."""
+    blank = {"sector": "", "ranked": [], "strongest": None, "weakest": None,
+             "above": None, "below": None, "rank": None, "n": 0}
+    try:
+        sym = (symbol or "").strip().upper()
+        sect = resolve_sector(sym)
+        name = sect.get("name")
+        if not name:
+            return blank
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
+        peers = [s for s in by_symbol
+                 if resolve_sector(s).get("name") == name and s in (scores or {})]
+        if sym in (scores or {}) and sym not in peers:
+            peers.append(sym)
+        if not peers:
+            return blank
+        ranked = sorted(
+            ({"symbol": s, "score": scores[s]} for s in peers),
+            key=lambda d: d["score"], reverse=True)
+        idx = next((i for i, d in enumerate(ranked) if d["symbol"] == sym), None)
+        return {
+            "sector": name,
+            "ranked": ranked,
+            "strongest": ranked[0],
+            "weakest": ranked[-1],
+            "above": ranked[idx - 1] if idx not in (None, 0) else None,
+            "below": (ranked[idx + 1]
+                      if idx is not None and idx + 1 < len(ranked) else None),
+            "rank": None if idx is None else idx + 1,
+            "n": len(ranked),
+        }
+    except Exception:
+        _degrade.degraded("trade.sector_peers")
+        return blank
 
 
 def _read_universe_snapshot():
@@ -531,21 +640,37 @@ def _read_universe_snapshot():
 
 
 def _write_universe_snapshot(snapshot):
+    """Cache today's snapshot. Stores ``by_symbol`` (the identity-preserving
+    shape) and bumps ``version`` so a payload written by the older code — which
+    had only the flat ``factors`` — is not mistaken for the new one."""
     try:
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
         _bus().cache_set(_UNIVERSE_KEY, {
-            "factors": {k: [float(x) for x in v] for k, v in snapshot.items()},
+            "version": 2,
+            "by_symbol": {s: {k: float(v) for k, v in row.items()}
+                          for s, row in by_symbol.items()},
             "date": _today_ct_str()})
     except Exception:
         pass
 
 
 def get_universe_snapshot():
-    """{factor: [values]} for today. Lazy: reuse today's cached snapshot; else
-    rebuild from the universe and cache it; {} on failure (the scorer then uses
-    the artifact's historical norm)."""
+    """Today's universe snapshot in the ``{"by_symbol": …}`` shape.
+
+    Lazy: reuse today's cache, else rebuild and store it. ``{}`` on failure, in
+    which case the scorer falls back to the artifact's historical norm.
+
+    ⚠ A cached payload written by the PREVIOUS code carries only the flat
+    ``factors`` key. It is returned as-is; :func:`flat_basis` accepts both, so
+    a snapshot outliving a deploy keeps scoring instead of silently
+    cross-sectioning against nothing. Only the peer lines are unavailable until
+    the next daily rebuild."""
     cached = _read_universe_snapshot()
-    if cached and cached.get("date") == _today_ct_str() and cached.get("factors"):
-        return cached["factors"]
+    if cached and cached.get("date") == _today_ct_str():
+        if cached.get("by_symbol"):
+            return {"by_symbol": cached["by_symbol"]}
+        if cached.get("factors"):
+            return cached["factors"]          # legacy shape, still scoreable
     try:
         snapshot = build_universe_factor_snapshot()
         if snapshot:
@@ -690,6 +815,43 @@ def _read_regime():
         return env.payload if env else None
     except Exception:
         return None
+
+
+_MATRIX_KEY = "cache:options:matrix"
+
+
+def _read_matrix_row(symbol):
+    """``(row, payload_ts)`` for ``symbol`` from the options matrix, or
+    ``(None, None)``.
+
+    Tier-2 reading another domain's Tier-3 cache view — the same thing
+    `driver_svc` does for its market context. Never raises."""
+    try:
+        env = _bus().cache_get(_MATRIX_KEY)
+        payload = env.payload if env else None
+        if not payload:
+            return None, None
+        sym = (symbol or "").strip().upper()
+        for r in (payload.get("rows") or []):
+            if (r.get("symbol") or "").strip().upper() == sym:
+                return r, payload.get("ts")
+        return None, payload.get("ts")
+    except Exception:
+        return None, None
+
+
+def _dealer_context(symbol):
+    """Dealer positioning + IV context for ``symbol``. Never raises.
+
+    Context only — nothing here reaches a verdict. Positioning informs and
+    gates in this codebase; only the IC-tested harness grants weight."""
+    from services.trade_svc import dealer_context as _dc
+    try:
+        row, ts = _read_matrix_row(symbol)
+        return _dc.build(row, ts=ts)
+    except Exception:
+        _degrade.degraded("trade.dealer_context")
+        return _dc.build(None)
 
 
 def _direction_clearance(spy):
@@ -1068,6 +1230,7 @@ def analyze(symbol):
     # verdict off the calibration band. Fully defensive: any failure leaves
     # swing_block None and the existing verdict/markov untouched.
     swing_block = None
+    _peers = None
     try:
         from services.trade_svc import swing_model as _swing
         _art = _swing.load_artifact()
@@ -1080,7 +1243,11 @@ def analyze(symbol):
             _cur = {c: (float(_ff[c].iloc[-1]) if _ff[c].notna().iloc[-1] else None)
                     for c in _ff.columns}
             _snap = get_universe_snapshot()
-            swing_block = _swing.score_symbol(_cur, _snap, _art)
+            # The scorer takes the FLAT basis; the snapshot keeps identity for
+            # the peer lines. flat_basis derives one from the other, so the
+            # scoring path is unchanged by that shape change.
+            swing_block = _swing.score_symbol(_cur, flat_basis(_snap), _art)
+            _peers = _peer_block(symbol, _snap, _art, swing_block)
     except Exception:
         swing_block = None
 
@@ -1127,6 +1294,8 @@ def analyze(symbol):
         "investor_verdict": investor_verdict,
         "swing_model": swing_block,
         "direction_clearance": _direction_clearance(spy),
+        "dealer_context": _dealer_context(symbol),
+        "peers": _peers,
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),
