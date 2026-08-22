@@ -100,7 +100,7 @@ def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None):
 
     board = {
         "rows": [], "long_pool": [], "short_pool": [],
-        "n": 0, "thin_cross_section": True,
+        "n": 0, "thin_cross_section": True, "status": "ok",
         "market_filter": {
             "long": clearance.get("long") or {"state": "cleared", "reasons": []},
             "short": clearance.get("short") or {"state": "cleared", "reasons": []},
@@ -110,7 +110,19 @@ def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None):
         "regime_key": None, "risk_share": None, "model_version": None,
         "horizon_days": (artifact or {}).get("horizon", 20),
     }
-    if not by_symbol or not artifact:
+    if not artifact:
+        board["status"] = "no_artifact"
+        return board
+    if not by_symbol:
+        # ⚠ Two very different empties. `get_universe_snapshot` deliberately
+        # tolerates a payload from older code carrying only the FLAT
+        # `{factor: [values]}` basis — scoring works against it, and its
+        # docstring says so. RANKING cannot: the flat basis has values but no
+        # symbol names. Found on the first live build, where it rendered as a
+        # board of zero rows, which is indistinguishable from "the market
+        # offered nothing today".
+        board["status"] = ("legacy_snapshot"
+                           if (snapshot or {}).get("factors") else "no_snapshot")
         return board
 
     basis = flat_basis(snapshot)
@@ -135,6 +147,7 @@ def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None):
             "_raw": s,
         })
     if not scored:
+        board["status"] = "unscoreable"
         return board
 
     first = scored[0]["_raw"]

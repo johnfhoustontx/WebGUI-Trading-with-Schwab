@@ -102,7 +102,7 @@ def rank_board(bus, args=None) -> None:
 
 
 _BOARD_FIELDS = {
-    "as_of": None, "model_version": None, "regime_key": None,
+    "status": "ok", "as_of": None, "model_version": None, "regime_key": None,
     "risk_share": None, "horizon_days": 20, "n": 0,
     "thin_cross_section": True, "rows": [], "long_pool": [], "short_pool": [],
     "market_filter": {}, "short_expression": "relative", "gates_evaluated": [],

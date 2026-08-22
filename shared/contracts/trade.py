@@ -92,6 +92,10 @@ class RankBoard(_Base):
     in an uptrend is predicted to LAG, not to fall.
     """
 
+    # WHY the board is empty, when it is: "ok" | "no_snapshot" |
+    # "legacy_snapshot" | "no_artifact" | "unscoreable". Only one of those is
+    # about the market, and on screen they are indistinguishable without it.
+    status: str = "ok"
     as_of: str | None = None
     model_version: str | None = None
     regime_key: str | None = None

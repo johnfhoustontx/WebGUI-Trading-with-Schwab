@@ -124,3 +124,33 @@ class TestMeta:
 
     def test_render_is_callable(self):
         assert callable(trade_board.render)
+
+
+# ── Empty has kinds (found live, 2026-08-22) ─────────────────────────────────
+# The first live build rendered zero rows because the cached snapshot was in the
+# documented LEGACY flat shape — values but no symbol names. On screen that was
+# indistinguishable from "the market offered nothing today", which is the exact
+# confusion the pool notes exist to prevent.
+
+class TestEmptyStates:
+    def test_a_healthy_board_shows_no_status_banner(self):
+        assert trade_board.status_note(_BOARD) == ""
+
+    def test_a_legacy_snapshot_says_the_SHAPE_is_the_problem(self):
+        note = trade_board.status_note(dict(_BOARD, status="legacy_snapshot",
+                                            rows=[], n=0)).lower()
+        assert "snapshot" in note
+        assert "market" in note        # explicitly disclaims a market reading
+
+    def test_a_missing_snapshot_is_a_different_message(self):
+        a = trade_board.status_note(dict(_BOARD, status="no_snapshot"))
+        b = trade_board.status_note(dict(_BOARD, status="legacy_snapshot"))
+        assert a and b and a != b
+
+    def test_a_missing_artifact_points_at_the_model_not_the_data(self):
+        note = trade_board.status_note(dict(_BOARD, status="no_artifact")).lower()
+        assert "model" in note
+
+    def test_an_unknown_status_does_not_invent_a_message(self):
+        assert trade_board.status_note(dict(_BOARD, status="wat")) == ""
+        assert trade_board.status_note(None) == ""

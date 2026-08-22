@@ -562,6 +562,17 @@ def build_rank_board():
     from services.trade_svc import rank_board as _rb
     try:
         snap = get_universe_snapshot()
+        if not (snap or {}).get("by_symbol"):
+            # A snapshot in the LEGACY flat shape has values but no symbol
+            # names, so it can be scored but not ranked. `get_universe_snapshot`
+            # returns it as-is for the day, which for the board means an empty
+            # table that reads like a quiet market. Rebuild once instead — the
+            # cost is the daily fan-out we would have paid tomorrow anyway, and
+            # it self-heals rather than waiting out the day.
+            rebuilt = build_universe_factor_snapshot()
+            if rebuilt:
+                _write_universe_snapshot(rebuilt)
+                snap = rebuilt
         art = _swing.load_artifact()
         spy = _price_history("SPY", "year", 2, "daily", 1)
         spy_close = (_factors._close(spy)

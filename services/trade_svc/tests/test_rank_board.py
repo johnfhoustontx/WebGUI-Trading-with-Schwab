@@ -269,3 +269,94 @@ class TestTheHandlerPublishesOnce:
 
         H.handle_command(bus, _Cmd())
         assert bus.cache_get(H.CACHE_RANK_BOARD) is not None
+
+
+# ── The legacy snapshot shape (found live, 2026-08-22) ───────────────────────
+# `get_universe_snapshot` deliberately tolerates a payload written by older code
+# that carries only the FLAT `{factor: [values]}` basis — scoring works fine
+# against it, and its docstring says so. Ranking does not: the board needs the
+# symbol NAMES, which the flat shape does not carry.
+#
+# Found on the first live build, where it rendered as a board with zero rows —
+# indistinguishable from "the market offered nothing today". An empty board must
+# say which kind of empty it is.
+
+class TestItDistinguishesKindsOfEmpty:
+    def test_a_healthy_build_reports_ok(self):
+        assert _build()["status"] == "ok"
+
+    def test_no_snapshot_at_all_says_so(self):
+        assert _build(snapshot=None)["status"] == "no_snapshot"
+        assert _build(snapshot={})["status"] == "no_snapshot"
+
+    def test_a_LEGACY_flat_snapshot_is_named_rather_than_rendered_empty(self):
+        """The flat basis has values but no symbols. A board built from it is
+        empty for a DATA-SHAPE reason, not a market reason, and the two look
+        identical without this."""
+        legacy = {"factors": {"mom_12_1": [0.1, 0.2, 0.3], "low_vol": [-0.02] * 3}}
+        board = _build(snapshot=legacy)
+        assert board["status"] == "legacy_snapshot"
+        assert board["rows"] == []
+
+    def test_a_missing_artifact_is_its_own_status(self):
+        assert _build(artifact=None)["status"] == "no_artifact"
+
+    def test_a_snapshot_the_scorer_declines_entirely_is_not_called_ok(self):
+        board = _build(snapshot={"by_symbol": {"A": {}, "B": {}}})
+        assert board["status"] == "unscoreable"
+
+
+class TestTheBoardSelfHealsALegacySnapshot:
+    def test_it_rebuilds_when_the_snapshot_carries_no_symbol_names(self, monkeypatch):
+        """Waiting out the day would leave the board empty for a data-shape
+        reason while looking like a quiet market. The rebuild costs the daily
+        fan-out we would have paid tomorrow anyway."""
+        from services.trade_svc import compute as C
+
+        calls = []
+        monkeypatch.setattr(C, "get_universe_snapshot",
+                            lambda: {"factors": {"mom_12_1": [0.1, 0.2]}})
+        monkeypatch.setattr(C, "build_universe_factor_snapshot",
+                            lambda: (calls.append(1), _snapshot())[1])
+        monkeypatch.setattr(C, "_write_universe_snapshot", lambda s: None)
+        monkeypatch.setattr(C, "_price_history", lambda *a, **k: None)
+        monkeypatch.setattr(C, "_board_gate_ctx", lambda syms: {})
+        from services.trade_svc import swing_model as _sw
+        monkeypatch.setattr(_sw, "load_artifact", lambda: _ARTIFACT)
+
+        board = C.build_rank_board()
+        assert calls, "a legacy-shaped snapshot must trigger one rebuild"
+        assert board["status"] == "ok" and board["rows"]
+
+    def test_a_healthy_snapshot_does_NOT_trigger_a_rebuild(self, monkeypatch):
+        from services.trade_svc import compute as C
+
+        calls = []
+        monkeypatch.setattr(C, "get_universe_snapshot", lambda: _snapshot())
+        monkeypatch.setattr(C, "build_universe_factor_snapshot",
+                            lambda: calls.append(1))
+        monkeypatch.setattr(C, "_price_history", lambda *a, **k: None)
+        monkeypatch.setattr(C, "_board_gate_ctx", lambda syms: {})
+        from services.trade_svc import swing_model as _sw
+        monkeypatch.setattr(_sw, "load_artifact", lambda: _ARTIFACT)
+
+        C.build_rank_board()
+        assert not calls
+
+
+def test_the_contract_projection_preserves_every_field_the_board_sets(monkeypatch):
+    """The handler projects the board onto `RankBoard`, so a field the contract
+    lacks is dropped between the service and the page — silently, and only
+    visible end to end. `status` was added to the builder and the page and was
+    missing here."""
+    from shared.contracts.trade import RankBoard
+    from services.trade_svc import handlers as H
+
+    built = set(_build())
+    modelled = set(RankBoard.model_fields)
+    projected = set(H._BOARD_FIELDS)
+    missing = built - modelled - {"pool"}
+    assert not missing, f"board fields the contract drops: {sorted(missing)}"
+    assert (built & modelled) <= projected, (
+        "fields the contract models but the handler never projects: "
+        f"{sorted((built & modelled) - projected)}")

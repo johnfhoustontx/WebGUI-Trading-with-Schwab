@@ -99,6 +99,36 @@ def pool_headline(board, side):
                      + (f" {reasons}" if reasons else ""))}
 
 
+# An empty board has kinds, and only one of them is about the market. Found
+# live: a cached snapshot in the documented LEGACY flat shape carries factor
+# values but no symbol names, so the board came back with zero rows — on screen
+# indistinguishable from "the market offered nothing today".
+_STATUS_NOTES = {
+    "legacy_snapshot": (
+        "Today's universe snapshot has no per-symbol detail yet, so there is "
+        "nothing to rank. This is a data-shape limit, not a reading of the "
+        "market — press Rebuild, or it clears on tomorrow's snapshot."),
+    "no_snapshot": (
+        "No universe snapshot yet today. The board fills in once the Trade "
+        "service has built one — press Rebuild to build it now."),
+    "no_artifact": (
+        "The swing model artifact is missing, so nothing can be scored. The "
+        "Analyze tab falls back to its legacy verdict; this board has no "
+        "fallback because ranking IS the model."),
+    "unscoreable": (
+        "The snapshot has symbols but none of them could be scored — usually a "
+        "thin factor history rather than anything about the market."),
+}
+
+
+def status_note(board):
+    """Why the board is empty, when it is. '' when healthy or unrecognised.
+
+    An unknown status returns '' rather than a guess: inventing a reason is
+    worse than showing none."""
+    return _STATUS_NOTES.get((board or {}).get("status"), "")
+
+
 def board_exposure_note(board):
     """What the ordering is actually ranking by. '' when unknown."""
     share = fmt.num((board or {}).get("risk_share"))
@@ -145,6 +175,7 @@ def render():
                 .props("no-caps").classes(BTN_PRIMARY)
 
         meta = ui.label("").classes(f"text-xs {MUTED}")
+        status = ui.label("").classes("text-sm text-amber-9")
         exposure = ui.label("").classes("text-xs text-amber-9")
         gates = ui.label("").classes(f"text-xs {MUTED}")
 
@@ -177,6 +208,8 @@ def render():
         spinner.hide()
         b = state["board"] or {}
         meta.text = meta_line(b)
+        status.text = status_note(b)
+        status.set_visibility(bool(status.text))
         exposure.text = board_exposure_note(b)
         exposure.set_visibility(bool(exposure.text))
         gates.text = gates_note(b)
