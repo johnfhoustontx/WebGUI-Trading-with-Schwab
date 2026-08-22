@@ -4,6 +4,84 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-21 (**Audit batch 4 — the fake bus stops lying, and two
+discipline-only invariants become tests.**
+- **The fake bus had different semantics from prod, and four modules could feel
+  it.** Every `Bus(fake=True)` built its OWN `FakeStrictRedis`, so two Bus objects
+  in one test shared nothing — while in production every Bus talks to the same
+  Memurai. Measured: bus A writes a key, bus B reads `None`. That matters because
+  **four production modules construct their own bus** rather than receiving one
+  (`options_svc.compute._BRIEFING_BUS`, `trade_svc.compute._BUS`,
+  `webgui/bus_client._bus`, `_scaffold`'s `the_bus or Bus()`), so a test that
+  handed a handler its own fake bus and then exercised code reaching one of those
+  singletons was reading an EMPTY cache and passing down the degrade path — the
+  same shape as the documented "fake bus of bare dicts" incident.
+- **The fix needed no conftest anywhere.** One `fakeredis.FakeServer` keyed on
+  `PYTEST_CURRENT_TEST` (phase suffix stripped, so a fixture's writes are visible
+  in the test body) gives both halves at once: shared within a test — pub/sub and
+  streams now cross Bus instances exactly as in prod — and clean between tests,
+  because pytest rewrites that variable per test. The alternative, an autouse
+  fixture, would have meant editing ~15 suites that have no common conftest.
+  **It immediately caught two tests whose premise was impossible in production.**
+  `test_collect_gex_history_captures_viewed_symbol_chain` said it outright -
+  `bus2 = Bus(fake=True)  # empty cache -> defaults to $SPX` - but in prod a new
+  `Bus()` is NEVER empty; every one talks to the same Memurai. And
+  `test_regular_window_detection_is_unaffected` looped over three clock times
+  building a fresh bus each pass, so 08:15 only fired because it could not see
+  the cooldown map 08:00 had just written. Both now create the clean-slate
+  condition DELIBERATELY (`reset_fake_bus()`), which is what they always meant.
+  Everything else across the affected suites still passes, so nothing legitimate
+  was depending on the old isolation.
+- **`pyrightconfig.json` — a deliberately narrow type check**, over `shared/bus`,
+  `shared/contracts`, `shared/config_toml.py` and `webgui/bus_client.py`: the one
+  seam every tier crosses, and where the envelope-vs-payload bug class lives.
+  **Now clean at 0 errors.** ⚠ It found four things and **none was a bug** —
+  `redis-py`'s stubs return `bytes | str` where `decode_responses=True`
+  guarantees `str`. Fixed with `cast()` **plus a comment stating the invariant**,
+  never a blanket ignore; the fourth was genuine sloppiness in
+  `shared/config_toml.py`, written earlier the same day. Explicitly NOT widened
+  to the repo: the services and pages are large, untyped, and full of
+  deliberately loose payload dicts, so a repo-wide switch yields thousands of
+  findings nobody actions — the failure mode ruff's minimal select list already
+  avoids.
+- **`webgui/bus_client.py` had ZERO annotations** while `shared/bus/client.py`
+  was fully typed — so the seam was typed on one side only, and the untyped side
+  is the one where `.payload` confusion bites. All 13 functions now carry
+  signatures.
+- **Two mirrors moved from discipline to test**
+  (`shared/tests/test_cross_tier_mirrors.py`, AST-parsing the files and importing
+  nothing, so it cannot itself trigger the cross-app `scoring` collision): the
+  five **regime display words** duplicated across `driver_svc`, `options_svc` and
+  the webgui, and the **manuals dual registration**. The manuals half is the
+  interesting one — the existing webgui test checked catalog → built file, and
+  the CONVERSE was unguarded: a manual that is built but never listed is silently
+  unreachable, because that dict is also the serving whitelist.
+- **The mirror pin was verified to actually fail.** Drift was injected into the
+  webgui copy ("Whipsaw" → "Chop"); the test failed and named the file. A pin
+  that has never been seen to fail is not evidence of anything — the same lesson
+  batch 1 learned from three `TestEarningsAvoidance` tests passing for the wrong
+  reason.
+- **`scoring/_common.py` absorbed `clamp` and `num`.** Measured by AST with
+  docstrings stripped: **nine byte-identical `_clamp` copies and seven `_num`**
+  (six identical plus one differently spelled, verified equivalent across 20
+  inputs — None/''/NaN/inf/bool/bytes — before folding it in). ⚠ This is NOT the
+  thing root CLAUDE.md warns against: that warning is about changing `_clamp`'s
+  NaN *semantics* centrally, and this body is byte-identical to the nine it
+  replaced. The NaN policy stays at the call sites, because only the caller knows
+  whether a missing input means "neutral 50", "floor the magnitude" or
+  "confidence 0". `_finite` was deliberately left alone — three functions share
+  that name and `momentum_regime`'s takes an ITERABLE, so hoisting it would hand
+  someone the wrong one silently. A test records that reasoning so a later
+  tidy-up does not "finish the job".
+- **`pytest` now defaults to `-rf`.** "Compare the failing SET, not the count"
+  stops being something you have to remember to ask for. Verified that every
+  per-app run resolves the root `pyproject.toml` as its configfile, so it applies
+  from inside `webgui/` and `options-scanner/` too. `-rfs` was rejected: the
+  suites carry permanent `importorskip`s and printing them every run trains
+  people to ignore the summary.)
+
+---
+
 **Last updated:** 2026-08-21 (**Audit batch 3 — four config files, and the test
 that proves a constant actually moved.**
 - **The selection rule for what became config.** Every one of the four exists

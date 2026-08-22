@@ -18,6 +18,7 @@ score how those states stratify forward returns.
 from __future__ import annotations
 
 from scoring import effort, rejection_defense, aggression, market_state, trend_regime
+from ._common import clamp as _clamp, num as _num
 
 
 # --- direction-score tunables -------------------------------------------------
@@ -29,20 +30,6 @@ SLOPE_WINDOW = 20      # trailing bars for the signed slope sub-signal
 RSI_PERIOD = 14
 ALIGN_SCALE = 0.05     # EMA-stack spread that saturates alignment to +/-1
 SLOPE_SCALE = 0.05     # 20-bar return that saturates slope to +/-1
-
-
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
-def _num(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
-        return None
-    return v
 
 
 def _closes(daily_bars):

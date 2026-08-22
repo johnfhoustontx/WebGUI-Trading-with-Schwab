@@ -47,7 +47,9 @@ scoring/                    Pure functions. No tk imports here.
   |                         the five-state classifier inputs
   |- momentum.py momentum_regime.py     the nightly cascade
   |- daily_direction.py     OFFLINE validation proxy only (validate_market_state.py)
-  |- _common.py             shared safe_float / score_from_thresholds
+  |- _common.py             shared safe_float / score_from_thresholds /
+  |                         clamp / num  (clamp had NINE identical private
+  |                         copies and num seven, until 2026-08-21)
         |
         v
 live_composite.py           compute_live -> the live intraday composite

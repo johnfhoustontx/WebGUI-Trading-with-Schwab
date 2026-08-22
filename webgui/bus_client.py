@@ -12,9 +12,12 @@ Dependency-light on purpose: only ``threading`` + ``shared.bus``. This module
 must import cleanly under plain pytest (no NiceGUI app). The page layer is
 responsible for marshaling event callbacks back onto the UI thread safely.
 """
+from __future__ import annotations
+
 import pathlib
 import sys
 import threading
+from typing import Any, Callable, Iterable
 
 # Repo root on sys.path -> ``shared`` package is importable (mirrors webgui/proxy.py).
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -23,15 +26,17 @@ if str(_REPO_ROOT) not in sys.path:
 
 from shared.bus import Bus  # noqa: E402
 
-_bus = None
+_bus: Bus | None = None
 
 
-def bus():
+def bus() -> Bus:
     """Lazy process-wide Bus singleton (fakeredis under pytest, else Memurai).
 
-    A single shared instance matters: fakeredis pub/sub only fans out across the
-    same FakeStrictRedis object, so the EventListener thread and any publisher
-    must both go through this singleton.
+    A single shared instance is still the right shape - it avoids per-call
+    connection churn, and the EventListener thread and any publisher stay on one
+    object. (The fakeredis caveat this docstring used to give as the REASON is
+    handled inside ``Bus`` since 2026-08-21: every fake now shares one FakeServer
+    per running test, so pub/sub fans out across instances the way prod does.)
     """
     global _bus
     if _bus is None:
@@ -39,13 +44,13 @@ def bus():
     return _bus
 
 
-def reset():
+def reset() -> None:
     """Drop the cached Bus so the next ``bus()`` builds a fresh one (test helper)."""
     global _bus
     _bus = None
 
 
-def read(view):
+def read(view: str) -> dict | None:
     """Return the cached payload dict for a view (e.g. 'sentiment:composite'), or None.
 
     Key is ``f'cache:{view}'``.
@@ -54,7 +59,7 @@ def read(view):
     return env.payload if env else None
 
 
-def read_full(view):
+def read_full(view: str) -> tuple[dict | None, int | None]:
     """Return ``(payload, version)`` for a view in ONE cache read, or ``(None, None)``.
 
     For callers that need both the payload and its version (e.g. a nav-badge that
@@ -65,7 +70,7 @@ def read_full(view):
     return (env.payload, env.version) if env else (None, None)
 
 
-def read_version(view):
+def read_version(view: str) -> int | None:
     """Return the cache version int for a view, or None if absent.
 
     Cheap change-detection helper for a fetch-free ``ui.timer``: reads only the
@@ -78,7 +83,7 @@ def read_version(view):
 _GATE_ABSENT = object()   # "we have observed this view as absent"
 
 
-def read_gated(view, memo):
+def read_gated(view: str, memo: dict) -> tuple[dict | None, bool]:
     """``(payload, changed)`` — deserialize only when the view's version moved.
 
     ``memo`` is a caller-owned dict (``{}`` to start) holding the last-seen
@@ -109,7 +114,7 @@ def read_gated(view, memo):
     return payload, True
 
 
-def read_versions(views):
+def read_versions(views: Iterable[str]) -> dict[str, int | None]:
     """Pipelined :func:`read_version` for many views → ``{view: int|None}``.
 
     One Redis round-trip for the whole batch — used by pages that poll several
@@ -119,13 +124,13 @@ def read_versions(views):
     return {v: raw.get(f"cache:{v}") for v in views}
 
 
-def _envelope_meta(view):
+def _envelope_meta(view: str) -> tuple[int | None, str | None]:
     """``(version, ts)`` read from the full envelope — the pre-``:ts`` fallback."""
     env = bus().cache_get(f"cache:{view}")
     return (env.version, env.ts) if env else (None, None)
 
 
-def read_meta(view):
+def read_meta(view: str) -> tuple[int | None, str | None]:
     """Return ``(version, ts)`` for a view, or ``(None, None)`` if absent.
 
     ``ts`` is the ``{key}:ts`` side key: the ISO-8601 UTC time the publishing
@@ -142,7 +147,7 @@ def read_meta(view):
     return (ver, ts)
 
 
-def read_metas(views):
+def read_metas(views: Iterable[str]) -> dict[str, tuple[int | None, str | None]]:
     """Pipelined :func:`read_meta` for many views → ``{view: (version, ts)}``.
 
     Reads only the tiny ``:ver``/``:ts`` side keys in ONE round-trip — no payload
@@ -163,7 +168,7 @@ def read_metas(views):
     return out
 
 
-def ping():
+def ping() -> bool:
     """Return True if the Redis/Memurai backbone answers a PING, else False.
 
     Never raises — a down/unreachable backend yields False. Used by the System
@@ -175,7 +180,7 @@ def ping():
         return False
 
 
-def request(domain, command):
+def request(domain: str, command: dict) -> str:
     """Enqueue a command dict (e.g. {'type':'refresh'}) onto ``f'cmd:{domain}'``.
 
     Returns the Redis stream message id.
@@ -193,17 +198,18 @@ class EventListener:
     :meth:`stop` to end it.
     """
 
-    def __init__(self, channel, callback, poll_timeout: float = 0.5):
+    def __init__(self, channel: str, callback: Callable[[Any], None],
+                 poll_timeout: float = 0.5) -> None:
         self._channel = channel
         self._callback = callback
         self._poll_timeout = poll_timeout
         self._stopped = False
-        self._sub = None
+        self._sub: Any = None
         self.subscribed = False  # flips True once the channel subscription is live
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def _run(self):
+    def _run(self) -> None:
         try:
             # Use the singleton Bus so we share the (fake)redis instance with
             # publishers in this process.
@@ -220,7 +226,7 @@ class EventListener:
                 # Never let a bad callback or transient error kill the thread.
                 continue
 
-    def stop(self):
+    def stop(self) -> None:
         """Signal the loop to exit and best-effort close the subscription."""
         self._stopped = True
         try:
@@ -230,7 +236,7 @@ class EventListener:
             pass
 
 
-def on_event(channel, callback):
+def on_event(channel: str, callback: Callable[[Any], None]) -> EventListener:
     """Start an :class:`EventListener` on ``channel`` and return it.
 
     Example: ``on_event('events:sentiment:composite', lambda v: ...)``.

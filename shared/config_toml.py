@@ -55,7 +55,7 @@ def toml_loader(path, defaults, *, label=None):
     (test hook, and the way to force a re-read inside one mtime tick).
     """
     name = label or os.path.basename(str(path))
-    cache = {"mtime": None, "cfg": None}
+    cache: dict[str, object] = {"mtime": None, "cfg": None}
 
     def reset():
         cache.update(mtime=None, cfg=None)

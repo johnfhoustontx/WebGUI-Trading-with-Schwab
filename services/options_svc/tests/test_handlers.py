@@ -11,6 +11,7 @@ live proxy, and use a fakeredis ``Bus(fake=True)``.
 import types as _types
 
 from shared.bus import Bus
+from shared.bus.client import reset_fake_bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
 
@@ -1512,8 +1513,14 @@ def test_collect_gex_history_captures_viewed_symbol_chain(monkeypatch):
     handlers.collect_gex_history(bus=bus)
     assert seen["cap"] == {"SPY"}
 
-    bus2 = Bus(fake=True)  # empty cache -> defaults to $SPX
-    handlers.collect_gex_history(bus=bus2)
+    # ...and with NO viewed symbol cached, it falls back to $SPX. The explicit
+    # reset is load-bearing: this used to rely on a fresh ``Bus(fake=True)``
+    # starting empty, which prod NEVER does -- every Bus there talks to the same
+    # Memurai, so "a new bus, therefore an empty cache" was a premise that could
+    # not occur in production. Now the fake matches prod, so the empty-cache
+    # condition under test has to be created deliberately.
+    reset_fake_bus()
+    handlers.collect_gex_history(bus=Bus(fake=True))
     assert seen["cap"] == {"$SPX"}
 
 

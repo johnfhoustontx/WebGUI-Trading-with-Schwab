@@ -19,6 +19,10 @@ fast-attack bypass (``apply_crisis_attack``/``crisis_attacked``).
 from __future__ import annotations
 import math
 from dataclasses import dataclass, field
+# _num was a differently-spelled but behaviourally identical seventh copy;
+# verified equivalent across 20 inputs (None/''/NaN/inf/bool/bytes/...) before
+# folding it in.
+from ._common import clamp as _clamp, num as _num
 
 
 # The evidence contract: one flat dict, every key OPTIONAL (None = unavailable ->
@@ -155,27 +159,11 @@ class RegimeScores:
     evidence_detail: list[dict] = field(default_factory=list)
 
 
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
 def ramp(x, lo, hi):
     """clamp((x-lo)/(hi-lo), 0, 1). Works inverted too (lo > hi)."""
     if hi == lo:
         return 0.0
     return _clamp((float(x) - lo) / (hi - lo), 0.0, 1.0)
-
-
-def _num(v):
-    """Finite float(v) or None — a non-numeric / NaN / ±inf / missing input is
-    ABSENT, never a default (a NaN warm-up value must not score as intensity)."""
-    if v is None:
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def _bool(v):

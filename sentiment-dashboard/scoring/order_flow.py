@@ -21,6 +21,7 @@ Documented choices:
 from __future__ import annotations
 
 import re
+from ._common import clamp as _clamp, num as _num
 
 MIN_TICKS_FULL = 30    # tick count at which flow confidence saturates
 
@@ -28,20 +29,6 @@ MIN_TICKS_FULL = 30    # tick count at which flow confidence saturates
 # 8-digit strike (strike×1000, zero-padded). Anchored at end so the space-padded
 # root (e.g. "SPY   ") is ignored. Schwab OSIs look like "SPY   260717C00500000".
 _OSI_TAIL_RE = re.compile(r"\d{6}([CP])\d{8}$")
-
-
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
-def _num(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf
-        return None
-    return v
 
 
 def classify_tick(last, bid, ask, prev_last=None) -> int:

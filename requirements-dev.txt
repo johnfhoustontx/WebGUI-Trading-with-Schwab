@@ -7,3 +7,6 @@ ruff>=0.14                 # lint + format (config: ruff.toml)
 pre-commit>=3.7            # local hook runner (.pre-commit-config.yaml)
 pip-audit>=2.7            # dependency CVE scanning (supply-chain)
 pytest-cov>=5.0          # coverage measurement
+pyright>=1.1.400           # SCOPED type check of the tier seam only - see
+                           # pyrightconfig.json for why it is not repo-wide.
+                           # Run: .venv\Scripts\python -m pyright

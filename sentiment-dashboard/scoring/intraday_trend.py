@@ -8,6 +8,7 @@ scoring/composite.py and the state vocabulary of scoring/trend_regime.py.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from ._common import clamp as _clamp
 
 
 @dataclass(frozen=True)
@@ -29,11 +30,6 @@ def _finite(x):
     except (TypeError, ValueError):
         return None
     return None if (v != v or v in (float("inf"), float("-inf"))) else v
-
-
-def _clamp(v, lo, hi):
-    # Always float so TrendSub.score is uniformly float (it gets JSON-serialized).
-    return float(max(lo, min(hi, v)))
 
 
 def score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx,

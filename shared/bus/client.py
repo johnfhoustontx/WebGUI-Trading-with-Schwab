@@ -14,6 +14,7 @@ Under pytest (or with ``fake=True``) it auto-selects an in-memory
 ``fakeredis`` backend so tests need no live server.
 """
 import json
+from typing import cast
 import os
 import pathlib
 import sys
@@ -73,12 +74,46 @@ class _Subscription:
         self.close()
 
 
+# --- fake-bus backing store (tests only) ------------------------------------
+# Prod has ONE Memurai, so every Bus in the process sees the same data. A fake
+# that gave each Bus its own store would lie about exactly the thing several
+# modules depend on: options_svc.compute._BRIEFING_BUS, trade_svc.compute._BUS,
+# webgui/bus_client._bus and _scaffold's ``the_bus or Bus()`` all construct their
+# OWN bus rather than receiving one, so a test handing a handler its own fake bus
+# would have them reading an empty cache and passing down the degrade path.
+#
+# One FakeServer per RUNNING TEST gives both halves at once: shared within a
+# test, clean between tests - and it needs no conftest wiring in any of the ~15
+# suites that use the fake bus, because pytest rewrites PYTEST_CURRENT_TEST for
+# every test (and phase). The phase suffix is stripped so a fixture's writes are
+# visible in the test body.
+_fake_servers: dict = {}
+
+
+def _fake_server():
+    import fakeredis
+
+    key = os.environ.get("PYTEST_CURRENT_TEST", "").split(" ")[0]
+    srv = _fake_servers.get(key)
+    if srv is None:
+        srv = fakeredis.FakeServer()
+        _fake_servers.clear()      # only the current test's server is ever live
+        _fake_servers[key] = srv
+    return srv
+
+
+def reset_fake_bus() -> None:
+    """Drop the fake backing store (test hook; the per-test key usually suffices)."""
+    _fake_servers.clear()
+
+
 class Bus:
     def __init__(self, fake: bool = False, url: str | None = None):
         if fake or os.environ.get("PYTEST_CURRENT_TEST"):
             import fakeredis
 
-            self._r = fakeredis.FakeStrictRedis(decode_responses=True)
+            self._r = fakeredis.FakeStrictRedis(server=_fake_server(),
+                                                decode_responses=True)
         else:
             import redis
 
@@ -178,7 +213,10 @@ class Bus:
         raw = self._r.get(key)
         if raw is None:
             return None
-        return CacheEnvelope.from_json(raw)
+        # Every client here is built with decode_responses=True (both branches of
+        # __init__), so redis returns str; the stubs' bytes|str is the general
+        # case, not ours. cast rather than ignore, so the invariant is stated.
+        return CacheEnvelope.from_json(cast(str, raw))
 
     def cache_version(self, key: str) -> int | None:
         """Read just the version counter (``{key}:ver``) — NO payload deserialize.
@@ -243,9 +281,9 @@ class Bus:
         cmd = Command(**command)
         # maxlen caps the stream so cmd:* can't grow forever; approximate=True lets
         # Redis trim in efficient ~macro-node batches (a small overshoot is fine).
-        return self._r.xadd(
+        return cast(str, self._r.xadd(          # decode_responses=True -> str
             stream, {"data": cmd.to_json()}, maxlen=_XADD_MAXLEN, approximate=True
-        )
+        ))
 
     def dead_letter(self, stream: str, raw_fields: dict, reason: str) -> None:
         """Record an un-processable command on the ``{stream}:dead`` list.
@@ -341,7 +379,9 @@ class Bus:
         if not resp:
             return []
         out: list[tuple[str, Command]] = []
-        for _stream_name, messages in resp:
+        # xreadgroup's stub covers every response shape (including the int of an
+        # async/raw client); ours is always [(stream, [(id, fields), ...])].
+        for _stream_name, messages in cast(list, resp):
             for msg_id, fields in messages:
                 try:
                     out.append((msg_id, Command.from_json(fields["data"])))

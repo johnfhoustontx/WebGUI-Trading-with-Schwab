@@ -1655,6 +1655,76 @@ hand.
 in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
 handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
 
+## Test infrastructure (2026-08-21)
+
+**The fake bus now matches prod's ONE-Redis semantics.** Every `Bus(fake=True)`
+used to build its own `FakeStrictRedis`, so two Bus objects in the same test
+shared nothing — while in production every Bus talks to the same Memurai. That is
+not harmless: **four production modules construct their OWN bus** rather than
+receiving one (`options_svc.compute._BRIEFING_BUS`, `trade_svc.compute._BUS`,
+`webgui/bus_client._bus`, `_scaffold`'s `the_bus or Bus()`), so a test handing a
+handler its own fake bus while the code reached one of those singletons was
+reading an **empty cache and passing down the degrade path**.
+
+`shared/bus/client.py` keys **one `fakeredis.FakeServer` per running test**, off
+`PYTEST_CURRENT_TEST` with the phase suffix stripped. Shared within a test
+(pub/sub and streams cross Bus instances, as in prod), clean between tests — and
+**no conftest wiring in any of the ~15 suites** that use it, because pytest
+rewrites that variable per test. `reset_fake_bus()` is the explicit hook.
+
+⚠ **If a test needs an EMPTY cache, it must now say so.** Building a second
+`Bus(fake=True)` used to give you one for free — a semantic prod never had. Two
+tests were relying on exactly that and broke when the fake stopped lying: one
+looped over three clock times and only passed because each pass could not see the
+cooldown map the previous one wrote. Call `reset_fake_bus()` and rebuild.
+
+**`pyrightconfig.json` is a DELIBERATELY NARROW type check** — `shared/bus`,
+`shared/contracts`, `shared/config_toml.py`, `webgui/bus_client.py`. That is the
+one seam every tier crosses, and where the documented envelope-vs-payload bug
+class lives (`cache_get` returns a `CacheEnvelope`, not the payload). Run it with
+`.venv\Scripts\python -m pyright`; it is **clean, and must stay clean**.
+
+⚠ **Do not widen it to the repo.** The services and pages are large, untyped, and
+full of deliberately loose payload dicts (contracts model rows as `list[dict]` on
+purpose) — switching them on yields thousands of findings nobody will action,
+the same failure mode ruff's minimal select list already avoids. Its four
+original findings were all **typing-stub artifacts, not bugs**: `redis-py`'s
+stubs return `bytes | str` where `decode_responses=True` guarantees `str`. They
+are fixed with `cast()` **plus a comment stating the invariant**, never a blanket
+ignore.
+
+**Two cross-tier mirrors are now pinned by test, not discipline**
+(`shared/tests/test_cross_tier_mirrors.py`, which AST-parses the files and
+imports nothing, so it cannot itself trigger the `scoring` collision):
+- the five **regime display words**, duplicated in `driver_svc/compute.py`,
+  `options_svc/market_console.py` and `webgui/pages/regime_mix.py` because those
+  tiers cannot import the source. (`sentiment_svc` correctly delegates to
+  `market_regime.regime_label` — a test records that it must not grow a fourth
+  copy "for symmetry".)
+- the **manuals dual registration**. The existing webgui test checked catalog →
+  built file; this adds the converse, which was the unguarded half: a manual
+  that is BUILT but never listed in `pages/manuals.py` is silently unreachable,
+  since that dict is also the serving whitelist.
+
+**`scoring/_common.py` now holds `clamp` and `num`.** Measured by AST with
+docstrings stripped: **`clamp` had NINE byte-identical private copies and `num`
+seven** (six identical, one differently spelled but verified equivalent across 20
+inputs before folding it in). That was the "patch one of nine" trap in the very
+package where the NaN-guard bug class keeps recurring. ⚠ This is **not** the
+thing the NaN section below warns against — that warning is about changing
+`clamp`'s NaN *semantics* centrally, and the body here is byte-identical to the
+nine it replaced. The NaN policy stays at the call sites, because only the caller
+knows whether a missing input means "neutral 50", "floor the magnitude" or
+"confidence 0". `_finite` is deliberately **not** consolidated: three functions
+share that name and `momentum_regime`'s takes an *iterable*, so hoisting it would
+hand someone the wrong one silently. A test records that.
+
+**`pytest` now defaults to `-rf`** (`[tool.pytest.ini_options]` in
+`pyproject.toml`, which every per-app run resolves as its configfile). "Compare
+the failing SET, not the count" stops being something you have to remember to ask
+for. `-rfs` was considered and rejected: the suites carry a couple of permanent
+`importorskip`s, and printing those every run trains people to ignore the summary.
+
 ## Observability — a swallowed exception must leave a trace
 
 **`services/_degrade.py` is the house guard-rail for the repo's most expensive bug
