@@ -94,10 +94,60 @@ daily-batch cadence is sufficient; a 1–2 week lag is acceptable for short
 interest because it gates a coarse threshold, while an earnings DATE must be
 accurate.
 
-⚠ **The short side does not ship until this lands.** The squeeze gate has no
-other supplier, and shorting crowded names unguarded is precisely the tail the
-gate exists to avoid. Phase 2's mirrored gates (2.1) can be built and tested
-without it; the squeeze gate alone waits.
+#### ✅ Short interest — SOLVED 2026-08-22, free and official
+
+**FINRA's Query API ÷ Schwab's `marketCapFloat`**, in
+`services/trade_svc/short_interest.py`. Verified live end-to-end: the whole US
+universe (22,341 rows) in ~7 s, unauthenticated, and FINRA's Specific Terms for
+Equity Data permit "non-commercial personal or professional use" plus derivative
+data. Days-to-cover arrives **pre-computed**. The float denominator was already
+in a payload every analyze fetches — Schwab's `marketCapFloat` is float in
+**shares**, despite the name.
+
+Four things the live verification forced, each of which would otherwise have
+shipped as a silent bug:
+- **The API returns CSV, not JSON** (`content-type: text/plain`, every field
+  quoted) — its docs imply otherwise. It does honour `Accept: application/json`.
+- **Filter on `settlementDate`, never `limit` + client-side sort.** The default
+  ordering is not newest-first; a naive `limit: 200` returned a cycle **four
+  months stale** while looking perfectly healthy.
+- **Cap the ratio at 100%.** FINRA is not split-adjusted and its
+  `stockSplitFlag` only appears in the cycle AFTER a split, so a reverse split
+  between settlement and today puts a pre-split numerator over a post-split
+  float. Measured live: **BYND computes to 783%**. `percent_of_float` returns
+  `None` there — reporting it would fire the gate hardest exactly when the data
+  is meaningless, the same shape as a missing reading clamping to an extreme.
+- **The gate fires on EITHER leg**, not both. Float is the contested term
+  (CHWY: 89% / 51% / 12% depending on whose float), while days-to-cover is
+  FINRA's own computation and never touches float. Measured live, **GME fires on
+  days-to-cover (17.06) while its 13.14% of float sits under the threshold** —
+  exactly the case an AND would have missed.
+
+⚠ **A float artifact can still fire it** — CHWY reads 89.46% on Schwab's float
+against ~12% on shares outstanding. For a gate that *blocks* shorting that is
+the safe direction (a false positive costs a trade you skip; a false negative
+costs a squeeze), but it is a known imprecision, not a measurement.
+
+Cadence is bi-monthly, published 9–12 days after settlement, so a reading is
+**8–27 days old**. Fine for a coarse gate, and the best any official source can
+do; anything advertising daily short interest is a stock-loan model. FINRA has a
+weekly-reporting rule change pending — if it lands, only the refresh cadence
+changes.
+
+#### ⛔ Earnings dates — still open, and it is a spending decision
+
+No official source exists: SEC 8-K Item 2.02 is retrospective, and no exchange
+publishes a forward calendar, so **every forward earnings date is a vendor
+product**. Options: Alpha Vantage's bulk `EARNINGS_CALENDAR` free (one call a
+night fits the 25/day limit, but a measured 3-month probe was missing mega-caps
+— retest `horizon=12month` with a real key before trusting it); FMP ~$49/mo,
+whose `includeReportTimes=true` carries a **confirmed-vs-estimated flag**; or
+Benzinga via Massive $99/mo for a server-side `date_status`. The flag is the
+thing worth paying for — a gate that blocks on a *guessed* date blocks the wrong
+weeks and lets the real ones through, silently.
+
+**Until this lands the earnings gate stays dead on both verdicts.** The mirrored
+and squeeze gates do not depend on it.
 
 ### 1.2b finviz supplement — NOT TAKEN (kept for the record)
 - **Test** (`services/trade_svc/tests/test_compute.py`): with a stubbed finviz

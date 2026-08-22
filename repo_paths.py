@@ -124,6 +124,12 @@ REC_JOURNAL_DB = TRADE_SVC_DATA / "rec_journal.db"
 # that remembers what each field read on the day it was read.
 FUNDAMENTALS_HISTORY_DB = TRADE_SVC_DATA / "fundamentals_history.db"
 
+# FINRA's bi-monthly short-interest cycles. Schwab ships both short-interest
+# fields as a 0.0 sentinel for every symbol, so the short side's squeeze gate
+# needs the regulatory filing itself; the float denominator still comes from
+# Schwab (``marketCapFloat``, which is float in SHARES despite the name).
+SHORT_INTEREST_DB = TRADE_SVC_DATA / "short_interest.db"
+
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that
 # follow from it. Resolution lives here rather than in a new module because this

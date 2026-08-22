@@ -346,3 +346,107 @@ def test_journal_reading_never_raises(tmp_path):
     the row — an unwritable path must be swallowed, not propagated."""
     assert compute.journal_reading(_analysis_result(),
                                    db_path=tmp_path / "no" / "such" / "dir" / "\0bad.db") is False
+
+
+# ── short-interest enrichment (Phase 1, task 1.2) ────────────────────────────
+
+def test_fundamentals_get_short_interest_from_finra_not_schwab(monkeypatch, tmp_path):
+    """Schwab ships both short-interest fields as a 0.0 sentinel for EVERY
+    symbol, so `parse_schwab_fundamentals` maps them to None. FINRA supplies
+    the real numerator and a pre-computed days-to-cover; Schwab still supplies
+    the float denominator via `marketCapFloat` (which is float in SHARES).
+
+    This is the join the whole short side rests on."""
+    from services.trade_svc import short_interest as si
+
+    db = tmp_path / "si.db"
+    conn = si.init_db(db)
+    si.store_cycle(conn, [{"symbol": "GME", "short_qty": 53736062,
+                           "days_to_cover": 17.06, "avg_daily_volume": 3150012,
+                           "settlement_date": "2026-07-31"}])
+    si.close_db(conn)
+
+    class FinraClient(FakeClient):
+        def get_fundamentals(self, symbol):
+            # Schwab's real shape: the fields exist and are always zero.
+            return {"peRatio": 13.5, "marketCapFloat": 408810860.0,
+                    "shortIntToFloat": 0.0, "shortIntDayToCover": 0.0}
+
+    _patch(monkeypatch, FinraClient())
+    monkeypatch.setattr(compute, "_short_interest_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_short_interest", lambda conn: None)
+
+    f = compute._fetch_fundamentals("GME")
+    assert f.short_int_to_float == pytest.approx(13.14, abs=0.01)
+    assert f.short_int_day_to_cover == pytest.approx(17.06)
+
+
+def test_short_interest_enrichment_degrades_to_none_not_to_schwabs_zero(monkeypatch, tmp_path):
+    """A symbol FINRA does not carry (a rename, most often) must leave the
+    fields None. Falling back to Schwab's 0.0 would silently reinstate the
+    sentinel this whole module exists to escape."""
+    from services.trade_svc import short_interest as si
+
+    db = tmp_path / "si.db"
+    si.close_db(si.init_db(db))          # empty store
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0,
+                    "shortIntToFloat": 0.0, "shortIntDayToCover": 0.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_short_interest_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_short_interest", lambda conn: None)
+
+    f = compute._fetch_fundamentals("SQ")
+    assert f.short_int_to_float is None
+    assert f.short_int_day_to_cover is None
+
+
+def test_short_interest_enrichment_never_breaks_an_analysis(monkeypatch):
+    """The store being unreachable must cost the short-interest fields and
+    nothing else — the fundamentals themselves still come back."""
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_short_interest_db_path",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no store")))
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.pe_ratio == 20.0
+    assert f.short_int_to_float is None
+
+
+def test_short_interest_enrichment_is_skipped_under_pytest_by_default(monkeypatch):
+    """With no explicit store path the enrichment must not run under pytest.
+
+    Unguarded it opens a SQLite file inside the repo AND triggers a LIVE FINRA
+    fetch: measured, a single suite run downloaded 22,341 rows into
+    services/trade_svc/data/short_interest.db. That is the documented
+    "pytest must isolate on-disk stores" trap plus an unwanted network call,
+    and `analyze` is exercised by many tests that know nothing about this
+    store. Tests that DO want the join pass their own path, which opts back in.
+    """
+    from services.trade_svc import short_interest as si
+
+    opened = []
+
+    def spy(path):
+        opened.append(path)
+        raise RuntimeError("must not be reached under pytest")
+
+    monkeypatch.setattr(si, "init_db", spy)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0}
+
+    _patch(monkeypatch, Client())
+    f = compute._fetch_fundamentals("AAPL")
+
+    assert opened == [], f"enrichment opened the real store: {opened}"
+    assert f.pe_ratio == 20.0
+    assert f.short_int_to_float is None

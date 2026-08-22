@@ -610,11 +610,77 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
         return None
 
 
+# ── short interest: FINRA numerator, Schwab denominator ─────────────────────
+# Schwab ships shortIntToFloat/shortIntDayToCover as a 0.0 sentinel for every
+# symbol, so parse_schwab_fundamentals maps them to None and the real values
+# are joined in here. Schwab still supplies the FLOAT (``marketCapFloat`` is
+# float in SHARES despite the name). See services/trade_svc/short_interest.py.
+_SI_REFRESH_DAY = [None]   # one refresh attempt per calendar day, at most
+
+
+def _short_interest_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import short_interest as _si
+    return _si.DEFAULT_DB_PATH
+
+
+def _refresh_short_interest(conn):
+    """At most one FINRA cycle check per day. FINRA publishes bi-monthly, so
+    this is a no-op on all but ~24 days a year; the daily probe is one cheap
+    request that usually finds the store already current."""
+    today = _today_ct_str()
+    if _SI_REFRESH_DAY[0] == today:
+        return
+    _SI_REFRESH_DAY[0] = today
+    try:
+        from services.trade_svc import short_interest as _si
+        _si.refresh(conn)
+    except Exception:
+        _degrade.degraded("trade.refresh_short_interest")
+
+
+def _enrich_short_interest(fundamentals, symbol, float_shares):
+    """Fill the two short-interest fields from FINRA, in place.
+
+    Never raises and never falls back to Schwab's 0.0 — a symbol FINRA does
+    not carry (a rename, most often) leaves both fields None, because a
+    sentinel reinstated here would silently disable the squeeze gate again."""
+    conn = None
+    try:
+        from services.trade_svc import short_interest as _si
+        path = _short_interest_db_path()
+        # Same isolation rule the journal and PIT stores carry, and this one
+        # matters more: unguarded it opened a SQLite file inside the repo AND
+        # pulled a live FINRA cycle — measured, 22,341 rows downloaded during a
+        # single suite run. A test that wants the join patches the path, which
+        # opts back in.
+        if _under_pytest() and path == _si.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _si.init_db(path)
+        _refresh_short_interest(conn)
+        got = _si.for_symbol(conn, symbol, float_shares)
+        if got:
+            fundamentals.short_int_to_float = got["pct_of_float"]
+            fundamentals.short_int_day_to_cover = got["days_to_cover"]
+    except Exception:
+        _degrade.degraded("trade.enrich_short_interest")
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import short_interest as _si2
+                _si2.close_db(conn)
+            except Exception:
+                pass
+    return fundamentals
+
+
 def _fetch_fundamentals(symbol):
     """Fetch + parse Schwab fundamentals for ``symbol`` → ``Fundamentals``.
 
     Defensive: a proxy/parse failure returns an empty ``Fundamentals`` (so the
     Investor verdict degrades to insufficient-data HOLD) rather than raising.
+    Short interest is joined in from FINRA afterwards — see
+    :func:`_enrich_short_interest`.
     """
     try:
         raw = _proxy.schwab_client.get_fundamentals(symbol)
@@ -623,9 +689,11 @@ def _fetch_fundamentals(symbol):
     if not raw:
         return Fundamentals()
     try:
-        return parse_schwab_fundamentals({"fundamental": raw}, as_of=date.today().isoformat())
+        f = parse_schwab_fundamentals({"fundamental": raw},
+                                      as_of=date.today().isoformat())
     except Exception:
         return Fundamentals()
+    return _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
 
 
 # ── sector P/E median (Phase 1) ──────────────────────────────────────────────
