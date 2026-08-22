@@ -295,22 +295,41 @@ its rising 200-EMA prints a blocked short with reasons.
 
 ## Phase 3 — the trade ticket
 
-### 3.1 Convention unification (first — it gates the rest)
-- **Test** (`shared/tests/test_cross_tier_mirrors.py`): the deep-dive flip
-  helper and `gamma_tool.snapshot_summary` agree on a shared fixture grid; a
-  source-level test pins that only one 25Δ sign convention exists.
-- **Code**: adopt `flow_skew`'s `put − call`; relabel the deep dive's. Port the
-  banded + persistence flip as a small pure function into `deepdive/engine.py`
-  (it may not import `gamma_tool` — per-domain engine isolation).
+### 3.1 Convention unification ✅ DONE 2026-08-22
+Two numbers disagreed with the rest of the app for reasons that were convention
+rather than market — which matters now that the ticket puts IV state and dealer
+levels side by side.
 
-### 3.2 Structure matrix
+- **25Δ skew:** adopted `flow_skew`'s `put − call`. It won on two counts:
+  positive-means-downside-fear is the standard equity reading, and its value
+  already feeds a live scoring path (the sentiment aggression axis), so
+  changing *it* would have moved a scorer while changing the deep dive's moves
+  only a display. **The prose flipped with the number** — a sign change that
+  left the words alone would be worse than the inconsistency it fixed, since
+  the takeaway would confidently say the opposite of the truth. **So did the
+  colour:** the generic `signed_class` paints positive green, and under the new
+  convention positive means downside protection is bid; `skew_class` is
+  polarity-aware, the treatment the Macro Board already gives VIX and TLT.
+- **Gamma flip:** the deep dive found where CUMULATIVE GEX crosses zero;
+  `gamma_tool.snapshot_summary` — whose result the collector stores and every
+  dealer surface shows — finds where PER-STRIKE net GEX changes sign. Different
+  quantities, not different precisions: **on the test grid they land five
+  strikes apart**, because a cumulative sum must pay back the deep wing first.
+  `flip_point` ports gamma_tool's rules (±3% band, strict crossing, 2-live-
+  strike persistence with zeros skipped, interpolation, nearest-to-spot). A
+  port rather than an import, since this module may not reach into
+  options-scanner — so a **cross-tier test runs BOTH on one grid and compares**,
+  which is what will catch either side drifting.
+- The cumulative series is kept for the chart; it is simply no longer the flip.
+
+### 3.2 Structure matrix ✅ DONE 2026-08-22
 - **Test** (`trade-analyzer/tests/analysis/test_structure.py`, pure): each
   (side, IV state, wall geometry) cell returns the documented structure and a
   30–45 DTE tenor; an unknown IV state degrades to the mid column, never raises.
 - **Code**: `src/analysis/structure.py`, module constants until a second tier
   needs them (then a TOML — the house rule for config files).
 
-### 3.3 Trade Plan block
+### 3.3 Trade Plan block ✅ DONE 2026-08-22
 - **Test**: a cleared long yields every field populated; a blocked side yields
   the "no trade — what would change it" form; the time stop always equals the
   artifact's `horizon`; a missing ATR or wall omits that line rather than

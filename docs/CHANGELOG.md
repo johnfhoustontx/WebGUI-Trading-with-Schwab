@@ -69,6 +69,57 @@ swing model's refit is the headline, and it is not good news.**
   job — dev runs `schedulers: False`, so a service job would sit inert.
 - Suites: trade_svc **105**, trade-analyzer **259**.
 
+**Phases 2 and 3** — the short side becomes real, and the verdict becomes a plan.
+- **The short side had no gates.** Below-200-EMA and sector-downtrend cap only
+  BUY, so nothing stopped the model recommending a short into a healthy uptrend.
+  Three short-only gates now: above a **rising** 200-EMA (the slope is
+  load-bearing — price bouncing back above a still-FALLING 200-EMA is the
+  textbook short entry, which a bare "above the 200" test would have gated
+  away), sector in confirmed uptrend, and squeeze risk. They live in their own
+  `short_gates` list, which came out of a test failure that was right: a
+  short-only constraint in the shared list prints "cannot be SELL" on every
+  strong BUY.
+- **Direction clearance, and a bug only live data found.** The first version let
+  a committed downward regime clear directional shorts outright; run against the
+  real tape it returned SPY above a *rising* 200-DMA → longs cleared AND
+  Softening → shorts cleared, a contradiction on its face. The 200-DMA is a
+  multi-week structure while the committed direction comes from a 5-minute EMA
+  slope — using the latter to authorise a **twenty-day** short is the same
+  horizon mismatch the audit criticised in the legacy engine. The structural
+  read now outranks the fast one. Everything fails conservative: unknown trend,
+  missing regime and stale regime all land shorts on relative-only, and
+  `spy_trend` returns **None** rather than False on thin history, because False
+  reads as "below the 200-DMA" — one of the conditions that CLEARS a short.
+- **Dealer positioning and sector peers reach the page**, and the universe
+  snapshot keeps symbol identity (it computed every symbol's factors daily and
+  threw the names away). The flat basis the scorer consumes is DERIVED, so the
+  scoring path provably did not move. A legacy test caught that an empty
+  snapshot must stay **falsy**, or a truthy `{"by_symbol": {}}` caches a
+  snapshot of nothing for the day.
+- **Earnings dates via Alpha Vantage — and the fail-open hole it exposed.**
+  Measured with a real key: 1,814 symbols, coverage collapsing with distance
+  (1,032 rows in October, 11 in March), **11 of 20 mega-caps missing**, and
+  genuinely patchy rather than announced-only — AAPL and GOOGL appear at 67–68
+  days while MSFT, AMZN and META, the same cycle, are absent. Both mega-caps
+  inside the gate's own window WERE covered. The danger was that
+  `days_to_earnings is None` meant both "nothing scheduled" and "not carried",
+  so a hold could walk into an unlisted report wearing the appearance of
+  protection. `coverage()` now separates them and the page says the date is
+  UNKNOWN.
+- **Two conventions unified** (Phase 3.1): one 25Δ skew sign (`put − call`,
+  with the prose AND the colour flipped to match) and one gamma flip. The deep
+  dive's cumulative-crossing flip sat **five strikes** from the per-strike one
+  the collector stores; a cross-tier test now runs both on one grid.
+- **The Trade Plan block** turns a verdict into something falsifiable:
+  structure and tenor from a pure lookup (clearance outranks IV; walls set the
+  short strike; unknown IV rank is MID, never cheap), entry zone, an ATR-or-wall
+  stop that prefers whichever is TIGHTER and returns None rather than inventing
+  a level, the calibrated target — and a **time stop at the model's own 20
+  trading days**, resolved to a real date. Past that the read is unmodelled and
+  nothing in the app had ever said so.
+- Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
+  options-scanner **1186**, schwab-proxy **104**.
+
 **Phase 0** follows.
 - **Program docs:** [design](plans/2026-08-22-trade-analyzer-longshort-design.md)
   + [plan](plans/2026-08-22-trade-analyzer-longshort-plan.md) — an audit of the
