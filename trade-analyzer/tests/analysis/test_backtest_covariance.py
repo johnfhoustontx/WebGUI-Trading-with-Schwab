@@ -131,3 +131,12 @@ class TestWalkForwardAcceptsADataWeighter:
         out = B.walk_forward(panel, fwd, train=40, test=10, step=10,
                              fit_fn=B.ridge_weights)
         assert out["oos_ic"] > 0
+
+    def test_it_reports_how_many_rows_the_composite_actually_scored(self):
+        """The regime-conditioned variant is only comparable to the pooled one
+        if both score the same rows, so the count has to come from the same
+        place the OOS IC does — recomputing it in a second pass would double the
+        cost of every variant on a ~100k-row panel."""
+        panel, fwd = _panel(n_dates=90)
+        out = B.walk_forward(panel, fwd, train=40, test=10, step=10)
+        assert out["n_scored_rows"] == out["n_folds"] * 10 * 25

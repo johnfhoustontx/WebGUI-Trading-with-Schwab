@@ -236,7 +236,7 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
     ``fit_fn`` wins when both are given."""
     weight_fn = weight_fn or signed_ic_weights
     dates = factors.index.get_level_values("date").unique().sort_values()
-    folds, oos_ics, last_weights = 0, [], {}
+    folds, oos_ics, last_weights, scored = 0, [], {}, 0
     i = train
     while i + test <= len(dates):
         tr = dates[i - train:i]
@@ -249,12 +249,14 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
              else weight_fn({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns}))
         comp_te = composite(zscore_by_date(f_te), w)
         oos_ics.append(factor_ic(comp_te, y_te)["mean_ic"])
+        scored += int(comp_te.notna().sum())
         last_weights = w
         folds += 1
         i += step
     oos = float(np.nanmean(oos_ics)) if oos_ics else 0.0
     return {"oos_ic": oos, "n_folds": folds, "weights": last_weights,
-            "oos_ic_by_fold": [float(x) for x in oos_ics]}
+            "oos_ic_by_fold": [float(x) for x in oos_ics],
+            "n_scored_rows": scored}
 
 
 def _isotonic_nondecreasing(values):

@@ -17,6 +17,9 @@ Pure — the caller supplies the panel. No I/O, no fetching.
 import math
 from functools import partial
 
+import numpy as np
+import pandas as pd
+
 from src.analysis import backtest as B
 
 
@@ -74,4 +77,81 @@ def run_variant(panel, forward, *, label, min_abs_ic=None, weight_fn=None,
         "n_factors": len(ics),
         "weights": weights,
         "factor_ic": {c: ics[c]["mean_ic"] for c in ics},
+        "n_scored_rows": wf["n_scored_rows"],
+    }
+
+
+def _fold_windows(panel, train, test, step):
+    dates = panel.index.get_level_values("date").unique().sort_values()
+    i = train
+    while i + test <= len(dates):
+        yield dates[i - train:i], dates[i:i + test]
+        i += step
+
+
+def _slice(frame, dates):
+    return frame[frame.index.get_level_values("date").isin(dates)]
+
+
+def regime_walk_forward(panel, forward, regimes, *, label, train=378, test=63,
+                        step=63, weight_fn=None, min_regime_days=60):
+    """Walk-forward where each test date is scored under ITS OWN regime's
+    weights, fitted on that regime's dates within the same train window.
+
+    Two rules keep the comparison against the pooled fit honest:
+
+    **A thinly-trained regime falls back to pooled.** Weights from a handful of
+    days are noise wearing a regime's name, and this model's edge is thin enough
+    that such a weight set would dominate whatever fold it landed in.
+
+    **No test row is ever dropped.** An unlabelled or fallen-back date is scored
+    with the pooled weights, so the OOS IC covers exactly the sample the pooled
+    variant covers. Dropping them would silently change the denominator.
+    """
+    weight_fn = weight_fn or B.signed_ic_weights
+    reg = pd.Series(regimes).dropna()
+
+    oos_ics, folds, scored = [], 0, 0
+    weights_by_regime, fallback = {}, set()
+    for tr, te in _fold_windows(panel, train, test, step):
+        f_tr, y_tr = _slice(panel, tr), _slice(forward, tr)
+        pooled_w = weight_fn({c: B.factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
+
+        tr_lab = reg.reindex(tr).dropna()
+        reg_w = {}
+        for r, cnt in tr_lab.value_counts().items():
+            if cnt < min_regime_days:
+                fallback.add(r)
+                continue
+            rd = tr_lab.index[tr_lab == r]
+            f_r, y_r = _slice(panel, rd), _slice(forward, rd)
+            w = weight_fn({c: B.factor_ic(f_r[c], y_r) for c in f_r.columns})
+            if w:
+                reg_w[r] = w
+            else:
+                fallback.add(r)
+
+        z_te = B.zscore_by_date(_slice(panel, te))
+        lab = pd.Series(reg.reindex(z_te.index.get_level_values("date")).to_numpy(),
+                        index=z_te.index)
+        parts = [B.composite(z_te[~lab.isin(list(reg_w))], pooled_w)]
+        parts += [B.composite(z_te[lab == r], w) for r, w in reg_w.items()]
+        parts = [p for p in parts if len(p)]
+        comp = pd.concat(parts).reindex(z_te.index) if parts else pd.Series(
+            float("nan"), index=z_te.index)
+
+        oos_ics.append(B.factor_ic(comp, _slice(forward, te))["mean_ic"])
+        scored += int(comp.notna().sum())
+        weights_by_regime = reg_w          # the LAST fold's, as walk_forward does
+        folds += 1
+
+    oos = float(np.nanmean(oos_ics)) if oos_ics else 0.0
+    return {
+        "label": label, "oos_ic": oos, "n_folds": folds,
+        "oos_ic_by_fold": [float(x) for x in oos_ics],
+        "negative_folds": sum(1 for x in oos_ics if x < 0),
+        "weights_by_regime": weights_by_regime,
+        "fallback_regimes": sorted(fallback),
+        "regime_days": {str(k): int(v) for k, v in reg.value_counts().items()},
+        "n_scored_rows": scored,
     }
