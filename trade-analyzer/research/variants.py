@@ -93,6 +93,32 @@ def _slice(frame, dates):
     return frame[frame.index.get_level_values("date").isin(dates)]
 
 
+def oos_composite(panel, forward, *, train=378, test=63, step=63,
+                  weight_fn=None, fit_fn=None):
+    """``(composite, forward)`` over the walk-forward's TEST windows only.
+
+    The shipped artifact calibrates its score->outcome bands on the full-sample
+    composite — the same rows the weights were fitted on — so the mean forward
+    return and hit rate the Trade page prints are in-sample statistics. Bands
+    built from THIS are not: no training row reaches them, which is the only way
+    to answer whether a band's edge is real."""
+    weight_fn = weight_fn or B.signed_ic_weights
+    comps, ys = [], []
+    for tr, te in _fold_windows(panel, train, test, step):
+        f_tr, y_tr = _slice(panel, tr), _slice(forward, tr)
+        w = (fit_fn(f_tr, y_tr) if fit_fn is not None
+             else weight_fn({c: B.factor_ic(f_tr[c], y_tr) for c in f_tr.columns}))
+        f_te = _slice(panel, te)
+        comps.append(B.composite(B.zscore_by_date(f_te), w))
+        ys.append(_slice(forward, te))
+    if not comps:
+        empty = pd.Series(dtype="float64")
+        return empty, empty
+    comp = pd.concat(comps)
+    y = pd.concat(ys).reindex(comp.index)
+    return comp, y
+
+
 def regime_walk_forward(panel, forward, regimes, *, label, train=378, test=63,
                         step=63, weight_fn=None, min_regime_days=60):
     """Walk-forward where each test date is scored under ITS OWN regime's

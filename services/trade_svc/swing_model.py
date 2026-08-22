@@ -102,15 +102,38 @@ def _percentile(idx, n_bands):
     return int(round((idx + 0.5) / n_bands * 100))
 
 
-def score_symbol(current_factors, universe_snapshot, artifact):
+def _select_regime(artifact, regime):
+    """``(block, key)`` — the requested regime's block, or the pooled ``"all"``.
+
+    Falls back whenever the requested key is absent OR present but unfitted (the
+    fit writes a key for every regime it saw, and one it could not estimate
+    carries no weights). Scoring on an empty block would return None and drop
+    the whole card to the legacy verdict — a silent downgrade, exactly the
+    failure mode the artifact's degrade paths exist to avoid."""
+    regimes = (artifact or {}).get("regimes") or {}
+    for key in ([regime] if regime else []) + ["all"]:
+        blk = regimes.get(key)
+        if blk and blk.get("weights") and blk.get("calibration"):
+            return blk, key
+    return None, None
+
+
+def score_symbol(current_factors, universe_snapshot, artifact, regime=None):
     """current_factors: {factor: value} for the symbol now.
     universe_snapshot: {factor: [values across the watchlist]} or None.
-    artifact: the loaded swing_model.json (or None). Returns the swing_model
-    verdict dict, or None to degrade to the legacy verdict."""
+    artifact: the loaded swing_model.json (or None).
+    regime: today's market regime key (`src.analysis.regime.current_regime`), or
+    None. Falls back to the pooled ``"all"`` weights whenever that regime is not
+    fitted — and the chosen key is reported as ``regime_key``, because a verdict
+    scored under regime weights is a different claim from one scored under
+    pooled weights. Returns the swing_model verdict dict, or None to degrade to
+    the legacy verdict."""
     try:
         if not artifact:
             return None
-        reg = artifact["regimes"]["all"]
+        reg, regime_key = _select_regime(artifact, regime)
+        if reg is None:
+            return None
         weights, norm, calib = reg.get("weights", {}), reg.get("norm", {}), reg.get("calibration", [])
         if not weights or not calib:
             return None
@@ -151,6 +174,7 @@ def score_symbol(current_factors, universe_snapshot, artifact):
             "horizon_days": artifact.get("horizon", 20),
             "contributions": sorted(contribs, key=lambda d: abs(d["contribution"]), reverse=True),
             "model_version": artifact.get("version"), "oos_ic": reg.get("oos_ic"),
+            "regime_key": regime_key,
             "source": "validated",
         }
     except Exception:

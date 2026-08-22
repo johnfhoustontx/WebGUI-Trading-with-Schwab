@@ -442,3 +442,40 @@ class TestTradePlanRows:
         text, kind = trade.plan_headline(plan)
         assert kind == "relative"
         assert "pair" in text.lower()
+
+
+# ── Phase 4.3: the page says which regime's weights scored ───────────────────
+# A verdict scored under regime weights and one scored under the pooled fit are
+# different claims about the same symbol. When they can differ, the card has to
+# say which it made — otherwise the evidence expander shows contributions whose
+# weights the reader cannot account for.
+
+def test_a_named_regime_is_described_in_WORDS_not_its_artifact_key():
+    """`highvol` is a dict key. The card says what it means about the tape."""
+    note = trade.swing_regime_note({"regime_key": "highvol"})
+    assert "volatility" in note.lower()
+    assert "highvol" not in note.lower()
+
+
+def test_each_regime_gets_its_own_description():
+    notes = {k: trade.swing_regime_note({"regime_key": k})
+             for k in ("trend", "chop", "highvol")}
+    assert len(set(notes.values())) == 3
+
+
+def test_an_unrecognised_key_still_says_something_rather_than_nothing():
+    """A fit that grows a fourth regime must not render a blank line."""
+    assert trade.swing_regime_note({"regime_key": "crisis"}).strip()
+
+
+def test_the_pooled_fit_says_so_rather_than_printing_a_key():
+    """'all' is an internal artifact key, not a market condition. Printing it
+    raw would read as a regime named 'all'."""
+    note = trade.swing_regime_note({"regime_key": "all"})
+    assert "all" not in note.lower().split()
+    assert "regime" in note.lower()
+
+
+def test_an_artifact_predating_regimes_shows_nothing_rather_than_a_guess():
+    assert trade.swing_regime_note({"model_version": "2026-06-28"}) == ""
+    assert trade.swing_regime_note(None) == ""

@@ -506,6 +506,21 @@ def _swing_universe():
     return list(_MK_UNIVERSE)
 
 
+def _market_regime(spy_close):
+    """Today's daily-bar regime key, or None.
+
+    ⚠ Needs ~272 bars of SPY to classify, and analyze() fetches TWO years — so
+    this is real only because that is comfortably enough. A shorter fetch would
+    return None on every call and the regime selector would silently sit on the
+    pooled weights forever, which looks identical to it working."""
+    try:
+        from src.analysis import regime as _regime
+        return _regime.current_regime(spy_close)
+    except Exception:
+        _degrade.degraded("trade._market_regime")
+        return None
+
+
 def build_universe_factor_snapshot():
     """``{"by_symbol": {symbol: {factor: value}}}`` for the whole universe.
 
@@ -1286,7 +1301,8 @@ def analyze(symbol):
             # The scorer takes the FLAT basis; the snapshot keeps identity for
             # the peer lines. flat_basis derives one from the other, so the
             # scoring path is unchanged by that shape change.
-            swing_block = _swing.score_symbol(_cur, flat_basis(_snap), _art)
+            swing_block = _swing.score_symbol(_cur, flat_basis(_snap), _art,
+                                              regime=_market_regime(_spy_close))
             _peers = _peer_block(symbol, _snap, _art, swing_block)
     except Exception:
         swing_block = None

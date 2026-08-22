@@ -320,6 +320,28 @@ def swing_model_meta(sm):
             "oos_ic": f"{oos:+.4f}" if isinstance(oos, (int, float)) else "—"}
 
 
+_REGIME_WORDS = {"trend": "a trending tape", "chop": "a rangebound tape",
+                 "highvol": "an elevated-volatility tape"}
+
+
+def swing_regime_note(sm):
+    """Which weight set scored this symbol, in words. '' when unknown.
+
+    Worth its own line because the two cases are different claims: regime
+    weights say "this is what has worked in tapes like today's", the pooled fit
+    says "this is what has worked on average". A reader looking at the
+    contributions table cannot otherwise account for the weights it shows.
+
+    ``"all"`` is an artifact key, not a market condition — printed raw it would
+    read as a regime called "all"."""
+    key = (sm or {}).get("regime_key")
+    if not key:
+        return ""
+    if key == "all":
+        return "scored on the pooled fit (no regime-specific weights)"
+    return f"scored on weights fitted for {_REGIME_WORDS.get(key, key)}"
+
+
 def model_staleness(version, today=None, threshold_days=60):
     """A staleness nudge for the swing-model artifact, or '' when fresh/unparseable.
 
@@ -697,6 +719,9 @@ def render():
                     if meta:
                         ui.label(f"model {meta['version']} · OOS IC {meta['oos_ic']}") \
                             .classes("text-xs opacity-60")
+                        rnote = swing_regime_note(sm)
+                        if rnote:
+                            ui.label(rnote).classes("text-xs opacity-60")
                         stale = model_staleness(meta["version"])
                         if stale:
                             ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
