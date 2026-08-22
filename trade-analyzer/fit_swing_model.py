@@ -89,14 +89,18 @@ def _forward_excess(close, spy_close, horizon):
     return sym_fwd - spy_fwd
 
 
-def build_panel(hist, spy_close, sector_closes, horizon=HORIZON):
-    """Assemble a (date, symbol) factor panel + an aligned forward-excess Series."""
+def build_panel(hist, spy_close, sector_closes, horizon=HORIZON, universe=None):
+    """Assemble a (date, symbol) factor panel + an aligned forward-excess Series.
+
+    ``universe`` is the symbol -> sector-ETF map; it defaults to this module's
+    curated one, and the Phase-4 research harness passes an expanded map."""
+    universe = universe if universe is not None else UNIVERSE_SECTOR
     frames, fwds = [], []
     used = 0
     for sym, df in hist.items():
         if df is None or len(df) < 300:
             continue
-        sec_close = sector_closes.get(UNIVERSE_SECTOR.get(sym))
+        sec_close = sector_closes.get(universe.get(sym))
         ff = F.compute_factor_frame(df, spy_close=spy_close, sector_close=sec_close)
         fwd = _forward_excess(_close(df), spy_close, horizon)
         mi = pd.MultiIndex.from_arrays(

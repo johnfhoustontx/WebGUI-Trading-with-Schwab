@@ -62,6 +62,12 @@ def zscore_by_date(factors: pd.DataFrame, winsor=(0.02, 0.98)) -> pd.DataFrame:
     band) then standardize (x - mean)/std. A constant cross-section -> all zeros
     (no inf). Look-ahead-free: only same-date data is used."""
     lo, hi = winsor
+    if factors.empty:
+        # An empty slice is a real input once the panel is split by regime (a
+        # regime with no dates in a fold). pandas' groupby-transform raises on
+        # it; returning the empty frame is unambiguously correct and lets the
+        # caller's own emptiness check speak.
+        return factors
 
     def _z(col):  # col: one factor's values for one date (a Series across symbols)
         c = col.clip(lower=col.quantile(lo), upper=col.quantile(hi))
@@ -105,6 +111,103 @@ def signed_ic_weights(ic_by_factor: Dict[str, dict], min_abs_ic: float = 0.005) 
     return {k: v / denom for k, v in raw.items()} if denom > 0 else {}
 
 
+def _rank_target(forward: pd.Series) -> pd.Series:
+    """Cross-sectionally standardized RANK of the forward return, per date.
+
+    The IC framework this model is built on is rank-based (Spearman), and
+    forward excess returns are fat-tailed — a linear fit on raw levels would let
+    a handful of extreme moves set every coefficient. Ranking first makes the
+    multivariate weighters the honest analogue of the univariate rank IC they
+    are competing against."""
+    r = forward.groupby(level="date").rank()
+    mu = r.groupby(level="date").transform("mean")
+    sd = r.groupby(level="date").transform("std")
+    return ((r - mu) / sd.where(sd > 0)).replace([np.inf, -np.inf], np.nan)
+
+
+def _normalize_signed(raw: Dict[str, float]) -> Dict[str, float]:
+    denom = sum(abs(v) for v in raw.values())
+    return {k: v / denom for k, v in raw.items()} if denom > 0 else {}
+
+
+def ridge_weights(factors: pd.DataFrame, forward: pd.Series,
+                  alpha: float = 1.0) -> Dict[str, float]:
+    """Covariance-aware SIGNED weights via ridge regression (the C12 fix).
+
+    `signed_ic_weights` scores each factor UNIVARIATELY, so the correlated
+    momentum cluster (mom_12_1 / mom_6_1 / vol_adj_mom / trend_quality) is paid
+    four times for one signal. Ridge sees the covariance and splits the credit;
+    `alpha` shrinks toward equal weight, which keeps a near-collinear pair from
+    exploding into a large offsetting pair.
+
+    Signed by construction, |weights| sum to 1, and EVERY input column gets a
+    key — ridge shrinks rather than selects, so nothing is dropped."""
+    cols = list(factors.columns)
+    if not cols:
+        return {}
+    z = zscore_by_date(factors)
+    y = _rank_target(forward).reindex(z.index)
+    df = pd.concat([z, y.rename("__y__")], axis=1).replace(
+        [np.inf, -np.inf], np.nan).dropna()
+    if len(df) <= len(cols):
+        return {c: 0.0 for c in cols}
+    X = df[cols].to_numpy(dtype="float64")
+    yv = df["__y__"].to_numpy(dtype="float64")
+    try:
+        beta = np.linalg.solve(X.T @ X + alpha * np.eye(len(cols)), X.T @ yv)
+    except np.linalg.LinAlgError:                      # pragma: no cover - alpha>0 guards it
+        return {c: 0.0 for c in cols}
+    raw = {c: float(b) for c, b in zip(cols, beta)}
+    return _normalize_signed(raw) or {c: 0.0 for c in cols}
+
+
+def orthogonalized_ic_weights(factors: pd.DataFrame, forward: pd.Series,
+                              min_abs_ic: float = 0.005) -> Dict[str, float]:
+    """Greedy residual-IC weights: the other C12 candidate.
+
+    Take the strongest factor by |IC|, residualize every remaining factor
+    against those already chosen, and re-score on the RESIDUAL — so a factor is
+    paid only for information the model does not already have. A duplicate of an
+    admitted factor therefore earns ~nothing.
+
+    Greedy and order-dependent by construction (strongest |IC| first), which is
+    the point: the cluster's best member keeps its weight and its echoes lose
+    theirs. Weights are the residual ICs, signed, normalized to |sum| 1."""
+    cols = list(factors.columns)
+    if not cols:
+        return {}
+    z = zscore_by_date(factors).replace([np.inf, -np.inf], np.nan)
+    chosen: Dict[str, float] = {}
+    selected: list = []
+    remaining = list(cols)
+    while remaining:
+        scores = {}
+        for c in remaining:
+            resid = z[c] if not selected else _residual(z[c], z[selected])
+            scores[c] = factor_ic(resid, forward)["mean_ic"]
+        best = max(scores, key=lambda k: abs(scores[k]))
+        if abs(scores[best]) <= min_abs_ic:
+            break
+        chosen[best] = scores[best]
+        selected.append(best)
+        remaining.remove(best)
+    return _normalize_signed(chosen)
+
+
+def _residual(col: pd.Series, basis: pd.DataFrame) -> pd.Series:
+    """`col` with the part explained by `basis` removed (pooled OLS)."""
+    df = pd.concat([col.rename("__c__"), basis], axis=1).dropna()
+    if len(df) <= basis.shape[1] + 1:
+        return col
+    X = np.column_stack([np.ones(len(df)), df[basis.columns].to_numpy(dtype="float64")])
+    y = df["__c__"].to_numpy(dtype="float64")
+    try:
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    except np.linalg.LinAlgError:                      # pragma: no cover
+        return col
+    return pd.Series(y - X @ beta, index=df.index).reindex(col.index)
+
+
 def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     """Weighted sum of z-scored factors (only weighted columns contribute)."""
     cols = [c for c in weights if c in zscores.columns]
@@ -114,13 +217,23 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     return (zscores[cols] * w).sum(axis=1, min_count=1)
 
 
-def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None) -> dict:
+def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
+                 fit_fn=None) -> dict:
     """Rolling train->test. Fit weights on each train window (default
     `signed_ic_weights`, n-independent + stable across folds — see that function),
     score the next (unseen) test window, collect the composite's OOS IC. Returns
     oos_ic, fold count, the per-fold OOS ICs, and the weights from the LAST train
     window. Train/test never overlap within a fold; test windows across folds are
-    non-overlapping when step >= test (the default step=test tiles them)."""
+    non-overlapping when step >= test (the default step=test tiles them).
+
+    Two doors for the weighter, because they need different things:
+      * ``weight_fn(ic_by_factor)`` — the univariate schemes, which need only IC
+        summaries.
+      * ``fit_fn(factors, forward)`` — the covariance-aware schemes
+        (`ridge_weights`, `orthogonalized_ic_weights`), which need the fold's
+        actual data. Without this door they could only ever be measured
+        in-sample, which is no measurement at all.
+    ``fit_fn`` wins when both are given."""
     weight_fn = weight_fn or signed_ic_weights
     dates = factors.index.get_level_values("date").unique().sort_values()
     folds, oos_ics, last_weights = 0, [], {}
@@ -132,7 +245,8 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None) 
         y_tr = forward[forward.index.get_level_values("date").isin(tr)]
         f_te = factors[factors.index.get_level_values("date").isin(te)]
         y_te = forward[forward.index.get_level_values("date").isin(te)]
-        w = weight_fn({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
+        w = (fit_fn(f_tr, y_tr) if fit_fn is not None
+             else weight_fn({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns}))
         comp_te = composite(zscore_by_date(f_te), w)
         oos_ics.append(factor_ic(comp_te, y_te)["mean_ic"])
         last_weights = w
