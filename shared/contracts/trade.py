@@ -60,3 +60,7 @@ class TradeAnalysis(_Base):
     # fundamentals.days_to_earnings because the last two BOTH leave that
     # None, and conflating them lets the earnings gate fail open silently.
     earnings_coverage: str | None = None
+    # The verdict rendered as a falsifiable plan: structure, entry zone,
+    # stop, target, and a TIME STOP at the model's own 20-day horizon —
+    # past which the read is unmodelled and nothing else says so.
+    trade_plan: dict | None = None

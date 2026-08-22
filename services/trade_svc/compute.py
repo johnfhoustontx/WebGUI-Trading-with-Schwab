@@ -957,6 +957,17 @@ def earnings_coverage(symbol):
                 pass
 
 
+def _trade_plan(result):
+    """The trade plan for an assembled analysis. Never raises — a plan is a
+    convenience over the verdict, and must not cost the user the analysis."""
+    from services.trade_svc import trade_plan as _tp
+    try:
+        return _tp.build(result)
+    except Exception:
+        _degrade.degraded("trade.trade_plan")
+        return None
+
+
 def _squeeze_reason(fundamentals):
     """The short-side squeeze reason for these fundamentals, or None.
 
@@ -1331,6 +1342,10 @@ def analyze(symbol):
         "timestamp": _now_iso(),
         "errors": [],
     }
+    # The plan is derived FROM the assembled result, so it sees the clearance,
+    # dealer context and earnings coverage rather than recomputing any of them.
+    result["trade_plan"] = _trade_plan(result)
+
     # Forward-accruing record of what the model said today. Side effect only —
     # never raises, and skipped under pytest (see journal_reading).
     journal_reading(result)

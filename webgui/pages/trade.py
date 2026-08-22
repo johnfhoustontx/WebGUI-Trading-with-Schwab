@@ -460,6 +460,70 @@ def peer_chips(peers, symbol):
     return out
 
 
+def plan_headline(plan):
+    """``(text, kind)`` for the Trade Plan header.
+
+    ``kind`` is one of debit / credit / relative / none — a finite set that maps
+    to a fixed palette class, never a runtime-built one."""
+    if not plan:
+        return ("", "none")
+    action = (plan.get("action") or "none").lower()
+    side = (plan.get("side") or "").lower()
+    structure = plan.get("structure") or ""
+    if action == "none":
+        return ("No trade — the tape does not support this side today", "none")
+    if action == "relative":
+        return (f"{side.title()} · {structure}", "relative")
+    return (f"{side.title()} · {structure} ({action})", action)
+
+
+def plan_rows(plan):
+    """Label/value rows for the Trade Plan block, or [].
+
+    A field the analysis could not produce is OMITTED rather than rendered as
+    None — a printed None in a stop row reads as a level."""
+    if not plan or (plan.get("action") or "none") == "none":
+        return []
+    rows = []
+    structure = plan.get("structure")
+    if structure:
+        tenor = ""
+        if plan.get("dte_min") and plan.get("dte_max"):
+            tenor = f" · {plan['dte_min']}–{plan['dte_max']} DTE"
+        rows.append({"label": "Structure", "value": f"{structure}{tenor}",
+                     "note": plan.get("rationale") or ""})
+    if plan.get("short_strike_guidance"):
+        rows.append({"label": "Short strike",
+                     "value": plan["short_strike_guidance"], "note": ""})
+    if plan.get("entry_zone"):
+        rows.append({"label": "Entry zone", "value": plan["entry_zone"],
+                     "note": ""})
+    if plan.get("stop") is not None:
+        rows.append({"label": "Stop", "value": f"{plan['stop']:g}",
+                     "note": plan.get("stop_note") or ""})
+    if plan.get("target"):
+        rows.append({"label": "Target", "value": plan["target"], "note": ""})
+    days = plan.get("time_stop_trading_days")
+    if days:
+        date = plan.get("time_stop_date") or ""
+        rows.append({"label": "Time stop",
+                     "value": f"{days} trading days — {date}".strip(" —"),
+                     "note": plan.get("time_stop_note") or ""})
+    if plan.get("events"):
+        rows.append({"label": "Events", "value": plan["events"], "note": ""})
+    return rows
+
+
+_PLAN_TEXT = {"debit": _BUY_TEXT, "credit": _BUY_TEXT,
+              "relative": _HOLD_TEXT, "none": _HOLD_TEXT}
+
+
+def plan_text_class(kind):
+    """Tailwind class for a plan kind (amber default — never green by
+    accident)."""
+    return _PLAN_TEXT.get(kind, _HOLD_TEXT)
+
+
 def earnings_note(coverage, days):
     """One line about the next earnings report — including when we don't know.
 
@@ -740,6 +804,31 @@ def render():
                     ui.label(c["symbol"]).classes("text-xs text-weight-medium")
                     ui.label(c["role"]).classes("text-[10px] opacity-60")
 
+    def _plan_card(plan):
+        """The verdict as a falsifiable plan — including the no-trade case,
+        which states what would change it rather than rendering empty."""
+        headline, kind = plan_headline(plan)
+        if not headline:
+            return
+        with ui.card().classes(f"{CARD} w-full"):
+            with ui.row().classes("w-full items-baseline justify-between gap-3"):
+                ui.label("Trade plan").classes(EYEBROW)
+                ui.label(headline).classes(
+                    f"text-sm text-weight-medium {plan_text_class(kind)}")
+            rows = plan_rows(plan)
+            for r in rows:
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.label(r["label"]).classes(f"{EYEBROW} w-28 shrink-0")
+                    with ui.column().classes("gap-0"):
+                        ui.label(r["value"]).classes("text-xs")
+                        if r["note"]:
+                            ui.label(r["note"]).classes("text-[11px] opacity-60")
+            if not rows:
+                for reason in (plan or {}).get("what_would_change_it", []):
+                    ui.label(f"• {reason}").classes("text-xs opacity-70")
+            ui.label("Not advice — a way of holding the read, and what would "
+                     "prove it wrong.").classes("text-[11px] opacity-50")
+
     def _render_results():
         res = state["result"]
         results_top.clear()
@@ -758,6 +847,7 @@ def render():
                     ui.label("; ".join(res["errors"]))
             _header(res)
             _clearance_strip(res.get("direction_clearance"))
+            _plan_card(res.get("trade_plan"))
         has_verdict = bool(res.get("position_verdict") or res.get("investor_verdict"))
         verdict_row.set_visibility(has_verdict)
         if has_verdict:

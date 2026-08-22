@@ -58,6 +58,7 @@ _FIELDS = {
     "dealer_context": None,
     "peers": None,
     "earnings_coverage": None,
+    "trade_plan": None,
 }
 
 

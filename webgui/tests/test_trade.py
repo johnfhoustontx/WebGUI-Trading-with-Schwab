@@ -383,3 +383,62 @@ class TestEarningsCoverageNote:
 
     def test_no_coverage_information_renders_nothing(self):
         assert trade.earnings_note(None, None) == ""
+
+
+class TestTradePlanRows:
+    PLAN = {
+        "symbol": "NVDA", "side": "long", "action": "debit",
+        "structure": "call debit spread", "dte_min": 30, "dte_max": 45,
+        "rationale": "IV is cheap — pay for convexity rather than sell it.",
+        "entry_zone": "pull back toward the 178 flip; avoid entering into the call wall",
+        "stop": 173.7, "stop_note": "1.8x ATR — whichever is tighter",
+        "target": "+1.6% vs SPY over 20 trading days",
+        "short_strike_guidance": "",
+        "time_stop_trading_days": 20, "time_stop_date": "2026-09-21",
+        "time_stop_note": "Exit or re-underwrite at 20 trading days — past the model's horizon the read is unmodelled.",
+        "events": "Earnings: none scheduled in the calendar",
+        "what_would_change_it": [],
+    }
+
+    def test_every_field_becomes_a_labelled_row(self):
+        rows = trade.plan_rows(self.PLAN)
+        labels = [r["label"] for r in rows]
+        for expected in ("Structure", "Entry zone", "Stop", "Target",
+                         "Time stop", "Events"):
+            assert expected in labels
+
+    def test_the_structure_row_carries_the_tenor(self):
+        row = next(r for r in trade.plan_rows(self.PLAN) if r["label"] == "Structure")
+        assert "call debit spread" in row["value"]
+        assert "30" in row["value"] and "45" in row["value"]
+
+    def test_the_time_stop_shows_the_date_AND_the_horizon(self):
+        row = next(r for r in trade.plan_rows(self.PLAN) if r["label"] == "Time stop")
+        assert "20 trading days" in row["value"]
+        assert "2026-09-21" in row["value"]
+
+    def test_an_absent_stop_is_omitted_not_rendered_as_none(self):
+        plan = dict(self.PLAN, stop=None, stop_note="")
+        assert not any(r["label"] == "Stop" for r in trade.plan_rows(plan))
+
+    def test_no_plan_renders_nothing(self):
+        assert trade.plan_rows(None) == []
+
+    def test_a_no_trade_plan_renders_what_would_change_it_instead(self):
+        plan = dict(self.PLAN, action="none", structure=None,
+                    what_would_change_it=["SPY losing its 200-DMA"])
+        rows = trade.plan_rows(plan)
+        assert not any(r["label"] == "Structure" for r in rows)
+        assert trade.plan_headline(plan)[1] == "none"
+
+    def test_the_headline_names_the_side_and_the_action(self):
+        text, kind = trade.plan_headline(self.PLAN)
+        assert "long" in text.lower() and "debit" in text.lower()
+        assert kind == "debit"
+
+    def test_a_relative_plan_says_so_in_the_headline(self):
+        plan = dict(self.PLAN, action="relative",
+                    structure="pair vs a top-decile name")
+        text, kind = trade.plan_headline(plan)
+        assert kind == "relative"
+        assert "pair" in text.lower()
