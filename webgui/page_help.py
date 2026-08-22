@@ -76,10 +76,13 @@ on · what am I holding.*
 Nothing on this page places or changes a trade.
 
 **It talks to you.** When a new flow alert or a newly-opened position appears, the
-Desk says the ticker and the cause out loud — *"S P Y. Crossover alert, calls
-over."* — and that row **glows for ten seconds**, so your eye lands where the voice
-pointed. If several arrive at once it names the newest and counts the rest ("plus 5
-more"). A position that only changes **flag** — OK to At risk to Rescue — glows
+Desk says it out loud — and that row **glows for ten seconds**, so your eye lands
+where the voice pointed. When the alert names a **contract** it is spoken in full:
+*"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover or a gamma flip is about
+the whole book rather than one contract, so it stays short — *"S P Y. Crossover
+alert, calls over."* A new position adds its strikes, expiry and entry price, and
+says **credit or debit** rather than leaving you to work out the sign. If several
+arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **flag** — OK to At risk to Rescue — glows
 amber and stays **silent**: it was already there, and the flag column has already
 told you.
 

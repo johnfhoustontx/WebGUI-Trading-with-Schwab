@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-21 (**The Desk speaks — spoken arrival alerts + a
+**Last updated:** 2026-08-21 (**The Desk speaks the CONTRACT, not just the cause.**
+- **What shipped.** The spoken alert now names the option. `uoa`/`big_delta` carry a
+  strike and an expiry, so they say them — *"N D X. Unusual activity, 0-D T E 7 15
+  Put."*, *"A M D. Big delta, 8 - 28 4 72. point 5 Call."* — with the word "alert"
+  dropped and the side moved after the strike it belongs to. A new position adds
+  strikes, expiry and entry: *"S P Y. New position, put credit spread. 2 07. point
+  5, 2 05, 8 - 31, entry 56 cent credit."* `crossover`/`gamma_flip` carry no
+  contract and are **unchanged**.
+- **The number rule was settled by LISTENING, not by argument.** Leading digits
+  singly, the last two as a pair, `00` → "hundred", a fraction → ". point 5": 205 →
+  "2 05", 4500 → "4 5 hundred", 207.5 → "2 07. point 5", 21500 → "2 1 5 hundred".
+  A neural voice reads "205" as *two hundred and five*; a trader hears *two oh
+  five*. Twelve cases are pinned in `test_voice.py`. `say_number`/`say_expiry`/
+  `say_entry`/`say_strikes` all guard through `pages.fmt.num`, so NaN, infinity,
+  `""` and — the documented one — `bool` return `""` rather than a number nobody
+  supplied.
+- **`say_entry` lets the SIGN pick the word**, because the paper book stores a debit
+  as a **negative** `entry_credit`: `0.56` → "entry 56 cent credit", `-1.25` →
+  "entry 1 dollar 25 debit". A debit announced as a credit was the most expensive
+  sentence this feature could have said.
+- **Shorter, never half.** The two forms are chosen on the PARSED values, not on the
+  alert kind, so the contract path and the degrade path are one line of code and
+  cannot drift. A missing or unreadable strike/expiry/entry falls back to the
+  existing short form rather than emitting a sentence with a hole in it.
+- **`flow.alert_rows` gained `strike`/`expiry`/`dte`** — additive, no column
+  declares them — so the Desk still composes off the row the Flow Alerts page
+  builds instead of becoming a second reader of the raw payload.
+- **The prewarm halved, 8 pairs → 4.** `FLOW_CAUSES` is now DERIVED (`_ALL_CAUSES`
+  minus `CONTRACT_KINDS`). A uoa phrase's space is the whole option chain, so
+  warming those pairs synthesized clips that could never be played — half the
+  prewarm's network and disk, spent on nothing.
+
+**Prior —** 2026-08-21 (**The Desk speaks — spoken arrival alerts + a
 10-second neon glow, and the two traps that make both of them work.**
 - **What shipped.** A new flow alert or a newly-opened position on `/desk` is now
   **announced out loud** — ticker spelled squawk-style, then the cause ("S P Y.

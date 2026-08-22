@@ -53,13 +53,33 @@ module.
 
 **Spoken arrival alerts + the neon glow (2026-08-21).** A new **flow alert** or a
 **newly-opened position** is announced out loud — ticker spelled squawk-style, then
-the cause ("S P Y. Crossover alert, calls over.") — and its row glows **cyan for 10
-seconds**. A position whose **flag** moves (OK → AT RISK → RESCUE) glows **amber and
-stays silent**: it was already in the book, and the FLAG column already prints the
-new word. All **four** flow kinds speak, `big_delta` included — that deliberately
+the CONTRACT where the alert names one ("N D X. Unusual activity, 0-D T E 7 15
+Put." · "S P Y. New position, put credit spread. 2 07. point 5, 2 05, 8 - 31, entry
+56 cent credit.") — and its row glows **cyan for 10 seconds**. A position whose
+**flag** moves (OK → AT RISK → RESCUE) glows **amber and stays silent**: it was
+already in the book, and the FLAG column already prints the new word. All **four**
+flow kinds speak, `big_delta` included — that deliberately
 diverges from `alerts.py`'s quiet-live exclusion, because the exclusion exists to
 stop an *information-free chime* at that frequency and an announcement naming the
-ticker and the cause is not one. A burst says the **newest only, plus a count**
+ticker and the contract is not one.
+- **Two phrase forms, chosen by what the row CARRIES, not by the alert kind.**
+  `uoa`/`big_delta` carry a strike + expiry and take the contract form (the word
+  "alert" dropped, the side moved after the strike); `crossover`/`gamma_flip` carry
+  none and keep the original short form verbatim. Deciding on the PARSED values
+  makes the degrade path and the contract path one line of code, so they cannot
+  drift: an unreadable strike falls back to the short form — **shorter, never
+  half**, since a sentence with a hole in it is worse than a terse one and silence
+  is worse than both. `voice.say_number`/`say_expiry`/`say_entry`/`say_strikes` are
+  the vocabulary; `say_number`'s rule ("2 05", "4 5 hundred", "2 07. point 5") was
+  settled by a listening test and its cases are pinned. `say_entry` lets the SIGN
+  pick the word because the paper book stores a debit as a **negative**
+  `entry_credit`.
+- **`flow.alert_rows` gained `strike`/`expiry`/`dte`** (additive; no column declares
+  them) so the Desk composes off the same row the Flow Alerts page draws rather than
+  becoming a second reader of the raw payload.
+- **The prewarm SHRANK to the contract-less kinds** — `voice.FLOW_CAUSES` is derived
+  as `_ALL_CAUSES` minus `CONTRACT_KINDS`, 8 pairs → 4. A uoa phrase's space is the
+  option chain, so warming it synthesized sentences no live alert can produce. A burst says the **newest only, plus a count**
 ("…Plus 5 more."), **one utterance per panel per paint**, so a tick is bounded at two
 clips; detection runs over the **full** alert list, not the five rows drawn, or a
 burst's arrivals would announce themselves later when the list shortened. **First

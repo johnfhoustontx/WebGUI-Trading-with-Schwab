@@ -245,13 +245,30 @@ that count toward that total; *Watch* does not.
 ### Spoken arrivals
 
 A **new flow alert** or a **newly-opened position** is announced in a synthetic
-human voice — the ticker spelled letter by letter, then the cause: *"S P Y.
-Crossover alert, calls over."* — and the row glows cyan for ten seconds. Tickers are
-always spelled rather than read as words, which is squawk-box convention and also
+human voice and the row glows cyan for ten seconds. Tickers are always spelled
+letter by letter rather than read as words, which is squawk-box convention and also
 the only rule that survives an unbounded symbol list: "SPY" read aloud as *spy* is
 actively misleading.
 
-Three rules are worth knowing, because each is a decision rather than an accident:
+**Two of the four flow detectors name a contract, and the announcement says it.**
+Unusual activity and large delta are about one option, so the sentence carries its
+expiry, strike and side: *"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover
+is a fact about a symbol's whole premium tape and a gamma flip about the whole
+dealer book — neither has a contract to name, so both keep the short form: *"S P Y.
+Crossover alert, calls over."* A new position speaks its strikes, expiry and entry
+price, and says **credit or debit** explicitly, because the paper book stores a
+debit as a negative credit and a debit that sounded like a credit would be the most
+expensive sentence this feature could say.
+
+Numbers are spoken the way a trader hears them, not the way a computer reads them:
+leading digits one at a time and the last two as a pair, so 715 is *"seven
+fifteen"*, 21500 is *"two one five hundred"* and 207.5 is *"two oh seven point
+five"*. This was settled by listening, not by argument. If any part of a contract
+is missing or unreadable, the announcement falls back to the short form rather than
+speaking a sentence with a hole in it — **shorter, never half**.
+
+Three more rules are worth knowing, because each is a decision rather than an
+accident:
 
 - **A flag change glows amber and says nothing.** A position moving OK → At risk →
   Rescue is not an *arrival*; it was already on the screen, and the flag column
@@ -259,7 +276,7 @@ Three rules are worth knowing, because each is a decision rather than an acciden
 - **All four flow detectors speak, large-delta included** — even though the scanner
   chime deliberately ignores that one. The reason the chime ignores it is that a
   *chime* carrying no information is noise at that detector's frequency. An
-  announcement that names the ticker and the cause is not: if it does not concern
+  announcement that names the ticker and the contract is not: if it does not concern
   you, ignoring it costs nothing.
 - **A burst names the newest and counts the rest** — "…plus 5 more" — rather than
   reading a list. Six sentences back to back is a minute of talking over a moving
