@@ -89,6 +89,175 @@ def test_more_tail_survives_a_non_finite_count():
     assert voice.more_tail(float("nan")) == ""
 
 
+# ── say_number ───────────────────────────────────────────────────────────────
+# Every one of these was confirmed by LISTENING to the synthesized clip, which
+# is the only test that counts for a pronunciation rule — "2 05" is here because
+# the voice reads "205" as "two hundred and five" and a trader hears "two oh
+# five". Do not "simplify" the rule against these; they ARE the rule.
+_NUMBER_CASES = {
+    5: "5",                      # 1-2 digits are left alone
+    12.5: "12. point 5",
+    205: "2 05",                 # lead digits singly, the last two as a pair
+    207.5: "2 07. point 5",
+    380: "3 80",
+    472.5: "4 72. point 5",
+    715: "7 15",
+    1250: "1 2 50",
+    4500: "4 5 hundred",         # a trailing "00" is a word, not "zero zero"
+    7710: "7 7 10",
+    21500: "2 1 5 hundred",
+    24350: "2 4 3 50",
+}
+
+
+def test_say_number_speaks_a_strike_the_way_a_trader_hears_it():
+    for value, want in _NUMBER_CASES.items():
+        assert voice.say_number(value) == want, value
+
+
+def test_say_number_gives_the_same_answer_for_the_int_and_the_float():
+    # Strikes reach here as floats off a cache read and as ints from a hand-
+    # written test; a rule that split on the type would be a rule nobody could
+    # reason about.
+    assert voice.say_number(205.0) == voice.say_number(205) == "2 05"
+
+
+def test_say_number_refuses_junk_rather_than_speaking_it():
+    """Nothing on this module's surface raises, and nothing invents a reading.
+
+    ``True`` is in the list for the documented ``float(True) == 1.0`` reason —
+    a flag arriving where a strike belongs must not be announced as the $1
+    strike. ``pages/fmt.py``'s ``num`` is the guard, and it rejects bool and
+    non-finite ahead of the coercion.
+    """
+    for junk in (None, "", "abc", float("nan"), float("inf"), float("-inf"),
+                 True, False, object(), [1]):
+        assert voice.say_number(junk) == "", junk
+
+
+def test_say_number_says_a_negative_out_loud_rather_than_dropping_the_sign():
+    # A silently absolute value is how a debit comes to sound like a credit.
+    # Nothing feeds this a negative today (strikes are positive and ``say_entry``
+    # takes its own absolute value), which is exactly why the honest answer is
+    # the cheap one to pick.
+    assert voice.say_number(-205) == "minus 2 05"
+
+
+def test_say_number_never_leaves_a_dangling_point(monkeypatch):
+    """A fraction that ROUNDS AWAY must not emit "4 72. point " with nothing after.
+
+    ``f"{0.99999:.4f}"`` is ``"1.0000"``, whose digits strip to the empty string
+    — the one input shape the reference rule got wrong, and a half-word is the
+    thing this feature is least allowed to say.
+    """
+    assert voice.say_number(472.99999) == "4 72"
+    assert not voice.say_number(472.99999).endswith("point ")
+
+
+# ── say_expiry ───────────────────────────────────────────────────────────────
+def test_say_expiry_spells_out_zero_dte():
+    # "0DTE" read as a word is a noise; the letters are the whole point.
+    assert voice.say_expiry("2026-08-18", 0) == "0-D T E"
+
+
+def test_say_expiry_is_month_and_day_with_no_leading_zeros():
+    # The spaced hyphen is what makes the voice PAUSE between the two numbers —
+    # "8-28" runs together into something that is not a date.
+    assert voice.say_expiry("2026-08-28", 3) == "8 - 28"
+    assert voice.say_expiry("2026-09-05", 12) == "9 - 5"
+    assert voice.say_expiry("2026-08-31", None) == "8 - 31"
+
+
+def test_say_expiry_zero_dte_wins_over_an_unusable_date():
+    assert voice.say_expiry("", 0) == "0-D T E"
+    assert voice.say_expiry(None, 0) == "0-D T E"
+
+
+def test_say_expiry_refuses_what_it_cannot_read():
+    """Unlike ``flow._exp_short``, which falls back to the RAW string.
+
+    That is right for a table cell — the reader can see it is odd — and wrong
+    out loud, where "two zero two six dash oh eight" is unintelligible.
+    """
+    for junk in (None, "", "nope", "2026-08", 7, True):
+        assert voice.say_expiry(junk, None) == "", junk
+
+
+def test_say_expiry_does_not_take_a_bool_for_zero_dte():
+    # ``False == 0`` is True in Python, so an unguarded ``dte == 0`` would call
+    # a flag a 0DTE contract.
+    assert voice.say_expiry("2026-08-28", False) == "8 - 28"
+
+
+# ── say_entry ────────────────────────────────────────────────────────────────
+def test_say_entry_names_a_credit_and_a_debit_by_their_sign():
+    """The paper book stores a DEBIT as a negative ``entry_credit``.
+
+    A debit that sounds like a credit is the most dangerous sentence this
+    feature can say, so the sign picks the word rather than being dropped.
+    """
+    assert voice.say_entry(0.56) == "entry 56 cent credit"
+    assert voice.say_entry(-1.25) == "entry 1 dollar 25 debit"
+
+
+def test_say_entry_uses_cents_below_a_dollar_and_dollars_above():
+    assert voice.say_entry(0.05) == "entry 5 cent credit"
+    assert voice.say_entry(0.99) == "entry 99 cent credit"
+    assert voice.say_entry(1.0) == "entry 1 dollar credit"
+    assert voice.say_entry(-2.0) == "entry 2 dollar debit"
+    assert voice.say_entry(12.5) == "entry 12 dollar 50 credit"
+
+
+def test_say_entry_rounds_into_the_dollar_rather_than_saying_100_cents():
+    assert voice.say_entry(0.999) == "entry 1 dollar credit"
+
+
+def test_say_entry_speaks_a_genuine_zero_rather_than_hiding_it():
+    # Absent and zero are different facts (pages/fmt.py's governing rule). A
+    # zero entry is a real reading, and swallowing it would degrade the whole
+    # sentence back to the short form over a number that was actually there.
+    assert voice.say_entry(0) == "entry 0 cent credit"
+
+
+def test_say_entry_refuses_junk():
+    for junk in (None, "", "abc", float("nan"), float("inf"), True, False):
+        assert voice.say_entry(junk) == "", junk
+
+
+def test_say_entry_survives_a_finite_number_too_big_to_scale():
+    """``_num`` passes ``1.7e308`` — it IS finite — and then ``× 100`` is not.
+
+    ``round(inf)`` raises ``OverflowError``, exactly as ``int(inf)`` does in
+    ``more_tail``, and this module's promise that nothing on its public surface
+    raises is categorical rather than "for values we expect".
+    """
+    assert voice.say_entry(1.7e308) == ""
+    assert voice.say_entry(-1.7e308) == ""
+
+
+# ── say_strikes ──────────────────────────────────────────────────────────────
+def test_say_strikes_speaks_both_legs_of_a_spread():
+    # ``desk.strikes_text`` builds this string for the panel; the spoken form
+    # reads the SAME string rather than re-deriving one from the raw fields.
+    assert voice.say_strikes("207.5/205") == "2 07. point 5, 2 05"
+    assert voice.say_strikes("600.0/595.0") == "6 hundred, 5 95"
+
+
+def test_say_strikes_handles_a_single_leg():
+    assert voice.say_strikes("100") == "1 hundred"
+
+
+def test_say_strikes_refuses_the_em_dash_and_the_unreadable():
+    # ``strikes_text`` returns "—" for a position with no strike pair at all.
+    for junk in (None, "", "—", "/", "abc/def", 7, True):
+        assert voice.say_strikes(junk) == "", junk
+
+
+def test_say_strikes_drops_only_the_unusable_half():
+    assert voice.say_strikes("100/") == "1 hundred"
+    assert voice.say_strikes("/205") == "2 05"
+
+
 # ── flow_phrase ──────────────────────────────────────────────────────────────
 # The rows below are the shape ``pages.options.flow.alert_rows`` publishes:
 # ``kind`` and ``side`` are already the DISPLAY labels, not the raw keys.
@@ -97,6 +266,9 @@ def test_flow_phrase_names_the_ticker_then_the_cause():
     assert voice.flow_phrase(row) == "S P Y. Crossover alert, calls over."
 
 
+# ⚠ These rows carry NO strike/expiry, so the two contract-carrying kinds land on
+# the DEGRADE path here on purpose — the short form is what a uoa alert with an
+# unreadable contract still says. The contract form has its own block below.
 _FLOW_CASES = {
     ("SPY", "Crossover", "Calls over"): "S P Y. Crossover alert, calls over.",
     ("SPY", "Crossover", "Puts over"): "S P Y. Crossover alert, puts over.",
@@ -137,6 +309,91 @@ def test_flow_phrase_cases_are_complete_against_the_flow_pages_own_labels():
     assert tested_sides >= set(flow._SIDE_LABEL.values())
 
 
+# ── flow_phrase: the CONTRACT ────────────────────────────────────────────────
+# Two of the four alert kinds name a specific contract, and until 2026-08-21 the
+# squawk threw that away: "N D X. Unusual activity alert, put." told the listener
+# something was moving and then refused to say WHAT, so every alert cost a look
+# at the screen anyway. These are the user's own reference phrases.
+def test_flow_phrase_speaks_the_contract_for_unusual_activity():
+    row = {"symbol": "$NDX", "kind": "Unusual activity", "side": "Put",
+           "strike": 715.0, "expiry": "2026-08-18", "dte": 0}
+    assert voice.flow_phrase(row) == "N D X. Unusual activity, 0-D T E 7 15 Put."
+
+
+def test_flow_phrase_speaks_a_five_digit_index_strike():
+    row = {"symbol": "$NDX", "kind": "Unusual activity", "side": "Put",
+           "strike": 21500.0, "expiry": "2026-08-18", "dte": 0}
+    assert voice.flow_phrase(row) == \
+        "N D X. Unusual activity, 0-D T E 2 1 5 hundred Put."
+
+
+def test_flow_phrase_speaks_the_contract_for_big_delta():
+    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+           "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
+    assert voice.flow_phrase(row) == "A M D. Big delta, 8 - 28 4 72. point 5 Call."
+
+
+def test_the_contract_form_drops_the_word_alert_and_moves_the_side_last():
+    """Both changes are deliberate, and both are the user's wording.
+
+    "Unusual activity alert, put, 8 - 28 4 72. point 5" would put the side
+    before the contract it belongs to; naming the contract and THEN its side is
+    how the contract is spoken aloud everywhere else.
+    """
+    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+           "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
+    said = voice.flow_phrase(row)
+    assert "alert" not in said
+    assert said.index("4 72") < said.index("Call")
+
+
+def test_the_contract_less_kinds_are_untouched():
+    """Crossover and gamma flip carry no contract, so their phrase does not move.
+
+    They keep the word "alert" precisely because there is nothing to put in its
+    place — the shortening was paid for by the detail that replaced it.
+    """
+    assert voice.flow_phrase(
+        {"symbol": "SPY", "kind": "Crossover", "side": "Calls over",
+         "strike": None, "expiry": None, "dte": None}) == \
+        "S P Y. Crossover alert, calls over."
+    assert voice.flow_phrase(
+        {"symbol": "QQQ", "kind": "Gamma flip", "side": "To negative",
+         "strike": None, "expiry": None, "dte": None}) == \
+        "Q Q Q. Gamma flip alert, to negative."
+
+
+def test_a_contract_alert_takes_the_burst_tail_too():
+    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+           "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
+    assert voice.flow_phrase(row, extra=2) == \
+        "A M D. Big delta, 8 - 28 4 72. point 5 Call. Plus 2 more."
+
+
+# ── flow_phrase: the DEGRADE path ────────────────────────────────────────────
+# ⚠ The rule is SHORTER, never HALF. A missing strike must not produce
+# "Big delta, 8 - 28  Call." with a hole in it — a terse alert is worth having,
+# a broken sentence is not, and silence is worse than both.
+@pytest.mark.parametrize("missing", ["strike", "expiry", "side"])
+def test_a_contract_alert_missing_a_piece_falls_back_to_the_short_form(missing):
+    row = {"symbol": "NDX", "kind": "Unusual activity", "side": "Put",
+           "strike": 715.0, "expiry": "2026-08-18", "dte": 3}
+    row[missing] = None
+    said = voice.flow_phrase(row)
+    if missing == "side":
+        assert said == "N D X. Unusual activity alert."
+    else:
+        assert said == "N D X. Unusual activity alert, put."
+    assert ",," not in said and "  " not in said
+
+
+def test_an_unreadable_strike_degrades_rather_than_speaking_nonsense():
+    for junk in ("abc", float("nan"), True, ""):
+        row = {"symbol": "NDX", "kind": "Unusual activity", "side": "Put",
+               "strike": junk, "expiry": "2026-08-18", "dte": 3}
+        assert voice.flow_phrase(row) == "N D X. Unusual activity alert, put.", junk
+
+
 def test_flow_phrase_omits_a_missing_side_without_a_dangling_comma():
     row = {"symbol": "SPY", "kind": "Crossover", "side": ""}
     assert voice.flow_phrase(row) == "S P Y. Crossover alert."
@@ -168,6 +425,65 @@ def test_position_phrase_takes_the_burst_tail_too():
     row = {"symbol": "SPY", "strategy": "iron_condor"}
     assert voice.position_phrase(row, extra=2) == \
         "S P Y. New position, iron condor. Plus 2 more."
+
+
+# ── position_phrase: the CONTRACT ────────────────────────────────────────────
+def _pos_row(**over):
+    """The shape ``desk.position_rows`` publishes — note ``strikes`` is the
+    already-built STRING, and ``expiration`` (not ``expiry``) the ISO date."""
+    row = {"symbol": "SPY", "strategy": "put_credit_spread",
+           "strikes": "207.5/205", "expiration": "2026-08-31", "dte": 10,
+           "entry_credit": 0.56}
+    row.update(over)
+    return row
+
+
+def test_position_phrase_speaks_the_strikes_the_expiry_and_the_entry():
+    assert voice.position_phrase(_pos_row()) == (
+        "S P Y. New position, put credit spread. "
+        "2 07. point 5, 2 05, 8 - 31, entry 56 cent credit.")
+
+
+def test_a_position_opened_for_a_debit_says_so():
+    """The book stores a debit as a NEGATIVE ``entry_credit``, and a debit
+    announced as a credit is the worst sentence this feature could say."""
+    said = voice.position_phrase(_pos_row(entry_credit=-1.25))
+    assert said.endswith("entry 1 dollar 25 debit.")
+    assert "credit spread" in said        # the STRATEGY word is untouched
+
+
+def test_a_zero_dte_position_says_so_rather_than_naming_the_date():
+    assert "0-D T E" in voice.position_phrase(_pos_row(dte=0))
+
+
+def test_a_position_contract_takes_the_burst_tail_too():
+    assert voice.position_phrase(_pos_row(), extra=3).endswith(
+        "entry 56 cent credit. Plus 3 more.")
+
+
+# ── position_phrase: the DEGRADE path ────────────────────────────────────────
+_SHORT_POS = "S P Y. New position, put credit spread."
+
+
+@pytest.mark.parametrize("over", [
+    {"strikes": "—"},               # what ``strikes_text`` returns with no pair
+    {"strikes": None},
+    {"expiration": "", "dte": None},
+    {"entry_credit": None},
+    {"entry_credit": float("nan")},
+])
+def test_a_position_missing_a_piece_falls_back_to_the_short_form(over):
+    said = voice.position_phrase(_pos_row(**over))
+    assert said == _SHORT_POS
+    assert ", ," not in said and "  " not in said
+
+
+def test_a_single_leg_position_speaks_its_one_strike():
+    """A single leg is not a malformed spread — it is a long call. Degrading it
+    to the short form would silence the one number the listener wants."""
+    assert voice.position_phrase(
+        _pos_row(strategy="long_call", strikes="600.0")) == (
+        "S P Y. New position, long call. 6 hundred, 8 - 31, entry 56 cent credit.")
 
 
 # ── cache keys ───────────────────────────────────────────────────────────────
@@ -553,7 +869,23 @@ def test_prewarm_texts_covers_every_symbol_and_cause():
     texts = voice.prewarm_texts(["SPY", "QQQ"])
     assert len(texts) == 2 * len(voice.FLOW_CAUSES)
     assert "S P Y. Crossover alert, calls over." in texts
-    assert "Q Q Q. Big delta alert, put." in texts
+    assert "Q Q Q. Gamma flip alert, to negative." in texts
+
+
+def test_the_prewarm_skips_the_kinds_whose_phrase_embeds_a_contract():
+    """Warming those would synthesize clips that can NEVER be played.
+
+    A uoa phrase now names a strike and an expiry, so its phrase space is the
+    whole chain — the eight-pair list warmed "N D X. Unusual activity alert,
+    put.", a sentence no live alert produces any more. Pure network and disk for
+    nothing, on every first Desk open.
+    """
+    warmed_kinds = {kind for kind, _side in voice.FLOW_CAUSES}
+    assert warmed_kinds.isdisjoint(voice.CONTRACT_KINDS)
+    assert warmed_kinds == {"Crossover", "Gamma flip"}
+    assert len(voice.FLOW_CAUSES) == 4          # was 8 before the contract form
+    for text in voice.prewarm_texts(["SPY"]):
+        assert "alert" in text                  # only the short form is warmable
 
 
 def test_prewarm_texts_of_nothing_is_empty():
@@ -658,8 +990,8 @@ def test_prewarm_sweeps_stale_parts_before_it_starts(tmp_path, monkeypatch):
     assert not stale.exists()
 
 
-def test_flow_causes_cover_every_pair_the_flow_page_can_emit():
-    """``FLOW_CAUSES`` is a deliberate COPY of pages.options.flow's labels — it
+def test_all_causes_cover_every_pair_the_flow_page_can_emit():
+    """``_ALL_CAUSES`` is a deliberate COPY of pages.options.flow's labels — it
     is restated so ``voice`` stays importable with no ``pages`` package on the
     path (the prewarm runs before any page is built). A copy with no guard is
     a copy waiting to rot, so this is the guard: ``flow._TONE``'s keys enumerate
@@ -669,4 +1001,22 @@ def test_flow_causes_cover_every_pair_the_flow_page_can_emit():
     from pages.options import flow
     real = {(flow.alert_kind_label({"type": t}), flow.side_label({"side": s}))
             for t, s in flow._TONE}
-    assert set(voice.FLOW_CAUSES) == real
+    assert set(voice._ALL_CAUSES) == real
+
+
+def test_the_prewarm_list_is_exactly_the_contract_less_pairs():
+    """The prewarm shrank; this is what stops it shrinking by accident.
+
+    ``FLOW_CAUSES`` is DERIVED (``_ALL_CAUSES`` minus ``CONTRACT_KINDS``) rather
+    than written out a second time, so the two can only disagree if somebody
+    edits the derivation. Recomputing it here from the flow page's own labels
+    catches the case the test above cannot: a FIFTH contract-less alert kind
+    that nobody remembers to warm. It would land in ``_ALL_CAUSES`` (that test
+    forces it to) and then here, unwarmed.
+    """
+    from pages.options import flow
+    real = {(flow.alert_kind_label({"type": t}), flow.side_label({"side": s}))
+            for t, s in flow._TONE}
+    want = {(k, s) for k, s in real if k not in voice.CONTRACT_KINDS}
+    assert set(voice.FLOW_CAUSES) == want
+    assert len(want) == 4
