@@ -164,16 +164,29 @@ def fit():
         ]).reindex(panel.index)
         horizon_ic[h] = {c: B.factor_ic(panel[c], fwd_h)["mean_ic"] for c in cols}
 
-    artifact = {
-        "version": date.today().isoformat(),
-        "fit_universe_n": used, "fit_universe": sorted(UNIVERSE_SECTOR), "horizon": HORIZON,
-        "regimes": {"all": {
+    # Per-regime weight sets (Phase 4). `build_regimes` always emits "all", adds
+    # a key only for a regime it had a full trading year of data to estimate,
+    # and calibrates every block OUT OF SAMPLE — see research/artifact.py. It
+    # supersedes the single hand-built "all" block this script used to write.
+    from src.analysis import regime as R
+    from research import artifact as ART
+    regimes = R.classify(spy_close)
+    regime_blocks = ART.build_regimes(panel, forward, regimes,
+                                      train=TRAIN, test=TEST, step=STEP)
+    if not regime_blocks:                       # never ship an unscoreable artifact
+        regime_blocks = {"all": {
             "weights": weights,
             "factor_ic": {c: {k: ics[c][k] for k in ("mean_ic", "icir", "n_days")} for c in cols},
             "norm": norm, "calibration": calib,
+            "calibration_basis": "in-sample",
             "oos_ic": wf["oos_ic"], "oos_ic_by_fold": wf["oos_ic_by_fold"],
             "n_folds": wf["n_folds"],
-        }},
+        }}
+
+    artifact = {
+        "version": date.today().isoformat(),
+        "fit_universe_n": used, "fit_universe": sorted(UNIVERSE_SECTOR), "horizon": HORIZON,
+        "regimes": regime_blocks,
     }
     return artifact, ics, weights, horizon_ic, wf, calib, used
 
@@ -197,11 +210,41 @@ def write_report(artifact, ics, weights, horizon_ic, wf, calib, used):
         lines.append(f"| {c} | {ics[c]['mean_ic']:+.4f} | {ics[c]['icir']:+.3f} | "
                      f"{ics[c]['n_days']} | {weights.get(c,0):.3f} | "
                      f"{horizon_ic[10][c]:+.4f} | {horizon_ic[20][c]:+.4f} | {horizon_ic[40][c]:+.4f} |")
-    lines += ["", "## Calibration bands (composite score -> forward excess)", "",
+    lines += ["", "## Regime weight sets", "",
+              "A key exists only for a regime the fit had a full trading year to "
+              "estimate; anything thinner is omitted and the scorer falls back to "
+              "`all`.", "",
+              "| regime | days | OOS IC | neg folds | kept |",
+              "|---|---:|---:|---:|---:|"]
+    for key, blk in artifact["regimes"].items():
+        kept = sum(1 for v in blk.get("weights", {}).values() if v)
+        neg = sum(1 for x in blk.get("oos_ic_by_fold", []) if x < 0)
+        lines.append(f"| {key} | {blk.get('n_days', '—')} | {blk.get('oos_ic', 0):+.4f} | "
+                     f"{neg}/{blk.get('n_folds', 0)} | {kept} |")
+    lines.append("")
+    for key, blk in artifact["regimes"].items():
+        top = {k: round(v, 3) for k, v in
+               sorted(blk.get("weights", {}).items(), key=lambda kv: -abs(kv[1])) if v}
+        lines.append(f"- **{key}** — {top}")
+
+    basis = reg.get("calibration_basis", "in-sample")
+    lines += ["", f"## Calibration bands, `all` (composite score -> forward excess)",
+              "", f"Basis: **{basis}**. Out-of-sample bands see only walk-forward "
+              "test windows, so their mean-forward and hit-rate are what the model "
+              "actually delivered on unseen data — the in-sample equivalents "
+              "(kept in the artifact as `calibration_insample`) are fitted on the "
+              "rows the weights came from and flatter the model by an unknown "
+              "amount.", "",
               "| band | score range | mean fwd | hit-rate | n |", "|---:|---|---:|---:|---:|"]
-    for b in calib:
+    for b in reg.get("calibration", calib):
         lines.append(f"| {b['band']} | [{b['score_lo']:+.2f}, {b['score_hi']:+.2f}] | "
                      f"{b['mean_fwd']:+.4f} | {b['hit_rate']:.2%} | {b['n']} |")
+    ins = reg.get("calibration_insample")
+    if ins:
+        lines += ["", "In-sample, for comparison:", "",
+                  "| band | mean fwd | hit-rate |", "|---:|---:|---:|"]
+        for b in ins:
+            lines.append(f"| {b['band']} | {b['mean_fwd']:+.4f} | {b['hit_rate']:.2%} |")
     lines += ["", "## Limitations",
               "- Survivorship bias: the fit universe is today's liquid names (survivors).",
               "- Regime non-stationarity: a few-year fit may not hold forward.",
