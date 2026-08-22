@@ -176,9 +176,28 @@ Phase 4 found that what remains is a beta bet.**
   qualifies — and at 66% of the sample it would be the pooled fit under another
   name. `regime.py`, `artifact.build_regimes`, the scorer selector and the card
   line are all in place for a fit that can fill them honestly.
+- **Root-cause test — with beta priced out, nothing is left.** Rebuilding the
+  same panel's labels as `r − beta·r_market`: the up/down gap collapses **0.2739
+  → 0.0104 (−96%)**, confirming the label was the cause — and the edge goes with
+  it. OOS IC **+0.0674 raw → −0.0101 beta-adjusted** (orthogonalized: +0.0853 →
+  −0.0009); paired **−0.0774, t = −2.15**.
+- ⚠ **The beta-neutral calibration is worse than flat.** Smoothed, all five
+  bands read −0.0006 at 48.14%, which looks like "no edge". UNSMOOTHED they are
+  non-monotone with a **negative** top-minus-bottom (−0.00147) and hit rates
+  that DESCEND across the ranking (48.94% → 47.27%) — the isotonic smoother
+  pooled four of five. The control makes it readable: on the raw label the same
+  code left all five untouched and cleanly ordered, so the flattening is the
+  data, not the transform. **`calibrate` now records `pooled` per band**,
+  because after smoothing "flat" and "no ordering at all" are
+  indistinguishable and only the second means the model cannot rank.
+- Momentum was partly beta too (`mom_6_1` +0.0172 → **+0.0014**, `mom_12_1`
+  +0.0156 → **+0.0040**, both dropped). The only factor that IMPROVES
+  beta-neutral is `str_5d` short-term reversal, +0.0092 → **+0.0217**.
 - **The gate FAILED on the question it stood in for**, so the Phase-0 artifact
   stays primary. Per the plan, a documented negative result is a completed
-  phase.
+  phase. What remains is a **product** decision — keep the model with the
+  disclosure now on the card, reframe it as the volatility ranking it is, or
+  demote it to the legacy heuristic — and it is deliberately not taken here.
 - Suites: trade-analyzer **392**, trade_svc **261**, webgui **2581**,
   options_svc **1222**.
 

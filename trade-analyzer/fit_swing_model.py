@@ -235,10 +235,17 @@ def write_report(artifact, ics, weights, horizon_ic, wf, calib, used):
               "(kept in the artifact as `calibration_insample`) are fitted on the "
               "rows the weights came from and flatter the model by an unknown "
               "amount.", "",
-              "| band | score range | mean fwd | hit-rate | n |", "|---:|---|---:|---:|---:|"]
+              "⚠ A `pooled` band was MERGED with a neighbour by the isotonic "
+              "smoother, meaning the raw score->outcome relationship was "
+              "non-monotone there. Several pooled bands in a row is the "
+              "signature of a ranking with no ordering at all — after smoothing "
+              "that is indistinguishable from a genuinely flat curve.", "",
+              "| band | score range | mean fwd | hit-rate | n | pooled |",
+              "|---:|---|---:|---:|---:|---|"]
     for b in reg.get("calibration", calib):
         lines.append(f"| {b['band']} | [{b['score_lo']:+.2f}, {b['score_hi']:+.2f}] | "
-                     f"{b['mean_fwd']:+.4f} | {b['hit_rate']:.2%} | {b['n']} |")
+                     f"{b['mean_fwd']:+.4f} | {b['hit_rate']:.2%} | {b['n']} | "
+                     f"{'**yes**' if b.get('pooled') else 'no'} |")
     ins = reg.get("calibration_insample")
     if ins:
         lines += ["", "In-sample, for comparison:", "",

@@ -259,9 +259,16 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
             "n_scored_rows": scored}
 
 
-def _isotonic_nondecreasing(values):
+def _isotonic_nondecreasing(values, with_pooled=False):
     """Pool-adjacent-violators: nearest non-decreasing fit (equal weights).
-    Smooths thin-signal noise so a higher score-band never shows a lower stat."""
+    Smooths thin-signal noise so a higher score-band never shows a lower stat.
+
+    With ``with_pooled``, also returns a per-band flag marking bands that were
+    MERGED with a neighbour. That flag is the difference between "this ranking
+    is flat" and "this ranking has no ordering at all" — after smoothing the two
+    look identical, and only the second means the model cannot rank. Measured on
+    the beta-neutral label, all five bands returned the same value while the raw
+    means were non-monotone with a NEGATIVE top-minus-bottom."""
     vals = [float(v) for v in values]
     # blocks of (sum, count); merge while the running mean violates monotonicity
     blocks = []
@@ -271,10 +278,11 @@ def _isotonic_nondecreasing(values):
             s, c = blocks.pop()
             blocks[-1][0] += s
             blocks[-1][1] += c
-    out = []
+    out, pooled = [], []
     for s, c in blocks:
         out.extend([s / c] * c)
-    return out
+        pooled.extend([c > 1] * c)
+    return (out, pooled) if with_pooled else out
 
 
 def calibrate(comp: pd.Series, forward: pd.Series, n_bands: int = 5) -> list:
@@ -300,8 +308,9 @@ def calibrate(comp: pd.Series, forward: pd.Series, n_bands: int = 5) -> list:
             "n": int(len(g)),
         })
     out.sort(key=lambda d: d["score_lo"])
-    mf = _isotonic_nondecreasing([b["mean_fwd"] for b in out])
+    mf, pooled = _isotonic_nondecreasing([b["mean_fwd"] for b in out],
+                                         with_pooled=True)
     hr = _isotonic_nondecreasing([b["hit_rate"] for b in out])
-    for b, m, h in zip(out, mf, hr):
-        b["mean_fwd"], b["hit_rate"] = m, h
+    for b, m, h, p in zip(out, mf, hr, pooled):
+        b["mean_fwd"], b["hit_rate"], b["pooled"] = m, h, p
     return out

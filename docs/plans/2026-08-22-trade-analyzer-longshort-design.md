@@ -306,6 +306,53 @@ and the keys stay empty until a fit can fill them honestly.
   weight on volatility factors — is computed by the scorer and rendered in the
   evidence expander. The live artifact reads **47.6%**.
 
+### The root-cause test: with beta priced out, nothing is left
+
+Rebuilding the SAME panel's labels as `r − beta·r_market` (trailing beta;
+`research/labels.py`) and re-running everything:
+
+| | IC market UP | IC market DOWN | gap |
+|---|---:|---:|---:|
+| raw excess (shipping) | +0.1598 | −0.1142 | **0.2739** |
+| beta-adjusted | +0.0319 | +0.0423 | **0.0104** |
+
+**The gap closes by 96%, which confirms the label was the cause.** And the edge
+goes with it:
+
+| label | weighting | OOS IC |
+|---|---|---:|
+| raw excess | signed IC | +0.0674 |
+| raw excess | orthogonalized | +0.0853 |
+| **beta-adjusted** | signed IC | **−0.0101** |
+| **beta-adjusted** | orthogonalized | **−0.0009** |
+
+Paired, signed IC adjusted vs raw: **−0.0774, t = −2.15**.
+
+The beta-neutral calibration is flat — and ⚠ **it is worse than flat.** The
+smoothed bands all read −0.0006 at a 48.14% hit rate, which looks like "no
+edge"; the UNSMOOTHED bands are non-monotone with a **negative** top-minus-bottom
+of **−0.00147** and hit rates that DESCEND across the ranking (48.94% → 47.27%).
+The isotonic smoother pooled four of five bands. The control run is what makes
+this readable: on the raw label the same code left all five bands untouched and
+cleanly ordered (−0.00934 → +0.00847), so the flattening is the data, not the
+transform.
+
+**`calibrate` now records `pooled` per band** for exactly this reason: after
+smoothing, "flat" and "no ordering at all" are indistinguishable, and only the
+second means the model cannot rank.
+
+Two secondary readings. Momentum was partly beta too — `mom_6_1` +0.0172 →
+**+0.0014**, `mom_12_1` +0.0156 → **+0.0040**, both dropped by the floor. The one
+factor that IMPROVES beta-neutral is `str_5d` (short-term reversal), +0.0092 →
+**+0.0217** — too thin to build on alone, but the only place in this study
+where removing beta revealed signal rather than hiding it.
+
+**So the honest statement is: the Position card's validated swing model has no
+measurable beta-neutral edge.** Its BUY/SELL is a volatility ranking. That is a
+product decision, not an engineering one — options are to keep it with the
+disclosure now on the card, reframe it as the volatility ranking it is, or
+demote it to the legacy heuristic. None of them is taken here.
+
 ### Exit criterion
 
 Phase 4's gate was: does the new artifact OOS-beat the single-regime fit? Two

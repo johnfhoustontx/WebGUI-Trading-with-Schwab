@@ -140,3 +140,45 @@ class TestWalkForwardAcceptsADataWeighter:
         panel, fwd = _panel(n_dates=90)
         out = B.walk_forward(panel, fwd, train=40, test=10, step=10)
         assert out["n_scored_rows"] == out["n_folds"] * 10 * 25
+
+
+# ── Calibration must say when it pooled (Phase 4) ────────────────────────────
+# `calibrate` applies isotonic (pool-adjacent-violators) smoothing, which merges
+# bands whenever the score->outcome relationship is non-monotone. That is the
+# right transform, but it destroys the evidence: a genuinely flat curve and a
+# noise-pooled one are indistinguishable in the artifact, and only the second
+# means "this ranking has no ordering". Measured on the beta-neutral label, all
+# five bands came back identical and it took a separate script to establish that
+# the raw means were non-monotone (top-minus-bottom -0.00147, hit rates
+# DESCENDING across the ranking).
+
+class TestCalibrationRecordsWhetherItPooled:
+    def _bands(self, means):
+        """Compose a composite/forward pair whose per-band means are `means`."""
+        c, y = [], []
+        for i, m in enumerate(means):
+            for k in range(200):
+                c.append(i + k * 1e-6)
+                y.append(m + (0.001 if k % 2 else -0.001))
+        idx = pd.MultiIndex.from_arrays(
+            [pd.date_range("2024-01-01", periods=len(c), freq="min"),
+             ["S"] * len(c)], names=["date", "symbol"])
+        return pd.Series(c, index=idx), pd.Series(y, index=idx)
+
+    def test_a_monotone_relationship_pools_nothing(self):
+        comp, fwd = self._bands([-0.02, -0.01, 0.0, 0.01, 0.02])
+        bands = B.calibrate(comp, fwd, n_bands=5)
+        assert [b["pooled"] for b in bands] == [False] * 5
+
+    def test_a_non_monotone_relationship_marks_the_bands_it_merged(self):
+        comp, fwd = self._bands([0.01, -0.02, -0.01, -0.01, 0.0])
+        bands = B.calibrate(comp, fwd, n_bands=5)
+        assert any(b["pooled"] for b in bands)
+
+    def test_pooling_does_not_change_the_smoothed_values(self):
+        """The flag is additive — the bands the scorer reads must not move."""
+        comp, fwd = self._bands([0.01, -0.02, -0.01, -0.01, 0.0])
+        bands = B.calibrate(comp, fwd, n_bands=5)
+        means = [b["mean_fwd"] for b in bands]
+        assert means == sorted(means)
+        assert means[0] == pytest.approx(means[3], abs=1e-9)
