@@ -4,7 +4,87 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-21 (**Audit batch 4 — the fake bus stops lying, and two
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phase 0. The swing
+model's refit is the headline, and it is not good news.**
+- **Program docs:** [design](plans/2026-08-22-trade-analyzer-longshort-design.md)
+  + [plan](plans/2026-08-22-trade-analyzer-longshort-plan.md) — an audit of the
+  Position (1–8 wk) and Investor (months+) verdicts turned into a six-phase
+  build for two-sided (long **and** short) research and recommendations. Phase 0
+  is bench-clearing only; Phases 1–6 are designed, not built.
+- **The artifact was 55 days stale, and refreshing it cost 44% of the measured
+  edge.** `fit_swing_model.py` re-run **unchanged** (same methodology, same
+  78-name universe, fresh 5-yr window through today): **composite OOS IC +0.0367
+  → +0.0206**, 6 of 13 folds negative (was 5). The decay is concentrated in
+  exactly the factors with the theoretical grounding — `mom_12_1` mean IC
+  +0.0407 → **+0.0183**, `mom_6_1` +0.0332 → +0.0214, `trend_quality` +0.0228 →
+  +0.0104 — while `low_vol`, the audit's least-defensible factor, **grew** its
+  share to −0.391 (39% of absolute weight, still on the inverted sign). The
+  calibration bands held (top band 52.29% → 52.68% beat-SPY, spread ~2.4%), so
+  the RANK still separates outcomes; the composite's ability to order the
+  cross-section is what fell. The old artifact + report are archived under
+  `trade-analyzer/data/archive/2026-06-28/`.
+- **"Kept 9/10 factors" (was 6/10) is a symptom, not an improvement.**
+  `signed_ic_weights` admits anything with `|mean_ic| > 0.005`; as the strong
+  factors decayed, noise crossed the floor. **`rs_spy` now carries a NEGATIVE
+  weight (−0.059)** — the model mildly rewards a stock for LAGGING SPY, which is
+  backwards for a momentum model and visible to the user in the evidence
+  expander. Verified live on AAPL: `z −0.300 × w −0.059 = +0.018`, i.e. AAPL
+  scored *up* for underperforming. This is C12 (univariate IC weighting over a
+  correlated momentum cluster) meeting a too-permissive noise floor, and it has
+  moved from a deferred theoretical finding to something in production. Phase 4
+  now leads with a **measured** floor study (re-fit at several `min_abs_ic`
+  values, adopt only if it wins OOS) *before* any new factors, so a floor change
+  and a factor change are never confounded in one OOS number.
+- **This does not argue against the refit.** The new artifact is fit through
+  today and is the more honest estimate; the old one was scoring a changed market
+  with June weights. It does argue loudly for the regime work the artifact's
+  `regimes` keys were built for and which has still never been fit.
+- **⚠ The validated swing model has NEVER run in prod, and could not have.**
+  Found while verifying the refit: `D:\WebGUI Trading Prod\trade-analyzer\data\`
+  **does not exist**. `SWING_MODEL` resolves under each checkout's own root, the
+  artifact is gitignored, and `promote.bat` moves code via `git pull --ff-only`
+  — so no promotion has ever carried an artifact across, and none ever will.
+  `load_artifact()` → `None` → `swing_block` → `None` → `trade.py` renders
+  `_legacy_verdict_body`. Confirmed from both ends: the file is absent, **and**
+  prod's own `cache:trade:analysis` (db 0, AVAV) carries `swing_model: null`
+  beside a legacy `position_verdict` HOLD 31. **Prod's Position card has only
+  ever shown the legacy 5-minute-bar heuristic** — the engine the validated
+  model exists to replace. Deploying an artifact to prod is a manual copy or a
+  prod-side fit run; it is a deliberate decision (it changes what the card
+  displays), so Phase 0 stops at dev and flags it. **The general lesson: for
+  anything under a gitignored `data/` directory, "shipped to dev" and "live in
+  prod" are different states, and `promote.bat` does not bridge them.**
+- **A correction to this session's own earlier reporting:** the regime figures
+  quoted while auditing (trend score 41.21, A/D 0.51:1) came from **dev's**
+  Redis (db 1), whose schedulers are suppressed, so they were a stale 2026-08-20
+  snapshot. Prod's live read today is **trend score 58.61** (still labelled
+  Neutral) with the regime at Trending · Softening. The qualitative
+  "softening tape" characterisation holds; the number did not. A process
+  resolving `ENV_NAME` from a worktree or the dev root reads **db 1** — check
+  which database you are on before quoting a live figure.
+- **The wall-side bug is fixed** (`options_svc/compute._gex_from_snapshot`). It
+  read `gamma_walls()` positionally — `put_wall = walls[0]` — but that helper
+  **filters `None` out**, so a chain with strikes only above spot returned
+  `[call_wall]` and the call wall was silently filed as the **put** wall, with no
+  call wall reported at all. It feeds `rescue.assess_position_risk` /
+  `strategic_context`, which judge whether a short strike sits past its barrier.
+  Fixed at the consumer (the list contract is pinned by an existing test and the
+  Gamma page draws that list as wall lines), using the picker's own contract as
+  the disambiguator — put wall strictly below spot, call wall strictly above,
+  exactly as `_matrix_dealer_levels` already documents. A lone wall with **no
+  usable spot is now dropped rather than guessed**: a wrong-side wall is worse
+  than no wall, and the flip still carries the context. Four tests, two of which
+  failed first with the reported symptom (`assert None == 452.0`).
+- **`webgui/pages/trade.py`'s docstring stopped lying** — it claimed
+  "Fundamentals are not wired (MVP)" long after the proxy fundamentals landed. It
+  now states what is true, *and* names the three Investor inputs that are
+  structurally absent from `/instruments` (EPS surprises, guidance, FCF) and so
+  score a permanent 0 — the reason a live Investor composite tops out near +59.5
+  against a designed +74.5 with BUY at +40.
+- Suites: options_svc **1222** (1218 + 4 new), trade_svc **79**, webgui
+  unchanged.)
+
+**Prior — 2026-08-21** (**Audit batch 4 — the fake bus stops lying, and two
 discipline-only invariants become tests.**
 - **The fake bus had different semantics from prod, and four modules could feel
   it.** Every `Bus(fake=True)` built its OWN `FakeStrictRedis`, so two Bus objects

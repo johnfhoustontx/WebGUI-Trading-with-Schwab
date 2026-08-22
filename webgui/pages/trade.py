@@ -15,8 +15,18 @@ prior analysis paints instantly on revisit. The pure display builders
 (``verdict_text_class``/``momentum_rows``/``breakdown_rows``/``alignment_rows``)
 are unit-tested.
 
-Fundamentals are not wired (MVP): the Investor verdict uses technicals/RS only
-and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
+Fundamentals ARE wired: ``trade_svc.compute`` fetches them from the proxy's
+``/instruments?projection=fundamental`` endpoint, so the Investor verdict scores
+real P/E, PEG, revenue/EPS growth, ROE and margin trend whenever at least three
+of its four core fields arrive. It degrades to "Insufficient fundamental data →
+HOLD" only on a failed/thin fetch — a note flags that case.
+
+⚠ Three Investor inputs are structurally absent from that payload and score a
+permanent 0 regardless of the symbol: EPS-surprise streak and guidance (the
+whole ``earnings_traj`` component), and free cash flow (so its HOLD gate cannot
+fire). ``days_to_earnings`` is absent for the same reason, which is why the
+Position earnings gate never fires either. Do not read a low Investor score as a
+verdict on the company without checking which components could contribute.
 """
 import time
 

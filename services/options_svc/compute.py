@@ -6439,14 +6439,31 @@ def _light_gex_context(symbol):
 def _gex_from_snapshot(snap):
     """Extract {flip, put_wall, call_wall} from a gamma_snapshot() GEX view.
 
-    The snapshot's ``views["GEX"]`` carries ``flip`` and ``walls`` =
-    [put_wall, call_wall] (one per side). Returns None if unavailable."""
+    The snapshot's ``views["GEX"]`` carries ``flip`` and ``walls`` — the strikes
+    from ``gamma_walls``, which builds ``[put_wall, call_wall]`` but FILTERS
+    None OUT. A chain with strikes on only one side of spot therefore arrives as
+    a SINGLE-ELEMENT list whose side position no longer identifies, so the sides
+    are established from SPOT, using the picker's own contract (put wall
+    strictly below spot, call wall strictly above) — the same disambiguation
+    ``_matrix_dealer_levels`` applies to the matrix grid. Reading positionally
+    filed a lone call wall as the PUT wall and reported no call wall at all,
+    silently, and rescue then judged a short strike against the wrong barrier.
+
+    Without a usable spot a PAIR is still unambiguous (a side is dropped only
+    when it is empty), but a lone wall is not — it is discarded rather than
+    guessed, since a wrong-side wall is worse than no wall and the flip still
+    carries context. Returns None when nothing is available."""
     if not isinstance(snap, dict):
         return None
     gex = (snap.get("views") or {}).get("GEX") or {}
     walls = gex.get("walls") or []
-    put_wall = walls[0] if len(walls) >= 1 else None
-    call_wall = walls[1] if len(walls) >= 2 else None
+    spot = snap.get("spot")
+    put_wall = call_wall = None
+    if isinstance(spot, (int, float)) and spot > 0:
+        put_wall = next((w for w in walls if w < spot), None)
+        call_wall = next((w for w in walls if w > spot), None)
+    elif len(walls) >= 2:
+        put_wall, call_wall = walls[0], walls[1]
     if gex.get("flip") is None and put_wall is None and call_wall is None:
         return None
     return {"flip": gex.get("flip"), "put_wall": put_wall, "call_wall": call_wall}

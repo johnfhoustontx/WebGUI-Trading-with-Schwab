@@ -3554,6 +3554,55 @@ def test_gamma_walls_single_side_and_empty():
     assert compute.gamma_walls("GEX", {"spot": 450.0, "gex": {}}, 450.0) == []
 
 
+# ── _gex_from_snapshot: wall SIDES come from spot, never list position ───────
+
+def test_gex_from_snapshot_files_a_lone_call_wall_as_the_call_wall():
+    """A chain with strikes only ABOVE spot must report a call wall, not a put wall.
+
+    ``gamma_walls`` returns ``[put_wall, call_wall]`` but FILTERS None out (see
+    test_gamma_walls_single_side_and_empty, which pins the single-element
+    result), so position no longer identifies the side. Indexing it —
+    ``put_wall = walls[0]`` — files the call wall as the PUT wall and reports no
+    call wall at all, silently. Rescue then judges a short strike against the
+    wrong barrier. ``_matrix_dealer_levels`` documents and avoids this exact
+    trap by splitting on spot; this is the same rule at the other consumer.
+    """
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [452.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert gex["call_wall"] == 452.0
+    assert gex["put_wall"] is None
+
+
+def test_gex_from_snapshot_keeps_both_walls_on_their_own_sides():
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [440.0, 452.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, 452.0)
+
+
+def test_gex_from_snapshot_files_a_lone_put_wall_as_the_put_wall():
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [440.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, None)
+
+
+def test_gex_from_snapshot_drops_an_unsidable_wall_when_spot_is_missing():
+    """No spot -> a single wall's side cannot be established, so report NEITHER.
+
+    Rescue penalizes a short strike that sits past ITS wall, so a wall on the
+    wrong side is worse than no wall at all — and the flip still carries the
+    context. A well-formed PAIR stays positional (``gamma_walls`` only omits a
+    side when that side is empty, so two entries are unambiguously put-then-call).
+    """
+    one = {"views": {"GEX": {"flip": 449.0, "walls": [452.0]}}}
+    gex = compute._gex_from_snapshot(one)
+    assert gex is not None and gex["flip"] == 449.0
+    assert gex["put_wall"] is None and gex["call_wall"] is None
+
+    pair = {"views": {"GEX": {"flip": 449.0, "walls": [440.0, 452.0]}}}
+    gex = compute._gex_from_snapshot(pair)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, 452.0)
+
+
 # ── Gamma dropdown symbol universe ──────────────────────────────────────────
 
 def test_gamma_symbol_options_excludes_vix_spx_first(monkeypatch):
