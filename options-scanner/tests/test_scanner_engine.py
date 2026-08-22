@@ -795,20 +795,30 @@ class TestVIXTermStructure:
 
 
 class TestEarningsAvoidance:
+    """check_earnings_conflict windows on [today - 5d, expiration], so every
+    fixture here is RELATIVE to today. The original absolute dates (2026-05-xx)
+    were 'the future' when written and silently became 'far in the past' - at
+    which point all five tests took the same early-out and three of them passed
+    for the wrong reason while two failed."""
+
+    @staticmethod
+    def _d(days):
+        return (date.today() + timedelta(days=days)).isoformat()
+
     def test_no_conflict_when_earnings_after_expiration(self):
-        assert check_earnings_conflict("2026-05-15", "2026-05-10") is False
+        assert check_earnings_conflict(self._d(15), self._d(10)) is False
 
     def test_conflict_when_earnings_before_expiration(self):
-        assert check_earnings_conflict("2026-05-05", "2026-05-10") is True
+        assert check_earnings_conflict(self._d(5), self._d(10)) is True
 
     def test_conflict_when_earnings_same_day(self):
-        assert check_earnings_conflict("2026-05-10", "2026-05-10") is True
+        assert check_earnings_conflict(self._d(10), self._d(10)) is True
 
     def test_no_conflict_when_no_earnings_date(self):
-        assert check_earnings_conflict(None, "2026-05-10") is False
+        assert check_earnings_conflict(None, self._d(10)) is False
 
     def test_no_conflict_when_earnings_far_before_entry(self):
-        assert check_earnings_conflict("2026-03-01", "2026-05-10") is False
+        assert check_earnings_conflict(self._d(-70), self._d(10)) is False
 
 
 class TestDynamicMinCredit:

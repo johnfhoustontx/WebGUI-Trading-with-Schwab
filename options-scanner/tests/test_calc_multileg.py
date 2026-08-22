@@ -1,5 +1,5 @@
 # options-scanner/tests/test_calc_multileg.py
-from datetime import date
+from datetime import date, timedelta
 
 import options_calculator as oc
 
@@ -8,15 +8,21 @@ def test_per_leg_expiry_back_leg_retains_value_at_front_expiry():
     # Calendar: short near call, long far call, same strike. With per-leg expiry,
     # at the front-expiry column the back leg still has time value, so the net
     # P&L recovers well above the full net debit (-300).
+    #
+    # The expiries are RELATIVE to today on purpose: _leg_expiry_years measures
+    # from now(), so a hard-coded "far" date silently becomes a dead leg the day
+    # it arrives - which is exactly how the original 2026-08-21 back leg started
+    # asserting -300.0 > -300 on 2026-08-21.
+    front, back = date.today() + timedelta(days=30), date.today() + timedelta(days=65)
     legs = [
         {"strike": 100, "option_type": "call", "side": "short", "premium": 2.0,
-         "qty": 1, "expiry": "2026-07-17"},
+         "qty": 1, "expiry": front.isoformat()},
         {"strike": 100, "option_type": "call", "side": "long", "premium": 5.0,
-         "qty": 1, "expiry": "2026-08-21"},
+         "qty": 1, "expiry": back.isoformat()},
     ]
     grid = oc.calc_spread_pnl(
         legs, spot=100, iv=0.30, r=0.04, eval_dates=None,
-        price_range=(100, 100), expiry_date=date(2026, 7, 17),
+        price_range=(100, 100), expiry_date=front,
         eval_times=[0.0], per_leg_expiry=True)
     row = grid[0]
     assert row["pnl"][0] > -300

@@ -69,3 +69,37 @@ def test_ordinal_ic_positive():
 
 def test_stats_ignore_none():
     assert per_state_stats([None, "bullish"], [None, 0.01])["bullish"]["n"] == 1
+
+
+# --- NaN inputs are MISSING, never a reading (the _clamp-pins-the-bound trap) ---
+NAN = float("nan")
+
+
+def test_all_nan_closes_score_neutral_not_bullish():
+    assert daily_direction_score(_bars([NAN] * 220)) == 50.0
+
+
+def test_a_nan_close_reads_as_a_missing_bar():
+    clean = [100 + i for i in range(220)]
+    dirty = list(clean)
+    dirty[100] = NAN
+    assert (daily_direction_score(_bars(dirty))
+            == daily_direction_score(_bars(clean[:100] + clean[101:])))
+
+
+def test_nan_price_yields_no_forward_return():
+    assert forward_returns([100, NAN, 121], horizon=1) == [None, None, None]
+
+
+def test_nan_forward_return_is_excluded_from_state_stats():
+    st = per_state_stats(["bullish", "bullish"], [0.02, NAN])
+    assert st["bullish"]["n"] == 1
+    assert st["bullish"]["mean"] == 0.02
+
+
+def test_nan_forward_return_is_excluded_from_ic():
+    states = ["bearish", "lack_of_bullishness", "neutral",
+              "lack_of_bearishness", "bullish", "bullish"]
+    # Dropping the NaN pair leaves five perfectly monotone pairs -> IC exactly
+    # 1.0. Ranking THROUGH the NaN instead degrades it to ~0.9856.
+    assert ordinal_ic(states, [-0.02, -0.01, 0.0, 0.01, 0.02, NAN]) > 0.999

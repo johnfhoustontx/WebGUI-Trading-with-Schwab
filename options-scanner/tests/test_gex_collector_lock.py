@@ -35,9 +35,13 @@ def test_acquire_when_absent_writes_lock(tmp_path):
 def test_acquire_defers_when_fresh_other_owner(tmp_path):
     p = tmp_path / "g.lock"
     gc.acquire_collector_lock(p, source="standalone", owner="A", now=1000)
-    # different owner, still fresh -> defer
+    # Different owner, still inside LOCK_TTL_SEC -> defer. Derived from the TTL:
+    # the fixed +200s was written when LOCK_TTL_SEC was 240 (POLL_INTERVAL_MIN=2)
+    # and silently became a STALE lock - i.e. the opposite test - when the
+    # collector moved to 1-minute polls and the TTL halved to 120.
+    still_fresh = 1000 + gc.LOCK_TTL_SEC // 2
     assert gc.acquire_collector_lock(p, source="gamma_tool", owner="B",
-                                     now=1200) is False
+                                     now=still_fresh) is False
 
 
 def test_acquire_takes_over_stale_lock(tmp_path):

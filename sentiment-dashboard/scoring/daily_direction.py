@@ -37,9 +37,12 @@ def _clamp(v, lo, hi):
 
 def _num(x):
     try:
-        return float(x)
+        v = float(x)
     except (TypeError, ValueError):
         return None
+    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
+        return None
+    return v
 
 
 def _closes(daily_bars):
