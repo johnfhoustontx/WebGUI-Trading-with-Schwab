@@ -4,8 +4,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 and 1. The
-swing model's refit is the headline, and it is not good news.**
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 4.
+The swing model's refit is the headline, and it is not good news: Phase 0 found
+the artifact 55 days stale and 44% of the measured edge gone on refresh, and
+Phase 4 found that what remains is a beta bet.**
 
 **Phase 1** — three of four tasks; the fourth turned into a sourcing decision.
 - **The Investor verdict was silently running at HALF WEIGHT for every symbol
@@ -119,6 +121,66 @@ swing model's refit is the headline, and it is not good news.**
   nothing in the app had ever said so.
 - Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
   options-scanner **1186**, schwab-proxy **104**.
+
+**Phase 4 — the model refit, which turned into finding out what the model is.**
+- **The swing composite is a beta bet, not a cross-sectional edge.** Splitting
+  the panel on the market's own forward 20-day return: composite IC **+0.1598
+  when SPY rises, −0.1142 when it falls**. Nine of fourteen factors flip sign
+  with the market — `downside_beta` −0.1923/+0.1702, `low_vol` −0.1507/+0.1195,
+  `semivol` −0.1465/+0.0991 — and the down-market weight set is nearly the
+  negation of the up-market one. Over a window that was roughly 2:1 up, that
+  nets to exactly the small positive OOS IC every study measured.
+- **The cause is the LABEL.** `r_symbol − r_SPY` is a raw excess return, so a
+  high-beta stock earns positive excess whenever the market rises —
+  mechanically, no skill. Fit over a mostly-rising five years, any model on this
+  label MUST discover that volatile names outperform. `research/labels.py` adds
+  the textbook alternative, `r − beta·r_market`, with beta on a **trailing**
+  window (a full-sample beta would leak the future into the label itself).
+- ⚠ **The regime split could not have caught it.** `highvol` is a VOLATILITY
+  regime, so a violent rally and a violent selloff both land in it. And
+  splitting on a FORWARD market return is look-ahead — labelled a diagnostic
+  throughout, since the question is not what to buy but what the model does when
+  the market falls.
+- **Four of six tasks measured NOT to adopt.** Noise floor: no floor differs
+  from 0.005 (all |t| < 1.4). Universe 78 → 173: t = **+0.82**, and it costs
+  live latency because the artifact's `fit_universe` IS the cross-section
+  `trade_svc` snapshots daily. Regime-conditioned weights: **worse** (+0.0128 vs
+  +0.0206). **C13 is refuted outright** — `low_vol` carries the same sign in all
+  three regimes (trend −0.0972, chop −0.1254, highvol −0.0721), stronger in each
+  than pooled.
+- **The two that WON are the ones not to ship.** Orthogonalized residual IC
+  (+0.0834, t = **+3.01**) and the four-factor short slate (+0.0698, t =
+  **+2.64**) are both pre-specified fixes for documented problems, and both win
+  by concentrating weight on the volatility cluster. The orthogonalized
+  weighting's down-market IC (−0.1282) is *worse* than the scheme it would
+  replace. Nine comparisons ran this phase; a Bonferroni-style correction at 13
+  folds would want |t| > ~3.4 anyway.
+- **Calibration moved OUT OF SAMPLE** — the one unambiguous win. The artifact
+  calibrated its bands on the rows its weights were fitted on, so the
+  "calibrated mean" the page prints as an expectation was in-sample. Measured:
+  top-band hit rate **49.86% OOS against 52.68% in-sample**. The in-sample set
+  is retained as `calibration_insample` so the flattery is visible. The bottom
+  band's edge is real (**−0.93%** vs SPY over 20 days against **+0.85%** at the
+  top) — but ⚠ **every band's hit rate is below 50%**, top included, because the
+  label is excess return vs a cap-weighted index.
+- **The exposure is now on the card.** The factor registry gained a `family`;
+  `score_symbol` derives `risk_share` and the evidence expander states it, with
+  a reversal caveat above 30%. The live artifact reads **47.6%**.
+- **The harness is the reusable part.** `research/panel_cache.py` fetches once
+  and keys on anything that changes the panel's content, **including the factor
+  registry**; `paired_delta` tests two variants on the SAME folds. Phase 0 moved
+  OOS IC 44% on a refetch alone, so without this every comparison above would
+  have been swamped by fetch noise.
+- **Regime machinery ships with the keys EMPTY.** 5 years gives 653/182/149
+  regime-days against a 441-day floor for one walk-forward fold, so only `trend`
+  qualifies — and at 66% of the sample it would be the pooled fit under another
+  name. `regime.py`, `artifact.build_regimes`, the scorer selector and the card
+  line are all in place for a fit that can fill them honestly.
+- **The gate FAILED on the question it stood in for**, so the Phase-0 artifact
+  stays primary. Per the plan, a documented negative result is a completed
+  phase.
+- Suites: trade-analyzer **392**, trade_svc **261**, webgui **2581**,
+  options_svc **1222**.
 
 **Phase 0** follows.
 - **Program docs:** [design](plans/2026-08-22-trade-analyzer-longshort-design.md)
