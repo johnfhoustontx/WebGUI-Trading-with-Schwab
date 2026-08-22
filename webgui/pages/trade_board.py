@@ -30,6 +30,7 @@ from pages.ui_guard import guard
 from pages.view_watch import watch_view
 
 VIEW = "trade:rank_board"
+BOOK_VIEW = "trade:model_book"
 POLL_SEC = 5.0
 
 _COLS = [
@@ -150,6 +151,65 @@ def gates_note(board):
     return "Gates checked here: " + "; ".join(gates) + "."
 
 
+_BOOK_COLS = [
+    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+    {"name": "side", "label": "Side", "field": "side"},
+    {"name": "expression", "label": "As", "field": "expression"},
+    {"name": "opened_on", "label": "Opened", "field": "opened_on"},
+    {"name": "pnl", "label": "P&L", "field": "pnl"},
+    {"name": "status", "label": "Status", "field": "status"},
+]
+
+
+def book_rows(book):
+    """Display rows for the model paper book, newest first."""
+    out = []
+    for p in ((book or {}).get("positions") or []):
+        pnl = fmt.num(p.get("pnl_pct"))
+        out.append({
+            "symbol": p.get("symbol", "?"),
+            "side": p.get("side") or "—",
+            "expression": p.get("expression") or "—",
+            "opened_on": p.get("opened_on") or "—",
+            "pnl": f"{pnl:+.1%}" if pnl is not None else "—",
+            "status": p.get("status") or "—",
+            "close_reason": p.get("close_reason") or "",
+        })
+    return out
+
+
+def _side_bit(label, s):
+    n = (s or {}).get("n") or 0
+    mean = fmt.num((s or {}).get("mean_pnl"))
+    if not n or mean is None:
+        return f"{label} — no closed trades"
+    hr = fmt.num((s or {}).get("hit_rate"))
+    hit = f", {hr:.0%} hit" if hr is not None else ""
+    return f"{label} {mean:+.1%} mean over {n}{hit}"
+
+
+def book_summary_line(book):
+    """Realized performance, each side on its own. '' when the book is empty.
+
+    Separate sides on purpose: this model's short pool is usually expressed
+    RELATIVE to SPY, so averaging the two would hide which half is working."""
+    s = (book or {}).get("summary") or {}
+    if not s:
+        return ""
+    parts = [_side_bit("Long", s.get("long")), _side_bit("Short", s.get("short"))]
+    tail = f" · {s.get('open', 0)} open, {s.get('closed', 0)} closed"
+    return " · ".join(parts) + tail
+
+
+def book_note():
+    """What the book is, and the one thing about it that could mislead."""
+    return ("Paper only, isolated from the driver's book. It trades the "
+            "UNDERLYING rather than the options structure the Trade Plan "
+            "suggests — a spread's theta and vega would swamp the question of "
+            "whether the ranking works. A relative short is held as a pair "
+            "against SPY, which is what the model actually predicts.")
+
+
 def meta_line(board):
     board = board or {}
     bits = [f"model {board.get('model_version') or '?'}",
@@ -163,7 +223,8 @@ def meta_line(board):
 
 def render():
     ui.add_css(QUASAR_INTERNAL_CSS)
-    state = {"board": bus_client.read(VIEW) or {}}
+    state = {"board": bus_client.read(VIEW) or {},
+             "book": bus_client.read(BOOK_VIEW) or {}}
 
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
         with ui.row().classes("w-full items-center justify-between"):
@@ -188,6 +249,13 @@ def render():
                     "names": ui.label("").classes(f"text-sm {LABEL}"),
                 }
 
+        with ui.column().classes(f"{CARD} w-full gap-2"):
+            ui.label("MODEL PAPER BOOK").classes(EYEBROW)
+            book_summary = ui.label("").classes(f"text-sm {LABEL}")
+            ui.label(book_note()).classes(f"text-xs {MUTED}")
+            book_table = ui.table(columns=_BOOK_COLS, rows=[],
+                                  row_key="symbol").classes("w-full")                 .props("dense flat")
+
         with ui.column().classes(f"{CARD} w-full gap-2") as board_card:
             ui.label("Full cross-section").classes(EYEBROW)
             table = ui.table(columns=_COLS, rows=[], row_key="symbol") \
@@ -201,6 +269,9 @@ def render():
     def _request():
         spinner.show("Rebuilding the board…")
         bus_client.request("trade", {"type": "rank_board", "args": {}})
+        # The book follows the board, so one click advances both rather than
+        # leaving the book a tick behind whatever it is reporting on.
+        bus_client.request("trade", {"type": "model_book", "args": {}})
 
     rebuild.on_click(_request)
 
@@ -221,11 +292,17 @@ def render():
             refs["names"].text = ", ".join(names) if names else "—"
         table.rows = board_rows(b)
         table.update()
+        bk = state["book"] or {}
+        book_summary.text = book_summary_line(bk) or "No positions yet."
+        book_table.rows = book_rows(bk)
+        book_table.update()
 
     @guard
     def _on_change():
         state["board"] = bus_client.read(VIEW) or {}
+        state["book"] = bus_client.read(BOOK_VIEW) or {}
         _paint()
 
     _paint()
     watch_view(VIEW, _on_change, interval=POLL_SEC)
+    watch_view(BOOK_VIEW, _on_change, interval=POLL_SEC)

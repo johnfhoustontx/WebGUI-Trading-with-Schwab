@@ -141,3 +141,24 @@ class TestRiskShare:
         art = {"version": "x", "horizon": 20, "regimes": {"all": blk}}
         out = sm.score_symbol(CUR, None, art)
         assert out["risk_share"] == pytest.approx(0.0)
+
+
+class TestTheBandIndexIsReported:
+    def test_the_scorer_returns_the_band_it_landed_in(self):
+        """`rec_journal` has a `band` column and `journal_reading` writes
+        `sm.get("band")` — which the scorer never returned, so every journalled
+        row carried NULL. Phase 6's monitor groups by band, so an always-NULL
+        column stops being cosmetic."""
+        out = sm.score_symbol(CUR, None, _artifact())
+        assert out["band"] == 2               # top band of the 3-band fixture
+
+    def test_a_bottom_band_read_reports_band_zero(self):
+        low = {"mom_12_1": -0.5, "low_vol": 0.05}
+        out = sm.score_symbol(low, None, _artifact())
+        assert out["band"] == 0
+        assert out["verdict"] == "SELL"
+
+    def test_the_band_and_the_percentile_agree_about_direction(self):
+        hi = sm.score_symbol(CUR, None, _artifact())
+        lo = sm.score_symbol({"mom_12_1": -0.5, "low_vol": 0.05}, None, _artifact())
+        assert (hi["band"] > lo["band"]) == (hi["percentile"] > lo["percentile"])

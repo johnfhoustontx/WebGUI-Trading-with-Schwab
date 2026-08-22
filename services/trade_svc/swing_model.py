@@ -208,6 +208,11 @@ def score_symbol(current_factors, universe_snapshot, artifact, regime=None):
         verdict = "BUY" if idx >= n - 1 else "SELL" if idx <= 0 else "HOLD"
         return {
             "verdict": verdict, "score": round(comp, 3),
+            # The calibration band index. `rec_journal` has always had a `band`
+            # column and `journal_reading` has always written `sm["band"]` —
+            # which was never returned, so every journalled row carried NULL.
+            # Phase 6's monitor groups by band, so that stopped being cosmetic.
+            "band": band.get("band", idx),
             "percentile": _percentile(idx, n),
             "expected_fwd": band["mean_fwd"], "hit_rate": band["hit_rate"],
             "horizon_days": artifact.get("horizon", 20),

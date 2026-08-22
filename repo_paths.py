@@ -118,6 +118,8 @@ IV_HISTORY_DB = TRADE_SVC_DATA / "iv_history.db"
 # historical output is unrecoverable after the fact (artifact, cross-section and
 # gates all move), so this is written from Phase 1 onward.
 REC_JOURNAL_DB = TRADE_SVC_DATA / "rec_journal.db"
+# The model's own paper book (Phase 6) - isolated from the driver's.
+MODEL_BOOK_DB = TRADE_SVC_DATA / "model_book.db"
 
 # Point-in-time fundamentals. Live-parsed ratios describe TODAY, so validating
 # the Investor verdict against forward returns is impossible without a store

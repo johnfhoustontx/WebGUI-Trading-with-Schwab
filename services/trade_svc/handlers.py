@@ -17,7 +17,7 @@ On-demand only: there is no scheduler. The GUI Trade page enqueues an
 Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
 from services.trade_svc import compute
-from shared.contracts.trade import TradeAnalysis, RankBoard
+from shared.contracts.trade import TradeAnalysis, RankBoard, ModelBook
 
 CACHE_ANALYSIS = "cache:trade:analysis"
 EVENT_ANALYSIS = "events:trade:analysis"
@@ -27,6 +27,11 @@ EVENT_ANALYSIS = "events:trade:analysis"
 # and the board is pure scoring on top of it.
 CACHE_RANK_BOARD = "cache:trade:rank_board"
 EVENT_RANK_BOARD = "events:trade:rank_board"
+
+# The model's own paper book (Phase 6): what following the board would have
+# done. Isolated from the driver's book, and paper only.
+CACHE_MODEL_BOOK = "cache:trade:model_book"
+EVENT_MODEL_BOOK = "events:trade:model_book"
 
 # EquityDeepDive on-demand views (loose {html|markdown, symbol, ts} dicts — NOT
 # projected onto TradeAnalysis; the webgui serves them raw / in a copyable page).
@@ -65,6 +70,7 @@ _FIELDS = {
     "peers": None,
     "earnings_coverage": None,
     "trade_plan": None,
+    "live_ic": None,
 }
 
 
@@ -109,6 +115,17 @@ _BOARD_FIELDS = {
 }
 
 
+def model_book(bus, args=None) -> None:
+    """Tick the model paper book and publish it."""
+    book = compute.run_model_book()
+    mbk = ModelBook(**{k: book.get(k, d) for k, d in _MODEL_BOOK_FIELDS.items()})
+    bus.cache_set(CACHE_MODEL_BOOK, mbk.model_dump(),
+                  event=EVENT_MODEL_BOOK, skip_unchanged=True)
+
+
+_MODEL_BOOK_FIELDS = {"as_of": None, "positions": [], "summary": {}}
+
+
 def deepdive(bus, args) -> None:
     """Run the EquityDeepDive quant report for the symbol; cache the HTML + publish."""
     res = compute.run_deep_dive((args or {}).get("symbol", ""))
@@ -135,3 +152,5 @@ def handle_command(bus, command) -> None:
         deepdive_query(bus, command.args)
     elif command.type == "rank_board":
         rank_board(bus, command.args)
+    elif command.type == "model_book":
+        model_book(bus, command.args)

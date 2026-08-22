@@ -32,6 +32,7 @@ import time
 
 import bus_client
 from pages import busy as _busy
+from pages import fmt
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -43,6 +44,7 @@ from .options.theme import (
     CARD,
     EYEBROW,
     LABEL,
+    MUTED,
     PAGE,
     QUASAR_INTERNAL_CSS,
 )
@@ -369,6 +371,67 @@ def swing_exposure_note(sm):
         return base + "."
     return (base + " — historically that ranks high-beta names top, and it "
             "reverses when the market falls.")
+
+
+def live_ic_line(lic):
+    """Is the live edge holding? '' when there is no monitor block.
+
+    ⚠ The live number is a POOLED rank correlation over every labelled reading.
+    The artifact's OOS IC is the mean of per-DATE cross-sectional correlations.
+    They are different statistics, and printing them adjacent without saying so
+    would manufacture a decay finding out of a units mismatch — so the line says
+    it every time."""
+    lic = lic or {}
+    if not lic.get("status"):
+        return ""
+    if lic["status"] != "ok":
+        n, need = lic.get("n_labelled", 0), lic.get("min_required", 20)
+        return (f"Live tracking: {n} labelled reading(s) so far, {need} needed "
+                "before an edge can be measured at all.")
+    ic = fmt.num(lic.get("pooled_ic"))
+    n = lic.get("n_labelled", 0)
+    if ic is None:
+        return f"Live tracking: {n} readings, not yet correlatable."
+    return (f"Live pooled IC {ic:+.3f} over {n} readings — a pooled statistic, "
+            "not the per-date one the model's OOS IC reports.")
+
+
+def live_ic_split_line(lic):
+    """The up-market / down-market split, and the beta-neutral reading.
+
+    This is the line that matters most: Phase 4 showed the model's measured edge
+    IS beta, so a single live IC would read healthy through any rising market."""
+    lic = lic or {}
+    if lic.get("status") != "ok":
+        return ""
+    up, down = fmt.num(lic.get("ic_market_up")), fmt.num(lic.get("ic_market_down"))
+    ba = fmt.num(lic.get("pooled_ic_beta_adj"))
+    bits = []
+    if up is not None or down is not None:
+        bits.append("market up " + (f"{up:+.2f}" if up is not None else "—")
+                    + " · down " + (f"{down:+.2f}" if down is not None else "—"))
+    if ba is not None:
+        bits.append(f"beta-neutral {ba:+.3f}")
+    return " · ".join(bits)
+
+
+def live_ic_decay_note(lic):
+    """A decay claim, ONLY from the statistic that is actually comparable.
+
+    '' the rest of the time — which is most of the time, because live readings
+    are too sparse for a per-date cross-sectional IC. Absent is the honest state
+    here, not a gap to fill with the pooled number."""
+    lic = lic or {}
+    if not lic.get("comparable_to_artifact"):
+        return ""
+    decay = fmt.num(lic.get("decay"))
+    live = fmt.num(lic.get("by_date_ic"))
+    if decay is None or live is None:
+        return ""
+    word = "decay" if decay < 0 else "improvement"
+    return (f"Live per-date IC {live:+.4f} vs the fit's "
+            f"{fmt.num(lic.get('artifact_oos_ic')) or 0:+.4f} — "
+            f"{word} of {abs(decay):.4f}.")
 
 
 def model_staleness(version, today=None, threshold_days=60):
@@ -760,6 +823,15 @@ def render():
                         stale = model_staleness(meta["version"])
                         if stale:
                             ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
+                        # Phase 6: what the model has actually done since it
+                        # shipped, next to what it claimed it would do.
+                        lic = (result or {}).get("live_ic")
+                        for text, cls in ((live_ic_line(lic), f"text-xs {MUTED}"),
+                                          (live_ic_split_line(lic), f"text-xs {MUTED}"),
+                                          (live_ic_decay_note(lic),
+                                           "text-xs text-amber-9")):
+                            if text:
+                                ui.label(text).classes(cls)
                 with ui.expansion("Legacy heuristic").classes("w-full"):
                     _legacy_verdict_body(verdict)
             else:

@@ -64,14 +64,46 @@ _FIELDS = ("symbol", "reading_date", "recorded_at", "price", "composite",
            "band", "percentile", "swing_verdict", "position_verdict",
            "investor_verdict", "investor_score", "gates", "model_version")
 
+# Phase 6. Phase 4 measured this model at cross-sectional IC +0.16 when the
+# market rises and -0.11 when it falls — its edge IS beta. A live monitor
+# scoring itself on the RAW forward excess would therefore report a healthy IC
+# right through any rising market, reproducing exactly the illusion Phase 4
+# dismantled. So each horizon also stores the BETA-ADJUSTED forward and the
+# market's OWN forward, which is what lets the monitor split up-market from
+# down-market instead of averaging them into a comfortable number.
+#
+# Added by migration rather than a new schema: this store cannot be backfilled
+# (a model's historical output is not recoverable), so it must never be
+# recreated to gain a column.
+_LABEL_COLUMNS = (
+    ("fwd_5d_ba", "REAL"), ("fwd_10d_ba", "REAL"), ("fwd_20d_ba", "REAL"),
+    ("mkt_fwd_5d", "REAL"), ("mkt_fwd_10d", "REAL"), ("mkt_fwd_20d", "REAL"),
+    ("beta", "REAL"),
+)
+
+_LABEL_FIELDS = ("fwd_5d", "fwd_10d", "fwd_20d",
+                 "fwd_5d_ba", "fwd_10d_ba", "fwd_20d_ba",
+                 "mkt_fwd_5d", "mkt_fwd_10d", "mkt_fwd_20d", "beta")
+
+
+def _migrate(conn):
+    """Add any label column this journal predates. Idempotent."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(readings)")}
+    for name, decl in _LABEL_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE readings ADD COLUMN {name} {decl}")
+    conn.commit()
+
 
 def init_db(db_path=DEFAULT_DB_PATH):
     """Open the journal, creating the schema if needed. Idempotent."""
     db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if str(db_path) != ":memory:":
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -109,14 +141,23 @@ def record(conn, reading):
         return False
 
 
-def apply_label(conn, symbol, reading_date, fwd_5d=None, fwd_10d=None,
-                fwd_20d=None):
-    """Attach realized forward excess returns to one reading (Phase 6)."""
+def apply_label(conn, symbol, reading_date, **fields):
+    """Attach realized forward returns to one reading (Phase 6).
+
+    Accepts any of ``_LABEL_FIELDS``; anything omitted is written as NULL.
+    ⚠ NULL and 0.0 are different answers — an unmatured horizon is UNKNOWN,
+    while 0.0 is a measured flat outcome, and the monitor has to tell them
+    apart. That is why absent fields are not defaulted to zero."""
     try:
+        unknown = set(fields) - set(_LABEL_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown label fields: {sorted(unknown)}")
+        sets = ", ".join(f"{k}=?" for k in _LABEL_FIELDS)
+        args = [fields.get(k) for k in _LABEL_FIELDS]
         conn.execute(
-            "UPDATE readings SET fwd_5d=?, fwd_10d=?, fwd_20d=?, labeled_at=? "
-            "WHERE symbol=? AND reading_date=?",
-            (fwd_5d, fwd_10d, fwd_20d, _now_iso(), symbol, reading_date))
+            f"UPDATE readings SET {sets}, labeled_at=? "
+            f"WHERE symbol=? AND reading_date=?",
+            (*args, _now_iso(), symbol, reading_date))
         conn.commit()
         return True
     except Exception:

@@ -64,6 +64,11 @@ class TradeAnalysis(_Base):
     # stop, target, and a TIME STOP at the model's own 20-day horizon —
     # past which the read is unmodelled and nothing else says so.
     trade_plan: dict | None = None
+    # Phase 6. The live-IC monitor's reading over the recommendation journal:
+    # is the edge holding? Carries its own `status`, because with a young
+    # journal the honest answer is "not enough data yet" and that must not
+    # render as a thin edge.
+    live_ic: dict | None = None
 
 
 class RankBoard(_Base):
@@ -109,3 +114,26 @@ class RankBoard(_Base):
     market_filter: dict = {}
     short_expression: str = "relative"
     gates_evaluated: list[str] = []
+
+
+class ModelBook(_Base):
+    """The model's own paper book — ``trade_svc.compute.run_model_book``.
+
+    Paper only, and isolated from the driver's book: this one exists to give the
+    swing model a track record without anyone placing its trades.
+
+    ⚠ It trades the UNDERLYING rather than the Trade Plan's options structure, a
+    deliberate deviation. The model predicts a 20-day excess return on the
+    stock; wrapping that in a spread would add theta and vega P&L that says
+    nothing about whether the ranking works, so a book that lost money on
+    correct calls would be indistinguishable from one whose calls were wrong.
+
+    ``summary`` splits long from short, because a book carried entirely by its
+    longs is a different product from one that works on both sides — and this
+    model's short side is usually expressed RELATIVE to SPY, since that is
+    literally what it predicts.
+    """
+
+    as_of: str | None = None
+    positions: list[dict] = []
+    summary: dict = {}

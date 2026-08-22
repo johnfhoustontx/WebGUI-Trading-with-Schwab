@@ -511,3 +511,69 @@ def test_an_unknown_share_says_nothing_rather_than_implying_zero():
     assert trade.swing_exposure_note({"risk_share": None}) == ""
     assert trade.swing_exposure_note({}) == ""
     assert trade.swing_exposure_note(None) == ""
+
+
+# ── Phase 6: is the live edge holding? ───────────────────────────────────────
+# The monitor reads the recommendation journal. Two traps it must not fall into,
+# both of which would produce a confident number from nothing:
+#   * a young journal has too few labelled rows to correlate anything, and that
+#     is "no measurement", not "a thin edge";
+#   * the live POOLED statistic is not the artifact's per-date cross-sectional
+#     OOS IC, so printing them side by side as though they were comparable would
+#     manufacture a decay finding out of a units mismatch.
+
+_LIC_OK = {
+    "status": "ok", "n_labelled": 64, "min_required": 20,
+    "pooled_ic": 0.081, "pooled_ic_beta_adj": -0.004,
+    "by_date_ic": None, "comparable_to_artifact": False,
+    "ic_market_up": 0.14, "ic_market_down": -0.09,
+    "artifact_oos_ic": 0.0206, "decay": None,
+    "long": {"n": 30, "mean_fwd": 0.011, "hit_rate": 0.5, "ic": 0.05},
+    "short": {"n": 18, "mean_fwd": -0.004, "hit_rate": 0.44, "ic": 0.02},
+    "horizon_days": 20,
+}
+
+
+def test_live_ic_line_reports_the_pooled_reading():
+    line = trade.live_ic_line(_LIC_OK)
+    assert "+0.081" in line or "0.081" in line
+
+
+def test_it_says_the_pooled_number_is_NOT_the_artifacts_statistic():
+    """Different units: a pooled correlation over all readings versus a mean of
+    per-date cross-sectional correlations."""
+    line = trade.live_ic_line(_LIC_OK).lower()
+    assert "not" in line or "pooled" in line
+
+
+def test_a_young_journal_reports_how_far_off_a_reading_is():
+    line = trade.live_ic_line({"status": "insufficient", "n_labelled": 3,
+                               "min_required": 20})
+    assert "3" in line and "20" in line
+    assert "0.0" not in line          # no number that could read as an IC
+
+
+def test_no_monitor_block_renders_nothing():
+    assert trade.live_ic_line(None) == ""
+    assert trade.live_ic_line({}) == ""
+
+
+def test_the_beta_split_is_surfaced_because_that_is_the_whole_question():
+    line = trade.live_ic_split_line(_LIC_OK)
+    assert "+0.14" in line and "-0.09" in line
+
+
+def test_the_beta_adjusted_reading_is_shown_when_present():
+    line = trade.live_ic_split_line(_LIC_OK).lower()
+    assert "beta" in line
+
+
+def test_the_split_line_is_empty_without_a_reading():
+    assert trade.live_ic_split_line({"status": "insufficient"}) == ""
+
+
+def test_decay_is_only_claimed_from_the_COMPARABLE_statistic():
+    assert trade.live_ic_decay_note(_LIC_OK) == ""
+    comparable = dict(_LIC_OK, by_date_ic=0.004, comparable_to_artifact=True,
+                      decay=-0.0166)
+    assert "decay" in trade.live_ic_decay_note(comparable).lower()

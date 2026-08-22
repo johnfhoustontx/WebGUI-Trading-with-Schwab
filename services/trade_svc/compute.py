@@ -506,6 +506,121 @@ def _swing_universe():
     return list(_MK_UNIVERSE)
 
 
+def live_ic_reading(symbol=None, db_path=None):
+    """The live-IC monitor's reading over the journal. Never raises.
+
+    ``symbol`` narrows it to one name's own history — which is almost always
+    far too thin to produce an IC, and the monitor says so rather than printing
+    one. The whole-journal reading is the useful one.
+
+    ⚠ Skipped under pytest without an explicit path, the same rule
+    :func:`journal_reading` follows and for the same reason: the bus is
+    fakeredis, SQLite is not."""
+    from services.trade_svc import live_ic as _lic
+    if db_path is None and _under_pytest():
+        return _lic.compute(None)
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        from services.trade_svc import swing_model as _swing
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        rows = [dict(r) for r in rec_journal.readings(conn, symbol=symbol)]
+        art = _swing.load_artifact() or {}
+        oos = ((art.get("regimes") or {}).get("all") or {}).get("oos_ic")
+        return _lic.compute(rows, artifact_oos_ic=oos)
+    except Exception:
+        _degrade.degraded("trade.live_ic_reading")
+        return _lic.compute(None)
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
+def run_model_book(board=None, prices=None, today=None, db_path=None):
+    """One tick of the model paper book: open, mark, close. Never raises.
+
+    Returns the book's published view. ``prices`` is injected in tests; live it
+    is one batched quote call over the symbols actually involved.
+
+    ⚠ Skipped under pytest without an explicit path — the same store-isolation
+    rule ``journal_reading`` follows."""
+    from services.trade_svc import model_book as _mb
+    from services.trade_svc import model_book_store as _store
+    import datetime as _dt
+
+    blank = {"positions": [], "summary": _mb.summary([]), "as_of": None}
+    if db_path is None and _under_pytest():
+        return blank
+    conn = None
+    try:
+        today = today or _dt.date.today()
+        conn = _store.init_db(db_path or _store.DEFAULT_DB_PATH)
+        if board is None:
+            env = _bus().cache_get("cache:trade:rank_board")
+            board = env.payload if env else None
+
+        held = _store.open_symbols(conn)
+        wanted = [c for c in _mb.candidates(board, prices or {}, today=today)
+                  if c["symbol"] not in held]
+        open_rows = [dict(r) for r in _store.positions(conn, status="open")]
+        need = sorted({r["symbol"] for r in open_rows}
+                      | {c["symbol"] for c in wanted} | {"SPY"})
+        if prices is None:
+            prices = _quotes_for(need)
+
+        for cand in wanted:
+            px = prices.get(cand["symbol"])
+            if px:
+                cand["entry"] = float(px)
+                cand["spy_entry"] = prices.get("SPY")
+                _store.open_position(conn, cand)
+
+        for row in open_rows:
+            px, spy = prices.get(row["symbol"]), prices.get("SPY")
+            marked = _mb.mark(row, px, spy)
+            why = _mb.close_reason(row, px, spy, today)
+            if why:
+                _store.close_position(conn, row["symbol"], row["opened_on"],
+                                      marked.get("last"), marked.get("pnl_pct"),
+                                      why, on=today)
+            else:
+                _store.update_mark(conn, row["symbol"], row["opened_on"],
+                                   marked.get("last"), marked.get("pnl_pct"))
+
+        rows = [dict(r) for r in _store.positions(conn, limit=200)]
+        return {"positions": rows, "summary": _mb.summary(rows),
+                "as_of": today.isoformat()}
+    except Exception:
+        _degrade.degraded("trade.run_model_book")
+        return blank
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import model_book_store as _s
+                _s.close_db(conn)
+            except Exception:
+                pass
+
+
+def _quotes_for(symbols):
+    """``{symbol: last}`` for the book's tick. {} on any failure."""
+    try:
+        quotes = _proxy.schwab_client.get_quotes(list(symbols)) or {}
+        out = {}
+        for sym, q in quotes.items():
+            last = (q or {}).get("last")
+            if isinstance(last, (int, float)) and last > 0:
+                out[sym] = float(last)
+        return out
+    except Exception:
+        _degrade.degraded("trade.model_book_quotes")
+        return {}
+
+
 def _board_gate_ctx(symbols):
     """Gate inputs for the whole board: ``{"earnings_days": …, "squeeze": …}``.
 
@@ -1450,6 +1565,9 @@ def analyze(symbol):
     # The plan is derived FROM the assembled result, so it sees the clearance,
     # dealer context and earnings coverage rather than recomputing any of them.
     result["trade_plan"] = _trade_plan(result)
+    # Is the live edge holding? Read AFTER the plan so today's own reading is
+    # not counted — it has no forward return yet and could not contribute.
+    result["live_ic"] = live_ic_reading()
 
     # Forward-accruing record of what the model said today. Side effect only —
     # never raises, and skipped under pytest (see journal_reading).

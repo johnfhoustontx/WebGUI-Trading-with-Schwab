@@ -154,3 +154,64 @@ class TestEmptyStates:
     def test_an_unknown_status_does_not_invent_a_message(self):
         assert trade_board.status_note(dict(_BOARD, status="wat")) == ""
         assert trade_board.status_note(None) == ""
+
+
+# ── The model paper book (Phase 6) ───────────────────────────────────────────
+# The board says what the model thinks; the book says what following it did.
+# Long and short are shown separately because this model's short side is usually
+# expressed RELATIVE to SPY, and averaging the two would hide that.
+
+_BOOK = {
+    "as_of": "2026-08-22",
+    "positions": [
+        {"symbol": "MU", "side": "long", "status": "open", "entry": 100.0,
+         "last": 108.0, "pnl_pct": 0.08, "expression": "directional",
+         "opened_on": "2026-08-01", "time_stop_on": "2026-08-29"},
+        {"symbol": "TMO", "side": "short", "status": "closed", "entry": 500.0,
+         "last": 505.0, "pnl_pct": -0.01, "expression": "relative",
+         "opened_on": "2026-07-01", "close_reason": "time"},
+    ],
+    "summary": {
+        "long": {"n": 4, "mean_pnl": 0.021, "hit_rate": 0.5, "total_pnl": 0.084},
+        "short": {"n": 3, "mean_pnl": -0.008, "hit_rate": 0.33, "total_pnl": -0.024},
+        "open": 1, "closed": 7,
+    },
+}
+
+
+def test_book_rows_format_the_position():
+    rows = {r["symbol"]: r for r in trade_board.book_rows(_BOOK)}
+    assert rows["MU"]["pnl"] == "+8.0%"
+    assert rows["MU"]["status"] == "open"
+    assert rows["TMO"]["expression"] == "relative"
+
+
+def test_a_position_with_no_mark_shows_a_dash():
+    rows = trade_board.book_rows({"positions": [{"symbol": "X", "side": "long"}]})
+    assert rows[0]["pnl"] == "—"
+
+
+def test_the_book_summary_reports_each_side_separately():
+    line = trade_board.book_summary_line(_BOOK)
+    assert "+2.1%" in line and "-0.8%" in line
+
+
+def test_a_side_with_no_closed_trades_says_so_rather_than_zero():
+    book = {"summary": {"long": {"n": 2, "mean_pnl": 0.01, "hit_rate": 0.5},
+                        "short": {"n": 0, "mean_pnl": None, "hit_rate": None},
+                        "open": 0, "closed": 2}}
+    line = trade_board.book_summary_line(book)
+    assert "—" in line or "no closed" in line.lower()
+
+
+def test_an_empty_book_renders_nothing_rather_than_a_row_of_zeros():
+    assert trade_board.book_summary_line({}) == ""
+    assert trade_board.book_summary_line(None) == ""
+    assert trade_board.book_rows(None) == []
+
+
+def test_the_book_discloses_that_it_trades_the_underlying():
+    """A deliberate deviation from the phase plan, so it has to be visible
+    where the numbers are — otherwise the P&L reads as options P&L."""
+    note = trade_board.book_note().lower()
+    assert "underlying" in note or "stock" in note

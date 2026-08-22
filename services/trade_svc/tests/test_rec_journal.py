@@ -129,3 +129,76 @@ def test_the_default_path_is_under_the_service_data_dir():
 def test_sqlite_row_factory_so_callers_read_by_name(conn):
     rec_journal.record(conn, _reading())
     assert isinstance(rec_journal.readings(conn)[0], sqlite3.Row)
+
+
+# ── Phase 6: the labeler needs more than a raw forward return ────────────────
+# Phase 4 measured this model at cross-sectional IC +0.16 when the market rises
+# and −0.11 when it falls: its edge is beta. A live monitor that scored itself on
+# the RAW forward excess would therefore report a healthy IC through any rising
+# market and reproduce exactly the illusion Phase 4 dismantled. So the journal
+# stores the beta-adjusted forward and the market's own forward beside the raw
+# one, and the monitor can split on them.
+
+class TestTheLabelColumns:
+    def test_the_beta_aware_columns_exist(self, tmp_path):
+        conn = rec_journal.init_db(tmp_path / "j.db")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(readings)")}
+        assert {"fwd_5d_ba", "fwd_10d_ba", "fwd_20d_ba"} <= cols
+        assert {"mkt_fwd_5d", "mkt_fwd_10d", "mkt_fwd_20d"} <= cols
+        assert "beta" in cols
+
+    def test_a_db_created_by_the_OLD_schema_is_migrated_in_place(self, tmp_path):
+        """The store cannot be backfilled, so it must never be recreated. An
+        existing journal has to gain the columns and keep its rows."""
+        import sqlite3
+        p = tmp_path / "old.db"
+        old = sqlite3.connect(str(p))
+        old.executescript("""
+            CREATE TABLE readings (
+                symbol TEXT NOT NULL, reading_date TEXT NOT NULL,
+                recorded_at TEXT, price REAL, composite REAL, band INTEGER,
+                percentile INTEGER, swing_verdict TEXT, position_verdict TEXT,
+                investor_verdict TEXT, investor_score INTEGER, gates TEXT,
+                model_version TEXT, fwd_5d REAL, fwd_10d REAL, fwd_20d REAL,
+                labeled_at TEXT, PRIMARY KEY (symbol, reading_date));""")
+        old.execute("INSERT INTO readings (symbol, reading_date, composite) "
+                    "VALUES ('AAPL', '2026-08-01', 0.5)")
+        old.commit()
+        old.close()
+
+        conn = rec_journal.init_db(p)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(readings)")}
+        assert "fwd_20d_ba" in cols and "beta" in cols
+        row = conn.execute("SELECT * FROM readings").fetchone()
+        assert row["symbol"] == "AAPL" and row["composite"] == 0.5
+
+    def test_migration_is_idempotent(self, tmp_path):
+        p = tmp_path / "j.db"
+        rec_journal.close_db(rec_journal.init_db(p))
+        conn = rec_journal.init_db(p)          # second open must not raise
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+
+
+class TestApplyLabelCarriesTheBetaAwareFields:
+    def test_it_stores_every_field_it_is_given(self, tmp_path):
+        conn = rec_journal.init_db(tmp_path / "j.db")
+        rec_journal.record(conn, {"symbol": "AAPL", "reading_date": "2026-08-01",
+                         "composite": 0.4})
+        rec_journal.apply_label(conn, "AAPL", "2026-08-01", fwd_5d=0.01, fwd_20d=0.03,
+                       fwd_20d_ba=0.012, mkt_fwd_20d=0.02, beta=1.4)
+        row = conn.execute("SELECT * FROM readings").fetchone()
+        assert row["fwd_20d"] == 0.03
+        assert row["fwd_20d_ba"] == 0.012
+        assert row["mkt_fwd_20d"] == 0.02
+        assert row["beta"] == 1.4
+        assert row["labeled_at"]
+
+    def test_a_partial_label_leaves_the_others_NULL_rather_than_zero(self):
+        """A horizon that has not matured yet is unknown, and 0.0 is a
+        measurement. The monitor must be able to tell them apart."""
+        conn = rec_journal.init_db(":memory:")
+        rec_journal.record(conn, {"symbol": "X", "reading_date": "2026-08-01"})
+        rec_journal.apply_label(conn, "X", "2026-08-01", fwd_5d=0.01)
+        row = conn.execute("SELECT * FROM readings").fetchone()
+        assert row["fwd_5d"] == 0.01
+        assert row["fwd_20d"] is None and row["fwd_20d_ba"] is None
