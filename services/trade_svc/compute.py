@@ -30,6 +30,7 @@ Every engine-call function is defensive: per the page/service convention it
 catches and degrades (returns ``None`` / an ``errors`` payload) rather than
 raising, so one bad symbol can never crash the service.
 """
+import os
 import sys
 from datetime import date, datetime, timezone
 
@@ -701,6 +702,94 @@ def _sector_strength_dict(ss):
     }
 
 
+def _under_pytest():
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def journal_reading(result, db_path=None):
+    """Append one analysis to the recommendation journal. Side effect only.
+
+    Returns True when the row was written, False otherwise — and NEVER raises:
+    ``analyze`` owes the user an analysis whether or not the journal took the
+    row, exactly as the IV/RV store behaves.
+
+    ⚠ With no explicit ``db_path`` the write is SKIPPED under pytest. The bus
+    is fakeredis but SQLite is not, and this repo has a documented incident
+    where a suite wrote into live data; ``analyze`` is exercised by many tests
+    that know nothing about this store. Tests that want the mapping pass their
+    own tmp path, which bypasses the guard.
+    """
+    if db_path is None and _under_pytest():
+        return False
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        sm = (result or {}).get("swing_model") or {}
+        pv = (result or {}).get("position_verdict") or {}
+        iv = (result or {}).get("investor_verdict") or {}
+        row = {
+            "symbol": (result or {}).get("symbol"),
+            "reading_date": _today_ct_str(),
+            "price": (result or {}).get("price"),
+            "composite": sm.get("score"),
+            "band": sm.get("band"),
+            "percentile": sm.get("percentile"),
+            "swing_verdict": sm.get("verdict"),
+            "position_verdict": pv.get("verdict"),
+            "investor_verdict": iv.get("verdict"),
+            "investor_score": iv.get("score"),
+            "gates": "; ".join(pv.get("gates_triggered") or []),
+            "model_version": sm.get("model_version"),
+        }
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        return rec_journal.record(conn, row)
+    except Exception:
+        return False
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
+def snapshot_fundamentals(symbol, fundamentals, sector_name, pe_median,
+                          db_path=None):
+    """Append today's fundamental INPUTS to the point-in-time store.
+
+    Side effect only; same contract and same pytest guard as
+    :func:`journal_reading` — see that docstring for why the guard exists."""
+    if db_path is None and _under_pytest():
+        return False
+    conn = None
+    try:
+        from services.trade_svc import fundamentals_history as _fh
+        f = fundamentals
+        row = {
+            "symbol": symbol, "snapshot_date": _today_ct_str(),
+            "pe_ratio": f.pe_ratio, "peg_ratio": f.peg_ratio,
+            "rev_growth_ttm": f.rev_growth_ttm,
+            "eps_growth_ttm": f.eps_growth_ttm, "roe": f.roe,
+            "margin_expanding": f.margin_expanding, "fcf": f.fcf,
+            "short_int_to_float": f.short_int_to_float,
+            "short_int_day_to_cover": f.short_int_day_to_cover,
+            "days_to_earnings": f.days_to_earnings,
+            "sector": sector_name, "sector_pe_median": pe_median,
+        }
+        conn = _fh.init_db(db_path or _fh.DEFAULT_DB_PATH)
+        return _fh.record(conn, row)
+    except Exception:
+        return False
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import fundamentals_history as _fh2
+                _fh2.close_db(conn)
+            except Exception:
+                pass
+
+
 def analyze(symbol):
     """Analyze ``symbol`` end-to-end → a JSON-safe result dict (or None).
 
@@ -820,8 +909,12 @@ def analyze(symbol):
     sym_close = daily["close"]
     spy_close = spy["close"] if spy is not None and not spy.empty else None
     sect_close = sector_hist["close"] if sector_hist is not None else None
+    pe_median = sector_pe_median(symbol)
+    # Point-in-time record of the INPUTS (not the score) — the only path to
+    # ever validating the Investor weights. Side effect only; never raises.
+    snapshot_fundamentals(symbol, fundamentals, sect["name"], pe_median)
     inv_inputs = InvestorInputs(
-        fundamentals=fundamentals, sector_pe_median=sector_pe_median(symbol),
+        fundamentals=fundamentals, sector_pe_median=pe_median,
         rs_vs_spy_3m=rs_percentile(sym_close, spy_close, 63),
         rs_vs_spy_6m=rs_percentile(sym_close, spy_close, 126),
         rs_vs_spy_12m=rs_percentile(sym_close, spy_close, 252),
@@ -836,7 +929,7 @@ def analyze(symbol):
         investor_verdict = {"verdict": "HOLD", "score": 0, "breakdown": [],
                             "top_reasons": [], "gates_triggered": [f"error: {exc}"]}
 
-    return {
+    result = {
         "symbol": symbol,
         "description": quote.get("symbol", symbol),
         "price": price,
@@ -860,6 +953,10 @@ def analyze(symbol):
         "timestamp": _now_iso(),
         "errors": [],
     }
+    # Forward-accruing record of what the model said today. Side effect only —
+    # never raises, and skipped under pytest (see journal_reading).
+    journal_reading(result)
+    return result
 
 
 # ── EquityDeepDive (migrated) — on-demand quant deep dive + chat-prompt query ──

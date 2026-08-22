@@ -74,7 +74,32 @@ copied forward is exactly the trap this repo documents.
 - **Code**: two fields on the dataclass + two reads in
   `parse_schwab_fundamentals`. No new I/O — the payload is already fetched.
 
-### 1.2 finviz supplement
+### 1.2 ⛔ SUPERSEDED — earnings dates and short interest need a real source
+
+**Decision, 2026-08-22: no finviz.** Task 1.1 found that Schwab serves
+`shortIntToFloat` / `shortIntDayToCover` as a **0.0 sentinel for every symbol**
+(verified live: AAPL, TSLA, GME, CVNA all 0.0 while `peRatio` and
+`returnOnEquity` in the same payload were correct). That promoted finviz from a
+convenience for earnings dates into the **sole supplier of both the earnings
+gate and the entire short side** — i.e. load-bearing scraping infrastructure,
+with the terms-of-service and fragility exposure that implies. The user declined
+it and asked for a different source first.
+
+So this task is now: **evaluate real sources, then wire the winner.** Candidates
+under review include FINRA's official short-interest files, exchange
+publications, licensed vendor APIs, and the broker APIs the user named
+(Public.com, TradeStation, moomoo/Futu). Requirements: official or licensed
+rather than scraped; usable for **data alone without funding a new account**;
+daily-batch cadence is sufficient; a 1–2 week lag is acceptable for short
+interest because it gates a coarse threshold, while an earnings DATE must be
+accurate.
+
+⚠ **The short side does not ship until this lands.** The squeeze gate has no
+other supplier, and shorting crowded names unguarded is precisely the tail the
+gate exists to avoid. Phase 2's mirrored gates (2.1) can be built and tested
+without it; the squeeze gate alone waits.
+
+### 1.2b finviz supplement — NOT TAKEN (kept for the record)
 - **Test** (`services/trade_svc/tests/test_compute.py`): with a stubbed finviz
   returning an earnings date and Schwab returning `None` for it, the merged
   `Fundamentals` carries the date **and keeps every Schwab value** (fill-only,
@@ -101,17 +126,31 @@ copied forward is exactly the trap this repo documents.
 - **Code**: average only non-`None` sub-scores in `InvestorVerdict`; a
   `_sector_pe_median(sector)` helper over `_SYMBOL_SECTOR` peers.
 
-### 1.4 Start the accrual stores
-- **Test**: `fundamentals_history` and `rec_journal` create their schema
-  idempotently, insert, and read back; a failed write never raises into
-  `analyze` (mirror `iv_history`'s contract).
-- **Code**: two small modules + call sites in `analyze`. Nightly universe sweep
-  for fundamentals; one row per analyze for the journal. **Isolate the DB paths
-  under pytest** — the documented "pytest must isolate on-disk stores" trap.
+### 1.4 Start the accrual stores ✅ DONE 2026-08-22
+- `services/trade_svc/rec_journal.py` — what the model SAID, one row per
+  (symbol, day), upserted so a symbol analyzed five times in an afternoon casts
+  one vote rather than five. Label columns (`fwd_5d/10d/20d`, `labeled_at`)
+  exist from the first row so Phase 6's labeler is an UPDATE, not a migration.
+- `services/trade_svc/fundamentals_history.py` — the point-in-time INPUTS (not
+  the score: a score is recomputable from inputs under new weights, inputs are
+  not recoverable from a score), plus `sector_pe_median`, since the valuation
+  component is relative and the peer median moves too. `margin_expanding` stays
+  three-valued — None is "the pair needed to decide was absent", never 0.
+- Paths added to `repo_paths` (`TRADE_SVC_DATA`, `REC_JOURNAL_DB`,
+  `FUNDAMENTALS_HISTORY_DB`); `IV_HISTORY_DB` re-derived from the same dir.
+- **The pytest isolation guard is real and verified**: with no explicit
+  `db_path` both writers no-op under `PYTEST_CURRENT_TEST`, and a full 105-test
+  run creates no `services/trade_svc/data/` at all. Tests that want the mapping
+  pass a `tmp_path`, which bypasses the guard.
+- ⚠ **Still open**: the nightly UNIVERSE sweep. Today both stores accrue only
+  for symbols actually analyzed. Per the promotion freeze the sweep must be a
+  standalone script on a scheduled task, not a service scheduler job — dev runs
+  `schedulers: False`, so a service job would sit inert until promotion.
 
-**Exit:** live analyze shows `days_to_earnings` populated and the earnings gate
-firing; Investor valuation ≠ 0 for a symbol with a known P/E; both stores
-accruing; prod dry-run names only `finvizfinance`.
+**Phase 1 exit, revised:** Investor valuation ≠ 0 for a symbol with a known P/E
+✅ (MSFT scores 35 where the old halving gave 20); both stores accruing ✅.
+The earnings gate stays dead until 1.2's source question is settled — it is the
+one Phase 1 goal that did not survive contact with the data.
 
 ---
 

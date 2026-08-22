@@ -100,11 +100,29 @@ MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
 MARKET_STATE_VALIDATION_REPORT = SENTIMENT / "data" / "market_state_validation.md"
 MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.json"
 
-# EquityDeepDive IV/RV history (migrated into services/trade_svc/deepdive). Schwab
-# serves no IV history, so IV rank accumulates forward from the first run; each
-# on-demand Deep Dive records a snapshot. On-demand only (no scheduled job yet).
-# services/trade_svc/data/ is gitignored (generated).
-IV_HISTORY_DB = REPO_ROOT / "services" / "trade_svc" / "data" / "iv_history.db"
+# Trade-service on-disk stores. All three are FORWARD-ACCRUING: none can be
+# backfilled, because each records something the source does not serve as
+# history. They are worth starting long before their readers exist, since they
+# pay in calendar time rather than effort. services/trade_svc/data/ is
+# gitignored (generated).
+TRADE_SVC_DATA = REPO_ROOT / "services" / "trade_svc" / "data"
+
+# EquityDeepDive IV/RV history. Schwab serves no IV history, so IV rank
+# accumulates forward from the first run; each on-demand Deep Dive records a
+# snapshot. On-demand only (no scheduled job yet).
+IV_HISTORY_DB = TRADE_SVC_DATA / "iv_history.db"
+
+# What the model SAID, per symbol per day — composite, band, percentile, both
+# verdicts, the gates and the artifact version. Phase 6's labeler attaches the
+# realized forward excess returns; the live-IC monitor reads the pair. A model's
+# historical output is unrecoverable after the fact (artifact, cross-section and
+# gates all move), so this is written from Phase 1 onward.
+REC_JOURNAL_DB = TRADE_SVC_DATA / "rec_journal.db"
+
+# Point-in-time fundamentals. Live-parsed ratios describe TODAY, so validating
+# the Investor verdict against forward returns is impossible without a store
+# that remembers what each field read on the day it was read.
+FUNDAMENTALS_HISTORY_DB = TRADE_SVC_DATA / "fundamentals_history.db"
 
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that

@@ -283,3 +283,66 @@ def test_sector_pe_median_none_for_an_unmapped_symbol(monkeypatch):
     _patch(monkeypatch, _PeerPEClient({"ZZZZ": 11.0}))
     compute.reset_sector_pe_cache()
     assert compute.sector_pe_median("ZZZZ") is None
+
+
+# ── recommendation-journal wiring (Phase 1) ──────────────────────────────────
+
+def _analysis_result():
+    return {
+        "symbol": "AAPL", "price": 309.69,
+        "swing_model": {"verdict": "HOLD", "score": 0.096, "percentile": 70,
+                        "model_version": "2026-08-22"},
+        "position_verdict": {"verdict": "HOLD", "gates_triggered": ["ADX<15: no trend, capped at HOLD"]},
+        "investor_verdict": {"verdict": "HOLD", "score": 17},
+    }
+
+
+def test_journal_reading_maps_an_analysis_onto_a_row(tmp_path):
+    """The journal row is what Phase 6's IC monitor will read back, so the
+    mapping from an ``analyze`` result is worth pinning now."""
+    from services.trade_svc import rec_journal
+
+    assert compute.journal_reading(_analysis_result(),
+                                   db_path=tmp_path / "j.db") is True
+    conn = rec_journal.init_db(tmp_path / "j.db")
+    try:
+        row = rec_journal.readings(conn)[0]
+        assert row["symbol"] == "AAPL"
+        assert row["percentile"] == 70
+        assert row["composite"] == pytest.approx(0.096)
+        assert row["swing_verdict"] == "HOLD"
+        assert row["investor_score"] == 17
+        assert row["model_version"] == "2026-08-22"
+        assert "ADX<15" in row["gates"]
+    finally:
+        rec_journal.close_db(conn)
+
+
+def test_journal_reading_records_a_degraded_analysis_too(tmp_path):
+    """An analysis with no swing block is exactly the reading worth keeping —
+    it records that the model could not speak, which a gap in the series
+    could not distinguish from 'nobody looked'."""
+    from services.trade_svc import rec_journal
+
+    res = {"symbol": "ZZZZ", "price": 4.2, "errors": ["No quote / price for symbol"]}
+    assert compute.journal_reading(res, db_path=tmp_path / "j.db") is True
+    conn = rec_journal.init_db(tmp_path / "j.db")
+    try:
+        row = rec_journal.readings(conn)[0]
+        assert row["symbol"] == "ZZZZ" and row["composite"] is None
+    finally:
+        rec_journal.close_db(conn)
+
+
+def test_journal_reading_writes_nothing_to_the_real_store_under_pytest():
+    """This repo has a documented incident where a suite wrote into live data:
+    the bus is fakeredis, SQLite is not. With no explicit path the write is
+    SKIPPED under pytest rather than landing in services/trade_svc/data/."""
+    assert compute.journal_reading(_analysis_result()) is False
+
+
+def test_journal_reading_never_raises(tmp_path):
+    """``analyze`` owes the user an analysis whether or not the journal took
+    the row — an unwritable path must be swallowed, not propagated."""
+    assert compute.journal_reading(_analysis_result(),
+                                   db_path=tmp_path / "no" / "such" / "dir" / "\0bad.db") is False
