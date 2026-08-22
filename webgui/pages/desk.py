@@ -1648,10 +1648,15 @@ VOICE_UNLOCK_PHRASE = "Spoken alerts on."
 _PREWARMED = {"done": False}
 
 # How many symbols the prewarm will warm. UNCAPPED this is the whole watchlist —
-# ~30 rows × the 8 ``voice.FLOW_CAUSES`` = ~240 SERIAL synthesis calls at a
-# measured 0.9-2.4 s each, i.e. 3.6 to 9.6 minutes of continuous network on the
+# ~30 rows × the 4 ``voice.FLOW_CAUSES`` = ~120 SERIAL synthesis calls at a
+# measured 0.9-2.4 s each, i.e. 1.8 to 4.8 minutes of continuous network on the
 # first Desk open, repeated whenever the voice changes (it is part of the clip
-# cache key) or the clip directory is cleared. Eight is 64 phrases, ~1-2.5 min.
+# cache key) or the clip directory is cleared. Eight is 32 phrases, ~30-80 s.
+#
+# ⚠ Those numbers HALVED on 2026-08-21 and the cap deliberately did not move:
+# the contract-carrying kinds left the prewarm (their phrase now embeds a strike,
+# so there is nothing warmable to warm), which is a saving to bank rather than
+# spend. The argument for the cap is unchanged, and it is about the ranking.
 #
 # Eight of THESE eight, specifically: ``options_svc`` sorts the matrix rows by
 # HOTNESS, descending, server-side, so the head of the list is the set most

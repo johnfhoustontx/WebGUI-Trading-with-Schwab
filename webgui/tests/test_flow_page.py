@@ -62,6 +62,34 @@ def test_alert_rows_give_every_row_a_key_even_without_an_id():
     assert len({r["id"] for r in rows}) == 2
 
 
+def test_alert_rows_carry_the_contract_the_desk_speaks_aloud():
+    """``strike``/``expiry``/``dte`` ride the SAME row the table already builds.
+
+    The Desk's spoken alert names the contract, and the alternative to carrying
+    it here was a second reader of the raw payload living in ``desk.py`` — two
+    readers of one payload is precisely how this app's documented sectors-vs-
+    rotation split happened. Additive: the table declares no column for them.
+    """
+    row = flow.alert_rows({"alerts": [_UOA]})[0]
+    assert (row["strike"], row["expiry"], row["dte"]) == (737.0, "2026-08-09", 0)
+    bd = flow.alert_rows({"alerts": [_BD]})[0]
+    assert (bd["strike"], bd["expiry"], bd["dte"]) == (100.0, "2026-08-14", 3)
+
+
+def test_alert_rows_leave_the_contract_empty_where_the_alert_has_none():
+    """A crossover is a symbol-level fact and a gamma flip a book-level one.
+
+    ``None`` and not ``0``: a zero strike would be spoken as a real contract,
+    and a ``dte`` of 0 specifically means 0DTE — the one value that must never
+    be manufactured out of an absence.
+    """
+    for a in (_XO, _GF):
+        row = flow.alert_rows({"alerts": [a]})[0]
+        assert row["strike"] is None
+        assert row["expiry"] is None
+        assert row["dte"] is None
+
+
 def test_kind_labels_are_whole_words():
     """UI labels spell things out; 'UOA' means nothing at a glance."""
     assert flow.alert_kind_label(_XO) == "Crossover"

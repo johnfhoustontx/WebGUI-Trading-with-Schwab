@@ -203,6 +203,17 @@ def alert_rows(view):
             "kind": alert_kind_label(a),
             "_kind_key": a.get("type") or "",
             "side": side_label(a),
+            # The contract itself, carried RAW for the Desk's spoken alert
+            # (``voice.flow_phrase`` hardens them; ``detail`` below is the
+            # printed form). Additive — no column declares them. They ride this
+            # row rather than being read a second time out of the raw payload,
+            # because two readers of one payload is how the documented
+            # sectors-vs-rotation split happened. Absent for the alert kinds
+            # that name no contract, and absent means ``None``: a ``dte`` of 0
+            # means 0DTE, which is the last value to manufacture from a gap.
+            "strike": a.get("strike"),
+            "expiry": a.get("expiry"),
+            "dte": a.get("dte"),
             "detail": alert_detail(a),
             "share_pct": _share_pct(a),     # numeric % for the sortable Share column
             "text": a.get("text", ""),

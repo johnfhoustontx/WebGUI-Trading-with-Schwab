@@ -288,11 +288,20 @@ Ledger or Claude Trades.
 **Nothing on this page can place or change a trade.** It reads and links only.
 
 **It announces arrivals out loud.** When a new flow alert or a newly-opened position
-appears, the Desk speaks the ticker and the cause — *"S P Y. Crossover alert, calls
-over."* — and the row itself **glows for ten seconds**, so your eye lands where the
-voice pointed. Tickers are spelled letter by letter, squawk-box style. If several
-arrive together it names the newest and counts the rest ("plus 5 more") rather than
-reading out a list.
+appears, the Desk speaks it and the row itself **glows for ten seconds**, so your eye
+lands where the voice pointed. Tickers are spelled letter by letter, squawk-box style.
+If several arrive together it names the newest and counts the rest ("plus 5 more")
+rather than reading out a list.
+
+**It names the contract when there is one.** An unusual-activity or big-delta alert is
+about a specific option, so the announcement says which — *"N D X. Unusual activity,
+0-D T E 7 15 Put."* Numbers are spoken the way they are said at a desk rather than the
+way a computer reads them: 715 is "seven fifteen", 4500 is "forty-five hundred", 207.5
+is "two oh seven point five". A crossover or a gamma flip is a fact about the whole
+book with no contract to name, so it stays short: *"S P Y. Crossover alert, calls
+over."* A new position adds its strikes, expiry and entry price, and says **credit or
+debit** out loud — *"S P Y. New position, put credit spread. 2 07. point 5, 2 05,
+8 - 31, entry 56 cent credit."*
 
 A position that only changes **flag** — OK to At risk to Rescue — glows amber and
 stays **silent**. It was already in the book, and the flag column has already told

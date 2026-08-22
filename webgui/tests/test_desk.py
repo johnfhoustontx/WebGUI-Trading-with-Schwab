@@ -1953,6 +1953,35 @@ def test_a_new_position_glows_and_speaks():
     assert s["glow"] == {"p1": (d.GLOW_NEW, 100.0)}
 
 
+# ── the spoken contract, END TO END ──────────────────────────────────────────
+# ⚠ The unit tests in test_voice.py hand ``flow_phrase``/``position_phrase`` a
+# hand-written row, so they cannot see the field NAMES drift — a builder reading
+# ``expiry`` while ``position_rows`` publishes ``expiration`` would leave that
+# whole file green and every live phrase silently short. These two start from a
+# raw service payload and end at the sentence.
+def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
+    raw = {"type": "uoa", "side": "call", "symbol": "QQQ", "strike": 737.0,
+           "expiry": "2026-08-09", "dte": 0, "volume": 12400, "oi": 1100,
+           "vol_oi": 11.27, "premium": 2132800.0, "ts": 1754750100,
+           "id": "QQQ|uoa|call|737|2026-08-09"}
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
+    assert said == "Q Q Q. Unusual activity, 0-D T E 7 37 Call."
+
+
+def test_a_new_position_speaks_its_contract_from_the_raw_payload():
+    """The expiration is deliberately far out so ``dte`` cannot reach 0 and turn
+    the date into "0-D T E" — ``position_rows`` computes it against today."""
+    raw = _pos("p1", expiration="2027-09-17", entry_credit=1.35)
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_position_arrivals(
+        s, d.position_rows({"positions": [raw]}, None), now=1.0)
+    assert said == ("S P Y. New position, put credit spread. "
+                    "6 hundred, 5 95, 9 - 17, entry 1 dollar 35 credit.")
+
+
 def test_a_flag_change_glows_amber_but_says_nothing():
     """A position ALREADY in the book changing state is not an arrival."""
     s = d.arrival_state()
@@ -2143,8 +2172,10 @@ def test_the_prewarm_is_capped_at_the_head_of_the_hotness_ranking():
     got = d.prewarm_symbols(view)
     assert len(got) == d.PREWARM_SYMBOLS_MAX == 8
     assert got == [f"S{i}" for i in range(8)]        # the head, not a sample
-    # 8 symbols x 8 causes: about a minute and a half, not nine.
-    assert len(voice.prewarm_texts(got)) == 64
+    # 8 symbols x the 4 CONTRACT-LESS causes: about 30-80 s, not nine minutes.
+    # (It was 64 phrases until the contract form retired the four warmable-in-
+    # principle uoa/big_delta pairs — see voice.FLOW_CAUSES.)
+    assert len(voice.prewarm_texts(got)) == 32
 
 
 def test_the_prewarm_cap_counts_usable_symbols_not_rows():

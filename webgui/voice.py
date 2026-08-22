@@ -29,6 +29,16 @@ import pathlib
 import threading
 import time
 
+# The shared numeric vocabulary, and the ONLY thing this module takes from
+# ``pages``. ``pages/__init__.py`` is a docstring and ``fmt`` imports ``math``,
+# so this costs nothing and is free of page side effects — but it is also the
+# reason the alert labels further down are still a hand-kept COPY rather than an
+# import: ``pages.options.flow`` is a PAGE, and the prewarm runs before any page
+# is built. ``num`` specifically (not ``float_or``) because every value reaching
+# here feeds a decision — speak this, or fall back — and ``num`` is the half of
+# that pair that answers None for a NaN and for a bool.
+from pages.fmt import num as _num
+
 # The six en-US neural voices offered in Settings. Aria is the default because
 # it was the one picked from a live listening test of all six, not because it
 # is first alphabetically.
@@ -74,6 +84,136 @@ def more_tail(n):
     return f"Plus {n} more." if n > 0 else ""
 
 
+# ── the numeric vocabulary ───────────────────────────────────────────────────
+# Everything below is spoken, so the only evidence that counts is a LISTENING
+# test, and every rule here came out of one against real strikes.
+
+
+def say_number(v):
+    """A strike or a price, spoken the way a trader hears it. ``''`` for junk.
+
+    Leading digits go one at a time and the last two as a PAIR, because a neural
+    voice reads "205" as "two hundred and five" while the strike is "two oh
+    five" — and at five digits ("21500") the plain reading is a mouthful nobody
+    can hold. A trailing ``00`` becomes "hundred" rather than two spoken zeros,
+    and a fraction becomes ". point 5", where the leading period is what makes
+    the voice pause before it.
+
+    A number of one or two digits is left completely alone: "5" already reads
+    correctly, and "5" spelled out is not an improvement on anything.
+
+    ``_num`` is the guard, so ``None``, ``""``, ``"abc"``, NaN, infinity and —
+    the documented one — ``bool`` all return ``''`` rather than a number nobody
+    supplied. A negative keeps its sign out loud instead of quietly becoming its
+    own absolute value; nothing feeds this a negative today, which is exactly
+    why the honest branch is the cheap one to write.
+    """
+    f = _num(v)
+    if f is None:
+        return ""
+    whole = int(abs(f))
+    frac = abs(f) - whole
+    s = str(whole)
+    if len(s) <= 2:
+        out = s
+    else:
+        lead, pair = s[:-2], s[-2:]
+        out = " ".join(lead) + (" hundred" if pair == "00" else f" {pair}")
+    if frac:
+        # ⚠ The strip can empty the string — ``f"{0.99999:.4f}"`` is "1.0000" —
+        # and appending ". point " with nothing after it is the one thing a
+        # spoken alert is least allowed to do.
+        digits = f"{frac:.4f}".split(".")[1].rstrip("0")
+        if digits:
+            out += ". point " + " ".join(digits)
+    return f"minus {out}" if f < 0 else out
+
+
+def say_expiry(expiry, dte):
+    """``'0-D T E'`` or ``'8 - 28'`` from an ISO date. ``''`` when unusable.
+
+    The mirror of ``pages.options.flow._exp_short``, which prints "0DTE" and
+    "08/28" — same two branches, different medium. Two differences are
+    deliberate. The zero-DTE case is SPELLED, since "0DTE" read as a word is a
+    noise. And an unreadable date returns ``''`` here where the table falls back
+    to the raw string: a reader can see that an odd cell is odd, while
+    "two thousand and twenty six dash zero eight" is simply unintelligible, and
+    an empty answer routes the caller to the short form instead.
+
+    ``_num(dte) == 0`` rather than ``dte == 0`` because ``False == 0`` is True in
+    Python, and a flag arriving where a day count belongs must not be announced
+    as a 0DTE contract.
+    """
+    if _num(dte) == 0:
+        return "0-D T E"
+    parts = str(expiry).split("-")
+    if len(parts) != 3:
+        return ""
+    try:
+        month, day = int(parts[1]), int(parts[2])
+    except (TypeError, ValueError):
+        return ""
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return ""
+    # Spaced hyphen: "8-28" runs together into something that is not a date.
+    return f"{month} - {day}"
+
+
+def say_entry(v):
+    """``'entry 56 cent credit'`` / ``'entry 1 dollar 25 debit'``. ``''`` for junk.
+
+    THE SIGN PICKS THE WORD, and that is the whole reason this function exists
+    rather than a format string: the paper book stores a debit as a NEGATIVE
+    ``entry_credit`` (see the paper-representation note in CLAUDE.md), so a
+    phrase that dropped the sign would announce a debit as a credit — the most
+    expensive sentence this feature could say.
+
+    Under a dollar it speaks cents, at or above it speaks "N dollar NN", which
+    is how the price is said at a desk. A round dollar drops the trailing zeros
+    ("2 dollar", not "2 dollar 0"), and a value that rounds up through 99 cents
+    becomes a dollar rather than "100 cent".
+
+    A genuine ZERO is spoken, not swallowed. Absent and zero are different facts
+    (``pages/fmt.py``'s governing rule) and treating one as the other would drop
+    the whole sentence back to the short form over a number that was there.
+    """
+    f = _num(v)
+    if f is None:
+        return ""
+    word = "debit" if f < 0 else "credit"
+    try:
+        # ``_num`` passes any FINITE float, and 1.7e308 × 100 is not finite —
+        # ``round(inf)`` then raises ``OverflowError``, the same edge
+        # ``more_tail`` catches around ``int(inf)``. Nothing here may raise.
+        dollars, cents = divmod(int(round(abs(f) * 100)), 100)
+    except (OverflowError, ValueError):
+        return ""
+    if not dollars:
+        return f"entry {cents} cent {word}"
+    amount = f"{say_number(dollars)} dollar"
+    if cents:
+        amount += f" {cents}"
+    return f"entry {amount} {word}"
+
+
+def say_strikes(text):
+    """``'207.5/205'`` -> ``'2 07. point 5, 2 05'``. ``''`` when there is none.
+
+    Reads the string ``desk.strikes_text`` ALREADY built for the panel rather
+    than re-deriving a pair from the raw short/long fields — that helper has an
+    iron-condor fallback of its own, and a second derivation here would be free
+    to disagree with the row the listener is looking at.
+
+    A single leg speaks its one strike (a long call is not a malformed spread),
+    and an unusable half is dropped rather than taking the usable one with it.
+    ``strikes_text`` returns an em-dash when there is no pair at all, which
+    parses to nothing and routes the caller to the short form.
+    """
+    if not isinstance(text, str):
+        return ""
+    return ", ".join(s for s in (say_number(p) for p in text.split("/")) if s)
+
+
 def _sentence(symbol, body, extra):
     """``'S P Y. <body>.'`` plus the burst tail. The shared shape of both phrases."""
     parts = []
@@ -88,33 +228,66 @@ def _sentence(symbol, body, extra):
 
 
 def flow_phrase(row, extra=0):
-    """``'S P Y. Crossover alert, calls over.'``
+    """``'N D X. Unusual activity, 0-D T E 7 15 Put.'``
 
-    ``kind`` and ``side`` are read straight off the row that
+    Every field is read straight off the row that
     ``pages.options.flow.alert_rows`` built, so the spoken words are the SAME
     words the panel prints. That is not tidiness — the Desk's governing rule is
     that it composes and never re-derives, and a spoken vocabulary drifting
     from the printed one would be the documented sectors-vs-rotation bug in a
-    new place.
+    new place. It is also why ``strike``/``expiry``/``dte`` were added to
+    ``alert_rows`` rather than read here out of the raw payload.
+
+    **Two forms, chosen by what the alert CARRIES.** Unusual activity and big
+    delta name a specific contract, so they say it: kind, expiry, strike, side,
+    with the word "alert" dropped (the detail earned its place) and the side
+    moved AFTER the strike it belongs to. A crossover is a symbol-level fact and
+    a gamma flip a book-level one — neither has a contract to name, so both keep
+    the original short form unchanged.
+
+    **The fallback is SHORTER, never HALF.** A contract-carrying alert whose
+    strike or expiry will not parse drops to the short form rather than emitting
+    "Big delta, 8 - 28  Call." with a hole in it. The rows arrive off a cache
+    read, so this is a live path and not a hypothetical: a terse alert is worth
+    having, a broken sentence is not, and silence is worse than both. Which is
+    also why the choice is made on the PARSED values and not on the alert kind —
+    the degrade path and the contract path are then the same one line of code,
+    and cannot drift apart.
     """
     d = row if isinstance(row, dict) else {}
     kind = str(d.get("kind") or "Flow").strip() or "Flow"
     side = str(d.get("side") or "").strip()
-    body = f"{kind} alert" + (f", {side.lower()}" if side else "")
+    strike = say_number(d.get("strike"))
+    expiry = say_expiry(d.get("expiry"), d.get("dte"))
+    if strike and expiry and side:
+        body = f"{kind}, {expiry} {strike} {side}"
+    else:
+        body = f"{kind} alert" + (f", {side.lower()}" if side else "")
     return _sentence(d.get("symbol"), body, extra)
 
 
 def position_phrase(row, extra=0):
-    """``'S P Y. New position, put credit spread.'``
+    """``'S P Y. New position, put credit spread. 2 07. point 5, 2 05, 8 - 31,
+    entry 56 cent credit.'``
 
     Phrases a position as an ARRIVAL — the wording assumes the caller only
     reaches here for a row genuinely new to the book. Choosing which rows those
     are is the Desk's job, not this module's; the design has a flag change
     (OK -> AT RISK -> RESCUE) glow but stay silent.
+
+    Reads ``desk.position_rows``' own fields, including the ``strikes`` STRING
+    that panel already renders — see ``say_strikes``. Same all-or-nothing rule
+    as ``flow_phrase``: a row missing any of strikes, expiry or entry falls back
+    to the short form rather than reading a sentence with a gap in it.
     """
     d = row if isinstance(row, dict) else {}
     strat = str(d.get("strategy") or "").replace("_", " ").strip().lower()
     body = f"New position, {strat}" if strat else "New position"
+    strikes = say_strikes(d.get("strikes"))
+    expiry = say_expiry(d.get("expiration"), d.get("dte"))
+    entry = say_entry(d.get("entry_credit"))
+    if strikes and expiry and entry:
+        body = f"{body}. {strikes}, {expiry}, {entry}"
     return _sentence(d.get("symbol"), body, extra)
 
 
@@ -336,23 +509,37 @@ def ensure(text, voice_name=None, rate=RATE, warn=True, timeout=None):
 
 # The (kind, side) pairs the flow panel can produce, as DISPLAY labels — the
 # same eight ``pages.options.flow`` maps its four types and their sides onto.
-# Restated here rather than imported because ``voice`` must stay importable
-# with no ``pages`` package on the path (the prewarm runs before any page).
-# ``test_voice.test_flow_causes_cover_every_pair_the_flow_page_can_emit`` is
+# Restated here rather than imported because the flow module is a PAGE and the
+# prewarm runs before any page is built.
+# ``test_voice.test_all_causes_cover_every_pair_the_flow_page_can_emit`` is
 # what keeps the copy honest — it compares this tuple against ``flow._TONE``.
-FLOW_CAUSES = (("Crossover", "Calls over"), ("Crossover", "Puts over"),
+_ALL_CAUSES = (("Crossover", "Calls over"), ("Crossover", "Puts over"),
                ("Unusual activity", "Call"), ("Unusual activity", "Put"),
                ("Gamma flip", "To positive"), ("Gamma flip", "To negative"),
                ("Big delta", "Call"), ("Big delta", "Put"))
 
+# The kinds whose phrase embeds a CONTRACT (see ``flow_phrase``). Their phrase
+# space is the option chain, so it is unbounded and nothing in it can be warmed
+# in advance.
+CONTRACT_KINDS = ("Unusual activity", "Big delta")
+
+# ...which is why the prewarm list is the OTHER four. Warming the contract kinds
+# synthesized "N D X. Unusual activity alert, put." — a sentence no live alert
+# produces any more, since a real one always carries a strike and an expiry. It
+# was half the prewarm's network, disk and time, spent on clips that could never
+# be played. DERIVED rather than written out a second time: a hand-kept subset
+# of a hand-kept copy is two chances to rot instead of one.
+FLOW_CAUSES = tuple((kind, side) for kind, side in _ALL_CAUSES
+                    if kind not in CONTRACT_KINDS)
+
 
 def prewarm_texts(symbols):
-    """Every flow phrase the given symbols can produce — the prewarm work list.
+    """Every WARMABLE flow phrase the given symbols can produce.
 
-    Flow only. A new position is a thing the user just did, so they are already
-    looking at the screen and a couple of seconds of first synthesis costs
-    nothing; a flow alert arrives unbidden and is the case worth paying disk
-    for.
+    Flow only, and only the contract-less kinds (see ``FLOW_CAUSES``). A new
+    position is a thing the user just did, so they are already looking at the
+    screen and a couple of seconds of first synthesis costs nothing; a flow
+    alert arrives unbidden and is the case worth paying disk for.
 
     A non-iterable ``symbols`` degrades to ``[]`` rather than raising. It would
     be tempting to call that a caller bug and let it through — but the symbol

@@ -656,12 +656,27 @@ unrealized P&amp;L, and how many need attention. <em>At risk</em> and <em>Rescue
 that count toward that total; <em>Watch</em> does not.</p>
 <h3 id="spoken-arrivals">Spoken arrivals</h3>
 <p>A <strong>new flow alert</strong> or a <strong>newly-opened position</strong> is announced in a synthetic
-human voice — the ticker spelled letter by letter, then the cause: <em>"S P Y.
-Crossover alert, calls over."</em> — and the row glows cyan for ten seconds. Tickers are
-always spelled rather than read as words, which is squawk-box convention and also
+human voice and the row glows cyan for ten seconds. Tickers are always spelled
+letter by letter rather than read as words, which is squawk-box convention and also
 the only rule that survives an unbounded symbol list: "SPY" read aloud as <em>spy</em> is
 actively misleading.</p>
-<p>Three rules are worth knowing, because each is a decision rather than an accident:</p>
+<p><strong>Two of the four flow detectors name a contract, and the announcement says it.</strong>
+Unusual activity and large delta are about one option, so the sentence carries its
+expiry, strike and side: <em>"N D X. Unusual activity, 0-D T E 7 15 Put."</em> A crossover
+is a fact about a symbol's whole premium tape and a gamma flip about the whole
+dealer book — neither has a contract to name, so both keep the short form: <em>"S P Y.
+Crossover alert, calls over."</em> A new position speaks its strikes, expiry and entry
+price, and says <strong>credit or debit</strong> explicitly, because the paper book stores a
+debit as a negative credit and a debit that sounded like a credit would be the most
+expensive sentence this feature could say.</p>
+<p>Numbers are spoken the way a trader hears them, not the way a computer reads them:
+leading digits one at a time and the last two as a pair, so 715 is <em>"seven
+fifteen"</em>, 21500 is <em>"two one five hundred"</em> and 207.5 is <em>"two oh seven point
+five"</em>. This was settled by listening, not by argument. If any part of a contract
+is missing or unreadable, the announcement falls back to the short form rather than
+speaking a sentence with a hole in it — <strong>shorter, never half</strong>.</p>
+<p>Three more rules are worth knowing, because each is a decision rather than an
+accident:</p>
 <ul>
 <li><strong>A flag change glows amber and says nothing.</strong> A position moving OK → At risk →
   Rescue is not an <em>arrival</em>; it was already on the screen, and the flag column
@@ -669,7 +684,7 @@ actively misleading.</p>
 <li><strong>All four flow detectors speak, large-delta included</strong> — even though the scanner
   chime deliberately ignores that one. The reason the chime ignores it is that a
   <em>chime</em> carrying no information is noise at that detector's frequency. An
-  announcement that names the ticker and the cause is not: if it does not concern
+  announcement that names the ticker and the contract is not: if it does not concern
   you, ignoring it costs nothing.</li>
 <li><strong>A burst names the newest and counts the rest</strong> — "…plus 5 more" — rather than
   reading a list. Six sentences back to back is a minute of talking over a moving
