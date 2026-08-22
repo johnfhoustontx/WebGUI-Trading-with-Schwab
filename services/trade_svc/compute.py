@@ -707,6 +707,65 @@ def _direction_clearance(spy):
         return _mf.direction_clearance(None, None)
 
 
+# ── forward earnings dates (Alpha Vantage) ──────────────────────────────────
+# Schwab's payload has no earnings date, so `days_to_earnings` was always None
+# and the earnings gate — the one that matters most for a multi-week hold —
+# could never fire on either verdict. One bulk call a night fills the whole
+# market; the refresh is day-memoized like the FINRA one.
+_EC_REFRESH_DAY = [None]
+
+
+def _earnings_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import earnings_calendar as _ec
+    return _ec.DEFAULT_DB_PATH
+
+
+def _refresh_earnings_calendar(conn):
+    """At most one calendar pull per day (the free tier allows 25)."""
+    today = _today_ct_str()
+    if _EC_REFRESH_DAY[0] == today:
+        return
+    _EC_REFRESH_DAY[0] = today
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        _ec.refresh(conn)
+    except Exception:
+        _degrade.degraded("trade.refresh_earnings_calendar")
+
+
+def _enrich_earnings_date(fundamentals, symbol):
+    """Fill ``days_to_earnings`` from the calendar, in place. Never raises.
+
+    Leaves it None when the calendar has no upcoming report for the symbol —
+    which, with no API key configured, is every symbol, so the gate simply
+    stays as quiet as it was before this existed."""
+    conn = None
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        path = _earnings_db_path()
+        # Same isolation rule as the other stores: unguarded this opens a
+        # SQLite file in the repo and issues a live vendor request during the
+        # suite. A test that wants the join patches the path.
+        if _under_pytest() and path == _ec.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _ec.init_db(path)
+        _refresh_earnings_calendar(conn)
+        days = _ec.days_to_earnings(conn, symbol)
+        if days is not None:
+            fundamentals.days_to_earnings = days
+    except Exception:
+        _degrade.degraded("trade.enrich_earnings_date")
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import earnings_calendar as _ec2
+                _ec2.close_db(conn)
+            except Exception:
+                pass
+    return fundamentals
+
+
 def _squeeze_reason(fundamentals):
     """The short-side squeeze reason for these fundamentals, or None.
 
@@ -742,7 +801,8 @@ def _fetch_fundamentals(symbol):
                                       as_of=date.today().isoformat())
     except Exception:
         return Fundamentals()
-    return _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
+    f = _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
+    return _enrich_earnings_date(f, symbol)
 
 
 # ── sector P/E median (Phase 1) ──────────────────────────────────────────────

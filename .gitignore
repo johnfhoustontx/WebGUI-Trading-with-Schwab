@@ -7,6 +7,7 @@
 shared/sentiment_bridge.json
 shared/notifications.json
 shared/anthropic_key.txt
+shared/alphavantage_key.txt
 shared/driver_model.txt
 # Which environment this checkout is (dev|prod). Gitignored ON PURPOSE: a git
 # pull must never be able to carry an environment identity between checkouts.

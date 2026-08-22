@@ -519,3 +519,77 @@ def test_read_regime_never_raises_when_the_bus_is_down(monkeypatch):
 
     monkeypatch.setattr(_c, "_bus", boom)
     assert _c._read_regime() is None
+
+
+# ── earnings-date enrichment (Phase 1, task 1.2 completed) ───────────────────
+
+def test_an_earnings_date_inside_the_horizon_caps_both_verdicts(monkeypatch, tmp_path):
+    """The gate that has NEVER fired. Schwab carries no earnings date, so
+    days_to_earnings was always None and a multi-week hold could span a report
+    with nothing said about it."""
+    from services.trade_svc import earnings_calendar as ec
+
+    db = tmp_path / "ec.db"
+    conn = ec.init_db(db)
+    soon = (_dt.date.today() + _dt.timedelta(days=9)).isoformat()
+    ec.store_calendar(conn, [{"symbol": "AAPL", "report_date": soon,
+                              "fiscal_date_ending": "", "estimate": None}])
+    ec.close_db(conn)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0, "revChangeTTM": 10.0,
+                    "epsChangePercentTTM": 12.0, "returnOnEquity": 20.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_earnings_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_earnings_calendar", lambda conn: None)
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.days_to_earnings == 9
+
+    res = compute.analyze("AAPL")
+    assert any("earnings" in g.lower()
+               for g in res["position_verdict"]["gates_triggered"])
+
+
+def test_no_api_key_leaves_the_earnings_gate_exactly_as_quiet_as_before(monkeypatch, tmp_path):
+    """Without a key the calendar is empty, and an empty calendar must read as
+    'unknown', never as 'nobody reports soon'."""
+    from services.trade_svc import earnings_calendar as ec
+
+    db = tmp_path / "ec.db"
+    ec.close_db(ec.init_db(db))          # empty store
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_earnings_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_earnings_calendar", lambda conn: None)
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.days_to_earnings is None
+
+
+def test_earnings_enrichment_is_skipped_under_pytest_by_default(monkeypatch):
+    """Same isolation rule as the other stores: unguarded it opens a SQLite
+    file in the repo AND issues a live vendor request during the suite."""
+    from services.trade_svc import earnings_calendar as ec
+
+    opened = []
+
+    def spy(path):
+        opened.append(path)
+        raise RuntimeError("must not be reached under pytest")
+
+    monkeypatch.setattr(ec, "init_db", spy)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0}
+
+    _patch(monkeypatch, Client())
+    compute._fetch_fundamentals("AAPL")
+    assert opened == [], f"enrichment opened the real store: {opened}"

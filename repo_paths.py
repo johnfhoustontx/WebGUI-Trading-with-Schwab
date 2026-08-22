@@ -130,6 +130,11 @@ FUNDAMENTALS_HISTORY_DB = TRADE_SVC_DATA / "fundamentals_history.db"
 # Schwab (``marketCapFloat``, which is float in SHARES despite the name).
 SHORT_INTEREST_DB = TRADE_SVC_DATA / "short_interest.db"
 
+# Forward earnings dates (Alpha Vantage). Schwab carries none, and no official
+# source exists — 8-K Item 2.02 is retrospective and no exchange publishes a
+# forward calendar — so this is a vendor product by necessity.
+EARNINGS_CALENDAR_DB = TRADE_SVC_DATA / "earnings_calendar.db"
+
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that
 # follow from it. Resolution lives here rather than in a new module because this
