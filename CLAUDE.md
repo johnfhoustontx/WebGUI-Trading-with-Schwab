@@ -1561,6 +1561,22 @@ disabled**. **Promotion is explicit:** merge to `main` and push from dev, then r
 stopping anything, `git pull --ff-only`, reinstall only if `requirements.lock`
 moved, restart).
 
+⚠ **A NEW DEPENDENCY MUST GO IN `requirements.lock`, NOT ONLY IN
+`requirements.txt` — otherwise it ships to prod MISSING (2026-08-21).** Prod has
+its **own venv**, and promote reinstalls *only when the lock moved*, so a package
+added to `requirements.txt` alone is never installed there. Whether that is
+visible depends entirely on how the importer degrades: `webgui/voice.py` guards
+its `edge_tts` import and returns `None`, so the Desk's spoken alerts would have
+gone live on prod **completely silent**, with one log line and nothing on screen
+to say why. Caught before promoting only because prod's venv was checked
+directly. **Verify with a dry-run against the prod venv before promoting** —
+`"D:\WebGUI Trading Prod\.venv\Scripts\python.exe" -m pip install --dry-run -r requirements.lock`
+should name exactly the packages you intended and nothing else. Regenerating the
+whole lock with `pip freeze` is the wrong fix: the lock has drifted from the
+venv before (132 entries against 135 installed, `tweepy` missing entirely), so a
+wholesale refresh sweeps unrelated local state into the commit. Add the pins by
+hand.
+
 **Known limits (not defects) are listed in the runbook** — chiefly that dev is
 *quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan
 in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
