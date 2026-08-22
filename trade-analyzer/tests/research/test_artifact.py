@@ -93,6 +93,25 @@ class TestCalibrationIsOutOfSample:
         assert los == sorted(los)
 
 
+class TestTheFloorMatchesWhatAWalkForwardActuallyNeeds:
+    def test_the_default_floor_is_derived_from_train_plus_test(self):
+        """A regime needs train+test days to form even ONE fold. A floor below
+        that admits regimes the walk-forward then silently drops for want of a
+        calibration — the block disappears for a reason nobody wrote down."""
+        panel, fwd, lab = _panel()
+        assert A.default_min_regime_days(train=378, test=63) == 441
+
+    def test_a_regime_above_the_stated_floor_but_below_one_fold_is_refused(self):
+        """`chop` has 140 days here: past a 40-day floor, short of the 100 a
+        single 80/20 fold needs. It must be refused by the FLOOR, with the
+        reason visible, rather than vanishing inside the calibration step."""
+        panel, fwd, lab = _panel()
+        art = A.build_regimes(panel, fwd, lab, **WF)      # floor now derived = 100
+        assert "chop" in art          # 140 days clears the derived floor
+        thin = A.build_regimes(panel, fwd, lab, train=130, test=20, step=20)
+        assert "chop" not in thin     # 140 < 150 -> refused up front
+
+
 class TestItNeverProducesAnUnscoreableBlock:
     def test_a_block_that_cannot_be_calibrated_is_dropped(self, art):
         """`build_regimes` may only emit blocks the scorer can actually use —

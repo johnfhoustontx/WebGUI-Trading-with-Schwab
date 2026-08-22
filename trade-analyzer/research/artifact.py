@@ -74,15 +74,28 @@ def _block(panel, forward, *, train, test, step, weight_fn, n_bands, n_days):
     }
 
 
+def default_min_regime_days(*, train, test):
+    """The fewest regime-days worth their own key: enough for ONE fold.
+
+    A hand-picked floor (a trading year, say) can sit BELOW this, and then a
+    regime clears the stated floor only to be dropped further down for want of a
+    calibration — the key vanishes for a reason nobody wrote down. Deriving it
+    keeps the refusal where it is legible."""
+    return int(train) + int(test)
+
+
 def build_regimes(panel, forward, regimes, *, train=378, test=63, step=63,
-                  weight_fn=None, min_regime_days=252, n_bands=5):
+                  weight_fn=None, min_regime_days=None, n_bands=5):
     """``{regime_key: block}``, always including ``"all"``.
 
-    ``min_regime_days`` defaults to a full trading year: a weight set is only
-    worth its own key if it was estimated on enough dates to survive a fold, and
-    this model's edge is thin enough that an under-powered block would dominate
+    ``min_regime_days`` defaults to ``train + test`` — see
+    :func:`default_min_regime_days`. A weight set is only worth its own key if
+    it was estimated on enough dates to be validated out of sample, and this
+    model's edge is thin enough that an under-powered block would dominate
     whatever tape it happened to be selected on."""
     weight_fn = weight_fn or B.signed_ic_weights
+    if min_regime_days is None:
+        min_regime_days = default_min_regime_days(train=train, test=test)
     lab = pd.Series(regimes).dropna()
     out = {}
 
