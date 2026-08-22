@@ -206,13 +206,34 @@ one Phase 1 goal that did not survive contact with the data.
 
 ## Phase 2 — both sides + context
 
-### 2.1 Mirrored + short gates
-- **Test** (`test_recommendation_position.py`): above a rising 200-EMA caps
-  SELL at HOLD; a sector in confirmed **up**trend caps SELL; SI > threshold or
-  DTC > threshold caps SELL **and prints the reason**; none of the three touches
-  a BUY. Existing long-side gate tests must stay green.
-- **Code**: `PositionVerdict.score` gains the mirrored branches;
-  `SectorStrength` gains `in_confirmed_uptrend`.
+### 2.1 Mirrored + short gates ✅ DONE 2026-08-22
+Three short-only gates on `PositionVerdict`: above a **rising** 200-EMA, sector
+in confirmed uptrend, and squeeze risk. `SectorStrength` gained
+`in_confirmed_uptrend` (`above_50ema and rs_pct > 0.80`, the mirror of the
+existing downtrend rule), defaulted so no existing construction site changes.
+
+Three decisions worth keeping:
+- **The 200-EMA mirror requires a RISING average, not just price above it.**
+  Price bouncing back above a still-falling 200-EMA is a rally in a downtrend —
+  the textbook short entry — so a bare "above the 200" test would gate away
+  exactly the setup the short side wants. `_is_rising` compares the EMA to
+  itself 20 bars back and returns False when the series is too short, so an
+  unknowable slope never gates a trade.
+- **Short gates live in their OWN list (`short_gates`), not `gates_triggered`.**
+  This surfaced as a test failure and it was the test being right:
+  `gates_triggered` answers "why isn't this a BUY?", so a short-only constraint
+  there prints "cannot be SELL" on every strong BUY — noise, not a reason.
+  Separating them is also what lets the page render each side with its own
+  reasons, which is 2.2's whole point. `gates_triggered` is untouched, so the
+  change is additive.
+- **The squeeze reason is computed UPSTREAM and passed in.** The pure engine
+  cannot reach FINRA, so `PositionInputs.squeeze_reason` carries the verdict and
+  the threshold policy stays in one place (`short_interest.squeeze_flag`).
+
+Live proof it discriminates: **GME** gates on `Squeeze risk (17.1 days to
+cover)`, **AAPL** on `Above a rising 200-EMA`, **CVNA** on neither — 10.09% of
+float and 6.02 days to cover clear both legs, so it is shortable per these
+gates.
 
 ### 2.2 Direction clearance
 - **Test** (`services/trade_svc/tests/test_compute.py`, pure helper): SPY above

@@ -450,3 +450,34 @@ def test_short_interest_enrichment_is_skipped_under_pytest_by_default(monkeypatc
     assert opened == [], f"enrichment opened the real store: {opened}"
     assert f.pe_ratio == 20.0
     assert f.short_int_to_float is None
+
+
+def test_analyze_feeds_the_squeeze_reason_into_the_position_gate(monkeypatch):
+    """The engine cannot reach FINRA, so `analyze` computes the squeeze reason
+    and hands it down. Without this wiring the gate exists but never fires."""
+    from src.analysis.fundamentals import Fundamentals
+
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(
+        compute, "_fetch_fundamentals",
+        lambda sym: Fundamentals(pe_ratio=13.5, rev_growth_ttm=0.1,
+                                 eps_growth_ttm=0.1, roe=0.2,
+                                 short_int_to_float=31.0,
+                                 short_int_day_to_cover=17.1))
+    res = compute.analyze("GME")
+    short_gates = res["position_verdict"]["short_gates"]
+    assert any("squeeze" in g.lower() for g in short_gates)
+    assert any("31.0% of float short" in g for g in short_gates)
+
+
+def test_analyze_leaves_the_squeeze_gate_quiet_without_short_interest(monkeypatch):
+    from src.analysis.fundamentals import Fundamentals
+
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(
+        compute, "_fetch_fundamentals",
+        lambda sym: Fundamentals(pe_ratio=13.5, rev_growth_ttm=0.1,
+                                 eps_growth_ttm=0.1, roe=0.2))
+    res = compute.analyze("AAPL")
+    assert not any("squeeze" in g.lower()
+                   for g in res["position_verdict"]["short_gates"])

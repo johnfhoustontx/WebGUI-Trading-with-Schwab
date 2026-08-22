@@ -49,6 +49,12 @@ class PositionInputs:
     sector_strength: SectorStrength
     days_to_earnings: Optional[int] = None
     sector_history: Optional[pd.DataFrame] = None
+    # Short-side only. A non-empty string means "this name is a crowded short"
+    # and carries the human-readable why. It is computed UPSTREAM — the reading
+    # comes from FINRA, which this pure engine cannot reach — so the engine
+    # gates on its presence and the threshold policy lives in one place
+    # (``services/trade_svc/short_interest.squeeze_flag``).
+    squeeze_reason: Optional[str] = None
 
 
 def _rs_percentile(symbol_close: pd.Series, spy_close: pd.Series, lookback: int) -> float:
@@ -66,6 +72,22 @@ def _dist_from_52wk_high_pct(daily: pd.DataFrame) -> float:
     if high_252 <= 0:
         return 0.0
     return float((high_252 - last) / high_252)
+
+
+_EMA_SLOPE_LOOKBACK = 20
+
+
+def _is_rising(series: pd.Series, lookback: int = _EMA_SLOPE_LOOKBACK) -> bool:
+    """Is this moving average higher than it was ``lookback`` bars ago?
+
+    Used to distinguish "price is above its 200-EMA because the trend is up"
+    from "price bounced back above a 200-EMA that is still falling" — only the
+    first is a reason not to short. A series too short to judge returns False,
+    so an unknowable slope never gates a trade."""
+    s = pd.Series(series).dropna()
+    if len(s) <= lookback:
+        return False
+    return bool(float(s.iloc[-1]) > float(s.iloc[-1 - lookback]))
 
 
 def _verdict_from_score(score: float) -> str:
@@ -122,10 +144,46 @@ class PositionVerdict:
             if verdict in ("BUY", "SELL"):
                 verdict = "HOLD"
 
-        ema200 = inp.daily["close"].ewm(span=200, adjust=False).mean().iloc[-1]
+        ema200_series = inp.daily["close"].ewm(span=200, adjust=False).mean()
+        ema200 = ema200_series.iloc[-1]
         if last_close < ema200:
             gates.append("Below 200EMA: cannot be BUY")
             if verdict == "BUY":
+                verdict = "HOLD"
+
+        # ── short-side mirrors ──────────────────────────────────────────────
+        # The long gates above are one-sided: without these, the model would
+        # recommend shorting a name in a healthy uptrend inside a leading
+        # sector — the mirror of the mistake they exist to prevent.
+        #
+        # These live in their OWN list. ``gates_triggered`` answers "why isn't
+        # this a BUY?"; a short-only constraint there would print
+        # "cannot be SELL" on every strong BUY, which is noise, not a reason.
+        # Keeping them apart is also what lets the page render both sides with
+        # their own reasons — a blocked short WITH its reasons is a finding.
+        short_gates: List[str] = []
+
+        # Requires the average to be RISING, not merely for price to sit above
+        # it. Price bouncing back above a still-falling 200-EMA is a rally in a
+        # downtrend — the textbook short entry — so a bare "above the 200" test
+        # would gate away exactly the setup the short side wants.
+        if last_close > ema200 and _is_rising(ema200_series):
+            short_gates.append("Above a rising 200-EMA: cannot be SELL")
+            if verdict == "SELL":
+                verdict = "HOLD"
+
+        if getattr(inp.sector_strength, "in_confirmed_uptrend", False):
+            short_gates.append("Sector in confirmed uptrend: cannot be SELL")
+            if verdict == "SELL":
+                verdict = "HOLD"
+
+        # Crowded shorts carry squeeze tails that a thin cross-sectional edge
+        # has no business fading. Being heavily shorted is NOT a reason to
+        # avoid being long — if anything it is fuel — so this only ever
+        # touches SELL.
+        if inp.squeeze_reason:
+            short_gates.append(f"Squeeze risk ({inp.squeeze_reason}): cannot be SELL")
+            if verdict == "SELL":
                 verdict = "HOLD"
 
         if inp.days_to_earnings is not None and 0 <= inp.days_to_earnings <= 56:
@@ -147,6 +205,7 @@ class PositionVerdict:
             "breakdown": breakdown,
             "top_reasons": reasons,
             "gates_triggered": gates,
+            "short_gates": short_gates,
         }
 
 

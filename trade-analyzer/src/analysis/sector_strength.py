@@ -24,6 +24,11 @@ class SectorStrength:
     in_confirmed_downtrend: bool
     sector_above_50ema: bool
     rs_3m_percentile: float
+    # The mirror of ``in_confirmed_downtrend``, for the short side: a sector
+    # both above its 50-EMA and leading the market is a headwind to shorting
+    # anything inside it. Defaulted so every existing construction site (and
+    # every fixture) keeps working unchanged.
+    in_confirmed_uptrend: bool = False
 
 
 def _three_month_return(history: pd.DataFrame, lookback: int = 63) -> float:
@@ -58,12 +63,14 @@ def compute_sector_strength(
     score = int(np.clip(trend_score + rs_score, -100, 100))
 
     in_confirmed_downtrend = (not above_50ema) and (rs_pct < 0.20)
+    in_confirmed_uptrend = above_50ema and (rs_pct > 0.80)
 
     return SectorStrength(
         score=score,
         in_confirmed_downtrend=in_confirmed_downtrend,
         sector_above_50ema=above_50ema,
         rs_3m_percentile=rs_pct,
+        in_confirmed_uptrend=in_confirmed_uptrend,
     )
 
 

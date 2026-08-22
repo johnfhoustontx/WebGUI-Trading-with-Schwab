@@ -674,6 +674,22 @@ def _enrich_short_interest(fundamentals, symbol, float_shares):
     return fundamentals
 
 
+def _squeeze_reason(fundamentals):
+    """The short-side squeeze reason for these fundamentals, or None.
+
+    The threshold policy lives in ``short_interest.squeeze_flag`` (one place,
+    tested there); this only carries its verdict down to the pure engine, which
+    cannot reach FINRA itself. Never raises — an unavailable reading leaves the
+    gate quiet rather than blocking a trade on a missing input."""
+    try:
+        from services.trade_svc import short_interest as _si
+        fires, why = _si.squeeze_flag(fundamentals.short_int_to_float,
+                                      fundamentals.short_int_day_to_cover)
+        return why if fires else None
+    except Exception:
+        return None
+
+
 def _fetch_fundamentals(symbol):
     """Fetch + parse Schwab fundamentals for ``symbol`` → ``Fundamentals``.
 
@@ -939,6 +955,7 @@ def analyze(symbol):
         rsi=rsi, adx=adx, macd_hist=macd_hist, macd_hist_prev=macd_prev,
         relative_volume=float(rel_vol), vwap=vwap_val, volume_profile=vp,
         sector_strength=ss, days_to_earnings=fundamentals.days_to_earnings,
+        squeeze_reason=_squeeze_reason(fundamentals),
     )
     try:
         position_verdict = PositionVerdict().score(pos_inputs)
