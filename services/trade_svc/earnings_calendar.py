@@ -168,6 +168,33 @@ def lookup(conn, symbol, as_of=None):
         return None
 
 
+def coverage(conn, symbol, as_of=None):
+    """Whether the calendar can speak for this symbol at all.
+
+    ``"upcoming"``       a scheduled report on or after ``as_of``
+    ``"none_scheduled"`` the vendor knows the symbol but has nothing ahead —
+                         a real, trustworthy "no earnings in the window"
+    ``"not_listed"``     the vendor does not carry the symbol — we do NOT know
+
+    The last two both produce ``days_to_earnings is None``, and conflating them
+    makes the gate fail OPEN silently. Measured live 2026-08-22 with a real
+    key: the 12-month horizon returns 1,814 symbols and coverage collapses with
+    distance (1,032 rows in October, 40 in December, 11 in March). It is
+    genuinely patchy rather than merely announced-only — AAPL and GOOGL appear
+    at 67-68 days out while MSFT, AMZN and META, the same late-October cycle,
+    are absent entirely. A caller that reads "not_listed" as "no earnings" walks
+    a trade into an unlisted report wearing the appearance of protection."""
+    try:
+        if lookup(conn, symbol, as_of=as_of) is not None:
+            return "upcoming"
+        row = conn.execute(
+            "SELECT 1 FROM earnings WHERE symbol = ? LIMIT 1",
+            ((symbol or "").strip().upper(),)).fetchone()
+        return "none_scheduled" if row else "not_listed"
+    except Exception:
+        return "not_listed"
+
+
 def days_to_earnings(conn, symbol, as_of=None):
     """Calendar days until the next report, or None when unknown.
 

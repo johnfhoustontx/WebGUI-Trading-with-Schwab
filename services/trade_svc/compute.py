@@ -928,6 +928,35 @@ def _enrich_earnings_date(fundamentals, symbol):
     return fundamentals
 
 
+def earnings_coverage(symbol):
+    """Whether the earnings calendar can speak for ``symbol`` at all.
+
+    ``"upcoming"`` / ``"none_scheduled"`` / ``"not_listed"`` — see
+    :func:`earnings_calendar.coverage`. Kept SEPARATE from
+    ``days_to_earnings`` because the last two both leave that None, and
+    conflating them lets the earnings gate fail open silently: the vendor's
+    coverage is measurably patchy, so "we have no date" must be distinguishable
+    from "there is no date". Never raises; degrades to ``"not_listed"``, which
+    is the honest answer when we cannot tell."""
+    conn = None
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        path = _earnings_db_path()
+        if _under_pytest() and path == _ec.DEFAULT_DB_PATH:
+            return "not_listed"
+        conn = _ec.init_db(path)
+        return _ec.coverage(conn, symbol)
+    except Exception:
+        return "not_listed"
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import earnings_calendar as _ec2
+                _ec2.close_db(conn)
+            except Exception:
+                pass
+
+
 def _squeeze_reason(fundamentals):
     """The short-side squeeze reason for these fundamentals, or None.
 
@@ -1296,6 +1325,7 @@ def analyze(symbol):
         "direction_clearance": _direction_clearance(spy),
         "dealer_context": _dealer_context(symbol),
         "peers": _peers,
+        "earnings_coverage": earnings_coverage(symbol),
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),

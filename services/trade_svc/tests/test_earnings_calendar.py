@@ -152,3 +152,48 @@ class TestFetch:
 
         monkeypatch.setattr(ec, "_get", boom)
         assert ec.fetch_calendar() == []
+
+
+class TestCoverageIsDistinctFromAbsence:
+    """Measured live 2026-08-22 with a real key: the 12-month horizon returns
+    1,814 symbols and coverage COLLAPSES with distance — 1,032 rows in October,
+    40 in December, 11 in March. It is genuinely patchy, not merely limited to
+    announced dates: AAPL and GOOGL are listed at 67-68 days out while MSFT,
+    AMZN and META — the same late-October cycle — are absent entirely.
+
+    So `days_to_earnings is None` means TWO different things, and conflating
+    them makes the gate fail OPEN silently: "no report scheduled" and "this
+    symbol is not in the calendar at all" must be distinguishable, or a trade
+    walks into an unlisted earnings date under the appearance of protection.
+    That is the same absence-reads-as-a-confident-value trap this whole program
+    exists to close."""
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = ec.init_db(tmp_path / "ec.db")
+        ec.store_calendar(c, [
+            {"symbol": "NVDA", "report_date": "2026-08-26",
+             "fiscal_date_ending": "", "estimate": None},
+            {"symbol": "OLDCO", "report_date": "2026-01-05",
+             "fiscal_date_ending": "", "estimate": None},
+        ])
+        yield c
+        ec.close_db(c)
+
+    def test_a_listed_symbol_with_an_upcoming_date_is_covered(self, conn):
+        assert ec.coverage(conn, "NVDA", as_of=dt.date(2026, 8, 22)) == "upcoming"
+
+    def test_a_listed_symbol_whose_dates_are_all_past_is_still_COVERED(self, conn):
+        """The vendor knows this symbol; it simply has nothing scheduled ahead.
+        That is a real 'no earnings in the window', and it is trustworthy."""
+        assert ec.coverage(conn, "OLDCO", as_of=dt.date(2026, 8, 22)) == "none_scheduled"
+
+    def test_a_symbol_the_vendor_never_lists_is_UNKNOWN_not_clear(self, conn):
+        assert ec.coverage(conn, "MSFT", as_of=dt.date(2026, 8, 22)) == "not_listed"
+
+    def test_an_empty_calendar_reports_unknown_for_everything(self, tmp_path):
+        c = ec.init_db(tmp_path / "empty.db")
+        try:
+            assert ec.coverage(c, "AAPL") == "not_listed"
+        finally:
+            ec.close_db(c)

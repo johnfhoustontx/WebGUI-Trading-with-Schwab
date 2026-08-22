@@ -362,3 +362,24 @@ class TestShortGateRows:
     def test_a_verdict_without_short_gates_is_fine(self):
         assert trade.short_gate_rows({"gates_triggered": []}) == []
         assert trade.short_gate_rows(None) == []
+
+
+class TestEarningsCoverageNote:
+    def test_an_unlisted_symbol_says_the_date_is_UNKNOWN(self):
+        """The gate's silence must not read as an all-clear. Alpha Vantage's
+        coverage is measurably patchy (MSFT/AMZN/META absent while AAPL and
+        GOOGL are listed on the same cycle), so an unlisted symbol has to say
+        so rather than let the reader infer 'no earnings'."""
+        note = trade.earnings_note("not_listed", None)
+        assert "unknown" in note.lower()
+        assert "no earnings" not in note.lower()
+
+    def test_a_covered_symbol_with_nothing_scheduled_can_say_so_plainly(self):
+        note = trade.earnings_note("none_scheduled", None)
+        assert "none scheduled" in note.lower()
+
+    def test_a_known_date_is_reported_with_its_distance(self):
+        assert "12 days" in trade.earnings_note("upcoming", 12)
+
+    def test_no_coverage_information_renders_nothing(self):
+        assert trade.earnings_note(None, None) == ""

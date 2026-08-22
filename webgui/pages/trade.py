@@ -460,6 +460,24 @@ def peer_chips(peers, symbol):
     return out
 
 
+def earnings_note(coverage, days):
+    """One line about the next earnings report — including when we don't know.
+
+    The vendor's coverage is measurably patchy (MSFT/AMZN/META absent while
+    AAPL and GOOGL are listed on the same reporting cycle), so an unlisted
+    symbol must SAY the date is unknown. Letting the gate's silence read as an
+    all-clear is the fail-open case: a hold walks into a report under the
+    appearance of protection."""
+    if coverage == "upcoming" and days is not None:
+        return f"Next earnings in {days} days"
+    if coverage == "none_scheduled":
+        return "Next earnings: none scheduled in the calendar"
+    if coverage == "not_listed":
+        return ("Next earnings: unknown — this symbol is not in the earnings "
+                "calendar, so the earnings gate cannot speak for it")
+    return ""
+
+
 def gate_rows(verdict):
     """Long-side gates — "why isn't this a BUY?"."""
     return list((verdict or {}).get("gates_triggered") or [])
@@ -757,6 +775,11 @@ def render():
                         _fundamentals_card(res.get("fundamentals"))
                     _dealer_card(res.get("dealer_context"))
                 _peers_strip(res.get("peers"), res.get("symbol"))
+                note = earnings_note(
+                    res.get("earnings_coverage"),
+                    (res.get("fundamentals") or {}).get("days_to_earnings"))
+                if note:
+                    ui.label(note).classes("text-xs opacity-60")
                 if not res.get("fundamentals_available"):
                     ui.label("Fundamentals unavailable for this symbol — the "
                              "Investor verdict degrades to HOLD on insufficient "

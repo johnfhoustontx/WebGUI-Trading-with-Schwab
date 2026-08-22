@@ -56,3 +56,7 @@ class TradeAnalysis(_Base):
     direction_clearance: dict | None = None
     dealer_context: dict | None = None
     peers: dict | None = None
+    # "upcoming" / "none_scheduled" / "not_listed". Kept separate from
+    # fundamentals.days_to_earnings because the last two BOTH leave that
+    # None, and conflating them lets the earnings gate fail open silently.
+    earnings_coverage: str | None = None

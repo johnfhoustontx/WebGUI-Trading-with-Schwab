@@ -704,3 +704,12 @@ class TestSectorPeers:
         peers = compute.sector_peers("NVDA", self.SNAP, self._scores())
         assert peers["strongest"]["symbol"] == "NVDA"
         assert peers["above"] is None        # nothing ranks above it
+
+
+def test_analyze_reports_whether_the_earnings_calendar_covers_the_symbol(monkeypatch):
+    """`days_to_earnings is None` means both "nothing scheduled" and "the
+    vendor does not carry this symbol". The gate would fail OPEN on the second
+    without a way to tell them apart."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "earnings_coverage", lambda sym: "not_listed")
+    assert compute.analyze("MSFT")["earnings_coverage"] == "not_listed"
