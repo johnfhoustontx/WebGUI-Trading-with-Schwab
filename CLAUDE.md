@@ -260,6 +260,16 @@ value/on_value_change API as the old `ui.toggle`). Pages live in
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
 heavy engine calls run off-thread via `nicegui.run.io_bound`.
+**`webgui/voice.py`** is the Desk's spoken-alert clip cache — pure phrase
+builders over an `edge-tts` synthesis layer, writing mp3s to `webgui/data/voice/`
+(gitignored) which `main.py` mounts at **`/voice`** beside `/static`. ⚠ It is the
+**one deliberate exception** to the Tier-1 import rule: `edge_tts` is neither an
+engine nor a Schwab caller but a presentation concern, the audio equivalent of
+the bundled WAVs in `webgui/static/sounds/`, and the import is **lazy** so the
+module stays importable on a machine without the package (a test guards that).
+Its public surface never raises — every failure (no network, no package,
+unwritable cache) degrades to `None`, because the alternative to silence is a
+traceback on the landing page.
 
 **The app-wide alert/badge watcher, the Market Dashboard, the Market Summary Ticker and the
 multi-strategy Swing Scanner each have their build notes in
@@ -667,6 +677,23 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `* { transition: none !important; animation: none !important; }`. (Related preview
   caveats: `computer{action:"screenshot"}` times out on this app — verify via DOM eval;
   and hover-by-`ref` works while hover-by-coordinate requires a screenshot first.)
+- **A CSS animation on a row a painter REBUILDS restarts from zero, and
+  `animation-fill-mode: forwards` then outranks every `hover:` rule you own
+  (2026-08-21, both caught in review before shipping).** Two traps in one
+  mechanism, both silent. (1) `_paint_positions` does `.clear()` + rebuild on
+  every re-price, and a rebuilt element restarts its animation — so a
+  time-limited effect never expires, which is indistinguishable from never
+  having built it. The fix is a whole-second **negative `animation-delay`** so a
+  rebuilt element RESUMES: ten static classes `desk-neon-0…9`, never a computed
+  `[animation-delay:-3.2s]` (the finite-set rule). ⚠ Emit the base rule as
+  `animation-name`/`-duration` **longhands** — the `animation:` shorthand
+  declares `animation-delay: 0s`, and since both selectors are one class the
+  winner is decided by nothing but source order in an f-string. (2) Per CSS
+  Cascade §6.6.2 **animation declarations outrank normal author declarations**,
+  so `forwards` holds the final keyframe forever and beats the row's
+  `hover:bg-…` for as long as the class sits there — on a `cursor-pointer` row,
+  for the rest of the session. Drop `forwards` when the end keyframe already IS
+  the element's default. See `pages/desk.py` `DESK_NEON_CSS`.
 - **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
   bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
   has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
