@@ -372,10 +372,18 @@ STRATEGY_TOOLS_CHILDREN = [
     ("/options/simulator", "Simulator", "science"),
 ]
 
+# Trade Analyzer became a GROUP on 2026-08-22 (Phase 5): the single-symbol
+# card and the ranked cross-section are the two halves of the same workflow —
+# find a candidate, then research it — so they are peer tabs rather than one
+# page hiding inside the other. (route, label, icon)
+TRADE_CHILDREN = [
+    ("/trade", "Analyze", "query_stats"),
+    ("/trade/board", "Rank Board", "leaderboard"),
+]
+
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
-    ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -423,6 +431,7 @@ _NAV_GROUPS = [
     ("Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
     ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
+    ("Trade Analyzer", "query_stats", TRADE_CHILDREN),
 ]
 
 
@@ -477,7 +486,7 @@ NAV_SECTIONS = [
     ("STRATEGY", [
         _sec_group("Strategy Tools"),
         _sec_group("Options"),
-        _sec_page("/trade"),              # Trade Analyzer
+        _sec_group("Trade Analyzer"),
         _sec_page("/driver"),             # Claude Trades
     ]),
     ("ACCOUNT", [
@@ -750,7 +759,7 @@ def drawer_width(pinned: bool) -> int:
 # ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
 _NAV_LABEL = {route: label for route, label, _icon in
               OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
-              + SENTIMENT_CHILDREN + FLAT_NAV
+              + SENTIMENT_CHILDREN + TRADE_CHILDREN + FLAT_NAV
               + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
@@ -2178,6 +2187,13 @@ def trade_page() -> None:
     with _layout("/trade", "Trade Analyzer"):
         from pages import trade
         trade.render()
+
+
+@ui.page("/trade/board")
+def trade_board_page() -> None:
+    with _layout("/trade/board", "Rank Board"):
+        from pages import trade_board
+        trade_board.render()
 
 
 @ui.page("/portfolio")

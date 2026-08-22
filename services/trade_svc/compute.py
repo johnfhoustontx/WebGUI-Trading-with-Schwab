@@ -506,6 +506,77 @@ def _swing_universe():
     return list(_MK_UNIVERSE)
 
 
+def _board_gate_ctx(symbols):
+    """Gate inputs for the whole board: ``{"earnings_days": …, "squeeze": …}``.
+
+    Both come from LOCAL stores, so a 78-row board costs no network at all.
+
+    ⚠ The squeeze leg here is days-to-cover ONLY. The card's gate also tests
+    percent-of-float, which needs a per-symbol Schwab `/instruments` fetch —
+    78 of those on a board build is not worth it, and days-to-cover is FINRA's
+    own computation and never touches the contested float denominator anyway.
+    The board therefore gates a SUBSET, which is why `GATES_EVALUATED` is
+    published beside the rows."""
+    from services.trade_svc import earnings_calendar as _ec
+    from services.trade_svc import short_interest as _si
+    out = {"earnings_days": {}, "squeeze": {}}
+    syms = [s for s in (symbols or []) if s]
+    try:
+        conn = _ec.init_db()
+        try:
+            for s in syms:
+                d = _ec.days_to_earnings(conn, s)
+                if d is not None:
+                    out["earnings_days"][s] = d
+        finally:
+            _ec.close_db(conn)
+    except Exception:
+        _degrade.degraded("trade.board_earnings_ctx")
+    try:
+        conn = _si.init_db()
+        try:
+            for s in syms:
+                row = _si.lookup(conn, s)
+                dtc = (row["days_to_cover"] if row is not None
+                       and "days_to_cover" in row.keys() else None)
+                # The module's OWN gate, called with the float leg absent, so
+                # the board and the card cannot drift on the threshold.
+                fires, reason = _si.squeeze_flag(None, dtc)
+                if fires:
+                    out["squeeze"][s] = reason
+        finally:
+            _si.close_db(conn)
+    except Exception:
+        _degrade.degraded("trade.board_squeeze_ctx")
+    return out
+
+
+def build_rank_board():
+    """Today's ranked cross-section over the universe snapshot.
+
+    Reuses the snapshot `analyze` already builds once a day, so the board costs
+    one SPY history read plus two local store scans — the scoring itself is
+    pure. Never raises: a failure yields the empty board shape, which the page
+    renders as "waiting for the snapshot" rather than as an empty market."""
+    from services.trade_svc import swing_model as _swing
+    from services.trade_svc import rank_board as _rb
+    try:
+        snap = get_universe_snapshot()
+        art = _swing.load_artifact()
+        spy = _price_history("SPY", "year", 2, "daily", 1)
+        spy_close = (_factors._close(spy)
+                     if spy is not None and not spy.empty else None)
+        board = _rb.build(
+            snap, art, regime=_market_regime(spy_close),
+            clearance=_direction_clearance(spy),
+            gate_ctx=_board_gate_ctx(list((snap or {}).get("by_symbol") or {})))
+        board["as_of"] = _today_ct_str()
+        return board
+    except Exception:
+        _degrade.degraded("trade.build_rank_board")
+        return _rb.build(None, None)
+
+
 def _market_regime(spy_close):
     """Today's daily-bar regime key, or None.
 
@@ -567,12 +638,18 @@ def flat_basis(snapshot):
     return out
 
 
-def _peer_block(symbol, snapshot, artifact, swing_block):
+def _peer_block(symbol, snapshot, artifact, swing_block, regime=None):
     """Sector-peer placement for the analyzed symbol, or None.
 
     Scores every peer in the snapshot through the SAME scorer the symbol went
     through, so the ranking and the headline percentile come from one code path
-    — a second scoring path would drift. Never raises."""
+    — a second scoring path would drift. Never raises.
+
+    ⚠ ``regime`` must be the SAME key the headline symbol was scored under. It
+    was omitted here until 2026-08-22, which was invisible only because the
+    artifact carried one regime: the moment a regime key populates, the peers
+    would be scored on pooled weights and the symbol on regime weights, and
+    their percentiles compared as though they came from one model."""
     from services.trade_svc import swing_model as _swing
     try:
         by_symbol = (snapshot or {}).get("by_symbol") or {}
@@ -587,7 +664,7 @@ def _peer_block(symbol, snapshot, artifact, swing_block):
         for peer, row in by_symbol.items():
             if resolve_sector(peer).get("name") != sect:
                 continue
-            scored = _swing.score_symbol(row, basis, artifact)
+            scored = _swing.score_symbol(row, basis, artifact, regime=regime)
             if scored and scored.get("percentile") is not None:
                 scores[peer] = scored["percentile"]
         if swing_block and swing_block.get("percentile") is not None:
@@ -1301,9 +1378,10 @@ def analyze(symbol):
             # The scorer takes the FLAT basis; the snapshot keeps identity for
             # the peer lines. flat_basis derives one from the other, so the
             # scoring path is unchanged by that shape change.
+            _regime = _market_regime(_spy_close)
             swing_block = _swing.score_symbol(_cur, flat_basis(_snap), _art,
-                                              regime=_market_regime(_spy_close))
-            _peers = _peer_block(symbol, _snap, _art, swing_block)
+                                              regime=_regime)
+            _peers = _peer_block(symbol, _snap, _art, swing_block, regime=_regime)
     except Exception:
         swing_block = None
 

@@ -18,7 +18,7 @@ def test_shell_registers_all_pages():
         "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/sentiment/momentum",
-        "/trade", "/portfolio", "/driver", "/settings",
+        "/trade", "/trade/board", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
         "/market", "/desk",
     )
@@ -98,8 +98,12 @@ def test_group_children_maps_routes_to_their_group():
     assert main._group_children("/market") == main.SENTIMENT_CHILDREN  # folded in
     more = main._group_children("/manuals")                        # Settings child
     assert ("/eod", "EOD Report", "summarize") in more             # merged into More
-    assert main._group_children("/trade") is None                  # flat page — no strip
-    assert main._group_children("/driver") is None
+    # Trade Analyzer became a GROUP in Phase 5 — the single-symbol card and the
+    # ranked cross-section are peer tabs of one workflow, not one page hiding
+    # inside the other.
+    assert main._group_children("/trade") == main.TRADE_CHILDREN
+    assert main._group_children("/trade/board") == main.TRADE_CHILDREN
+    assert main._group_children("/driver") is None                  # flat page — no strip
     # Rail pages are standalone: promoted OUT of the Options tab strip.
     for route, _label, _icon in main.OPTIONS_RAIL:
         assert main._group_children(route) is None, route
@@ -447,7 +451,10 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/options/gamma") == ["Markets", "Dealer Positioning"]
     assert main.breadcrumb_trail("/options/matrix") == ["Markets", "Opportunity Board"]
     assert main.breadcrumb_trail("/options/flow") == ["Markets", "Flow Alerts"]
-    assert main.breadcrumb_trail("/trade") == ["Strategy", "Trade Analyzer"]
+    assert main.breadcrumb_trail("/trade") == [
+        "Strategy", "Trade Analyzer", "Analyze"]
+    assert main.breadcrumb_trail("/trade/board") == [
+        "Strategy", "Trade Analyzer", "Rank Board"]
     assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]
     assert main.breadcrumb_trail("/portfolio") == ["Account", "Portfolio"]
     # The bottom-pinned block is not a NAV_SECTIONS caption, so it names its own.

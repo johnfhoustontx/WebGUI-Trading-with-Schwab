@@ -84,7 +84,7 @@ The left menu is grouped into three captioned sections. Each answers one questio
 | ▸ Paper Ledger | You want your own hand-kept practice trades. |
 | ▸ Paper Account | You want the automated practice engine's account. |
 | ▸ Rescue | You have a credit spread going wrong and want ranked repair options. |
-| **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock. |
+| **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock, or a ranked shortlist to pick one from. |
 | **Claude Trades** | You want to watch (or stop) the autonomous paper trader. |
 
 ### ACCOUNT — *what do I own, and how did I do?*
@@ -1415,7 +1415,7 @@ telling you which of those two states you are in *before* showing you the list.
 
 Practically, the highest-value output is **alignment** — a name where the whole hierarchy
 agrees. The green panel in section 2 lists every one of them, ranked, and those are the
-candidates worth taking to [Trade Analyzer](#trade-analyzer) or
+candidates worth taking to [Analyze](#analyze) or
 [Strategy Finder](#strategy-finder). The leaderboard's **Align** column shows the same
 thing per row, as three blocks, but only for the names inside its top/bottom slice.
 
@@ -1440,7 +1440,7 @@ because *suppressed* is a genuine stand-aside signal.
 ### Related pages
 
 [RRG](#rrg) · [Sector & Industry](#sector-industry) ·
-[Trade Analyzer](#trade-analyzer).
+[Analyze](#analyze).
 
 ---
 
@@ -1845,7 +1845,7 @@ symbol, and any time you have a directional opinion and want the best way to exp
 ### Related pages
 
 [Market Scanner](#market-scanner) · [Calculator](#calculator) ·
-[Trade Analyzer](#trade-analyzer) (for the directional opinion itself).
+[Analyze](#analyze) (for the directional opinion itself).
 
 ---
 
@@ -2202,9 +2202,9 @@ in a symbol you are short premium in.
 
 ---
 
-## Trade Analyzer
+## Analyze
 
-*Menu: STRATEGY → Trade Analyzer · Route `/trade`*
+*Menu: STRATEGY → Trade Analyzer → Analyze · Route `/trade`*
 
 ### What it is
 
@@ -2280,8 +2280,72 @@ name you do not know.
 
 ### Related pages
 
+[Rank Board](#rank-board) (the same model over the whole universe) ·
 [Momentum](#momentum) · [Strategy Finder](#strategy-finder) (how to express the view) ·
 [Expected Move](#expected-move).
+
+---
+
+## Rank Board
+
+*Menu: STRATEGY → Trade Analyzer → Rank Board · Route `/trade/board`*
+
+### What it is
+
+The same swing model as [Analyze](#analyze), run over **every name in the
+model's universe at once** and sorted. Analyze answers "what about this stock?"; the
+Rank Board answers "of everything the model can see, what is best and worst today?" —
+the shortlist you start from rather than the verdict you end on.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc` (:8213), `cache:trade:rank_board` |
+| Trigger | Rebuilt from the daily universe snapshot; **Rebuild** forces it |
+| Scoring | The *same* scorer the Analyze card uses — one code path, so the two can never disagree about a symbol |
+
+### Reading the screen
+
+**Deciles are today's ranking, not a historical grade.** A name in decile 10 is
+the best of *this* cross-section right now. That is a different question from the
+calibration band shown on the Analyze card, which asks where the score sat against
+five years — a universe where every name is mid-band still has a best and a worst.
+
+**Long candidates / Short candidates** are the top and bottom deciles. Each carries a
+note explaining its own state, because a thin short list has three quite different
+causes:
+
+- *"Express these RELATIVE…"* — the tape has not cleared the short side. The model
+  predicts **excess return versus SPY**, so a bottom-decile name in an uptrend is
+  predicted to **lag**, not to fall. Pair it against the index rather than shorting it
+  outright.
+- *"Too few names in today's cross-section…"* — a sample-size limit, not a reading of
+  the market. With fewer than ten names there is no bottom decile to speak of.
+- *"Directional expression is cleared"* — the tape permits the trade as stated.
+
+**Gates mark rows; they never remove them.** A gated row stays visible with its reasons,
+because "the top-ranked name reports earnings in two days" is exactly what you opened
+the board to find out. The line beneath the header names **which** gates were checked
+here — the board evaluates a *subset* of the Analyze card's, so a row with no gates has
+not cleared everything the card would test.
+
+### ⚠ What the ranking is actually sorted by
+
+An amber line states what share of the model's weight sits on **volatility factors** —
+currently about half. That matters more here than anywhere else in the app: it means
+**the top of this board is the high-beta end of the universe**. Measured over five
+years, this ordering works when the market rises and inverts when it falls. Treat the
+board as a starting shortlist to research, never as a ranked buy list.
+
+### When to open it
+
+At the start of a research session, to pick what to analyze. Not as a signal in itself.
+
+### Related pages
+
+[Analyze](#analyze) (the per-symbol verdict) · [Momentum](#momentum) ·
+[Strategy Finder](#strategy-finder).
 
 ---
 
@@ -2451,7 +2515,7 @@ useful decisions are.
 ### Related pages
 
 [Sector & Industry](#sector-industry) (context for the RS column) ·
-[Trade Analyzer](#trade-analyzer) (a verdict on any holding).
+[Analyze](#analyze) (a verdict on any holding).
 
 ---
 

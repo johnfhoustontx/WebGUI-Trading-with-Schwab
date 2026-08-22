@@ -181,7 +181,7 @@ question, plus a block of machine controls pinned to the bottom.
 |-----------|-------|
 | **Strategy Tools** (group) | Calculator · Simulator |
 | **Options** (group) | Market Scanner · Strategy Finder · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue |
-| **Trade Analyzer** (standalone) | — |
+| **Trade Analyzer** (group) | Analyze · Rank Board |
 | **Claude Trades** (standalone) | — |
 
 **ACCOUNT — what do I own?**
@@ -987,9 +987,9 @@ log.
 > paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 > Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
 
-## Trade Analyzer
+## Analyze
 
-**Route:** `/trade`.
+**Route:** `/trade`. The first tab of the Trade Analyzer group.
 
 On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**
 (tabbing out of the field does it too).
@@ -1037,6 +1037,45 @@ browser tab:**
   & EPS growth, ROE, margin trend).
 
 The analysis persists as you navigate away and back.
+
+---
+
+## Rank Board
+
+**Route:** `/trade/board`. The second tab of the Trade Analyzer group.
+
+Where **Analyze** judges one stock you already have in mind, the **Rank Board**
+runs the same model across every name in its universe and sorts them — so you can
+start a session by seeing what is best and worst today, then analyze the ones worth
+a closer look.
+
+**Deciles** are today's ordering: decile 10 is the strongest of the current
+cross-section, decile 1 the weakest. **Long candidates** and **Short candidates** are
+those two ends.
+
+Each pool carries a line explaining its own state, and it is worth reading before
+acting on the list:
+
+- **"Express these RELATIVE…"** means the market filter has not cleared the short
+  side. The model predicts return *versus the S&P 500*, so a bottom-decile name in a
+  rising market is expected to **lag the index**, not to fall. Pair it against the
+  index rather than shorting it outright.
+- **"Too few names in today's cross-section…"** means the universe is too small to
+  form deciles — a data limit, not a verdict on the market.
+
+**Gated rows stay on the board** with their reasons shown, because "the top-ranked
+name reports earnings in two days" is exactly what you want to see. The line under the
+header tells you which gates were checked here; it is fewer than the Analyze card
+tests, so an unmarked row has not passed everything.
+
+⚠ **Read the amber line before you read the ranking.** It states how much of the
+model's weight sits on volatility, and that is currently about half — meaning **the top
+of this board is the highest-beta end of the universe**. That ordering has historically
+worked while the market rose and inverted when it fell. Use the board to pick what to
+research, not as a ranked buy list.
+
+**Rebuild** forces a fresh scoring run; otherwise the board follows the daily
+universe snapshot.
 
 ---
 

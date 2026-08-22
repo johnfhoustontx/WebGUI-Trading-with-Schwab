@@ -64,3 +64,44 @@ class TradeAnalysis(_Base):
     # stop, target, and a TIME STOP at the model's own 20-day horizon —
     # past which the read is unmodelled and nothing else says so.
     trade_plan: dict | None = None
+
+
+class RankBoard(_Base):
+    """Today's whole cross-section, ranked — ``trade_svc.compute.build_rank_board``.
+
+    Rows are modelled as ``list[dict]`` for the same reason ``TradeAnalysis``'s
+    sub-objects are loose: the per-row gate list and score fields are sparse and
+    move with the model. This validates the ENVELOPE — that rows are a list and
+    the pools are lists of symbols — as a gate against gross drift before
+    caching.
+
+    ⚠ ``risk_share`` is not decoration. Phase 4 measured this composite at
+    cross-sectional IC +0.16 when the market's forward 20 days were up and −0.11
+    when they were down, with the asymmetry carried entirely by the volatility
+    factors. On a RANKED board that means the top decile skews to the
+    highest-beta names, which is the single most important thing to know about
+    the ordering — so it travels with the payload rather than being something
+    the page could forget to ask for.
+
+    ``gates_evaluated`` names the SUBSET of the card's gates the board can
+    check from the daily snapshot plus two local stores. Without it, a row
+    showing no gates would read as "cleared everything the card checks".
+
+    ``short_expression`` is ``"relative"`` whenever the tape has not cleared the
+    short side: the model predicts excess return vs SPY, so a bottom-decile name
+    in an uptrend is predicted to LAG, not to fall.
+    """
+
+    as_of: str | None = None
+    model_version: str | None = None
+    regime_key: str | None = None
+    risk_share: float | None = None
+    horizon_days: int = 20
+    n: int = 0
+    thin_cross_section: bool = True
+    rows: list[dict] = []
+    long_pool: list[str] = []
+    short_pool: list[str] = []
+    market_filter: dict = {}
+    short_expression: str = "relative"
+    gates_evaluated: list[str] = []

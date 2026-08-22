@@ -86,6 +86,15 @@ def test_trade_page_has_no_inline_style():
     assert ":style=" not in src, "trade.py still uses a Vue :style= slot binding"
 
 
+# Phase 5 (2026-08-22): the Rank Board is the Trade group's second tab and wears
+# the same navy dashboard theme, so it is held to the same standard.
+def test_trade_board_page_has_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    src = (base / "trade_board.py").read_text(encoding="utf-8")
+    assert ".style(" not in src, "trade_board.py still uses .style()"
+    assert ":style=" not in src, "trade_board.py still uses a Vue :style= binding"
+
+
 # Phase 5: the top-level Sentiment + Sector-Rotation pages on Tailwind only. These
 # keep their OWN look (NOT the navy dashboard theme), so their dynamic colors map to
 # a LOCAL 5-color Tailwind class palette (not the theme tokens); reactive in-place
