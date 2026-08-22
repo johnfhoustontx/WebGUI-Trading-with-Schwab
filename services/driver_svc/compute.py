@@ -68,6 +68,7 @@ def _daily_max_loss() -> float:
 # The banking target carries the $500/day deficit/excess forward month-to-date, clamped
 # to [floor, cap]. Pure + defensive; the −$1,500 loss halt + per-trade caps are untouched.
 import datetime as _dt
+from services import _degrade  # noqa: E402
 
 
 def effective_target(base, n_trading_days, mtd_before_today, *, cap, floor) -> float:
@@ -394,6 +395,7 @@ def _structural_regime(payload) -> dict:
                                  f"{_regime_label(tr['to'], *direction)}{pct}")
         return out
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        _degrade.degraded("driver._structural_regime")
         return {}
 
 
@@ -478,6 +480,7 @@ def _market_read(market) -> dict:
         read["summary"] = _market_read_summary(read)
         return read
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        _degrade.degraded("driver._market_read")
         return {}
 
 
@@ -508,6 +511,7 @@ def _directional_posture(market_read) -> str:
             return "down"
         return "neutral"
     except Exception:  # noqa: BLE001 — context is best-effort; default to no gate.
+        _degrade.degraded("driver._directional_posture")
         return "neutral"
 
 
@@ -627,6 +631,7 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
                 "market_read": packet.get("market_read"),
                 "shadow_gate": shadow, **guarded}
     except Exception as exc:  # noqa: BLE001 — the cycle never raises; stand down.
+        _degrade.degraded("driver.run_cycle")
         return {"decision": {"stand_down": True, "day_thesis": "", "confidence": 0.0,
                              "trades": [], "error": str(exc)},
                 "executable": [], "rejected": [], "halted": False, "halt_reason": None,

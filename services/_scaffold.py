@@ -53,6 +53,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from repo_paths import ENV_FLAGS  # noqa: E402
+from services import _degrade  # noqa: E402
 from shared.bus import Bus  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -372,12 +373,19 @@ def make_app(
         # A service with no scheduler is trivially "alive" (nothing can die);
         # a supervised scheduler reports its real alive flag. Keys are ADDITIVE
         # — ``domain``/``up`` are unchanged for backward compatibility.
+        #
+        # ``degrades`` is the swallowed-exception counter (see services/_degrade.py).
+        # It is process-lifetime, not a rate: the useful read is "this number is
+        # climbing" or "this area is 300 and every other is 0", which is exactly
+        # what a silent ``except Exception -> return a plausible default`` hides.
         return {
             "domain": domain,
             "up": True,
             "scheduler_alive": hs.alive if hs.has_scheduler else True,
             "scheduler_restarts": hs.restarts,
             "scheduler_last_tick_age_s": hs.last_tick_age_s(),
+            "degrades_total": _degrade.total(),
+            "degrades": _degrade.counts(),
         }
 
     return app

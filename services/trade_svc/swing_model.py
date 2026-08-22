@@ -27,6 +27,7 @@ which calibration band the composite lands in (top band -> BUY, bottom -> SELL).
 import json
 import numpy as np
 from repo_paths import SWING_MODEL
+from services import _degrade
 
 MIN_XSECTION = 5   # a cross-section thinner than this can't form stable 2/98
                    # quantiles -> fall back to the artifact norm (documented
@@ -153,4 +154,5 @@ def score_symbol(current_factors, universe_snapshot, artifact):
             "source": "validated",
         }
     except Exception:
+        _degrade.degraded("trade.score_symbol")
         return None

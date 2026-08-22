@@ -4,6 +4,71 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-21 (**Audit batch 2 — a swallowed exception now leaves a
+trace, and `/health` counts them.**
+- **The problem, measured.** An AST census of every `except Exception` in
+  `services/` + `webgui/` (non-test) found **542**, of which **289 were silent** —
+  no log, no re-raise, just a plausible default returned. That is the exact shape
+  behind all five NaN incidents. The worst wrapped **294 lines** of
+  `sentiment_svc.compute_intraday_trend` and returned `_neutral_trend()`, so any bug
+  in the entire trend computation rendered as a calm neutral reading with nothing in
+  `logs/sentiment.log` to say so.
+- **The fix is scoped by SIZE, and that is the interesting part.** Splitting the 289
+  by how much they guard turns an unmanageable sweep into a small one:
+  **41 guard >= 15 lines** (they swallow a whole computation) and **248 guard < 15**
+  (one-statement parse guards like `try: return float(x) except: return None`).
+  Only the 41 were touched. Logging the 248 would put a WARNING on every failed
+  float parse, per row, per tick — spam rather than observability, and there the
+  missing-value contract IS the point rather than a failure. The audit's headline
+  number was "276 sites"; the useful number was 41.
+- **`services/_degrade.py`** — `degraded(area, *, detail=None)` logs at **WARNING
+  with a traceback** and increments a per-area counter. WARNING and not ERROR
+  deliberately: most of these fire on real, expected conditions (a symbol with no
+  chain off-hours), so ERROR should keep meaning "look now". **The counter is the
+  signal; the log line is the detail** — one degrade is noise, 340 in a session is a
+  bug. No heavy imports, because `compute` modules import it and it must not drag in
+  FastAPI or the Bus.
+- **It is visible, not just recorded.** `_scaffold`'s `/health` gained
+  `degrades_total` + `degrades` (additive; `domain`/`up` unchanged), and the Status
+  page renders it on the service card as `healthy - 12 degraded`
+  (`status.service_detail` — zero stays a plain "healthy", and a service predating
+  the counter or a garbled value degrades to "healthy" rather than breaking the
+  card). The page already fetched `/health`, so this costs **no new probe**.
+- **Applied to 40 handlers across 8 modules** by an AST transformer doing line-based
+  insertion — *not* `ast.unparse`, which would have reformatted every file and
+  thrown away every comment. Area labels are `<domain>.<function>`, derived from the
+  enclosing scope. ⚠ One placement needed hand-fixing: `options_svc/compute.py` has
+  a top-level import at line 6291, so the auto-inserted import landed at 6292. Not a
+  runtime bug (module-level names resolve at call time) but wrong, and moved up
+  beside `from services import _proxy`.
+- **`services/tests/test_no_silent_degrades.py`** pins it: no NEW silent guard may
+  swallow >= 15 lines. It carries its own "the scan actually reaches the code"
+  canary, because a source-walking guard that silently walks nothing passes
+  vacuously forever.
+- **ruff `BLE001` was considered and rejected**, against the audit's recommendation.
+  It flags every `except Exception` — all 542 — so adopting it means ~542
+  grandfathered `noqa` comments, which dilutes the signal to nothing, and it
+  contradicts the standing rule that a rule class is added only once the tree is
+  already clean under it. The AST guard test pins the invariant that matters at a
+  fraction of the noise. (Worth knowing: the `# noqa: BLE001` comments already
+  scattered through the code are **decorative** — `BLE` is not in the select list,
+  so nothing has ever checked them.)
+- **`webgui/logging_setup.py`** — Tier 1 had **no log handler at all**. `main.py`
+  logs through `logging.getLogger("webgui")` throughout, but output went to the
+  console and died with the Windows Terminal tab; only the nowindow launcher
+  captured it, by shell redirection. Now a rotating `logs/webgui.log` beside the six
+  services' logs. A deliberate ~30-line copy of
+  `_scaffold._install_file_logging` rather than an import — the Tier-1 allow-list
+  has no `services.*`, and that helper pulls in FastAPI and the Bus.
+- **One audit finding refuted.** `webgui/pages/status.py:365` was flagged as a large
+  silent guard; it is a **false positive**. The handler surfaces the failure **in the
+  UI** as `unreachable (ConnectionError)`, which is strictly better than logging it.
+  The census flagged it only because the handler contains no `log.` token — a
+  reminder that "does it log" is a proxy for "does it tell anyone", not the thing
+  itself.)
+
+---
+
 **Last updated:** 2026-08-21 (**Audit batch 1 — the "permanent" test baseline was
 a fiction; NaN in the validation study; Tier-1 loses its last engine glue.**
 - **The 8-11 "permanent baseline failures" were all stale fixtures.** Every suite in

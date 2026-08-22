@@ -383,3 +383,34 @@ def test_healthy_scheduler_not_restarted_and_alive(schedulers_enabled):
         assert body["scheduler_restarts"] == 0
         assert len(started) == 1  # ran exactly once, never restarted
         assert body["scheduler_last_tick_age_s"] is not None
+
+
+# --- degrade counters on /health --------------------------------------------
+
+def test_health_reports_degrade_counts():
+    """A silent degrade is invisible; /health is where it becomes a number.
+
+    The Status page already reads /health, so surfacing the counter here means
+    "sentiment: 340 degrades this session" shows up with no new probe."""
+    from fastapi.testclient import TestClient
+
+    from services import _degrade
+
+    _degrade.reset()
+    try:
+        app = _scaffold.make_app("probe", bus=Bus(fake=True))
+        with TestClient(app) as client:
+            body = client.get("/health").json()
+            assert body["degrades_total"] == 0
+            assert body["degrades"] == {}
+
+            try:
+                raise ValueError("boom")
+            except Exception:
+                _degrade.degraded("probe.thing")
+
+            body = client.get("/health").json()
+            assert body["degrades_total"] == 1
+            assert body["degrades"] == {"probe.thing": 1}
+    finally:
+        _degrade.reset()

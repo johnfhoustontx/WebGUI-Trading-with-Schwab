@@ -23,6 +23,7 @@ from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
 from shared.contracts.options import MatrixSnapshot, NetPremiumSnapshot, ScanResult
+from services import _degrade
 
 log = logging.getLogger(__name__)
 
@@ -1675,6 +1676,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
     except Exception as e:
         # Never let a bad apply kill the consumer; surface the error to the GUI.
+        _degrade.degraded("options.run_rescue_apply")
         adv = {
             "position_id": position_id,
             "error": f"{type(e).__name__}: {e}",

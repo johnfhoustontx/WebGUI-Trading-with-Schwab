@@ -48,6 +48,7 @@ from scanner_engine import run_full_scan, vix_regime  # noqa: E402
 from regime_filter import evaluate_regime  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
+from services import _degrade  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
@@ -791,6 +792,7 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
         return {"status": "opened", "symbol": signal["symbol"], "qty": open_qty,
                 "entry_credit": fill, "max_loss_total": max_loss_total}
     except Exception as exc:  # noqa: BLE001
+        _degrade.degraded("options.open_driver_position")
         return {"status": "error", "error": str(exc)}
 
 
@@ -2743,6 +2745,7 @@ def gex_status_view(now=None) -> dict:
                 "last_scan": last_scan, "next_scan": next_scan,
                 "age_seconds": age, "session": gs.session_label(now)}
     except Exception:
+        _degrade.degraded("options.gex_status_view")
         return {"status_label": "Collector status unknown",
                 "status_color": "#666666", "last_scan": None,
                 "next_scan": None, "age_seconds": None, "session": ""}
@@ -3222,6 +3225,7 @@ def _session_expected_move(chain):
             return None
         return round(spot * (atm_iv / 100.0) * math.sqrt(1.0 / 365.0), 2)
     except Exception:  # noqa: BLE001 — EM is best-effort; missing → None → '—'.
+        _degrade.degraded("options._session_expected_move")
         return None
 
 
@@ -4455,6 +4459,7 @@ def _movers_html(movers) -> str:
                 f'<div style="color:{color};font-weight:700">{_h.escape(move_txt) or "—"}</div>'
                 f'{sub}</div>')
         except Exception:
+            _degrade.degraded("options._movers_html")
             continue
     if not chips:
         return ""
@@ -5004,6 +5009,7 @@ def _backfill_indices(data, levels_by_sym, em_by_sym, recap) -> dict:
                     "recap": " ".join(bits),
                 })
             except Exception:
+                _degrade.degraded("options._backfill_indices")
                 continue
         data["indices"] = out
         if out:
@@ -5974,6 +5980,7 @@ def em_chain_meta(symbol) -> dict:
             pass
         return base
     except Exception as exc:
+        _degrade.degraded("options.em_chain_meta")
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
 
@@ -6144,6 +6151,7 @@ def _fetch_em_candles(symbol, spec):
         candles.sort(key=lambda r: r[0])
         return candles[-int(spec.get("bars", _EM_HISTORY_BARS)):]
     except Exception:
+        _degrade.degraded("options._fetch_em_candles")
         return []
 
 
@@ -6245,6 +6253,7 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
         base["em_lower"] = cone["lower"]
         return base
     except Exception as exc:
+        _degrade.degraded("options.compute_expected_move")
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
 
@@ -6416,6 +6425,7 @@ def _light_gex_context(symbol):
                 "views": {"GEX": {"flip": (summary or {}).get("flip"),
                                   "walls": gamma_walls("GEX", gex, spot)}}}
     except Exception:
+        _degrade.degraded("options._light_gex_context")
         return None
 
 
@@ -6607,6 +6617,7 @@ def _advisory_from_position(pos, *, source: str, force_advisory: bool,
         )
         return adv.model_dump()
     except Exception as e:
+        _degrade.degraded("options._advisory_from_position")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6700,6 +6711,7 @@ def _assemble_advisory(pos, mark, engine_mark, *, price_leg, gex,
         )
         return adv.model_dump()
     except Exception as e:  # noqa: BLE001 — the board must render an error, not 500
+        _degrade.degraded("options._assemble_advisory")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6769,6 +6781,7 @@ def _advisory_from_single(pos, *, source: str = "adhoc",
             position_id=position_id, source=source,
             symbol=symbol, strategy=strategy)
     except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_single")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6830,6 +6843,7 @@ def _adhoc_single(spec) -> dict:
         }
         return _advisory_from_single(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_single")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6899,6 +6913,7 @@ def _advisory_from_debit(pos, *, source: str = "adhoc",
             position_id=position_id, source=source,
             symbol=symbol, strategy=strategy)
     except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_debit")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6957,6 +6972,7 @@ def _adhoc_debit(spec) -> dict:
         }
         return _advisory_from_debit(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_debit")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7030,6 +7046,7 @@ def _advisory_from_range(pos, *, source: str = "adhoc",
             position_id=position_id, source=source,
             symbol=symbol, strategy=strategy)
     except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_range")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7103,6 +7120,7 @@ def _adhoc_range(spec) -> dict:
         }
         return _advisory_from_range(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_range")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7196,6 +7214,7 @@ def compute_rescue_adhoc(spec) -> dict:
         return _advisory_from_position(pos, source="adhoc",
                                        force_advisory=True, position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options.compute_rescue_adhoc")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7232,6 +7251,7 @@ def assess_open_positions() -> dict:
             if state == "critical":
                 n_critical += 1
         except Exception:
+            _degrade.degraded("options.assess_open_positions")
             continue
     return {
         "per_position": per_position,
@@ -7349,6 +7369,7 @@ def collect_action_items(now_ct=None) -> dict:
                         "symbol": p.get("symbol"), "strategy": p.get("strategy"),
                         "note": f"loss {abs(cap):.0f}% of credit (near stop)"})
         except Exception:
+            _degrade.degraded("options.collect_action_items")
             continue
 
     return out

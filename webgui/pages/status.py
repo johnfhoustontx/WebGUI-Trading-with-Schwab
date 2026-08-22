@@ -331,6 +331,25 @@ def _do_restart(target):
 
 
 # ── network / redis probes (thin, screenshot-verified) ───────────────────────
+def service_detail(body) -> str:
+    """The detail line for a healthy service card, given its ``/health`` JSON.
+
+    Surfaces ``degrades_total`` - the count of swallowed exceptions since the
+    process started (``services/_degrade``). One degrade is noise; a few hundred
+    in one domain is a bug that would otherwise never appear anywhere, which is
+    the whole reason the counter exists. Zero is the normal case and stays a
+    plain "healthy" rather than putting "- 0 degraded" on every card.
+
+    PURE + defensive: a service predating the counter has no key, and a garbled
+    value must not break the card, so anything that is not a positive int is
+    treated as no reading.
+    """
+    n = body.get("degrades_total") if isinstance(body, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+        return "healthy"
+    return f"healthy - {n} degraded"
+
+
 def _probe_one(target, proxy_health=None):
     """Probe a single component target → a result dict with ``up`` + ``detail``.
 
@@ -360,8 +379,11 @@ def _probe_one(target, proxy_health=None):
             out.update(up=up, detail=detail)
         else:  # service
             resp = requests.get(f"{target['url']}/health", timeout=_HTTP_TIMEOUT)
-            up = resp.status_code == 200 and resp.json().get("up") is True
-            out.update(up=up, detail="healthy" if up else f"HTTP {resp.status_code}")
+            body = resp.json() if resp.status_code == 200 else {}
+            up = resp.status_code == 200 and body.get("up") is True
+            out.update(up=up,
+                       detail=service_detail(body) if up
+                       else f"HTTP {resp.status_code}")
     except Exception as exc:  # noqa: BLE001 — a probe must never raise.
         out.update(up=False, detail=f"unreachable ({type(exc).__name__})")
     return out

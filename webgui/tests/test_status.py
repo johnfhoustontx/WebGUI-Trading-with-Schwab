@@ -399,3 +399,32 @@ def test_render_merges_auth_into_proxy_card_with_aligned_buttons():
     assert "w-[280px]" in src and "justify-end" in src
     # No stray ml-auto button placement remains (the old drift-prone layout).
     assert "ml-auto {BTN_3D}" not in src
+
+
+# --- degrade counts surfaced from /health ------------------------------------
+
+def test_service_detail_reports_degrades_when_present():
+    """A silent swallowed exception becomes a number here.
+
+    services/_degrade counts them and _scaffold puts the total on /health; a
+    counter nobody can see is not observability, so the service card says
+    "healthy - 12 degraded" and the operator has somewhere to start."""
+    assert status.service_detail({"up": True, "degrades_total": 12}) == \
+        "healthy - 12 degraded"
+    assert status.service_detail({"up": True, "degrades_total": 1}) == \
+        "healthy - 1 degraded"
+
+
+def test_service_detail_is_plain_healthy_at_zero():
+    """Zero is the normal case; showing "- 0 degraded" on every card is noise."""
+    assert status.service_detail({"up": True, "degrades_total": 0}) == "healthy"
+    assert status.service_detail({"up": True}) == "healthy"
+
+
+def test_service_detail_tolerates_junk():
+    """An older service predating the counter, or a garbled payload, must not
+    break the card."""
+    for junk in ({"up": True, "degrades_total": None},
+                 {"up": True, "degrades_total": "lots"},
+                 {"up": True, "degrades_total": -3}):
+        assert status.service_detail(junk) == "healthy"

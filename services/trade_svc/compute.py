@@ -56,6 +56,7 @@ from src.analysis.recommendation import (  # noqa: E402
     InvestorInputs, InvestorVerdict, PositionInputs, PositionVerdict)
 from src.analysis.sector_strength import (  # noqa: E402
     SectorStrength, compute_sector_strength)
+from services import _degrade  # noqa: E402
 
 # Symbol → (sector name, sector ETF). A small built-in map for common large caps
 # in lieu of the legacy finviz scrape; unknown symbols fall back to a neutral
@@ -350,6 +351,7 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
             composite.iloc[:_MK_WARMUP] = np.nan
         return composite
     except Exception:
+        _degrade.degraded("trade.reconstruct_daily_composite")
         return pd.Series([], dtype=float)
 
 
@@ -484,6 +486,7 @@ def _symbol_factor_row(sym):
                 row[c] = float(last)
         return row
     except Exception:
+        _degrade.degraded("trade._symbol_factor_row")
         return {}
 
 
@@ -602,6 +605,7 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
             "prior_version": version,
         }
     except Exception:
+        _degrade.degraded("trade.build_markov_block")
         return None
 
 

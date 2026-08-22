@@ -6,6 +6,7 @@ I/O orchestration lives in services/options_svc/compute.build_matrix.
 from __future__ import annotations
 
 import math
+from services import _degrade
 
 # ---- tunable thresholds ----
 _TREND_LOOKBACK_S = 900        # 15 min recent-move window
@@ -467,6 +468,7 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None,
         except Exception:
             # Per-item construction can't sink the batch: one bad symbol must
             # never zero the whole matrix. Append a minimal degraded row.
+            _degrade.degraded("options.build_rows")
             rows.append({
                 "symbol": symbol,
                 "spot": None,

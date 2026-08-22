@@ -37,6 +37,14 @@ from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
+import logging_setup  # noqa: E402
+
+# Persist our own log the way the six services already do. Without this the
+# webgui logger has no handler at all, so everything it says lives and dies in
+# the console - gone when a WT tab closes. Must run BEFORE the filter install
+# below so the filter applies to the handler we just added.
+logging_setup.install_file_logging()
+
 # Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
 # the element has been deleted.") — it escapes the ui_guard callback decorators
 # (raised by Timer._run_in_loop BEFORE the callback runs) and is logged by

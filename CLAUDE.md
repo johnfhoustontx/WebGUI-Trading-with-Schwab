@@ -1606,6 +1606,58 @@ hand.
 in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
 handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
 
+## Observability — a swallowed exception must leave a trace
+
+**`services/_degrade.py` is the house guard-rail for the repo's most expensive bug
+class**: `try/except Exception -> return a plausible default`, which turns a real
+bug into a confident number with nothing in the log to say it happened. That shape
+sat over all five NaN incidents, and the worst instance wrapped **294 lines** of
+`sentiment_svc.compute_intraday_trend` and returned `_neutral_trend()` — so any bug
+inside it rendered as a calm neutral reading.
+
+```python
+except Exception:                       # the guard STAYS - it keeps the refresh alive
+    _degrade.degraded("sentiment.compute_intraday_trend")
+    return _neutral_trend()
+```
+
+`degraded(area, *, detail=None)` logs at **WARNING with a traceback** and increments
+a per-area counter that `_scaffold`'s `/health` publishes as **`degrades_total`** +
+**`degrades`**. The Status page renders it on the service card as
+`healthy - 12 degraded` (`status.service_detail`, zero stays a plain "healthy").
+WARNING and not ERROR on purpose: most of these fire on real, expected conditions
+(a symbol with no chain off-hours), so ERROR should stay meaning "look now" — **the
+counter is the signal, the log line is the detail**. One degrade is noise; 340 in a
+session is a bug that had nowhere else to surface.
+
+**The scope rule is by SIZE, and it is deliberate** (census 2026-08-21, 542
+`except Exception` in `services/` + `webgui/`, 289 of them silent):
+
+| guarded body | policy |
+|---|---|
+| **>= 15 lines** (41 found) | must speak — `_degrade.degraded(...)` or its own log line. Pinned by `services/tests/test_no_silent_degrades.py`. |
+| **< 15 lines** (248 found) | leave alone. These are one-statement parse guards (`try: return float(x) except: return None`) where the missing-value contract IS the point; a WARNING per row per tick is spam, not observability. |
+
+⚠ **Do not "just enable ruff BLE001" instead.** It flags every `except Exception`,
+so it would need ~542 grandfathered `noqa` comments — diluting the signal to
+nothing — and it contradicts the standing rule that a new ruff rule class is added
+only once the tree is already clean under it. The AST guard test above pins the
+invariant that actually matters at a fraction of the noise. Note the existing
+`# noqa: BLE001` comments scattered in the code are **decorative** — `BLE` is not in
+the ruff select list, so nothing checks them.
+
+**Tier 1 is out of scope for the counter** — `webgui/` cannot import `services.*`.
+Its guards are all small, and its one large one (`status._probe_one`) is a health
+probe that already surfaces the failure **in the UI** as `unreachable
+(ConnectionError)`, which beats logging it.
+
+**`webgui/logging_setup.py`** is Tier 1's own rotating file log (`logs/webgui.log`),
+called once at `main.py` startup. It is a deliberate ~30-line copy of
+`_scaffold._install_file_logging` rather than an import of it — the Tier-1
+allow-list has no `services.*`, and that helper drags in FastAPI and the Bus.
+Before it, the `webgui` logger had **no handler at all**: output went to the console
+and died with the Windows Terminal tab.
+
 ## Performance characteristics & known hotspots
 
 Single-user, localhost Memurai — so most of these are *tolerable today* but are the
