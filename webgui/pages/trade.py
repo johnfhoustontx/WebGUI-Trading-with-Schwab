@@ -785,7 +785,7 @@ def render():
                 ui.table(columns=_BREAKDOWN_COLS, rows=rows,
                          row_key="factor").classes("w-full").props("dense")
 
-    def _fill_verdict_card(card, title, verdict, sm=None):
+    def _fill_verdict_card(card, title, verdict, sm=None, lic=None):
         # Refill a PERSISTENT verdict card in place (clear+rebuild its contents).
         # When a validated swing model is present (Position card only) it is the ONLY
         # Position voice: a ranked TILT + a "Why — validated factors" evidence expander,
@@ -825,7 +825,6 @@ def render():
                             ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
                         # Phase 6: what the model has actually done since it
                         # shipped, next to what it claimed it would do.
-                        lic = (result or {}).get("live_ic")
                         for text, cls in ((live_ic_line(lic), f"text-xs {MUTED}"),
                                           (live_ic_split_line(lic), f"text-xs {MUTED}"),
                                           (live_ic_decay_note(lic),
@@ -985,7 +984,8 @@ def render():
         if has_verdict:
             # Two EQUAL-width cards in one row: Position · Investor.
             _fill_verdict_card(position_card, "Position · 1–8 weeks",
-                               res.get("position_verdict"), res.get("swing_model"))
+                               res.get("position_verdict"), res.get("swing_model"),
+                               lic=res.get("live_ic"))
             _fill_verdict_card(investor_card, "Investor · months+",
                                res.get("investor_verdict"))
             with results_bottom:
