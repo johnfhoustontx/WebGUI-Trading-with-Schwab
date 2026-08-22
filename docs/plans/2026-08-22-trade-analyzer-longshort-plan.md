@@ -341,30 +341,58 @@ ticket in dev; the long's legs reach the Calculator through the stash.
 
 ---
 
-## Phase 4 — model refit (offline, parallel with P2–P3)
+## Phase 4 — model refit ✅ RAN TO A DECISION 2026-08-22 (gate FAILED, documented)
 
-Order matters: **measure the noise floor before adding factors**, so a floor
-change and a factor change are never confounded in the same OOS number.
+Order mattered: **measure the noise floor before adding factors**, so a floor
+change and a factor change are never confounded in the same OOS number. It held
+— and then a question nobody had planned subsumed all six tasks. Full findings:
+the design doc's **"Phase 4 findings — the model is a beta bet"**. Reports under
+`trade-analyzer/data/research/` (gitignored).
 
-1. **Noise-floor study.** Re-fit at `min_abs_ic` ∈ {0.005, 0.01, 0.02} on the
-   current universe; report OOS IC, kept-factor count, and whether `rs_spy`'s
-   sign flip survives. Adopt only if it wins OOS.
-2. **Universe expansion** to ~140–160 liquid optionable names.
-3. **Regime classifier** in `src/analysis` (shared by fit and live scorer);
-   per-regime weights; `score_symbol` gains a regime selector with `"all"`
-   fallback. Test: a missing regime key falls back; the page shows which key scored.
-4. **Covariance-aware weighting** (ridge / orthogonalized-residual IC) vs
-   signed-IC — keep whichever wins OOS.
-5. **Short-factor slate**: MAX effect, downside beta/semivol,
-   distance-below-200-EMA. Dealer aggregates enter as *exploratory conditioning*
-   only (~2 months of history is too thin to trust). Short interest stays a gate.
-6. **Report upgrades**: folds tagged by prevailing regime; long/short split
-   stats; per-regime calibration bands.
+- [x] **4.0 Research harness** (not in the original plan; everything else depends
+      on it). `research/panel_cache.py` fetches once and keys the cache on
+      anything that changes the panel's content, **including the factor
+      registry**. `research/variants.py` scores a variant comparably and
+      `paired_delta` tests two on the SAME folds. Without this, Phase 0's
+      44%-on-a-refetch would have swamped every comparison below.
+- [x] **4.1 Noise-floor study** — floors {0, 0.005, 0.01, 0.02, 0.03}. **No floor
+      differs from the incumbent** (all |t| < 1.4). `min_abs_ic = 0.005` stays.
+      The highest raw score came from a ONE-factor model, which is what prompted
+      the ablation that found everything else.
+- [x] **4.2 Universe expansion** to 174 names (173 fetched; DFS returned no
+      data). **+0.0206 → +0.0333, t = +0.82 — not adopted.** It also costs real
+      latency: the artifact's `fit_universe` IS the live cross-section
+      `trade_svc` snapshots daily.
+- [x] **4.3 Regime classifier** — `src/analysis/regime.py`, causal by
+      construction (a TRAILING vol quantile). Scorer selector + `"all"` fallback
+      shipped, card names the key that scored. **Regime-conditioned weights
+      measured WORSE** (+0.0128 vs +0.0206) and **C13 is refuted**: `low_vol`
+      carries the same sign in all three regimes.
+- [x] **4.4 Covariance-aware weighting** — ridge and orthogonalized residual IC,
+      both shipped in `backtest.py`, `walk_forward` gains a `fit_fn` door.
+      Orthogonalized scored **+0.0834, t = +3.01**. **Not adopted:** it wins by
+      loading more beta, and its down-market IC is worse than the scheme it
+      replaces.
+- [x] **4.5 Short-factor slate** — `max_effect`, `semivol`, `downside_beta`,
+      `below_200ema`, all four registered and tested. **+0.0206 → +0.0698,
+      t = +2.64. Not adopted, same reason.**
+- [x] **4.6 Report upgrades** — the one unambiguous win: **calibration is now
+      OUT OF SAMPLE** (`research/artifact.py`), with the in-sample bands kept
+      alongside as `calibration_insample`. The top band's hit rate is 49.86% OOS
+      against 52.68% in-sample.
+- [x] **The exposure reaches the user.** `risk_share` on the scorer, rendered in
+      the evidence expander. The live artifact reads **47.6%**.
 
-**Exit:** a new artifact with populated regime keys, and a report that answers —
-does it OOS-beat the single-regime fit, do the negative folds cluster where the
-classifier says, and is the bottom band's edge real? **If the gate fails, the
-Phase-0 artifact stays primary and that outcome is written down.**
+**Exit: the gate FAILED on the question it stood in for.** Two configurations
+OOS-beat the single-regime fit, but the gain is beta loading rather than
+cross-sectional skill, so the Phase-0 artifact stays primary. The regime keys
+ship EMPTY: the 5-year sample gives 653/182/149 regime-days against a 441-day
+floor for one fold, so only `trend` qualifies and at 66% of the sample it would
+be the pooled fit under another name.
+
+⚠ Per the freeze rule at the top of this document, **"Phase 4 complete" means it
+ran to a decision** — a documented negative result is a completed phase and does
+not by itself extend the promotion freeze.
 
 ---
 

@@ -201,6 +201,118 @@ dealer columns.
 an isolated model paper book auto-trading both cleared deciles; monthly
 scheduled refits; Investor validation once the PIT store matures.
 
+## Phase 4 findings (2026-08-22) — the model is a beta bet
+
+**Read this before touching the swing model again.** Phase 4 set out to raise
+the noise floor, expand the universe, condition weights on regime and fix the
+correlated-cluster problem. Four of those were measured; the fifth question —
+one nobody had asked — turned out to subsume them all.
+
+Every study ran against ONE cached panel per configuration
+(`trade-analyzer/research/panel_cache.py`), because Phase 0 moved OOS IC 44%
+with no methodology change at all: a variant comparison that re-fetched between
+runs cannot separate a methodology effect from a fetch-date effect. Every
+comparison is a PAIRED test over the same walk-forward folds, because at this
+signal level the ranking of five means is not a result.
+
+### The headline: the composite is beta, not alpha
+
+Splitting the 173-name panel on the market's own forward 20-day return:
+
+| | market UP | market DOWN |
+|---|---:|---:|
+| composite (shipping weights) | **+0.1598** | **-0.1142** |
+| composite (orthogonalized weights) | +0.1800 | -0.1282 |
+| `downside_beta` | -0.1923 | +0.1702 |
+| `low_vol` | -0.1507 | +0.1195 |
+| `semivol` | -0.1465 | +0.0991 |
+
+**Nine of fourteen factors flip sign with the market**, and the down-market
+weight set is nearly the negation of the up-market one. Averaged over a window
+that was roughly 2:1 up, that nets to the small positive OOS IC every study in
+this phase measured.
+
+The cause is the **label**. `r_symbol - r_SPY` is a RAW excess return, so a
+high-beta stock earns positive excess whenever the market rises — mechanically,
+no skill. Fit over a mostly-rising five years, any model on this label MUST
+discover that volatile names outperform. See `research/labels.py` for the
+beta-adjusted alternative.
+
+⚠ **The regime split could not have caught this**, which is worth remembering
+before trusting a regime cut again: `highvol` is a VOLATILITY regime, so a
+violent rally and a violent selloff both land in it.
+
+⚠ **Splitting on a FORWARD market return is look-ahead** and is labelled a
+diagnostic throughout. It could never be traded. The question it answers is not
+"what should we buy" but "what does this model do when the market falls" — a
+property of the model, knowable only by looking.
+
+### What that does to the other four results
+
+Each was individually measured, and each turns out to be a measurement of how
+much beta the configuration loads:
+
+| task | result | paired t | verdict |
+|---|---|---:|---|
+| 4.1 noise floor | no floor differs from 0.005 | all \|t\| < 1.4 | **keep 0.005** |
+| 4.2 universe 78 → 173 | +0.0206 → +0.0333 | +0.82 | **do not adopt** |
+| 4.3 regime-conditioned weights | +0.0206 → +0.0128 | −0.37 | **do not adopt** |
+| 4.4 orthogonalized residual IC | +0.0206 → +0.0834 | +3.01 | **do not adopt — see below** |
+| 4.5 short-factor slate | +0.0206 → +0.0698 | +2.64 | **do not adopt — see below** |
+
+The last two are the trap. Both are large and (4.4) nominally significant, and
+both are **pre-specified fixes for documented problems** (C12's correlated
+cluster; the absence of asymmetric factors), so neither is a fishing result.
+They still must not ship: each wins by concentrating weight on the volatility
+cluster, and the up/down table above shows exactly what that buys. The
+orthogonalized weighting has a *worse* down-market IC than the scheme it
+replaces.
+
+Note also that this phase ran roughly nine comparisons; a Bonferroni-style
+correction at 13 folds would want |t| > ~3.4, which even +3.01 does not reach.
+
+### C13 is refuted, not deferred
+
+`low_vol`'s inverted sign was documented as a regime artifact to be fixed by
+regime-gating. It is not one. Per-regime IC: **trend −0.0972, chop −0.1254,
+highvol −0.0721** — the same sign in all three, and *stronger* in every regime
+than pooled (−0.0614). Regime-conditioned weights measured worse than pooled.
+
+### The sample cannot support per-regime fits anyway
+
+Regime mix over the 5-year window (984 days after warmup): trend 653 / highvol
+182 / chop 149. One walk-forward fold needs `train + test` = **441** days, so
+only `trend` clears the floor — and at 66% of the sample a "trend" block is the
+pooled fit wearing a regime label. Lengthening the window to 15+ years would
+populate the others, but an edge that decays 44% in two months should not be
+estimated on a market that far gone. The machinery ships (`research/artifact.py`
+builds the keys, `swing_model` selects them, the card names the one that scored)
+and the keys stay empty until a fit can fill them honestly.
+
+### What DID ship from Phase 4
+
+- **Out-of-sample calibration.** The artifact calibrated its bands on the same
+  rows its weights were fitted on, so the "calibrated mean" the Trade page
+  prints as an expectation was an in-sample statistic. Measured: the top band's
+  hit rate is **49.86% out of sample against 52.68% in-sample**. Both bands are
+  now built from walk-forward test windows, with the in-sample set retained as
+  `calibration_insample` so the flattery is visible rather than assumed.
+- **The bottom band's edge is real** (the exit criterion's question): OOS mean
+  forward **−0.93%** vs SPY over 20 days, against **+0.85%** at the top.
+- ⚠ **Every band's hit rate is below 50%,** top included. The label is excess
+  return vs a cap-weighted index, so most stocks lose to SPY most of the time;
+  the mean is the honest read and the hit rate is not a coin-flip comparison.
+- **The exposure is now on the card.** `risk_share` — the share of absolute
+  weight on volatility factors — is computed by the scorer and rendered in the
+  evidence expander. The live artifact reads **47.6%**.
+
+### Exit criterion
+
+Phase 4's gate was: does the new artifact OOS-beat the single-regime fit? Two
+configurations do, numerically. **The gate fails on the question it was standing
+in for** — those gains are beta loading, not cross-sectional skill — so per the
+plan, the Phase-0 artifact stays primary and the outcome is written down here.
+
 ## Standing guardrails
 
 - **Overlays before weights.** Dealer data, clearance and context inform; only
