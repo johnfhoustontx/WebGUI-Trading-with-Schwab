@@ -349,3 +349,16 @@ class TestTheCompanyNameIsShown:
 
     def test_nothing_at_all_still_says_it_is_not_in_the_cross_section(self):
         assert "cross-section" in tt.command_bar({"symbol": "ZZZZ"})["name"]
+
+
+def test_the_command_bars_change_uses_the_desk_wide_minus():
+    """The bar predated the shared formatter and formatted its own change, so
+    the one number visible on every screen was the one rendering a hyphen."""
+    bar = tt.command_bar({"symbol": "MU", "price": 963.68, "change_pct": -0.32})
+    assert bar["change"] == "−0.32%"
+    assert "-" not in bar["change"]
+
+
+def test_a_rising_change_keeps_its_plus():
+    bar = tt.command_bar({"symbol": "MU", "price": 963.68, "change_pct": 0.31})
+    assert bar["change"] == "+0.31%"

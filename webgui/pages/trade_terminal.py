@@ -84,7 +84,9 @@ def command_bar(analysis):
         "symbol": sym,
         "name": name,
         "price": f"{price:.2f}" if price is not None else "—",
-        "change": f"{chg:+.2f}%" if chg is not None else "—",
+        # `chg` is already a percentage figure, not a fraction, so this is
+        # `signed` plus a unit rather than `signed_pct`.
+        "change": (signed(chg, 2) + "%") if chg is not None else "—",
         "change_class": T.sign_text(chg) if chg is not None else T.OFF,
         "bias": bias or "—",
         "bias_class": _BIAS_CLASS.get(bias, T.DIM),
