@@ -887,8 +887,8 @@ function paint(s) {
   b = panel('#positions', s.positions.note);
   if (b) {
     const tb = table(b, [['BOOK', 7], ['SYMBOL', 9], ['STRAT', 11],
-                         ['EXPIRY', 14], ['ENTRY', 9], ['MARK', 9],
-                         ['STRIKES', 11], ['QTY', 4], ['UNREALIZED', 16],
+                         ['EXPIRY', 13], ['ENTRY', 9], ['MARK', 9],
+                         ['STRIKES', 11], ['QTY', 5], ['UNREALIZED', 16],
                          ['FLAG', 10]]);
     s.positions.rows.forEach((r) => {
       const tr = row(tb, r.href);
