@@ -71,6 +71,7 @@ _FIELDS = {
     "earnings_coverage": None,
     "trade_plan": None,
     "live_ic": None,
+    "symbol_history": [],
 }
 
 

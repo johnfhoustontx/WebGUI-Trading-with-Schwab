@@ -377,8 +377,10 @@ STRATEGY_TOOLS_CHILDREN = [
 # find a candidate, then research it — so they are peer tabs rather than one
 # page hiding inside the other. (route, label, icon)
 TRADE_CHILDREN = [
-    ("/trade", "Analyze", "query_stats"),
+    ("/trade", "Overview", "query_stats"),
+    ("/trade/evidence", "Evidence", "fact_check"),
     ("/trade/board", "Rank Board", "leaderboard"),
+    ("/trade/plan", "Trade Plan", "assignment"),
 ]
 
 # Flat top-level items (single-page apps). (route, label, icon)
@@ -2184,9 +2186,16 @@ def sentiment_momentum_page(level: str = "industry") -> None:
 
 @ui.page("/trade")
 def trade_page() -> None:
-    with _layout("/trade", "Trade Analyzer"):
-        from pages import trade
-        trade.render()
+    with _layout("/trade", "Overview"):
+        from pages import trade_overview
+        trade_overview.render()
+
+
+@ui.page("/trade/evidence")
+def trade_evidence_page() -> None:
+    with _layout("/trade/evidence", "Evidence"):
+        from pages import trade_evidence
+        trade_evidence.render()
 
 
 @ui.page("/trade/board")
@@ -2194,6 +2203,13 @@ def trade_board_page() -> None:
     with _layout("/trade/board", "Rank Board"):
         from pages import trade_board
         trade_board.render()
+
+
+@ui.page("/trade/plan")
+def trade_plan_page() -> None:
+    with _layout("/trade/plan", "Trade Plan"):
+        from pages import trade_plan_screen
+        trade_plan_screen.render()
 
 
 @ui.page("/portfolio")

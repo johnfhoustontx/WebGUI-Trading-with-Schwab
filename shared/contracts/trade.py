@@ -69,6 +69,8 @@ class TradeAnalysis(_Base):
     # journal the honest answer is "not enough data yet" and that must not
     # render as a thin edge.
     live_ic: dict | None = None
+    # This name's recent journal reads — rows, not a statistic.
+    symbol_history: list[dict] = []
 
 
 class RankBoard(_Base):

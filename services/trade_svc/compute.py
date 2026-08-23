@@ -622,6 +622,30 @@ def _quotes_for(symbols):
         return {}
 
 
+def symbol_history_rows(symbol, limit=5, db_path=None):
+    """Recent journal reads for one symbol. [] under pytest without a path."""
+    from services.trade_svc import live_ic as _lic
+    if db_path is None and _under_pytest():
+        return []
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        rows = [dict(r) for r in rec_journal.readings(
+            conn, symbol=(symbol or "").strip().upper(), limit=limit * 4)]
+        return _lic.symbol_history(rows, limit=limit)
+    except Exception:
+        _degrade.degraded("trade.symbol_history")
+        return []
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
 def _board_gate_ctx(symbols):
     """Gate inputs for the whole board: ``{"earnings_days": …, "squeeze": …}``.
 
@@ -1569,6 +1593,9 @@ def analyze(symbol):
     # Is the live edge holding? Read AFTER the plan so today's own reading is
     # not counted — it has no forward return yet and could not contribute.
     result["live_ic"] = live_ic_reading()
+    # This name's own recent reads, for the Evidence screen. Deliberately rows
+    # rather than a statistic: five reads cannot support a correlation.
+    result["symbol_history"] = symbol_history_rows(symbol)
 
     # Forward-accruing record of what the model said today. Side effect only —
     # never raises, and skipped under pytest (see journal_reading).

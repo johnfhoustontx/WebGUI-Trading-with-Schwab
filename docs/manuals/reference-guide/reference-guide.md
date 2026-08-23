@@ -1415,7 +1415,7 @@ telling you which of those two states you are in *before* showing you the list.
 
 Practically, the highest-value output is **alignment** — a name where the whole hierarchy
 agrees. The green panel in section 2 lists every one of them, ranked, and those are the
-candidates worth taking to [Analyze](#analyze) or
+candidates worth taking to [Overview](#overview) or
 [Strategy Finder](#strategy-finder). The leaderboard's **Align** column shows the same
 thing per row, as three blocks, but only for the names inside its top/bottom slice.
 
@@ -1440,7 +1440,7 @@ because *suppressed* is a genuine stand-aside signal.
 ### Related pages
 
 [RRG](#rrg) · [Sector & Industry](#sector-industry) ·
-[Analyze](#analyze).
+[Overview](#overview).
 
 ---
 
@@ -1845,7 +1845,7 @@ symbol, and any time you have a directional opinion and want the best way to exp
 ### Related pages
 
 [Market Scanner](#market-scanner) · [Calculator](#calculator) ·
-[Analyze](#analyze) (for the directional opinion itself).
+[Overview](#overview) (for the directional opinion itself).
 
 ---
 
@@ -2202,87 +2202,95 @@ in a symbol you are short premium in.
 
 ---
 
-## Analyze
+## Overview
 
-*Menu: STRATEGY → Trade Analyzer → Analyze · Route `/trade`*
+*Menu: STRATEGY -> Trade Analyzer -> Overview · Route `/trade`*
 
 ### What it is
 
-A Buy / Hold / Sell verdict on a single stock, over two horizons, with all the evidence
-exposed. This is the app's only genuinely *stock-level* (rather than options-level) view.
+The Signal desk's landing screen: market state, both verdicts, dealer positioning and
+peer placement for one symbol, under a command bar shared by all four tabs.
 
 ### Where the data comes from
 
 | | |
 |---|---|
 | Service | `trade_svc` (:8213), `cache:trade:analysis` |
-| Trigger | On demand — type a symbol and press **Analyze**, or just tab out of the field |
-| State | Remembers the last analyzed symbol across navigation |
+| Trigger | Commit a symbol in the command bar - Enter, Tab, or blur |
+| State | The committed symbol persists across all four screens and across navigation |
 
 ### Reading the screen
 
-**Two verdict cards, side by side.**
+**The command bar** carries a draft/committed distinction: the symbol box outlines
+indigo while your typing differs from what is on screen, and an emptied box reverts
+rather than clearing. The company and sector line, and every panel below, follow the
+committed symbol.
 
-**Position (1–8 weeks)** is the more rigorous of the two. It is a **backtested,
-IC-weighted cross-sectional factor model** — meaning each factor's weight was set by how
-well it actually predicted forward returns historically (its *information coefficient*),
-not by hand-tuning. The verdict comes from a **calibration band**, and the headline
-reports what that band has historically delivered:
+**Deep Dive** and **AI Query** sit in the command bar. Each enqueues its report for the
+committed symbol and opens the result in a new tab when it lands; the cache version is
+baselined at click time, so a stale report from an earlier run never opens a tab.
 
-- an **expected return** over roughly the next four weeks, stated as **excess versus the
-  S&P 500** — how much it beat or trailed the index, not the raw move;
-- a **beat-SPY hit rate** (e.g. *"+1.3% excess / 20d · 52% beat-SPY"*).
+**Position** shows the cross-section percentile on a decile rail rather than a
+verdict word, because the model's output is a rank. The two side cards state what
+the tape permits per side.
 
-**"Why — validated factors"** expands to each factor's z-score, weight, contribution and
-information coefficient, plus the model's version and its **out-of-sample** IC. The
-older hand-tuned score is preserved under **"Legacy heuristic"** for comparison.
+**Investor** puts its six factors on the same centred bar language used on the
+Evidence screen - right of centre is a positive contribution. A structurally absent
+factor reads `n/a` with no bar, never a zero-length one.
 
-**Investor (months+)** remains a heuristic score with its top reasons listed.
+**Dealer positioning** is withheld in full when uncollected or stale. That is the
+off-hours case, and an absent ladder is the honest rendering of it.
 
-**Hard gates (⛔)** override the score outright — for example *"Below 200EMA: cannot be
-BUY"*. A gate is a veto, not a deduction.
+### When to open it
 
-**The evidence panels below:**
-
-| Panel | What it shows |
-|---|---|
-| **MTF EMA alignment** | Whether the trend agrees across 1-minute, 5, 15, 60 and daily. A percentage plus per-timeframe labels. All five aligned is a strong, rare condition. |
-| **Momentum** | RSI, ADX, MACD histogram, VWAP, relative volume. |
-| **Sector** | Sector strength, as a signed adjustment. |
-| **Fundamentals** | P/E, PEG, revenue and EPS growth, ROE, margin direction. |
-
-**Deep Dive** opens a full standalone report in a new tab — technicals, fundamentals and
-short interest, plus options analytics (at-the-money IV, implied move, max pain, 25-delta
-skew, IV term structure, 30-day constant-maturity IV, net GEX and flip, open-interest
-walls) and an IV/RV rank. **AI Query** opens the same digest formatted as a chat prompt
-you can copy into an AI assistant — it makes no API call itself.
-
-### Why it matters
-
-The honesty of the Position verdict is what sets it apart. Most retail scoring systems
-are hand-tuned and never tested; this one publishes its own out-of-sample accuracy, so
-you can see how much to trust it. An expected excess return of +1.3% with a 52% hit rate
-is a **small** edge, and the page says so plainly rather than dressing it up.
-
-The **excess-versus-S&P** framing is the right one and is frequently missed elsewhere: a
-stock returning +3% in a month the index returned +5% has lost you money in
-opportunity terms.
-
-**Where it is weak.** Fundamentals come from the broker's instrument data and are
-sometimes stale or odd — negative P/E on unprofitable companies, extreme PEG values.
-Read the fundamentals card as indicative. The model is also cross-sectional, so it ranks
-*relative* to the universe; in a falling market the top-ranked stock still falls.
-
-### When to use it
-
-Before taking a directional options position, and when [Momentum](#momentum) surfaces a
-name you do not know.
+First, for any symbol. It is the orientation screen.
 
 ### Related pages
 
-[Rank Board](#rank-board) (the same model over the whole universe) ·
-[Momentum](#momentum) · [Strategy Finder](#strategy-finder) (how to express the view) ·
-[Expected Move](#expected-move).
+[Evidence](#evidence) · [Rank Board](#rank-board) · [Trade Plan](#trade-plan).
+
+---
+
+## Evidence
+
+*Menu: STRATEGY -> Trade Analyzer -> Evidence · Route `/trade/evidence`*
+
+### What it is
+
+Why the Position verdict is what it is - every weighted factor, its z-score against
+the cross-section, its contribution, and its historical IC - plus how the model has
+been doing and what this name has done before.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:analysis` (`swing_model.contributions`) |
+| Track record | The artifact's own OOS IC, plus the live monitor over `rec_journal.db` |
+| History | This symbol's journalled reads, labelled once their 20 days elapse |
+
+### Reading the screen
+
+The **contribution bar** is the same centred language as the Investor factors: right
+of the axis is a positive contribution to the composite, left negative, and the
+foot of the table is their weighted sum.
+
+⚠ **The two right-hand cards are not the same question.** Track record is about the
+MODEL across every symbol; history is about THIS symbol. Five reads of one name
+cannot support a correlation, so the history is a list of outcomes with `pending`
+where the horizon has not elapsed - never a statistic.
+
+The amber callout states what share of the model's weight sits on volatility
+factors. Read it before reading the table.
+
+### When to open it
+
+Before acting on a Position read you intend to size, and any time the verdict
+surprises you.
+
+### Related pages
+
+[Overview](#overview) · [Trade Plan](#trade-plan).
 
 ---
 
@@ -2292,7 +2300,7 @@ name you do not know.
 
 ### What it is
 
-The same swing model as [Analyze](#analyze), run over **every name in the
+The same swing model as [Overview](#overview), run over **every name in the
 model's universe at once** and sorted. Analyze answers "what about this stock?"; the
 Rank Board answers "of everything the model can see, what is best and worst today?" —
 the shortlist you start from rather than the verdict you end on.
@@ -2364,8 +2372,51 @@ At the start of a research session, to pick what to analyze. Not as a signal in 
 
 ### Related pages
 
-[Analyze](#analyze) (the per-symbol verdict) · [Momentum](#momentum) ·
+[Overview](#overview) (the per-symbol verdict) · [Momentum](#momentum) ·
 [Strategy Finder](#strategy-finder).
+
+---
+
+## Trade Plan
+
+*Menu: STRATEGY -> Trade Analyzer -> Trade Plan · Route `/trade/plan`*
+
+### What it is
+
+The verdict rendered as something you could be wrong about: structure, legs, entry
+zone, stop, target, time stop and events - beside a card stating what would change
+the call.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:analysis` (`trade_plan`) |
+| Structure | A pure lookup over side x IV state x dealer levels |
+| Stop | ATR or the nearer wall, whichever is TIGHTER; absent if neither exists |
+
+### Reading the screen
+
+**The time stop is highlighted deliberately.** It is the model's own 20-trading-day
+horizon, and it is the only field nothing else in the app enforces - a position
+opened on a 20-day edge and held three months is no longer being held for the
+reason it was opened.
+
+**The no-trade card is always present**, even when a plan is cleared. A refused side
+with its reasons is a research finding; hiding it would make the screen look like
+the model had nothing to say.
+
+⚠ Where the tape has not cleared a directional short, the alternative offered is a
+**pair against SPY**. The model predicts excess return versus the index, so that is
+the expression the prediction actually supports.
+
+### When to open it
+
+After Overview and Evidence, when you have decided the read is worth acting on.
+
+### Related pages
+
+[Overview](#overview) · [Evidence](#evidence) · [Rank Board](#rank-board).
 
 ---
 
@@ -2535,7 +2586,7 @@ useful decisions are.
 ### Related pages
 
 [Sector & Industry](#sector-industry) (context for the RS column) ·
-[Analyze](#analyze) (a verdict on any holding).
+[Overview](#overview) (a verdict on any holding).
 
 ---
 

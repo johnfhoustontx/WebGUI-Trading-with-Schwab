@@ -174,3 +174,46 @@ class TestNeverRaises:
     def test_a_degraded_input_yields_a_monitor_shaped_dict(self, rows):
         out = live_ic.compute(rows)
         assert set(out) >= {"status", "pooled_ic", "n_labelled", "long", "short"}
+
+
+# ── Per-symbol history (Phase 7 / terminal redesign) ─────────────────────────
+# The Evidence screen shows "this name's last five reads and what followed",
+# which is the journal filtered to one symbol. It is a different question from
+# the model-wide IC: five reads can never support a correlation, so this returns
+# ROWS, not a statistic — and every row says plainly whether its outcome is
+# known yet.
+
+class TestSymbolHistory:
+    def _rows(self):
+        return [
+            {"symbol": "AAPL", "reading_date": "2026-07-01", "percentile": 90,
+             "swing_verdict": "BUY", "fwd_20d": 0.021, "composite": 0.8},
+            {"symbol": "AAPL", "reading_date": "2026-06-15", "percentile": 70,
+             "swing_verdict": "HOLD", "fwd_20d": -0.004, "composite": 0.2},
+            {"symbol": "AAPL", "reading_date": "2026-08-20", "percentile": 90,
+             "swing_verdict": "BUY", "fwd_20d": None, "composite": 0.9},
+        ]
+
+    def test_it_returns_rows_newest_first(self):
+        out = live_ic.symbol_history(self._rows())
+        assert [r["date"] for r in out] == ["2026-08-20", "2026-07-01", "2026-06-15"]
+
+    def test_an_unmatured_read_says_PENDING_rather_than_showing_a_zero(self):
+        out = live_ic.symbol_history(self._rows())
+        assert out[0]["result"] is None
+        assert out[0]["pending"] is True
+
+    def test_a_matured_read_carries_its_outcome_and_direction(self):
+        out = live_ic.symbol_history(self._rows())
+        row = next(r for r in out if r["date"] == "2026-07-01")
+        assert row["result"] == pytest.approx(0.021)
+        assert row["pending"] is False
+
+    def test_it_caps_the_list(self):
+        many = [dict(self._rows()[0], reading_date=f"2026-07-{d:02d}")
+                for d in range(1, 12)]
+        assert len(live_ic.symbol_history(many, limit=5)) == 5
+
+    def test_no_rows_is_an_empty_list(self):
+        assert live_ic.symbol_history(None) == []
+        assert live_ic.symbol_history([]) == []

@@ -18,7 +18,8 @@ def test_shell_registers_all_pages():
         "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/sentiment/momentum",
-        "/trade", "/trade/board", "/portfolio", "/driver", "/settings",
+        "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
+        "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
         "/market", "/desk",
     )
@@ -452,7 +453,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/options/matrix") == ["Markets", "Opportunity Board"]
     assert main.breadcrumb_trail("/options/flow") == ["Markets", "Flow Alerts"]
     assert main.breadcrumb_trail("/trade") == [
-        "Strategy", "Trade Analyzer", "Analyze"]
+        "Strategy", "Trade Analyzer", "Overview"]
     assert main.breadcrumb_trail("/trade/board") == [
         "Strategy", "Trade Analyzer", "Rank Board"]
     assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]

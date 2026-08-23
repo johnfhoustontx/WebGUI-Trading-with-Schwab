@@ -987,56 +987,69 @@ log.
 > paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 > Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
 
-## Analyze
+## Overview
 
-**Route:** `/trade`. The first tab of the Trade Analyzer group.
+**Route:** `/trade`. The first tab of the Trade Analyzer group, and the screen the
+**Signal desk** command bar sits above on all four tabs.
 
-On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**
-(tabbing out of the field does it too).
+The command bar is persistent: the model stamp, a **Symbol** box, the last price and
+its change, and the multi-timeframe bias. Type a ticker and press **Enter** (or tab
+out) to commit it - the box outline turns indigo while your typing differs from the
+committed symbol, so a half-typed ticker never looks like the thing on screen.
+Clearing the box and leaving it reverts to the last good symbol rather than blanking
+the desk.
 
-**Two more buttons sit beside Analyze, and each opens a separate screen in a new
-browser tab:**
+Two report buttons sit in the command bar beside the bias, and each opens a separate
+screen in a new browser tab once its report is ready:
 
 | Button | Opens |
-|--------|-------|
-| **Deep Dive** | A full standalone report for the symbol — technicals, fundamentals and short interest, plus options analytics (at-the-money IV, implied move, max pain, 25-delta skew, IV term structure, 30-day constant-maturity IV, net GEX and flip, open-interest walls) and an IV/RV rank. |
-| **AI Query** | The same digest formatted as a **copyable chat prompt** you can paste into an AI assistant. It makes **no** API call itself, so it costs nothing. |
+| --- | --- |
+| **Deep Dive** | The EquityDeepDive quantitative report for the committed symbol |
+| **AI Query** | A copyable chat prompt describing the symbol, for pasting into Claude |
 
-> IV rank reads "building" until enough daily snapshots have accumulated for that
-> symbol. That is expected on a name you have just started analyzing.
+They act on the **committed** symbol, so commit first if you have just typed a new
+ticker.
 
-- A **header** with the symbol, price, bias, and volume.
-- **Two verdict cards side by side** — **Position** (1–8 weeks) and **Investor**
-  (months+):
-  - **Position (1–8 weeks)** is **backtested**. Rather than a hand-tuned score, it
-    ranks the stock on a set of price/volume factors that were *validated against real
-    forward returns* (which factors matter, and by how much, was learned from history —
-    not guessed), then places it in a **calibrated band**. The headline shows the
-    Buy / Hold / Sell verdict for that band plus what the band has *historically*
-    delivered: a band **percentile**, an **expected return** over the model's horizon
-    (≈ 4 weeks), and how often names in that band **beat the S&P 500** — e.g.
-    *"90th pctile · +1.3% / 20d · 52% beat-SPY"*. Open **"Why — validated factors"** to
-    see each factor's contribution (momentum, trend quality, relative strength,
-    volatility, turnover…) and the **model's own track record** (its version date and
-    out-of-sample accuracy). The previous hand-tuned verdict is still available under a
-    collapsed **"Legacy heuristic"** section for comparison. *Honest note:* the edge is
-    real but **small and regime-dependent** — treat it as one weighted input, not a
-    guarantee. The **Investor (months+)** validation is deferred (it needs fundamentals
-    history), so that card is unchanged.
-  - **Investor (months+)** shows a Buy / Hold / Sell verdict (color-coded), a score,
-    the top reasons, any hard "gates" that fired, and an expandable factor breakdown.
-> **The Markov Forecast card was removed in June 2026** and no longer appears on
-> this page. It projected the *legacy* technical-momentum score, which contradicted
-> the validated Position read sitting beside it. The underlying forecast is still
-> computed and still reaches the data feed, but nothing on this screen renders it.
+The screen itself reads top to bottom:
 
-- An **MTF EMA Alignment** card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
-  5m, 1m).
-- A **Momentum** strip (RSI, ADX, MACD histogram, VWAP, relative volume).
-- A **Sector** card and, when available, a **Fundamentals** card (P/E, PEG, revenue
-  & EPS growth, ROE, margin trend).
+- **Market state** with a chip per side - *long cleared*, *short relative only*, and
+  so on. These are the same gates the rest of the app applies.
+- **Position (1-8 weeks)** - the cross-section percentile as a large number over a
+  **decile rail**, with the marker where this name sits between the bottom and top
+  decile, and the calibrated expectation beneath. Two cards below it say what each
+  side is permitted and why.
+- **Investor (months+)** - the verdict with its six factor scores on centred bars.
+  A bar to the right of the middle line is a positive contribution, to the left
+  negative, and a factor with no data reads **n/a** with no bar at all.
+- **Dealer positioning & volatility** - put wall, flip, spot and call wall on one
+  ladder, over the volatility stats. The ladder is **absent entirely** when the
+  data is not collected or is stale, because a drawn ladder is a much stronger
+  claim than a missing one.
+- **Where it sits among its peers** - the same model run across its sector, with
+  this symbol highlighted.
 
-The analysis persists as you navigate away and back.
+---
+
+## Evidence
+
+**Route:** `/trade/evidence`.
+
+The reasoning behind the Position verdict. Each validated factor appears with its
+**z-score** against today's cross-section, its **weight**, a zero-centred
+**contribution bar**, and its **IC** - the historical information coefficient. The
+weighted composite is footed at the bottom, and it is the sum of the contribution
+column.
+
+Two cards sit alongside, and they answer different questions:
+
+- **Model track record** - the artifact, its out-of-sample IC, which weight set
+  scored this symbol, and the live tracking line. The amber callout carries the
+  loudest thing the model has to say about itself: how much of its weight sits on
+  volatility factors.
+- **This name's history** - the last five reads of *this symbol* and what followed.
+  A read whose 20 days have not elapsed shows **pending** rather than a number.
+  Five reads can never support a correlation, which is why this is a list of
+  outcomes and not a statistic.
 
 ---
 
@@ -1096,6 +1109,22 @@ Two details worth knowing before reading its P&L:
   be recording the market's direction instead.
 
 It is paper only, and separate from the Claude Trades book.
+
+---
+
+## Trade Plan
+
+**Route:** `/trade/plan`.
+
+Two cards. The left one is the plan when a side is cleared: structure, legs, entry
+zone, stop, target, **time stop** and events. The time stop is highlighted in indigo
+because it is the model's own 20-trading-day horizon and nothing else in the app
+enforces it - past that date the read is unmodelled.
+
+The right card is the other half, and it is always shown. It states plainly why
+there is no trade (or why one side is refused), lists **what would change it**, and
+tells you **how to express the view anyway** if you want the exposure - usually as a
+pair against SPY, since relative return is what the model actually predicts.
 
 ---
 

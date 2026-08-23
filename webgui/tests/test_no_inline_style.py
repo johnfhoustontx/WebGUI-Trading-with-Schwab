@@ -9,6 +9,8 @@ reintroduces either an inline `.style()` or a slot `:style=`.
 """
 import pathlib
 
+import pytest
+
 
 def test_options_helpers_have_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages" / "options"
@@ -86,8 +88,23 @@ def test_trade_page_has_no_inline_style():
     assert ":style=" not in src, "trade.py still uses a Vue :style= slot binding"
 
 
-# Phase 5 (2026-08-22): the Rank Board is the Trade group's second tab and wears
-# the same navy dashboard theme, so it is held to the same standard.
+# The Signal Desk terminal redesign: four screens plus their shared shell and
+# token vocabulary. The source design was authored entirely in inline styles, so
+# these are exactly the files where the standard could have quietly lapsed.
+@pytest.mark.parametrize("name", [
+    "terminal_theme.py", "trade_terminal.py", "trade_shell.py",
+    "trade_overview.py", "trade_evidence.py", "trade_plan_screen.py",
+])
+def test_signal_desk_screens_have_no_inline_style(name):
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    src = (base / name).read_text(encoding="utf-8")
+    assert ".style(" not in src, f"{name} still uses .style()"
+    assert ":style=" not in src, f"{name} still uses a Vue :style= binding"
+
+
+# The Rank Board joined in Phase 5 and keeps its own guard: it is the one Signal
+# Desk screen with a Quasar table, so it has a slot-binding surface the others
+# do not.
 def test_trade_board_page_has_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages"
     src = (base / "trade_board.py").read_text(encoding="utf-8")

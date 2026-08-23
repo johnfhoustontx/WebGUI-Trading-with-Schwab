@@ -98,6 +98,30 @@ def _side(rows, want):
     }
 
 
+def symbol_history(rows, limit=5):
+    """This name's recent reads and what followed — ROWS, not a statistic.
+
+    Five reads can never support a correlation, so this deliberately returns no
+    IC: it is a record, and the reader draws their own line through it. Every
+    row says whether its outcome is known yet, because an unmatured read and a
+    flat one are different facts and a blank cell conflates them."""
+    out = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        fwd = _num(r.get(HORIZON_KEY))
+        out.append({
+            "date": r.get("reading_date"),
+            "percentile": r.get("percentile"),
+            "verdict": r.get("swing_verdict"),
+            "composite": _num(r.get("composite")),
+            "result": fwd,
+            "pending": fwd is None,
+        })
+    out.sort(key=lambda d: (d["date"] or ""), reverse=True)
+    return out[:int(limit)] if limit else out
+
+
 def compute(rows, artifact_oos_ic=None):
     """The monitor's reading over ``rows`` (labelled journal readings)."""
     out = {
