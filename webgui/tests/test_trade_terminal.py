@@ -103,6 +103,26 @@ class TestThePercentileRail:
         rail = tt.percentile_rail({"percentile": 50})
         assert "+0.0%" not in rail["stats"]
 
+    def test_the_caption_does_not_claim_a_rank_among_todays_names(self):
+        """The number is a calibration band cut from the model's own history,
+        NOT a percentile of today's cross-section. Measured live on 2026-08-22:
+        78 names landed 20/20/12/14/12 across the five bands — a true
+        cross-sectional percentile could not do that."""
+        note = tt.percentile_rail({"percentile": 90})["note"].lower()
+        assert "today" not in note
+        assert "cross-section" not in note
+
+    def test_it_offers_the_longer_explanation_on_hover(self):
+        tip = tt.percentile_rail({"percentile": 90})["tip"].lower()
+        assert "band" in tip
+        # The specific misreading the caption exists to prevent.
+        assert "top 10%" in tip
+
+    def test_an_unranked_reading_carries_no_explanation_to_give(self):
+        rail = tt.percentile_rail({})
+        assert "unranked" in rail["note"].lower()
+        assert rail["tip"] == ""
+
 
 class TestGateChips:
     def test_a_cleared_side_reads_positive(self):
@@ -151,6 +171,41 @@ class TestInvestorFactorBars:
     def test_no_breakdown_is_an_empty_list(self):
         assert tt.investor_bars({}) == []
         assert tt.investor_bars(None) == []
+
+    def test_earnings_trajectory_reads_as_unpublished_not_as_a_zero(self):
+        """Schwab's `/instruments?projection=fundamental` carries no
+        `epsSurprises` and no `guidanceDirection` (verified live: 56 keys,
+        neither present), so both of this component's inputs score 0 and it
+        contributes exactly 0 for every symbol. A drawn 0 reads as "measured
+        and neutral", which is a different claim from "never published"."""
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "earnings_traj", "raw_score": 0, "contribution": 0.0}]})
+        assert bars[0]["unpublished"] is True
+        assert bars[0]["width_pct"] == 0.0
+        # Whole words, in the bar track the empty bar leaves free — a 46px
+        # value column can only hold an abbreviation, and this needs saying.
+        assert bars[0]["value"] == ""
+        assert bars[0]["track_text"] == "not published by Schwab"
+
+    def test_a_scored_row_puts_nothing_in_the_bar_track(self):
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "valuation", "raw_score": 20, "contribution": 4.0}]})
+        assert bars[0]["track_text"] == ""
+
+    def test_a_scored_earnings_trajectory_is_left_alone(self):
+        """Self-correcting: the flag is keyed off the score being 0, not off
+        the factor name, so a fundamentals source that DOES carry surprises
+        renders normally instead of being libelled as missing."""
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "earnings_traj", "raw_score": 40, "contribution": 6.0}]})
+        assert bars[0]["unpublished"] is False
+        assert bars[0]["value"] == "+6"
+
+    def test_another_factor_scoring_zero_is_a_real_zero(self):
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "valuation", "raw_score": 0, "contribution": 0.0}]})
+        assert bars[0]["unpublished"] is False
+        assert bars[0]["value"] == "0"
 
 
 class TestTheDealerLadder:

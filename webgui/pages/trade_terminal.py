@@ -109,8 +109,26 @@ def should_commit(draft, committed, explicit):
     return bool(explicit) or d != (committed or "").strip().upper()
 
 
+# The rail's caption used to read "of today's cross-section", which is the
+# natural reading of a percentile and is NOT what this number is. The score's
+# INPUTS are today's cross-section — each factor z-scored against the same 78
+# names the model was fitted on — but the BUCKETS are fixed thresholds cut from
+# the 5-year training panel, so a band is a claim about the model's own score
+# history, not a rank among today's names. Measured live on 2026-08-22 the 78
+# names landed 20/20/12/14/12 across the five bands; a real percentile of a
+# 78-name cross-section is ~15.6 per band by construction and cannot do that.
+_RAIL_NOTE = "its band, against this model's own history"
+_RAIL_TIP = (
+    "The model's scores are sorted into five bands, cut from years of its own "
+    "output. 90th means the top band, 10th the bottom.\n\n"
+    "This is NOT the top 10% of today's names — the bands are fixed score "
+    "thresholds, so on any given day they fill unevenly. A defensive market "
+    "puts most names in the low bands and leaves the top one nearly empty."
+)
+
+
 def percentile_rail(swing):
-    """The cross-section rank, its marker position, and the calibrated stats."""
+    """The band reading, its marker position, and the calibrated stats."""
     sm = swing or {}
     pct = fmt.num(sm.get("percentile"))
     exp = fmt.num(sm.get("expected_fwd"))
@@ -124,8 +142,11 @@ def percentile_rail(swing):
     return {
         "percentile": f"{int(pct)}th" if pct is not None else "—",
         "pos_pct": pct if pct is not None else 50.0,
-        "note": ("of today's cross-section" if pct is not None
-                 else "unranked — no cross-section to place it in"),
+        "note": (_RAIL_NOTE if pct is not None
+                 else "unranked — too few peers to score it against"),
+        # Nothing to explain when there is no reading; an unranked rail showing
+        # a tooltip about bands would be explaining a number it isn't showing.
+        "tip": _RAIL_TIP if pct is not None else "",
         "stats": " · ".join(stats),
     }
 
@@ -149,20 +170,41 @@ def gate_chips(clearance):
     return out
 
 
+# Schwab's `/instruments?projection=fundamental` carries 56 fields and neither
+# `epsSurprises` nor `guidanceDirection` (verified live 2026-08-22), so both of
+# `earnings_traj`'s inputs score 0 and the component contributes exactly 0 for
+# every symbol, always. Flagged off the SCORE rather than the factor name, so a
+# fundamentals source that does supply them renders normally.
+_UNPUBLISHED_FACTOR = "earnings_traj"
+
+
 def investor_bars(verdict):
     """Investor factor scores on the shared centred bar."""
     out = []
     for b in ((verdict or {}).get("breakdown") or []):
         v = fmt.num(b.get("contribution"))
+        # Strictly the 0, not a None: a None contribution means the engine
+        # returned nothing for this row, which is "n/a" — a different claim
+        # from "the data source does not carry it".
+        unpublished = b.get("factor") == _UNPUBLISHED_FACTOR and v == 0
         left, width = T.centred(v, 60.0) if v is not None else (50.0, 0.0)
+        if unpublished:
+            left, width = 50.0, 0.0
         out.append({
             "label": humanize_factor(b.get("factor", "")),
-            "value": _signed(v, 0, dash="n/a") if v is not None else "n/a",
-            "value_class": T.sign_text(v) if v is not None else T.OFF,
-            "bar_class": T.sign_bar(v) if v is not None else T.BAR_DIM,
+            "value": ("" if unpublished else
+                      _signed(v, 0, dash="n/a") if v is not None else "n/a"),
+            # Words in the bar track, where a zero-width bar leaves the space
+            # free. The 46px value column can only hold an abbreviation, and
+            # "the data source does not carry this" is not abbreviable into
+            # something a reader would decode correctly.
+            "track_text": "not published by Schwab" if unpublished else "",
+            "value_class": (T.OFF if unpublished or v is None else T.sign_text(v)),
+            "bar_class": (T.BAR_DIM if unpublished or v is None else T.sign_bar(v)),
             "left_pct": left,
             "width_pct": width,
             "absent": v is None,
+            "unpublished": unpublished,
         })
     return out
 

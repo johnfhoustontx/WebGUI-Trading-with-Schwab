@@ -71,9 +71,18 @@ def _build(state, refs):
                     ui.label(str(plan["action"]).upper()).classes(
                         f"{T.CHIP_BASE} {T.CHIP_POS} text-[10.5px] "
                         "tracking-[0.13em] px-[11px] py-[3px]")
+            # Not "percentile": the number is a calibration band, not a rank
+            # among today's names. The rail on Overview carries the full
+            # explanation; here it rides along as a hover.
+            rail = tt.percentile_rail(sm)
             pct = fmt.num(sm.get("percentile"))
-            ui.label(f"{int(pct)}th percentile" if pct is not None else "").classes(
-                f"{T.MONO} text-[12.5px] text-[#7d8db0]")
+            with ui.label(f"{rail['percentile']} band" if pct is not None
+                          else "").classes(
+                    f"{T.MONO} text-[12.5px] text-[#7d8db0]"):
+                if rail["tip"]:
+                    ui.tooltip(rail["tip"]).classes(
+                        "max-w-[320px] whitespace-pre-line text-[11.5px] "
+                        "leading-[1.55]")
 
         plan_body.clear()
         with plan_body:

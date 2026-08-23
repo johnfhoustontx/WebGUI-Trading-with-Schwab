@@ -21,12 +21,19 @@ real P/E, PEG, revenue/EPS growth, ROE and margin trend whenever at least three
 of its four core fields arrive. It degrades to "Insufficient fundamental data →
 HOLD" only on a failed/thin fetch — a note flags that case.
 
-⚠ Three Investor inputs are structurally absent from that payload and score a
-permanent 0 regardless of the symbol: EPS-surprise streak and guidance (the
-whole ``earnings_traj`` component), and free cash flow (so its HOLD gate cannot
-fire). ``days_to_earnings`` is absent for the same reason, which is why the
-Position earnings gate never fires either. Do not read a low Investor score as a
-verdict on the company without checking which components could contribute.
+⚠ Four Investor/Position inputs are structurally absent from that payload — verified
+live 2026-08-22, where ``fundamental`` returned 56 keys and none of these:
+
+* ``epsSurprises`` and ``guidanceDirection`` — both inputs to ``earnings_traj``, so
+  that component scores a permanent 0 and **15 of the composite's 100 points are
+  unreachable for every symbol**. This is the only one that moves the score, and it
+  moves it down; the Overview renders the row as "not published by Schwab" rather
+  than as a measured zero.
+* ``freeCashFlow`` — scores nothing either way, but its HOLD gate cannot fire.
+* ``nextEarningsDate`` — which is why the Position earnings gate never fires.
+
+Do not read a low Investor score as a verdict on the company without checking which
+components could contribute.
 """
 import time
 

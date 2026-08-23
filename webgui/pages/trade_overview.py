@@ -65,9 +65,15 @@ def _build(state, refs):
                         "bg-white shadow-[0_0_10px_rgba(255,255,255,0.6)] left-1/2")
                 with ui.row().classes("w-full justify-between text-[10.5px] "
                                       "text-[#56678a]"):
-                    ui.label("bottom decile")
-                    ui.label("cross-section rank")
-                    ui.label("top decile")
+                    # Not "decile" — there are five bands, and they are cut from
+                    # the model's own score history, not from today's names.
+                    ui.label("weakest band")
+                    ui.label("model band")
+                    ui.label("strongest band")
+                with rail:
+                    rail_tip = ui.tooltip("").classes("max-w-[320px] "
+                                                      "whitespace-pre-line "
+                                                      "text-[11.5px] leading-[1.55]")
 
             side_cards = ui.element("div").classes(
                 "w-full grid grid-cols-2 gap-3")
@@ -123,6 +129,7 @@ def _build(state, refs):
         rail_vals = tt.percentile_rail(sm)
         pctl.text = rail_vals["percentile"]
         pctl_note.text = rail_vals["note"]
+        rail_tip.text = rail_vals["tip"]
         pctl_stats.text = rail_vals["stats"]
         marker.classes(remove="left-1/2", add=f"left-[{rail_vals['pos_pct']:.1f}%]")
 
@@ -153,12 +160,22 @@ def _build(state, refs):
                         "w-full grid items-center gap-3 "
                         "[grid-template-columns:minmax(96px,152px)_1fr_46px]"):
                     ui.label(b["label"]).classes(f"{T.LABEL} leading-[1.35]")
-                    sh.centred_bar(b["left_pct"], b["width_pct"], b["bar_class"])
+                    if b["track_text"]:
+                        # A zero-width bar and an empty value column would read
+                        # as "measured, and it came to nothing". Say why instead.
+                        ui.label(b["track_text"]).classes(
+                            f"{T.OFF} text-[11px] italic leading-[1.35]")
+                    else:
+                        sh.centred_bar(b["left_pct"], b["width_pct"],
+                                       b["bar_class"])
                     ui.label(b["value"]).classes(
                         f"{T.MONO} text-[12.5px] text-right {b['value_class']}")
-        inv_foot.text = ("Three inputs are structurally absent from the Schwab "
-                         "payload and score a permanent zero — read a low score "
-                         "against what could contribute.")
+        inv_foot.text = (
+            "Schwab publishes no earnings surprises and no company guidance, so "
+            "Earnings trajectory can never score — 15 of the 100 points are off "
+            "the table for every stock, and the score reads low because of it. "
+            "Free cash flow is missing too, so the check that would cap a stock "
+            "at HOLD on negative cash flow never runs.")
 
         marks = tt.dealer_ladder(a.get("dealer_context"), a.get("price"))
         dealer_panel.set_visibility(bool(marks))

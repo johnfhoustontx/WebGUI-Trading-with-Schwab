@@ -2230,13 +2230,27 @@ committed symbol.
 committed symbol and opens the result in a new tab when it lands; the cache version is
 baselined at click time, so a stale report from an earlier run never opens a tab.
 
-**Position** shows the cross-section percentile on a decile rail rather than a
-verdict word, because the model's output is a rank. The two side cards state what
-the tape permits per side.
+**Position** shows a band reading on a rail rather than a verdict word, because the
+model's output is a rank. **The band is not a percentile of today's names.** The
+score's inputs are today's cross-section - each factor measured against the same 78
+symbols the model was fitted on - but the five bands are fixed score thresholds cut
+from five years of the model's own output. So 90th means "top band", not "top 10% of
+the board", and the bands fill unevenly: on 2026-08-22 the 78 names landed 20 / 20 /
+12 / 14 / 12 from the weakest band to the strongest, where a true percentile would put
+about 15 or 16 in each. A defensive market can leave the top band nearly empty. Hover
+the rail for that explanation in the app. The two side cards state what the tape
+permits per side.
 
 **Investor** puts its six factors on the same centred bar language used on the
-Evidence screen - right of centre is a positive contribution. A structurally absent
-factor reads `n/a` with no bar, never a zero-length one.
+Evidence screen - right of centre is a positive contribution. A factor the engine did
+not return reads `n/a` with no bar, never a zero-length one. **Earnings trajectory is
+a special case and always reads "not published by Schwab".** Schwab's fundamentals
+payload carries 56 fields and neither earnings surprises nor company guidance, so both
+of that component's inputs are missing and it contributes exactly 0 for every symbol -
+15 of the score's 100 points are off the table before any stock is examined. Free cash
+flow is absent for the same reason, so the check that would cap a stock at HOLD on
+negative cash flow can never fire. Read a middling Investor score against what could
+have contributed, not as a verdict on the company.
 
 **Dealer positioning** is withheld in full when uncollected or stale. That is the
 off-hours case, and an absent ladder is the honest rendering of it.

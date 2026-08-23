@@ -34,7 +34,10 @@ POLL_SEC = 5.0
 _COLS = ("w-full [grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
 _TABLE_MIN = "min-w-[940px]"
 
-_HEAD = ("SYMBOL", "PCTL", "SCORE", "EXP / 20D", "HIT", None, "DEALER", "IV",
+# "BAND", not "PCTL": the number is a calibration band cut from the model's own
+# score history, and on any given day the bands fill unevenly — so it is not a
+# percentile of the names in this table. See `trade_terminal._RAIL_TIP`.
+_HEAD = ("SYMBOL", "BAND", "SCORE", "EXP / 20D", "HIT", None, "DEALER", "IV",
          "GATES")
 
 
