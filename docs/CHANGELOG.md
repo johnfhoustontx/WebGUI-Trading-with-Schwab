@@ -122,6 +122,50 @@ Phase 4 found that what remains is a beta bet.**
 - Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
   options-scanner **1186**, schwab-proxy **104**.
 
+**The Signal Desk — the Trade Analyzer rebuilt to a supplied design.** Four
+screens behind one persistent command bar: Overview, Evidence, Rank board, Trade
+plan.
+- **Tailwind-first held.** The source design is entirely inline styles, which
+  this repo forbids; every value is a token in `webgui/pages/terminal_theme.py`
+  and the six new files join `test_no_inline_style.py`. Percentages (bar
+  geometry, the dealer ladder, the decile marker) use runtime arbitrary classes
+  — the documented continuous-value exception — while every COLOUR comes from a
+  fixed finite set. Not config-driven, deliberately: a page-scoped palette whose
+  numbers are chosen against each other, the same category as `sector_heat`.
+- **The design's own tab bar was dropped**, because the app already renders one
+  from the nav; the four screens are nav children instead, and the command bar
+  keeps symbol, price, bias and the model stamp. The symbol is a DRAFT until
+  committed — the box outlines indigo while your typing differs from what is on
+  screen, and blurring an empty field reverts, because an empty symbol is not a
+  request.
+- **Mono is reserved for numerics**, so any monospaced text on screen IS a
+  number — which is what makes a nine-column rank table scannable.
+- **Absent stays absent.** The dealer ladder is withheld ENTIRELY when
+  uncollected or stale; an investor factor with no data reads `n/a` with no bar;
+  an unmatured history row reads `pending`. A dense mono grid reads as measured
+  whether or not it was, which makes this app's documented failure mode worse,
+  not better.
+- **Five real defects surfaced by building it**, three of them only by running
+  it: the rewrite would have DROPPED the Deep Dive and AI Query buttons (now in
+  the command bar, reachable from all four screens); `plan_rows`/`dealer_rows`
+  return DICTS and were unpacked as tuples (the plan screen 500-ed — pinned now
+  at the boundary, since the webgui tests never execute a render body and ruff's
+  F82 sees no undefined name); `analyze` fetched the quote's `change_pct` and
+  stored neither, so the command bar showed a permanent em dash over data
+  already in hand; `−0.00` rendered as a small negative; and the options
+  matrix's `"na"` SENTINEL leaked into the dealer column as a literal value —
+  normalised at the service boundary, with a test that a real 0 still survives.
+- **The rank board gained real columns**, joined from one cache read for the
+  whole board: dealer regime and IV from the options matrix, plus a genuinely
+  side-specific metric — the calibration band for longs, FINRA's days-to-cover
+  for shorts. `symbol_history` is new on the payload for the Evidence screen:
+  the last five reads of one name, deliberately rows and not a statistic.
+- Verified live across all four screens: tokens resolve exactly (`#080d17`
+  ground with its radial lift, `#0e1626→#0b1220` panels, Manrope + JetBrains
+  Mono), and the decile marker sits at 89.9% of the rail for a 90th-percentile
+  read.
+- Suites: webgui **2676**, trade_svc **385**; ruff and pyright clean.
+
 **Phase 6 — the feedback loop.** The journal has recorded what the model SAID
 since Phase 1; this records what happened next. Phase 4 decided the shape of all
 of it.
