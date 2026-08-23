@@ -4,6 +4,87 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-23 (**Sonnet 5 everywhere, and a prompt audit measured with
+`count_tokens` rather than estimated.**
+- **The migration was one line; the audit was the work.** Only one production call site
+  still ran Sonnet 4.6 — `options_svc.compute._NEWS_MODEL`, the web-search phase. It was
+  pinned there because Sonnet 5's support for the `web_search_20260209` tool version was
+  undocumented at the time; that pairing **is** documented now (the `_20260209` variants
+  run on Opus 5/4.8/4.7/4.6, Sonnet 5 and Sonnet 4.6), so the pin is retired. Live-probed
+  end to end: the search fires (`server_tool_use` blocks present) and the driver lines
+  parse.
+- **⚠ Migrating that call flipped a SILENT default.** `_research_news` passes no
+  `thinking` argument. On Sonnet 4.6 that meant thinking-OFF; on Sonnet 5 it means
+  ADAPTIVE — and thinking tokens come out of `max_tokens`. A live probe returned a
+  `thinking` block and **1267 output tokens** against the old `_NEWS_MAX_TOKENS = 700`,
+  i.e. the migration alone would have started truncating driver lines. Thinking is
+  deliberately left adaptive there rather than disabled: with thinking off Sonnet 5 is
+  markedly less tool-eager, and firing the search is that call's entire job — a search
+  that never fires returns training memory as if it were today's news, the exact failure
+  the `_NEWS_ABORT_ERROR_CODES` scan exists to catch. `output_config={"effort": "low"}`
+  bounds the spend instead, and the cap moved 700 → 1600.
+- **The biggest single win was dead instruction text on a forced-tool call.**
+  `gamma_tool.build_summary_prompt_bundled` appended `_INTRADAY_SUMMARY_ASK` /
+  `_PREMARKET_SUMMARY_ASK` — a numbered free-text structure ("1. BIG PICTURE … 4. WHAT
+  IF") plus "Cap the whole reply at 350 words". Both production consumers
+  (`gamma_analyze`, `eod_briefing`) call with `tool_choice` forcing `submit_analysis` /
+  `submit_eod`, so the model never free-writes: the output contract is the tool schema
+  and the caller's system prompt, and that whole block was unreachable text billed on
+  every call. Each ASK is now one line. The role sentence that opened each one went too —
+  the caller's system prompt owns the role, and a second differently-worded identity in
+  the user turn only competes with it.
+- **Say the real budget or pay for what you throw away.** `_research_news` truncates to
+  `_NEWS_MAX_LINES` (6) but never told the model, so a probe produced ten lines and four
+  were discarded unread. `_NEWS_SYSTEM` is now an f-string on that constant — the prompt
+  and the code cannot drift. Measured on a second live probe: **1267 → 810 output tokens
+  (−36%)**, exactly six lines, none discarded. Output bills at 5× input, so the 46 input
+  tokens this cost are bought back many times over.
+- **⚠ A stale factual claim in `decider._cached_system` inverted its own conclusion.** The
+  docstring said Sonnet 5's minimum cacheable prefix is ~2048 tokens and that the
+  tools+system prefix measures ~800, concluding the breakpoint was inert. Measured with
+  `count_tokens`: the floor is **1024** (Sonnet 5 and Opus 4.8 alike) and the prefix is
+  **1078**. The cache is live and has been. Consequence worth knowing before anyone
+  "tidies" that mandate: it clears the floor by 54 tokens, so trimming the driver prompt
+  silently switches the cache off. That is why the driver prompt is the one prompt this
+  pass deliberately did not shorten.
+- **The driver's committed default was Opus.** `settings._resolve_model()` returned
+  `claude-opus-4-8`, and the only thing keeping the 30-minute autonomous checkpoints on
+  Sonnet was `shared/driver_model.txt` — gitignored and untracked, so a fresh clone, a
+  wiped `shared/` or a new machine put them on Opus silently. The committed default is
+  now `claude-sonnet-5`; the env var and file overrides still win, and the no-override
+  path is pinned by a test that says why.
+- **Deduplication, not shortening.** "Frame it as what the reader should DO, not what
+  dealers are doing" appeared five times across `_ANALYZE_SYSTEM`, the `submit_analysis`
+  tool description and three field descriptions. It now appears where it belongs — once
+  in the system prompt, once on `narrative` where the shape genuinely varies. `_EOD_SYSTEM`
+  stated its mandatory-fields rule twice and shouted both. Kept once, at normal volume,
+  **with its reason attached**: that demand is not emphasis boilerplate, it mitigates a
+  failure this briefing has actually shown (a `max_tokens` stop truncates the tool input
+  and drops trailing fields, which reads exactly like the model choosing to omit them —
+  the schema's `required` array does not prevent it).
+- **What was deliberately left alone.** `market_svc._SUMMARY_SYSTEM` is clean — terse, and
+  its numeric cap is genuinely enforced downstream (`text[:_SUMMARY_MAX_CHARS]`), so it is
+  a contract, not a verbosity clamp. `_NEWS_SYSTEM`'s prohibition list stays because
+  `_is_meta_line` / `_strip_markdown_emphasis` exist precisely because the model emitted
+  those anyway. The `submit_eod` tool description carries contract only. An audit that
+  finds nothing should change nothing.
+- **Measured, not estimated** (`messages.count_tokens` against `claude-sonnet-5`, real
+  builders, representative four-view/three-symbol data): `gamma_analyze` 5879 → 5455
+  (−7.2%), `eod_briefing` 5935 → 5439 (−8.4%), `_research_news` 296 → 342 input but
+  1267 → 810 output, `market_svc` and `driver_svc` unchanged. App-wide **33,656 → 32,072
+  input tokens/day (−4.7%)** plus **−1,828 output tokens/day (−36% on that phase)** at the
+  scheduled cadence — about **$0.03/day, ~$8/yr** at $3/$15 per MTok. Small in dollars
+  because the whole Claude bill is small; the behavioral fixes (a truncating news phase, a
+  cache believed dead, an Opus default one deleted file away) are worth more than the
+  tokens.
+- ⚠ **Sonnet 5's tokenizer emits ~30% more tokens for the same text**, so every
+  token-denominated baseline in this repo shifts. Re-run `count_tokens` against
+  `claude-sonnet-5` rather than reusing a figure measured on 4.6.
+- **Suites:** options-scanner 1186 passed / 2 skipped, options_svc 1222, driver_svc +
+  market_svc 316, shared/tests 152 — all green.)
+
+---
+
 **Last updated:** 2026-08-23 (**A streaming HTML mirror of the Desk — `/desk/live`
 + `/desk/stream`.**
 - **Why a second screen at all.** `/desk` is a NiceGUI page: a websocket, a Vue runtime

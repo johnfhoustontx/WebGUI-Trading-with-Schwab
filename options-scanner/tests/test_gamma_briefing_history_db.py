@@ -10,7 +10,7 @@ def _analysis(bias=-25, headline="SPX pinned."):
 
 def _ins(conn, date, slot, bias=-25, ts="2026-07-02T08:00:00-05:00", headline="h"):
     gdb.insert_briefing(conn, date=date, slot=slot, generated_at=ts,
-                        symbol_scope="$SPX/SPY/QQQ", model="claude-sonnet-4-6",
+                        symbol_scope="$SPX/SPY/QQQ", model="claude-sonnet-5",
                         bias=bias, headline=headline, analysis=_analysis(bias, headline))
 
 

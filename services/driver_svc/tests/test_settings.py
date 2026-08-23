@@ -47,13 +47,19 @@ def test_resolve_model_falls_back_to_file(monkeypatch, tmp_path):
     monkeypatch.delenv("DRIVER_MODEL", raising=False)
     import repo_paths
     monkeypatch.setattr(repo_paths, "SHARED_DIR", tmp_path)
-    (tmp_path / "driver_model.txt").write_text("  claude-sonnet-4-6 \n", encoding="utf-8")
-    assert settings._resolve_model() == "claude-sonnet-4-6"
+    (tmp_path / "driver_model.txt").write_text("  claude-opus-4-8 \n", encoding="utf-8")
+    assert settings._resolve_model() == "claude-opus-4-8"
 
 
 def test_resolve_model_default_when_unset(monkeypatch, tmp_path):
-    """Env unset AND no override file → the committed Opus build default."""
+    """Env unset AND no override file → the committed Sonnet build default.
+
+    Load-bearing, not a restatement of the constant: the ONLY thing that used to
+    keep the 30-minute autonomous checkpoints off an Opus model was
+    shared/driver_model.txt, which is gitignored — so a fresh clone or a wiped
+    shared/ silently ran them on Opus. This pins the no-override path to the
+    Sonnet tier the standing cost directive requires."""
     monkeypatch.delenv("DRIVER_MODEL", raising=False)
     import repo_paths
     monkeypatch.setattr(repo_paths, "SHARED_DIR", tmp_path)  # empty dir → no file
-    assert settings._resolve_model() == "claude-opus-4-8"
+    assert settings._resolve_model() == "claude-sonnet-5"

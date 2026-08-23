@@ -3656,7 +3656,14 @@ def _eod_session_recap(levels_by_sym) -> dict:
 # client tool_choice in the same turn (see docstring below), so news research
 # happens first, in its own call, and its output is folded into the render
 # phase's prompt as plain text context by the caller (Task 4/6 — NOT this task).
-_NEWS_MAX_TOKENS = 700
+# Raised 700 -> 1600 with the Sonnet 5 migration. Two compounding reasons, both
+# documented: (a) this call passes NO `thinking` argument, and on Sonnet 5 that
+# means ADAPTIVE thinking (Sonnet 4.6 ran thinking-off when the field was
+# omitted) — thinking tokens come out of `max_tokens`; (b) Sonnet 5's tokenizer
+# emits ~30% more tokens for the same text. `_NEWS_MAX_LINES` still caps what we
+# actually keep, so this is a truncation guard, not a spend: billing is on real
+# output tokens and a good run measures well under it.
+_NEWS_MAX_TOKENS = 1600
 _NEWS_MAX_LINES = 6
 # Web search is GA (no beta header/`betas=[...]` needed). `allowed_callers` is
 # set EXPLICITLY to ["direct"] because on tool version 20260209+ it otherwise
@@ -3665,11 +3672,12 @@ _NEWS_MAX_LINES = 6
 # silently never fires (the model would then answer from memory instead).
 _WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
                     "max_uses": 3, "allowed_callers": ["direct"]}
-# The news phase runs on Sonnet 4.6 — the documented model pairing for the
-# web_search_20260209 tool version. Deliberately NOT `_ANALYZE_MODEL`
-# (claude-sonnet-5, whose web-search support is undocumented) and NOT an Opus
-# model (explicit user directive — ask before changing this).
-_NEWS_MODEL = "claude-sonnet-4-6"
+# The news phase runs on the same Sonnet tier as `_ANALYZE_MODEL`. It was pinned
+# to claude-sonnet-4-6 while Sonnet 5's support for the web_search_20260209 tool
+# version was undocumented; that pairing IS documented now (the 20260209 variants
+# run on Opus 5/4.8/4.7/4.6, Sonnet 5 and Sonnet 4.6), so the pin is retired.
+# Still deliberately NOT an Opus model — explicit user directive, ask first.
+_NEWS_MODEL = "claude-sonnet-5"
 # A search that FAILS still returns an HTTP 200 — the error arrives as a block
 # of this type inside the response, and the model then goes on to answer from
 # its training memory. A bare try/except cannot catch this; it must be
@@ -3694,17 +3702,24 @@ _NEWS_ABORT_ERROR_CODES = frozenset({
 # rates steady" is never dropped just for containing a colon.
 _NEWS_META_PREFIXES = ("note:", "summary:", "disclaimer:", "sources:")
 
+# An f-string on `_NEWS_MAX_LINES` deliberately: `_research_news` truncates to that
+# many lines, so a model that does not know the budget writes lines nobody reads.
+# A live probe on Sonnet 5 produced TEN driver lines (1267 output tokens) of which
+# six survived — stating the cap makes the prompt and the code agree instead of
+# paying for the difference. This is a real contract, not a verbosity clamp.
 _NEWS_SYSTEM = (
     "You are a market-news researcher. Search the web for the concrete macro and "
     "earnings news that actually moved US equities TODAY (Fed/rates, CPI/PPI/jobs, "
     "major earnings, geopolitics). The user message states today's date — treat it "
     "as authoritative and IGNORE any search result that is not from that session. "
-    "Reply with a short plain list, one driver per line, prefixed by '- ', each "
-    "naming the event and its market effect in ONE clause. Do NOT include a preamble "
+    f"Reply with at most {_NEWS_MAX_LINES} lines TOTAL, as a short plain list, one "
+    "driver per line, prefixed by '- ', each naming the event and its market effect "
+    "in ONE clause; give the most market-moving ones first, since anything past that "
+    "budget is discarded unread. Do NOT include a preamble "
     "sentence, a section header, a summary line, markdown emphasis (no **bold** or "
     "__underline__), citations, or disclaimers — ONLY the bulleted driver lines. If "
     "asked for the next session, also list tomorrow's scheduled economic releases and "
-    "notable earnings, each as its own bulleted line."
+    "notable earnings, each as its own bulleted line, within the same total budget."
 )
 
 
@@ -3824,6 +3839,14 @@ def _research_news(label: str, context: str = "", client=None, eod: bool = False
         resp = client.messages.create(
             model=_NEWS_MODEL,
             max_tokens=_NEWS_MAX_TOKENS,
+            # Thinking stays ADAPTIVE here — the one call in this module that does
+            # not disable it. With thinking off, Sonnet 5 is markedly less likely
+            # to reach for a tool or to consider searching, and firing the search
+            # is this call's entire job (a search that never fires returns the
+            # model's training memory as if it were today's news — the failure the
+            # `_NEWS_ABORT_ERROR_CODES` scan below exists to catch). `effort: low`
+            # bounds the spend: listing the day's drivers is a short, scoped task.
+            output_config={"effort": "low"},
             system=_NEWS_SYSTEM,
             tools=[_WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": ask}],
@@ -3934,14 +3957,14 @@ _ANALYZE_SYSTEM = (
     "your own recollection), and list them in 'macro_drivers'. When NOTABLE "
     "INDIVIDUAL STOCK MOVES are supplied, surface them in 'movers', copying the "
     "computed percentages exactly — never invent a move or a number. "
-    "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — write what the READER should DO "
-    "and expect, NOT what dealers are doing. Prefer 'you' and concrete actions ('fade "
-    "the call wall', 'buy dips toward the put wall', 'lean long / stay long above the "
-    "flip', 'respect the supply', 'trade with the trend', 'tighten stops') over "
-    "describing dealer hedging mechanics; you may mention the mechanism briefly, but "
-    "LEAD with the action. Keep the headline and per-index notes terse and the "
-    "narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, 'not "
-    "financial advice' notes, or boilerplate — only the analysis."
+    "Write what the reader should do and expect, not what dealers are doing: prefer "
+    "'you' and concrete actions ('fade the call wall', 'buy dips toward the put wall', "
+    "'lean long above the flip', 'trade with the trend', 'tighten stops'), and lead "
+    "with the action even when you name the hedging mechanism behind it. Keep the "
+    "headline and per-index notes terse and the narrative to 2-3 sentences. Include no "
+    "disclaimers, risk warnings, 'not financial advice' notes or boilerplate — the "
+    "reader sees this rendered as a briefing, and that text would be the only thing "
+    "on it that is not analysis."
 )
 
 # Forced tool the model fills with the structured analysis (the infographic's data
@@ -3952,8 +3975,7 @@ _ANALYZE_TOOL = {
     "description": ("Return the structured intraday options-flow analysis + trader "
                     "playbook for $SPX, SPY and QQQ. The app renders it as an "
                     "infographic, so copy the exact computed levels from the provided "
-                    "data rather than estimating. Frame the prose as what the reader "
-                    "should DO, not what dealers are doing."),
+                    "data rather than estimating."),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -3967,8 +3989,7 @@ _ANALYZE_TOOL = {
                            "description": "Two-or-three-word bias label, e.g. 'Mildly bearish'."},
             "headline": {"type": "string",
                          "description": "One-sentence headline telling the reader what to "
-                                        "do / expect over the next few hours (an action, "
-                                        "not a description of dealer hedging)."},
+                                        "do / expect over the next few hours."},
             "narrative": {"type": "string",
                           "description": "2-3 sentence plain read of what the reader should "
                                          "do and expect, and why — lead with the action "
@@ -4023,8 +4044,7 @@ _ANALYZE_TOOL = {
                             "description": "One line on what to DO as the day decays "
                                 "into the close, using the provided FORWARD PROJECTION "
                                 "(e.g. 'into the close the call wall firms at 5950 — trim "
-                                "rallies into it; stay defensive below the flip'). "
-                                "Reader-first action, NOT dealer mechanics."},
+                                "rallies into it; stay defensive below the flip')."},
                         "what_if": {
                             "type": "object",
                             "description": "Three short plain-English scenarios for this "
@@ -4764,41 +4784,43 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
 _EOD_MAX_TOKENS = 2600
 _EOD_TITLE = "End-of-Day Recap"
 _EOD_SYSTEM = (
-    "You are an options-market analyst writing an END-OF-DAY RETROSPECTIVE. The US "
-    "cash session has CLOSED. Call the submit_eod tool exactly once.\n"
-    "MANDATORY FIELDS — your single tool call MUST include EVERY ONE of: regime, "
-    "bias, bias_label, headline, narrative, why, indices, next_session. 'indices' "
-    "MUST contain exactly three entries — $SPX, SPY and QQQ, in that order — each "
-    "with its levels and its 'recap'. 'next_session' MUST have all four of levels, "
-    "expected_move_note, catalysts and posture. Omitting any of these makes the "
-    "briefing unusable. Do not skip a field to save space: keep individual prose "
-    "SHORT if you need to, but emit them all.\n"
-    "WRITE A RETROSPECTIVE, NOT A FORWARD INTRADAY PLAYBOOK. Never advise intraday "
-    "entries, exits or management for the session that just ended — it is over. Use "
-    "the PAST TENSE for everything about today.\n"
-    "Say what the market DID today, WHY it did it (use the supplied MACRO DRIVERS — "
+    "You are an options-market analyst writing an end-of-day retrospective. The US "
+    "cash session has closed. Call the submit_eod tool exactly once.\n"
+    # The completeness demand is NOT boilerplate emphasis — it is a mitigation for a
+    # failure this briefing has actually shown: a max_tokens stop truncates the tool
+    # input and silently drops whatever had not been emitted yet (next_session is
+    # last), which reads exactly like the model choosing to omit it. The schema's
+    # `required` array does not prevent that. Stated once, here, with its reason.
+    "Emit every field in one tool call: regime, bias, bias_label, headline, narrative, "
+    "why, indices, next_session. 'indices' holds exactly three entries — $SPX, SPY and "
+    "QQQ, in that order — each with its levels and its 'recap'. 'next_session' holds "
+    "all four of levels, expected_move_note, catalysts and posture, each with "
+    "substantive content. A missing field makes the briefing unusable, so shorten the "
+    "prose rather than dropping a field.\n"
+    "Write a retrospective, not a forward intraday playbook: the session is over, so "
+    "never advise entries, exits or management for it, and use the past tense "
+    "throughout for today.\n"
+    "Say what the market did today, why it did it (use the supplied MACRO DRIVERS — "
     "these are researched facts, prefer them over your own recollection), which key "
     "levels held or broke (use the supplied SESSION PATH + LEVELS verbatim — it is "
     "code-computed truth), and which individual names moved (use the supplied "
     "NOTABLE INDIVIDUAL STOCK MOVES; copy the percentages exactly, never invent one).\n"
-    "Then fill 'next_session' with what to carry into TOMORROW: the levels that "
-    "matter (today's closing walls and gamma flip persist overnight because open "
-    "interest does), the expected-move band, tomorrow's scheduled catalysts, and the "
-    "posture to bring in. This is the only forward-looking part of the briefing, and "
-    "it is MANDATORY — fill all four of levels / expected_move_note / catalysts / "
-    "posture with substantive content; never leave one blank.\n"
-    "Per index, 'recap' is what THAT index did today and where it closed relative to "
+    "'next_session' is the one forward-looking part: the levels that carry (today's "
+    "closing walls and gamma flip persist overnight because open interest does), the "
+    "expected-move band, tomorrow's scheduled catalysts, and the posture to bring in.\n"
+    "Per index, 'recap' is what that index did today and where it closed relative to "
     "its levels — one or two terse sentences, past tense.\n"
-    "Copy the EXACT computed levels from the data into each index entry — gamma flip, "
+    "Copy the exact computed levels from the data into each index entry — gamma flip, "
     "call wall, put wall, max pain, expected move (in points), put/call ratio — do not "
     "estimate or invent numbers, and omit a field only if it isn't present in the data. "
     "Set bias from -100 (max bearish) to +100 (max bullish), 0 = neutral, describing "
-    "how the day RESOLVED.\n"
-    "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — prefer 'you' and concrete "
-    "observations over dealer-hedging mechanics; you may mention the mechanism "
-    "briefly, but lead with what it meant for the reader. Keep the headline terse and "
-    "the narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, "
-    "'not financial advice' notes, or boilerplate — only the analysis."
+    "how the day resolved.\n"
+    "Write what the day meant for the reader rather than what dealers were doing: "
+    "prefer 'you' and concrete observations, and lead with the meaning even when you "
+    "name the mechanism. Keep the headline terse and the narrative to 2-3 sentences. "
+    "Include no disclaimers, risk warnings, 'not financial advice' notes or "
+    "boilerplate — the reader sees this rendered as a briefing, and that text would be "
+    "the only thing on it that is not analysis."
 )
 
 _EOD_TOOL = {

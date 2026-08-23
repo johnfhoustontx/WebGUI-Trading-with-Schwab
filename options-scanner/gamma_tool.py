@@ -2325,59 +2325,22 @@ def _per_symbol_summary_section(symbol_label, blocks, premarket):
     return "\n".join(lines) + "\n\n" + "\n\n".join(sub)
 
 
-_INTRADAY_SUMMARY_ASK = """\
-You are giving a regular investor a 1-page glance at today's market.
-Plain English throughout. No jargon.
+# The closing ask. Deliberately ONE line: both production consumers
+# (`options_svc.compute.gamma_analyze` / `eod_briefing`) call with
+# `tool_choice` forcing `submit_analysis` / `submit_eod`, so the output
+# contract is the TOOL SCHEMA and the caller's system prompt — the model never
+# free-writes here. This used to carry a numbered free-text structure
+# ("1. BIG PICTURE ... 4. WHAT IF") and a "Cap the whole reply at 350 words"
+# ceiling, both unreachable under a forced tool and both billed on every call.
+_INTRADAY_SUMMARY_ASK = (
+    "Write the reader's cross-index read of this session from the data above."
+)
 
-Structure:
-
-1. BIG PICTURE (1-2 sentences)
-   What is the market mood right now? Use the Put/Call ratio,
-   advancers/decliners, and SKEW Index. Plain words.
-
-2. WHY IS THIS HAPPENING (1-2 sentences)
-   In one or two lines: why is the tape acting this way today?
-   Mention the macro context AND the session's path so far.
-
-3. KEY LEVELS
-   Three key price levels for SPX, SPY, QQQ each — one upside, one
-   downside, one "must hold". One short sentence per level.
-
-4. WHAT IF (3 short bullets)
-   Three plausible scenarios for the rest of the session — one
-   upside path, one downside path, one chop/sideways path. One
-   sentence each, plain English.
-
-Cap the whole reply at 350 words.
-"""
-
-
-_PREMARKET_SUMMARY_ASK = """\
-You are giving a regular investor a 1-page premarket brief. Plain
-English throughout. No jargon.
-
-The data above is yesterday's close. Consider OVERNIGHT futures action
-and any scheduled events today.
-
-Structure:
-
-1. BIG PICTURE (1-2 sentences)
-   Overnight mood + today's scheduled events at a glance.
-
-2. WHY IS THIS HAPPENING (1-2 sentences)
-   In one or two lines: what macro/dealer/recent-tape context
-   explains why we're opening from yesterday's close in this shape?
-
-3. KEY LEVELS
-   Three carry-over price levels for SPX, SPY, QQQ each — one upside,
-   one downside, one "must hold". One short sentence per level.
-
-4. WHAT IF (3 short bullets)
-   Three plausible opens — gap up, gap down, in-line open. One
-   sentence each, plain English.
-
-Cap the whole reply at 350 words.
-"""
+_PREMARKET_SUMMARY_ASK = (
+    "Write the reader's read of the open, carrying these closing levels into "
+    "today's session; consider overnight futures action and today's scheduled "
+    "events."
+)
 
 
 def build_summary_prompt_bundled(spx_blocks, spy_blocks, qqq_blocks,
@@ -2398,19 +2361,16 @@ def build_summary_prompt_bundled(spx_blocks, spy_blocks, qqq_blocks,
     anchor_view = (anchor.get("gex") or anchor.get("charm") or anchor.get("dex") or anchor.get("vanna"))
     dte = anchor_view.get("dte", 0) if anchor_view else 0
     dte_str = "0-DTE" if dte == 0 else f"{dte}-DTE"
+    # Describes what the DATA is (which the model cannot know otherwise). The
+    # role line that used to open each of these ("You are an options trader's
+    # ... briefer") is gone: the caller's system prompt owns the role, and a
+    # second, differently-worded identity in the user turn only competes with it.
     if premarket:
-        intro = (
-            "You are an options trader's premarket briefer. Below is YESTERDAY'S "
-            "CLOSING gamma profile for SPX, SPY, and QQQ being carried into today's "
-            "open. Research overnight futures action and today's scheduled events "
-            "yourself."
-        )
+        intro = ("Yesterday's CLOSING gamma profile for SPX, SPY and QQQ, carried "
+                 "into today's open. Overnight futures action and today's scheduled "
+                 "events are not in the data below.")
     else:
-        intro = (
-            "You are an options trader's intraday briefer. Below is structured "
-            f"data covering SPX, SPY, and QQQ {dte_str} options. Compare them as a "
-            "cross-index readout for a 1-page summary."
-        )
+        intro = (f"Structured intraday data for SPX, SPY and QQQ {dte_str} options.")
     parts.append(intro)
     parts.append("=== STRUCTURED DATA ===")
 

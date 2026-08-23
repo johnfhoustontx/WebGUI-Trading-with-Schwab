@@ -31,7 +31,7 @@ from shared import driver_limits as _driver_limits  # noqa: E402
 
 def _resolve_model() -> str:
     """The decision model: DRIVER_MODEL env var → gitignored shared/driver_model.txt
-    → the build default (Opus 4.8). The file fallback mirrors the API-key resolver
+    → the build default (Sonnet 5). The file fallback mirrors the API-key resolver
     (api_keys.py) so a deployment can pin the model WITHOUT fighting env-var
     propagation (Windows ``setx`` only affects NEW windows and is easy to miss). Read
     at import — set the env var or the file before starting driver_svc; a restart
@@ -48,7 +48,13 @@ def _resolve_model() -> str:
                 return picked
     except Exception:  # noqa: BLE001 — a missing/unreadable override is non-fatal.
         pass
-    return "claude-opus-4-8"
+    # The standing directive is "current Sonnet tier at every call site; never an
+    # Opus model without asking". This default used to be claude-opus-4-8, and the
+    # ONLY thing keeping the 30-minute autonomous checkpoints off Opus was
+    # shared/driver_model.txt — which is gitignored and untracked, so a fresh
+    # clone, a wiped shared/ or a new machine silently put them on Opus. The
+    # committed default now matches the directive; the overrides above still win.
+    return "claude-sonnet-5"
 
 
 # ── The risk envelope now lives in config/driver.toml ────────────────────────
@@ -84,9 +90,9 @@ MAX_TOKENS = int(_D["max_tokens"])
 # Deliberately NOT in driver.toml: a kill switch for unvalidated behaviour should
 # take a code change, not a config edit.
 DIRECTIONAL_GATE_ENABLED = False
-# Decision model (committed build default: Opus 4.8). Override per-deployment via the
-# DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
-# _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
+# Decision model (committed build default: Sonnet 5). Override per-deployment via
+# the DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
+# _resolve_model) — e.g. put "claude-opus-4-8" there to run one deployment richer.
 MODEL = _resolve_model()
 
 
