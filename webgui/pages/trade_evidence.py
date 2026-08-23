@@ -101,7 +101,10 @@ def _build(state, refs):
             entries.append(("Scored under", (swing_regime_note(sm) or "—")))
             line = live_ic_line(lic)
             if line:
-                entries.append(("Live tracking", line))
+                # The shared line is written for a standalone context and names
+                # itself; here it sits beside a label that already does.
+                entries.append(("Live tracking",
+                                line.replace("Live tracking: ", "", 1)))
             split = live_ic_split_line(lic)
             if split:
                 entries.append(("By market direction", split))

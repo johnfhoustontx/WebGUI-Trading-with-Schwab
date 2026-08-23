@@ -279,3 +279,30 @@ class TestTheCommandBarReadsTheRealPayloadShape:
         bar = tt.command_bar({"symbol": "AAPL", "description": "Apple Inc",
                               "sector": {"name": "Technology"}})
         assert bar["name"].startswith("Apple Inc")
+
+
+class TestNegativeZeroNeverRenders:
+    """A value that rounds to zero must not carry a sign.
+
+    "−0.00" reads as a small negative number at a glance, which is exactly the
+    wrong impression for a factor contributing nothing — and "−0" next to "+0"
+    in the investor bars implies a distinction that does not exist."""
+
+    def test_a_contribution_rounding_to_zero_is_unsigned(self):
+        rows = tt.evidence_rows({"contributions": [
+            {"factor": "mom_12_1", "z": -0.0004, "weight": 0.117,
+             "contribution": -0.00002, "ic": 0.018}]})
+        assert rows[0]["z"] == "0.00"
+        assert rows[0]["contribution"] == "0.000"
+
+    def test_a_real_negative_keeps_its_sign(self):
+        rows = tt.evidence_rows({"contributions": [
+            {"factor": "low_vol", "z": -0.20, "weight": -0.391,
+             "contribution": -0.08, "ic": -0.061}]})
+        assert rows[0]["z"] == "−0.20"
+        assert rows[0]["weight"] == "−0.391"
+
+    def test_an_investor_factor_rounding_to_zero_is_unsigned(self):
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "rs_vs_sector", "contribution": -0.4}]})
+        assert bars[0]["value"] == "0"

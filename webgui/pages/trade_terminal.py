@@ -25,12 +25,20 @@ _CLEARANCE = {
 
 
 def _signed(v, nd=2, dash="—"):
+    """A signed fixed-width number, or ``dash`` when absent.
+
+    Two deliberate details. The sign is a true MINUS, not a hyphen: at mono
+    sizes a hyphen reads as a dash and a negative number stops looking negative.
+    And a value that ROUNDS to zero carries no sign at all — "−0.00" reads as a
+    small negative at a glance, which is the wrong impression for a factor
+    contributing nothing."""
     n = fmt.num(v)
     if n is None:
         return dash
-    # A true minus sign, not a hyphen: at mono sizes the hyphen reads as a dash
-    # and a negative number stops looking negative.
-    return ("+" if n >= 0 else "−") + f"{abs(n):.{nd}f}"
+    body = f"{abs(n):.{nd}f}"
+    if float(body) == 0.0:
+        return body
+    return ("+" if n >= 0 else "−") + body
 
 
 def command_bar(analysis):
@@ -116,7 +124,7 @@ def investor_bars(verdict):
         left, width = T.centred(v, 60.0) if v is not None else (50.0, 0.0)
         out.append({
             "label": humanize_factor(b.get("factor", "")),
-            "value": (("+" if v >= 0 else "−") + f"{abs(v):.0f}") if v is not None else "n/a",
+            "value": _signed(v, 0, dash="n/a") if v is not None else "n/a",
             "value_class": T.sign_text(v) if v is not None else T.OFF,
             "bar_class": T.sign_bar(v) if v is not None else T.BAR_DIM,
             "left_pct": left,
