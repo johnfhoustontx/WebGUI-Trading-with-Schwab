@@ -2230,6 +2230,16 @@ committed symbol.
 committed symbol and opens the result in a new tab when it lands; the cache version is
 baselined at click time, so a stale report from an earlier run never opens a tab.
 
+**Hover anything you do not recognise.** Every tile on these four screens
+carries its own plain-English explanation on hover: the clearance chips and side
+cards, each factor name, every table column on the Rank board and the Evidence
+screen, the trade-plan rows, the dealer levels, the panel titles and the two
+report buttons. The explanations say what the number is and where it misleads,
+not just what it is called - so `LONG CLEARED` explains that it is permission
+rather than a recommendation, and `SHORT RELATIVE ONLY` explains that the model
+predicts a LAG against the index rather than a fall, which is why a plain short
+on a correct read can still lose money.
+
 **Position** shows a band reading on a rail rather than a verdict word, because the
 model's output is a rank. **The band is not a percentile of today's names.** The
 score's inputs are today's cross-section - each factor measured against the same 78
