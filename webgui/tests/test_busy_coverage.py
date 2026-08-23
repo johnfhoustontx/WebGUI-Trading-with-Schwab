@@ -34,6 +34,10 @@ _EXEMPT = {
     "eod.py": "Generate writes files and links to them; no in-page repaint",
     # Already has its own spinner + re-entrancy guard on the sweep (predates this).
     "status.py": "the Refresh button owns a spinner of its own",
+    # The four Signal Desk screens share ONE frame, and the shell owns its
+    # spinner; a per-screen one would fight it. `trade_shell.py` is where the
+    # wait actually lives, and it is not exempt.
+    "trade_board.py": "the shared Signal Desk shell owns the wait",
 }
 
 

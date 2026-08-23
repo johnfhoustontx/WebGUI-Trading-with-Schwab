@@ -118,6 +118,9 @@ class RankBoard(_Base):
     market_filter: dict = {}
     short_expression: str = "relative"
     gates_evaluated: list[str] = []
+    # Joined per row from the options matrix + short-interest store:
+    # dealer regime, ATM IV and its state, and days-to-cover. A symbol
+    # either source lacks reads ABSENT rather than neutral.
 
 
 class ModelBook(_Base):

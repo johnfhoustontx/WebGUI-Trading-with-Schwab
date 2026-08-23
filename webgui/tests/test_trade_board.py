@@ -44,22 +44,31 @@ class TestRows:
         rows = trade_board.board_rows(_BOARD)
         top = rows[0]
         assert top["symbol"] == "AAA"
-        assert top["composite"] == "+0.81"
-        assert top["percentile"] == "90th"
-        assert "+1.6%" in top["expected_fwd"]
+        assert top["score"] == "+0.81"
+        assert top["pctl"] == "90th"
+        assert "+1.6%" in top["exp"]
 
     def test_a_gated_row_shows_its_reasons_rather_than_vanishing(self):
         rows = {r["symbol"]: r for r in trade_board.board_rows(_BOARD)}
-        assert "earnings in 3 days" in rows["BBB"]["gates"]
+        assert "earnings in 3 days" in rows["BBB"]["gate"]
 
-    def test_an_ungated_row_renders_an_em_dash_not_an_empty_cell(self):
+    def test_an_ungated_row_reads_CLEAR_rather_than_blank(self):
+        """The design's language, and more informative than a dash: a row with
+        no gates has passed the ones the board checks, and the gates-checked
+        line beneath says which those were."""
         rows = {r["symbol"]: r for r in trade_board.board_rows(_BOARD)}
-        assert rows["AAA"]["gates"] == "—"
+        assert rows["AAA"]["gate"] == "clear"
 
     def test_missing_numbers_degrade_rather_than_crash(self):
         board = {"rows": [{"symbol": "X"}]}
         row = trade_board.board_rows(board)[0]
-        assert row["composite"] == "—" and row["percentile"] == "—"
+        assert row["score"] == "—" and row["pctl"] == "—"
+
+    def test_an_uncollected_dealer_reads_NOT_COLLECTED_not_a_regime(self):
+        """`not collected` and `at the flip` are different claims."""
+        row = trade_board.board_rows({"rows": [{"symbol": "X"}]})[0]
+        assert row["dealer"] == "not collected"
+        assert row["iv"] == "—"
 
     def test_no_rows_is_an_empty_list(self):
         assert trade_board.board_rows({}) == []

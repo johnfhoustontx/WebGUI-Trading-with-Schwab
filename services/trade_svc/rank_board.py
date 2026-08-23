@@ -89,12 +89,17 @@ def _gates(symbol, factors, ctx):
     return gates, glong, gshort
 
 
-def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None):
+def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None,
+          matrix=None):
     """Today's ranked cross-section. Never raises."""
     from services.trade_svc import swing_model as _swing
 
     clearance = clearance or {}
     ctx = gate_ctx or {}
+    # ``matrix`` is {symbol: options-matrix row}, joined from ONE cache read for
+    # the whole board. A symbol it lacks reads ABSENT: "not collected" and "at
+    # the flip" are different claims, and the off-hours case turns on that.
+    mx = matrix or {}
     by_symbol = (snapshot or {}).get("by_symbol") or {}
     short_state = ((clearance.get("short") or {}).get("state")) or "cleared"
 
@@ -132,8 +137,16 @@ def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None):
         if not s:
             continue          # the scorer declined — omit rather than invent a 0
         gates, glong, gshort = _gates(sym, factors, ctx)
+        row = mx.get(sym) or {}
         scored.append({
             "symbol": sym,
+            "dealer": row.get("dealer_regime"),
+            "atm_iv": row.get("atm_iv"),
+            "iv_state": row.get("iv_state"),
+            # The short side's own metric. FINRA's days-to-cover never touches
+            # the contested float denominator, which is why it is the leg the
+            # squeeze gate trusts too.
+            "dtc": (ctx.get("days_to_cover") or {}).get(sym),
             "composite": s.get("score"),
             "percentile": s.get("percentile"),
             "band": None,

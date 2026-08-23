@@ -1,31 +1,25 @@
-"""Rank Board — today's whole cross-section, ranked, with its gates showing.
+"""Signal Desk — Rank board.
 
-The Analyze tab answers "what about THIS name?". This answers "of everything the
-model can see, what is best and worst right now?" — the shortlist the
-single-symbol card was always missing.
+Long and short candidate tables, nine columns each, plus the model paper book
+that follows them. The short table carries the market-filter note, because a
+bottom-decile name in an uptrend is predicted to LAG the index rather than to
+fall, and an unlabelled short list invites the trade the tape has refused.
 
-Tier-1 reader of ``cache:trade:rank_board``. Every number is computed
-service-side by ``trade_svc.rank_board``; this module formats and wires only.
+Every table sits in an `overflow-x: auto` wrapper over a `min-width` grid, so
+columns scroll rather than collide or clip at any width — nine columns of mono
+do not fit a narrow window, and clipping the gates column would hide exactly the
+thing the board exists to surface.
 
-Two things the page must not overclaim, and both have their own line:
-
-**What it ranks BY.** The composite is ~48% volatility weight, and Phase 4
-measured it at cross-sectional IC +0.16 when the market rises and −0.11 when it
-falls. On a ranked board that means the top of the ordering IS the high-beta
-end, which is the single most important thing to know before reading down it.
-
-**Why a short pool looks the way it does.** Three different situations produce a
-thin or unusual short list — the tape has not cleared the short side, the
-cross-section is too small to have a bottom decile, or there genuinely are no
-candidates — and they are indistinguishable unless the page says which.
+⚠ The amber line above the tables states what share of the ranking weight sits
+on volatility factors. On a RANKED board that is the single most important thing
+to know: the top of the ordering is the high-beta end of the universe.
 """
 from nicegui import ui
 
 import bus_client
-from pages import busy as _busy
 from pages import fmt
-from pages.options.theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW,
-                                 LABEL, MUTED, BTN_PRIMARY)
+from pages import terminal_theme as T
+from pages import trade_shell as sh
 from pages.ui_guard import guard
 from pages.view_watch import watch_view
 
@@ -33,17 +27,12 @@ VIEW = "trade:rank_board"
 BOOK_VIEW = "trade:model_book"
 POLL_SEC = 5.0
 
-_COLS = [
-    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left",
-     "sortable": True},
-    {"name": "decile", "label": "Decile", "field": "decile", "sortable": True},
-    {"name": "composite", "label": "Composite", "field": "composite",
-     "sortable": True},
-    {"name": "percentile", "label": "Rank", "field": "percentile"},
-    {"name": "verdict", "label": "Read", "field": "verdict"},
-    {"name": "expected_fwd", "label": "Expected", "field": "expected_fwd"},
-    {"name": "gates", "label": "Gates", "field": "gates", "align": "left"},
-]
+# 84 62 70 78 58 74 120 104 1fr — the design's column rhythm.
+_COLS = ("[grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
+_TABLE_MIN = "min-w-[940px]"
+
+_HEAD = ("SYMBOL", "PCTL", "SCORE", "EXP / 20D", "HIT", None, "DEALER", "IV",
+         "GATES")
 
 
 def board_rows(board):
@@ -54,19 +43,44 @@ def board_rows(board):
         comp = fmt.num(r.get("composite"))
         pct = fmt.num(r.get("percentile"))
         exp = fmt.num(r.get("expected_fwd"))
+        hit = fmt.num(r.get("hit_rate"))
+        iv = fmt.num(r.get("atm_iv"))
+        dtc = fmt.num(r.get("dtc"))
         gates = r.get("gates") or []
         out.append({
             "symbol": r.get("symbol", "?"),
-            "decile": r.get("decile") if r.get("decile") is not None else "—",
-            "composite": f"{comp:+.2f}" if comp is not None else "—",
-            "percentile": f"{int(pct)}th" if pct is not None else "—",
-            "verdict": r.get("verdict") or "—",
-            "expected_fwd": f"{exp:+.1%}" if exp is not None else "—",
-            "gates": "; ".join(gates) if gates else "—",
+            "decile": r.get("decile"),
+            "pctl": f"{int(pct)}th" if pct is not None else "—",
+            "score": f"{comp:+.2f}" if comp is not None else "—",
+            "score_class": T.sign_text(comp),
+            "exp": f"{exp:+.1%}" if exp is not None else "—",
+            "exp_class": T.sign_text(exp) if exp is not None else T.OFF,
+            "hit": f"{hit:.0%}" if hit is not None else "—",
+            "band": r.get("band"),
+            "dtc": f"{dtc:.1f}" if dtc is not None else "—",
+            "dealer": r.get("dealer") or "not collected",
+            "dealer_class": _dealer_class(r.get("dealer")),
+            "iv": f"{iv:.0f}" if iv is not None else "—",
+            "iv_state": r.get("iv_state") or "",
+            "iv_class": _iv_class(r.get("iv_state")),
+            "gate": "; ".join(gates) if gates else "clear",
+            "gate_chip": T.CHIP_WARN if gates else T.CHIP_POS,
             "pool": r.get("pool") or "",
-            "disqualified": bool(r.get("disqualified")),
         })
     return out
+
+
+def _dealer_class(word):
+    w = (word or "").lower()
+    if "above" in w:
+        return T.POS
+    if "below" in w:
+        return T.NEG
+    return T.OFF
+
+
+def _iv_class(state):
+    return {"cheap": T.POS, "rich": T.WARN}.get((state or "").lower(), T.DIM)
 
 
 def pool_headline(board, side):
@@ -151,16 +165,6 @@ def gates_note(board):
     return "Gates checked here: " + "; ".join(gates) + "."
 
 
-_BOOK_COLS = [
-    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
-    {"name": "side", "label": "Side", "field": "side"},
-    {"name": "expression", "label": "As", "field": "expression"},
-    {"name": "opened_on", "label": "Opened", "field": "opened_on"},
-    {"name": "pnl", "label": "P&L", "field": "pnl"},
-    {"name": "status", "label": "Status", "field": "status"},
-]
-
-
 def book_rows(book):
     """Display rows for the model paper book, newest first."""
     out = []
@@ -172,6 +176,7 @@ def book_rows(book):
             "expression": p.get("expression") or "—",
             "opened_on": p.get("opened_on") or "—",
             "pnl": f"{pnl:+.1%}" if pnl is not None else "—",
+            "pnl_class": T.sign_text(pnl) if pnl is not None else T.OFF,
             "status": p.get("status") or "—",
             "close_reason": p.get("close_reason") or "",
         })
@@ -222,61 +227,33 @@ def meta_line(board):
 
 
 def render():
-    ui.add_css(QUASAR_INTERNAL_CSS)
-    state = {"board": bus_client.read(VIEW) or {},
-             "book": bus_client.read(BOOK_VIEW) or {}}
+    sh.page(_build)
 
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        with ui.row().classes("w-full items-center justify-between"):
-            with ui.column().classes("gap-0"):
-                ui.label("RANK BOARD").classes(EYEBROW)
-                ui.label("Today's cross-section, ranked").classes(
-                    f"text-h6 {LABEL}")
-            rebuild = ui.button("Rebuild", color=None) \
-                .props("no-caps").classes(BTN_PRIMARY)
 
-        meta = ui.label("").classes(f"text-xs {MUTED}")
-        status = ui.label("").classes("text-sm text-amber-9")
-        exposure = ui.label("").classes("text-xs text-amber-9")
-        gates = ui.label("").classes(f"text-xs {MUTED}")
+def _build(state, refs):
+    state["board"] = bus_client.read(VIEW) or {}
+    state["book"] = bus_client.read(BOOK_VIEW) or {}
+    state["hide_gated"] = False
 
-        pools = {}
-        for side in ("long", "short"):
-            with ui.column().classes(f"{CARD} w-full gap-1"):
-                pools[side] = {
-                    "title": ui.label("").classes(f"text-subtitle2 {LABEL}"),
-                    "note": ui.label("").classes(f"text-xs {MUTED}"),
-                    "names": ui.label("").classes(f"text-sm {LABEL}"),
-                }
+    with ui.row().classes("w-full items-end justify-between gap-4 flex-wrap"):
+        with ui.column().classes("gap-1"):
+            ui.label("Rank board").classes(T.SCREEN_TITLE)
+            meta = ui.label("").classes("text-[11.5px] text-[#6b7b9c]")
+        filters = ui.row().classes("gap-[9px]")
 
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("MODEL PAPER BOOK").classes(EYEBROW)
-            book_summary = ui.label("").classes(f"text-sm {LABEL}")
-            ui.label(book_note()).classes(f"text-xs {MUTED}")
-            book_table = ui.table(columns=_BOOK_COLS, rows=[],
-                                  row_key="symbol").classes("w-full")                 .props("dense flat")
+    status = ui.label("").classes("text-[13px] text-[#fbbf24]")
+    exposure = ui.label("").classes(f"{T.CALLOUT_TEXT} text-[12px]")
+    gates = ui.label("").classes(f"{T.NOTE}")
 
-        with ui.column().classes(f"{CARD} w-full gap-2") as board_card:
-            ui.label("Full cross-section").classes(EYEBROW)
-            table = ui.table(columns=_COLS, rows=[], row_key="symbol") \
-                .classes("w-full").props("dense flat")
+    tables = ui.column().classes("w-full gap-4")
 
-    # A rebuild rescores the whole universe snapshot; without a wait the button
-    # looks inert for as long as that takes.
-    spinner = _busy.build_busy(board_card, "Rebuilding the board…")
+    book_panel = sh.panel("Model paper book")
+    with book_panel:
+        book_summary = ui.label("").classes("text-[13px] text-[#cfdaee]")
+        ui.label(book_note()).classes(T.NOTE)
+        book_wrap = ui.column().classes("w-full gap-0")
 
-    @guard
-    def _request():
-        spinner.show("Rebuilding the board…")
-        bus_client.request("trade", {"type": "rank_board", "args": {}})
-        # The book follows the board, so one click advances both rather than
-        # leaving the book a tick behind whatever it is reporting on.
-        bus_client.request("trade", {"type": "model_book", "args": {}})
-
-    rebuild.on_click(_request)
-
-    def _paint():
-        spinner.hide()
+    def _paint(_a=None):
         b = state["board"] or {}
         meta.text = meta_line(b)
         status.text = status_note(b)
@@ -284,25 +261,146 @@ def render():
         exposure.text = board_exposure_note(b)
         exposure.set_visibility(bool(exposure.text))
         gates.text = gates_note(b)
-        for side, refs in pools.items():
-            head = pool_headline(b, side)
-            refs["title"].text = head["title"]
-            refs["note"].text = head["note"]
-            names = b.get(f"{side}_pool") or []
-            refs["names"].text = ", ".join(names) if names else "—"
-        table.rows = board_rows(b)
-        table.update()
+
+        filters.clear()
+        with filters:
+            on = state["hide_gated"]
+            ui.button("Hide gated" if not on else "Showing ungated only",
+                      color=None).props("no-caps") \
+                .classes(T.FILTER_ON if on else T.FILTER_OFF) \
+                .on_click(_toggle_gated)
+            ui.button("Rebuild", color=None).props("no-caps") \
+                .classes(T.FILTER_OFF).on_click(_rebuild)
+
+        rows = board_rows(b)
+        tables.clear()
+        with tables:
+            for side, accent in (("long", "bg-[#34d399]"), ("short", "bg-[#f87171]")):
+                _table(b, side, accent, rows, state["hide_gated"])
+
         bk = state["book"] or {}
         book_summary.text = book_summary_line(bk) or "No positions yet."
-        book_table.rows = book_rows(bk)
-        book_table.update()
+        book_wrap.clear()
+        with book_wrap:
+            _book_table(book_rows(bk))
 
     @guard
-    def _on_change():
+    def _toggle_gated():
+        state["hide_gated"] = not state["hide_gated"]
+        _paint()
+
+    @guard
+    def _rebuild():
+        # The wait is the SHELL's — all four screens share one frame, and a
+        # second spinner would fight it. See test_busy_coverage's exemption.
+        sp = state.get("spinner")
+        if sp:
+            sp.show("Rebuilding the board…")
+        bus_client.request("trade", {"type": "rank_board", "args": {}})
+        # The book follows the board, so one click advances both rather than
+        # leaving the book a tick behind whatever it is reporting on.
+        bus_client.request("trade", {"type": "model_book", "args": {}})
+
+    @guard
+    def _on_board():
         state["board"] = bus_client.read(VIEW) or {}
         state["book"] = bus_client.read(BOOK_VIEW) or {}
         _paint()
 
-    _paint()
-    watch_view(VIEW, _on_change, interval=POLL_SEC)
-    watch_view(BOOK_VIEW, _on_change, interval=POLL_SEC)
+    refs["paint"].append(_paint)
+    watch_view(VIEW, _on_board, interval=POLL_SEC)
+    watch_view(BOOK_VIEW, _on_board, interval=POLL_SEC)
+
+
+def _table(board, side, accent, rows, hide_gated):
+    head = pool_headline(board, side)
+    pool = set(board.get(f"{side}_pool") or [])
+    picked = [r for r in rows if r["symbol"] in pool]
+    if hide_gated:
+        picked = [r for r in picked if r["gate"] == "clear"]
+    metric_head = "BAND" if side == "long" else "DTC"
+
+    with ui.column().classes(f"{T.PANEL} w-full gap-[14px] min-w-0 pb-3"):
+        with ui.row().classes("items-baseline gap-3 flex-wrap"):
+            ui.element("div").classes(f"w-[3px] h-[15px] rounded-[2px] {accent}")
+            ui.label(head["title"]).classes(
+                "text-[15px] font-bold tracking-[-0.01em] text-[#f2f6fc]")
+        if head["note"]:
+            with ui.row().classes(f"{T.CALLOUT} w-full"):
+                ui.label("⚠").classes("text-[13px] text-[#fbbf24]")
+                ui.label(head["note"]).classes(T.CALLOUT_TEXT)
+
+        with ui.element("div").classes(T.SCROLL_X):
+            with ui.column().classes(f"{_TABLE_MIN} gap-0"):
+                with ui.element("div").classes(
+                        f"grid {_COLS} gap-x-3 px-[6px] pb-[9px] {T.RULE} "
+                        "text-[9.5px] font-bold tracking-[0.13em] "
+                        "text-[#56678a]"):
+                    for i, h in enumerate(_HEAD):
+                        label = metric_head if h is None else h
+                        ui.label(label).classes(
+                            "text-right" if 1 <= i <= 5 else "")
+                if not picked:
+                    ui.label("No candidates on this side today.").classes(
+                        f"{T.NOTE} pt-3")
+                for r in picked:
+                    _row(r, side)
+
+
+def _row(r, side):
+    with ui.element("div").classes(
+            f"grid {_COLS} gap-x-3 items-center px-[6px] py-[11px] "
+            f"{T.HAIRLINE}"):
+        ui.label(r["symbol"]).classes(
+            f"{T.MONO} text-[13.5px] font-bold text-[#f2f6fc]")
+        ui.label(r["pctl"]).classes(f"{T.VALUE} text-right")
+        ui.label(r["score"]).classes(
+            f"{T.MONO} text-[12.5px] text-right {r['score_class']}")
+        ui.label(r["exp"]).classes(
+            f"{T.MONO} text-[12.5px] text-right {r['exp_class']}")
+        ui.label(r["hit"]).classes(
+            f"{T.MONO} text-[12.5px] text-right text-[#8b9bb4]")
+        metric = (str(r["band"]) if r["band"] is not None else "—") \
+            if side == "long" else r["dtc"]
+        ui.label(metric).classes(
+            f"{T.MONO} text-[12.5px] text-right text-[#a8b6cf]")
+        ui.label(r["dealer"]).classes(
+            f"text-[12px] whitespace-nowrap {r['dealer_class']}")
+        with ui.row().classes("items-baseline gap-[7px] min-w-0"):
+            ui.label(r["iv"]).classes(f"{T.MONO} text-[12.5px] text-[#cfdaee]")
+            if r["iv_state"]:
+                ui.label("· " + r["iv_state"]).classes(
+                    f"text-[11.5px] {r['iv_class']}")
+        ui.label(r["gate"]).classes(
+            f"{T.CHIP_BASE} {r['gate_chip']} justify-self-start "
+            "text-[11.5px] font-semibold tracking-normal px-[10px] py-[3px]")
+
+
+_BOOK_COLS = "[grid-template-columns:84px_70px_96px_100px_78px_1fr]"
+
+
+def _book_table(rows):
+    with ui.element("div").classes(T.SCROLL_X):
+        with ui.column().classes("min-w-[520px] gap-0"):
+            with ui.element("div").classes(
+                    f"grid {_BOOK_COLS} gap-x-3 px-[6px] pb-[9px] {T.RULE} "
+                    "text-[9.5px] font-bold tracking-[0.13em] text-[#56678a]"):
+                for h in ("SYMBOL", "SIDE", "AS", "OPENED", "P&L", "STATUS"):
+                    ui.label(h)
+            if not rows:
+                ui.label("The book opens positions from the pools above.") \
+                    .classes(f"{T.NOTE} pt-3")
+            for r in rows:
+                with ui.element("div").classes(
+                        f"grid {_BOOK_COLS} gap-x-3 items-center px-[6px] "
+                        f"py-[9px] {T.HAIRLINE}"):
+                    ui.label(r["symbol"]).classes(
+                        f"{T.MONO} text-[13px] font-bold text-[#f2f6fc]")
+                    ui.label(r["side"]).classes("text-[12px] text-[#a8b6cf]")
+                    ui.label(r["expression"]).classes(
+                        "text-[12px] text-[#7d8db0]")
+                    ui.label(r["opened_on"]).classes(
+                        f"{T.MONO} text-[12px] text-[#a8b6cf]")
+                    ui.label(r["pnl"]).classes(
+                        f"{T.MONO} text-[12.5px] {r['pnl_class']}")
+                    ui.label(r["status"]).classes("text-[12px] text-[#7d8db0]")

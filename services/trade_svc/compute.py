@@ -659,7 +659,7 @@ def _board_gate_ctx(symbols):
     published beside the rows."""
     from services.trade_svc import earnings_calendar as _ec
     from services.trade_svc import short_interest as _si
-    out = {"earnings_days": {}, "squeeze": {}}
+    out = {"earnings_days": {}, "squeeze": {}, "days_to_cover": {}}
     syms = [s for s in (symbols or []) if s]
     try:
         conn = _ec.init_db()
@@ -681,6 +681,8 @@ def _board_gate_ctx(symbols):
                        and "days_to_cover" in row.keys() else None)
                 # The module's OWN gate, called with the float leg absent, so
                 # the board and the card cannot drift on the threshold.
+                if isinstance(dtc, (int, float)):
+                    out["days_to_cover"][s] = float(dtc)
                 fires, reason = _si.squeeze_flag(None, dtc)
                 if fires:
                     out["squeeze"][s] = reason
@@ -720,7 +722,8 @@ def build_rank_board():
         board = _rb.build(
             snap, art, regime=_market_regime(spy_close),
             clearance=_direction_clearance(spy),
-            gate_ctx=_board_gate_ctx(list((snap or {}).get("by_symbol") or {})))
+            gate_ctx=_board_gate_ctx(list((snap or {}).get("by_symbol") or {})),
+            matrix=_matrix_by_symbol())
         board["as_of"] = _today_ct_str()
         return board
     except Exception:
@@ -1061,6 +1064,22 @@ def _read_regime():
 
 
 _MATRIX_KEY = "cache:options:matrix"
+
+
+def _matrix_by_symbol():
+    """``{symbol: row}`` for the WHOLE options matrix, from one cache read.
+
+    The rank board joins dealer regime and IV for every name at once; reading
+    the matrix per symbol would be 78 deserializes of the same payload."""
+    try:
+        env = _bus().cache_get(_MATRIX_KEY)
+        payload = env.payload if env else None
+        rows = (payload or {}).get("rows") or []
+        return {(r.get("symbol") or "").strip().upper(): r for r in rows
+                if r.get("symbol")}
+    except Exception:
+        _degrade.degraded("trade.matrix_by_symbol")
+        return {}
 
 
 def _read_matrix_row(symbol):

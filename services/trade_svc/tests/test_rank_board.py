@@ -67,7 +67,7 @@ UPTREND = {"long": {"state": "cleared", "reasons": ["SPY above a rising 200-DMA"
 
 def _build(**over):
     kw = dict(snapshot=_snapshot(), artifact=_ARTIFACT, regime=None,
-              clearance=CLEARED, gate_ctx=None)
+              clearance=CLEARED, gate_ctx=None, matrix=None)
     kw.update(over)
     return rb.build(**kw)
 
@@ -360,3 +360,45 @@ def test_the_contract_projection_preserves_every_field_the_board_sets(monkeypatc
     assert (built & modelled) <= projected, (
         "fields the contract models but the handler never projects: "
         f"{sorted((built & modelled) - projected)}")
+
+
+# ── Dealer / IV / side metric columns (terminal redesign) ────────────────────
+# The Signal Desk rank tables carry a dealer regime, an IV reading and a
+# side-specific metric. All three are joined from data the app ALREADY holds —
+# one read of the options matrix for the whole board, and the short-interest
+# store for the short side. Nothing here is computed from scratch, and a symbol
+# the matrix does not carry reads as absent rather than as a neutral value.
+
+class TestJoinedColumns:
+    _MATRIX = {"NVDA": {"dealer_regime": "Above flip", "atm_iv": 31.4,
+                        "iv_state": "cheap"},
+               "S00": {"dealer_regime": "Below flip", "atm_iv": 58.0,
+                       "iv_state": "rich"}}
+
+    def test_a_row_carries_its_dealer_regime_and_iv(self):
+        board = _build(matrix=self._MATRIX)
+        row = next(r for r in board["rows"] if r["symbol"] == "S00")
+        assert row["dealer"] == "Below flip"
+        assert row["atm_iv"] == 58.0
+        assert row["iv_state"] == "rich"
+
+    def test_a_symbol_the_matrix_lacks_reads_ABSENT_not_neutral(self):
+        """`not collected` and `at the flip` are different claims, and the
+        off-hours case turns on the distinction."""
+        board = _build(matrix=self._MATRIX)
+        row = next(r for r in board["rows"] if r["symbol"] == "S05")
+        assert row["dealer"] is None
+        assert row["atm_iv"] is None
+
+    def test_no_matrix_at_all_leaves_every_row_absent(self):
+        board = _build(matrix=None)
+        assert all(r["dealer"] is None for r in board["rows"])
+
+    def test_the_short_side_metric_is_days_to_cover(self):
+        board = _build(gate_ctx={"days_to_cover": {"S00": 17.1}})
+        row = next(r for r in board["rows"] if r["symbol"] == "S00")
+        assert row["dtc"] == 17.1
+
+    def test_a_name_with_no_short_interest_has_no_days_to_cover(self):
+        board = _build()
+        assert all(r["dtc"] is None for r in board["rows"])
