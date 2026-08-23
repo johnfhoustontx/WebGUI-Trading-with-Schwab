@@ -20,6 +20,7 @@ import bus_client
 from pages import fmt
 from pages import terminal_theme as T
 from pages import trade_shell as sh
+from pages import trade_terminal as tt
 from pages.ui_guard import guard
 from pages.view_watch import watch_view
 
@@ -51,9 +52,9 @@ def board_rows(board):
             "symbol": r.get("symbol", "?"),
             "decile": r.get("decile"),
             "pctl": f"{int(pct)}th" if pct is not None else "—",
-            "score": f"{comp:+.2f}" if comp is not None else "—",
+            "score": tt.signed(comp, 2),
             "score_class": T.sign_text(comp),
-            "exp": f"{exp:+.1%}" if exp is not None else "—",
+            "exp": tt.signed_pct(exp, 1),
             "exp_class": T.sign_text(exp) if exp is not None else T.OFF,
             "hit": f"{hit:.0%}" if hit is not None else "—",
             "band": r.get("band"),
@@ -175,7 +176,7 @@ def book_rows(book):
             "side": p.get("side") or "—",
             "expression": p.get("expression") or "—",
             "opened_on": p.get("opened_on") or "—",
-            "pnl": f"{pnl:+.1%}" if pnl is not None else "—",
+            "pnl": tt.signed_pct(pnl, 1),
             "pnl_class": T.sign_text(pnl) if pnl is not None else T.OFF,
             "status": p.get("status") or "—",
             "close_reason": p.get("close_reason") or "",

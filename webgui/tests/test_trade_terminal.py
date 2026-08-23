@@ -306,3 +306,25 @@ class TestNegativeZeroNeverRenders:
         bars = tt.investor_bars({"breakdown": [
             {"factor": "rs_vs_sector", "contribution": -0.4}]})
         assert bars[0]["value"] == "0"
+
+
+class TestOneSignedFormatterForTheWholeDesk:
+    """Evidence used a true minus and the Rank board a hyphen, so the same
+    number rendered two ways one tab apart. At mono sizes a hyphen reads as a
+    dash and a negative number stops looking negative — which is the whole
+    reason the true minus was chosen."""
+
+    def test_the_formatter_is_public(self):
+        assert callable(tt.signed)
+
+    def test_it_uses_a_TRUE_minus_not_a_hyphen(self):
+        assert tt.signed(-0.49, 2) == "−0.49"
+        assert "-" not in tt.signed(-0.49, 2)
+
+    def test_a_percentage_helper_shares_the_same_sign(self):
+        assert tt.signed_pct(-0.008, 1) == "−0.8%"
+        assert tt.signed_pct(0.016, 1) == "+1.6%"
+
+    def test_absent_is_a_dash_in_both(self):
+        assert tt.signed(None) == "—"
+        assert tt.signed_pct(None) == "—"

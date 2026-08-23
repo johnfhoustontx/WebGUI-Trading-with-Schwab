@@ -24,7 +24,7 @@ _CLEARANCE = {
 }
 
 
-def _signed(v, nd=2, dash="—"):
+def signed(v, nd=2, dash="—"):
     """A signed fixed-width number, or ``dash`` when absent.
 
     Two deliberate details. The sign is a true MINUS, not a hyphen: at mono
@@ -39,6 +39,20 @@ def _signed(v, nd=2, dash="—"):
     if float(body) == 0.0:
         return body
     return ("+" if n >= 0 else "−") + body
+
+
+def signed_pct(v, nd=1, dash="—"):
+    """The same sign convention, as a percentage."""
+    n = fmt.num(v)
+    if n is None:
+        return dash
+    body = f"{abs(n) * 100:.{nd}f}%"
+    if float(body[:-1]) == 0.0:
+        return body
+    return ("+" if n >= 0 else "−") + body
+
+
+_signed = signed          # the module used the private name before it was shared
 
 
 def command_bar(analysis):
