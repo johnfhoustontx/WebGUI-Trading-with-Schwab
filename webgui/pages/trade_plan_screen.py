@@ -74,19 +74,28 @@ def _build(state, refs):
 
         plan_body.clear()
         with plan_body:
-            for label, value in rows:
-                key = str(label).strip().lower() == _KEY_LABEL.lower()
-                cls = ("rounded-lg bg-[rgba(99,102,241,0.08)]" if key else "")
+            # `plan_rows` yields {"label", "value", "note"} dicts, and a field
+            # the analysis could not produce is OMITTED rather than None —
+            # a printed None in a stop row reads as a level.
+            for row in rows:
+                label = str(row.get("label", ""))
+                value = str(row.get("value", ""))
+                note = row.get("note") or ""
+                key = label.strip().lower() == _KEY_LABEL.lower()
+                cls = "rounded-lg bg-[rgba(99,102,241,0.08)]" if key else ""
                 with ui.element("div").classes(
                         f"w-full grid items-baseline gap-[14px] px-[10px] "
                         f"py-[11px] {T.HAIRLINE} {cls} "
                         "[grid-template-columns:108px_minmax(0,1fr)]"):
-                    ui.label(str(label).upper()).classes(
+                    ui.label(label.upper()).classes(
                         "text-[9.5px] font-bold tracking-[0.14em] "
                         + ("text-[#818cf8]" if key else "text-[#56678a]"))
-                    ui.label(str(value)).classes(
-                        f"text-[15px] font-medium text-[#e6edf7] "
-                        + (T.MONO if _looks_numeric(value) else ""))
+                    with ui.column().classes("gap-[5px] min-w-0"):
+                        ui.label(value).classes(
+                            "text-[15px] font-medium text-[#e6edf7] "
+                            + (T.MONO if _looks_numeric(value) else ""))
+                        if note:
+                            ui.label(note).classes(T.NOTE)
 
         actions.clear()
         with actions:

@@ -211,3 +211,47 @@ class TestEvidenceRows:
     def test_no_contributions_is_an_empty_table(self):
         assert tt.evidence_rows({}) == []
         assert tt.evidence_composite({}) is None
+
+
+# ── Row-builder shapes (found live, twice) ───────────────────────────────────
+# `dealer_rows` and `plan_rows` both return DICTS. The Signal Desk screens
+# consumed them as (label, value) tuples, which unpacks a dict's KEYS — the
+# Trade plan screen 500-ed on it and the Overview screen would have rendered
+# the strings "label" and "value" as its dealer stats.
+#
+# Nothing in the suite could catch that: the webgui tests exercise pure builders
+# and assert `callable(render)`, which never executes a render body, and ruff's
+# F82 sees no undefined name. So the shape is pinned HERE, at the boundary the
+# screens actually cross.
+
+class TestTheRowBuildersReturnDictsNotTuples:
+    def test_plan_rows_are_label_value_note_dicts(self):
+        from pages.trade import plan_rows
+        rows = plan_rows({
+            "action": "debit", "structure": "Call debit spread",
+            "dte_min": 30, "dte_max": 45, "rationale": "IV is cheap",
+            "entry_zone": "pull back", "stop": 172.1, "target": "+1.6%",
+            "time_stop_trading_days": 20, "time_stop_date": "2026-09-21",
+            "time_stop_note": "unmodelled past here", "events": "none"})
+        assert rows, "fixture should produce rows"
+        for r in rows:
+            assert isinstance(r, dict), f"plan_rows yielded {type(r)}"
+            assert {"label", "value"} <= set(r)
+
+    def test_dealer_rows_are_label_value_dicts(self):
+        from pages.trade import dealer_rows
+        rows = dealer_rows({"collected": True, "regime_words": "Above flip",
+                            "atm_iv": 31.0})
+        assert rows, "fixture should produce rows"
+        for r in rows:
+            assert isinstance(r, dict), f"dealer_rows yielded {type(r)}"
+            assert {"label", "value"} <= set(r)
+
+    def test_gate_rows_are_plain_strings(self):
+        """The other half of the same trap: these ARE flat, so a screen that
+        treated them like the dict builders would be equally wrong."""
+        from pages.trade import gate_rows, short_gate_rows
+        v = {"gates_triggered": ["below its 200-EMA"],
+             "short_gates": ["squeeze risk"]}
+        assert all(isinstance(g, str) for g in gate_rows(v))
+        assert all(isinstance(g, str) for g in short_gate_rows(v))
