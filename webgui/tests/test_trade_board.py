@@ -75,6 +75,38 @@ class TestRows:
         assert trade_board.board_rows(None) == []
 
 
+class TestTheSixthColumnDoesNotRepeatTheSecond:
+    """The second column is the calibration band as an ordinal ("90th"). The
+    long side's own metric used to be `band` — the SAME fact as a raw index —
+    which was invisible while the second column was mislabelled "PCTL" and
+    became a literal duplicate header the moment it was corrected to "BAND".
+
+    Today's decile is the genuinely different quantity: the band asks where the
+    score sits against five years of the model's own output, the decile asks
+    where the name sits among the ~78 scored today. A universe where every name
+    is mid-band still has a best and a worst."""
+
+    def test_the_long_metric_is_todays_decile_not_the_band(self):
+        row = trade_board.board_rows(_BOARD)[0]
+        head, value = trade_board.metric_cell(row, "long")
+        assert head == "DECILE"
+        assert value == "10"          # AAA: decile 10, band 2 — not "2"
+
+    def test_the_short_metric_is_still_days_to_cover(self):
+        head, _ = trade_board.metric_cell(trade_board.board_rows(_BOARD)[2], "short")
+        assert head == "DTC"
+
+    def test_a_missing_decile_degrades_rather_than_printing_a_rank(self):
+        row = trade_board.board_rows(_BOARD)[0] | {"decile": None}
+        assert trade_board.metric_cell(row, "long")[1] == "—"
+
+    def test_the_two_columns_never_carry_the_same_header(self):
+        row = trade_board.board_rows(_BOARD)[0]
+        for side in ("long", "short"):
+            head = trade_board.metric_cell(row, side)[0]
+            assert head not in trade_board._HEAD
+
+
 class TestPoolHeadlines:
     def test_the_long_headline_counts_the_pool(self):
         head = trade_board.pool_headline(_BOARD, "long")

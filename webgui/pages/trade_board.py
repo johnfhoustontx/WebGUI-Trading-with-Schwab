@@ -41,6 +41,24 @@ _HEAD = ("SYMBOL", "BAND", "SCORE", "EXP / 20D", "HIT", None, "DEALER", "IV",
          "GATES")
 
 
+def metric_cell(row, side):
+    """``(header, value)`` for the side-specific sixth column.
+
+    Long shows **today's decile** — where the name sits among the ~78 scored
+    right now. That is a different question from the BAND in column 2, which
+    asks where the score sat against five years of the model's own output: a
+    universe where every name is mid-band still has a best and a worst. The
+    long metric used to be `band`, i.e. column 2 restated as a raw index, which
+    only became visible when that column stopped being mislabelled "PCTL".
+
+    Short shows days-to-cover, the squeeze read that side actually needs."""
+    r = row or {}
+    if side != "long":
+        return "DTC", r.get("dtc", "—")
+    d = fmt.num(r.get("decile"))
+    return "DECILE", f"{int(d)}" if d is not None else "—"
+
+
 def board_rows(board):
     """Display rows, best first. Missing numbers render as an em dash — the
     board must never print a 0 it did not measure."""
@@ -324,7 +342,7 @@ def _table(board, side, accent, rows, hide_gated):
     picked = [r for r in rows if r["symbol"] in pool]
     if hide_gated:
         picked = [r for r in picked if r["gate"] == "clear"]
-    metric_head = "BAND" if side == "long" else "DTC"
+    metric_head = metric_cell(None, side)[0]
 
     with ui.column().classes(f"{T.PANEL} w-full gap-[14px] min-w-0 pb-3"):
         with ui.row().classes("items-baseline gap-3 flex-wrap"):
@@ -366,9 +384,7 @@ def _row(r, side):
             f"{T.MONO} text-[12.5px] text-right {r['exp_class']}")
         ui.label(r["hit"]).classes(
             f"{T.MONO} text-[12.5px] text-right text-[#8b9bb4]")
-        metric = (str(r["band"]) if r["band"] is not None else "—") \
-            if side == "long" else r["dtc"]
-        ui.label(metric).classes(
+        ui.label(metric_cell(r, side)[1]).classes(
             f"{T.MONO} text-[12.5px] text-right text-[#a8b6cf]")
         ui.label(r["dealer"]).classes(
             f"text-[12px] whitespace-nowrap {r['dealer_class']}")
