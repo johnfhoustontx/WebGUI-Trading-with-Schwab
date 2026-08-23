@@ -399,3 +399,67 @@ def test_render_merges_auth_into_proxy_card_with_aligned_buttons():
     assert "w-[280px]" in src and "justify-end" in src
     # No stray ml-auto button placement remains (the old drift-prone layout).
     assert "ml-auto {BTN_3D}" not in src
+
+
+# --- degrade counts surfaced from /health ------------------------------------
+
+def test_service_detail_reports_degrades_when_present():
+    """A silent swallowed exception becomes a number here.
+
+    services/_degrade counts them and _scaffold puts the total on /health; a
+    counter nobody can see is not observability, so the service card says
+    "healthy - 12 degraded" and the operator has somewhere to start."""
+    assert status.service_detail({"up": True, "degrades_total": 12}) == \
+        "healthy - 12 degraded"
+    assert status.service_detail({"up": True, "degrades_total": 1}) == \
+        "healthy - 1 degraded"
+
+
+def test_service_detail_is_plain_healthy_at_zero():
+    """Zero is the normal case; showing "- 0 degraded" on every card is noise."""
+    assert status.service_detail({"up": True, "degrades_total": 0}) == "healthy"
+    assert status.service_detail({"up": True}) == "healthy"
+
+
+def test_service_detail_tolerates_junk():
+    """An older service predating the counter, or a garbled payload, must not
+    break the card."""
+    for junk in ({"up": True, "degrades_total": None},
+                 {"up": True, "degrades_total": "lots"},
+                 {"up": True, "degrades_total": -3}):
+        assert status.service_detail(junk) == "healthy"
+
+
+def test_schwab_auth_state_sees_a_REJECTED_refresh_token():
+    """Observed live 2026-08-22: the proxy answered `refresh_token_expired:
+    false` for over an hour — from a locally stamped expiry — while Schwab was
+    rejecting the token and no market data flowed. The Status page rendered
+    "authorized — token valid" throughout.
+
+    The proxy now reports Schwab's own verdict; the page has to read it, or the
+    blindness just moves one layer up."""
+    ok, note = status.auth_status({
+        "up": True, "has_token": True,
+        "refresh_token_expired": False,      # the stamp still says fine
+        "refresh_token_rejected": True,      # Schwab disagrees
+        "token_expired": True,
+    })
+    assert ok is False
+    assert "re-auth" in note.lower() or "reauth" in note.lower()
+
+
+def test_schwab_auth_state_unchanged_when_nothing_is_rejected():
+    ok, note = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "refresh_token_rejected": False, "token_expired": False,
+    })
+    assert ok is True and "authorized" in note.lower()
+
+
+def test_schwab_auth_state_tolerates_an_older_proxy_without_the_field():
+    """A proxy that predates the rejection field must not read as rejected."""
+    ok, _ = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "token_expired": False,
+    })
+    assert ok is True

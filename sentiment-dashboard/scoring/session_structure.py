@@ -9,6 +9,7 @@ confidence-in-[0,1] idiom of scoring/effort.py.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from ._common import clamp as _clamp, num as _num
 
 VWAP_WEIGHT = 0.6      # blend weight of the VWAP-hold sub-signal
 OR_WEIGHT = 0.4        # blend weight of the opening-range-break sub-signal
@@ -20,20 +21,6 @@ _REQUIRED = ("high", "low", "close", "volume")
 class SessionStructure:
     score: float          # signed [-1.0, 1.0]; + = bullish structure
     confidence: float     # [0.0, 1.0]
-
-
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
-def _num(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
-        return None
-    return v
 
 
 def _clean(bar):

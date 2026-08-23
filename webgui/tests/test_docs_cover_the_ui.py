@@ -145,8 +145,10 @@ SUBTABS_AND_SCREENS = [
     ("Rescue", "Apply", "Apply"),
     ("EOD Report", "Detailed view", "Detailed"),
     ("EOD Report", "Generate button", "Generate"),
-    ("Trade Analyzer", "Deep Dive button", "Deep Dive"),
-    ("Trade Analyzer", "AI Query button", "AI Query"),
+    # Both report buttons moved into the Signal Desk COMMAND BAR, which is
+    # shared by all four screens; Overview is where the manuals describe it.
+    ("Overview", "Deep Dive button", "Deep Dive"),
+    ("Overview", "AI Query button", "AI Query"),
     ("System Status", "Re-authorize button", "Re-authorize"),
     ("System Status", "Restart button", "Restart"),
     ("Settings", "Appearance editor", "Appearance"),

@@ -113,7 +113,13 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-ledger">Paper Ledger</a></li>
 <li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#rescue">Rescue</a></li>
-<li><a href="#trade-analyzer">Trade Analyzer</a></li>
+<li><a href="#overview">Overview</a></li>
+<li><a href="#evidence">Evidence</a></li>
+<li><a href="#rank-board">Rank Board</a><ul>
+<li><a href="#the-model-paper-book">The model paper book</a></li>
+</ul>
+</li>
+<li><a href="#trade-plan">Trade Plan</a></li>
 <li><a href="#claude-trades">Claude Trades</a></li>
 <li><a href="#cross-page-actions">Cross-page actions</a></li>
 </ul>
@@ -329,8 +335,8 @@ question, plus a block of machine controls pinned to the bottom.</p>
 <td>Market Scanner · Strategy Finder · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue</td>
 </tr>
 <tr>
-<td><strong>Trade Analyzer</strong> (standalone)</td>
-<td>—</td>
+<td><strong>Trade Analyzer</strong> (group)</td>
+<td>Analyze · Rank Board</td>
 </tr>
 <tr>
 <td><strong>Claude Trades</strong> (standalone)</td>
@@ -463,7 +469,26 @@ structure · what should I act on · what am I holding.</em></p>
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
 Ledger or Claude Trades.</p>
 <p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
-<p><strong>Three things that will look like faults and are not:</strong></p>
+<p><strong>It announces arrivals out loud.</strong> When a new flow alert or a newly-opened position
+appears, the Desk speaks it and the row itself <strong>glows for ten seconds</strong>, so your eye
+lands where the voice pointed. Tickers are spelled letter by letter, squawk-box style.
+If several arrive together it names the newest and counts the rest ("plus 5 more")
+rather than reading out a list.</p>
+<p><strong>It names the contract when there is one.</strong> An unusual-activity or big-delta alert is
+about a specific option, so the announcement says which — <em>"N D X. Unusual activity,
+0-D T E 7 15 Put."</em> Numbers are spoken the way they are said at a desk rather than the
+way a computer reads them: 715 is "seven fifteen", 4500 is "forty-five hundred", 207.5
+is "two oh seven point five". A crossover or a gamma flip is a fact about the whole
+book with no contract to name, so it stays short: <em>"S P Y. Crossover alert, calls
+over."</em> A new position adds its strikes, expiry and entry price, and says <strong>credit or
+debit</strong> out loud — <em>"S P Y. New position, put credit spread. 2 07. point 5, 2 05,
+8 - 31, entry 56 cent credit."</em></p>
+<p>A position that only changes <strong>flag</strong> — OK to At risk to Rescue — glows amber and
+stays <strong>silent</strong>. It was already in the book, and the flag column has already told
+you.</p>
+<p>Switch it off, change the voice or set its volume under <strong>Settings → Spoken alerts
+(Desk)</strong>. It obeys the same <em>only during market hours</em> setting as the scanner chime.</p>
+<p><strong>Four things that will look like faults and are not:</strong></p>
 <ul>
 <li><strong>After the close the walls vanish and the panel greys out with a timestamp.</strong>
   Index option open interest reads 0 overnight, which would otherwise produce
@@ -475,6 +500,11 @@ Ledger or Claude Trades.</p>
 <li><strong>The top strip shows VIX but not SPX or QQQ.</strong> Those sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol.</li>
+<li><strong>The Desk goes silent on a fresh tab, and an <em>Enable spoken alerts</em> button
+  appears.</strong> Browsers refuse to play audio until you have interacted with the page,
+  and they refuse silently — nothing is logged and no error is shown. That button is
+  the app telling you it was blocked. One click unlocks sound for the session; any
+  other click on the page unlocks it too, the button just says so.</li>
 </ul>
 <hr />
 <h2 id="live-mirror">Live Mirror</h2>
@@ -1179,12 +1209,17 @@ at-risk table and gets a full candidate menu, but it has <strong>no Apply button
 paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 Captured signals do <strong>not</strong> add to the Rescue nav badge (that counts paper positions).</p>
 </blockquote>
-<h2 id="trade-analyzer">Trade Analyzer</h2>
-<p><strong>Route:</strong> <code>/trade</code>.</p>
-<p>On-demand analysis of a single symbol. Type a <strong>Symbol</strong> and press <strong>Analyze</strong>
-(tabbing out of the field does it too).</p>
-<p><strong>Two more buttons sit beside Analyze, and each opens a separate screen in a new
-browser tab:</strong></p>
+<h2 id="overview">Overview</h2>
+<p><strong>Route:</strong> <code>/trade</code>. The first tab of the Trade Analyzer group, and the screen the
+<strong>Signal desk</strong> command bar sits above on all four tabs.</p>
+<p>The command bar is persistent: the model stamp, a <strong>Symbol</strong> box, the last price and
+its change, and the multi-timeframe bias. Type a ticker and press <strong>Enter</strong> (or tab
+out) to commit it - the box outline turns indigo while your typing differs from the
+committed symbol, so a half-typed ticker never looks like the thing on screen.
+Clearing the box and leaving it reverts to the last good symbol rather than blanking
+the desk.</p>
+<p>Two report buttons sit in the command bar beside the bias, and each opens a separate
+screen in a new browser tab once its report is ready:</p>
 <table>
 <thead>
 <tr>
@@ -1195,56 +1230,112 @@ browser tab:</strong></p>
 <tbody>
 <tr>
 <td><strong>Deep Dive</strong></td>
-<td>A full standalone report for the symbol — technicals, fundamentals and short interest, plus options analytics (at-the-money IV, implied move, max pain, 25-delta skew, IV term structure, 30-day constant-maturity IV, net GEX and flip, open-interest walls) and an IV/RV rank.</td>
+<td>The EquityDeepDive quantitative report for the committed symbol</td>
 </tr>
 <tr>
 <td><strong>AI Query</strong></td>
-<td>The same digest formatted as a <strong>copyable chat prompt</strong> you can paste into an AI assistant. It makes <strong>no</strong> API call itself, so it costs nothing.</td>
+<td>A copyable chat prompt describing the symbol, for pasting into Claude</td>
 </tr>
 </tbody>
 </table>
-<blockquote>
-<p>IV rank reads "building" until enough daily snapshots have accumulated for that
-symbol. That is expected on a name you have just started analyzing.</p>
-</blockquote>
+<p>They act on the <strong>committed</strong> symbol, so commit first if you have just typed a new
+ticker.</p>
+<p>The screen itself reads top to bottom:</p>
 <ul>
-<li>A <strong>header</strong> with the symbol, price, bias, and volume.</li>
-<li><strong>Two verdict cards side by side</strong> — <strong>Position</strong> (1–8 weeks) and <strong>Investor</strong>
-  (months+):</li>
-<li><strong>Position (1–8 weeks)</strong> is <strong>backtested</strong>. Rather than a hand-tuned score, it
-    ranks the stock on a set of price/volume factors that were <em>validated against real
-    forward returns</em> (which factors matter, and by how much, was learned from history —
-    not guessed), then places it in a <strong>calibrated band</strong>. The headline shows the
-    Buy / Hold / Sell verdict for that band plus what the band has <em>historically</em>
-    delivered: a band <strong>percentile</strong>, an <strong>expected return</strong> over the model's horizon
-    (≈ 4 weeks), and how often names in that band <strong>beat the S&amp;P 500</strong> — e.g.
-    <em>"90th pctile · +1.3% / 20d · 52% beat-SPY"</em>. Open <strong>"Why — validated factors"</strong> to
-    see each factor's contribution (momentum, trend quality, relative strength,
-    volatility, turnover…) and the <strong>model's own track record</strong> (its version date and
-    out-of-sample accuracy). The previous hand-tuned verdict is still available under a
-    collapsed <strong>"Legacy heuristic"</strong> section for comparison. <em>Honest note:</em> the edge is
-    real but <strong>small and regime-dependent</strong> — treat it as one weighted input, not a
-    guarantee. The <strong>Investor (months+)</strong> validation is deferred (it needs fundamentals
-    history), so that card is unchanged.</li>
-<li>
-<p><strong>Investor (months+)</strong> shows a Buy / Hold / Sell verdict (color-coded), a score,
-    the top reasons, any hard "gates" that fired, and an expandable factor breakdown.</p>
-<blockquote>
-<p><strong>The Markov Forecast card was removed in June 2026</strong> and no longer appears on
-this page. It projected the <em>legacy</em> technical-momentum score, which contradicted
-the validated Position read sitting beside it. The underlying forecast is still
-computed and still reaches the data feed, but nothing on this screen renders it.</p>
-</blockquote>
-</li>
-<li>
-<p>An <strong>MTF EMA Alignment</strong> card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
-  5m, 1m).</p>
-</li>
-<li>A <strong>Momentum</strong> strip (RSI, ADX, MACD histogram, VWAP, relative volume).</li>
-<li>A <strong>Sector</strong> card and, when available, a <strong>Fundamentals</strong> card (P/E, PEG, revenue
-  &amp; EPS growth, ROE, margin trend).</li>
+<li><strong>Market state</strong> with a chip per side - <em>long cleared</em>, <em>short relative only</em>, and
+  so on. These are the same gates the rest of the app applies.</li>
+<li><strong>Position (1-8 weeks)</strong> - the cross-section percentile as a large number over a
+  <strong>decile rail</strong>, with the marker where this name sits between the bottom and top
+  decile, and the calibrated expectation beneath. Two cards below it say what each
+  side is permitted and why.</li>
+<li><strong>Investor (months+)</strong> - the verdict with its six factor scores on centred bars.
+  A bar to the right of the middle line is a positive contribution, to the left
+  negative, and a factor with no data reads <strong>n/a</strong> with no bar at all.</li>
+<li><strong>Dealer positioning &amp; volatility</strong> - put wall, flip, spot and call wall on one
+  ladder, over the volatility stats. The ladder is <strong>absent entirely</strong> when the
+  data is not collected or is stale, because a drawn ladder is a much stronger
+  claim than a missing one.</li>
+<li><strong>Where it sits among its peers</strong> - the same model run across its sector, with
+  this symbol highlighted.</li>
 </ul>
-<p>The analysis persists as you navigate away and back.</p>
+<hr />
+<h2 id="evidence">Evidence</h2>
+<p><strong>Route:</strong> <code>/trade/evidence</code>.</p>
+<p>The reasoning behind the Position verdict. Each validated factor appears with its
+<strong>z-score</strong> against today's cross-section, its <strong>weight</strong>, a zero-centred
+<strong>contribution bar</strong>, and its <strong>IC</strong> - the historical information coefficient. The
+weighted composite is footed at the bottom, and it is the sum of the contribution
+column.</p>
+<p>Two cards sit alongside, and they answer different questions:</p>
+<ul>
+<li><strong>Model track record</strong> - the artifact, its out-of-sample IC, which weight set
+  scored this symbol, and the live tracking line. The amber callout carries the
+  loudest thing the model has to say about itself: how much of its weight sits on
+  volatility factors.</li>
+<li><strong>This name's history</strong> - the last five reads of <em>this symbol</em> and what followed.
+  A read whose 20 days have not elapsed shows <strong>pending</strong> rather than a number.
+  Five reads can never support a correlation, which is why this is a list of
+  outcomes and not a statistic.</li>
+</ul>
+<hr />
+<h2 id="rank-board">Rank Board</h2>
+<p><strong>Route:</strong> <code>/trade/board</code>. The second tab of the Trade Analyzer group.</p>
+<p>Where <strong>Analyze</strong> judges one stock you already have in mind, the <strong>Rank Board</strong>
+runs the same model across every name in its universe and sorts them — so you can
+start a session by seeing what is best and worst today, then analyze the ones worth
+a closer look.</p>
+<p><strong>Deciles</strong> are today's ordering: decile 10 is the strongest of the current
+cross-section, decile 1 the weakest. <strong>Long candidates</strong> and <strong>Short candidates</strong> are
+those two ends.</p>
+<p>Each pool carries a line explaining its own state, and it is worth reading before
+acting on the list:</p>
+<ul>
+<li><strong>"Express these RELATIVE…"</strong> means the market filter has not cleared the short
+  side. The model predicts return <em>versus the S&amp;P 500</em>, so a bottom-decile name in a
+  rising market is expected to <strong>lag the index</strong>, not to fall. Pair it against the
+  index rather than shorting it outright.</li>
+<li><strong>"Too few names in today's cross-section…"</strong> means the universe is too small to
+  form deciles — a data limit, not a verdict on the market.</li>
+</ul>
+<p><strong>Gated rows stay on the board</strong> with their reasons shown, because "the top-ranked
+name reports earnings in two days" is exactly what you want to see. The line under the
+header tells you which gates were checked here; it is fewer than the Analyze card
+tests, so an unmarked row has not passed everything.</p>
+<p>⚠ <strong>Read the amber line before you read the ranking.</strong> It states how much of the
+model's weight sits on volatility, and that is currently about half — meaning <strong>the top
+of this board is the highest-beta end of the universe</strong>. That ordering has historically
+worked while the market rose and inverted when it fell. Use the board to pick what to
+research, not as a ranked buy list.</p>
+<p><strong>Rebuild</strong> forces a fresh scoring run; otherwise the board follows the daily
+universe snapshot.</p>
+<h3 id="the-model-paper-book">The model paper book</h3>
+<p>Below the board sits an isolated <strong>paper book</strong> that follows the board's own
+pools, so the model builds a track record without you placing anything. It opens
+the ungated names from each pool, applies the Trade Plan's stop, target and
+20-trading-day time stop, and reports <strong>long and short separately</strong> — a model
+carried entirely by its longs is a different thing from one that works on both
+sides.</p>
+<p>Two details worth knowing before reading its P&amp;L:</p>
+<ul>
+<li>It trades the <strong>underlying stock</strong>, not the options structure the Trade Plan
+  suggests. A spread's time decay and volatility swings would swamp the actual
+  question, which is whether the ranking works.</li>
+<li>A <strong>relative</strong> short is held as a pair against SPY. The model predicts return
+  versus the index, so that is what the book measures; holding it outright would
+  be recording the market's direction instead.</li>
+</ul>
+<p>It is paper only, and separate from the Claude Trades book.</p>
+<hr />
+<h2 id="trade-plan">Trade Plan</h2>
+<p><strong>Route:</strong> <code>/trade/plan</code>.</p>
+<p>Two cards. The left one is the plan when a side is cleared: structure, legs, entry
+zone, stop, target, <strong>time stop</strong> and events. The time stop is highlighted in indigo
+because it is the model's own 20-trading-day horizon and nothing else in the app
+enforces it - past that date the read is unmodelled.</p>
+<p>The right card is the other half, and it is always shown. It states plainly why
+there is no trade (or why one side is refused), lists <strong>what would change it</strong>, and
+tells you <strong>how to express the view anyway</strong> if you want the exposure - usually as a
+pair against SPY, since relative return is what the model actually predicts.</p>
 <hr />
 <h2 id="claude-trades">Claude Trades</h2>
 <p><strong>Route:</strong> <code>/driver</code>.</p>
@@ -1425,6 +1516,11 @@ Status and Stop All Services.</p>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
   hours</strong> toggle, and a <strong>minimum score to alert</strong>.</li>
+<li><strong>Spoken alerts (Desk)</strong> — the Desk announcing new flow alerts and newly-opened
+  positions out loud. An <strong>on/off</strong> switch, a <strong>Voice</strong> picker (six neural voices;
+  Aria is the default), a <strong>Volume</strong> slider, and a <strong>Test voice</strong> button. There is
+  deliberately no second market-hours toggle here: spoken alerts obey the <em>only
+  during market hours</em> switch in <strong>Scanner alerts</strong> above.</li>
 <li><strong>Desktop notifications</strong> — enable them and grant the browser permission.</li>
 <li><strong>Flow alerts</strong> — whether put/call premium crossovers and unusual activity alert
   you.</li>
@@ -1445,7 +1541,14 @@ Status and Stop All Services.</p>
   database and reports the before-and-after size.</li>
 </ul>
 <blockquote>
-<p>Clicking <strong>Test sound</strong> also unlocks browser audio for the session.</p>
+<p>Clicking <strong>Test sound</strong> — or <strong>Test voice</strong> — also unlocks browser audio for the
+session. Browsers block sound until you interact with the page, and they do it
+silently, so a Desk that never speaks is usually blocked rather than broken. The
+Desk shows an <strong>Enable spoken alerts</strong> button when that happens.</p>
+<p><strong>The first time a given phrase is spoken it takes a second or two to generate</strong>,
+because the clip is made on demand; after that it plays from a cache on your own
+machine and is instant. The app pre-generates the common flow phrases in the
+background at startup, so in practice you rarely hear the delay.</p>
 <p><strong>Turning the ticker off also stops the Claude calls behind it</strong>, so it is a cost
 control as well as a display setting.</p>
 <p><strong>Run Vacuum after hours.</strong> It locks the database for minutes, and the tool

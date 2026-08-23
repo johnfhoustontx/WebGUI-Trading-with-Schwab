@@ -7,6 +7,7 @@ import logging
 import tomllib
 
 from repo_paths import FLOW_ALERTS_TOML
+from services import _degrade
 
 log = logging.getLogger(__name__)
 _TOML_PATH = FLOW_ALERTS_TOML
@@ -239,6 +240,7 @@ def detect_big_delta(symbol, chain, cfg):
                                          "delta": float(d), "volume": int(vol),
                                          "delta_notional": dn, "cost": _mark(c)})
                         except Exception:
+                            _degrade.degraded("options.detect_big_delta")
                             continue
         if gross <= 0:
             return []

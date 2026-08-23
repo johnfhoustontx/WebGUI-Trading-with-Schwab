@@ -30,6 +30,7 @@ Every engine-call function is defensive: per the page/service convention it
 catches and degrades (returns ``None`` / an ``errors`` payload) rather than
 raising, so one bad symbol can never crash the service.
 """
+import os
 import sys
 from datetime import date, datetime, timezone
 
@@ -56,6 +57,7 @@ from src.analysis.recommendation import (  # noqa: E402
     InvestorInputs, InvestorVerdict, PositionInputs, PositionVerdict)
 from src.analysis.sector_strength import (  # noqa: E402
     SectorStrength, compute_sector_strength)
+from services import _degrade  # noqa: E402
 
 # Symbol → (sector name, sector ETF). A small built-in map for common large caps
 # in lieu of the legacy finviz scrape; unknown symbols fall back to a neutral
@@ -350,6 +352,7 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
             composite.iloc[:_MK_WARMUP] = np.nan
         return composite
     except Exception:
+        _degrade.degraded("trade.reconstruct_daily_composite")
         return pd.Series([], dtype=float)
 
 
@@ -484,6 +487,7 @@ def _symbol_factor_row(sym):
                 row[c] = float(last)
         return row
     except Exception:
+        _degrade.degraded("trade._symbol_factor_row")
         return {}
 
 
@@ -502,20 +506,375 @@ def _swing_universe():
     return list(_MK_UNIVERSE)
 
 
+def live_ic_reading(symbol=None, db_path=None):
+    """The live-IC monitor's reading over the journal. Never raises.
+
+    ``symbol`` narrows it to one name's own history — which is almost always
+    far too thin to produce an IC, and the monitor says so rather than printing
+    one. The whole-journal reading is the useful one.
+
+    ⚠ Skipped under pytest without an explicit path, the same rule
+    :func:`journal_reading` follows and for the same reason: the bus is
+    fakeredis, SQLite is not."""
+    from services.trade_svc import live_ic as _lic
+    if db_path is None and _under_pytest():
+        return _lic.compute(None)
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        from services.trade_svc import swing_model as _swing
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        rows = [dict(r) for r in rec_journal.readings(conn, symbol=symbol)]
+        art = _swing.load_artifact() or {}
+        oos = ((art.get("regimes") or {}).get("all") or {}).get("oos_ic")
+        return _lic.compute(rows, artifact_oos_ic=oos)
+    except Exception:
+        _degrade.degraded("trade.live_ic_reading")
+        return _lic.compute(None)
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
+def run_model_book(board=None, prices=None, today=None, db_path=None):
+    """One tick of the model paper book: open, mark, close. Never raises.
+
+    Returns the book's published view. ``prices`` is injected in tests; live it
+    is one batched quote call over the symbols actually involved.
+
+    ⚠ Skipped under pytest without an explicit path — the same store-isolation
+    rule ``journal_reading`` follows."""
+    from services.trade_svc import model_book as _mb
+    from services.trade_svc import model_book_store as _store
+    import datetime as _dt
+
+    blank = {"positions": [], "summary": _mb.summary([]), "as_of": None}
+    if db_path is None and _under_pytest():
+        return blank
+    conn = None
+    try:
+        today = today or _dt.date.today()
+        conn = _store.init_db(db_path or _store.DEFAULT_DB_PATH)
+        if board is None:
+            env = _bus().cache_get("cache:trade:rank_board")
+            board = env.payload if env else None
+
+        held = _store.open_symbols(conn)
+        open_rows = [dict(r) for r in _store.positions(conn, status="open")]
+
+        # Quote FIRST, then build candidates. Building them from an empty price
+        # map drops every one of them for want of a price — which is exactly
+        # what a live tick did, silently, while every unit test passed: they all
+        # inject prices, so the fetch path was never exercised.
+        need = sorted({r["symbol"] for r in open_rows}
+                      | set(_mb.wanted_symbols(board)) | {"SPY"})
+        if prices is None:
+            prices = _quotes_for(need)
+
+        wanted = [c for c in _mb.candidates(board, prices, today=today)
+                  if c["symbol"] not in held]
+        for cand in wanted:
+            _store.open_position(conn, cand)
+
+        for row in open_rows:
+            px, spy = prices.get(row["symbol"]), prices.get("SPY")
+            marked = _mb.mark(row, px, spy)
+            why = _mb.close_reason(row, px, spy, today)
+            if why:
+                _store.close_position(conn, row["symbol"], row["opened_on"],
+                                      marked.get("last"), marked.get("pnl_pct"),
+                                      why, on=today)
+            else:
+                _store.update_mark(conn, row["symbol"], row["opened_on"],
+                                   marked.get("last"), marked.get("pnl_pct"))
+
+        rows = [dict(r) for r in _store.positions(conn, limit=200)]
+        return {"positions": rows, "summary": _mb.summary(rows),
+                "as_of": today.isoformat()}
+    except Exception:
+        _degrade.degraded("trade.run_model_book")
+        return blank
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import model_book_store as _s
+                _s.close_db(conn)
+            except Exception:
+                pass
+
+
+def _quotes_for(symbols):
+    """``{symbol: last}`` for the book's tick. {} on any failure."""
+    try:
+        quotes = _proxy.schwab_client.get_quotes(list(symbols)) or {}
+        out = {}
+        for sym, q in quotes.items():
+            last = (q or {}).get("last")
+            if isinstance(last, (int, float)) and last > 0:
+                out[sym] = float(last)
+        return out
+    except Exception:
+        _degrade.degraded("trade.model_book_quotes")
+        return {}
+
+
+def symbol_history_rows(symbol, limit=5, db_path=None):
+    """Recent journal reads for one symbol. [] under pytest without a path."""
+    from services.trade_svc import live_ic as _lic
+    if db_path is None and _under_pytest():
+        return []
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        rows = [dict(r) for r in rec_journal.readings(
+            conn, symbol=(symbol or "").strip().upper(), limit=limit * 4)]
+        return _lic.symbol_history(rows, limit=limit)
+    except Exception:
+        _degrade.degraded("trade.symbol_history")
+        return []
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
+def _board_gate_ctx(symbols):
+    """Gate inputs for the whole board: ``{"earnings_days": …, "squeeze": …}``.
+
+    Both come from LOCAL stores, so a 78-row board costs no network at all.
+
+    ⚠ The squeeze leg here is days-to-cover ONLY. The card's gate also tests
+    percent-of-float, which needs a per-symbol Schwab `/instruments` fetch —
+    78 of those on a board build is not worth it, and days-to-cover is FINRA's
+    own computation and never touches the contested float denominator anyway.
+    The board therefore gates a SUBSET, which is why `GATES_EVALUATED` is
+    published beside the rows."""
+    from services.trade_svc import earnings_calendar as _ec
+    from services.trade_svc import short_interest as _si
+    out = {"earnings_days": {}, "squeeze": {}, "days_to_cover": {}}
+    syms = [s for s in (symbols or []) if s]
+    try:
+        conn = _ec.init_db()
+        try:
+            for s in syms:
+                d = _ec.days_to_earnings(conn, s)
+                if d is not None:
+                    out["earnings_days"][s] = d
+        finally:
+            _ec.close_db(conn)
+    except Exception:
+        _degrade.degraded("trade.board_earnings_ctx")
+    try:
+        conn = _si.init_db()
+        try:
+            for s in syms:
+                row = _si.lookup(conn, s)
+                dtc = (row["days_to_cover"] if row is not None
+                       and "days_to_cover" in row.keys() else None)
+                # The module's OWN gate, called with the float leg absent, so
+                # the board and the card cannot drift on the threshold.
+                if isinstance(dtc, (int, float)):
+                    out["days_to_cover"][s] = float(dtc)
+                fires, reason = _si.squeeze_flag(None, dtc)
+                if fires:
+                    out["squeeze"][s] = reason
+        finally:
+            _si.close_db(conn)
+    except Exception:
+        _degrade.degraded("trade.board_squeeze_ctx")
+    return out
+
+
+def build_rank_board():
+    """Today's ranked cross-section over the universe snapshot.
+
+    Reuses the snapshot `analyze` already builds once a day, so the board costs
+    one SPY history read plus two local store scans — the scoring itself is
+    pure. Never raises: a failure yields the empty board shape, which the page
+    renders as "waiting for the snapshot" rather than as an empty market."""
+    from services.trade_svc import swing_model as _swing
+    from services.trade_svc import rank_board as _rb
+    try:
+        snap = get_universe_snapshot()
+        if not (snap or {}).get("by_symbol"):
+            # A snapshot in the LEGACY flat shape has values but no symbol
+            # names, so it can be scored but not ranked. `get_universe_snapshot`
+            # returns it as-is for the day, which for the board means an empty
+            # table that reads like a quiet market. Rebuild once instead — the
+            # cost is the daily fan-out we would have paid tomorrow anyway, and
+            # it self-heals rather than waiting out the day.
+            rebuilt = build_universe_factor_snapshot()
+            if rebuilt:
+                _write_universe_snapshot(rebuilt)
+                snap = rebuilt
+        art = _swing.load_artifact()
+        spy = _price_history("SPY", "year", 2, "daily", 1)
+        spy_close = (_factors._close(spy)
+                     if spy is not None and not spy.empty else None)
+        board = _rb.build(
+            snap, art, regime=_market_regime(spy_close),
+            clearance=_direction_clearance(spy),
+            gate_ctx=_board_gate_ctx(list((snap or {}).get("by_symbol") or {})),
+            matrix=_matrix_by_symbol())
+        board["as_of"] = _today_ct_str()
+        return board
+    except Exception:
+        _degrade.degraded("trade.build_rank_board")
+        return _rb.build(None, None)
+
+
+def _market_regime(spy_close):
+    """Today's daily-bar regime key, or None.
+
+    ⚠ Needs ~272 bars of SPY to classify, and analyze() fetches TWO years — so
+    this is real only because that is comfortably enough. A shorter fetch would
+    return None on every call and the regime selector would silently sit on the
+    pooled weights forever, which looks identical to it working."""
+    try:
+        from src.analysis import regime as _regime
+        return _regime.current_regime(spy_close)
+    except Exception:
+        _degrade.degraded("trade._market_regime")
+        return None
+
+
 def build_universe_factor_snapshot():
-    """Assemble {factor: [values across the universe]} from the latest per-symbol
-    factor rows (NaN/missing dropped). Fetches concurrently; never raises."""
-    snapshot = {}
+    """``{"by_symbol": {symbol: {factor: value}}}`` for the whole universe.
+
+    ⚠ This used to return the FLAT ``{factor: [values]}`` the scorer consumes —
+    it computed every symbol's factors daily and then threw the NAMES away.
+    Keeping them is the single change that turns a one-symbol scorer into a
+    ranking: it powers the sector-peer lines on the single-symbol card, and
+    later the rank board, at no extra fetch cost.
+
+    The flat basis is DERIVED from this by :func:`flat_basis`, so the scoring
+    path provably does not move. Fetches concurrently; never raises."""
+    by_symbol = {}
     try:
         results = parallel_map(lambda s: (s, _symbol_factor_row(s)),
                                _swing_universe())
-        for _sym, row in results:
-            for factor, value in (row or {}).items():
-                if value is not None and np.isfinite(value):
-                    snapshot.setdefault(factor, []).append(value)
+        for sym, row in results:
+            clean = {f: v for f, v in (row or {}).items()
+                     if v is not None and np.isfinite(v)}
+            if clean:
+                by_symbol[sym] = clean
     except Exception:
         return {}
-    return snapshot
+    # An empty result stays FALSY: the caller writes the cache only `if
+    # snapshot`, and a truthy {"by_symbol": {}} would cache a snapshot of
+    # nothing for the rest of the day.
+    return {"by_symbol": by_symbol} if by_symbol else {}
+
+
+def flat_basis(snapshot):
+    """``{factor: [values]}`` — what the scorer cross-sections against.
+
+    Accepts both shapes: the new ``{"by_symbol": …}`` and a LEGACY flat payload
+    cached before that change. A cached snapshot outliving a deploy must keep
+    scoring rather than silently cross-sectioning against nothing."""
+    if not isinstance(snapshot, dict):
+        return {}
+    by_symbol = snapshot.get("by_symbol")
+    if not isinstance(by_symbol, dict):
+        return snapshot          # legacy flat payload, already the right shape
+    out = {}
+    for row in by_symbol.values():
+        for factor, value in (row or {}).items():
+            out.setdefault(factor, []).append(value)
+    return out
+
+
+def _peer_block(symbol, snapshot, artifact, swing_block, regime=None):
+    """Sector-peer placement for the analyzed symbol, or None.
+
+    Scores every peer in the snapshot through the SAME scorer the symbol went
+    through, so the ranking and the headline percentile come from one code path
+    — a second scoring path would drift. Never raises.
+
+    ⚠ ``regime`` must be the SAME key the headline symbol was scored under. It
+    was omitted here until 2026-08-22, which was invisible only because the
+    artifact carried one regime: the moment a regime key populates, the peers
+    would be scored on pooled weights and the symbol on regime weights, and
+    their percentiles compared as though they came from one model."""
+    from services.trade_svc import swing_model as _swing
+    try:
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
+        if not by_symbol or not artifact:
+            return None
+        basis = flat_basis(snapshot)
+        sym = (symbol or "").strip().upper()
+        sect = resolve_sector(sym).get("name")
+        if not sect:
+            return None
+        scores = {}
+        for peer, row in by_symbol.items():
+            if resolve_sector(peer).get("name") != sect:
+                continue
+            scored = _swing.score_symbol(row, basis, artifact, regime=regime)
+            if scored and scored.get("percentile") is not None:
+                scores[peer] = scored["percentile"]
+        if swing_block and swing_block.get("percentile") is not None:
+            scores[sym] = swing_block["percentile"]
+        if len(scores) < 2:
+            return None
+        return sector_peers(sym, snapshot, scores)
+    except Exception:
+        _degrade.degraded("trade.peer_block")
+        return None
+
+
+def sector_peers(symbol, snapshot, scores):
+    """Where ``symbol`` sits among its SECTOR peers in today's cross-section.
+
+    ``scores`` maps symbol -> percentile (or composite). Returns the ranked
+    peer list plus the strongest, the weakest and the immediate neighbours —
+    the lines that answer "is this the best vehicle for the thesis?", which is
+    the question single-stock research should end on.
+
+    An unmapped symbol yields an EMPTY peer set rather than the whole universe:
+    ranking a name against companies it shares nothing with would invent a
+    comparison that does not exist."""
+    blank = {"sector": "", "ranked": [], "strongest": None, "weakest": None,
+             "above": None, "below": None, "rank": None, "n": 0}
+    try:
+        sym = (symbol or "").strip().upper()
+        sect = resolve_sector(sym)
+        name = sect.get("name")
+        if not name:
+            return blank
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
+        peers = [s for s in by_symbol
+                 if resolve_sector(s).get("name") == name and s in (scores or {})]
+        if sym in (scores or {}) and sym not in peers:
+            peers.append(sym)
+        if not peers:
+            return blank
+        ranked = sorted(
+            ({"symbol": s, "score": scores[s]} for s in peers),
+            key=lambda d: d["score"], reverse=True)
+        idx = next((i for i, d in enumerate(ranked) if d["symbol"] == sym), None)
+        return {
+            "sector": name,
+            "ranked": ranked,
+            "strongest": ranked[0],
+            "weakest": ranked[-1],
+            "above": ranked[idx - 1] if idx not in (None, 0) else None,
+            "below": (ranked[idx + 1]
+                      if idx is not None and idx + 1 < len(ranked) else None),
+            "rank": None if idx is None else idx + 1,
+            "n": len(ranked),
+        }
+    except Exception:
+        _degrade.degraded("trade.sector_peers")
+        return blank
 
 
 def _read_universe_snapshot():
@@ -527,21 +886,37 @@ def _read_universe_snapshot():
 
 
 def _write_universe_snapshot(snapshot):
+    """Cache today's snapshot. Stores ``by_symbol`` (the identity-preserving
+    shape) and bumps ``version`` so a payload written by the older code — which
+    had only the flat ``factors`` — is not mistaken for the new one."""
     try:
+        by_symbol = (snapshot or {}).get("by_symbol") or {}
         _bus().cache_set(_UNIVERSE_KEY, {
-            "factors": {k: [float(x) for x in v] for k, v in snapshot.items()},
+            "version": 2,
+            "by_symbol": {s: {k: float(v) for k, v in row.items()}
+                          for s, row in by_symbol.items()},
             "date": _today_ct_str()})
     except Exception:
         pass
 
 
 def get_universe_snapshot():
-    """{factor: [values]} for today. Lazy: reuse today's cached snapshot; else
-    rebuild from the universe and cache it; {} on failure (the scorer then uses
-    the artifact's historical norm)."""
+    """Today's universe snapshot in the ``{"by_symbol": …}`` shape.
+
+    Lazy: reuse today's cache, else rebuild and store it. ``{}`` on failure, in
+    which case the scorer falls back to the artifact's historical norm.
+
+    ⚠ A cached payload written by the PREVIOUS code carries only the flat
+    ``factors`` key. It is returned as-is; :func:`flat_basis` accepts both, so
+    a snapshot outliving a deploy keeps scoring instead of silently
+    cross-sectioning against nothing. Only the peer lines are unavailable until
+    the next daily rebuild."""
     cached = _read_universe_snapshot()
-    if cached and cached.get("date") == _today_ct_str() and cached.get("factors"):
-        return cached["factors"]
+    if cached and cached.get("date") == _today_ct_str():
+        if cached.get("by_symbol"):
+            return {"by_symbol": cached["by_symbol"]}
+        if cached.get("factors"):
+            return cached["factors"]          # legacy shape, still scoreable
     try:
         snapshot = build_universe_factor_snapshot()
         if snapshot:
@@ -602,6 +977,314 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
             "prior_version": version,
         }
     except Exception:
+        _degrade.degraded("trade.build_markov_block")
+        return None
+
+
+# ── short interest: FINRA numerator, Schwab denominator ─────────────────────
+# Schwab ships shortIntToFloat/shortIntDayToCover as a 0.0 sentinel for every
+# symbol, so parse_schwab_fundamentals maps them to None and the real values
+# are joined in here. Schwab still supplies the FLOAT (``marketCapFloat`` is
+# float in SHARES despite the name). See services/trade_svc/short_interest.py.
+_SI_REFRESH_DAY = [None]   # one refresh attempt per calendar day, at most
+
+
+def _short_interest_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import short_interest as _si
+    return _si.DEFAULT_DB_PATH
+
+
+def _refresh_short_interest(conn):
+    """At most one FINRA cycle check per day. FINRA publishes bi-monthly, so
+    this is a no-op on all but ~24 days a year; the daily probe is one cheap
+    request that usually finds the store already current."""
+    today = _today_ct_str()
+    if _SI_REFRESH_DAY[0] == today:
+        return
+    _SI_REFRESH_DAY[0] = today
+    try:
+        from services.trade_svc import short_interest as _si
+        _si.refresh(conn)
+    except Exception:
+        _degrade.degraded("trade.refresh_short_interest")
+
+
+def _enrich_short_interest(fundamentals, symbol, float_shares):
+    """Fill the two short-interest fields from FINRA, in place.
+
+    Never raises and never falls back to Schwab's 0.0 — a symbol FINRA does
+    not carry (a rename, most often) leaves both fields None, because a
+    sentinel reinstated here would silently disable the squeeze gate again."""
+    conn = None
+    try:
+        from services.trade_svc import short_interest as _si
+        path = _short_interest_db_path()
+        # Same isolation rule the journal and PIT stores carry, and this one
+        # matters more: unguarded it opened a SQLite file inside the repo AND
+        # pulled a live FINRA cycle — measured, 22,341 rows downloaded during a
+        # single suite run. A test that wants the join patches the path, which
+        # opts back in.
+        if _under_pytest() and path == _si.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _si.init_db(path)
+        _refresh_short_interest(conn)
+        got = _si.for_symbol(conn, symbol, float_shares)
+        if got:
+            fundamentals.short_int_to_float = got["pct_of_float"]
+            fundamentals.short_int_day_to_cover = got["days_to_cover"]
+    except Exception:
+        _degrade.degraded("trade.enrich_short_interest")
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import short_interest as _si2
+                _si2.close_db(conn)
+            except Exception:
+                pass
+    return fundamentals
+
+
+_REGIME_KEY = "cache:sentiment:regime"
+
+
+def _read_regime():
+    """The sentiment service's committed market-regime payload, or None.
+
+    Tier-2 reading another domain's Tier-3 cache view — allowed, and the same
+    thing `driver_svc` does for its market context. Never raises: a sentiment
+    outage costs the clearance its nuance, not the user their analysis, and
+    :func:`market_filter.direction_clearance` treats a missing regime exactly
+    as it treats a stale one (conservatively)."""
+    try:
+        env = _bus().cache_get(_REGIME_KEY)
+        return env.payload if env else None
+    except Exception:
+        return None
+
+
+_MATRIX_KEY = "cache:options:matrix"
+
+
+# Company names never change intraday, so one lookup per symbol per process is
+# plenty. Schwab returns them ONLY on the `symbol-search` projection — the
+# `fundamental` one carries no name at all, which is why `analyze` had been
+# setting `description` to the ticker.
+_COMPANY_NAMES = {}
+
+
+def reset_company_names():
+    """Test hook."""
+    _COMPANY_NAMES.clear()
+
+
+def company_name(symbol):
+    """A display company name for ``symbol``, or None. Never raises.
+
+    None rather than the ticker: a name that merely repeats the symbol is not a
+    name, and the command bar already renders absence properly."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    if sym in _COMPANY_NAMES:
+        return _COMPANY_NAMES[sym]
+    name = None
+    try:
+        raw = _proxy.schwab_client._request(
+            "/instruments", {"symbol": sym, "projection": "symbol-search"})
+        for inst in ((raw or {}).get("instruments") or []):
+            if (inst.get("symbol") or "").strip().upper() != sym:
+                continue
+            desc = (inst.get("description") or "").strip()
+            if desc and desc.upper() != sym:
+                # Schwab returns these SHOUTED and often truncated; title-case
+                # reads as a name rather than as a warning.
+                name = desc.title()
+            break
+    except Exception:
+        _degrade.degraded("trade.company_name")
+        name = None
+    _COMPANY_NAMES[sym] = name
+    return name
+
+
+def _matrix_by_symbol():
+    """``{symbol: row}`` for the WHOLE options matrix, from one cache read.
+
+    The rank board joins dealer regime and IV for every name at once; reading
+    the matrix per symbol would be 78 deserializes of the same payload."""
+    try:
+        env = _bus().cache_get(_MATRIX_KEY)
+        payload = env.payload if env else None
+        rows = (payload or {}).get("rows") or []
+        return {(r.get("symbol") or "").strip().upper(): r for r in rows
+                if r.get("symbol")}
+    except Exception:
+        _degrade.degraded("trade.matrix_by_symbol")
+        return {}
+
+
+def _read_matrix_row(symbol):
+    """``(row, payload_ts)`` for ``symbol`` from the options matrix, or
+    ``(None, None)``.
+
+    Tier-2 reading another domain's Tier-3 cache view — the same thing
+    `driver_svc` does for its market context. Never raises."""
+    try:
+        env = _bus().cache_get(_MATRIX_KEY)
+        payload = env.payload if env else None
+        if not payload:
+            return None, None
+        sym = (symbol or "").strip().upper()
+        for r in (payload.get("rows") or []):
+            if (r.get("symbol") or "").strip().upper() == sym:
+                return r, payload.get("ts")
+        return None, payload.get("ts")
+    except Exception:
+        return None, None
+
+
+def _dealer_context(symbol):
+    """Dealer positioning + IV context for ``symbol``. Never raises.
+
+    Context only — nothing here reaches a verdict. Positioning informs and
+    gates in this codebase; only the IC-tested harness grants weight."""
+    from services.trade_svc import dealer_context as _dc
+    try:
+        row, ts = _read_matrix_row(symbol)
+        return _dc.build(row, ts=ts)
+    except Exception:
+        _degrade.degraded("trade.dealer_context")
+        return _dc.build(None)
+
+
+def _direction_clearance(spy):
+    """What the tape permits per side, for this analysis. Never raises.
+
+    On any failure it returns the clearance a missing regime and an unknown
+    trend produce — which is the conservative one (shorts relative-only), not
+    an absent block the page would have to interpret."""
+    from services.trade_svc import market_filter as _mf
+    try:
+        spy_close = spy["close"] if spy is not None and not spy.empty else None
+        return _mf.direction_clearance(spy_close, _read_regime())
+    except Exception:
+        _degrade.degraded("trade.direction_clearance")
+        return _mf.direction_clearance(None, None)
+
+
+# ── forward earnings dates (Alpha Vantage) ──────────────────────────────────
+# Schwab's payload has no earnings date, so `days_to_earnings` was always None
+# and the earnings gate — the one that matters most for a multi-week hold —
+# could never fire on either verdict. One bulk call a night fills the whole
+# market; the refresh is day-memoized like the FINRA one.
+_EC_REFRESH_DAY = [None]
+
+
+def _earnings_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import earnings_calendar as _ec
+    return _ec.DEFAULT_DB_PATH
+
+
+def _refresh_earnings_calendar(conn):
+    """At most one calendar pull per day (the free tier allows 25)."""
+    today = _today_ct_str()
+    if _EC_REFRESH_DAY[0] == today:
+        return
+    _EC_REFRESH_DAY[0] = today
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        _ec.refresh(conn)
+    except Exception:
+        _degrade.degraded("trade.refresh_earnings_calendar")
+
+
+def _enrich_earnings_date(fundamentals, symbol):
+    """Fill ``days_to_earnings`` from the calendar, in place. Never raises.
+
+    Leaves it None when the calendar has no upcoming report for the symbol —
+    which, with no API key configured, is every symbol, so the gate simply
+    stays as quiet as it was before this existed."""
+    conn = None
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        path = _earnings_db_path()
+        # Same isolation rule as the other stores: unguarded this opens a
+        # SQLite file in the repo and issues a live vendor request during the
+        # suite. A test that wants the join patches the path.
+        if _under_pytest() and path == _ec.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _ec.init_db(path)
+        _refresh_earnings_calendar(conn)
+        days = _ec.days_to_earnings(conn, symbol)
+        if days is not None:
+            fundamentals.days_to_earnings = days
+    except Exception:
+        _degrade.degraded("trade.enrich_earnings_date")
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import earnings_calendar as _ec2
+                _ec2.close_db(conn)
+            except Exception:
+                pass
+    return fundamentals
+
+
+def earnings_coverage(symbol):
+    """Whether the earnings calendar can speak for ``symbol`` at all.
+
+    ``"upcoming"`` / ``"none_scheduled"`` / ``"not_listed"`` — see
+    :func:`earnings_calendar.coverage`. Kept SEPARATE from
+    ``days_to_earnings`` because the last two both leave that None, and
+    conflating them lets the earnings gate fail open silently: the vendor's
+    coverage is measurably patchy, so "we have no date" must be distinguishable
+    from "there is no date". Never raises; degrades to ``"not_listed"``, which
+    is the honest answer when we cannot tell."""
+    conn = None
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        path = _earnings_db_path()
+        if _under_pytest() and path == _ec.DEFAULT_DB_PATH:
+            return "not_listed"
+        conn = _ec.init_db(path)
+        return _ec.coverage(conn, symbol)
+    except Exception:
+        return "not_listed"
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import earnings_calendar as _ec2
+                _ec2.close_db(conn)
+            except Exception:
+                pass
+
+
+def _trade_plan(result):
+    """The trade plan for an assembled analysis. Never raises — a plan is a
+    convenience over the verdict, and must not cost the user the analysis."""
+    from services.trade_svc import trade_plan as _tp
+    try:
+        return _tp.build(result)
+    except Exception:
+        _degrade.degraded("trade.trade_plan")
+        return None
+
+
+def _squeeze_reason(fundamentals):
+    """The short-side squeeze reason for these fundamentals, or None.
+
+    The threshold policy lives in ``short_interest.squeeze_flag`` (one place,
+    tested there); this only carries its verdict down to the pure engine, which
+    cannot reach FINRA itself. Never raises — an unavailable reading leaves the
+    gate quiet rather than blocking a trade on a missing input."""
+    try:
+        from services.trade_svc import short_interest as _si
+        fires, why = _si.squeeze_flag(fundamentals.short_int_to_float,
+                                      fundamentals.short_int_day_to_cover)
+        return why if fires else None
+    except Exception:
         return None
 
 
@@ -610,6 +1293,8 @@ def _fetch_fundamentals(symbol):
 
     Defensive: a proxy/parse failure returns an empty ``Fundamentals`` (so the
     Investor verdict degrades to insufficient-data HOLD) rather than raising.
+    Short interest is joined in from FINRA afterwards — see
+    :func:`_enrich_short_interest`.
     """
     try:
         raw = _proxy.schwab_client.get_fundamentals(symbol)
@@ -618,9 +1303,64 @@ def _fetch_fundamentals(symbol):
     if not raw:
         return Fundamentals()
     try:
-        return parse_schwab_fundamentals({"fundamental": raw}, as_of=date.today().isoformat())
+        f = parse_schwab_fundamentals({"fundamental": raw},
+                                      as_of=date.today().isoformat())
     except Exception:
         return Fundamentals()
+    f = _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
+    return _enrich_earnings_date(f, symbol)
+
+
+# ── sector P/E median (Phase 1) ──────────────────────────────────────────────
+# The Investor verdict's ``valuation`` component is the mean of {P/E vs the
+# sector median, PEG}. ``analyze`` passed ``sector_pe_median=None``
+# unconditionally, so ``score_pe_vs_sector`` returned its missing-input 0 for
+# every symbol — and averaging that structural 0 in HALVED the surviving PEG
+# score. The median is computed from the peers ``_SYMBOL_SECTOR`` already names.
+#
+# Memoized per (sector, day): a sector's median P/E moves on earnings, not on
+# the minute, so one fan-out per sector per day is the right cadence — without
+# it every analysis would re-fetch a dozen peers.
+_SECTOR_PE_CACHE = {}
+
+
+def reset_sector_pe_cache():
+    """Drop the memo (tests, and anything that needs a forced refetch)."""
+    _SECTOR_PE_CACHE.clear()
+
+
+def _sector_peers(sector_name):
+    return [s for s, (name, _etf) in _SYMBOL_SECTOR.items() if name == sector_name]
+
+
+def sector_pe_median(symbol):
+    """Median trailing P/E across ``symbol``'s sector peers, or None.
+
+    None means "no basis to compare against" — the Investor verdict then scores
+    valuation on PEG alone rather than averaging in a structural zero. Only
+    POSITIVE P/Es count: a loss-making peer reports a negative ratio, which is
+    not a valuation the median should be dragged by, and a peer with no
+    fundamentals contributes nothing rather than a zero. Never raises.
+    """
+    sect = resolve_sector(symbol)
+    name = sect.get("name")
+    if not name:
+        return None
+    today = _today_ct_str()
+    hit = _SECTOR_PE_CACHE.get(name)
+    if hit and hit[0] == today:
+        return hit[1]
+    try:
+        peers = _sector_peers(name)
+        results = parallel_map(_fetch_fundamentals, peers)
+        pes = [f.pe_ratio for f in results
+               if f is not None and f.pe_ratio is not None and f.pe_ratio > 0]
+        median = float(np.median(pes)) if pes else None
+    except Exception:
+        _degrade.degraded("trade.sector_pe_median")
+        return None
+    _SECTOR_PE_CACHE[name] = (today, median)
+    return median
 
 
 def _fundamentals_dict(f):
@@ -643,6 +1383,94 @@ def _sector_strength_dict(ss):
         "sector_above_50ema": ss.sector_above_50ema,
         "rs_3m_percentile": ss.rs_3m_percentile,
     }
+
+
+def _under_pytest():
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def journal_reading(result, db_path=None):
+    """Append one analysis to the recommendation journal. Side effect only.
+
+    Returns True when the row was written, False otherwise — and NEVER raises:
+    ``analyze`` owes the user an analysis whether or not the journal took the
+    row, exactly as the IV/RV store behaves.
+
+    ⚠ With no explicit ``db_path`` the write is SKIPPED under pytest. The bus
+    is fakeredis but SQLite is not, and this repo has a documented incident
+    where a suite wrote into live data; ``analyze`` is exercised by many tests
+    that know nothing about this store. Tests that want the mapping pass their
+    own tmp path, which bypasses the guard.
+    """
+    if db_path is None and _under_pytest():
+        return False
+    conn = None
+    try:
+        from services.trade_svc import rec_journal
+        sm = (result or {}).get("swing_model") or {}
+        pv = (result or {}).get("position_verdict") or {}
+        iv = (result or {}).get("investor_verdict") or {}
+        row = {
+            "symbol": (result or {}).get("symbol"),
+            "reading_date": _today_ct_str(),
+            "price": (result or {}).get("price"),
+            "composite": sm.get("score"),
+            "band": sm.get("band"),
+            "percentile": sm.get("percentile"),
+            "swing_verdict": sm.get("verdict"),
+            "position_verdict": pv.get("verdict"),
+            "investor_verdict": iv.get("verdict"),
+            "investor_score": iv.get("score"),
+            "gates": "; ".join(pv.get("gates_triggered") or []),
+            "model_version": sm.get("model_version"),
+        }
+        conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
+        return rec_journal.record(conn, row)
+    except Exception:
+        return False
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import rec_journal as _rj
+                _rj.close_db(conn)
+            except Exception:
+                pass
+
+
+def snapshot_fundamentals(symbol, fundamentals, sector_name, pe_median,
+                          db_path=None):
+    """Append today's fundamental INPUTS to the point-in-time store.
+
+    Side effect only; same contract and same pytest guard as
+    :func:`journal_reading` — see that docstring for why the guard exists."""
+    if db_path is None and _under_pytest():
+        return False
+    conn = None
+    try:
+        from services.trade_svc import fundamentals_history as _fh
+        f = fundamentals
+        row = {
+            "symbol": symbol, "snapshot_date": _today_ct_str(),
+            "pe_ratio": f.pe_ratio, "peg_ratio": f.peg_ratio,
+            "rev_growth_ttm": f.rev_growth_ttm,
+            "eps_growth_ttm": f.eps_growth_ttm, "roe": f.roe,
+            "margin_expanding": f.margin_expanding, "fcf": f.fcf,
+            "short_int_to_float": f.short_int_to_float,
+            "short_int_day_to_cover": f.short_int_day_to_cover,
+            "days_to_earnings": f.days_to_earnings,
+            "sector": sector_name, "sector_pe_median": pe_median,
+        }
+        conn = _fh.init_db(db_path or _fh.DEFAULT_DB_PATH)
+        return _fh.record(conn, row)
+    except Exception:
+        return False
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import fundamentals_history as _fh2
+                _fh2.close_db(conn)
+            except Exception:
+                pass
 
 
 def analyze(symbol):
@@ -726,6 +1554,7 @@ def analyze(symbol):
         rsi=rsi, adx=adx, macd_hist=macd_hist, macd_hist_prev=macd_prev,
         relative_volume=float(rel_vol), vwap=vwap_val, volume_profile=vp,
         sector_strength=ss, days_to_earnings=fundamentals.days_to_earnings,
+        squeeze_reason=_squeeze_reason(fundamentals),
     )
     try:
         position_verdict = PositionVerdict().score(pos_inputs)
@@ -745,6 +1574,7 @@ def analyze(symbol):
     # verdict off the calibration band. Fully defensive: any failure leaves
     # swing_block None and the existing verdict/markov untouched.
     swing_block = None
+    _peers = None
     try:
         from services.trade_svc import swing_model as _swing
         _art = _swing.load_artifact()
@@ -757,15 +1587,25 @@ def analyze(symbol):
             _cur = {c: (float(_ff[c].iloc[-1]) if _ff[c].notna().iloc[-1] else None)
                     for c in _ff.columns}
             _snap = get_universe_snapshot()
-            swing_block = _swing.score_symbol(_cur, _snap, _art)
+            # The scorer takes the FLAT basis; the snapshot keeps identity for
+            # the peer lines. flat_basis derives one from the other, so the
+            # scoring path is unchanged by that shape change.
+            _regime = _market_regime(_spy_close)
+            swing_block = _swing.score_symbol(_cur, flat_basis(_snap), _art,
+                                              regime=_regime)
+            _peers = _peer_block(symbol, _snap, _art, swing_block, regime=_regime)
     except Exception:
         swing_block = None
 
     sym_close = daily["close"]
     spy_close = spy["close"] if spy is not None and not spy.empty else None
     sect_close = sector_hist["close"] if sector_hist is not None else None
+    pe_median = sector_pe_median(symbol)
+    # Point-in-time record of the INPUTS (not the score) — the only path to
+    # ever validating the Investor weights. Side effect only; never raises.
+    snapshot_fundamentals(symbol, fundamentals, sect["name"], pe_median)
     inv_inputs = InvestorInputs(
-        fundamentals=fundamentals, sector_pe_median=None,
+        fundamentals=fundamentals, sector_pe_median=pe_median,
         rs_vs_spy_3m=rs_percentile(sym_close, spy_close, 63),
         rs_vs_spy_6m=rs_percentile(sym_close, spy_close, 126),
         rs_vs_spy_12m=rs_percentile(sym_close, spy_close, 252),
@@ -780,9 +1620,14 @@ def analyze(symbol):
         investor_verdict = {"verdict": "HOLD", "score": 0, "breakdown": [],
                             "top_reasons": [], "gates_triggered": [f"error: {exc}"]}
 
-    return {
+    result = {
         "symbol": symbol,
         "description": quote.get("symbol", symbol),
+        "company_name": company_name(symbol),
+        # The quote already carries these; storing them is what lets the
+        # command bar show a change instead of a permanent em dash.
+        "change": quote.get("change"),
+        "change_pct": quote.get("change_pct"),
         "price": price,
         "volume": int(today_vol or quote.get("volume") or 0),
         "bias": align.get("bias", "NEUTRAL"),
@@ -799,11 +1644,29 @@ def analyze(symbol):
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
         "swing_model": swing_block,
+        "direction_clearance": _direction_clearance(spy),
+        "dealer_context": _dealer_context(symbol),
+        "peers": _peers,
+        "earnings_coverage": earnings_coverage(symbol),
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),
         "errors": [],
     }
+    # The plan is derived FROM the assembled result, so it sees the clearance,
+    # dealer context and earnings coverage rather than recomputing any of them.
+    result["trade_plan"] = _trade_plan(result)
+    # Is the live edge holding? Read AFTER the plan so today's own reading is
+    # not counted — it has no forward return yet and could not contribute.
+    result["live_ic"] = live_ic_reading()
+    # This name's own recent reads, for the Evidence screen. Deliberately rows
+    # rather than a statistic: five reads cannot support a correlation.
+    result["symbol_history"] = symbol_history_rows(symbol)
+
+    # Forward-accruing record of what the model said today. Side effect only —
+    # never raises, and skipped under pytest (see journal_reading).
+    journal_reading(result)
+    return result
 
 
 # ── EquityDeepDive (migrated) — on-demand quant deep dive + chat-prompt query ──

@@ -87,3 +87,89 @@ def test_on_event_fires_callback_on_publish():
         assert got == [7]
     finally:
         listener.stop()
+
+
+# ── version-gated reads (2026-08-20) ───────────────────────────────────────
+# The app-wide 2 s watcher read options:scan (148 KB) + options:flow_alerts
+# (90 KB) UNCONDITIONALLY on every tick, per open tab: ~43,200 ticks/day x
+# 237 KB is ~10 GB/day/tab of transfer + JSON parse for data that changes a
+# handful of times an hour. read_gated pays a tiny :ver probe instead.
+
+def test_read_gated_returns_payload_and_changed_on_first_read():
+    memo = {}
+    bus_client.bus().cache_set("cache:options:scan", {"signals": [1, 2]})
+    payload, changed = bus_client.read_gated("options:scan", memo)
+    assert payload == {"signals": [1, 2]} and changed is True
+
+
+def test_read_gated_serves_the_memo_while_the_version_holds():
+    memo = {}
+    b = bus_client.bus()
+    b.cache_set("cache:options:scan", {"signals": [1]})
+    first, _ = bus_client.read_gated("options:scan", memo)
+    calls = {"n": 0}
+    real = b.cache_get
+
+    def _counting(key, *a, **k):
+        calls["n"] += 1
+        return real(key, *a, **k)
+
+    b.cache_get = _counting
+    for _ in range(5):
+        payload, changed = bus_client.read_gated("options:scan", memo)
+        assert payload is first          # same object, no re-deserialize
+        assert changed is False
+    assert calls["n"] == 0               # only :ver probes, no payload GETs
+
+
+def test_read_gated_rereads_when_the_version_moves():
+    memo = {}
+    b = bus_client.bus()
+    b.cache_set("cache:options:scan", {"signals": [1]})
+    bus_client.read_gated("options:scan", memo)
+    b.cache_set("cache:options:scan", {"signals": [1, 2]})
+    payload, changed = bus_client.read_gated("options:scan", memo)
+    assert payload == {"signals": [1, 2]} and changed is True
+
+
+def test_read_gated_on_an_absent_view_reads_through():
+    """An absent view has no version, so there is nothing to gate on — it reads
+    through rather than memoizing an absence it could never invalidate."""
+    memo = {}
+    for _ in range(3):
+        payload, changed = bus_client.read_gated("options:absent", memo)
+        assert payload is None and changed is True
+
+
+def test_read_gated_never_caches_a_key_that_has_no_version_counter():
+    """`cache_set` always INCRs {key}:ver, but a pre-upgrade key can carry a
+    payload with no counter. A memo keyed on None has no invalidation signal, so
+    it would serve that first payload forever — such a view reads through."""
+    seen = {"n": 0}
+
+    def _fake_read(view):
+        seen["n"] += 1
+        return {"legacy": True}
+
+    real_read, real_ver = bus_client.read, bus_client.read_version
+    bus_client.read = _fake_read
+    bus_client.read_version = lambda view: None
+    try:
+        memo = {}
+        payload, changed = bus_client.read_gated("options:legacy", memo)
+        assert payload == {"legacy": True} and changed is True
+        assert seen["n"] == 1
+        # ...and it keeps reading, so a later change to a versionless key is seen
+        payload, changed = bus_client.read_gated("options:legacy", memo)
+        assert payload == {"legacy": True} and changed is True
+        assert seen["n"] == 2
+    finally:
+        bus_client.read, bus_client.read_version = real_read, real_ver
+
+
+def test_read_gated_recovers_when_an_absent_view_appears():
+    memo = {}
+    bus_client.read_gated("options:scan", memo)
+    bus_client.bus().cache_set("cache:options:scan", {"signals": [9]})
+    payload, changed = bus_client.read_gated("options:scan", memo)
+    assert payload == {"signals": [9]} and changed is True

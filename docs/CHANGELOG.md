@@ -4,7 +4,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-20 (**A streaming HTML mirror of the Desk — `/desk/live`
+**Last updated:** 2026-08-23 (**A streaming HTML mirror of the Desk — `/desk/live`
 + `/desk/stream`.**
 - **Why a second screen at all.** `/desk` is a NiceGUI page: a websocket, a Vue runtime
   and a live client connection per tab. That is right for the screen you click through
@@ -61,7 +61,1097 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   each panel body carries `overflow-x: auto` as the floor — a column too narrow even for
   the truncated table scrolls its own TABLE, never the page.
 
-**Last updated:** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
+**Last updated:** 2026-08-22 (**Trade Analyzer long/short — Phases 0 through 6.
+The swing model's refit is the headline, and it is not good news: Phase 0 found
+the artifact 55 days stale and 44% of the measured edge gone on refresh, and
+Phase 4 found that what remains is a beta bet.**
+
+**Phase 1** — three of four tasks; the fourth turned into a sourcing decision.
+- **The Investor verdict was silently running at HALF WEIGHT for every symbol
+  ever analyzed.** `valuation` is the mean of {P/E vs sector median, PEG}, but
+  `analyze()` passed `sector_pe_median=None` unconditionally, so
+  `score_pe_vs_sector` returned its missing-input 0 and the mean HALVED the
+  surviving PEG score — an excellent PEG scored +20 where it should score +40.
+  Fixed at both ends: the mean now averages only sub-scores whose **inputs** are
+  present (the availability test cannot be on the outputs, because `score_peg`
+  legitimately returns 0 for a PEG between 1 and 2), and a new
+  `compute.sector_pe_median()` computes a real median from the peers
+  `_SYMBOL_SECTOR` already names, memoized per sector per day. Measured live:
+  13 valid Technology P/Es, median **32.88**. MSFT's valuation now scores **35**
+  where the old halving gave 20; AAPL's is a genuine −5 (it trades above its
+  sector) rather than a structural 0.
+- **Schwab serves short interest as a 0.0 SENTINEL, not as data.** Both
+  `shortIntToFloat` and `shortIntDayToCover` are present in every
+  `/instruments` payload and populated for NO symbol — measured live, 0.0 for
+  AAPL, TSLA, **GME** and **CVNA** alike, while `peRatio`/`returnOnEquity` in
+  the same response were correct. A listed optionable equity with literally zero
+  short interest does not exist. Parsing it through would have disabled the
+  planned short-side squeeze gate for every symbol forever with nothing on
+  screen to say why — the documented "a 0.00% cell is not proof of a flat tape"
+  trap. It now maps to `None`, so absence reads as absence.
+- **⛔ No finviz (decision).** That finding promoted finviz from a convenience
+  for earnings dates into the **sole supplier of both the earnings gate and the
+  entire short side** — load-bearing scraping infrastructure. Declined; official
+  and licensed sources are under evaluation instead (FINRA, exchange
+  publications, vendor APIs, and the broker APIs Public.com / TradeStation /
+  moomoo). **The short side does not ship until that lands**: the squeeze gate
+  has no other supplier, and shorting crowded names unguarded is the exact tail
+  it exists to avoid. The earnings gate consequently stays dead for now — the
+  one Phase 1 goal that did not survive contact with the data.
+- **Two forward-accruing stores started**, because neither can be backfilled and
+  both pay in calendar time rather than effort. `rec_journal` records what the
+  MODEL SAID (composite, band, percentile, both verdicts, gates, artifact
+  version), keyed `(symbol, reading_date)` and upserted so a symbol analyzed
+  five times in an afternoon casts ONE vote in the IC rather than five — those
+  being exactly the names you were unsure about; its `fwd_5d/10d/20d` and
+  `labeled_at` columns exist from the first row so Phase 6's labeler is an
+  UPDATE, not a migration. `fundamentals_history` records the point-in-time
+  **inputs, not the score** — a score is recomputable from inputs under new
+  weights, inputs are not recoverable from a score — plus `sector_pe_median`,
+  since valuation is relative and the peer median moves too;
+  `margin_expanding` stays three-valued, because None means "the pair needed to
+  decide was absent" and collapsing it to 0 would invent a bearish reading out
+  of missing data.
+- **The pytest isolation guard is real and verified.** Both writers no-op under
+  `PYTEST_CURRENT_TEST` unless handed an explicit path: this repo has a
+  documented incident where a suite wrote into live data (the bus is fakeredis;
+  SQLite is not), and `analyze()` is exercised by many tests that know nothing
+  about these stores. A full 105-test run creates no `services/trade_svc/data/`
+  at all, while a real analyze writes both — verified end-to-end by enqueuing
+  `cmd:trade` against the running dev service.
+- Paths went into `repo_paths` per the no-hardcoded-paths rule
+  (`TRADE_SVC_DATA`, `REC_JOURNAL_DB`, `FUNDAMENTALS_HISTORY_DB`), with
+  `IV_HISTORY_DB` re-derived from the new directory constant.
+- ⚠ Still open in Phase 1: the nightly UNIVERSE sweep. Both stores currently
+  accrue only for symbols actually analyzed, and per the promotion freeze the
+  sweep must be a standalone scheduled script rather than a service scheduler
+  job — dev runs `schedulers: False`, so a service job would sit inert.
+- Suites: trade_svc **105**, trade-analyzer **259**.
+
+**Phases 2 and 3** — the short side becomes real, and the verdict becomes a plan.
+- **The short side had no gates.** Below-200-EMA and sector-downtrend cap only
+  BUY, so nothing stopped the model recommending a short into a healthy uptrend.
+  Three short-only gates now: above a **rising** 200-EMA (the slope is
+  load-bearing — price bouncing back above a still-FALLING 200-EMA is the
+  textbook short entry, which a bare "above the 200" test would have gated
+  away), sector in confirmed uptrend, and squeeze risk. They live in their own
+  `short_gates` list, which came out of a test failure that was right: a
+  short-only constraint in the shared list prints "cannot be SELL" on every
+  strong BUY.
+- **Direction clearance, and a bug only live data found.** The first version let
+  a committed downward regime clear directional shorts outright; run against the
+  real tape it returned SPY above a *rising* 200-DMA → longs cleared AND
+  Softening → shorts cleared, a contradiction on its face. The 200-DMA is a
+  multi-week structure while the committed direction comes from a 5-minute EMA
+  slope — using the latter to authorise a **twenty-day** short is the same
+  horizon mismatch the audit criticised in the legacy engine. The structural
+  read now outranks the fast one. Everything fails conservative: unknown trend,
+  missing regime and stale regime all land shorts on relative-only, and
+  `spy_trend` returns **None** rather than False on thin history, because False
+  reads as "below the 200-DMA" — one of the conditions that CLEARS a short.
+- **Dealer positioning and sector peers reach the page**, and the universe
+  snapshot keeps symbol identity (it computed every symbol's factors daily and
+  threw the names away). The flat basis the scorer consumes is DERIVED, so the
+  scoring path provably did not move. A legacy test caught that an empty
+  snapshot must stay **falsy**, or a truthy `{"by_symbol": {}}` caches a
+  snapshot of nothing for the day.
+- **Earnings dates via Alpha Vantage — and the fail-open hole it exposed.**
+  Measured with a real key: 1,814 symbols, coverage collapsing with distance
+  (1,032 rows in October, 11 in March), **11 of 20 mega-caps missing**, and
+  genuinely patchy rather than announced-only — AAPL and GOOGL appear at 67–68
+  days while MSFT, AMZN and META, the same cycle, are absent. Both mega-caps
+  inside the gate's own window WERE covered. The danger was that
+  `days_to_earnings is None` meant both "nothing scheduled" and "not carried",
+  so a hold could walk into an unlisted report wearing the appearance of
+  protection. `coverage()` now separates them and the page says the date is
+  UNKNOWN.
+- **Two conventions unified** (Phase 3.1): one 25Δ skew sign (`put − call`,
+  with the prose AND the colour flipped to match) and one gamma flip. The deep
+  dive's cumulative-crossing flip sat **five strikes** from the per-strike one
+  the collector stores; a cross-tier test now runs both on one grid.
+- **The Trade Plan block** turns a verdict into something falsifiable:
+  structure and tenor from a pure lookup (clearance outranks IV; walls set the
+  short strike; unknown IV rank is MID, never cheap), entry zone, an ATR-or-wall
+  stop that prefers whichever is TIGHTER and returns None rather than inventing
+  a level, the calibrated target — and a **time stop at the model's own 20
+  trading days**, resolved to a real date. Past that the read is unmodelled and
+  nothing in the app had ever said so.
+- Suites: trade-analyzer **288**, trade_svc **248**, webgui **2572**,
+  options-scanner **1186**, schwab-proxy **104**.
+
+**The Signal Desk — the Trade Analyzer rebuilt to a supplied design.** Four
+screens behind one persistent command bar: Overview, Evidence, Rank board, Trade
+plan.
+- **Tailwind-first held.** The source design is entirely inline styles, which
+  this repo forbids; every value is a token in `webgui/pages/terminal_theme.py`
+  and the six new files join `test_no_inline_style.py`. Percentages (bar
+  geometry, the dealer ladder, the decile marker) use runtime arbitrary classes
+  — the documented continuous-value exception — while every COLOUR comes from a
+  fixed finite set. Not config-driven, deliberately: a page-scoped palette whose
+  numbers are chosen against each other, the same category as `sector_heat`.
+- **The design's own tab bar was dropped**, because the app already renders one
+  from the nav; the four screens are nav children instead, and the command bar
+  keeps symbol, price, bias and the model stamp. The symbol is a DRAFT until
+  committed — the box outlines indigo while your typing differs from what is on
+  screen, and blurring an empty field reverts, because an empty symbol is not a
+  request.
+- **Mono is reserved for numerics**, so any monospaced text on screen IS a
+  number — which is what makes a nine-column rank table scannable.
+- **Absent stays absent.** The dealer ladder is withheld ENTIRELY when
+  uncollected or stale; an investor factor with no data reads `n/a` with no bar;
+  an unmatured history row reads `pending`. A dense mono grid reads as measured
+  whether or not it was, which makes this app's documented failure mode worse,
+  not better.
+- **Five real defects surfaced by building it**, three of them only by running
+  it: the rewrite would have DROPPED the Deep Dive and AI Query buttons (now in
+  the command bar, reachable from all four screens); `plan_rows`/`dealer_rows`
+  return DICTS and were unpacked as tuples (the plan screen 500-ed — pinned now
+  at the boundary, since the webgui tests never execute a render body and ruff's
+  F82 sees no undefined name); `analyze` fetched the quote's `change_pct` and
+  stored neither, so the command bar showed a permanent em dash over data
+  already in hand; `−0.00` rendered as a small negative; and the options
+  matrix's `"na"` SENTINEL leaked into the dealer column as a literal value —
+  normalised at the service boundary, with a test that a real 0 still survives.
+- **The rank board gained real columns**, joined from one cache read for the
+  whole board: dealer regime and IV from the options matrix, plus a genuinely
+  side-specific metric — the calibration band for longs, FINRA's days-to-cover
+  for shorts. `symbol_history` is new on the payload for the Evidence screen:
+  the last five reads of one name, deliberately rows and not a statistic.
+- Verified live across all four screens: tokens resolve exactly (`#080d17`
+  ground with its radial lift, `#0e1626→#0b1220` panels, Manrope + JetBrains
+  Mono), and the decile marker sits at 89.9% of the rail for a 90th-percentile
+  read.
+- Suites: webgui **2676**, trade_svc **385**; ruff and pyright clean.
+
+**Phase 6 — the feedback loop.** The journal has recorded what the model SAID
+since Phase 1; this records what happened next. Phase 4 decided the shape of all
+of it.
+- **The labeler is beta-aware, because otherwise it would lie.** The model's
+  measured edge IS beta, so a monitor scoring itself on the raw forward excess
+  would report health straight through any rising market. Each horizon stores
+  three numbers — raw excess, beta-adjusted, and the market's own move — added
+  to `rec_journal` by MIGRATION, since a store that cannot be backfilled must
+  never be recreated to gain a column. Horizons are TRADING bars, matching the
+  fit; unknown stays NULL, because an unmatured horizon is not a flat outcome
+  and an unmeasurable beta does not become 1.0.
+- **The monitor refuses two temptations.** It will not print an IC from a dozen
+  readings — that is no measurement, not a thin edge — and it will not compare
+  its POOLED correlation to the artifact's per-DATE cross-sectional OOS IC.
+  Those are different statistics, and printing them adjacent would manufacture a
+  decay finding out of a units mismatch. `decay` populates only from the
+  comparable statistic, which with sparse live readings usually means not at all.
+- **The refit runs monthly and reports what moved** — and was validated against
+  the two REAL reports: it reconstructs the Phase 0 finding unaided, *"-44%, the
+  measured edge fell by more than a quarter"*, which is precisely the change
+  that went unremarked for 55 days.
+- **The model paper book** follows the board's pools by the Trade Plan's rules,
+  honours the market filter (a relative-only short is held as a PAIR against
+  SPY) and declines gated names. Verified live: **13 positions, 6 long
+  directional and 7 short relative**. ⚠ It trades the UNDERLYING, a stated
+  deviation — a spread's theta and vega would make a book that lost money on
+  correct calls indistinguishable from one whose calls were wrong.
+- **Four bugs, three of them findable only by running it.** `score_symbol` never
+  returned `band`, so every journalled row carried NULL in a column
+  `journal_reading` had always written. `rec_journal.init_db`'s default argument
+  binds at DEFINITION, so monkeypatching the module attribute did nothing and
+  the first labeler tests opened the **real journal** — contained by the
+  worktree, which was luck. The book's tick built candidates from an empty price
+  map and fetched quotes afterwards, so it opened nothing while every unit test
+  passed (they all inject prices). And the card's new lines referenced a name
+  that does not exist in that scope, 500-ing the whole Trade page — **ruff's F82
+  catches that and is already in this repo's select list**, so the guard
+  existed; it just is not part of the test run.
+- **Still open:** Investor validation is BLOCKED (`fundamentals_history.db`
+  started 2026-08-22, needs ~2 quarters), and a third book in the EOD report is
+  deferred until the book has closed trades to report.
+- Suites: trade_svc **418** (with contracts), webgui **2619**, tools **837**;
+  ruff and pyright clean.
+
+**Phase 5 — the rank board.** The Analyze card answers "what about THIS name?";
+the board answers "of everything the model can see, what is best and worst right
+now?" — the shortlist the single-symbol page was always missing.
+- **One code path, and threading it found a latent bug.** Every row is scored by
+  the same `score_symbol` the card calls, with the same basis AND the same
+  regime key. `_peer_block` had been scoring peers with NO regime while the
+  headline symbol was scored with one, then comparing their percentiles —
+  invisible only because the artifact carries a single regime today.
+- **Deciles come from TODAY's cross-section**, not the artifact's calibration
+  bands. Pinned by a test that hands the artifact ONE band, making every name
+  historically indistinguishable, and still requires the board to rank them.
+- **Gated rows are marked, never dropped**, and `gates_evaluated` is published
+  beside them — the board checks a SUBSET of the card's gates, so an unmarked
+  row must not read as "cleared everything". Its squeeze gate calls
+  `short_interest.squeeze_flag` with the float leg absent rather than
+  re-implementing the threshold, so board and card cannot drift.
+- ⚠ **The first live build returned zero rows, and that was a real bug.** The
+  cached universe snapshot was in the FLAT `{factor: [values]}` shape
+  `get_universe_snapshot` deliberately tolerates from older code — scoring works
+  against it, ranking cannot, because it has values but no symbol NAMES. On
+  screen that is indistinguishable from "the market offered nothing today". Now:
+  a `status` naming which kind of empty it is, a self-heal that rebuilds a legacy
+  snapshot once instead of waiting out the day, and a page that renders the
+  reason — or NOTHING for an unrecognised status, rather than guessing. A fourth
+  fix fell out of the third: `status` was in the builder and the page but not the
+  contract, so the projection dropped it silently between service and page.
+- **Verified live in dev** (78 names): 25 rows carry visible gates (NVDA
+  earnings in 4 days; ORCL earnings in 17 days *and* below its 200-EMA), and the
+  short pool renders as *"Express these RELATIVE… SPY above a rising 200-DMA"*.
+- **The live run demonstrates Phase 4 better than any table.** Long pool: MU,
+  INTC, AMD, AMAT, QCOM, CAT, AVGO, TXN. Short pool: TMO, DIS, BAC, PFE, V, ABT,
+  MA. The buy list is high-beta semiconductors and the sell list is defensives —
+  which is why the amber exposure line sits directly above the table.
+- Trade Analyzer became a nav GROUP (Analyze · Rank Board). The manuals guards
+  caught it immediately: both manuals gained a Rank Board section and the
+  renamed Analyze heading, and two stale nav tables were corrected.
+- Suites: trade_svc **346** (with contracts), webgui **2616**.
+
+**Phase 4 — the model refit, which turned into finding out what the model is.**
+- **The swing composite is a beta bet, not a cross-sectional edge.** Splitting
+  the panel on the market's own forward 20-day return: composite IC **+0.1598
+  when SPY rises, −0.1142 when it falls**. Nine of fourteen factors flip sign
+  with the market — `downside_beta` −0.1923/+0.1702, `low_vol` −0.1507/+0.1195,
+  `semivol` −0.1465/+0.0991 — and the down-market weight set is nearly the
+  negation of the up-market one. Over a window that was roughly 2:1 up, that
+  nets to exactly the small positive OOS IC every study measured.
+- **The cause is the LABEL.** `r_symbol − r_SPY` is a raw excess return, so a
+  high-beta stock earns positive excess whenever the market rises —
+  mechanically, no skill. Fit over a mostly-rising five years, any model on this
+  label MUST discover that volatile names outperform. `research/labels.py` adds
+  the textbook alternative, `r − beta·r_market`, with beta on a **trailing**
+  window (a full-sample beta would leak the future into the label itself).
+- ⚠ **The regime split could not have caught it.** `highvol` is a VOLATILITY
+  regime, so a violent rally and a violent selloff both land in it. And
+  splitting on a FORWARD market return is look-ahead — labelled a diagnostic
+  throughout, since the question is not what to buy but what the model does when
+  the market falls.
+- **Four of six tasks measured NOT to adopt.** Noise floor: no floor differs
+  from 0.005 (all |t| < 1.4). Universe 78 → 173: t = **+0.82**, and it costs
+  live latency because the artifact's `fit_universe` IS the cross-section
+  `trade_svc` snapshots daily. Regime-conditioned weights: **worse** (+0.0128 vs
+  +0.0206). **C13 is refuted outright** — `low_vol` carries the same sign in all
+  three regimes (trend −0.0972, chop −0.1254, highvol −0.0721), stronger in each
+  than pooled.
+- **The two that WON are the ones not to ship.** Orthogonalized residual IC
+  (+0.0834, t = **+3.01**) and the four-factor short slate (+0.0698, t =
+  **+2.64**) are both pre-specified fixes for documented problems, and both win
+  by concentrating weight on the volatility cluster. The orthogonalized
+  weighting's down-market IC (−0.1282) is *worse* than the scheme it would
+  replace. Nine comparisons ran this phase; a Bonferroni-style correction at 13
+  folds would want |t| > ~3.4 anyway.
+- **Calibration moved OUT OF SAMPLE** — the one unambiguous win. The artifact
+  calibrated its bands on the rows its weights were fitted on, so the
+  "calibrated mean" the page prints as an expectation was in-sample. Measured:
+  top-band hit rate **49.86% OOS against 52.68% in-sample**. The in-sample set
+  is retained as `calibration_insample` so the flattery is visible. The bottom
+  band's edge is real (**−0.93%** vs SPY over 20 days against **+0.85%** at the
+  top) — but ⚠ **every band's hit rate is below 50%**, top included, because the
+  label is excess return vs a cap-weighted index.
+- **The exposure is now on the card.** The factor registry gained a `family`;
+  `score_symbol` derives `risk_share` and the evidence expander states it, with
+  a reversal caveat above 30%. The live artifact reads **47.6%**.
+- **The harness is the reusable part.** `research/panel_cache.py` fetches once
+  and keys on anything that changes the panel's content, **including the factor
+  registry**; `paired_delta` tests two variants on the SAME folds. Phase 0 moved
+  OOS IC 44% on a refetch alone, so without this every comparison above would
+  have been swamped by fetch noise.
+- **Regime machinery ships with the keys EMPTY.** 5 years gives 653/182/149
+  regime-days against a 441-day floor for one walk-forward fold, so only `trend`
+  qualifies — and at 66% of the sample it would be the pooled fit under another
+  name. `regime.py`, `artifact.build_regimes`, the scorer selector and the card
+  line are all in place for a fit that can fill them honestly.
+- **Root-cause test — with beta priced out, nothing is left.** Rebuilding the
+  same panel's labels as `r − beta·r_market`: the up/down gap collapses **0.2739
+  → 0.0104 (−96%)**, confirming the label was the cause — and the edge goes with
+  it. OOS IC **+0.0674 raw → −0.0101 beta-adjusted** (orthogonalized: +0.0853 →
+  −0.0009); paired **−0.0774, t = −2.15**.
+- ⚠ **The beta-neutral calibration is worse than flat.** Smoothed, all five
+  bands read −0.0006 at 48.14%, which looks like "no edge". UNSMOOTHED they are
+  non-monotone with a **negative** top-minus-bottom (−0.00147) and hit rates
+  that DESCEND across the ranking (48.94% → 47.27%) — the isotonic smoother
+  pooled four of five. The control makes it readable: on the raw label the same
+  code left all five untouched and cleanly ordered, so the flattening is the
+  data, not the transform. **`calibrate` now records `pooled` per band**,
+  because after smoothing "flat" and "no ordering at all" are
+  indistinguishable and only the second means the model cannot rank.
+- Momentum was partly beta too (`mom_6_1` +0.0172 → **+0.0014**, `mom_12_1`
+  +0.0156 → **+0.0040**, both dropped). The only factor that IMPROVES
+  beta-neutral is `str_5d` short-term reversal, +0.0092 → **+0.0217**.
+- **The gate FAILED on the question it stood in for**, so the Phase-0 artifact
+  stays primary. Per the plan, a documented negative result is a completed
+  phase. What remains is a **product** decision — keep the model with the
+  disclosure now on the card, reframe it as the volatility ranking it is, or
+  demote it to the legacy heuristic — and it is deliberately not taken here.
+- Suites: trade-analyzer **392**, trade_svc **261**, webgui **2581**,
+  options_svc **1222**.
+
+**Phase 0** follows.
+- **Program docs:** [design](plans/2026-08-22-trade-analyzer-longshort-design.md)
+  + [plan](plans/2026-08-22-trade-analyzer-longshort-plan.md) — an audit of the
+  Position (1–8 wk) and Investor (months+) verdicts turned into a six-phase
+  build for two-sided (long **and** short) research and recommendations. Phase 0
+  is bench-clearing only; Phases 1–6 are designed, not built.
+- **The artifact was 55 days stale, and refreshing it cost 44% of the measured
+  edge.** `fit_swing_model.py` re-run **unchanged** (same methodology, same
+  78-name universe, fresh 5-yr window through today): **composite OOS IC +0.0367
+  → +0.0206**, 6 of 13 folds negative (was 5). The decay is concentrated in
+  exactly the factors with the theoretical grounding — `mom_12_1` mean IC
+  +0.0407 → **+0.0183**, `mom_6_1` +0.0332 → +0.0214, `trend_quality` +0.0228 →
+  +0.0104 — while `low_vol`, the audit's least-defensible factor, **grew** its
+  share to −0.391 (39% of absolute weight, still on the inverted sign). The
+  calibration bands held (top band 52.29% → 52.68% beat-SPY, spread ~2.4%), so
+  the RANK still separates outcomes; the composite's ability to order the
+  cross-section is what fell. The old artifact + report are archived under
+  `trade-analyzer/data/archive/2026-06-28/`.
+- **"Kept 9/10 factors" (was 6/10) is a symptom, not an improvement.**
+  `signed_ic_weights` admits anything with `|mean_ic| > 0.005`; as the strong
+  factors decayed, noise crossed the floor. **`rs_spy` now carries a NEGATIVE
+  weight (−0.059)** — the model mildly rewards a stock for LAGGING SPY, which is
+  backwards for a momentum model and visible to the user in the evidence
+  expander. Verified live on AAPL: `z −0.300 × w −0.059 = +0.018`, i.e. AAPL
+  scored *up* for underperforming. This is C12 (univariate IC weighting over a
+  correlated momentum cluster) meeting a too-permissive noise floor, and it has
+  moved from a deferred theoretical finding to something in production. Phase 4
+  now leads with a **measured** floor study (re-fit at several `min_abs_ic`
+  values, adopt only if it wins OOS) *before* any new factors, so a floor change
+  and a factor change are never confounded in one OOS number.
+- **This does not argue against the refit.** The new artifact is fit through
+  today and is the more honest estimate; the old one was scoring a changed market
+  with June weights. It does argue loudly for the regime work the artifact's
+  `regimes` keys were built for and which has still never been fit.
+- **⚠ The validated swing model has NEVER run in prod, and could not have.**
+  Found while verifying the refit: `D:\WebGUI Trading Prod\trade-analyzer\data\`
+  **does not exist**. `SWING_MODEL` resolves under each checkout's own root, the
+  artifact is gitignored, and `promote.bat` moves code via `git pull --ff-only`
+  — so no promotion has ever carried an artifact across, and none ever will.
+  `load_artifact()` → `None` → `swing_block` → `None` → `trade.py` renders
+  `_legacy_verdict_body`. Confirmed from both ends: the file is absent, **and**
+  prod's own `cache:trade:analysis` (db 0, AVAV) carries `swing_model: null`
+  beside a legacy `position_verdict` HOLD 31. **Prod's Position card has only
+  ever shown the legacy 5-minute-bar heuristic** — the engine the validated
+  model exists to replace. Deploying an artifact to prod is a manual copy or a
+  prod-side fit run; it is a deliberate decision (it changes what the card
+  displays), so Phase 0 stops at dev and flags it. **The general lesson: for
+  anything under a gitignored `data/` directory, "shipped to dev" and "live in
+  prod" are different states, and `promote.bat` does not bridge them.**
+- **A correction to this session's own earlier reporting:** the regime figures
+  quoted while auditing (trend score 41.21, A/D 0.51:1) came from **dev's**
+  Redis (db 1), whose schedulers are suppressed, so they were a stale 2026-08-20
+  snapshot. Prod's live read today is **trend score 58.61** (still labelled
+  Neutral) with the regime at Trending · Softening. The qualitative
+  "softening tape" characterisation holds; the number did not. A process
+  resolving `ENV_NAME` from a worktree or the dev root reads **db 1** — check
+  which database you are on before quoting a live figure.
+- **The wall-side bug is fixed** (`options_svc/compute._gex_from_snapshot`). It
+  read `gamma_walls()` positionally — `put_wall = walls[0]` — but that helper
+  **filters `None` out**, so a chain with strikes only above spot returned
+  `[call_wall]` and the call wall was silently filed as the **put** wall, with no
+  call wall reported at all. It feeds `rescue.assess_position_risk` /
+  `strategic_context`, which judge whether a short strike sits past its barrier.
+  Fixed at the consumer (the list contract is pinned by an existing test and the
+  Gamma page draws that list as wall lines), using the picker's own contract as
+  the disambiguator — put wall strictly below spot, call wall strictly above,
+  exactly as `_matrix_dealer_levels` already documents. A lone wall with **no
+  usable spot is now dropped rather than guessed**: a wrong-side wall is worse
+  than no wall, and the flip still carries the context. Four tests, two of which
+  failed first with the reported symptom (`assert None == 452.0`).
+- **`webgui/pages/trade.py`'s docstring stopped lying** — it claimed
+  "Fundamentals are not wired (MVP)" long after the proxy fundamentals landed. It
+  now states what is true, *and* names the three Investor inputs that are
+  structurally absent from `/instruments` (EPS surprises, guidance, FCF) and so
+  score a permanent 0 — the reason a live Investor composite tops out near +59.5
+  against a designed +74.5 with BUY at +40.
+- Suites: options_svc **1222** (1218 + 4 new), trade_svc **79**, webgui
+  unchanged.)
+
+**Prior — 2026-08-21** (**Audit batch 4 — the fake bus stops lying, and two
+discipline-only invariants become tests.**
+- **The fake bus had different semantics from prod, and four modules could feel
+  it.** Every `Bus(fake=True)` built its OWN `FakeStrictRedis`, so two Bus objects
+  in one test shared nothing — while in production every Bus talks to the same
+  Memurai. Measured: bus A writes a key, bus B reads `None`. That matters because
+  **four production modules construct their own bus** rather than receiving one
+  (`options_svc.compute._BRIEFING_BUS`, `trade_svc.compute._BUS`,
+  `webgui/bus_client._bus`, `_scaffold`'s `the_bus or Bus()`), so a test that
+  handed a handler its own fake bus and then exercised code reaching one of those
+  singletons was reading an EMPTY cache and passing down the degrade path — the
+  same shape as the documented "fake bus of bare dicts" incident.
+- **The fix needed no conftest anywhere.** One `fakeredis.FakeServer` keyed on
+  `PYTEST_CURRENT_TEST` (phase suffix stripped, so a fixture's writes are visible
+  in the test body) gives both halves at once: shared within a test — pub/sub and
+  streams now cross Bus instances exactly as in prod — and clean between tests,
+  because pytest rewrites that variable per test. The alternative, an autouse
+  fixture, would have meant editing ~15 suites that have no common conftest.
+  **It immediately caught two tests whose premise was impossible in production.**
+  `test_collect_gex_history_captures_viewed_symbol_chain` said it outright -
+  `bus2 = Bus(fake=True)  # empty cache -> defaults to $SPX` - but in prod a new
+  `Bus()` is NEVER empty; every one talks to the same Memurai. And
+  `test_regular_window_detection_is_unaffected` looped over three clock times
+  building a fresh bus each pass, so 08:15 only fired because it could not see
+  the cooldown map 08:00 had just written. Both now create the clean-slate
+  condition DELIBERATELY (`reset_fake_bus()`), which is what they always meant.
+  Everything else across the affected suites still passes, so nothing legitimate
+  was depending on the old isolation.
+- **`pyrightconfig.json` — a deliberately narrow type check**, over `shared/bus`,
+  `shared/contracts`, `shared/config_toml.py` and `webgui/bus_client.py`: the one
+  seam every tier crosses, and where the envelope-vs-payload bug class lives.
+  **Now clean at 0 errors.** ⚠ It found four things and **none was a bug** —
+  `redis-py`'s stubs return `bytes | str` where `decode_responses=True`
+  guarantees `str`. Fixed with `cast()` **plus a comment stating the invariant**,
+  never a blanket ignore; the fourth was genuine sloppiness in
+  `shared/config_toml.py`, written earlier the same day. Explicitly NOT widened
+  to the repo: the services and pages are large, untyped, and full of
+  deliberately loose payload dicts, so a repo-wide switch yields thousands of
+  findings nobody actions — the failure mode ruff's minimal select list already
+  avoids.
+- **`webgui/bus_client.py` had ZERO annotations** while `shared/bus/client.py`
+  was fully typed — so the seam was typed on one side only, and the untyped side
+  is the one where `.payload` confusion bites. All 13 functions now carry
+  signatures.
+- **Two mirrors moved from discipline to test**
+  (`shared/tests/test_cross_tier_mirrors.py`, AST-parsing the files and importing
+  nothing, so it cannot itself trigger the cross-app `scoring` collision): the
+  five **regime display words** duplicated across `driver_svc`, `options_svc` and
+  the webgui, and the **manuals dual registration**. The manuals half is the
+  interesting one — the existing webgui test checked catalog → built file, and
+  the CONVERSE was unguarded: a manual that is built but never listed is silently
+  unreachable, because that dict is also the serving whitelist.
+- **The mirror pin was verified to actually fail.** Drift was injected into the
+  webgui copy ("Whipsaw" → "Chop"); the test failed and named the file. A pin
+  that has never been seen to fail is not evidence of anything — the same lesson
+  batch 1 learned from three `TestEarningsAvoidance` tests passing for the wrong
+  reason.
+- **`scoring/_common.py` absorbed `clamp` and `num`.** Measured by AST with
+  docstrings stripped: **nine byte-identical `_clamp` copies and seven `_num`**
+  (six identical plus one differently spelled, verified equivalent across 20
+  inputs — None/''/NaN/inf/bool/bytes — before folding it in). ⚠ This is NOT the
+  thing root CLAUDE.md warns against: that warning is about changing `_clamp`'s
+  NaN *semantics* centrally, and this body is byte-identical to the nine it
+  replaced. The NaN policy stays at the call sites, because only the caller knows
+  whether a missing input means "neutral 50", "floor the magnitude" or
+  "confidence 0". `_finite` was deliberately left alone — three functions share
+  that name and `momentum_regime`'s takes an ITERABLE, so hoisting it would hand
+  someone the wrong one silently. A test records that reasoning so a later
+  tidy-up does not "finish the job".
+- **`pytest` now defaults to `-rf`.** "Compare the failing SET, not the count"
+  stops being something you have to remember to ask for. Verified that every
+  per-app run resolves the root `pyproject.toml` as its configfile, so it applies
+  from inside `webgui/` and `options-scanner/` too. `-rfs` was rejected: the
+  suites carry permanent `importorskip`s and printing them every run trains
+  people to ignore the summary.)
+
+---
+
+**Last updated:** 2026-08-21 (**Audit batch 3 — four config files, and the test
+that proves a constant actually moved.**
+- **The selection rule for what became config.** Every one of the four exists
+  because the value was **duplicated across modules that cannot import each
+  other** — which is the difference between a config file that DEDUPLICATES a
+  constant and one that merely relocates it. Values with a single consumer stayed
+  in code.
+- **`config/driver.toml`** — the driver's risk envelope. `driver_svc.settings`
+  (guardrails) and `options_svc.compute` (the paper sizer) each held `3000.0`
+  under a comment reading "must stay in sync". When those disagree the failure is
+  silent and baffling: the driver approves a quantity the sizer then zeroes to
+  RISK_TOO_HIGH, and the log says "Executed" while nothing opened.
+- **`config/trade_mgmt.toml`** — the stop rules. `options_svc/rescue.py` opened
+  with "Mirror signal_recommender stop constants" and then restated four of them.
+  `rescue_thresholds()` now **derives** those four from `[stops]`, so the mirror
+  is structural rather than clerical; the TOML deliberately does not list them,
+  and a test fails if anyone adds them back (they would look authoritative and be
+  ignored).
+- **`config/scanner.toml`** — the selection floors, the block with dated
+  "2026-06-11 quality retune" comments in the source, and the documented reason
+  index names rarely fire. Read by `scanner_engine`, `signal_recorder` and
+  `options_svc/compute`.
+- **`config/symbols.toml`** — the traded universe, previously **four** literals:
+  the collector's poll list, the Net-Prem groups, the BIG10 basket, and a
+  byte-copy of the groups in Tier-1 `gamma.py` carrying a comment explaining that
+  Tier 1 may not import `services.*`. **Reading a config file is not a `services`
+  import** — `theme.toml` is the standing precedent — so `shared.symbols` joins
+  `shared.market_calendar` on the Tier-1 allow-list and the copy is gone rather
+  than policed. The API-budget warning that justified the collection list moved
+  into the TOML header, where someone about to add a ticker will actually read it.
+- **`config/sessions.toml` gained `[slots]`** rather than a fifth file: the
+  scheduled Claude briefings, the thrice-daily action digest and the nightly
+  momentum cascade are named clock marks, which is exactly what `[windows]`
+  already models. **Each `analyze` slot is a paid Claude call**, so that table is
+  the direct control on that spend — delete a line, drop a briefing.
+- **`shared/config_toml.py` — one loader instead of six.** `flow_alerts` and
+  `sessions` had each grown their own ~40 lines of mtime-cache + deep-merge +
+  degrade-to-defaults; adding four more files would have made six copies.
+  `toml_loader(path, defaults)` returns `(load, reset)`. ⚠ Documented rather than
+  over-promised: `load()` hands back the CACHED mapping, so a config dict is
+  **read-only by convention** — copying on every hot-path read would defeat the
+  cache. The test that first claimed otherwise was corrected to assert what
+  actually matters, which is that the module-level DEFAULTS can never be poisoned.
+- **The test shape is the transferable part.** A test asserting
+  `settings.PER_TRADE_MAX_RISK == driver_limits.per_trade_max_risk()` **passes
+  before the code is wired** — the literal it replaces has the same value. The
+  first draft of every one of these extractions was green against unwired code.
+  The discriminating test monkeypatches the accessor and `importlib.reload`s the
+  consumer, so it fails unless the module genuinely reads the file. Same family as
+  batch 1's stale fixtures: equality with a constant proves nothing about where
+  the constant came from.
+- **Shapes were preserved on purpose.** TOML yields lists and flat tables, but the
+  engines index `MIN_CREDIT_PCT["0-DTE"][regime]`, unpack tuple delta bands,
+  compare a tuple `SINGLE_LEG_EXCLUDED_GRADES` and iterate tuple-of-dict
+  `netprem_groups`. The shared modules convert at the boundary rather than making
+  every call site change — the extraction is invisible to the code that uses it,
+  and every value was verified byte-identical to the literal it replaced before
+  anything was committed.
+- Also worth recording: **`pytest services` over all six folders at once still
+  breaks** with 10 collection errors, exactly as CLAUDE.md's Tests section warns —
+  multiple hyphenated app dirs on `sys.path` re-trigger the `config`/`scoring`
+  collisions. Run them per folder.)
+
+---
+
+**Last updated:** 2026-08-21 (**Audit batch 2 — a swallowed exception now leaves a
+trace, and `/health` counts them.**
+- **The problem, measured.** An AST census of every `except Exception` in
+  `services/` + `webgui/` (non-test) found **542**, of which **289 were silent** —
+  no log, no re-raise, just a plausible default returned. That is the exact shape
+  behind all five NaN incidents. The worst wrapped **294 lines** of
+  `sentiment_svc.compute_intraday_trend` and returned `_neutral_trend()`, so any bug
+  in the entire trend computation rendered as a calm neutral reading with nothing in
+  `logs/sentiment.log` to say so.
+- **The fix is scoped by SIZE, and that is the interesting part.** Splitting the 289
+  by how much they guard turns an unmanageable sweep into a small one:
+  **41 guard >= 15 lines** (they swallow a whole computation) and **248 guard < 15**
+  (one-statement parse guards like `try: return float(x) except: return None`).
+  Only the 41 were touched. Logging the 248 would put a WARNING on every failed
+  float parse, per row, per tick — spam rather than observability, and there the
+  missing-value contract IS the point rather than a failure. The audit's headline
+  number was "276 sites"; the useful number was 41.
+- **`services/_degrade.py`** — `degraded(area, *, detail=None)` logs at **WARNING
+  with a traceback** and increments a per-area counter. WARNING and not ERROR
+  deliberately: most of these fire on real, expected conditions (a symbol with no
+  chain off-hours), so ERROR should keep meaning "look now". **The counter is the
+  signal; the log line is the detail** — one degrade is noise, 340 in a session is a
+  bug. No heavy imports, because `compute` modules import it and it must not drag in
+  FastAPI or the Bus.
+- **It is visible, not just recorded.** `_scaffold`'s `/health` gained
+  `degrades_total` + `degrades` (additive; `domain`/`up` unchanged), and the Status
+  page renders it on the service card as `healthy - 12 degraded`
+  (`status.service_detail` — zero stays a plain "healthy", and a service predating
+  the counter or a garbled value degrades to "healthy" rather than breaking the
+  card). The page already fetched `/health`, so this costs **no new probe**.
+- **Applied to 40 handlers across 8 modules** by an AST transformer doing line-based
+  insertion — *not* `ast.unparse`, which would have reformatted every file and
+  thrown away every comment. Area labels are `<domain>.<function>`, derived from the
+  enclosing scope. ⚠ One placement needed hand-fixing: `options_svc/compute.py` has
+  a top-level import at line 6291, so the auto-inserted import landed at 6292. Not a
+  runtime bug (module-level names resolve at call time) but wrong, and moved up
+  beside `from services import _proxy`.
+- **`services/tests/test_no_silent_degrades.py`** pins it: no NEW silent guard may
+  swallow >= 15 lines. It carries its own "the scan actually reaches the code"
+  canary, because a source-walking guard that silently walks nothing passes
+  vacuously forever.
+- **ruff `BLE001` was considered and rejected**, against the audit's recommendation.
+  It flags every `except Exception` — all 542 — so adopting it means ~542
+  grandfathered `noqa` comments, which dilutes the signal to nothing, and it
+  contradicts the standing rule that a rule class is added only once the tree is
+  already clean under it. The AST guard test pins the invariant that matters at a
+  fraction of the noise. (Worth knowing: the `# noqa: BLE001` comments already
+  scattered through the code are **decorative** — `BLE` is not in the select list,
+  so nothing has ever checked them.)
+- **`webgui/logging_setup.py`** — Tier 1 had **no log handler at all**. `main.py`
+  logs through `logging.getLogger("webgui")` throughout, but output went to the
+  console and died with the Windows Terminal tab; only the nowindow launcher
+  captured it, by shell redirection. Now a rotating `logs/webgui.log` beside the six
+  services' logs. A deliberate ~30-line copy of
+  `_scaffold._install_file_logging` rather than an import — the Tier-1 allow-list
+  has no `services.*`, and that helper pulls in FastAPI and the Bus.
+- **One audit finding refuted.** `webgui/pages/status.py:365` was flagged as a large
+  silent guard; it is a **false positive**. The handler surfaces the failure **in the
+  UI** as `unreachable (ConnectionError)`, which is strictly better than logging it.
+  The census flagged it only because the handler contains no `log.` token — a
+  reminder that "does it log" is a proxy for "does it tell anyone", not the thing
+  itself.)
+
+---
+
+**Last updated:** 2026-08-21 (**Audit batch 1 — the "permanent" test baseline was
+a fiction; NaN in the validation study; Tier-1 loses its last engine glue.**
+- **The 8-11 "permanent baseline failures" were all stale fixtures.** Every suite in
+  the repo now runs clean — options-scanner **1180/0/2**, sentiment-dashboard
+  **507/0/1**, sentiment_svc **328 + 1 xfail**, options_svc **1218/0**, trade_svc
+  **79/0**. They had been labelled "timing-dependent" and "stale fixtures — do not
+  fix", so nobody looked; on inspection each one pinned a constant that had since
+  moved. Four `test_next_boundary_*` pinned a 2-minute cadence after
+  `POLL_INTERVAL_MIN` went 2 → 1 on 2026-07-11;
+  `test_main_skips_before_market_open` used 8:20/8:25 as "before the open" after the
+  window moved 8:30 → 8:00 CT; `test_acquire_defers_when_fresh_other_owner` used
+  +200 s, inside the old `LOCK_TTL_SEC` of 240 and outside the derived 120; the two
+  `TestEarningsAvoidance` cases used absolute 2026-05 dates that drifted into the
+  past. All are now **derived from the constant or relative to today**, the same
+  reasoning `gex_collector.py` already applied to `LOCK_TTL_SEC`. **Nothing was
+  xfail-ed to hide a failure.**
+- **The two costs of a red baseline, both realised.** A **9th** failure
+  (`test_per_leg_expiry_back_leg_retains_value_at_front_expiry`, whose "far" back-leg
+  expiry of 2026-08-21 simply arrived) appeared the morning of the audit and was
+  invisible against an expected count of 8 — the exact failure mode the
+  "compare the SET, not the count" rule exists to catch, one level up: the rule was
+  being followed against a *stale* set. And **three of the five
+  `TestEarningsAvoidance` tests were PASSING for the wrong reason** — once every
+  fixture date is in the past they all take the same early-out, so a green test over
+  a stale fixture asserted nothing.
+- **The two genuinely-unpassable tests are now explicit**, not failures:
+  `test_apply_sector_perf.py` gets a module-level `importorskip` (it exercises the Tk
+  entrypoint this fork deliberately never copied), and the real `$VIX1D`
+  session-latch bug gets **`xfail(strict=True)`** — fixing it now FAILS the run until
+  the marker is removed, so the xfail is a tracked bug rather than a hidden one.
+- **`daily_direction._num` accepted NaN** where its six siblings reject it, so a NaN
+  bar close reached `_clamp` and pinned a bound. Measured: an **all-NaN close series
+  scored 66.67** — moderately bullish, from no data — and one NaN close dropped a
+  maximal uptrend 100.0 → 83.33. It leaked into the study's own metrics too:
+  `per_state_stats` reported `mean=nan` at `n=2`, and `ordinal_ic` ranked THROUGH the
+  NaN (0.9856 where the clean pairs give 1.0). **Offline-only** — the module feeds
+  `validate_market_state.py`, never a service or request path — so the blast radius
+  is the five-state validation study's numbers, not a live gauge. Same family as the
+  2026-08-20 round; the guarded list keeps proving to be a map of where someone has
+  looked.
+- **`cache:options:matrix` is now actually validated.** Root CLAUDE.md and the
+  2026-07-20 design both said `MatrixSnapshot` gated it; in fact the model was used
+  **only in its own unit test** while both publish sites wrote unvalidated — from
+  2026-07-20 until now. Both now go through one `_cache_matrix(bus, view)` helper.
+  ⚠ **Wiring it naively would have broken two screens**: the gate caches
+  `model_dump()`, so a top-level key the contract omits is a key the pages lose, and
+  `matrix.py` renders `payload["error"]` in its status line. Verified against the
+  **live prod payload (92 rows)** — zero keys lost — before switching it on.
+- **The gate immediately caught a real shape mismatch**: `session_date` is a
+  `datetime.date` OBJECT in memory (straight from `scheduler.active_session_date()`),
+  not the `str` the contract declared. `json.dumps` had been stringifying it on the
+  way into Redis, so the wire format was always right and the annotation looked
+  right — the mismatch could only surface once the payload was validated *in memory*.
+  `MatrixSnapshot` now normalises date/datetime to isoformat, keeping the cached
+  bytes byte-identical (which is what `skip_unchanged` compares).
+- **Tier 1 lost its last `sys.path` glue into a hyphenated app folder.**
+  `webgui/proxy.py` built `SchwabProxyClient` / `SchwabPyProxyClient` singletons at
+  import; **nothing had called them since the 3-tier migration** (every runtime use
+  is `health()` / `api_call_stats()`, both plain `requests.get`). Deleting them
+  completes "remove the last sys.path engine-glue from webgui" from the 3-tier plan.
+  A **source-level** guard in `test_proxy.py` keeps it gone — an attribute check
+  alone would not catch the sys.path insertion coming back.
+- **`trade_svc/deepdive/engine.py` lost its `--direct` mode** — it read `tokens.json`
+  itself and called Schwab's API host, bypassing the proxy. Unreachable in-service
+  (compute.py builds `SchwabClient()` with no args), but a credential-reading path
+  inside `services/` contradicts "the proxy is the only Schwab gateway", and the
+  refresh token is a single rotating credential. Its guard test parses the file with
+  **`ast` and strips docstrings** before checking, because the docstring explaining
+  the removal necessarily names the things being banned.
+- **`validate_directional_gate.py` no longer hard-codes `D:\WebGUI Trading with
+  Schwab`** — run from prod or a worktree it would silently resolve the *dev*
+  checkout's `repo_paths`, and therefore the dev DBs and ports.
+- **`yfinance` dropped** (declared in `requirements.txt` as "still imported by some
+  analysis paths"; **zero imports repo-wide** — its consumers went with the
+  2026-08-20 Blueprint deletion), along with its three orphaned transitives
+  `curl_cffi` / `multitasking` / `peewee`. ⚠ **`Flask` was NOT removed** despite the
+  audit flagging it as pip-freeze cruft: `pip show` says `Required-by: schwab-py`, so
+  it is a legitimate transitive of the Schwab SDK. Verify before pruning a lock.
+- **Two per-app `CLAUDE.md`s were describing codebases this repo does not have**, and
+  they auto-load into every session that edits those folders.
+  `options-scanner/CLAUDE.md` (470 → 207 lines) still opened "Ships two interfaces …
+  a Tk desktop app and a FastAPI + React web app" and gave commands for
+  `dashboard.py`, `scanner.py`, `eod_report.py`, `uvicorn server.main:app` and
+  `npm run dev` — **all eight of those paths verified absent**. Its appended "Options
+  Simulator" section described a Dash app with `viz/`/`engine/`/`data/` packages and
+  a plotly/dash/py_vollib/mibian stack; the real module is **three flat files** and
+  the app charts with Highcharts. `sentiment-dashboard/CLAUDE.md` still opened "A
+  tkinter desktop app" and named `D:\AI_Based_Analysis\shared\sentiment_bridge.json`
+  as the canonical bridge path.
+- **The Tier-1 import allow-list is now stated exactly**, because the familiar
+  shorthand was wrong on its last term: the webgui imports **`shared.contracts`
+  nowhere at all**. Measured across all 153 non-test webgui files — `nicegui`,
+  `shared.bus`, `shared.market_calendar`, `repo_paths`, `requests` (health only),
+  `fastapi.responses`, and the lazy `edge_tts`. Recorded alongside it: contracts are
+  a **write-side gate on ~15 of 74 `cache_set` sites**, not the typed API both tiers
+  share — ~50 views are read by the GUI, 18 models exist, and read-side validation
+  does not exist at all. Documenting a view as "validated by X" does not make it so.)
+
+---
+
+**Last updated:** 2026-08-21 (**The Desk speaks the CONTRACT, not just the cause.**
+- **What shipped.** The spoken alert now names the option. `uoa`/`big_delta` carry a
+  strike and an expiry, so they say them — *"N D X. Unusual activity, 0-D T E 7 15
+  Put."*, *"A M D. Big delta, 8 - 28 4 72. point 5 Call."* — with the word "alert"
+  dropped and the side moved after the strike it belongs to. A new position adds
+  strikes, expiry and entry: *"S P Y. New position, put credit spread. 2 07. point
+  5, 2 05, 8 - 31, entry 56 cent credit."* `crossover`/`gamma_flip` carry no
+  contract and are **unchanged**.
+- **The number rule was settled by LISTENING, not by argument.** Leading digits
+  singly, the last two as a pair, `00` → "hundred", a fraction → ". point 5": 205 →
+  "2 05", 4500 → "4 5 hundred", 207.5 → "2 07. point 5", 21500 → "2 1 5 hundred".
+  A neural voice reads "205" as *two hundred and five*; a trader hears *two oh
+  five*. Twelve cases are pinned in `test_voice.py`. `say_number`/`say_expiry`/
+  `say_entry`/`say_strikes` all guard through `pages.fmt.num`, so NaN, infinity,
+  `""` and — the documented one — `bool` return `""` rather than a number nobody
+  supplied.
+- **`say_entry` lets the SIGN pick the word**, because the paper book stores a debit
+  as a **negative** `entry_credit`: `0.56` → "entry 56 cent credit", `-1.25` →
+  "entry 1 dollar 25 debit". A debit announced as a credit was the most expensive
+  sentence this feature could have said.
+- **Shorter, never half.** The two forms are chosen on the PARSED values, not on the
+  alert kind, so the contract path and the degrade path are one line of code and
+  cannot drift. A missing or unreadable strike/expiry/entry falls back to the
+  existing short form rather than emitting a sentence with a hole in it.
+- **`flow.alert_rows` gained `strike`/`expiry`/`dte`** — additive, no column
+  declares them — so the Desk still composes off the row the Flow Alerts page
+  builds instead of becoming a second reader of the raw payload.
+- **The prewarm halved, 8 pairs → 4.** `FLOW_CAUSES` is now DERIVED (`_ALL_CAUSES`
+  minus `CONTRACT_KINDS`). A uoa phrase's space is the whole option chain, so
+  warming those pairs synthesized clips that could never be played — half the
+  prewarm's network and disk, spent on nothing.
+
+**Prior —** 2026-08-21 (**The Desk speaks — spoken arrival alerts + a
+10-second neon glow, and the two traps that make both of them work.**
+- **What shipped.** A new flow alert or a newly-opened position on `/desk` is now
+  **announced out loud** — ticker spelled squawk-style, then the cause ("S P Y.
+  Crossover alert, calls over.") — and the **row glows neon for 10 seconds**, so
+  the voice and the eye land on the same place. Nothing else changed: the page is
+  still read-only, still composes rather than re-derives, and the scanner chime is
+  untouched.
+- **`edge-tts`, and the alternatives were measured, not assumed.** Free Microsoft
+  neural voices, no API key, synthesized **server-side** and cached permanently on
+  disk. Windows SAPI was ruled out because this machine has **no Windows neural
+  voice installed** — `System.Speech` reports only the old David / Zira / Mark
+  concatenative voices — and browser `speechSynthesis` was ruled out for the same
+  reason one layer up: in Chrome on this box it falls back to those same SAPI
+  voices, so the feature's core quality would depend on which browser the launcher
+  happened to open. Default **`en-US-AriaNeural`** (picked from a listening test of
+  all six offered, not alphabetically), rate **+8%** — past about +15% the spelled
+  tickers slur. `webgui/voice.py`; `edge-tts>=7.0` added to `requirements.txt`.
+- **`big_delta` speaks, and that deliberately breaks the quiet-live rule.**
+  `alerts.py` excludes it from the chime/toast set because a *chime* carrying no
+  information is pure noise at that detector's frequency. An announcement that
+  names the ticker and the cause is not — the cost of ignoring it is zero. So all
+  **four** flow kinds speak. ⚠ Do not "fix" this into consistency with the chime
+  without revisiting the reasoning.
+- **What speaks vs what only glows.** A newly-opened position speaks. A position
+  whose **flag moves** (OK → AT RISK → RESCUE) glows **amber** and stays silent —
+  it was already in the book, and the FLAG column already prints the new word.
+  New rows glow **cyan**. A burst announces the **newest only, plus a count**
+  ("…Plus 5 more."), one utterance per panel per paint, so a tick is bounded at
+  two clips. Detection runs over the **full** alert list, not the five rows the
+  panel draws, or a burst's arrivals would announce themselves later when the list
+  shortened. First paint seeds every set **silently** — navigating to the Desk must
+  not read out the day's backlog.
+- ⚠ **TRAP 1 — a rebuilt element restarts its CSS animation from zero.**
+  `_paint_positions` clears and rebuilds every row whenever the paper account
+  re-prices, which is constant during market hours, so the naive glow **never
+  expires**: every repaint resets the decay. The fix is that the glow's start time
+  lives in page state keyed by row id, and each row wears one of **ten static
+  classes** `desk-neon-0…9` carrying a whole-second **negative `animation-delay`**,
+  so a rebuilt row **resumes** the animation instead of restarting it. Ten fixed
+  classes rather than a computed `[animation-delay:-3.2s]` — the styling standard's
+  finite-set rule; the cost is one second of granularity on a ten-second decay.
+- ⚠ **TRAP 2 — browser autoplay refusal is completely silent.** `play()` simply
+  rejects; nothing appears in any log, so a tab left alone announces nothing and the
+  feature looks broken rather than blocked. The rejection is now caught and surfaces
+  an **ENABLE SPOKEN ALERTS** chip in the Desk header, hidden until a block is
+  actually reported; the click that dismisses it *is* the gesture that unlocks
+  audio, and it speaks one line back so the unlock is audibly confirmed. A blocked
+  attempt **clears** the queue rather than holding it — audio may unlock minutes
+  later, and a backlog replayed then would announce a market that has moved on.
+- **Its own `<audio>` element, and a queue.** `desk-voice`, not `main.py`'s shared
+  `alert-audio`: whichever source assigns `src` last wins, so a scanner chime —
+  which fires from the app-wide watcher on **every** page, this one included — would
+  cut an announcement off mid-sentence. `el.onerror = next` sits beside
+  `el.onended` deliberately: with only the latter, one 404 leaves `busy` true
+  forever and the tab never speaks again.
+- **The cache.** `sha1(voice|rate|text)` → `webgui/data/voice/<hex>.mp3`, mounted at
+  **`/voice`**, **gitignored** (generated artefacts stay out of `static/`). Measured:
+  synthesis **~0.9–2.4 s** on a miss, **~110 µs** on a hit, **~22–28 KB** a clip. The
+  whole utterance including the burst tail is ONE clip, so the key is the full
+  sentence — two concatenated clips would make the cache `O(tickers + causes)`
+  instead of `O(tickers × causes)` at the cost of an audible seam. A background
+  **prewarm** (once per process, daemon thread, flow phrases only — eight causes per
+  watchlist symbol) warms it at startup; a position arrival is something you just
+  did, so paying first synthesis there costs nothing.
+- **Nothing on `voice.py`'s public surface raises, and that is categorical.** No
+  network, no `edge_tts`, an unwritable cache dir, a lone surrogate off a malformed
+  payload, a non-iterable symbol list — all degrade to `None`/`[]`, which the caller
+  reads as "no speech this tick". The row still glows, the chime is unaffected, and
+  the warning is logged **once per process**, not once per 2 s tick. The synthesis
+  wrapper carries its **own 20 s bound** (`asyncio.wait_for` inside the loop, so a
+  timeout genuinely cancels) because edge-tts's timeouts are per-operation — a
+  stream dribbling one chunk every 59 s trips neither.
+- **Settings.** A **Spoken alerts (Desk)** card: enable switch, the six en-US neural
+  voices, a volume slider, and a **Test voice** button that doubles as the audio
+  unlock. Three new `app_settings` keys — `voice_enabled` (True), `voice_name`
+  (`en-US-AriaNeural`), `voice_volume` (0.8). The existing
+  **`alert_market_hours_only`** gate is **honoured, not duplicated**: a desk that
+  talks at 3 a.m. is a bug, and a second market-hours switch beside the first is a
+  drift hazard.
+- **The spoken vocabulary is the printed one.** `flow_phrase` reads `kind`/`side`
+  straight off the row `flow.alert_rows` built, and `voice.FLOW_CAUSES` — restated
+  rather than imported, because `voice` must stay importable with no `pages` package
+  on the path — is pinned against `flow._TONE` by a test. A spoken vocabulary
+  drifting from the printed one would be the documented sectors-vs-rotation split in
+  a new place.
+- **Verification.** webgui **2470** green (was 2358), including 47 new `test_voice`
+  cases and the extended `test_desk`. Docs: CHANGELOG, `webgui-routes.md`,
+  `page_help.py`, the User Guide + Reference Guide, and a Constants Appendix entry in
+  the Technical Reference. Design:
+  [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
+
+**Prior —** 2026-08-20 (**The tidiness sweep — measured first, and it was a
+third the size claimed.**
+- **The estimate was wrong, so the sweep started with a measurement.** The audit
+  reported "~60 formatter clones, 200-300 lines". Grouping webgui page functions by
+  NORMALISED AST BODY — identical code, not merely identical names — gives
+  **11 clone groups / 32 defs / ~123 removable lines**. The gap is entirely
+  same-named functions that differ (six distinct colour helpers all called some
+  variant of "lerp"), which is why the count needed deriving rather than trusting.
+- **`pages/fmt.py` is the shared numeric vocabulary now.** `num` (the strict "is
+  this a real reading" coercion) had **six** byte-identical copies whose own
+  docstring recorded the fact; `clamp` had three, `round_or_none` four, and the
+  permissive `float_or` four more under three different names and three different
+  defaults. All aliased, so no call site changed.
+- ⚠ **`num` and `float_or` are deliberately different and the tests say so.**
+  `float_or` preserves whatever `float()` produced — including NaN and bool —
+  because it is a coercion with a fallback; `num` answers None for both because it
+  answers "is this a reading". After a day of NaN findings, collapsing them into
+  one permissive helper would have been the wrong tidy-up, so the divergence is
+  pinned by a test that asserts it.
+- **A test that asserted the duplication was replaced by one that asserts the
+  fix.** `test_num_body_is_identical_to_every_sibling_its_docstring_names` compared
+  six bodies because prose claims aren't enforced (it cites the RISK_FREE_RATE
+  incident by name). With the copies gone, identity replaces comparison: the pages
+  do not merely AGREE, they are the same object.
+- **`rescue_highlight` + `_AT_RISK_STATES`** moved beside the `heat_border_class`
+  they already delegated to, removing three copies of each.
+- **The 35-branch `elif` chain was NOT converted to a dispatch registry** — the
+  bodies are heterogeneous (2 to 20 lines), so it is 35 extractions and 35 chances
+  to mis-pass an argument, for no behaviour change. Its real hazard was the 43-line
+  docstring restating every branch in prose: **`gamma_history`, `rescue_adhoc` and
+  `sim_replay` were already implemented and undocumented.** Documented, and two
+  tests now fail on drift in either direction — adding a branch without a line is a
+  red suite.
+- **L6 (the "colour-helper spread") is largely a false positive.** Of the six,
+  `sector_heat._lerp(pair, f)` interpolates SCALARS, `_hex_rgb`/`_mix`/`_rgba` are
+  three different conversions, and `gauge._lerp` vs `svg._lerp_color` differ by a
+  clamp that is a real behavioural difference. Nothing merged; reported instead.
+- **Stopped at 7 groups / 16 defs / ~41 lines remaining, deliberately.** Every one
+  is a 2-copy group of 3-8 lines spanning different packages, and the clearest
+  (`pnl_color`/`pnl_class`) would mean relocating palette constants used 11 times
+  in `paper.py` to save 8 lines in `driver.py`. Diminishing returns, measured.
+- **Verification.** webgui 2358, options_svc 1216, sentiment_svc 328 + the
+  documented 1, tools 819, shared 93. Ruff clean tree-wide.
+
+**Prior —** 2026-08-20 (**Batch 4 — consolidation: one calendar, one P/C,
+one advisory core, one poll idiom, and a contract that finally validates.**
+- **The `tools/` holiday literals are gone.** `flow_delta_instrumentation.py` and
+  `nq_signal.py` each carried a hardcoded 2026-2027 NYSE frozenset — silently wrong
+  from 2028 — justified by a comment claiming an import would drag `compute` and
+  `handlers` in. That named the wrong module: `shared/market_calendar` is
+  deliberately import-light (**measured: no pandas/numpy/redis/fastapi at all**) and
+  derives holidays algorithmically. Both now import it; verified against 2028-2030
+  dates the literals never covered. `nq_signal.is_trading_day` also accepts a `date`
+  OR a `datetime` — callers pass both, and taking only one is how a session gate
+  silently stops gating.
+- **`pcr_from_chain` was two byte-identical copies** feeding the SAME composite
+  (`sentiment_svc/compute.py` and `live_composite.py`), so a threshold tweak in one
+  would have diverged the live P/C from the sector table's. Homed in
+  `scoring/put_call.py`; a test asserts both tiers now reference the same function
+  object, not merely agree.
+- **The three ad-hoc rescue builders shared a 30-line tail differing by exactly TWO
+  lines** — which candidates function, which risk function. Injecting those two is
+  the whole difference, so `_assemble_advisory` now owns regime → engine →
+  validated `RescueAdvisory`, and a new strategy family needs a mark builder and
+  nothing else. The `_flt` spec validator, defined byte-for-byte three times, is now
+  the module-level `_spec_float`.
+- **The version-gate poll idiom is a helper now** (`pages/view_watch.watch_view`):
+  seed the version, probe the cheap `:ver`, repaint only on movement, hang it on a
+  timer. **Converted 4 of the 22 pages** — the sentiment screens that share the
+  canonical shape. The rest (Gamma's coalesced `read_versions`, the Calculator's
+  three timers, Rescue's four) are genuinely different shapes and were left alone;
+  a blanket regex sweep is exactly how the decorator above `_maybe_repaint` gets
+  orphaned, which happened on the first attempt and was caught by ruff.
+- ⚠ **One test of the new helper asserted the wrong thing and was corrected.** It
+  originally required `watch_view` to swallow ANY repaint exception. That is the
+  degrade-guard antipattern this repo bans — NiceGUI logs and keeps ticking anyway.
+  It now asserts a real error PROPAGATES and only the deleted-client case is
+  absorbed, which is what `ui_guard` is for.
+- **`MomentumSnapshot` finally validates something.** The contract carried real
+  validators (chiefly `_exactly_three_levels`) and NOTHING used them — the publisher
+  shipped a raw dict, so it was documentation rather than enforcement. Wired in at
+  the publish site: a ragged cascade now leaves the last good snapshot up instead of
+  blanking the Bull/Bear map and the momentum page.
+- **Verified live in dev, not just green:** republished `cache:sentiment:rotation`
+  with a doctored spread and watched `/sentiment/rotation` repaint **−1.69 → −2.55
+  with no reload**, then restored from the engine and watched it pick up **−1.32**
+  on its own. `webgui.err.log` stayed empty throughout.
+- **Verification.** options_svc 1214, webgui 2341, options-scanner 1172 + the
+  documented 8, sentiment-dashboard 502 + the documented 2, sentiment_svc 328 + the
+  documented 1, tools 819, driver_svc 239, portfolio-analyzer 197, market_svc 77,
+  trade_svc 77, portfolio_svc 32, shared 93/28/49, tests 69. Ruff clean tree-wide.
+- **Left for a later pass, deliberately:** the ~60 formatter clones (a mechanical
+  sweep across many pages, pure tidiness, real regression surface — the same shape
+  of risk that just orphaned a decorator), `handle_command`'s 35-branch elif chain,
+  the color-helper spread, and the remaining 18 poll sites. The `compute.py` split
+  (7,354 lines) remains its own decision.
+
+**Prior —** 2026-08-20 (**Second-pass batch 3 — one 10 GB/day win, and one
+"fix" the measurement told me not to ship.**
+- **The watcher was moving 10.2 GB/day/tab.** `_watcher_compute` read
+  `options:scan` (148 KB) + `options:flow_alerts` (90 KB) **unconditionally** on
+  every 2 s tick, per open tab — 43,200 ticks/day of transfer and JSON parse for
+  views that change a handful of times an hour. New `bus_client.read_gated(view,
+  memo)` pays a tiny `:ver` probe instead. **Measured against prod: 3.16 ms →
+  0.32 ms per tick (−90%); 10.2 GB → 0.7 MB moved, 2.3 min → 0.2 min of CPU, per
+  tab per day.**
+- ⚠ **`read_gated` does NOT gate a versionless key.** First cut skipped the
+  payload read whenever `:ver` was absent, which would make a pre-upgrade key
+  permanently invisible; second cut memoized it, which is worse — a memo keyed on
+  `None` has no invalidation signal and would serve that first payload forever.
+  It gates only when there is a version to gate on. A shell test caught both.
+- ⚠ **M7 was measured and REJECTED — the audit's estimate was ~10x high.** The
+  Desk's 11-view seed was reported as "~50-100 ms of loop block"; measured against
+  prod it is **10.7 ms**, only 6.2 ms of it parse. Deferring it off-loop buys ~10 ms
+  and costs a fill-in flash on the landing page. Pipelining the round-trips is
+  *slower* (**12.34 ms vs 11.25 ms** — on localhost the round-trips are free and the
+  pipeline setup is not). Both attempts were written, measured, and reverted rather
+  than shipped; `/eod`'s on-loop build falls to the same arithmetic. **No change.**
+- **Accuracy Lows.** Closing an IRON CONDOR is four legs, not two —
+  `commission_for(2, ...)` understated every IC close by $0.65 x 2 x qty against
+  the adjustments it is ranked against (`_close_legs`). `score_vix_context` fed an
+  absent `$VIX1D` in as a literal 0 and still claimed confidence 1.0, structurally
+  shrinking the sub-score's deflection 20% — and `$VIX1D` does not quote for this
+  account, so that was a standing bias, not an outage case; it now renormalizes
+  over the terms present and carries the absence in the confidence (0.8), the same
+  split `vix.score_complex` got this morning. And `annualize_return` refuses below
+  `MIN_ANNUALIZE_DAYS` (21): a first-day +2% annualized to ~14,500% and a −2% to
+  −99%, driving BOTH the Sharpe-like risk grade and capital efficiency, so a new
+  position's first wiggle swung two of four dimensions between A and F on noise.
+- **Bounded growth.** `_SIM_SNAPSHOTS` (a full ChainSnapshot per symbol ever
+  fetched, ~1-10 MB for $SPX/$NDX, no eviction) is capped at 4 with re-fetch
+  moving a symbol to newest, so the one you are actively simulating is never the
+  one evicted. And `cache_set` gained a `ttl` — applied to the payload AND its
+  `:ver`/`:ts` side keys, since an un-expired counter outlives its payload as an
+  orphan — used by the per-position rescue boards (37 in prod, one per rescued
+  trade forever, no delete API on the bus). The rolling rescue SUMMARY does not
+  expire.
+- **The prod `cache:test:dot:ver` key: investigated, not a live leak.** Its payload
+  key is gone (an orphan `:ver` counter, 1 byte), no writer exists anywhere in the
+  current tree, and `Bus()` selects fakeredis under pytest — so it predates
+  something already removed. Left in place rather than mutating prod Redis.
+- **Stale comments corrected**: three `~14 MB` references to `cache:options:gamma`
+  in gamma.py, which is 0.4 MB since the history split — and that number is what
+  justifies the in-flight guard, so a future reader would mis-size the tradeoff.
+- **Verification.** options_svc 1209, webgui 2334, sentiment-dashboard 498 + the
+  documented 2, sentiment_svc 325 + the documented 1, options-scanner 1172 + the
+  documented 8, portfolio-analyzer 197, driver_svc 239, market_svc 77, trade_svc
+  77, portfolio_svc 32, shared 93/49, tests 69. Ruff clean tree-wide.
+
+**Prior —** 2026-08-20 (**Second-pass batch 2 — the first deletion stranded
+5,600 more lines, and four calculations that flattered themselves.**
+- **The dead-code deletion cascaded.** Batch 3's removal of the Tk window and the
+  legacy CLI left **1,848 lines unreachable inside the still-live `gamma_tool.py`**
+  — the Explain-text family, the drift-pressure panels, the full Analyze prompt,
+  the slot/today's-path helpers and every matplotlib/Tk remnant. Verified with an
+  independent AST reachability run (roots = production callers + module-level code):
+  51 dead defs of 83, and the same 9 live entry points the audit found. Dynamic
+  access (`getattr`) and string references were checked separately — none. With
+  `theme.py`, `event_calendar.py`, `html_render.py`, `options_simulator/ai_prompt.py`,
+  two broken `tools/` scripts and their tests: **5,624 lines across 34 files**.
+- **Two side effects worth more than the lines.** `gamma_tool` now imports with
+  **zero** tkinter/matplotlib modules (verified in a fresh interpreter), and the
+  options-scanner permanent-failure baseline shrank **11 → 8**: `test_key_levels_doc`
+  asserted a `docs/KEY_LEVELS.md` that does not exist in this repo. The Tk-root
+  skip race also lost 2 of its 3 racing files, so `skipped` is a stable 2 rather
+  than a random 2-or-3.
+- ⚠ **Deleting from a live module is not a bulk operation.** Nine test files mixed
+  live and dead subjects and had to be pruned test-by-test rather than removed; a
+  cleanup regex whose `\s*` crossed newlines ate the opening of two parenthesised
+  imports (caught by the suite, restored). Every claim was re-derived locally
+  before anything was removed.
+- **IC probability was the better leg, not both.** `pop_pct = min(put, call)` — but
+  an iron condor loses if EITHER short breaches and the two breaches are DISJOINT,
+  so it is `put + call − 100`, floored at 0. Two 20-delta shorts read **80%**
+  against a true **~60%**, inflating `calc_expected_pnl`'s EV and the scoring PoP
+  factor for every IC the scanner has ever ranked.
+- **The width selector overrode the account risk cap.** `if contracts <
+  CONTRACT_ROUND_TO: contracts = CONTRACT_ROUND_TO` ran AFTER the cap, and
+  `calc_contracts_for_target` already applies that same minimum — so the repeat
+  could only ever raise size past the limit. On a $1,000 account at 5% ($50 budget)
+  a $51-max-loss spread sized to **5 contracts = $255 = 25.5% of the account**.
+  Extracted as `size_contracts`; a cap that leaves no room now returns no
+  selection. ⚠ The existing `test_risk_cap_limits_contracts` asserted
+  `result is not None` — it had enshrined the override it was named for.
+- **A missing $DECN quote fabricated maximum-bullish breadth.** `(advn/decn) if
+  (advn and decn) else (inf if advn else None)` could not distinguish `decn == 0`
+  (a real 10/10 tape) from the symbol being ABSENT from the batch, and `inf` maps
+  to breadth score **10**. `inf` is now reserved for a genuine zero; either symbol
+  missing reads None. (`advn == 0` with decliners stays a real 0.0 — an extreme
+  bearish tape is data, not an absence.)
+- **The portfolio "execution" grade was graded on hindsight.** `entry_pct` was
+  computed over the closes SINCE entry, so a position that rose made its own entry
+  the window minimum (grade A) and one that fell made it the maximum (F) — a
+  near-monotone function of the subsequent return, which made the 15%-weighted
+  execution dimension a re-weighted copy of the 35%-weighted return dimension and
+  the stated 35/25/25/15 split behave like ~50/25/25. Now judged against
+  `slice_before` — the 60 sessions of range actually on offer at the fill —
+  dropping out (and reweighting) when that history is absent.
+- **Verification.** options_svc 1200, options-scanner 1172 + the documented 8,
+  webgui 2328, sentiment-dashboard 495 + the documented 2, sentiment_svc 325 + the
+  documented 1, portfolio-analyzer 194, portfolio_svc 32, trade_svc 77, market_svc
+  77, shared 93. Ruff clean tree-wide.
+- **Still open** (batch 3): the webgui efficiency debt — the 2 s watcher's ungated
+  237 KB reads, the Desk's 11 on-loop seed reads, `/eod`'s on-loop build — plus the
+  accumulated first-pass Mediums (pcr duplication, the `tools/` holiday literals,
+  the 22-page poll idiom, ~60 formatter clones, the rescue triplication and the
+  compute.py split).
+
+**Prior —** 2026-08-20 (**Second-pass audit, batch 1 — a rescue action that
+could never be applied, a crash tape that read bullish, and the biggest key in Redis.**
+- **Context.** After the day's three audit batches were promoted, the full audit was
+  re-run. All ten morning fixes verified independently (no regressions); this entry is
+  the remediation of the second pass's High tier + the round-3 NaN cluster.
+- **HIGH — `roll_out`/`roll_down_out` could NEVER pass the stale-price guard, and the
+  bypass overstated equity.** The two builders emitted only the 2 reopening legs in
+  `est_fill_legs` while their `net_cash` included the close debit (−cv) — so
+  `paper_adjust._reprice_candidate_net`, which reprices the legs uniformly, read even
+  IDENTICAL quotes as drift equal to the whole close cost (measured 187% vs the 15%
+  tolerance): every live apply refused with "prices moved — re-review". And with
+  repricing unavailable (off-hours), `apply_roll` booked the old spread's close at the
+  entry-credit scratch, so the close debit never hit cash — equity overstated by
+  `(cv − entry_credit)·100·qty`. **Fix: every roll candidate now carries the CLOSE pair
+  ahead of its reopen pair** (`rescue._close_pair`), priced live with a cv-split
+  fallback (BUY-back = cv, sell = 0.0) when the old legs are unpriceable — which also
+  fixes the second-pass Low where `roll_down`'s 0.0-coalesced close legs booked a
+  CREDIT to close a tested spread. The legacy 2-leg shape still applies (cached
+  boards), pinned by test. ⚠ The `_leg` docstring claimed est_fill_legs prices were
+  "display-only"; they were load-bearing in two places. Corrected.
+- **HIGH — `blend_trend` turned a saturated max-bear sub-score into neutral.**
+  `scores.get(k, 50.0) or 50.0` — a score of exactly 0.0 is falsy, and 0.0 is the
+  ENTIRE clamped crash-tape region of `score_price`. Measured: the most bearish
+  possible tape blended **36.5** where one tick off the floor blended **14.0**, a
+  22.5-point bullish jump at confidence 1.0, feeding the Day gauge, both structural
+  horizons and the classifier's direction axis. Now only absence (or non-finite)
+  means neutral; the fix is continuous at the floor by test.
+- **HIGH — `cache:options:calc_chain` was 8.77 MB, 53% of ALL prod Redis string
+  bytes.** The raw 20-expiry chain, ~40 fields/contract, no TTL, forever. The pages
+  read five contract fields; `thin_calc_chain` cuts to that whitelist at publish:
+  **8.77 → 0.68 MB (−92%)** measured on the real prod payload, extractors verified
+  unchanged. Fields cut, strikes kept — the leg builder legitimately offers far wings.
+- **NaN round 3** (`flow_skew._as_float`, `_pick_nearest_delta`, `profile_shape._num`):
+  non-finites rejected, and an IV must now be **positive** — Schwab's `-999`
+  uncomputable-IV sentinel no longer wins the 25Δ risk-reversal pick. One audit claim
+  was REFUTED on reproduction: `detect_uoa` never emitted NaN rows — `int(nan)` raises
+  into its broad `except`, an accidental save now pinned by tests so it cannot be
+  removed silently.
+- **Verification.** options_svc 1200, options-scanner 1379 + the documented 11,
+  webgui 2328, sentiment-dashboard 491 + the documented 2, sentiment_svc 325 + the
+  documented 1. Ruff clean. All counts grew only by the new tests; failing sets
+  compared name-for-name.
+- **Second-pass items still open** (not in this batch): the ~5,200 lines of dead code
+  stranded in `gamma_tool.py` + friends (with the 11→8 baseline shrink), IC PoP
+  `min()` vs `pop_put+pop_call−100`, the width-selector risk-cap override, the missing-
+  `$DECN` breadth fabrication, the portfolio execution grade, the 2 s watcher's
+  ungated 237 KB reads, and the Desk's on-loop seed.
+
+**Prior —** 2026-08-20 (**The RRG momentum axis — fixed, and my own case for
 fixing it was overstated by a factor of ten.**
 - **The defect was real at the function level.** `sector_rotation_assessment.
   compute_rs_momentum` subtracted ROC's OWN rolling mean before normalizing, which

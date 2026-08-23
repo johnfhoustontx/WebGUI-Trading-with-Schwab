@@ -10,6 +10,7 @@ put demand arrives NEGATIVE. This function is sign-agnostic: it blends signed
 inputs and flips nothing.
 """
 from __future__ import annotations
+from ._common import clamp as _clamp
 
 
 # ⚠ These sum to 1.30, NOT 1.0 -- `rejection` and `option_flow` were added without
@@ -20,10 +21,6 @@ from __future__ import annotations
 # a confidence -- see blend_aggression (fixed 2026-08-20).
 AGG_WEIGHTS = {"effort": 0.35, "skew": 0.30, "flow": 0.20, "order_flow": 0.15,
                "rejection": 0.20, "option_flow": 0.10}
-
-
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
 
 
 def blend_aggression(components, confs, weights=None):

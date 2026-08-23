@@ -48,6 +48,46 @@ class TestInvestorVerdictHappyPath:
         assert sum(b["weight"] for b in v["breakdown"]) == 100
 
 
+def _valuation_raw(verdict):
+    return next(b["raw_score"] for b in verdict["breakdown"] if b["factor"] == "valuation")
+
+
+class TestValuationAveragesOnlyAvailableInputs:
+    """`valuation` is the mean of {P/E-vs-sector, PEG}. When a sub-score's INPUT
+    is missing its primitive returns 0, and averaging that structural 0 in HALVES
+    the surviving sub-score — so a symbol with an excellent PEG scored +20 where
+    it should score +40, purely because no sector median was supplied. Live
+    `analyze()` passes `sector_pe_median=None` unconditionally, so this halving
+    applied to EVERY symbol, always.
+
+    The availability test has to be on the INPUTS, not the outputs: `score_peg`
+    legitimately returns 0 for a PEG between 1 and 2, so "score == 0" cannot mean
+    "missing"."""
+
+    def test_missing_sector_median_does_not_halve_the_peg_score(self, strong_inputs):
+        no_median = replace(strong_inputs, sector_pe_median=None)
+        v = InvestorVerdict().score(no_median)
+        # PEG 0.9 -> score_peg == 40. Averaging in a structural 0 would give 20.
+        assert _valuation_raw(v) == 40
+
+    def test_both_inputs_present_still_averages_both(self, strong_inputs):
+        v = InvestorVerdict().score(strong_inputs)
+        # P/E 18 vs median 22 -> ratio 0.82 -> 30;  PEG 0.9 -> 40;  mean -> 35.
+        assert _valuation_raw(v) == 35
+
+    def test_a_legitimate_zero_peg_score_is_not_treated_as_missing(self, strong_inputs):
+        # PEG 1.5 scores exactly 0 — a real reading, not an absence. With no
+        # sector median it must stand alone as 0, not vanish.
+        f = replace(strong_inputs.fundamentals, peg_ratio=1.5)
+        inp = replace(strong_inputs, fundamentals=f, sector_pe_median=None)
+        assert _valuation_raw(InvestorVerdict().score(inp)) == 0
+
+    def test_neither_input_available_scores_zero(self, strong_inputs):
+        f = replace(strong_inputs.fundamentals, peg_ratio=None)
+        inp = replace(strong_inputs, fundamentals=f, sector_pe_median=None)
+        assert _valuation_raw(InvestorVerdict().score(inp)) == 0
+
+
 class TestInvestorVerdictGates:
     def test_insufficient_fundamentals_returns_hold_short_circuit(self):
         empty = Fundamentals()

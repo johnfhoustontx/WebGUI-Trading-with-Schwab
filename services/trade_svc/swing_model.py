@@ -25,8 +25,21 @@ Weights are SIGNED (a negative-IC factor like low_vol carries a negative weight)
 so the composite is sum(weight * zscore). The BUY/HOLD/SELL verdict is taken from
 which calibration band the composite lands in (top band -> BUY, bottom -> SELL)."""
 import json
+import sys
+
 import numpy as np
-from repo_paths import SWING_MODEL
+from repo_paths import SWING_MODEL, TRADE_ANALYZER
+from services import _degrade
+
+# `trade-analyzer` has no package init and a hyphenated folder, so its dir goes
+# on sys.path — the same bootstrap `compute` performs. Done here too because
+# `_risk_share` reads the FACTORS registry for each factor's family, and this
+# module is imported directly by tests that never touch `compute`. Safe within
+# this service: trade_svc is its own process and imports only this app's `src`,
+# so the documented cross-app `src` collision with portfolio-analyzer cannot
+# arise here.
+if str(TRADE_ANALYZER) not in sys.path:
+    sys.path.insert(0, str(TRADE_ANALYZER))
 
 MIN_XSECTION = 5   # a cross-section thinner than this can't form stable 2/98
                    # quantiles -> fall back to the artifact norm (documented
@@ -101,15 +114,65 @@ def _percentile(idx, n_bands):
     return int(round((idx + 0.5) / n_bands * 100))
 
 
-def score_symbol(current_factors, universe_snapshot, artifact):
+def _risk_share(weights):
+    """Share of the model's ABSOLUTE weight sitting on volatility factors.
+
+    Phase 4 measured this composite at cross-sectional IC **+0.16 when the
+    market's forward 20 days were up and -0.11 when they were down**, with the
+    whole asymmetry carried by the `risk`-family factors — so this number is how
+    much of the verdict is a directional bet on the market rather than a
+    cross-sectional read. The live artifact sits at 47.6%.
+
+    The SIGN is irrelevant: a tilt toward or away from volatility is exposure
+    either way. An unrecognised factor name counts as not-risk, so an artifact
+    from a future fit with new factors under-reports rather than over-reports.
+
+    None when the factor registry is unreachable — the page then says nothing
+    rather than printing a zero that would read as "no exposure"."""
+    try:
+        from src.analysis import factors as _f
+        total = sum(abs(v) for v in weights.values())
+        if not total:
+            return 0.0
+        risky = sum(abs(v) for k, v in weights.items()
+                    if _f.family_of(k) == "risk")
+        return risky / total
+    except Exception:
+        return None
+
+
+def _select_regime(artifact, regime):
+    """``(block, key)`` — the requested regime's block, or the pooled ``"all"``.
+
+    Falls back whenever the requested key is absent OR present but unfitted (the
+    fit writes a key for every regime it saw, and one it could not estimate
+    carries no weights). Scoring on an empty block would return None and drop
+    the whole card to the legacy verdict — a silent downgrade, exactly the
+    failure mode the artifact's degrade paths exist to avoid."""
+    regimes = (artifact or {}).get("regimes") or {}
+    for key in ([regime] if regime else []) + ["all"]:
+        blk = regimes.get(key)
+        if blk and blk.get("weights") and blk.get("calibration"):
+            return blk, key
+    return None, None
+
+
+def score_symbol(current_factors, universe_snapshot, artifact, regime=None):
     """current_factors: {factor: value} for the symbol now.
     universe_snapshot: {factor: [values across the watchlist]} or None.
-    artifact: the loaded swing_model.json (or None). Returns the swing_model
-    verdict dict, or None to degrade to the legacy verdict."""
+    artifact: the loaded swing_model.json (or None).
+    regime: today's market regime key (`src.analysis.regime.current_regime`), or
+    None. Falls back to the pooled ``"all"`` weights whenever that regime is not
+    fitted — and the chosen key is reported as ``regime_key``, because a verdict
+    scored under regime weights is a different claim from one scored under
+    pooled weights. Returns the swing_model verdict dict, or None to degrade to
+    the legacy verdict."""
     try:
         if not artifact:
             return None
-        reg = artifact["regimes"]["all"]
+        reg, regime_key = _select_regime(artifact, regime)
+        if reg is None:
+            return None
         weights, norm, calib = reg.get("weights", {}), reg.get("norm", {}), reg.get("calibration", [])
         if not weights or not calib:
             return None
@@ -145,12 +208,20 @@ def score_symbol(current_factors, universe_snapshot, artifact):
         verdict = "BUY" if idx >= n - 1 else "SELL" if idx <= 0 else "HOLD"
         return {
             "verdict": verdict, "score": round(comp, 3),
+            # The calibration band index. `rec_journal` has always had a `band`
+            # column and `journal_reading` has always written `sm["band"]` —
+            # which was never returned, so every journalled row carried NULL.
+            # Phase 6's monitor groups by band, so that stopped being cosmetic.
+            "band": band.get("band", idx),
             "percentile": _percentile(idx, n),
             "expected_fwd": band["mean_fwd"], "hit_rate": band["hit_rate"],
             "horizon_days": artifact.get("horizon", 20),
             "contributions": sorted(contribs, key=lambda d: abs(d["contribution"]), reverse=True),
             "model_version": artifact.get("version"), "oos_ic": reg.get("oos_ic"),
+            "regime_key": regime_key,
+            "risk_share": _risk_share(weights),
             "source": "validated",
         }
     except Exception:
+        _degrade.degraded("trade.score_symbol")
         return None

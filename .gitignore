@@ -7,6 +7,16 @@
 shared/sentiment_bridge.json
 shared/notifications.json
 shared/anthropic_key.txt
+shared/alphavantage_key.txt
+shared/massive_key.txt
+# Belt and braces: the same names ANYWHERE, not only under shared/. A stray copy
+# of a key at the repo root was found untracked and unignored on 2026-08-22 —
+# one `git add .` from being committed. Only `shared/` is ever READ (see
+# `earnings_calendar._KEY_FILE`); a copy elsewhere is always a mistake, and it
+# should not also be a publishable one.
+**/anthropic_key.txt
+**/alphavantage_key.txt
+**/massive_key.txt
 shared/driver_model.txt
 # Which environment this checkout is (dev|prod). Gitignored ON PURPOSE: a git
 # pull must never be able to carry an environment identity between checkouts.
@@ -68,6 +78,9 @@ webgui/data/eod/
 # `git status --porcelain` by design. app_settings._load_from_disk falls back to
 # DEFAULTS when the file is absent, so an untracked file costs nothing.
 webgui/data/settings.json
+# Generated text-to-speech clip cache for the Desk's spoken alerts. Regenerated
+# on demand by webgui/voice.py; nothing here is worth versioning.
+webgui/data/voice/
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/

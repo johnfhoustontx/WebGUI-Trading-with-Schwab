@@ -1,0 +1,29 @@
+{
+  // DELIBERATELY NARROW. This checks the ONE seam every tier crosses: the bus
+  // envelope contract and the typed cache payloads. That is where the documented
+  // recurring bug lives - Bus.cache_get returns a CacheEnvelope, not the payload,
+  // and reading it as a dict fails silently while a try/except degrades past it.
+  //
+  // It is NOT a repo-wide type check and should not become one. The services and
+  // the webgui pages are large, untyped, and full of deliberately loose payload
+  // dicts (contracts model rows as list[dict] on purpose); switching them on
+  // would produce thousands of findings nobody will action - the failure mode
+  // this repo already avoided by keeping ruff's select list minimal.
+  //
+  // Run:  .venv\Scripts\python -m pyright
+  "include": [
+    "shared/bus",
+    "shared/contracts",
+    "shared/config_toml.py",
+    "webgui/bus_client.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/tests"
+  ],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportMissingImports": "warning"
+}

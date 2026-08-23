@@ -58,8 +58,6 @@ logger = logging.getLogger(__name__)
 #############################################
 
 PROXY_BASE = PROXY_URL  # migrated: source the proxy base from repo_paths (:8100)
-DIRECT_BASE = 'https://api.schwabapi.com'
-MARKETDATA_PREFIX = '/marketdata/v1'
 
 # SchwabProxy mounts its routes at the root (/quotes, /chains, /pricehistory)
 # and its /quotes handler hardcodes fields=quote, which drops the fundamental
@@ -67,7 +65,6 @@ MARKETDATA_PREFIX = '/marketdata/v1'
 PASSTHROUGH_ROUTE = '/passthrough'
 PROXY_NATIVE_ROUTES = {'/quotes', '/chains', '/pricehistory'}
 
-TOKEN_PATH = None  # direct mode unused in-service (always proxy)
 DEFAULT_OUTPUT_DIR = Path('./reports')
 
 # Schwab uses -999.0 as a "no value" sentinel on greeks
@@ -87,70 +84,31 @@ REQUEST_TIMEOUT = 30
 #############################################
 
 class SchwabClient:
-    """Thin wrapper over the Schwab market data endpoints.
+    """Thin wrapper over the Schwab market data endpoints, via SchwabProxy.
 
-    Defaults to routing through SchwabProxy so this tool does not open a
-    second OAuth token lifecycle. Set direct=True to hit Schwab directly
-    using a bearer token read from tokens.json.
+    The proxy is the only Schwab gateway. This class used to carry a
+    ``direct=True`` mode that read tokens.json and called api.schwabapi.com
+    itself; it was unreachable in-service and opened a second OAuth token
+    lifecycle against a single rotating refresh token, so it went 2026-08-21.
+    ``tests/test_no_direct_schwab.py`` keeps it gone.
     """
 
-    def __init__(self, direct=False, base_url=None, path_prefix=MARKETDATA_PREFIX,
-                 token_path=TOKEN_PATH, proxy_native=False):
-        self.direct = direct
+    def __init__(self, base_url=None, proxy_native=False):
         self.proxy_native = proxy_native
-        self.base_url = (base_url or (DIRECT_BASE if direct else PROXY_BASE)).rstrip('/')
-        self.path_prefix = path_prefix.rstrip('/') if direct else ''
+        self.base_url = (base_url or PROXY_BASE).rstrip('/')
         self.session = requests.Session()
-
-        if direct:
-            token = self._load_token(token_path)
-            self.session.headers.update({'Authorization': f'Bearer {token}'})
-
         self.session.headers.update({'Accept': 'application/json'})
-
-    @staticmethod
-    def _load_token(token_path):
-        """Read the access token out of tokens.json"""
-        token_path = Path(token_path)
-        if not token_path.exists():
-            raise FileNotFoundError(
-                f'Token file not found: {token_path}. '
-                f'Run without --direct to route through SchwabProxy instead.'
-            )
-        with open(token_path, 'r') as fh:
-            payload = json.load(fh)
-
-        # tokens.json layouts vary; check the common shapes
-        for path in (('access_token',), ('token', 'access_token'),
-                     ('creation_timestamp', ), ('token_dictionary', 'access_token')):
-            node = payload
-            ok = True
-            for key in path:
-                if isinstance(node, dict) and key in node:
-                    node = node[key]
-                else:
-                    ok = False
-                    break
-            if ok and isinstance(node, str):
-                return node
-
-        raise KeyError(f'Could not locate access_token in {token_path}')
 
     def _build_request(self, endpoint, params):
         """Resolve the URL and query params for the active transport mode
 
-        Direct mode hits Schwab itself under /marketdata/v1.
-
-        Proxy mode routes through /passthrough, which forwards verbatim. The
+        Routes through the proxy's /passthrough, which forwards verbatim. The
         proxy's dedicated routes are avoided because /quotes pins fields=quote
         and there is no /instruments route at all.
 
         --proxy-native opts back into the dedicated routes where they exist.
         """
         params = {k: v for k, v in (params or {}).items() if v is not None}
-
-        if self.direct:
-            return f'{self.base_url}{self.path_prefix}{endpoint}', params
 
         if self.proxy_native and endpoint in PROXY_NATIVE_ROUTES:
             return f'{self.base_url}{endpoint}', params
@@ -161,7 +119,7 @@ class SchwabClient:
             if ',' in str(value):
                 raise ValueError(
                     f"Cannot send '{key}={value}' through /passthrough: the proxy "
-                    f'splits params on commas. Use --direct for this request.'
+                    f'splits params on commas.'
                 )
 
         query = {'endpoint': endpoint}
@@ -177,7 +135,7 @@ class SchwabClient:
         except requests.exceptions.ConnectionError:
             raise ConnectionError(
                 f'Could not reach {self.base_url}. '
-                f'Is SchwabProxy running on port 8100? Use --direct to bypass it.'
+                f'Is SchwabProxy running on port 8100?'
             )
 
         if resp.status_code == 401:
@@ -185,18 +143,16 @@ class SchwabClient:
                 'Schwab returned 401. The refresh token has likely expired '
                 '(Schwab refresh tokens are 7 days). Re-run the proxy OAuth flow.'
             )
-        if resp.status_code == 404 and not self.direct:
+        if resp.status_code == 404:
             raise ConnectionError(
                 f'Proxy returned 404 for {url}. Expected SchwabProxy to expose '
-                f'{PASSTHROUGH_ROUTE}. Check the proxy version, or use --direct.'
+                f'{PASSTHROUGH_ROUTE}. Check the proxy version.'
             )
         resp.raise_for_status()
         return resp.json()
 
     def check_health(self):
         """Preflight the proxy so token problems surface before any data call"""
-        if self.direct:
-            return None
         try:
             resp = self.session.get(f'{self.base_url}/health', timeout=10)
             resp.raise_for_status()
@@ -762,8 +718,97 @@ def atm_straddle(df_exp, spot):
     return atm_strike, straddle, implied_move
 
 
+FLIP_BAND_PCT = 0.03        # mirrors gamma_tool: candidates within ±3% of spot
+FLIP_PERSIST_STRIKES = 2    # mirrors gamma_tool._FLIP_PERSIST_STRIKES
+
+
+def _flip_sign_persists(strikes, net, i, k=FLIP_PERSIST_STRIKES):
+    """True when the sign holds ``k`` LIVE strikes either side of the crossing.
+
+    Zero-net strikes are SKIPPED rather than counted against the run: a strike
+    nobody traded is the absence of data, so it can neither confirm nor deny
+    persistence. Counting one as a sign break would reject genuine flips that
+    merely sit beside an untraded strike — most of them, on an index ladder
+    carrying a hundred-odd dead strikes.
+
+    False when the grid cannot offer ``k`` live strikes on both sides:
+    persistence that cannot be CHECKED is not persistence observed, and
+    accepting an unverifiable crossing at the edge is how an artifact gets
+    promoted to a level. Ported from ``gamma_tool._flip_sign_persists`` — this
+    module cannot import it (per-domain engine isolation), so the two are
+    pinned equal by test instead."""
+    def _run(start, step, ref):
+        seen, j = 0, start
+        while 0 <= j < len(strikes) and seen < k:
+            v = net.get(strikes[j], 0.0)
+            if v != 0.0:
+                if v * ref <= 0:
+                    return False
+                seen += 1
+            j += step
+        return seen >= k
+
+    v1, v2 = net.get(strikes[i], 0.0), net.get(strikes[i + 1], 0.0)
+    return _run(i, -1, v1) and _run(i + 1, 1, v2)
+
+
+def flip_point(net_by_strike, spot):
+    """The gamma flip: where PER-STRIKE net GEX changes sign, near spot.
+
+    ⚠ This replaces a cumulative-sum crossing that used to live here. The two
+    are different QUANTITIES, not different precisions — on the same grid they
+    can differ by several strikes, because a cumulative sum has to pay back the
+    deep wing before it reaches zero. ``gamma_tool.snapshot_summary`` is the
+    one the collector STORES and every dealer surface displays, so this mirrors
+    it: candidates restricted to ±3% of spot, a STRICT crossing test (a
+    zero-net strike is absence of data, never a level), the sign required to
+    persist 2 live strikes either side, linear interpolation of the crossing,
+    and the candidate nearest spot winning.
+
+    Returns None when no crossing qualifies — which is a real answer, not a
+    failure."""
+    try:
+        spot = float(spot)
+    except (TypeError, ValueError):
+        return None
+    if not net_by_strike or spot <= 0:
+        return None
+
+    strikes = sorted(float(s) for s in net_by_strike)
+    net = {float(s): float(v) for s, v in net_by_strike.items()}
+    lo, hi = spot * (1 - FLIP_BAND_PCT), spot * (1 + FLIP_BAND_PCT)
+
+    best, best_dist = None, None
+    for i in range(len(strikes) - 1):
+        s1, s2 = strikes[i], strikes[i + 1]
+        v1, v2 = net[s1], net[s2]
+        if v1 * v2 >= 0:                       # strict: 0 is not a crossing
+            continue
+        if not (lo <= s1 <= hi or lo <= s2 <= hi):
+            continue
+        if not _flip_sign_persists(strikes, net, i):
+            continue
+        # Linear interpolation of the zero crossing between the two strikes.
+        crossing = s1 + (s2 - s1) * abs(v1) / (abs(v1) + abs(v2))
+        dist = abs(crossing - spot)
+        if best_dist is None or dist < best_dist:
+            best, best_dist = crossing, dist
+    return best
+
+
 def risk_reversal(df_exp, target_delta=0.25):
-    """25-delta risk reversal: call IV minus put IV (skew)"""
+    """25-delta risk reversal: **put IV minus call IV**. Positive = downside fear.
+
+    ⚠ This used to be ``call - put``, the OPPOSITE of ``flow_skew``'s
+    ``risk_reversal_25d`` in options-scanner. Two implementations with opposite
+    conventions disagree for reasons that are convention rather than market,
+    and a reader looking at both has no way to tell which.
+
+    ``flow_skew``'s convention won for two reasons: positive-means-downside-fear
+    is the standard equity-skew reading, and its value already feeds a live
+    scoring path (the sentiment aggression axis), so changing IT would have
+    moved a scorer while changing this one moves only a display.
+    """
     calls = df_exp[(df_exp['side'] == 'CALL') & df_exp['delta'].notna() & df_exp['iv'].notna()]
     puts = df_exp[(df_exp['side'] == 'PUT') & df_exp['delta'].notna() & df_exp['iv'].notna()]
     if calls.empty or puts.empty:
@@ -774,7 +819,7 @@ def risk_reversal(df_exp, target_delta=0.25):
 
     call_iv = float(call_row['iv'])
     put_iv = float(put_row['iv'])
-    return call_iv - put_iv, call_iv, put_iv
+    return put_iv - call_iv, call_iv, put_iv
 
 
 def max_pain(df_exp):
@@ -815,15 +860,14 @@ def gamma_exposure(df_exp, spot):
     by_strike = working.groupby('strike')['gex'].sum().reset_index()
     by_strike = by_strike.sort_values('strike')
 
-    # Flip point: strike where cumulative GEX crosses zero
+    # Cumulative is kept for the chart/table; it is NOT the flip any more.
     by_strike['cumulative'] = by_strike['gex'].cumsum()
-    flip = None
-    cum = by_strike['cumulative'].values
-    strikes = by_strike['strike'].values
-    for i in range(1, len(cum)):
-        if cum[i - 1] < 0 <= cum[i] or cum[i - 1] > 0 >= cum[i]:
-            flip = float(strikes[i])
-            break
+
+    # The flip is the PER-STRIKE sign change near spot, matching what the
+    # collector stores and every other dealer surface shows. The cumulative
+    # crossing this used to return is a different quantity that can sit several
+    # strikes away on the same grid — see flip_point.
+    flip = flip_point(dict(zip(by_strike['strike'], by_strike['gex'])), spot)
 
     return by_strike, flip
 
@@ -1012,12 +1056,16 @@ def build_takeaways(tech, fund, opts, ranks=None):
             else:
                 notes.append(f'ATM IV is {ratio:.2f}x 20-day realized vol - roughly fair.')
 
+        # put - call, so POSITIVE is downside fear. The prose flipped with the
+        # number: a sign change that left the words alone would be worse than
+        # the inconsistency it fixed, because the text would confidently say
+        # the opposite of the truth.
         rr = front.get('risk_reversal_25d')
         if rr is not None:
             if rr > 2:
-                notes.append(f'25-delta risk reversal {rr:+.1f} vol points - call skew, upside is being bid.')
-            elif rr < -2:
                 notes.append(f'25-delta risk reversal {rr:+.1f} vol points - put skew, downside protection is bid.')
+            elif rr < -2:
+                notes.append(f'25-delta risk reversal {rr:+.1f} vol points - call skew, upside is being bid.')
 
         if opts.get('term_state'):
             notes.append(f"IV term structure in {opts['term_state']} "
@@ -1275,6 +1323,16 @@ def render_html(symbol, quote, tech, fund, opts, notes, ranks=None):
             return ''
         return 'pos' if value >= 0 else 'neg'
 
+    def skew_class(value):
+        """Colour for the 25-delta risk reversal, whose polarity is INVERTED
+        relative to the generic signed one: the value is put IV minus call IV,
+        so positive means downside protection is being bid. Painting that green
+        would read as good news for the opposite of what it means — the same
+        polarity trap the Macro Board handles for VIX and TLT."""
+        if value is None:
+            return ''
+        return 'neg' if value >= 0 else 'pos'
+
     trend_rows = ''
     for label, key in (('20 SMA', 'sma_20'), ('50 SMA', 'sma_50'), ('200 SMA', 'sma_200'),
                        ('9 EMA', 'ema_9'), ('21 EMA', 'ema_21')):
@@ -1323,7 +1381,10 @@ def render_html(symbol, quote, tech, fund, opts, notes, ranks=None):
                 f'<td>{fmt(e["straddle"])}</td>'
                 f'<td>{fmt(e["put_call_oi"], ".2f")}</td>'
                 f'<td>{fmt(e["max_pain"])}</td>'
-                f'<td class="{signed_class(e["risk_reversal_25d"])}">'
+                # POLARITY-AWARE: the skew is put - call, so a positive value
+                # is downside fear. `signed_class` would paint that green,
+                # which reads as good news for the opposite of what it means.
+                f'<td class="{skew_class(e["risk_reversal_25d"])}">'
                 f'{fmt(e["risk_reversal_25d"], "+.1f")}</td></tr>'
             )
     else:
@@ -1733,11 +1794,7 @@ def parse_args():
     parser.add_argument('--from-date', default=None, help='Chain start expiry YYYY-MM-DD')
     parser.add_argument('--to-date', default=None, help='Chain end expiry YYYY-MM-DD')
     parser.add_argument('--no-options', action='store_true', help='Skip the option chain pull')
-    parser.add_argument('--direct', action='store_true',
-                        help='Bypass SchwabProxy and call api.schwabapi.com with tokens.json')
     parser.add_argument('--base-url', default=None, help='Override the base URL')
-    parser.add_argument('--path-prefix', default=MARKETDATA_PREFIX,
-                        help='Path prefix for --direct mode (default /marketdata/v1)')
     parser.add_argument('--proxy-native', action='store_true',
                         help="Use the proxy's own /quotes and /chains routes instead of "
                              '/passthrough. Note: its /quotes drops the fundamental block.')
@@ -1791,9 +1848,7 @@ def main():
     # ---- Client
     try:
         client = SchwabClient(
-            direct=args.direct,
             base_url=args.base_url,
-            path_prefix=args.path_prefix,
             proxy_native=args.proxy_native,
         )
     except Exception as exc:
@@ -1816,7 +1871,7 @@ def main():
         else:
             logger.info('Proxy healthy, token valid.')
 
-    if args.proxy_native and not args.direct:
+    if args.proxy_native:
         logger.warning('--proxy-native: the proxy pins fields=quote, so fundamentals '
                        'will be missing from this run.')
 

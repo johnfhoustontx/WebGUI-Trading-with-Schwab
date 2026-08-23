@@ -160,36 +160,3 @@ def test_analysis_dict_max_pain_none_without_chain():
     gex = GammaEngine().calc_from_chain(chain)
     result = build_analysis_dict(gex, "gex", "SPX", dte=0, expected_move=40.0)
     assert result["max_pain"] is None
-
-
-# ── Explain wiring (Task 5) ──
-
-def test_explain_gex_includes_max_pain_and_pin_risk():
-    from gamma_tool import build_explain_text
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "max_pain": {"max_pain": 5800.0, "pin_risk": 0.5,
-                     "magnet": {"level": 5800.0, "agree": True, "confidence": 0.8}},
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)
-    assert "Max pain" in text
-    assert "Pin risk" in text
-
-
-def test_explain_gex_no_max_pain_does_not_crash():
-    from gamma_tool import build_explain_text
-    ctx = {
-        "symbol": "SPX", "spot": 5805.0, "dte": 0,
-        "vix_now": None, "vix_delta": None,
-        "gex_summary": {"spot": 5805.0, "flip": 5800.0,
-                        "top_pos_strike": 5850.0, "top_neg_strike": 5750.0,
-                        "net_total": 1.0e9},
-        "sentiment": {"active": False},
-    }
-    text = build_explain_text("gex", ctx)  # no "max_pain" key
-    assert isinstance(text, str) and text

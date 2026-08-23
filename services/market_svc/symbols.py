@@ -18,6 +18,10 @@ Each entry:
   source       – for kind=="external" (e.g. "sentiment_pcr")
 """
 
+# BIG10's membership must match services/options_svc/net_premium's basket
+# (a comment used to say so; config/symbols.toml now enforces it).
+from shared import symbols as _shared_symbols
+
 # Frame layout order (design §5): macro gauges → tape → rotation.
 CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
@@ -131,8 +135,7 @@ SYMBOL_MAP = [
     # Top 10 — a leading equal-weighted composite (avg day-move + breadth + the net
     # call/put PREMIUM skew) over the 10 mega-cap names (the Mag-7 + AVGO/PLTR/AMD),
     # then the constituents.
-    _basket("BIG10", ("NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
-                      "AVGO", "PLTR", "AMD"),
+    _basket("BIG10", _shared_symbols.big10(),
             "Equal-weighted avg day move of the 10 mega-caps (+ N/10 advancing) "
             "and the net call/put premium skew of the 10", _MAG, prem=True),
     _q("NVDA", "NVDA", "NVIDIA", _MAG, prem=True),

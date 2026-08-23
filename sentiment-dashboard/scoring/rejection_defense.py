@@ -19,6 +19,7 @@ Design choices (documented constants below):
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from ._common import clamp as _clamp, num as _num
 
 MIN_BARS = 5           # below this -> confidence 0.0
 FULL_CONF_BARS = 15    # bar count at which confidence saturates
@@ -33,22 +34,8 @@ class RejectionDefense:
     confidence: float     # [0.0, 1.0]
 
 
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
 def _mean(xs):
     return sum(xs) / len(xs) if xs else 0.0
-
-
-def _num(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
-        return None
-    return v
 
 
 def _clean(bar):

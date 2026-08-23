@@ -29,6 +29,7 @@ vocabulary deduped — see ``test_heat_palette_is_a_finite_deduped_vocabulary``.
 import math
 from datetime import datetime, timezone
 
+from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex  # noqa: F401 — re-exported; the ramp's unit
 
 # ── oklch ────────────────────────────────────────────────────────────────────
@@ -89,17 +90,6 @@ COLUMNS = ("day", "week", "month")
 # highest value that still spends all thirteen steps on every column, and lower
 # values start collapsing the tails of Day into a single saturated step.
 SCALE_QUANTILE = 0.90
-
-
-def _num(v):
-    """``v`` as a float, or None for anything that isn't a real reading."""
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def all_heat_values(sector_rows, industries):

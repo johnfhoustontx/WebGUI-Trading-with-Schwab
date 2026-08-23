@@ -48,6 +48,9 @@ from scanner_engine import run_full_scan, vix_regime  # noqa: E402
 from regime_filter import evaluate_regime  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
+from services import _degrade  # noqa: E402
+from shared import driver_limits as _driver_limits  # noqa: E402
+from shared import scanner_config as _scanner_config  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
@@ -253,7 +256,7 @@ _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 # adds at most +6, so a Weak candidate tops out at 45 and can never clear 50.
 # Both are kept because they express DIFFERENT intents ("no low-scoring trades"
 # vs "no gate-failing trades") and either constant can move independently.
-SWING_MIN_SCORE = 50.0
+SWING_MIN_SCORE = _scanner_config.scores()["swing_min"]
 SWING_EXCLUDED_GRADES = ("Weak",)
 
 
@@ -689,12 +692,17 @@ def collect_eod_summary(now_ct=None) -> dict:
 
 # The driver account's per-trade risk cap for the PAPER SIZER on the open path.
 # Kept SEPARATE from the manual account's ``config_paper.MAX_RISK_PER_TRADE`` ($250)
-# so raising the driver's cap never changes the user's manual paper trades. Must match
-# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the guardrail's per-trade cap) so the
-# driver can't approve a qty the sizer then zeroes to RISK_TOO_HIGH. Raised to fund
+# so raising the driver's cap never changes the user's manual paper trades. It funds
 # liquid index/large-cap spreads ($SPX ~$700-1,150/contract, MU ~$400) that a $250
 # cap sized to 0 — the reason $SPX/MU picks logged "Executed" but never opened.
-_DRIVER_MAX_RISK_PER_TRADE = 3000.0
+#
+# Sourced from config/driver.toml via shared.driver_limits, which is also where
+# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the GUARDRAIL's cap) comes from. The
+# two must agree or the driver approves a quantity the sizer then zeroes to
+# RISK_TOO_HIGH — a quiet failure whose only symptom is a log line saying
+# "Executed" with nothing opened. They used to be two literals and a comment
+# asking future editors to keep them in step.
+_DRIVER_MAX_RISK_PER_TRADE = _driver_limits.per_trade_max_risk()
 
 
 def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> dict:
@@ -791,6 +799,7 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
         return {"status": "opened", "symbol": signal["symbol"], "qty": open_qty,
                 "entry_credit": fill, "max_loss_total": max_loss_total}
     except Exception as exc:  # noqa: BLE001
+        _degrade.degraded("options.open_driver_position")
         return {"status": "error", "error": str(exc)}
 
 
@@ -2743,6 +2752,7 @@ def gex_status_view(now=None) -> dict:
                 "last_scan": last_scan, "next_scan": next_scan,
                 "age_seconds": age, "session": gs.session_label(now)}
     except Exception:
+        _degrade.degraded("options.gex_status_view")
         return {"status_label": "Collector status unknown",
                 "status_color": "#666666", "last_scan": None,
                 "next_scan": None, "age_seconds": None, "session": ""}
@@ -3222,6 +3232,7 @@ def _session_expected_move(chain):
             return None
         return round(spot * (atm_iv / 100.0) * math.sqrt(1.0 / 365.0), 2)
     except Exception:  # noqa: BLE001 — EM is best-effort; missing → None → '—'.
+        _degrade.degraded("options._session_expected_move")
         return None
 
 
@@ -4455,6 +4466,7 @@ def _movers_html(movers) -> str:
                 f'<div style="color:{color};font-weight:700">{_h.escape(move_txt) or "—"}</div>'
                 f'{sub}</div>')
         except Exception:
+            _degrade.degraded("options._movers_html")
             continue
     if not chips:
         return ""
@@ -5004,6 +5016,7 @@ def _backfill_indices(data, levels_by_sym, em_by_sym, recap) -> dict:
                     "recap": " ".join(bits),
                 })
             except Exception:
+                _degrade.degraded("options._backfill_indices")
                 continue
         data["indices"] = out
         if out:
@@ -5244,6 +5257,43 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
 # fns).
 
 
+# The five contract fields the Calculator/Rescue pages actually read (verified
+# against every `.get("...")` on a contract dict in both pages). Everything else
+# in Schwab's ~40-field contract dicts was dead weight: the raw 20-expiry chain
+# cached 8.77 MB — 53% of ALL prod Redis string bytes — with no TTL (2026-08-20).
+_CALC_CONTRACT_FIELDS = ("bid", "ask", "mark", "volatility", "delta")
+
+
+def thin_calc_chain(chain):
+    """The two expiry maps with each contract cut to `_CALC_CONTRACT_FIELDS`.
+
+    Keeps exactly the structure the pages iterate — `{put,call}ExpDateMap` →
+    expiry key → strike key → [contracts] — and nothing else. Cutting FIELDS
+    rather than cropping STRIKES is deliberate: the leg builder legitimately
+    offers far wings (a user hedging with a 10-delta teenie), so the strike
+    ladder must stay whole; no page reads any other per-contract field or any
+    other top-level key. None passes through (the degrade path). Junk-tolerant:
+    a malformed strike entry becomes an empty list, never a raise.
+    """
+    if chain is None:
+        return None
+    out = {}
+    for map_key in ("putExpDateMap", "callExpDateMap"):
+        exp_out = {}
+        for exp_key, strikes in ((chain.get(map_key) or {}) or {}).items():
+            strike_out = {}
+            for strike_key, contracts in (strikes or {}).items():
+                if not isinstance(contracts, list):
+                    strike_out[strike_key] = []
+                    continue
+                strike_out[strike_key] = [
+                    {f: c.get(f) for f in _CALC_CONTRACT_FIELDS if f in c}
+                    for c in contracts if isinstance(c, dict)]
+            exp_out[exp_key] = strike_out
+        out[map_key] = exp_out
+    return out
+
+
 def calc_load_symbol(symbol) -> dict:
     """Fetch the quote + option chain for ``symbol`` → JSON-safe loader payload.
 
@@ -5272,7 +5322,7 @@ def calc_load_symbol(symbol) -> dict:
 
     lo, hi = oc.generate_price_range(price) if price else (0.0, 0.0)
     return {"symbol": symbol, "api": api, "price": price,
-            "range_lo": lo, "range_hi": hi, "chain": chain}
+            "range_lo": lo, "range_hi": hi, "chain": thin_calc_chain(chain)}
 
 
 # Strategy codes the analytic ``calc_summary`` handles exactly; everything else
@@ -5470,7 +5520,28 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
 # into the process, keeping the combined pytest run clean.
 
 # symbol -> ChainSnapshot object (in-process; never serialized whole).
+#
+# BOUNDED: a snapshot holds thousands of contract objects (~1-10 MB for
+# $SPX/$NDX), and this held one per symbol ever fetched for the whole process
+# lifetime — the only module-level cache here with no eviction. Single-user, so
+# it grew slowly, but unbounded is unbounded (capped 2026-08-20). Insertion order
+# is the age order (dicts preserve it), and a re-fetch MOVES a symbol to the end
+# so the one you are actively simulating is never the one evicted.
+SIM_SNAPSHOT_LIMIT = 4
 _SIM_SNAPSHOTS: dict = {}
+
+
+def reset_sim_snapshots() -> None:
+    """Drop every cached simulator snapshot (test helper / manual reset)."""
+    _SIM_SNAPSHOTS.clear()
+
+
+def _stash_sim_snapshot(symbol, snap) -> None:
+    """Cache ``snap`` under ``symbol``, evicting the oldest past the cap."""
+    _SIM_SNAPSHOTS.pop(symbol, None)          # re-insert so it counts as newest
+    _SIM_SNAPSHOTS[symbol] = snap
+    while len(_SIM_SNAPSHOTS) > SIM_SNAPSHOT_LIMIT:
+        _SIM_SNAPSHOTS.pop(next(iter(_SIM_SNAPSHOTS)))
 
 # Equity/index option contract multiplier (shares per contract). The simulator
 # engine prices in per-share × qty units; ×100 converts the What-if curve to a
@@ -5523,7 +5594,7 @@ def sim_fetch(symbol: str) -> dict:
     from options_simulator import data as sdata
 
     snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol)
-    _SIM_SNAPSHOTS[symbol] = snap
+    _stash_sim_snapshot(symbol, snap)
     exps = expiries_of(snap)
     return {
         "symbol": snap.symbol,
@@ -5916,6 +5987,7 @@ def em_chain_meta(symbol) -> dict:
             pass
         return base
     except Exception as exc:
+        _degrade.degraded("options.em_chain_meta")
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
 
@@ -6086,6 +6158,7 @@ def _fetch_em_candles(symbol, spec):
         candles.sort(key=lambda r: r[0])
         return candles[-int(spec.get("bars", _EM_HISTORY_BARS)):]
     except Exception:
+        _degrade.degraded("options._fetch_em_candles")
         return []
 
 
@@ -6187,6 +6260,7 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
         base["em_lower"] = cone["lower"]
         return base
     except Exception as exc:
+        _degrade.degraded("options.compute_expected_move")
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
 
@@ -6358,20 +6432,38 @@ def _light_gex_context(symbol):
                 "views": {"GEX": {"flip": (summary or {}).get("flip"),
                                   "walls": gamma_walls("GEX", gex, spot)}}}
     except Exception:
+        _degrade.degraded("options._light_gex_context")
         return None
 
 
 def _gex_from_snapshot(snap):
     """Extract {flip, put_wall, call_wall} from a gamma_snapshot() GEX view.
 
-    The snapshot's ``views["GEX"]`` carries ``flip`` and ``walls`` =
-    [put_wall, call_wall] (one per side). Returns None if unavailable."""
+    The snapshot's ``views["GEX"]`` carries ``flip`` and ``walls`` — the strikes
+    from ``gamma_walls``, which builds ``[put_wall, call_wall]`` but FILTERS
+    None OUT. A chain with strikes on only one side of spot therefore arrives as
+    a SINGLE-ELEMENT list whose side position no longer identifies, so the sides
+    are established from SPOT, using the picker's own contract (put wall
+    strictly below spot, call wall strictly above) — the same disambiguation
+    ``_matrix_dealer_levels`` applies to the matrix grid. Reading positionally
+    filed a lone call wall as the PUT wall and reported no call wall at all,
+    silently, and rescue then judged a short strike against the wrong barrier.
+
+    Without a usable spot a PAIR is still unambiguous (a side is dropped only
+    when it is empty), but a lone wall is not — it is discarded rather than
+    guessed, since a wrong-side wall is worse than no wall and the flip still
+    carries context. Returns None when nothing is available."""
     if not isinstance(snap, dict):
         return None
     gex = (snap.get("views") or {}).get("GEX") or {}
     walls = gex.get("walls") or []
-    put_wall = walls[0] if len(walls) >= 1 else None
-    call_wall = walls[1] if len(walls) >= 2 else None
+    spot = snap.get("spot")
+    put_wall = call_wall = None
+    if isinstance(spot, (int, float)) and spot > 0:
+        put_wall = next((w for w in walls if w < spot), None)
+        call_wall = next((w for w in walls if w > spot), None)
+    elif len(walls) >= 2:
+        put_wall, call_wall = walls[0], walls[1]
     if gex.get("flip") is None and put_wall is None and call_wall is None:
         return None
     return {"flip": gex.get("flip"), "put_wall": put_wall, "call_wall": call_wall}
@@ -6549,6 +6641,7 @@ def _advisory_from_position(pos, *, source: str, force_advisory: bool,
         )
         return adv.model_dump()
     except Exception as e:
+        _degrade.degraded("options._advisory_from_position")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6578,6 +6671,71 @@ def compute_rescue(position_id, source: str = "paper") -> dict:
                                        force_advisory=captured,
                                        position_id=position_id)
     except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def _spec_float(spec, key, required):
+    """``(value, error)`` for a float field of an ad-hoc rescue spec.
+
+    THE one copy: defined byte-for-byte inside three separate ad-hoc validators
+    until 2026-08-20. Blank/whitespace counts as missing so an empty form field
+    reports "required" rather than "must be a number".
+    """
+    raw = spec.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return (None, f"{key} is required") if required else (None, None)
+    try:
+        return float(raw), None
+    except (TypeError, ValueError):
+        return None, f"{key} must be a number"
+
+
+def _assemble_advisory(pos, mark, engine_mark, *, price_leg, gex,
+                       candidates_fn, risk_fn, position_id, source,
+                       symbol, strategy) -> dict:
+    """Regime context → engine → validated ``RescueAdvisory`` dict.
+
+    The shared tail of the three ad-hoc advisory builders, which were structural
+    clones differing by exactly TWO lines — which candidates function and which
+    risk function. Injecting those two is the whole difference, so a new strategy
+    family now needs a mark builder and nothing else (consolidated 2026-08-20).
+
+    Every candidate is forced to ``apply_kind="advisory"``: an ad-hoc board
+    describes a trade the paper book does not hold, so there is nothing to apply
+    to. Fully defensive → ``{"error": "..."}``; never raises.
+    """
+    try:
+        regime = _rescue_regime()
+        cands = candidates_fn(pos, engine_mark, price_leg, gex, regime)
+        risk = risk_fn(pos, engine_mark, gex, regime)
+
+        context = []
+        if cands and cands[0].get("context"):
+            context = list(cands[0]["context"])
+
+        valid = []
+        for c in cands:
+            try:
+                c = {**c, "apply_kind": "advisory", "applies": False}
+                valid.append(RescueCandidate(**c))
+            except Exception:
+                continue
+
+        adv = RescueAdvisory(
+            position_id=position_id,
+            source=source,
+            symbol=symbol,
+            strategy=strategy,
+            state=risk.get("state", "ok"),
+            heat=risk.get("heat", 0.0),
+            mark=RescueMark(**mark),
+            context=context,
+            candidates=valid,
+            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
+        )
+        return adv.model_dump()
+    except Exception as e:  # noqa: BLE001 — the board must render an error, not 500
+        _degrade.degraded("options._assemble_advisory")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6641,39 +6799,13 @@ def _advisory_from_single(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _single_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_single_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_single_candidates, risk_fn=_assess_single_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_single")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6690,19 +6822,10 @@ def _adhoc_single(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        strike, err = _flt("short_strike", True)
+        strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:
@@ -6744,6 +6867,7 @@ def _adhoc_single(spec) -> dict:
         }
         return _advisory_from_single(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_single")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6807,39 +6931,13 @@ def _advisory_from_debit(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _debit_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_debit_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_debit_candidates, risk_fn=_assess_debit_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_debit")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6856,23 +6954,14 @@ def _adhoc_debit(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        long_strike, err = _flt("long_strike", True)
+        long_strike, err = _spec_float(spec, "long_strike", True)
         if err:
             return {"error": err}
-        short_strike, err = _flt("short_strike", True)
+        short_strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
         # entry_credit is SIGNED (NEGATIVE = debit paid); do NOT reject a negative.
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:
@@ -6907,6 +6996,7 @@ def _adhoc_debit(spec) -> dict:
         }
         return _advisory_from_debit(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_debit")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -6974,39 +7064,13 @@ def _advisory_from_range(pos, *, source: str = "adhoc",
             "dte": dte,
         }
 
-        # 3. regime context (defensive → None).
-        regime = _rescue_regime()
-
-        # 4. engine.
-        cands = _range_candidates(pos, engine_mark, price_leg, gex, regime)
-        risk = _assess_range_risk(pos, engine_mark, gex, regime)
-
-        context = []
-        if cands and cands[0].get("context"):
-            context = list(cands[0]["context"])
-
-        valid = []
-        for c in cands:
-            try:
-                c = {**c, "apply_kind": "advisory", "applies": False}
-                valid.append(RescueCandidate(**c))
-            except Exception:
-                continue
-
-        adv = RescueAdvisory(
-            position_id=position_id,
-            source=source,
-            symbol=symbol,
-            strategy=strategy,
-            state=risk.get("state", "ok"),
-            heat=risk.get("heat", 0.0),
-            mark=RescueMark(**mark),
-            context=context,
-            candidates=valid,
-            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
-        )
-        return adv.model_dump()
-    except Exception as e:
+        return _assemble_advisory(
+            pos, mark, engine_mark, price_leg=price_leg, gex=gex,
+            candidates_fn=_range_candidates, risk_fn=_assess_range_risk,
+            position_id=position_id, source=source,
+            symbol=symbol, strategy=strategy)
+    except Exception as e:  # noqa: BLE001 — mark-building failures too
+        _degrade.degraded("options._advisory_from_range")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7080,6 +7144,7 @@ def _adhoc_range(spec) -> dict:
         }
         return _advisory_from_range(pos, source="adhoc", position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options._adhoc_range")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7120,28 +7185,19 @@ def compute_rescue_adhoc(spec) -> dict:
         if not expiration:
             return {"error": "expiration is required"}
 
-        def _flt(key, required):
-            raw = spec.get(key)
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return (None, f"{key} is required") if required else (None, None)
-            try:
-                return float(raw), None
-            except (TypeError, ValueError):
-                return None, f"{key} must be a number"
-
-        short_strike, err = _flt("short_strike", True)
+        short_strike, err = _spec_float(spec, "short_strike", True)
         if err:
             return {"error": err}
-        long_strike, err = _flt("long_strike", True)
+        long_strike, err = _spec_float(spec, "long_strike", True)
         if err:
             return {"error": err}
-        call_short, err = _flt("call_short", strategy == "IC")
+        call_short, err = _spec_float(spec, "call_short", strategy == "IC")
         if err:
             return {"error": err}
-        call_long, err = _flt("call_long", strategy == "IC")
+        call_long, err = _spec_float(spec, "call_long", strategy == "IC")
         if err:
             return {"error": err}
-        entry_credit, err = _flt("entry_credit", False)
+        entry_credit, err = _spec_float(spec, "entry_credit", False)
         if err:
             return {"error": err}
         if entry_credit is None:
@@ -7182,6 +7238,7 @@ def compute_rescue_adhoc(spec) -> dict:
         return _advisory_from_position(pos, source="adhoc",
                                        force_advisory=True, position_id="adhoc")
     except Exception as e:
+        _degrade.degraded("options.compute_rescue_adhoc")
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -7218,6 +7275,7 @@ def assess_open_positions() -> dict:
             if state == "critical":
                 n_critical += 1
         except Exception:
+            _degrade.degraded("options.assess_open_positions")
             continue
     return {
         "per_position": per_position,
@@ -7335,6 +7393,7 @@ def collect_action_items(now_ct=None) -> dict:
                         "symbol": p.get("symbol"), "strategy": p.get("strategy"),
                         "note": f"loss {abs(cap):.0f}% of credit (near stop)"})
         except Exception:
+            _degrade.degraded("options.collect_action_items")
             continue
 
     return out

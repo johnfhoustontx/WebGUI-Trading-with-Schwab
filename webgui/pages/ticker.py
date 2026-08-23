@@ -14,7 +14,12 @@ import app_settings
 import bus_client
 from nicegui import run, ui
 
+from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
 from pages.ui_guard import guard, guard_async
+
+def _as_float(v, default):
+    return float_or(v, default)
+
 
 # The ONE ui.add_css escape hatch for this component: a keyframe marquee animation
 # (not expressible as a Tailwind utility) + the three finite scroll-speed buckets
@@ -89,13 +94,6 @@ def _fmt(v, nd=2):
         return f"{float(v):.{nd}f}"
     except (TypeError, ValueError):
         return "—"
-
-
-def _as_float(v, default):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
 
 
 def _tiles_by_cat(dashboard):

@@ -5,8 +5,21 @@ which replaced (rather than merged into) the cumulative quote map.
 Industries fetched lazily during expand were wiped on every subsequent
 fetch, causing the UI to render them as "—" until the user re-expanded
 the sector.
+
+This fork replaced the Tk UI with the NiceGUI webgui and deliberately never
+copied ``sentiment_dashboard.py`` (root CLAUDE.md, folder map), so these two
+tests can never pass HERE — they are green in the source repo. Skipped at module
+level rather than deleted: the regression they pin is real, and the day the
+module reappears they should run again.
 """
 from unittest.mock import MagicMock
+
+import pytest
+
+pytest.importorskip(
+    "sentiment_dashboard",
+    reason="Tk UI entrypoint deliberately not copied into this fork",
+)
 
 
 def _make_app():

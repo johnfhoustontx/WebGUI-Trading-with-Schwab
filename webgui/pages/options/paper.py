@@ -15,21 +15,21 @@ result via ``ui.notify`` when it lands. Dialogs (the close debit input) stay
 client-side (input collection only). Graceful-empty when the service is cold.
 """
 import bus_client
+from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
 
 from . import detail, handoff
-from .rescue import heat_border_class
+from .rescue import AT_RISK_STATES as _AT_RISK_STATES
+from .rescue import heat_border_class, rescue_highlight, rescue_highlight
 from .theme import BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D_DANGER, BTN_PRIMARY
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
 # rescue overlay tags the paper *account* positions view; the paper-trades ledger
 # this page renders carries no rescue_state in the common case, so this highlight
 # is a safe no-op unless a trade row is explicitly flagged.
-_AT_RISK_STATES = ("tested", "critical")
-
 # Paper-ledger styling (injected via ui.add_css — ui.html strips <style>):
 #  • compact rows to match the Scanner table (dense + tight padding);
 #  • fixed header with a scrollable body (sticky thead + bounded scroll area).
@@ -42,18 +42,6 @@ PAPER_CSS = """
   position: sticky; top: 0; z-index: 2; background: #141a30;
 }
 """
-
-
-def rescue_highlight(state, heat):
-    """Left-border Tailwind classes for an at-risk row, or '' (no tint) otherwise.
-
-    Defensive: a missing/None ``state`` yields no highlight, so normal rows look
-    unchanged. The class set comes from the shared ``heat_border_class`` (rescue.py)."""
-    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
-
-
-def _round(value, ndigits=2):
-    return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
 def paper_columns():

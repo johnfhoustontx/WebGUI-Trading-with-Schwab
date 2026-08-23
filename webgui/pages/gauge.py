@@ -11,7 +11,13 @@ module, which the nicegui-highcharts component auto-loads (``loadMore``) on
 mount, so the element needs NO ``extras`` — just ``ui.highchart(gauge_figure(...))``.
 Pure + unit-tested.
 """
+from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
+from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
 from pages.options.theme import THEME, hex_rgb
+
+def _safe_float(v, default=0.0):
+    return float_or(v, default)
+
 
 _G = THEME["gauge"]
 _RED = hex_rgb(_G["low"], (239, 83, 80))       # left of the arc  (default #ef5350)
@@ -19,17 +25,6 @@ _YELLOW = hex_rgb(_G["mid"], (255, 213, 79))   # middle           (default #ffd5
 _GREEN = hex_rgb(_G["high"], (102, 187, 106))  # right            (default #66bb6a)
 _NEEDLE = _G["needle"]                          # needle + pivot   (default #f5f5f5)
 _FACE_BANDS = 60          # graduated plotBands across the arc → smooth gradient
-
-
-def _safe_float(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
-def _clamp(v, lo, hi):
-    return max(lo, min(hi, v))
 
 
 def _esc(text):

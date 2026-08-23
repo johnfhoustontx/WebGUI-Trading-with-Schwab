@@ -167,6 +167,26 @@ def build_bridge_payload(snapshot, history_scores, spy_closes, generated_at,
     return payload
 
 
+def _breadth_ratio(advn, decn):
+    """Advance/decline ratio, or None when there is no reading.
+
+    ⚠ ABSENT and ZERO are different facts here, and conflating them fabricated
+    the most bullish possible breadth: the old
+    ``(advn / decn) if (advn and decn) else (inf if advn else None)`` handed
+    ``inf`` to ``breadth.score`` — which maps inf to score 10 — whenever $DECN
+    was simply MISSING from the batched quote (a per-symbol failure the batch
+    can produce), indistinguishable from a genuine no-decliners tape. ``inf`` is
+    now reserved for ``decn == 0`` with advancers present; a missing symbol on
+    either side reads None. ``advn == 0`` with decliners is a real, extreme
+    bearish tape (ratio 0.0), not an absence (fixed 2026-08-20).
+    """
+    if advn is None or decn is None:
+        return None
+    if decn == 0:
+        return float("inf") if advn > 0 else None
+    return advn / decn
+
+
 def _last(qd):
     if not isinstance(qd, dict):
         return None
@@ -186,26 +206,7 @@ def reset_pcr_cache():
     _PCR_CACHE.update(ts=0.0, pcr=None)
 
 
-def _pcr_from_chain(chain):
-    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume."""
-    if not chain:
-        return None
-    pv = cv = 0
-    for strikes in (chain.get("putExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    pv += v
-    for strikes in (chain.get("callExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    cv += v
-    return round(pv / cv, 3) if cv > 0 else None
-
+from scoring.put_call import pcr_from_chain as _pcr_from_chain  # noqa: E402
 
 def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None):
     """Compute the live intraday composite snapshot (backfill-snapshot shaped)."""
@@ -259,7 +260,7 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
     advn, decn = _first("advn"), _first("decn")
     highs, lows = _first("nyhgh") or 0, _first("nylow") or 0
     pct50 = _first("pct50")
-    ratio = (advn / decn) if (advn and decn) else (float("inf") if advn else None)
+    ratio = _breadth_ratio(advn, decn)
     net = ((advn or 0) - (decn or 0)) if (advn is not None or decn is not None) else None
     br = _breadth.score(pct_above_50=(f"{pct50:.1f}" if pct50 is not None else ""),
                         nyse_ad="Neutral", new_highs=float(highs), new_lows=float(lows),

@@ -15,38 +15,55 @@ touching anything in this directory.
 
 ## Purpose
 
-A tkinter desktop app that computes a daily 0–10 contrarian sentiment
-composite from market data, displays it, and publishes it for other apps
-(Options Scanner, Blueprint Analyzer) to consume via a JSON bridge file.
+**In THIS monorepo this folder is ENGINES ONLY** - the pure `scoring/` package,
+`live_composite.py`, `history_backfill.py`, `sectors_ref.py`,
+`sector_rotation_assessment.py` and the bridge writer. It is imported by
+`services/sentiment_svc`, which owns all scheduling and publishing.
+
+**The tkinter desktop app was never copied into this repo.** Verified absent
+2026-08-21: `sentiment_dashboard.py`, `notifier.py`, `Launch_Dashboard.bat`,
+`sentiment_data.json`, `credit_cache.json`. Sections below that describe a UI
+shell, a Live Data panel, autosave or a 15-minute Tk ticker are describing the
+SOURCE repo (`D:\Trading With Schwab`), not this one - they are kept because the
+scoring contracts they document are still exact. The interface here is the
+NiceGUI webgui `/sentiment` family, which reads Redis and never imports this
+folder.
 
 ## Architecture
 
 ```
-sentiment_dashboard.py     UI shell (tkinter). Builds payload,
-                           updates display, schedules autofetch.
-        │
-        ▼
-scoring/                   Pure functions. No tk imports here.
-  ├─ __init__.py           WEIGHTS dict — single source of truth.
-  ├─ types.py              ScoreResult dataclass — the contract.
-  ├─ vix.py                term, vix1d, slope, complex
-  ├─ put_call.py
-  ├─ breadth.py
-  ├─ rotation.py
-  ├─ sector_perf.py
-  ├─ credit_pulse.py
-  └─ composite.py          blend, velocity, divergence
-        │
-        ▼
-bridge.py                  write_bridge(payload) → JSON to shared/.
-        │
-        ▼
-D:\AI_Based_Analysis\shared\sentiment_bridge.json    (canonical)
-SentimentDashboard\sentiment_bridge.json             (legacy mirror)
-        │
-        ▼
-External consumers: Options Scanner regime_filter, Blueprint Analyzer.
+services/sentiment_svc/     Owns cadence + publishing (composite 120s, trend 15m,
+        |                   momentum nightly 16:20 CT). Reads these engines.
+        v
+scoring/                    Pure functions. No tk imports here.
+  |- __init__.py            WEIGHTS dict - single source of truth.
+  |- types.py               ScoreResult dataclass - the contract.
+  |- vix.py                 term, vix1d, slope, complex
+  |- put_call.py  breadth.py  rotation.py  sector_perf.py
+  |- credit_pulse.py        (computed for display; NOT in WEIGHTS since v4.3)
+  |- composite.py           blend, velocity, divergence
+  |- market_state.py aggression.py effort.py session_structure.py
+  |  rejection_defense.py profile_shape.py order_flow.py
+  |                         the five-state classifier inputs
+  |- momentum.py momentum_regime.py     the nightly cascade
+  |- daily_direction.py     OFFLINE validation proxy only (validate_market_state.py)
+  |- _common.py             shared safe_float / score_from_thresholds /
+  |                         clamp / num  (clamp had NINE identical private
+  |                         copies and num seven, until 2026-08-21)
+        |
+        v
+live_composite.py           compute_live -> the live intraday composite
+bridge.py                   write_bridge(payload) -> repo_paths.BRIDGE_PATH
+        |
+        v
+shared/sentiment_bridge.json    (repo_paths.BRIDGE_PATH - the ONLY path)
+        |
+        v
+options-scanner/regime_filter.py   the one remaining consumer; migrating it to
+                                   cache:sentiment:composite is the last open
+                                   item of the 3-tier migration.
 ```
+
 
 ## Component catalog (5 components, v4.3)
 
@@ -189,19 +206,27 @@ flow) are independent.
 1. **Add the weight** to `scoring/__init__.py:WEIGHTS`. The assert at the bottom enforces `Σ = 1.0` — rebalance accordingly.
 2. **Create `scoring/<name>.py`** exposing `score(inputs) -> ScoreResult`. No `tk` imports.
 3. **Write tests** in `tests/test_<name>.py`: boundary case per piecewise breakpoint, missing-data case (returns 0/0.0), typical-day case.
-4. **Wire it in the UI**: add to `_component_meta` table in `_build_composite_panel`, call from `calculate_all_scores`, store in `_component_confidence`.
-5. **Extend the bridge payload** in `sentiment_dashboard.py:_write_bridge`: add `component_scores.<name>` and `component_confidence.<name>`. Bridge fields are additive-only — never rename or remove.
+4. **Wire it in the service**: call it from `services/sentiment_svc/compute.py` and carry its score + confidence into the published payload. (Older revisions said to edit `_build_composite_panel` in the Tk app - that app is not in this repo.)
+5. **Extend the bridge payload** in `services/sentiment_svc/compute.build_and_write_bridge`: add `component_scores.<name>` and `component_confidence.<name>`. Bridge fields are additive-only - never rename or remove, `regime_filter` reads them.
 
 ## Bridge contract
 
-- **Schema version**: `BRIDGE_SCHEMA_VERSION` constant in `bridge.py`. Bump on any non-additive change.
-- **Canonical path**: `D:\AI_Based_Analysis\shared\sentiment_bridge.json`. All new consumers MUST read from here.
-- **Legacy path**: `SentimentDashboard\sentiment_bridge.json`. Written with `"deprecated_path": true` for back-compat. Will be removed in a future release.
-- **Write triggers**: every call to `calculate_all_scores` (manual recalc + autofetch + initial load) and on app close.
-- **Known consumers**:
-  - `D:\Schwab Test Project\OptionsScanner\regime_filter.py` — reads `composite_score`, `regime`, and (v4.1+) `trend_regime.state`.
-  - Blueprint Analyzer (`src/blueprint_scorer.py`) — reads composite_score.
-- **Fields are additive-only**. If you need to remove or rename, bump the major schema version and coordinate with consumers.
+- **Schema version**: `BRIDGE_SCHEMA_VERSION` constant in `bridge.py`. Bump on any
+  non-additive change.
+- **Path**: `repo_paths.BRIDGE_PATH` = `shared/sentiment_bridge.json`. **One path,
+  imported, never written literally.** Older revisions of this file named
+  `D:\AI_Based_Analysis\shared\sentiment_bridge.json` as "canonical" and a
+  `SentimentDashboard\sentiment_bridge.json` "legacy mirror"; neither exists here.
+- **Writers**: `services/sentiment_svc` dual-writes it each composite refresh
+  (`compute.build_and_write_bridge`), and `options-scanner/gex_collector.py`
+  spawns `publish_bridge.py` when the manual fallback collector runs.
+- **Reader**: `options-scanner/regime_filter.py` (`composite_score`, `regime`,
+  `trend_regime.state`). It reads the FILE, not Redis - which makes this a
+  Tier-2 -> Tier-2 file side channel, the documented last shim of the 3-tier
+  migration.
+- **Fields are additive-only.** Removing or renaming one is a coordinated change
+  with `regime_filter`.
+
 
 ## Daily flow
 
@@ -246,14 +271,18 @@ The only non-Schwab read is `Sectors_Industries_ETFs.xlsx` — a static referenc
 ## Testing
 
 ```powershell
-py -3.11 -m pytest SentimentDashboard/tests -q
+cd sentiment-dashboard; ..\.venv\Scripts\python -m pytest tests -q
 ```
 
-Required green before merging any change under `scoring/` or `bridge.py`.
+**Baseline: 507 passed, 1 skipped, 0 failed** (2026-08-21). The skip is
+`test_apply_sector_perf.py`, a module-level `importorskip("sentiment_dashboard")`
+- it exercises the Tk entrypoint this fork never copied, so it can only pass in
+the source repo. Required green before merging any change under `scoring/` or
+`bridge.py`.
 
-Current count: 105 tests covering all 6 component modules, composite math (blend, velocity, divergence), bridge round-trip, and the notifier (formatters, throttling, and credential resolution).
+There is no Tk UI here to verify manually; check webgui behaviour on
+`/sentiment` instead.
 
-The tkinter UI is not unit-tested. Verify UI changes manually by launching `Launch_Dashboard.bat`.
 
 ## Invariants
 
@@ -269,69 +298,27 @@ The tkinter UI is not unit-tested. Verify UI changes manually by launching `Laun
 
 | File | Role |
 |---|---|
-| `sentiment_dashboard.py` | UI shell. ~3500 lines after extraction. |
-| `bridge.py` | Bridge writer + schema version + paths. |
-| `live_composite.py` | **Live intraday composite** (`compute_live` — current quotes → the pure scoring modules, the live analog of `history_backfill._score_one_day`) + `signal_band` + `build_bridge_payload` + `publish_bridge`. Shared by the webgui page and the GEX collector. No tk. **The per-sector Put/Call chain fan-out (11 NTM `/chains`) is TTL-cached 15 min** (`PCR_TTL_SEC` / `_PCR_CACHE` / `reset_pcr_cache`; 2026-07-18) — the 120 s composite refresh was refetching all 11 every cycle (~3,300 Schwab calls/day) for a slow-moving cumulative ratio; an empty off-hours result is NOT cached, so the first post-open refresh still picks up real volume. |
-| `publish_bridge.py` | Standalone headless entry: `compute_live` → write `shared/sentiment_bridge.json`. Run by the GEX collector each cycle in a subprocess (sentiment dir on `sys.path[0]` so `import scoring` resolves to this package, not options-scanner's `scoring.py`). |
+| `bridge.py` | Bridge writer + schema version + path (via `repo_paths`). |
+| `live_composite.py` | **Live intraday composite** (`compute_live`) + `signal_band` + `build_bridge_payload` + `publish_bridge`. Shared by the sentiment service and the GEX collector. No tk. The per-sector Put/Call chain fan-out (11 NTM `/chains`) is TTL-cached 15 min (`PCR_TTL_SEC` / `reset_pcr_cache`); an empty off-hours result is NOT cached, so the first post-open refresh still picks up real volume. |
+| `publish_bridge.py` | Standalone headless entry: `compute_live` -> write the bridge. Run by the GEX collector each cycle in a subprocess (this dir on `sys.path[0]` so `import scoring` resolves HERE, not to options-scanner's `scoring.py`). |
+| `history_backfill.py` | Historical daily scoring (`_score_one_day`). |
+| `sectors_ref.py` | `Sectors_Industries_ETFs.xlsx` loader - sector/industry ETF map, S&P cap weights, the Stocks tab. mtime-cached. |
+| `sector_rotation_assessment.py` | RRG-style rotation assessment (`compute_rs_momentum`, `RISK_THRESHOLD`). See the root `CLAUDE.md` - there are TWO RRG implementations with different momentum definitions. |
+| `validate_market_state.py` | OFFLINE five-state validation study. Run manually; never imported by a service. |
 | `scoring/` | All scoring logic. Pure functions. |
 | `tests/` | pytest suite. Includes `fixtures/bridge_v39_snapshot.json` regression oracle. |
-| `Launch_Dashboard.bat` | Windows launcher. |
-| `README.md` | User-facing docs. Updated when behavior changes. |
-| `sentiment_data.json` | Current session snapshot (auto-created). |
-| `sentiment_history.json` | 90-day history (auto-created, auto-appended). |
-| `sentiment_bridge.json` | Legacy bridge file (deprecated, still written). |
-| `credit_cache.json` | 60-day HYG/IEI cache for Credit Pulse. |
+| `README.md` | User-facing docs. |
 
-## Where things live in `sentiment_dashboard.py` (rough map)
 
-These line numbers shift; use Grep for current locations.
+## Notifications
 
-- Constants + WEIGHTS imports: top of file.
-- UI build: `_build_*` methods (`_build_main_panels`, `_build_composite_panel`, `_build_history_tab`, etc.).
-- Scoring entrypoint: `calculate_all_scores` — calls each scoring module, blends, autosaves.
-- Autosave plumbing: `_autosave`, `_append_today_to_history`.
-- Fetch scheduling: `_init_schwab`, `_start_auto_refresh`, `_auto_fetch_tick`, `_maybe_initial_fetch`.
-- Bridge: `_write_bridge` → delegates to `bridge.write_bridge`.
+**`notifier.py` was deleted 2026-08-20** (with ~20 of its tests). Notifications
+are now `shared/notify/` - Telegram, Discord, Fi-SMS - configured from
+`shared/notifications.json` and gated by the environment's `allow_notifications`
+flag, which `shared/notify/channels.py:load_config` enforces by zeroing every
+`enabled` key in dev. The sentiment state-transition alert lives in
+`services/sentiment_svc/state_alert.py`.
 
-## Notifications (v4.0)
-
-Optional Discord + Telegram notifier in `notifier.py`. Lazy-initialized
-at the end of `SentimentDashboardApp.__init__` and called from
-`_autosave()` after `_write_bridge()` with the same payload dict.
-
-**Config (constructor kwargs > env > local file > shared file)**
-- Env: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`.
-- Local file: `config_notifications.py` anywhere on `sys.path` (e.g.
-  next to `sentiment_dashboard.py`). Use `config_notifications.example.py`
-  as the template.
-- Shared file: when no local one is found, the notifier loads
-  `D:\Schwab Test Project\OptionsScanner\config_notifications.py`
-  by absolute path — both apps share one credential file. Override the
-  location via `SentimentNotifier.SHARED_CONFIG_PATH` if OptionsScanner
-  lives elsewhere.
-- If no creds are configured anywhere, the notifier logs an info line
-  at startup and every `post_sentiment` call is a no-op. **That is the
-  opt-out.**
-
-**Throttling** (in `notifier.py`, module-level constants
-`THROTTLE_SCORE_DELTA = 0.3`, `THROTTLE_MIN_INTERVAL_SEC = 3600`):
-- First autosave per session: always posts.
-- After that, posts only if any of:
-  - composite score moved by ≥ 0.3, OR
-  - `bias` string changed, OR
-  - `velocity.regime_break` just went True, OR
-  - `divergence_flag` just went non-empty, OR
-  - ≥ 60 minutes elapsed since the last post.
-
-**Payload shape** is identical to the bridge dict
-(`_build_bridge_payload()`); the notifier reads `composite_score`,
-`bias`, `position_size_modifier`, `aggregate_confidence`,
-`component_scores.{vix_complex,put_call,breadth,rotation,sector_perf,credit_pulse}`,
-`component_confidence.*`, `velocity.regime_break`, `divergence_flag`.
-
-**Network**: only `requests` (auto-installed if missing, mirroring the
-OptionsScanner pattern). No `discord.py`, no `python-telegram-bot`.
-HTTP sends run on daemon threads so they never block the Tk loop.
 
 ## Common pitfalls
 

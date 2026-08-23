@@ -24,6 +24,7 @@ import page_help as _page_help
 from pages import busy as _busy
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
+from shared import symbols as _symbols
 from . import flow_panels as _fx
 from .inputs import select_all_on_focus
 from .theme import BTN, BTN_PRIMARY, FLOW_KEYFRAMES_CSS, MUTED
@@ -1266,9 +1267,14 @@ def flow_summary_text(rows):
 # Intraday net premium (cumulative call $ − cumulative put $) for any combination
 # of ~28 symbols, from ``cache:options:net_premium``.
 #
-# The group/colour tables below DUPLICATE ``services/options_svc/net_premium.GROUPS``
-# on purpose: Tier 1 may import only nicegui / bus_client / shared.contracts, never
-# ``services.*``. Tests pin the membership so the two copies cannot drift silently.
+# The group table comes from ``config/symbols.toml`` via ``shared.symbols`` - the
+# SAME file ``services/options_svc/net_premium.GROUPS`` reads. It used to be a
+# deliberate byte-copy of that constant, because Tier 1 may not import
+# ``services.*`` and tests were the only thing keeping the two in step. Reading a
+# config FILE is not a services import, and ``theme.toml`` is the standing
+# precedent for Tier 1 doing exactly this, so the duplication is gone rather than
+# merely policed. The COLOUR table below stays here: it is presentation, and
+# nothing outside this page needs it.
 #
 # Everything here is TOTAL over the payload. ``NetPremiumSnapshot.series`` is typed
 # as a bare ``dict``, so ``{'SPY': 'notalist'}``, ``{'SPY': [[1]]}``, ``{'SPY': [None]}``
@@ -1281,16 +1287,7 @@ def flow_summary_text(rows):
 # Shape note: JSON round-trip is not identity. Tuples arrive as LISTS and dict keys
 # as STRINGS, so the page always sees ``list`` rows keyed by ``str`` — which is what
 # makes positional access viable at all. Nothing below may assume tuples.
-NET_PREM_GROUPS = (
-    {"key": "indices", "label": "Indices & Broad",
-     "symbols": ("$SPX", "$NDX", "BIG10", "SPY", "QQQ", "IWM", "DIA")},
-    {"key": "sectors", "label": "SPDR Sectors",
-     "symbols": ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
-                 "XLP", "XLRE", "XLU", "XLV", "XLY")},
-    {"key": "megacaps", "label": "Mega-caps",
-     "symbols": ("NVDA", "AVGO", "AAPL", "META", "MSFT",
-                 "TSLA", "PLTR", "AMZN", "GOOGL", "AMD")},
-)
+NET_PREM_GROUPS = _symbols.netprem_groups()
 
 # One fixed colour per symbol — keyed by SYMBOL, never by position in the
 # selection, so a line keeps its colour whether you plot 2 names or 20 (a
@@ -1895,7 +1892,8 @@ def render():
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
-    # (cache:options:gamma is ~14 MB) can't pile up across 2 s poll ticks.
+    # (cache:options:gamma, ~0.4 MB since the 2026-08-20 history split, plus the
+    # visible view's ~1.1 MB history key) can't pile up across 2 s poll ticks.
     # state["netprem"] is the (separate, ~500 KB) cache:options:net_premium payload
     # with its own in-flight guard — it is symbol-independent, so it is NOT part of
     # the gamma snapshot and must not share the big snapshot's ``fetching`` latch.
@@ -2223,7 +2221,7 @@ def render():
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
         _reflow_charts()
 
-    # Inline wait for the chart region: a symbol change refetches a ~14 MB
+    # Inline wait for the chart region: a symbol change refetches a ~1.5 MB
     # snapshot, and until it lands the panels still show the PREVIOUS symbol,
     # which is worse than showing nothing — it looks like live data for a
     # symbol you are no longer on.
@@ -2552,7 +2550,8 @@ def render():
         # Repaint only when the bus cache version changes (the service bumps it
         # when a requested gamma_refresh finishes). The version compare is done by
         # the caller off the cheap :ver probe; the actual snapshot payload
-        # (cache:options:gamma is ~14 MB — a big blocking GET + JSON parse) is read
+        # (cache:options:gamma is ~0.4 MB since the history split — still a blocking
+        # GET + JSON parse, and the visible view's history follows it) is read
         # OFF the event loop via run.io_bound so it never blocks other clients.
         if version == seen["gamma"] or state.get("fetching"):
             # Unchanged, or a prior big read is still in flight — don't stack them.

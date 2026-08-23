@@ -37,6 +37,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
 import page_help as _page_help
 from nicegui import run, ui
@@ -45,10 +46,6 @@ from pages.ui_guard import guard, guard_async
 
 from . import detail, handoff
 from .theme import BTN_3D
-
-
-def _round(value, ndigits=2):
-    return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
 def iv_rank_value(value):

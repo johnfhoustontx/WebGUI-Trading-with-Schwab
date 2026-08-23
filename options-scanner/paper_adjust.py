@@ -373,9 +373,11 @@ def _partition_roll_legs(candidate, right):
       * roll_down / roll_down_out (4 legs): [BUY old_short, SELL old_long,
         SELL new_short, BUY new_long] — first SELL/BUY-back pair closes the OLD
         spread, the trailing SELL/BUY pair reopens the new one.
-      * roll_out (2 legs): [SELL new_short, BUY new_long] — reopen only; the old
-        spread has no explicit close-leg prices (closed at the entry-credit
-        scratch fallback).
+      * roll_out (2 legs): [SELL new_short, BUY new_long] — reopen only. LEGACY:
+        boards built before 2026-08-20 emitted this shape (the old spread closed
+        at the entry-credit scratch fallback); every builder now emits the 4-leg
+        shape, and this branch survives only so a cached pre-fix board still
+        applies rather than crashing.
     """
     legs = [lg for lg in _legs(candidate)
             if (lg.get("right") or "").upper() == right.upper()]

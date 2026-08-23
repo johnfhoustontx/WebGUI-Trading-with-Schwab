@@ -15,13 +15,31 @@ prior analysis paints instantly on revisit. The pure display builders
 (``verdict_text_class``/``momentum_rows``/``breakdown_rows``/``alignment_rows``)
 are unit-tested.
 
-Fundamentals are not wired (MVP): the Investor verdict uses technicals/RS only
-and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
+Fundamentals ARE wired: ``trade_svc.compute`` fetches them from the proxy's
+``/instruments?projection=fundamental`` endpoint, so the Investor verdict scores
+real P/E, PEG, revenue/EPS growth, ROE and margin trend whenever at least three
+of its four core fields arrive. It degrades to "Insufficient fundamental data →
+HOLD" only on a failed/thin fetch — a note flags that case.
+
+⚠ Four Investor/Position inputs are structurally absent from that payload — verified
+live 2026-08-22, where ``fundamental`` returned 56 keys and none of these:
+
+* ``epsSurprises`` and ``guidanceDirection`` — both inputs to ``earnings_traj``, so
+  that component scores a permanent 0 and **15 of the composite's 100 points are
+  unreachable for every symbol**. This is the only one that moves the score, and it
+  moves it down; the Overview renders the row as "not published by Schwab" rather
+  than as a measured zero.
+* ``freeCashFlow`` — scores nothing either way, but its HOLD gate cannot fire.
+* ``nextEarningsDate`` — which is why the Position earnings gate never fires.
+
+Do not read a low Investor score as a verdict on the company without checking which
+components could contribute.
 """
 import time
 
 import bus_client
 from pages import busy as _busy
+from pages import fmt
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -33,6 +51,7 @@ from .options.theme import (
     CARD,
     EYEBROW,
     LABEL,
+    MUTED,
     PAGE,
     QUASAR_INTERNAL_CSS,
 )
@@ -310,6 +329,118 @@ def swing_model_meta(sm):
             "oos_ic": f"{oos:+.4f}" if isinstance(oos, (int, float)) else "—"}
 
 
+_REGIME_WORDS = {"trend": "a trending tape", "chop": "a rangebound tape",
+                 "highvol": "an elevated-volatility tape"}
+
+
+def swing_regime_note(sm):
+    """Which weight set scored this symbol, in words. '' when unknown.
+
+    Worth its own line because the two cases are different claims: regime
+    weights say "this is what has worked in tapes like today's", the pooled fit
+    says "this is what has worked on average". A reader looking at the
+    contributions table cannot otherwise account for the weights it shows.
+
+    ``"all"`` is an artifact key, not a market condition — printed raw it would
+    read as a regime called "all"."""
+    key = (sm or {}).get("regime_key")
+    if not key:
+        return ""
+    if key == "all":
+        return "scored on the pooled fit (no regime-specific weights)"
+    return f"scored on weights fitted for {_REGIME_WORDS.get(key, key)}"
+
+
+# A third of the model's weight on one directional exposure is material by any
+# reading; below that the number is worth stating but does not change how you
+# would hold the position.
+_EXPOSURE_CAVEAT_AT = 0.30
+
+
+def swing_exposure_note(sm):
+    """How much of this score is a bet on volatility. '' when unknown.
+
+    Phase 4 measured the composite at cross-sectional IC **+0.16 when the
+    market's forward 20 days were up and -0.11 when they were down**, with the
+    whole asymmetry carried by the volatility factors. So a high share here
+    means the verdict is substantially a directional bet on the market — which
+    reverses in exactly the drawdown a 1-8 week position cannot sit through.
+
+    A `risk_share` of None means the factor registry was unreachable, NOT that
+    the model has no exposure; printing "0%" there would be a confident wrong
+    answer, so the line is omitted instead."""
+    share = (sm or {}).get("risk_share")
+    if not isinstance(share, (int, float)) or isinstance(share, bool):
+        return ""
+    pct = f"{share:.0%}"
+    base = f"{pct} of this score's weight sits on volatility factors"
+    if share < _EXPOSURE_CAVEAT_AT:
+        return base + "."
+    return (base + " — historically that ranks high-beta names top, and it "
+            "reverses when the market falls.")
+
+
+def live_ic_line(lic):
+    """Is the live edge holding? '' when there is no monitor block.
+
+    ⚠ The live number is a POOLED rank correlation over every labelled reading.
+    The artifact's OOS IC is the mean of per-DATE cross-sectional correlations.
+    They are different statistics, and printing them adjacent without saying so
+    would manufacture a decay finding out of a units mismatch — so the line says
+    it every time."""
+    lic = lic or {}
+    if not lic.get("status"):
+        return ""
+    if lic["status"] != "ok":
+        n, need = lic.get("n_labelled", 0), lic.get("min_required", 20)
+        return (f"Live tracking: {n} labelled reading(s) so far, {need} needed "
+                "before an edge can be measured at all.")
+    ic = fmt.num(lic.get("pooled_ic"))
+    n = lic.get("n_labelled", 0)
+    if ic is None:
+        return f"Live tracking: {n} readings, not yet correlatable."
+    return (f"Live pooled IC {ic:+.3f} over {n} readings — a pooled statistic, "
+            "not the per-date one the model's OOS IC reports.")
+
+
+def live_ic_split_line(lic):
+    """The up-market / down-market split, and the beta-neutral reading.
+
+    This is the line that matters most: Phase 4 showed the model's measured edge
+    IS beta, so a single live IC would read healthy through any rising market."""
+    lic = lic or {}
+    if lic.get("status") != "ok":
+        return ""
+    up, down = fmt.num(lic.get("ic_market_up")), fmt.num(lic.get("ic_market_down"))
+    ba = fmt.num(lic.get("pooled_ic_beta_adj"))
+    bits = []
+    if up is not None or down is not None:
+        bits.append("market up " + (f"{up:+.2f}" if up is not None else "—")
+                    + " · down " + (f"{down:+.2f}" if down is not None else "—"))
+    if ba is not None:
+        bits.append(f"beta-neutral {ba:+.3f}")
+    return " · ".join(bits)
+
+
+def live_ic_decay_note(lic):
+    """A decay claim, ONLY from the statistic that is actually comparable.
+
+    '' the rest of the time — which is most of the time, because live readings
+    are too sparse for a per-date cross-sectional IC. Absent is the honest state
+    here, not a gap to fill with the pooled number."""
+    lic = lic or {}
+    if not lic.get("comparable_to_artifact"):
+        return ""
+    decay = fmt.num(lic.get("decay"))
+    live = fmt.num(lic.get("by_date_ic"))
+    if decay is None or live is None:
+        return ""
+    word = "decay" if decay < 0 else "improvement"
+    return (f"Live per-date IC {live:+.4f} vs the fit's "
+            f"{fmt.num(lic.get('artifact_oos_ic')) or 0:+.4f} — "
+            f"{word} of {abs(decay):.4f}.")
+
+
 def model_staleness(version, today=None, threshold_days=60):
     """A staleness nudge for the swing-model artifact, or '' when fresh/unparseable.
 
@@ -328,6 +459,221 @@ def model_staleness(version, today=None, threshold_days=60):
         return ""
     return (f"⚠ Model is {age} days old (fit {fit.isoformat()}) — re-run "
             f"fit_swing_model.py to refresh the weights.")
+
+
+# ── two-sided reads (Phase 2) ───────────────────────────────────────────────
+# Pure builders for the three additive blocks `trade_svc` now publishes. Each
+# no-ops on an absent block, so a payload cached before they existed renders
+# exactly as it did.
+
+# Data-driven colour maps to a FIXED finite set of static Tailwind classes —
+# never a runtime-built arbitrary value (the Tailwind-first house rule).
+CLEARANCE_TEXT_CLASSES = (_BUY_TEXT, _HOLD_TEXT, _SELL_TEXT)
+_CLEARANCE_TEXT = {"cleared": _BUY_TEXT,
+                   "relative_only": _HOLD_TEXT,
+                   "blocked": _SELL_TEXT}
+
+
+def clearance_text_class(state):
+    """Tailwind text-[…] class for a clearance state.
+
+    An unknown state falls back to the amber HOLD colour rather than a green
+    that would read as permission."""
+    return _CLEARANCE_TEXT.get(state, _HOLD_TEXT)
+
+
+def clearance_rows(clearance):
+    """One row per SIDE — always both, each with its reasons.
+
+    Rendering only the permitted side would make the reader infer the absence;
+    a blocked side WITH its reasons is a research finding."""
+    if not clearance:
+        return []
+    rows = []
+    for key, label in (("long", "Long"), ("short", "Short")):
+        side = (clearance or {}).get(key)
+        if not side:
+            continue
+        state = side.get("state") or ""
+        rows.append({
+            "side": label,
+            "state": state.replace("_", " "),
+            "state_key": state,
+            "text_class": clearance_text_class(state),
+            "reasons": list(side.get("reasons") or []),
+        })
+    return rows
+
+
+def _wall_value(level, pct):
+    if level is None:
+        return None
+    return "%g" % level if pct is None else "%g (%+.1f%%)" % (level, pct)
+
+
+def dealer_rows(context):
+    """Label/value rows for the dealer-positioning block, or [].
+
+    A withheld wall is simply ABSENT rather than rendered as ``None`` — a
+    printed None reads as a level. Off-hours (index OI zero) and stale
+    payloads both land there by design."""
+    if not context or not context.get("collected"):
+        return []
+    rows = []
+    if context.get("regime_words"):
+        rows.append({"label": "Gamma regime", "value": context["regime_words"]})
+    if context.get("setup_words"):
+        rows.append({"label": "Setup", "value": context["setup_words"]})
+    if context.get("flip") is not None:
+        rows.append({"label": "Flip", "value": "%g" % context["flip"]})
+    cw = _wall_value(context.get("call_wall"), context.get("call_wall_pct"))
+    if cw:
+        rows.append({"label": "Call wall", "value": cw})
+    pw = _wall_value(context.get("put_wall"), context.get("put_wall_pct"))
+    if pw:
+        rows.append({"label": "Put wall", "value": pw})
+    if context.get("atm_iv") is not None:
+        iv = "%.1f%%" % context["atm_iv"]
+        state = context.get("iv_state")
+        if state and state != "na":
+            iv += " (%s)" % state
+        rows.append({"label": "ATM IV", "value": iv})
+    return rows
+
+
+def _ordinal(n):
+    if n is None:
+        return ""
+    if 10 <= (n % 100) <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def peer_line(peers, symbol):
+    """"3rd of 5 in Technology" — where this name sits among its peers.
+
+    This answers the question single-stock research should end on: is this the
+    best vehicle for the thesis? Empty when there is no peer set."""
+    if not peers or not peers.get("ranked"):
+        return ""
+    rank, n, sector = peers.get("rank"), peers.get("n"), peers.get("sector")
+    if not rank or not n or not sector:
+        return ""
+    return f"{_ordinal(rank)} of {n} in {sector}"
+
+
+def peer_chips(peers, symbol):
+    """The named peers — strongest, immediate neighbours, weakest — as chips."""
+    if not peers or not peers.get("ranked"):
+        return []
+    sym = (symbol or "").strip().upper()
+    out, seen = [], set()
+    for key, role in (("strongest", "strongest"), ("above", "just above"),
+                      ("below", "just below"), ("weakest", "weakest")):
+        p = peers.get(key)
+        if not p or p.get("symbol") in seen or p.get("symbol") == sym:
+            continue
+        seen.add(p["symbol"])
+        out.append({"symbol": p["symbol"], "role": role,
+                    "score": p.get("score")})
+    return out
+
+
+def plan_headline(plan):
+    """``(text, kind)`` for the Trade Plan header.
+
+    ``kind`` is one of debit / credit / relative / none — a finite set that maps
+    to a fixed palette class, never a runtime-built one."""
+    if not plan:
+        return ("", "none")
+    action = (plan.get("action") or "none").lower()
+    side = (plan.get("side") or "").lower()
+    structure = plan.get("structure") or ""
+    if action == "none":
+        return ("No trade — the tape does not support this side today", "none")
+    if action == "relative":
+        return (f"{side.title()} · {structure}", "relative")
+    return (f"{side.title()} · {structure} ({action})", action)
+
+
+def plan_rows(plan):
+    """Label/value rows for the Trade Plan block, or [].
+
+    A field the analysis could not produce is OMITTED rather than rendered as
+    None — a printed None in a stop row reads as a level."""
+    if not plan or (plan.get("action") or "none") == "none":
+        return []
+    rows = []
+    structure = plan.get("structure")
+    if structure:
+        tenor = ""
+        if plan.get("dte_min") and plan.get("dte_max"):
+            tenor = f" · {plan['dte_min']}–{plan['dte_max']} DTE"
+        rows.append({"label": "Structure", "value": f"{structure}{tenor}",
+                     "note": plan.get("rationale") or ""})
+    if plan.get("short_strike_guidance"):
+        rows.append({"label": "Short strike",
+                     "value": plan["short_strike_guidance"], "note": ""})
+    if plan.get("entry_zone"):
+        rows.append({"label": "Entry zone", "value": plan["entry_zone"],
+                     "note": ""})
+    if plan.get("stop") is not None:
+        rows.append({"label": "Stop", "value": f"{plan['stop']:g}",
+                     "note": plan.get("stop_note") or ""})
+    if plan.get("target"):
+        rows.append({"label": "Target", "value": plan["target"], "note": ""})
+    days = plan.get("time_stop_trading_days")
+    if days:
+        date = plan.get("time_stop_date") or ""
+        rows.append({"label": "Time stop",
+                     "value": f"{days} trading days — {date}".strip(" —"),
+                     "note": plan.get("time_stop_note") or ""})
+    if plan.get("events"):
+        rows.append({"label": "Events", "value": plan["events"], "note": ""})
+    return rows
+
+
+_PLAN_TEXT = {"debit": _BUY_TEXT, "credit": _BUY_TEXT,
+              "relative": _HOLD_TEXT, "none": _HOLD_TEXT}
+
+
+def plan_text_class(kind):
+    """Tailwind class for a plan kind (amber default — never green by
+    accident)."""
+    return _PLAN_TEXT.get(kind, _HOLD_TEXT)
+
+
+def earnings_note(coverage, days):
+    """One line about the next earnings report — including when we don't know.
+
+    The vendor's coverage is measurably patchy (MSFT/AMZN/META absent while
+    AAPL and GOOGL are listed on the same reporting cycle), so an unlisted
+    symbol must SAY the date is unknown. Letting the gate's silence read as an
+    all-clear is the fail-open case: a hold walks into a report under the
+    appearance of protection."""
+    if coverage == "upcoming" and days is not None:
+        return f"Next earnings in {days} days"
+    if coverage == "none_scheduled":
+        return "Next earnings: none scheduled in the calendar"
+    if coverage == "not_listed":
+        return ("Next earnings: unknown — this symbol is not in the earnings "
+                "calendar, so the earnings gate cannot speak for it")
+    return ""
+
+
+def gate_rows(verdict):
+    """Long-side gates — "why isn't this a BUY?"."""
+    return list((verdict or {}).get("gates_triggered") or [])
+
+
+def short_gate_rows(verdict):
+    """Short-side gates, kept SEPARATE from the long ones.
+
+    A short-only constraint in the shared list prints "cannot be SELL" on every
+    strong BUY, which is noise rather than a reason."""
+    return list((verdict or {}).get("short_gates") or [])
 
 
 _BREAKDOWN_COLS = [
@@ -433,15 +779,20 @@ def render():
                      else "").classes("opacity-70")
         for r in verdict.get("top_reasons", []):
             ui.label(f"• {humanize_reason(r)}").classes("text-sm opacity-80")
-        for g in verdict.get("gates_triggered", []):
+        for g in gate_rows(verdict):
             ui.label(f"⛔ {g}").classes("text-xs text-[#c62828]")
+        # Short-side gates render SEPARATELY and in the warning colour, not the
+        # red of a long-side block: they explain why this is not a SHORT, which
+        # on a strong BUY is context rather than a constraint on what you asked.
+        for g in short_gate_rows(verdict):
+            ui.label(f"↓ {g}").classes("text-xs text-[#f9a825] opacity-80")
         rows = breakdown_rows(verdict)
         if rows:
             with ui.expansion("Factor breakdown").classes("w-full"):
                 ui.table(columns=_BREAKDOWN_COLS, rows=rows,
                          row_key="factor").classes("w-full").props("dense")
 
-    def _fill_verdict_card(card, title, verdict, sm=None):
+    def _fill_verdict_card(card, title, verdict, sm=None, lic=None):
         # Refill a PERSISTENT verdict card in place (clear+rebuild its contents).
         # When a validated swing model is present (Position card only) it is the ONLY
         # Position voice: a ranked TILT + a "Why — validated factors" evidence expander,
@@ -467,9 +818,26 @@ def render():
                     if meta:
                         ui.label(f"model {meta['version']} · OOS IC {meta['oos_ic']}") \
                             .classes("text-xs opacity-60")
+                        rnote = swing_regime_note(sm)
+                        if rnote:
+                            ui.label(rnote).classes("text-xs opacity-60")
+                        xnote = swing_exposure_note(sm)
+                        if xnote:
+                            ui.label(xnote).classes(
+                                "text-xs text-amber-9"
+                                if (sm.get("risk_share") or 0) >= _EXPOSURE_CAVEAT_AT
+                                else "text-xs opacity-60")
                         stale = model_staleness(meta["version"])
                         if stale:
                             ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
+                        # Phase 6: what the model has actually done since it
+                        # shipped, next to what it claimed it would do.
+                        for text, cls in ((live_ic_line(lic), f"text-xs {MUTED}"),
+                                          (live_ic_split_line(lic), f"text-xs {MUTED}"),
+                                          (live_ic_decay_note(lic),
+                                           "text-xs text-amber-9")):
+                            if text:
+                                ui.label(text).classes(cls)
                 with ui.expansion("Legacy heuristic").classes("w-full"):
                     _legacy_verdict_body(verdict)
             else:
@@ -518,6 +886,87 @@ def render():
             if strength.get("in_confirmed_downtrend"):
                 ui.label("Confirmed downtrend").classes("text-xs text-[#c62828]")
 
+    def _clearance_strip(clearance):
+        """What the tape permits, per side — both always shown.
+
+        A blocked side with its reasons is a research finding; showing only the
+        permitted one would make the reader infer the absence."""
+        rows = clearance_rows(clearance)
+        if not rows:
+            return
+        with ui.card().classes(f"{CARD} w-full"):
+            summary = ((clearance or {}).get("market") or {}).get("summary")
+            with ui.row().classes("w-full items-center justify-between gap-3 "
+                                  "flex-wrap"):
+                ui.label("Market state").classes(EYEBROW)
+                if summary:
+                    ui.label(summary).classes("text-xs opacity-80")
+            for r in rows:
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.label(r["side"]).classes(f"{EYEBROW} w-12 shrink-0")
+                    ui.label(r["state"]).classes(
+                        f"text-xs text-weight-medium w-28 shrink-0 {r['text_class']}")
+                    ui.label(" · ".join(r["reasons"])).classes(
+                        "text-xs opacity-70")
+
+    def _dealer_card(context):
+        """Dealer positioning + IV. Context only — it reaches no verdict."""
+        rows = dealer_rows(context)
+        if not rows:
+            note = (context or {}).get("summary")
+            if note and not (context or {}).get("collected"):
+                with ui.card().classes(f"{CARD} flex-1 min-w-[200px]"):
+                    ui.label("Dealer positioning").classes(EYEBROW)
+                    ui.label(note).classes("text-xs opacity-60")
+            return
+        with ui.card().classes(f"{CARD} flex-1 min-w-[240px]"):
+            ui.label("Dealer positioning").classes(EYEBROW)
+            for r in rows:
+                with ui.row().classes("items-center gap-2 w-full justify-between"):
+                    ui.label(r["label"]).classes("text-xs opacity-70")
+                    ui.label(r["value"]).classes("text-xs text-weight-medium")
+
+    def _peers_strip(peers, symbol):
+        """Where this name sits among its sector peers — the question
+        single-stock research should end on: is this the best vehicle?"""
+        line = peer_line(peers, symbol)
+        chips = peer_chips(peers, symbol)
+        if not line and not chips:
+            return
+        with ui.row().classes("w-full items-center gap-3 flex-wrap"):
+            if line:
+                ui.label(line).classes(f"{EYEBROW}")
+            for c in chips:
+                with ui.row().classes("items-baseline gap-1 rounded px-2 py-0.5 "
+                                      "bg-[#10162c] border border-[#2a3358]"):
+                    ui.label(c["symbol"]).classes("text-xs text-weight-medium")
+                    ui.label(c["role"]).classes("text-[10px] opacity-60")
+
+    def _plan_card(plan):
+        """The verdict as a falsifiable plan — including the no-trade case,
+        which states what would change it rather than rendering empty."""
+        headline, kind = plan_headline(plan)
+        if not headline:
+            return
+        with ui.card().classes(f"{CARD} w-full"):
+            with ui.row().classes("w-full items-baseline justify-between gap-3"):
+                ui.label("Trade plan").classes(EYEBROW)
+                ui.label(headline).classes(
+                    f"text-sm text-weight-medium {plan_text_class(kind)}")
+            rows = plan_rows(plan)
+            for r in rows:
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.label(r["label"]).classes(f"{EYEBROW} w-28 shrink-0")
+                    with ui.column().classes("gap-0"):
+                        ui.label(r["value"]).classes("text-xs")
+                        if r["note"]:
+                            ui.label(r["note"]).classes("text-[11px] opacity-60")
+            if not rows:
+                for reason in (plan or {}).get("what_would_change_it", []):
+                    ui.label(f"• {reason}").classes("text-xs opacity-70")
+            ui.label("Not advice — a way of holding the read, and what would "
+                     "prove it wrong.").classes("text-[11px] opacity-50")
+
     def _render_results():
         res = state["result"]
         results_top.clear()
@@ -535,12 +984,15 @@ def render():
                     ui.icon("warning")
                     ui.label("; ".join(res["errors"]))
             _header(res)
+            _clearance_strip(res.get("direction_clearance"))
+            _plan_card(res.get("trade_plan"))
         has_verdict = bool(res.get("position_verdict") or res.get("investor_verdict"))
         verdict_row.set_visibility(has_verdict)
         if has_verdict:
             # Two EQUAL-width cards in one row: Position · Investor.
             _fill_verdict_card(position_card, "Position · 1–8 weeks",
-                               res.get("position_verdict"), res.get("swing_model"))
+                               res.get("position_verdict"), res.get("swing_model"),
+                               lic=res.get("live_ic"))
             _fill_verdict_card(investor_card, "Investor · months+",
                                res.get("investor_verdict"))
             with results_bottom:
@@ -550,6 +1002,13 @@ def render():
                     _sector_card(res.get("sector"))
                     if res.get("fundamentals_available"):
                         _fundamentals_card(res.get("fundamentals"))
+                    _dealer_card(res.get("dealer_context"))
+                _peers_strip(res.get("peers"), res.get("symbol"))
+                note = earnings_note(
+                    res.get("earnings_coverage"),
+                    (res.get("fundamentals") or {}).get("days_to_earnings"))
+                if note:
+                    ui.label(note).classes("text-xs opacity-60")
                 if not res.get("fundamentals_available"):
                     ui.label("Fundamentals unavailable for this symbol — the "
                              "Investor verdict degrades to HOLD on insufficient "

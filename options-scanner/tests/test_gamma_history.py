@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gamma_tool import GammaEngine, extrapolate_linear
+from gamma_tool import GammaEngine
 
 
 class TestSnapshotSummary:
@@ -238,78 +238,3 @@ class TestFlipIgnoresDeadStrikes:
         }
         summary = GammaEngine.snapshot_summary(data)
         assert summary["flip"] is None
-
-
-class TestExtrapolateLinear:
-    def test_flat_series_stays_flat(self):
-        ts = [0.0, 60.0, 120.0, 180.0]
-        ys = [100.0, 100.0, 100.0, 100.0]
-        projected = extrapolate_linear(ts, ys, 300.0)
-        assert abs(projected - 100.0) < 1e-6
-
-    def test_linear_trend_projects_correctly(self):
-        ts = [0.0, 60.0, 120.0]
-        ys = [100.0, 110.0, 120.0]
-        projected = extrapolate_linear(ts, ys, 180.0)
-        assert abs(projected - 130.0) < 1e-6
-
-    def test_too_few_points_returns_last_value(self):
-        assert extrapolate_linear([], [], 100.0) is None
-        assert extrapolate_linear([0.0], [42.0], 100.0) == 42.0
-
-    def test_degenerate_time_axis_returns_last_value(self):
-        ts = [0.0, 0.0, 0.0]
-        ys = [100.0, 110.0, 120.0]
-        projected = extrapolate_linear(ts, ys, 100.0)
-        assert projected == 120.0
-
-
-from gamma_tool import eod_narrative
-
-
-def _summary(spot, flip, top_pos, top_neg, net_total):
-    return {"spot": spot, "flip": flip, "top_pos_strike": top_pos,
-            "top_neg_strike": top_neg, "net_total": net_total}
-
-
-class TestEodNarrative:
-    def test_empty_history_returns_insufficient(self):
-        result = eod_narrative([])
-        assert "INSUFFICIENT" in result["scenario"].upper() or "NEUTRAL" in result["scenario"].upper()
-
-    def test_flat_flip_and_net_returns_pin(self):
-        hist = [_summary(6880, 6885, 6900, 6870, 1e9) for _ in range(5)]
-        result = eod_narrative(hist)
-        assert "PIN" in result["scenario"].upper()
-
-    def test_flip_rising_returns_upward(self):
-        hist = [_summary(6880, 6880 + i * 3, 6900, 6870, 1e9) for i in range(5)]
-        result = eod_narrative(hist)
-        assert "UP" in result["scenario"].upper() or "HIGHER" in result["scenario"].upper()
-
-    def test_net_flipping_negative_returns_volatility(self):
-        hist = [_summary(6880, 6885, 6900, 6870, 1e9 - i * 5e8) for i in range(5)]
-        # Last net is -1e9 (negative)
-        result = eod_narrative(hist)
-        assert "VOL" in result["scenario"].upper() or "BREAKOUT" in result["scenario"].upper()
-
-    def test_charm_downward_omits_target_strike(self):
-        # Flip migrating down; top_neg_strike on opposite side of spot (charm).
-        hist = [_summary(6983, 7000 - i * 8, 6950, 7025, 1e9) for i in range(5)]
-        result = eod_narrative(hist, is_charm=True)
-        assert "DOWNWARD" in result["scenario"].upper()
-        assert "7025" not in result["scenario"]
-        # Magnitude still reported.
-        assert "pts" in result["scenario"].lower()
-
-    def test_charm_upward_omits_target_strike(self):
-        hist = [_summary(6983, 6960 + i * 8, 6950, 7025, 1e9) for i in range(5)]
-        result = eod_narrative(hist, is_charm=True)
-        assert "UP" in result["scenario"].upper() or "DRIFT" in result["scenario"].upper()
-        assert "6950" not in result["scenario"]
-
-    def test_gex_downward_keeps_target_strike(self):
-        # Default (is_charm=False) still includes the target strike.
-        hist = [_summary(6983, 7000 - i * 8, 7025, 6950, 1e9) for i in range(5)]
-        result = eod_narrative(hist)
-        assert "6950" in result["scenario"]

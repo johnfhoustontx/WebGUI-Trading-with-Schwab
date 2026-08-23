@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
+from shared import scanner_config as _scfg  # noqa: E402
 
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
@@ -284,10 +285,10 @@ MOMENTUM_VETO = 0.6
 INDEX_SYMBOLS = frozenset({"$SPX", "SPY", "QQQ"})
 # Net-GEX regime: ratio = net/gross in [-1,1]. <= this => strongly-negative
 # (trend-prone) -> skip index premium. See 2026-06-12 design doc.
-GEX_STRONG_NEG = -0.30
+GEX_STRONG_NEG = _scfg.scores()["gex_strong_neg"]
 # Elevated score floor required for index premium spreads in a mildly-negative
 # GEX regime (above the 58 capture floor).
-NEG_GEX_MIN_SCORE = 62
+NEG_GEX_MIN_SCORE = _scfg.scores()["neg_gex_min"]
 
 # Required credit/width margin ABOVE the delta-implied breakeven (|short_delta|).
 # 0.00 = enforce the zero-margin breakeven (cr/w >= |delta|, i.e. non-negative
@@ -472,31 +473,17 @@ MIN_ABS_SPREAD = 0.02
 # 2026-06-11 quality retune: raised 0-DTE 25->35, SWING 20->30 to demand richer
 # premium before selling. Binds only on low-IV days (most days have IV Rank well
 # above these floors). See docs/plans/2026-06-11-quality-first-selection-design.md.
-MIN_IV_RANK = {
-    "0-DTE": 35,
-    "SWING": 30,
-}
+MIN_IV_RANK = _scfg.min_iv_rank()
 
 # --- Adaptive minimum credit % by VIX regime ---
-MIN_CREDIT_PCT = {
-    "0-DTE": {
-        "LOW":      0.08,   # IV is cheap — accept thinner credits, POP is high
-        "NORMAL":   0.12,
-        "ELEVATED": 0.15,
-        "HIGH":     0.20,   # Rich premium — demand more credit
-    },
-    "SWING": 0.12,          # 1-15 DTE: raised from 0.10 — shorter DTE leaves less recovery time
-}
+MIN_CREDIT_PCT = _scfg.min_credit_pct()
 
 # --- Directional pass parameters ---
-DIRECTIONAL_DELTA_RANGE = {
-    # short delta band — closer-to-spot than premium ranges
-    "PCS": (-0.55, -0.30),
-    "CCS": (0.30, 0.55),
-}
-DIRECTIONAL_MAX_PER_SYMBOL_BUCKET = 2
-DIRECTIONAL_MAX_RISK_PCT = 0.02   # 2% account risk per directional trade
-DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
+DIRECTIONAL_DELTA_RANGE = _scfg.directional_delta_range()
+_DIR = _scfg.directional()
+DIRECTIONAL_MAX_PER_SYMBOL_BUCKET = _DIR["max_per_symbol_bucket"]
+DIRECTIONAL_MAX_RISK_PCT = _DIR["max_risk_pct"]     # account risk per directional trade
+DIRECTIONAL_MIN_CREDIT_PCT = _DIR["min_credit_pct"]  # higher floor — these strikes pay more
 
 # --- Single-leg candidate parameters (LONG/SHORT calls & puts) ---
 # Deliberately NOT named DIRECTIONAL_*: the block above tunes a directionally-
@@ -507,7 +494,7 @@ DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
 # model -- options-scanner's own `scoring.py` is a premium-seller's model that
 # cannot score a long call (it rewards positive theta and penalizes long vega).
 # 4 structures x 2 windows (0-DTE + swing) = 8.
-SINGLE_LEG_MAX_PER_SYMBOL = 8
+SINGLE_LEG_MAX_PER_SYMBOL = _scfg.single_leg()["max_per_symbol"]
 
 # Emission cut for single-leg directional candidates: a candidate must reach
 # SINGLE_LEG_MIN_SCORE on strategy_scoring's Fit+Quality composite AND not carry
@@ -520,8 +507,8 @@ SINGLE_LEG_MAX_PER_SYMBOL = 8
 # most +6, so a Weak candidate tops out at 45 and can never clear 50. Both are
 # kept because they express DIFFERENT intents ("no low-scoring trades" vs "no
 # gate-failing trades") and either constant can move independently.
-SINGLE_LEG_MIN_SCORE = 50.0
-SINGLE_LEG_EXCLUDED_GRADES = ("Weak",)
+SINGLE_LEG_MIN_SCORE = _scfg.single_leg()["min_score"]
+SINGLE_LEG_EXCLUDED_GRADES = tuple(_scfg.single_leg()["excluded_grades"])
 
 
 def get_min_credit_pct(regime, trade_type):
@@ -1071,7 +1058,14 @@ def build_iron_condors(spreads, max_n=3):
                     "spread_bid": round(p.get("spread_bid", 0) + c.get("spread_bid", 0), 2),
                     "spread_ask": round(p.get("spread_ask", 0) + c.get("spread_ask", 0), 2),
                     "rr_pct": round(cr / ml * 100, 1),
-                    "pop_pct": round(min(p["pop_pct"], c["pop_pct"]), 1),
+                    # An IC loses if EITHER short breaches, and the two breaches
+                    # are DISJOINT (price cannot finish below the put short AND
+                    # above the call short), so the two-sided probability is
+                    # P(put ok) + P(call ok) - 1 -- floored at 0. This was
+                    # min(...) until 2026-08-20, which reports the BETTER leg:
+                    # two 20-delta shorts read 80% against a true ~60%, inflating
+                    # calc_expected_pnl's EV and the scoring PoP factor.
+                    "pop_pct": round(max(0.0, p["pop_pct"] + c["pop_pct"] - 100.0), 1),
                     "short_delta": round(p["short_delta"] + c["short_delta"], 4),
                     "net_theta": round(p["net_theta"] + c["net_theta"], 3),
                     "breakeven": f"{p['breakeven']}/{c['breakeven']}",
@@ -1158,6 +1152,27 @@ def _entry_credit(short, lo, width):
     return fill_model.realistic_vertical_fill(sb, sa, lb, la, "SELL_TO_OPEN")
 
 
+def size_contracts(n_target, n_risk):
+    """Contracts to trade: the profit-target size, capped by the account risk
+    limit, floored at CONTRACT_ROUND_TO only where the cap leaves room.
+
+    ⚠ The floor must never RAISE the size past ``n_risk``. Until 2026-08-20 this
+    was a bare ``if contracts < CONTRACT_ROUND_TO: contracts = CONTRACT_ROUND_TO``
+    applied AFTER the cap, so a binding cap was silently overridden: on a $10k
+    account at 5% the cap is $500 = 1 contract of a $4-max-loss spread, and
+    forcing 5 risks $2,000 — 4x the stated limit. (``calc_contracts_for_target``
+    already applies the same minimum, so the repeat only ever overrode risk.)
+
+    ``n_risk <= 0`` means the cap allows nothing; the caller drops the candidate.
+    """
+    if n_risk <= 0:
+        return 0
+    contracts = min(n_target, n_risk)
+    if contracts < CONTRACT_ROUND_TO:
+        contracts = min(CONTRACT_ROUND_TO, n_risk)
+    return contracts
+
+
 def select_best_width(short, opts, side, strike_increment, trade_type,
                       min_cr_pct, account_size=100000, max_risk_pct=0.05):
     """Select the width that maximizes expected total dollar P&L.
@@ -1222,9 +1237,9 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         # Contract sizing: hit profit target on a win, bounded by risk cap.
         n_target = calc_contracts_for_target(credit)
         n_risk = calculate_position_size(ml, account_size, max_risk_pct)
-        contracts = min(n_target, n_risk) if n_risk > 0 else n_target
-        if contracts < CONTRACT_ROUND_TO:
-            contracts = CONTRACT_ROUND_TO
+        contracts = size_contracts(n_target, n_risk)
+        if contracts <= 0:
+            continue   # the risk cap leaves no room for this width
 
         # Expected total $P&L at the sized position.
         e_pnl = (credit * pop - ml * (1 - pop)) * contracts * 100

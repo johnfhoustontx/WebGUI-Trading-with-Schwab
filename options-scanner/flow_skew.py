@@ -86,13 +86,22 @@ def _iter_contracts(strike_map):
 
 
 def _as_float(val):
-    """Coerce to float, or None if missing/non-numeric."""
+    """Coerce to float, or None if missing/non-numeric/non-finite.
+
+    NaN/inf read as missing: a NaN delta used to seed ``best_dist = nan`` in
+    ``_pick_nearest_delta``, after which every ``dist < nan`` comparison is False
+    and the NaN contract's IV won permanently (fixed 2026-08-20, the same guard
+    the sentiment scorers' ``_num`` gained earlier today).
+    """
     if val is None:
         return None
     try:
-        return float(val)
+        v = float(val)
     except (TypeError, ValueError):
         return None
+    if v != v or v in (float("inf"), float("-inf")):
+        return None
+    return v
 
 
 def _pick_nearest_delta(strike_map, target):
@@ -106,7 +115,10 @@ def _pick_nearest_delta(strike_map, target):
     for c in _iter_contracts(strike_map):
         delta = _as_float(c.get("delta"))
         iv = _as_float(c.get("volatility"))
-        if delta is None or iv is None:
+        # An IV must be POSITIVE to be usable: Schwab publishes volatility=-999
+        # as an "uncomputable" sentinel, and 0 is no reading either. Without this
+        # a sentinel contract sitting nearest the target delta won the pick.
+        if delta is None or iv is None or iv <= 0:
             continue
         dist = abs(delta - target)
         if best_dist is None or dist < best_dist:

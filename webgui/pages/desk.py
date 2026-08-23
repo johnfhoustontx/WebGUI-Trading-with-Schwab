@@ -22,11 +22,22 @@ The arithmetic is module-level pure functions over plain dicts, so the whole
 screen is testable without a browser; ``render()`` at the foot is widgets and
 wiring only.
 """
+import json
+import logging
 import math
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+# ``alerts`` for its ONE market-hours predicate. The Settings card promises the
+# spoken alerts obey "the existing market-hours gate above", so this page must
+# read the SAME ``alert_market_hours_only`` setting through the SAME function
+# the scanner chime does — a second, voice-only copy of the idea is how two
+# gates end up disagreeing about when the market is open.
+import alerts as _alerts
+import app_settings
 import bus_client
+import voice as _voice
 from nicegui import run, ui
 
 from pages import bullbear as _bb
@@ -37,6 +48,7 @@ from pages import console_regime as _CR
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
+from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import header as _hdr
@@ -74,24 +86,6 @@ DESK_SYMBOLS = ("$SPX", "SPY", "$NDX", "QQQ")
 # that needs it. Every session BOUND still comes from ``market_calendar``; this
 # is only the zone a naive datetime is read in, which is that module's rule too.
 _CT = ZoneInfo("America/Chicago")
-
-
-def _finite(v):
-    """``float(v)`` when it is a real, finite number — otherwise ``None``.
-
-    This is the guard the app's documented NaN trap demands. ``min(hi, nan)``
-    returns ``hi`` and ``max(lo, nan)`` returns ``lo`` (every comparison against
-    NaN is False, so the running value survives), so an unguarded non-finite
-    value does not degrade to "no reading" — it PINS a bound and renders as a
-    confident extreme. Filter at the call site; never trust a clamp to notice.
-    """
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 # ── structure map ────────────────────────────────────────────────────────────
@@ -253,21 +247,24 @@ _ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
 # worth writing down. Flow's neighbour is Positions, whose length is DATA (open
 # trades), so a constant can only match it by accident. This panel's neighbour is
 # Dealer Positioning, which is exactly ``len(DESK_SYMBOLS)`` rows — deterministic
-# — so the two genuinely can be squared off. Measured live at 2381px:
+# — so the two genuinely can be squared off. Re-measured live at 1920px, on the
+# reference-scale type ladder (the panel chrome is common to both, so only the
+# head and the rows are counted):
 #
-#   dealer   87px chrome + 27px column head + 4 x 71.4px rows = 399.6px
-#   board    87px chrome + 27px column head + N x 50px rows
+#   dealer   24px column head + 4 x 62.5px rows = 274px of content
+#   board    24px column head + N x 44px rows
 #
-#   N = 5 -> 364px (36px SHORT of the dealer, and no extra rows at all)
-#   N = 6 -> 414px (14px OVER)
+#   N = 5 -> 244px (30px SHORT of the dealer, and no extra rows at all)
+#   N = 6 -> 288px (14px OVER)
 #
 # `items-stretch` makes the two cards the same height either way, so this only
 # decides which panel carries the void — and six puts the smaller void in the
 # better place twice over. It is a third of a row, less than the panel's own
-# 16px bottom padding; and the dealer panel grows by a ~24px "walls withheld"
+# 16px bottom padding; and the dealer panel grows by a ~19px "walls withheld"
 # line whenever the GEX feed goes stale, which is most of the day, so six sits
-# BETWEEN the dealer's two heights (14px over the live one, 9px under the stale
-# one) rather than above both.
+# BETWEEN the dealer's two heights rather than above both. ⚠ The 14px survived
+# the whole ladder being rescaled 0.8x — both panels shrank together — but that
+# is luck, not invariance: re-measure it, do not re-derive it.
 BOARD_ROWS_N = 6
 
 
@@ -495,6 +492,71 @@ def position_flag(rescue_state, rescue_tagged=True):
     return POSITION_FLAGS.get(rescue_state, _DEFAULT_FLAG)
 
 
+# ── arrival + change detection ───────────────────────────────────────────────
+# Pure, so the whole "what is new on this screen" question is testable without
+# a browser. The page-state sets these read against are seeded SILENTLY on the
+# first paint — without that, navigating to the Desk announces the entire day's
+# alert list and lights every row, which is exactly the trap main.py's watcher
+# already documents for the scanner chime.
+def new_ids(rows, seen, key="id"):
+    """Ids in ``rows`` not already in ``seen``, IN ROW ORDER.
+
+    Row order is load-bearing: the flow feed is newest-first and the newest
+    arrival is the one that gets spoken, so the caller reads ``[0]``. A row with
+    no id is skipped rather than given a positional key — a synthetic key would
+    change identity on the next repaint and re-announce forever.
+    """
+    out = []
+    for r in rows or ():
+        rid = r.get(key) if isinstance(r, dict) else None
+        if rid is None or rid in seen or rid in out:
+            continue
+        out.append(rid)
+    return out
+
+
+def id_set(rows, key="id"):
+    """The ids present in ``rows`` — what ``seen`` is replaced with each paint.
+
+    REPLACED, not unioned: the flow list is day-scoped and rolling, and a
+    position that closes and reopens really is a new position. An ever-growing
+    set would also never shrink on a page left open for days.
+    """
+    ids = (r.get(key) for r in rows or () if isinstance(r, dict))
+    return {rid for rid in ids if rid is not None}
+
+
+def flag_map(rows):
+    """``{position_id: flag}`` — the previous-state map ``flag_changes`` reads.
+
+    The id field is hardcoded where ``new_ids``/``id_set`` take a ``key=``, and
+    that is the intended asymmetry: those two run over the flow feed as well,
+    which keys on ``id``, while a FLAG is a positions-only idea and there is no
+    second caller for this pair to generalise for.
+    """
+    return {r["position_id"]: r.get("flag") for r in rows or ()
+            if isinstance(r, dict) and r.get("position_id") is not None}
+
+
+def flag_changes(rows, prev):
+    """Position ids whose ``flag`` moved since ``prev``.
+
+    A FIRST SIGHTING is deliberately not a change — it is an arrival, and
+    ``new_ids`` already glows it. Counting it in both places would give a new
+    row two overlapping glows.
+    """
+    out = []
+    for r in rows or ():
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("position_id")
+        if rid is None or rid not in prev:
+            continue
+        if r.get("flag") != prev[rid]:
+            out.append(rid)
+    return out
+
+
 def _is_open(p):
     return (p.get("status") or "OPEN").upper() not in _CLOSED_STATUSES
 
@@ -609,10 +671,10 @@ def positions_summary(rows):
 #
 # The layout does not argue against it either, and that was arithmetic rather
 # than optimism: eleven chips on their ``min-w-[124px]`` floor plus ten 8px gaps
-# is 1444px, where the panel grid immediately below already demands 2104px of
-# content width before it will go two-up. Below that breakpoint the page is one
-# column and the strip wraps to two rows, which is the same graceful floor every
-# panel here takes.
+# is 1444px, and the strip is a ``flex-wrap`` row — so below that it simply
+# wraps to two rows and keeps every sector. It is the one region on this page
+# that reflows rather than clips, which is why it needs no width budget of its
+# own (contrast the panel grid: see ``PANEL_BUDGET_PX``).
 BULLBEAR_ROUTE = "/sentiment/bullbear"
 
 # Its own message, NOT ``WAITING_OPTIONS``: these scores come from a NIGHTLY
@@ -1052,11 +1114,11 @@ def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
     """
     flow = "break-words leading-[1.3]" if wrap else "whitespace-nowrap"
     bg = "" if fill is None else f"bg-[{hexv}]/[{fill}]"
-    return (f"{pad} py-[2px] rounded-[2px] text-[11px] tracking-[{track}] {flow} "
+    return (f"{pad} py-[2px] rounded-[2px] text-[9px] tracking-[{track}] {flow} "
             f"border border-[{hexv}] {bg} text-[{hexv}] {weight}").strip()
 
 
-# The book and flag chips live in the 52px and 44px tracks, so they take the
+# The book and flag chips live in the panel's two tightest tracks, so they take the
 # compact tracking and padding; they also wrap, because "AT RISK" is two words
 # and "RESCUE" is one long one.
 _TIGHT = {"track": ".1em", "pad": "px-[5px]", "wrap": True}
@@ -1081,7 +1143,7 @@ CHIP_LABEL = _chip(_C["label"], **_TIGHT)
 # in a 96px track — but explicitly NOT its ``wrap``: a board row is one line by
 # construction now, and a chip that folded onto a second line would be the only
 # thing on the panel breaking that. It fits without folding — "VOL CRUSH", the
-# longest of the four tags, measures 80px against the track's 96px floor.
+# longest of the four tags, measures ~69px against the track's 77px floor.
 CHIP_SETUP = _chip(_C["accent"], track=".1em", pad="px-[5px]")
 
 # regime_word → chip. Only the two real readings are coloured; the em-dash
@@ -1206,6 +1268,508 @@ CALL_HEX = "#2dd4a7"                   # the call wall, and its marker on the ma
 PUT_HEX = "#fb5f7c"                    # the put wall, and its marker
 FLIP_HEX = "#f5b841"                   # the gamma flip tick
 SPOT_HEX = "#22d3ee"                   # the spot dot
+
+# ── the 10-second neon glow ──────────────────────────────────────────────────
+# ⚠ THE NON-OBVIOUS PART. ``_paint_positions`` calls ``pos_body.clear()`` and
+# rebuilds every row, and it runs whenever the paper account re-prices — which
+# is constant during market hours. A REBUILT ELEMENT RESTARTS ITS CSS ANIMATION
+# FROM ZERO, so the naive implementation glows forever: every repaint resets the
+# decay and the row never goes dark.
+#
+# The fix is a whole-second NEGATIVE ``animation-delay``, which starts an
+# animation partway through. The glow's START TIME lives in page state keyed by
+# row id; the row wears ``desk-neon-N`` where N is how many seconds have already
+# elapsed, so a rebuilt element RESUMES rather than restarts.
+#
+# Ten fixed classes rather than a computed ``[animation-delay:-3.2s]``: the
+# styling standard's finite-set rule. The cost is one second of granularity on
+# a ten-second decay, which is invisible.
+GLOW_SEC = 10.0
+GLOW_STEPS = 10
+
+# The two things worth glowing about, and nothing else. NEW is the cyan the
+# structure map already uses for spot; FLAG is the amber it uses for the flip —
+# both already mean "look here" on this page.
+GLOW_NEW = "new"
+GLOW_FLAG = "flag"
+GLOW_KINDS = (GLOW_NEW, GLOW_FLAG)
+
+
+def glow_step(started, now, span=GLOW_SEC, steps=GLOW_STEPS):
+    """Which ``desk-neon-N`` class a glow started at ``started`` wears at ``now``.
+
+    ``None`` once it has expired, or if it has not begun. Both are the same
+    answer to the caller — do not glow — and collapsing them here keeps the
+    check at the call site to one branch.
+    """
+    if started is None:
+        return None
+    try:
+        elapsed = float(now) - float(started)
+    except (TypeError, ValueError):
+        return None
+    # ⚠ INVERTED ON PURPOSE — do not "clean this up" to
+    # ``if elapsed < 0 or elapsed >= span``. Every comparison against a NaN is
+    # False, so that spelling is False on BOTH halves and waves a NaN through to
+    # ``int(nan)``, which raises ValueError — on the paint path, inside
+    # ``prune_glows``, which runs this over every entry in the map: one wedged
+    # timestamp takes down a whole panel repaint rather than one row. Written
+    # this way round the NaN makes the ``not`` True and lands on the safe answer.
+    # (Same family as the ``min(hi, nan) == hi`` trap CLAUDE.md documents, where
+    # a missing reading rendered as a maximum one. NaN does not degrade; it has
+    # to be caught by name.)
+    if not (0 <= elapsed < span):
+        return None
+    # The ``min`` is DEFENSIVE, not observed. For it to fire, the float division
+    # at the very top of the range would have to round up to exactly ``steps``,
+    # and it does not — checked over the 500 consecutive doubles below each of
+    # eight spans plus 2M random samples, never once. It stays because it is
+    # free, because a loosened range check above would make it load-bearing, and
+    # because ``desk-neon-10`` has no rule behind it, so the failure it guards
+    # is silent (the animation restarts instead of finishing). The floor is
+    # applied LAST so a nonsense ``steps`` cannot yield ``desk-neon--1``.
+    return max(0, min(steps - 1, int(elapsed / span * steps)))
+
+
+def glow_classes(entry, now):
+    """The class string for a glowing row, or ``''``.
+
+    ``entry`` is the ``(kind, started)`` tuple held in page state, or ``None``.
+    """
+    if not entry:
+        return ""
+    kind, started = entry
+    # A kind outside the finite set is a WIRING bug, and an unguarded one is
+    # invisible: ``desk-neon-<typo>`` leaves ``--neon`` unset, and a
+    # ``box-shadow`` naming an undefined custom property is invalid at
+    # computed-value time, so BOTH shadow declarations drop. The row gets the
+    # background flash and no glow at all. Paint nothing instead.
+    if kind not in GLOW_KINDS:
+        return ""
+    step = glow_step(started, now)
+    if step is None:
+        return ""
+    return f"desk-neon desk-neon-{kind} desk-neon-{step}"
+
+
+def prune_glows(glow, now):
+    """Drop expired entries. Mutates and returns ``glow``.
+
+    Called once per paint. Without it the map grows for the life of the tab —
+    small, but it is also the only thing that makes the map's size mean
+    something when debugging.
+    """
+    for rid in [k for k, v in glow.items() if glow_step(v[1], now) is None]:
+        glow.pop(rid, None)
+    return glow
+
+
+# ── arrival detection ────────────────────────────────────────────────────────
+# The whole decision layer of the feature — what lights up, what gets said, and
+# how many arrivals one sentence stands for — as module-level functions taking
+# their state explicitly, rather than as closures inside ``render()``. That is
+# the only reason any of it is testable: a closure is reachable from a browser
+# and from nowhere else, and every rule below is one a plain dict can exercise.
+# ``render()`` keeps the parts that genuinely need a page: reading the cache and
+# painting.
+#
+# ``now`` is passed IN rather than read here, so ONE ``time.monotonic()`` can
+# serve both folds, ``prune_glows`` and every ``glow_classes`` call in a single
+# paint. Two clocks in one paint can prune a glow and then be asked to draw it.
+
+
+def arrival_state():
+    """The arrival-tracking half of the page state.
+
+    A builder rather than a dict literal in ``render`` so the tests start from
+    the state the page actually starts from. ``first`` is the entire mechanism
+    behind the silent, dark first paint — navigating to the Desk must not
+    announce the day's alert backlog or light every row — and a hand-rolled copy
+    in a test could not catch it being dropped.
+
+    ``seen_flow``/``seen_pos`` are REPLACED each paint (see ``id_set``);
+    ``glow`` maps a row id to its ``(kind, started_monotonic)``; ``speak`` is
+    the queue ``_paint`` fills and the poll drains.
+    """
+    return {"seen_flow": set(), "seen_pos": set(), "pos_flags": {},
+            "glow": {}, "first": True, "speak": []}
+
+
+def _utterance(row, phrase, extra):
+    """``phrase(row, extra)``, or None when the row carries no ticker.
+
+    ``voice.flow_phrase({})`` is "Flow alert." — a squawk that tells the reader
+    something happened and then refuses to say what, which is worse than
+    silence. ``spell`` is the right test rather than a truthiness check on the
+    raw field, because it is exactly what decides whether a ticker survives into
+    the sentence: a symbol of pure punctuation spells to "".
+    """
+    if not isinstance(row, dict) or not _voice.spell(row.get("symbol")):
+        return None
+    return phrase(row, extra=extra)
+
+
+def fold_flow_arrivals(state, rows, now):
+    """Fold new flow alerts into the glow map; return the utterance, or None.
+
+    Runs over the FULL alert list, not the nine rows the panel draws. A burst of
+    ten would otherwise push arrivals off the bottom unseen, and they would
+    announce themselves later, when the list shortened.
+
+    ONE sentence per paint however many arrived: the newest is named and the
+    rest are counted ("Plus 2 more"). Six sentences queued back to back is a
+    minute of talking over a moving tape.
+    """
+    ids = new_ids(rows, state["seen_flow"])
+    state["seen_flow"] = id_set(rows)
+    if state["first"] or not ids:
+        return None
+    for rid in ids:
+        state["glow"][rid] = (GLOW_NEW, now)
+    newest = next((r for r in rows
+                   if isinstance(r, dict) and r.get("id") == ids[0]), None)
+    return _utterance(newest, _voice.flow_phrase, len(ids) - 1)
+
+
+def fold_position_arrivals(state, rows, now):
+    """The same, across the three books — plus the SILENT flag-change glow.
+
+    A flag moving (OK -> AT RISK -> RESCUE) glows amber but never speaks: a
+    position already in the book changing state is not something that was absent
+    a moment ago, and the panel's own FLAG column already prints the new word.
+    ``setdefault`` is what keeps an arrival cyan — ``flag_changes`` declines a
+    first sighting, and this is the other half of that.
+    """
+    ids = new_ids(rows, state["seen_pos"], key="position_id")
+    moved = flag_changes(rows, state["pos_flags"])
+    state["seen_pos"] = id_set(rows, key="position_id")
+    state["pos_flags"] = flag_map(rows)
+    if state["first"]:
+        return None
+    for rid in ids:
+        state["glow"][rid] = (GLOW_NEW, now)
+    for rid in moved:
+        state["glow"].setdefault(rid, (GLOW_FLAG, now))
+    if not ids:
+        return None
+    # NOT "newest". ``fold_flow_arrivals`` names ``ids[0]`` the newest and is
+    # entitled to: its feed arrives newest-first. ``position_rows`` sorts by
+    # URGENCY, so ``ids[0]`` here is the most urgent of the new arrivals, which
+    # happens to be the better one to name out loud — but the variable must not
+    # assert an ordering the source does not have.
+    most_urgent = next((r for r in rows if isinstance(r, dict)
+                        and r.get("position_id") == ids[0]), None)
+    return _utterance(most_urgent, _voice.position_phrase, len(ids) - 1)
+
+
+# ── the speak gate ───────────────────────────────────────────────────────────
+# ``app_settings``' own default, restated as the fallback for a value that will
+# not parse. Not 1.0: a settings file somebody hand-edited into nonsense should
+# land on the volume they were last offered, never on the loudest one.
+DEFAULT_VOICE_VOLUME = 0.8
+
+
+def should_speak(settings, now):
+    """Whether a queued phrase may be spoken at ``now`` (a tz-aware datetime).
+
+    Deliberately the same shape as ``alerts.should_alert`` and going through the
+    same ``in_market_hours``: the Settings card tells the user the spoken alerts
+    "use the existing market-hours gate above", so there is ONE gate and one
+    setting, not a voice-only second copy that can drift out of step with the
+    chime's.
+    """
+    s = settings or {}
+    if not s.get("voice_enabled"):
+        return False
+    if s.get("alert_market_hours_only") and not _alerts.in_market_hours(now):
+        return False
+    return True
+
+
+def speak_volume(settings):
+    """``voice_volume`` clamped to 0..1, falling back rather than raising.
+
+    The clamp is ``main.play_alert``'s, character for character. What differs is
+    the PARSE in front of it, and it has to: this runs on the 2 s poll path
+    inside a timer callback, and ``settings.json`` is hand-editable and never
+    validated on read — a bare ``float("loud")`` there is a traceback the user
+    never sees on a page that then has no audio. ``fmt.num`` is the house
+    coercion and also refuses a NaN, which matters for the documented reason:
+    ``max(0.0, min(1.0, nan))`` is **1.0**, so the trap would answer a missing
+    reading with FULL volume.
+    """
+    v = _finite((settings or {}).get("voice_volume"))
+    if v is None:
+        return DEFAULT_VOICE_VOLUME
+    return max(0.0, min(1.0, v))
+
+
+async def speak_phrases(phrases, settings, synth, now=None):
+    """The whole speak path: gate, synthesize, and return the JS — or ``None``.
+
+    Module-level and taking its synthesizer as an argument, for one reason: a
+    closure inside ``render()`` can only be tested by scraping its SOURCE, and
+    a source scrape cannot see a gate that has been deleted. ``should_speak``
+    and ``speak_volume`` each had thorough unit tests while the lines that CALL
+    them had none — removing ``if not should_speak(...): return`` left the whole
+    suite green, so the market-hours promise the Settings card makes was
+    unguarded. This is the same extraction, and for the same reason, that
+    ``fold_flow_arrivals``/``fold_position_arrivals`` already got.
+
+    ``synth`` is an async ``text -> url or None``; the caller owns the off-loop
+    hop and the per-call timeout budget. Returning the JS rather than running it
+    keeps every ``ui`` call in ``render()``.
+    """
+    if not phrases:
+        return None
+    if not should_speak(settings, datetime.now(_CT) if now is None else now):
+        return None
+    urls = []
+    for text in phrases:
+        url = await synth(text)
+        # ``ensure`` never raises; None is "no clip", and the row has already
+        # glowed, so a dead synthesis endpoint costs the sentence and nothing
+        # else.
+        if url:
+            urls.append(url)
+    if not urls:
+        return None
+    # ``json.dumps`` rather than an f-string join: the URLs are
+    # ``voice.clip_url``'s "/voice/<sha1>.mp3" and could not carry a quote, but
+    # the escaping should not depend on knowing that.
+    return f"window.__deskSpeak({json.dumps(urls)}, {speak_volume(settings)})"
+
+
+# ── the browser side ─────────────────────────────────────────────────────────
+# The Desk speaks through its OWN audio element, not ``main.py``'s shared
+# ``alert-audio``. Sharing one element means whichever source assigns ``src``
+# last wins, so a scanner chime — which fires from the app-wide 2 s watcher on
+# every page, this one included — would cut an announcement off mid-sentence.
+# Two elements cost nothing and cannot collide.
+#
+# A QUEUE rather than a bare play, because a burst can yield several clips and
+# ``play()`` on an element already playing restarts it. ``el.onerror = next`` is
+# the line that is easy to leave out and expensive to omit: with only
+# ``onended``, one 404 — a clip evicted from the cache, a service restarted
+# mid-flight — leaves ``busy`` true forever and the tab never speaks again.
+#
+# A blocked autoplay CLEARS the queue rather than holding it. Audio unlocks on
+# the user's next click, which may be minutes later, and a backlog replayed then
+# would announce a market that has moved on.
+#
+# The event the JS below emits when the browser refuses to play. NiceGUI's
+# ``emitEvent`` is a plain global (nicegui.js is a classic ``<script defer>``),
+# and ``ui.on`` subscribes on the CLIENT's layout — so this is per-tab, not
+# process-wide, and a second Desk build cannot pile up handlers. It is declared
+# ABOVE the script and substituted into it: three untied copies of an event name
+# (here, in the JS, in the test) means renaming the constant leaves ``ui.on``
+# subscribed to a name nothing emits — the unlock button silently dead, with
+# every test green. ``.replace`` rather than an f-string because the script is
+# almost entirely CSS-style braces, every one of which would need doubling.
+VOICE_BLOCKED_EVENT = "desk_voice_blocked"
+
+# ⚠ TWO FAILURE MODES LOOK ALIKE FROM JAVASCRIPT AND MUST NOT BE CONFLATED.
+# Assigning ``el.src`` a clip that 404s runs the HTML "dedicated media source
+# failure steps": the element fires ``error`` AND every pending ``play()``
+# promise rejects with a **NotSupportedError**. A genuine autoplay block instead
+# rejects with **NotAllowedError** and fires no ``error`` at all. Catching every
+# rejection as a block was wrong in three ways at once: the queue was truncated
+# mid-burst, ``busy`` stopped tracking what was actually playing (both handlers
+# ran for the one clip), and — worst — the user was shown "ENABLE SPOKEN ALERTS"
+# for what is really a missing file, a dead end whose button does nothing
+# audible. So the ``catch`` discriminates on the DOMException name, and anything
+# that is not an autoplay block falls through to ``done()`` like any other
+# playback failure.
+#
+# The TOKEN is the other half of that. A 404 delivers BOTH signals for the same
+# attempt, so without it the queue would advance twice on one clip. ``v.token``
+# is stamped when an attempt starts and invalidated by whichever signal arrives
+# first; the loser sees a stale stamp and returns. Do not "simplify" either of
+# these back into a bare ``catch(() => next())``.
+#
+# The Python tests below can only READ this string, so both halves were also
+# verified by EXECUTING it against a fake media element. Measured on the
+# previous version, queue ["bad", "good1", "good2"] with "bad" 404ing: "good2"
+# was never played and one ``desk_voice_blocked`` fired. With this version both
+# good clips play and no event fires. That is the regression the greps are
+# standing in for.
+#
+# KNOWN GAP, accepted: a media element that stalls without ever firing ``ended``
+# or ``error`` leaves ``busy`` true for the life of the tab. The clips are local
+# files served by this same process, which makes it very unlikely, and a
+# ``timeupdate`` watchdog is disproportionate to that.
+DESK_VOICE_JS = """
+window.__deskVoice = window.__deskVoice || {q: [], busy: false, token: 0};
+window.__deskSpeak = function (urls, vol) {
+  const v = window.__deskVoice;
+  const el = document.getElementById('desk-voice');
+  if (!el) return;
+  urls.forEach(u => v.q.push(u));
+  // A mid-burst volume change is IGNORED: every clip after the first plays at
+  // the volume the call that started the burst was given. Deliberate — the
+  // alternative is reaching past this guard to re-set el.volume on a clip
+  // already sounding, and burst integrity is worth more than a slider that
+  // takes effect a few seconds late.
+  if (v.busy) return;
+  const next = () => {
+    if (!v.q.length) { v.busy = false; return; }
+    v.busy = true;
+    const attempt = ++v.token;
+    // Retire THIS attempt, once. See the token note above the script.
+    const done = () => { if (attempt !== v.token) return; v.token++; next(); };
+    el.onended = done;
+    el.onerror = done;
+    el.src = v.q.shift();
+    el.volume = vol;
+    el.play().catch(err => {
+      if (err && err.name === 'NotAllowedError') {
+        v.q.length = 0; v.busy = false; v.token++;
+        emitEvent('__VOICE_BLOCKED_EVENT__', {});
+        return;
+      }
+      done();
+    });
+  };
+  next();
+};
+""".replace("__VOICE_BLOCKED_EVENT__", VOICE_BLOCKED_EVENT)
+
+# The phrase the unlock button speaks. It confirms audibly that the unlock
+# worked, which a silent button could not.
+VOICE_UNLOCK_PHRASE = "Spoken alerts on."
+
+# Once per PROCESS, not once per page build: the clip cache is on disk and
+# shared by every tab, so a second prewarm would re-walk a warm cache for
+# nothing. Only a run that actually prewarms sets the latch — with the feature
+# switched off there is nothing to warm, and turning it on later should still
+# get the benefit, and a run that RAISED warmed nothing either, so the next
+# build is entitled to try again. (Pinned by
+# ``test_a_failed_prewarm_leaves_the_latch_open_for_the_next_build``.)
+_PREWARMED = {"done": False}
+
+# How many symbols the prewarm will warm. UNCAPPED this is the whole watchlist —
+# ~30 rows × the 4 ``voice.FLOW_CAUSES`` = ~120 SERIAL synthesis calls at a
+# measured 0.9-2.4 s each, i.e. 1.8 to 4.8 minutes of continuous network on the
+# first Desk open, repeated whenever the voice changes (it is part of the clip
+# cache key) or the clip directory is cleared. Eight is 32 phrases, ~30-80 s.
+#
+# ⚠ Those numbers HALVED on 2026-08-21 and the cap deliberately did not move:
+# the contract-carrying kinds left the prewarm (their phrase now embeds a strike,
+# so there is nothing warmable to warm), which is a saving to bank rather than
+# spend. The argument for the cap is unchanged, and it is about the ranking.
+#
+# Eight of THESE eight, specifically: ``options_svc`` sorts the matrix rows by
+# HOTNESS, descending, server-side, so the head of the list is the set most
+# likely to actually produce a flow alert and the tail buys close to nothing.
+# Do not raise this without checking that ordering still holds — the cap is only
+# defensible because it is a cap on a ranked list.
+PREWARM_SYMBOLS_MAX = 8
+
+
+def prewarm_symbols(matrix_view, limit=PREWARM_SYMBOLS_MAX):
+    """The symbols to warm the flow-clip cache for, de-duplicated, in order.
+
+    The matrix carries one row per WATCHLIST symbol, which is the same universe
+    the flow alerts fire on — so this is the set of first-synthesis pauses the
+    prewarm can actually remove. Anything that is not a usable symbol string is
+    dropped rather than warmed: the payload is a cache read, and a blank would
+    only synthesize the ticker-less sentence nothing is allowed to speak.
+
+    Capped at ``limit`` — see ``PREWARM_SYMBOLS_MAX`` for why the cap exists and
+    why the truncation is at the CHEAP end of the list rather than arbitrary.
+    The cap lives here, in the pure function, so it is unit-testable.
+    """
+    rows = (matrix_view or {}).get("rows") if isinstance(matrix_view, dict) else None
+    out = []
+    for row in rows or ():
+        sym = row.get("symbol") if isinstance(row, dict) else None
+        if isinstance(sym, str) and sym.strip() and sym not in out:
+            out.append(sym)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _prewarm_clips(seed):
+    """Warm the flow-phrase clip cache in the background. Never raises.
+
+    Wrapped whole, because this runs during the page BUILD: a cold cache, an
+    unreadable data directory or a malformed matrix payload must cost the
+    prewarm and not the Desk. ``voice.prewarm`` is itself fire-and-forget on a
+    daemon thread and swallows its own synthesis failures, so the guard here is
+    for the two lines in front of it.
+
+    The latch is set AFTER the launch, not before, so that the code says what
+    the comment on ``_PREWARMED`` says: a run that raised warmed nothing, and
+    permanently disabling the prewarm for the rest of the process on the
+    strength of one unreadable payload would trade a whole feature for a
+    transient. Page builds are synchronous on the event loop, so there is no
+    second caller to race the window this opens.
+    """
+    if _PREWARMED["done"]:
+        return
+    try:
+        settings = app_settings.load()
+        if not settings.get("voice_enabled"):
+            return          # nothing to warm, and the latch stays open so
+                            # switching it on later still gets the benefit
+        _voice.prewarm(prewarm_symbols(seed.get("options:matrix")),
+                       settings.get("voice_name"))
+        _PREWARMED["done"] = True
+    except Exception:  # noqa: BLE001 — a cold cache must never break the build.
+        logging.getLogger("webgui").warning(
+            "Desk voice prewarm failed", exc_info=True)
+
+
+# The ONE escape hatch this page is already allowed (it injects
+# CONSOLE_KEYFRAMES_CSS beside this). A keyframes animation cannot be a utility
+# class, and ``--neon`` is a plain custom property inside a real stylesheet —
+# NOT a Tailwind arbitrary value, which is where the documented ``var(...)``
+# JIT limitation bites.
+#
+# ⚠ THE BASE RULE USES LONGHANDS, DELIBERATELY. ``animation:`` is a SHORTHAND,
+# so it resets every ``animation-*`` longhand it does not name —
+# ``animation-delay`` back to 0s included. ``.desk-neon`` and ``.desk-neon-3``
+# are both one class, so specificity cannot break that tie and SOURCE ORDER
+# would decide it: with a shorthand the whole resume trick rests on the step
+# rules happening to be concatenated last in the f-string below, and its failure
+# mode is a glow that never expires — indistinguishable from the feature never
+# having been built. Spelled as longhands, ``.desk-neon`` never declares a delay
+# at all, so the step rule wins wherever it sits. Pinned by
+# ``test_the_base_rule_declares_no_delay_for_a_step_rule_to_out_order``.
+#
+# No ``animation-fill-mode: forwards`` either, and that is not an oversight:
+# animation declarations outrank normal author declarations (CSS Cascade
+# §6.6.2), so an element still applying the 100% keyframe
+# (``background-color: transparent``) would beat the row's ``hover:bg-…`` for as
+# long as the class stayed on it — the rest of the session for an alert arriving
+# at 15:59, on a row that is ``cursor-pointer`` and click-navigates. It buys
+# nothing anyway: that 100% keyframe IS the row's author default, so the end
+# state is identical without it.
+_NEON_STEPS_CSS = "\n".join(
+    # ``-0s`` is valid and behaves identically, but it reads as a generator
+    # artifact in a stylesheet a human will open.
+    f".desk-neon-{i} {{ animation-delay: {'0s' if i == 0 else f'-{i}s'}; }}"
+    for i in range(GLOW_STEPS))
+
+DESK_NEON_CSS = f"""
+@keyframes deskNeon {{
+  0%   {{ box-shadow: inset 0 0 0 1px var(--neon), 0 0 18px -2px var(--neon);
+          background-color: rgba(255,255,255,.055); }}
+  65%  {{ box-shadow: inset 0 0 0 1px var(--neon), 0 0 11px -5px var(--neon);
+          background-color: rgba(255,255,255,.022); }}
+  100% {{ box-shadow: inset 0 0 0 0 transparent, 0 0 0 0 transparent;
+          background-color: transparent; }}
+}}
+.desk-neon {{ animation-name: deskNeon;
+              animation-duration: {GLOW_SEC:g}s;
+              animation-timing-function: linear;
+              border-radius: 3px; }}
+.desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
+.desk-neon-{GLOW_FLAG} {{ --neon: {FLIP_HEX}; }}
+{_NEON_STEPS_CSS}
+"""
+
 # The reference design's BODY face. It is a monospace, which is the whole point
 # on a screen that is nine columns of numbers: JetBrains Mono's figures are
 # fixed-width by construction, so a price column stays a column without
@@ -1237,9 +1801,9 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # head tuple and the row painter, or the labels silently slide one cell across
 # and every number on the panel starts reading as the wrong quantity.
 #
-# The widest panel (Positions) is what sets the page's two-column breakpoint —
-# see the panel wrapper in ``render``, which does that arithmetic from the
-# minmax floors below.
+# The widest panel (Positions) is what sets the page's MINIMUM SUPPORTED WIDTH
+# — see the panel wrapper in ``render``, which does that arithmetic from the
+# minmax floors below, and ``PANEL_BUDGET_PX`` for the budget they spend.
 # Every qualifier rides as a SECOND LINE inside its owner's cell rather than
 # taking a column of its own: the day % under spot, the flip distance under the
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
@@ -1247,36 +1811,77 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # ONE grid line — which is what puts the structure map beside its symbol instead
 # of on a tier of its own. `overflow-x-auto` was deliberately not used as the
 # fallback: a dashboard you scroll sideways to read defeats the page's purpose.
-_GAP = "gap-x-[10px] gap-y-0"
+_GAP = "gap-x-[8px] gap-y-0"
+
+# ── the width budget every track floor below is spent against ────────────────
+# The page is read at a 1920px window, and the four panels are a FIXED 2x2 (see
+# the note in ``render``), so each panel gets exactly half of what is left after
+# the app chrome and the grid gutter. That is the number every floor here has to
+# add up under — not a target, an upper bound: a CSS grid will not shrink a
+# track below its ``minmax()`` floor, so a panel whose floors oversubscribe this
+# does not reflow, it CLIPS.
+#
+# ``DESK_CHROME_PX`` is the MEASURED non-panel width — the icon rail's laid-out
+# 68px plus the page's own ``p-4`` and the drawer/page padding around it —
+# confirmed live at 1920 (a 1905px document less a 1741px panel grid). It is
+# written down rather than computed because there is nothing to compute it from.
+#
+# ⚠ The SCROLLBAR is subtracted, and that is not fussiness: this page is taller
+# than any window it is read in, so the classic scrollbar is ALWAYS there, and a
+# budget taken off ``innerWidth`` reads 868px where the panel really gets 860px.
+# Eight pixels is a third of the slack the tightest panel has.
+DESK_WINDOW_PX = 1920
+DESK_CHROME_PX = 164
+DESK_SCROLLBAR_PX = 15            # the classic Windows scrollbar, always shown
+PANEL_GUTTER_PX = 20              # the 2x2's ``gap-5``, between the two columns
+PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
+                   - PANEL_GUTTER_PX) // 2
+
+# What a panel spends before its first track: the card's 1px border both sides,
+# the panel's ``px-4`` both sides (``_panel``) and the row's own ``px-1`` both
+# sides (``_ROW``/``_grid_head``). The gaps are ``len(tracks) - 1`` x 8px on top.
+PANEL_PAD_PX = 2 + 32 + 8
+COL_GAP_PX = 8
+
 # Column widths are the reference design's, but every flexible track is
 # ``minmax(<reference px>, <weight>fr)`` rather than a bare pixel width with ONE
 # 1fr track soaking up the remainder.
 #
-# Why: the reference was authored against ~920px panels. Measured live at a
-# 2381px viewport the panels are ~1100px, and with a single 1fr track the
-# structure map rendered **502px wide** — it needs ~200 — which left a void
-# between the map and the wall columns and made the markers read as scattered
-# rather than as a scale. The map was CORRECT (put 0%, spot 26%, flip 46%,
-# call 100%); it was just stretched across half the panel.
+# Why: with a single 1fr track the structure map rendered **502px wide** — it
+# needs ~200 — which left a void between the map and the wall columns and made
+# the markers read as scattered rather than as a scale. The map was CORRECT (put
+# 0%, spot 26%, flip 46%, call 100%); it was just stretched across half the
+# panel. Weighting every track instead spreads the slack proportionally, so the
+# row fills at any width and no single cell balloons.
 #
-# Weighting every track instead spreads the slack proportionally, so the row
-# fills at any width and no single cell balloons.
+# **The floors are the reference's own pixels, at the reference's own scale.**
+# They were briefly carried at ~1.3x it, to stand under type scaled ~1.35x for a
+# 2381px screen (see the size ladder below) — and that pairing is right, a floor
+# is only meaningful relative to the text standing in it. But the page is read
+# at 1920px, which is the width the reference was authored for in the first
+# place, and at 1920 the scaled-up floors oversubscribed the budget above by
+# 174px on Positions, 100px on the Board and 44px on Dealer Positioning: three
+# of four panels clipped their rows. So the whole scaling was unwound — type and
+# floors together, at 0.8x, which lands both back within a rounding step of the
+# reference. The `fr` WEIGHTS are untouched throughout: the proportions were
+# always right, only the absolute floor moved.
 #
-# The minmax LOWER bounds are the reference's pixels SCALED BY ~1.3, because the
-# type on this page is scaled ~1.35 (see the size ladder below) and a floor is
-# only meaningful relative to the text standing in it. The reference was drawn
-# for ~1920px; measured on the 2381px screen this page is actually read at, its
-# 8-16px range was uncomfortably small. Leaving the floors at the reference's
-# own pixels while enlarging the text would have made every one of them a
-# CLIPPING width rather than a minimum. The `fr` WEIGHTS are untouched — the
-# proportions were right, only the absolute floor moved.
-#
-# The BOARD's first track additionally jumps 44px -> 68px before that scaling:
-# it holds the word SCORE on .2em tracking, which never fit 44px and only fits
-# less well at 12px.
-DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
-               "minmax(170px,2fr)_minmax(94px,1fr)_minmax(94px,1fr)_"
-               f"minmax(154px,1.5fr)] {_GAP} w-full")
+# ⚠ Three floors do NOT follow that 0.8x, and none of the three is bound by the
+# value under it. "GAMMA FLIP" (82px) and the BOARD's SCORE track (52px) are
+# bound by their column LABEL: a label on .2em tracking does not shrink as fast
+# as the data under it, and a label that clips turns a column of numbers into an
+# unlabelled column of numbers. "NET GEX / REGIME" (144px) is bound by neither —
+# it is the dealer REGIME CHIP, which measures 139px ("SHORT GAMMA · RUNS" on
+# .16em tracking) against a label needing 128px and a value needing 47px. That
+# one was found by MEASUREMENT, not arithmetic: at the 130px this track was
+# first given, the fr weights handed it 138.5px and the chip wrapped to two
+# lines by half a pixel — leaving two of the four dealer rows 13px taller than
+# the other two, which reads as a rendering fault rather than as a long word.
+# Chip ``wrap=True`` stays the genuine narrow-case backstop; it should not be
+# what happens at the width the page is read at.
+DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
+               "minmax(136px,2fr)_minmax(75px,1fr)_minmax(75px,1fr)_"
+               f"minmax(144px,1.5fr)] {_GAP} w-full")
 # Eight tracks now, not six: the board rows went flat (one line per symbol), so
 # WHY and SETUP take columns of their own instead of riding under the symbol and
 # the signal. The IV state rides INSIDE the ATM IV cell, on the same line — it
@@ -1286,30 +1891,28 @@ DEALER_GRID = ("grid grid-cols-[98px_minmax(96px,1fr)_minmax(96px,1fr)_"
 # WHY carries 5fr, far more than any other track, and that weight is what stops
 # it ellipsing. The longest rationale this page can build is three clauses —
 # "pinned at wall · below flip · strong downtrend", 46 characters — which is
-# 331px of JetBrains Mono at 12px (0.6em advance). Measured against the 2381px
-# viewport this page is read at, the weights hand WHY ~360px, so the worst case
-# clears with ~28px to spare. Its floor is 250px because the panel's total
-# minimum must stay UNDER the Positions panel's 973px, which is what sets the
-# page's two-column breakpoint: 848px of floors + 70px of gaps + 8px of row
-# padding + 40px of panel padding + 2px of border = 968px. Raising the floor
-# further would move the breakpoint, and the breakpoint belongs to Positions.
+# 276px of JetBrains Mono at 10px (0.6em advance). Its floor is 200px, and the
+# weights hand it well past that at the width the page is read at, so the worst
+# case never reaches the `truncate`.
 #
-# ATM IV's 144px is likewise a WORST CASE, not the common one: it holds the
-# value AND its state word on one line, and "100.0% collapsing" measures 139px.
-# The obvious 132px (which is what the common "57.6% collapsing" wants) fits
-# every symbol on the board today and truncates the first three-digit IV that
-# appears — the kind of column that looks correct until the one row that matters
-# arrives. The 12px it needed came out of SCORE, which is a fixed track holding
-# a two-digit number under a 48px label and had the slack to give.
-BOARD_GRID = ("grid grid-cols-[64px_minmax(96px,1fr)_minmax(250px,5fr)_"
-              "minmax(144px,1.2fr)_minmax(82px,1fr)_minmax(46px,0.8fr)_"
-              f"minmax(70px,1fr)_minmax(96px,1fr)] {_GAP} w-full")
+# ATM IV's 116px is likewise a WORST CASE, not the common one: it holds the
+# value AND its state word on one line, and "100.0% collapsing" measures ~113px
+# at the current ladder. The obvious ~106px (which is what the common "57.6%
+# collapsing" wants) fits every symbol on the board today and truncates the
+# first three-digit IV that appears — the kind of column that looks correct
+# until the one row that matters arrives.
+#
+# SCORE's 52px is the exception noted above: it holds a two-digit number, but
+# its LABEL is five caps on .2em tracking (~40px), and that is what binds it.
+BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
+              "minmax(116px,1.2fr)_minmax(66px,1fr)_minmax(37px,0.8fr)_"
+              f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
 # weight is still on DETAIL because it is the only cell here that can be long —
 # the other three are a clock time, a ticker, and a two-word kind.
-FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
-             f"minmax(158px,2fr)] {_GAP} w-full")
+FLOW_GRID = ("grid grid-cols-[54px_minmax(70px,1fr)_minmax(192px,4fr)_"
+             f"minmax(126px,2fr)] {_GAP} w-full")
 # Ten tracks now, not nine: the position rows went flat like the board's and the
 # flow's, so STRATEGY takes a column of its own instead of riding under the
 # symbol, and the expiry rides WITH the DTE it is the source of rather than
@@ -1317,66 +1920,76 @@ FLOW_GRID = ("grid grid-cols-[68px_minmax(88px,1fr)_minmax(240px,4fr)_"
 # and gets back a whole line of height per row — which is what pays for a third
 # book on the same panel.
 #
-# Every floor is a worst-case string MEASURED in the live DOM against the
-# rendered font, not computed from an assumed advance. That distinction earned
-# its keep: a first pass sized three of these tracks from arithmetic, they came
-# out 7-17px short, and the shortfall was invisible because none of the strings
-# that overflow them was on screen the day it was measured.
+# Every floor is a worst-case string against the RENDERED font, not an assumed
+# advance. That distinction earned its keep: a first pass sized three of these
+# tracks from arithmetic, they came out 7-17px short, and the shortfall was
+# invisible because none of the strings that overflow them was on screen the day
+# it was measured. The widths below are quoted at the current ladder (14px
+# symbol / 13px value / 11px secondary / 10px label / 9px chip); JetBrains Mono
+# advances 0.6em, so a size change moves every one of them proportionally.
 #
-#   BOOK   80px  "CAPTURED" is the widest chip on the page. The chips
+#   BOOK   64px  "CAPTURED" is the widest chip on the page. The chips
 #                ``break-words`` as a backstop, and this floor is what stops
 #                that backstop ever firing: a folded chip would be the one
 #                two-line cell in a panel of one-line rows.
-#   SYMBOL  66px "GOOGL" at 18px bold on .08em tracking — 61.2px measured.
-#   STRAT   52px the head label "STRAT" binds, not the value: the services emit
-#                two- and three-letter codes (PCS / CCS / IC), 25.2px.
-#   EXPIRY 180px ⚠ "2026-08-28 · 0DTE" is 173.4px, NOT the 163.2px of the
-#                "· 10d" shape that happened to be on screen. Every credit
-#                spread reaches 0DTE on its expiration day, and "· 365d" is the
-#                same width — so the common case is 10px narrower than the case
-#                that matters. Sizing on what was visible would have clipped
-#                this column on exactly the morning it was being read hardest.
+#   SYMBOL  53px "GOOGL" at 14px bold on .08em tracking — 47.6px.
+#   STRAT   42px the head label "STRAT" binds, not the value: the services emit
+#                two- and three-letter codes (PCS / CCS / IC).
+#   EXPIRY 144px ⚠ "2026-08-28 · 0DTE" is 132.6px, NOT the shorter "· 10d"
+#                shape that happened to be on screen. Every credit spread
+#                reaches 0DTE on its expiration day, and "· 365d" is the same
+#                width — so the common case is narrower than the case that
+#                matters. Sizing on what was visible would have clipped this
+#                column on exactly the morning it was being read hardest.
 #   ENTRY,
-#   MARK    66px "$12.45" at 17px, 61.2px.
-#   STRIKES 158px "24000.0/23950.0" — an index strike pair, 153px. An equity
-#                pair ("1200.0/1195.0", 132.6px) is not the worst case.
-#   QTY     44px "125" at 17px is 30.6px; the label is the binding half.
-#   UNREAL 118px "-$12,345.00" is 112.2px. The driver's own max_loss_total runs
+#   MARK    53px "$12.45" at 13px, 46.8px.
+#   STRIKES 126px "24000.0/23950.0" — an index strike pair, 117px. An equity
+#                pair ("1200.0/1195.0") is not the worst case.
+#   QTY     36px "125" at 13px is 23.4px; the label is the binding half.
+#   UNREAL  94px "-$12,345.00" is 85.8px. The driver's own max_loss_total runs
 #                to four figures, so five-figure P&L is a real row, not a
 #                hypothetical one.
-#   FLAG    72px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
+#   FLAG    60px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
 #
 # The fr WEIGHTS are set so no track sits ON its floor at the width this page is
-# read at: measured at 2381px every one clears with 3-11px of slack, which is
-# what stops a single character of drift becoming a clipped cell.
-POS_GRID = ("grid grid-cols-[80px_minmax(66px,0.8fr)_minmax(52px,0.6fr)_"
-            "minmax(180px,2fr)_minmax(66px,0.8fr)_minmax(66px,0.8fr)_"
-            "minmax(158px,1.8fr)_minmax(44px,0.5fr)_minmax(118px,1.3fr)_"
-            f"minmax(72px,0.8fr)] {_GAP} w-full")
+# read at, which is what stops a single character of drift becoming a clipped
+# cell. This is the panel that spends the budget hardest: its ten floors plus
+# nine gaps plus ``PANEL_PAD_PX`` are what decide the page's minimum supported
+# window, so a track widened here is a track that has to come from somewhere.
+POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
+            "minmax(144px,2fr)_minmax(53px,0.8fr)_minmax(53px,0.8fr)_"
+            "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
+            f"minmax(60px,0.8fr)] {_GAP} w-full")
 
-# The type ladder. Every size is the reference design's own, multiplied by ~1.35
-# and rounded: the reference was authored against a ~1920px screen, and on the
-# 2381px screen this page is read at, its 8-16px range sat well below
-# comfortable reading size. The RATIOS between the steps are the reference's and
-# must stay that way — the three-tier hierarchy (value / qualifier / label) is
-# what makes a nine-column row scannable, and flattening it by scaling one step
-# and not another would cost more than the small type did. (The ladder's top
-# step, a 13px eyebrow, went with the strip that used it — the strip tiles carry
-# their own, smaller one; see ``_STRIP_EYEBROW``.)
-# Column labels get a step MORE than the ladder gives (11px -> 12px) and a
+# The type ladder. Every size is 0.8x what this page briefly carried, which was
+# the reference design's own multiplied by ~1.35 for a 2381px screen. The page
+# is read at 1920px — the width the reference was authored for — so that scaling
+# was unwound rather than trimmed: squeezing columns until the text ellipsed
+# would have cost the reading, where returning to the scale the design was drawn
+# at costs nothing. The ladder now runs 14 / 13 / 12 / 11 / 10 / 9.
+#
+# The RATIOS between the steps are the reference's and must stay that way — the
+# three-tier hierarchy (value / qualifier / label) is what makes a nine-column
+# row scannable, and flattening it by scaling one step and not another would
+# cost more than the small type does. Scale the whole ladder or none of it.
+# (The ladder's top step, a 13px eyebrow, went with the strip that used it — the
+# strip tiles carry their own; see ``_STRIP_EYEBROW``.)
+#
+# Column labels still get a step MORE than the ladder gives (9px -> 10px) and a
 # brighter hex (see ``REF_HEAD_TXT``): at 8px on .2em tracking they were the one
 # thing on the page that could not be read at all, and a label nobody can read
 # turns nine columns of numbers into nine unlabelled columns of numbers. The
 # wide tracking stays — it is what separates a LABEL from the data under it now
-# that the size difference between them is smaller.
-_HEAD = f"text-[12px] tracking-[.2em] {REF_HEAD_TXT}"
+# that the size difference between them is smaller — and it is also why three
+# track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
+_HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
 _ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
-_VALUE = f"text-[17px] tabular-nums {CON_TXT}"
+_VALUE = f"text-[13px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
-_V_SPOT = f"text-[18px] tabular-nums {REF_TXT}"
-_V_FLIP = f"text-[18px] tabular-nums {REF_TXT_SOFT}"
-_SUB = "text-[12px] tabular-nums"          # a cell's second line
-_PLACEHOLDER = f"text-[15px] {CON_TXT_MUTED} py-4"
+_V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
+_V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
+_SUB = "text-[10px] tabular-nums"          # a cell's second line
+_PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
 # the same words for both would make a dead service indistinguishable from a
@@ -1571,16 +2184,16 @@ def _panel(title, subtitle=""):
 
     The head is built ONCE and the body is what each painter clears, so a
     repaint can neither duplicate the title nor strand a handle to it."""
-    with ui.column().classes(f"{CONSOLE_CARD} w-full px-5 pt-4 pb-4 gap-2"):
+    with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
         with ui.row().classes(
                 f"items-baseline justify-between w-full gap-4 border-b "
                 f"{CONSOLE_RULE} pb-2"):
             ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[24px] font-bold tracking-[.16em] "
+                f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
                 f"{CON_TXT}")
             if subtitle:
                 ui.label(subtitle).classes(
-                    f"text-[13px] tracking-[.2em] whitespace-nowrap "
+                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
                     f"{CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
     return body
@@ -1676,7 +2289,7 @@ def _structure_map(pos):
             # Named, because a lone amber hairline between two glowing walls is
             # not self-explanatory. `ml-[-6px]` half-centres it on the tick.
             ui.label("FLIP").classes(
-                f"absolute bottom-[-4px] ml-[-8px] text-[11px] "
+                f"absolute bottom-[-4px] ml-[-7px] text-[9px] "
                 f"text-[#4b6070] {_K.left_class(pos['flip'])}")
         if pos.get("spot") is not None:
             # A ring, not a dot: it has to read as a position ON the span
@@ -1702,13 +2315,26 @@ def render():
     # The reference's BODY face, loaded alongside the console's display face
     # rather than instead of it — the panel titles still want Rajdhani.
     ui.add_head_html(DESK_FONT_HEAD_HTML)
-    # The console vocabulary's ONE escape hatch: a keyframes animation cannot be
-    # expressed as a utility class.
+    # TWO ``ui.add_css`` calls, deliberately. The Tailwind-first standard allows
+    # "a single documented block PER THEME", and these are two vocabularies, not
+    # one split in half: ``CONSOLE_KEYFRAMES_CSS`` is the shared console
+    # language (``/sentiment`` injects the same constant), while
+    # ``DESK_NEON_CSS`` is this page's own arrival glow. Both qualify for the
+    # hatch for the same reason — a keyframes animation cannot be a utility
+    # class — and folding them into one call would only hide which is which.
     ui.add_css(CONSOLE_KEYFRAMES_CSS)
+    ui.add_css(DESK_NEON_CSS)
+    # The player and its queue. ``ui.html`` is main.py's own idiom for the
+    # shared chime element, so the ``<audio preload>`` pair is already known to
+    # survive NiceGUI's DOMPurify pass.
+    ui.add_head_html(f"<script>{DESK_VOICE_JS}</script>")
+    ui.html('<audio id="desk-voice" preload="auto"></audio>')
 
     # ``data`` holds the LAST payload seen for every view, because the poll hands
     # over only the ones that moved and most regions read more than one view.
-    state = {"versions": {}, "data": {}}
+    # ``glow_now`` is the ONE clock a paint runs on — set by ``_paint`` before it
+    # calls a painter, so detection, pruning and drawing cannot disagree.
+    state = {"versions": {}, "data": {}, "glow_now": 0.0, **arrival_state()}
 
     # ``DESK_FONT`` where the console pages carry ``CONSOLE_DISPLAY``: this page
     # is nine columns of numbers, so the body face is the monospace and the
@@ -1718,6 +2344,23 @@ def render():
     # winner up to stylesheet order.
     with ui.column().classes(
             f"{CONSOLE_PAGE} {DESK_FONT} w-full gap-4 p-4"):
+        # ── the autoplay unlock ──────────────────────────────────────────────
+        # Browsers refuse audio until the document has been interacted with, and
+        # the refusal is COMPLETELY SILENT — ``play()`` rejects and nothing
+        # appears in any log. With no affordance the feature simply looks broken
+        # on every fresh tab, which is the worst of the three possible states
+        # (working / off / apparently-broken).
+        #
+        # Hidden until the JS reports a block, so a tab that was never going to
+        # need it never shows it. ``set_visibility(False)`` is ``display:none``,
+        # which a flex ``gap`` skips entirely — the hidden row costs no height.
+        # The click that dismisses it IS the gesture that unblocks audio.
+        unlock_btn = ui.button("ENABLE SPOKEN ALERTS", icon="volume_up",
+                               color=None).props("no-caps dense").classes(
+            f"self-start text-[11px] tracking-[.14em] px-3 "
+            f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
+        unlock_btn.set_visibility(False)
+
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO SPX/QQQ quote. The Dealer Positioning panel
         # below shows those same symbols with far more context, and the two
@@ -1798,57 +2441,40 @@ def render():
         # already on. `items-stretch` so the two panels of a row square off at
         # the same height instead of leaving a stepped edge between them.
         #
-        # The breakpoint is ARITHMETIC, not a Tailwind size name, and it is
-        # re-derived whenever a track floor moves — which the ~1.35x type scale
-        # just did to every one of them. Positions is the widest panel:
+        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). It was
+        # `grid-cols-1 min-[2300px]:grid-cols-2`; with the breakpoint gone, that
+        # breakpoint's arithmetic became the page's MINIMUM SUPPORTED WIDTH.
+        # Positions is the panel that sets it:
         #
-        #   902px  the TEN ``POS_GRID`` minmax floors summed
-        #   + 90   nine 10px column gaps
+        #   725px  the TEN ``POS_GRID`` minmax floors summed
+        #   + 72   nine 8px column gaps (``_GAP``)
         #   +  8   the row's own px-1, both sides (``_ROW``)
-        #   + 40   the panel's px-5, both sides (``_panel``)
+        #   + 32   the panel's px-4, both sides (``_panel``)
         #   +  2   the card's 1px border, both sides
-        #   = 1042px minimum for one panel
-        #   x2 + 20px gutter = 2104px of panel content
-        #   + 164 of chrome (below)          = 2268px of LAYOUT width
-        #   + 15 for the classic scrollbar   = 2283px of innerWidth
+        #   = 839px minimum for one panel      (the last three are PANEL_PAD_PX)
+        #   x2 + 20px gutter = 1698px of panel content
+        #   + 164 of measured chrome           = 1862px of LAYOUT width
+        #   + 15 for the classic scrollbar     = 1877px of innerWidth
         #
-        # Positions is still the widest panel and by a wider margin than before
-        # — the Opportunity Board needs 968px. Going flat added a track, and
-        # sizing the three starved columns on their real worst cases (see
-        # ``POS_GRID``) cost another 70px, so the breakpoint moved 2160 -> 2300.
-        # That is the documented procedure, not a liberty: this number is
-        # ARITHMETIC and is re-derived whenever a track floor moves. 2300 leaves
-        # 17px over the 2283 the arithmetic demands, and the 2381px screen this
-        # page is read at clears it by 81px.
+        # At the 1920px window this page is read at, ``PANEL_BUDGET_PX`` hands
+        # each panel 860px (measured: 861), so Positions clears its floor by
+        # 21px and the other three by more (Board 783px, Dealer 757px, Flow
+        # 508px). Measured live at 1920 and at 2560: no panel, and no cell in
+        # one, reports a horizontal overflow — and at exactly 1877 the panels
+        # measure 839px, so the sum above is the boundary rather than an
+        # estimate of it. **Below it the page clips**: a CSS grid will not shrink
+        # a track under its minmax() floor, so the rows overflow their card
+        # rather than reflowing. Measured at 1600 (701px panels): Positions over
+        # by 134px, the Board by 78, Dealer Positioning by 52; only Flow, with
+        # four tracks, still fits. Keep this sum current when a floor moves; it
+        # is the number the next track is sized against.
         #
-        # The CHROME around that content was MEASURED in the live DOM, not
-        # assumed, and it is nearly double what a guess would give: 68px for the
-        # icon rail (`.q-page-container` padding-left) plus THREE stacked 16px
-        # paddings — `.nicegui-content`, the shell's own page column, and this
-        # page's `p-4` — for 164px in total.
-        #
-        # The +15 on the last line is the other thing that is easy to measure
-        # and impossible to reason out: a media query here matches on
-        # `window.innerWidth`, while the grid is laid out in
-        # `documentElement.clientWidth`, and this page is tall enough to carry a
-        # classic scrollbar — so the layout is 15px NARROWER than the width the
-        # query fired on. A breakpoint set to the bare layout figure switches to
-        # two columns 15px too early, every time.
-        #
-        # Every earlier value here was measured wrong rather than argued wrong,
-        # which is why the margin is now deliberate rather than tight. 2100
-        # (chrome guessed at rail + one p-4) overflowed the Positions rows by
-        # 11px. 2140 looked clean only by luck: every track sat exactly on its
-        # floor and nothing clipped solely because the last cell held a short
-        # "OK" chip — a row flagged RESCUE would have clipped.
-        #
-        # Below the breakpoint the page is ONE column, where a full-width panel
-        # carries far more than 1042px and every grid fits with room to spare —
-        # the narrow layout is the comfortable one, and the two-up layout is the
-        # one that has to be earned.
+        # `overflow-x-auto` is deliberately NOT the fallback — see the note above
+        # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
+        # purpose. If the narrow case ever has to work, narrow the tracks — and
+        # the type standing in them, together (see the ladder above).
         with ui.element("div").classes(
-                "grid grid-cols-1 min-[2300px]:grid-cols-2 gap-5 w-full "
-                "items-stretch"):
+                "grid grid-cols-2 gap-5 w-full items-stretch"):
             dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
             # Both subtitles are DERIVED from their panel's row cap, because
             # each used to be a word and a number written down separately — and
@@ -1997,7 +2623,7 @@ def render():
                 # a broken page; this reads as a stopped feed, which is true.
                 ui.label(
                     f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[13px] {CON_WARN} pb-1")
+                ).classes(f"text-[10px] {CON_WARN} pb-1")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
@@ -2019,7 +2645,7 @@ def render():
             f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             with _stack():
                 ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
                 ui.label(fmt_signed_pct(row["day_pct"])).classes(
@@ -2041,11 +2667,11 @@ def render():
             # and the tick standing for it are visibly one thing. The reference
             # puts an open-interest figure under each; this app publishes no
             # per-strike OI on a matrix row, so the second line is left out.
-            _cell(fmt_price(row["call_wall"]), f"text-[18px] text-[{CALL_HEX}]")
-            _cell(fmt_price(row["put_wall"]), f"text-[18px] text-[{PUT_HEX}]")
+            _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
+            _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
             with _stack():
                 ui.label(fmt_gex(row["net_gex"])).classes(
-                    f"text-[17px] font-medium tabular-nums "
+                    f"text-[13px] font-medium tabular-nums "
                     f"{signed_class(row['net_gex'])}")
                 # `self-start` so the chip shrinks to its words. Without it the
                 # chip stretches to the full 118px track and, on a row with no
@@ -2079,7 +2705,7 @@ def render():
             # ATM IV cell on the same line.
             #
             # SCORE rather than HOTNESS because the first track cannot hold
-            # seven letters of 12px caps on .2em tracking — and the panel's own
+            # seven letters of 10px caps on .2em tracking — and the panel's own
             # subtitle already says HOTTEST N, so nothing is lost.
             _grid_head(BOARD_GRID,
                        ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
@@ -2098,7 +2724,7 @@ def render():
         with el:
             _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             # A rationale is up to three clauses of ordinary words. Its track
             # carries by far the largest weight (see ``BOARD_GRID``) precisely
             # so this never ellipses at the width the page is read at; the
@@ -2107,13 +2733,13 @@ def render():
             ui.label(row["rationale"] or _DASH).classes(
                 f"{_SUB} min-w-0 truncate "
                 + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
-            # `items-baseline` so the 12px state word sits on the 17px value's
+            # `items-baseline` so the 10px state word sits on the 13px value's
             # baseline rather than floating mid-cap.
             with ui.row().classes(
                     "items-baseline gap-[6px] flex-nowrap min-w-0"):
                 _cell(fmt_iv(row["atm_iv"]))
                 ui.label(row["iv_state"]).classes(
-                    f"text-[12px] truncate {iv_state_class(row['iv_state'])}")
+                    f"text-[10px] truncate {iv_state_class(row['iv_state'])}")
             _cell(fmt_net_prem(row["net_prem_m"]),
                   signed_class(row["net_prem_m"]))
             _cell(fmt_ratio(row["pc_ratio"]))
@@ -2121,7 +2747,7 @@ def render():
             # dealer regime chip: a chip stretched to its track is a box around
             # a word rather than a label on it.
             ui.label(row["signal"].upper()).classes(
-                f"self-start px-[5px] py-[2px] rounded-[2px] text-[11px] "
+                f"self-start px-[5px] py-[2px] rounded-[2px] text-[9px] "
                 f"tracking-[.1em] whitespace-nowrap {_signal_class(row['signal'])}")
             # An empty setup tag renders NO chip: an empty cell reads as "no
             # setup", where a "NEUTRAL" chip would read as a finding.
@@ -2158,23 +2784,31 @@ def render():
                 _flow_row(row)
 
     def _flow_row(row):
+        # The glow class is applied at BUILD time and never touched again on a
+        # live element. Changing ``animation-delay`` on a running animation
+        # re-anchors its start, and the glow visibly jumps; both painters
+        # ``.clear()`` and rebuild, which is the path the resume trick is
+        # designed for (see the ``GLOW_SEC`` notes). ``state["glow_now"]`` is the
+        # paint's single clock — not a fresh ``monotonic()`` per row.
         el = ui.element("div").classes(
-            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            + glow_classes(state["glow"].get(row.get("id")),
+                           state["glow_now"]))
         with el:
             ui.label(row["time"] or _DASH).classes(
-                f"text-[14px] tabular-nums {CON_TXT_MUTED}")
+                f"text-[11px] tabular-nums {CON_TXT_MUTED}")
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             # `min-w-0` is what lets `truncate` bite: a grid item's automatic
             # minimum is its content, so without it a long detail line widens
             # the track past the panel instead of ellipsing inside it.
             ui.label(row["detail"] or row["text"] or _DASH).classes(
-                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
             # finite (type, side) map — borrowed here rather than re-derived,
             # and shared by the kind and the side it qualifies.
             ui.label(flow_kind_text(row)).classes(
-                f"text-[13px] min-w-0 truncate {row['_tone_class']}")
+                f"text-[10px] min-w-0 truncate {row['_tone_class']}")
         el.on("click", lambda _e: ui.navigate.to("/options/flow"))
 
     def _paint_positions():
@@ -2194,7 +2828,7 @@ def render():
             summary = positions_summary(rows)
             shown = rows[:POSITION_ROWS_N]
             ui.label(summary_line(summary, len(shown))).classes(
-                f"text-[14px] tracking-[.16em] pb-2 "
+                f"text-[11px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
                 ui.label("No open positions.").classes(_PLACEHOLDER)
@@ -2214,15 +2848,18 @@ def render():
                 _position_row(row)
 
     def _position_row(row):
+        # Rebuild-time only, same as the flow row above — never updated in place.
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            + glow_classes(state["glow"].get(row.get("position_id")),
+                           state["glow_now"]))
         with el:
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
             ui.label(row["symbol"]).classes(
-                f"text-[18px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
             ui.label(strategy_label(row["strategy"])).classes(
-                f"text-[14px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             _cell(expiry_text(row))
             # Both are per-share option prices (0.21 / 0.39), not position
             # dollars — the same numbers the paper ledger quotes.
@@ -2240,7 +2877,7 @@ def render():
             # box in the FLAG column reads as a verdict whatever is inside it.
             if row["flag"] == UNTAGGED_FLAG:
                 ui.label(UNTAGGED_FLAG).classes(
-                    f"self-start text-[14px] {CON_TXT_FAINT}")
+                    f"self-start text-[11px] {CON_TXT_FAINT}")
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")
@@ -2272,13 +2909,101 @@ def render():
                 "dealer": _paint_dealer, "board": _paint_board,
                 "flow": _paint_flow, "positions": _paint_positions}
 
+    # ── arrival detection ────────────────────────────────────────────────────
+    # Thin: read the cache, build the rows, hand them to the module-level fold.
+    # Everything that DECIDES anything lives up there, where a test can reach it.
+    def _detect_flow(now):
+        # ``_flow.alert_rows``, not ``flow_rows`` — the FULL list, not the nine
+        # the panel draws. A burst of ten would otherwise push arrivals off the
+        # bottom unseen and announce them later, when the list shortened.
+        rows = _flow.alert_rows(_view("options:flow_alerts"))
+        return fold_flow_arrivals(state, rows, now)
+
+    def _detect_positions(now):
+        rows = position_rows(_view("options:paper_account"),
+                             _view("options:driver_paper_account"),
+                             _view("options:captured"))
+        return fold_position_arrivals(state, rows, now)
+
     def _paint(payloads):
         """Merge the changed views in, then repaint only what depends on them."""
         state["data"].update(payloads)
         changed = set(payloads)
+        state["speak"] = []
+        # ONE clock for the whole paint. Two would let ``prune_glows`` drop an
+        # entry that ``glow_classes`` is then asked to draw, or the reverse.
+        now = time.monotonic()
+        state["glow_now"] = now
+        # Detection FIRST: the painters read ``state["glow"]``, so a row has to
+        # be marked before the paint that is supposed to draw it lit.
+        for region, detect in (("flow", _detect_flow),
+                               ("positions", _detect_positions)):
+            if changed.intersection(_REGION_VIEWS[region]):
+                said = detect(now)
+                if said:
+                    state["speak"].append(said)
+        prune_glows(state["glow"], now)
         for region, deps in _REGION_VIEWS.items():
             if changed.intersection(deps):
                 painters[region]()
+
+    @guard_async
+    async def _speak_pending():
+        """Turn the phrases ``_paint`` queued into clips and play them.
+
+        Synthesis is BLOCKING (measured ~0.9-2.4 s on a cache miss), so it goes
+        through ``run.io_bound`` — never on the event loop, which every page
+        shares. The queue is taken and cleared FIRST: an ``await`` below can
+        outlive this tick, and a phrase left in the queue would be spoken twice.
+
+        ⚠ THE TIMEOUT IS THE LOAD-BEARING ARGUMENT HERE. ``_poll`` awaits this,
+        and NiceGUI's timer awaits its callback before sleeping — so every
+        second spent in here is a second the Desk fetches no quotes, no
+        positions and no flow. With ``voice``'s own 20 s budget and a paint that
+        can queue two phrases, a hung TTS endpoint froze the landing page for
+        FORTY SECONDS. ``LIVE_SYNTH_TIMEOUT_SEC`` caps the worst case at ~6 s,
+        and the endpoint is only re-tried about once a minute after a failure
+        (``voice``'s breaker), so a dead endpoint is a one-off stutter rather
+        than a stutter on every burst. The prewarm keeps the long budget: it is
+        on a daemon thread where waiting costs nobody anything.
+        """
+        phrases, state["speak"] = state["speak"], []
+        settings = app_settings.load()
+
+        async def _synth(text):
+            return await run.io_bound(_voice.ensure, text,
+                                      settings.get("voice_name"),
+                                      timeout=_voice.LIVE_SYNTH_TIMEOUT_SEC)
+
+        js = await speak_phrases(phrases, settings, _synth)
+        if js:
+            ui.run_javascript(js)
+
+    @guard
+    def _voice_blocked(_e=None):
+        """The browser refused to play. Offer the gesture that fixes it."""
+        unlock_btn.set_visibility(True)
+
+    @guard_async
+    async def _unlock_voice(_e=None):
+        """Hide the prompt and say one line, so the unlock is audibly confirmed.
+
+        The click itself is what unblocks audio — user activation is sticky for
+        the document, so the ``await`` below does not cost it. Any other click
+        on the page unlocks it too; this button exists because nothing TELLS the
+        user that.
+        """
+        unlock_btn.set_visibility(False)
+        settings = app_settings.load()
+        url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
+                                 settings.get("voice_name"))
+        if url:
+            ui.run_javascript(
+                f"window.__deskSpeak({json.dumps([url])}, "
+                f"{speak_volume(settings)})")
+
+    ui.on(VOICE_BLOCKED_EVENT, _voice_blocked)
+    unlock_btn.on_click(_unlock_voice)
 
     @guard
     def _tick_clock():
@@ -2311,6 +3036,9 @@ def render():
             payloads[v] = await run.io_bound(bus_client.read, v)
             state["versions"][v] = vers.get(v)
         _paint(payloads)
+        # After the paint, never before: the row must already be lit when the
+        # sentence starts, and synthesis can take a second.
+        await _speak_pending()
 
     # First paint: seed every version so the first poll reports only genuine
     # movement, and paint every region once — including the ones whose view is
@@ -2323,5 +3051,18 @@ def render():
         state["versions"][view] = version
     _tick_clock()
     _paint(seed)
+    # Everything on screen at first paint is history, not an arrival. Clearing
+    # the flag AFTER the seed paint is what makes it so — the folds have just
+    # recorded the whole backlog into ``seen_*`` without glowing or speaking a
+    # line of it, so the next poll can only report genuine movement.
+    #
+    # KNOWN BEHAVIOUR, not a bug: a service that was COLD at seed time and
+    # publishes its first backlog a moment later reads as N arrivals — one
+    # sentence naming the most notable and "plus 14 more". That is what the
+    # flag can promise, and it is defensible: those rows genuinely are new to
+    # this tab, and the alternative (a second, time-based quiet period) would
+    # also swallow a real burst that happened to land during it.
+    state["first"] = False
+    _prewarm_clips(seed)
     ui.timer(CLOCK_SEC, _tick_clock)
     ui.timer(POLL_SEC, _poll)

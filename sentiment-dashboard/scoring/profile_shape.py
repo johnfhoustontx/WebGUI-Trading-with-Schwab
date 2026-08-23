@@ -19,6 +19,7 @@ Thresholds (module constants, tuned for a defensible split):
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from ._common import clamp as _clamp, num as _num
 
 VA_TARGET = 0.70            # value-area volume fraction (Market Profile standard)
 POC_DOMINANCE_MIN = 0.12    # POC bin volume fraction to qualify as a real peak
@@ -36,17 +37,6 @@ class ProfileShape:
     shape: str            # "balance" | "trend" | "double"
     balance_strength: float   # [0.0, 1.0]; 1 = tight central single peak
     neutral_signal: float     # == balance_strength (the classifier consumes this)
-
-
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
-def _num(x):
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return None
 
 
 def _typical_vol(bar):

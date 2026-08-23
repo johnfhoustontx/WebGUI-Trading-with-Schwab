@@ -166,6 +166,12 @@ class TokenManager:
         self._rate_lock = threading.Lock()   # serializes _rate_limit's spacing
         self._last_request_time = 0.0
         self.session = requests.Session()
+        # Schwab's own verdict on the refresh token, as opposed to the expiry
+        # we stamped locally. Set when a refresh is REJECTED, cleared when one
+        # succeeds — so re-authorizing makes the alarm stop rather than
+        # latching an error that outlives the fault.
+        self.refresh_rejected = False
+        self.refresh_error = None
         self._bootstrap_tokens()
 
     def _load_config(self) -> Dict:
@@ -232,6 +238,16 @@ class TokenManager:
             return True
 
     def _is_refresh_expired(self) -> bool:
+        """Has the refresh token passed the expiry WE STAMPED when we got it?
+
+        ⚠ This is a local clock check, not Schwab's opinion. A token revoked
+        before that stamp still reads False here — which is exactly what
+        happened on 2026-08-22, when /health reported the proxy healthy for
+        over an hour while every refresh came back ``invalid_grant`` and no
+        market data flowed. ``refresh_rejected`` carries Schwab's own answer;
+        this check is kept because it still catches the ordinary case of a
+        token that simply aged out without anyone calling Schwab.
+        """
         ea = self.tokens.get("RefreshTokenExpiresAt", "")
         if not ea:
             return True
@@ -254,8 +270,16 @@ class TokenManager:
         )
         if resp.status_code != 200:
             logger.error(f"Token refresh failed ({resp.status_code}): {resp.text}")
+            # Schwab's rejection is AUTHORITATIVE in a way the stored
+            # RefreshTokenExpiresAt stamp is not: a token can be revoked long
+            # before the expiry we wrote down. Record it so /health can see the
+            # outage — see the note on _is_refresh_expired.
+            self.refresh_rejected = True
+            self.refresh_error = f"{resp.status_code}: {resp.text[:300]}"
             raise RuntimeError(f"Token refresh failed: {resp.status_code}")
         data = resp.json()
+        self.refresh_rejected = False
+        self.refresh_error = None
         now = datetime.utcnow()
         expires_in = data.get("expires_in", 1800)
         self.tokens["AccessToken"] = data["access_token"]
@@ -477,11 +501,20 @@ def api_call_stats():
 @app.get("/health")
 def health():
     has_token = bool(token_mgr.tokens.get("AccessToken"))
+    # Schwab REJECTING the refresh token is the one failure that stops all
+    # market data, and it used to be invisible here: `refresh_token_expired`
+    # reads a locally stamped expiry, so a revoked-but-not-yet-expired token
+    # reported healthy. On 2026-08-22 this proxy answered `status: ok` for over
+    # an hour while every call 500'd. A dead credential must not render green.
+    rejected = bool(getattr(token_mgr, "refresh_rejected", False)) if has_token else False
+    refresh_expired = token_mgr._is_refresh_expired() if has_token else True
     return {
-        "status": "ok",
+        "status": "reauth_required" if (rejected or not has_token or refresh_expired) else "ok",
         "has_token": has_token,
         "token_expired": token_mgr._is_expired() if has_token else True,
-        "refresh_token_expired": token_mgr._is_refresh_expired() if has_token else True,
+        "refresh_token_expired": refresh_expired,
+        "refresh_token_rejected": rejected,
+        "refresh_error": getattr(token_mgr, "refresh_error", None) if rejected else None,
         "token_file": str(TOKEN_FILE),
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }

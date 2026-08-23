@@ -4,10 +4,31 @@ Every builder here takes plain dicts and returns plain dicts, so the whole
 screen's arithmetic is testable without a browser — the same shape
 ``pages/market.py`` proved out.
 """
+import ast
 import datetime
+import inspect
 import pathlib
+import re
 
+import pytest
+import voice
 from pages import desk as d
+
+
+@pytest.fixture(autouse=True)
+def _no_synthesis_over_the_network(monkeypatch):
+    """NO test may reach the edge-tts endpoint.
+
+    render() warms the flow-clip cache on its first build, and prewarm
+    is a daemon thread that synthesizes over the network and writes mp3s under
+    webgui/data/voice — a live call and an on-disk side effect from a smoke
+    test that only wanted to read some labels back. ensure is stubbed for
+    the same reason. The _PREWARMED latch is reset per test so the order
+    tests run in cannot decide which one exercises the prewarm path.
+    """
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: None)
+    monkeypatch.setattr(voice, "ensure", lambda *a, **k: None)
+    monkeypatch.setitem(d._PREWARMED, "done", False)
 
 
 # The Tailwind-first guard for this module now lives with every other page's, in
@@ -1455,3 +1476,914 @@ def test_render_draws_no_breadth_groove_where_there_is_no_reading(monkeypatch):
     assert len(grooves) == 2                                   # not three
     assert [c for c in classes if "w-[0%]" in c]                # empty ≠ absent
     assert [c for c in classes if "w-[80%]" in c]
+
+
+def test_desk_panel_grid_is_two_columns_at_every_width():
+    """The 2x2 is fixed, not responsive (2026-08-20, by request).
+
+    It was `grid-cols-1 min-[2300px]:grid-cols-2`. A responsive class here is
+    the regression: the layout would silently rearrange itself at the width
+    this page is actually read at, which is what the request removed.
+    """
+    import ast
+    import inspect
+
+    from pages import desk
+
+    # Read the STRING LITERALS, not the raw source: the comment above the grid
+    # quotes the old `grid-cols-1 min-[2300px]:grid-cols-2` value, and a
+    # substring check over the source matches that and fails on a correct file.
+    tree = ast.parse(inspect.getsource(desk.render).lstrip())
+    literals = [n.value for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    grids = [v for v in literals if "grid-cols" in v]
+    assert "grid grid-cols-2 gap-5 w-full items-stretch" in grids
+    for value in grids:
+        assert "grid-cols-1" not in value, f"panel grid went responsive: {value}"
+        assert "min-[" not in value, f"a width breakpoint came back: {value}"
+
+
+def test_desk_panels_do_not_scroll_sideways():
+    """`overflow-x-auto` is the tempting fix for the fixed 2x2 at narrow widths
+    and is deliberately refused — see the note above `_GAP`: a dashboard you
+    scroll sideways to read defeats the page's purpose. Pinned because the next
+    person to hit a clipped row will reach for it."""
+    import inspect
+
+    from pages import desk
+    assert "overflow-x-auto" not in inspect.getsource(desk._panel)
+
+
+# ── the 1920px width budget ──────────────────────────────────────────────────
+# A CSS grid never shrinks a track below its ``minmax()`` floor, so a panel
+# whose floors oversubscribe its share of the window CLIPS its rows instead of
+# reflowing — and `overflow-x-auto` is refused (see the test above). Three of
+# the four grids shipped over budget until the type ladder and the floors were
+# unwound together to the reference design's own scale; these are the guards
+# that make the next widened track fail HERE rather than on screen.
+def _floors(grid):
+    """The pixel floor of every track in a grid class string, in order."""
+    inner = grid.split("grid-cols-[", 1)[1].split("]", 1)[0]
+    out = []
+    for track in inner.split("_"):
+        m = (re.fullmatch(r"minmax\((\d+)px,[\d.]+fr\)", track)
+             or re.fullmatch(r"(\d+)px", track))
+        assert m, f"unparsed track {track!r}"
+        out.append(int(m.group(1)))
+    return out
+
+
+def _panel_width_needed(grid):
+    """What one panel must be given before this grid stops clipping."""
+    t = _floors(grid)
+    return sum(t) + (len(t) - 1) * d.COL_GAP_PX + d.PANEL_PAD_PX
+
+
+def _px(classes):
+    """The `text-[Npx]` size out of a Tailwind class string."""
+    return int(re.search(r"text-\[(\d+)px\]", classes).group(1))
+
+
+def _head_calls():
+    """Every ``_grid_head(GRID, (labels...))`` in ``render``, resolved."""
+    tree = ast.parse(inspect.getsource(d.render).lstrip())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_grid_head":
+            yield (getattr(d, node.args[0].id),
+                   [e.value for e in node.args[1].elts])
+
+
+def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
+    """The four panels are a fixed 2x2, so each gets half the window less the
+    chrome and the gutter. Over that, the row overflows its card."""
+    for name in ("DEALER_GRID", "BOARD_GRID", "FLOW_GRID", "POS_GRID"):
+        need = _panel_width_needed(getattr(d, name))
+        assert need <= d.PANEL_BUDGET_PX, (
+            f"{name} needs {need}px of the {d.PANEL_BUDGET_PX}px a panel gets")
+
+
+def test_the_panel_budget_subtracts_the_scrollbar_and_is_860px():
+    """Derived, so a chrome or gutter change moves it — and pinned at its value,
+    because 860 is what the grid comment's arithmetic is written against.
+
+    The scrollbar term is the half of this that is easy to drop: the page is
+    taller than any window it is read in, so it is always there, and leaving it
+    out reads 868px where the panel really gets 860."""
+    assert d.PANEL_BUDGET_PX == 860 == (
+        d.DESK_WINDOW_PX - d.DESK_SCROLLBAR_PX - d.DESK_CHROME_PX
+        - d.PANEL_GUTTER_PX) // 2
+
+
+def test_the_minimum_supported_window_above_the_grid_is_the_real_one():
+    """That arithmetic is load-bearing documentation — it is what the next
+    person sizes a track against — and nothing fails when it goes stale.
+    Positions is the widest panel, so its floors ARE the minimum."""
+    src = inspect.getsource(d.render)
+    need = _panel_width_needed(d.POS_GRID)
+    assert f"= {need}px minimum for one panel" in src
+    window = need * 2 + d.PANEL_GUTTER_PX + d.DESK_CHROME_PX + 15   # + scrollbar
+    assert f"{window}px of innerWidth" in src
+
+
+def test_every_column_label_fits_the_track_it_stands_over():
+    """Three floors here are LABEL-bound rather than value-bound: a label on
+    .2em tracking does not shrink with the data under it, and a clipped label
+    turns a column of numbers into an unlabelled column of numbers. JetBrains
+    Mono advances 0.6em, and CSS adds the .2em after every character."""
+    per_char = _px(d._HEAD) * 0.8
+    for grid, labels in _head_calls():
+        floors = _floors(grid)
+        assert len(labels) == len(floors), (labels, floors)
+        for label, floor in zip(labels, floors):
+            assert len(label) * per_char <= floor, (label, floor)
+
+
+def test_the_panel_type_ladder_stays_a_ladder():
+    """Value over qualifier is what makes a ten-column row scannable. Scaling
+    the ladder is allowed — it was scaled 0.8x to fit 1920 — but flattening it
+    is not, so this pins the ORDER and the label's readability step, never the
+    sizes themselves."""
+    price, value, sub = _px(d._V_SPOT), _px(d._VALUE), _px(d._SUB)
+    assert price > value > sub
+    assert _px(d._HEAD) >= sub          # the documented +1 step, never below it
+
+
+def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
+    """The identity of the two grid strings is the only thing keeping a label
+    over its column; if they drift, every number on the panel starts reading as
+    the wrong quantity. Row painters interpolate the grid into an f-string, so
+    the two uses are collected separately and compared."""
+    tree = ast.parse(inspect.getsource(d.render).lstrip())
+    heads = {n.args[0].id for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_grid_head"}
+    rows = {v.value.id for j in ast.walk(tree) if isinstance(j, ast.JoinedStr)
+            for v in j.values
+            if isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)
+            and v.value.id.endswith("_GRID")}
+    assert heads == rows and len(heads) == 4
+
+
+# ── arrival detection ────────────────────────────────────────────────────────
+def test_new_ids_reports_only_rows_not_seen_before():
+    rows = [{"id": "c"}, {"id": "b"}, {"id": "a"}]
+    assert d.new_ids(rows, {"a", "b"}) == ["c"]
+
+
+def test_new_ids_preserves_row_order_so_the_newest_is_first():
+    # ``flow.alert_rows`` is newest-first, and the newest new row is the one
+    # that gets spoken. Order is load-bearing, not incidental.
+    rows = [{"id": "c"}, {"id": "b"}, {"id": "a"}]
+    assert d.new_ids(rows, set()) == ["c", "b", "a"]
+
+
+def test_new_ids_counts_a_duplicated_id_once():
+    rows = [{"id": "a"}, {"id": "a"}]
+    assert d.new_ids(rows, set()) == ["a"]
+
+
+def test_new_ids_skips_rows_with_no_id():
+    assert d.new_ids([{"id": None}, {}, {"id": "a"}], set()) == ["a"]
+
+
+def test_new_ids_reads_the_key_the_caller_names():
+    # Positions key on position_id, flow on id. One function, not two.
+    rows = [{"position_id": "p1"}]
+    assert d.new_ids(rows, set(), key="position_id") == ["p1"]
+
+
+def test_new_ids_of_nothing_is_empty():
+    assert d.new_ids(None, set()) == []
+    assert d.new_ids([], {"a"}) == []
+
+
+def test_id_set_is_what_seen_is_replaced_with_each_paint():
+    # REPLACED, not unioned — see ``id_set``'s docstring. A row with no id is
+    # left out, matching ``new_ids``, so the two can never disagree about which
+    # rows exist.
+    rows = [{"id": "a"}, {"id": None}, {}, {"id": "b"}]
+    assert d.id_set(rows) == {"a", "b"}
+    assert d.id_set(None) == set()
+    assert d.id_set([{"position_id": "p1"}], key="position_id") == {"p1"}
+
+
+# ── flag changes ─────────────────────────────────────────────────────────────
+def test_flag_changes_reports_a_moved_flag():
+    rows = [{"position_id": "p1", "flag": "AT RISK"}]
+    assert d.flag_changes(rows, {"p1": "OK"}) == ["p1"]
+
+
+def test_flag_changes_ignores_an_unchanged_flag():
+    rows = [{"position_id": "p1", "flag": "OK"}]
+    assert d.flag_changes(rows, {"p1": "OK"}) == []
+
+
+def test_a_first_sighting_is_not_a_flag_change():
+    # It is an ARRIVAL, and new_ids already glows it. Counting it here too
+    # would give a brand-new row two overlapping glows.
+    rows = [{"position_id": "p1", "flag": "OK"}]
+    assert d.flag_changes(rows, {}) == []
+
+
+def test_flag_map_keys_positions_by_id():
+    rows = [{"position_id": "p1", "flag": "OK"}, {"position_id": None,
+                                                  "flag": "RESCUE"}]
+    assert d.flag_map(rows) == {"p1": "OK"}
+
+
+# ── the neon glow ────────────────────────────────────────────────────────────
+def test_glow_step_starts_at_zero():
+    assert d.glow_step(started=100.0, now=100.0) == 0
+
+
+def test_glow_step_advances_one_class_per_second():
+    assert d.glow_step(started=100.0, now=103.4) == 3
+    assert d.glow_step(started=100.0, now=109.9) == 9
+
+
+def test_glow_step_never_exceeds_the_last_class():
+    # A rounding slip that returned 10 would emit desk-neon-10, a class with no
+    # rule behind it — the animation would restart instead of finishing.
+    assert d.glow_step(started=100.0, now=109.999999) == d.GLOW_STEPS - 1
+
+
+def test_glow_step_is_none_once_expired():
+    assert d.glow_step(started=100.0, now=110.0) is None
+    assert d.glow_step(started=100.0, now=999.0) is None
+
+
+def test_glow_step_is_none_for_a_row_that_never_glowed():
+    assert d.glow_step(started=None, now=100.0) is None
+
+
+def test_glow_classes_name_a_hue_and_a_resume_point():
+    cls = d.glow_classes(("new", 100.0), now=103.0)
+    assert "desk-neon" in cls and "desk-neon-new" in cls and "desk-neon-3" in cls
+
+
+def test_glow_classes_are_empty_once_expired():
+    assert d.glow_classes(("new", 100.0), now=120.0) == ""
+    assert d.glow_classes(None, now=120.0) == ""
+
+
+def test_every_glow_step_class_has_a_rule_behind_it():
+    # The resume trick is silent when it breaks: a missing rule just restarts
+    # the animation, which looks like a glow that never expires.
+    css = d.DESK_NEON_CSS.replace(" ", "")
+    for i in range(d.GLOW_STEPS):
+        assert f".desk-neon-{i}{{" in css
+
+
+def test_both_glow_hues_have_a_rule():
+    assert ".desk-neon-new" in d.DESK_NEON_CSS
+    assert ".desk-neon-flag" in d.DESK_NEON_CSS
+
+
+def test_the_animation_runs_for_the_advertised_ten_seconds():
+    assert d.GLOW_SEC == 10.0
+    assert "animation-name: deskNeon;" in d.DESK_NEON_CSS
+    assert f"animation-duration: {d.GLOW_SEC:g}s;" in d.DESK_NEON_CSS
+
+
+def _base_neon_rule():
+    """The body of the ``.desk-neon`` rule — the base the step rules refine."""
+    css = d.DESK_NEON_CSS
+    start = css.index(".desk-neon {")
+    return css[start:css.index("}", start)]
+
+
+def test_the_base_rule_declares_no_delay_for_a_step_rule_to_out_order():
+    """THE trick, and the one thing about it a reader would not guess.
+
+    ``.desk-neon`` and ``.desk-neon-3`` are both a single class, so specificity
+    cannot break the tie between them — whichever declares ``animation-delay``
+    LAST in source order wins. The base rule therefore must not declare one at
+    all, and in particular must not use the ``animation:`` SHORTHAND, which
+    resets every ``animation-*`` longhand it does not name (``animation-delay``
+    back to 0s included) whether the author meant it or not.
+
+    Written as a shorthand it happens to work only because the step rules are
+    concatenated last in the f-string — an invariant nothing but string order
+    holds up, whose failure mode is a glow that never expires and so is
+    indistinguishable from the feature not having been built. Longhands make it
+    structural: the step rule wins wherever it sits in the file.
+    """
+    base = _base_neon_rule()
+    assert "animation:" not in base           # the resetting shorthand
+    assert "animation-delay" not in base
+    for i in range(d.GLOW_STEPS):
+        assert f".desk-neon-{i} {{ animation-delay:" in d.DESK_NEON_CSS
+
+
+def test_the_glow_does_not_fill_forwards_over_the_rows_hover():
+    """``animation-fill-mode: forwards`` would kill the row's hover cue.
+
+    Animation declarations outrank normal author declarations (CSS Cascade
+    §6.6.2), so an element still applying the 100% keyframe —
+    ``background-color: transparent`` — beats the row's ``hover:bg-…`` for as
+    long as the class stays on it. That is until the next rebuild: seconds
+    during market hours, but the rest of the session for an alert arriving at
+    15:59, on a row that is ``cursor-pointer`` and click-navigates. The cue
+    dies on exactly the row the user was just told to look at.
+
+    ``forwards`` buys nothing here: the 100% keyframe (transparent, no shadow)
+    IS the row's author default, so dropping it gives an identical end state
+    with no snap. It looks like an obvious improvement, hence this test.
+    """
+    assert "forwards" not in d.DESK_NEON_CSS
+
+
+def test_the_zero_step_delay_is_not_written_as_negative_zero():
+    # ``-0s`` is valid and behaves identically; it just reads as a generator
+    # artifact in a stylesheet a human will open.
+    assert ".desk-neon-0 { animation-delay: 0s; }" in d.DESK_NEON_CSS
+    assert "-0s" not in d.DESK_NEON_CSS
+
+
+def test_the_glow_map_drops_only_expired_entries():
+    glow = {"a": ("new", 100.0), "b": ("flag", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
+    assert glow == {"b": ("flag", 108.0)}       # mutates the caller's map
+
+
+def test_glow_step_survives_a_nonsense_timestamp():
+    # Page state is a plain dict; a wedged entry must go dark, never raise on
+    # the paint path.
+    assert d.glow_step(started="soon", now=100.0) is None
+
+
+def test_glow_step_goes_dark_on_a_nan_instead_of_raising():
+    """A NaN is the one bad value that survives the ``float()`` coercion.
+
+    ``float('nan')`` raises nothing, so the try/except cannot catch it, and
+    EVERY comparison against a NaN is False — so the obvious range guard
+    (``if elapsed < 0 or elapsed >= span``) is False on both halves and waves it
+    through to ``int(nan)``, which raises ValueError. That raise lands on the
+    paint path, inside ``prune_glows``, which runs this over every entry in the
+    map: one wedged timestamp takes down a whole panel repaint, not one row.
+    """
+    nan = float("nan")
+    assert d.glow_step(started=0.0, now=nan) is None
+    assert d.glow_step(started=nan, now=5.0) is None
+    assert d.glow_step(started=0.0, now=5.0, span=nan) is None
+
+
+def test_the_glow_map_survives_a_nan_timestamp():
+    # The reason the line above matters: prune runs mid-paint over every entry.
+    glow = {"a": ("new", float("nan")), "b": ("flag", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
+
+
+def test_glow_classes_refuses_a_hue_with_no_rule_behind_it():
+    """An unknown kind must paint nothing, not a half-glow.
+
+    ``desk-neon-<typo>`` leaves ``--neon`` unset, and a ``box-shadow`` naming an
+    undefined custom property is invalid at computed-value time — BOTH shadow
+    declarations drop. The row would flash a background and never glow, which
+    looks like a rendering quirk rather than a wiring bug. GLOW_NEW/GLOW_FLAG
+    exist precisely so there is a finite set to check against.
+    """
+    assert d.glow_classes(("nwe", 100.0), now=103.0) == ""
+    assert d.glow_classes((None, 100.0), now=103.0) == ""
+    for kind in (d.GLOW_NEW, d.GLOW_FLAG):
+        assert d.glow_classes((kind, 100.0), now=103.0) != ""
+
+
+def test_the_step_clamp_cannot_produce_a_negative_class():
+    # ``min(steps - 1, max(0, …))`` undoes its own floor when ``steps`` is 0 and
+    # emits ``desk-neon--1``. Unreachable today — nothing passes ``steps`` — but
+    # the fix is free (apply the floor last) and the comment beside it claims
+    # the clamp is airtight, so it should be.
+    assert d.glow_step(started=100.0, now=100.0, steps=0) >= 0
+
+
+# ── arrival detection: what glows, and what gets said ────────────────────────
+# These are the feature's whole decision layer, and they are module-level
+# functions taking their state explicitly precisely so this block can exist —
+# a closure inside ``render()`` is reachable only from a browser.
+def _arr_flow(rid, symbol="SPY", kind="Crossover", side="Calls over"):
+    return {"id": rid, "symbol": symbol, "kind": kind, "side": side}
+
+
+def _arr_pos(pid, symbol="SPY", flag="OK", strategy="put_credit_spread"):
+    return {"position_id": pid, "symbol": symbol, "flag": flag,
+            "strategy": strategy}
+
+
+def test_arrival_state_starts_silent_and_empty():
+    """``first`` being True IS the silent-first-paint mechanism.
+
+    Built by a shared helper rather than a dict literal in ``render`` so this
+    test exercises the state the page actually starts from — a hand-rolled copy
+    here could not catch the flag being dropped there.
+    """
+    s = d.arrival_state()
+    assert s["first"] is True
+    assert s["glow"] == {} and s["speak"] == []
+    assert s["seen_flow"] == set() and s["seen_pos"] == set()
+    assert s["pos_flags"] == {}
+
+
+def test_the_first_paint_announces_nothing_and_lights_nothing():
+    """Navigating to the Desk must not squawk the whole backlog at you."""
+    s = d.arrival_state()
+    said = d.fold_flow_arrivals(s, [_arr_flow("a"), _arr_flow("b")], now=100.0)
+    assert said is None
+    assert s["glow"] == {}
+    # ...but the backlog IS recorded, so the next arrival is the only new one.
+    assert s["seen_flow"] == {"a", "b"}
+
+
+def test_the_first_paint_is_dark_for_positions_too():
+    s = d.arrival_state()
+    assert d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0) is None
+    assert s["glow"] == {}
+    assert s["seen_pos"] == {"p1"} and s["pos_flags"] == {"p1": "OK"}
+
+
+def test_the_second_paint_glows_and_speaks_the_new_alert():
+    s = d.arrival_state()
+    d.fold_flow_arrivals(s, [_arr_flow("a")], now=100.0)
+    s["first"] = False
+    said = d.fold_flow_arrivals(s, [_arr_flow("b"), _arr_flow("a")], now=200.0)
+    assert said == "S P Y. Crossover alert, calls over."
+    assert s["glow"] == {"b": (d.GLOW_NEW, 200.0)}
+
+
+def test_a_burst_is_one_sentence_naming_the_newest_and_counting_the_rest():
+    """The feed is newest-first, so ``[0]`` is the one to say out loud."""
+    s = d.arrival_state()
+    s["first"] = False
+    rows = [_arr_flow("c", "QQQ"), _arr_flow("b", "AMD"), _arr_flow("a", "SPY")]
+    said = d.fold_flow_arrivals(s, rows, now=100.0)
+    assert said.startswith("Q Q Q.")
+    assert said.endswith("Plus 2 more.")
+    assert set(s["glow"]) == {"a", "b", "c"}
+
+
+def test_an_unchanged_feed_says_nothing_on_the_next_paint():
+    s = d.arrival_state()
+    s["first"] = False
+    d.fold_flow_arrivals(s, [_arr_flow("a")], now=100.0)
+    assert d.fold_flow_arrivals(s, [_arr_flow("a")], now=101.0) is None
+
+
+def test_an_alert_with_no_ticker_glows_but_is_never_announced():
+    """``flow_phrase({})`` is "Flow alert." — a squawk that refuses to say what.
+
+    Worse than silence: it makes the reader look for something the sentence
+    declines to name. The row still lights, because the panel prints whatever
+    the alert does carry.
+    """
+    s = d.arrival_state()
+    s["first"] = False
+    assert d.fold_flow_arrivals(s, [_arr_flow("a", symbol="")], now=100.0) is None
+    assert s["glow"] == {"a": (d.GLOW_NEW, 100.0)}
+    # A symbol of pure punctuation spells to nothing, so it counts as absent —
+    # ``spell`` is the test, not a truthiness check on the raw field.
+    s2 = d.arrival_state()
+    s2["first"] = False
+    assert d.fold_flow_arrivals(s2, [_arr_flow("z", symbol="$$")], now=1.0) is None
+
+
+def test_a_new_position_glows_and_speaks():
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0)
+    assert said == "S P Y. New position, put credit spread."
+    assert s["glow"] == {"p1": (d.GLOW_NEW, 100.0)}
+
+
+# ── the spoken contract, END TO END ──────────────────────────────────────────
+# ⚠ The unit tests in test_voice.py hand ``flow_phrase``/``position_phrase`` a
+# hand-written row, so they cannot see the field NAMES drift — a builder reading
+# ``expiry`` while ``position_rows`` publishes ``expiration`` would leave that
+# whole file green and every live phrase silently short. These two start from a
+# raw service payload and end at the sentence.
+def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
+    raw = {"type": "uoa", "side": "call", "symbol": "QQQ", "strike": 737.0,
+           "expiry": "2026-08-09", "dte": 0, "volume": 12400, "oi": 1100,
+           "vol_oi": 11.27, "premium": 2132800.0, "ts": 1754750100,
+           "id": "QQQ|uoa|call|737|2026-08-09"}
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
+    assert said == "Q Q Q. Unusual activity, 0-D T E 7 37 Call."
+
+
+def test_a_new_position_speaks_its_contract_from_the_raw_payload():
+    """The expiration is deliberately far out so ``dte`` cannot reach 0 and turn
+    the date into "0-D T E" — ``position_rows`` computes it against today."""
+    raw = _pos("p1", expiration="2027-09-17", entry_credit=1.35)
+    s = d.arrival_state()
+    s["first"] = False
+    said = d.fold_position_arrivals(
+        s, d.position_rows({"positions": [raw]}, None), now=1.0)
+    assert said == ("S P Y. New position, put credit spread. "
+                    "6 hundred, 5 95, 9 - 17, entry 1 dollar 35 credit.")
+
+
+def test_a_flag_change_glows_amber_but_says_nothing():
+    """A position ALREADY in the book changing state is not an arrival."""
+    s = d.arrival_state()
+    d.fold_position_arrivals(s, [_arr_pos("p1", flag="OK")], now=100.0)
+    s["first"] = False
+    said = d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=200.0)
+    assert said is None
+    assert s["glow"] == {"p1": (d.GLOW_FLAG, 200.0)}
+
+
+def test_a_brand_new_position_never_takes_the_flag_glow_as_well():
+    # ``flag_changes`` already declines a first sighting; the ``setdefault`` is
+    # the second half of that, so an arrival keeps its cyan.
+    s = d.arrival_state()
+    s["first"] = False
+    d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=100.0)
+    assert s["glow"]["p1"][0] == d.GLOW_NEW
+
+
+def test_the_folds_survive_a_malformed_row():
+    """Rows arrive off a cache read, so a non-dict must not take the paint down."""
+    s = d.arrival_state()
+    s["first"] = False
+    assert d.fold_flow_arrivals(s, ["junk", None, _arr_flow("a")], now=1.0)
+    s2 = d.arrival_state()
+    s2["first"] = False
+    assert d.fold_position_arrivals(s2, ["junk", _arr_pos("p1")], now=1.0)
+
+
+# ── the speak gate ───────────────────────────────────────────────────────────
+_WEEKDAY = datetime.datetime(2026, 8, 19, 10, 0, tzinfo=d._CT)   # a Wednesday
+_SUNDAY = datetime.datetime(2026, 8, 23, 10, 0, tzinfo=d._CT)
+
+
+def test_the_enable_switch_silences_the_desk():
+    assert d.should_speak({"voice_enabled": False}, _WEEKDAY) is False
+    assert d.should_speak({}, _WEEKDAY) is False
+    assert d.should_speak({"voice_enabled": True}, _WEEKDAY) is True
+
+
+def test_the_market_hours_gate_is_honoured_on_the_speak_path():
+    """The Settings card promises "Uses the existing market-hours gate above."
+
+    It is the SAME ``alerts.in_market_hours`` the scanner chime goes through —
+    one setting, not a second voice-only copy of the idea.
+    """
+    on = {"voice_enabled": True, "alert_market_hours_only": True}
+    assert d.should_speak(on, _WEEKDAY) is True
+    assert d.should_speak(on, _SUNDAY) is False
+    # Gate off: a Sunday backtest session still speaks.
+    off = {"voice_enabled": True, "alert_market_hours_only": False}
+    assert d.should_speak(off, _SUNDAY) is True
+
+
+def test_speak_volume_clamps_a_hand_edited_settings_file():
+    # settings.json is hand-editable and never validated on read.
+    assert d.speak_volume({"voice_volume": 1.7}) == 1.0
+    assert d.speak_volume({"voice_volume": -3}) == 0.0
+    assert d.speak_volume({"voice_volume": 0.5}) == 0.5
+
+
+def test_speak_volume_falls_back_rather_than_raising_inside_a_timer():
+    """A bare ``float("loud")`` raises on the poll path — one tab, no audio, and
+    a traceback a user never sees. And a NaN must not pin the MAXIMUM: the
+    documented ``min(1.0, nan) == 1.0`` trap would answer a missing reading with
+    full volume."""
+    for junk in ("loud", None, object(), float("nan"), True, {}):
+        v = d.speak_volume({"voice_volume": junk})
+        assert 0.0 <= v <= 1.0
+    assert d.speak_volume({}) == d.DEFAULT_VOICE_VOLUME
+    assert d.speak_volume(None) == d.DEFAULT_VOICE_VOLUME
+
+
+# ── the browser side ─────────────────────────────────────────────────────────
+def test_the_desk_speaks_through_its_own_audio_element():
+    """Not ``alert-audio``: a scanner chime must not cut an announcement off."""
+    assert "desk-voice" in d.DESK_VOICE_JS
+    assert "alert-audio" not in d.DESK_VOICE_JS
+
+
+def test_a_dead_clip_cannot_wedge_the_queue_for_the_life_of_the_tab():
+    """``onended`` alone stalls forever on a 404 — nothing ever ends."""
+    assert "el.onerror = done" in d.DESK_VOICE_JS
+    assert "el.onended = done" in d.DESK_VOICE_JS
+
+
+def test_a_blocked_autoplay_reports_itself_instead_of_failing_silently():
+    """``play()`` just rejects; nothing appears in any log. Without this the
+    feature looks broken on every fresh tab."""
+    assert f"emitEvent('{d.VOICE_BLOCKED_EVENT}'" in d.DESK_VOICE_JS
+    assert ".catch(" in d.DESK_VOICE_JS
+
+
+def test_the_blocked_event_name_is_the_constant_and_not_a_third_copy():
+    """Renaming ``VOICE_BLOCKED_EVENT`` must not leave ``ui.on`` subscribed to a
+    name nothing emits — the unlock button silently dead, every test green. The
+    placeholder must also be fully substituted, or the JS emits a literal
+    ``__VOICE_BLOCKED_EVENT__`` that no handler is listening for."""
+    assert "__VOICE_BLOCKED_EVENT__" not in d.DESK_VOICE_JS
+    assert d.DESK_VOICE_JS.count(f"'{d.VOICE_BLOCKED_EVENT}'") == 1
+
+
+def test_only_a_real_autoplay_block_is_reported_as_one():
+    """A 404 clip rejects ``play()`` too — with **NotSupportedError**, per the
+    HTML "dedicated media source failure steps", which ALSO fire ``error``.
+    Treating every rejection as a block truncated the queue, desynced ``busy``,
+    and showed the user an unlock button that fixes nothing."""
+    assert "err.name === 'NotAllowedError'" in d.DESK_VOICE_JS
+    # ...and everything else retires the attempt like any playback failure.
+    blocked = d.DESK_VOICE_JS.index("NotAllowedError")
+    assert "done();" in d.DESK_VOICE_JS[blocked:]
+
+
+def test_one_clip_cannot_advance_the_queue_twice():
+    """A 404 delivers BOTH the ``error`` event and the ``play()`` rejection for
+    the same attempt. Without the token, ``done`` would run twice: two clips
+    consumed for one played, and ``busy`` no longer describing reality."""
+    js = d.DESK_VOICE_JS
+    assert "const attempt = ++v.token;" in js
+    assert "if (attempt !== v.token) return;" in js
+
+
+def test_a_blocked_queue_is_dropped_rather_than_replayed_later():
+    # Holding a backlog would announce a stale burst the moment audio unlocks.
+    assert "v.q.length = 0" in d.DESK_VOICE_JS
+
+
+def test_the_known_gaps_in_the_play_queue_stay_written_down():
+    """Two accepted limitations, both recorded so they are not re-discovered as
+    bugs: a mid-burst volume change only takes effect on the NEXT burst, and a
+    media element that stalls without ``ended`` or ``error`` wedges ``busy``."""
+    src = inspect.getsource(d)
+    head = src[:src.index("DESK_VOICE_JS = ")]
+    assert "KNOWN GAP" in head
+    assert "volume change is IGNORED" in d.DESK_VOICE_JS
+
+
+def test_the_glow_needs_no_repaint_timer_of_its_own():
+    """The browser animates the LIVE element for free; the class only matters at
+    REBUILD time, which is what ``glow_step`` computes. A 1 s timer on the
+    landing page would be 86,400 no-op repaints a day."""
+    assert inspect.getsource(d.render).count("ui.timer(") == 2   # clock + poll
+
+
+def test_the_paint_uses_one_clock_for_detection_pruning_and_drawing():
+    """Two ``time.monotonic()`` calls in one paint can prune a glow and then be
+    asked to draw it."""
+    src = inspect.getsource(d.render)
+    paint = src[src.index("    def _paint(payloads):"):]
+    # ⚠ NO trailing newline in the anchor. ``"\n    @guard\n"`` does not match
+    # ``@guard_async``, which is what actually follows ``_paint`` — so the slice
+    # silently widened to cover ``_speak_pending`` too, and a ``time.monotonic()``
+    # added THERE would fail this test with a message naming the wrong function.
+    # As a prefix, ``"\n    @guard"`` matches both decorators.
+    paint = paint[:paint.index("\n    @guard")]
+    assert "async def _speak_pending" not in paint     # the slice really stops
+    assert paint.count("time.monotonic()") == 1
+
+
+# ── the prewarm ──────────────────────────────────────────────────────────────
+def test_prewarm_symbols_reads_the_watchlist_off_the_matrix():
+    view = {"rows": [{"symbol": "SPY"}, {"symbol": "AMD"}, {"symbol": "SPY"}]}
+    assert d.prewarm_symbols(view) == ["SPY", "AMD"]
+
+
+def test_prewarm_symbols_drops_anything_that_is_not_a_symbol():
+    # The payload is a cache read. A blank would warm the ticker-less sentence
+    # that nothing is allowed to speak in the first place.
+    view = {"rows": [{"symbol": ""}, {"symbol": None}, "junk", {},
+                     {"symbol": "  "}, {"symbol": "SPY"}]}
+    assert d.prewarm_symbols(view) == ["SPY"]
+    assert d.prewarm_symbols(None) == []
+    assert d.prewarm_symbols({"rows": None}) == []
+
+
+def test_the_prewarm_is_capped_at_the_head_of_the_hotness_ranking():
+    """UNCAPPED this is the whole watchlist — ~30 symbols × the 8
+    ``voice.FLOW_CAUSES`` = ~240 SERIAL synthesis calls at a measured 0.9-2.4 s
+    each: 3.6 to 9.6 MINUTES of continuous network on first Desk open, repeated
+    whenever the voice changes (it is part of the clip cache key).
+
+    Truncating is only defensible because ``options_svc`` sorts the matrix rows
+    by HOTNESS descending, server-side — so the kept head is the set most likely
+    to fire a flow alert. The order is therefore load-bearing, not incidental,
+    and the cap keeps the FIRST N.
+    """
+    view = {"rows": [{"symbol": f"S{i}"} for i in range(30)]}
+    got = d.prewarm_symbols(view)
+    assert len(got) == d.PREWARM_SYMBOLS_MAX == 8
+    assert got == [f"S{i}" for i in range(8)]        # the head, not a sample
+    # 8 symbols x the 4 CONTRACT-LESS causes: about 30-80 s, not nine minutes.
+    # (It was 64 phrases until the contract form retired the four warmable-in-
+    # principle uoa/big_delta pairs — see voice.FLOW_CAUSES.)
+    assert len(voice.prewarm_texts(got)) == 32
+
+
+def test_the_prewarm_cap_counts_usable_symbols_not_rows():
+    """A run of junk rows in front must not eat the budget — the cap is on what
+    actually gets warmed."""
+    rows = [{"symbol": ""}, "junk", {}, {"symbol": None}]
+    rows += [{"symbol": f"S{i}"} for i in range(12)]
+    assert d.prewarm_symbols({"rows": rows}) == [f"S{i}" for i in range(8)]
+
+
+def test_the_prewarm_is_skipped_while_spoken_alerts_are_off(monkeypatch):
+    """...and the latch stays OPEN, so switching them on later still warms."""
+    calls = []
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(d.app_settings, "load", lambda: {"voice_enabled": False})
+    d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
+    assert calls == []
+    assert d._PREWARMED["done"] is False
+
+
+def test_the_prewarm_runs_once_per_process(monkeypatch):
+    calls = []
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    seed = {"options:matrix": {"rows": [{"symbol": "SPY"}]}}
+    d._prewarm_clips(seed)
+    d._prewarm_clips(seed)
+    assert calls == [(["SPY"], "v")]
+
+
+def test_a_broken_prewarm_cannot_break_the_page_build(monkeypatch):
+    """It runs during ``render()``. A cold cache must cost the prewarm, not the
+    Desk."""
+    def _boom(*_a, **_k):
+        raise OSError("no cache directory")
+    monkeypatch.setattr(voice, "prewarm", _boom)
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
+
+
+def test_a_failed_prewarm_leaves_the_latch_open_for_the_next_build(monkeypatch):
+    """The latch means "this process has warmed the cache". A run that RAISED
+    warmed nothing, so setting it before the call would trade the whole feature
+    for one transient — permanently, for the life of the process, on the
+    strength of a single unreadable payload. Either behaviour is defensible;
+    this pins the one the ``_PREWARMED`` comment claims."""
+    calls = []
+
+    def _boom(*_a, **_k):
+        raise OSError("no cache directory")
+
+    monkeypatch.setattr(voice, "prewarm", _boom)
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_name": "v"})
+    seed = {"options:matrix": {"rows": [{"symbol": "SPY"}]}}
+    d._prewarm_clips(seed)
+    assert d._PREWARMED["done"] is False
+    # ...and the next build gets its chance.
+    monkeypatch.setattr(voice, "prewarm", lambda *a, **k: calls.append(a))
+    d._prewarm_clips(seed)
+    assert calls == [(["SPY"], "v")]
+    assert d._PREWARMED["done"] is True
+
+
+# ── speak_phrases: the gate WIRING, not just the gate ────────────────────────
+# ⚠ WHY THESE EXIST. ``should_speak`` and ``speak_volume`` were thoroughly unit
+# tested while every test of the code that CALLS them was a source scrape
+# (``inspect.getsource``). Deleting ``if not should_speak(...): return`` from the
+# speak path left the whole suite green — so the market-hours gate the Settings
+# card promises was, in practice, unguarded. A source scrape cannot see a line
+# that is not there. These call the real function and assert on what came out.
+def _spoke(phrases, settings, urls=None, now=_WEEKDAY):
+    """Run the speak path with a fake synthesizer; return (js, texts_synthesized)."""
+    import asyncio
+    seen = []
+    supply = list(urls if urls is not None else
+                  [f"/voice/{i}.mp3" for i in range(len(phrases))])
+
+    async def _synth(text):
+        seen.append(text)
+        return supply.pop(0) if supply else None
+
+    js = asyncio.run(d.speak_phrases(phrases, settings, _synth, now=now))
+    return js, seen
+
+
+_SPEAK_ON = {"voice_enabled": True, "voice_volume": 0.5}
+
+
+def test_the_speak_path_actually_speaks_when_the_gates_allow_it():
+    js, seen = _spoke(["S P Y. Crossover alert."], _SPEAK_ON)
+    assert seen == ["S P Y. Crossover alert."]
+    assert js == 'window.__deskSpeak(["/voice/0.mp3"], 0.5)'
+
+
+def test_the_market_hours_gate_really_silences_the_speak_path():
+    """Not just ``should_speak`` in isolation — the CALL. This is the test whose
+    absence let the gate be deleted with the suite green."""
+    on = dict(_SPEAK_ON, alert_market_hours_only=True)
+    js, seen = _spoke(["S P Y. Crossover alert."], on, now=_SUNDAY)
+    assert js is None
+    assert seen == []           # and nothing was synthesized, either
+
+
+def test_the_enable_switch_really_silences_the_speak_path():
+    js, seen = _spoke(["S P Y. Crossover alert."], {"voice_enabled": False})
+    assert js is None and seen == []
+
+
+def test_the_volume_that_reaches_the_browser_is_the_CLAMPED_one():
+    """``speak_volume`` clamping in isolation proves nothing if the raw settings
+    value is what gets interpolated into the JS."""
+    js, _ = _spoke(["a"], {"voice_enabled": True, "voice_volume": 9.9})
+    assert js.endswith(", 1.0)")
+    js, _ = _spoke(["a"], {"voice_enabled": True, "voice_volume": "loud"})
+    assert js.endswith(f", {d.DEFAULT_VOICE_VOLUME})")
+
+
+def test_a_phrase_that_would_not_synthesize_is_skipped_not_spoken_as_a_gap():
+    """``ensure`` returns None on failure. The row has already glowed, so a dead
+    endpoint costs the sentence and nothing else — but it must not put a null
+    into the URL list the browser is handed."""
+    js, seen = _spoke(["first", "second"], _SPEAK_ON,
+                      urls=[None, "/voice/b.mp3"])
+    assert seen == ["first", "second"]
+    assert js == 'window.__deskSpeak(["/voice/b.mp3"], 0.5)'
+    # ...and if NOTHING synthesized there is no call at all.
+    js, _ = _spoke(["first"], _SPEAK_ON, urls=[None])
+    assert js is None
+
+
+def test_an_empty_queue_never_reaches_the_browser_or_the_synthesizer():
+    """The common case, 43,200 times a day: a poll that painted nothing to say.
+    It must not load settings' worth of work, and must never emit JS."""
+    js, seen = _spoke([], _SPEAK_ON)
+    assert js is None and seen == []
+
+
+def test_the_urls_are_json_encoded_not_string_joined():
+    js, _ = _spoke(["a", "b"], _SPEAK_ON,
+                   urls=['/voice/x".mp3', "/voice/y.mp3"])
+    import json
+    assert json.loads(js[js.index("(") + 1:js.rindex(",")]) == \
+        ['/voice/x".mp3', "/voice/y.mp3"]
+
+
+def test_the_live_synthesis_budget_is_short_enough_to_keep_the_poll_alive():
+    """``_poll`` AWAITS the speak step, and NiceGUI's timer awaits its callback
+    before sleeping — so a hung endpoint at ``voice``'s 20 s background budget
+    froze the landing page for 40 s (a paint can queue two phrases). The live
+    path must pass its own, much shorter, budget."""
+    assert voice.LIVE_SYNTH_TIMEOUT_SEC <= 3.0
+    assert voice.LIVE_SYNTH_TIMEOUT_SEC > 2.4    # the slowest measured synthesis
+    src = inspect.getsource(d.render)
+    assert "timeout=_voice.LIVE_SYNTH_TIMEOUT_SEC" in src
+    # 2 phrases x the budget, and no worse.
+    assert 2 * voice.LIVE_SYNTH_TIMEOUT_SEC <= 6.0
+
+
+# ── render() wiring for the voice ────────────────────────────────────────────
+def _rendered_elements():
+    """Every element ``render()`` just added, in build order."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [e for key, e in ui.context.client.elements.items()
+            if key not in before]
+
+
+def test_render_mounts_the_desks_own_audio_element():
+    """Its own, not ``main.py``'s shared ``alert-audio``: a scanner chime fires
+    from the app-wide watcher on every page, this one included, and sharing one
+    element would let it cut an announcement off mid-sentence."""
+    html = [getattr(e, "content", "") or "" for e in _rendered_elements()]
+    assert any('id="desk-voice"' in h for h in html)
+
+
+def test_render_hides_the_unlock_prompt_until_the_browser_complains():
+    """A tab that was never going to need it must never show it."""
+    btn = [e for e in _rendered_elements()
+           if getattr(e, "text", None) == "ENABLE SPOKEN ALERTS"]
+    assert len(btn) == 1
+    assert "hidden" in btn[0]._classes          # NiceGUI's display:none class
+
+
+def test_render_subscribes_to_the_blocked_autoplay_event():
+    src = inspect.getsource(d.render)
+    assert "ui.on(VOICE_BLOCKED_EVENT" in src
+    assert "unlock_btn.on_click" in src
+
+
+def test_the_poll_speaks_only_after_the_paint():
+    """The row must already be lit when the sentence starts, and synthesis can
+    take a second."""
+    src = inspect.getsource(d.render)
+    poll = src[src.index("    async def _poll():"):]
+    assert poll.index("_paint(payloads)") < poll.index("await _speak_pending()")
+
+
+def test_synthesis_never_runs_on_the_event_loop():
+    """``voice.ensure`` blocks a measured 0.9-2.4 s on a cache miss, and the loop
+    is shared by every page in the app."""
+    src = inspect.getsource(d.render)
+    for line in src.splitlines():
+        if "_voice.ensure" in line:
+            assert "run.io_bound" in line
+    assert src.count("_voice.ensure") == 2      # the poll, and the unlock button

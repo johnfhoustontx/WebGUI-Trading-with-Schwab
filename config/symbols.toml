@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/symbols.toml — THE TRADED SYMBOL UNIVERSE
+#
+#   One file, read from all three tiers. These lists previously existed as four
+#   separate literals — in options-scanner/gex_collector.py, in
+#   services/options_svc/net_premium.py, in services/market_svc/symbols.py and
+#   (byte-copied, because Tier 1 may not import services.*) in
+#   webgui/pages/options/gamma.py. Tests pinned them equal to one another, which
+#   caught drift but still meant editing four files to add one ticker.
+#
+#   ⚠ ADDING A SYMBOL TO [collection] COSTS REAL SCHWAB API BUDGET.
+#     Collection polls every symbol once a minute over a 440-minute window, so
+#     one extra name is ~440 extra /chains calls per day — and roughly double
+#     that on a fresh clone, where the gitignored Top 20.xlsx watchlist is absent
+#     so nothing overlaps. Quote BOTH numbers; which applies depends on a file you
+#     cannot see in git. Two further costs are easy to miss: poll_once's worker
+#     pool overlaps only the FETCH, so each added symbol also costs a SERIAL
+#     engine calc + SQLite insert inside the 60-second budget; and each writes one
+#     gex_history.db row per poll, on a DB that has already needed a manual ~1 GB
+#     VACUUM.
+#
+#   Edit + restart options_svc, market_svc and the webgui.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[collection]
+# What the 1-minute GEX collector polls. The union of this and the (gitignored)
+# Top 20.xlsx watchlist is the real collected set — see collection_symbols().
+base = ["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]
+
+# Added 2026-08-05 for the Net Prem view. Broad ETFs and mega-caps are usually in
+# the workbook already (so typically no extra fetch); the SPDR sectors are the
+# genuinely new collection cost.
+broad   = ["IWM", "DIA"]
+sectors = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
+           "XLP", "XLRE", "XLU", "XLV", "XLY"]
+megacaps = ["NVDA", "MSFT", "GOOGL", "AMZN", "META",
+            "AAPL", "TSLA", "AVGO", "PLTR", "AMD"]
+
+[baskets]
+# Composite pseudo-symbols, summed server-side from real tickers. BIG10 is the
+# Mag-7 plus AVGO/PLTR/AMD. market_svc renders it as an equal-weighted day-move +
+# breadth tile; net_premium sums its call/put premium. Both read it from here, so
+# the "must match by design" comment they each carried is now enforced by the file.
+big10 = ["NVDA", "MSFT", "GOOGL", "AMZN", "META",
+         "AAPL", "TSLA", "AVGO", "PLTR", "AMD"]
+
+# ── Net Prem display groups ──────────────────────────────────────────────────
+# The selectable groups on the Dealer Positioning "Net Prem" subtab, in display
+# order. Membership AND ordering are both meaningful here: this is what builds
+# the tabs. Note megacaps is deliberately a DIFFERENT order from [baskets].big10
+# — that one is basket-composition order, this one is display order.
+#
+# Every symbol named here must have a colour in webgui gamma.NET_PREM_COLORS
+# (a test pins the coverage), and every real ticker should be in [collection] or
+# it will plot empty.
+
+[[netprem_groups]]
+key = "indices"
+label = "Indices & Broad"
+symbols = ["$SPX", "$NDX", "BIG10", "SPY", "QQQ", "IWM", "DIA"]
+
+[[netprem_groups]]
+key = "sectors"
+label = "SPDR Sectors"
+symbols = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
+           "XLP", "XLRE", "XLU", "XLV", "XLY"]
+
+[[netprem_groups]]
+key = "megacaps"
+label = "Mega-caps"
+symbols = ["NVDA", "AVGO", "AAPL", "META", "MSFT",
+           "TSLA", "PLTR", "AMZN", "GOOGL", "AMD"]

@@ -40,6 +40,14 @@ from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
+import logging_setup  # noqa: E402
+
+# Persist our own log the way the six services already do. Without this the
+# webgui logger has no handler at all, so everything it says lives and dies in
+# the console - gone when a WT tab closes. Must run BEFORE the filter install
+# below so the filter applies to the handler we just added.
+logging_setup.install_file_logging()
+
 # Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
 # the element has been deleted.") — it escapes the ui_guard callback decorators
 # (raised by Timer._run_in_loop BEFORE the callback runs) and is logged by
@@ -50,6 +58,19 @@ install_deleted_slot_log_filter()
 _STATIC_DIR = _REPO_ROOT / "webgui" / "static"
 if _STATIC_DIR.is_dir():
     app.add_static_files("/static", str(_STATIC_DIR))
+
+# Generated Desk voice clips at /voice. Created eagerly rather than guarded on
+# ``is_dir()`` like /static above: this directory is BUILT at runtime, so on a
+# fresh clone the guard would skip the mount and every clip would 404 until a
+# restart. See webgui/voice.py.
+_VOICE_DIR = _REPO_ROOT / "webgui" / "data" / "voice"
+try:
+    _VOICE_DIR.mkdir(parents=True, exist_ok=True)
+    app.add_static_files("/voice", str(_VOICE_DIR))
+except OSError:
+    logging.getLogger("webgui").warning(
+        "voice clip directory unavailable — Desk spoken alerts are off",
+        exc_info=True)
 
 _CT = _ZoneInfo("America/Chicago")
 
@@ -380,6 +401,17 @@ STRATEGY_TOOLS_CHILDREN = [
     ("/options/simulator", "Simulator", "science"),
 ]
 
+# Trade Analyzer became a GROUP on 2026-08-22 (Phase 5): the single-symbol
+# card and the ranked cross-section are the two halves of the same workflow —
+# find a candidate, then research it — so they are peer tabs rather than one
+# page hiding inside the other. (route, label, icon)
+TRADE_CHILDREN = [
+    ("/trade", "Overview", "query_stats"),
+    ("/trade/evidence", "Evidence", "fact_check"),
+    ("/trade/board", "Rank Board", "leaderboard"),
+    ("/trade/plan", "Trade Plan", "assignment"),
+]
+
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
@@ -387,7 +419,6 @@ FLAT_NAV = [
     # Desk, in the same pinned landing block, because it is the same screen for a
     # different display rather than a destination of its own.
     ("/desk/live", "Live Mirror", "cast"),
-    ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -435,6 +466,7 @@ _NAV_GROUPS = [
     ("Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
     ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
+    ("Trade Analyzer", "query_stats", TRADE_CHILDREN),
 ]
 
 
@@ -489,7 +521,7 @@ NAV_SECTIONS = [
     ("STRATEGY", [
         _sec_group("Strategy Tools"),
         _sec_group("Options"),
-        _sec_page("/trade"),              # Trade Analyzer
+        _sec_group("Trade Analyzer"),
         _sec_page("/driver"),             # Claude Trades
     ]),
     ("ACCOUNT", [
@@ -776,7 +808,7 @@ def drawer_width(pinned: bool) -> int:
 # ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
 _NAV_LABEL = {route: label for route, label, _icon in
               OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
-              + SENTIMENT_CHILDREN + FLAT_NAV
+              + SENTIMENT_CHILDREN + TRADE_CHILDREN + FLAT_NAV
               + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
@@ -831,6 +863,21 @@ def _favicon_link(color: str) -> str:
 # flat drawer links); _group_badge_refs maps group label->(badge, member paths)
 # for the drawer group items (badge = sum of member counts).
 _NAV_BADGES: dict[str, int] = {}
+# Version-gated payload memos for the 2 s watcher. `options:scan` (148 KB) and
+# `options:flow_alerts` (90 KB) were read+parsed on EVERY tick per open tab —
+# ~43,200 ticks/day x 237 KB is ~10 GB/day/tab for views that change a handful of
+# times an hour. read_gated pays a tiny :ver probe instead (2026-08-20).
+_WATCH_SCAN_MEMO: dict = {}
+_WATCH_FLOW_MEMO: dict = {}
+
+
+def reset_watcher_memos() -> None:
+    """Drop the watcher's payload memos (test helper; also safe after a manual
+    cache edit)."""
+    _WATCH_SCAN_MEMO.clear()
+    _WATCH_FLOW_MEMO.clear()
+
+
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
     # Captured badge: the SET of acknowledged captured signal ids (not a version),
@@ -1366,8 +1413,11 @@ def _watcher_compute():
     System Status nav item reflects the current unhealthy count regardless of the
     chime gate.
     """
-    scan = bus_client.read("options:scan") or {}   # read ONCE; passed to badges below
-    flow_view = bus_client.read("options:flow_alerts")
+    # Version-gated: a tick where neither view moved costs two tiny :ver probes
+    # and no JSON parsing (see reset_watcher_memos). `scan` is read ONCE here and
+    # passed to the badge helpers below.
+    scan = bus_client.read_gated("options:scan", _WATCH_SCAN_MEMO)[0] or {}
+    flow_view = bus_client.read_gated("options:flow_alerts", _WATCH_FLOW_MEMO)[0]
     keys = alerts.scanner_keys(scan)
     s = app_settings.load()                        # in-memory cached (no disk hit)
     now = _dt.datetime.now(tz=_CT)
@@ -2191,9 +2241,30 @@ def sentiment_momentum_page(level: str = "industry") -> None:
 
 @ui.page("/trade")
 def trade_page() -> None:
-    with _layout("/trade", "Trade Analyzer"):
-        from pages import trade
-        trade.render()
+    with _layout("/trade", "Overview"):
+        from pages import trade_overview
+        trade_overview.render()
+
+
+@ui.page("/trade/evidence")
+def trade_evidence_page() -> None:
+    with _layout("/trade/evidence", "Evidence"):
+        from pages import trade_evidence
+        trade_evidence.render()
+
+
+@ui.page("/trade/board")
+def trade_board_page() -> None:
+    with _layout("/trade/board", "Rank Board"):
+        from pages import trade_board
+        trade_board.render()
+
+
+@ui.page("/trade/plan")
+def trade_plan_page() -> None:
+    with _layout("/trade/plan", "Trade Plan"):
+        from pages import trade_plan_screen
+        trade_plan_screen.render()
 
 
 @ui.page("/portfolio")

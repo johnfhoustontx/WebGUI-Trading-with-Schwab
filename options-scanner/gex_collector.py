@@ -23,6 +23,9 @@ from zoneinfo import ZoneInfo
 import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+from shared import symbols as _symbols  # noqa: E402
 import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
@@ -55,16 +58,7 @@ TZ = ZoneInfo("America/Chicago")
 # symbol also costs a SERIAL engine calc + SQLite insert inside the 60s budget;
 # and each writes one gex_history.db row per poll, on a DB that has already
 # needed a manual ~1 GB VACUUM.
-SYMBOLS = [
-    "$SPX", "$VIX", "SPY", "QQQ", "$NDX",
-    # Everything below — NEW 2026-08-05, added for the Net Prem view.
-    # Broad ETFs and mega-caps are usually in the workbook already (so typically
-    # no extra fetch); the SPDR sectors are the genuinely new collection.
-    "IWM", "DIA",
-    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
-    # BIG10 mega-caps (also the Net Prem "Mega-caps" group).
-    "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA", "AVGO", "PLTR", "AMD",
-]
+SYMBOLS = _symbols.collection_base()
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20

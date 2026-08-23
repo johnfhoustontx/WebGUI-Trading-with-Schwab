@@ -478,3 +478,80 @@ def test_apply_adjustment_refuses_non_open(tmp_path):
     # no mutation
     assert pdb.get_account(db)["cash"] == cash0
     assert pdb.list_adjustments(db, pid) == []
+
+
+#############################################
+# roll_out through the FULL dispatcher (2026-08-20)
+#
+# roll_out/roll_down_out candidates now carry the CLOSE pair too (see
+# services/options_svc/rescue._close_pair). These pin the two consequences on
+# the apply side: the stale guard passes on unchanged quotes, and the close
+# books the REAL debit rather than the entry-credit scratch fallback.
+#############################################
+
+def _roll_out_cand_4leg():
+    """A roll_out shaped the way rescue.build_roll_out now emits it: close pair
+    (old expiry) + reopen pair (new expiry). cv=2.50, reopen credit 1.20."""
+    return {"action": "roll_out", "commission": 5.20,
+            # gross = (-2.50 + 1.20) * 100 * 2 = -260; net = -265.20
+            "gross_cash": -260.0, "net_cash": -265.20,
+            "new_width": 5.0, "new_max_loss": 760.0, "new_expiry": "2026-08-30",
+            "est_fill_legs": [
+                _leg("BUY", "PUT", 500.0, price=2.80),               # close short
+                _leg("SELL", "PUT", 495.0, price=0.30),              # close long
+                _leg("SELL", "PUT", 500.0, price=1.45, expiry="2026-08-30"),
+                _leg("BUY", "PUT", 495.0, price=0.25, expiry="2026-08-30")]}
+
+
+def test_dispatcher_applies_a_roll_out_when_prices_are_unchanged(tmp_path):
+    """Pre-fix this refused with 'prices moved' at 187% drift on IDENTICAL
+    quotes, because the stored net included the close debit the 2-leg reprice
+    could not see. With the close pair in est_fill_legs, same-price repricing
+    lands on net_cash exactly and the apply goes through."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    prices = {("2026-07-31", 500.0): 2.80, ("2026-07-31", 495.0): 0.30,
+              ("2026-08-30", 500.0): 1.45, ("2026-08-30", 495.0): 0.25}
+
+    def price_leg(sym, expiry, right, strike):
+        return prices[(str(expiry), float(strike))]
+
+    res = pa.apply_adjustment(db, pos, _roll_out_cand_4leg(),
+                              price_leg=price_leg, tolerance=0.15)
+    assert res["ok"] is True, res
+    assert res.get("stale") is not True
+
+
+def test_roll_out_books_the_real_close_debit_not_scratch(tmp_path):
+    """The close pair prices the exit: debit 2.80-0.30 = 2.50, realized =
+    (1.00 - 2.50) * 100 * 2 = -300. The scratch fallback used to book exit at
+    entry_credit (realized 0), overstating equity by exactly that 300."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    res = pa.apply_roll(db, pos, _roll_out_cand_4leg())
+    assert res["ok"] is True
+    assert res["realized"] == -300.0
+    old = _pos(db, pid)
+    assert old["status"] == "CLOSED" and old["realized_pnl"] == -300.0
+    new = _pos(db, res["new_position_id"])
+    assert new["expiration"] == "2026-08-30"
+    assert new["entry_credit"] == 1.20          # 1.45 - 0.25 at the new expiry
+
+
+def test_legacy_2leg_roll_out_still_applies_with_the_scratch_fallback(tmp_path):
+    """A cached board built BEFORE the fix still carries the 2-leg shape; it must
+    keep applying exactly as before (scratch close), not crash on the partition."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    cand = {"action": "roll_out", "gross_cash": 30.0, "commission": 5.20,
+            "net_cash": 24.80, "new_width": 5.0, "new_max_loss": 770.0,
+            "new_expiry": "2026-08-30",
+            "est_fill_legs": [
+                _leg("SELL", "PUT", 500.0, price=1.45, expiry="2026-08-30"),
+                _leg("BUY", "PUT", 495.0, price=0.25, expiry="2026-08-30")]}
+    res = pa.apply_roll(db, pos, cand)
+    assert res["ok"] is True
+    assert _pos(db, pid)["realized_pnl"] == 0.0          # scratch, as before

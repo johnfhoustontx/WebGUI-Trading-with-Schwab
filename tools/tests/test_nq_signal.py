@@ -133,9 +133,10 @@ _WED = date(2026, 7, 29)   # a plain non-holiday weekday
 
 
 def test_the_session_fixture_date_is_a_weekday_and_not_a_holiday():
-    # Guards the cases below against a silently wrong fixture date.
+    # Guards the cases below against a silently wrong fixture date. Asks the
+    # shared calendar rather than a local HOLIDAYS literal (deleted 2026-08-20).
     assert _WED.weekday() < 5
-    assert _WED not in ns.HOLIDAYS
+    assert ns.is_trading_day(_WED)
 
 
 @pytest.mark.parametrize("hh,mm,expected", [
@@ -719,3 +720,33 @@ def test_minimum_is_a_ratio_not_a_point_count():
     assert isinstance(ns.MIN_REWARD_RISK, float)
     assert 1.0 <= ns.MIN_REWARD_RISK <= 3.0
     assert not hasattr(ni.NQ, "min_reward_risk")
+
+
+# ── holidays come from the shared calendar, not a yearly-edit literal ──────
+
+def test_holidays_are_not_a_hardcoded_2026_2027_literal():
+    """`tools/` carried its own 2026-2027 frozenset, justified by a comment
+    claiming an import would drag `compute`/`handlers` in. That is false for
+    `shared/market_calendar`, which is deliberately import-light (measured: no
+    pandas/numpy/redis/fastapi) and derives holidays ALGORITHMICALLY — so the
+    literal was both unnecessary and, being a fixed two-year set, silently wrong
+    from 2028 onward (2026-08-20)."""
+    import datetime as _d
+    # dates past the old literal's horizon must still be recognised
+    assert not ns.is_trading_day(_d.date(2028, 1, 17))    # MLK 2028
+    assert not ns.is_trading_day(_d.date(2029, 11, 22))   # Thanksgiving 2029
+    assert not ns.is_trading_day(_d.date(2030, 12, 25))   # Christmas 2030
+
+
+def test_holiday_gate_still_recognises_the_dates_the_literal_covered():
+    import datetime as _d
+    for d in (_d.date(2026, 1, 1), _d.date(2026, 7, 3), _d.date(2026, 11, 26),
+              _d.date(2027, 5, 31), _d.date(2027, 12, 24)):
+        assert not ns.is_trading_day(d), d
+
+
+def test_holiday_gate_passes_a_plain_weekday_and_blocks_weekends():
+    import datetime as _d
+    assert ns.is_trading_day(_d.date(2026, 7, 29))        # a plain Wednesday
+    assert not ns.is_trading_day(_d.date(2026, 7, 25))    # Saturday
+    assert not ns.is_trading_day(_d.date(2026, 7, 26))    # Sunday

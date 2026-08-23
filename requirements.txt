@@ -51,9 +51,6 @@ openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.x
 # --- Windows desktop notifications (O, S) ---
 winotify                  # toast notifications (provides the `winotify` package)
 
-# --- Market data (optional / legacy) ---
-yfinance                  # still imported by some analysis paths; optional fallback data source
-
 # --- Scheduling (D) ---
 apscheduler==3.10.4
 
@@ -82,6 +79,11 @@ customtkinter>=5.2       # dark-themed Tk widgets for the always-on-top NQ deale
                          #   HUD. Imported lazily inside NQHud.__init__ / main(), so every other
                          #   entrypoint — and the whole test suite — runs without it installed.
                          #   Pulls in darkdetect. Tk itself ships with CPython.
+
+# --- Spoken alerts (Desk page audio) ---
+edge-tts>=7.0             # Microsoft neural TTS for the Desk's spoken alerts — no API key.
+                          #   Pulls only aiohttp (already required) + tabulate. webgui/voice.py
+                          #   guards the import — absent it, the Desk simply does not speak.
 
 # --- Testing (P, O, S, D) ---
 pytest

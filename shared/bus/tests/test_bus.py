@@ -262,3 +262,30 @@ def test_drain_pending_noop_when_nothing_stranded():
     # group exists but no pending entries
     b.consume_commands("cmd:clean", group="g", consumer="c", block_ms=10)
     assert b.drain_pending("cmd:clean", group="g", consumer="c") == 0
+
+
+def test_cache_set_ttl_expires_the_payload_and_its_side_keys():
+    """Per-position rescue boards accumulate one key per rescued trade FOREVER
+    (37 in prod, ~150 KB, incl. boards for long-closed trades) and the bus has no
+    delete API. A board is stale within minutes, so it is written with a TTL —
+    which must cover the :ver and :ts side keys too, or they outlive the payload
+    as orphan counters (2026-08-20)."""
+    b = Bus(fake=True)
+    b.cache_set("cache:test:ttl", {"n": 1}, ttl=90)
+    for suffix in ("", ":ver", ":ts"):
+        assert 0 < b._r.ttl("cache:test:ttl" + suffix) <= 90, suffix
+
+
+def test_cache_set_without_ttl_persists():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:forever", {"n": 1})
+    assert b._r.ttl("cache:test:forever") == -1        # no expiry
+
+
+def test_cache_set_ttl_refreshes_on_rewrite():
+    """A board that is still being republished must not expire under the page."""
+    b = Bus(fake=True)
+    b.cache_set("cache:test:ttl2", {"n": 1}, ttl=60)
+    b._r.expire("cache:test:ttl2", 5)                  # simulate near-expiry
+    b.cache_set("cache:test:ttl2", {"n": 2}, ttl=60)
+    assert b._r.ttl("cache:test:ttl2") > 5

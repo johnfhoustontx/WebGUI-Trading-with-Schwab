@@ -22,7 +22,8 @@ from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
-from shared.contracts.options import NetPremiumSnapshot, ScanResult
+from shared.contracts.options import MatrixSnapshot, NetPremiumSnapshot, ScanResult
+from services import _degrade
 
 log = logging.getLogger(__name__)
 
@@ -291,6 +292,13 @@ CACHE_EM_CHAIN = "cache:options:em_chain"
 EVENT_EM_CHAIN = "events:options:em_chain"
 
 CACHE_RESCUE = "cache:options:rescue"            # per-id: f"{CACHE_RESCUE}:{position_id}"
+# Per-position boards are TRANSIENT: one key per rescued position, written on
+# demand and never deleted (the bus has no delete API), so they accumulated one
+# per rescued trade forever — 37 in prod, including boards for long-closed
+# trades. A board prices live legs, so it is stale within minutes; 6h simply
+# outlives any realistic review session and the key then goes away by itself.
+# The rescue SUMMARY beside it is a single rolling key and is NOT expired.
+RESCUE_BOARD_TTL_SEC = 6 * 3600
 CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
 EVENT_RESCUE = "events:options:rescue"
 EVENT_RESCUE_SUMMARY = "events:options:rescue_summary"
@@ -404,6 +412,33 @@ def refresh_header(bus) -> None:
         log.exception("refresh_matrix_spots after header degraded")
 
 
+def _cache_matrix(bus, view) -> None:
+    """Validate against MatrixSnapshot, then publish. The ONE way this view is
+    written - both publish sites go through here.
+
+    The constructor IS the gate, same shape as publish_net_premium: every field
+    defaults (so a payload cached before a field existed still validates),
+    pydantic drops extras, and a non-dict raises TypeError at the ** expansion.
+    Publishing hangs off ``else`` so "only a clean payload is cached" is
+    structural.
+
+    NOTE the caching of ``snap.model_dump()``: a top-level key the contract does
+    not declare is a key the pages LOSE. Verified 2026-08-21 against the live
+    prod payload (92 rows) - date/session_date/ts/rows/premium/error all survive
+    the round trip. ``error`` in particular is rendered by the Opportunity Board
+    status line, so adding a top-level key here means adding it to the contract
+    in the same commit.
+    """
+    try:
+        snap = MatrixSnapshot(**view)
+    except Exception:
+        log.exception("matrix payload could not be validated against "
+                      "MatrixSnapshot - NOT publishing (shape regression)")
+    else:
+        bus.cache_set(CACHE_MATRIX, snap.model_dump(), event=EVENT_MATRIX,
+                      skip_unchanged=True)
+
+
 def refresh_matrix_spots(bus) -> None:
     """Overlay live spot + day% onto the last-published matrix (best-effort).
 
@@ -424,7 +459,7 @@ def refresh_matrix_spots(bus) -> None:
             return
         raw = compute.matrix_quotes(symbols)
         view = compute.apply_live_spots(payload, raw)
-        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+        _cache_matrix(bus, view)
     except Exception:
         log.exception("refresh_matrix_spots degraded")
 
@@ -1003,7 +1038,7 @@ def publish_matrix(bus) -> None:
         flow_cooldowns = _cache_payload(bus, _FLOW_COOLDOWN_KEY)
         view = compute.build_matrix(
             scan_day, flow_cooldowns, today, session_date, now_ts)
-        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+        _cache_matrix(bus, view)
     except Exception:
         log.exception("publish_matrix degraded")
 
@@ -1562,7 +1597,7 @@ def run_rescue(bus, position_id, source: str = "paper") -> None:
     ``cache:options:rescue:<position_id>`` (the string signal_id works as a key)."""
     adv = compute.compute_rescue(position_id, source)
     key = f"{CACHE_RESCUE}:{position_id}"
-    version = bus.cache_set(key, adv)
+    version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 
@@ -1576,7 +1611,7 @@ def run_rescue_adhoc(bus, spec) -> None:
     ``cache:options:rescue:adhoc`` key (advisory-only, so no Apply flow)."""
     adv = compute.compute_rescue_adhoc(spec)
     key = f"{CACHE_RESCUE}:adhoc"
-    version = bus.cache_set(key, adv)
+    version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": "adhoc"})
 
 
@@ -1613,7 +1648,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
                     "position_id": position_id,
                 },
             }
-            version = bus.cache_set(key, adv)
+            version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
             bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
             return
 
@@ -1637,16 +1672,17 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
                    if isinstance(adv, dict) else "advisory unavailable"}
         adv["apply_result"] = result
 
-        version = bus.cache_set(key, adv)
+        version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
     except Exception as e:
         # Never let a bad apply kill the consumer; surface the error to the GUI.
+        _degrade.degraded("options.run_rescue_apply")
         adv = {
             "position_id": position_id,
             "error": f"{type(e).__name__}: {e}",
             "apply_result": {"ok": False, "error": str(e), "position_id": position_id},
         }
-        version = bus.cache_set(key, adv)
+        version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 
@@ -1689,9 +1725,19 @@ def handle_command(bus, command) -> None:
     symbol) → expirations + strike ladders for the Expected Move dropdowns;
     ``rescue`` (args
     position_id) → compute the ranked rescue advisory for one paper position, cache
-    per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
-    approved candidate against the paper position (stale-price guarded), refresh the
-    paper view + re-cache the advisory; else no-op."""
+    per-id + publish; ``rescue_adhoc`` (args = a user-defined trade spec) → the same
+    ranked advisory for a trade the paper book does not hold (advisory-only, cached
+    under the ``:adhoc`` id); ``rescue_apply`` (args position_id, candidate) →
+    execute the approved candidate against the paper position (stale-price guarded),
+    refresh the paper view + re-cache the advisory; ``sim_replay`` (args symbol/legs)
+    → step the position along the underlying's recent path, cache the six-panel
+    trace + publish; ``gamma_history`` (args symbol, date) → build the standalone
+    intraday history report, cache the HTML + publish; else no-op.
+
+    ⚠ This list IS the API the GUI codes against, and prose drifts:
+    ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
+    from here until 2026-08-20. Two tests in test_handlers.py now fail on drift in
+    either direction, so adding a branch without a line here is a red suite."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":

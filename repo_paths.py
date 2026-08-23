@@ -38,6 +38,32 @@ FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
 # to change a window.
 SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 
+# The autonomous driver's risk envelope (daily target band, per-trade + daily risk
+# caps, VIX ceiling, loss halt). Read by shared/driver_limits.py, which BOTH
+# driver_svc.settings and options_svc.compute use - they cannot import each other,
+# and the per-trade cap has to agree on both sides or the driver approves a size
+# the paper sizer then zeroes. Edit + restart both services.
+DRIVER_TOML = REPO_ROOT / "config" / "driver.toml"
+
+# Trade-management stop/target rules (take-profit fraction, stop multiple, delta
+# drift + hard ceiling, cut-DTE, the trail ladders). Read by shared/trade_mgmt.py,
+# which BOTH options-scanner/signal_recommender.py (the auto-manage cycle) and
+# services/options_svc/rescue.py (the at-risk detector) use, so the two cannot
+# drift apart. Edit + restart options_svc.
+TRADE_MGMT_TOML = REPO_ROOT / "config" / "trade_mgmt.toml"
+
+# Scanner selection floors - IV-rank minimums, per-VIX-regime credit floors,
+# directional delta band, score cutoffs. These are the knobs that decide whether a
+# signal fires at all (and the documented reason index names rarely do). Read by
+# shared/scanner_config.py. Edit + restart options_svc.
+SCANNER_TOML = REPO_ROOT / "config" / "scanner.toml"
+
+# The traded symbol universe: what GEX collection polls, the Net-Prem display
+# groups, and the BIG10 basket. Read by shared/symbols.py from all three tiers -
+# the same lists were previously duplicated in four modules and held together only
+# by tests. Adding a symbol has a real Schwab API-budget cost; see the file.
+SYMBOLS_TOML = REPO_ROOT / "config" / "symbols.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).
@@ -74,11 +100,42 @@ MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
 MARKET_STATE_VALIDATION_REPORT = SENTIMENT / "data" / "market_state_validation.md"
 MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.json"
 
-# EquityDeepDive IV/RV history (migrated into services/trade_svc/deepdive). Schwab
-# serves no IV history, so IV rank accumulates forward from the first run; each
-# on-demand Deep Dive records a snapshot. On-demand only (no scheduled job yet).
-# services/trade_svc/data/ is gitignored (generated).
-IV_HISTORY_DB = REPO_ROOT / "services" / "trade_svc" / "data" / "iv_history.db"
+# Trade-service on-disk stores. All three are FORWARD-ACCRUING: none can be
+# backfilled, because each records something the source does not serve as
+# history. They are worth starting long before their readers exist, since they
+# pay in calendar time rather than effort. services/trade_svc/data/ is
+# gitignored (generated).
+TRADE_SVC_DATA = REPO_ROOT / "services" / "trade_svc" / "data"
+
+# EquityDeepDive IV/RV history. Schwab serves no IV history, so IV rank
+# accumulates forward from the first run; each on-demand Deep Dive records a
+# snapshot. On-demand only (no scheduled job yet).
+IV_HISTORY_DB = TRADE_SVC_DATA / "iv_history.db"
+
+# What the model SAID, per symbol per day — composite, band, percentile, both
+# verdicts, the gates and the artifact version. Phase 6's labeler attaches the
+# realized forward excess returns; the live-IC monitor reads the pair. A model's
+# historical output is unrecoverable after the fact (artifact, cross-section and
+# gates all move), so this is written from Phase 1 onward.
+REC_JOURNAL_DB = TRADE_SVC_DATA / "rec_journal.db"
+# The model's own paper book (Phase 6) - isolated from the driver's.
+MODEL_BOOK_DB = TRADE_SVC_DATA / "model_book.db"
+
+# Point-in-time fundamentals. Live-parsed ratios describe TODAY, so validating
+# the Investor verdict against forward returns is impossible without a store
+# that remembers what each field read on the day it was read.
+FUNDAMENTALS_HISTORY_DB = TRADE_SVC_DATA / "fundamentals_history.db"
+
+# FINRA's bi-monthly short-interest cycles. Schwab ships both short-interest
+# fields as a 0.0 sentinel for every symbol, so the short side's squeeze gate
+# needs the regulatory filing itself; the float denominator still comes from
+# Schwab (``marketCapFloat``, which is float in SHARES despite the name).
+SHORT_INTEREST_DB = TRADE_SVC_DATA / "short_interest.db"
+
+# Forward earnings dates (Alpha Vantage). Schwab carries none, and no official
+# source exists — 8-K Item 2.02 is retrospective and no exchange publishes a
+# forward calendar — so this is a vendor product by necessity.
+EARNINGS_CALENDAR_DB = TRADE_SVC_DATA / "earnings_calendar.db"
 
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that

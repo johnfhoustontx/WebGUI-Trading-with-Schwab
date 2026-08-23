@@ -200,3 +200,43 @@ def test_sector_pcr_empty_result_not_cached():
     L.compute_live(dead, sd)
     L.compute_live(c, sd)  # next refresh must fetch, not reuse the empty {}
     assert c.chain_calls >= 11
+
+
+# ── breadth: a MISSING symbol is not "no decliners" (2026-08-20) ────────────
+
+def _bq(**kw):
+    """A batched-quote map shaped like the one _breadth_inputs reads."""
+    return {k: [{"close": v}] for k, v in kw.items() if v is not None}
+
+
+def test_missing_decn_does_not_fabricate_max_bullish_breadth():
+    """`(advn/decn) if (advn and decn) else (inf if advn else None)` could not
+    tell `decn == 0` (a real 10/10 tape) from `decn is None` (the symbol simply
+    absent from the batch, which a per-symbol quote failure produces). The
+    absent case handed `inf` to breadth.score, which maps inf -> score 10:
+    MAXIMUM bullish breadth conjured from a missing quote."""
+    from live_composite import _breadth_ratio
+    assert _breadth_ratio(1500.0, None) is None      # absent -> no reading
+    assert _breadth_ratio(1500.0, 0.0) == float("inf")   # genuinely no decliners
+
+
+def test_breadth_ratio_normal_and_bearish_cases():
+    from live_composite import _breadth_ratio
+    assert _breadth_ratio(1500.0, 500.0) == 3.0
+    # advn == 0 with decliners is an EXTREME bearish tape, not "no reading"
+    assert _breadth_ratio(0.0, 900.0) == 0.0
+
+
+def test_breadth_ratio_none_when_advancers_absent():
+    from live_composite import _breadth_ratio
+    assert _breadth_ratio(None, 900.0) is None
+    assert _breadth_ratio(None, None) is None
+
+
+def test_inf_still_scores_max_when_it_is_real():
+    """Guard the other direction: the inf path must survive for a true 10/10."""
+    from scoring import breadth as _breadth
+    r = _breadth.score(pct_above_50="", nyse_ad="Neutral", new_highs=0.0,
+                       new_lows=0.0, breadth_ratio=float("inf"),
+                       breadth_numeric=1500.0)
+    assert r.score == 10

@@ -7,6 +7,10 @@ import pytest
 import repo_paths
 from shared import market_calendar as mc
 
+
+def _t(h, m):
+    return dt.time(h, m)
+
 CT = ZoneInfo("America/Chicago")
 ET = ZoneInfo("America/New_York")
 
@@ -471,3 +475,60 @@ def test_unknown_window_name_raises():
     """A typo'd window name is a programming error, not a config degrade."""
     with pytest.raises(KeyError):
         mc.in_window("nope", _ct(2026, 8, 17, 10, 0))
+
+
+# --- scheduled slot times ([slots] in sessions.toml) -------------------------
+# The scheduled Claude-analyze briefings and the thrice-daily action digest were
+# hard-coded dicts in services/options_svc/scheduler.py, and the nightly momentum
+# cascade a tuple in sentiment_svc. They are named clock times - the same thing
+# [windows] already models - and two of the three cost real money per firing
+# (each analyze slot is a paid Claude call), so they belong where an operator can
+# see and change them.
+
+def test_analyze_slots_match_the_pre_extraction_times():
+    assert mc.slot_times("analyze") == {
+        "premarket": _t(8, 0),
+        "open": _t(8, 48),
+        "midday": _t(11, 30),
+        "close": _t(15, 15),
+    }
+    assert mc.slot_grace_min("analyze") == 20
+
+
+def test_action_alert_slots_match_the_pre_extraction_times():
+    assert mc.slot_times("action_alert") == {
+        "morning": _t(10, 0),
+        "midday": _t(13, 0),
+        "close": _t(15, 0),
+    }
+    assert mc.slot_grace_min("action_alert") == 20
+
+
+def test_momentum_is_a_single_nightly_slot():
+    assert mc.slot_times("momentum") == {"at": _t(16, 20)}
+
+
+def test_unknown_slot_group_raises():
+    """A typo'd group is a programming error, not something to degrade past -
+    mirrors _window()."""
+    import pytest as _pytest
+    with _pytest.raises(KeyError):
+        mc.slot_times("nope")
+
+
+def test_a_malformed_slot_time_falls_back_rather_than_crashing(monkeypatch):
+    monkeypatch.setattr(mc, "load_config",
+                        lambda: {"slots": {"analyze": {"midday": "half past"}}})
+    assert mc.slot_times("analyze")["midday"] == _t(11, 30)
+
+
+def test_a_malformed_grace_falls_back(monkeypatch):
+    monkeypatch.setattr(mc, "load_config",
+                        lambda: {"slots": {"analyze": {"grace_min": "soon"}}})
+    assert mc.slot_grace_min("analyze") == 20
+
+
+def test_grace_min_is_not_returned_as_a_slot(monkeypatch):
+    """grace_min shares the table with the times; treating it as one would
+    schedule a briefing at a nonsense hour."""
+    assert "grace_min" not in mc.slot_times("analyze")

@@ -1,8 +1,16 @@
 """Thin proxy client for the NiceGUI webgui app.
 
-Wraps the existing ``schwab-proxy/proxy_client.py`` adapter classes (so pages
-reuse the battle-tested client code instead of reimplementing it) and adds a
-``health()`` helper the shell uses to render a proxy-down banner.
+Two read-only HTTP helpers over the schwab-proxy: ``health()`` (the shell's
+proxy-down banner + the Status page) and ``api_call_stats()`` (the Settings
+"API usage" card). Neither raises.
+
+This module used to also build ``schwab_py_client`` / ``schwab_client``
+singletons out of ``schwab-proxy/proxy_client.py``, which meant Tier 1 carried
+sys.path glue into a hyphenated app folder and held live Schwab-capable clients.
+Nothing had called them since the 3-tier migration - every page reads Redis - so
+they went on 2026-08-21, completing "remove the last sys.path engine-glue from
+webgui" from the 3-tier plan. If a page ever appears to need one, that is the
+signal it should be reading a cache view instead.
 
 Run order reminder: the schwab-proxy must be started first (``:8100``); every
 feature backend resolves its Schwab client + market data through it.
@@ -12,25 +20,12 @@ import sys
 
 import requests
 
-# Repo root on sys.path -> repo_paths + the hyphenated app folders are importable.
+# Repo root on sys.path -> repo_paths is importable.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from repo_paths import PROXY_URL, SCHWAB_PROXY  # noqa: E402
-
-# schwab-proxy contains a hyphen, so it can't be a normal package import; add the
-# folder to sys.path and import the module by name.
-if str(SCHWAB_PROXY) not in sys.path:
-    sys.path.insert(0, str(SCHWAB_PROXY))
-
-from proxy_client import SchwabProxyClient, SchwabPyProxyClient  # noqa: E402
-
-# Shared singletons callers can reuse.
-#   schwab_py_client -> schwab-py compatible (Options Scanner engines)
-#   schwab_client    -> SchwabClient compatible (Sentiment / others)
-schwab_py_client = SchwabPyProxyClient(PROXY_URL)
-schwab_client = SchwabProxyClient(PROXY_URL)
+from repo_paths import PROXY_URL  # noqa: E402
 
 
 def health(base_url: str = PROXY_URL, timeout: float = 3.0) -> dict:

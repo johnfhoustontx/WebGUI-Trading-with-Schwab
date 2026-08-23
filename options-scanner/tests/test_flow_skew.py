@@ -420,3 +420,44 @@ def test_premium_by_strike_defensive():
     # A malformed map must degrade, not raise.
     assert flow_skew.premium_by_strike(
         {"callExpDateMap": {"e": "notamap"}, "putExpDateMap": None}) == {}
+
+
+# ── non-finite and sentinel inputs (2026-08-20, NaN sweep round 3) ──────────
+
+def test_as_float_rejects_non_finite():
+    """`_as_float` is the parsing guard ("float or None"); NaN/inf are not usable
+    numbers. A NaN delta used to seed `best_dist = nan` in _pick_nearest_delta,
+    and every later `dist < nan` comparison is False -- so the NaN contract's IV
+    won permanently. Mirrors the guard completed in the sentiment scorers today."""
+    from math import inf, nan
+
+    from flow_skew import _as_float
+    assert _as_float(nan) is None
+    assert _as_float(inf) is None and _as_float(-inf) is None
+    assert _as_float("3.5") == 3.5 and _as_float(None) is None
+
+
+def test_pick_nearest_delta_skips_a_nan_delta_contract():
+    from math import nan
+
+    from flow_skew import _pick_nearest_delta
+    smap = {"100.0": [{"delta": nan, "volatility": 55.0}],
+            "101.0": [{"delta": -0.25, "volatility": 22.0}]}
+    assert _pick_nearest_delta(smap, -0.25) == 22.0
+
+
+def test_pick_nearest_delta_rejects_schwabs_minus_999_iv_sentinel():
+    """Schwab publishes volatility = -999 for an uncomputable IV. An IV must be
+    positive to be usable; the sentinel contract must not win on delta proximity."""
+    from flow_skew import _pick_nearest_delta
+    smap = {"100.0": [{"delta": -0.25, "volatility": -999.0}],
+            "101.0": [{"delta": -0.30, "volatility": 22.0}]}
+    assert _pick_nearest_delta(smap, -0.25) == 22.0
+
+
+def test_pick_nearest_delta_none_when_no_usable_contract():
+    from math import nan
+
+    from flow_skew import _pick_nearest_delta
+    assert _pick_nearest_delta({"100.0": [{"delta": nan, "volatility": -999.0}]},
+                               -0.25) is None

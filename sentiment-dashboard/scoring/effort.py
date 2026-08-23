@@ -11,6 +11,7 @@ _clamp / confidence-in-[0,1] idiom of scoring/intraday_trend.py.
 from __future__ import annotations
 from dataclasses import dataclass
 import math
+from ._common import clamp as _clamp, num as _num
 
 MIN_BARS = 10          # below this -> confidence 0.0
 WINDOW = 20            # trailing bars the sub-signals read
@@ -25,22 +26,8 @@ class EffortResult:
     components: dict       # signed sub-signals: updown_vol, vol_trend, clv
 
 
-def _clamp(v, lo, hi):
-    return float(max(lo, min(hi, v)))
-
-
 def _mean(xs):
     return sum(xs) / len(xs) if xs else None
-
-
-def _num(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    if v != v or v in (float("inf"), float("-inf")):   # NaN / inf -> missing
-        return None
-    return v
 
 
 def _clean(bar):

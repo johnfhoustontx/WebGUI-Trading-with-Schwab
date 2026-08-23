@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/scanner.toml — WHETHER A SIGNAL FIRES AT ALL
+#
+#   The selection floors. Edit + restart options_svc. Anything omitted falls back
+#   to the built-in default in shared/scanner_config.py.
+#
+#   ⚠ These are the knobs behind the most common "why do I never see signals on
+#     $SPX / SPY / QQQ?" question. It is not a bug: index IV rank frequently sits
+#     below [iv_rank], and index credits below [credit]. Loosening those two is
+#     how you see index signals — and how you start selling cheap premium, which
+#     is what the 2026-06-11 quality retune raised them to stop.
+#
+#   Sibling file: config/flow_alerts.toml holds the ALERT thresholds (what gets
+#   pushed once a signal exists). This file decides what exists.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[iv_rank]
+# Hard pre-filter: reject a candidate below this IV Rank. Selling cheap premium
+# is destructive, so this binds only on low-IV days — most days sit well above.
+# 2026-06-11 quality retune raised 0-DTE 25 -> 35 and SWING 20 -> 30.
+"0-DTE" = 35
+SWING   = 30
+
+[credit]
+# Minimum credit as a fraction of spread width, adaptive by VIX regime: when IV
+# is cheap a thinner credit is acceptable because POP is high; when premium is
+# rich, demand more of it.
+swing = 0.12          # 1-15 DTE. Raised from 0.10 — short DTE leaves less recovery time.
+
+[credit.zero_dte]
+LOW      = 0.08
+NORMAL   = 0.12
+ELEVATED = 0.15
+HIGH     = 0.20
+
+[directional]
+# A directionally-biased CREDIT spread (mode="DIRECTIONAL"): strikes closer to
+# spot than the premium ranges, so they pay more and carry a higher floor.
+min_credit_pct   = 0.20
+max_risk_pct     = 0.02      # 2% account risk per directional trade
+max_per_symbol_bucket = 2
+pcs_delta = [-0.55, -0.30]   # short-delta band
+ccs_delta = [0.30, 0.55]
+
+[single_leg]
+# LONG/SHORT calls & puts — NOT the same thing as [directional] above, which is a
+# two-leg credit spread. Scored on strategy_scoring's Fit+Quality model, because
+# the premium-seller's scoring.py cannot score a long call (it rewards positive
+# theta and penalises long vega).
+max_per_symbol = 8           # 4 structures x 2 windows (0-DTE + swing)
+min_score      = 50.0
+excluded_grades = ["Weak"]
+
+[scores]
+# Capture floor: a signal must reach this to be recorded at all.
+capture_min = 58
+
+# Index premium spreads in a mildly-negative GEX (trend-prone) regime need a
+# higher bar than the capture floor. Below gex_strong_neg, index premium is
+# skipped outright.
+neg_gex_min   = 62
+gex_strong_neg = -0.30
+
+# Emission cut for the Strategy Finder (services/options_svc). Deliberately a
+# SEPARATE knob from single_leg.min_score even though both read 50.0 today: they
+# express different intents ("no low-scoring trades" vs "no gate-failing trades")
+# and either may move alone.
+swing_min = 50.0

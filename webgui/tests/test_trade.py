@@ -265,3 +265,315 @@ def test_humanize_reason_swaps_leading_key():
     assert trade.humanize_reason("Insufficient fundamental data") == "Insufficient fundamental data"
     assert trade.humanize_reason("") == ""
     assert trade.humanize_reason(None) is None
+
+
+
+
+# ── two-sided reads (Phase 2, task 2.5) ──────────────────────────────────────
+
+class TestClearanceRows:
+    def test_both_sides_render_even_when_one_is_blocked(self):
+        """A blocked side WITH its reasons is a research finding. Rendering
+        only the permitted side would make the reader infer the absence."""
+        dc = {"market": {"summary": "SPY above a rising 200-DMA"},
+              "long": {"state": "cleared", "reasons": ["SPY above a rising 200-DMA"]},
+              "short": {"state": "relative_only",
+                        "reasons": ["SPY above a rising 200-DMA",
+                                    "committed direction is Softening"]}}
+        rows = trade.clearance_rows(dc)
+        assert [r["side"] for r in rows] == ["Long", "Short"]
+        assert rows[1]["state"] == "relative only"
+        assert len(rows[1]["reasons"]) == 2
+
+    def test_absent_clearance_renders_nothing_rather_than_a_placeholder(self):
+        assert trade.clearance_rows(None) == []
+        assert trade.clearance_rows({}) == []
+
+    def test_each_state_maps_to_a_finite_palette_class(self):
+        """Data-driven colours map to a FIXED set of static Tailwind classes,
+        never a runtime-built arbitrary value (the house rule)."""
+        seen = {trade.clearance_text_class(s)
+                for s in ("cleared", "relative_only", "blocked", "nonsense", None)}
+        assert seen <= set(trade.CLEARANCE_TEXT_CLASSES)
+
+
+class TestDealerRows:
+    def test_a_collected_fresh_row_yields_readable_fields(self):
+        ctx = {"collected": True, "stale": False, "gamma_regime": "above",
+               "regime_words": "long gamma — dealers damp moves",
+               "setup_words": "Grind — charm drift into the close",
+               "flip": 306.5, "call_wall": 315.0, "put_wall": 300.0,
+               "call_wall_pct": 1.71, "put_wall_pct": -3.13,
+               "atm_iv": 27.4, "iv_state": "stable", "net_gex": 4.12e8,
+               "summary": "long gamma · call wall 315"}
+        rows = trade.dealer_rows(ctx)
+        labels = {r["label"] for r in rows}
+        assert "Gamma regime" in labels and "Call wall" in labels
+        cw = next(r for r in rows if r["label"] == "Call wall")
+        assert "315" in cw["value"] and "+1.7" in cw["value"]
+
+    def test_an_uncollected_symbol_yields_no_rows(self):
+        assert trade.dealer_rows({"collected": False, "summary": "Not collected"}) == []
+        assert trade.dealer_rows(None) == []
+
+    def test_suppressed_walls_are_simply_absent_not_shown_as_none(self):
+        """Off-hours the walls are withheld deliberately. Printing 'None' would
+        read as a level."""
+        ctx = {"collected": True, "stale": False, "gamma_regime": "above",
+               "regime_words": "long gamma", "setup_words": "",
+               "flip": 306.5, "call_wall": None, "put_wall": None,
+               "call_wall_pct": None, "put_wall_pct": None,
+               "atm_iv": None, "iv_state": "na", "net_gex": 0.0, "summary": "x"}
+        labels = {r["label"] for r in trade.dealer_rows(ctx)}
+        assert "Call wall" not in labels and "Put wall" not in labels
+
+
+class TestPeerRow:
+    PEERS = {"sector": "Technology", "rank": 3, "n": 5,
+             "strongest": {"symbol": "NVDA", "score": 91},
+             "weakest": {"symbol": "INTC", "score": 12},
+             "above": {"symbol": "AVGO", "score": 74},
+             "below": {"symbol": "MSFT", "score": 66},
+             "ranked": [{"symbol": "NVDA", "score": 91}]}
+
+    def test_names_the_placement_in_words(self):
+        line = trade.peer_line(self.PEERS, "AAPL")
+        assert "3rd of 5" in line and "Technology" in line
+
+    def test_absent_peers_render_nothing(self):
+        assert trade.peer_line(None, "AAPL") == ""
+        assert trade.peer_line({"ranked": []}, "AAPL") == ""
+
+    def test_peer_chips_carry_every_named_peer(self):
+        chips = trade.peer_chips(self.PEERS, "AAPL")
+        syms = {c["symbol"] for c in chips}
+        assert {"NVDA", "AVGO", "MSFT", "INTC"} <= syms
+        assert all(c["role"] for c in chips)
+
+
+class TestShortGateRows:
+    def test_short_gates_render_separately_from_long_ones(self):
+        v = {"gates_triggered": ["Below 200EMA: cannot be BUY"],
+             "short_gates": ["Squeeze risk (17.1 days to cover): cannot be SELL"]}
+        assert trade.gate_rows(v) == ["Below 200EMA: cannot be BUY"]
+        assert trade.short_gate_rows(v) == [
+            "Squeeze risk (17.1 days to cover): cannot be SELL"]
+
+    def test_a_verdict_without_short_gates_is_fine(self):
+        assert trade.short_gate_rows({"gates_triggered": []}) == []
+        assert trade.short_gate_rows(None) == []
+
+
+class TestEarningsCoverageNote:
+    def test_an_unlisted_symbol_says_the_date_is_UNKNOWN(self):
+        """The gate's silence must not read as an all-clear. Alpha Vantage's
+        coverage is measurably patchy (MSFT/AMZN/META absent while AAPL and
+        GOOGL are listed on the same cycle), so an unlisted symbol has to say
+        so rather than let the reader infer 'no earnings'."""
+        note = trade.earnings_note("not_listed", None)
+        assert "unknown" in note.lower()
+        assert "no earnings" not in note.lower()
+
+    def test_a_covered_symbol_with_nothing_scheduled_can_say_so_plainly(self):
+        note = trade.earnings_note("none_scheduled", None)
+        assert "none scheduled" in note.lower()
+
+    def test_a_known_date_is_reported_with_its_distance(self):
+        assert "12 days" in trade.earnings_note("upcoming", 12)
+
+    def test_no_coverage_information_renders_nothing(self):
+        assert trade.earnings_note(None, None) == ""
+
+
+class TestTradePlanRows:
+    PLAN = {
+        "symbol": "NVDA", "side": "long", "action": "debit",
+        "structure": "call debit spread", "dte_min": 30, "dte_max": 45,
+        "rationale": "IV is cheap — pay for convexity rather than sell it.",
+        "entry_zone": "pull back toward the 178 flip; avoid entering into the call wall",
+        "stop": 173.7, "stop_note": "1.8x ATR — whichever is tighter",
+        "target": "+1.6% vs SPY over 20 trading days",
+        "short_strike_guidance": "",
+        "time_stop_trading_days": 20, "time_stop_date": "2026-09-21",
+        "time_stop_note": "Exit or re-underwrite at 20 trading days — past the model's horizon the read is unmodelled.",
+        "events": "Earnings: none scheduled in the calendar",
+        "what_would_change_it": [],
+    }
+
+    def test_every_field_becomes_a_labelled_row(self):
+        rows = trade.plan_rows(self.PLAN)
+        labels = [r["label"] for r in rows]
+        for expected in ("Structure", "Entry zone", "Stop", "Target",
+                         "Time stop", "Events"):
+            assert expected in labels
+
+    def test_the_structure_row_carries_the_tenor(self):
+        row = next(r for r in trade.plan_rows(self.PLAN) if r["label"] == "Structure")
+        assert "call debit spread" in row["value"]
+        assert "30" in row["value"] and "45" in row["value"]
+
+    def test_the_time_stop_shows_the_date_AND_the_horizon(self):
+        row = next(r for r in trade.plan_rows(self.PLAN) if r["label"] == "Time stop")
+        assert "20 trading days" in row["value"]
+        assert "2026-09-21" in row["value"]
+
+    def test_an_absent_stop_is_omitted_not_rendered_as_none(self):
+        plan = dict(self.PLAN, stop=None, stop_note="")
+        assert not any(r["label"] == "Stop" for r in trade.plan_rows(plan))
+
+    def test_no_plan_renders_nothing(self):
+        assert trade.plan_rows(None) == []
+
+    def test_a_no_trade_plan_renders_what_would_change_it_instead(self):
+        plan = dict(self.PLAN, action="none", structure=None,
+                    what_would_change_it=["SPY losing its 200-DMA"])
+        rows = trade.plan_rows(plan)
+        assert not any(r["label"] == "Structure" for r in rows)
+        assert trade.plan_headline(plan)[1] == "none"
+
+    def test_the_headline_names_the_side_and_the_action(self):
+        text, kind = trade.plan_headline(self.PLAN)
+        assert "long" in text.lower() and "debit" in text.lower()
+        assert kind == "debit"
+
+    def test_a_relative_plan_says_so_in_the_headline(self):
+        plan = dict(self.PLAN, action="relative",
+                    structure="pair vs a top-decile name")
+        text, kind = trade.plan_headline(plan)
+        assert kind == "relative"
+        assert "pair" in text.lower()
+
+
+# ── Phase 4.3: the page says which regime's weights scored ───────────────────
+# A verdict scored under regime weights and one scored under the pooled fit are
+# different claims about the same symbol. When they can differ, the card has to
+# say which it made — otherwise the evidence expander shows contributions whose
+# weights the reader cannot account for.
+
+def test_a_named_regime_is_described_in_WORDS_not_its_artifact_key():
+    """`highvol` is a dict key. The card says what it means about the tape."""
+    note = trade.swing_regime_note({"regime_key": "highvol"})
+    assert "volatility" in note.lower()
+    assert "highvol" not in note.lower()
+
+
+def test_each_regime_gets_its_own_description():
+    notes = {k: trade.swing_regime_note({"regime_key": k})
+             for k in ("trend", "chop", "highvol")}
+    assert len(set(notes.values())) == 3
+
+
+def test_an_unrecognised_key_still_says_something_rather_than_nothing():
+    """A fit that grows a fourth regime must not render a blank line."""
+    assert trade.swing_regime_note({"regime_key": "crisis"}).strip()
+
+
+def test_the_pooled_fit_says_so_rather_than_printing_a_key():
+    """'all' is an internal artifact key, not a market condition. Printing it
+    raw would read as a regime named 'all'."""
+    note = trade.swing_regime_note({"regime_key": "all"})
+    assert "all" not in note.lower().split()
+    assert "regime" in note.lower()
+
+
+def test_an_artifact_predating_regimes_shows_nothing_rather_than_a_guess():
+    assert trade.swing_regime_note({"model_version": "2026-06-28"}) == ""
+    assert trade.swing_regime_note(None) == ""
+
+
+# ── Phase 4: the card states the model's directional exposure ────────────────
+# Phase 4 measured this composite at cross-sectional IC +0.16 when the market's
+# forward 20 days were up and -0.11 when they were down, with the whole
+# asymmetry carried by the volatility factors — and the live artifact puts 48%
+# of its absolute weight there. A BUY from this model therefore skews toward
+# high-beta names, which is exposure that reverses in exactly the drawdown a
+# 1-8 week position cannot sit through. The card has to say so.
+
+def test_the_exposure_note_states_the_share():
+    note = trade.swing_exposure_note({"risk_share": 0.476})
+    assert "48%" in note or "47.6%" in note
+
+
+def test_a_material_share_carries_the_reversal_caveat():
+    note = trade.swing_exposure_note({"risk_share": 0.476})
+    assert "revers" in note.lower() or "falls" in note.lower()
+
+
+def test_a_small_share_reports_the_number_without_the_caveat():
+    note = trade.swing_exposure_note({"risk_share": 0.04})
+    assert note
+    assert "revers" not in note.lower() and "falls" not in note.lower()
+
+
+def test_an_unknown_share_says_nothing_rather_than_implying_zero():
+    """None means the factor registry was unreachable, not that the model has
+    no exposure. Printing '0%' there would be a confident wrong answer."""
+    assert trade.swing_exposure_note({"risk_share": None}) == ""
+    assert trade.swing_exposure_note({}) == ""
+    assert trade.swing_exposure_note(None) == ""
+
+
+# ── Phase 6: is the live edge holding? ───────────────────────────────────────
+# The monitor reads the recommendation journal. Two traps it must not fall into,
+# both of which would produce a confident number from nothing:
+#   * a young journal has too few labelled rows to correlate anything, and that
+#     is "no measurement", not "a thin edge";
+#   * the live POOLED statistic is not the artifact's per-date cross-sectional
+#     OOS IC, so printing them side by side as though they were comparable would
+#     manufacture a decay finding out of a units mismatch.
+
+_LIC_OK = {
+    "status": "ok", "n_labelled": 64, "min_required": 20,
+    "pooled_ic": 0.081, "pooled_ic_beta_adj": -0.004,
+    "by_date_ic": None, "comparable_to_artifact": False,
+    "ic_market_up": 0.14, "ic_market_down": -0.09,
+    "artifact_oos_ic": 0.0206, "decay": None,
+    "long": {"n": 30, "mean_fwd": 0.011, "hit_rate": 0.5, "ic": 0.05},
+    "short": {"n": 18, "mean_fwd": -0.004, "hit_rate": 0.44, "ic": 0.02},
+    "horizon_days": 20,
+}
+
+
+def test_live_ic_line_reports_the_pooled_reading():
+    line = trade.live_ic_line(_LIC_OK)
+    assert "+0.081" in line or "0.081" in line
+
+
+def test_it_says_the_pooled_number_is_NOT_the_artifacts_statistic():
+    """Different units: a pooled correlation over all readings versus a mean of
+    per-date cross-sectional correlations."""
+    line = trade.live_ic_line(_LIC_OK).lower()
+    assert "not" in line or "pooled" in line
+
+
+def test_a_young_journal_reports_how_far_off_a_reading_is():
+    line = trade.live_ic_line({"status": "insufficient", "n_labelled": 3,
+                               "min_required": 20})
+    assert "3" in line and "20" in line
+    assert "0.0" not in line          # no number that could read as an IC
+
+
+def test_no_monitor_block_renders_nothing():
+    assert trade.live_ic_line(None) == ""
+    assert trade.live_ic_line({}) == ""
+
+
+def test_the_beta_split_is_surfaced_because_that_is_the_whole_question():
+    line = trade.live_ic_split_line(_LIC_OK)
+    assert "+0.14" in line and "-0.09" in line
+
+
+def test_the_beta_adjusted_reading_is_shown_when_present():
+    line = trade.live_ic_split_line(_LIC_OK).lower()
+    assert "beta" in line
+
+
+def test_the_split_line_is_empty_without_a_reading():
+    assert trade.live_ic_split_line({"status": "insufficient"}) == ""
+
+
+def test_decay_is_only_claimed_from_the_COMPARABLE_statistic():
+    assert trade.live_ic_decay_note(_LIC_OK) == ""
+    comparable = dict(_LIC_OK, by_date_ic=0.004, comparable_to_artifact=True,
+                      decay=-0.0166)
+    assert "decay" in trade.live_ic_decay_note(comparable).lower()

@@ -24,6 +24,7 @@ Palette and the warm-neutral ladder are imported from ``pages/rotation_view.py``
 """
 import math
 
+from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
 from pages.rotation_view import (  # noqa: F401 — the shared palette
     NB, NE, NT, QUAD_CHROMA, QUAD_HUE,
@@ -31,16 +32,6 @@ from pages.rotation_view import (  # noqa: F401 — the shared palette
 
 DASH = "—"
 MINUS = "−"      # U+2212, matching the mono face's figures
-
-
-def _num(v):
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 # ── 1 · the regime cards ─────────────────────────────────────────────────────

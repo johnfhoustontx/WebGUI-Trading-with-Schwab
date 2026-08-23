@@ -33,6 +33,7 @@ from pages import busy as _busy
 from pages import sector_heat as H
 from pages.options.theme import SECTOR_FONT_HEAD_HTML, SECTOR_TOKENS as _T
 from pages.sentiment import industry_rows, sector_table_rows
+from pages.view_watch import watch_view
 from pages.ui_guard import guard
 
 VIEW = "sentiment:sectors"
@@ -297,15 +298,8 @@ def render():
         _render_head()
         _render_rows()
 
-    @guard
-    def _maybe_repaint():
-        ver = bus_client.read_version(VIEW)
-        if ver == state["ver"]:
-            return
-        state["ver"] = ver
-        _read_cache()
-        _apply()
-
-    state["ver"] = bus_client.read_version(VIEW)
     _apply()
-    ui.timer(2.0, _maybe_repaint)
+    # Version-gated repaint + seed, in one line (pages/view_watch.py).
+    # This idiom -- probe :ver, compare, re-read, repaint, hang it on a
+    # 2 s timer -- was written out longhand on 22 pages.
+    watch_view(VIEW, lambda: (_read_cache(), _apply()))

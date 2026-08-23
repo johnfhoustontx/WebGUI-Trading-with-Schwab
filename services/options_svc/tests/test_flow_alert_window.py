@@ -26,6 +26,7 @@ import pytest
 from services.options_svc import handlers
 from shared import market_calendar as mc
 from shared.bus import Bus
+from shared.bus.client import reset_fake_bus
 
 BEFORE = dt.date(2026, 8, 14)     # Friday before activation
 ACTIVE = dt.date(2026, 8, 17)     # activation Monday
@@ -216,8 +217,17 @@ def test_config_opt_in_lets_gth_alerts_fire(monkeypatch):
 
 def test_regular_window_detection_is_unaffected(monkeypatch):
     """Power check for the inertness tests above: the 08:00 and 15:19 edges --
-    both OUTSIDE the 08:30-15:00 REGULAR session -- still detect and push."""
+    both OUTSIDE the 08:30-15:00 REGULAR session -- still detect and push.
+
+    Each time is evaluated from a CLEAN cache, which is the point: run_flow_alerts
+    writes a cooldown map, so without the reset 08:15 would be suppressed by
+    08:00's cooldown and this would assert the opposite of what it means. That
+    independence used to come free because every ``Bus(fake=True)`` had its own
+    store -- a semantic prod never had (one Memurai, shared by every Bus). Now
+    that the fake matches prod, the reset has to be explicit.
+    """
     for hh, mm in [(8, 0), (8, 15), (15, 19)]:
+        reset_fake_bus()
         bus = Bus(fake=True)
         sent = []
         _wire(monkeypatch, sent=sent)

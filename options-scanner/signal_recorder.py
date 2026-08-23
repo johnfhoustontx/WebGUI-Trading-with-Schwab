@@ -6,12 +6,17 @@ from zoneinfo import ZoneInfo
 
 import signal_db
 
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import scanner_config as _scfg  # noqa: E402
+
 log = logging.getLogger("signal_recorder")
 TZ = ZoneInfo("America/Chicago")
 # Quality-first capture floor: only signals scoring >= MIN_SCORE are recorded.
 # 2026-06-11 quality retune: raised 50 -> 58 to stop capturing marginal signals.
 # See docs/plans/2026-06-11-quality-first-selection-design.md.
-MIN_SCORE = 58
+MIN_SCORE = _scfg.scores()["capture_min"]   # config/scanner.toml
 
 
 def _dedup_key(sig, scanner_type):

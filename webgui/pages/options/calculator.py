@@ -1868,7 +1868,8 @@ def render():
     @guard_async
     async def _poll_chain():
         # The :ver probe stays ON the event loop (cheap). The chain payload
-        # (cache:options:calc_chain is the full ~7000-contract chain, ~10 MB — a
+        # (cache:options:calc_chain — thinned server-side to the five fields this
+        # page reads, ~0.7 MB since 2026-08-20; it was the raw ~8.8 MB chain — a
         # blocking GET + JSON parse) is read OFF the loop via run.io_bound so it
         # never blocks other clients. The version-gate means the big read only
         # happens when a new chain was published (not every 1 s tick), and the

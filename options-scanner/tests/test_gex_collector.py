@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import date, datetime, time as dtime, timedelta
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -7,32 +7,33 @@ import gex_collector as gc
 import gex_history_db as db
 
 
+TZ = ZoneInfo("America/Chicago")
+STEP = timedelta(minutes=gc.POLL_INTERVAL_MIN)
+
+
+# next_boundary is defined in terms of POLL_INTERVAL_MIN, so these expectations
+# are DERIVED from it rather than written out. They were hard-coded to a 2-minute
+# cadence, and when the collector moved to 1 minute (2026-07-11) all four started
+# failing - then sat in the permanent-baseline bucket mislabelled "timing
+# dependent" for a month. Same reasoning as LOCK_TTL_SEC in gex_collector.py.
 def test_next_boundary_mid_interval():
-    tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 10, 2, 30, tzinfo=tz)
-    target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 13, 10, 4, 0, tzinfo=tz)
+    aligned = datetime(2026, 4, 13, 10, 0, 0, tzinfo=TZ)
+    assert gc.next_boundary(aligned + STEP / 2) == aligned + STEP
 
 
 def test_next_boundary_on_boundary_rolls_forward():
-    tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 10, 4, 0, tzinfo=tz)
-    target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 13, 10, 6, 0, tzinfo=tz)
+    aligned = datetime(2026, 4, 13, 10, 0, 0, tzinfo=TZ)
+    assert gc.next_boundary(aligned) == aligned + STEP
 
 
 def test_next_boundary_rolls_over_hour():
-    tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 10, 58, 0, tzinfo=tz)
-    target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 13, 11, 0, 0, tzinfo=tz)
+    top_of_hour = datetime(2026, 4, 13, 11, 0, 0, tzinfo=TZ)
+    assert gc.next_boundary(top_of_hour - STEP) == top_of_hour
 
 
 def test_next_boundary_rolls_over_day():
-    tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 23, 58, 0, tzinfo=tz)
-    target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 14, 0, 0, 0, tzinfo=tz)
+    midnight = datetime(2026, 4, 14, 0, 0, 0, tzinfo=TZ)
+    assert gc.next_boundary(midnight - STEP) == midnight
 
 
 def _make_client(chain_by_symbol):
@@ -316,13 +317,18 @@ def test_main_exits_past_stop_time(tmp_path, monkeypatch):
 
 def test_main_skips_before_market_open(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    tz = ZoneInfo("America/Chicago")
+    # Derived from START_/STOP_ rather than written out: the fixture used a
+    # hard-coded 8:20/8:25 as "before the open", which stopped being true when
+    # collection moved to 08:00 CT - the loop then polled twice, not once.
+    # run_collector_loop reads the clock TWICE per iteration (once to pick the
+    # boundary, once after sleeping to decide whether to poll).
+    day = date(2026, 4, 13)
+    start = datetime.combine(day, dtime(gc.START_HOUR, gc.START_MIN), tzinfo=TZ)
+    stop = datetime.combine(day, dtime(gc.STOP_HOUR, gc.STOP_MIN), tzinfo=TZ)
     times = iter([
-        datetime(2026, 4, 13, 8, 20, 0, tzinfo=tz),
-        datetime(2026, 4, 13, 8, 25, 0, tzinfo=tz),
-        datetime(2026, 4, 13, 8, 30, 0, tzinfo=tz),
-        datetime(2026, 4, 13, 8, 30, 0, tzinfo=tz),
-        datetime(2026, 4, 13, 15, 25, 0, tzinfo=tz),
+        start - 10 * STEP, start - 5 * STEP,   # boundary lands before the open -> skipped
+        start, start,                          # first boundary at the open -> one poll
+        stop,                                  # past the stop time -> exit
     ])
     polls = []
     def clock():

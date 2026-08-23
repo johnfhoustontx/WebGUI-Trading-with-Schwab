@@ -52,11 +52,23 @@ def _ret(close: pd.Series, lookback: int, skip: int = 0) -> pd.Series:
     return end / start - 1.0
 
 
-FACTORS: dict = {}  # name -> {"fn", "direction", "needs_ref", "desc"}
+FACTORS: dict = {}  # name -> {"fn", "direction", "needs_ref", "desc", "family"}
+
+# What KIND of bet a factor's weight represents. `risk` is the load-bearing one:
+# Phase 4 measured the composite at cross-sectional IC +0.16 when the market's
+# forward 20 days were up and -0.11 when they were down, and the whole asymmetry
+# sits in these five. A consumer can only state that exposure if which factors
+# are volatility factors is written down ONCE, here, beside their definitions.
+FAMILIES = ("risk", "momentum", "relative", "other")
 
 
-def _register(name, fn, direction=1, needs_ref=False, desc=""):
-    FACTORS[name] = {"fn": fn, "direction": direction, "needs_ref": needs_ref, "desc": desc}
+def _register(name, fn, direction=1, needs_ref=False, desc="", family="other"):
+    FACTORS[name] = {"fn": fn, "direction": direction, "needs_ref": needs_ref,
+                     "desc": desc, "family": family}
+
+
+def family_of(name):
+    return (FACTORS.get(name) or {}).get("family", "other")
 
 
 def mom_12_1(df: pd.DataFrame) -> pd.Series:
@@ -118,22 +130,93 @@ def rs_sector(df: pd.DataFrame, ref_close: Optional[pd.Series] = None) -> pd.Ser
     return _excess_return(_close(df), ref_close, 63)
 
 
+# --- short-side slate ------------------------------------------------------
+# The ten factors above describe a RISING name and express a falling one only by
+# inversion. These four are asymmetric by construction: each measures something
+# about the downside that a symmetric factor cannot represent. All follow the
+# module contract — raw, causal, HIGHER = MORE BULLISH.
+
+MAX_WINDOW = 21          # the "past month" of the MAX-effect literature
+SEMI_WINDOW = 60         # matches _realized_vol's window, so the two are comparable
+DBETA_WINDOW = 252
+
+
+def max_effect(df: pd.DataFrame) -> pd.Series:
+    """-(largest single-day return in the past month).
+
+    Bali/Cakici/Whitelaw: stocks with an extreme recent daily gain subsequently
+    UNDERPERFORM — investors overpay for lottery-like payoffs. Negated, so a
+    spiky name scores low."""
+    r = _close(df).pct_change()
+    return -r.rolling(MAX_WINDOW, min_periods=MAX_WINDOW).max()
+
+
+def semivol(df: pd.DataFrame) -> pd.Series:
+    """-(downside semi-deviation of daily returns).
+
+    Distinct from `low_vol`, which counts an upward jump as risk. Here only
+    negative returns contribute, so a name that moves violently UP is not
+    penalised — which is the asymmetry the short side turns on."""
+    r = _close(df).pct_change()
+    downside = r.where(r < 0, 0.0)
+    sd = downside.pow(2).rolling(SEMI_WINDOW, min_periods=SEMI_WINDOW).mean().pow(0.5)
+    return -sd
+
+
+def downside_beta(df: pd.DataFrame, ref_close: Optional[pd.Series] = None) -> pd.Series:
+    """-(beta measured on DOWN-market days only).
+
+    A name's average beta says little about what it does when the tape breaks;
+    downside beta is the part a short cares about. Negated, so a name that falls
+    harder than the market scores low. NaN without a reference — an unmeasurable
+    beta must not read as a beta of zero."""
+    close = _close(df)
+    if ref_close is None:
+        return pd.Series(np.nan, index=close.index)
+    ref = ref_close.reindex(close.index).ffill()
+    r, m = close.pct_change(), ref.pct_change()
+    down = m < 0
+    rd, md = r.where(down), m.where(down)
+    cov = (rd * md).rolling(DBETA_WINDOW, min_periods=DBETA_WINDOW // 4).mean() \
+        - rd.rolling(DBETA_WINDOW, min_periods=DBETA_WINDOW // 4).mean() \
+        * md.rolling(DBETA_WINDOW, min_periods=DBETA_WINDOW // 4).mean()
+    var = md.rolling(DBETA_WINDOW, min_periods=DBETA_WINDOW // 4).var()
+    return -(cov / var.replace(0, np.nan))
+
+
+def below_200ema(df: pd.DataFrame) -> pd.Series:
+    """min(0, close/EMA200 - 1) — how far BELOW the long-term mean, or 0 above it.
+
+    Deliberately one-sided: `trend_quality` already carries the upside, and a
+    symmetric distance would pay this factor twice for the same information.
+    What it adds is the broken-name tail, where the short candidates live."""
+    close = _close(df)
+    ema200 = close.ewm(span=200, adjust=False).mean()
+    out = ((close - ema200) / ema200).clip(upper=0.0)
+    return out.where(close.expanding().count() >= 200)   # same warmup as trend_quality
+
+
 def turnover(df: pd.DataFrame) -> pd.Series:
     vol = pd.Series(df["volume"].to_numpy(dtype="float64"),
                     index=pd.to_datetime(df["datetime"]))
     return vol / vol.rolling(63, min_periods=63).mean()
 
 
-_register("mom_12_1", mom_12_1, desc="12-1 intermediate momentum")
-_register("mom_6_1", mom_6_1, desc="6-1 momentum")
-_register("pth", pth, desc="price / 252d high (anchoring)")
-_register("str_5d", str_5d, desc="short-term (5d) reversal, sign-corrected")
-_register("low_vol", low_vol, desc="-(60d realized vol)")
-_register("vol_adj_mom", vol_adj_mom, desc="3m return / realized vol")
-_register("trend_quality", trend_quality, desc="distance above 50/200 EMA stack")
-_register("rs_spy", rs_spy, needs_ref=True, desc="63d excess return vs SPY")
-_register("rs_sector", rs_sector, needs_ref=True, desc="63d excess return vs sector ETF")
-_register("turnover", turnover, desc="volume / 63d avg (conditioning var)")
+_register("mom_12_1", mom_12_1, desc="12-1 intermediate momentum", family="momentum")
+_register("mom_6_1", mom_6_1, desc="6-1 momentum", family="momentum")
+_register("pth", pth, desc="price / 252d high (anchoring)", family="momentum")
+_register("str_5d", str_5d, desc="short-term (5d) reversal, sign-corrected", family="momentum")
+_register("low_vol", low_vol, desc="-(60d realized vol)", family="risk")
+_register("vol_adj_mom", vol_adj_mom, desc="3m return / realized vol", family="risk")
+_register("trend_quality", trend_quality, desc="distance above 50/200 EMA stack", family="momentum")
+_register("rs_spy", rs_spy, needs_ref=True, desc="63d excess return vs SPY", family="relative")
+_register("rs_sector", rs_sector, needs_ref=True, desc="63d excess return vs sector ETF", family="relative")
+_register("turnover", turnover, desc="volume / 63d avg (conditioning var)", family="other")
+_register("max_effect", max_effect, desc="-(max 1d return over 21d) — lottery preference", family="risk")
+_register("semivol", semivol, desc="-(60d downside semi-deviation)", family="risk")
+_register("downside_beta", downside_beta, needs_ref=True,
+          desc="-(beta on down-market days, 252d)", family="risk")
+_register("below_200ema", below_200ema, desc="min(0, close/EMA200-1) — one-sided break", family="momentum")
 
 
 def compute_factor_frame(df, spy_close=None, sector_close=None) -> pd.DataFrame:

@@ -133,22 +133,14 @@ FLOW_ALERTS_KEY = "cache:options:flow_alerts"
 # outage rather than "wrong database". --alerts-db overrides.
 LIVE_ALERTS_DB = 0
 
-# NYSE full-closure holidays 2026–2027, COPIED (not imported) from
-# services/options_svc/scheduler.py. Importing that module would drag `compute`
-# and `handlers` — the engine chain and the Redis bus — into a tool that
-# deliberately touches neither; shared/notify/channels.py keeps its own copy for
-# the same reason. Observed dates per NYSE (Sat->prior Fri, Sun->following Mon).
-# **Update yearly**, alongside webgui/alerts.py _HOLIDAYS.
-_HOLIDAYS = frozenset({
-    # 2026
-    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
-    _date(2026, 11, 26), _date(2026, 12, 25),
-    # 2027
-    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
-    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
-    _date(2027, 11, 25), _date(2027, 12, 24),
-})
+# Holidays come from the ONE source, `shared/market_calendar` (algorithmic, so no
+# yearly edit and correct past 2027). This module used to carry its own
+# 2026-2027 frozenset justified by a comment claiming an import would drag
+# `compute` and `handlers` in — that named the wrong module: market_calendar is
+# deliberately import-light and pulls in no pandas/numpy/redis/fastapi
+# (measured 2026-08-20). The same comment claimed shared/notify/channels.py kept
+# a copy "for the same reason", which had also stopped being true.
+from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 
 
 def is_trading_day(d) -> bool:
@@ -162,7 +154,7 @@ def is_trading_day(d) -> bool:
     open interest has already settled to include the prior session's trades, so
     vol/OI is deflated throughout and index names can come back with OI 0 across
     the board — the exact artifact that invalidated the 2026-08-09 baseline."""
-    return d.weekday() < 5 and d not in _HOLIDAYS
+    return _cal_is_trading_day(d)
 
 
 def flow_symbols():

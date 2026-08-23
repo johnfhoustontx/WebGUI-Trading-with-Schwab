@@ -7,28 +7,40 @@ the dashboard's "Refresh marks now" action and the EOD pipeline so they
 write structurally identical rows.
 """
 
+import pathlib as _pathlib
+import sys as _sys
 from datetime import date
 
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import trade_mgmt as _trade_mgmt  # noqa: E402
+
 MULTIPLIER = 100
-TP_FRAC = 0.50            # >= 50% credit captured → ARM break-even (no longer an immediate close)
-STOP_MULT = 2.0           # cut at >= 2x credit loss
-DELTA_DRIFT = 0.12        # cut when short delta drifts this far past entry
-DELTA_HARD_CEILING = 0.45 # ...but never hold past this, regardless of entry
-DELTA_ABS_FALLBACK = 0.35 # absolute breach when entry delta is unknown
-CUT_DTE = 2               # cut when DTE <= this and underwater
-RECOVERY_DTE_MIN = 5      # min DTE to DEFER a soft delta stop (a recoverable trade)
-RECOVERY_MIN_CUSHION = 0.015  # min spot↔short-strike cushion (1.5%) to defer
+
+# ── The stop rules live in config/trade_mgmt.toml ───────────────────────────
+# Read through shared.trade_mgmt because services/options_svc/rescue.py needs the
+# SAME numbers to decide what is at risk. It used to restate four of them by hand
+# under a comment asking future editors to keep the mirror in step; it now derives
+# them from the very dict below. Edit the TOML and restart options_svc.
+_STOPS = _trade_mgmt.stops()
+
+TP_FRAC = _STOPS["tp_frac"]                 # >= this credit captured -> ARM break-even
+STOP_MULT = _STOPS["stop_mult"]             # cut at >= this x credit, as a loss
+DELTA_DRIFT = _STOPS["delta_drift"]         # cut when short delta drifts this far past entry
+DELTA_HARD_CEILING = _STOPS["delta_hard_ceiling"]  # ...but never hold past this
+DELTA_ABS_FALLBACK = _STOPS["delta_abs_fallback"]  # absolute breach when entry delta unknown
+CUT_DTE = _STOPS["cut_dte"]                 # cut when DTE <= this and underwater
+RECOVERY_DTE_MIN = _STOPS["recovery_dte_min"]      # min DTE to DEFER a soft delta stop
+RECOVERY_MIN_CUSHION = _STOPS["recovery_min_cushion"]  # min spot<->strike cushion to defer
 
 # Peak-driven profit-lock ladder for the armed break-even stop (Rule 3). Each rung
 # ``(peak_frac, lock_frac)``: once the trade's PEAK profit reaches ``peak_frac`` of
 # the credit, the stop ratchets up to lock in ``lock_frac`` of the credit. The
-# DEFAULT is a single break-even rung (lock 0.0) — i.e. exactly today's plain
+# DEFAULT is a single break-even rung (lock 0.0) — i.e. exactly the plain
 # break-even stop — so the ratchet is INERT until a caller passes a richer ladder
-# plus ``peak_pnl_frac`` in ctx.
-DEFAULT_TRAIL_LADDER = [(0.50, 0.0)]
-# The sensible default ratchet (OPT-IN, not wired to any caller yet — a later
-# activation step): lock +25% of credit once peak >= 65%, +50% once peak >= 80%.
-RATCHET_TRAIL_LADDER = [(0.50, 0.0), (0.65, 0.25), (0.80, 0.50)]
+# plus ``peak_pnl_frac`` in ctx. RATCHET_TRAIL_LADDER is the OPT-IN alternative,
+# not wired to any caller yet.
+DEFAULT_TRAIL_LADDER = _trade_mgmt.default_trail_ladder()
+RATCHET_TRAIL_LADDER = _trade_mgmt.ratchet_trail_ladder()
 
 
 def track_thresholds(entry_credit):

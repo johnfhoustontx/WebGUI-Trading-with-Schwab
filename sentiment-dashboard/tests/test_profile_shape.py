@@ -122,3 +122,48 @@ def test_missing_keys_do_not_raise():
 
 def test_never_raises_on_garbage():
     assert isinstance(classify_profile_shape([{}, {"volume": "x"}, 5]), ProfileShape)
+
+
+def test_num_rejects_non_finite_values():
+    """`_num` was the last scorer parsing guard still passing NaN (the sweep hit
+    effort/rejection_defense/session_structure this morning). Measured before the
+    fix: ONE NaN volume in a 30-bar profile flipped shape 'double'->'trend' and
+    inflated balance_strength 0.038 -> 0.59 (15x) via the clamp trap, and a NaN
+    price raised ValueError out of the histogram (swallowed upstream)."""
+    from math import inf, nan
+
+    from scoring.profile_shape import _num
+    assert _num(nan) is None
+    assert _num(inf) is None and _num(-inf) is None
+    assert _num("3.5") == 3.5 and _num(None) is None
+
+
+def test_a_nan_bar_is_dropped_not_shape_shifting():
+    """A profile that classifies 'double' clean must classify the SAME with one
+    NaN-volume bar added -- the bar drops; it must not tilt the whole shape.
+    Measured pre-fix: shape flipped 'double' -> 'trend' and balance_strength
+    inflated 15x from a single NaN volume."""
+    from math import nan
+
+    from scoring.profile_shape import classify_profile_shape
+    bars = []
+    for i in range(30):
+        px = 100 + 2 * (i % 2)          # two-node tape
+        bars.append({"high": px + 0.2, "low": px - 0.2, "close": px,
+                     "volume": 1000})
+    clean = classify_profile_shape(bars)
+    with_nan = classify_profile_shape(
+        bars + [{"high": 100.2, "low": 99.8, "close": 100, "volume": nan}])
+    assert with_nan.shape == clean.shape
+    assert abs(with_nan.balance_strength - clean.balance_strength) < 0.05
+
+
+def test_a_nan_price_bar_is_dropped_not_raising():
+    from math import nan
+
+    from scoring.profile_shape import classify_profile_shape
+    bars = [{"high": 100.5 + 0.01 * i, "low": 99.5, "close": 100, "volume": 1000}
+            for i in range(15)]
+    out = classify_profile_shape(
+        bars + [{"high": nan, "low": nan, "close": nan, "volume": 500}])
+    assert out is not None        # degraded, never raised

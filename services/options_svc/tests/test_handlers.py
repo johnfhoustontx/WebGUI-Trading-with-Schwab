@@ -11,6 +11,7 @@ live proxy, and use a fakeredis ``Bus(fake=True)``.
 import types as _types
 
 from shared.bus import Bus
+from shared.bus.client import reset_fake_bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
 
@@ -1512,8 +1513,14 @@ def test_collect_gex_history_captures_viewed_symbol_chain(monkeypatch):
     handlers.collect_gex_history(bus=bus)
     assert seen["cap"] == {"SPY"}
 
-    bus2 = Bus(fake=True)  # empty cache -> defaults to $SPX
-    handlers.collect_gex_history(bus=bus2)
+    # ...and with NO viewed symbol cached, it falls back to $SPX. The explicit
+    # reset is load-bearing: this used to rely on a fresh ``Bus(fake=True)``
+    # starting empty, which prod NEVER does -- every Bus there talks to the same
+    # Memurai, so "a new bus, therefore an empty cache" was a premise that could
+    # not occur in production. Now the fake matches prod, so the empty-cache
+    # condition under test has to be created deliberately.
+    reset_fake_bus()
+    handlers.collect_gex_history(bus=Bus(fake=True))
     assert seen["cap"] == {"$SPX"}
 
 
@@ -2610,3 +2617,77 @@ def test_refresh_gamma_clears_history_keys_for_views_the_snapshot_lacks(monkeypa
     monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: thin)
     handlers.refresh_gamma(bus, "SPY")
     assert bus.cache_get("cache:options:gamma_hist_vanna").payload["rows"] == []
+
+
+# ── the command list cannot silently drift from the code (2026-08-20) ──────
+
+def test_every_implemented_command_is_documented():
+    """`handle_command` carried a 43-line docstring restating all 35 branches in
+    prose — and prose drifts: `gamma_history`, `rescue_adhoc` and `sim_replay`
+    were implemented and undocumented when this guard was added. The docstring is
+    the API surface the GUI codes against, so the drift is now a test failure
+    rather than something you find by reading."""
+    import ast
+    import inspect
+    import re
+
+    src = inspect.getsource(handlers.handle_command)
+    fn = ast.parse(src.lstrip()).body[0]
+    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    documented = set(re.findall(r"``([a-z_]+)``", ast.get_docstring(fn) or ""))
+    missing = implemented - documented
+    assert not missing, f"implemented but undocumented: {sorted(missing)}"
+
+
+def test_no_command_is_documented_that_does_not_exist():
+    import ast
+    import inspect
+    import re
+
+    src = inspect.getsource(handlers.handle_command)
+    fn = ast.parse(src.lstrip()).body[0]
+    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    doc = ast.get_docstring(fn) or ""
+    # names in the "``name`` ->" position are command claims
+    claimed = set(re.findall(r"``([a-z_]+)``(?=[^\n]{0,80}?→)", doc))
+    ghosts = claimed - implemented
+    assert not ghosts, f"documented but not implemented: {sorted(ghosts)}"
+
+
+# --- the matrix contract gate ------------------------------------------------
+
+def test_publish_matrix_malformed_payload_logs_and_does_not_cache(monkeypatch, caplog):
+    """cache:options:matrix is documented (root CLAUDE.md route table + the
+    2026-07-20 design) as validated by MatrixSnapshot, but for a long time the
+    contract existed only in its own unit test - neither publish site used it.
+
+    ``rows`` typed as a str must fail the gate: log naming the contract, cache
+    nothing. The Opportunity Board and the Desk both read this view, so a
+    half-valid payload is two broken screens."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_matrix",
+                        lambda *a, **kw: {"date": "2026-08-21", "rows": "not-a-list"})
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_matrix(bus)           # must not raise
+
+    assert bus.cache_get("cache:options:matrix") is None, "must not cache"
+    assert any("MatrixSnapshot" in r.message for r in caplog.records), \
+        "a gate failure must log loudly, naming the contract"
+
+
+def test_publish_matrix_keeps_every_key_the_pages_read(monkeypatch):
+    """The gate caches model_dump(), so a key the contract forgets is a key the
+    pages silently lose. ``error`` is the one that matters - matrix.py renders it
+    in the status line - so it is asserted by name, not just by round-trip."""
+    bus = Bus(fake=True)
+    view = {"date": "2026-08-21", "session_date": "2026-08-21", "ts": "T",
+            "rows": [{"symbol": "SPY", "hotness": 3}],
+            "premium": {"net": 1.0}, "error": "matrix unavailable"}
+    monkeypatch.setattr(handlers.compute, "build_matrix", lambda *a, **kw: view)
+
+    handlers.publish_matrix(bus)
+
+    cached = bus.cache_get("cache:options:matrix").payload
+    assert cached == view
+    assert cached["error"] == "matrix unavailable"

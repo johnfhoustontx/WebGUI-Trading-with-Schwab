@@ -17,10 +17,21 @@ On-demand only: there is no scheduler. The GUI Trade page enqueues an
 Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
 from services.trade_svc import compute
-from shared.contracts.trade import TradeAnalysis
+from shared.contracts.trade import TradeAnalysis, RankBoard, ModelBook
 
 CACHE_ANALYSIS = "cache:trade:analysis"
 EVENT_ANALYSIS = "events:trade:analysis"
+
+# The ranked cross-section (Phase 5). Rebuilt on demand and once the universe
+# snapshot has been refreshed for the day; the snapshot is the expensive part
+# and the board is pure scoring on top of it.
+CACHE_RANK_BOARD = "cache:trade:rank_board"
+EVENT_RANK_BOARD = "events:trade:rank_board"
+
+# The model's own paper book (Phase 6): what following the board would have
+# done. Isolated from the driver's book, and paper only.
+CACHE_MODEL_BOOK = "cache:trade:model_book"
+EVENT_MODEL_BOOK = "events:trade:model_book"
 
 # EquityDeepDive on-demand views (loose {html|markdown, symbol, ts} dicts — NOT
 # projected onto TradeAnalysis; the webgui serves them raw / in a copyable page).
@@ -36,8 +47,11 @@ EVENT_DEEPDIVE_QUERY = "events:trade:deepdive_query"
 _FIELDS = {
     "symbol": "",
     "description": "",
+    "company_name": None,
     "price": None,
     "volume": None,
+    "change": None,
+    "change_pct": None,
     "bias": "",
     "ema_alignment": {},
     "momentum": {},
@@ -51,6 +65,16 @@ _FIELDS = {
     "fundamentals_available": False,
     "timestamp": None,
     "errors": [],
+    # Two-sided reads. Additive and optional; a compute result that predates
+    # them (or a degraded one that omits them) projects to None and the page's
+    # builders no-op.
+    "direction_clearance": None,
+    "dealer_context": None,
+    "peers": None,
+    "earnings_coverage": None,
+    "trade_plan": None,
+    "live_ic": None,
+    "symbol_history": [],
 }
 
 
@@ -71,6 +95,39 @@ def analyze(bus, args) -> None:
 
     version = bus.cache_set(CACHE_ANALYSIS, ta.model_dump())
     bus.publish(EVENT_ANALYSIS, {"version": version})
+
+
+def rank_board(bus, args=None) -> None:
+    """Rebuild and publish the ranked cross-section.
+
+    ``skip_unchanged`` because the board only moves when the daily universe
+    snapshot does: a page polling its version must not repaint on every rebuild
+    of an identical board. ``event`` makes ``cache_set`` pipeline the SET and
+    the PUBLISH into one round trip — and skip BOTH when nothing changed, which
+    a separate ``bus.publish`` call would defeat."""
+    board = compute.build_rank_board()
+    rb = RankBoard(**{k: board.get(k, d) for k, d in _BOARD_FIELDS.items()})
+    bus.cache_set(CACHE_RANK_BOARD, rb.model_dump(),
+                  event=EVENT_RANK_BOARD, skip_unchanged=True)
+
+
+_BOARD_FIELDS = {
+    "status": "ok", "as_of": None, "model_version": None, "regime_key": None,
+    "risk_share": None, "horizon_days": 20, "n": 0,
+    "thin_cross_section": True, "rows": [], "long_pool": [], "short_pool": [],
+    "market_filter": {}, "short_expression": "relative", "gates_evaluated": [],
+}
+
+
+def model_book(bus, args=None) -> None:
+    """Tick the model paper book and publish it."""
+    book = compute.run_model_book()
+    mbk = ModelBook(**{k: book.get(k, d) for k, d in _MODEL_BOOK_FIELDS.items()})
+    bus.cache_set(CACHE_MODEL_BOOK, mbk.model_dump(),
+                  event=EVENT_MODEL_BOOK, skip_unchanged=True)
+
+
+_MODEL_BOOK_FIELDS = {"as_of": None, "positions": [], "summary": {}}
 
 
 def deepdive(bus, args) -> None:
@@ -97,3 +154,7 @@ def handle_command(bus, command) -> None:
         deepdive(bus, command.args)
     elif command.type == "deepdive_query":
         deepdive_query(bus, command.args)
+    elif command.type == "rank_board":
+        rank_board(bus, command.args)
+    elif command.type == "model_book":
+        model_book(bus, command.args)

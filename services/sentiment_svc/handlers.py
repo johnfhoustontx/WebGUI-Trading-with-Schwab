@@ -28,7 +28,8 @@ from zoneinfo import ZoneInfo as _ZI
 from services.sentiment_svc import (
     compute, intraday_history_db, market_state_history_db, order_flow_consumer,
     scheduler, sector_pcr_history_db, state_alert)
-from shared.contracts.sentiment import CompositeSnapshot, RegimeState
+from shared.contracts.sentiment import (CompositeSnapshot, MomentumSnapshot,
+                                        RegimeState)
 
 log = logging.getLogger(__name__)
 
@@ -778,6 +779,18 @@ def refresh_momentum(bus, session_date=None, force=False) -> None:
             log.exception("momentum refresh failed")
             return
         _MOMENTUM["session"] = target
+    # Validate against the contract before publishing. MomentumSnapshot carried
+    # real validators (chiefly `_exactly_three_levels`) that NOTHING used — the
+    # publisher shipped a raw dict, so the contract was documentation rather than
+    # enforcement. A ragged tree reaching the cache renders as an EMPTY Bull/Bear
+    # map and momentum page rather than an error, which is the failure mode the
+    # validator exists to prevent; refusing to publish keeps the last good
+    # snapshot up instead (wired 2026-08-20).
+    try:
+        payload = MomentumSnapshot(**payload).model_dump(by_alias=True)
+    except Exception:  # noqa: BLE001 — a bad cascade must not blank the pages
+        log.exception("momentum payload failed contract validation; not published")
+        return
     version = bus.cache_set(CACHE_MOMENTUM, payload)
     bus.publish(EVENT_MOMENTUM, {"version": version})
 

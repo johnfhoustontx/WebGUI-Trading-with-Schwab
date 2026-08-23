@@ -18,7 +18,8 @@ def test_shell_registers_all_pages():
         "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/sentiment/momentum",
-        "/trade", "/portfolio", "/driver", "/settings",
+        "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
+        "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
         "/market", "/desk",
     )
@@ -98,8 +99,12 @@ def test_group_children_maps_routes_to_their_group():
     assert main._group_children("/market") == main.SENTIMENT_CHILDREN  # folded in
     more = main._group_children("/manuals")                        # Settings child
     assert ("/eod", "EOD Report", "summarize") in more             # merged into More
-    assert main._group_children("/trade") is None                  # flat page — no strip
-    assert main._group_children("/driver") is None
+    # Trade Analyzer became a GROUP in Phase 5 — the single-symbol card and the
+    # ranked cross-section are peer tabs of one workflow, not one page hiding
+    # inside the other.
+    assert main._group_children("/trade") == main.TRADE_CHILDREN
+    assert main._group_children("/trade/board") == main.TRADE_CHILDREN
+    assert main._group_children("/driver") is None                  # flat page — no strip
     # Rail pages are standalone: promoted OUT of the Options tab strip.
     for route, _label, _icon in main.OPTIONS_RAIL:
         assert main._group_children(route) is None, route
@@ -447,7 +452,10 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/options/gamma") == ["Markets", "Dealer Positioning"]
     assert main.breadcrumb_trail("/options/matrix") == ["Markets", "Opportunity Board"]
     assert main.breadcrumb_trail("/options/flow") == ["Markets", "Flow Alerts"]
-    assert main.breadcrumb_trail("/trade") == ["Strategy", "Trade Analyzer"]
+    assert main.breadcrumb_trail("/trade") == [
+        "Strategy", "Trade Analyzer", "Overview"]
+    assert main.breadcrumb_trail("/trade/board") == [
+        "Strategy", "Trade Analyzer", "Rank Board"]
     assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]
     assert main.breadcrumb_trail("/portfolio") == ["Account", "Portfolio"]
     # The bottom-pinned block is not a NAV_SECTIONS caption, so it names its own.
@@ -980,6 +988,27 @@ def test_brand_assets_are_shipped():
 
     assert (main._STATIC_DIR / "img" / "neuralstrike-mark.png").is_file()
     assert (main._STATIC_DIR / "img" / "neuralstrike-logo.jpg").is_file()
+
+
+def test_voice_clips_are_served_from_the_directory_voice_writes_to():
+    """``voice.clip_url`` hands the browser a URL nothing else validates.
+
+    Three things have to line up or every Desk clip 404s in silence: the mount
+    has to exist, its URL has to be the prefix ``clip_url`` builds, and the
+    directory it serves has to be the one ``voice.ensure`` writes into. The
+    mkdir is eager (not ``is_dir()``-guarded like /static) because this
+    directory is BUILT at runtime — on a fresh clone the guard would skip the
+    mount and clips would 404 until a restart.
+    """
+    from nicegui import app
+
+    import main
+    import voice
+
+    assert main._VOICE_DIR.resolve() == voice.CACHE_DIR.resolve()
+    assert main._VOICE_DIR.is_dir()
+    routes = {getattr(r, "path", "") for r in app.routes}
+    assert f"{voice.URL_PREFIX}/{{path:path}}" in routes
 
 
 def test_app_name_comes_from_brand_config():

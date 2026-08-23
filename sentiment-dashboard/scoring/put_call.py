@@ -101,3 +101,31 @@ def score_sector_weighted(
         interp = (f"Cap-weighted sector P/C {blended:.2f} "
                   f"({used}/{n_possible} sectors) — put-dominated")
     return ScoreResult(score=s, confidence=confidence, interp=interp)
+
+
+def pcr_from_chain(chain):
+    """Sum put vs call ``totalVolume`` from a Schwab /chains payload -> ratio.
+
+    Returns None when there is no chain or no call volume. THE one copy: this
+    lived byte-for-byte in both ``services/sentiment_svc/compute.py`` and
+    ``sentiment-dashboard/live_composite.py``, two tiers feeding the SAME
+    composite — so a threshold tweak in one would have silently diverged the live
+    P/C from the sector table's (consolidated 2026-08-20). Ported from source
+    sentiment_dashboard.py:2939-2953.
+    """
+    if not chain:
+        return None
+    pv = cv = 0
+    for strikes in (chain.get("putExpDateMap") or {}).values():
+        for contracts in strikes.values():
+            for c in contracts:
+                v = c.get("totalVolume", 0) or 0
+                if v > 0:
+                    pv += v
+    for strikes in (chain.get("callExpDateMap") or {}).values():
+        for contracts in strikes.values():
+            for c in contracts:
+                v = c.get("totalVolume", 0) or 0
+                if v > 0:
+                    cv += v
+    return round(pv / cv, 3) if cv > 0 else None

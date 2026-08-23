@@ -20,6 +20,15 @@
 # formatter would rewrite it wholesale. So the rule set is the minimal high-signal
 # "correctness" subset and the line length is generous.
 # ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+# -rf prints the FAILED lines at the end of every run, so "compare the failing
+# SET, not the count" stops being a thing you have to remember to ask for. This
+# repo has a documented incident where two real regressions hid behind two tests
+# flipping to skipped while the total held steady; -rfs would also list skips,
+# but the suites deliberately carry a couple of permanent importorskips and
+# printing those every run would train people to ignore the summary.
+addopts = "-rf"
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

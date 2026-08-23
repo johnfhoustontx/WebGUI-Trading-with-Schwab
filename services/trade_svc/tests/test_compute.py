@@ -5,6 +5,8 @@ synthetic OHLCV candles so nothing touches a live proxy. The synthetic series
 is a gentle uptrend with enough bars (300 daily / 200 intraday) to satisfy every
 indicator's lookback, so ``analyze`` exercises the full orchestration.
 """
+import datetime as _dt
+
 import pandas as pd
 import pytest
 
@@ -221,3 +223,550 @@ def test_analyze_never_raises_on_client_explosion(monkeypatch):
     res = compute.analyze("AAPL")
     assert res["symbol"] == "AAPL"
     assert res["errors"]
+
+
+# ── sector P/E median (Phase 1) ──────────────────────────────────────────────
+
+class _PeerPEClient(FakeClient):
+    """Serves a P/E per symbol and counts how many fundamental fetches happen."""
+
+    def __init__(self, pes):
+        super().__init__()
+        self._pes = pes
+        self.fetches = 0
+
+    def get_fundamentals(self, symbol):
+        self.fetches += 1
+        pe = self._pes.get(symbol)
+        return {"peRatio": pe} if pe is not None else None
+
+
+def test_sector_pe_median_is_the_median_of_that_sectors_peers(monkeypatch):
+    """The Investor `valuation` component compares a symbol's P/E to its
+    SECTOR's median, but live ``analyze`` passed ``sector_pe_median=None``
+    unconditionally — so that half never scored, and averaging its structural 0
+    halved the surviving PEG score for every symbol ever analyzed.
+
+    The peers are the ones the static sector map already names."""
+    client = _PeerPEClient({"AAPL": 35.0, "MSFT": 30.0, "NVDA": 50.0, "AVGO": 40.0})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("AAPL") == 37.5      # median of 30/35/40/50
+
+
+def test_sector_pe_median_ignores_non_positive_and_missing(monkeypatch):
+    """A loss-making peer reports a negative P/E, which is not a valuation the
+    median should be dragged by; a peer with no fundamentals contributes
+    nothing rather than a zero."""
+    client = _PeerPEClient({"AAPL": 20.0, "MSFT": 30.0, "NVDA": -12.0, "AVGO": None})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("AAPL") == 25.0      # median of 20/30 only
+
+
+def test_sector_pe_median_is_memoized_per_sector(monkeypatch):
+    """One fan-out per sector per day — not one per analyze. Without the memo
+    every analysis would re-fetch a dozen peers to compute a number that moves
+    once a quarter."""
+    client = _PeerPEClient({"AAPL": 35.0, "MSFT": 30.0})
+    _patch(monkeypatch, client)
+    compute.reset_sector_pe_cache()
+    compute.sector_pe_median("AAPL")
+    first = client.fetches
+    assert first > 1                                     # it really did fan out
+    compute.sector_pe_median("MSFT")                     # same sector
+    assert client.fetches == first                       # served from the memo
+
+
+def test_sector_pe_median_none_for_an_unmapped_symbol(monkeypatch):
+    """An unknown symbol has no sector, so there is no peer set — return None
+    (the Investor verdict then scores valuation on PEG alone) rather than a
+    median of everything."""
+    _patch(monkeypatch, _PeerPEClient({"ZZZZ": 11.0}))
+    compute.reset_sector_pe_cache()
+    assert compute.sector_pe_median("ZZZZ") is None
+
+
+# ── recommendation-journal wiring (Phase 1) ──────────────────────────────────
+
+def _analysis_result():
+    return {
+        "symbol": "AAPL", "price": 309.69,
+        "swing_model": {"verdict": "HOLD", "score": 0.096, "percentile": 70,
+                        "model_version": "2026-08-22"},
+        "position_verdict": {"verdict": "HOLD", "gates_triggered": ["ADX<15: no trend, capped at HOLD"]},
+        "investor_verdict": {"verdict": "HOLD", "score": 17},
+    }
+
+
+def test_journal_reading_maps_an_analysis_onto_a_row(tmp_path):
+    """The journal row is what Phase 6's IC monitor will read back, so the
+    mapping from an ``analyze`` result is worth pinning now."""
+    from services.trade_svc import rec_journal
+
+    assert compute.journal_reading(_analysis_result(),
+                                   db_path=tmp_path / "j.db") is True
+    conn = rec_journal.init_db(tmp_path / "j.db")
+    try:
+        row = rec_journal.readings(conn)[0]
+        assert row["symbol"] == "AAPL"
+        assert row["percentile"] == 70
+        assert row["composite"] == pytest.approx(0.096)
+        assert row["swing_verdict"] == "HOLD"
+        assert row["investor_score"] == 17
+        assert row["model_version"] == "2026-08-22"
+        assert "ADX<15" in row["gates"]
+    finally:
+        rec_journal.close_db(conn)
+
+
+def test_journal_reading_records_a_degraded_analysis_too(tmp_path):
+    """An analysis with no swing block is exactly the reading worth keeping —
+    it records that the model could not speak, which a gap in the series
+    could not distinguish from 'nobody looked'."""
+    from services.trade_svc import rec_journal
+
+    res = {"symbol": "ZZZZ", "price": 4.2, "errors": ["No quote / price for symbol"]}
+    assert compute.journal_reading(res, db_path=tmp_path / "j.db") is True
+    conn = rec_journal.init_db(tmp_path / "j.db")
+    try:
+        row = rec_journal.readings(conn)[0]
+        assert row["symbol"] == "ZZZZ" and row["composite"] is None
+    finally:
+        rec_journal.close_db(conn)
+
+
+def test_journal_reading_writes_nothing_to_the_real_store_under_pytest():
+    """This repo has a documented incident where a suite wrote into live data:
+    the bus is fakeredis, SQLite is not. With no explicit path the write is
+    SKIPPED under pytest rather than landing in services/trade_svc/data/."""
+    assert compute.journal_reading(_analysis_result()) is False
+
+
+def test_journal_reading_never_raises(tmp_path):
+    """``analyze`` owes the user an analysis whether or not the journal took
+    the row — an unwritable path must be swallowed, not propagated."""
+    assert compute.journal_reading(_analysis_result(),
+                                   db_path=tmp_path / "no" / "such" / "dir" / "\0bad.db") is False
+
+
+# ── short-interest enrichment (Phase 1, task 1.2) ────────────────────────────
+
+def test_fundamentals_get_short_interest_from_finra_not_schwab(monkeypatch, tmp_path):
+    """Schwab ships both short-interest fields as a 0.0 sentinel for EVERY
+    symbol, so `parse_schwab_fundamentals` maps them to None. FINRA supplies
+    the real numerator and a pre-computed days-to-cover; Schwab still supplies
+    the float denominator via `marketCapFloat` (which is float in SHARES).
+
+    This is the join the whole short side rests on."""
+    from services.trade_svc import short_interest as si
+
+    db = tmp_path / "si.db"
+    conn = si.init_db(db)
+    si.store_cycle(conn, [{"symbol": "GME", "short_qty": 53736062,
+                           "days_to_cover": 17.06, "avg_daily_volume": 3150012,
+                           "settlement_date": "2026-07-31"}])
+    si.close_db(conn)
+
+    class FinraClient(FakeClient):
+        def get_fundamentals(self, symbol):
+            # Schwab's real shape: the fields exist and are always zero.
+            return {"peRatio": 13.5, "marketCapFloat": 408810860.0,
+                    "shortIntToFloat": 0.0, "shortIntDayToCover": 0.0}
+
+    _patch(monkeypatch, FinraClient())
+    monkeypatch.setattr(compute, "_short_interest_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_short_interest", lambda conn: None)
+
+    f = compute._fetch_fundamentals("GME")
+    assert f.short_int_to_float == pytest.approx(13.14, abs=0.01)
+    assert f.short_int_day_to_cover == pytest.approx(17.06)
+
+
+def test_short_interest_enrichment_degrades_to_none_not_to_schwabs_zero(monkeypatch, tmp_path):
+    """A symbol FINRA does not carry (a rename, most often) must leave the
+    fields None. Falling back to Schwab's 0.0 would silently reinstate the
+    sentinel this whole module exists to escape."""
+    from services.trade_svc import short_interest as si
+
+    db = tmp_path / "si.db"
+    si.close_db(si.init_db(db))          # empty store
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0,
+                    "shortIntToFloat": 0.0, "shortIntDayToCover": 0.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_short_interest_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_short_interest", lambda conn: None)
+
+    f = compute._fetch_fundamentals("SQ")
+    assert f.short_int_to_float is None
+    assert f.short_int_day_to_cover is None
+
+
+def test_short_interest_enrichment_never_breaks_an_analysis(monkeypatch):
+    """The store being unreachable must cost the short-interest fields and
+    nothing else — the fundamentals themselves still come back."""
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_short_interest_db_path",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no store")))
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.pe_ratio == 20.0
+    assert f.short_int_to_float is None
+
+
+def test_short_interest_enrichment_is_skipped_under_pytest_by_default(monkeypatch):
+    """With no explicit store path the enrichment must not run under pytest.
+
+    Unguarded it opens a SQLite file inside the repo AND triggers a LIVE FINRA
+    fetch: measured, a single suite run downloaded 22,341 rows into
+    services/trade_svc/data/short_interest.db. That is the documented
+    "pytest must isolate on-disk stores" trap plus an unwanted network call,
+    and `analyze` is exercised by many tests that know nothing about this
+    store. Tests that DO want the join pass their own path, which opts back in.
+    """
+    from services.trade_svc import short_interest as si
+
+    opened = []
+
+    def spy(path):
+        opened.append(path)
+        raise RuntimeError("must not be reached under pytest")
+
+    monkeypatch.setattr(si, "init_db", spy)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 20.0, "marketCapFloat": 1_000_000.0}
+
+    _patch(monkeypatch, Client())
+    f = compute._fetch_fundamentals("AAPL")
+
+    assert opened == [], f"enrichment opened the real store: {opened}"
+    assert f.pe_ratio == 20.0
+    assert f.short_int_to_float is None
+
+
+def test_analyze_feeds_the_squeeze_reason_into_the_position_gate(monkeypatch):
+    """The engine cannot reach FINRA, so `analyze` computes the squeeze reason
+    and hands it down. Without this wiring the gate exists but never fires."""
+    from src.analysis.fundamentals import Fundamentals
+
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(
+        compute, "_fetch_fundamentals",
+        lambda sym: Fundamentals(pe_ratio=13.5, rev_growth_ttm=0.1,
+                                 eps_growth_ttm=0.1, roe=0.2,
+                                 short_int_to_float=31.0,
+                                 short_int_day_to_cover=17.1))
+    res = compute.analyze("GME")
+    short_gates = res["position_verdict"]["short_gates"]
+    assert any("squeeze" in g.lower() for g in short_gates)
+    assert any("31.0% of float short" in g for g in short_gates)
+
+
+def test_analyze_leaves_the_squeeze_gate_quiet_without_short_interest(monkeypatch):
+    from src.analysis.fundamentals import Fundamentals
+
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(
+        compute, "_fetch_fundamentals",
+        lambda sym: Fundamentals(pe_ratio=13.5, rev_growth_ttm=0.1,
+                                 eps_growth_ttm=0.1, roe=0.2))
+    res = compute.analyze("AAPL")
+    assert not any("squeeze" in g.lower()
+                   for g in res["position_verdict"]["short_gates"])
+
+
+# ── direction clearance wiring (Phase 2, task 2.2) ───────────────────────────
+
+def test_analyze_carries_direction_clearance_for_both_sides(monkeypatch):
+    """The clearance block is what tells the page whether a bottom-band read is
+    a directional short or a relative one — it must reach the payload."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_regime", lambda: {
+        "committed_label": "trending", "label": "Softening", "direction": -1,
+        "as_of": _dt.datetime.now(_dt.timezone.utc).isoformat()})
+    res = compute.analyze("AAPL")
+    dc = res["direction_clearance"]
+    assert set(dc) == {"market", "long", "short"}
+    assert dc["short"]["state"] in {"cleared", "relative_only", "blocked"}
+    assert dc["short"]["reasons"]
+
+
+def test_analyze_survives_a_regime_the_bus_cannot_supply(monkeypatch):
+    """A sentiment outage must cost the clearance nuance, not the analysis —
+    and the short side must fall to relative_only, never to cleared."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_regime", lambda: None)
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []
+    assert res["direction_clearance"]["short"]["state"] == "relative_only"
+
+
+def test_read_regime_never_raises_when_the_bus_is_down(monkeypatch):
+    import services.trade_svc.compute as _c
+
+    def boom():
+        raise RuntimeError("memurai down")
+
+    monkeypatch.setattr(_c, "_bus", boom)
+    assert _c._read_regime() is None
+
+
+# ── earnings-date enrichment (Phase 1, task 1.2 completed) ───────────────────
+
+def test_an_earnings_date_inside_the_horizon_caps_both_verdicts(monkeypatch, tmp_path):
+    """The gate that has NEVER fired. Schwab carries no earnings date, so
+    days_to_earnings was always None and a multi-week hold could span a report
+    with nothing said about it."""
+    from services.trade_svc import earnings_calendar as ec
+
+    db = tmp_path / "ec.db"
+    conn = ec.init_db(db)
+    soon = (_dt.date.today() + _dt.timedelta(days=9)).isoformat()
+    ec.store_calendar(conn, [{"symbol": "AAPL", "report_date": soon,
+                              "fiscal_date_ending": "", "estimate": None}])
+    ec.close_db(conn)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0, "revChangeTTM": 10.0,
+                    "epsChangePercentTTM": 12.0, "returnOnEquity": 20.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_earnings_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_earnings_calendar", lambda conn: None)
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.days_to_earnings == 9
+
+    res = compute.analyze("AAPL")
+    assert any("earnings" in g.lower()
+               for g in res["position_verdict"]["gates_triggered"])
+
+
+def test_no_api_key_leaves_the_earnings_gate_exactly_as_quiet_as_before(monkeypatch, tmp_path):
+    """Without a key the calendar is empty, and an empty calendar must read as
+    'unknown', never as 'nobody reports soon'."""
+    from services.trade_svc import earnings_calendar as ec
+
+    db = tmp_path / "ec.db"
+    ec.close_db(ec.init_db(db))          # empty store
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0}
+
+    _patch(monkeypatch, Client())
+    monkeypatch.setattr(compute, "_earnings_db_path", lambda: db)
+    monkeypatch.setattr(compute, "_refresh_earnings_calendar", lambda conn: None)
+
+    f = compute._fetch_fundamentals("AAPL")
+    assert f.days_to_earnings is None
+
+
+def test_earnings_enrichment_is_skipped_under_pytest_by_default(monkeypatch):
+    """Same isolation rule as the other stores: unguarded it opens a SQLite
+    file in the repo AND issues a live vendor request during the suite."""
+    from services.trade_svc import earnings_calendar as ec
+
+    opened = []
+
+    def spy(path):
+        opened.append(path)
+        raise RuntimeError("must not be reached under pytest")
+
+    monkeypatch.setattr(ec, "init_db", spy)
+
+    class Client(FakeClient):
+        def get_fundamentals(self, symbol):
+            return {"peRatio": 30.0}
+
+    _patch(monkeypatch, Client())
+    compute._fetch_fundamentals("AAPL")
+    assert opened == [], f"enrichment opened the real store: {opened}"
+
+
+# ── dealer context wiring (Phase 2, task 2.3) ────────────────────────────────
+
+def test_analyze_carries_dealer_context(monkeypatch):
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_matrix_row", lambda sym: (
+        {"symbol": sym, "spot": 120.0, "flip": 118.0, "call_wall": 125.0,
+         "put_wall": 115.0, "net_gex": 4.1e8, "atm_iv": 27.4,
+         "iv_state": "stable", "gex_regime": "above",
+         "dealer_regime": "charm_grind"},
+        _dt.datetime.now(_dt.timezone.utc).isoformat()))
+    ctx = compute.analyze("AAPL")["dealer_context"]
+    assert ctx["collected"] is True and ctx["stale"] is False
+    assert ctx["call_wall"] == 125.0
+    assert "long gamma" in ctx["summary"].lower()
+
+
+def test_analyze_says_not_collected_for_a_symbol_outside_the_universe(monkeypatch):
+    """Most symbols a user types are NOT in the ~93-name gamma universe. That
+    must read as 'not collected', never as absent levels the reader has to
+    interpret."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "_read_matrix_row", lambda sym: (None, None))
+    ctx = compute.analyze("ZZZZ")["dealer_context"]
+    assert ctx["collected"] is False
+    assert "not collected" in ctx["summary"].lower()
+
+
+def test_dealer_context_survives_a_bus_outage(monkeypatch):
+    _patch(monkeypatch, FakeClient())
+
+    def boom():
+        raise RuntimeError("memurai down")
+
+    monkeypatch.setattr(compute, "_bus", boom)
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []
+    assert res["dealer_context"]["collected"] is False
+
+
+# ── per-symbol snapshot + sector peers (Phase 2, task 2.4) ───────────────────
+
+def test_the_universe_snapshot_keeps_symbol_identity(monkeypatch):
+    """The snapshot was `{factor: [values]}` — it computed every symbol's
+    factors daily and then THREW THE NAMES AWAY. Keeping them is the single
+    change that turns a one-symbol scorer into a ranking, and it powers the
+    peer lines on the single-symbol card before any board exists."""
+    monkeypatch.setattr(compute, "_swing_universe", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr(compute, "_symbol_factor_row",
+                        lambda s: {"mom_6_1": 1.0 if s == "AAPL" else 0.5,
+                                   "low_vol": -0.02})
+    snap = compute.build_universe_factor_snapshot()
+    assert set(snap["by_symbol"]) == {"AAPL", "MSFT"}
+    assert snap["by_symbol"]["AAPL"]["mom_6_1"] == 1.0
+
+
+def test_the_flat_basis_is_DERIVED_and_unchanged(monkeypatch):
+    """The scorer consumes `{factor: [values]}`. That must come out of the new
+    shape byte-identically, so the scoring path provably does not move."""
+    monkeypatch.setattr(compute, "_swing_universe", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr(compute, "_symbol_factor_row",
+                        lambda s: {"mom_6_1": 1.0 if s == "AAPL" else 0.5,
+                                   "low_vol": -0.02})
+    snap = compute.build_universe_factor_snapshot()
+    flat = compute.flat_basis(snap)
+    assert sorted(flat["mom_6_1"]) == [0.5, 1.0]
+    assert sorted(flat["low_vol"]) == [-0.02, -0.02]
+
+
+def test_a_legacy_flat_snapshot_still_scores(monkeypatch):
+    """A cached payload written before this change has no `by_symbol`. It must
+    keep working rather than silently scoring every symbol off nothing."""
+    legacy = {"mom_6_1": [0.5, 1.0], "low_vol": [-0.02, -0.02]}
+    assert compute.flat_basis(legacy) == legacy
+
+
+class TestSectorPeers:
+    SNAP = {"by_symbol": {
+        "AAPL": {"mom_6_1": 0.5}, "MSFT": {"mom_6_1": 0.4},
+        "NVDA": {"mom_6_1": 0.9}, "INTC": {"mom_6_1": -0.8},
+        "JPM": {"mom_6_1": 0.7},
+    }}
+
+    def _scores(self):
+        return {"AAPL": 70, "MSFT": 66, "NVDA": 91, "INTC": 12, "JPM": 80}
+
+    def test_ranks_within_the_sector_only(self, monkeypatch):
+        peers = compute.sector_peers("AAPL", self.SNAP, self._scores())
+        names = [p["symbol"] for p in peers["ranked"]]
+        assert "JPM" not in names            # Financials, not Technology
+        assert names[0] == "NVDA"            # strongest first
+
+    def test_names_the_strongest_weakest_and_neighbours(self, monkeypatch):
+        peers = compute.sector_peers("AAPL", self.SNAP, self._scores())
+        assert peers["strongest"]["symbol"] == "NVDA"
+        assert peers["weakest"]["symbol"] == "INTC"
+        assert peers["above"]["symbol"] == "NVDA"
+        assert peers["below"]["symbol"] == "MSFT"
+        assert peers["sector"] == "Technology"
+
+    def test_a_symbol_with_no_sector_yields_nothing_rather_than_everything(self):
+        """An unmapped symbol has no peer set. Ranking it against the whole
+        universe would invent a comparison that does not exist."""
+        peers = compute.sector_peers("ZZZZ", self.SNAP, self._scores())
+        assert peers["ranked"] == [] and peers["sector"] == ""
+
+    def test_the_strongest_peer_can_BE_the_analyzed_symbol(self):
+        peers = compute.sector_peers("NVDA", self.SNAP, self._scores())
+        assert peers["strongest"]["symbol"] == "NVDA"
+        assert peers["above"] is None        # nothing ranks above it
+
+
+def test_analyze_reports_whether_the_earnings_calendar_covers_the_symbol(monkeypatch):
+    """`days_to_earnings is None` means both "nothing scheduled" and "the
+    vendor does not carry this symbol". The gate would fail OPEN on the second
+    without a way to tell them apart."""
+    _patch(monkeypatch, FakeClient())
+    monkeypatch.setattr(compute, "earnings_coverage", lambda sym: "not_listed")
+    assert compute.analyze("MSFT")["earnings_coverage"] == "not_listed"
+
+
+# ── Company name (terminal redesign) ─────────────────────────────────────────
+# `analyze` set `description` to the quote's SYMBOL, so the command bar had no
+# company name to show. Schwab's `symbol-search` projection carries one; the
+# `fundamental` projection does not.
+
+def test_company_name_comes_from_the_symbol_search_projection(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    seen = {}
+
+    def _req(endpoint, params=None):
+        seen["endpoint"] = endpoint
+        seen["params"] = dict(params or {})
+        return {"instruments": [{"symbol": "MU", "exchange": "NASDAQ",
+                                 "description": "MICRON TECHNOLOGY IN"}]}
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _req)
+    assert C.company_name("MU") == "Micron Technology In"
+    assert seen["params"].get("projection") == "symbol-search"
+
+
+def test_the_name_is_memoized_so_a_reanalyze_does_not_refetch(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    calls = []
+
+    def _req(endpoint, params=None):
+        calls.append(1)
+        return {"instruments": [{"symbol": "MU", "description": "MICRON TECH"}]}
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _req)
+    C.company_name("MU")
+    C.company_name("MU")
+    assert len(calls) == 1, "a company name does not change intraday"
+
+
+def test_an_unknown_symbol_yields_None_rather_than_the_ticker(monkeypatch):
+    """A name that merely repeats the ticker is not a name, and the command bar
+    already handles absence."""
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    monkeypatch.setattr(C._proxy.schwab_client, "_request",
+                        lambda e, p=None: {"instruments": []})
+    assert C.company_name("ZZZZ") is None
+
+
+def test_a_failed_lookup_never_raises(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+
+    def _boom(endpoint, params=None):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _boom)
+    assert C.company_name("MU") is None

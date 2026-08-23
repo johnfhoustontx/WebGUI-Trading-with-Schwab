@@ -84,7 +84,7 @@ The left menu is grouped into three captioned sections. Each answers one questio
 | ▸ Paper Ledger | You want your own hand-kept practice trades. |
 | ▸ Paper Account | You want the automated practice engine's account. |
 | ▸ Rescue | You have a credit spread going wrong and want ranked repair options. |
-| **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock. |
+| **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock, or a ranked shortlist to pick one from. |
 | **Claude Trades** | You want to watch (or stop) the autonomous paper trader. |
 
 ### ACCOUNT — *what do I own, and how did I do?*
@@ -191,6 +191,10 @@ First thing, and whenever you have lost the thread. Every panel is a summary of 
 page that goes deeper, and **clicking any row opens that page already set to the
 symbol you clicked**.
 
+It is also the screen to **leave open**, because it is the only one that will
+interrupt you: new flow alerts and newly-opened positions are announced out loud and
+the arriving row glows for ten seconds (see *Spoken arrivals* below).
+
 ### The panels
 
 **Top strip.** The clock; **VIX** and its regime band; the **market regime** word
@@ -238,6 +242,50 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
+### Spoken arrivals
+
+A **new flow alert** or a **newly-opened position** is announced in a synthetic
+human voice and the row glows cyan for ten seconds. Tickers are always spelled
+letter by letter rather than read as words, which is squawk-box convention and also
+the only rule that survives an unbounded symbol list: "SPY" read aloud as *spy* is
+actively misleading.
+
+**Two of the four flow detectors name a contract, and the announcement says it.**
+Unusual activity and large delta are about one option, so the sentence carries its
+expiry, strike and side: *"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover
+is a fact about a symbol's whole premium tape and a gamma flip about the whole
+dealer book — neither has a contract to name, so both keep the short form: *"S P Y.
+Crossover alert, calls over."* A new position speaks its strikes, expiry and entry
+price, and says **credit or debit** explicitly, because the paper book stores a
+debit as a negative credit and a debit that sounded like a credit would be the most
+expensive sentence this feature could say.
+
+Numbers are spoken the way a trader hears them, not the way a computer reads them:
+leading digits one at a time and the last two as a pair, so 715 is *"seven
+fifteen"*, 21500 is *"two one five hundred"* and 207.5 is *"two oh seven point
+five"*. This was settled by listening, not by argument. If any part of a contract
+is missing or unreadable, the announcement falls back to the short form rather than
+speaking a sentence with a hole in it — **shorter, never half**.
+
+Three more rules are worth knowing, because each is a decision rather than an
+accident:
+
+- **A flag change glows amber and says nothing.** A position moving OK → At risk →
+  Rescue is not an *arrival*; it was already on the screen, and the flag column
+  already prints the new word. Only genuinely new rows speak.
+- **All four flow detectors speak, large-delta included** — even though the scanner
+  chime deliberately ignores that one. The reason the chime ignores it is that a
+  *chime* carrying no information is noise at that detector's frequency. An
+  announcement that names the ticker and the contract is not: if it does not concern
+  you, ignoring it costs nothing.
+- **A burst names the newest and counts the rest** — "…plus 5 more" — rather than
+  reading a list. Six sentences back to back is a minute of talking over a moving
+  tape.
+
+Everything about it is switchable under *Settings → Spoken alerts (Desk)*, and it
+obeys the **same** market-hours restriction as the scanner chime — there is
+deliberately no second switch to fall out of step with the first.
+
 ### What the numbers are, and are not
 
 - **The Desk computes nothing of its own.** Every figure is produced by the same
@@ -250,6 +298,11 @@ that count toward that total; *Watch* does not.
   last reading I trust", not "the market is flat".
 - **The freshness indicator reports the real collection state**, including
   "unknown". It is not a decorative "live" light.
+- **Silence is more often a blocked browser than a broken feature.** Browsers refuse
+  to play audio until the page has been interacted with, and the refusal produces no
+  error anywhere. When it happens an **Enable spoken alerts** button appears at the
+  top of the Desk; one click unlocks sound for the session, and it speaks a line back
+  to confirm.
 - **Nothing on this page can place, change, or close a trade.** It reads and links.
 
 ---
@@ -1427,7 +1480,7 @@ telling you which of those two states you are in *before* showing you the list.
 
 Practically, the highest-value output is **alignment** — a name where the whole hierarchy
 agrees. The green panel in section 2 lists every one of them, ranked, and those are the
-candidates worth taking to [Trade Analyzer](#trade-analyzer) or
+candidates worth taking to [Overview](#overview) or
 [Strategy Finder](#strategy-finder). The leaderboard's **Align** column shows the same
 thing per row, as three blocks, but only for the names inside its top/bottom slice.
 
@@ -1452,7 +1505,7 @@ because *suppressed* is a genuine stand-aside signal.
 ### Related pages
 
 [RRG](#rrg) · [Sector & Industry](#sector-industry) ·
-[Trade Analyzer](#trade-analyzer).
+[Overview](#overview).
 
 ---
 
@@ -1857,7 +1910,7 @@ symbol, and any time you have a directional opinion and want the best way to exp
 ### Related pages
 
 [Market Scanner](#market-scanner) · [Calculator](#calculator) ·
-[Trade Analyzer](#trade-analyzer) (for the directional opinion itself).
+[Overview](#overview) (for the directional opinion itself).
 
 ---
 
@@ -2214,86 +2267,245 @@ in a symbol you are short premium in.
 
 ---
 
-## Trade Analyzer
+## Overview
 
-*Menu: STRATEGY → Trade Analyzer · Route `/trade`*
+*Menu: STRATEGY -> Trade Analyzer -> Overview · Route `/trade`*
 
 ### What it is
 
-A Buy / Hold / Sell verdict on a single stock, over two horizons, with all the evidence
-exposed. This is the app's only genuinely *stock-level* (rather than options-level) view.
+The Signal desk's landing screen: market state, both verdicts, dealer positioning and
+peer placement for one symbol, under a command bar shared by all four tabs.
 
 ### Where the data comes from
 
 | | |
 |---|---|
 | Service | `trade_svc` (:8213), `cache:trade:analysis` |
-| Trigger | On demand — type a symbol and press **Analyze**, or just tab out of the field |
-| State | Remembers the last analyzed symbol across navigation |
+| Trigger | Commit a symbol in the command bar - Enter, Tab, or blur |
+| State | The committed symbol persists across all four screens and across navigation |
 
 ### Reading the screen
 
-**Two verdict cards, side by side.**
+**The command bar** carries a draft/committed distinction: the symbol box outlines
+indigo while your typing differs from what is on screen, and an emptied box reverts
+rather than clearing. The company and sector line, and every panel below, follow the
+committed symbol.
 
-**Position (1–8 weeks)** is the more rigorous of the two. It is a **backtested,
-IC-weighted cross-sectional factor model** — meaning each factor's weight was set by how
-well it actually predicted forward returns historically (its *information coefficient*),
-not by hand-tuning. The verdict comes from a **calibration band**, and the headline
-reports what that band has historically delivered:
+**Deep Dive** and **AI Query** sit in the command bar. Each enqueues its report for the
+committed symbol and opens the result in a new tab when it lands; the cache version is
+baselined at click time, so a stale report from an earlier run never opens a tab.
 
-- an **expected return** over roughly the next four weeks, stated as **excess versus the
-  S&P 500** — how much it beat or trailed the index, not the raw move;
-- a **beat-SPY hit rate** (e.g. *"+1.3% excess / 20d · 52% beat-SPY"*).
+**Hover anything you do not recognise.** Every tile on these four screens
+carries its own plain-English explanation on hover: the clearance chips and side
+cards, each factor name, every table column on the Rank board and the Evidence
+screen, the trade-plan rows, the dealer levels, the panel titles and the two
+report buttons. The explanations say what the number is and where it misleads,
+not just what it is called - so `LONG CLEARED` explains that it is permission
+rather than a recommendation, and `SHORT RELATIVE ONLY` explains that the model
+predicts a LAG against the index rather than a fall, which is why a plain short
+on a correct read can still lose money.
 
-**"Why — validated factors"** expands to each factor's z-score, weight, contribution and
-information coefficient, plus the model's version and its **out-of-sample** IC. The
-older hand-tuned score is preserved under **"Legacy heuristic"** for comparison.
+**Position** shows a band reading on a rail rather than a verdict word, because the
+model's output is a rank. **The band is not a percentile of today's names.** The
+score's inputs are today's cross-section - each factor measured against the same 78
+symbols the model was fitted on - but the five bands are fixed score thresholds cut
+from five years of the model's own output. So 90th means "top band", not "top 10% of
+the board", and the bands fill unevenly: on 2026-08-22 the 78 names landed 20 / 20 /
+12 / 14 / 12 from the weakest band to the strongest, where a true percentile would put
+about 15 or 16 in each. A defensive market can leave the top band nearly empty. Hover
+the rail for that explanation in the app. The two side cards state what the tape
+permits per side.
 
-**Investor (months+)** remains a heuristic score with its top reasons listed.
+**Investor** puts its six factors on the same centred bar language used on the
+Evidence screen - right of centre is a positive contribution. A factor the engine did
+not return reads `n/a` with no bar, never a zero-length one. **Earnings trajectory is
+a special case and always reads "not published by Schwab".** Schwab's fundamentals
+payload carries 56 fields and neither earnings surprises nor company guidance, so both
+of that component's inputs are missing and it contributes exactly 0 for every symbol -
+15 of the score's 100 points are off the table before any stock is examined. Free cash
+flow is absent for the same reason, so the check that would cap a stock at HOLD on
+negative cash flow can never fire. Read a middling Investor score against what could
+have contributed, not as a verdict on the company.
 
-**Hard gates (⛔)** override the score outright — for example *"Below 200EMA: cannot be
-BUY"*. A gate is a veto, not a deduction.
+**Dealer positioning** is withheld in full when uncollected or stale. That is the
+off-hours case, and an absent ladder is the honest rendering of it.
 
-**The evidence panels below:**
+### When to open it
 
-| Panel | What it shows |
-|---|---|
-| **MTF EMA alignment** | Whether the trend agrees across 1-minute, 5, 15, 60 and daily. A percentage plus per-timeframe labels. All five aligned is a strong, rare condition. |
-| **Momentum** | RSI, ADX, MACD histogram, VWAP, relative volume. |
-| **Sector** | Sector strength, as a signed adjustment. |
-| **Fundamentals** | P/E, PEG, revenue and EPS growth, ROE, margin direction. |
-
-**Deep Dive** opens a full standalone report in a new tab — technicals, fundamentals and
-short interest, plus options analytics (at-the-money IV, implied move, max pain, 25-delta
-skew, IV term structure, 30-day constant-maturity IV, net GEX and flip, open-interest
-walls) and an IV/RV rank. **AI Query** opens the same digest formatted as a chat prompt
-you can copy into an AI assistant — it makes no API call itself.
-
-### Why it matters
-
-The honesty of the Position verdict is what sets it apart. Most retail scoring systems
-are hand-tuned and never tested; this one publishes its own out-of-sample accuracy, so
-you can see how much to trust it. An expected excess return of +1.3% with a 52% hit rate
-is a **small** edge, and the page says so plainly rather than dressing it up.
-
-The **excess-versus-S&P** framing is the right one and is frequently missed elsewhere: a
-stock returning +3% in a month the index returned +5% has lost you money in
-opportunity terms.
-
-**Where it is weak.** Fundamentals come from the broker's instrument data and are
-sometimes stale or odd — negative P/E on unprofitable companies, extreme PEG values.
-Read the fundamentals card as indicative. The model is also cross-sectional, so it ranks
-*relative* to the universe; in a falling market the top-ranked stock still falls.
-
-### When to use it
-
-Before taking a directional options position, and when [Momentum](#momentum) surfaces a
-name you do not know.
+First, for any symbol. It is the orientation screen.
 
 ### Related pages
 
-[Momentum](#momentum) · [Strategy Finder](#strategy-finder) (how to express the view) ·
-[Expected Move](#expected-move).
+[Evidence](#evidence) · [Rank Board](#rank-board) · [Trade Plan](#trade-plan).
+
+---
+
+## Evidence
+
+*Menu: STRATEGY -> Trade Analyzer -> Evidence · Route `/trade/evidence`*
+
+### What it is
+
+Why the Position verdict is what it is - every weighted factor, its z-score against
+the cross-section, its contribution, and its historical IC - plus how the model has
+been doing and what this name has done before.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:analysis` (`swing_model.contributions`) |
+| Track record | The artifact's own OOS IC, plus the live monitor over `rec_journal.db` |
+| History | This symbol's journalled reads, labelled once their 20 days elapse |
+
+### Reading the screen
+
+The **contribution bar** is the same centred language as the Investor factors: right
+of the axis is a positive contribution to the composite, left negative, and the
+foot of the table is their weighted sum.
+
+⚠ **The two right-hand cards are not the same question.** Track record is about the
+MODEL across every symbol; history is about THIS symbol. Five reads of one name
+cannot support a correlation, so the history is a list of outcomes with `pending`
+where the horizon has not elapsed - never a statistic.
+
+The amber callout states what share of the model's weight sits on volatility
+factors. Read it before reading the table.
+
+### When to open it
+
+Before acting on a Position read you intend to size, and any time the verdict
+surprises you.
+
+### Related pages
+
+[Overview](#overview) · [Trade Plan](#trade-plan).
+
+---
+
+## Rank Board
+
+*Menu: STRATEGY → Trade Analyzer → Rank Board · Route `/trade/board`*
+
+### What it is
+
+The same swing model as [Overview](#overview), run over **every name in the
+model's universe at once** and sorted. Analyze answers "what about this stock?"; the
+Rank Board answers "of everything the model can see, what is best and worst today?" —
+the shortlist you start from rather than the verdict you end on.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc` (:8213), `cache:trade:rank_board` |
+| Trigger | Rebuilt from the daily universe snapshot; **Rebuild** forces it |
+| Scoring | The *same* scorer the Analyze card uses — one code path, so the two can never disagree about a symbol |
+
+### Reading the screen
+
+**Deciles are today's ranking, not a historical grade.** A name in decile 10 is
+the best of *this* cross-section right now. That is a different question from the
+calibration band shown on the Analyze card, which asks where the score sat against
+five years — a universe where every name is mid-band still has a best and a worst.
+
+**Long candidates / Short candidates** are the top and bottom deciles. Each carries a
+note explaining its own state, because a thin short list has three quite different
+causes:
+
+- *"Express these RELATIVE…"* — the tape has not cleared the short side. The model
+  predicts **excess return versus SPY**, so a bottom-decile name in an uptrend is
+  predicted to **lag**, not to fall. Pair it against the index rather than shorting it
+  outright.
+- *"Too few names in today's cross-section…"* — a sample-size limit, not a reading of
+  the market. With fewer than ten names there is no bottom decile to speak of.
+- *"Directional expression is cleared"* — the tape permits the trade as stated.
+
+**Gates mark rows; they never remove them.** A gated row stays visible with its reasons,
+because "the top-ranked name reports earnings in two days" is exactly what you opened
+the board to find out. The line beneath the header names **which** gates were checked
+here — the board evaluates a *subset* of the Analyze card's, so a row with no gates has
+not cleared everything the card would test.
+
+### ⚠ What the ranking is actually sorted by
+
+An amber line states what share of the model's weight sits on **volatility factors** —
+currently about half. That matters more here than anywhere else in the app: it means
+**the top of this board is the high-beta end of the universe**. Measured over five
+years, this ordering works when the market rises and inverts when it falls. Treat the
+board as a starting shortlist to research, never as a ranked buy list.
+
+### The model paper book
+
+Beneath the board, an isolated paper book follows the board's own pools so the
+model accrues a track record nobody has to place. It takes the ungated names
+from each pool, applies the Trade Plan's stop, target and 20-trading-day time
+stop, and splits its reporting by side.
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:model_book`, store `model_book.db` |
+| Trigger | The board's **Rebuild** advances it; otherwise it follows the board |
+| Scope | **Paper only**, and isolated from the Claude Trades book |
+
+⚠ Two things about what it measures. It trades the **underlying**, not the
+options structure the plan suggests — a spread's theta and vega would swamp the
+question of whether the ranking works, so a book that lost money on correct
+calls would look identical to one whose calls were wrong. And a **relative**
+short is held as a pair against SPY, because return-versus-the-index is what the
+model actually predicts.
+
+### When to open it
+
+At the start of a research session, to pick what to analyze. Not as a signal in itself.
+
+### Related pages
+
+[Overview](#overview) (the per-symbol verdict) · [Momentum](#momentum) ·
+[Strategy Finder](#strategy-finder).
+
+---
+
+## Trade Plan
+
+*Menu: STRATEGY -> Trade Analyzer -> Trade Plan · Route `/trade/plan`*
+
+### What it is
+
+The verdict rendered as something you could be wrong about: structure, legs, entry
+zone, stop, target, time stop and events - beside a card stating what would change
+the call.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `trade_svc`, `cache:trade:analysis` (`trade_plan`) |
+| Structure | A pure lookup over side x IV state x dealer levels |
+| Stop | ATR or the nearer wall, whichever is TIGHTER; absent if neither exists |
+
+### Reading the screen
+
+**The time stop is highlighted deliberately.** It is the model's own 20-trading-day
+horizon, and it is the only field nothing else in the app enforces - a position
+opened on a 20-day edge and held three months is no longer being held for the
+reason it was opened.
+
+**The no-trade card is always present**, even when a plan is cleared. A refused side
+with its reasons is a research finding; hiding it would make the screen look like
+the model had nothing to say.
+
+⚠ Where the tape has not cleared a directional short, the alternative offered is a
+**pair against SPY**. The model predicts excess return versus the index, so that is
+the expression the prediction actually supports.
+
+### When to open it
+
+After Overview and Evidence, when you have decided the read is worth acting on.
+
+### Related pages
+
+[Overview](#overview) · [Evidence](#evidence) · [Rank Board](#rank-board).
 
 ---
 
@@ -2463,7 +2675,7 @@ useful decisions are.
 ### Related pages
 
 [Sector & Industry](#sector-industry) (context for the RS column) ·
-[Trade Analyzer](#trade-analyzer) (a verdict on any holding).
+[Overview](#overview) (a verdict on any holding).
 
 ---
 
@@ -2636,7 +2848,14 @@ cosmetic: **API usage** and **Maintenance**.
 market hours, and set a **minimum score to alert** — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.
 
-> Browsers block audio until you interact with the page. **Test sound** unlocks it.
+> Browsers block audio until you interact with the page. **Test sound** — or **Test
+> voice** — unlocks it.
+
+**Spoken alerts (Desk).** Whether the Desk announces new flow alerts and
+newly-opened positions out loud, which of six neural voices does it, and how loud.
+**Test voice** speaks a sample and doubles as the audio unlock. Note what is *not*
+here: a market-hours toggle. Spoken alerts reuse the one in **Scanner alerts**, so
+the two can never disagree about when the app is allowed to make noise.
 
 **Desktop notifications.** A toggle plus a permission grant.
 

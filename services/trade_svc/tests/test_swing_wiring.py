@@ -39,17 +39,24 @@ _ARTIFACT = {
 
 
 def test_build_universe_factor_snapshot_shape(monkeypatch):
-    # Every symbol gets the same synthetic daily frame; SPY/sector resolve to it
-    # too. Snapshot must be {factor: [list]} with >=1 finite value per factor.
+    """The snapshot now keeps SYMBOL IDENTITY ({"by_symbol": {sym: {factor:
+    value}}}) so it can rank as well as cross-section. The flat basis the
+    scorer consumes is derived from it — asserted here too, because that
+    derivation is what keeps the scoring path unchanged."""
     monkeypatch.setattr(compute, "_price_history",
                         lambda *a, **k: _synthetic_daily())
     snap = compute.build_universe_factor_snapshot()
     assert isinstance(snap, dict) and snap
-    for factor, values in snap.items():
+    by_symbol = snap["by_symbol"]
+    assert by_symbol and all(isinstance(r, dict) and r for r in by_symbol.values())
+    assert all(np.isfinite(v) for r in by_symbol.values() for v in r.values())
+
+    flat = compute.flat_basis(snap)
+    for factor, values in flat.items():
         assert isinstance(values, list) and len(values) >= 1
         assert all(np.isfinite(v) for v in values)
     # The non-ref momentum/vol factors should always be present given 320 bars.
-    assert "mom_12_1" in snap and "low_vol" in snap
+    assert "mom_12_1" in flat and "low_vol" in flat
 
 
 def test_build_universe_factor_snapshot_all_missing(monkeypatch):

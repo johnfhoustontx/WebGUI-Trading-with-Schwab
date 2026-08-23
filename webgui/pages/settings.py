@@ -12,6 +12,7 @@ add new cards/sections here as more settings arrive.
 import app_settings
 import bus_client
 import proxy as _proxy
+import voice
 from nicegui import run, ui
 
 from pages.options import theme
@@ -133,6 +134,34 @@ def render():
 
         ui.label("Tip: your browser blocks sound until you interact with the page — "
                  "clicking Test sound (or any nav link) unlocks it.").classes(
+                 "opacity-60 text-xs")
+
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("Spoken alerts (Desk)").classes("text-subtitle1 font-bold")
+        ui.label("Announce the ticker and the cause out loud when a new flow "
+                 "alert or a newly-opened position appears on the Desk. Uses "
+                 "the existing market-hours gate above.").classes(
+                 "opacity-70 text-sm")
+
+        v_enable = ui.switch("Enable spoken alerts", value=s["voice_enabled"])
+        v_enable.on_value_change(lambda e: app_settings.set("voice_enabled", e.value))
+
+        with ui.row().classes("items-center gap-4"):
+            # Wider than the sound picker beside it: the voice names are long.
+            v_name = ui.select(list(voice.VOICES), label="Voice",
+                               value=s["voice_name"]).classes("w-64")
+            v_name.on_value_change(lambda e: app_settings.set("voice_name", e.value))
+            v_test = ui.button("Test voice", icon="record_voice_over",
+                               color=None).props("no-caps").classes(BTN_3D)
+
+        ui.label("Volume").classes("text-sm opacity-70")
+        v_vol = ui.slider(min=0, max=1, step=0.05, value=s["voice_volume"]).classes("w-64")
+        v_vol.on_value_change(lambda e: app_settings.set("voice_volume", e.value))
+
+        ui.label("The first time a phrase is spoken it takes a second or two to "
+                 "generate; after that it plays from a local cache. Test voice "
+                 "also unlocks browser audio, which is blocked until you "
+                 "interact with the page.").classes(
                  "opacity-60 text-xs")
 
     with ui.card().classes("w-full max-w-2xl"):
@@ -421,3 +450,31 @@ def render():
         from main import play_alert
         play_alert(app_settings.get("alert_sound"), app_settings.get("alert_volume"))
     test.on_click(_test)
+
+    # Test voice is its sibling, but it cannot reuse play_alert: the clip is
+    # synthesized on demand, and voice.ensure BLOCKS (measured ~0.9-2.4 s on a
+    # cache miss), so it has to cross run.io_bound before any of this touches the
+    # page.
+    @guard_async
+    async def _test_voice():
+        settings = app_settings.load()
+        url = await run.io_bound(voice.ensure, "S P Y. Crossover alert, calls over.",
+                                 settings["voice_name"])
+        if url is None:
+            ui.notify("Voice unavailable — check the network and edge-tts.",
+                      type="warning")
+            return
+        # The shared alert element is fine HERE: nothing else is speaking on the
+        # Settings page. The Desk uses its own element so a chime cannot cut an
+        # announcement off, which is a Desk-only concern.
+        # Interpolated the way play_alert does, and safe for the same reason:
+        # both operands are constrained at their SOURCE rather than escaped here
+        # — url is voice.clip_url's "/voice/<sha1 hex>.mp3", which cannot contain
+        # a quote, and the volume is clamped to a float below (a hand-edited
+        # settings.json is the reason that clamp is not just decoration).
+        vol = max(0.0, min(1.0, float(settings["voice_volume"] or 0)))
+        ui.run_javascript(
+            f"(() => {{ const a = document.getElementById('alert-audio'); if (!a) return; "
+            f"a.src = '{url}'; a.volume = {vol}; "
+            f"a.play().catch(() => {{}}); }})()")
+    v_test.on_click(_test_voice)

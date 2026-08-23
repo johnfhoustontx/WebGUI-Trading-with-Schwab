@@ -111,27 +111,8 @@ def commit_trend_regime(spy_closes, lookback_days=trend_regime.HYSTERESIS_DAYS +
     return result, (committed or result.state), days
 
 
-def pcr_from_chain(chain):
-    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume. Ported from source
-    sentiment_dashboard.py:2939-2953."""
-    if not chain:
-        return None
-    pv = cv = 0
-    for strikes in (chain.get("putExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    pv += v
-    for strikes in (chain.get("callExpDateMap") or {}).values():
-        for contracts in strikes.values():
-            for c in contracts:
-                v = c.get("totalVolume", 0) or 0
-                if v > 0:
-                    cv += v
-    return round(pv / cv, 3) if cv > 0 else None
-
+from scoring.put_call import pcr_from_chain  # noqa: E402  (the ONE copy)
+from services import _degrade  # noqa: E402
 
 def _pct_change_n(closes, n):
     """%-change from n sessions ago to last close, or None. Mirrors source
@@ -312,6 +293,7 @@ def build_trend_dict(spy):
             "days": days,
         }
     except Exception:  # noqa: BLE001
+        _degrade.degraded("sentiment.build_trend_dict")
         return None
 
 
@@ -522,6 +504,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                     align_pct, vwap_pct, macd_hist, rsi, adx,
                     n_timeframes=len(frames))
         except Exception:  # noqa: BLE001
+            _degrade.degraded("sentiment.compute_intraday_trend")
             price = intraday_trend.TrendSub(50.0, 0.0)
 
         # 1b) SESSION STRUCTURE — VWAP-hold + opening-range break blended INTO the
@@ -546,6 +529,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                     price = intraday_trend.TrendSub(
                         blended_price, price.confidence, price.interp)
         except Exception:  # noqa: BLE001 — session structure simply drops out.
+            _degrade.degraded("sentiment.compute_intraday_trend")
             sess = session_structure_mod.SessionStructure(0.0, 0.0)
 
         # 2) BREADTH — A/D, % above 50DMA, new highs/lows.
@@ -567,6 +551,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             lows = _first("nylow") or 0
             breadth = intraday_trend.score_breadth_dir(net_ad, pct50, highs, lows)
         except Exception:  # noqa: BLE001
+            _degrade.degraded("sentiment.compute_intraday_trend")
             breadth = intraday_trend.TrendSub(50.0, 0.0)
 
         # 3) SECTOR — participation + cyclical/defensive leadership.
@@ -588,6 +573,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             sector = intraday_trend.score_sector_participation(
                 n_green, n_total, cyc_def_spread)
         except Exception:  # noqa: BLE001
+            _degrade.degraded("sentiment.compute_intraday_trend")
             sector = intraday_trend.TrendSub(50.0, 0.0)
 
         # 4) VIX context.
@@ -778,6 +764,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             "evidence": list(ms.evidence),
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.
+        _degrade.degraded("sentiment.compute_intraday_trend")
         return _neutral_trend()
 
 
@@ -1264,6 +1251,7 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
             "_sample_ts": int(now_ts),
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.
+        _degrade.degraded("sentiment.compute_market_regime")
         return _unclear_shell(now_ts, prior)
 
 
@@ -1618,6 +1606,7 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
             "values": {"roc_3d": roc3, "roc_5d": roc5, "z_20d": z},
         }
     except Exception:  # noqa: BLE001
+        _degrade.degraded("sentiment.derive_composite_extras")
         velocity = {"text": "", "flag": "", "values": _EMPTY_VELOCITY_VALUES.copy()}
 
     divergence = ""
@@ -1789,6 +1778,7 @@ def build_and_write_bridge(snaps, spy, live, sector, trend=None):
                                        sector=sec_arg, trend=trend)
         bridge.write_bridge(payload)
     except Exception:
+        _degrade.degraded("sentiment.build_and_write_bridge")
         pass
 
 

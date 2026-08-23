@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/trade_mgmt.toml — WHEN TO TAKE PROFIT AND WHEN TO CUT
+#
+#   Your stop rules. Edit + restart options_svc. Anything omitted falls back to
+#   the built-in default in shared/trade_mgmt.py, so a partial file is fine.
+#
+#   ⚠ [stops] is read by BOTH sides of trade management and they must agree:
+#       * options-scanner/signal_recommender.py — the auto-manage cycle that
+#         actually closes positions.
+#       * services/options_svc/rescue.py — the at-risk board that flags them.
+#     rescue.py used to restate four of these by hand under a comment asking
+#     future editors to mirror them. It now DERIVES them, so a disagreement is no
+#     longer possible: change a number here and both sides move together.
+#
+#   These apply to the manual paper book's managed signals. The autonomous
+#   driver's separate envelope is config/driver.toml.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[stops]
+# Reaching tp_frac ARMS a break-even stop — it is not an immediate close. The
+# trade keeps running with its downside pinned; the [trail] ladder decides
+# whether the stop then ratchets further.
+tp_frac = 0.50            # fraction of credit captured
+
+stop_mult = 2.0           # cut at >= this multiple of the credit, as a loss
+
+# Delta discipline on the SHORT leg. delta_drift is relative to the entry delta;
+# delta_hard_ceiling is absolute and always wins, so a position entered at an
+# already-rich delta cannot be held indefinitely. delta_abs_fallback applies when
+# the entry delta was never recorded.
+delta_drift        = 0.12
+delta_hard_ceiling = 0.45
+delta_abs_fallback = 0.35
+
+cut_dte = 2               # cut when DTE <= this AND underwater
+
+# A soft delta stop can be DEFERRED when the trade still has room to recover:
+# both of these must hold, or the stop fires.
+recovery_dte_min     = 5
+recovery_min_cushion = 0.015    # 1.5% spot <-> short-strike cushion
+
+[trail]
+# Peak-driven profit-lock ladder for the armed break-even stop. Each rung is
+# [peak_frac, lock_frac]: once PEAK profit reaches peak_frac of the credit, the
+# stop ratchets up to lock in lock_frac of it.
+#
+# The DEFAULT is a single break-even rung (lock 0.0) — exactly the plain
+# break-even stop — so the ratchet is INERT unless a caller passes a richer
+# ladder plus peak_pnl_frac. ratchet_ladder is the sensible opt-in: lock +25% of
+# the credit once peak >= 65%, +50% once peak >= 80%.
+default_ladder = [[0.50, 0.0]]
+ratchet_ladder = [[0.50, 0.0], [0.65, 0.25], [0.80, 0.50]]
+
+[rescue]
+# Escalation bands the at-risk board owns ALONE. The four it shares with [stops]
+# (delta_critical, delta_drift, money_tested_mult, dte_urgent) are deliberately
+# absent — they are derived, so they cannot drift.
+delta_warn           = 0.30
+money_warn_mult      = 1.0      # x entry credit, as a loss
+money_critical_mult  = 3.0
+dte_manage           = 21
+proximity_watch_pct  = 0.03     # underlying within 3% of the short strike
+proximity_tested_pct = 0.01

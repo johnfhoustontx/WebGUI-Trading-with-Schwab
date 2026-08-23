@@ -30,6 +30,7 @@ Unifying the two is a separate decision, not one to make silently here.
 """
 import math
 
+from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
 
 # ── the quadrant palette ─────────────────────────────────────────────────────
@@ -172,17 +173,6 @@ TONE_TXT_CLASSES = " ".join(dict.fromkeys(t["txt"] for t in TONE.values()))
 # ── numbers ──────────────────────────────────────────────────────────────────
 DASH = "—"
 MINUS = "−"      # U+2212, the typographic minus the mono face aligns on
-
-
-def _num(v):
-    """``v`` as a float, or None for anything that isn't a real reading."""
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def fmt_mom(v):

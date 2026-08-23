@@ -289,13 +289,10 @@ def periodic_refresh_due(now, last_slot):
 # reference is in the comment. Each slot fires ONCE per day, within a grace window
 # after its target — so a missed 30 s tick or a mid-window service start still fires
 # it, but a long-late start does NOT backfill a stale slot.
-_ANALYZE_SLOTS = {
-    "premarket": (8, 0),    # 09:00 ET — premarket
-    "open":      (8, 48),   # 09:48 ET — ~18 min after the 09:30 open
-    "midday":    (11, 30),  # 12:30 ET — midday
-    "close":     (15, 15),  # 16:15 ET — EOD retrospective (after the 15:00 CT cash close)
-}
-_ANALYZE_GRACE_MIN = 20  # fire within this many minutes of the target, else skip
+# From config/sessions.toml [slots.analyze] — each firing is a PAID Claude call,
+# so the schedule is an operator control, not a code constant.
+_ANALYZE_SLOTS = {k: (t.hour, t.minute) for k, t in mc.slot_times("analyze").items()}
+_ANALYZE_GRACE_MIN = mc.slot_grace_min("analyze")  # fire within this many min, else skip
 
 
 def analyze_slot_due(now, ran_slots):
@@ -323,12 +320,10 @@ def analyze_slot_due(now, ran_slots):
 # human decision. Times are CT (this module's clock). Each slot fires ONCE per
 # trading day within a grace window (mirrors analyze_slot_due) so a missed 30 s
 # tick / mid-window start still fires it without backfilling a long-stale slot.
-_ACTION_ALERT_SLOTS = {
-    "morning": (10, 0),   # 10:00 CT
-    "midday":  (13, 0),   # 13:00 CT
-    "close":   (15, 0),   # 15:00 CT — pre-close sweep (market close)
-}
-_ACTION_ALERT_GRACE_MIN = 20
+# From config/sessions.toml [slots.action_alert] — how often the phone buzzes.
+_ACTION_ALERT_SLOTS = {k: (t.hour, t.minute)
+                       for k, t in mc.slot_times("action_alert").items()}
+_ACTION_ALERT_GRACE_MIN = mc.slot_grace_min("action_alert")
 
 
 def action_alert_due(now, ran_slots):

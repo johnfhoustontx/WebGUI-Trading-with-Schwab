@@ -95,13 +95,28 @@ class TestSelectBestWidth:
         assert result is None
 
     def test_risk_cap_limits_contracts(self):
-        """When a tiny account forces the risk cap below the target size, the
-        function still returns a selection (not None) — the cap just reduces
-        E[PnL] but narrow widths can still win."""
+        """An account too small to afford ONE contract inside its risk limit gets
+        no selection at all.
+
+        This asserted `result is not None` until 2026-08-20, which enshrined the
+        override it was meant to document: a $1,000 account at 5% has a $50
+        budget, the fixture's max loss is $51/contract (n_risk = 0), and the old
+        code answered by forcing the 5-contract minimum — $255 risked, 25.5% of
+        the account, 5x the stated cap. Refusing is what a risk cap means.
+        """
         opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.10})
         result = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
                                    trade_type="0-DTE", min_cr_pct=0.05,
                                    account_size=1000, max_risk_pct=0.05)
+        assert result is None
+
+    def test_an_account_that_can_afford_one_contract_still_selects(self):
+        """The refusal is about affordability, not about small accounts: raise the
+        budget just past one contract and the same fixture selects again."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.10})
+        result = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                   trade_type="0-DTE", min_cr_pct=0.05,
+                                   account_size=100_000, max_risk_pct=0.05)
         assert result is not None
 
     def test_candidate_widths_constants(self):
@@ -780,20 +795,30 @@ class TestVIXTermStructure:
 
 
 class TestEarningsAvoidance:
+    """check_earnings_conflict windows on [today - 5d, expiration], so every
+    fixture here is RELATIVE to today. The original absolute dates (2026-05-xx)
+    were 'the future' when written and silently became 'far in the past' - at
+    which point all five tests took the same early-out and three of them passed
+    for the wrong reason while two failed."""
+
+    @staticmethod
+    def _d(days):
+        return (date.today() + timedelta(days=days)).isoformat()
+
     def test_no_conflict_when_earnings_after_expiration(self):
-        assert check_earnings_conflict("2026-05-15", "2026-05-10") is False
+        assert check_earnings_conflict(self._d(15), self._d(10)) is False
 
     def test_conflict_when_earnings_before_expiration(self):
-        assert check_earnings_conflict("2026-05-05", "2026-05-10") is True
+        assert check_earnings_conflict(self._d(5), self._d(10)) is True
 
     def test_conflict_when_earnings_same_day(self):
-        assert check_earnings_conflict("2026-05-10", "2026-05-10") is True
+        assert check_earnings_conflict(self._d(10), self._d(10)) is True
 
     def test_no_conflict_when_no_earnings_date(self):
-        assert check_earnings_conflict(None, "2026-05-10") is False
+        assert check_earnings_conflict(None, self._d(10)) is False
 
     def test_no_conflict_when_earnings_far_before_entry(self):
-        assert check_earnings_conflict("2026-03-01", "2026-05-10") is False
+        assert check_earnings_conflict(self._d(-70), self._d(10)) is False
 
 
 class TestDynamicMinCredit:
@@ -2214,3 +2239,141 @@ class TestIvSurfacedOntoSignals:
         assert sigs
         for s in sigs:
             json.dumps({k: s[k] for k in self.NEW_FIELDS})
+
+
+class TestIronCondorProbability:
+    """An IC loses if EITHER short breaches. The two breaches are DISJOINT
+    (price cannot finish below the put short and above the call short), so
+    P(win) = P(put ok) + P(call ok) - 1, not min(...).
+
+    `min()` reports the better of the two legs and so overstates every IC:
+    two 20-delta shorts (each ~80% single-sided) read 80% where the true
+    two-sided figure is ~60%. That inflates the two-point EV in
+    calc_expected_pnl and the PoP factor in scoring (fixed 2026-08-20).
+    """
+
+    @staticmethod
+    def _legs(put_pop, call_pop):
+        base = {"symbol": "TEST", "expiration": "2026-04-19", "dte": 0,
+                "short_mark": 1.50, "long_mark": 0.50, "width": 5,
+                "credit": 1.00, "max_loss": 4.00, "rr_pct": 25.0,
+                "net_theta": -0.03, "trade_type": "0-DTE",
+                "underlying_price": 530.0}
+        pcs = {**base, "type": "PCS", "short_strike": 520, "long_strike": 515,
+               "pop_pct": put_pop, "short_delta": -0.20, "breakeven": 519.0}
+        ccs = {**base, "type": "CCS", "short_strike": 540, "long_strike": 550,
+               "pop_pct": call_pop, "short_delta": 0.20, "breakeven": 541.0}
+        return pcs, ccs
+
+    def test_two_sided_pop_is_not_the_better_leg(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(80.0, 80.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 60.0        # 80 + 80 - 100, not min() == 80
+
+    def test_asymmetric_legs_combine(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(90.0, 70.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 60.0        # 90 + 70 - 100
+
+    def test_pop_floors_at_zero_never_negative(self):
+        """Two coin-flip shorts leave no two-sided edge; a negative probability
+        would be nonsense and would flip the EV sign downstream."""
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(40.0, 40.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 0.0
+
+    def test_a_near_certain_pair_stays_high(self):
+        from scanner_engine import build_iron_condors
+        ic = build_iron_condors(list(self._legs(97.0, 96.0)), max_n=2)[0]
+        assert ic["pop_pct"] == 93.0
+
+
+class TestWidthSelectionRespectsTheRiskCap:
+    """`select_best_width` sizes to the profit target then caps by the account
+    risk limit — but it re-applied the 5-contract minimum AFTER that cap, so a
+    binding cap was silently overridden upward.
+
+    `calc_contracts_for_target` already enforces the multiple-of-5 minimum; the
+    repeat after the cap was pure override. On a $10k account at 5% the cap is
+    $500 = 1 contract of a $4 max-loss spread; forcing 5 puts $2,000 (20% of the
+    account) at risk — 4x the stated limit (fixed 2026-08-20).
+    """
+
+    def test_a_binding_risk_cap_is_not_overridden_upward(self):
+        from scanner_engine import calculate_position_size, size_contracts
+        # $10k account, 5% cap = $500; a $4-max-loss spread costs $400/contract
+        n_risk = calculate_position_size(4.0, 10_000, 0.05)
+        assert n_risk == 1                      # the cap genuinely binds below 5
+        assert size_contracts(10, n_risk) == 1  # was 5
+
+    def test_position_never_risks_more_than_the_cap_allows(self):
+        from scanner_engine import calculate_position_size, size_contracts
+        for account, ml in ((10_000, 4.0), (25_000, 9.0), (50_000, 2.5),
+                            (100_000, 4.0), (5_000, 15.0)):
+            n_risk = calculate_position_size(ml, account, 0.05)
+            risked = size_contracts(calc_target := 25, n_risk) * ml * 100
+            assert risked <= account * 0.05 + 1e-9, (account, ml, n_risk)
+
+    def test_a_generous_account_still_gets_the_five_minimum(self):
+        """The minimum is not removed — it just cannot exceed the cap."""
+        from scanner_engine import size_contracts
+        assert size_contracts(1, 50) == 5      # tiny target, ample risk room
+
+    def test_the_cap_binds_before_the_target_when_it_is_tighter(self):
+        from scanner_engine import size_contracts
+        assert size_contracts(40, 12) == 12
+
+    def test_zero_risk_room_sizes_to_nothing(self):
+        from scanner_engine import size_contracts
+        assert size_contracts(10, 0) == 0
+        assert size_contracts(10, -1) == 0
+
+
+# --- selection floors come from config/scanner.toml --------------------------
+
+class TestScannerConfigWiring:
+    """The IV-rank / credit / score floors were literals here with dated retune
+    comments; they now live in config/scanner.toml so they can be tuned without a
+    code edit. signal_recorder's capture floor reads the same file."""
+
+    @staticmethod
+    def _cfg():
+        import sys, pathlib
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+        from shared import scanner_config
+        return scanner_config
+
+    def test_engine_constants_match_the_config(self):
+        sc = self._cfg()
+        assert scanner_engine.MIN_IV_RANK == sc.min_iv_rank()
+        assert scanner_engine.MIN_CREDIT_PCT == sc.min_credit_pct()
+        assert scanner_engine.DIRECTIONAL_DELTA_RANGE == sc.directional_delta_range()
+        assert scanner_engine.DIRECTIONAL_MIN_CREDIT_PCT == sc.directional()["min_credit_pct"]
+        assert scanner_engine.DIRECTIONAL_MAX_RISK_PCT == sc.directional()["max_risk_pct"]
+        assert scanner_engine.SINGLE_LEG_MIN_SCORE == sc.single_leg()["min_score"]
+        assert scanner_engine.NEG_GEX_MIN_SCORE == sc.scores()["neg_gex_min"]
+        assert scanner_engine.GEX_STRONG_NEG == sc.scores()["gex_strong_neg"]
+
+    def test_recorder_capture_floor_matches_the_config(self):
+        import signal_recorder
+        assert signal_recorder.MIN_SCORE == self._cfg().scores()["capture_min"]
+
+    def test_excluded_grades_stays_a_TUPLE(self):
+        """TOML gives an array; the engine treats this as a tuple."""
+        assert isinstance(scanner_engine.SINGLE_LEG_EXCLUDED_GRADES, tuple)
+        assert scanner_engine.SINGLE_LEG_EXCLUDED_GRADES == ("Weak",)
+
+    def test_the_engine_actually_READS_the_config(self, monkeypatch):
+        """Equality proves nothing on its own - the literals matched the config
+        values before the extraction. Move the config, require the engine to
+        follow. Module constants resolve at import, so this reloads."""
+        import importlib
+        sc = self._cfg()
+        monkeypatch.setattr(sc, "min_iv_rank", lambda: {"0-DTE": 91, "SWING": 92})
+        try:
+            importlib.reload(scanner_engine)
+            assert scanner_engine.MIN_IV_RANK == {"0-DTE": 91, "SWING": 92}, \
+                "scanner_engine.py is not reading config/scanner.toml"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(scanner_engine)

@@ -28,6 +28,7 @@ from pages import rotation_view as V
 from pages.options.theme import (
     ROTATION_FONT_HEAD_HTML, ROTATION_TOKENS as _T,
 )
+from pages.view_watch import watch_view
 from pages.ui_guard import guard
 
 # Repeated class strings for the verdict strip, named once so the three panels
@@ -359,15 +360,8 @@ def render():
         ui.notify("Refresh requested")
         rot_busy.show()
 
-    @guard
-    def _maybe_repaint():
-        # Fetch-free: repaint only when the bus cache version changes.
-        ver = bus_client.read_version("sentiment:rotation")
-        if ver == state["ver"]:
-            return
-        state["ver"] = ver
-        _apply()
-
-    state["ver"] = bus_client.read_version("sentiment:rotation")
     _apply()
-    ui.timer(2.0, _maybe_repaint)
+    # Version-gated repaint + seed, in one line (pages/view_watch.py).
+    # This idiom -- probe :ver, compare, re-read, repaint, hang it on a
+    # 2 s timer -- was written out longhand on 22 pages.
+    watch_view("sentiment:rotation", lambda: _apply())

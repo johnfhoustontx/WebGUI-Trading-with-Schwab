@@ -63,6 +63,35 @@ end   = "15:30"
 # in the last 30 min before the close", so it must not drift to inclusive.
 end_exclusive = true
 
+# -- Scheduled slots (a named clock mark a service fires at, once per day) ---
+# Each slot fires ONCE per trading day, within `grace_min` minutes of its target,
+# so a missed 30 s tick or a mid-window service start still fires it - but a
+# long-late start does NOT backfill a stale slot.
+
+[slots.analyze]
+# The scheduled Claude briefings on the Dealer Positioning page. EACH FIRING IS A
+# PAID CLAUDE CALL, so this table is the direct control on that spend: delete a
+# line to drop a briefing, add one to gain a briefing. Times CT, ET in comments.
+grace_min = 20
+premarket = "08:00"   # 09:00 ET
+open      = "08:48"   # 09:48 ET - ~18 min after the 09:30 open
+midday    = "11:30"   # 12:30 ET
+close     = "15:15"   # 16:15 ET - EOD retrospective, after the 15:00 CT cash close
+
+[slots.action_alert]
+# The thrice-daily "trades needing action" digest pushed to Telegram/Discord.
+# This is what decides how often your phone buzzes.
+grace_min = 20
+morning = "10:00"
+midday  = "13:00"
+close   = "15:00"     # pre-close sweep
+
+[slots.momentum]
+# The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the
+# day's daily bars have settled at the proxy. Moving it earlier will silently
+# score stale bars.
+at = "16:20"
+
 [alerts]
 # Fire phone pushes / in-app toasts during extended sessions. Off by default:
 # a 06:30 CT push on a handful of thin GTH prints is noise, and the execution

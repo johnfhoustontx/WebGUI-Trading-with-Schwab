@@ -8,6 +8,7 @@ scoring/composite.py and the state vocabulary of scoring/trend_regime.py.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from ._common import clamp as _clamp
 
 
 @dataclass(frozen=True)
@@ -29,11 +30,6 @@ def _finite(x):
     except (TypeError, ValueError):
         return None
     return None if (v != v or v in (float("inf"), float("-inf"))) else v
-
-
-def _clamp(v, lo, hi):
-    # Always float so TrendSub.score is uniformly float (it gets JSON-serialized).
-    return float(max(lo, min(hi, v)))
 
 
 def score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx,
@@ -91,12 +87,21 @@ def score_vix_context(vix, vix_change_pct, vix1d, vix9d) -> TrendSub:
     vix1d = _finite(vix1d)
     if not vix or vix <= 0 or vix_change_pct is None:
         return TrendSub(score=50.0, confidence=0.0)
-    lvl = _clamp((20.0 - vix) / 10.0, -1, 1)
-    chg = _clamp(-vix_change_pct / 5.0, -1, 1)
-    term = _clamp((vix - vix1d) / 2.0, -1, 1) if vix1d else 0.0
-    direction = 0.4 * lvl + 0.4 * chg + 0.2 * term
+    # Renormalize over the terms PRESENT rather than feeding a missing one in as
+    # a literal 0: a zero is a real "neutral" reading, and substituting it for an
+    # absence structurally shrank the deflection from 50 by the missing term's
+    # weight while still claiming confidence 1.0. $VIX1D does not quote for this
+    # account, so that was a standing 20% shrink, not an outage case. The absence
+    # is carried by the CONFIDENCE instead — the same split vix.score_complex
+    # uses (both fixed 2026-08-20).
+    parts = [(0.4, _clamp((20.0 - vix) / 10.0, -1, 1)),
+             (0.4, _clamp(-vix_change_pct / 5.0, -1, 1))]
+    if vix1d:
+        parts.append((0.2, _clamp((vix - vix1d) / 2.0, -1, 1)))
+    den = sum(w for w, _ in parts)
+    direction = sum(w * v for w, v in parts) / den
     return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
-                    confidence=1.0)
+                    confidence=round(den, 3))
 
 
 def vol_confidence_factor(vix_change_pct) -> float:
@@ -116,8 +121,14 @@ def blend_trend(scores, confs, weights=None):
     weights = weights or TREND_WEIGHTS
     num = den = 0.0
     for k, w in weights.items():
-        c = float(confs.get(k, 0.0) or 0.0)
-        s = float(scores.get(k, 50.0) or 50.0)
+        c = _finite(confs.get(k)) or 0.0
+        # Only ABSENCE means neutral. `scores.get(k, 50.0) or 50.0` used to
+        # replace a score of exactly 0.0 with 50 -- and 0.0 is the entire
+        # saturated crash-tape region of score_price (clamped to [0,100]), so
+        # the most bearish possible tape blended 22.5 points BULLISH of one
+        # tick off the floor, at unchanged confidence (fixed 2026-08-20).
+        s = _finite(scores.get(k))
+        s = 50.0 if s is None else s
         num += w * s * c
         den += w * c
     if den <= 0:

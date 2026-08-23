@@ -95,8 +95,33 @@ client and market data through `http://127.0.0.1:8100`.
 
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
 **Redis (Memurai) backbone**. **All six domains are migrated** — sentiment, options,
-portfolio, trade, driver, market — so the webgui imports only `nicegui` + `shared.bus` +
-`shared.contracts`, and every page reads Redis. The shape:
+portfolio, trade, driver, market — and every page reads Redis. The shape:
+
+**The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
+153 non-test `webgui/**/*.py`, extended 2026-08-21): `nicegui` · `shared.bus`
+(never `redis` directly) · `shared.market_calendar` · `shared.symbols` ·
+`repo_paths` · `requests` — **only** for the
+`/health` fan-out the shell and Status page run · `fastapi.responses` for the
+report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
+`sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
+a hyphenated app folder (`webgui/proxy.py` held the last of it for two dead
+client singletons; `test_proxy.py` now guards it at source level). ⚠ The
+shorthand "only nicegui + shared.bus + shared.contracts" was repeated in several
+places and was wrong on the last term: **the webgui imports `shared.contracts`
+nowhere at all** — see the contracts note below.
+
+**Contracts are a WRITE-side gate on SOME views, not the typed API both tiers
+share.** The design says "both tiers import them; validated on write and read".
+Measured 2026-08-21: the webgui reads ~50 distinct cache views, `shared/contracts/`
+defines 18 models, and services validate at ~15 of 74 `cache_set` sites. Read-side
+validation does not exist. Treat a contract as a guarantee only for the views that
+actually construct one (`ScanResult`, `NetPremiumSnapshot`, `MatrixSnapshot`, …);
+for the rest the payload shape is whatever the builder last emitted. ⚠ Documenting
+a view as "validated by X" does not make it so — `cache:options:matrix` carried
+that claim in this file and its design doc while `MatrixSnapshot` was used only in
+its own unit test, from 2026-07-20 until it was actually wired on 2026-08-21.
+
+The shape:
 
 ```
 TIER 1 GUI         webgui/ NiceGUI (:8500) — render() only; reads Redis cache on
@@ -268,6 +293,16 @@ value/on_value_change API as the old `ui.toggle`). Pages live in
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
 heavy engine calls run off-thread via `nicegui.run.io_bound`.
+**`webgui/voice.py`** is the Desk's spoken-alert clip cache — pure phrase
+builders over an `edge-tts` synthesis layer, writing mp3s to `webgui/data/voice/`
+(gitignored) which `main.py` mounts at **`/voice`** beside `/static`. ⚠ It is the
+**one deliberate exception** to the Tier-1 import rule: `edge_tts` is neither an
+engine nor a Schwab caller but a presentation concern, the audio equivalent of
+the bundled WAVs in `webgui/static/sounds/`, and the import is **lazy** so the
+module stays importable on a machine without the package (a test guards that).
+Its public surface never raises — every failure (no network, no package,
+unwritable cache) degrades to `None`, because the alternative to silence is a
+traceback on the landing page.
 
 **The app-wide alert/badge watcher, the Market Dashboard, the Market Summary Ticker and the
 multi-strategy Swing Scanner each have their build notes in
@@ -676,6 +711,23 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `* { transition: none !important; animation: none !important; }`. (Related preview
   caveats: `computer{action:"screenshot"}` times out on this app — verify via DOM eval;
   and hover-by-`ref` works while hover-by-coordinate requires a screenshot first.)
+- **A CSS animation on a row a painter REBUILDS restarts from zero, and
+  `animation-fill-mode: forwards` then outranks every `hover:` rule you own
+  (2026-08-21, both caught in review before shipping).** Two traps in one
+  mechanism, both silent. (1) `_paint_positions` does `.clear()` + rebuild on
+  every re-price, and a rebuilt element restarts its animation — so a
+  time-limited effect never expires, which is indistinguishable from never
+  having built it. The fix is a whole-second **negative `animation-delay`** so a
+  rebuilt element RESUMES: ten static classes `desk-neon-0…9`, never a computed
+  `[animation-delay:-3.2s]` (the finite-set rule). ⚠ Emit the base rule as
+  `animation-name`/`-duration` **longhands** — the `animation:` shorthand
+  declares `animation-delay: 0s`, and since both selectors are one class the
+  winner is decided by nothing but source order in an f-string. (2) Per CSS
+  Cascade §6.6.2 **animation declarations outrank normal author declarations**,
+  so `forwards` holds the final keyframe forever and beats the row's
+  `hover:bg-…` for as long as the class sits there — on a `cursor-pointer` row,
+  for the rest of the session. Drop `forwards` when the end keyframe already IS
+  the element's default. See `pages/desk.py` `DESK_NEON_CSS`.
 - **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
   bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
   has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
@@ -923,7 +975,23 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   **unchanged confidence 1.0**. The sibling `order_flow._num` had rejected
   non-finites all along; the three now match it. This is completing a parsing
   guard, **not** the `_clamp` shortcut banned below.
-- **`is not None` does not mean "present".** `intraday_trend`'s scorers each declare
+- **A second-pass audit the same evening found the trap in THREE more places**,
+  which is the strongest argument yet for treating the guarded list as a map of
+  where someone has looked: `flow_skew._as_float` passed NaN (a NaN delta seeded
+  `best_dist = nan`, and every later `dist < nan` is False — the NaN contract's
+  IV won the 25Δ pick permanently) and accepted Schwab's **`volatility = -999`**
+  sentinel as a usable IV; and `profile_shape._num` let one NaN volume flip a
+  profile's shape and inflate `balance_strength` **15×**. Same fix as the
+  siblings. `detect_uoa` turned out to be accidentally safe — NaN passes its
+  floors but `int(nan)` raises into the broad `except` — and that accident is
+  now pinned by tests so it cannot be un-fixed silently.
+- **`is not None` does not mean "present", and neither does `or default`.**
+  `blend_trend`'s `scores.get(k, 50.0) or 50.0` replaced a score of exactly
+  **0.0** with neutral 50 — and 0.0 is not a corner: `score_price` clamps to
+  [0,100], so the ENTIRE saturated crash-tape region lands on it. The most
+  bearish possible tape blended **36.5** where one tick off the floor blended
+  14.0, at confidence 1.0 (fixed 2026-08-20 evening; only absence means
+  neutral). `intraday_trend`'s scorers each declare
   their own missing-input policy (drop the component, or return confidence 0) and
   tested it with `x is not None` / `not x` — both of which a NaN survives.
   Measured: `score_vix_context(nan, …)` returned **70.0 at confidence 1.0**, a
@@ -1170,6 +1238,54 @@ page whose other two engines were intraday-aware. It now calls the new
 There is one settlement instant (16:00 ET) and one helper per tier —
 `options_calculator.expiry_time_to_years` and `options_svc.compute.time_to_expiry_years`.**
 
+**Four config files were extracted on 2026-08-21, and all four exist because the
+value was duplicated across modules that CANNOT import each other.** That is the
+test for whether a value belongs in a TOML here: a config file genuinely
+deduplicates a cross-tier constant, where moving a single-consumer constant just
+relocates it.
+
+| file | holds | read by |
+|---|---|---|
+| **`config/driver.toml`** | the autonomous driver's risk envelope — target band, per-trade + daily risk caps, VIX ceiling, loss halt, decision budget | `driver_svc.settings` (guardrails) **and** `options_svc.compute` (the paper sizer's cap) |
+| **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
+| **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
+| **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
+
+Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
+briefings, the thrice-daily action digest, and the nightly momentum cascade. They
+are named clock marks, the same thing `[windows]` already models, and **each
+`analyze` slot is a paid Claude call**, so the table is the direct control on
+that spend.
+
+**`shared/config_toml.py:toml_loader(path, defaults)` is the one loader.** It
+returns `(load, reset)` and encodes the contract every config file here follows:
+built-in defaults are the real values and the TOML only overrides · deep-merged
+so a file setting one key keeps every sibling · mtime-cached · **never raises**.
+`flow_alerts.py` and `market_calendar.py` still carry their own older copies of
+that logic; new config goes through the factory. ⚠ `load()` hands back the
+CACHED mapping, so **treat a config dict as read-only** — copying on every
+hot-path read would defeat the cache.
+
+⚠ **Two traps when wiring one of these.** (1) The consumers keep module-level
+CONSTANTS resolved at import (`MIN_IV_RANK = _scfg.min_iv_rank()`), matching the
+"edit + restart" contract — so a test that merely asserts `settings.X ==
+config.X` **proves nothing**, since the literal it replaced had the same value.
+The discriminating test monkeypatches the accessor and `importlib.reload`s the
+consumer. Every one of these extractions ships with that test, because the first
+draft of each passed green before the code was wired. (2) The shapes the engines
+index are preserved deliberately — `MIN_CREDIT_PCT["0-DTE"][regime]`,
+tuple delta bands, a tuple `SINGLE_LEG_EXCLUDED_GRADES`, tuple-of-dicts
+`netprem_groups` — TOML gives lists and flat tables, so the shared modules convert
+rather than making every call site change.
+
+**`shared/symbols.py` is now on the Tier-1 allow-list**, alongside
+`shared.market_calendar`. `webgui/pages/options/gamma.py` used to hold a
+deliberate byte-copy of `net_premium.GROUPS` under a comment explaining that Tier
+1 may not import `services.*`, with tests as the only thing keeping the two in
+step. **Reading a config FILE is not a `services` import** — and `theme.toml` is
+the standing precedent for Tier 1 doing exactly that — so the duplication is gone
+rather than merely policed.
+
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
 speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
@@ -1239,12 +1355,30 @@ GTH collection can't silently move the Gamma display flip, and
 gate — flipping it to inclusive re-opens a checkpoint slot at 15:30 ET inside the
 no-new-entries window. See the 2026-08-02 "Last updated" entry.
 
+**`webgui/pages/fmt.py` is the shared numeric vocabulary** — `num` (strict: a real
+reading or None, rejecting NaN AND bool, since `float(True)` is 1.0), `float_or`
+(permissive: coerce with a fallback, NaN passes through), `clamp`,
+`round_or_none`, `fixed`, `signed_pct`. ⚠ **`num` and `float_or` differ on
+purpose and a test pins it**: use `num` for anything feeding a comparison, a
+colour or a direction; use `float_or` when you have a sensible fallback and the
+value is about to be formatted. `num` alone had SIX byte-identical copies before
+2026-08-20. Options table helpers (`rescue_highlight`, `AT_RISK_STATES`) live in
+`pages/options/rescue.py` beside `heat_border_class`.
+
+**The version-gate poll idiom is `webgui/pages/view_watch.watch_view(view, on_change)`**
+— seed the version, probe the cheap `{key}:ver` on a timer, repaint only when it
+moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing
+the canonical shape) were converted 2026-08-20, the rest have genuinely different
+shapes. ⚠ It deliberately does NOT swallow repaint errors — only the
+deleted-client case, via `ui_guard`. Anything else propagates so NiceGUI logs it.
+
 **`shared/market_calendar.py` is the single source of truth for the NYSE calendar**
 (holidays **derived algorithmically** — no yearly edit) **and session/window
 predicates**. Ten duplicated holiday sets and fourteen hardcoded window constants
 were consolidated onto it. **Do not add a new holiday literal or window constant
-anywhere** — add it here, or to `config/sessions.toml`. The one site left outside
-it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
+anywhere** — add it here, or to `config/sessions.toml`. The two `tools/` copies went on 2026-08-20 (their justifying comment named the
+wrong module — market_calendar pulls in no heavy deps, measured). The one site
+left outside it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
 2026-07-08, only `RISK_LIMITS` is still read), deliberately exempt.
 `shared/` is a namespace package, so
 `from shared.market_calendar import ...` resolves once the repo root is on
@@ -1351,10 +1485,10 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 > "Waiting for … service" placeholder. **Sentiment, the entire Options section,
 > Portfolio, Trade, and Driver are migrated** (`services/sentiment_svc`,
 > `services/options_svc`, `services/portfolio_svc`, `services/trade_svc`,
-> `services/driver_svc`) — **every page now reads Redis**; the webgui imports
-> ONLY `nicegui` + `shared.bus` + `shared.contracts` — no app engines, so the documented
-> `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
-> architecture" section.
+> `services/driver_svc`) — **every page now reads Redis**; the webgui imports no app
+> engines, so the documented `scoring`/`notifier` cross-app collision can no longer
+> occur. The exact allow-list (and why the familiar "+ `shared.contracts`" shorthand
+> is wrong) is in the "3-tier architecture" section.
 
 ## Environments (dev / prod)
 
@@ -1509,10 +1643,148 @@ disabled**. **Promotion is explicit:** merge to `main` and push from dev, then r
 stopping anything, `git pull --ff-only`, reinstall only if `requirements.lock`
 moved, restart).
 
+⚠ **A NEW DEPENDENCY MUST GO IN `requirements.lock`, NOT ONLY IN
+`requirements.txt` — otherwise it ships to prod MISSING (2026-08-21).** Prod has
+its **own venv**, and promote reinstalls *only when the lock moved*, so a package
+added to `requirements.txt` alone is never installed there. Whether that is
+visible depends entirely on how the importer degrades: `webgui/voice.py` guards
+its `edge_tts` import and returns `None`, so the Desk's spoken alerts would have
+gone live on prod **completely silent**, with one log line and nothing on screen
+to say why. Caught before promoting only because prod's venv was checked
+directly. **Verify with a dry-run against the prod venv before promoting** —
+`"D:\WebGUI Trading Prod\.venv\Scripts\python.exe" -m pip install --dry-run -r requirements.lock`
+should name exactly the packages you intended and nothing else. Regenerating the
+whole lock with `pip freeze` is the wrong fix: the lock has drifted from the
+venv before (132 entries against 135 installed, `tweepy` missing entirely), so a
+wholesale refresh sweeps unrelated local state into the commit. Add the pins by
+hand.
+
 **Known limits (not defects) are listed in the runbook** — chiefly that dev is
 *quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan
 in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
 handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
+
+## Test infrastructure (2026-08-21)
+
+**The fake bus now matches prod's ONE-Redis semantics.** Every `Bus(fake=True)`
+used to build its own `FakeStrictRedis`, so two Bus objects in the same test
+shared nothing — while in production every Bus talks to the same Memurai. That is
+not harmless: **four production modules construct their OWN bus** rather than
+receiving one (`options_svc.compute._BRIEFING_BUS`, `trade_svc.compute._BUS`,
+`webgui/bus_client._bus`, `_scaffold`'s `the_bus or Bus()`), so a test handing a
+handler its own fake bus while the code reached one of those singletons was
+reading an **empty cache and passing down the degrade path**.
+
+`shared/bus/client.py` keys **one `fakeredis.FakeServer` per running test**, off
+`PYTEST_CURRENT_TEST` with the phase suffix stripped. Shared within a test
+(pub/sub and streams cross Bus instances, as in prod), clean between tests — and
+**no conftest wiring in any of the ~15 suites** that use it, because pytest
+rewrites that variable per test. `reset_fake_bus()` is the explicit hook.
+
+⚠ **If a test needs an EMPTY cache, it must now say so.** Building a second
+`Bus(fake=True)` used to give you one for free — a semantic prod never had. Two
+tests were relying on exactly that and broke when the fake stopped lying: one
+looped over three clock times and only passed because each pass could not see the
+cooldown map the previous one wrote. Call `reset_fake_bus()` and rebuild.
+
+**`pyrightconfig.json` is a DELIBERATELY NARROW type check** — `shared/bus`,
+`shared/contracts`, `shared/config_toml.py`, `webgui/bus_client.py`. That is the
+one seam every tier crosses, and where the documented envelope-vs-payload bug
+class lives (`cache_get` returns a `CacheEnvelope`, not the payload). Run it with
+`.venv\Scripts\python -m pyright`; it is **clean, and must stay clean**.
+
+⚠ **Do not widen it to the repo.** The services and pages are large, untyped, and
+full of deliberately loose payload dicts (contracts model rows as `list[dict]` on
+purpose) — switching them on yields thousands of findings nobody will action,
+the same failure mode ruff's minimal select list already avoids. Its four
+original findings were all **typing-stub artifacts, not bugs**: `redis-py`'s
+stubs return `bytes | str` where `decode_responses=True` guarantees `str`. They
+are fixed with `cast()` **plus a comment stating the invariant**, never a blanket
+ignore.
+
+**Two cross-tier mirrors are now pinned by test, not discipline**
+(`shared/tests/test_cross_tier_mirrors.py`, which AST-parses the files and
+imports nothing, so it cannot itself trigger the `scoring` collision):
+- the five **regime display words**, duplicated in `driver_svc/compute.py`,
+  `options_svc/market_console.py` and `webgui/pages/regime_mix.py` because those
+  tiers cannot import the source. (`sentiment_svc` correctly delegates to
+  `market_regime.regime_label` — a test records that it must not grow a fourth
+  copy "for symmetry".)
+- the **manuals dual registration**. The existing webgui test checked catalog →
+  built file; this adds the converse, which was the unguarded half: a manual
+  that is BUILT but never listed in `pages/manuals.py` is silently unreachable,
+  since that dict is also the serving whitelist.
+
+**`scoring/_common.py` now holds `clamp` and `num`.** Measured by AST with
+docstrings stripped: **`clamp` had NINE byte-identical private copies and `num`
+seven** (six identical, one differently spelled but verified equivalent across 20
+inputs before folding it in). That was the "patch one of nine" trap in the very
+package where the NaN-guard bug class keeps recurring. ⚠ This is **not** the
+thing the NaN section below warns against — that warning is about changing
+`clamp`'s NaN *semantics* centrally, and the body here is byte-identical to the
+nine it replaced. The NaN policy stays at the call sites, because only the caller
+knows whether a missing input means "neutral 50", "floor the magnitude" or
+"confidence 0". `_finite` is deliberately **not** consolidated: three functions
+share that name and `momentum_regime`'s takes an *iterable*, so hoisting it would
+hand someone the wrong one silently. A test records that.
+
+**`pytest` now defaults to `-rf`** (`[tool.pytest.ini_options]` in
+`pyproject.toml`, which every per-app run resolves as its configfile). "Compare
+the failing SET, not the count" stops being something you have to remember to ask
+for. `-rfs` was considered and rejected: the suites carry a couple of permanent
+`importorskip`s, and printing those every run trains people to ignore the summary.
+
+## Observability — a swallowed exception must leave a trace
+
+**`services/_degrade.py` is the house guard-rail for the repo's most expensive bug
+class**: `try/except Exception -> return a plausible default`, which turns a real
+bug into a confident number with nothing in the log to say it happened. That shape
+sat over all five NaN incidents, and the worst instance wrapped **294 lines** of
+`sentiment_svc.compute_intraday_trend` and returned `_neutral_trend()` — so any bug
+inside it rendered as a calm neutral reading.
+
+```python
+except Exception:                       # the guard STAYS - it keeps the refresh alive
+    _degrade.degraded("sentiment.compute_intraday_trend")
+    return _neutral_trend()
+```
+
+`degraded(area, *, detail=None)` logs at **WARNING with a traceback** and increments
+a per-area counter that `_scaffold`'s `/health` publishes as **`degrades_total`** +
+**`degrades`**. The Status page renders it on the service card as
+`healthy - 12 degraded` (`status.service_detail`, zero stays a plain "healthy").
+WARNING and not ERROR on purpose: most of these fire on real, expected conditions
+(a symbol with no chain off-hours), so ERROR should stay meaning "look now" — **the
+counter is the signal, the log line is the detail**. One degrade is noise; 340 in a
+session is a bug that had nowhere else to surface.
+
+**The scope rule is by SIZE, and it is deliberate** (census 2026-08-21, 542
+`except Exception` in `services/` + `webgui/`, 289 of them silent):
+
+| guarded body | policy |
+|---|---|
+| **>= 15 lines** (41 found) | must speak — `_degrade.degraded(...)` or its own log line. Pinned by `services/tests/test_no_silent_degrades.py`. |
+| **< 15 lines** (248 found) | leave alone. These are one-statement parse guards (`try: return float(x) except: return None`) where the missing-value contract IS the point; a WARNING per row per tick is spam, not observability. |
+
+⚠ **Do not "just enable ruff BLE001" instead.** It flags every `except Exception`,
+so it would need ~542 grandfathered `noqa` comments — diluting the signal to
+nothing — and it contradicts the standing rule that a new ruff rule class is added
+only once the tree is already clean under it. The AST guard test above pins the
+invariant that actually matters at a fraction of the noise. Note the existing
+`# noqa: BLE001` comments scattered in the code are **decorative** — `BLE` is not in
+the ruff select list, so nothing checks them.
+
+**Tier 1 is out of scope for the counter** — `webgui/` cannot import `services.*`.
+Its guards are all small, and its one large one (`status._probe_one`) is a health
+probe that already surfaces the failure **in the UI** as `unreachable
+(ConnectionError)`, which beats logging it.
+
+**`webgui/logging_setup.py`** is Tier 1's own rotating file log (`logs/webgui.log`),
+called once at `main.py` startup. It is a deliberate ~30-line copy of
+`_scaffold._install_file_logging` rather than an import of it — the Tier-1
+allow-list has no `services.*`, and that helper drags in FastAPI and the Bus.
+Before it, the `webgui` logger had **no handler at all**: output went to the console
+and died with the Windows Terminal tab.
 
 ## Performance characteristics & known hotspots
 
@@ -1622,6 +1894,22 @@ for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other pe
 republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
 unconditionally — opt them in the same way if they prove chatty.
 
+**Measure before you optimise a localhost read — twice now the estimate was the
+bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop
+block"; measured against prod it is **10.7 ms**, only 6.2 ms of it JSON parse.
+Deferring it off-loop buys ~10 ms and costs a fill-in flash on the landing page,
+and **pipelining the round-trips is SLOWER** (12.34 vs 11.25 ms — on localhost the
+round-trips are nearly free and the pipeline setup is not). Both were written,
+measured and reverted. The lever that IS real is the *cadence*: the app-wide 2 s
+watcher read `options:scan` + `options:flow_alerts` (237 KB) ungated on every
+tick per tab — **3.16 ms → 0.32 ms, 10.2 GB → 0.7 MB moved per tab per day** —
+via `bus_client.read_gated(view, memo)`, a `:ver`-probe-then-deserialize helper.
+⚠ `read_gated` deliberately does **not** gate a key with no `:ver`: a memo keyed
+on `None` has no invalidation signal and would serve its first payload forever,
+so versionless keys keep the old always-read behaviour. **Rule: a per-navigation
+read of a few hundred KB on localhost is single-digit milliseconds — optimise the
+thing that runs 43,200 times a day, not the thing that runs once per click.**
+
 **A cropped payload is not a BOUNDED payload — split what the reader doesn't read
 (2026-08-20).** `cache:options:gamma` was cropped in 2026-06 to a ±display-window
 strike range, and the comment recording that said it cut the key to "well under
@@ -1646,6 +1934,16 @@ only the visible view's, on demand, cached per gamma version
   stale history is benign (append-only for the session), across symbols it would
   draw one symbol's heatmap under another's bars. A view the snapshot lacks is
   published EMPTY, never skipped, for the same reason.
+
+**The same class, next key over (2026-08-20 evening):** `cache:options:calc_chain`
+was **8.77 MB — 53% of ALL prod Redis string bytes** — because `calc_load_symbol`
+cached the raw 20-expiry Schwab chain, ~40 fields per contract, no TTL. The
+Calculator/Rescue pages read exactly FIVE contract fields (`bid`/`ask`/`mark`/
+`volatility`/`delta`) plus the two expiry maps' structure, so
+`compute.thin_calc_chain` now cuts contracts to that whitelist at publish:
+**8.77 MB → 0.68 MB (−92%)**, measured on the real prod payload, page extractors
+verified unchanged on the thinned dict. Fields were cut rather than strikes —
+the leg builder legitimately offers far wings, so the strike ladder stays whole.
 
 **Two more unbounded-growth fixes from the same audit.** `driver_account_view`
 published **every closed trade ever** (160 rows / 158 KB of a 224 KB payload,
@@ -1779,11 +2077,11 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 # from the repo root, one service at a time. ALL of these were re-measured
 # 2026-08-19 on the post-dependency-refresh venv — see the note below.
 .venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1189
+.venv\Scripts\python -m pytest services\options_svc    # 1216
 .venv\Scripts\python -m pytest services\portfolio_svc  # 32
 .venv\Scripts\python -m pytest services\trade_svc      # 77
 .venv\Scripts\python -m pytest services\driver_svc     # 239
-.venv\Scripts\python -m pytest services\market_svc     # 73
+.venv\Scripts\python -m pytest services\market_svc     # 77
 .venv\Scripts\python -m pytest shared\bus              # 25
 .venv\Scripts\python -m pytest shared\contracts        # 49 (no app-dir imports — safe together)
 .venv\Scripts\python -m pytest shared\tests            # 89
@@ -1800,35 +2098,54 @@ drifted far from their written values (driver_svc 162 → 239, `shared/bus` 15 �
 which is exactly what an unverified number does. `market_svc`, `shared/tests`,
 `tests` and `tools/tests` were never listed here at all.
 
-**Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
-read them as a regression:**
+**There are no known baseline failures.** As of **2026-08-21** every suite in the
+repo runs clean:
 
-- **options-scanner** — **11**, not the "~2" this line claimed until 2026-08-09.
-  Re-measured 2026-08-20 at **11 failed / 1371 passed / 3 skipped**. The set, which
-  is what you compare (never the count — see below):
-  `test_gex_collector.py` ×5 (`test_next_boundary_*` ×4, `test_main_skips_before_market_open`),
-  `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`,
-  `test_key_levels_doc.py` ×3, and
-  `test_scanner_engine.py::TestEarningsAvoidance` ×2. **Re-confirmed 2026-08-15**
-  (1439 passed / 11 failed / 2 skipped) — same set, unchanged.
-- **options_svc** — **none as of 2026-08-18** (**1148 passed**, re-measured on
-  `claude/dashboard-key-elements`). The 2 date-relative `test_expected_move`
-  failures previously listed here now pass — they depend on the run date, so
-  expect them to return. ⚠ `test_flow_alert_window.py::
-  test_gth_signal_still_fires_at_the_open` is **FLAKY**: observed failing once in
-  a full run, then passing in isolation and in two subsequent full runs.
-- **sentiment-dashboard** — **2**, both in `tests/test_apply_sector_perf.py`
-  (`test_apply_sector_perf_merges_into_existing_quotes`,
-  `test_apply_sector_perf_renders_from_merged_map`), failing with
-  `ModuleNotFoundError: No module named 'sentiment_dashboard'`. They test the old
-  **Tk UI entrypoint, which this repo deliberately never copied** (see the folder
-  map), so they can never pass here. Suite reads **479 passed / 2 failed**
-  (2026-08-20, after the legacy `notifier.py` and its ~20 tests were deleted;
-  it read 496 earlier the same day and 487 on 2026-08-14).
-- **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
-  (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
-  reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
-  so it **predates** the dev/prod-environments branch; first documented 2026-08-08.
+| suite | reads |
+|---|---|
+| options-scanner | **1180 passed / 0 failed / 2 skipped** |
+| sentiment-dashboard | **507 passed / 0 failed / 1 skipped** |
+| sentiment_svc | **328 passed / 1 xfailed** |
+| options_svc | **1218 passed** |
+| trade_svc | **79 passed** |
+
+**The long-standing "8-11 permanent failures" were a fiction, and that cost
+more than the failures did.** Every one turned out to be a **stale fixture
+pinning a constant that had since moved** - a 2-minute collector cadence that
+became 1-minute, an 8:30 collection window that became 8:00, a `LOCK_TTL_SEC`
+that halved with it, and absolute 2026-05 dates that drifted into the past. They
+had been labelled "timing-dependent" and "stale fixtures - do not fix", so nobody
+looked. Two consequences worth remembering:
+
+1. **A red baseline hides new failures.** A 9th failure
+   (`test_calc_multileg.py::test_per_leg_expiry_back_leg_retains_value_at_front_expiry`,
+   whose "far" back-leg expiry of 2026-08-21 simply arrived) appeared the morning
+   of the audit and was invisible against an expected count of 8.
+2. **Three of the five `TestEarningsAvoidance` tests were PASSING for the wrong
+   reason** - once every fixture date is in the past, they all take the same
+   early-out. A green test over a stale fixture asserts nothing.
+
+Fixtures are now **derived from the constant or relative to today** wherever the
+subject is one (the reasoning `gex_collector.py` already applied to
+`LOCK_TTL_SEC`). Nothing was xfail-ed to paper over a failure. The two remaining
+**skips** and the one **xfail** are deliberate and named:
+
+- `options-scanner/tests/test_dashboard_*` (2 skips) and
+  `sentiment-dashboard/tests/test_apply_sector_perf.py` (1 skip) carry module-level
+  `pytest.importorskip`s for the Tk entrypoints **this fork deliberately never
+  copied** - they can only pass in the source repo.
+- `sentiment_svc/tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
+  is `xfail(strict=True)` over a **real open bug**: the `$VIX1D` session latch
+  beats the daily close, so `vix1d_prev` reads 18.0 where the true prior close is
+  10.0, inflating `vix1d_spike_pct`. `strict=True` means fixing it FAILS the run
+  until the marker is deleted - the xfail is a tracked bug, not a hidden one.
+
+⚠ Two known-flaky behaviours survive: `options_svc`'s
+`test_flow_alert_window.py::test_gth_signal_still_fires_at_the_open` was observed
+failing once in a full run then passing in isolation and twice more in full runs,
+and the date-relative `test_expected_move` cases depend on the run date. Neither
+is an expected failure - investigate rather than accept.
+
 
 **Compare the failing SET, not the count.** A matching total is not evidence of a
 clean run: this repo has a documented incident where two real regressions hid
@@ -1837,13 +2154,16 @@ and diff the node IDs name-by-name. It nearly bit again on 2026-08-09, when
 options-scanner's passed/skipped drifted 1351/2 → 1370/3 across a change while the
 failure count sat unmoved at 11.
 
-**That drift has TWO independent sources, not one** (the second measured
-2026-08-18). The first is the timing-dependent `test_gex_collector*` group. The
-second is a trio of Tk-dependent tests — `test_chart_style_vars.py:38`,
-`test_gex_dex.py:182`, `test_theme.py:130` — which race on Tk root creation:
-**whichever loses self-skips, and it is a DIFFERENT one each run.** Six no-op
-runs of just those three gave `34 passed` / `33 passed, 1 skipped` at random. So
-`1453/3` and `1454/2` are both healthy readings of an unchanged tree.
+**That drift had TWO independent sources** (the second measured 2026-08-18), and
+BOTH are now gone. The first was the `test_gex_collector*` group, recorded here
+for a month as "timing-dependent" when in fact it pinned a superseded
+`POLL_INTERVAL_MIN` — fixed 2026-08-21 by deriving the expectations from the
+constant. The second was a trio of Tk-dependent tests — `test_chart_style_vars.py`,
+`test_gex_dex.py:182`, `test_theme.py` — racing on Tk root creation, where
+**whichever lost self-skipped, a DIFFERENT one each run**. Two of those three
+files were deleted on 2026-08-20 (they tested `build_chart_style_vars` and
+`options-scanner/theme.py`, both dead), leaving only `test_gex_dex`'s Tk block —
+so the skipped count is now a stable **2**, not a random 2-or-3.
 
 ⚠ Because the *identity* of the skipping test varies, **compare the skipped SET
 as well as the failed set.** A count-only comparison reads as stable while a
@@ -1856,10 +2176,12 @@ refresh (pillow / setuptools / aiohttp / cryptography) — so they are a post-bu
 baseline, which is the useful thing to compare a suspected dependency regression
 against. The three large suites, re-measured **2026-08-20** after the dead-code
 trim: **webgui 2320 green** (1986 on 08-19; the Bull/Bear map landed in between),
-**options_svc 1189 green**, **options-scanner 1371 passed / 11 failed / 3
-skipped** — that suite FELL by ~115 because the tests were deleted along with
-their subjects (the legacy CLI + Tk remnants), which is the one case where a
-dropping count is the healthy signal. Also **schwab-proxy 98**
+**options_svc 1200 green**, **options-scanner 1172 passed / 8 failed / 2
+skipped** — that suite has now FALLEN twice for the same healthy reason: tests
+deleted along with their subjects (the legacy CLI + Tk remnants on 2026-08-20
+morning, then ~1,850 lines of `gamma_tool` interior + four whole modules that
+evening). A dropping count is the one case where the drop is the good news; the
+failing SET is what you compare, and it shrank 11 → 8. Also **schwab-proxy 98**
 (worth its own line — it is the only suite that exercises the Schwab OAuth stack, so
 it is the one that would catch a `cryptography` bump going wrong).
 

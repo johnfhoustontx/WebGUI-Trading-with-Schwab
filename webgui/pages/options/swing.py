@@ -179,6 +179,13 @@ def render():
     # button), deduped so tabbing through an unchanged symbol won't re-scan.
     bind_symbol_load(symbol_in, _request_scan)
 
+    # A symbol handed over from the Trade Plan: seed the input and scan at once,
+    # the same one-shot pattern Dealer Positioning uses.
+    _handoff_sym = handoff.take_pending_swing()
+    if _handoff_sym:
+        symbol_in.value = _handoff_sym
+        _request_scan()
+
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:swing")
     _populate(bus_client.read("options:swing") or {})

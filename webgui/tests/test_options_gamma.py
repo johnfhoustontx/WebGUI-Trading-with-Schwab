@@ -1227,37 +1227,23 @@ def test_net_prem_symbols_is_every_group_member_in_group_order():
     assert syms == flat
 
 
-def _service_consts(module, *names):
-    """Module-level constants read out of a Tier-2 file WITHOUT importing it.
-
-    The Net Prem view duplicates two things across the tier boundary because the
-    webgui may not import ``services.*``. The tier rule forbids IMPORTING that
-    code, not READING the file — so parse it and compare, giving each duplicated
-    table a real pin instead of a reviewer's one-off check. Zero runtime coupling;
-    the tests skip cleanly if the service layout ever moves.
-    """
-    import ast
-    import pathlib
-    src = pathlib.Path(__file__).parents[2] / "services" / "options_svc" / module
-    if not src.exists():
-        pytest.skip(f"service module not present: {module}")
-    tree = ast.parse(src.read_text(encoding="utf-8"))
-    found = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if getattr(target, "id", None) in names:
-                found[target.id] = ast.literal_eval(node.value)
-    missing = [n for n in names if n not in found]
-    if missing:
-        pytest.skip(f"{module} no longer defines {', '.join(missing)}")
-    return found
-
-
 def test_net_prem_groups_match_the_service():
-    groups = _service_consts("net_premium.py", "GROUPS")["GROUPS"]
-    assert gamma.NET_PREM_GROUPS == groups
+    """Both tiers must show the same Net Prem groups.
+
+    The duplication is now GONE: the page and ``options_svc/net_premium.GROUPS``
+    both read ``config/symbols.toml`` through ``shared.symbols``, so they cannot
+    drift. This test used to AST-parse the ``GROUPS`` literal out of the service
+    file without importing it (the tier rule forbids importing ``services.*``,
+    not reading the file) - and that pin broke the moment the constant stopped
+    being a literal, exactly as the sibling window test below records happening
+    when the GEX window moved into the shared calendar. Pin against the shared
+    source itself instead.
+    """
+    from shared import symbols as shared_symbols
+
+    assert gamma.NET_PREM_GROUPS == shared_symbols.netprem_groups()
+    # Non-vacuity: the real groups, not an empty default.
+    assert [g["key"] for g in gamma.NET_PREM_GROUPS] ==         ["indices", "sectors", "megacaps"]
 
 
 def test_net_prem_collection_window_matches_the_scheduler():

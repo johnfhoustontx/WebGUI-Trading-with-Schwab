@@ -2747,7 +2747,11 @@ def test_calc_load_returns_chain_price_range(monkeypatch):
     assert out["price"] == 450.0
     assert out["range_lo"] == 450.0 * 0.95
     assert out["range_hi"] == 450.0 * 1.05
-    assert out["chain"] == chain
+    # The chain is THINNED at publish since 2026-08-20 (see thin_calc_chain):
+    # structure preserved, contracts cut to the five page-read fields, absent
+    # maps normalized to {}.
+    assert out["chain"] == {"putExpDateMap": {},
+                            "callExpDateMap": {"2026-06-19:4": {"450.0": [{"mark": 1.0}]}}}
     assert seen["qsyms"] == ["SPY"]  # quote fetched for the API symbol
 
 
@@ -3548,6 +3552,55 @@ def test_gamma_walls_single_side_and_empty():
     # Charm/Vanna never get walls; empty data -> [].
     assert compute.gamma_walls("Charm", above_only, 450.0) == []
     assert compute.gamma_walls("GEX", {"spot": 450.0, "gex": {}}, 450.0) == []
+
+
+# ── _gex_from_snapshot: wall SIDES come from spot, never list position ───────
+
+def test_gex_from_snapshot_files_a_lone_call_wall_as_the_call_wall():
+    """A chain with strikes only ABOVE spot must report a call wall, not a put wall.
+
+    ``gamma_walls`` returns ``[put_wall, call_wall]`` but FILTERS None out (see
+    test_gamma_walls_single_side_and_empty, which pins the single-element
+    result), so position no longer identifies the side. Indexing it —
+    ``put_wall = walls[0]`` — files the call wall as the PUT wall and reports no
+    call wall at all, silently. Rescue then judges a short strike against the
+    wrong barrier. ``_matrix_dealer_levels`` documents and avoids this exact
+    trap by splitting on spot; this is the same rule at the other consumer.
+    """
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [452.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert gex["call_wall"] == 452.0
+    assert gex["put_wall"] is None
+
+
+def test_gex_from_snapshot_keeps_both_walls_on_their_own_sides():
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [440.0, 452.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, 452.0)
+
+
+def test_gex_from_snapshot_files_a_lone_put_wall_as_the_put_wall():
+    snap = {"spot": 450.0, "views": {"GEX": {"flip": 449.0, "walls": [440.0]}}}
+    gex = compute._gex_from_snapshot(snap)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, None)
+
+
+def test_gex_from_snapshot_drops_an_unsidable_wall_when_spot_is_missing():
+    """No spot -> a single wall's side cannot be established, so report NEITHER.
+
+    Rescue penalizes a short strike that sits past ITS wall, so a wall on the
+    wrong side is worse than no wall at all — and the flip still carries the
+    context. A well-formed PAIR stays positional (``gamma_walls`` only omits a
+    side when that side is empty, so two entries are unambiguously put-then-call).
+    """
+    one = {"views": {"GEX": {"flip": 449.0, "walls": [452.0]}}}
+    gex = compute._gex_from_snapshot(one)
+    assert gex is not None and gex["flip"] == 449.0
+    assert gex["put_wall"] is None and gex["call_wall"] is None
+
+    pair = {"views": {"GEX": {"flip": 449.0, "walls": [440.0, 452.0]}}}
+    gex = compute._gex_from_snapshot(pair)
+    assert (gex["put_wall"], gex["call_wall"]) == (440.0, 452.0)
 
 
 # ── Gamma dropdown symbol universe ──────────────────────────────────────────
@@ -5383,3 +5436,108 @@ def test_leg_days_to_expiry_tolerates_a_string_expiry():
     now = dt.datetime(2026, 6, 30, 11, 0, tzinfo=ZoneInfo("America/New_York"))
     assert compute._leg_days_to_expiry("2026-06-30", 0.0, now=now) == pytest.approx(
         compute._leg_days_to_expiry(dt.date(2026, 6, 30), 0.0, now=now))
+
+
+# ── calc_chain slimming (2026-08-20) ────────────────────────────────────────
+# Measured in prod: cache:options:calc_chain was 8.77 MB — 53% of ALL Redis
+# string bytes — because calc_load_symbol cached the raw 20-expiry Schwab chain
+# with ~40 fields per contract. The Calculator/Rescue pages read exactly FIVE
+# contract fields (volatility, mark, bid, ask, delta) plus the two expiry maps'
+# structure. Same pattern the gamma crop fixed in June, one key over.
+
+def _fat_contract(**over):
+    c = {"putCall": "PUT", "symbol": "SPXW_082126P6000", "description": "SPX Aug",
+         "bid": 1.0, "ask": 1.2, "last": 1.1, "mark": 1.1, "bidSize": 5,
+         "askSize": 7, "lastSize": 1, "highPrice": 2.0, "lowPrice": 0.9,
+         "openPrice": 1.5, "closePrice": 1.3, "totalVolume": 500, "tradeDate": None,
+         "quoteTimeInLong": 1, "tradeTimeInLong": 1, "netChange": -0.2,
+         "volatility": 22.5, "delta": -0.25, "gamma": 0.01, "theta": -0.5,
+         "vega": 0.1, "rho": -0.01, "openInterest": 1000, "timeValue": 1.1,
+         "theoreticalOptionValue": 1.1, "theoreticalVolatility": 22.0,
+         "strikePrice": 6000.0, "expirationDate": "2026-08-21T20:00:00Z",
+         "daysToExpiration": 1, "expirationType": "W", "lastTradingDay": 1,
+         "multiplier": 100.0, "settlementType": "P", "deliverableNote": "",
+         "percentChange": -15.0, "markChange": -0.2, "markPercentChange": -15.0,
+         "intrinsicValue": 0.0, "extrinsicValue": 1.1, "inTheMoney": False,
+         "mini": False, "nonStandard": False, "pennyPilot": True}
+    c.update(over)
+    return c
+
+
+def test_thin_calc_chain_keeps_only_the_fields_the_pages_read():
+    chain = {"symbol": "$SPX", "status": "SUCCESS", "underlyingPrice": 6400.0,
+             "putExpDateMap": {"2026-08-21:1": {"6000.0": [_fat_contract()]}},
+             "callExpDateMap": {"2026-08-21:1": {"6400.0": [
+                 _fat_contract(putCall="CALL", delta=0.5)]}}}
+    out = compute.thin_calc_chain(chain)
+    put = out["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
+    assert put == {"bid": 1.0, "ask": 1.2, "mark": 1.1,
+                   "volatility": 22.5, "delta": -0.25}
+    call = out["callExpDateMap"]["2026-08-21:1"]["6400.0"][0]
+    assert call["delta"] == 0.5
+    # structure the pages iterate is intact; the bulk top-level keys are gone
+    assert set(out) == {"putExpDateMap", "callExpDateMap"}
+
+
+def test_thin_calc_chain_is_null_safe():
+    assert compute.thin_calc_chain(None) is None
+    assert compute.thin_calc_chain({}) == {"putExpDateMap": {}, "callExpDateMap": {}}
+    # a malformed strike entry degrades to an empty list, never raises
+    out = compute.thin_calc_chain({"putExpDateMap": {"e": {"100.0": "junk"}},
+                                   "callExpDateMap": {}})
+    assert out["putExpDateMap"]["e"]["100.0"] == []
+
+
+def test_calc_load_symbol_publishes_the_thinned_chain(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def __init__(self, data): self._d = data
+        def json(self): return self._d
+
+    fat = {"putExpDateMap": {"2026-08-21:1": {"6000.0": [_fat_contract()]}},
+           "callExpDateMap": {}, "status": "SUCCESS"}
+    quote = {"$SPX": {"quote": {"lastPrice": 6400.0}}}
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: _Resp(quote))
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _Resp(fat))
+    cc = compute.calc_load_symbol("SPX")
+    contract = cc["chain"]["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
+    assert "gamma" not in contract and "description" not in contract
+    assert contract["mark"] == 1.1
+    assert cc["price"] == 6400.0
+
+
+# ── the simulator snapshot cache is bounded (2026-08-20) ───────────────────
+
+def test_sim_snapshots_evicts_the_oldest_beyond_the_cap():
+    """`_SIM_SNAPSHOTS` held a full ChainSnapshot (thousands of contract objects
+    for $SPX/$NDX, ~1-10 MB each) per symbol ever fetched, for the process
+    lifetime — the one module-level cache with no eviction at all. Single-user,
+    so it grew slowly; unbounded is still unbounded."""
+    compute.reset_sim_snapshots()
+    try:
+        for i in range(compute.SIM_SNAPSHOT_LIMIT + 3):
+            compute._stash_sim_snapshot(f"SYM{i}", {"n": i})
+        assert len(compute._SIM_SNAPSHOTS) == compute.SIM_SNAPSHOT_LIMIT
+        # the OLDEST went, the newest stayed
+        assert "SYM0" not in compute._SIM_SNAPSHOTS
+        assert f"SYM{compute.SIM_SNAPSHOT_LIMIT + 2}" in compute._SIM_SNAPSHOTS
+    finally:
+        compute.reset_sim_snapshots()
+
+
+def test_sim_snapshots_refresh_keeps_a_symbol_recent():
+    """Re-fetching a symbol must renew it, not leave it at its original age —
+    otherwise the symbol you are actively simulating is the one evicted."""
+    compute.reset_sim_snapshots()
+    try:
+        compute._stash_sim_snapshot("KEEP", {"v": 1})
+        for i in range(compute.SIM_SNAPSHOT_LIMIT - 1):
+            compute._stash_sim_snapshot(f"X{i}", {"n": i})
+        compute._stash_sim_snapshot("KEEP", {"v": 2})     # touched again
+        compute._stash_sim_snapshot("NEW", {"n": 99})     # forces one eviction
+        assert "KEEP" in compute._SIM_SNAPSHOTS
+        assert compute._SIM_SNAPSHOTS["KEEP"] == {"v": 2}
+    finally:
+        compute.reset_sim_snapshots()

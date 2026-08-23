@@ -26,11 +26,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
+from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
 from pages import console_page
 from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
+
+def _safe_float(v, default=0.0):
+    return float_or(v, default)
+
 
 _CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
 
@@ -67,13 +73,6 @@ COMPONENTS = [
 ]
 
 
-def _safe_float(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
 def traffic_color(total):
     """Composite traffic-light band for tile backgrounds.
     >=6.5 green, <=4.5 red, else amber. Mirrors source _update_metric_card_colors."""
@@ -88,10 +87,6 @@ def traffic_color(total):
 def gauge_score(total):
     """0-10 composite -> 0-100 for the speedometer gauge."""
     return max(0.0, min(100.0, _safe_float(total) * 10.0))
-
-
-def _clamp(v, lo, hi):
-    return max(lo, min(hi, v))
 
 
 # Short state words, one per trend horizon. These used to caption the two trend

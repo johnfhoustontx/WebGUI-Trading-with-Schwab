@@ -190,25 +190,6 @@ def test_view_var_accepts_three_views():
         root.destroy()
 
 
-from gamma_tool import _fmt_dollar_magnitude
-
-
-def test_fmt_dollar_magnitude_none():
-    assert _fmt_dollar_magnitude(None) == "n/a"
-
-
-def test_fmt_dollar_magnitude_billions():
-    assert _fmt_dollar_magnitude(-1.24e9) == "-$1.24B"
-    assert _fmt_dollar_magnitude(3.3e8) == "+$330M"
-
-
-def test_fmt_dollar_magnitude_small():
-    assert _fmt_dollar_magnitude(12345) == "+$12,345"
-
-
-def test_fmt_dollar_magnitude_zero():
-    # Zero magnitude is treated as non-negative → '+$0'.
-    assert _fmt_dollar_magnitude(0) == "+$0"
 
 
 def test_dex_end_to_end_db_roundtrip(tmp_path, monkeypatch):
