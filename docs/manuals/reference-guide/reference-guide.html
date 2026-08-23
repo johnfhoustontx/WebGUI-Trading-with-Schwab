@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Reference Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-20</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -85,11 +85,19 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-the-numbers-are-and-are-not_1">What the numbers are, and are not</a></li>
 </ul>
 </li>
+<li><a href="#live-mirror">Live Mirror</a><ul>
+<li><a href="#what-it-is_1">What it is</a></li>
+<li><a href="#when-to-open-it_1">When to open it</a></li>
+<li><a href="#how-it-differs-from-the-desk">How it differs from the Desk</a></li>
+<li><a href="#the-connection-indicator">The connection indicator</a></li>
+<li><a href="#what-the-numbers-are-and-are-not_2">What the numbers are, and are not</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li><a href="#markets">MARKETS</a><ul>
 <li><a href="#dealer-positioning">Dealer Positioning</a><ul>
-<li><a href="#what-it-is_1">What it is</a></li>
+<li><a href="#what-it-is_2">What it is</a></li>
 <li><a href="#where-the-data-comes-from">Where the data comes from</a></li>
 <li><a href="#reading-the-screen">Reading the screen</a></li>
 <li><a href="#the-flow-subtab-premium-divergence">The Flow subtab — premium divergence</a></li>
@@ -102,7 +110,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#opportunity-board">Opportunity Board</a><ul>
-<li><a href="#what-it-is_2">What it is</a></li>
+<li><a href="#what-it-is_3">What it is</a></li>
 <li><a href="#where-the-data-comes-from_1">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_1">Reading the screen</a></li>
 <li><a href="#why-it-matters_1">Why it matters</a></li>
@@ -112,7 +120,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#flow-alerts">Flow Alerts</a><ul>
-<li><a href="#what-it-is_3">What it is</a></li>
+<li><a href="#what-it-is_4">What it is</a></li>
 <li><a href="#where-the-data-comes-from_2">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_2">Reading the screen</a></li>
 <li><a href="#why-it-matters_2">Why it matters</a></li>
@@ -122,7 +130,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#market-dashboard">Market Dashboard</a><ul>
-<li><a href="#what-it-is_4">What it is</a></li>
+<li><a href="#what-it-is_5">What it is</a></li>
 <li><a href="#where-the-data-comes-from_3">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_3">Reading the screen</a></li>
 <li><a href="#why-it-matters_3">Why it matters</a></li>
@@ -132,7 +140,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#sentiment">Sentiment</a><ul>
-<li><a href="#what-it-is_5">What it is</a></li>
+<li><a href="#what-it-is_6">What it is</a></li>
 <li><a href="#where-the-data-comes-from_4">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_4">Reading the screen</a></li>
 <li><a href="#why-it-matters_4">Why it matters</a></li>
@@ -142,7 +150,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#bull-bear-map">Bull / Bear Map</a><ul>
-<li><a href="#what-it-is_6">What it is</a></li>
+<li><a href="#what-it-is_7">What it is</a></li>
 <li><a href="#where-the-data-comes-from_5">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_5">Reading the screen</a></li>
 <li><a href="#why-it-matters_5">Why it matters</a></li>
@@ -151,7 +159,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#sector-industry">Sector &amp; Industry</a><ul>
-<li><a href="#what-it-is_7">What it is</a></li>
+<li><a href="#what-it-is_8">What it is</a></li>
 <li><a href="#where-the-data-comes-from_6">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_6">Reading the screen</a></li>
 <li><a href="#why-it-matters_6">Why it matters</a></li>
@@ -160,7 +168,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#sector-rotation">Sector Rotation</a><ul>
-<li><a href="#what-it-is_8">What it is</a></li>
+<li><a href="#what-it-is_9">What it is</a></li>
 <li><a href="#where-the-data-comes-from_7">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_7">Reading the screen</a></li>
 <li><a href="#why-it-matters_7">Why it matters</a></li>
@@ -169,7 +177,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#rrg">RRG</a><ul>
-<li><a href="#what-it-is_9">What it is</a></li>
+<li><a href="#what-it-is_10">What it is</a></li>
 <li><a href="#where-the-data-comes-from_8">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_8">Reading the screen</a></li>
 <li><a href="#why-it-matters_8">Why it matters</a></li>
@@ -178,7 +186,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#momentum">Momentum</a><ul>
-<li><a href="#what-it-is_10">What it is</a></li>
+<li><a href="#what-it-is_11">What it is</a></li>
 <li><a href="#where-the-data-comes-from_9">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_9">Reading the screen</a></li>
 <li><a href="#why-it-matters_9">Why it matters</a></li>
@@ -191,7 +199,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#strategy">STRATEGY</a><ul>
 <li><a href="#calculator">Calculator</a><ul>
-<li><a href="#what-it-is_11">What it is</a></li>
+<li><a href="#what-it-is_12">What it is</a></li>
 <li><a href="#where-the-data-comes-from_10">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_10">Reading the screen</a></li>
 <li><a href="#why-it-matters_10">Why it matters</a></li>
@@ -201,7 +209,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#simulator">Simulator</a><ul>
-<li><a href="#what-it-is_12">What it is</a></li>
+<li><a href="#what-it-is_13">What it is</a></li>
 <li><a href="#where-the-data-comes-from_11">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_11">Reading the screen</a></li>
 <li><a href="#why-it-matters_11">Why it matters</a></li>
@@ -210,7 +218,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#market-scanner">Market Scanner</a><ul>
-<li><a href="#what-it-is_13">What it is</a></li>
+<li><a href="#what-it-is_14">What it is</a></li>
 <li><a href="#where-the-data-comes-from_12">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_12">Reading the screen</a></li>
 <li><a href="#why-it-matters_12">Why it matters</a></li>
@@ -220,7 +228,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#strategy-finder">Strategy Finder</a><ul>
-<li><a href="#what-it-is_14">What it is</a></li>
+<li><a href="#what-it-is_15">What it is</a></li>
 <li><a href="#where-the-data-comes-from_13">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_13">Reading the screen</a></li>
 <li><a href="#why-it-matters_13">Why it matters</a></li>
@@ -229,7 +237,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#expected-move">Expected Move</a><ul>
-<li><a href="#what-it-is_15">What it is</a></li>
+<li><a href="#what-it-is_16">What it is</a></li>
 <li><a href="#where-the-data-comes-from_14">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_14">Reading the screen</a></li>
 <li><a href="#why-it-matters_14">Why it matters</a></li>
@@ -238,7 +246,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#captured-signals">Captured Signals</a><ul>
-<li><a href="#what-it-is_16">What it is</a></li>
+<li><a href="#what-it-is_17">What it is</a></li>
 <li><a href="#where-the-data-comes-from_15">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_15">Reading the screen</a></li>
 <li><a href="#why-it-matters_15">Why it matters</a></li>
@@ -247,7 +255,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#paper-ledger">Paper Ledger</a><ul>
-<li><a href="#what-it-is_17">What it is</a></li>
+<li><a href="#what-it-is_18">What it is</a></li>
 <li><a href="#where-the-data-comes-from_16">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_16">Reading the screen</a></li>
 <li><a href="#why-it-matters_16">Why it matters</a></li>
@@ -256,7 +264,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#paper-account">Paper Account</a><ul>
-<li><a href="#what-it-is_18">What it is</a></li>
+<li><a href="#what-it-is_19">What it is</a></li>
 <li><a href="#where-the-data-comes-from_17">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_17">Reading the screen</a></li>
 <li><a href="#why-it-matters_17">Why it matters</a></li>
@@ -265,7 +273,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#rescue">Rescue</a><ul>
-<li><a href="#what-it-is_19">What it is</a></li>
+<li><a href="#what-it-is_20">What it is</a></li>
 <li><a href="#where-the-data-comes-from_18">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_18">Reading the screen</a></li>
 <li><a href="#why-it-matters_18">Why it matters</a></li>
@@ -274,7 +282,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#trade-analyzer">Trade Analyzer</a><ul>
-<li><a href="#what-it-is_20">What it is</a></li>
+<li><a href="#what-it-is_21">What it is</a></li>
 <li><a href="#where-the-data-comes-from_19">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_19">Reading the screen</a></li>
 <li><a href="#why-it-matters_19">Why it matters</a></li>
@@ -283,7 +291,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#claude-trades">Claude Trades</a><ul>
-<li><a href="#what-it-is_21">What it is</a></li>
+<li><a href="#what-it-is_22">What it is</a></li>
 <li><a href="#where-the-data-comes-from_20">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_20">Reading the screen</a></li>
 <li><a href="#how-the-guardrails-work">How the guardrails work</a></li>
@@ -296,7 +304,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#account">ACCOUNT</a><ul>
 <li><a href="#portfolio">Portfolio</a><ul>
-<li><a href="#what-it-is_22">What it is</a></li>
+<li><a href="#what-it-is_23">What it is</a></li>
 <li><a href="#where-the-data-comes-from_21">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_21">Reading the screen</a></li>
 <li><a href="#why-it-matters_21">Why it matters</a></li>
@@ -305,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#eod-report">EOD Report</a><ul>
-<li><a href="#what-it-is_23">What it is</a></li>
+<li><a href="#what-it-is_24">What it is</a></li>
 <li><a href="#where-the-data-comes-from_22">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_22">Reading the screen</a></li>
 <li><a href="#why-it-matters_22">Why it matters</a></li>
@@ -318,7 +326,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#system">SYSTEM</a><ul>
 <li><a href="#system-status">System Status</a><ul>
-<li><a href="#what-it-is_24">What it is</a></li>
+<li><a href="#what-it-is_25">What it is</a></li>
 <li><a href="#reading-the-screen_23">Reading the screen</a></li>
 <li><a href="#why-it-matters_23">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_12">Caveats and gotchas</a></li>
@@ -326,7 +334,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#settings">Settings</a><ul>
-<li><a href="#what-it-is_25">What it is</a></li>
+<li><a href="#what-it-is_26">What it is</a></li>
 <li><a href="#reading-the-screen_24">Reading the screen</a></li>
 <li><a href="#why-it-matters_24">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_13">Caveats and gotchas</a></li>
@@ -665,12 +673,88 @@ that count toward that total; <em>Watch</em> does not.</p>
 <li><strong>Nothing on this page can place, change, or close a trade.</strong> It reads and links.</li>
 </ul>
 <hr />
+<h2 id="live-mirror">Live Mirror</h2>
+<p><em>Menu: pinned directly under Desk · Route <code>/desk/live</code> · opens in a new browser tab</em></p>
+<h3 id="what-it-is_1">What it is</h3>
+<p><strong>The Desk, built as a plain web page.</strong> Same panels, same numbers, same layout —
+but with none of the app framework behind it. The Desk keeps a live two-way
+connection open to the server for every tab you have on it; the Live Mirror instead
+receives a one-way stream of updates over an ordinary web request.</p>
+<p>That difference is the whole point. A plain page reconnects by itself after the
+machine sleeps, the Wi-Fi drops or the browser suspends a background tab, so it can
+be left running on a display nobody is touching.</p>
+<h3 id="when-to-open-it_1">When to open it</h3>
+<p>When the Desk needs to be <em>somewhere else</em>: a wall display, a second monitor, a
+tablet propped beside the keyboard, a phone. Open it once, put the window where you
+want it, and leave it. It opens in a new tab so the tab you were working in stays
+where it was.</p>
+<p>Use the Desk itself, not the mirror, when you intend to click through to other
+pages — that is the screen built for working.</p>
+<h3 id="how-it-differs-from-the-desk">How it differs from the Desk</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Desk</th>
+<th>Live Mirror</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Panel layout</td>
+<td>2x2, stacking to one column on a narrow screen</td>
+<td><strong>always 2x2</strong></td>
+</tr>
+<tr>
+<td>Recovers from sleep / network drop</td>
+<td>needs a reload</td>
+<td><strong>reconnects itself</strong></td>
+</tr>
+<tr>
+<td>Click-through to other pages</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Charts</td>
+<td>none</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>The layout difference is deliberate. A screen you have pinned to a display should
+not rearrange itself when the window is resized, so the mirror keeps its four panels
+in the same four places at every width. On a narrow display the columns get tighter
+and long values shorten with an ellipsis rather than the panels moving.</p>
+<h3 id="the-connection-indicator">The connection indicator</h3>
+<p>Top right, beside the title:</p>
+<ul>
+<li><strong>Live</strong> — the stream is connected and the screen is current.</li>
+<li><strong>Reconnecting</strong> — the stream dropped and the page is retrying on its own. The
+  numbers on screen are the last good ones until it says Live again.</li>
+</ul>
+<p><strong>The countdown keeps ticking every second even when nothing else on the screen
+changes.</strong> That is deliberate, and it is the fastest check available from across a
+room: a stopped page and a quiet market look identical, and the moving clock is what
+tells them apart.</p>
+<h3 id="what-the-numbers-are-and-are-not_2">What the numbers are, and are not</h3>
+<ul>
+<li><strong>Every figure is produced by the Desk's own code.</strong> The mirror formats nothing
+  itself, so it cannot quietly disagree with the Desk. If the two ever show
+  different numbers, one of them has stopped updating — check the indicator.</li>
+<li><strong>The same honesty rules apply</strong>, because they are the same rules: walls are
+  hidden rather than zeroed when the gamma feed is stale, a missing reading shows a
+  dash rather than a zero, and the Positions header reports the whole book even
+  though only the first rows are drawn.</li>
+<li><strong>Nothing on this page can place, change, or close a trade.</strong> It reads and links.</li>
+</ul>
+<hr />
 <h1 id="markets">MARKETS</h1>
 <p>The four entries in this section answer <em>what is the market doing right now</em>. Nothing
 here proposes a trade; it establishes the conditions a trade would be taken in.</p>
 <h2 id="dealer-positioning">Dealer Positioning</h2>
 <p><em>Menu: MARKETS → Dealer Positioning · Route <code>/options/gamma</code></em></p>
-<h3 id="what-it-is_1">What it is</h3>
+<h3 id="what-it-is_2">What it is</h3>
 <p>The most important — and least familiar — screen in the app. It measures how much
 stock option dealers are forced to buy or sell as price moves, and at which strikes
 that pressure concentrates.</p>
@@ -966,7 +1050,7 @@ per symbol) · <a href="#expected-move">Expected Move</a> (whether your strike i
 <hr />
 <h2 id="opportunity-board">Opportunity Board</h2>
 <p><em>Menu: MARKETS → Opportunity Board · Route <code>/options/matrix</code></em></p>
-<h3 id="what-it-is_2">What it is</h3>
+<h3 id="what-it-is_3">What it is</h3>
 <p>Every symbol the app tracks — around 45 to 90 names — as one sortable row each. It is
 the triage screen: instead of opening Dealer Positioning for twenty tickers, you sort
 this board and open the two that stand out.</p>
@@ -1096,7 +1180,7 @@ credit-spread filters exclude.</p>
 <hr />
 <h2 id="flow-alerts">Flow Alerts</h2>
 <p><em>Menu: MARKETS → Flow Alerts · Route <code>/options/flow</code></em></p>
-<h3 id="what-it-is_3">What it is</h3>
+<h3 id="what-it-is_4">What it is</h3>
 <p>A readable log of every unusual options event the app detected today. These are the
 same alerts that chime, toast, and push to your phone — kept somewhere you can actually
 review them, because a toast you miss is gone.</p>
@@ -1200,7 +1284,7 @@ you already follow is worth more than a strong alert on a name you have never tr
 <h2 id="market-dashboard">Market Dashboard</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Market Dashboard · Route <code>/market</code> — and the
 app's </em><em>landing page</em><em>: opening <code>http://127.0.0.1:8500</code> redirects here</em></p>
-<h3 id="what-it-is_4">What it is</h3>
+<h3 id="what-it-is_5">What it is</h3>
 <p>A live wall of roughly 48 macro instruments, grouped into framed panels. It is the
 app's widest lens — the tape everything else happens inside.</p>
 <h3 id="where-the-data-comes-from_3">Where the data comes from</h3>
@@ -1358,7 +1442,7 @@ are ticking, the gateway and <code>market_svc</code> are both healthy.</p>
 <hr />
 <h2 id="sentiment">Sentiment</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Sentiment · Route <code>/sentiment</code></em></p>
-<h3 id="what-it-is_5">What it is</h3>
+<h3 id="what-it-is_6">What it is</h3>
 <p>The app's mood reading, presented as the <strong>Market Regime Console</strong> — a single screen
 that answers two separate questions: <em>how does the market feel</em> (sentiment) and <em>how is
 it behaving</em> (regime).</p>
@@ -1585,7 +1669,7 @@ can genuinely change within a session — the share table shows that happening.<
 <hr />
 <h2 id="bull-bear-map">Bull / Bear Map</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Bull / Bear Map · Route <code>/sentiment/bullbear</code></em></p>
-<h3 id="what-it-is_6">What it is</h3>
+<h3 id="what-it-is_7">What it is</h3>
 <p>A three-level tree — sector, industry, stock — answering one question directly:
 where is the market bullish, and where is it bearish. It exists because "bullish" is
 <strong>two facts, not one</strong>, and every other rotation screen in this app collapses them.</p>
@@ -1692,7 +1776,7 @@ highly and you want to know whether it is actually going up.</p>
 <hr />
 <h2 id="sector-industry">Sector &amp; Industry</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Sector &amp; Industry · Route <code>/sentiment/sectors</code></em></p>
-<h3 id="what-it-is_7">What it is</h3>
+<h3 id="what-it-is_8">What it is</h3>
 <p>A performance <strong>heat grid</strong> for the eleven S&amp;P 500 sectors, each expandable into the
 industries inside it. It is the "where is it working" screen, and since the 2026-08-17
 rebuild it answers that by colour before you read any number.</p>
@@ -1802,7 +1886,7 @@ is where you find the specific names behind it.</p>
 <hr />
 <h2 id="sector-rotation">Sector Rotation</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Sector Rotation · Route <code>/sentiment/rotation</code></em></p>
-<h3 id="what-it-is_8">What it is</h3>
+<h3 id="what-it-is_9">What it is</h3>
 <p>A single verdict — <strong>Risk-ON</strong> or <strong>Risk-OFF</strong> — plus the evidence for it, based on
 where money is rotating between sectors.</p>
 <h3 id="where-the-data-comes-from_7">Where the data comes from</h3>
@@ -1885,7 +1969,7 @@ nothing new, which is why it is manual-refresh only.</p>
 <hr />
 <h2 id="rrg">RRG</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → RRG · Route <code>/sentiment/rrg</code></em></p>
-<h3 id="what-it-is_9">What it is</h3>
+<h3 id="what-it-is_10">What it is</h3>
 <p>A <strong>Relative Rotation Graph</strong> — the same rotation data as the previous page, drawn as a
 map where each sector leaves a trail showing where it has come from.</p>
 <p>The technique was created by Julius de Kempenaer and is standard on institutional
@@ -1973,7 +2057,7 @@ picture, but different axes — see that page for the distinction).</p>
 <hr />
 <h2 id="momentum">Momentum</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Momentum · Route <code>/sentiment/momentum</code></em></p>
-<h3 id="what-it-is_10">What it is</h3>
+<h3 id="what-it-is_11">What it is</h3>
 <p>A three-level momentum screen — sectors, ~70 industry ETFs, and 311 stocks — that also
 tells you whether momentum is currently <em>worth trading at all</em>.</p>
 <h3 id="where-the-data-comes-from_9">Where the data comes from</h3>
@@ -2152,7 +2236,7 @@ the app <em>finds</em>, <strong>Trade Analyzer</strong> judges a single stock, a
 the automated trader.</p>
 <h2 id="calculator">Calculator</h2>
 <p><em>Menu: STRATEGY → Strategy Tools → Calculator · Route <code>/options/calculator</code></em></p>
-<h3 id="what-it-is_11">What it is</h3>
+<h3 id="what-it-is_12">What it is</h3>
 <p>A profit-and-loss calculator for any multi-leg options trade, priced against the real
 option chain. This is where you find out what a trade actually risks before you take it.</p>
 <h3 id="where-the-data-comes-from_10">Where the data comes from</h3>
@@ -2319,7 +2403,7 @@ and a position.</p>
 <hr />
 <h2 id="simulator">Simulator</h2>
 <p><em>Menu: STRATEGY → Strategy Tools → Simulator · Route <code>/options/simulator</code></em></p>
-<h3 id="what-it-is_12">What it is</h3>
+<h3 id="what-it-is_13">What it is</h3>
 <p>The Calculator's companion. Where the Calculator answers <em>what does this trade pay</em>, the
 Simulator answers <em>how does it behave</em> — as price moves, as days pass, and as volatility
 changes.</p>
@@ -2393,7 +2477,7 @@ position is behaving in a way you do not understand.</p>
 <hr />
 <h2 id="market-scanner">Market Scanner</h2>
 <p><em>Menu: STRATEGY → Options → Market Scanner · Route <code>/options/scanner</code></em></p>
-<h3 id="what-it-is_13">What it is</h3>
+<h3 id="what-it-is_14">What it is</h3>
 <p>The app's front door. It scans the watchlist continuously and ranks option trade
 candidates 0–100, split across three tabs by trade type.</p>
 <h3 id="where-the-data-comes-from_12">Where the data comes from</h3>
@@ -2566,7 +2650,7 @@ Directional with a 70 on Swing.</p>
 <hr />
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><em>Menu: STRATEGY → Options → Strategy Finder · Route <code>/options/swing</code></em></p>
-<h3 id="what-it-is_14">What it is</h3>
+<h3 id="what-it-is_15">What it is</h3>
 <p>The Market Scanner inverted. Instead of scanning many symbols for one kind of trade, you
 give it <strong>one symbol</strong> and it ranks <strong>every strategy family</strong> for that symbol on a single
 comparable score.</p>
@@ -2638,7 +2722,7 @@ symbol, and any time you have a directional opinion and want the best way to exp
 <hr />
 <h2 id="expected-move">Expected Move</h2>
 <p><em>Menu: STRATEGY → Options → Expected Move · Route <code>/options/expected-move</code></em></p>
-<h3 id="what-it-is_15">What it is</h3>
+<h3 id="what-it-is_16">What it is</h3>
 <p>A price chart with a forward cone showing how far the market <strong>expects</strong> the symbol to
 move by a chosen expiration — with your strikes drawn on it.</p>
 <p><strong>The concept.</strong> Option prices encode a forecast. If you know the implied volatility and
@@ -2720,7 +2804,7 @@ smile this app's move would read roughly 25% <em>larger</em>.</p>
 <hr />
 <h2 id="captured-signals">Captured Signals</h2>
 <p><em>Menu: STRATEGY → Options → Captured Signals · Route <code>/options/captured</code></em></p>
-<h3 id="what-it-is_16">What it is</h3>
+<h3 id="what-it-is_17">What it is</h3>
 <p>A watchlist for trade ideas. Bookmark a scanner signal here and the app tracks it over
 time, re-pricing it and telling you whether it worked — without committing to a position.</p>
 <h3 id="where-the-data-comes-from_15">Where the data comes from</h3>
@@ -2830,7 +2914,7 @@ commission. Real fills are worse. The P&amp;L column is an upper bound.</p>
 <hr />
 <h2 id="paper-ledger">Paper Ledger</h2>
 <p><em>Menu: STRATEGY → Options → Paper Ledger · Route <code>/options/paper</code></em></p>
-<h3 id="what-it-is_17">What it is</h3>
+<h3 id="what-it-is_18">What it is</h3>
 <p>Your <strong>hand-kept</strong> practice book. Trades you sent here yourself, with live unrealized
 P&amp;L. No real money.</p>
 <p><strong>This is one of three separate paper books</strong>, and confusing them is the most common
@@ -2906,7 +2990,7 @@ hand closes that gap at no cost.</p>
 <hr />
 <h2 id="paper-account">Paper Account</h2>
 <p><em>Menu: STRATEGY → Options → Paper Account · Route <code>/options/portfolio</code></em></p>
-<h3 id="what-it-is_18">What it is</h3>
+<h3 id="what-it-is_19">What it is</h3>
 <p>The account behind the <strong>automated</strong> paper-trading engine — the one that opens and
 closes positions on its own from captured signals. Distinct from both the hand-kept
 <a href="#paper-ledger">Paper Ledger</a> and the <a href="#claude-trades">Claude Trades</a> driver book.</p>
@@ -2964,7 +3048,7 @@ rules, or subtracts it. That is an uncomfortable comparison and a genuinely usef
 <hr />
 <h2 id="rescue">Rescue</h2>
 <p><em>Menu: STRATEGY → Options → Rescue · Route <code>/options/rescue</code></em></p>
-<h3 id="what-it-is_19">What it is</h3>
+<h3 id="what-it-is_20">What it is</h3>
 <p>Damage control. It finds credit spreads that have gone against you and offers a ranked
 menu of ways to fix them, each costed including commissions.</p>
 <h3 id="where-the-data-comes-from_18">Where the data comes from</h3>
@@ -3056,7 +3140,7 @@ in a symbol you are short premium in.</p>
 <hr />
 <h2 id="trade-analyzer">Trade Analyzer</h2>
 <p><em>Menu: STRATEGY → Trade Analyzer · Route <code>/trade</code></em></p>
-<h3 id="what-it-is_20">What it is</h3>
+<h3 id="what-it-is_21">What it is</h3>
 <p>A Buy / Hold / Sell verdict on a single stock, over two horizons, with all the evidence
 exposed. This is the app's only genuinely <em>stock-level</em> (rather than options-level) view.</p>
 <h3 id="where-the-data-comes-from_19">Where the data comes from</h3>
@@ -3153,7 +3237,7 @@ name you do not know.</p>
 <hr />
 <h2 id="claude-trades">Claude Trades</h2>
 <p><em>Menu: STRATEGY → Claude Trades · Route <code>/driver</code></em></p>
-<h3 id="what-it-is_21">What it is</h3>
+<h3 id="what-it-is_22">What it is</h3>
 <p>An <strong>autonomous paper options trader</strong>. Claude selects and sizes defined-risk credit
 spreads from the scanner's output; code-enforced guardrails cap the risk. This page
 monitors it and can stop it.</p>
@@ -3253,7 +3337,7 @@ than a strategy.</p>
 <p>Two entries: your real holdings, and the day's results.</p>
 <h2 id="portfolio">Portfolio</h2>
 <p><em>Menu: ACCOUNT → Portfolio · Route <code>/portfolio</code></em></p>
-<h3 id="what-it-is_22">What it is</h3>
+<h3 id="what-it-is_23">What it is</h3>
 <p>Your <strong>real</strong> Schwab holdings — the only place in the app where real money appears. It
 is strictly read-only; no action on this page can affect your account.</p>
 <h3 id="where-the-data-comes-from_21">Where the data comes from</h3>
@@ -3344,7 +3428,7 @@ useful decisions are.</p>
 <hr />
 <h2 id="eod-report">EOD Report</h2>
 <p><em>Menu: ACCOUNT → More → EOD Report · Routes <code>/eod</code> and <code>/eod/detail</code></em></p>
-<h3 id="what-it-is_23">What it is</h3>
+<h3 id="what-it-is_24">What it is</h3>
 <p>The day's scoreboard, aggregating every book in the app into one document — and archiving
 it as a standalone file you can reopen later.</p>
 <h3 id="where-the-data-comes-from_22">Where the data comes from</h3>
@@ -3446,7 +3530,7 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
 a trading workflow, which is exactly why they are separated.</p>
 <h2 id="system-status">System Status</h2>
 <p><em>Menu: bottom of the rail · Route <code>/status</code></em></p>
-<h3 id="what-it-is_24">What it is</h3>
+<h3 id="what-it-is_25">What it is</h3>
 <p>A live health board for every part of the stack, plus a check that each service is not
 merely running but actually <em>publishing</em>.</p>
 <h3 id="reading-the-screen_23">Reading the screen</h3>
@@ -3539,7 +3623,7 @@ fetch anything.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p><em>Menu: bottom of the rail · Route <code>/settings</code></em></p>
-<h3 id="what-it-is_25">What it is</h3>
+<h3 id="what-it-is_26">What it is</h3>
 <p>Every preference in the app, plus two things that are genuinely useful rather than
 cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
 <h3 id="reading-the-screen_24">Reading the screen</h3>

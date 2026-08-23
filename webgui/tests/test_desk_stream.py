@@ -405,6 +405,49 @@ def test_the_stream_stops_when_the_client_disconnects(monkeypatch):
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
+def test_the_rail_carries_the_mirror_in_the_home_block_next_to_desk():
+    """It is filed WITH the home page, not under a workflow section.
+
+    The mirror is the same screen as Desk for a different display, so the pinned
+    caption-less landing block is where it belongs; filing it under MARKETS would
+    have presented it as a distinct market read.
+    """
+    import main
+
+    caption, entries = main.NAV_SECTIONS[0]
+    assert caption is None
+    assert [e[1] for e in entries] == ["/desk", ds.PAGE_ROUTE]
+
+
+def test_the_mirror_opens_in_a_new_tab_and_never_claims_the_active_state():
+    """Both halves matter, and for the same reason.
+
+    ``/desk/live`` is a raw document with no ``_layout`` — no drawer, no way back
+    except the one link it draws itself — so a same-tab navigation would strand
+    the reader. And because it does not replace the page you were on, the row
+    must not paint the active wash: that would claim a navigation that never
+    happened.
+    """
+    import inspect
+
+    import main
+
+    assert ds.PAGE_ROUTE in main.EXTERNAL_RAIL_ROUTES
+    src = inspect.getsource(main._nav_link)
+    assert "is_active = path == active and not new_tab" in src
+    assert "ui.link(target=path, new_tab=new_tab)" in src
+    assert "new_tab=_path in EXTERNAL_RAIL_ROUTES" in inspect.getsource(main._layout)
+
+
+def test_the_mirror_has_its_own_hover_guide():
+    """Every rail item carries one; ``page_help`` is the app's fifth manual."""
+    import page_help
+
+    assert ds.PAGE_ROUTE in page_help.HELP_MD
+    md = page_help.help_md(ds.PAGE_ROUTE)
+    assert md != page_help._DEFAULT and "**" in md
+
+
 def test_both_routes_are_registered_on_the_app():
     import main
     from nicegui import app

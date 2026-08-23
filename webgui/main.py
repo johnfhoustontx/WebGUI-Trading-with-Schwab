@@ -383,6 +383,10 @@ STRATEGY_TOOLS_CHILDREN = [
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
+    # The Desk's streaming mirror (webgui/desk_stream.py). It sits DIRECTLY under
+    # Desk, in the same pinned landing block, because it is the same screen for a
+    # different display rather than a destination of its own.
+    ("/desk/live", "Live Mirror", "cast"),
     ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
@@ -475,7 +479,7 @@ def _sec_page(route: str):
 # filing it under one of the three workflow sections. Its breadcrumb is likewise
 # just ["Desk"], since there is no section to name above it.
 NAV_SECTIONS = [
-    (None, [_sec_page("/desk")]),
+    (None, [_sec_page("/desk"), _sec_page("/desk/live")]),
     ("MARKETS", [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
@@ -493,6 +497,20 @@ NAV_SECTIONS = [
         _sec_group("More"),
     ]),
 ]
+
+
+# Rail routes that are NOT shell pages, and so open in a NEW TAB.
+#
+# ``/desk/live`` is a raw HTMLResponse document with no ``_layout`` — no drawer,
+# no header, no breadcrumb. Navigating to it in the same tab would therefore
+# strand the reader: the only way back is the one link the document draws itself.
+# Opening it in a new tab is also what the page is FOR — you put the mirror on a
+# second display and keep working in the tab you were already in.
+#
+# A set rather than a flag on the nav tuple: every other rail entry is a shell
+# page, and widening the tuple would make ten call sites carry a field that only
+# one of them ever uses.
+EXTERNAL_RAIL_ROUTES = {"/desk/live"}
 
 
 def _group_children(active: str):
@@ -1531,7 +1549,11 @@ def _nav_icon(icon: str, count: int):
     return dot
 
 
-def _nav_link(path: str, label: str, icon: str, active: str) -> None:
+def _nav_link(path: str, label: str, icon: str, active: str,
+              new_tab: bool = False) -> None:
+    """One drawer row. ``new_tab`` is for the rail's non-shell routes — see
+    ``EXTERNAL_RAIL_ROUTES``; such a row never claims the active state, because
+    it does not replace the page you are looking at."""
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
     # nav-active is a plain CSS rule in _NAV_CSS (a soft rgba navy wash) — NOT a
@@ -1539,10 +1561,13 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     # nor rgba(...) arbitraries reliably (plain-hex ones are fine), so the old
     # bg-[var(--q-primary)] silently produced no rule at all. The pill is now
     # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
-    is_active = path == active
+    # A new-tab row leaves the current page where it is, so it must not paint
+    # itself as "where you are" — the active wash would claim a navigation that
+    # never happened.
+    is_active = path == active and not new_tab
     state = " nav-active" if is_active else ""
     n = _NAV_BADGES.get(path, 0)
-    with ui.link(target=path).classes(base + state):
+    with ui.link(target=path, new_tab=new_tab).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             rail_dot = _nav_icon(icon, n)
@@ -1817,7 +1842,8 @@ def _layout(active: str, title: str):
                         _nav_group_link(_label, _icon, _children, active)
                     else:
                         _kind, _path, _label, _icon = entry
-                        _nav_link(_path, _label, _icon, active)
+                        _nav_link(_path, _label, _icon, active,
+                                  new_tab=_path in EXTERNAL_RAIL_ROUTES)
             # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
             # the leftover column height so they sit at the bottom edge (the column
             # is h-full flex-col), while still reading as the last items when the

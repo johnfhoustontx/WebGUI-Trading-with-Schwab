@@ -80,6 +80,33 @@ reads 0 overnight, which would otherwise produce confident-looking walls that ar
 pure noise. A greyed panel with a timestamp means "this is the last good reading",
 not "the market is flat".
 """,
+    "/desk/live": """
+**Live Mirror — the simple version**
+
+**The Desk, on a screen you are not sitting at.** Same numbers, same layout, built
+as a plain web page instead of an app page — so it keeps updating on a wall
+display, a spare monitor or a phone, and picks itself back up after the machine
+sleeps or the network blinks. It opens in a **new tab**, so the tab you were
+working in stays where it was.
+
+- **Same numbers, always.** Every figure is produced by the Desk's own code, so
+  the mirror cannot quietly disagree with the Desk. If the two ever differ, one of
+  them has stopped updating — check the dot.
+- **The dot, top right.** **Live** means the stream is connected and the screen is
+  current. **Reconnecting** means it dropped and is retrying by itself; the numbers
+  on screen are the last good ones until it says Live again.
+- **The clock keeps ticking even when nothing else changes** — that is deliberate.
+  A frozen page and a quiet market look identical, and the second hand is how you
+  tell them apart at a glance from across the room.
+- **The four panels stay 2x2 at every width**, unlike the Desk, which stacks them
+  into one column on a narrow screen. A display you have pinned something to should
+  not rearrange itself.
+
+**Click any row** to open the page it came from. **Open the full Desk** (top left)
+goes back to the real app.
+
+This screen is **read-only**. It places no trades and changes nothing.
+""",
     "/options/scanner": """
 **Market Scanner — the simple version**
 

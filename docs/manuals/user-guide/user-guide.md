@@ -302,6 +302,51 @@ Ledger or Claude Trades.
 
 ---
 
+## Live Mirror
+
+**Route:** `/desk/live` — pinned in the rail directly under **Desk**, and it
+**opens in a new browser tab**, so the tab you were working in stays where it was.
+
+**The Desk, on a screen you are not sitting at.** Same panels, same numbers, same
+layout, built as a plain web page instead of an app page. It keeps updating on a
+wall display, a spare monitor, a tablet or a phone, and it picks itself back up on
+its own after the machine sleeps, the Wi-Fi drops, or the browser suspends the tab.
+
+**How to use it:** open it once, drag the window to the display you want it on, and
+leave it. Clicking a row still opens the page it came from, and **Open the full
+Desk** at the top left brings you back to the app.
+
+**What is different from the Desk:**
+
+| | Desk | Live Mirror |
+|---|---|---|
+| Panels | 2x2, stacking to one column on a narrow screen | **always 2x2** |
+| After sleep or a dropped connection | reload it | **reconnects itself** |
+
+The layout difference is deliberate: a screen you have pinned somewhere should not
+rearrange itself. On a narrow display the columns tighten and long values shorten
+with an ellipsis instead of the panels moving.
+
+**The indicator at the top right tells you whether to trust the screen:**
+
+- **Live** — connected, and what you are looking at is current.
+- **Reconnecting** — the connection dropped and the page is retrying by itself. The
+  numbers are the last good ones until it says Live again.
+
+**The countdown keeps ticking every second even when nothing else changes**, and
+that is the point: a frozen page and a quiet market look identical from across the
+room, and the moving clock is how you tell them apart.
+
+**Every number comes from the Desk's own code**, so the mirror cannot drift from
+it. If the two ever disagree, one of them has stopped updating — check the
+indicator. The same honesty rules apply, because they are the same rules: walls are
+hidden rather than zeroed when the gamma feed is stale, and a missing reading shows
+a dash rather than a zero.
+
+**Nothing on this page can place or change a trade.** It reads and links only.
+
+---
+
 # MARKETS — what is the market doing?
 
 The four rail entries in this section establish the conditions a trade would be

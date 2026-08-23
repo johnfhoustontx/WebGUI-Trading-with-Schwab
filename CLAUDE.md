@@ -147,8 +147,9 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **14 items** — a top-pinned **Desk** (the landing page, in a
-**caption-less leading `NAV_SECTIONS` block**, 2026-08-18), 10 in three captioned
+the left drawer holds **15 items** — a top-pinned **Desk** + its **Live Mirror**
+(`/desk/live`, the streaming standalone view, added 2026-08-20) in a
+**caption-less leading `NAV_SECTIONS` block** (2026-08-18), 10 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
@@ -171,7 +172,7 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
-(Desk) · **MARKETS** (Dealer
+(Desk + Live Mirror) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
@@ -188,7 +189,14 @@ than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
 (it is now just the flat-route registry `_NAV_LABEL` iterates). Caption counts are
 **derived** from `len(entries)` — never written down. The sentiment group renamed
 **"Market Trend & Sentiment" → "Trend & Sentiment"** now the MARKETS caption
-carries the word. ⚠ The Options group sits under STRATEGY while Dealer Positioning
+carries the word. ⚠ **`/desk/live` is the ONE rail route that is not a shell page**, and it is
+therefore the one that opens in a **new tab** (`EXTERNAL_RAIL_ROUTES`, consumed by
+`_nav_link(..., new_tab=)`). It renders no `_layout` — no drawer, no breadcrumb —
+so a same-tab navigation would strand the reader on a page whose only way back is
+the link the document draws itself; and the row never claims the active wash,
+which would otherwise assert a navigation that did not happen. It is also why
+`_LANDING_ROUTES` in `test_shell.py` holds two routes rather than one. ⚠ The
+Options group sits under STRATEGY while Dealer Positioning
 / Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are
 market-WIDE reads, the Options group is the per-signal find → analyze → track →
 repair workflow. `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
@@ -221,7 +229,7 @@ this app's Highcharts have no ResizeObserver, so a reflow on every hover would
 leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
 only the icon is visible when collapsed, **the icon is the affordance** (the
 `icon` arg is live again — the earlier colored-dot indicator is retired; a test
-guards that the 14 drawer icons stay non-empty + mutually distinct). Labels/title
+guards that the 15 drawer icons stay non-empty + mutually distinct). Labels/title
 clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
 264px of content raising a scrollbar in the rail. **Section captions cross-fade to
 HAIRLINES in the rail** (2026-08-16): `.nav-sep` is the exact INVERSE of the

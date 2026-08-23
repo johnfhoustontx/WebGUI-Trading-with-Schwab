@@ -36,6 +36,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   alert type appears, instead of the mirror silently painting it in a fallback hue. ⚠ Key
   coverage alone would have been VACUOUS there — `FLOW_TONE_HEX` is built *from*
   `flow._TONE` — so the assertion is on the hex being non-None.
+- **Wired into the rail as "Live Mirror"**, pinned directly under Desk in the SAME
+  caption-less landing block — it is the same screen for a different display, not a
+  destination of its own, so filing it under MARKETS would have presented it as a
+  distinct market read. It is the **one rail route that is not a shell page**, hence
+  the only one that opens in a **new tab** (`EXTERNAL_RAIL_ROUTES`): it renders no
+  `_layout`, so a same-tab navigation would strand the reader on a page with no
+  drawer, and the row never claims the active wash. Drawer 14 -> 15 items, with the
+  hover guide (`page_help`), a User Guide section and a Reference Guide section
+  added in the same commit — the repo's own tests enforce all three, which is
+  exactly the guard that keeps the manuals from rotting.
 - **Verified live** (worktree, throwaway harness on :9700, read-only against prod's
   cache): 4 dealer rows, 6 board rows, 9 flow alerts, 8 of 39 positions with the
   `SHOWING 8` clause present, 11 Bull/Bear chips, the clock ticking off the stream, the

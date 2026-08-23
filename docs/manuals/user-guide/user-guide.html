@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-20</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -87,6 +87,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
 <li><a href="#desk">Desk</a></li>
+<li><a href="#live-mirror">Live Mirror</a></li>
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
@@ -475,6 +476,57 @@ Ledger or Claude Trades.</p>
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol.</li>
 </ul>
+<hr />
+<h2 id="live-mirror">Live Mirror</h2>
+<p><strong>Route:</strong> <code>/desk/live</code> — pinned in the rail directly under <strong>Desk</strong>, and it
+<strong>opens in a new browser tab</strong>, so the tab you were working in stays where it was.</p>
+<p><strong>The Desk, on a screen you are not sitting at.</strong> Same panels, same numbers, same
+layout, built as a plain web page instead of an app page. It keeps updating on a
+wall display, a spare monitor, a tablet or a phone, and it picks itself back up on
+its own after the machine sleeps, the Wi-Fi drops, or the browser suspends the tab.</p>
+<p><strong>How to use it:</strong> open it once, drag the window to the display you want it on, and
+leave it. Clicking a row still opens the page it came from, and <strong>Open the full
+Desk</strong> at the top left brings you back to the app.</p>
+<p><strong>What is different from the Desk:</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Desk</th>
+<th>Live Mirror</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Panels</td>
+<td>2x2, stacking to one column on a narrow screen</td>
+<td><strong>always 2x2</strong></td>
+</tr>
+<tr>
+<td>After sleep or a dropped connection</td>
+<td>reload it</td>
+<td><strong>reconnects itself</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The layout difference is deliberate: a screen you have pinned somewhere should not
+rearrange itself. On a narrow display the columns tighten and long values shorten
+with an ellipsis instead of the panels moving.</p>
+<p><strong>The indicator at the top right tells you whether to trust the screen:</strong></p>
+<ul>
+<li><strong>Live</strong> — connected, and what you are looking at is current.</li>
+<li><strong>Reconnecting</strong> — the connection dropped and the page is retrying by itself. The
+  numbers are the last good ones until it says Live again.</li>
+</ul>
+<p><strong>The countdown keeps ticking every second even when nothing else changes</strong>, and
+that is the point: a frozen page and a quiet market look identical from across the
+room, and the moving clock is how you tell them apart.</p>
+<p><strong>Every number comes from the Desk's own code</strong>, so the mirror cannot drift from
+it. If the two ever disagree, one of them has stopped updating — check the
+indicator. The same honesty rules apply, because they are the same rules: walls are
+hidden rather than zeroed when the gamma feed is stale, and a missing reading shows
+a dash rather than a zero.</p>
+<p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
 <p>The four rail entries in this section establish the conditions a trade would be
