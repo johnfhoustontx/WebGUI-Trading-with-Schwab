@@ -80,6 +80,16 @@ class TestCoverage:
         missing = [r for r in rows if not th.row_help(r)]
         assert missing == []
 
+    def test_every_command_bar_report_button_is_explained(self):
+        """Caught live: the buttons are keyed by their COMMAND name
+        ("deepdive"), not by a slug I chose ("deep_dive"), so both tooltips
+        silently attached nothing. Reading the keys off `_REPORTS` is what
+        makes this test able to fail."""
+        from pages.trade_shell import _REPORTS
+        missing = [cmd for _label, cmd, _view, _route in _REPORTS
+                   if not th.help_for(cmd)]
+        assert missing == []
+
     def test_every_dealer_stat_is_explained(self):
         rows = ("Gamma regime", "Setup", "Flip", "Call wall", "Put wall",
                 "ATM IV")

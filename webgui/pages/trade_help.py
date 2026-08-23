@@ -605,13 +605,17 @@ _GENERAL = {
         "Bullish here means the shorter and longer views point the same way. "
         "When they disagree the bias reads neutral, which is honest rather "
         "than unhelpful — it is telling you the timeframes are in conflict."),
-    "deep_dive": (
+    # Keyed by the COMMAND name the shell dispatches ("deepdive"), not by a
+    # slug chosen here — the two diverged, and a tooltip keyed on a name
+    # nothing passes attaches silently. A test now reads the keys off
+    # `trade_shell._REPORTS`, so the two cannot drift again.
+    "deepdive": (
         "Builds a long-form written report on this symbol and opens it in a "
         "new browser tab.\n\n"
         "It takes a little while, because it gathers far more than this "
         "screen shows. If nothing appears, check that your browser did not "
         "block the new tab."),
-    "ai_query": (
+    "deepdive_query": (
         "Sends this symbol's data to Claude for a written second opinion, and "
         "opens the answer in a new browser tab.\n\n"
         "This is the one control here that costs money per click, and its "
