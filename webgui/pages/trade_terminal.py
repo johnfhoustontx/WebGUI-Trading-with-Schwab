@@ -214,3 +214,42 @@ def evidence_composite(swing):
     vals = [fmt.num(c.get("contribution")) for c in rows]
     vals = [v for v in vals if v is not None]
     return sum(vals) if vals else None
+
+
+# ── the plan's hand-off to the options tools ────────────────────────────────
+# `structure.choose` names a STRUCTURE and a tenor and deliberately not strikes,
+# so the Calculator is where a plan becomes a contract. These are the only four
+# option structures it produces; a relative PAIR is a stock trade with no
+# options template at all.
+_CALC_STRATEGY = {
+    "call debit spread": "VERT_CALL_DEBIT",
+    "put debit spread": "VERT_PUT_DEBIT",
+    "call credit spread": "CCS",
+    "put credit spread": "PCS",
+}
+
+
+def calculator_strategy(structure):
+    """The Calculator template for a plan structure, or None.
+
+    None for anything unmapped — including the relative pair — so the caller
+    hands over a symbol without pre-selecting a structure that does not fit."""
+    return _CALC_STRATEGY.get((structure or "").strip().lower())
+
+
+def calculator_handoff(analysis):
+    """The signal `handoff.set_pending_calculator` expects, or None.
+
+    Carries symbol, strategy and the underlying price; NO strikes and no expiry,
+    because the plan has none. The Calculator loads the chain and seeds the
+    template's default legs, which is exactly the step the plan leaves open."""
+    a = analysis or {}
+    plan = a.get("trade_plan") or {}
+    sym = (a.get("symbol") or "").strip().upper()
+    if not sym or not plan.get("structure"):
+        return None
+    return {
+        "symbol": sym,
+        "type": calculator_strategy(plan.get("structure")),
+        "underlying_price": fmt.num(a.get("price")),
+    }

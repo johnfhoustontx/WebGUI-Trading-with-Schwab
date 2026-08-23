@@ -15,7 +15,7 @@ import bus_client
 
 from .theme import BTN_3D
 
-_pending = {"calculator": None, "expected_move": None,
+_pending = {"calculator": None, "expected_move": None, "swing": None,
             "simulator": None, "calculator_legs": None, "gamma": None}
 
 
@@ -166,6 +166,35 @@ def send_to_gamma(symbol):
         return
     set_pending_gamma(symbol)
     ui.navigate.to("/options/gamma")
+
+
+def set_pending_swing(symbol):
+    _pending["swing"] = symbol
+
+
+def take_pending_swing():
+    """Return and clear the pending Strategy Finder symbol (one-shot).
+
+    One-shot for the same reason the gamma stash is: a symbol left behind would
+    silently re-hijack the Finder's input the next time that page is built."""
+    s = _pending.get("swing")
+    _pending["swing"] = None
+    return s
+
+
+def send_to_swing(symbol):
+    """Stash a symbol and open the Strategy Finder on it.
+
+    The step between a Trade Plan and a paper trade. The plan names a STRUCTURE
+    ("call debit spread, 30-45 DTE") and deliberately not strikes; the Finder
+    turns that into concrete multi-leg candidates, and its rows already carry
+    the Send-to-Paper action. Wiring the plan straight to paper would mean
+    inventing the strikes it declines to specify."""
+    if not symbol:
+        ui.notify("No symbol for the Strategy Finder.", type="warning")
+        return
+    set_pending_swing(symbol)
+    ui.navigate.to("/options/swing")
 
 
 def _signal_legs_payload(sig):

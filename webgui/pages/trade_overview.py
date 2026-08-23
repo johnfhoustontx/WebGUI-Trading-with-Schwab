@@ -26,12 +26,16 @@ def _build(state, refs):
     paint = refs["paint"]
 
     # ── market state + gates ────────────────────────────────────────────────
-    with ui.row().classes(f"{T.PANEL_TIGHT} w-full items-center "
-                          "justify-between gap-[18px] flex-wrap"):
-        with ui.column().classes("gap-1 min-w-0"):
-            ui.label("MARKET STATE").classes(T.EYEBROW_WIDE)
-            market = ui.label("").classes("text-[14px] font-medium text-[#cfdaee]")
-        chips = ui.row().classes("gap-[9px] flex-wrap")
+    # One line, not a stacked block: the eyebrow, the sentence and both chips
+    # are each short, and stacking them cost a third of the fold for four words.
+    with ui.row().classes("w-full items-center gap-3 flex-wrap rounded-[10px] "
+                          "border border-[#1c2740] "
+                          "bg-[linear-gradient(180deg,#0e1626,#0b1220)] "
+                          "px-[14px] py-2"):
+        ui.label("MARKET STATE").classes(T.EYEBROW)
+        market = ui.label("").classes("text-[12.5px] text-[#cfdaee] min-w-0")
+        ui.element("div").classes("flex-1 min-w-[8px]")
+        chips = ui.row().classes("gap-[7px] flex-wrap")
 
     # ── position | investor ─────────────────────────────────────────────────
     with ui.element("div").classes(
@@ -110,8 +114,10 @@ def _build(state, refs):
         chips.clear()
         with chips:
             for c in tt.gate_chips(clearance):
-                with ui.row().classes(f"{T.CHIP_BASE} {c['chip_class']}"):
-                    ui.label(c["icon"]).classes("text-[12px]")
+                with ui.row().classes(
+                        f"{T.CHIP_BASE} {c['chip_class']} "
+                        "px-[10px] py-[3px] gap-[6px] text-[10.5px]"):
+                    ui.label(c["icon"]).classes("text-[11px]")
                     ui.label(c["label"])
 
         rail_vals = tt.percentile_rail(sm)

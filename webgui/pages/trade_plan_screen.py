@@ -14,7 +14,10 @@ from nicegui import ui
 from pages import fmt
 from pages import terminal_theme as T
 from pages import trade_shell as sh
+from pages import trade_terminal as tt
+from pages.options import handoff
 from pages.trade import plan_headline, plan_rows
+from pages.ui_guard import guard
 
 # The one row the design lifts out of the list, because it is the only field
 # nothing else in the app enforces.
@@ -99,10 +102,18 @@ def _build(state, refs):
 
         actions.clear()
         with actions:
-            ui.button("Send to paper trade", color=None).props("no-caps") \
-                .classes(T.BTN_PRIMARY)
+            # Both actions exist because the plan stops one step short of a
+            # contract: it names a structure and a tenor, never strikes. The
+            # design's "Send to paper trade" is not wireable from here without
+            # inventing them — the Strategy Finder is where a structure becomes
+            # concrete legs, and ITS rows already carry the paper action.
+            ui.button("Find strikes", color=None).props("no-caps") \
+                .classes(T.BTN_PRIMARY).on_click(_find_strikes(a))
             ui.button("Open in calculator", color=None).props("no-caps") \
-                .classes(T.BTN_GHOST)
+                .classes(T.BTN_GHOST).on_click(_open_calculator(a))
+        ui.label("The plan names a structure and a tenor, not strikes — the "
+                 "Finder turns it into concrete legs you can paper-trade.") \
+            .classes(T.NOTE)
 
         # ── the no-trade side ───────────────────────────────────────────────
         blocked_side = _blocked_side(clearance)
@@ -142,6 +153,33 @@ def _build(state, refs):
             ui.label(_alternative(clearance, blocked_side)).classes(T.BODY)
 
     refs["paint"].append(_paint)
+
+
+def _find_strikes(analysis):
+    """Open the Strategy Finder on this symbol.
+
+    The step between a plan and a paper trade. The Finder returns concrete
+    multi-leg candidates, and ITS rows already carry Send-to-Paper — so the
+    chain completes without this screen inventing the strikes the plan
+    deliberately declines to specify."""
+    @guard
+    def _go():
+        handoff.send_to_swing((analysis or {}).get("symbol"))
+    return _go
+
+
+def _open_calculator(analysis):
+    """Pre-select the plan's structure and symbol in the Calculator."""
+    @guard
+    def _go():
+        sig = tt.calculator_handoff(analysis)
+        if not sig:
+            ui.notify("This plan has no options structure to model.",
+                      type="warning")
+            return
+        handoff.set_pending_calculator(sig)
+        ui.navigate.to("/options/calculator")
+    return _go
 
 
 def _looks_numeric(value):

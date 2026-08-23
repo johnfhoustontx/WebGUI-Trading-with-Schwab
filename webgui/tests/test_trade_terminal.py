@@ -362,3 +362,44 @@ def test_the_command_bars_change_uses_the_desk_wide_minus():
 def test_a_rising_change_keeps_its_plus():
     bar = tt.command_bar({"symbol": "MU", "price": 963.68, "change_pct": 0.31})
     assert bar["change"] == "+0.31%"
+
+
+# ── The plan's actions (found dead in a live read-through) ───────────────────
+# Both buttons were drawn from the design and never wired. What they can
+# honestly do is set by what the plan carries: a STRUCTURE and a tenor, never
+# strikes. So "Open in calculator" pre-selects the structure and the Calculator
+# supplies the strikes; the paper action goes via the Strategy Finder, whose
+# rows are concrete multi-leg candidates that already carry Send-to-Paper.
+# Wiring the plan straight to paper would mean inventing the strikes it
+# deliberately declines to specify.
+
+class TestThePlanMapsToACalculatorStrategy:
+    def test_each_structure_maps_to_a_real_calculator_template(self):
+        from pages.options.strategies import STRATEGY_TEMPLATES
+        for structure in ("call debit spread", "put debit spread",
+                          "call credit spread", "put credit spread"):
+            key = tt.calculator_strategy(structure)
+            assert key in STRATEGY_TEMPLATES, f"{structure} -> {key}"
+
+    def test_the_debit_and_credit_sides_do_not_collapse_together(self):
+        assert (tt.calculator_strategy("call debit spread")
+                != tt.calculator_strategy("call credit spread"))
+        assert (tt.calculator_strategy("call debit spread")
+                != tt.calculator_strategy("put debit spread"))
+
+    def test_a_relative_pair_has_NO_options_structure(self):
+        """'pair vs a defensive name' is a stock pair, not a spread — there is
+        nothing for the Calculator to pre-select."""
+        assert tt.calculator_strategy("pair vs a defensive name") is None
+        assert tt.calculator_strategy(None) is None
+
+    def test_the_handoff_signal_carries_symbol_strategy_and_price(self):
+        sig = tt.calculator_handoff({"symbol": "MU", "price": 963.68,
+                                     "trade_plan": {"structure": "call debit spread"}})
+        assert sig["symbol"] == "MU"
+        assert sig["type"] == tt.calculator_strategy("call debit spread")
+        assert sig["underlying_price"] == 963.68
+
+    def test_no_plan_yields_no_handoff(self):
+        assert tt.calculator_handoff({"symbol": "MU"}) is None
+        assert tt.calculator_handoff(None) is None
