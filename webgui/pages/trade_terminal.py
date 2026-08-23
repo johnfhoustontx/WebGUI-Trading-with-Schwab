@@ -38,10 +38,17 @@ def command_bar(analysis):
     a = analysis or {}
     sym = (a.get("symbol") or "").strip().upper()
     price = fmt.num(a.get("price"))
-    chg = fmt.num((a.get("momentum") or {}).get("change_pct"))
+    # The quote's OWN change, stored top-level by `analyze`. The momentum block
+    # carries indicators (RSI/ADX/MACD/VWAP) and never had a change field.
+    chg = fmt.num(a.get("change_pct"))
     sm = a.get("swing_model") or {}
 
+    # Schwab's quote has no company name — `description` is the SYMBOL — so a
+    # description that merely repeats the ticker is dropped rather than
+    # rendered as "MU · MU · Technology".
     desc = (a.get("description") or "").strip()
+    if desc.upper() == sym:
+        desc = ""
     sect = a.get("sector") or {}
     bits = [b for b in (desc, sect.get("name"), sect.get("etf")) if b]
     name = " · ".join(bits) if bits else "not in today's cross-section"

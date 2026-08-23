@@ -19,14 +19,14 @@ from pages import terminal_theme as T
 class TestTheCommandBar:
     def test_it_carries_price_and_change_with_a_direction_class(self):
         bar = tt.command_bar({"symbol": "AAPL", "price": 309.69,
-                              "momentum": {"change_pct": -0.36}})
+                              "change_pct": -0.36})
         assert bar["price"] == "309.69"
         assert "0.36" in bar["change"]
         assert bar["change_class"] == T.NEG
 
     def test_a_rising_price_reads_green(self):
         bar = tt.command_bar({"symbol": "X", "price": 10.0,
-                              "momentum": {"change_pct": 1.2}})
+                              "change_pct": 1.2})
         assert bar["change_class"] == T.POS
 
     def test_an_unknown_change_is_a_dash_not_a_zero(self):
@@ -255,3 +255,27 @@ class TestTheRowBuildersReturnDictsNotTuples:
              "short_gates": ["squeeze risk"]}
         assert all(isinstance(g, str) for g in gate_rows(v))
         assert all(isinstance(g, str) for g in short_gate_rows(v))
+
+
+class TestTheCommandBarReadsTheRealPayloadShape:
+    def test_the_change_comes_from_the_TOP_LEVEL_field(self):
+        """`analyze` stores the quote's own `change_pct`; the momentum block
+        carries indicators (RSI, ADX, MACD, VWAP) and never had a change at
+        all. Reading the wrong one renders a permanent em dash over data that
+        was fetched."""
+        bar = tt.command_bar({"symbol": "MU", "price": 963.68,
+                              "change_pct": -0.32065})
+        assert "0.32" in bar["change"]
+        assert bar["change_class"] == T.NEG
+
+    def test_a_description_that_merely_repeats_the_ticker_is_dropped(self):
+        """Schwab's quote has no company name — `description` is the SYMBOL. It
+        must not render as 'MU · MU · Technology'."""
+        bar = tt.command_bar({"symbol": "MU", "description": "MU",
+                              "sector": {"name": "Technology", "etf": "XLK"}})
+        assert bar["name"] == "Technology · XLK"
+
+    def test_a_real_description_is_kept(self):
+        bar = tt.command_bar({"symbol": "AAPL", "description": "Apple Inc",
+                              "sector": {"name": "Technology"}})
+        assert bar["name"].startswith("Apple Inc")

@@ -22,6 +22,8 @@ class TradeAnalysis(_Base):
     description: str = ""
     price: float | None = None
     volume: int | None = None
+    change: float | None = None
+    change_pct: float | None = None
     bias: str = ""
     ema_alignment: dict = {}
     momentum: dict = {}

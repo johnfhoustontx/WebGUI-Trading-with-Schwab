@@ -1562,6 +1562,10 @@ def analyze(symbol):
     result = {
         "symbol": symbol,
         "description": quote.get("symbol", symbol),
+        # The quote already carries these; storing them is what lets the
+        # command bar show a change instead of a permanent em dash.
+        "change": quote.get("change"),
+        "change_pct": quote.get("change_pct"),
         "price": price,
         "volume": int(today_vol or quote.get("volume") or 0),
         "bias": align.get("bias", "NEUTRAL"),

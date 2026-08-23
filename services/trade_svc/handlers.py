@@ -49,6 +49,8 @@ _FIELDS = {
     "description": "",
     "price": None,
     "volume": None,
+    "change": None,
+    "change_pct": None,
     "bias": "",
     "ema_alignment": {},
     "momentum": {},
