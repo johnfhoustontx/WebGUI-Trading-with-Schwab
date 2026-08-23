@@ -95,6 +95,20 @@ def command_bar(analysis):
     }
 
 
+def should_commit(draft, committed, explicit):
+    """Should committing ``draft`` enqueue an analyze?
+
+    ⚠ Blur fires constantly — clicking any button, leaving the page, switching
+    screens — and an analyze is a dozen proxy calls. So blur and Tab commit only
+    a CHANGE; Enter is the deliberate refresh gesture and always requests. An
+    empty draft is never a request: it means "I cleared the box", not "analyze
+    nothing"."""
+    d = (draft or "").strip().upper()
+    if not d:
+        return False
+    return bool(explicit) or d != (committed or "").strip().upper()
+
+
 def percentile_rail(swing):
     """The cross-section rank, its marker position, and the calibrated stats."""
     sm = swing or {}

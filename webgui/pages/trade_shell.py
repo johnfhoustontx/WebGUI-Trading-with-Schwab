@@ -145,24 +145,30 @@ def _command_bar(state, painters):
         dirty = (sym_in.value or "").strip().upper() != state["draft"]
         box.classes(remove=f"{_DIRTY} {_CLEAN}", add=_DIRTY if dirty else _CLEAN)
 
-    @guard
-    def _commit():
-        v = (sym_in.value or "").strip().upper()
-        if not v:
-            sym_in.value = state["draft"]          # empty is not a request
+    def _commit(explicit):
+        @guard
+        def _go():
+            v = (sym_in.value or "").strip().upper()
+            if not v:
+                sym_in.value = state["draft"]      # empty is not a request
+                _mark_draft()
+                return
+            fire = tt.should_commit(v, state["draft"], explicit)
+            state["draft"] = v
+            sym_in.value = v
             _mark_draft()
-            return
-        state["draft"] = v
-        sym_in.value = v
-        _mark_draft()
-        sp = state.get("spinner")
-        if sp:
-            sp.show(f"Analyzing {v}…")
-        request(v)
+            if not fire:
+                return
+            sp = state.get("spinner")
+            if sp:
+                sp.show(f"Analyzing {v}…")
+            request(v)
+        return _go
 
-    sym_in.on("blur", _commit)
-    sym_in.on("keydown.enter", _commit)
-    sym_in.on("keydown.tab", _commit)
+    # Enter is the deliberate refresh; blur and Tab only commit a CHANGE.
+    sym_in.on("blur", _commit(False))
+    sym_in.on("keydown.tab", _commit(False))
+    sym_in.on("keydown.enter", _commit(True))
     sym_in.on("update:model-value", lambda _e: _mark_draft())
 
     def _paint(a):

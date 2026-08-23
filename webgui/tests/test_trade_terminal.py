@@ -403,3 +403,32 @@ class TestThePlanMapsToACalculatorStrategy:
     def test_no_plan_yields_no_handoff(self):
         assert tt.calculator_handoff({"symbol": "MU"}) is None
         assert tt.calculator_handoff(None) is None
+
+
+class TestTheCommandBarDoesNotReanalyzeOnEveryBlur:
+    """A regression the live journal caught: the bar enqueued an analyze on
+    EVERY blur, and blur fires constantly — clicking any button, leaving the
+    page, switching screens. Each analyze is a dozen proxy calls (five
+    timeframes, SPY, the sector ETF, fundamentals, a chain), so a session of
+    navigating re-analyzed the same name again and again.
+
+    Enter stays an explicit refresh; blur and Tab only commit a CHANGE."""
+
+    def test_blur_on_an_unchanged_symbol_does_not_request(self):
+        assert tt.should_commit("MU", committed="MU", explicit=False) is False
+
+    def test_blur_on_a_changed_symbol_does_request(self):
+        assert tt.should_commit("NVDA", committed="MU", explicit=False) is True
+
+    def test_ENTER_refreshes_the_same_symbol_deliberately(self):
+        assert tt.should_commit("MU", committed="MU", explicit=True) is True
+
+    def test_an_empty_draft_never_requests(self):
+        assert tt.should_commit("", committed="MU", explicit=True) is False
+        assert tt.should_commit("   ", committed="MU", explicit=False) is False
+
+    def test_no_committed_symbol_yet_means_the_first_one_requests(self):
+        assert tt.should_commit("MU", committed="", explicit=False) is True
+
+    def test_case_and_padding_do_not_count_as_a_change(self):
+        assert tt.should_commit(" mu ", committed="MU", explicit=False) is False
