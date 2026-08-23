@@ -402,3 +402,33 @@ class TestJoinedColumns:
     def test_a_name_with_no_short_interest_has_no_days_to_cover(self):
         board = _build()
         assert all(r["dtc"] is None for r in board["rows"])
+
+
+class TestTheMatrixSentinelDoesNotLeak:
+    """`cache:options:matrix` degrades to the STRING "na", never to 0 — the
+    off-hours case turns on that distinction. But "na" is a sentinel, not a
+    reading, and passing it through renders a column of literal `na` in the UI
+    where "not collected" is what it means. Normalised at the service boundary
+    so Tier 1 never sees it."""
+
+    def test_the_na_sentinel_becomes_absent(self):
+        board = _build(matrix={"S00": {"dealer_regime": "na", "atm_iv": "na",
+                                       "iv_state": "na"}})
+        row = next(r for r in board["rows"] if r["symbol"] == "S00")
+        assert row["dealer"] is None
+        assert row["atm_iv"] is None
+        assert row["iv_state"] is None
+
+    def test_a_real_reading_is_untouched(self):
+        board = _build(matrix={"S00": {"dealer_regime": "Above flip",
+                                       "atm_iv": 31.4, "iv_state": "cheap"}})
+        row = next(r for r in board["rows"] if r["symbol"] == "S00")
+        assert row["dealer"] == "Above flip"
+        assert row["atm_iv"] == 31.4
+
+    def test_a_zero_iv_is_NOT_treated_as_absent(self):
+        """0 and "na" are different: the matrix contract is explicit that a
+        real zero must survive."""
+        board = _build(matrix={"S00": {"atm_iv": 0.0}})
+        row = next(r for r in board["rows"] if r["symbol"] == "S00")
+        assert row["atm_iv"] == 0.0

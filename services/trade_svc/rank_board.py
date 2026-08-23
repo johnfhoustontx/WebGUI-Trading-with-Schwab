@@ -63,6 +63,17 @@ def flat_basis(snapshot):
     return basis
 
 
+def _unsentinel(v):
+    """The options matrix's ``"na"`` sentinel -> None; everything else through.
+
+    That contract degrades to ``None``/``"na"`` and never to 0, deliberately —
+    the off-hours case turns on it. But ``"na"`` is a sentinel, not a reading,
+    and passing it through renders a column of literal `na` where "not
+    collected" is what it means. A real 0 must survive, so this tests the
+    STRING rather than falsiness."""
+    return None if isinstance(v, str) and v.strip().lower() == "na" else v
+
+
 def _decile(rank_asc, n):
     """1..10 with **10 the highest** composite. Ascending 0-based rank in."""
     if n <= 0:
@@ -140,9 +151,9 @@ def build(snapshot, artifact, regime=None, clearance=None, gate_ctx=None,
         row = mx.get(sym) or {}
         scored.append({
             "symbol": sym,
-            "dealer": row.get("dealer_regime"),
-            "atm_iv": row.get("atm_iv"),
-            "iv_state": row.get("iv_state"),
+            "dealer": _unsentinel(row.get("dealer_regime")),
+            "atm_iv": _unsentinel(row.get("atm_iv")),
+            "iv_state": _unsentinel(row.get("iv_state")),
             # The short side's own metric. FINRA's days-to-cover never touches
             # the contested float denominator, which is why it is the leg the
             # squeeze gate trusts too.
