@@ -99,6 +99,12 @@ FILTER_ON = ("rounded-lg border border-[#3a4a72] bg-[#151f36] px-[14px] py-2 "
 FILTER_OFF = ("rounded-lg border border-[#22304c] bg-transparent px-[14px] "
               "py-2 text-[12px] font-semibold normal-case text-[#7d8db0]")
 
+# Per-tile hover explanations (`pages/trade_help`). `whitespace-pre-line` is
+# load-bearing: the texts are written as short paragraphs separated by blank
+# lines, and without it they collapse into one wall of prose.
+TOOLTIP = ("max-w-[340px] whitespace-pre-line text-[11.5px] leading-[1.6] "
+           "text-left")
+
 HAIRLINE = "border-b border-[#131d31]"
 RULE = "border-b border-[#1c2740]"
 

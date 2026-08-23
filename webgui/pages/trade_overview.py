@@ -12,6 +12,7 @@ from nicegui import ui
 
 from pages import fmt
 from pages import terminal_theme as T
+from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages.trade import (dealer_rows, gate_rows, short_gate_rows,
@@ -32,7 +33,8 @@ def _build(state, refs):
                           "border border-[#1c2740] "
                           "bg-[linear-gradient(180deg,#0e1626,#0b1220)] "
                           "px-[14px] py-2"):
-        ui.label("MARKET STATE").classes(T.EYEBROW)
+        with ui.label("MARKET STATE").classes(T.EYEBROW):
+            sh.tip(th.help_for("market_state"))
         market = ui.label("").classes("text-[12.5px] text-[#cfdaee] min-w-0")
         ui.element("div").classes("flex-1 min-w-[8px]")
         chips = ui.row().classes("gap-[7px] flex-wrap")
@@ -45,7 +47,8 @@ def _build(state, refs):
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    ui.label("Position").classes(T.PANEL_TITLE)
+                    with ui.label("Position").classes(T.PANEL_TITLE):
+                        sh.tip(th.help_for("position_panel"))
                     ui.label("1–8 weeks").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("validated factor model").classes(T.SUBTLE)
 
@@ -54,6 +57,8 @@ def _build(state, refs):
                     pctl = ui.label("").classes(T.BIG_NUM)
                     pctl_note = ui.label("").classes("text-[13px] text-[#8b9bb4]")
                 pctl_stats = ui.label("").classes(f"{T.MONO} text-[12.5px] text-[#7d8db0]")
+                with pctl_stats:
+                    sh.tip(th.help_for("band_stats"))
 
                 # The decile rail: a red→neutral→green ground with a marker.
                 with ui.element("div").classes(
@@ -71,9 +76,7 @@ def _build(state, refs):
                     ui.label("model band")
                     ui.label("strongest band")
                 with rail:
-                    rail_tip = ui.tooltip("").classes("max-w-[320px] "
-                                                      "whitespace-pre-line "
-                                                      "text-[11.5px] leading-[1.55]")
+                    rail_tip = ui.tooltip("").classes(T.TOOLTIP)
 
             side_cards = ui.element("div").classes(
                 "w-full grid grid-cols-2 gap-3")
@@ -83,13 +86,16 @@ def _build(state, refs):
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    ui.label("Investor").classes(T.PANEL_TITLE)
+                    with ui.label("Investor").classes(T.PANEL_TITLE):
+                        sh.tip(th.help_for("investor_panel"))
                     ui.label("months+").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("fundamentals + relative strength").classes(T.SUBTLE)
 
             with ui.row().classes("items-baseline gap-[14px] flex-wrap"):
                 verdict = ui.label("").classes(
                     "text-[34px] font-extrabold leading-none tracking-[-0.02em]")
+                with verdict:
+                    sh.tip(th.help_for("investor_verdict"))
                 verdict_score = ui.label("").classes(
                     f"{T.MONO} text-[13px] text-[#7d8db0]")
             inv_bars = ui.column().classes("w-full gap-[9px]")
@@ -97,7 +103,8 @@ def _build(state, refs):
                                             "text-[#6b7b9c] mt-auto pt-[3px]")
 
     # ── dealer ──────────────────────────────────────────────────────────────
-    dealer_panel = sh.panel("Dealer positioning & volatility")
+    dealer_panel = sh.panel("Dealer positioning & volatility",
+                            help=th.help_for("dealer_panel"))
     with dealer_panel:
         ladder = ui.element("div").classes("relative h-[62px] mx-1 w-full")
         dstats = ui.element("div").classes(
@@ -106,7 +113,8 @@ def _build(state, refs):
     dealer_empty = ui.label("").classes(f"{T.NOTE} px-5 pb-4")
 
     # ── peers ───────────────────────────────────────────────────────────────
-    peer_panel = sh.panel("Where it sits among its peers")
+    peer_panel = sh.panel("Where it sits among its peers",
+                          help=th.help_for("peers_panel"))
     with peer_panel:
         peer_wrap = ui.element("div").classes(
             "w-full grid gap-3 "
@@ -125,6 +133,11 @@ def _build(state, refs):
                         "px-[10px] py-[3px] gap-[6px] text-[10.5px]"):
                     ui.label(c["icon"]).classes("text-[11px]")
                     ui.label(c["label"])
+                    # "LONG CLEARED" / "SHORT RELATIVE ONLY" are the two labels
+                    # that most need explaining, and the chip is where a reader
+                    # first meets them.
+                    sh.tip(th.clearance_help(
+                        c["side"], (clearance.get(c["side"]) or {}).get("state")))
 
         rail_vals = tt.percentile_rail(sm)
         pctl.text = rail_vals["percentile"]
@@ -159,7 +172,9 @@ def _build(state, refs):
                 with ui.element("div").classes(
                         "w-full grid items-center gap-3 "
                         "[grid-template-columns:minmax(96px,152px)_1fr_46px]"):
-                    ui.label(b["label"]).classes(f"{T.LABEL} leading-[1.35]")
+                    with ui.label(b["label"]).classes(
+                            f"{T.LABEL} leading-[1.35]"):
+                        sh.tip(th.factor_help(b["key"]))
                     if b["track_text"]:
                         # A zero-width bar and an empty value column would read
                         # as "measured, and it came to nothing". Say why instead.
@@ -209,7 +224,9 @@ def _build(state, refs):
             for row in dealer_rows(a.get("dealer_context")):
                 with ui.column().classes(
                         "gap-[6px] pl-3 border-l-2 border-[#22304c]"):
-                    ui.label(str(row.get("label", "")).upper()).classes(T.EYEBROW)
+                    with ui.label(str(row.get("label", "")).upper()).classes(
+                            T.EYEBROW):
+                        sh.tip(th.row_help(row.get("label")))
                     ui.label(str(row.get("value", "—"))).classes(
                         f"{T.MONO} text-[16px] font-bold text-[#cfdaee]")
 
@@ -247,6 +264,10 @@ def _side_card(side, clearance, gates):
     }.get(state, (T.CHIP_OFF, "", "Unknown"))
     with ui.column().classes(f"gap-[7px] rounded-[10px] border px-[14px] "
                              f"py-[13px] {chip}"):
+        # The whole card is the hover target, not just the word: "Cleared" and
+        # "Relative only" mean nothing without the reasons listed beneath them,
+        # and a reader hovering the reasons wants the same explanation.
+        sh.tip(th.clearance_help(side, state))
         ui.label(side).classes("text-[10px] font-extrabold tracking-[0.15em]")
         ui.label(word).classes("text-[14px] font-semibold text-[#e6edf7]")
         detail = "; ".join(g for g in (gates or [])) or \

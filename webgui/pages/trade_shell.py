@@ -19,6 +19,7 @@ from nicegui import ui
 import bus_client
 from pages import busy as _busy
 from pages import terminal_theme as T
+from pages import trade_help as th
 from pages import trade_terminal as tt
 from pages.trade import should_open_tab
 from pages.ui_guard import guard
@@ -92,6 +93,8 @@ def _command_bar(state, painters):
             stamp = ui.label("").classes(
                 f"{T.MONO} text-[10px] tracking-[0.12em] text-[#56678a] "
                 "whitespace-nowrap")
+            with stamp:
+                tip(th.help_for("model_stamp"))
 
         ui.element("div").classes("flex-1 min-w-[20px]")
 
@@ -119,17 +122,25 @@ def _command_bar(state, painters):
             with ui.row().classes("items-center gap-2 rounded-[7px] border "
                                   "border-[#263353] bg-[rgba(15,23,40,0.6)] "
                                   "px-[11px] py-[5px]"):
-                ui.label("MTF BIAS").classes(
-                    "text-[9.5px] font-bold tracking-[0.13em] text-[#6b7b9c]")
+                with ui.label("MTF BIAS").classes(
+                        "text-[9.5px] font-bold tracking-[0.13em] "
+                        "text-[#6b7b9c]"):
+                    tip(th.help_for("mtf_bias"))
                 bias = ui.label("").classes(
                     "text-[11.5px] font-bold tracking-[0.04em]")
 
             with ui.row().classes("items-center gap-[7px]"):
                 for label, cmd, view, route in _REPORTS:
-                    ui.button(label, color=None).props("no-caps dense")                         .classes("rounded-lg border border-[#2b3a57] px-3 py-[5px] "
-                                 "text-[11.5px] font-semibold normal-case "
-                                 "bg-transparent text-[#a8b6cf] "
-                                 "hover:border-[#4a5b7d] hover:text-[#f2f6fc]")                         .on_click(_report(state, cmd, view, label))
+                    btn = ui.button(label, color=None)
+                    btn.props("no-caps dense")
+                    btn.classes(
+                        "rounded-lg border border-[#2b3a57] px-3 py-[5px] "
+                        "text-[11.5px] font-semibold normal-case "
+                        "bg-transparent text-[#a8b6cf] "
+                        "hover:border-[#4a5b7d] hover:text-[#f2f6fc]")
+                    btn.on_click(_report(state, cmd, view, label))
+                    with btn:
+                        tip(th.help_for(cmd))
                 # A report takes tens of seconds. Without a line that STAYS,
                 # the click reads as "nothing happened" — a toast is gone
                 # before the work is.
@@ -224,14 +235,29 @@ def _watch_reports(state):
     return _tick
 
 
-def panel(title=None, stamp=None, classes=""):
-    """A titled Signal Desk panel. Returns the column to fill."""
+def tip(text):
+    """Attach a hover explanation to the element currently being built.
+
+    Call it inside a ``with <element>:`` block. Empty text attaches nothing —
+    an empty tooltip still shows an empty box on hover, which reads as a bug.
+    """
+    if text:
+        ui.tooltip(text).classes(T.TOOLTIP)
+
+
+def panel(title=None, stamp=None, classes="", help=None):
+    """A titled Signal Desk panel. Returns the column to fill.
+
+    ``help`` attaches a hover explanation to the TITLE rather than to the whole
+    panel: a tooltip covering a panel would fire wherever the pointer rested
+    inside it, including over the numbers it is trying to explain."""
     col = ui.column().classes(f"{T.PANEL} w-full gap-4 {classes}")
     if title:
         with col:
             with ui.row().classes("w-full items-baseline justify-between "
                                   "gap-3 flex-wrap"):
-                ui.label(title).classes(T.PANEL_TITLE)
+                with ui.label(title).classes(T.PANEL_TITLE):
+                    tip(help)
                 if stamp:
                     ui.label(stamp).classes(T.SUBTLE)
     return col

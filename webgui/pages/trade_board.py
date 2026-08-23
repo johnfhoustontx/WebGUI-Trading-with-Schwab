@@ -19,6 +19,7 @@ from nicegui import ui
 import bus_client
 from pages import fmt
 from pages import terminal_theme as T
+from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages.ui_guard import guard
@@ -267,11 +268,14 @@ def _build(state, refs):
 
     status = ui.label("").classes("text-[13px] text-[#fbbf24]")
     exposure = ui.label("").classes(f"{T.CALLOUT_TEXT} text-[12px]")
+    with exposure:
+        sh.tip(th.help_for("exposure_note"))
     gates = ui.label("").classes(f"{T.NOTE}")
 
     tables = ui.column().classes("w-full gap-4")
 
-    book_panel = sh.panel("Model paper book")
+    book_panel = sh.panel("Model paper book",
+                          help=th.help_for("paper_book"))
     with book_panel:
         book_summary = ui.label("").classes("text-[13px] text-[#cfdaee]")
         ui.label(book_note()).classes(T.NOTE)
@@ -289,12 +293,14 @@ def _build(state, refs):
         filters.clear()
         with filters:
             on = state["hide_gated"]
-            ui.button("Hide gated" if not on else "Showing ungated only",
-                      color=None).props("no-caps") \
-                .classes(T.FILTER_ON if on else T.FILTER_OFF) \
-                .on_click(_toggle_gated)
-            ui.button("Rebuild", color=None).props("no-caps") \
-                .classes(T.FILTER_OFF).on_click(_rebuild)
+            with ui.button("Hide gated" if not on else "Showing ungated only",
+                           color=None).props("no-caps") \
+                    .classes(T.FILTER_ON if on else T.FILTER_OFF) \
+                    .on_click(_toggle_gated):
+                sh.tip(th.help_for("hide_gated"))
+            with ui.button("Rebuild", color=None).props("no-caps") \
+                    .classes(T.FILTER_OFF).on_click(_rebuild):
+                sh.tip(th.help_for("rebuild"))
 
         rows = board_rows(b)
         tables.clear()
@@ -362,8 +368,9 @@ def _table(board, side, accent, rows, hide_gated):
                         "text-[#56678a]"):
                     for i, h in enumerate(_HEAD):
                         label = metric_head if h is None else h
-                        ui.label(label).classes(
-                            "text-right" if 1 <= i <= 5 else "")
+                        with ui.label(label).classes(
+                                "text-right" if 1 <= i <= 5 else ""):
+                            sh.tip(th.column_help(label))
                 if not picked:
                     ui.label("No candidates on this side today.").classes(
                         f"{T.NOTE} pt-3")
@@ -408,7 +415,8 @@ def _book_table(rows):
                     f"grid {_BOOK_COLS} gap-x-3 px-[6px] pb-[9px] {T.RULE} "
                     "text-[9.5px] font-bold tracking-[0.13em] text-[#56678a]"):
                 for h in ("SYMBOL", "SIDE", "AS", "OPENED", "P&L", "STATUS"):
-                    ui.label(h)
+                    with ui.label(h):
+                        sh.tip(th.column_help(h))
             if not rows:
                 ui.label("The book opens positions from the pools above.") \
                     .classes(f"{T.NOTE} pt-3")

@@ -191,6 +191,7 @@ def investor_bars(verdict):
         if unpublished:
             left, width = 50.0, 0.0
         out.append({
+            "key": b.get("factor", ""),
             "label": humanize_factor(b.get("factor", "")),
             "value": ("" if unpublished else
                       _signed(v, 0, dash="n/a") if v is not None else "n/a"),
@@ -250,6 +251,9 @@ def evidence_rows(swing):
         contrib = fmt.num(c.get("contribution"))
         left, width = T.centred(contrib, 0.12)
         out.append({
+            # The raw key travels beside the humanized name: `trade_help` is
+            # keyed by engine key, so a renamed label must not drop a tooltip.
+            "key": c.get("factor", ""),
             "name": humanize_factor(c.get("factor", "")),
             "z": _signed(c.get("z"), 2),
             "weight": _signed(c.get("weight"), 3),

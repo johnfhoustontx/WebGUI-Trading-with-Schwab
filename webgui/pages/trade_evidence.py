@@ -14,6 +14,7 @@ from nicegui import ui
 
 from pages import fmt
 from pages import terminal_theme as T
+from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages.trade import (live_ic_decay_note, live_ic_line, live_ic_split_line,
@@ -37,16 +38,19 @@ def _build(state, refs):
             "w-full grid gap-4 items-start "
             "[grid-template-columns:minmax(0,1.55fr)_minmax(300px,1fr)]"):
 
-        factors = sh.panel("Why — validated factors")
+        factors = sh.panel("Why — validated factors",
+                           help=th.help_for("position_panel"))
         with factors:
             table = ui.column().classes("w-full gap-0 min-w-0")
 
         with ui.column().classes("w-full gap-4 min-w-0"):
-            track = sh.panel("Model track record")
+            track = sh.panel("Model track record",
+                             help=th.help_for("track_record"))
             with track:
                 track_rows = ui.column().classes("w-full gap-[10px]")
                 warn = ui.column().classes(f"{T.CALLOUT} w-full")
-            hist = sh.panel("This name's history")
+            hist = sh.panel("This name's history",
+                            help=th.help_for("symbol_history"))
             with hist:
                 hist_note = ui.label("").classes("text-[11.5px] text-[#6b7b9c]")
                 hist_rows = ui.column().classes("w-full gap-0")
@@ -60,9 +64,11 @@ def _build(state, refs):
             with ui.element("div").classes(
                     f"{_GRID} px-1 pb-[9px] {T.RULE} "
                     "text-[9.5px] font-bold tracking-[0.14em] text-[#56678a]"):
-                ui.label("FACTOR")
+                with ui.label("FACTOR"):
+                    sh.tip(th.column_help("FACTOR"))
                 for h in ("Z", "WEIGHT", "CONTRIBUTION", "IC"):
-                    ui.label(h).classes("text-right")
+                    with ui.label(h).classes("text-right"):
+                        sh.tip(th.column_help(h))
             if not rows:
                 ui.label("No validated model reading for this symbol — the "
                          "Position card is on its legacy heuristic.").classes(
@@ -70,8 +76,10 @@ def _build(state, refs):
             for r in rows:
                 with ui.element("div").classes(
                         f"{_GRID} px-1 py-[9px] {T.HAIRLINE}"):
-                    ui.label(r["name"]).classes(
-                        "text-[13px] font-medium text-[#e6edf7] truncate min-w-0")
+                    with ui.label(r["name"]).classes(
+                            "text-[13px] font-medium text-[#e6edf7] "
+                            "truncate min-w-0"):
+                        sh.tip(th.factor_help(r["key"]))
                     ui.label(r["z"]).classes(f"{T.VALUE} text-right")
                     ui.label(r["weight"]).classes(
                         f"{T.MONO} text-[12.5px] text-right {r['weight_class']}")
@@ -88,8 +96,9 @@ def _build(state, refs):
             if comp is not None:
                 with ui.row().classes("w-full items-baseline justify-between "
                                       "gap-[14px] px-1 pt-[15px]"):
-                    ui.label("weighted composite").classes(
-                        "text-[12.5px] text-[#8b9bb4]")
+                    with ui.label("weighted composite").classes(
+                            "text-[12.5px] text-[#8b9bb4]"):
+                        sh.tip(th.help_for("composite"))
                     ui.label(f"{comp:+.3f}").classes(
                         f"{T.MONO} text-[21px] font-bold "
                         + T.sign_text(comp))

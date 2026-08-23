@@ -168,6 +168,13 @@ class TestInvestorFactorBars:
             {"factor": "growth_quality", "contribution": 1.0}]})
         assert "_" not in bars[0]["label"]
 
+    def test_it_carries_the_raw_factor_key_for_the_help_lookup(self):
+        """`name` is humanized for display, so it cannot key the per-tile
+        explanations — a renamed label would silently drop the tooltip."""
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "growth_quality", "contribution": 1.0}]})
+        assert bars[0]["key"] == "growth_quality"
+
     def test_no_breakdown_is_an_empty_list(self):
         assert tt.investor_bars({}) == []
         assert tt.investor_bars(None) == []
@@ -245,6 +252,12 @@ class TestEvidenceRows:
          "contribution": 0.118, "ic": 0.021},
         {"factor": "low_vol", "z": 0.26, "weight": -0.391,
          "contribution": -0.101, "ic": -0.061}]}
+
+    def test_it_carries_the_raw_factor_key_for_the_help_lookup(self):
+        """Same reason as the investor bars: the displayed name is humanized,
+        so only the engine key can look up the factor's explanation."""
+        rows = tt.evidence_rows(self._SM)
+        assert rows[0]["key"] == "mom_6_1"
 
     def test_each_row_carries_a_centred_contribution_bar(self):
         rows = tt.evidence_rows(self._SM)

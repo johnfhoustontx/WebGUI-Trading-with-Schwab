@@ -13,6 +13,7 @@ from nicegui import ui
 
 from pages import fmt
 from pages import terminal_theme as T
+from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages.options import handoff
@@ -79,10 +80,7 @@ def _build(state, refs):
             with ui.label(f"{rail['percentile']} band" if pct is not None
                           else "").classes(
                     f"{T.MONO} text-[12.5px] text-[#7d8db0]"):
-                if rail["tip"]:
-                    ui.tooltip(rail["tip"]).classes(
-                        "max-w-[320px] whitespace-pre-line text-[11.5px] "
-                        "leading-[1.55]")
+                sh.tip(rail["tip"])
 
         plan_body.clear()
         with plan_body:
@@ -99,9 +97,10 @@ def _build(state, refs):
                         f"w-full grid items-baseline gap-[14px] px-[10px] "
                         f"py-[11px] {T.HAIRLINE} {cls} "
                         "[grid-template-columns:108px_minmax(0,1fr)]"):
-                    ui.label(label.upper()).classes(
-                        "text-[9.5px] font-bold tracking-[0.14em] "
-                        + ("text-[#818cf8]" if key else "text-[#56678a]"))
+                    with ui.label(label.upper()).classes(
+                            "text-[9.5px] font-bold tracking-[0.14em] "
+                            + ("text-[#818cf8]" if key else "text-[#56678a]")):
+                        sh.tip(th.row_help(label))
                     with ui.column().classes("gap-[5px] min-w-0"):
                         ui.label(value).classes(
                             "text-[15px] font-medium text-[#e6edf7] "
@@ -130,12 +129,16 @@ def _build(state, refs):
         with nt_head:
             ui.element("div").classes(
                 "w-[3px] h-[17px] rounded-[2px] bg-[#fbbf24]")
-            ui.label("No trade" if not actionable else
-                     f"{blocked_side.title()} side").classes(
-                "text-[17px] font-bold tracking-[-0.01em] text-[#f2f6fc]")
-            ui.label(_badge(clearance, blocked_side)).classes(
-                f"{T.CHIP_BASE} {T.CHIP_WARN} text-[10.5px] "
-                "tracking-[0.13em] px-[11px] py-[3px]")
+            with ui.label("No trade" if not actionable else
+                          f"{blocked_side.title()} side").classes(
+                    "text-[17px] font-bold tracking-[-0.01em] text-[#f2f6fc]"):
+                sh.tip(th.help_for("no_trade"))
+            with ui.label(_badge(clearance, blocked_side)).classes(
+                    f"{T.CHIP_BASE} {T.CHIP_WARN} text-[10.5px] "
+                    "tracking-[0.13em] px-[11px] py-[3px]"):
+                sh.tip(th.clearance_help(
+                    blocked_side,
+                    ((clearance or {}).get(blocked_side) or {}).get("state")))
 
         nt_summary.clear()
         with nt_summary:
