@@ -32,11 +32,15 @@ FONT_HTML = (
 )
 
 # ── ground + panels ─────────────────────────────────────────────────────────
-PAGE = ("min-h-screen w-full text-[#e6edf7] font-[Manrope,system-ui,sans-serif] "
-        "bg-[#080d17] "
-        "bg-[radial-gradient(1400px_700px_at_50%_-20%,#101a2e_0%,#080d17_60%)] "
-        "px-6 pt-5 pb-11")
-SHELL = "w-full max-w-[1440px] mx-auto flex flex-col gap-[18px]"
+# PAGE mirrors the app-wide `theme.PAGE` STRUCTURALLY — a rounded, bordered
+# frame with the same 18/20/22 padding — so a Signal Desk screen sits in the
+# shell exactly like every other page. Only the palette differs. The first
+# version was a full-bleed `min-h-screen` wrapper with its own max-width, which
+# made these four screens the only ones in the app without the frame.
+PAGE = ("w-full rounded-[14px] border border-[#1c2740] p-[18px_20px_22px] "
+        "text-[#e6edf7] font-[Manrope,system-ui,sans-serif] "
+        "bg-[radial-gradient(130%_90%_at_50%_-20%,#101a2e_0%,#0b1220_55%,#080d17_100%)]")
+SHELL = "w-full flex flex-col gap-[18px]"
 
 PANEL = ("flex flex-col rounded-xl border border-[#1c2740] "
          "bg-[linear-gradient(180deg,#0e1626,#0b1220)] px-5 pt-[19px] pb-5")

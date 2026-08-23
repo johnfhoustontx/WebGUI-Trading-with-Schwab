@@ -328,3 +328,24 @@ class TestOneSignedFormatterForTheWholeDesk:
     def test_absent_is_a_dash_in_both(self):
         assert tt.signed(None) == "—"
         assert tt.signed_pct(None) == "—"
+
+
+class TestTheCompanyNameIsShown:
+    def test_a_real_company_name_leads_the_line(self):
+        bar = tt.command_bar({"symbol": "MU", "company_name": "Micron Technology",
+                              "description": "MU",
+                              "sector": {"name": "Technology", "etf": "XLK"}})
+        assert bar["name"] == "Micron Technology · Technology · XLK"
+
+    def test_it_beats_the_ticker_masquerading_as_a_description(self):
+        bar = tt.command_bar({"symbol": "MU", "company_name": "Micron Technology",
+                              "description": "MU"})
+        assert bar["name"] == "Micron Technology"
+
+    def test_no_company_name_falls_back_to_the_sector_line(self):
+        bar = tt.command_bar({"symbol": "MU", "description": "MU",
+                              "sector": {"name": "Technology", "etf": "XLK"}})
+        assert bar["name"] == "Technology · XLK"
+
+    def test_nothing_at_all_still_says_it_is_not_in_the_cross_section(self):
+        assert "cross-section" in tt.command_bar({"symbol": "ZZZZ"})["name"]

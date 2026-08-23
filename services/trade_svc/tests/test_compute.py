@@ -713,3 +713,60 @@ def test_analyze_reports_whether_the_earnings_calendar_covers_the_symbol(monkeyp
     _patch(monkeypatch, FakeClient())
     monkeypatch.setattr(compute, "earnings_coverage", lambda sym: "not_listed")
     assert compute.analyze("MSFT")["earnings_coverage"] == "not_listed"
+
+
+# ── Company name (terminal redesign) ─────────────────────────────────────────
+# `analyze` set `description` to the quote's SYMBOL, so the command bar had no
+# company name to show. Schwab's `symbol-search` projection carries one; the
+# `fundamental` projection does not.
+
+def test_company_name_comes_from_the_symbol_search_projection(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    seen = {}
+
+    def _req(endpoint, params=None):
+        seen["endpoint"] = endpoint
+        seen["params"] = dict(params or {})
+        return {"instruments": [{"symbol": "MU", "exchange": "NASDAQ",
+                                 "description": "MICRON TECHNOLOGY IN"}]}
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _req)
+    assert C.company_name("MU") == "Micron Technology In"
+    assert seen["params"].get("projection") == "symbol-search"
+
+
+def test_the_name_is_memoized_so_a_reanalyze_does_not_refetch(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    calls = []
+
+    def _req(endpoint, params=None):
+        calls.append(1)
+        return {"instruments": [{"symbol": "MU", "description": "MICRON TECH"}]}
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _req)
+    C.company_name("MU")
+    C.company_name("MU")
+    assert len(calls) == 1, "a company name does not change intraday"
+
+
+def test_an_unknown_symbol_yields_None_rather_than_the_ticker(monkeypatch):
+    """A name that merely repeats the ticker is not a name, and the command bar
+    already handles absence."""
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+    monkeypatch.setattr(C._proxy.schwab_client, "_request",
+                        lambda e, p=None: {"instruments": []})
+    assert C.company_name("ZZZZ") is None
+
+
+def test_a_failed_lookup_never_raises(monkeypatch):
+    from services.trade_svc import compute as C
+    C.reset_company_names()
+
+    def _boom(endpoint, params=None):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(C._proxy.schwab_client, "_request", _boom)
+    assert C.company_name("MU") is None

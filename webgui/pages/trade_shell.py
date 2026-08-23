@@ -57,10 +57,9 @@ def page(build):
     state["draft"] = (state["analysis"].get("symbol") or "AAPL").upper()
     painters = []
 
-    with ui.column().classes(f"{T.PAGE} gap-0"):
-        with ui.column().classes(T.SHELL) as shell:
-            bar = _command_bar(state, painters)
-            build(state, {"paint": painters})
+    with ui.column().classes(f"{T.PAGE} {T.SHELL}") as shell:
+        bar = _command_bar(state, painters)
+        build(state, {"paint": painters})
 
     # Committing a symbol enqueues an analyze that can take several seconds
     # against a cold cache; without a wait the whole screen looks inert.
@@ -130,7 +129,13 @@ def _command_bar(state, painters):
                     ui.button(label, color=None).props("no-caps dense")                         .classes("rounded-lg border border-[#2b3a57] px-3 py-[5px] "
                                  "text-[11.5px] font-semibold normal-case "
                                  "bg-transparent text-[#a8b6cf] "
-                                 "hover:border-[#4a5b7d] hover:text-[#f2f6fc]")                         .on_click(_report(state, cmd, view))
+                                 "hover:border-[#4a5b7d] hover:text-[#f2f6fc]")                         .on_click(_report(state, cmd, view, label))
+                # A report takes tens of seconds. Without a line that STAYS,
+                # the click reads as "nothing happened" — a toast is gone
+                # before the work is.
+                report_status = ui.label("").classes(
+                    "text-[11px] text-[#818cf8] whitespace-nowrap")
+                state["report_status"] = report_status
 
     # The draft/committed distinction, shown as a border colour. Two static
     # classes swapped, never a computed one — the finite-set rule.
@@ -178,7 +183,7 @@ def _seed(sym_in, state):
     sym_in.value = state["draft"]
 
 
-def _report(state, cmd, view):
+def _report(state, cmd, view, label):
     """Enqueue a report for the COMMITTED symbol and open it when it lands.
 
     The version is baselined at click time, so a stale cached report from an
@@ -191,7 +196,9 @@ def _report(state, cmd, view):
         state[f"{cmd}_ver"] = bus_client.read_version(view)
         state[f"{cmd}_pending"] = True
         bus_client.request("trade", {"type": cmd, "args": {"symbol": sym}})
-        ui.notify(f"Running {cmd.replace('_', ' ')} for {sym}…")
+        st = state.get("report_status")
+        if st:
+            st.text = f"Running {label} for {sym}…"
     return _go
 
 
@@ -204,6 +211,9 @@ def _watch_reports(state):
                                state.get(f"{cmd}_ver")):
                 state[f"{cmd}_pending"] = False
                 state[f"{cmd}_ver"] = v
+                st = state.get("report_status")
+                if st:
+                    st.text = ""
                 ui.navigate.to(f"{route}?v={v}", new_tab=True)
     return _tick
 

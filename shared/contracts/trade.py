@@ -20,6 +20,9 @@ class TradeAnalysis(_Base):
 
     symbol: str
     description: str = ""
+    # The real company name, from Schwab's symbol-search projection.
+    # `description` is the TICKER; the fundamental projection has no name.
+    company_name: str | None = None
     price: float | None = None
     volume: int | None = None
     change: float | None = None

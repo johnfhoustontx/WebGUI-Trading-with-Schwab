@@ -29,7 +29,9 @@ BOOK_VIEW = "trade:model_book"
 POLL_SEC = 5.0
 
 # 84 62 70 78 58 74 120 104 1fr — the design's column rhythm.
-_COLS = ("[grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
+# `w-full` for the same reason the Evidence grid needs it: a column child
+# sizes to its own content, so a trailing `1fr` would differ per row.
+_COLS = ("w-full [grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
 _TABLE_MIN = "min-w-[940px]"
 
 _HEAD = ("SYMBOL", "PCTL", "SCORE", "EXP / 20D", "HIT", None, "DEALER", "IV",
@@ -377,7 +379,7 @@ def _row(r, side):
             "text-[11.5px] font-semibold tracking-normal px-[10px] py-[3px]")
 
 
-_BOOK_COLS = "[grid-template-columns:84px_70px_96px_100px_78px_1fr]"
+_BOOK_COLS = "w-full [grid-template-columns:84px_70px_96px_100px_78px_1fr]"
 
 
 def _book_table(rows):

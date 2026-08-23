@@ -1066,6 +1066,48 @@ def _read_regime():
 _MATRIX_KEY = "cache:options:matrix"
 
 
+# Company names never change intraday, so one lookup per symbol per process is
+# plenty. Schwab returns them ONLY on the `symbol-search` projection — the
+# `fundamental` one carries no name at all, which is why `analyze` had been
+# setting `description` to the ticker.
+_COMPANY_NAMES = {}
+
+
+def reset_company_names():
+    """Test hook."""
+    _COMPANY_NAMES.clear()
+
+
+def company_name(symbol):
+    """A display company name for ``symbol``, or None. Never raises.
+
+    None rather than the ticker: a name that merely repeats the symbol is not a
+    name, and the command bar already renders absence properly."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    if sym in _COMPANY_NAMES:
+        return _COMPANY_NAMES[sym]
+    name = None
+    try:
+        raw = _proxy.schwab_client._request(
+            "/instruments", {"symbol": sym, "projection": "symbol-search"})
+        for inst in ((raw or {}).get("instruments") or []):
+            if (inst.get("symbol") or "").strip().upper() != sym:
+                continue
+            desc = (inst.get("description") or "").strip()
+            if desc and desc.upper() != sym:
+                # Schwab returns these SHOUTED and often truncated; title-case
+                # reads as a name rather than as a warning.
+                name = desc.title()
+            break
+    except Exception:
+        _degrade.degraded("trade.company_name")
+        name = None
+    _COMPANY_NAMES[sym] = name
+    return name
+
+
 def _matrix_by_symbol():
     """``{symbol: row}`` for the WHOLE options matrix, from one cache read.
 
@@ -1581,6 +1623,7 @@ def analyze(symbol):
     result = {
         "symbol": symbol,
         "description": quote.get("symbol", symbol),
+        "company_name": company_name(symbol),
         # The quote already carries these; storing them is what lets the
         # command bar show a change instead of a permanent em dash.
         "change": quote.get("change"),

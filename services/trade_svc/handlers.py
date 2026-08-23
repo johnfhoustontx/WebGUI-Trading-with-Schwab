@@ -47,6 +47,7 @@ EVENT_DEEPDIVE_QUERY = "events:trade:deepdive_query"
 _FIELDS = {
     "symbol": "",
     "description": "",
+    "company_name": None,
     "price": None,
     "volume": None,
     "change": None,

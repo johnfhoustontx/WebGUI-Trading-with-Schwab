@@ -20,7 +20,11 @@ from pages.trade import (live_ic_decay_note, live_ic_line, live_ic_split_line,
                          model_staleness, swing_exposure_note,
                          swing_model_meta, swing_regime_note)
 
-_GRID = ("grid items-center gap-x-3 "
+# ⚠ `w-full` is load-bearing. NiceGUI's column sets `align-items: flex-start`,
+# so a grid child sizes to its OWN content — and `minmax(0,1fr)` then resolves
+# to a different width on every row, which is exactly how the header and the
+# rows ended up 34px out of step.
+_GRID = ("grid w-full items-center gap-x-3 "
          "[grid-template-columns:minmax(0,1fr)_58px_66px_minmax(96px,124px)_62px]")
 
 
