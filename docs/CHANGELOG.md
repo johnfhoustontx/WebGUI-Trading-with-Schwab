@@ -4,6 +4,60 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-24 (**BIAS and SIGNAL replace VIX on the Desk top strip.**
+- **By request.** The strip's `$VIX` quote gives way to the Market Regime console's own
+  two verdict tiles. Both words are ONE producer call's output —
+  `live_composite.signal_band(total)` returns `(size, bias, signal)` and `sentiment_svc`
+  writes all three onto `cache:sentiment:composite`'s `derived` — so the strip reads
+  them and derives nothing. Live: `derived = {"size": "0.85x", "bias": "Cautious",
+  "signal": "Bearish"}` at a composite total of 3.88.
+- **Label AND footer descriptor are imported**, not restated: `desk._BAND_TILES` is
+  built from `pages.sentiment.SIGNAL_TILE_DEFS` and the tone from that page's
+  `_word_tone`, so a wording or palette change on `/sentiment` reaches the Desk instead
+  of leaving two screens describing one number differently. The descriptors earn their
+  line — "Cautious" beside "Bearish" reads as one word said twice unless the tiles say
+  that one is **positioning** and the other is **strength**.
+- **Each tile is coloured from its OWN word**, and that is the load-bearing bit. The two
+  carry different vocabularies (positioning `Long`/`Neutral`/`Cautious`/`Short`;
+  strength `Strong Bull`…`Strong Bear`), so one shared tone would eventually paint a
+  colour contradicting the word standing beside it. Measured in the browser at the live
+  reading: BIAS `rgb(224,183,78)` amber, SIGNAL `rgb(242,100,107)` red. A cold composite
+  prints the em dash at the muted tone and **never** "Neutral" — that is the middle
+  reading, and an absent one is not a reading.
+- **Sizing, per the "resize the other tiles" half of the request.** These are words, not
+  numbers: `"Strong Bear"` at the numeric tiles' 28px needs ~205px of tile, and two of
+  those where VIX had 140px would push the two score cards under their 440px floor. At
+  19px it measures **exactly 125px** (browser-measured, in a 140px content box), so the
+  pair fits 160px tiles. Measured live at 1920: six tiles, ONE row, all 92px, cards at
+  469px, no clipped descendant, no sideways scroll — **with `"Strong Bear"` forced into
+  both tiles**, not merely with today's shorter words.
+- **The page's documented 1877px minimum is unchanged.** The strip's own floor is
+  ~1684px of content against the Positions panel's 1698px, so the panels still bind.
+  Re-measured at exactly 1877: panels 839px with zero overflow, strip still one row with
+  cards at 447px. (The 8 elements that do overflow there are the Bull/Bear chip names,
+  which carry `truncate` on purpose.)
+- **`/desk/live` moved with it, and had to.** The streaming mirror imports the Desk's
+  `VIEWS`, so dropping a view the mirror still read would have left it rendering a cold
+  VIX tile forever with nothing failing — the same class of trap as a pushed snapshot
+  being a separate renderer. Its band tiles **resolve** the hex from the class
+  `desk.signal_band_facts` already stamped (`band_tone_hex` → `_hue`), rather than
+  re-deciding which word is bullish: the difference between a mirror and a second
+  opinion. Verified live at `/desk/live` — six tiles, one row, no `#vix` node left.
+- **`cache:options:header` left the Desk's poll batch**, VIX having been its only reader
+  there: one fewer `:ver` probe every 2 s for the life of a session, and one fewer
+  repaint trigger for a strip that could not change because of it. `VIEWS` is 10.
+- **Tests:** 9 new on the page + 4 on the mirror, each mutation-checked (8 mutations, 8
+  caught) — a shared tone, a cold cache inventing "Neutral", the dead view creeping back
+  into `VIEWS`, restated labels, the strip unwiring from the composite, and the mirror
+  re-deciding its own tone. webgui **2825 passed**.
+- **Docs:** `page_help`, `webgui-routes`, the User and Reference guides (rebuilt), a
+  dated superseded note on the design doc that argued VIX could not move, and two stale
+  CLAUDE.md facts fixed in passing — the Desk view count (9 → 10) and a `/desk/live`
+  line still claiming `/desk` goes one-column when narrow, which stopped being true on
+  2026-08-20.)
+
+---
+
 **Last updated:** 2026-08-23 (**Sonnet 5 everywhere, and a prompt audit measured with
 `count_tokens` rather than estimated.**
 - **The migration was one line; the audit was the work.** Only one production call site
