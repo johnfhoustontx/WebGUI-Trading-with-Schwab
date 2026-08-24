@@ -136,6 +136,32 @@ def parse_earnings(body):
     return out
 
 
+def is_transient(body):
+    """Is this reply a refusal rather than an answer about coverage?
+
+    ⚠ Alpha Vantage throttles at 5 calls a MINUTE as well as 25 a day, and a
+    throttled reply carries a ``Note``/``Information`` string instead of a
+    ``quarterlyEarnings`` key. Parsed, that is an empty list — byte-identical
+    in effect to a symbol the vendor genuinely does not cover.
+
+    That distinction is load-bearing because an empty answer is REMEMBERED, so
+    uncovered symbols are not re-asked daily. Without this, one throttle cached
+    "no earnings history for NVDA" for 30 days. NVDA has 109 quarters; it was
+    measured doing exactly that on the first live run.
+
+    The test is the ENVELOPE, not the rows: an answer that CARRIES the
+    quarterly block is a real answer, however empty."""
+    try:
+        d = json.loads(body)
+    except Exception:
+        return True                      # an HTML error page says nothing
+    if not isinstance(d, dict):
+        return True
+    if "quarterlyEarnings" in d:
+        return False                     # the vendor answered, empty or not
+    return True
+
+
 def store(conn, symbol, rows):
     """Upsert a symbol's quarters and record that we asked. Never raises."""
     sym = (symbol or "").strip().upper()
@@ -279,11 +305,19 @@ def refresh(conn, symbol, today=None):
         return False
     note_call(conn, today=today)
     try:
-        rows = parse_earnings(_fetch(sym))
+        body = _fetch(sym)
     except Exception:
         logger.warning("earnings_history.refresh fetch failed for %s", sym,
                        exc_info=True)
         return False
-    # An empty result is STORED, so an uncovered symbol is not re-asked daily.
+    # A refusal is not evidence about coverage, and must NOT be stored — an
+    # empty result is remembered for REFRESH_AFTER_DAYS, so caching a throttle
+    # would hide a symbol's real history for a month.
+    if is_transient(body):
+        logger.info("earnings_history: vendor refused %s (throttle or error); "
+                    "not caching an empty result", sym)
+        return False
+    rows = parse_earnings(body)
+    # An empty ANSWER is stored, so an uncovered symbol is not re-asked daily.
     store(conn, sym, rows)
     return bool(rows)

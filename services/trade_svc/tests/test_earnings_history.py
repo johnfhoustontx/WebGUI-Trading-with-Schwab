@@ -218,3 +218,63 @@ class TestTheRequestBudget:
         before = eh.budget_left(conn, today=today)
         assert eh.refresh(conn, "MU", today=today) is False
         assert eh.budget_left(conn, today=today) == before
+
+
+class TestAThrottleIsNotAnAnswer:
+    """Caught on the first live run. Alpha Vantage throttles at 5 calls a
+    MINUTE as well as 25 a day, and a throttled reply carries a note instead of
+    a `quarterlyEarnings` key. Parsed, that is an empty list — identical to a
+    symbol the vendor genuinely does not cover.
+
+    Storing it was the bug: an empty result is REMEMBERED so uncovered symbols
+    are not re-asked daily, so one throttle cached "no earnings history for
+    NVDA" for 30 days. NVDA has 109 quarters. The distinction has to be made
+    from the ENVELOPE, because the parsed rows look the same either way."""
+
+    @pytest.fixture()
+    def conn(self, tmp_path):
+        return eh.init_db(tmp_path / "eh.db")
+
+    _THROTTLE = json.dumps({"Note": "call frequency is 5 calls per minute"})
+    _INFO = json.dumps({"Information": "our standard API rate limit is 25 per day"})
+    _EMPTY = json.dumps({"symbol": "ZZZZ", "quarterlyEarnings": []})
+
+    def test_a_throttle_is_recognised(self):
+        assert eh.is_transient(self._THROTTLE) is True
+        assert eh.is_transient(self._INFO) is True
+
+    def test_a_genuine_empty_answer_is_NOT_transient(self):
+        """The vendor said "here is the block, it is empty" — a real answer."""
+        assert eh.is_transient(self._EMPTY) is False
+
+    def test_a_populated_answer_is_not_transient(self):
+        assert eh.is_transient(_JSON) is False
+
+    def test_unparseable_bodies_are_treated_as_transient(self):
+        """An HTML error page is not evidence about coverage."""
+        assert eh.is_transient("<html>502</html>") is True
+        assert eh.is_transient("") is True
+
+    def test_a_throttled_refresh_does_not_poison_the_cache(self, conn, monkeypatch):
+        monkeypatch.setattr(eh, "api_key", lambda: "k")
+        monkeypatch.setattr(eh, "_fetch", lambda _s: self._THROTTLE)
+        assert eh.refresh(conn, "NVDA", today=dt.date(2026, 8, 23)) is False
+        # never asked, as far as the store is concerned - so it will retry
+        assert eh.surprise_fractions(conn, "NVDA") is None
+        assert eh.is_due(conn, "NVDA") is True
+
+    def test_a_genuinely_uncovered_symbol_IS_remembered(self, conn, monkeypatch):
+        monkeypatch.setattr(eh, "api_key", lambda: "k")
+        monkeypatch.setattr(eh, "_fetch", lambda _s: self._EMPTY)
+        assert eh.refresh(conn, "ZZZZ", today=dt.date(2026, 8, 23)) is False
+        assert eh.surprise_fractions(conn, "ZZZZ") == []
+        assert eh.is_due(conn, "ZZZZ") is False
+
+    def test_a_throttle_still_spends_its_call(self, conn, monkeypatch):
+        """The vendor counted the request even though it refused it."""
+        monkeypatch.setattr(eh, "api_key", lambda: "k")
+        monkeypatch.setattr(eh, "_fetch", lambda _s: self._THROTTLE)
+        today = dt.date(2026, 8, 23)
+        before = eh.budget_left(conn, today=today)
+        eh.refresh(conn, "NVDA", today=today)
+        assert eh.budget_left(conn, today=today) == before - 1
