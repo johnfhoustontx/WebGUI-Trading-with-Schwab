@@ -197,15 +197,28 @@ the arriving row glows for ten seconds (see *Spoken arrivals* below).
 
 ### The panels
 
-**Top strip.** The clock; **VIX** and its regime band; the **market regime** word
-(Rallying, Balanced, Whipsaw, Stressed…); and two dials showing **Day / Week /
-Month** for market **sentiment** and market **trend**.
+**Top strip.** The clock; two dials showing **Day / Week / Month** for market
+**sentiment** and market **trend**; then three verdict tiles — **Bias**, **Signal**
+and the **market regime** word (Rallying, Balanced, Whipsaw, Stressed…).
 
-Note it shows VIX but *not* SPX or QQQ. That is deliberate. Those prices appear in
-Dealer Positioning immediately below with more context, and the two panels read
+**Bias** and **Signal** are two readings of one number, the market sentiment
+composite. Bias says how to be positioned — **Long**, **Neutral**, **Cautious** or
+**Short**. Signal says how strong the reading is — **Strong Bull**, **Bullish**,
+**Neutral**, **Bearish** or **Strong Bear**. They are the same two tiles the
+Sentiment page's Signals column carries, and each is coloured from its own word, so
+the colour can never contradict the text beside it. Before either has been
+published they show a dash rather than "Neutral": Neutral is the middle reading,
+and no reading at all is not the same thing.
+
+**Market Regime** is a separate and independent read — the tape's own committed
+direction, not the composite's — which is why it sits at the far end.
+
+Note the strip shows *no price at all*, and that is deliberate. SPX and QQQ appear
+in Dealer Positioning immediately below with more context, and the two panels read
 from different caches with independent update counters — so showing both could
-display two different prices for one symbol on one screen. VIX stays because it is
-excluded from the dealer-row universe by design and cannot appear below.
+display two different prices for one symbol on one screen. VIX used to be the one
+exception (it is excluded from the dealer-row universe and cannot appear below); it
+was replaced by Bias and Signal on 2026-08-24.
 
 **Dealer Positioning.** One row each for **$SPX, SPY, QQQ, $NDX**: price and day
 change, the **gamma flip** with the signed distance to it, the **call and put

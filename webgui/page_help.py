@@ -52,10 +52,13 @@ The **home page**. One screen answering, top to bottom, the four questions you a
 in order: *what is the market doing · where is the structure · what should I act
 on · what am I holding.*
 
-- **Top strip** — the clock, **VIX** and its band, the **market regime** word
-  (Rallying / Balanced / Whipsaw / Stressed…), and two dials showing **Day / Week
-  / Month** for market **sentiment** and market **trend**. These are the same
-  numbers the Sentiment page shows — the Desk never computes its own.
+- **Top strip** — the clock, two dials showing **Day / Week / Month** for market
+  **sentiment** and market **trend**, then the three verdict tiles: **Bias** (how
+  to be positioned — Long / Neutral / Cautious / Short), **Signal** (how strong
+  the move is — Strong Bull … Strong Bear) and the **market regime** word
+  (Rallying / Balanced / Whipsaw / Stressed…). Bias and Signal are the same two
+  the Sentiment page's Signals column shows, read off the same composite score;
+  the Desk never computes its own.
 - **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
   **gamma flip** and how far price sits from it, the **call and put walls**, and
   net gamma exposure. The little bar shows where price sits **between the two

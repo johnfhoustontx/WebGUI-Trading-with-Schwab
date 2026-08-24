@@ -43,7 +43,6 @@ from pages import console_cards as _CC
 from pages import bullbear as _bb
 from pages import desk as _d
 from pages.options import flow as _flow
-from pages.options import header as _hdr
 from pages.options import matrix as _matrix
 
 # The trading clock, and the Desk's own — not a second reading of "now".
@@ -142,14 +141,15 @@ FLOW_TONE_HEX = {cls: tw_hex(cls) for cls in
                  set(_flow._TONE.values()) | {_flow._TONE_NEUTRAL}}
 
 
-def vix_band_hex(label):
-    """The VIX band's colour, read out of the header page's own label map.
+def band_tone_hex(cls):
+    """A BIAS/SIGNAL tile's colour, RESOLVED from the class the Desk stamps.
 
-    ``header._REGIME_BG`` holds ``bg-[#1D9E75]``-style classes traced from the
-    scanner engine's own regime colours. Resolving them beats restating them: a
-    palette change there follows here instead of drifting from it.
+    ``desk.signal_band_facts`` already decided the tone — from the console's own
+    ``_word_tone`` — so this resolves ``text-[#35d68a]`` to its hex rather than
+    re-deciding which word is bullish. That is the difference between a mirror
+    and a second opinion.
     """
-    return _hue(_hdr.regime_badge_class(label), prefix="bg")
+    return _hue(cls)
 
 
 def quadrant_hex(quadrant):
@@ -259,12 +259,18 @@ def _freshness(payloads):
             "tone": _C["warning"] if f["stale"] else _C["positive"]}
 
 
-def _vix(payloads):
-    hdr = _mapping(payloads, "options:header")
-    regime = hdr.get("vix_regime")
-    band = (regime if isinstance(regime, dict) else {}).get("label", "") or ""
-    return {"value": _d.fmt_price(hdr.get("vix")), "band": band,
-            "tone": vix_band_hex(band)}
+def _band(payloads):
+    """BIAS and SIGNAL — the two tiles that replaced VIX on the strip.
+
+    Straight off ``desk.signal_band_facts``, labels and descriptors included, so
+    the mirror cannot describe the composite's verdict in different words than
+    the page it mirrors.
+    """
+    comp = _mapping(payloads, "sentiment:composite")
+    derived = comp.get("derived")
+    return [{"label": f["label"], "value": f["value"],
+             "descriptor": f["descriptor"], "tone": band_tone_hex(f["cls"])}
+            for f in _d.signal_band_facts(derived)]
 
 
 def _dealer(payloads, stale):
@@ -444,7 +450,7 @@ def snapshot(payloads, now):
     return {
         "clock": clock_facts(now),
         "freshness": fresh,
-        "vix": _vix(payloads),
+        "band": _band(payloads),
         "regime": _regime(payloads),
         "cards": _cards(payloads),
         "bullbear": _bullbear(payloads),
@@ -569,7 +575,13 @@ a {{ color: inherit; text-decoration: none; }}
 .big {{ font-size: 28px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }}
 .sub {{ font-size: 11px; letter-spacing: .1em; color: {muted}; margin-top: auto; }}
 .tile.clock {{ width: 172px; flex: none; }}
-.tile.vix {{ width: 148px; flex: none; }}
+.tile.band {{ width: 172px; flex: none; }}
+/* BIAS and SIGNAL are WORDS: no tabular figures, and small enough that the
+   longest of them ("Strong Bear") stays on one line. */
+.tile.band .big {{ font-size: 19px; font-variant-numeric: normal;
+                   white-space: nowrap; }}
+.desc {{ font-size: 10px; letter-spacing: .08em; color: {label};
+         white-space: nowrap; margin-top: auto; }}
 .tile.regime {{ width: 250px; flex: none; }}
 .card {{ flex: 1 1 420px; min-width: 400px; }}
 .badge {{ align-self: flex-start; font-size: 10px; letter-spacing: .14em;
@@ -771,10 +783,17 @@ function paint(s) {
   $('#fresh').textContent = s.freshness.text;
   $('#fresh').style.color = s.freshness.tone;
   $('#fresh-dot').style.background = s.freshness.tone;
-  $('#vix').textContent = s.vix.value;
-  const band = $('#vix-band');
-  band.textContent = s.vix.band;
-  band.style.background = s.vix.band ? s.vix.tone : 'transparent';
+  const band = $('#band');
+  band.replaceChildren();
+  s.band.forEach((b) => {
+    const t = el('div', 'tile band');
+    t.appendChild(el('div', 'eyebrow', b.label));
+    const v = el('div', 'big', b.value);
+    v.style.color = b.tone;
+    t.appendChild(v);
+    t.appendChild(el('div', 'desc', b.descriptor));
+    band.appendChild(t);
+  });
   $('#regime').textContent = s.regime.word;
   $('#regime').style.color = s.regime.tone;
   $('#regime-sub').textContent = s.regime.sub;
@@ -966,11 +985,7 @@ def document():
       </div>
     </div>
     <div id="cards" style="display:contents"></div>
-    <div class="tile vix">
-      <div class="eyebrow">VIX</div>
-      <div class="big" id="vix">&mdash;</div>
-      <div class="badge" id="vix-band"></div>
-    </div>
+    <div id="band" style="display:contents"></div>
     <div class="tile regime">
       <div class="eyebrow">MARKET REGIME</div>
       <div class="big" id="regime">&mdash;</div>

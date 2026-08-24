@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Reference Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-24</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -651,14 +651,25 @@ symbol you clicked</strong>.</p>
 interrupt you: new flow alerts and newly-opened positions are announced out loud and
 the arriving row glows for ten seconds (see <em>Spoken arrivals</em> below).</p>
 <h3 id="the-panels">The panels</h3>
-<p><strong>Top strip.</strong> The clock; <strong>VIX</strong> and its regime band; the <strong>market regime</strong> word
-(Rallying, Balanced, Whipsaw, Stressed…); and two dials showing <strong>Day / Week /
-Month</strong> for market <strong>sentiment</strong> and market <strong>trend</strong>.</p>
-<p>Note it shows VIX but <em>not</em> SPX or QQQ. That is deliberate. Those prices appear in
-Dealer Positioning immediately below with more context, and the two panels read
+<p><strong>Top strip.</strong> The clock; two dials showing <strong>Day / Week / Month</strong> for market
+<strong>sentiment</strong> and market <strong>trend</strong>; then three verdict tiles — <strong>Bias</strong>, <strong>Signal</strong>
+and the <strong>market regime</strong> word (Rallying, Balanced, Whipsaw, Stressed…).</p>
+<p><strong>Bias</strong> and <strong>Signal</strong> are two readings of one number, the market sentiment
+composite. Bias says how to be positioned — <strong>Long</strong>, <strong>Neutral</strong>, <strong>Cautious</strong> or
+<strong>Short</strong>. Signal says how strong the reading is — <strong>Strong Bull</strong>, <strong>Bullish</strong>,
+<strong>Neutral</strong>, <strong>Bearish</strong> or <strong>Strong Bear</strong>. They are the same two tiles the
+Sentiment page's Signals column carries, and each is coloured from its own word, so
+the colour can never contradict the text beside it. Before either has been
+published they show a dash rather than "Neutral": Neutral is the middle reading,
+and no reading at all is not the same thing.</p>
+<p><strong>Market Regime</strong> is a separate and independent read — the tape's own committed
+direction, not the composite's — which is why it sits at the far end.</p>
+<p>Note the strip shows <em>no price at all</em>, and that is deliberate. SPX and QQQ appear
+in Dealer Positioning immediately below with more context, and the two panels read
 from different caches with independent update counters — so showing both could
-display two different prices for one symbol on one screen. VIX stays because it is
-excluded from the dealer-row universe by design and cannot appear below.</p>
+display two different prices for one symbol on one screen. VIX used to be the one
+exception (it is excluded from the dealer-row universe and cannot appear below); it
+was replaced by Bias and Signal on 2026-08-24.</p>
 <p><strong>Dealer Positioning.</strong> One row each for <strong>$SPX, SPY, QQQ, $NDX</strong>: price and day
 change, the <strong>gamma flip</strong> with the signed distance to it, the <strong>call and put
 walls</strong>, net gamma exposure, and a regime chip. The small bar shows where price

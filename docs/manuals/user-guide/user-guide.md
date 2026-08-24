@@ -275,7 +275,7 @@ structure · what should I act on · what am I holding.*
 
 | Panel | What it gives you |
 |-------|-------------------|
-| **Top strip** | Clock, **VIX** and its band, the **market regime** word, and two dials showing **Day / Week / Month** for sentiment and trend |
+| **Top strip** | Clock, two dials showing **Day / Week / Month** for sentiment and trend, then **Bias** (Long / Neutral / Cautious / Short), **Signal** (Strong Bull … Strong Bear) and the **market regime** word |
 | **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
@@ -319,9 +319,13 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
 - **Flow alerts say "call" or "put", never "bought" or "sold".** Schwab publishes
   no time-and-sales tape, so nobody — including this app — can honestly tell you
   which side initiated.
-- **The top strip shows VIX but not SPX or QQQ.** Those sit in the panel directly
+- **The top strip shows no prices at all.** SPX and QQQ sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
-  could briefly display two different prices for the same symbol.
+  could briefly display two different prices for the same symbol. (VIX used to be
+  the one exception; Bias and Signal took its tile on 2026-08-24.)
+- **Bias and Signal can look like the same word said twice.** They are two reads of
+  one number: Bias is how to be *positioned*, Signal is how *strong* the reading is.
+  A dash in either means the sentiment service has not published — not "Neutral".
 - **The Desk goes silent on a fresh tab, and an *Enable spoken alerts* button
   appears.** Browsers refuse to play audio until you have interacted with the page,
   and they refuse silently — nothing is logged and no error is shown. That button is

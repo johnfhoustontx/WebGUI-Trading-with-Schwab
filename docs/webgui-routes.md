@@ -13,9 +13,11 @@ the top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the m
 of the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`.
 
 A single-screen aggregate of the highest glance-value element of each page, laid out
-as the four questions a session opens with, in order: **top strip** (clock · VIX +
-band · Market Regime word · Day/Week/Month **Sentiment** and **Trend** rings ·
-honest freshness indicator) → **Dealer Positioning** (`$SPX`/`SPY`/`QQQ`/`$NDX`:
+as the four questions a session opens with, in order: **top strip** (clock ·
+Day/Week/Month **Sentiment** and **Trend** rings · **Bias** + **Signal** ·
+Market Regime word · honest freshness indicator — a **$VIX quote until
+2026-08-24**, when it gave way to the two band tiles and took `cache:options:header`
+off the page's poll batch with it, that view having had no other reader here) → **Dealer Positioning** (`$SPX`/`SPY`/`QQQ`/`$NDX`:
 spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, call
 and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
 hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**

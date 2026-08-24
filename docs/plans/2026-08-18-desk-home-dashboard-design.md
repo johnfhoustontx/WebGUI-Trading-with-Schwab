@@ -108,6 +108,11 @@ version counters**, so a 2-second window really can render two different prices 
 one symbol on one screen. The top strip therefore drops SPX/QQQ; the Dealer band
 owns per-symbol prices and shows strictly more (spot + day % + distance to flip).
 
+> ⚠ **Superseded 2026-08-24** — the VIX tile was replaced by BIAS and SIGNAL at
+> the user's request, and `cache:options:header` left the page's poll batch with
+> it. The paragraph below is the reasoning as written; the split it argues for is
+> unaffected, since the strip now carries no per-symbol quote at all.
+
 **VIX stays in the top strip and cannot move**, which is the clean confirmation
 that the split is right: `$VIX` is deliberately excluded from the matrix row
 universe (`compute.py:2696` — *"the collected universe minus `$VIX`"*), so it can

@@ -40,7 +40,6 @@ def _matrix():
 
 def _payloads():
     return {
-        "options:header": {"vix": 18.42, "vix_regime": {"label": "Elevated"}},
         "options:gex_status": {"age_seconds": 41.0},
         "options:matrix": _matrix(),
         "options:flow_alerts": {"alerts": [
@@ -60,7 +59,10 @@ def _payloads():
                              "direction": 1, "direction_strong": True},
         "sentiment:composite": {"live": {"composite": {"bias": "Cautious",
                                                        "total_score": 4.45}},
-                                "derived": {"trend": {"state": "resilient",
+                                "derived": {"size": "0.85x",
+                                            "bias": "Cautious",
+                                            "signal": "Bearish",
+                                            "trend": {"state": "resilient",
                                                       "score": 62.0,
                                                       "confidence": 0.8}}},
         "sentiment:history": {"snaps": []},
@@ -98,7 +100,7 @@ def test_snapshot_is_json_serializable():
 
 def test_snapshot_carries_every_region_even_with_no_payloads_at_all():
     snap = ds.snapshot({}, _NOW)
-    for region in ("clock", "freshness", "vix", "regime", "cards", "bullbear",
+    for region in ("clock", "freshness", "band", "regime", "cards", "bullbear",
                    "dealer", "board", "flow", "positions"):
         assert region in snap, region
 
@@ -136,16 +138,42 @@ def test_no_probe_data_reads_unknown_and_never_live():
     assert "Live" not in fresh["text"]
 
 
-def test_vix_band_colour_agrees_with_the_header_pages_own_map():
-    """One palette, read out of ``header._REGIME_BG`` rather than restated."""
-    for label, cls in _hdr._REGIME_BG.items():
-        assert ds.vix_band_hex(label) == cls[len("bg-["):-1]
+def test_the_band_tiles_are_the_desks_own_words_and_descriptors():
+    """The mirror composes; it does not restate. Label, value and descriptor all
+    come from ``desk.signal_band_facts``, so the two screens cannot describe the
+    composite's verdict differently."""
+    band = ds.snapshot(_payloads(), _NOW)["band"]
+    facts = d.signal_band_facts(
+        _payloads()["sentiment:composite"]["derived"])
+    assert [b["label"] for b in band] == [f["label"] for f in facts]
+    assert [b["value"] for b in band] == ["Cautious", "Bearish"]
+    assert [b["descriptor"] for b in band] == [f["descriptor"] for f in facts]
 
 
-def test_vix_value_is_formatted_by_the_desks_price_formatter():
-    vix = ds.snapshot(_payloads(), _NOW)["vix"]
-    assert vix["value"] == d.fmt_price(18.42)
-    assert vix["band"] == "Elevated"
+def test_the_band_tone_is_RESOLVED_from_the_class_the_desk_stamps():
+    """Not re-decided. ``band_tone_hex`` turns the Desk's own ``text-[#…]`` into
+    a hex — so a word the Desk paints amber can never paint green here."""
+    facts = d.signal_band_facts({"bias": "Cautious", "signal": "Bearish"})
+    band = ds.snapshot(_payloads(), _NOW)["band"]
+    assert [b["tone"] for b in band] == [
+        f["cls"][len("text-["):-1] for f in facts]
+    # …and the two differ, which is the whole reason each tile reads its OWN
+    # word: positioning and strength are separate vocabularies.
+    assert band[0]["tone"] != band[1]["tone"]
+
+
+def test_a_cold_composite_gives_the_band_tiles_a_dash_not_a_verdict():
+    band = ds.snapshot({}, _NOW)["band"]
+    assert [b["value"] for b in band] == [d._DASH, d._DASH]
+
+
+def test_the_mirror_stops_reading_the_view_the_desk_stopped_polling():
+    """``VIEWS`` is imported from the Desk, so a builder reading a view the Desk
+    dropped would silently render its cold state forever."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "desk_stream.py"
+           ).read_text(encoding="utf-8")
+    assert "options:header" not in src
 
 
 def test_regime_word_and_tone_follow_the_committed_direction():
@@ -357,7 +385,7 @@ def test_the_stream_opens_with_a_full_desk_snapshot(monkeypatch):
                     {v: 1 for v in d.VIEWS})
     assert frames[0].startswith("event: desk\n")
     body = json.loads(frames[0].split("data: ", 1)[1])
-    assert body["vix"]["value"] == d.fmt_price(18.42)
+    assert [b["value"] for b in body["band"]] == ["Cautious", "Bearish"]
 
 
 def test_the_stream_ticks_the_clock_without_resending_an_unchanged_desk(

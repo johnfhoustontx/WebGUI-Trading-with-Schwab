@@ -1098,8 +1098,9 @@ def test_the_top_strip_carries_no_index_quote_view():
     """Deliberate: the Dealer Positioning panel shows $SPX/SPY/QQQ with more
     context, and the two would come from different cache keys with independent
     version counters — a 2-second window could genuinely show two different
-    prices for one symbol on one screen. $VIX rides ``options:header`` because
-    it is excluded from the matrix universe and so can never be a dealer row."""
+    prices for one symbol on one screen. $VIX used to ride ``options:header``
+    (excluded from the matrix universe, so never a dealer row); since it was
+    replaced by BIAS/SIGNAL the strip carries no quote at all."""
     src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
            ).read_text(encoding="utf-8")
     # ``prices`` is the header payload's quote map. Reading that key is the one
@@ -1158,6 +1159,108 @@ def test_trend_pill_is_empty_for_an_unknown_or_absent_state():
     assert d.trend_pill_text({}) == ""
     assert d.trend_pill_text(None) == ""
     assert d.trend_pill_text({"trend": "nonsense"}) == ""
+
+
+# ── BIAS / SIGNAL, the strip tiles that replaced VIX ─────────────────────────
+
+
+def test_signal_band_facts_are_the_consoles_own_two_tiles_in_its_order():
+    """Both the label and the descriptor are lifted from the console's
+    ``SIGNAL_TILE_DEFS``, so a wording change there reaches this strip instead
+    of leaving two screens describing one number differently."""
+    from pages import sentiment as S
+    facts = d.signal_band_facts({"bias": "Long", "signal": "Bullish"})
+    assert [f["key"] for f in facts] == ["bias", "signal"]
+    defs = {x["key"]: x for x in S.SIGNAL_TILE_DEFS}
+    for f in facts:
+        assert f["label"] == defs[f["key"]]["label"]
+        assert f["descriptor"] == defs[f["key"]]["descriptor"]
+
+
+def test_signal_band_facts_read_the_two_words_off_derived():
+    """``live_composite.signal_band`` writes them there; nothing is recomputed
+    here, which is why this page needs no composite total at all."""
+    facts = d.signal_band_facts({"bias": "Cautious", "signal": "Bearish"})
+    assert [f["value"] for f in facts] == ["Cautious", "Bearish"]
+
+
+def test_signal_band_facts_colour_each_tile_from_its_OWN_word():
+    """The two carry DIFFERENT vocabularies — positioning (Long/Neutral/
+    Cautious/Short) and strength (Strong Bull…Strong Bear) — so one shared tone
+    would eventually paint a colour that contradicts the word beside it. At
+    total 3.88 the band is ('Cautious', 'Bearish'): amber and red, not one
+    colour twice."""
+    facts = d.signal_band_facts({"bias": "Cautious", "signal": "Bearish"})
+    assert facts[0]["cls"] == d.CON_WARN
+    assert facts[1]["cls"] == d.CON_NEG
+    assert facts[0]["cls"] != facts[1]["cls"]
+
+
+def test_signal_band_facts_tone_every_word_signal_band_can_emit():
+    """The producer's five bands, end to end — a word the desk cannot tone
+    would render at the cold-cache grey while saying something definite."""
+    import sys, pathlib as _pl
+    sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[2]
+                           / "sentiment-dashboard"))
+    from live_composite import signal_band
+    expected = {"Long": d.CON_POS, "Neutral": d.CON_WARN,
+                "Cautious": d.CON_WARN, "Short": d.CON_NEG,
+                "Strong Bull": d.CON_POS, "Bullish": d.CON_POS,
+                "Bearish": d.CON_NEG, "Strong Bear": d.CON_NEG}
+    for total in (9.5, 7.0, 5.0, 3.0, 1.0):
+        _size, bias, signal = signal_band(total)
+        facts = d.signal_band_facts({"bias": bias, "signal": signal})
+        assert facts[0]["cls"] == expected[bias], bias
+        assert facts[1]["cls"] == expected[signal], signal
+
+
+def test_signal_band_facts_print_a_dash_for_a_cold_cache_never_neutral():
+    """'Neutral' is a reading. A composite that has not published is not one,
+    and the strip must not turn the absence into the middle band."""
+    for cold in (None, {}, "nonsense", {"bias": None, "signal": ""}):
+        facts = d.signal_band_facts(cold)
+        assert [f["value"] for f in facts] == [d._DASH, d._DASH]
+        assert all(f["cls"] == d.CON_TXT_MUTED for f in facts)
+
+
+def test_signal_band_facts_survive_a_word_the_producer_has_not_shipped_yet():
+    """The vocabulary is service-side and could grow. An unknown word still
+    renders — toned by the same substring read the console falls back to."""
+    facts = d.signal_band_facts({"bias": "Very Long", "signal": "Wat"})
+    assert facts[0]["value"] == "Very Long" and facts[0]["cls"] == d.CON_POS
+    assert facts[1]["value"] == "Wat" and facts[1]["cls"] == d.CON_WARN
+
+
+def test_the_desk_band_words_match_the_console_tiles_for_one_payload():
+    """The two screens read the same two fields off the same ``derived``, so
+    for any payload their BIAS and SIGNAL text must be identical."""
+    from pages import sentiment as S
+    derived = {"size": "0.85x", "bias": "Cautious", "signal": "Bearish"}
+    rows = S.signal_tile_rows(
+        S.tiles({"composite": {"total_score": 3.88}}, None,
+                (derived["size"], derived["bias"], derived["signal"])), None)
+    console = {r["key"]: r["value"] for r in rows}
+    for f in d.signal_band_facts(derived):
+        assert f["value"] == console[f["key"]]
+
+
+def test_the_desk_no_longer_polls_the_options_header_view():
+    """VIX was its only reader. A view left in ``VIEWS`` with nothing reading
+    it is a Redis probe every 2 s for the life of the session, plus a repaint
+    trigger for a strip that cannot change because of it."""
+    assert "options:header" not in d.VIEWS
+    assert "options:header" not in d._REGION_VIEWS["strip"]
+    src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+           ).read_text(encoding="utf-8")
+    # The two payload fields the tile read. The WORD still appears in comments
+    # explaining what the strip used to carry, which is worth keeping.
+    assert '"vix"' not in src and "vix_regime" not in src
+
+
+def test_the_strip_repaints_its_band_when_the_composite_moves():
+    """BIAS and SIGNAL ride ``sentiment:composite``. Without it the two words
+    would freeze at whatever the page built with."""
+    assert "sentiment:composite" in d._REGION_VIEWS["strip"]
 
 
 def test_the_compact_cards_reuse_the_consoles_own_hero_and_delta():
@@ -1286,10 +1389,13 @@ def _seed_bus(monkeypatch, data):
 
 def _full_payloads():
     return {
-        "options:header": {"vix": 14.2, "vix_regime": {"label": "Normal"}},
         "sentiment:regime": {"label": "Rallying", "committed_label": "trending",
                              "confidence": 0.71, "direction": 1},
-        "sentiment:composite": {"live": None, "derived": {}},
+        "sentiment:composite": {
+            "live": None,
+            "derived": {"size": "0.85x", "bias": "Cautious",
+                        "signal": "Bearish"},
+        },
         "sentiment:history": {"snaps": []},
         "options:gex_status": _status(),
         "options:matrix": {"rows": [_mrow("$SPX")]},
@@ -1334,7 +1440,9 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     assert "AT RISK" in texts                    # the position flag
     assert any(t.startswith("OPEN 1 ·") for t in texts)
     assert "Rallying" in texts                   # the regime word in the strip
-    assert "14.20" in texts and "Normal" in texts    # VIX and its band
+    # The two band tiles that replaced VIX, each with the console's descriptor.
+    assert "Cautious" in texts and "Bearish" in texts
+    assert "MARKET DIRECTION" in texts and "STRENGTH & MOMENTUM" in texts
 
 
 def test_render_never_puts_a_buy_or_sell_word_on_the_flow_feed(monkeypatch):

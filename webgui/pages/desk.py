@@ -51,7 +51,6 @@ from pages import sentiment_bullbear as _bbmap
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
-from pages.options import header as _hdr
 from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
@@ -64,7 +63,9 @@ from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
 # the vocabulary the console's Trend pill prints, and the Desk shows the SAME
 # pill — copying the five words here is exactly the drift this page exists to
 # avoid, so it is imported rather than restated.
+from pages.sentiment import SIGNAL_TILE_DEFS as _SIGNAL_TILE_DEFS
 from pages.sentiment import _TREND_SHORT as _TREND_WORDS
+from pages.sentiment import _word_tone as _band_word_tone
 from pages.sentiment import sentiment_arcs as _sentiment_arcs
 from pages.sentiment import trend_arcs as _trend_arcs
 from pages.ui_guard import guard, guard_async
@@ -864,6 +865,45 @@ def trend_pill_text(derived):
     return str(_TREND_WORDS.get(trend.get("state")) or "").upper()
 
 
+# BIAS and SIGNAL are ONE call's output — ``live_composite.signal_band(total)``
+# returns (size, bias, signal) and the service writes all three onto ``derived``
+# — so the strip reads them rather than deriving anything, and needs no
+# composite total of its own. Both the label and the FOOTER DESCRIPTOR are the
+# Market Regime console's, imported rather than restated for the reason at the
+# top of this file: the two screens describe one number, and the words that
+# explain it are as easy to drift as the number would be.
+_BAND_TILES = tuple((x["key"], x["label"], x["descriptor"])
+                    for x in _SIGNAL_TILE_DEFS
+                    if x["key"] in ("bias", "signal"))
+
+# ``_word_tone``'s four tone keys -> this page's palette. It is the console's
+# own read, and it colours each tile from its OWN word: the two carry different
+# vocabularies (positioning: Long/Neutral/Cautious/Short; strength: Strong Bull
+# … Strong Bear), so one shared tone would sooner or later paint a colour that
+# contradicts the word standing next to it.
+_BAND_TONE_CLASS = {"pos": CON_POS, "neg": CON_NEG, "warn": CON_WARN,
+                    "flat": CON_TXT_MUTED}
+
+
+def signal_band_facts(derived):
+    """The strip's BIAS and SIGNAL tiles: ``{"key", "label", "descriptor",
+    "value", "cls"}`` each, in the console's own order.
+
+    A cold composite prints the em dash at the muted tone and NEVER a band
+    word — "Neutral" is the middle reading, and an absent one is not a reading
+    at all.
+    """
+    d = derived if isinstance(derived, dict) else {}
+    out = []
+    for key, label, descriptor in _BAND_TILES:
+        raw = d.get(key)
+        word = "" if raw is None else str(raw).strip()
+        out.append({"key": key, "label": label, "descriptor": descriptor,
+                    "value": word or _DASH,
+                    "cls": _BAND_TONE_CLASS[_band_word_tone(word)]})
+    return out
+
+
 def _arc_value(arcs, i):
     """The i-th arc's 0-100 value, or None.
 
@@ -1218,7 +1258,7 @@ def signed_class(v):
 # single pipelined round-trip and only the views that MOVED get deserialized.
 # ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
 # a timer of its own.
-VIEWS = ("options:header", "sentiment:regime", "sentiment:composite",
+VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:paper_account",
          "options:driver_paper_account", "options:captured",
@@ -1228,7 +1268,7 @@ VIEWS = ("options:header", "sentiment:regime", "sentiment:composite",
 # inputs actually changed — without this, one 2 s header bump would rebuild all
 # four panels (and re-emit both ring SVGs) every tick.
 _REGION_VIEWS = {
-    "strip": ("options:header", "sentiment:regime", "sentiment:composite",
+    "strip": ("sentiment:regime", "sentiment:composite",
               "sentiment:history", "options:gex_status"),
     # The dealer panel reads gex_status too: freshness is what GATES its walls.
     "dealer": ("options:matrix", "options:gex_status"),
@@ -2021,14 +2061,9 @@ _BB_DAY = f"text-[12px] leading-none tabular-nums shrink-0 {CON_TXT_MUTED}"
 _BB_FILL = {True: f"bg-[{_C['negative']}]", False: f"bg-[{_C['positive']}]"}
 _BB_TRACK = f"h-[3px] w-full rounded-full overflow-hidden bg-[{_C['line']}]/[0.35]"
 
-# The VIX band badge is repainted in place, so its previous background has to be
-# removed explicitly or the classes stack and the first band painted wins
-# forever. Derived from ``header.regime_badge_class`` over its finite label set
-# rather than reaching for that module's private set, so this follows a palette
-# change there instead of drifting from it.
-_VIX_BANDS = ("Low vol", "Normal", "Elevated", "High vol", "")
-_ALL_VIX_BG = " ".join(sorted({_hdr.regime_badge_class(b) for b in _VIX_BANDS}))
-# Same problem for the reactive text colours in the strip.
+# A reactive text colour is repainted in place, so the previous one has to be
+# removed explicitly or the classes stack and the first colour painted wins
+# forever.
 _ALL_STATE_TEXT = " ".join(sorted({CON_POS, CON_NEG, CON_WARN, CON_TXT,
                                    CON_TXT_MUTED}))
 _ALL_DOT_BG = f"bg-[{_C['warning']}] bg-[{_C['positive']}] con-pulse"
@@ -2078,6 +2113,15 @@ _RULER_MARK = f"text-[8px] leading-none {CON_TXT_FAINT}"
 # column of numbers to compete with and does not need the panels' weight.
 _STRIP_EYEBROW = f"text-[10px] leading-none tracking-[.22em] {CON_TXT_DIM}"
 _STRIP_VALUE = f"text-[28px] leading-none tabular-nums {CON_TXT}"
+# BIAS and SIGNAL are words, not numbers, and the longest of them ("Strong
+# Bear") would need ~185px of tile at the 28px the numeric tiles use — which is
+# two tiles of ~205px where VIX had one of 140, and more than the strip has to
+# give without pushing the two score cards under their 440px floor. At 19px the
+# same word measures ~125px and the pair fits in 160px tiles with the cards
+# still clear of that floor. No ``tabular-nums``: nothing here is a digit.
+_BAND_VALUE = "text-[19px] leading-none whitespace-nowrap"
+_BAND_FOOT = (f"text-[9px] leading-none tracking-[.08em] whitespace-nowrap "
+              f"mt-auto {CON_TXT_DIM}")
 # Each strip tile is its own console card. The strip used to be ONE card holding
 # everything, which meant a card inside a card once the score cards arrived —
 # and, more practically, its own padding on top of theirs, which is height this
@@ -2362,23 +2406,27 @@ def render():
         unlock_btn.set_visibility(False)
 
         # ── top strip ────────────────────────────────────────────────────────
-        # Deliberately carries NO SPX/QQQ quote. The Dealer Positioning panel
-        # below shows those same symbols with far more context, and the two
-        # would come from different cache keys with independent version
-        # counters — so a 2-second window could genuinely show two different
-        # prices for one symbol on one screen. $VIX is excluded from the matrix
-        # universe by design and so can never appear as a dealer row, which is
-        # why it is the one quote that belongs up here.
-        # FIVE tiles, and the ORDER is the argument the strip makes. The
+        # Deliberately carries NO QUOTE AT ALL. The Dealer Positioning panel
+        # below shows $SPX/SPY/QQQ with far more context, and the two would come
+        # from different cache keys with independent version counters — so a
+        # 2-second window could genuinely show two different prices for one
+        # symbol on one screen. $VIX used to be the one exception (excluded from
+        # the matrix universe, so it could never be a dealer row); it was
+        # replaced on 2026-08-24 by BIAS and SIGNAL, and with it went the strip's
+        # only reader of ``options:header`` — that view left the poll batch in
+        # the same change.
+        # SIX tiles, and the ORDER is the argument the strip makes. The
         # countdown owns the left edge because it is the temporal anchor —
         # everything else on the page is a reading taken AT some point in the
         # session, and how much session is left is what says whether a reading
         # is still actionable. The two score cards take the flexible middle
-        # because they are the only tiles whose content scales with width. VIX
-        # and MARKET REGIME are grouped at the right end, regime outermost:
-        # both answer "what is the tape doing", they qualify each other (a
-        # regime word means something different at VIX 15 than at VIX 30), and
-        # the regime is the coarsest read on the strip, so it terminates it.
+        # because they are the only tiles whose content scales with width. The
+        # three VERDICT tiles group at the right end, regime outermost: BIAS and
+        # SIGNAL are what the composite score two tiles to their left RESOLVES
+        # TO (positioning, then strength), so they sit beside it and read as its
+        # conclusion; MARKET REGIME is the coarsest and most independent read on
+        # the strip — its own committed direction, not the composite's — so it
+        # terminates it.
         #
         # The strip is a plain row now, not a card of its own: five console
         # cards inside a sixth would be a frame around frames, and its padding
@@ -2405,14 +2453,19 @@ def render():
             # handles through the painter buys nothing.
             sent_box = ui.column().classes("flex-1 min-w-[440px] gap-0")
             trend_box = ui.column().classes("flex-1 min-w-[440px] gap-0")
-            with ui.column().classes(f"{_TILE} w-[140px] shrink-0"):
-                ui.label("VIX").classes(_STRIP_EYEBROW)
-                vix_lbl = ui.label(_DASH).classes(_STRIP_VALUE)
-                # color=None drops Quasar's bg-primary so the mapped
-                # bg-[...] class is what actually paints.
-                vix_badge = ui.badge("", color=None).classes(
-                    "self-start text-[10px] leading-none tracking-[.14em] "
-                    "mt-auto")
+            # Built in their COLD state, which is exactly what the painter
+            # produces for a composite that has not published — so the tiles
+            # never flash a band word they have not read.
+            band_lbls = []
+            for _fact in signal_band_facts(None):
+                with ui.column().classes(f"{_TILE} w-[160px] shrink-0"):
+                    ui.label(_fact["label"]).classes(_STRIP_EYEBROW)
+                    band_lbls.append(ui.label(_fact["value"]).classes(
+                        f"{_BAND_VALUE} {_fact['cls']}"))
+                    # The console's descriptor earns its line: "Cautious" beside
+                    # "Bearish" reads as one word said twice unless the tiles say
+                    # that one is positioning and the other is strength.
+                    ui.label(_fact["descriptor"]).classes(_BAND_FOOT)
             with ui.column().classes(f"{_TILE} w-[236px] shrink-0"):
                 ui.label("MARKET REGIME").classes(_STRIP_EYEBROW)
                 regime_lbl = ui.label(_DASH).classes(
@@ -2423,10 +2476,10 @@ def render():
         # ── the Bull / Bear sector strip ─────────────────────────────────────
         # It sits between the TOP STRIP and the panels, and that position is
         # the argument: the tiles above read the market as one thing (clock,
-        # two composite scores, VIX, regime), the panels below are per-symbol,
-        # and this is the one band saying which PARTS the composite above is
-        # made of. Full width and one tile tall — eleven chips is a row, not a
-        # panel.
+        # two composite scores, the band verdicts, regime), the panels below
+        # are per-symbol, and this is the one band saying which PARTS the
+        # composite above is made of. Full width and one tile tall — eleven
+        # chips is a row, not a panel.
         with ui.column().classes(f"{_TILE} w-full gap-[8px]"):
             with ui.row().classes("items-baseline w-full gap-4 flex-wrap"):
                 ui.label("BULL / BEAR MAP").classes(_STRIP_EYEBROW)
@@ -2500,13 +2553,6 @@ def render():
         return v if isinstance(v, dict) else {}
 
     def _paint_strip():
-        hdr = _mapping("options:header")
-        vix_lbl.text = fmt_price(hdr.get("vix"))
-        band = (hdr.get("vix_regime") or {}).get("label", "")
-        vix_badge.text = band
-        vix_badge.classes(remove=_ALL_VIX_BG,
-                          add=_hdr.regime_badge_class(band))
-
         reg = regime_display(_view("sentiment:regime"))
         regime_lbl.text = reg["word"]
         # Colour follows the direction the service committed, and ONLY when it
@@ -2539,6 +2585,10 @@ def render():
         derived = comp.get("derived")
         derived = derived if isinstance(derived, dict) else {}
         live = comp.get("live")
+
+        for _lbl, _fact in zip(band_lbls, signal_band_facts(derived)):
+            _lbl.text = _fact["value"]
+            _lbl.classes(remove=_ALL_STATE_TEXT, add=_fact["cls"])
 
         sent_arcs = _sentiment_arcs(live, snaps)
         sent_box.clear()

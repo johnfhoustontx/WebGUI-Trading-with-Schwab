@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-24</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -445,7 +445,7 @@ structure · what should I act on · what am I holding.</em></p>
 <tbody>
 <tr>
 <td><strong>Top strip</strong></td>
-<td>Clock, <strong>VIX</strong> and its band, the <strong>market regime</strong> word, and two dials showing <strong>Day / Week / Month</strong> for sentiment and trend</td>
+<td>Clock, two dials showing <strong>Day / Week / Month</strong> for sentiment and trend, then <strong>Bias</strong> (Long / Neutral / Cautious / Short), <strong>Signal</strong> (Strong Bull … Strong Bear) and the <strong>market regime</strong> word</td>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
@@ -497,9 +497,13 @@ you.</p>
 <li><strong>Flow alerts say "call" or "put", never "bought" or "sold".</strong> Schwab publishes
   no time-and-sales tape, so nobody — including this app — can honestly tell you
   which side initiated.</li>
-<li><strong>The top strip shows VIX but not SPX or QQQ.</strong> Those sit in the panel directly
+<li><strong>The top strip shows no prices at all.</strong> SPX and QQQ sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
-  could briefly display two different prices for the same symbol.</li>
+  could briefly display two different prices for the same symbol. (VIX used to be
+  the one exception; Bias and Signal took its tile on 2026-08-24.)</li>
+<li><strong>Bias and Signal can look like the same word said twice.</strong> They are two reads of
+  one number: Bias is how to be <em>positioned</em>, Signal is how <em>strong</em> the reading is.
+  A dash in either means the sentiment service has not published — not "Neutral".</li>
 <li><strong>The Desk goes silent on a fresh tab, and an <em>Enable spoken alerts</em> button
   appears.</strong> Browsers refuse to play audio until you have interacted with the page,
   and they refuse silently — nothing is logged and no error is shown. That button is
