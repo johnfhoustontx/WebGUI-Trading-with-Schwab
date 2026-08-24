@@ -90,6 +90,12 @@ class TestCoverage:
                    if not th.help_for(cmd)]
         assert missing == []
 
+    def test_the_recommendation_tiles_are_explained(self):
+        """The Position card now LEADS with an action, so the two tiles that
+        qualify it have to carry their own explanation."""
+        for key in ("recommendation", "confidence"):
+            assert th.help_for(key), key
+
     def test_every_dealer_stat_is_explained(self):
         rows = ("Gamma regime", "Setup", "Flip", "Call wall", "Put wall",
                 "ATM IV")

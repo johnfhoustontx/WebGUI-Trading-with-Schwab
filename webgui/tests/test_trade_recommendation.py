@@ -1,0 +1,163 @@
+"""The Position card's recommendation.
+
+The card used to lead with a RANK and refuse to name an action, because the
+measured edge is thin. It now leads with the action the user asked for — so the
+honesty has to move into the recommendation rather than disappear with the
+rank: a confidence word derived from the band's own hit rate, the exposure
+caveat, and the rank retained as an informational line underneath.
+
+The thing these tests exist to prevent is a confident green BUY over a coin
+flip, and a "Sell short" on a side the tape never cleared.
+"""
+import pytest
+
+from pages import terminal_theme as T
+from pages import trade_terminal as tt
+
+
+def _a(verdict="BUY", pct=90, hit=0.5268, exp=0.0157, state="cleared",
+       side="long", action="debit", structure="call debit spread",
+       risk_share=0.476, **kw):
+    """An analysis payload shaped like the live one."""
+    out = {
+        "symbol": "MU",
+        "swing_model": {"verdict": verdict, "percentile": pct, "hit_rate": hit,
+                        "expected_fwd": exp, "horizon_days": 20,
+                        "risk_share": risk_share},
+        "direction_clearance": {
+            "long": {"state": state if side == "long" else "cleared",
+                     "reasons": []},
+            "short": {"state": state if side == "short" else "relative_only",
+                      "reasons": ["SPY above a rising 200-DMA"]}},
+        "trade_plan": {"side": side, "action": action, "structure": structure},
+    }
+    out.update(kw)
+    return out
+
+
+class TestTheActionIsTheHeadline:
+    def test_a_cleared_long_says_buy(self):
+        r = tt.recommendation(_a())
+        assert r["action"] == "Buy"
+        assert r["action_class"] == T.POS
+
+    def test_a_cleared_short_says_sell_short(self):
+        r = tt.recommendation(_a(verdict="SELL", pct=10, side="short",
+                                 state="cleared", hit=0.4377))
+        assert r["action"] == "Sell short"
+        assert r["action_class"] == T.NEG
+
+    def test_a_relative_only_short_does_NOT_say_sell_short(self):
+        """The trap. A bottom-band name is predicted to LAG the index, not to
+        fall, and the tape has refused a directional short — rendering that as
+        "Sell short" is the single most expensive thing this card could do."""
+        r = tt.recommendation(_a(verdict="SELL", pct=10, side="short",
+                                 state="relative_only", hit=0.4377))
+        assert "short" not in r["action"].lower() or "pair" in r["action"].lower()
+        assert r["action_class"] == T.WARN
+        assert "s&p" in r["detail"].lower() or "index" in r["detail"].lower()
+
+    def test_a_relative_only_long_says_pair_it(self):
+        r = tt.recommendation(_a(state="relative_only"))
+        assert "pair" in r["action"].lower()
+        assert r["action_class"] == T.WARN
+
+    def test_a_blocked_short_says_stand_aside(self):
+        r = tt.recommendation(_a(verdict="SELL", pct=10, side="short",
+                                 state="blocked", action="none"))
+        assert r["action"] == "Stand aside"
+        assert r["action_class"] == T.OFF
+
+    def test_the_middle_band_says_no_trade_rather_than_hold(self):
+        """"Hold" reads as advice about a position you own. The model has no
+        opinion here at all, which is a different statement."""
+        r = tt.recommendation(_a(verdict="HOLD", pct=50, side=None,
+                                 action="none", structure=None))
+        assert r["action"] == "No trade"
+        assert r["action_class"] == T.DIM
+
+    def test_no_model_reading_declines_to_recommend(self):
+        r = tt.recommendation({"symbol": "X"})
+        assert r["action"] == "No recommendation"
+        assert r["action_class"] == T.OFF
+        assert r["rank_line"] == ""
+
+    def test_it_never_raises_on_a_partial_payload(self):
+        for payload in ({}, None, {"swing_model": {}},
+                        {"swing_model": {"verdict": "BUY"}},
+                        {"swing_model": {"verdict": "BUY"}, "trade_plan": {}}):
+            assert tt.recommendation(payload)["action"]
+
+
+class TestTheDetailSaysWhatToDo:
+    def test_a_cleared_long_names_the_structure_from_the_plan(self):
+        r = tt.recommendation(_a(structure="call debit spread"))
+        assert "call debit spread" in r["detail"]
+
+    def test_a_credit_action_reads_as_selling_premium(self):
+        r = tt.recommendation(_a(action="credit",
+                                 structure="put credit spread"))
+        assert "put credit spread" in r["detail"]
+
+    def test_a_missing_structure_still_gives_an_instruction(self):
+        r = tt.recommendation(_a(structure=None, action="none"))
+        assert len(r["detail"]) > 20
+
+
+class TestConfidenceIsHonest:
+    """The card now names an action, so it has to name how well that action has
+    worked. The hit rate is "how often this band beat the S&P", so the edge is
+    its DISTANCE from a coin flip — which for a short band means a LOW hit rate
+    is a strong reading, not a weak one."""
+
+    def test_a_top_band_near_a_coin_flip_reads_low(self):
+        assert tt.recommendation(_a(hit=0.5268))["confidence"] == "Low"
+
+    def test_a_bottom_band_lagging_often_is_NOT_penalised_for_it(self):
+        r = tt.recommendation(_a(verdict="SELL", pct=10, side="short",
+                                 state="cleared", hit=0.4377))
+        assert r["confidence"] == "Moderate"
+
+    def test_a_true_coin_flip_reads_very_low(self):
+        assert tt.recommendation(_a(hit=0.502))["confidence"] == "Very low"
+
+    def test_the_confidence_note_states_the_actual_hit_rate(self):
+        note = tt.recommendation(_a(hit=0.5268))["confidence_note"]
+        assert "53%" in note
+
+    def test_an_unknown_hit_rate_does_not_invent_confidence(self):
+        r = tt.recommendation(_a(hit=None))
+        assert r["confidence"] == "Unknown"
+        assert "%" not in r["confidence_note"]
+
+
+class TestTheRankSurvivesAsInformation:
+    def test_the_rank_line_carries_the_band_and_the_calibrated_stats(self):
+        line = tt.recommendation(_a())["rank_line"]
+        assert "90th" in line
+        assert "+1.6%" in line
+        assert "53%" in line
+
+    def test_the_rank_line_does_not_claim_a_rank_among_todays_names(self):
+        line = tt.recommendation(_a())["rank_line"].lower()
+        assert "percentile" not in line
+        assert "cross-section" not in line
+
+    def test_an_unranked_reading_has_no_rank_line(self):
+        assert tt.recommendation(_a(pct=None, hit=None, exp=None))["rank_line"] == ""
+
+
+class TestTheCaveatTravelsWithTheRecommendation:
+    def test_the_exposure_share_is_disclosed_on_the_recommendation(self):
+        """It used to sit on the Evidence screen. A card that only ranked could
+        afford that; a card that says "Buy" cannot."""
+        assert "48%" in tt.recommendation(_a(risk_share=0.476))["caveat"]
+
+    def test_an_unknown_share_says_nothing_rather_than_implying_zero(self):
+        assert tt.recommendation(_a(risk_share=None))["caveat"] == ""
+
+    def test_a_no_trade_recommendation_carries_no_exposure_caveat(self):
+        """There is no exposure to caveat when nothing is being recommended."""
+        r = tt.recommendation(_a(verdict="HOLD", pct=50, side=None,
+                                 action="none", structure=None))
+        assert r["caveat"] == ""

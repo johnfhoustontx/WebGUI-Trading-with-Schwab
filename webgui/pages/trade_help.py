@@ -549,6 +549,29 @@ _GENERAL = {
         "regime read. The result is the pair of chips beside this line — one "
         "for the long side, one for the short side. Hover either for what it "
         "means."),
+    "recommendation": (
+        "What to do about this stock over the next few weeks, and how much "
+        "weight to put on it.\n\n"
+        "The action combines two separate things: the model's ranking of this "
+        "name, and whether the broad market permits acting on it directly. "
+        "That is why a name the model ranks at the very bottom can still "
+        "read 'Pair short' rather than 'Sell short' — the model "
+        "predicts the stock will LAG the index, which in a rising market "
+        "can still mean it goes up.\n\n"
+        "The confidence chip beside it is not decoration. Read the two "
+        "together: an action with Very low confidence is a tilt worth a "
+        "small position, not a conviction trade."),
+    "confidence": (
+        "How well this band has actually worked, from its own history.\n\n"
+        "It is the distance from a coin flip, not the raw percentage — "
+        "so a band that beat the index only 44% of the time is a STRONG "
+        "reading on the short side, not a weak one. Moderate means the "
+        "band was at least 5 percentage points away from 50/50; Low "
+        "means at least 2; Very low means the historical outcome is "
+        "within noise of a coin flip.\n\n"
+        "Even Moderate is a small edge by everyday standards. It shows "
+        "up across many trades, not in any single one, which is why "
+        "sizing matters more here than picking."),
     "position_panel": (
         "A ranking for a holding period of roughly one to eight weeks, from a "
         "model fitted and tested on five years of history.\n\n"

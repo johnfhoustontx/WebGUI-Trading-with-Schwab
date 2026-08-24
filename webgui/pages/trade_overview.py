@@ -52,23 +52,44 @@ def _build(state, refs):
                     ui.label("1–8 weeks").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("validated factor model").classes(T.SUBTLE)
 
-            with ui.column().classes("w-full gap-[11px]"):
-                with ui.row().classes("items-baseline gap-[10px] flex-wrap"):
-                    pctl = ui.label("").classes(T.BIG_NUM)
-                    pctl_note = ui.label("").classes("text-[13px] text-[#8b9bb4]")
-                pctl_stats = ui.label("").classes(f"{T.MONO} text-[12.5px] text-[#7d8db0]")
-                with pctl_stats:
-                    sh.tip(th.help_for("band_stats"))
+            # ── the recommendation: what to DO ──────────────────────────
+            with ui.column().classes("w-full gap-[9px]"):
+                with ui.label("RECOMMENDATION").classes(T.EYEBROW):
+                    sh.tip(th.help_for("recommendation"))
+                with ui.row().classes("items-center gap-[13px] flex-wrap"):
+                    rec_action = ui.label("").classes(
+                        "text-[30px] font-extrabold leading-none "
+                        "tracking-[-0.02em]")
+                    rec_conf = ui.label("").classes(
+                        f"{T.CHIP_BASE} text-[10.5px] tracking-[0.11em] "
+                        "px-[11px] py-[3px]")
+                    with rec_conf:
+                        sh.tip(th.help_for("confidence"))
+                rec_detail = ui.label("").classes(
+                    "text-[13px] leading-[1.6] text-[#cfdaee]")
+                rec_caveat = ui.row().classes(f"{T.CALLOUT} w-full")
 
-                # The decile rail: a red→neutral→green ground with a marker.
+            # ── the ranking, kept as information ────────────────────────
+            with ui.column().classes(f"w-full gap-[7px] pt-[13px] {T.RULE}"
+                                     .replace("border-b", "border-t")):
+                with ui.row().classes("w-full items-baseline justify-between "
+                                      "gap-3 flex-wrap"):
+                    with ui.label("RANKING").classes(T.EYEBROW):
+                        sh.tip(th.help_for("band_rail"))
+                    rank_line = ui.label("").classes(
+                        f"{T.MONO} text-[12px] text-[#7d8db0]")
+                    with rank_line:
+                        sh.tip(th.help_for("band_stats"))
+
+                # The band rail: a red→neutral→green ground with a marker.
                 with ui.element("div").classes(
-                        "relative h-[7px] w-full rounded-[4px] mt-[3px] "
+                        "relative h-[6px] w-full rounded-[4px] mt-[2px] "
                         "bg-[linear-gradient(90deg,#b4404f_0%,#4a4a63_46%,#2fa87a_100%)]"
                 ) as rail:
                     marker = ui.element("div").classes(
                         "absolute -top-1 -bottom-1 w-[3px] rounded-[2px] "
                         "bg-white shadow-[0_0_10px_rgba(255,255,255,0.6)] left-1/2")
-                with ui.row().classes("w-full justify-between text-[10.5px] "
+                with ui.row().classes("w-full justify-between text-[10px] "
                                       "text-[#56678a]"):
                     # Not "decile" — there are five bands, and they are cut from
                     # the model's own score history, not from today's names.
@@ -139,11 +160,24 @@ def _build(state, refs):
                     sh.tip(th.clearance_help(
                         c["side"], (clearance.get(c["side"]) or {}).get("state")))
 
+        # The recommendation leads; the rank is the informational line under it.
+        rec = tt.recommendation(a)
+        rec_action.text = rec["action"]
+        rec_action.classes(remove=T.STATE_TEXT, add=rec["action_class"])
+        rec_conf.text = f"{rec['confidence'].upper()} CONFIDENCE"
+        rec_conf.classes(remove=_CONF_CHIPS,
+                         add=_conf_chip(rec["confidence"]))
+        rec_detail.text = rec["detail"]
+        rec_caveat.clear()
+        rec_caveat.set_visibility(bool(rec["caveat"]))
+        if rec["caveat"]:
+            with rec_caveat:
+                ui.label("⚠").classes("text-[13px] text-[#fbbf24]")
+                ui.label(rec["caveat"]).classes(T.CALLOUT_TEXT)
+
         rail_vals = tt.percentile_rail(sm)
-        pctl.text = rail_vals["percentile"]
-        pctl_note.text = rail_vals["note"]
+        rank_line.text = rec["rank_line"] or rail_vals["note"]
         rail_tip.text = rail_vals["tip"]
-        pctl_stats.text = rail_vals["stats"]
         marker.classes(remove="left-1/2", add=f"left-[{rail_vals['pos_pct']:.1f}%]")
 
         side_cards.clear()
@@ -155,8 +189,9 @@ def _build(state, refs):
 
         head = swing_headline(sm) if sm else None
         pos_foot.text = (
-            "The model predicts 20-day excess return vs SPY — a ranked tilt, "
-            "not a trade call." if head else
+            "The model predicts 20-day return versus SPY, so every "
+            "recommendation here is relative to the index rather than a call "
+            "on the stock's own direction." if head else
             "No validated model reading; the legacy heuristic is in use.")
 
         iv = a.get("investor_verdict") or {}
@@ -239,6 +274,17 @@ def _build(state, refs):
                 _peer_card(p, a.get("symbol"))
 
     paint.append(_paint)
+
+
+# Confidence maps to the chip palette from a KNOWN finite set — the repo's rule
+# for any data-driven colour.
+_CONF_CHIP = {"Moderate": T.CHIP_POS, "Low": T.CHIP_WARN,
+              "Very low": T.CHIP_NEG, "Unknown": T.CHIP_OFF}
+_CONF_CHIPS = " ".join(dict.fromkeys(" ".join(_CONF_CHIP.values()).split()))
+
+
+def _conf_chip(word):
+    return _CONF_CHIP.get(word, T.CHIP_OFF)
 
 
 _MARK_BG = {"put_wall": "bg-[#f87171]", "flip": "bg-[#8b9bb4]",
