@@ -281,7 +281,7 @@ def swing_tilt(sm):
 
 
 def swing_headline(sm):
-    """Ranked-tilt headline + calibrated outcome line for the Position card, or None.
+    """Ranked-tilt headline + calibrated outcome line for the Short Term card, or None.
 
     ``tilt``/``tone`` are the ranked read (see :func:`swing_tilt`); ``line`` summarizes
     the calibrated outcome (expected forward EXCESS return vs SPY over the horizon +
@@ -794,7 +794,7 @@ def render():
 
     def _fill_verdict_card(card, title, verdict, sm=None, lic=None):
         # Refill a PERSISTENT verdict card in place (clear+rebuild its contents).
-        # When a validated swing model is present (Position card only) it is the ONLY
+        # When a validated swing model is present (Short Term card only) it is the ONLY
         # Position voice: a ranked TILT + a "Why — validated factors" evidence expander,
         # with the legacy heuristic tucked into a collapsed "Legacy heuristic" expander.
         # Without it the card falls back to the legacy body.

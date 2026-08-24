@@ -1,7 +1,7 @@
 """Signal Desk — Overview.
 
 Market state and its gate chips, the Position rank on a decile rail with a
-per-side gate card each, the Investor verdict over centred factor bars, the
+per-side gate card each, the Long Term verdict over centred factor bars, the
 dealer ladder with its volatility stats, and where the name sits among peers.
 
 Widgets only: values come from ``trade_terminal``, classes from
@@ -47,7 +47,7 @@ def _build(state, refs):
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    with ui.label("Position").classes(T.PANEL_TITLE):
+                    with ui.label("Short Term").classes(T.PANEL_TITLE):
                         sh.tip(th.help_for("position_panel"))
                     ui.label("1–8 weeks").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("validated factor model").classes(T.SUBTLE)
@@ -107,7 +107,7 @@ def _build(state, refs):
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    with ui.label("Investor").classes(T.PANEL_TITLE):
+                    with ui.label("Long Term").classes(T.PANEL_TITLE):
                         sh.tip(th.help_for("investor_panel"))
                     ui.label("months+").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("fundamentals + relative strength").classes(T.SUBTLE)
@@ -195,7 +195,9 @@ def _build(state, refs):
             "No validated model reading; the legacy heuristic is in use.")
 
         iv = a.get("investor_verdict") or {}
-        verdict.text = (iv.get("verdict") or "—").upper()
+        # Sentence case, matching the recommendation beside it — see
+        # `trade_terminal.verdict_word`.
+        verdict.text = tt.verdict_word(iv.get("verdict"))
         verdict.classes(remove=" ".join(
             ["text-[#2e7d32]", "text-[#c62828]", "text-[#f9a825]"]),
             add=verdict_text_class(iv.get("verdict")))

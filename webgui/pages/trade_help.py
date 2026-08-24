@@ -279,7 +279,7 @@ _FACTORS = {
         "How the stock's whole sector is doing, independent of the stock.\n\n"
         "Sector moves explain a large share of any single stock's move, so a "
         "great name in a sinking sector is swimming against a current. A "
-        "sector in a confirmed downtrend caps the Investor verdict at Hold "
+        "sector in a confirmed downtrend caps the Long Term verdict at Hold "
         "outright."),
     # Investor (months+) factors
     "valuation": (
@@ -302,7 +302,7 @@ _FACTORS = {
         "This one can never score, for any stock. Schwab's data feed does not "
         "publish earnings surprises or company guidance, so both of its "
         "inputs are permanently missing and it contributes exactly zero — "
-        "which means 15 of the Investor score's 100 points are unreachable "
+        "which means 15 of the Long Term score's 100 points are unreachable "
         "before any company is examined. That is why a decent business can "
         "show a middling score here."),
     "rs_vs_spy": (
@@ -320,7 +320,7 @@ _FACTORS = {
 
 
 def factor_help(key):
-    """Explain one model or Investor factor by its engine key."""
+    """Explain one model or Long Term factor by its engine key."""
     return _FACTORS.get((key or "").strip().lower(), "")
 
 
@@ -584,7 +584,8 @@ _GENERAL = {
         "A verdict for a holding period of months or longer, built from the "
         "company's fundamentals and how the stock has performed against the "
         "market and its sector.\n\n"
-        "Unlike the Position card beside it, this is not a backtested model — "
+        "Unlike the Short Term card beside it, this is not a backtested "
+        "model — "
         "it is a weighted scorecard. Read it as a structured summary of the "
         "business, not as a tested prediction."),
     "investor_verdict": (

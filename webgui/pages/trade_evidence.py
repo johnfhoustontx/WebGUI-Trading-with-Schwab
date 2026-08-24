@@ -71,7 +71,7 @@ def _build(state, refs):
                         sh.tip(th.column_help(h))
             if not rows:
                 ui.label("No validated model reading for this symbol — the "
-                         "Position card is on its legacy heuristic.").classes(
+                         "Short Term card is on its legacy heuristic.").classes(
                     f"{T.NOTE} pt-3")
             for r in rows:
                 with ui.element("div").classes(

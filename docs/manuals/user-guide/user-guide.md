@@ -1014,11 +1014,15 @@ The screen itself reads top to bottom:
 
 - **Market state** with a chip per side - *long cleared*, *short relative only*, and
   so on. These are the same gates the rest of the app applies.
-- **Position (1-8 weeks)** - the cross-section percentile as a large number over a
-  **decile rail**, with the marker where this name sits between the bottom and top
-  decile, and the calibrated expectation beneath. Two cards below it say what each
-  side is permitted and why.
-- **Investor (months+)** - the verdict with its six factor scores on centred bars.
+- **Short Term (1-8 weeks)** - a **recommendation** first: an action (Buy, Buy
+  paired, Sell short, Pair short, Stand aside or No trade), a confidence chip, and
+  one line saying what to do. The action combines the model's ranking with what the
+  market permits, so a bottom-ranked name can read "Pair short" rather than "Sell
+  short" - the model predicts it will lag the S&P, not that it will fall. Beneath
+  the rule the **ranking** remains as information: the band on its rail and what
+  that band has historically been worth. Two cards below say what each side is
+  permitted and why.
+- **Long Term (months+)** - the verdict with its six factor scores on centred bars.
   A bar to the right of the middle line is a positive contribution, to the left
   negative, and a factor with no data reads **n/a** with no bar at all.
 - **Dealer positioning & volatility** - put wall, flip, spot and call wall on one

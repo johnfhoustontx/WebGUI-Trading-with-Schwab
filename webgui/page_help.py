@@ -518,23 +518,39 @@ The page reads as five numbered steps, top to bottom.
     "/trade": """
 **Trade Analyzer — the simple version**
 
-A **Buy / Hold / Sell** read on a single stock, for two horizons.
+A read on a single stock over two horizons, across **four screens** that share one
+command bar: **Overview · Evidence · Rank Board · Trade Plan**. Type a symbol and
+press Enter.
 
-- **Position (1–8 weeks)** vs **Investor (months+)** verdicts, side by side.
-- **Position is now backtested** — instead of a hand-tuned score, it ranks the
-  stock on factors that were *tested against real forward returns*, then places it in
-  a **calibrated band**. The headline shows what that band has historically meant:
-  an **expected return** over the next ~4 weeks — **excess vs the S&P** (how much it
-  beat or trailed the index, not the raw move) — and how often it **beat the S&P**
-  (e.g. "+1.3% excess / 20d · 52% beat-SPY"). Open **"Why — validated factors"** to see each
-  factor's pull and the model's own track record (its out-of-sample accuracy). The
-  old hand-tuned verdict is still there under **"Legacy heuristic"**.
-- **Investor (months+)** still shows a verdict with a score and its top reasons.
-- **Hard gates (⛔)** — deal-breakers that override the score.
-- **MTF alignment / Momentum / Fundamentals** — the evidence behind the verdict.
+- **Short Term (1–8 weeks)** leads with a **recommendation** — Buy, Buy paired,
+  Sell short, Pair short, Stand aside or No trade — plus one line saying what to do.
+- **The action is not just the model's opinion.** It combines the model's ranking
+  with whether the broad market permits acting on it. That is why a stock the model
+  ranks at the very bottom can read **"Pair short"** rather than "Sell short": the
+  model predicts the stock will **lag the S&P**, and in a rising market a stock can
+  lag and still go up.
+- **Read the confidence chip with the action.** It is how far the stock's band sits
+  from a coin flip, historically. Even *Moderate* is a small edge — it argues about
+  how big a position to take, not about how sure you should feel.
+- **The amber line** says how much of the model's weight sits on volatility factors.
+  When that is high, the ranking is partly a bet on the market rather than on the
+  company.
+- **The ranking** is still there, below the rule: which of five bands the stock is
+  in, what that band has historically returned versus the S&P, and how often it beat
+  it. **Bands are cut from the model's own five-year history, not from today's
+  names**, so on any given day they fill unevenly.
+- **Long Term (months+)** is a Buy / Hold / Sell scorecard from the company's
+  fundamentals and its strength against the market and its sector. It is *not*
+  backtested. **"Earnings trajectory" always reads "not published by Schwab"** —
+  that data simply is not in the feed, which costs the score 15 of its 100 points
+  for every stock.
+- **Hover anything you do not recognise.** Every tile explains itself.
+- **Evidence** shows each factor's pull and the model's own track record;
+  **Rank Board** ranks the whole universe with its safety checks showing;
+  **Trade Plan** turns a cleared read into a structure, an entry zone and a time
+  stop.
 - **Deep Dive** opens a full technical + fundamental + options report in a new tab;
-  **AI Query** opens the same digest as a chat prompt you can copy.
-- Type a symbol and press **Analyze** (tabbing out of the field does it too).
+  **AI Query** opens a written second opinion. Both need pop-ups allowed.
 """,
     "/portfolio": """
 **Portfolio — the simple version**
