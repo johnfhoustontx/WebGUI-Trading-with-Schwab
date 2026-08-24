@@ -568,9 +568,11 @@ press Enter.
   names**, so on any given day they fill unevenly.
 - **Long Term (months+)** is a Buy / Hold / Sell scorecard from the company's
   fundamentals and its strength against the market and its sector. It is *not*
-  backtested. **"Earnings trajectory" always reads "not published by Schwab"** —
-  that data simply is not in the feed, which costs the score 15 of its 100 points
-  for every stock.
+  backtested. **"Earnings trajectory" scores the last four quarters of earnings
+  surprises** — four clear beats is the strongest reading, a miss in the most
+  recent quarter the weakest. That history comes from Alpha Vantage; Schwab's
+  feed carries none, which is why the row scored zero for every stock until that
+  source was added.
 - **Hover anything you do not recognise.** Every tile explains itself.
 - **Evidence** shows each factor's pull and the model's own track record;
   **Rank Board** ranks the whole universe with its safety checks showing;

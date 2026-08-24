@@ -3285,14 +3285,19 @@ the rail for that explanation in the app. The two side cards state what the tape
 permits per side.</p>
 <p><strong>Long Term</strong> puts its six factors on the same centred bar language used on the
 Evidence screen - right of centre is a positive contribution. A factor the engine did
-not return reads <code>n/a</code> with no bar, never a zero-length one. <strong>Earnings trajectory is
-a special case and always reads "not published by Schwab".</strong> Schwab's fundamentals
-payload carries 56 fields and neither earnings surprises nor company guidance, so both
-of that component's inputs are missing and it contributes exactly 0 for every symbol -
-15 of the score's 100 points are off the table before any stock is examined. Free cash
-flow is absent for the same reason, so the check that would cap a stock at HOLD on
-negative cash flow can never fire. Read a middling Long Term score against what could
-have contributed, not as a verdict on the company.</p>
+not return reads <code>n/a</code> with no bar, never a zero-length one.</p>
+<p><strong>Earnings trajectory scores the last four quarters of earnings surprises.</strong> Four
+clear beats in a row is the strongest reading; a miss in the most recent quarter is
+the weakest, whatever came before it. That history comes from <strong>Alpha Vantage</strong>, not
+Schwab - Schwab's fundamentals payload carries 56 fields and no surprises at all,
+which is why this row contributed exactly 0 for every stock until that source was
+wired in. Forward guidance is still unavailable from any source here, so the
+component scores on the surprise record alone rather than averaging in a permanent
+zero, which used to halve it.</p>
+<p>A zero on that row now means what a zero means anywhere else - a genuinely mixed
+record - or that the vendor holds no history for the symbol, which the row cannot
+tell apart. Free cash flow is still absent, so the check that would cap a stock at
+HOLD on negative cash flow can never fire.</p>
 <p><strong>Dealer positioning</strong> is withheld in full when uncollected or stale. That is the
 off-hours case, and an absent ladder is the honest rendering of it.</p>
 <h3 id="when-to-open-it_2">When to open it</h3>

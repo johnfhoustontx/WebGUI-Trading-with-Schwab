@@ -2339,14 +2339,21 @@ permits per side.
 
 **Long Term** puts its six factors on the same centred bar language used on the
 Evidence screen - right of centre is a positive contribution. A factor the engine did
-not return reads `n/a` with no bar, never a zero-length one. **Earnings trajectory is
-a special case and always reads "not published by Schwab".** Schwab's fundamentals
-payload carries 56 fields and neither earnings surprises nor company guidance, so both
-of that component's inputs are missing and it contributes exactly 0 for every symbol -
-15 of the score's 100 points are off the table before any stock is examined. Free cash
-flow is absent for the same reason, so the check that would cap a stock at HOLD on
-negative cash flow can never fire. Read a middling Long Term score against what could
-have contributed, not as a verdict on the company.
+not return reads `n/a` with no bar, never a zero-length one.
+
+**Earnings trajectory scores the last four quarters of earnings surprises.** Four
+clear beats in a row is the strongest reading; a miss in the most recent quarter is
+the weakest, whatever came before it. That history comes from **Alpha Vantage**, not
+Schwab - Schwab's fundamentals payload carries 56 fields and no surprises at all,
+which is why this row contributed exactly 0 for every stock until that source was
+wired in. Forward guidance is still unavailable from any source here, so the
+component scores on the surprise record alone rather than averaging in a permanent
+zero, which used to halve it.
+
+A zero on that row now means what a zero means anywhere else - a genuinely mixed
+record - or that the vendor holds no history for the symbol, which the row cannot
+tell apart. Free cash flow is still absent, so the check that would cap a stock at
+HOLD on negative cash flow can never fire.
 
 **Dealer positioning** is withheld in full when uncollected or stale. That is the
 off-hours case, and an absent ladder is the honest rendering of it.

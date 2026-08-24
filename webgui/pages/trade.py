@@ -24,11 +24,11 @@ HOLD" only on a failed/thin fetch — a note flags that case.
 ⚠ Four Investor/Position inputs are structurally absent from that payload — verified
 live 2026-08-22, where ``fundamental`` returned 56 keys and none of these:
 
-* ``epsSurprises`` and ``guidanceDirection`` — both inputs to ``earnings_traj``, so
-  that component scores a permanent 0 and **15 of the composite's 100 points are
-  unreachable for every symbol**. This is the only one that moves the score, and it
-  moves it down; the Overview renders the row as "not published by Schwab" rather
-  than as a measured zero.
+* ``epsSurprises`` — **now supplied by Alpha Vantage** via
+  ``trade_svc.earnings_history``, so ``earnings_traj`` scores properly rather
+  than sitting at a permanent 0. ``guidanceDirection`` is still absent from
+  every source here, so the component scores on the surprise record alone
+  instead of averaging in a structural zero that halved it.
 * ``freeCashFlow`` — scores nothing either way, but its HOLD gate cannot fire.
 * ``nextEarningsDate`` — which is why the Position earnings gate never fires.
 
