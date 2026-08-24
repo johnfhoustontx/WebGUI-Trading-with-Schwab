@@ -1280,6 +1280,50 @@ def _enrich_eps_surprises(fundamentals, symbol):
     return fundamentals
 
 
+def _edgar_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import edgar_fundamentals as _ef
+    return _ef.DEFAULT_DB_PATH
+
+
+def _enrich_free_cash_flow(fundamentals, symbol):
+    """Fill ``fcf`` from SEC EDGAR filings, in place. Never raises.
+
+    Schwab publishes no cash flow, so this field was always None and the
+    Investor gate that caps a stock at HOLD on negative free cash flow paired
+    with a missed quarter could never fire. EDGAR files both components, so
+    the figure comes from the primary record.
+
+    It is the latest FULL FISCAL YEAR, which can be up to a year old — the
+    gate asks a structural question (does this business generate cash), and a
+    10-K year is unambiguous where stitched quarters are not. No API key and
+    no daily quota, so unlike the earnings vendor there is no budget to
+    manage."""
+    conn = None
+    try:
+        from services.trade_svc import edgar_fundamentals as _ef
+        path = _edgar_db_path()
+        # Same isolation rule as the other stores: unguarded this opens a
+        # SQLite file in the repo and issues a live request during the suite.
+        if _under_pytest() and path == _ef.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _ef.init_db(path)
+        if _ef.is_due(conn, symbol):
+            _ef.refresh(conn, symbol)
+        row = _ef.latest_fcf(conn, symbol)
+        if row is not None:
+            fundamentals.fcf = row["fcf"]
+    except Exception:
+        _degrade.degraded("trade.enrich_free_cash_flow")
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return fundamentals
+
+
 def earnings_coverage(symbol):
     """Whether the earnings calendar can speak for ``symbol`` at all.
 
@@ -1357,7 +1401,8 @@ def _fetch_fundamentals(symbol):
         return Fundamentals()
     f = _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
     f = _enrich_earnings_date(f, symbol)
-    return _enrich_eps_surprises(f, symbol)
+    f = _enrich_eps_surprises(f, symbol)
+    return _enrich_free_cash_flow(f, symbol)
 
 
 # ── sector P/E median (Phase 1) ──────────────────────────────────────────────
@@ -1428,6 +1473,7 @@ def _fundamentals_dict(f):
         # the store held 122 quarters and the payload carried none of them.
         "eps_surprises": f.eps_surprises,
         "last_eps_surprise": f.last_eps_surprise,
+        "fcf": f.fcf,
     }
 
 

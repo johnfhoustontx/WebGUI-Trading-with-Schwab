@@ -176,3 +176,59 @@ class TestEarningsTrajectoryAveragesOnlyWhatArrived:
 
     def test_no_surprise_history_and_no_guidance_scores_zero(self):
         assert self._traj(self._f(eps_surprises=None, guidance=None)) == 0
+
+
+class TestTheCashFlowGateCanFinallyFire:
+    """It never has. The gate caps a stock at HOLD when free cash flow is
+    negative AND the last quarter missed — and BOTH inputs were permanently
+    None, because Schwab publishes neither. EDGAR supplies the cash flow and
+    Alpha Vantage the surprises, so the condition is now reachable.
+
+    Micron FY2023 is the real case it exists for: operating cash flow 1.56B
+    against 7.68B of capex, free cash flow -6.12B."""
+
+    def _f(self, **kw):
+        from src.analysis.fundamentals import Fundamentals
+        base = dict(pe_ratio=12.0, peg_ratio=0.8, rev_growth_ttm=0.30,
+                    eps_growth_ttm=0.40, roe=0.25, margin_expanding=True)
+        base.update(kw)
+        return Fundamentals(**base)
+
+    def _score(self, f):
+        from src.analysis.recommendation import InvestorInputs, InvestorVerdict
+        from src.analysis.sector_strength import SectorStrength
+        return InvestorVerdict().score(InvestorInputs(
+            fundamentals=f, sector_pe_median=18.0,
+            rs_vs_spy_3m=0.9, rs_vs_spy_6m=0.9, rs_vs_spy_12m=0.9,
+            rs_vs_sector_3m=0.9, rs_vs_sector_6m=0.9, rs_vs_sector_12m=0.9,
+            sector_strength=SectorStrength(score=60, rs_3m_percentile=0.8,
+                                           sector_above_50ema=True,
+                                           in_confirmed_downtrend=False)))
+
+    def test_negative_cash_flow_plus_a_miss_caps_a_strong_score_at_hold(self):
+        out = self._score(self._f(fcf=-6_120_000_000.0,
+                                  eps_surprises=[0.10, 0.08, 0.07, -0.02],
+                                  last_eps_surprise=-0.02))
+        assert out["verdict"] == "HOLD"
+        assert any("FCF" in g for g in out["gates_triggered"])
+
+    def test_negative_cash_flow_alone_does_NOT_cap(self):
+        """Capital-intensive companies run negative free cash flow for years
+        while doing well. The gate needs BOTH halves."""
+        out = self._score(self._f(fcf=-6_120_000_000.0,
+                                  eps_surprises=[0.10, 0.08, 0.07, 0.06],
+                                  last_eps_surprise=0.06))
+        assert not any("FCF" in g for g in out["gates_triggered"])
+
+    def test_a_miss_alone_does_NOT_cap(self):
+        out = self._score(self._f(fcf=1_664_000_000.0,
+                                  eps_surprises=[0.10, 0.08, 0.07, -0.02],
+                                  last_eps_surprise=-0.02))
+        assert not any("FCF" in g for g in out["gates_triggered"])
+
+    def test_absent_cash_flow_still_cannot_fire_it(self):
+        """The state every symbol was in before EDGAR: unknown is not negative."""
+        out = self._score(self._f(fcf=None,
+                                  eps_surprises=[0.10, 0.08, 0.07, -0.02],
+                                  last_eps_surprise=-0.02))
+        assert not any("FCF" in g for g in out["gates_triggered"])
