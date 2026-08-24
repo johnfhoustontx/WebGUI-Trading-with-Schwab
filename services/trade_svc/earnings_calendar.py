@@ -157,14 +157,32 @@ def lookup(conn, symbol, as_of=None):
     """The symbol's NEXT scheduled report on/after ``as_of``, or None.
 
     A symbol carries several scheduled quarters; the gate cares about the next
-    one. A date already past is never returned as upcoming."""
+    one. A date already past is never returned as upcoming.
+
+    ⚠ Reads through a CURSOR carrying its own ``row_factory`` rather than
+    ``conn.execute``, so the result is a name-indexable row no matter how the
+    caller opened the store. It used to inherit the connection's factory, and
+    every reader here indexes by column name — so a caller who opened the file
+    with a plain ``sqlite3.connect`` got ``TypeError`` on ``row["report_date"]``,
+    which ``days_to_earnings`` swallowed into ``None``. That renders as "no
+    earnings scheduled" for EVERY symbol, which is a confident answer over a
+    working 1,808-row calendar, and it is indistinguishable on screen from an
+    empty one. A cursor factory overrides the connection's, so this is correct
+    even against a connection configured some other way."""
     as_of = as_of or dt.date.today()
     try:
-        return conn.execute(
+        cur = conn.cursor()
+        cur.row_factory = sqlite3.Row
+        return cur.execute(
             "SELECT * FROM earnings WHERE symbol = ? AND report_date >= ? "
             "ORDER BY report_date ASC LIMIT 1",
             ((symbol or "").strip().upper(), as_of.isoformat())).fetchone()
     except Exception:
+        # A read failure here is genuinely unknown-not-absent, and the callers
+        # distinguish those (see `coverage`). Logged rather than silent, so a
+        # broken store cannot masquerade as an empty calendar again.
+        logger.warning("earnings_calendar.lookup failed for %s", symbol,
+                       exc_info=True)
         return None
 
 
@@ -192,6 +210,11 @@ def coverage(conn, symbol, as_of=None):
             ((symbol or "").strip().upper(),)).fetchone()
         return "none_scheduled" if row else "not_listed"
     except Exception:
+        # "not_listed" is the honest answer here — it already means "we do NOT
+        # know" — but a read failure reaching it silently is how this function
+        # would come to describe a broken store as a patchy vendor.
+        logger.warning("earnings_calendar.coverage failed for %s", symbol,
+                       exc_info=True)
         return "not_listed"
 
 

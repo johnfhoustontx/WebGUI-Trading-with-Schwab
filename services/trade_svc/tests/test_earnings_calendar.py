@@ -197,3 +197,65 @@ class TestCoverageIsDistinctFromAbsence:
             assert ec.coverage(c, "AAPL") == "not_listed"
         finally:
             ec.close_db(c)
+
+
+class TestTheReadPathDoesNotDependOnTheCALLERSConnection:
+    """Found in prod 2026-08-23. `lookup` used `conn.execute`, which inherits
+    the CONNECTION's row factory, and the readers index the result by column
+    name. A caller who opened the store with a plain `sqlite3.connect` — no
+    row factory — made `row["report_date"]` raise TypeError, which
+    `days_to_earnings` then swallowed into None.
+
+    The failure is silent and total: every symbol reports "no earnings", which
+    is indistinguishable from a calendar that simply has nothing scheduled. It
+    briefly convinced me a working 1,808-row calendar was empty.
+
+    `init_db` does set the factory, so production was never affected — but a
+    read path that only works when the caller configured the connection
+    correctly is a trap, and the guard turned that trap into a plausible
+    answer instead of an error.
+    """
+
+    @pytest.fixture()
+    def db_path(self, tmp_path):
+        c = ec.init_db(tmp_path / "ec.db")
+        ec.store_calendar(c, ec.parse_calendar(_CSV))
+        c.close()
+        return tmp_path / "ec.db"
+
+    def _raw(self, db_path):
+        """A connection opened the way a caller reasonably might — and the way
+        I did, which is what exposed this."""
+        import sqlite3
+        return sqlite3.connect(str(db_path))
+
+    def test_days_to_earnings_works_without_a_row_factory(self, db_path):
+        conn = self._raw(db_path)
+        got = ec.days_to_earnings(conn, "NVDA", as_of=dt.date(2026, 8, 23))
+        assert got == 3
+
+    def test_lookup_works_without_a_row_factory(self, db_path):
+        row = ec.lookup(self._raw(db_path), "NVDA", as_of=dt.date(2026, 8, 23))
+        assert row is not None
+        assert row["report_date"] == "2026-08-26"
+
+    def test_coverage_works_without_a_row_factory(self, db_path):
+        assert ec.coverage(self._raw(db_path), "NVDA",
+                           as_of=dt.date(2026, 8, 23)) == "upcoming"
+
+    def test_it_agrees_with_a_properly_configured_connection(self, db_path):
+        """The two must not disagree — that is the whole point."""
+        good = ec.init_db(db_path)
+        raw = self._raw(db_path)
+        for sym in ("NVDA", "AAPL", "CHWY", "ZZZZ"):
+            assert (ec.days_to_earnings(good, sym, as_of=dt.date(2026, 8, 23))
+                    == ec.days_to_earnings(raw, sym, as_of=dt.date(2026, 8, 23)))
+
+    def test_a_genuinely_absent_symbol_is_still_None(self, db_path):
+        """The fix must not turn "no idea" into a number."""
+        assert ec.days_to_earnings(self._raw(db_path), "ZZZZ",
+                                   as_of=dt.date(2026, 8, 23)) is None
+
+    def test_a_report_TODAY_is_still_zero_not_None(self, db_path):
+        assert ec.days_to_earnings(self._raw(db_path), "NVDA",
+                                   as_of=dt.date(2026, 8, 26)) == 0
