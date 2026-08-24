@@ -161,3 +161,79 @@ class TestTheCaveatTravelsWithTheRecommendation:
         r = tt.recommendation(_a(verdict="HOLD", pct=50, side=None,
                                  action="none", structure=None))
         assert r["caveat"] == ""
+
+
+class TestTheTwoHeadlinesShareOneCasing:
+    """The Short Term card said "Buy" and the Long Term card said "BUY" — the
+    same word, two conventions, side by side on one screen.
+
+    Sentence case wins because only one of the two is a single word: the
+    recommendation carries phrases ("Pair short", "Stand aside", "No
+    recommendation"), and those set in caps at 30px read as shouting and wrap.
+    """
+
+    def test_the_long_term_verdict_is_sentence_case(self):
+        assert tt.verdict_word("BUY") == "Buy"
+        assert tt.verdict_word("sell") == "Sell"
+        assert tt.verdict_word("Hold") == "Hold"
+
+    def test_an_absent_verdict_is_a_dash_not_an_empty_headline(self):
+        assert tt.verdict_word(None) == "—"
+        assert tt.verdict_word("") == "—"
+
+    def test_both_cards_agree_on_the_word_for_the_same_call(self):
+        assert tt.recommendation(_a())["action"] == tt.verdict_word("BUY")
+
+    def test_neither_headline_shouts(self):
+        """The rule, stated so a future edit to either card trips it."""
+        words = [tt.verdict_word(v) for v in ("BUY", "HOLD", "SELL")]
+        words += [tt.recommendation(_a(**kw))["action"] for kw in (
+            {},
+            {"state": "relative_only"},
+            {"verdict": "SELL", "pct": 10, "side": "short",
+             "state": "cleared", "hit": 0.4377},
+            {"verdict": "SELL", "pct": 10, "side": "short",
+             "state": "relative_only", "hit": 0.4377},
+            {"verdict": "SELL", "pct": 10, "side": "short",
+             "state": "blocked", "action": "none"},
+        )]
+        shouted = [w for w in words if len(w) > 3 and w == w.upper()]
+        assert shouted == [], shouted
+
+
+class TestTheRenameIsComplete:
+    """A half-done rename is the failure mode: the panel title changes and the
+    prose around it keeps naming the old one, so the page contradicts its own
+    tooltips and the nav guide."""
+
+    def _src(self, rel):
+        import pathlib as _p
+        return (_p.Path(__file__).resolve().parents[1]
+                / rel).read_text(encoding="utf-8")
+
+    def test_the_overview_panels_carry_the_new_titles(self):
+        src = self._src("pages/trade_overview.py")
+        assert 'ui.label("Short Term")' in src
+        assert 'ui.label("Long Term")' in src
+        assert 'ui.label("Position")' not in src
+        assert 'ui.label("Investor")' not in src
+
+    def test_no_user_facing_string_still_says_the_old_card_names(self):
+        """Engine keys (`position_verdict`, `investor_verdict`) and the dead
+        legacy page keep their names — this checks the PROSE."""
+        import re
+        for rel in ("pages/trade_overview.py", "pages/trade_evidence.py",
+                    "pages/trade_help.py"):
+            src = self._src(rel)
+            for m in re.finditer(r'"([^"]*(?:Position|Investor)[^"]*)"', src):
+                s = m.group(1)
+                assert "_" in s, (rel, s)      # an engine key, not prose
+
+    def test_the_nav_guide_describes_the_screens_that_exist(self):
+        src = self._src("page_help.py")
+        i = src.index('"/trade": """')
+        guide = src[i:src.index('"""', i + 20)]
+        assert "Short Term" in guide and "Long Term" in guide
+        # The guide described the pre-Signal-Desk single page for months.
+        assert "Legacy heuristic" not in guide
+        assert "Rank Board" in guide

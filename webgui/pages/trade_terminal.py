@@ -151,6 +151,18 @@ def percentile_rail(swing):
     }
 
 
+def verdict_word(verdict):
+    """A BUY/HOLD/SELL verdict as a headline word, in SENTENCE case.
+
+    The two headline cards on the Overview sit side by side, and one of them
+    carries PHRASES rather than single words — "Pair short", "Stand aside",
+    "No recommendation". Those set in caps at 30px shout and wrap, so sentence
+    case is the convention both cards follow. Absent renders as a dash, never
+    as an empty headline."""
+    v = (verdict or "").strip()
+    return v.capitalize() if v else "—"
+
+
 def gate_chips(clearance):
     """One chip per side, coloured by what the tape permits."""
     c = clearance or {}
@@ -315,7 +327,7 @@ def calculator_handoff(analysis):
     }
 
 
-# ── the Position card's recommendation ──────────────────────────────────────
+# ── the Short Term card's recommendation ──────────────────────────────────────
 # This card led with a RANK for most of its life, and `swing_tilt`'s docstring
 # still records why: "a coin-flip-plus-2% edge shown as a bold green BUY invites
 # over-reading". Leading with an action is a deliberate product decision, so the
@@ -398,7 +410,7 @@ def _rec_detail(side, state, action, structure):
 def recommendation(analysis):
     """What to DO, with what it is worth and what it is really betting on.
 
-    Replaces the ranked-tilt headline on the Position card. The rank survives
+    Replaces the ranked-tilt headline on the Short Term card. The rank survives
     as ``rank_line`` — informational, beneath — because it is still the honest
     description of what the model computed."""
     a = analysis or {}

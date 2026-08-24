@@ -964,7 +964,7 @@ guidance, FCF) degrade to `None`, so those gates simply never fire.
 `trade-analyzer/src/analysis/backtest.py` (IC engine) +
 `trade-analyzer/fit_swing_model.py` (offline orchestrator) +
 `trade-analyzer/data/swing_model.json` (artifact) +
-`services/trade_svc/swing_model.py` (live scorer). The **Position** verdict's
+`services/trade_svc/swing_model.py` (live scorer). The **Short Term** verdict's
 hand-weighted scoring is replaced by a **backtested, IC-weighted cross-sectional factor
 model** whose weights are learned from forward returns. Investing (months+) is deferred
 (no point-in-time fundamentals source). Architecture: **offline fit → versioned
@@ -1078,7 +1078,7 @@ step (same harness, new regime keys).
 
 **Files:** `trade-analyzer/src/analysis/markov.py` (pure math) +
 `services/trade_svc/compute.py` (reconstruction, prior, wiring). A probabilistic
-forward layer on the **Position** composite score, rendered as the third card in the
+forward layer on the **Short Term** composite score, rendered as the third card in the
 verdict row. *(It forecasts the **legacy** technical-momentum `composite_daily`, a
 separate lens from the validated swing model above — a documented coexistence.)*
 

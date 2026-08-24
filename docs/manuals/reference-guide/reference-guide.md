@@ -2305,7 +2305,7 @@ rather than a recommendation, and `SHORT RELATIVE ONLY` explains that the model
 predicts a LAG against the index rather than a fall, which is why a plain short
 on a correct read can still lose money.
 
-**Position** leads with a RECOMMENDATION - an action, a confidence chip and one
+**Short Term** leads with a RECOMMENDATION - an action, a confidence chip and one
 line saying what to do - and keeps the ranking underneath as information.
 
 **The action is not the model's verdict.** It combines the verdict with what the
@@ -2337,7 +2337,7 @@ about 15 or 16 in each. A defensive market can leave the top band nearly empty. 
 the rail for that explanation in the app. The two side cards state what the tape
 permits per side.
 
-**Investor** puts its six factors on the same centred bar language used on the
+**Long Term** puts its six factors on the same centred bar language used on the
 Evidence screen - right of centre is a positive contribution. A factor the engine did
 not return reads `n/a` with no bar, never a zero-length one. **Earnings trajectory is
 a special case and always reads "not published by Schwab".** Schwab's fundamentals
@@ -2345,7 +2345,7 @@ payload carries 56 fields and neither earnings surprises nor company guidance, s
 of that component's inputs are missing and it contributes exactly 0 for every symbol -
 15 of the score's 100 points are off the table before any stock is examined. Free cash
 flow is absent for the same reason, so the check that would cap a stock at HOLD on
-negative cash flow can never fire. Read a middling Investor score against what could
+negative cash flow can never fire. Read a middling Long Term score against what could
 have contributed, not as a verdict on the company.
 
 **Dealer positioning** is withheld in full when uncollected or stale. That is the

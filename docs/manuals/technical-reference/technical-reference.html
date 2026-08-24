@@ -1463,7 +1463,7 @@ guidance, FCF) degrade to <code>None</code>, so those gates simply never fire.</
 <code>trade-analyzer/src/analysis/backtest.py</code> (IC engine) +
 <code>trade-analyzer/fit_swing_model.py</code> (offline orchestrator) +
 <code>trade-analyzer/data/swing_model.json</code> (artifact) +
-<code>services/trade_svc/swing_model.py</code> (live scorer). The <strong>Position</strong> verdict's
+<code>services/trade_svc/swing_model.py</code> (live scorer). The <strong>Short Term</strong> verdict's
 hand-weighted scoring is replaced by a <strong>backtested, IC-weighted cross-sectional factor
 model</strong> whose weights are learned from forward returns. Investing (months+) is deferred
 (no point-in-time fundamentals source). Architecture: <strong>offline fit → versioned
@@ -1614,7 +1614,7 @@ step (same harness, new regime keys).</p>
 <h2 id="markov-20-forecast-position">Markov 2.0 forecast (Position)</h2>
 <p><strong>Files:</strong> <code>trade-analyzer/src/analysis/markov.py</code> (pure math) +
 <code>services/trade_svc/compute.py</code> (reconstruction, prior, wiring). A probabilistic
-forward layer on the <strong>Position</strong> composite score, rendered as the third card in the
+forward layer on the <strong>Short Term</strong> composite score, rendered as the third card in the
 verdict row. <em>(It forecasts the </em><em>legacy</em><em> technical-momentum <code>composite_daily</code>, a
 separate lens from the validated swing model above — a documented coexistence.)</em></p>
 <p><strong>States — 5 score bands</strong> anchored at the verdict's decision boundaries
