@@ -561,6 +561,19 @@ _GENERAL = {
         "The confidence chip beside it is not decoration. Read the two "
         "together: an action with Very low confidence is a tilt worth a "
         "small position, not a conviction trade."),
+    "investor_confidence": (
+        "How decisive this scorecard's result is — and it does NOT mean "
+        "what the confidence chip on the Short Term card means.\n\n"
+        "That one is a backtested hit rate: how often stocks in that band "
+        "actually beat the index. This card was never tested against "
+        "forward returns, so there is no hit rate to quote. What it can "
+        "say is how far the score cleared its own Buy/Sell boundary of "
+        "plus or minus 40, on the plus or minus 85 the scorecard can "
+        "actually reach — 15 of its 100 points are permanently "
+        "unreachable because Schwab publishes no earnings surprises or "
+        "guidance.\n\n"
+        "So read it as 'how clear-cut is this scorecard', not as 'how "
+        "often has this worked'."),
     "confidence": (
         "How well this band has actually worked, from its own history.\n\n"
         "It is the distance from a coin flip, not the raw percentage — "

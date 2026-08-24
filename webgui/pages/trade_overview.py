@@ -53,13 +53,15 @@ def _build(state, refs):
                 ui.label("validated factor model").classes(T.SUBTLE)
 
             # ── the recommendation: what to DO ──────────────────────────
-            with ui.column().classes("w-full gap-[9px]"):
-                with ui.label("RECOMMENDATION").classes(T.EYEBROW):
-                    sh.tip(th.help_for("recommendation"))
-                with ui.row().classes("items-center gap-[13px] flex-wrap"):
-                    rec_action = ui.label("").classes(
-                        "text-[30px] font-extrabold leading-none "
-                        "tracking-[-0.02em]")
+            # No eyebrow above the word. The card beside this one has none, and
+            # a heading over only ONE of two side-by-side headlines pushed this
+            # verdict 23px below its neighbour — measured. The explanation the
+            # eyebrow carried now hangs on the word itself.
+            with ui.column().classes(_HEAD_COL):
+                with ui.row().classes(_HEAD_ROW):
+                    rec_action = ui.label("").classes(_HEAD_WORD)
+                    with rec_action:
+                        sh.tip(th.help_for("recommendation"))
                     rec_conf = ui.label("").classes(
                         f"{T.CHIP_BASE} text-[10.5px] tracking-[0.11em] "
                         "px-[11px] py-[3px]")
@@ -112,13 +114,20 @@ def _build(state, refs):
                     ui.label("months+").classes("text-[12px] text-[#6b7b9c]")
                 ui.label("fundamentals + relative strength").classes(T.SUBTLE)
 
-            with ui.row().classes("items-baseline gap-[14px] flex-wrap"):
-                verdict = ui.label("").classes(
-                    "text-[34px] font-extrabold leading-none tracking-[-0.02em]")
-                with verdict:
-                    sh.tip(th.help_for("investor_verdict"))
-                verdict_score = ui.label("").classes(
-                    f"{T.MONO} text-[13px] text-[#7d8db0]")
+            # Same three geometry constants as the Short Term headline, so the
+            # two verdict words sit on one horizontal line.
+            with ui.column().classes(_HEAD_COL):
+                with ui.row().classes(_HEAD_ROW):
+                    verdict = ui.label("").classes(_HEAD_WORD)
+                    with verdict:
+                        sh.tip(th.help_for("investor_verdict"))
+                    inv_conf = ui.label("").classes(
+                        f"{T.CHIP_BASE} text-[10.5px] tracking-[0.11em] "
+                        "px-[11px] py-[3px]")
+                    with inv_conf:
+                        sh.tip(th.help_for("investor_confidence"))
+                    verdict_score = ui.label("").classes(
+                        f"{T.MONO} text-[13px] text-[#7d8db0]")
             inv_bars = ui.column().classes("w-full gap-[9px]")
             inv_foot = ui.label("").classes("text-[11px] leading-[1.5] "
                                             "text-[#6b7b9c] mt-auto pt-[3px]")
@@ -198,11 +207,16 @@ def _build(state, refs):
         # Sentence case, matching the recommendation beside it — see
         # `trade_terminal.verdict_word`.
         verdict.text = tt.verdict_word(iv.get("verdict"))
-        verdict.classes(remove=" ".join(
-            ["text-[#2e7d32]", "text-[#c62828]", "text-[#f9a825]"]),
-            add=verdict_text_class(iv.get("verdict")))
+        # The terminal palette, the same one the recommendation beside it uses
+        # — `pages.trade.verdict_text_class` is the OLD light-page palette and
+        # painted this word a different green from its neighbour.
+        verdict.classes(remove=T.STATE_TEXT,
+                        add=tt.verdict_class(iv.get("verdict")))
         score = fmt.num(iv.get("score"))
         verdict_score.text = f"score {score:.0f}" if score is not None else ""
+        inv_word, _inv_note = tt.investor_confidence(iv)
+        inv_conf.text = f"{inv_word.upper()} CONFIDENCE"
+        inv_conf.classes(remove=_CONF_CHIPS, add=_conf_chip(inv_word))
         inv_bars.clear()
         with inv_bars:
             for b in tt.investor_bars(iv):
@@ -277,6 +291,16 @@ def _build(state, refs):
 
     paint.append(_paint)
 
+
+# The two headline cards sit side by side, so their verdict words must sit on
+# ONE horizontal line and wear ONE colour. That holds only while the structure
+# above each word is identical — same column, same row alignment, same type
+# size — so all three are constants rather than literals repeated per card.
+# Measured before this existed: 30px against 34px, an eyebrow on one card only,
+# and the two words 23px apart.
+_HEAD_COL = "w-full gap-[9px]"
+_HEAD_ROW = "items-center gap-[13px] flex-wrap"
+_HEAD_WORD = "text-[30px] font-extrabold leading-none tracking-[-0.02em]"
 
 # Confidence maps to the chip palette from a KNOWN finite set — the repo's rule
 # for any data-driven colour.

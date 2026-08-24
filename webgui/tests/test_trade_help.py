@@ -93,7 +93,7 @@ class TestCoverage:
     def test_the_recommendation_tiles_are_explained(self):
         """The Position card now LEADS with an action, so the two tiles that
         qualify it have to carry their own explanation."""
-        for key in ("recommendation", "confidence"):
+        for key in ("recommendation", "confidence", "investor_confidence"):
             assert th.help_for(key), key
 
     def test_every_dealer_stat_is_explained(self):

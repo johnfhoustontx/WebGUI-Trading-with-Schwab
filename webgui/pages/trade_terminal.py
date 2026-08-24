@@ -163,6 +163,60 @@ def verdict_word(verdict):
     return v.capitalize() if v else "—"
 
 
+def verdict_class(verdict):
+    """Terminal-palette text class for a BUY/HOLD/SELL verdict.
+
+    NOT ``pages.trade.verdict_text_class``, whose own comment records that its
+    hexes are deliberately DARKER than the theme's — that palette belongs to
+    the old light-background page. On the Signal Desk's near-black ground it
+    rendered the Long Term "Buy" in a different green from the Short Term one
+    beside it (measured: rgb(46,125,50) against rgb(52,211,153))."""
+    v = (verdict or "").strip().upper()
+    if v == "BUY":
+        return T.POS
+    if v == "SELL":
+        return T.NEG
+    if v == "HOLD":
+        return T.WARN
+    return T.OFF
+
+
+# The Long Term verdict flips at +/-40, and only +/-85 is reachable because
+# `earnings_traj`'s 15 points can never score (Schwab publishes neither
+# earnings surprises nor guidance). So "how decisive is this" is measured
+# against the boundary it actually had to clear, on the range it actually had.
+_INV_BOUNDARY = 40.0
+_INV_REACHABLE = 85.0
+
+
+def investor_confidence(verdict):
+    """``(word, note)`` for the Long Term card's confidence chip.
+
+    ⚠ This does NOT mean what the Short Term card's confidence means. That one
+    is a backtested hit rate — how often the band beat the index. This card is
+    a weighted scorecard that was never tested against forward returns, so
+    there is no hit rate to quote; the honest reading is how decisively the
+    score cleared its own verdict boundary. The note says so, because a chip
+    reading "Moderate" beside a tested one would otherwise borrow credibility
+    it has not got.
+
+    Shares the Short Term card's four words, so one chip palette covers both."""
+    iv = verdict or {}
+    score = fmt.num(iv.get("score"))
+    if score is None or not iv.get("breakdown"):
+        return "Unknown", ("No fundamentals arrived for this symbol, so no "
+                           "reading was taken.")
+    mag = abs(score)
+    word = ("Moderate" if mag >= 60 else
+            "Low" if mag >= _INV_BOUNDARY else "Very low")
+    return word, (
+        f"Scored {score:+.0f} against a verdict boundary of "
+        f"±{_INV_BOUNDARY:.0f}, on the ±{_INV_REACHABLE:.0f} this scorecard "
+        f"can actually reach. This is how decisive the score is — it is NOT a "
+        f"backtested hit rate like the Short Term card's, because this "
+        f"scorecard was never tested against forward returns.")
+
+
 def gate_chips(clearance):
     """One chip per side, coloured by what the tape permits."""
     c = clearance or {}

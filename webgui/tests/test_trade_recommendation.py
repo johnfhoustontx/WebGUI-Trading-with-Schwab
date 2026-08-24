@@ -237,3 +237,83 @@ class TestTheRenameIsComplete:
         # The guide described the pre-Signal-Desk single page for months.
         assert "Legacy heuristic" not in guide
         assert "Rank Board" in guide
+
+
+class TestTheTwoHeadlinesShareOneColour:
+    """Measured live: the Short Term "Buy" rendered rgb(52,211,153) and the
+    Long Term "Buy" rgb(46,125,50) — the same word, the same call, two greens.
+    The second came from `pages.trade`'s LOCAL palette, whose own comment says
+    its hexes are deliberately darker than the theme's. That palette belongs to
+    the old light-background page, not to the Signal Desk."""
+
+    def test_buy_is_the_same_class_on_both_cards(self):
+        assert tt.verdict_class("BUY") == tt.recommendation(_a())["action_class"]
+
+    def test_sell_is_the_same_class_on_both_cards(self):
+        rec = tt.recommendation(_a(verdict="SELL", pct=10, side="short",
+                                   state="cleared", hit=0.4377))
+        assert tt.verdict_class("SELL") == rec["action_class"]
+
+    def test_every_verdict_maps_into_the_terminal_palette(self):
+        for v in ("BUY", "HOLD", "SELL", "", None):
+            assert tt.verdict_class(v) in T.STATE_TEXT.split()
+
+    def test_hold_is_the_caution_colour_not_the_absent_one(self):
+        assert tt.verdict_class("HOLD") == T.WARN
+
+
+class TestTheLongTermCardAlsoStatesConfidence:
+    """It cannot mean what the Short Term card's means. That one is a
+    BACKTESTED hit rate; this card is a weighted scorecard that was never
+    tested against forward returns, so there is no hit rate to quote.
+
+    What it CAN say is how decisively the scorecard cleared its own verdict
+    boundary (+/-40), on the range actually reachable (+/-85, because
+    earnings trajectory's 15 points can never score). The note has to say
+    which of the two it is, or the chip borrows credibility it has not got.
+    """
+
+    def _iv(self, score, breakdown=True):
+        return {"verdict": "BUY" if score >= 40 else
+                           "SELL" if score <= -40 else "HOLD",
+                "score": score,
+                "breakdown": [{"factor": "valuation", "contribution": 1.0}]
+                             if breakdown else []}
+
+    def test_a_score_well_past_the_boundary_reads_moderate(self):
+        assert tt.investor_confidence(self._iv(75))[0] == "Moderate"
+
+    def test_a_score_just_past_the_boundary_reads_low(self):
+        assert tt.investor_confidence(self._iv(58))[0] == "Low"
+
+    def test_a_hold_that_never_cleared_the_boundary_reads_very_low(self):
+        assert tt.investor_confidence(self._iv(20))[0] == "Very low"
+
+    def test_the_short_side_is_symmetric(self):
+        assert (tt.investor_confidence(self._iv(-75))[0]
+                == tt.investor_confidence(self._iv(75))[0])
+
+    def test_no_fundamentals_is_unknown_not_very_low(self):
+        """"Very low confidence" is a claim about a reading. No reading was
+        taken — the fundamentals never arrived."""
+        assert tt.investor_confidence(self._iv(0, breakdown=False))[0] == "Unknown"
+        assert tt.investor_confidence(None)[0] == "Unknown"
+        assert tt.investor_confidence({"verdict": "HOLD"})[0] == "Unknown"
+
+    def test_the_note_does_not_borrow_the_other_card_credibility(self):
+        note = tt.investor_confidence(self._iv(58))[1].lower()
+        assert "not" in note and ("backtest" in note or "tested" in note)
+
+    def test_the_note_explains_the_reachable_range(self):
+        assert "85" in tt.investor_confidence(self._iv(58))[1]
+
+    def test_both_cards_draw_confidence_from_ONE_vocabulary(self):
+        """The chip palette maps a finite set of words. A card inventing its
+        own word would fall through to the neutral chip silently."""
+        long_words = {tt.investor_confidence(self._iv(s))[0]
+                      for s in (75, 58, 20, -75)}
+        long_words.add(tt.investor_confidence(None)[0])
+        short_words = {tt.recommendation(_a(hit=h))["confidence"]
+                       for h in (0.4377, 0.5268, 0.502, None)}
+        assert long_words <= {"Moderate", "Low", "Very low", "Unknown"}
+        assert short_words <= {"Moderate", "Low", "Very low", "Unknown"}
