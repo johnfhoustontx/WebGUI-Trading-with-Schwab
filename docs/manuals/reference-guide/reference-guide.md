@@ -2305,8 +2305,29 @@ rather than a recommendation, and `SHORT RELATIVE ONLY` explains that the model
 predicts a LAG against the index rather than a fall, which is why a plain short
 on a correct read can still lose money.
 
-**Position** shows a band reading on a rail rather than a verdict word, because the
-model's output is a rank. **The band is not a percentile of today's names.** The
+**Position** leads with a RECOMMENDATION - an action, a confidence chip and one
+line saying what to do - and keeps the ranking underneath as information.
+
+**The action is not the model's verdict.** It combines the verdict with what the
+broad market permits, which is why a name the model ranks at the very bottom can
+read "Pair short" rather than "Sell short": the model predicts the stock will LAG
+the index, and in a rising market a stock can lag and still go up. The six actions
+are Buy, Buy paired, Sell short, Pair short, Stand aside and No trade.
+
+**Read the confidence chip with the action, not after it.** It is the band's own
+historical hit rate expressed as DISTANCE from a coin flip - so a band that beat
+the index only 44% of the time reads Moderate on the short side, because lagging
+is what that side predicted. Moderate means at least 5 percentage points from
+50/50, Low at least 2, Very low is within noise. Even Moderate is a small edge; it
+shows up across many trades rather than in any one, so it argues about sizing more
+than about picking.
+
+The amber line beneath states what share of the model's weight sits on volatility
+factors. It used to appear only on the Evidence screen - a card that merely ranked
+could afford that, one that says "Buy" cannot.
+
+The ranking still appears below the rule, on the same rail: the band, the
+calibrated expectation against the S&P over 20 trading days, and the hit rate. **The band is not a percentile of today's names.** The
 score's inputs are today's cross-section - each factor measured against the same 78
 symbols the model was fitted on - but the five bands are fixed score thresholds cut
 from five years of the model's own output. So 90th means "top band", not "top 10% of
