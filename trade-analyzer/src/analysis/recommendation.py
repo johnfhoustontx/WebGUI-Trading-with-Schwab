@@ -264,6 +264,12 @@ class InvestorVerdict:
         if f.peg_ratio is not None:
             valuation_parts.append(score_peg(f.peg_ratio))
 
+        traj_parts = []
+        if f.eps_surprises:
+            traj_parts.append(score_earnings_surprise_streak(f.eps_surprises))
+        if f.guidance:
+            traj_parts.append(score_guidance_direction(f.guidance))
+
         raw_scores = {
             "valuation": _mean_int(valuation_parts) if valuation_parts else 0,
             "growth_quality": _mean_int([
@@ -272,10 +278,15 @@ class InvestorVerdict:
                 score_roe(f.roe),
                 score_margin_trend(f.margin_expanding),
             ]),
-            "earnings_traj": _mean_int([
-                score_earnings_surprise_streak(f.eps_surprises),
-                score_guidance_direction(f.guidance),
-            ]),
+            # Same rule as `valuation` above, and the same reason: averaging a
+            # structurally-absent sub-score HALVES the one that arrived. No
+            # vendor here publishes forward guidance — Schwab does not, and
+            # Alpha Vantage's EARNINGS feed is historical — so the guidance
+            # half is always absent, which used to turn a four-quarter beat
+            # streak of 80 into 40 and a fresh miss of -60 into -30. Tested on
+            # the INPUT, never the output: a 0 from the streak scorer is a
+            # legitimate "mixed record", not a missing one.
+            "earnings_traj": _mean_int(traj_parts) if traj_parts else 0,
             "rs_vs_spy": _mean_int([
                 score_relative_strength_percentile(inp.rs_vs_spy_3m),
                 score_relative_strength_percentile(inp.rs_vs_spy_6m),

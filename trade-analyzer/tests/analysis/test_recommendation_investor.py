@@ -126,3 +126,53 @@ class TestInvestorVerdictGates:
         v = InvestorVerdict().score(inp)
         assert v["verdict"] == "HOLD"
         assert any("Sector in confirmed downtrend" in g for g in v["gates_triggered"])
+
+
+class TestEarningsTrajectoryAveragesOnlyWhatArrived:
+    """The same bug `valuation` already carries a comment about, one component
+    over: averaging a structurally-absent sub-score HALVES the one that did
+    arrive.
+
+    `earnings_traj` is the mean of a surprise-streak score and a guidance
+    score. No vendor here publishes forward guidance — Schwab does not, and
+    Alpha Vantage's EARNINGS feed is historical — so the guidance half is
+    always 0. Averaging it in turns a perfect four-quarter beat streak (80)
+    into 40, and a fresh miss (-60) into -30. The availability test is on the
+    INPUT, not the output: `score_earnings_surprise_streak` legitimately
+    returns 0 for a mixed record, so a 0 cannot stand for "missing"."""
+
+    def _f(self, **kw):
+        from src.analysis.fundamentals import Fundamentals
+        base = dict(pe_ratio=20.0, peg_ratio=1.5, rev_growth_ttm=0.10,
+                    eps_growth_ttm=0.10, roe=0.20, margin_expanding=True)
+        base.update(kw)
+        return Fundamentals(**base)
+
+    def _traj(self, f):
+        from src.analysis.recommendation import InvestorInputs, InvestorVerdict
+        from src.analysis.sector_strength import SectorStrength
+        inp = InvestorInputs(
+            fundamentals=f, sector_pe_median=18.0,
+            rs_vs_spy_3m=0.5, rs_vs_spy_6m=0.5, rs_vs_spy_12m=0.5,
+            rs_vs_sector_3m=0.5, rs_vs_sector_6m=0.5, rs_vs_sector_12m=0.5,
+            sector_strength=SectorStrength(score=0, rs_3m_percentile=0.5,
+                                           sector_above_50ema=True,
+                                           in_confirmed_downtrend=False))
+        out = InvestorVerdict().score(inp)
+        return next(b for b in out["breakdown"]
+                    if b["factor"] == "earnings_traj")["raw_score"]
+
+    def test_a_four_quarter_beat_streak_is_not_halved_by_absent_guidance(self):
+        f = self._f(eps_surprises=[0.10, 0.08, 0.07, 0.06], guidance=None)
+        assert self._traj(f) == 80
+
+    def test_a_recent_miss_is_not_halved_either(self):
+        f = self._f(eps_surprises=[0.10, 0.08, 0.07, -0.02], guidance=None)
+        assert self._traj(f) == -60
+
+    def test_guidance_still_counts_when_a_source_supplies_it(self):
+        f = self._f(eps_surprises=[0.10, 0.08, 0.07, 0.06], guidance="RAISED")
+        assert self._traj(f) == 60          # mean(80, 40)
+
+    def test_no_surprise_history_and_no_guidance_scores_zero(self):
+        assert self._traj(self._f(eps_surprises=None, guidance=None)) == 0

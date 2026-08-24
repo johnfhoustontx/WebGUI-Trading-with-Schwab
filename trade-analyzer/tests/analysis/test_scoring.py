@@ -278,6 +278,28 @@ class TestScoreEarningsSurpriseStreak:
         # only three entries, all strong - not "all four"
         assert score_earnings_surprise_streak([0.10, 0.08, 0.07]) == 0
 
+    # ── ordering ────────────────────────────────────────────────────────────
+    # The list is CHRONOLOGICAL: `[-1]` is the most recent quarter, which is
+    # what `test_last_missed` above asserts and what `Fundamentals` builds.
+    # Every fixture above holds exactly four entries, so `[:4]` and `[-4:]` are
+    # the same slice and the distinction never showed. Real vendor data runs to
+    # 100+ quarters, where checking the FIRST four means scoring a streak from
+    # the 1990s.
+
+    def test_the_streak_is_the_MOST_RECENT_four_not_the_oldest(self):
+        old_beats_then_flat = [0.10, 0.09, 0.08, 0.07,   # ancient history
+                               0.01, 0.01, 0.01, 0.01]   # the last year
+        assert score_earnings_surprise_streak(old_beats_then_flat) == 0
+
+    def test_a_recent_streak_scores_even_with_a_long_weak_history(self):
+        weak_then_strong = [-0.20, 0.00, 0.01, 0.02,
+                            0.10, 0.08, 0.07, 0.06]
+        assert score_earnings_surprise_streak(weak_then_strong) == 80
+
+    def test_a_miss_in_the_latest_quarter_still_dominates(self):
+        assert score_earnings_surprise_streak(
+            [0.10, 0.08, 0.07, 0.06, 0.09, -0.02]) == -60
+
 
 class TestScoreGuidanceDirection:
     def test_none(self):

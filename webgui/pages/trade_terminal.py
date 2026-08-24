@@ -236,14 +236,6 @@ def gate_chips(clearance):
     return out
 
 
-# Schwab's `/instruments?projection=fundamental` carries 56 fields and neither
-# `epsSurprises` nor `guidanceDirection` (verified live 2026-08-22), so both of
-# `earnings_traj`'s inputs score 0 and the component contributes exactly 0 for
-# every symbol, always. Flagged off the SCORE rather than the factor name, so a
-# fundamentals source that does supply them renders normally.
-_UNPUBLISHED_FACTOR = "earnings_traj"
-
-
 def investor_bars(verdict):
     """Investor factor scores on the shared centred bar."""
     out = []
@@ -252,7 +244,12 @@ def investor_bars(verdict):
         # Strictly the 0, not a None: a None contribution means the engine
         # returned nothing for this row, which is "n/a" — a different claim
         # from "the data source does not carry it".
-        unpublished = b.get("factor") == _UNPUBLISHED_FACTOR and v == 0
+        # Nothing is special-cased here any more. `earnings_traj` used to be:
+        # Schwab publishes no surprises, so it could never score, and a drawn 0
+        # would have read as "measured and neutral". Alpha Vantage supplies
+        # that history now, so a 0 on this row means what it means on every
+        # other one.
+        unpublished = False
         left, width = T.centred(v, 60.0) if v is not None else (50.0, 0.0)
         if unpublished:
             left, width = 50.0, 0.0

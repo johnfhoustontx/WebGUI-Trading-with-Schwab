@@ -1232,6 +1232,54 @@ def _enrich_earnings_date(fundamentals, symbol):
     return fundamentals
 
 
+def _eps_history_db_path():
+    """Isolated so tests can point the enrichment at a tmp store."""
+    from services.trade_svc import earnings_history as _eh
+    return _eh.DEFAULT_DB_PATH
+
+
+def _enrich_eps_surprises(fundamentals, symbol):
+    """Fill ``eps_surprises`` from Alpha Vantage, in place. Never raises.
+
+    Schwab publishes no surprises, which is why `earnings_traj` scored a
+    permanent 0 for every symbol. Alpha Vantage's EARNINGS endpoint does, and
+    this is where that history reaches the scorecard.
+
+    Costs at most ONE vendor call, and only when the symbol is stale by
+    `earnings_history.REFRESH_AFTER_DAYS` and the daily budget allows. The
+    budget deliberately sits below the vendor's allowance so the bulk earnings
+    CALENDAR — which feeds the earnings gate — always has room for its own
+    call. On a miss the field stays None, and the component scores nothing,
+    exactly as before this existed."""
+    conn = None
+    try:
+        from services.trade_svc import earnings_history as _eh
+        path = _eps_history_db_path()
+        # Same isolation rule as the other stores: unguarded this opens a
+        # SQLite file in the repo and issues a live vendor request during the
+        # suite. A test that wants the join patches the path.
+        if _under_pytest() and path == _eh.DEFAULT_DB_PATH:
+            return fundamentals
+        conn = _eh.init_db(path)
+        if _eh.is_due(conn, symbol):
+            _eh.refresh(conn, symbol)
+        fr = _eh.surprise_fractions(conn, symbol)
+        if fr:
+            fundamentals.eps_surprises = fr
+            # CHRONOLOGICAL, so the most recent quarter is the LAST one —
+            # the same convention `parse_schwab_fundamentals` uses.
+            fundamentals.last_eps_surprise = fr[-1]
+    except Exception:
+        _degrade.degraded("trade.enrich_eps_surprises")
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return fundamentals
+
+
 def earnings_coverage(symbol):
     """Whether the earnings calendar can speak for ``symbol`` at all.
 
@@ -1308,7 +1356,8 @@ def _fetch_fundamentals(symbol):
     except Exception:
         return Fundamentals()
     f = _enrich_short_interest(f, symbol, raw.get("marketCapFloat"))
-    return _enrich_earnings_date(f, symbol)
+    f = _enrich_earnings_date(f, symbol)
+    return _enrich_eps_surprises(f, symbol)
 
 
 # ── sector P/E median (Phase 1) ──────────────────────────────────────────────

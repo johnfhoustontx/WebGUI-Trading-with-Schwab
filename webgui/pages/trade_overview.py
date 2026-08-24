@@ -237,11 +237,14 @@ def _build(state, refs):
                     ui.label(b["value"]).classes(
                         f"{T.MONO} text-[12.5px] text-right {b['value_class']}")
         inv_foot.text = (
-            "Schwab publishes no earnings surprises and no company guidance, so "
-            "Earnings trajectory can never score — 15 of the 100 points are off "
-            "the table for every stock, and the score reads low because of it. "
-            "Free cash flow is missing too, so the check that would cap a stock "
-            "at HOLD on negative cash flow never runs.")
+            "Earnings trajectory scores from Alpha Vantage's quarterly "
+            "surprise history — Schwab publishes none, so this component "
+            "was dead until that feed was wired in. Forward guidance is "
+            "still unavailable from any source here, so the component "
+            "scores on the surprise record alone rather than averaging in "
+            "a permanent zero. Free cash flow is also absent, so the check "
+            "that would cap a stock at HOLD on negative cash flow never "
+            "runs.")
 
         marks = tt.dealer_ladder(a.get("dealer_context"), a.get("price"))
         dealer_panel.set_visibility(bool(marks))

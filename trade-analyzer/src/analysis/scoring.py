@@ -144,7 +144,12 @@ def score_margin_trend(expanding: Optional[bool]) -> int:
 def score_earnings_surprise_streak(surprises: Optional[List[float]]) -> int:
     if not surprises:
         return 0
-    if len(surprises) >= 4 and all(s > 0.05 for s in surprises[:4]):
+    # CHRONOLOGICAL: `[-1]` is the most recent quarter, so the streak is the
+    # LAST four, not the first. `[:4]` was indistinguishable while every caller
+    # and fixture passed exactly four entries; the vendor feed carries 100+,
+    # where it scored a streak from the 1990s and let a company that just
+    # missed its quarter keep an +80.
+    if len(surprises) >= 4 and all(s > 0.05 for s in surprises[-4:]):
         return 80
     if surprises[-1] < 0:
         return -60

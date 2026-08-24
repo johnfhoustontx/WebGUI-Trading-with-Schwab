@@ -179,25 +179,27 @@ class TestInvestorFactorBars:
         assert tt.investor_bars({}) == []
         assert tt.investor_bars(None) == []
 
-    def test_earnings_trajectory_reads_as_unpublished_not_as_a_zero(self):
-        """Schwab's `/instruments?projection=fundamental` carries no
-        `epsSurprises` and no `guidanceDirection` (verified live: 56 keys,
-        neither present), so both of this component's inputs score 0 and it
-        contributes exactly 0 for every symbol. A drawn 0 reads as "measured
-        and neutral", which is a different claim from "never published"."""
+    def test_earnings_trajectory_is_now_an_ORDINARY_row(self):
+        """It used to read "not published by Schwab", because Schwab carries no
+        surprises and the component could never score. Alpha Vantage's EARNINGS
+        endpoint supplies that history now, so a 0 here means what a 0 means on
+        every other row — a mixed record — and claiming the data does not exist
+        would be the false statement."""
         bars = tt.investor_bars({"breakdown": [
             {"factor": "earnings_traj", "raw_score": 0, "contribution": 0.0}]})
-        assert bars[0]["unpublished"] is True
-        assert bars[0]["width_pct"] == 0.0
-        # Whole words, in the bar track the empty bar leaves free — a 46px
-        # value column can only hold an abbreviation, and this needs saying.
-        assert bars[0]["value"] == ""
-        assert bars[0]["track_text"] == "not published by Schwab"
-
-    def test_a_scored_row_puts_nothing_in_the_bar_track(self):
-        bars = tt.investor_bars({"breakdown": [
-            {"factor": "valuation", "raw_score": 20, "contribution": 4.0}]})
         assert bars[0]["track_text"] == ""
+        assert bars[0]["value"] == "0"
+        assert bars[0]["unpublished"] is False
+
+    def test_a_scored_earnings_trajectory_reads_as_a_normal_row(self):
+        """Alpha Vantage supplies the surprise history Schwab does not, so this
+        row scores now. The "not published" treatment must fall away the moment
+        a real number arrives — it was never about the factor name."""
+        bars = tt.investor_bars({"breakdown": [
+            {"factor": "earnings_traj", "raw_score": 80, "contribution": 12.0}]})
+        assert bars[0]["unpublished"] is False
+        assert bars[0]["track_text"] == ""
+        assert bars[0]["value"] == "+12"
 
     def test_a_scored_earnings_trajectory_is_left_alone(self):
         """Self-correcting: the flag is keyed off the score being 0, not off

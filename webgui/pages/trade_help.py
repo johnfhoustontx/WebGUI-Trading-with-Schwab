@@ -297,14 +297,19 @@ _FACTORS = {
         "bought at the cost of collapsing margins scores worse than the "
         "headline growth number alone would suggest."),
     "earnings_traj": (
-        "Whether the company has been beating expectations and guiding "
-        "higher.\n\n"
-        "This one can never score, for any stock. Schwab's data feed does not "
-        "publish earnings surprises or company guidance, so both of its "
-        "inputs are permanently missing and it contributes exactly zero — "
-        "which means 15 of the Long Term score's 100 points are unreachable "
-        "before any company is examined. That is why a decent business can "
-        "show a middling score here."),
+        "Whether the company has been beating the estimates analysts set "
+        "for it.\n\n"
+        "It scores the last four quarters of EPS surprises: four clear "
+        "beats in a row is the strongest reading, and a miss in the most "
+        "recent quarter is the weakest, whatever came before it.\n\n"
+        "The history comes from Alpha Vantage, not Schwab — Schwab's feed "
+        "carries no surprises at all, which is why this row scored zero "
+        "for every stock until that source was added. Forward guidance is "
+        "still not available from any source here, so the score rests on "
+        "the surprise record alone.\n\n"
+        "A zero means a genuinely mixed record — or that the vendor has "
+        "no history for this symbol, which is not something this row can "
+        "tell apart."),
     "rs_vs_spy": (
         "How the stock has done against the S&P 500 over three, six and "
         "twelve months, averaged.\n\n"
