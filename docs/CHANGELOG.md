@@ -24,18 +24,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   reading: BIAS `rgb(224,183,78)` amber, SIGNAL `rgb(242,100,107)` red. A cold composite
   prints the em dash at the muted tone and **never** "Neutral" — that is the middle
   reading, and an absent one is not a reading.
-- **Sizing, per the "resize the other tiles" half of the request.** These are words, not
-  numbers: `"Strong Bear"` at the numeric tiles' 28px needs ~205px of tile, and two of
-  those where VIX had 140px would push the two score cards under their 440px floor. At
-  19px it measures **exactly 125px** (browser-measured, in a 140px content box), so the
-  pair fits 160px tiles. Measured live at 1920: six tiles, ONE row, all 92px, cards at
-  469px, no clipped descendant, no sideways scroll — **with `"Strong Bear"` forced into
-  both tiles**, not merely with today's shorter words.
-- **The page's documented 1877px minimum is unchanged.** The strip's own floor is
-  ~1684px of content against the Positions panel's 1698px, so the panels still bind.
-  Re-measured at exactly 1877: panels 839px with zero overflow, strip still one row with
-  cards at 447px. (The 8 elements that do overflow there are the Bull/Bear chip names,
-  which carry `truncate` on purpose.)
+- **The THREE verdict tiles share one type size and one width** — BIAS, SIGNAL and
+  MARKET REGIME, by request. They are peers, so a reader should not have to work out
+  which of them matters most from how big it is; `_STRIP_WORD` and `_STRIP_VERDICT_W`
+  are one constant each, read by all three, because a size change that reaches two of
+  them and misses the third is exactly what a shared vocabulary prevents. MARKET REGIME
+  came DOWN (28px / 236px) and the two band tiles came UP (19px / 160px) to meet at
+  **24px in a 180px tile**.
+- **24px is the largest size that fits, and the ceiling was measured, not reasoned.**
+  JetBrains Mono advances 0.6em, so the widest word either vocabulary can print —
+  `"Strong Bear"`, 11 characters — measures **126px at 19, 159 at 24, 172 at 26, 185 at
+  28** (browser-probed at all five sizes). At 24px it needs a 180px tile once `_TILE`'s
+  10px padding is counted both sides; three of those, the 168px clock and five 16px gaps
+  leave the two score cards **455px at the page's documented 1877px minimum**, clear of
+  their 440px floor. **At 26px the tile is 192px and the cards fall to 437px — the strip
+  would wrap at a width the page claims to support.** The clock keeps its own 28px
+  `tabular-nums`: a countdown is a running figure, not a verdict, and unifying it would
+  be unifying two different kinds of reading.
+- **The page's documented 1877px minimum is unchanged.** Verified live at 1920 (six
+  tiles, ONE row, all 92px, no clipped descendant, no sideways scroll — with
+  `"Strong Bear"` forced into both band tiles, not merely with today's shorter words)
+  and again at exactly 1877 (panels 839px, zero overflow, strip still one row). The 8
+  elements that do overflow at 1877 are the Bull/Bear chip names, which carry
+  `truncate` on purpose. Four guards pin the arithmetic itself — the shared constants,
+  the longest-word fit against BOTH vocabularies, the card floor at 1877, and one footer
+  size across the three.
 - **`/desk/live` moved with it, and had to.** The streaming mirror imports the Desk's
   `VIEWS`, so dropping a view the mirror still read would have left it rendering a cold
   VIX tile forever with nothing failing — the same class of trap as a pushed snapshot

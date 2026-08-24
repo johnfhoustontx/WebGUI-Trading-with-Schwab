@@ -2113,15 +2113,29 @@ _RULER_MARK = f"text-[8px] leading-none {CON_TXT_FAINT}"
 # column of numbers to compete with and does not need the panels' weight.
 _STRIP_EYEBROW = f"text-[10px] leading-none tracking-[.22em] {CON_TXT_DIM}"
 _STRIP_VALUE = f"text-[28px] leading-none tabular-nums {CON_TXT}"
-# BIAS and SIGNAL are words, not numbers, and the longest of them ("Strong
-# Bear") would need ~185px of tile at the 28px the numeric tiles use — which is
-# two tiles of ~205px where VIX had one of 140, and more than the strip has to
-# give without pushing the two score cards under their 440px floor. At 19px the
-# same word measures ~125px and the pair fits in 160px tiles with the cards
-# still clear of that floor. No ``tabular-nums``: nothing here is a digit.
-_BAND_VALUE = "text-[19px] leading-none whitespace-nowrap"
-_BAND_FOOT = (f"text-[9px] leading-none tracking-[.08em] whitespace-nowrap "
-              f"mt-auto {CON_TXT_DIM}")
+# The THREE VERDICT TILES — BIAS, SIGNAL and MARKET REGIME — share ONE type
+# size and ONE width (by request, 2026-08-24). They are peers: a reader should
+# not have to work out which of them matters most from how big it is. One
+# constant each, read by all three, because a size change that reaches two of
+# them and misses the third is exactly what a shared vocabulary prevents.
+#
+# 24px is the LARGEST size that fits, and every number here was measured in the
+# browser rather than reasoned. JetBrains Mono advances 0.6em, so the widest
+# word either vocabulary can emit — "Strong Bear", 11 characters — measures
+# 159px at 24px (126 at 19, 172 at 26, 185 at 28) and needs a 180px tile once
+# ``_TILE``'s 10px padding is counted both sides. Three of those, the 168px
+# clock and five 16px gaps leave the two score cards 455px at the page's
+# documented 1877px MINIMUM — clear of their 440px floor. At 26px the tile is
+# 192px and the cards fall to 437px, so the strip would WRAP at a width the
+# page claims to support. No ``tabular-nums`` on any of them: nothing here is
+# a digit — that belongs to the clock, which keeps its own 28px because a
+# countdown is a number and not a verdict.
+_STRIP_WORD = "text-[24px] leading-none font-semibold whitespace-nowrap"
+_STRIP_VERDICT_W = "w-[180px]"
+# One footer size across the three as well, so their three lines sit on three
+# shared baselines. 11px carries "STRENGTH & MOMENTUM" in 143px of a 160px box.
+_STRIP_FOOT = f"text-[11px] leading-none mt-auto {CON_TXT_MUTED}"
+_BAND_FOOT = f"{_STRIP_FOOT} tracking-[.08em] whitespace-nowrap"
 # Each strip tile is its own console card. The strip used to be ONE card holding
 # everything, which meant a card inside a card once the score cards arrived —
 # and, more practically, its own padding on top of theirs, which is height this
@@ -2458,20 +2472,21 @@ def render():
             # never flash a band word they have not read.
             band_lbls = []
             for _fact in signal_band_facts(None):
-                with ui.column().classes(f"{_TILE} w-[160px] shrink-0"):
+                with ui.column().classes(
+                        f"{_TILE} {_STRIP_VERDICT_W} shrink-0"):
                     ui.label(_fact["label"]).classes(_STRIP_EYEBROW)
                     band_lbls.append(ui.label(_fact["value"]).classes(
-                        f"{_BAND_VALUE} {_fact['cls']}"))
+                        f"{_STRIP_WORD} {_fact['cls']}"))
                     # The console's descriptor earns its line: "Cautious" beside
                     # "Bearish" reads as one word said twice unless the tiles say
                     # that one is positioning and the other is strength.
                     ui.label(_fact["descriptor"]).classes(_BAND_FOOT)
-            with ui.column().classes(f"{_TILE} w-[236px] shrink-0"):
+            with ui.column().classes(
+                    f"{_TILE} {_STRIP_VERDICT_W} shrink-0"):
                 ui.label("MARKET REGIME").classes(_STRIP_EYEBROW)
                 regime_lbl = ui.label(_DASH).classes(
-                    f"text-[28px] leading-none font-semibold {CON_TXT}")
-                regime_sub = ui.label("").classes(
-                    f"text-[11px] leading-none mt-auto {CON_TXT_MUTED}")
+                    f"{_STRIP_WORD} {CON_TXT}")
+                regime_sub = ui.label("").classes(_STRIP_FOOT)
 
         # ── the Bull / Bear sector strip ─────────────────────────────────────
         # It sits between the TOP STRIP and the panels, and that position is

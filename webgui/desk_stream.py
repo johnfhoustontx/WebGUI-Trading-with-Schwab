@@ -575,14 +575,16 @@ a {{ color: inherit; text-decoration: none; }}
 .big {{ font-size: 28px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }}
 .sub {{ font-size: 11px; letter-spacing: .1em; color: {muted}; margin-top: auto; }}
 .tile.clock {{ width: 172px; flex: none; }}
-.tile.band {{ width: 172px; flex: none; }}
-/* BIAS and SIGNAL are WORDS: no tabular figures, and small enough that the
-   longest of them ("Strong Bear") stays on one line. */
-.tile.band .big {{ font-size: 19px; font-variant-numeric: normal;
-                   white-space: nowrap; }}
-.desc {{ font-size: 10px; letter-spacing: .08em; color: {label};
+/* The three VERDICT tiles — BIAS, SIGNAL, MARKET REGIME — carry one size and
+   one width, as they do on /desk. 186px rather than that page's 180 because
+   this document's tiles pad 12px a side to its 10: the widest word either
+   vocabulary can emit ("Strong Bear") measures 159px at 24px, so 186 - 24
+   leaves it 162px. Words, not numbers, so the tabular figures come off. */
+.tile.band, .tile.regime {{ width: 186px; flex: none; }}
+.tile.band .big, .tile.regime .big {{ font-size: 24px;
+    font-variant-numeric: normal; white-space: nowrap; }}
+.desc {{ font-size: 11px; letter-spacing: .08em; color: {label};
          white-space: nowrap; margin-top: auto; }}
-.tile.regime {{ width: 250px; flex: none; }}
 .card {{ flex: 1 1 420px; min-width: 400px; }}
 .badge {{ align-self: flex-start; font-size: 10px; letter-spacing: .14em;
           padding: 2px 7px; border-radius: 2px; color: #0a1220; margin-top: auto; }}

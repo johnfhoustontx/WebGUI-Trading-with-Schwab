@@ -1257,6 +1257,95 @@ def test_the_desk_no_longer_polls_the_options_header_view():
     assert '"vix"' not in src and "vix_regime" not in src
 
 
+def _desk_src():
+    return (pathlib.Path(__file__).resolve().parents[1] / "pages" / "desk.py"
+            ).read_text(encoding="utf-8")
+
+
+# The two vocabularies the three verdict tiles can print. BIAS/SIGNAL are
+# ``live_composite.signal_band``'s; the regime words are the service's display
+# set plus its direction adornments (Tier-1 may not import that scoring package
+# — see the cross-app collision note — so they are listed, and the LENGTH is
+# all this file needs from them).
+_BAND_WORDS = ("Long", "Neutral", "Cautious", "Short",
+               "Strong Bull", "Bullish", "Bearish", "Strong Bear")
+_REGIME_WORDS = ("Balanced", "Whipsaw", "Stressed", "Trending", "Breakout",
+                 "Rallying", "Firming", "Retreating", "Softening",
+                 "Breakdown", "Unclear")
+
+# JetBrains Mono — the Desk's body face — advances 0.6em. Browser-measured on
+# the running page: "Strong Bear" (11 chars) is 126px at 19px, 159 at 24, 185
+# at 28, i.e. 0.6 x size x len to the pixel.
+_MONO_ADVANCE = 0.6
+_TILE_PAD_PX = 20          # ``_TILE``'s px-[10px], both sides
+
+
+def _cls_px(classes, prefix):
+    """The one ``{prefix}-[Npx]`` value in a class string."""
+    import re
+    found = re.findall(prefix + r"-\[(\d+)px\]", classes)
+    assert len(found) == 1, (prefix, classes, found)
+    return int(found[0])
+
+
+def test_the_three_verdict_tiles_share_one_type_size_and_one_width():
+    """BIAS, SIGNAL and MARKET REGIME are PEERS on the strip and must look it —
+    a reader should not have to work out which one matters most from how big it
+    is. One constant each, read by all three, so a size change cannot reach two
+    of them and quietly miss the third."""
+    src = _desk_src()
+    # Both band tiles and the regime tile open with the same class expression…
+    assert src.count('f"{_TILE} {_STRIP_VERDICT_W} shrink-0"') == 2
+    # …and all three values are typed by the one word constant.
+    assert src.count("{_STRIP_WORD} ") == 2      # the band loop, and regime
+    # Nothing may re-declare a size for them.
+    assert "text-[28px]" not in src.split("_STRIP_WORD")[1].split(
+        "def _compact_pill")[0]
+
+
+def test_the_verdict_tile_fits_the_longest_word_either_vocabulary_can_print():
+    """The tiles are a FIXED width carrying ``whitespace-nowrap``, so a word
+    that does not fit CLIPS — silently, and only on the most extreme readings
+    the app has, which are exactly the ones worth reading. Checked against both
+    vocabularies rather than today's words."""
+    size = _cls_px(d._STRIP_WORD, "text")
+    width = _cls_px(d._STRIP_VERDICT_W, "w")
+    longest = max(_BAND_WORDS + _REGIME_WORDS, key=len)
+    needed = _MONO_ADVANCE * size * len(longest)
+    assert needed <= width - _TILE_PAD_PX, (
+        f"{longest!r} needs {needed:.0f}px at {size}px; the tile offers "
+        f"{width - _TILE_PAD_PX}px")
+
+
+def test_the_strip_still_fits_one_row_at_the_pages_documented_minimum():
+    """The strip must not become the constraint that binds before the panels do.
+
+    At the documented 1877px minimum the page hands its content 1698px. The
+    strip spends that on the 168px clock, three verdict tiles and five 16px
+    gaps; what is left is split between the two score cards, which carry a
+    440px floor of their own. Cross that and the row wraps — at a width the
+    page claims to support."""
+    CONTENT_AT_MIN_PX = 1698        # browser-measured at innerWidth 1877
+    CLOCK_PX, GAP_PX, GAPS, CARD_FLOOR_PX = 168, 16, 5, 440
+    tiles = 3 * _cls_px(d._STRIP_VERDICT_W, "w")
+    per_card = (CONTENT_AT_MIN_PX - CLOCK_PX - tiles - GAP_PX * GAPS) / 2
+    assert per_card >= CARD_FLOOR_PX, (
+        f"score cards get {per_card:.0f}px, under their {CARD_FLOOR_PX}px floor")
+
+
+def test_the_three_verdict_tiles_share_one_footer_size():
+    """Three tiles the same width with two footer sizes read as a mistake."""
+    assert _cls_px(d._STRIP_FOOT, "text") == _cls_px(d._BAND_FOOT, "text")
+
+
+def test_the_countdown_keeps_its_own_type_because_it_is_a_number():
+    """The clock is NOT a fourth verdict — it is a running figure, and it keeps
+    ``tabular-nums`` so its digits do not jitter. Unifying it with the three
+    would be unifying two different kinds of reading."""
+    assert "tabular-nums" in d._STRIP_VALUE
+    assert "tabular-nums" not in d._STRIP_WORD
+
+
 def test_the_strip_repaints_its_band_when_the_composite_moves():
     """BIAS and SIGNAL ride ``sentiment:composite``. Without it the two words
     would freeze at whatever the page built with."""
