@@ -770,3 +770,27 @@ def test_a_failed_lookup_never_raises(monkeypatch):
 
     monkeypatch.setattr(C._proxy.schwab_client, "_request", _boom)
     assert C.company_name("MU") is None
+
+
+class TestTheFundamentalsPayloadCarriesTheSurpriseRecord:
+    """`_fundamentals_dict` is a WHITELIST, so a field the enrichment fills is
+    invisible to Tier 1 until it is listed here. That is how the new EPS
+    surprise history looked broken end-to-end while working perfectly: the
+    analysis payload simply never carried it."""
+
+    def test_the_surprise_history_reaches_the_payload(self):
+        from src.analysis.fundamentals import Fundamentals
+        from services.trade_svc import compute
+        f = Fundamentals(pe_ratio=20.0,
+                         eps_surprises=[0.01, 0.02, 0.03, 0.04],
+                         last_eps_surprise=0.04)
+        d = compute._fundamentals_dict(f)
+        assert d["eps_surprises"] == [0.01, 0.02, 0.03, 0.04]
+        assert d["last_eps_surprise"] == 0.04
+
+    def test_an_absent_history_is_None_not_an_empty_list(self):
+        from src.analysis.fundamentals import Fundamentals
+        from services.trade_svc import compute
+        d = compute._fundamentals_dict(Fundamentals())
+        assert d["eps_surprises"] is None
+        assert d["last_eps_surprise"] is None

@@ -1422,6 +1422,12 @@ def _fundamentals_dict(f):
         "roe": f.roe,
         "margin_expanding": f.margin_expanding,
         "days_to_earnings": f.days_to_earnings,
+        # ⚠ This is a WHITELIST: a field the enrichment fills is invisible to
+        # Tier 1 until it is listed here. The EPS surprise history looked
+        # broken end-to-end for exactly that reason while working perfectly —
+        # the store held 122 quarters and the payload carried none of them.
+        "eps_surprises": f.eps_surprises,
+        "last_eps_surprise": f.last_eps_surprise,
     }
 
 
