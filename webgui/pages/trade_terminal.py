@@ -313,3 +313,131 @@ def calculator_handoff(analysis):
         "type": calculator_strategy(plan.get("structure")),
         "underlying_price": fmt.num(a.get("price")),
     }
+
+
+# ── the Position card's recommendation ──────────────────────────────────────
+# This card led with a RANK for most of its life, and `swing_tilt`'s docstring
+# still records why: "a coin-flip-plus-2% edge shown as a bold green BUY invites
+# over-reading". Leading with an action is a deliberate product decision, so the
+# honesty has to move INTO the recommendation rather than leave with the rank —
+# hence `confidence`, drawn from the band's own hit rate, and `caveat`, which
+# carries the volatility-exposure share that used to sit only on Evidence.
+#
+# The action is (side x clearance), never the verdict alone. A bottom-band name
+# is predicted to LAG the index, not to fall, so "SELL" plus a tape that has not
+# cleared a directional short must NOT render as "Sell short".
+
+_REC_UNKNOWN = {
+    "action": "No recommendation",
+    "action_class": T.OFF,
+    "detail": ("No validated model reading for this symbol, so there is no "
+               "action to recommend. The card falls back to the legacy "
+               "heuristic below."),
+    "confidence": "Unknown",
+    "confidence_note": "",
+    "rank_line": "",
+    "caveat": "",
+}
+
+
+def _confidence(hit):
+    """``(word, note)`` from the band's beat-the-index rate.
+
+    The edge is the DISTANCE from a coin flip, not the rate itself: a bottom
+    band that beats the index only 44% of the time is a strong reading, and
+    scoring it as weak would invert the short side."""
+    h = fmt.num(hit)
+    if h is None:
+        return "Unknown", "No calibrated hit rate for this band."
+    edge = abs(h - 0.5)
+    word = ("Moderate" if edge >= 0.05 else
+            "Low" if edge >= 0.02 else "Very low")
+    return word, (f"{h:.0%} of past readings in this band beat the S&P over 20 "
+                  f"trading days — a real but small edge, so size it as one.")
+
+
+def _rec_action(side, state, action):
+    """``(headline, class, verb)`` for (side x clearance x plan action)."""
+    if side not in ("long", "short"):
+        return ("No trade", T.DIM, "")
+    if state == "blocked":
+        return ("Stand aside", T.OFF, "")
+    if state == "relative_only":
+        return (("Buy paired" if side == "long" else "Pair short"),
+                T.WARN, "pair")
+    if action == "none":
+        return ("Stand aside", T.OFF, "")
+    return (("Buy" if side == "long" else "Sell short"),
+            (T.POS if side == "long" else T.NEG), action or "debit")
+
+
+def _rec_detail(side, state, action, structure):
+    """The plain-English instruction under the headline."""
+    what = structure or ("a call spread" if side == "long" else "a put spread")
+    if side not in ("long", "short"):
+        return ("The composite sits in the middle band, where the model has no "
+                "edge to express. There is no directional read to hold.")
+    if state == "blocked":
+        return ("The tape has blocked this side outright. The ranking still "
+                "stands, but there is no version of the trade to take today.")
+    if state == "relative_only":
+        other = "short" if side == "long" else "long"
+        return (f"Express it as a pair — {side} this name against a {other} in "
+                f"the S&P — so the position is paid for the relative move the "
+                f"model predicted rather than for the market's direction.")
+    if action == "none":
+        return ("The tape clears this side but no structure fits today's "
+                "volatility. Wait, or take it in the underlying.")
+    if action == "credit":
+        return (f"Sell premium: {what}, sized so the level it depends on is "
+                f"the one the stock would have to break through.")
+    return (f"Take it {'long' if side == 'long' else 'short'}: {what}, or the "
+            f"underlying if you would rather not carry the expiry.")
+
+
+def recommendation(analysis):
+    """What to DO, with what it is worth and what it is really betting on.
+
+    Replaces the ranked-tilt headline on the Position card. The rank survives
+    as ``rank_line`` — informational, beneath — because it is still the honest
+    description of what the model computed."""
+    a = analysis or {}
+    sm = a.get("swing_model") or {}
+    if not sm.get("verdict"):
+        return dict(_REC_UNKNOWN)
+
+    plan = a.get("trade_plan") or {}
+    clearance = a.get("direction_clearance") or {}
+    side = (plan.get("side") or "").lower() or None
+    state = ((clearance.get(side) or {}).get("state") or "cleared"
+             if side else "")
+    action = (plan.get("action") or "").lower()
+
+    head, cls, _verb = _rec_action(side, state, action)
+    detail = _rec_detail(side, state, action, plan.get("structure"))
+    word, note = _confidence(sm.get("hit_rate"))
+
+    rail = percentile_rail(sm)
+    rank_line = ""
+    if rail["percentile"] != "—":
+        rank_line = f"{rail['percentile']} band"
+        if rail["stats"]:
+            rank_line += f" · {rail['stats']}"
+
+    # No exposure to disclose when nothing is being recommended.
+    share = fmt.num(sm.get("risk_share"))
+    caveat = ""
+    if share is not None and side in ("long", "short") and head != "Stand aside":
+        caveat = (f"{share:.0%} of this model's weight sits on volatility "
+                  f"factors, so the ranking is partly a bet on the market "
+                  f"rather than on this company.")
+
+    return {
+        "action": head,
+        "action_class": cls,
+        "detail": detail,
+        "confidence": word,
+        "confidence_note": note,
+        "rank_line": rank_line,
+        "caveat": caveat,
+    }
