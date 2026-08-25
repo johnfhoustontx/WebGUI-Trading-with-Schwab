@@ -72,6 +72,7 @@ _BRANCH_HANDLERS = (
     "run_driver_manage_and_refresh", "run_captured_manage_and_publish",
     "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",
     "run_action_alert", "run_eod_summary", "run_market_snapshot",
+    "refresh_calibration",
 )
 
 

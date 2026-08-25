@@ -27,8 +27,10 @@ with no other chart at load, fails with "Failed to resolve module specifier".
 """
 from nicegui import ui
 
+import bus_client
+
 from ..gauge import gauge_figure
-from . import svg
+from . import ev, svg
 from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
                     TILE_3D, CARD, EYEBROW, MUTED)
 
@@ -597,6 +599,33 @@ def contract_lines(signal):
     return lines
 
 
+# NOTE the view name carries no `cache:` prefix — bus_client.read* adds it.
+CALIBRATION_VIEW = "options:calibration"
+
+# The calibration is rebuilt ONCE a night, so a per-selection read would be pure
+# waste — this panel updates on every row click. `read_gated` probes the tiny
+# `{key}:ver` counter and only deserializes when it actually moved.
+_cal_memo: dict = {}
+
+
+def _calibration():
+    """The realized-outcome buckets, or ``{}`` when the cache is cold.
+
+    Never raises: a service that has not published yet, or a bus outage, must
+    cost the panel its EV row and nothing more.
+
+    ⚠ ``read_gated`` returns ``(payload, changed)``. Taking the tuple whole would
+    not raise — ``calibrated_facts`` type-checks its argument — it would just
+    silently never find a bucket, which is the failure this panel is least able
+    to notice.
+    """
+    try:
+        payload, _changed = bus_client.read_gated(CALIBRATION_VIEW, _cal_memo)
+        return payload or {}
+    except Exception:      # noqa: BLE001 — a missing EV row beats a broken panel
+        return {}
+
+
 def _signal_title(s):
     return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
                                   s.get("trade_type", "")) if x) or "Signal"
@@ -633,6 +662,19 @@ def _build_cards(s):
         _kv("Max loss", money_per_contract(s.get("max_loss")), RED)
         _kv("Breakeven", breakeven_text(s.get("breakeven")))
         _kv("Probability", _pct(s.get("pop_pct")), pop_color(s.get("pop_pct")))
+        # What the trade's own price REQUIRES, directly under what it offers, so
+        # the margin between them needs no arithmetic. Structural — it survives
+        # the wide marks that make a priced EV meaningless (see ev.py).
+        be = ev.breakeven_facts(s)
+        if be:
+            _kv("Needs", f"{be['breakeven_pct']:.1f}%", be["tone"])
+        # The one figure here whose probability is NOT read off the option's own
+        # price. Absent unless its bucket cleared both gates service-side.
+        cal = ev.calibrated_facts(s, _calibration())
+        if cal:
+            with ui.row().classes("justify-between w-full items-start gap-2"):
+                ui.label("Signals like this").classes("opacity-70 text-sm")
+                ui.label(cal["text"]).classes(f"text-sm text-right {cal['tone']}")
 
     # 3 — EXPLORE. All four collapsed: the ladder above already answered
     # reject-or-not, so nothing here competes with it for attention.
@@ -641,9 +683,12 @@ def _build_cards(s):
             _kv("Risk / reward", _pct(s.get("rr_pct")))
         if s.get("max_contracts") is not None:
             _kv("Max contracts", str(s.get("max_contracts")))
-        if isinstance(s.get("expected_pnl_10"), (int, float)):
-            v = s["expected_pnl_10"]
-            _kv("Expected P&L (10 contracts)", f"${v:+,.0f}", GREEN if v >= 0 else RED)
+        # `expected_pnl_10` was rendered here until 2026-08-25. It is the PRICED
+        # EV in dollars — p from the short delta, b from credit/max_loss, both
+        # read off the option's own price — so it is ~0 by construction and, on a
+        # wide mark, spectacular for the wrong reason. The ECONOMICS block above
+        # now carries the two figures that survive scrutiny. The engine still
+        # computes it, where it belongs: as a width-selection gate.
         for label, val, known in factor_rows(s.get("factor_scores"), s.get("type"),
                                              s.get("factors_unavailable")):
             with ui.row().classes("items-center gap-2 w-full no-wrap"):

@@ -448,6 +448,29 @@ def launch_branches(running, branches, create_task):
     return launched
 
 
+# config/sessions.toml [slots.calibration] -- the nightly realized-outcome rebuild.
+_CALIBRATION_AT = (lambda t: (t.hour, t.minute))(mc.slot_times("calibration")["at"])
+
+
+def calibration_due(now, last_session):
+    """(should_run, session) -- the ONE nightly calibration slot.
+
+    Nightly because the bucket table moves on CLOSED trades, which arrive a
+    handful per day; a per-tick rebuild would re-read the whole database for a
+    number that changes daily. Fires at/after _CALIBRATION_AT on a trading day,
+    once per session date -- ``last_session`` is the sentinel, so a late start
+    still catches the day and a restart cannot re-run it. Pure; the caller owns
+    the clock. Mirrors ``sentiment_svc.scheduler.momentum_due``.
+    """
+    if not mc.is_trading_day(now.date()):
+        return (False, last_session)
+    import datetime as _dt          # local, matching this module's convention
+    if now.time() < _dt.time(*_CALIBRATION_AT):
+        return (False, last_session)
+    session = now.date().isoformat()
+    return (session != last_session, session)
+
+
 async def loop(bus):
     """Server-side 15-min auto-scan + gated header/GEX-status refresh.
 
@@ -482,6 +505,7 @@ async def loop(bus):
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
+    calibration_session = None  # nightly calibration session sentinel (see calibration_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
@@ -494,6 +518,14 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_paper_account, bus)
     except Exception:
         log.exception("startup refresh_paper_account degraded")
+    # One-shot startup rebuild of the realized-outcome calibration so the Trade
+    # detail panel has buckets on first load instead of waiting for 16:30 CT.
+    # Reads signals.db only -- no Schwab call, no Claude call. Guarded so a
+    # missing DB never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_calibration, bus)
+    except Exception:
+        log.exception("startup refresh_calibration degraded")
     # One-shot startup refresh of the paper-trade ledger so the Paper Trades page
     # has data on first load. The ledger only changes on user actions
     # (reload/close/delete/delete-all commands re-publish it), so it is NOT polled
@@ -756,6 +788,25 @@ async def loop(bus):
 
         if aa_slot:
             branches.append(("action_alert", _action_alert_branch(aa_slot)))
+
+        # Nightly realized-outcome calibration -> cache:options:calibration, the
+        # EV the Trade detail panel shows. The session is latched BEFORE the
+        # blocking rebuild so a slow read can't double-fire on the next tick.
+        # Independently guarded; reads signals.db only (no Schwab, no Claude).
+        try:
+            cal_run, calibration_session = calibration_due(now, calibration_session)
+        except Exception:
+            log.exception("calibration_due gate degraded")
+            cal_run = False
+
+        async def _calibration_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.refresh_calibration, bus)
+            except Exception:
+                log.exception("refresh_calibration branch degraded")
+
+        if cal_run:
+            branches.append(("calibration", _calibration_branch()))
 
         # Scheduled end-of-day summary — push a per-book day-P&L digest at ~15:10 CT on
         # each trading day. Latched in eod_summary_ran BEFORE the blocking collect+push so

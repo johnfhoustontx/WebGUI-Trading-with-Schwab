@@ -98,8 +98,13 @@ The monorepo was re-tiered (strangler-fig) into three **physically separate** ti
 portfolio, trade, driver, market — and every page reads Redis. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
-153 non-test `webgui/**/*.py`, extended 2026-08-21): `nicegui` · `shared.bus`
+153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25):
+`nicegui` · `shared.bus`
 (never `redis` directly) · `shared.market_calendar` · `shared.symbols` ·
+`shared.calibration` (pure arithmetic — `import math` and nothing else; Tier 1
+takes only `bucket_key` from it, so the DB's `scanner_type` '0DTE' and the
+page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
+mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
@@ -1274,7 +1279,10 @@ relocates it.
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
 
 Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
-briefings, the thrice-daily action digest, and the nightly momentum cascade. They
+briefings, the thrice-daily action digest, the nightly momentum cascade, and the
+nightly **`calibration`** rebuild (16:30 CT, after `[windows.collection] stop`
+so the day's outcomes have settled — it reads `signals.db` only and costs no
+Schwab or Claude call). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call**, so the table is the direct control on
 that spend.

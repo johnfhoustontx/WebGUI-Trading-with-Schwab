@@ -258,6 +258,7 @@ _DEFAULTS = {
         "action_alert": {"grace_min": 20, "morning": "10:00", "midday": "13:00",
                          "close": "15:00"},
         "momentum": {"at": "16:20"},
+        "calibration": {"at": "16:30"},
     },
     "alerts": {"fire_in_extended_hours": False},
 }

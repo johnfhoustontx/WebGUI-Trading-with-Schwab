@@ -86,6 +86,14 @@ morning = "10:00"
 midday  = "13:00"
 close   = "15:00"     # pre-close sweep
 
+[slots.calibration]
+# The nightly signal-calibration rebuild -> cache:options:calibration, the
+# realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]
+# stop (15:20) and after the momentum slot, so the day's outcomes have settled:
+# recomputing mid-session would publish a bucket table that changes under the
+# reader. Cheap and local -- it reads signals.db, makes no Schwab or Claude call.
+at = "16:30"
+
 [slots.momentum]
 # The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the
 # day's daily bars have settled at the proxy. Moving it earlier will silently

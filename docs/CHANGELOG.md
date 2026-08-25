@@ -4,6 +4,52 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-25 (**Expected value in the Trade detail panel — and the version of it that was worth showing.**
+- **The ask** was to display `EV = p*b - (1-p)` as a recommendation. Measured first, and the
+  obvious implementation turned out to be harmful rather than merely useless. Design +
+  plan: [`docs/plans/2026-08-25-ev-in-trade-detail-{design,plan}.md`](plans/2026-08-25-ev-in-trade-detail-design.md).
+- **Finding 1 — the priced EV is ~0 in the median and junk in the tail.** Across the 75 live
+  signals carrying usable fields, median priced EV was **+0.038 R**, as no-arbitrage requires.
+  The top of the distribution was entirely bid-ask width: UAL **+2.832 R** at a *225%* relative
+  spread, IBKR +0.751 R at 239%, AMGN +0.412 R at 395%. Ranking on it ranks the least
+  trustworthy marks first.
+- **Finding 2 — `p` and `b` must name the same event.** Directional signals (390 of 465, **84%**
+  of the board) use `max_profit`/`max_loss` with no `credit` and no `short_delta`. Computing
+  `b = max_profit/max_loss` there printed **+2137 R for a long put** — whose `max_profit`
+  assumes the underlying reaches zero, while `pop_pct` is P(any profit). ⚠ The existing
+  `unbounded` flag reads **False** for every one of the worst offenders, so it is not the guard.
+- **Finding 3 — the family key nearly shipped broken.** `signals.db` stores `scanner_type`
+  `'0DTE'`; a live signal carries `trade_type` `'0-DTE'` and a `scanner_type` of `None`. Keyed
+  on the raw value the 0-DTE bucket would never have matched page-side — silently, for the
+  family with the most recorded data. One normalizer (`shared.calibration.family_key` /
+  `bucket_key`) is used by BOTH tiers, with a test on each side.
+- **What shipped.** Two rows in the panel's ECONOMICS block. **Needs** — the win rate the
+  trade's own price demands, `max_loss/(credit+max_loss)` — under `Probability`, so the margin
+  needs no arithmetic. **Signals like this** — realized R per trade for the signal's family and
+  score band, from the new `cache:options:calibration`. `expected_pnl_10` (the priced EV, in a
+  collapsed expander since it was written) was **removed**; the engine still computes it where
+  it belongs, as the width gate in `select_best_width`.
+- **Both rows are omitted ENTIRELY when they cannot be honest** — not dashed, not flagged. The
+  calibrated row is additionally withheld when its bucket's day-clustered t is inside ±2.
+- **Tier 2.** `services/options_svc/calibration.py` + `handlers.refresh_calibration` +
+  `scheduler.calibration_due`, on a new nightly `config/sessions.toml [slots.calibration]` at
+  16:30 CT (after `[windows.collection] stop`, so the day's outcomes have settled). Reads
+  `signals.db` only — no Schwab call, no Claude call. Payload is **984 bytes** on prod's 793
+  closed signals and carries no per-trade rows and no timestamp, so an unchanged night
+  `skip_unchanged`-skips the write.
+- **The math moved to `shared/calibration.py`** so the CLI and the service share one copy
+  rather than repeating the `clamp`-times-nine trap. Verified behaviour-preserving: the 39
+  existing tests passed **unchanged** and the prod CLI output was **byte-identical**.
+- ⚠ **Expect it to look inert at first.** On prod today only **3 of 7** buckets clear the t
+  gate (`0DTE|55-60`, `0DTE|60-65`, `SWING|65-70`); `SWING|55-60` — 221 trades, the largest
+  bucket — reads tDay **-0.89** and stays silent. That is the feature working.
+- **Tests:** +35 shared, +22 options_svc, +19 webgui, tools split 39 -> 19 CLI + 35 shared with
+  the SQL path now covered. Suites: webgui **2849**, options_svc **1244**, tools+shared **1127**.
+  The loop's own `test_the_loop_test_leaves_no_branch_work_running` guard caught the new branch
+  missing from `_BRANCH_HANDLERS` — exactly what it is for.)
+
+---
+
 **Last updated:** 2026-08-24 (**A missing composite published the most bearish band there is.**
 - **The symptom.** With no composite to read, `cache:sentiment:composite`'s `derived`
   carried `{"size": "0.70x", "bias": "Short", "signal": "Strong Bear"}` — the most

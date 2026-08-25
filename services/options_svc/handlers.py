@@ -241,6 +241,9 @@ EVENT_CALC_RESULT = "events:options:calc_result"
 CACHE_CALC_IV = "cache:options:calc_iv"
 EVENT_CALC_IV = "events:options:calc_iv"
 
+CACHE_CALIBRATION = "cache:options:calibration"
+EVENT_CALIBRATION = "events:options:calibration"
+
 CACHE_GEX_STATUS = "cache:options:gex_status"
 EVENT_GEX_STATUS = "events:options:gex_status"
 
@@ -1349,6 +1352,27 @@ def publish_gex_status(bus) -> None:
     # Per-tick republisher: skip the version bump + publish when the status view
     # is unchanged (e.g. off-hours), so it doesn't wake the GUI poller needlessly.
     bus.cache_set(CACHE_GEX_STATUS, data, event=EVENT_GEX_STATUS, skip_unchanged=True)
+
+
+def refresh_calibration(bus) -> None:
+    """Rebuild the realized-outcome calibration and publish it.
+
+    Nightly (``scheduler.calibration_due``) plus once at startup, so the Trade
+    detail panel has buckets on first load rather than waiting for 16:30 CT.
+
+    ``skip_unchanged`` matters more here than on a per-tick view: on a day that
+    closed no trades the payload is byte-identical and the GUI poller is never
+    woken. ``build_calibration`` deliberately carries no timestamp so that can
+    happen -- see its docstring.
+
+    ``load_and_build`` is already fully defensive (a missing signals.db is the
+    fresh-clone case and degrades to an empty payload), so a failure here cannot
+    take the nightly slot down.
+    """
+    from services.options_svc.calibration import load_and_build
+
+    bus.cache_set(CACHE_CALIBRATION, load_and_build(),
+                  event=EVENT_CALIBRATION, skip_unchanged=True)
 
 
 def _persist_briefing(res, slot, now) -> None:

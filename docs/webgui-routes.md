@@ -114,6 +114,34 @@ backlog or light every row.
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
+## Trade detail panel — the two expected-value rows (2026-08-25)
+
+Shared by every signal table, so it is documented once here rather than per route.
+
+The **ECONOMICS** block carries two figures about expected value, answering
+different questions. **Needs** is structural — the win rate this trade's own price
+demands, `max_loss/(credit+max_loss)` — rendered directly under `Probability` so
+the margin needs no arithmetic. **Signals like this** is the recommendation:
+realized R per trade for this signal's family and score band, read from
+`cache:options:calibration` (published nightly by `options_svc`, version-gated
+page-side since it moves once a day).
+
+⚠ The **priced** EV is deliberately absent, and `expected_pnl_10` was REMOVED from
+the "Score factors" expander on 2026-08-25. Both its terms come from the option's
+own price, so it is ~0 by construction — and where it is large it is measuring a
+broken mark: the top three live signals by priced EV that day carried relative
+bid-ask spreads of 225%, 239% and 395%. It survives where it is correct, as the
+width-selection gate in `scanner_engine.select_best_width`.
+
+Either row is **omitted entirely** — not dashed, not flagged — when it cannot be
+computed honestly. A Strategy Finder signal has no `credit` (so no breakeven) and
+carries `max_profit`, a TAIL outcome that would print **+2137R** for a long put if
+used as `b`; note its `unbounded` flag reads False for every one of the worst
+offenders, so that flag is not the guard. The calibrated row is additionally
+withheld when its bucket's day-clustered t is inside ±2. Builders:
+`pages/options/ev.py` (PURE, unit-tested); design:
+[`plans/2026-08-25-ev-in-trade-detail-design.md`](plans/2026-08-25-ev-in-trade-detail-design.md).
+
 ## `/options/scanner`
 
 Options · Market Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **Since 2026-08-06 the ENGINE only emits non-Weak candidates scoring ≥ 50** (`scanner_engine.SINGLE_LEG_MIN_SCORE` / `SINGLE_LEG_EXCLUDED_GRADES`, cut before the per-symbol cap) — an empty Directional tab now means "nothing cleared the bar", not a failure, and long CALLS largely vanish because the documented unbounded-profit R:R artifact scores them ~14 points below long puts. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]]))

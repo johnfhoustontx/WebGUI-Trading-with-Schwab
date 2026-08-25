@@ -143,6 +143,13 @@ plus single-leg directional trades on their own tab.
   probability of profit, and better trend fit. Work from the top down.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
+- **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
+  trade's own price DEMANDS to break even. Probability above it is cushion,
+  below it means the trade loses money over time even when it usually wins.
+- **Signals like this** — what trades in the same tab and score band actually
+  RETURNED, per trade, as a multiple of what was risked. It comes from your own
+  closed trades, not from the option's price, and it is **left out entirely**
+  when there aren't enough of them to mean anything.
 - It re-scans on its own — **Run scan** (at the right edge of the table) just
   forces a refresh.
 """,
