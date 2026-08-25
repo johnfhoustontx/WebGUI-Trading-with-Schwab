@@ -72,6 +72,40 @@ function (schema never duplicated here). Safety rails:
 
 Restore = copy a backup file back by hand.
 
+## `signal_calibration.py` — does the composite score predict?
+
+Read-only (`mode=ro`) join of `signals.entry_grade` / `entry_score` to
+`signal_outcomes.realized_pnl`, reported in **R** (P&L over dollars risked) so
+spreads of different widths are comparable.
+
+It exists because every probability the app displays is extracted from the
+option's own price, which makes `EV = p·b − (1−p)` ≈ 0 by construction. Realized
+outcomes are the only independent source of `p` this repo holds.
+
+```powershell
+.venv\Scripts\python tools\signal_calibration.py --by entry_score --min-n 15
+.venv\Scripts\python tools\signal_calibration.py --by entry_score --split scanner_type --min-n 15
+.venv\Scripts\python tools\signal_calibration.py --by exit_reason --exclude-reason MANUAL_CLOSE
+```
+
+`--by` takes `entry_grade` · `entry_score` (binned) · `scanner_type` ·
+`strategy` · `symbol` · `exit_reason` · `dte_at_entry`. `--since YYYY-MM-DD` and
+`--exclude-reason` narrow the population; `--db` points at another checkout.
+
+**`--split KEY` runs the whole `--by` breakdown separately within each value of
+KEY, and `--min-n` then applies within a split rather than across it.** This is
+not cosmetic: measured 2026-08-25, the pooled report showed no edge below score
+60, and splitting on `scanner_type` showed that was entirely a swing effect —
+0-DTE's `55-60` bucket reads `+0.257R` at `tDay 2.37` while swing's reads
+`+0.059R` at `tDay -0.89`. Pooling two populations reports the average of a gate
+that only one of them has.
+
+⚠ **Read `tDay`, not `t`.** One scan emits a dozen correlated signals onto one
+tape, so the naive t-stat counts them as a dozen independent bets and overstates
+significance by roughly √(rows/days) — measured on prod, 793 rows span 49 entry
+days. The bottom score bucket reads `t +2.45` and `tDay −0.88`: the naive column
+alone would have reported edge where there is none.
+
 ## Tests
 
 ```powershell
