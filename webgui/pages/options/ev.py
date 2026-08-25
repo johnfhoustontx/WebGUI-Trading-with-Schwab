@@ -88,6 +88,16 @@ def calibrated_facts(signal, payload):
     if not isinstance(buckets, dict):
         return None
 
+    # ⚠ Reads `trade_type`/`composite_score` ONLY, deliberately. The panel is
+    # shared and each table synthesizes its own signal-like dict, but every
+    # synthesizer is responsible for supplying those two names — Captured
+    # Signals stores `scanner_type`/`entry_score` and `synth_from_captured`
+    # already maps them across. A `scanner_type`/`entry_score` fallback HERE was
+    # written on 2026-08-25 and reverted the same hour: measured against the real
+    # synthesized dicts it changed nothing (104 rows either way), and its tests
+    # passed only because they fed a shape no producer emits. That is the
+    # documented trap — a consumer-side guard proves nothing until a test drives
+    # it from the PRODUCER, which is what test_ev.py now does instead.
     key = bucket_key(s.get("trade_type"), num(s.get("composite_score")))
     bucket = buckets.get(key) if key else None
     if not isinstance(bucket, dict) or not bucket.get("speaks"):

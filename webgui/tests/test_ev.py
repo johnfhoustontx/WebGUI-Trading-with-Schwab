@@ -148,3 +148,38 @@ class TestCalibratedEv:
                               "SWING|60-65": _bucket(ev_r=0.40)})
         f = ev.calibrated_facts(_spread(trade_type="SWING"), payload)
         assert f["ev_r"] == pytest.approx(0.40)
+
+
+class TestTheProducersSupplyWhatThisReads:
+    """`calibrated_facts` reads `trade_type`/`composite_score` and nothing else.
+    Every table that feeds the shared panel is therefore responsible for
+    supplying those two names, and these tests drive that from the PRODUCER --
+    not by handing the builder a shape and asserting it copes.
+
+    That distinction is the point. A `scanner_type`/`entry_score` fallback was
+    added to ev.py on 2026-08-25 and reverted within the hour: against the real
+    synthesized dicts it changed nothing (104 captured rows either way), and its
+    tests passed only because they fed a shape no producer emits.
+    """
+
+    def test_captured_signals_synthesizes_the_names_the_builder_reads(self):
+        from pages.options.captured import synth_from_captured
+        raw = {"symbol": "SMCI", "strategy": "PCS", "scanner_type": "0DTE",
+               "entry_score": 62.2, "current_score": None, "mode": "PREMIUM",
+               "entry_credit": 0.27, "entry_max_loss": 0.73}
+        syn = synth_from_captured(raw)
+        assert syn["trade_type"] == "0DTE"        # from scanner_type
+        assert syn["composite_score"] == 62.2     # from entry_score
+
+    def test_a_captured_row_end_to_end_finds_its_bucket(self):
+        """The synthesized dict, through the real builder, against a real key."""
+        from pages.options.captured import synth_from_captured
+        syn = synth_from_captured({"symbol": "SMCI", "strategy": "PCS",
+                                   "scanner_type": "0DTE", "entry_score": 62.2,
+                                   "entry_credit": 0.27, "entry_max_loss": 0.73})
+        f = ev.calibrated_facts(syn, _payload(**{"0DTE|60-65": _bucket()}))
+        assert f is not None and f["ev_r"] == pytest.approx(0.524)
+
+    def test_a_signal_missing_both_names_yields_nothing(self):
+        assert ev.calibrated_facts({"credit": 1.0, "max_loss": 1.0},
+                                   _payload(**{"0DTE|60-65": _bucket()})) is None

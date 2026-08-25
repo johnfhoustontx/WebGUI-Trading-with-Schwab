@@ -1756,7 +1756,8 @@ def handle_command(bus, command) -> None:
     refresh the paper view + re-cache the advisory; ``sim_replay`` (args symbol/legs)
     → step the position along the underlying's recent path, cache the six-panel
     trace + publish; ``gamma_history`` (args symbol, date) → build the standalone
-    intraday history report, cache the HTML + publish; else no-op.
+    intraday history report, cache the HTML + publish; ``calibration_refresh`` →
+    rebuild the realized-outcome calibration from signals.db + publish; else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
@@ -1764,6 +1765,12 @@ def handle_command(bus, command) -> None:
     either direction, so adding a branch without a line here is a red suite."""
     if command.type == "rescan":
         rescan(bus)
+    elif command.type == "calibration_refresh":
+        # Also runs from the scheduler's startup one-shot and its nightly slot.
+        # It is a command as well because dev suppresses schedulers, and a page
+        # feature that can never populate in dev is one no future change to it
+        # can be verified against.
+        refresh_calibration(bus)
     elif command.type == "swing_scan":
         swing_scan(bus, command.args)
     elif command.type == "refresh_paper":

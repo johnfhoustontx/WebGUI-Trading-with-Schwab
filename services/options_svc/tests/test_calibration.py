@@ -186,3 +186,41 @@ class TestTheNightlySlot:
         still landing would publish a bucket table that changes under the reader."""
         import shared.market_calendar as mc
         assert mc.slot_times("calibration")["at"] > mc.window_bounds("collection")[1]
+
+
+class TestTheRefreshCommand:
+    """`refresh_calibration` runs from the scheduler's startup one-shot -- but
+    dev has `schedulers: False`, so in dev it would NEVER run and the panel's
+    calibrated row could never be verified there. CLAUDE.md's rule is that dev is
+    quiet at rest, NOT incapable: command handlers still run. So the rebuild is
+    reachable as a command too, which is also how the Status page or a fresh
+    clone can populate it without waiting for 16:30 CT."""
+
+    @staticmethod
+    def _cmd(type_, **args):
+        from types import SimpleNamespace
+        return SimpleNamespace(type=type_, args=args, id="1")
+
+    def test_the_command_publishes_the_calibration_view(self):
+        from shared.bus import Bus
+
+        from services.options_svc import handlers
+        bus = Bus(fake=True)
+        handlers.handle_command(bus, self._cmd("calibration_refresh"))
+        env = bus.cache_get(handlers.CACHE_CALIBRATION)
+        assert env is not None and "buckets" in env.payload
+
+    def test_an_unknown_command_still_publishes_nothing(self):
+        from shared.bus import Bus
+
+        from services.options_svc import handlers
+        bus = Bus(fake=True)
+        handlers.handle_command(bus, self._cmd("not_a_command"))
+        assert bus.cache_get(handlers.CACHE_CALIBRATION) is None
+
+    def test_the_dispatcher_docstring_names_it(self):
+        """That docstring IS the API the GUI codes against, and it has drifted
+        before -- three commands were implemented and undocumented until
+        2026-08-20."""
+        from services.options_svc import handlers
+        assert "calibration_refresh" in (handlers.handle_command.__doc__ or "")
