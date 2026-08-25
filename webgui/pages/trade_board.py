@@ -5,10 +5,17 @@ that follows them. The short table carries the market-filter note, because a
 bottom-decile name in an uptrend is predicted to LAG the index rather than to
 fall, and an unlabelled short list invites the trade the tape has refused.
 
+The two pools sit SIDE BY SIDE from `xl` up and stack below it: the board's
+question is which side the model prefers today, and that is a comparison, so the
+two lists belong on one screen rather than one above the fold and one below.
+
 Every table sits in an `overflow-x: auto` wrapper over a `min-width` grid, so
 columns scroll rather than collide or clip at any width — nine columns of mono
 do not fit a narrow window, and clipping the gates column would hide exactly the
-thing the board exists to surface.
+thing the board exists to surface. That wrapper is what makes the two-up layout
+safe: a pane narrower than the table scrolls itself. It only works because the
+panel carries `min-w-0` — a grid item's default `min-width: auto` would refuse
+to shrink and blow the column out to the table's full width instead.
 
 ⚠ The amber line above the tables states what share of the ranking weight sits
 on volatility factors. On a RANKED board that is the single most important thing
@@ -34,6 +41,10 @@ POLL_SEC = 5.0
 # sizes to its own content, so a trailing `1fr` would differ per row.
 _COLS = ("w-full [grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
 _TABLE_MIN = "min-w-[940px]"
+# `items-start`, not the default stretch: the pools are rarely the same
+# length, and a two-row short pool padded to the height of a nine-row long
+# pool reads as missing rows.
+_BOARD_GRID = "grid grid-cols-1 xl:grid-cols-2 items-start"
 
 # "BAND", not "PCTL": the number is a calibration band cut from the model's own
 # score history, and on any given day the bands fill unevenly — so it is not a
@@ -272,7 +283,7 @@ def _build(state, refs):
         sh.tip(th.help_for("exposure_note"))
     gates = ui.label("").classes(f"{T.NOTE}")
 
-    tables = ui.column().classes("w-full gap-4")
+    tables = ui.element("div").classes(f"w-full {_BOARD_GRID} gap-4")
 
     book_panel = sh.panel("Model paper book",
                           help=th.help_for("paper_book"))
