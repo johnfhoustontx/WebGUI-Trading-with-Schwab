@@ -999,6 +999,28 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   returned **100.0**, maximum bullish breadth. They now run inputs through a local
   `_finite()` first, which extends each function's OWN stated policy rather than
   overriding a caller's intent.
+- **A TOTAL function has no absence branch, so a default input picks its bottom
+  band — and the guard was on the WRONG SIDE of the boundary (2026-08-24).**
+  `live_composite.signal_band` maps a composite total to
+  `(size, bias, signal)` through `>=9 / >=7 / >=5 / >=3 / else`. It is total
+  over the reals, so `_safe_float`'s **0.0** default falls out of the last
+  return — and so does a NaN, which fails every `>=` — publishing
+  **`0.70x` / `Short` / `Strong Bear`**, the most bearish word in either
+  vocabulary at the smallest position size, for six distinct ways of having no
+  composite at all. Reached the Desk strip, the Market Regime Console, **and the
+  market snapshot pushed to your phone**. Fixed at the call site in
+  `sentiment_svc.compute.derive_composite_extras`, which now publishes
+  `None, None, None` when `_as_finite` says there is nothing to band.
+  ⚠ **The absence value has to be the one the consumers already test** — `None`
+  here, since two of the three gate on `size is not None` and an empty-string
+  triple is a truthy tuple that renders blank rather than dashed.
+  **The lesson is where the guard lived.** All three renderers handled the
+  absence correctly and none of them could ever fire, because the producer never
+  emitted the shape they tested; `test_signal_band_facts_print_a_dash_for_a_cold_cache_never_neutral`
+  asserts precisely the right invariant and passed throughout, by feeding a
+  payload the service does not write. **A consumer-side guard proves nothing
+  until a test drives it from the PRODUCER** — which is the same reason
+  characterization tests pinned the ADX bug below.
 
 **Do not "fix" this in `_clamp` itself** — it looks like the one-line cure and is
 not. `_clamp` is **duplicated nine times** across `sentiment-dashboard/scoring/`

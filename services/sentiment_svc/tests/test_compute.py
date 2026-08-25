@@ -105,6 +105,68 @@ def test_derive_composite_extras_defensive_no_spy():
     assert out["divergence_detail"] is None
 
 
+def test_an_unusable_composite_total_publishes_no_band_at_all():
+    """Absence must not render as the BOTTOM band.
+
+    ``signal_band`` is a TOTAL function over the reals — ``>=9 / >=7 / >=5 /
+    >=3 / else`` — with no absence branch, so a manufactured 0.0
+    (``_safe_float``'s default) and a NaN (which fails every ``>=``) BOTH fall
+    out of its last return as ``('0.70x', 'Short', 'Strong Bear')``: the most
+    bearish word in the vocabulary at the smallest position size, and nothing
+    downstream can tell it from a measured one.
+
+    Two of these shapes genuinely reach production. ``live=None`` with an empty
+    backfill is the service starting before the proxy is warm — ``load_live``
+    swallows every exception and ``_load_snapshots_cached`` degrades to
+    ``([], [])`` — and ``handlers._composite_gate`` skips it precisely because
+    there is no snapshot to validate. NaN passes that gate too, since
+    ``float(nan)`` does not raise. The remaining three abort the refresh at the
+    gate today, and are pinned here so a future loosening of it cannot quietly
+    reopen this path.
+
+    ``None`` is the shape, not ``""``: all three renderers of these words — the
+    Desk strip, the Market Regime Console and the pushed market snapshot —
+    already dash on it, two of them by testing ``size is not None``, and an
+    empty-string triple is a TRUTHY tuple that would render blank instead.
+    """
+    unusable = [
+        (None, []),                                        # no live, no backfill
+        (None, [{"composite": {}}]),                       # snapshot carries no score
+        (None, [{"composite": {"total_score": None}}]),
+        (None, [{"composite": {"total_score": float("nan")}}]),
+        (None, [{"composite": {"total_score": "n/a"}}]),
+    ]
+    for live, snaps in unusable:
+        out = compute.derive_composite_extras(live, snaps, [])
+        assert (out["size"], out["bias"], out["signal"]) == (None, None, None), snaps
+
+
+def test_a_genuinely_bearish_composite_still_bands_strong_bear():
+    """The guard above must reject ABSENCE, not low scores. 1.00 is a real
+    reading and the bottom band is the correct answer for it — this is what
+    stops the fix from being 'publish None whenever the news is bad'."""
+    out = compute.derive_composite_extras(None, [_snap("2026-06-01", 1.0)], [])
+    assert (out["size"], out["bias"], out["signal"]) == ("0.70x", "Short",
+                                                        "Strong Bear")
+
+
+def test_a_raising_signal_band_publishes_the_same_absence_shape(monkeypatch):
+    """One function, one way of saying "no band".
+
+    The guard's fallback used to be ``("—", "", "")``, which is a THIRD shape:
+    a non-None ``size`` opens the populated branch in both
+    ``sentiment.tiles`` and ``market_snapshot`` (each gated on
+    ``size is not None``), which then render an em-dash modifier beside two
+    blank words. Absence is ``None`` here for the same reason it is ``None``
+    above."""
+    def _raise(_total):
+        raise RuntimeError("band engine drift")
+
+    monkeypatch.setattr(compute, "signal_band", _raise)
+    out = compute.derive_composite_extras(None, [_snap("2026-06-01", 8.0)], [])
+    assert (out["size"], out["bias"], out["signal"]) == (None, None, None)
+
+
 def test_divergence_detail_stays_none_when_the_engine_does_not_fire():
     """The >=4-point rule is the ENGINE's to own. The structured pair only ever
     names the components of a divergence the engine already declared — it must

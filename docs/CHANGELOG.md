@@ -4,6 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-24 (**A missing composite published the most bearish band there is.**
+- **The symptom.** With no composite to read, `cache:sentiment:composite`'s `derived`
+  carried `{"size": "0.70x", "bias": "Short", "signal": "Strong Bear"}` — the most
+  bearish word in either vocabulary, at the smallest position size, indistinguishable
+  from a measured reading. Six different ways of having no data all produced that one
+  answer: no live and no backfill, a snapshot with no `composite`, a `total_score` of
+  `None`, of `NaN`, or unparseable.
+- **The root cause is a boundary, not a formula.** `_safe_float` defaults to **0.0**, and
+  `live_composite.signal_band` is a **TOTAL** function over the reals — `>=9 / >=7 / >=5
+  / >=3 / else` — with no absence branch. So the manufactured 0.0 falls out of its last
+  return, and so does a NaN, which fails every `>=` for a different reason. The absence
+  was laundered into a reading one line before the band was computed.
+- **Two of the six genuinely reach production.** `handlers._composite_gate` raises on a
+  malformed composite and aborts the refresh, keeping the last good cache — which is
+  correct, and stops three of them. It skips when there is no snapshot at all, which is
+  `live=None` + an empty backfill: `compute.load_live` swallows **every** exception and
+  `_load_snapshots_cached` degrades to `([], [])`, i.e. **the service starting before the
+  proxy is warm**. NaN passes the gate too, since `float(nan)` does not raise.
+- **Three renderers, and the third is the phone.** The Desk strip, the Market Regime
+  Console, and — via `options_svc.market_snapshot` → `market_console.signal_rows` — the
+  **market snapshot pushed to Telegram/Discord** on the thrice-daily slots. During an
+  outage that push read "BIAS: Short / SIGNAL: Strong Bear" with nothing to mark it as
+  an absence. No trading logic reads these words (`derived["size"]` has no consumer
+  outside the GUI, and the bridge's `position_size_modifier` is written and never read),
+  so the blast radius was display — on the surface that reaches you when you are not
+  looking at the app.
+- **Why nothing caught it, which is the part worth keeping.** All three renderers guard
+  the absence *correctly* and none of their guards could fire:
+  `webgui/tests/test_desk.py::test_signal_band_facts_print_a_dash_for_a_cold_cache_never_neutral`
+  asserts the exact right invariant — "'Neutral' is a reading. A composite that has not
+  published is not one" — and passes, because it feeds `{"bias": None, "signal": ""}`.
+  **The producer never emitted that shape.** The guard sat on the consumer side of a
+  boundary the producer could not cross. The same self-contradiction was visible on
+  screen: for identical no-data input `sentiment_pill_text` correctly rendered nothing
+  while BIAS and SIGNAL two tiles over shouted Short / Strong Bear in red.
+- **Fixed at the CALL SITE**, per the standing rule that only the caller knows what a
+  missing input implies — not in `signal_band`, which has two other callers inside
+  `live_composite` and faithfully mirrors the source app's `_update_position_modifier`.
+  `derive_composite_extras` now resolves the total through the module's existing
+  `_as_finite` and publishes `size = bias = signal = None` when there is nothing to band.
+- **`None` specifically, not `""`.** Two of the three renderers gate on
+  `size is not None`, and an empty-string triple is a **truthy tuple** that would render
+  blank rather than dashed. The `except` fallback's `("—", "", "")` was a third shape
+  with the same defect — a non-None `size` opens the populated branch and prints an
+  em-dash modifier beside two blank words — and became `None, None, None` in its own
+  red-green cycle.
+- **`total` is untouched.** The first draft of the fix also moved it from NaN to 0.0,
+  which would have quietly changed `velocity`'s input; `raw_total` now feeds
+  `_as_finite` and `_safe_float` separately so the band is the only thing that moved.
+  `velocity`'s own missing-input policy stays its own.
+- **Three tests, two of them red first:** the five absence shapes, the raising-band
+  fallback, and — passing from the start, by design — a genuine 1.00 composite still
+  banding Strong Bear, so the fix cannot decay into "publish None whenever the news is
+  bad". Verified end to end by feeding the real producer's output through all three real
+  renderers: em dash at the muted/flat tone in every one. Suites: sentiment_svc **331
+  passed / 1 xfailed**, webgui **2830**, options_svc **1222**, failing set empty in all
+  three.)
+
+---
+
 **Last updated:** 2026-08-24 (**BIAS and SIGNAL replace VIX on the Desk top strip.**
 - **By request.** The strip's `$VIX` quote gives way to the Market Regime console's own
   two verdict tiles. Both words are ONE producer call's output —

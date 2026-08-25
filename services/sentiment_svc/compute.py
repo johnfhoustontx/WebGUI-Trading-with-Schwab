@@ -1570,12 +1570,26 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
     ``trend_7d`` is LAST so the existing positional call shape is unaffected.
     """
     latest = live or (snaps[-1] if snaps else None)
-    total = _safe_float((latest or {}).get("composite", {}).get("total_score"))
+    # ``scored`` is the composite total ONLY when one was actually read; the
+    # band below is derived from it rather than from ``total``, and that
+    # distinction is the whole point of the two names. ``signal_band`` is a
+    # TOTAL function over the reals (``>=9 / >=7 / >=5 / >=3 / else``), so both
+    # of ``_safe_float``'s degrade paths — its 0.0 default, and a NaN, which
+    # fails every ``>=`` — fall out of its last branch as the most bearish
+    # reading in the vocabulary at the smallest position size. Absence has to
+    # publish NO band instead: ``None``, which is the shape all three renderers
+    # of these words already dash on. ``total`` stays byte-for-byte what it was
+    # — ``velocity`` below has its own missing-input policy, which is not this
+    # line's to change.
+    raw_total = (latest or {}).get("composite", {}).get("total_score")
+    scored = _as_finite(raw_total)
+    total = _safe_float(raw_total)
 
     try:
-        size, bias, signal = signal_band(total)
+        size, bias, signal = (signal_band(scored) if scored is not None
+                              else (None, None, None))
     except Exception:  # noqa: BLE001
-        size, bias, signal = "—", "", ""
+        size, bias, signal = None, None, None
 
     # Prior composite series: when showing live, today=live and the prior
     # series is the full backfill; when showing backfill, exclude the last
