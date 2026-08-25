@@ -17,6 +17,11 @@ safe: a pane narrower than the table scrolls itself. It only works because the
 panel carries `min-w-0` — a grid item's default `min-width: auto` would refuse
 to shrink and blow the column out to the table's full width instead.
 
+⚠ The scroller is the fallback, not the plan: the columns are sized so that at
+a normal desktop width both panes fit whole, because a board you have to drag
+sideways to read the GATES column defeats the point of showing both sides at
+once.
+
 ⚠ The amber line above the tables states what share of the ranking weight sits
 on volatility factors. On a RANKED board that is the single most important thing
 to know: the top of the ordering is the high-beta end of the universe.
@@ -36,11 +41,21 @@ VIEW = "trade:rank_board"
 BOOK_VIEW = "trade:model_book"
 POLL_SEC = 5.0
 
-# 84 62 70 78 58 74 120 104 1fr — the design's column rhythm.
+# Every fixed column is its MEASURED worst case plus ~10px, so the eight of
+# them plus a one-line GATES chip fit a half-width pane without scrolling. The
+# widths were taken from the rendered page in its own fonts (Manrope 12px /
+# JetBrains Mono 12.5px), not estimated — measured need, in order:
+# 46 38 45 56 30 40 96 89. Both wide columns are CLOSED vocabularies, which is
+# what makes sizing them to content safe: DEALER's longest is `gamma_cascade`
+# (96px) out of six labels plus the page's own "not collected", and IV's is
+# `128 · collapsing` (89px) out of four states. A vocabulary that grows needs
+# these re-measured — DEALER is `whitespace-nowrap` and would spill into IV.
 # `w-full` for the same reason the Evidence grid needs it: a column child
 # sizes to its own content, so a trailing `1fr` would differ per row.
-_COLS = ("w-full [grid-template-columns:84px_62px_70px_78px_58px_74px_120px_104px_1fr]")
-_TABLE_MIN = "min-w-[940px]"
+_COLS = ("w-full [grid-template-columns:58px_48px_56px_64px_42px_50px_104px_96px_1fr]")
+# 594px of fixed columns, gaps and padding + ~155px so one gate reads on a
+# single line. A pane narrower than this still scrolls, as it always did.
+_TABLE_MIN = "min-w-[750px]"
 # `items-start`, not the default stretch: the pools are rarely the same
 # length, and a two-row short pool padded to the height of a nine-row long
 # pool reads as missing rows.
