@@ -348,12 +348,44 @@ def test_render_returns_handle_with_update():
     assert callable(detail.render)
 
 
-def test_detail_header_uses_highcharts_gauge_not_svg_speedometer():
+def test_detail_header_uses_the_svg_score_bar_not_a_chart():
+    """The header's score is `svg.score_bar_svg` (2026-08-25), replacing the
+    Highcharts angular gauge that replaced an earlier SVG speedometer.
+
+    The `ui.highchart` assertion is the load-bearing half. The gauge was the ONLY
+    chart on all four pages that mount this panel, so those pages no longer load
+    Highcharts at all — and a `ui.highchart` created after first render on a page
+    that had none dies with "Failed to resolve module specifier
+    nicegui-highcharts". Reintroducing one here would fail in the browser while
+    every test stayed green, so the guard lives at source level.
+
+    Checked by AST, not substring: the module's own comment EXPLAINS why there
+    is no `ui.highchart`, and a substring scan reads that explanation as a
+    violation. Attribute access is what matters, so that is what is inspected.
+    """
+    import ast
     import inspect
+    tree = ast.parse(inspect.getsource(detail))
+    attrs = {f"{n.value.id}.{n.attr}"
+             for n in ast.walk(tree)
+             if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)}
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    assert "svg.score_bar_svg" in attrs
+    assert "ui.highchart" not in attrs
+    assert "gauge_figure" not in names
+    assert "speedometer_svg" not in names
+
+
+def test_the_four_explore_expansions_are_in_the_agreed_order():
+    """Expected Move, Greeks, Implied volatility, Score factors — set 2026-08-25
+    by operator preference. Order is a deliberate choice here, not an accident of
+    how the code grew, so it gets a guard."""
+    import inspect
+    import re
     src = inspect.getsource(detail)
-    # The composite-score header is the shared Highcharts solid-gauge now.
-    assert "gauge_figure" in src
-    assert "speedometer_svg" not in src
+    found = re.findall(r'ui\.expansion\("([^"]+)"\)', src)
+    assert found == ["Expected Move", "Greeks", "Implied volatility",
+                     "Score factors"]
 
 
 def test_per_contract_multiplies_per_share_by_100():
@@ -517,10 +549,31 @@ def test_gauge_metric_falls_back_to_pop_and_relabels():
 
 
 def test_gauge_metric_when_nothing_is_available():
+    """`value` is None, NOT 0.
+
+    The Highcharts gauge it was written for had no way to draw absence, so 0 was
+    the only option and the caption carried the meaning. The SVG score bar that
+    replaced it on 2026-08-25 CAN draw absence -- a bare track and a dash -- and
+    a 0 there would render a confident worst-possible score under a caption
+    saying there is no score. The renderer got the ability, so the producer must
+    stop flattening it."""
     m = detail.gauge_metric({})
-    assert m["value"] == 0
+    assert m["value"] is None
     assert m["caption"] == "No score available"
     assert m["grade"] == ""
+
+
+def test_gauge_metric_treats_a_real_zero_as_a_score():
+    """0 is a legitimate composite score and must not read as absence."""
+    m = detail.gauge_metric({"composite_score": 0, "grade": "Weak"})
+    assert m["value"] == 0 and m["caption"] == "Composite score"
+
+
+def test_gauge_metric_rejects_a_non_finite_score(self=None):
+    """A NaN clamps to the HIGH bound in this repo's scorers -- here it would
+    slip past the isinstance check and reach the bar as a real reading."""
+    m = detail.gauge_metric({"composite_score": float("nan")})
+    assert m["value"] is None
 
 
 def test_iv_marker_suppressed_without_current_iv():

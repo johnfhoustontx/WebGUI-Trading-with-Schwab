@@ -114,6 +114,30 @@ backlog or light every row.
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
+## Trade detail panel — score bar + expansion order (2026-08-25)
+
+The header's score is an **SVG bar** (`svg.score_bar_svg`), not the Highcharts
+angular speedometer it replaced: a dark track, a gradient fill running dark → the
+value's own `value_color`, a tick at the fill's leading edge, and the number
+beside it. The red/amber/green semantics are unchanged, so a 20 cannot look as
+healthy as an 80. **A missing score draws a bare track and an em dash** — the
+gauge could only render absence as a filled-to-zero face, so `gauge_metric` now
+returns `value: None` instead of `0`.
+
+⚠ **The panel no longer provides a Highcharts ESM anchor.** The gauge was the
+only chart on all four pages that mount it (scanner / captured / paper / swing),
+so none of them loads Highcharts now. A `ui.highchart` created after first render
+on a page that had none dies with "Failed to resolve module specifier
+nicegui-highcharts" — so any of those pages gaining a chart must bring its own.
+Pinned by an AST guard in `test_options_detail.py` (AST, not substring: the
+module's own comment explains the absence and a substring scan reads that as a
+violation).
+
+The four EXPLORE expansions are ordered **Expected Move · Greeks · Implied
+volatility · Score factors** (operator preference). Expected Move renders only
+when the signal carries an `expected_moves` dict — scanner swing/directional
+signals do, captured signals do not, which pre-dates the reorder.
+
 ## Trade detail panel — the two expected-value rows (2026-08-25)
 
 Shared by every signal table, so it is documented once here rather than per route.

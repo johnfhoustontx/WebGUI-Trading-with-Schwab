@@ -4,6 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-25 (**The Trade detail speedometer became a score bar, and the expansions were reordered.**
+- **The gauge is gone.** `svg.score_bar_svg` replaces the Highcharts angular gauge in the
+  panel header — dark track, gradient fill running dark → the value's own `value_color`, a
+  tick at the fill edge, the number beside it. The red/amber/green mapping is deliberately
+  unchanged rather than a fixed green ramp, or a 20 would look as healthy as an 80.
+- **`gauge_metric` now returns `value: None` when there is no score, not `0`.** The gauge had
+  no way to draw absence, so 0 was the only option and the caption carried the meaning; the
+  bar draws a bare track and an em dash. When a renderer gains the ability to show absence,
+  the producer has to stop flattening it — the same lesson as `signal_band`.
+- ⚠ **The panel no longer provides a Highcharts ESM anchor**, and that WAS a documented
+  invariant. The old docstring said the gauge must live in `render()` so the ESM registers at
+  first paint. Checked before removing: the gauge was the ONLY chart on all four pages that
+  mount the panel, so none of them loads Highcharts at all now. Any of those pages gaining a
+  chart created after first render must bring its own anchor. Pinned by an AST guard.
+- **Expansion order is now Expected Move · Greeks · Implied volatility · Score factors** and
+  is pinned by test, because it is a deliberate choice rather than an accident of growth.
+- **Two prefix traps found by their own tests.** `<line` is a prefix of `<linearGradient`, so
+  the marker-position assertion read the gradient's `x1="0"` and reported a tick at the
+  origin. And the source guard for "no `ui.highchart` here" matched the module's own comment
+  EXPLAINING the absence — now AST-based.
+- **Verified in the dev browser:** `highcharts-container` count **0**, the gradient survives
+  DOMPurify (stops `#463712` → `#daac37` on a 62), marker x == fill width == 118.2, label
+  "62". webgui **2873 passed**.)
+
+---
+
 **Last updated:** 2026-08-25 (**Expected value in the Trade detail panel — and the version of it that was worth showing.**
 - **The ask** was to display `EV = p*b - (1-p)` as a recommendation. Measured first, and the
   obvious implementation turned out to be harmful rather than merely useless. Design +

@@ -4,32 +4,38 @@ One panel, reused by every signal table (scanner, captured, paper, swing). Each
 table synthesizes a signal-like dict and calls ``handle.update(signal)``.
 
 LAYOUT = REJECT -> VERIFY -> EXPLORE, top to bottom, because triage is mostly
-fast rejection. The **header** (title + gauge + its caption + the dealbreaker
+fast rejection. The **header** (title + score bar + its caption + the dealbreaker
 flags) is built ONCE in ``render()`` and updated in place; below it the body
 rebuilds per selection as the CONTRACT (what you would actually place), then the
-ECONOMICS (four figures, each carrying its unit), then four COLLAPSED
-expansions — score factors, greeks, implied volatility, expected move — for the
-minority of signals that survive far enough to be explored.
+ECONOMICS (six figures, each carrying its unit), then four COLLAPSED expansions
+— **Expected Move, Greeks, Implied volatility, Score factors** — for the minority
+of signals that survive far enough to be explored.
 
 Everything above the expansions answers "reject or not"; nothing that answers it
 is behind a click. The flags are the reason the header is not just a score: they
 are ABSENT for a clean trade, so their presence is the signal.
 
-The speedometer is the shared Highcharts angular gauge (``gauge.py`` — painted
-rainbow face + needle) and ALWAYS names its metric in the caption beneath, since
-it shows the composite score for some sources and PoP for others. The factor/IV
-bars + range markers are SVG (``svg.py``). Robust to missing keys (fields vary by
-trade type / source).
+**The score is an SVG bar (``svg.score_bar_svg``), not a gauge** — it replaced
+the Highcharts angular speedometer on 2026-08-25. It ALWAYS names its metric in
+the caption beneath, since it shows the composite score for some sources and PoP
+for others, and it draws a bare track with an em dash when there is no score
+rather than a filled-to-zero bar. The factor/IV bars + range markers are SVG too
+(``svg.py``). Robust to missing keys (fields vary by trade type / source).
 
-The gauge is persistent (not recreated per selection) so the Highcharts ESM is
-registered at initial page render — a gauge added only on selection, on a page
-with no other chart at load, fails with "Failed to resolve module specifier".
+⚠ The old note here said the gauge MUST be built in ``render()`` so the
+Highcharts ESM is registered at first page render — a ``ui.highchart`` created
+only on selection, on a page whose initial render had no chart, dies on "Failed
+to resolve module specifier nicegui-highcharts". **That constraint retired with
+the gauge**: it was the only chart on all four pages that mount this panel
+(scanner / captured / paper / swing), so none of them loads Highcharts at all
+now. If one of those pages ever gains a chart created after first render, it has
+to bring its own anchor — this panel no longer provides one.
 """
 from nicegui import ui
 
 import bus_client
 
-from ..gauge import gauge_figure
+from ..fmt import num
 from . import ev, svg
 from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
                     TILE_3D, CARD, EYEBROW, MUTED)
@@ -498,16 +504,23 @@ def gauge_metric(signal):
     composite's grade caption -- two different 0-100 scales on one unlabelled
     face. The grade belongs to the composite ONLY, so the PoP fallback carries
     no grade.
+
+    ⚠ ``value`` is **None** when there is no score, not 0. It was 0 while this
+    fed the Highcharts gauge, which had no way to draw absence -- the caption
+    carried the whole meaning. The SVG score bar that replaced it on 2026-08-25
+    draws a bare track and a dash instead, so a 0 here would paint a confident
+    worst-possible score underneath a caption saying there is no score. When a
+    renderer gains the ability to show absence, the producer has to stop
+    flattening it (the same lesson as `signal_band` publishing None).
     """
     s = signal or {}
-    score = s.get("composite_score")
-    if isinstance(score, (int, float)) and not isinstance(score, bool):
-        return {"value": score, "caption": "Composite score",
-                "grade": s.get("grade") or ""}
-    pop = s.get("pop_pct")
-    if isinstance(pop, (int, float)) and not isinstance(pop, bool):
-        return {"value": pop, "caption": "Probability of profit", "grade": ""}
-    return {"value": 0, "caption": "No score available", "grade": ""}
+    for key, caption, grade in (("composite_score", "Composite score", True),
+                                ("pop_pct", "Probability of profit", False)):
+        v = num(s.get(key))
+        if v is not None:
+            return {"value": v, "caption": caption,
+                    "grade": (s.get("grade") or "") if grade else ""}
+    return {"value": None, "caption": "No score available", "grade": ""}
 
 
 def _leg_pair(short_k, long_k, right):
@@ -678,23 +691,21 @@ def _build_cards(s):
 
     # 3 — EXPLORE. All four collapsed: the ladder above already answered
     # reject-or-not, so nothing here competes with it for attention.
-    with ui.expansion("Score factors").classes("w-full"):
-        if s.get("rr_pct") is not None:
-            _kv("Risk / reward", _pct(s.get("rr_pct")))
-        if s.get("max_contracts") is not None:
-            _kv("Max contracts", str(s.get("max_contracts")))
-        # `expected_pnl_10` was rendered here until 2026-08-25. It is the PRICED
-        # EV in dollars — p from the short delta, b from credit/max_loss, both
-        # read off the option's own price — so it is ~0 by construction and, on a
-        # wide mark, spectacular for the wrong reason. The ECONOMICS block above
-        # now carries the two figures that survive scrutiny. The engine still
-        # computes it, where it belongs: as a width-selection gate.
-        for label, val, known in factor_rows(s.get("factor_scores"), s.get("type"),
-                                             s.get("factors_unavailable")):
-            with ui.row().classes("items-center gap-2 w-full no-wrap"):
-                ui.label(label).classes("text-xs w-20 opacity-80")
-                ui.html(svg.gradient_bar_svg(val if known else 0))
-                ui.label(factor_value_text(val, known)).classes("text-xs w-8 text-right")
+    # ORDER (set 2026-08-25, operator preference): Expected Move, Greeks,
+    # Implied volatility, Score factors — outward-looking first, the
+    # scorer's own workings last.
+
+    # Expected Move (best-effort)
+    em = s.get("expected_moves")
+    if isinstance(em, dict):
+        with ui.expansion("Expected Move").classes("w-full"):
+            for key, label in (("daily", "1-day"), ("weekly", "1-week"), ("monthly", "30-day")):
+                blk = em.get(key) or {}
+                d = blk.get("move_dollars")
+                p = blk.get("move_percent", blk.get("move_pct"))
+                if isinstance(d, (int, float)):
+                    pct = f" ({p:.2f}%)" if isinstance(p, (int, float)) else ""
+                    _kv(label, f"±${d:,.2f}{pct}")
 
     with ui.expansion("Greeks").classes("w-full"):
         with ui.grid(columns=4).classes("gap-2 w-full"):
@@ -721,17 +732,23 @@ def _build_cards(s):
                     ui.html(svg.gradient_bar_svg(s["iv_rank"]))
                     ui.label(f"{s['iv_rank']:g}").classes("text-xs w-8 text-right")
 
-    # Card 5 — Expected Move (best-effort)
-    em = s.get("expected_moves")
-    if isinstance(em, dict):
-        with ui.expansion("Expected Move").classes("w-full"):
-            for key, label in (("daily", "1-day"), ("weekly", "1-week"), ("monthly", "30-day")):
-                blk = em.get(key) or {}
-                d = blk.get("move_dollars")
-                p = blk.get("move_percent", blk.get("move_pct"))
-                if isinstance(d, (int, float)):
-                    pct = f" ({p:.2f}%)" if isinstance(p, (int, float)) else ""
-                    _kv(label, f"±${d:,.2f}{pct}")
+    with ui.expansion("Score factors").classes("w-full"):
+        if s.get("rr_pct") is not None:
+            _kv("Risk / reward", _pct(s.get("rr_pct")))
+        if s.get("max_contracts") is not None:
+            _kv("Max contracts", str(s.get("max_contracts")))
+        # `expected_pnl_10` was rendered here until 2026-08-25. It is the PRICED
+        # EV in dollars — p from the short delta, b from credit/max_loss, both
+        # read off the option's own price — so it is ~0 by construction and, on a
+        # wide mark, spectacular for the wrong reason. The ECONOMICS block above
+        # now carries the two figures that survive scrutiny. The engine still
+        # computes it, where it belongs: as a width-selection gate.
+        for label, val, known in factor_rows(s.get("factor_scores"), s.get("type"),
+                                             s.get("factors_unavailable")):
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                ui.label(label).classes("text-xs w-20 opacity-80")
+                ui.html(svg.gradient_bar_svg(val if known else 0))
+                ui.label(factor_value_text(val, known)).classes("text-xs w-8 text-right")
 
 
 def _greek(label, value, fmt="{:.3f}", color=None):
@@ -781,11 +798,14 @@ class _Handle:
         self._sig_sub.text = " · ".join(
             x for x in (s.get("trade_type", ""), dte_text(s)) if x and x != "—")
 
-        # gauge_metric decides the value AND the caption together, so the face can
-        # never show PoP under a composite-score grade (they are different scales).
+        # gauge_metric decides the value AND the caption together, so the bar can
+        # never show PoP under a composite-score caption (different scales).
+        # ⚠ `m["value"] or 0` was right for the gauge, which had no way to render
+        # absence — it is WRONG for the bar, which does: score_bar_svg draws a
+        # bare track and a dash for None, where a 0 would draw a confident
+        # worst-possible score. Pass the value through untouched.
         m = gauge_metric(s)
-        self._gauge.options = gauge_figure(m["value"] or 0, m["grade"], height=104)
-        self._gauge.update()
+        self._gauge.content = svg.score_bar_svg(m["value"])
         self._caption.text = m["caption"]
 
         flags = flags_for(s)
@@ -823,18 +843,24 @@ def render(width: int = 360):
                     flag_badge = ui.badge("", color="red").props("floating") \
                         .classes("text-xs")
                 flag_badge.set_visibility(False)
-        # Persistent signal header (built once → registers the Highcharts ESM at
-        # page load; updated in place per selection). Hidden until a signal lands.
-        # The gauge MUST stay here rather than move into _build_cards: a
-        # ui.highchart created only on selection, on a page whose initial render
-        # had no chart, fails with "Failed to resolve module specifier
-        # nicegui-highcharts" (the ESM import map is fixed at first render).
+        # Persistent signal header (built once, updated in place per selection).
+        # Hidden until a signal lands.
+        #
+        # The Highcharts speedometer here was replaced by an SVG score bar on
+        # 2026-08-25. Its docstring used to warn that the gauge MUST live here to
+        # register the Highcharts ESM at page load, since a ui.highchart created
+        # only on selection — on a page whose first render had no chart — fails
+        # with "Failed to resolve module specifier nicegui-highcharts". That
+        # constraint retired with the gauge: it was the ONLY chart on all four
+        # pages that mount this panel (scanner / captured / paper / swing), so
+        # there is no longer anything needing an ESM anchor. Verified by grep
+        # before removing it — if one of those pages ever gains a chart added
+        # after first render, it must bring its own anchor.
         header = ui.column().classes("w-full gap-1")
         with header:
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
             sig_sub = ui.label("").classes(f"text-xs {MUTED}")
-            gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
-                .classes("self-center w-[160px] h-[104px]")
+            gauge_el = ui.html(svg.score_bar_svg(None)).classes("self-center")
             gauge_caption = ui.label("").classes(f"text-xs self-center {EYEBROW}")
             # Dealbreakers sit ABOVE the fold, directly under the score they
             # qualify. Empty for a clean trade — absence is the all-clear.
