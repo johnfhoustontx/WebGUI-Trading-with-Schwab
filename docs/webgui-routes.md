@@ -114,6 +114,37 @@ backlog or light every row.
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
+## Trade detail panel — Expected Move on captured signals (2026-08-25)
+
+The panel gates its Expected Move expansion on the signal carrying an
+`expected_moves` dict. Scan signals carry it for 100% of rows; **captured signals
+carried it for none**, so the expansion never rendered on `/options/captured` —
+reported after the expansion reorder, but long-standing rather than caused by it.
+
+Captured rows had a price but **no IV at all**. ⚠ `entry_iv_rank` is a
+PERCENTILE, not an implied volatility — feeding 52.8 in as a vol would print a
+confident, wrong move — so the IV now comes from `signal_repricer.atm_iv(chain)`,
+taken off the chain the reprice cycle **already fetches**. No extra Schwab call.
+
+Three things worth knowing:
+
+- It is the **ATM** IV (strike nearest spot), deliberately not the position's
+  short leg: the short leg is OTM, so its IV carries skew and would
+  systematically overstate the move — upward for a put spread, which is most of
+  this book.
+- `atm_iv` reads **both** chain shapes. Measured against a live Schwab chain on
+  2026-08-25, `underlying` came back **null** while the top-level
+  `underlyingPrice` carried the spot — reading only the nested `underlying.last`
+  refused a perfectly good IV for want of a price.
+- **It populates during RTH only.** The whole captured reprice path needs live
+  bid/ask (`_leg_bid_ask` returns None on a zero bid or ask), so off-hours there
+  is no mark at all — the same reason the P&L column reads an em dash. Not a
+  regression; the expansion simply follows its data.
+
+One IV is applied to all three horizons, which is a term-structure
+approximation — but it is the identical one `iv_analysis.calc_expected_moves`
+already makes for scan signals, so the two pages stay comparable.
+
 ## Trade detail panel — score bar + expansion order (2026-08-25)
 
 The header's score is an **SVG bar** (`svg.score_bar_svg`), not the Highcharts

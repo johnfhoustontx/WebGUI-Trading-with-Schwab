@@ -254,6 +254,10 @@ def reprice_swing(trade, client, today=None):
             "pnl_pct_of_credit": pnl_pct,
             "current_underlying": underlying,
             "current_short_delta": short_delta,
+            # ATM IV off the SAME chain — no extra Schwab call. Feeds the Trade
+            # detail panel's Expected Move for captured signals, which had a
+            # price but no IV at all and so never rendered that expansion.
+            "current_short_iv": atm_iv(chain),
             "error": None,
         }
     except Exception as e:
@@ -263,3 +267,62 @@ def reprice_swing(trade, client, today=None):
             "current_underlying": None, "current_short_delta": None,
             "error": "repricing failed",
         }
+
+
+# ── ATM implied volatility, off a chain already in hand ──────────────────────
+
+# Schwab returns this for a contract it cannot price. It is a SENTINEL, not a
+# reading — accepting it as an IV is a documented bug class in this repo
+# (flow_skew._as_float took it as usable until 2026-08-20).
+_IV_SENTINEL = -999.0
+
+
+def _usable_iv(v):
+    """A real positive IV percentage, or None."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    if f != f or f in (float("inf"), float("-inf")):      # NaN / inf
+        return None
+    if f <= 0 or f == _IV_SENTINEL:
+        return None
+    return f
+
+
+def atm_iv(chain):
+    """ATM implied volatility from an option chain, or None. Never raises.
+
+    Deliberately the strike NEAREST SPOT rather than the position's short leg:
+    the short leg is out-of-the-money, so its IV carries skew and would
+    systematically overstate the expected move — upward for a put spread, which
+    is most of this book.
+
+    Costs no API call: the captured-signal reprice cycle already fetches this
+    chain to mark the legs, so the IV rides on data in hand.
+    """
+    try:
+        # ⚠ Both shapes are real. Measured against a live Schwab chain on
+        # 2026-08-25, `underlying` came back NULL while the top-level
+        # `underlyingPrice` carried the spot and the contracts carried real
+        # volatilities — so reading only the nested form refused a perfectly
+        # good IV for want of a price. The nested `last` is preferred where it
+        # exists because it is the live quote; `underlyingPrice` is pinned to
+        # the prior close outside RTH.
+        chain = chain or {}
+        spot = ((chain.get("underlying") or {}).get("last")
+                or chain.get("underlyingPrice"))
+        if isinstance(spot, bool) or not isinstance(spot, (int, float)) or spot <= 0:
+            return None
+        best = None
+        for map_key in ("putExpDateMap", "callExpDateMap"):
+            for _exp, strikes in (chain.get(map_key) or {}).items():
+                for k, contracts in (strikes or {}).items():
+                    iv = _usable_iv((contracts or [{}])[0].get("volatility"))
+                    if iv is None:
+                        continue
+                    dist = abs(float(k) - float(spot))
+                    if best is None or dist < best[0]:
+                        best = (dist, iv)
+        return best[1] if best else None
+    except Exception:       # noqa: BLE001 — a missing EM beats a failed reprice
+        return None

@@ -351,3 +351,81 @@ def test_leg_bid_ask_missing_returns_none():
 def test_leg_bid_ask_one_sided_returns_none():
     leg_map = {"e": {"500.0": [{"bid": 0, "ask": 1.20, "delta": -0.3}]}}
     assert signal_repricer._leg_bid_ask(leg_map, 500) == (None, None, None)
+
+
+# ── ATM IV for the captured Expected Move (2026-08-25) ───────────────────────
+# The Trade detail panel's Expected Move expansion needs a price AND an IV.
+# Captured signals carried a price but NO IV at all, so the expansion never
+# rendered on that page. The reprice cycle ALREADY fetches the chain, so the IV
+# comes off data in hand — no extra Schwab call.
+
+class TestAtmIv:
+    @staticmethod
+    def _chain(*pairs, underlying=100.0):
+        """A putExpDateMap-shaped chain: (strike, volatility) pairs."""
+        return {"underlying": {"last": underlying},
+                "putExpDateMap": {"2026-09-04:10": {
+                    f"{float(k):.1f}": [{"bid": 1.0, "ask": 1.1, "volatility": v}]
+                    for k, v in pairs}}}
+
+    def test_it_takes_the_strike_nearest_spot(self):
+        """ATM, not the short leg. The short leg is OTM, so its IV carries skew
+        and would overstate the move — for a put spread, systematically."""
+        chain = self._chain((90, 40.0), (100, 25.0), (110, 30.0), underlying=101.0)
+        assert signal_repricer.atm_iv(chain) == 25.0
+
+    def test_it_rejects_schwabs_minus_999_sentinel(self):
+        """Schwab returns volatility = -999 for a contract it cannot price. It is
+        a sentinel, not a reading — `flow_skew._as_float` accepted it as a usable
+        IV until 2026-08-20 and this repo paid for that."""
+        chain = self._chain((100, -999.0), (110, 30.0), underlying=100.0)
+        assert signal_repricer.atm_iv(chain) == 30.0
+
+    def test_a_chain_with_no_usable_iv_yields_None(self):
+        chain = self._chain((100, -999.0), (110, None), underlying=100.0)
+        assert signal_repricer.atm_iv(chain) is None
+
+    def test_a_non_finite_iv_is_refused(self):
+        chain = self._chain((100, float("nan")), (110, 28.0), underlying=100.0)
+        assert signal_repricer.atm_iv(chain) == 28.0
+
+    def test_a_zero_or_negative_iv_is_not_a_reading(self):
+        chain = self._chain((100, 0.0), (110, 28.0), underlying=100.0)
+        assert signal_repricer.atm_iv(chain) == 28.0
+
+    def test_junk_inputs_yield_None_rather_than_raising(self):
+        for junk in (None, {}, {"underlying": {}}, "nope", {"putExpDateMap": {}}):
+            assert signal_repricer.atm_iv(junk) is None
+
+    def test_it_reads_the_call_map_when_there_are_no_puts(self):
+        chain = {"underlying": {"last": 100.0},
+                 "callExpDateMap": {"2026-09-04:10": {
+                     "100.0": [{"bid": 1.0, "ask": 1.1, "volatility": 22.0}]}}}
+        assert signal_repricer.atm_iv(chain) == 22.0
+
+
+class TestAtmIvOnTheRealChainShape:
+    """Measured against a live Schwab chain 2026-08-25: `underlying` came back
+    **null** while the top-level `underlyingPrice` carried 98.19 and the contracts
+    carried real volatilities. The fixtures above used the nested shape because
+    that is what `reprice_swing` reads, so they could not have caught this — the
+    IV was there and `atm_iv` refused it for want of a spot."""
+
+    def test_it_falls_back_to_the_top_level_underlying_price(self):
+        chain = {"underlying": None, "underlyingPrice": 98.19,
+                 "putExpDateMap": {"2026-09-04:10": {
+                     "98.0": [{"volatility": 46.3}],
+                     "120.0": [{"volatility": 55.0}]}}}
+        assert signal_repricer.atm_iv(chain) == 46.3
+
+    def test_the_nested_shape_still_wins_when_both_are_present(self):
+        chain = {"underlying": {"last": 120.0}, "underlyingPrice": 98.0,
+                 "putExpDateMap": {"2026-09-04:10": {
+                     "98.0": [{"volatility": 46.3}],
+                     "120.0": [{"volatility": 55.0}]}}}
+        assert signal_repricer.atm_iv(chain) == 55.0
+
+    def test_neither_price_present_still_yields_None(self):
+        chain = {"underlying": None,
+                 "putExpDateMap": {"2026-09-04:10": {"98.0": [{"volatility": 46.3}]}}}
+        assert signal_repricer.atm_iv(chain) is None

@@ -224,3 +224,54 @@ class TestTheRefreshCommand:
         2026-08-20."""
         from services.options_svc import handlers
         assert "calibration_refresh" in (handlers.handle_command.__doc__ or "")
+
+
+class TestCapturedExpectedMove:
+    """The Trade detail panel's Expected Move expansion is gated on the signal
+    carrying an `expected_moves` dict. Scan signals carry it (100%); captured
+    signals carried it for NONE of 289 in dev / 21 in prod, so the expansion
+    never rendered on that page — reported 2026-08-25.
+
+    Captured rows had a price but no IV at all (`entry_iv_rank` is a PERCENTILE,
+    not an IV — feeding 52.8 in as a volatility would print a plausible, wrong
+    move). The IV now comes off the chain the reprice cycle already fetches.
+    """
+
+    def test_moves_are_built_from_the_repriced_price_and_atm_iv(self):
+        from services.options_svc import compute
+        out = compute.captured_expected_moves(
+            {"current_underlying": 100.0, "current_short_iv": 25.0}, {})
+        assert set(out) == {"daily", "weekly", "monthly"}
+        assert out["daily"]["move_dollars"] > 0
+        # A longer horizon must imply a larger move.
+        assert out["monthly"]["move_dollars"] > out["daily"]["move_dollars"]
+
+    def test_it_falls_back_to_the_entry_price_when_not_yet_repriced(self):
+        from services.options_svc import compute
+        out = compute.captured_expected_moves(
+            {"current_short_iv": 25.0}, {"entry_underlying": 100.0})
+        assert out["daily"]["move_dollars"] > 0
+
+    def test_no_iv_means_no_expected_moves_at_all(self):
+        """Not a dict of Nones — the panel gates on `isinstance(em, dict)`, so an
+        all-None dict would render an EMPTY expansion rather than none at all."""
+        from services.options_svc import compute
+        assert compute.captured_expected_moves(
+            {"current_underlying": 100.0, "current_short_iv": None}, {}) is None
+
+    def test_no_price_means_no_expected_moves(self):
+        from services.options_svc import compute
+        assert compute.captured_expected_moves({"current_short_iv": 25.0}, {}) is None
+
+    def test_the_iv_rank_is_never_mistaken_for_an_iv(self):
+        """The trap this was written to avoid: entry_iv_rank 52.8 is a
+        percentile. If it ever leaks in as the volatility the move would be
+        computed off a 52.8% IV that the symbol does not have."""
+        from services.options_svc import compute
+        assert compute.captured_expected_moves(
+            {"current_underlying": 100.0}, {"entry_iv_rank": 52.8}) is None
+
+    def test_junk_inputs_do_not_raise(self):
+        from services.options_svc import compute
+        for rep, row in ((None, None), ({}, {}), ("x", "y"), ({"a": 1}, {"b": 2})):
+            assert compute.captured_expected_moves(rep, row) is None

@@ -1261,6 +1261,41 @@ def captured_view() -> dict:
     return {"signals": signals, "day": captured_day_summary()}
 
 
+def captured_expected_moves(rep, row):
+    """``{daily, weekly, monthly}`` for a captured signal, or None. PURE.
+
+    The Trade detail panel gates its Expected Move expansion on
+    ``isinstance(expected_moves, dict)``, so returning a dict of Nones would
+    render an EMPTY expansion — worse than none at all. Absent inputs return
+    None.
+
+    ⚠ ``entry_iv_rank`` is deliberately NOT a fallback for the volatility. It is
+    a PERCENTILE (52.8 = "richer than 52.8% of the past year"), not an implied
+    volatility, and feeding it in would compute a confident move off a vol the
+    symbol does not have.
+
+    ⚠ One IV is applied to all three horizons, which is a term-structure
+    approximation — but the identical one ``iv_analysis.calc_expected_moves``
+    already makes for scan signals, so the two pages stay comparable rather than
+    one being quietly "more correct" on a different basis.
+    """
+    rep = rep if isinstance(rep, dict) else {}
+    row = row if isinstance(row, dict) else {}
+    price = rep.get("current_underlying") or row.get("entry_underlying")
+    iv = rep.get("current_short_iv")
+    if not isinstance(price, (int, float)) or not isinstance(iv, (int, float)):
+        return None
+    if isinstance(price, bool) or isinstance(iv, bool) or price <= 0 or iv <= 0:
+        return None
+    try:
+        import iv_analysis
+        moves = iv_analysis.calc_expected_moves(price, iv)
+    except Exception:
+        _degrade.degraded("options.captured_expected_moves")
+        return None
+    return moves if any((moves or {}).values()) else None
+
+
 def reprice_captured() -> dict:
     """Reprice all open signals; merge mark fields into the rows + collect flags.
 
@@ -1304,6 +1339,12 @@ def reprice_captured() -> dict:
         # Merge the mark's display fields into the row (mirrors the page; not
         # persisted — the GUI reads these off the cached repriced list).
         r["current_value"] = mark.get("current_value")   # current option price (spread mark)
+        # Expected Move for the detail panel. Omitted (not set to None) when
+        # there is no usable IV, so the panel's isinstance() gate keeps the
+        # expansion hidden rather than rendering it empty.
+        _em = captured_expected_moves(rep, r)
+        if _em:
+            r["expected_moves"] = _em
         r["unrealized_pnl"] = mark.get("unrealized_pnl")
         r["current_score"] = mark.get("current_score")
         r["score_drift"] = mark.get("score_drift")
