@@ -50,6 +50,9 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SIGNALS_DB = OPTIONS_SCANNER / "data" / "signals.db"
 DEFAULT_CACHE_DB = TRADE_SVC_DATA / "replay_debate_cache.db"
+# Gitignored (services/trade_svc/data/), so generated prompts and pasted
+# replies never reach the tree.
+DEFAULT_PROMPT_DIR = TRADE_SVC_DATA / "replay_prompts"
 
 # Never Opus without asking — the house rule. Three calls per signal makes the
 # model choice the dominant cost lever here.
@@ -324,6 +327,14 @@ def render_report(report):
     L.append("=" * 66)
     if report["mode"] == "stub":
         L.append("  ** STUB DEBATER - NOT A RESULT. Re-run with --live. **")
+    elif report["mode"] == "manual":
+        ing = report.get("ingest") or {}
+        L.append("  manual run (Claude Chat). Bull and bear were ONE pass, not")
+        L.append("  two independent ones, and a batched prompt shows the model")
+        L.append("  the whole cross-section - a weaker test than the API path.")
+        L.append(f"  ingest: applied {ing.get('applied', 0)}, "
+                 f"unjudged {ing.get('missing', 0)}, "
+                 f"unrecognised {ing.get('unknown', 0)}")
     elif report["mode"] == "no_client":
         L.append("  ** NO CLIENT - NOT A RESULT. Nothing was called. **")
     L.append(f"  model            {report.get('model') or '(stub)'}")
@@ -374,17 +385,114 @@ def render_report(report):
     return "\n".join(L)
 
 
+def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
+                 signals_db=None, log=print):
+    """Write one paste-ready prompt per batch, plus a manifest.
+
+    The manifest records which signal ids went into which batch, so ``ingest``
+    can tell a missing answer from an id that was never asked about — and so a
+    reply pasted into the wrong batch file is caught rather than scored."""
+    conn = open_signals(signals_db)
+    try:
+        cases = load_cases(conn, scanner=scanner, limit=limit)
+    finally:
+        conn.close()
+
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    batches = RS.batch_views([c["view"] for c in cases], batch_size)
+    manifest = {"prompt_version": PROMPT_VERSION, "scanner": scanner or "all",
+                "limit": limit, "batch_size": batch_size, "batches": []}
+
+    for i, batch in enumerate(batches, 1):
+        path = out_dir / f"batch_{i:02d}.md"
+        path.write_text(RS.render_prompt(batch, i, len(batches)),
+                        encoding="utf-8")
+        manifest["batches"].append(
+            {"batch": i, "file": path.name,
+             "signal_ids": [v["signal_id"] for v in batch]})
+        log(f"  wrote {path.name}  ({len(batch)} trades)")
+
+    (out_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8")
+    log(f"\n{len(batches)} prompt file(s) in {out_dir}")
+    log("Paste each into Claude Chat, save the reply next to it as "
+        "reply_NN.txt, then run --ingest.")
+    return manifest
+
+
+def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
+    """Score the pasted replies in ``out_dir`` against the real outcomes."""
+    out_dir = pathlib.Path(out_dir)
+    manifest_path = out_dir / "manifest.json"
+    if not manifest_path.exists():
+        log(f"no manifest.json in {out_dir} — run --emit-prompts first")
+        return None
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    conn = open_signals(signals_db)
+    try:
+        cases = load_cases(conn, scanner=scanner or manifest.get("scanner"),
+                           limit=limit if limit is not None else manifest.get("limit"))
+    finally:
+        conn.close()
+
+    replies = sorted(out_dir.glob("reply_*.txt"))
+    if not replies:
+        log(f"no reply_*.txt files in {out_dir}")
+        return None
+
+    parsed = {}
+    for path in replies:
+        got = RS.parse_results(path.read_text(encoding="utf-8", errors="replace"))
+        log(f"  {path.name}: {len(got)} verdict(s)")
+        parsed.update(got)
+
+    stats = RS.apply_results(cases, parsed)
+    log(f"\napplied {stats['applied']}, unjudged {stats['missing']}, "
+        f"unrecognised id {stats['unknown']}, bad word {stats['bad']}")
+    if stats["unknown"]:
+        log("  WARNING: ids came back that were never sent — check you pasted the "
+            "reply for the right batch")
+
+    return {"mode": "manual", "errors": 0,
+            "model": "manual (Claude Chat)", "ingest": stats,
+            "score": RS.score(cases)}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--live", action="store_true",
                     help="make real Anthropic calls (default: free stub)")
     ap.add_argument("--yes", action="store_true", help="skip the cost prompt")
+    ap.add_argument("--emit-prompts", action="store_true",
+                    help="write paste-ready prompts for Claude Chat instead "
+                         "of calling the API")
+    ap.add_argument("--ingest", action="store_true",
+                    help="score the reply_*.txt files in --out")
+    ap.add_argument("--batch-size", type=int, default=25,
+                    help="trades per prompt (1 = the faithful per-trade form)")
+    ap.add_argument("--out", default=str(DEFAULT_PROMPT_DIR),
+                    help="directory for prompts, replies and the manifest")
     ap.add_argument("--limit", type=int, help="cap the number of signals")
     ap.add_argument("--scanner", default="all", help="0DTE | SWING | all")
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--signals-db", default=None)
     ap.add_argument("--cache-db", default=None)
     args = ap.parse_args(argv)
+
+    if args.emit_prompts:
+        emit_prompts(args.out, scanner=args.scanner, limit=args.limit,
+                     batch_size=args.batch_size, signals_db=args.signals_db)
+        return 0
+
+    if args.ingest:
+        report = ingest(args.out, scanner=args.scanner, limit=args.limit,
+                        signals_db=args.signals_db)
+        if report is None:
+            return 1
+        print(render_report(report))
+        return 0
 
     if args.live and not args.yes:
         conn = open_signals(args.signals_db)

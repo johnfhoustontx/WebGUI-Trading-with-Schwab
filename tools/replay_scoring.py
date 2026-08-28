@@ -31,6 +31,7 @@ rather than removing what it may not. A blacklist admits every column added to
 added to a signals table are outcome columns.
 """
 import math
+import re
 
 # Below this the sample is not a small effect, it is no measurement. Mirrors
 # ``services/trade_svc/live_ic.MIN_READINGS`` and its reasoning: the edge being
@@ -149,6 +150,139 @@ def verdict_from_text(text):
                 found = token
                 break
     return found
+
+
+# ── the manual (Claude Chat) path ───────────────────────────────────────────
+#
+# Running the debate by hand instead of through the API changes ONE thing that
+# can invalidate the whole measurement: the verdicts come back as pasted text,
+# so a verdict can attach to the wrong signal. Position-matching would do that
+# silently and every outcome in the sample would then be scored against
+# somebody else's call. So the id travels in the prompt, comes back in the
+# answer, and ``apply_results`` matches on it — never on order.
+#
+# ⚠ A batched prompt is a WEAKER test than the API path, and the difference
+# should travel with any number it produces. In the API path bull and bear are
+# independent generations; in a batch they are one pass, and the model can see
+# the whole cross-section at once, which lets it calibrate how many to pass on.
+# ``batch_size=1`` recovers the faithful form and is the way to check whether
+# batching moved the answer.
+
+_ID_VERDICT = re.compile(
+    r"^\W*([0-9A-Za-z_-]{4,64})\s*(?:\||:|-|\t|\s)\s*\**\s*(TAKE|PASS)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def batch_views(views, batch_size):
+    """Split ``views`` into consecutive batches. Order is preserved."""
+    views = list(views or [])
+    size = max(1, int(batch_size or 1))
+    return [views[i:i + size] for i in range(0, len(views), size)]
+
+
+def render_prompt(views, batch_no=1, batch_total=1):
+    """A self-contained prompt for one batch, to paste into Claude Chat.
+
+    Carries the same whitelisted view the API path sends, so the blind property
+    survives the copy-paste boundary: no grade, no score, no outcome, and no
+    hint at how many of these are expected to be taken. A stated target rate
+    would turn the exercise into following an instruction, and the rate is the
+    thing being measured."""
+    lines = [
+        f"# Trade review - batch {batch_no} of {batch_total}",
+        "",
+        "You are a trading desk running a structured review of defined-risk",
+        "options credit spreads that were proposed for entry. For EACH trade",
+        "below, in order:",
+        "",
+        "1. **Bull** - the strongest honest case FOR taking it: what has to be",
+        "   true, and what in the setup supports it.",
+        "2. **Bear** - the strongest honest case AGAINST: what breaks it, and",
+        "   what the credit is not paying for.",
+        "3. **Verdict** - as portfolio manager, weigh the two and decide.",
+        "",
+        "Judge each trade on its own risk-adjusted merit: does the credit",
+        "compensate for the risk actually being taken? You are selecting from a",
+        "stream of candidates, so 'acceptable' is not enough - pass on anything",
+        "you would not actively choose. Judge each trade independently; do not",
+        "aim for any particular number of TAKEs across the batch.",
+        "",
+        "Keep the bull and bear to two sentences each.",
+        "",
+        "## Trades",
+        "",
+    ]
+    for v in views:
+        lines.append(f"### {v.get('signal_id')}")
+        for key in CASE_FIELDS:
+            if key == "signal_id" or key not in v:
+                continue
+            lines.append(f"- {key}: {v[key]}")
+        lines.append("")
+    lines += [
+        "## Required output",
+        "",
+        "After the reasoning, end your reply with a single fenced code block",
+        "containing one line per trade, using the id exactly as given above:",
+        "",
+        "```",
+        "<id> | TAKE",
+        "<id> | PASS",
+        "```",
+        "",
+        "Every id above must appear exactly once. Use only TAKE or PASS.",
+    ]
+    return "\n".join(lines)
+
+
+def parse_results(text):
+    """``{signal_id: "TAKE"|"PASS"}`` from a pasted reply. Never raises.
+
+    Tolerant of the prose and fencing a chat wraps around a table, and of the
+    separators models actually use (``|``, ``:``, ``-``, tab, space). A line
+    carrying no recognisable verdict is skipped rather than guessed at."""
+    if not isinstance(text, str):
+        return {}
+    out = {}
+    for match in _ID_VERDICT.finditer(text):
+        sid, verdict = match.group(1), match.group(2).upper()
+        if sid.upper() in VERDICTS:          # a header row, not an id
+            continue
+        out[sid] = verdict
+    return out
+
+
+def apply_results(cases, results):
+    """Attach parsed verdicts to ``cases`` in place, matching on ``signal_id``.
+
+    Returns counts, because each one is a distinct failure worth seeing:
+
+      ``applied``  verdicts attached
+      ``missing``  cases the reply never mentioned — left unjudged and DROPPED
+                   by ``score``, never defaulted to TAKE
+      ``unknown``  ids in the reply that were never sent (a hallucinated or
+                   mistyped row) — refused rather than silently added
+      ``bad``      a word that is neither TAKE nor PASS
+
+    Idempotent: re-pasting a batch overwrites with the same value rather than
+    double-counting."""
+    results = dict(results or {})
+    by_id = {c.get("signal_id"): c for c in (cases or [])}
+    applied = bad = 0
+    for sid, verdict in results.items():
+        case = by_id.get(sid)
+        if case is None:
+            continue
+        if verdict not in VERDICTS:
+            bad += 1
+            continue
+        case["verdict"] = verdict
+        applied += 1
+    unknown = sum(1 for sid in results if sid not in by_id)
+    missing = sum(1 for c in (cases or []) if c.get("verdict") not in VERDICTS)
+    return {"applied": applied, "missing": missing, "unknown": unknown,
+            "bad": bad}
 
 
 def _rate(wins, n):
