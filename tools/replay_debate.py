@@ -38,6 +38,7 @@ import hashlib
 import json
 import logging
 import pathlib
+import random
 import sqlite3
 import sys
 
@@ -59,6 +60,8 @@ DEFAULT_PROMPT_DIR = TRADE_SVC_DATA / "replay_prompts"
 MODEL = "claude-sonnet-5"
 CALLS_PER_CASE = 3
 PROMPT_VERSION = "v1"
+# Fixed so a prompt set can be regenerated identically.
+DEFAULT_SEED = 20260828
 
 CACHE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS verdicts (
@@ -114,12 +117,60 @@ def open_signals(path=None):
     return conn
 
 
-def load_cases(conn, scanner=None, limit=None):
-    """Closed signals, newest first, as scoring cases.
+def settlement_cutoff(conn):
+    """The date from which outcomes are not yet representative, or None.
+
+    Derived from the data, never hardcoded: it is the ``first_seen_date`` of
+    the earliest signal that has NOT closed. On or after that date some of the
+    cohort is still running, so the rows that HAVE closed are the ones that
+    closed fastest -- and the ones that close fastest are the stop-outs.
+    Measured against prod on 2026-08-28: settled 80.9% win, unsettled tail
+    13.2%. Sampling across that boundary measures settlement speed, not trade
+    quality."""
+    row = conn.execute(
+        "SELECT MIN(s.first_seen_date) AS d FROM signals s "
+        "LEFT JOIN signal_outcomes o USING(signal_id) "
+        "WHERE o.signal_id IS NULL").fetchone()
+    return row["d"] if row and row["d"] else None
+
+
+def population_base_rate(conn, scanner=None, include_unsettled=False):
+    """Win rate over the whole eligible population, for comparison.
+
+    Carried into the report so a future sampling bug shows on the face of the
+    output rather than reading as a market regime."""
+    sql = ("SELECT COUNT(*) n, SUM(CASE WHEN o.realized_pnl > 0 THEN 1 ELSE 0 END) w "
+           "FROM signals s JOIN signal_outcomes o USING(signal_id) "
+           "WHERE o.realized_pnl IS NOT NULL")
+    args = []
+    if scanner and scanner.lower() != "all":
+        sql += " AND s.scanner_type = ?"
+        args.append(scanner)
+    if not include_unsettled:
+        cutoff = settlement_cutoff(conn)
+        if cutoff:
+            sql += " AND s.first_seen_date < ?"
+            args.append(cutoff)
+    row = conn.execute(sql, args).fetchone()
+    return (row["w"] / row["n"]) if row and row["n"] else None
+
+
+def load_cases(conn, scanner=None, limit=None, seed=DEFAULT_SEED,
+               include_unsettled=False):
+    """Eligible closed signals as scoring cases.
 
     Each case carries ``view`` (the whitelisted payload a prompt is built from)
     alongside ``entry_grade`` and ``outcome``, which are for SCORING only and
-    never reach the model."""
+    never reach the model.
+
+    Two sampling decisions, both of which the first version got wrong:
+
+      * signals from an UNSETTLED cohort are excluded (see
+        ``settlement_cutoff``) unless asked for explicitly;
+      * a ``limit`` draws a seeded RANDOM sample, not the newest rows. Taking
+        the newest is a survivorship filter -- the original harness did exactly
+        that and drew a sample winning 43.3% out of a population winning 80.9%.
+    """
     sql = ("SELECT s.*, o.realized_pnl FROM signals s "
            "JOIN signal_outcomes o USING(signal_id) "
            "WHERE o.realized_pnl IS NOT NULL")
@@ -127,10 +178,13 @@ def load_cases(conn, scanner=None, limit=None):
     if scanner and scanner.lower() != "all":
         sql += " AND s.scanner_type = ?"
         args.append(scanner)
-    sql += " ORDER BY s.first_seen_date DESC, s.signal_id DESC"
-    if limit:
-        sql += " LIMIT ?"
-        args.append(int(limit))
+    if not include_unsettled:
+        cutoff = settlement_cutoff(conn)
+        if cutoff:
+            sql += " AND s.first_seen_date < ?"
+            args.append(cutoff)
+    # A stable order so the seeded draw below is reproducible across runs.
+    sql += " ORDER BY s.signal_id ASC"
 
     cases = []
     for row in conn.execute(sql, args):
@@ -145,6 +199,9 @@ def load_cases(conn, scanner=None, limit=None):
             "view": RS.build_case(row),
             "verdict": None,
         })
+
+    if limit and len(cases) > int(limit):
+        cases = random.Random(seed).sample(cases, int(limit))
     return cases
 
 
@@ -307,9 +364,14 @@ def run(signals_db=None, cache_db=None, *, live=False, debater=None,
     finally:
         cache.close()
 
+    conn = open_signals(signals_db)
+    try:
+        pop = population_base_rate(conn, scanner=scanner)
+    finally:
+        conn.close()
     return {"mode": mode, "errors": errors,
             "model": model if mode == "live" else None,
-            "score": RS.score(cases)}
+            "score": RS.score(cases, population_base_rate=pop)}
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -343,7 +405,16 @@ def render_report(report):
     L.append("")
     L.append("  THE NULL MODEL - approve everything:")
     L.append(f"    base rate      {_pct(s['base_rate'])}   <- beat this")
+    if s.get("population_base_rate") is not None:
+        L.append(f"    population     {_pct(s['population_base_rate'])}   "
+                 "(whole eligible set)")
     L.append("")
+    if s.get("sample_is_unrepresentative"):
+        L.append("  ** UNREPRESENTATIVE SAMPLE - NOT A RESULT. The sample's base")
+        L.append("     rate is far from the population's, so this is measuring")
+        L.append("     the draw, not the debate. Check the sampler before")
+        L.append("     reading anything below. **")
+        L.append("")
     L.append("  THE DEBATE:")
     L.append(f"    approval rate  {_pct(s['approval_rate'])}   "
              f"({s['approved_n']} of {s['n']} taken)")
@@ -386,7 +457,7 @@ def render_report(report):
 
 
 def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
-                 signals_db=None, log=print):
+                 signals_db=None, seed=DEFAULT_SEED, log=print):
     """Write one paste-ready prompt per batch, plus a manifest.
 
     The manifest records which signal ids went into which batch, so ``ingest``
@@ -394,7 +465,7 @@ def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
     reply pasted into the wrong batch file is caught rather than scored."""
     conn = open_signals(signals_db)
     try:
-        cases = load_cases(conn, scanner=scanner, limit=limit)
+        cases = load_cases(conn, scanner=scanner, limit=limit, seed=seed)
     finally:
         conn.close()
 
@@ -402,7 +473,8 @@ def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
     out_dir.mkdir(parents=True, exist_ok=True)
     batches = RS.batch_views([c["view"] for c in cases], batch_size)
     manifest = {"prompt_version": PROMPT_VERSION, "scanner": scanner or "all",
-                "limit": limit, "batch_size": batch_size, "batches": []}
+                "limit": limit, "batch_size": batch_size, "seed": seed,
+                "batches": []}
 
     for i, batch in enumerate(batches, 1):
         path = out_dir / f"batch_{i:02d}.md"
@@ -432,8 +504,12 @@ def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
 
     conn = open_signals(signals_db)
     try:
-        cases = load_cases(conn, scanner=scanner or manifest.get("scanner"),
-                           limit=limit if limit is not None else manifest.get("limit"))
+        scanner = scanner or manifest.get("scanner")
+        cases = load_cases(
+            conn, scanner=scanner,
+            limit=limit if limit is not None else manifest.get("limit"),
+            seed=manifest.get("seed", DEFAULT_SEED))
+        pop = population_base_rate(conn, scanner=scanner)
     finally:
         conn.close()
 
@@ -457,7 +533,7 @@ def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
 
     return {"mode": "manual", "errors": 0,
             "model": "manual (Claude Chat)", "ingest": stats,
-            "score": RS.score(cases)}
+            "score": RS.score(cases, population_base_rate=pop)}
 
 
 def main(argv=None):

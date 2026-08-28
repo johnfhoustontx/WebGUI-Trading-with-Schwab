@@ -50,6 +50,11 @@ MIN_CELL = 10
 DEGENERATE_LO = 0.05
 DEGENERATE_HI = 0.95
 
+# How far a sample's base rate may sit from the population's before the
+# report calls the sample unrepresentative. Wide on purpose: this catches a
+# broken sampler, not ordinary sampling noise.
+BASE_RATE_TOLERANCE = 0.15
+
 # The entry-time context a debater may see. Everything absent from this tuple
 # is withheld, including anything added to the table later.
 CASE_FIELDS = (
@@ -319,8 +324,17 @@ def _subset_stats(cases):
     }
 
 
-def score(cases):
+def score(cases, population_base_rate=None):
     """Compare the debate against the base rate. Never raises.
+
+    ``population_base_rate`` is the win rate over the whole eligible
+    population. When given, the sample's own base rate is checked against it
+    and ``sample_is_unrepresentative`` is set — because a biased SAMPLE is
+    indistinguishable from a real effect on the face of a report, and the first
+    run of this harness proved it: a survivorship-filtered draw came back at 4%
+    against a population of 80.9%, and every downstream number was arithmetic
+    on a sample where vetoing everything was 96% accurate by construction.
+    ``None`` when no population rate was supplied — no claim either way.
 
     ``cases`` are dicts carrying ``entry_grade``, ``verdict`` and ``outcome``.
     Rows missing a verdict (unparseable) or an outcome (still open) are counted
@@ -348,6 +362,16 @@ def score(cases):
     for c in usable:
         grades.setdefault(c.get("entry_grade") or "unknown", []).append(c)
     out["by_grade"] = {g: _subset_stats(rows) for g, rows in sorted(grades.items())}
+
+    # A sample whose base rate is this far from the population's is not a
+    # sample of it. Wide on purpose: the point is to catch a broken sampler,
+    # not to police ordinary sampling noise.
+    out["population_base_rate"] = population_base_rate
+    if population_base_rate is None or out["base_rate"] is None:
+        out["sample_is_unrepresentative"] = None
+    else:
+        out["sample_is_unrepresentative"] = (
+            abs(out["base_rate"] - population_base_rate) > BASE_RATE_TOLERANCE)
 
     n = out["n"]
     ar = out["approval_rate"]

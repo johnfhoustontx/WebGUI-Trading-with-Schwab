@@ -85,10 +85,21 @@ def test_load_cases_takes_only_closed_signals(signals_db):
     assert all(c["outcome"] in ("win", "loss") for c in cases)
 
 
-def test_load_cases_returns_newest_first_so_limit_takes_a_recent_sample(signals_db):
-    """``--limit 60`` must mean the most recent 60, not the oldest 60."""
-    conn = RD.open_signals(signals_db)
-    assert [c["signal_id"] for c in RD.load_cases(conn)] == ["00535765", "0043e544"]
+def test_load_cases_does_not_order_by_recency():
+    """REPLACES a test that asserted newest-first was correct. It was not.
+
+    The original read "--limit 60 must mean the most recent 60", and it passed
+    while pinning a survivorship filter: within a recent window only the fast
+    closers have closed, and the fast closers are the stop-outs. It drew a
+    sample winning 43.3% from a population winning 80.9%.
+
+    The sampling properties now live in ``test_replay_sampling.py``; what is
+    recorded here is that the wrong assertion was removed deliberately rather
+    than quietly relaxed."""
+    import inspect
+    src = inspect.getsource(RD.load_cases)
+    assert "ORDER BY s.first_seen_date DESC" not in src
+    assert "random" in src.lower(), "a capped sample must be drawn at random"
 
 
 def test_load_cases_carries_grade_and_outcome_outside_the_debater_view(signals_db):
