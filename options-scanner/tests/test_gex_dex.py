@@ -147,6 +147,38 @@ def test_calc_dex_signs_and_scaling():
     assert grid[5000.0]["net"]  == pytest.approx(0.0)
 
 
+def test_net_dex_sign_follows_whichever_SIDE_dominates_calls_positive():
+    """Positive net DEX means CALL delta dominates; negative means PUT delta does.
+
+    Recorded as a test because the only place it was ever written down —
+    ``gamma_tool._EXPLAIN_WHAT["dex"]`` — stated it exactly backwards
+    ("Positive DEX: dealers long delta (from hedging puts)… Negative DEX:
+    dealers short delta (from calls)") and was deleted on 2026-08-28. Measured
+    on live $SPX that day the code gave calls +46.95B against puts -9.69B for a
+    net of +37.27B: positive, and driven entirely by the calls.
+
+    Note the book this implies is NOT the one GEX uses. GEX flips the put sign
+    by hand (dealers long calls, SHORT puts); DEX adds Schwab's already-signed
+    delta, so it reads as the delta of the open book held long. Sign-comparing
+    a GEX number against a DEX number therefore compares two different dealer
+    assumptions — which is a product question, deliberately left open here.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    exp_key = f"{today}:0"
+
+    def net_dex(call_oi, put_oi):
+        chain = _chain_factory(
+            spot=5000.0, exp_key=exp_key, dte=0,
+            strikes={5000.0: (0.5, -0.5, 0, 20.0)},
+        )
+        chain["callExpDateMap"][exp_key]["5000.0"][0]["openInterest"] = call_oi
+        chain["putExpDateMap"][exp_key]["5000.0"][0]["openInterest"] = put_oi
+        return GammaEngine().calc_dex_from_chain(chain)["gex"][5000.0]["net"]
+
+    assert net_dex(call_oi=300, put_oi=100) > 0     # calls dominate -> positive
+    assert net_dex(call_oi=100, put_oi=300) < 0     # puts dominate  -> negative
+
+
 def test_calc_dex_populates_0dte_fields_when_0dte_present():
     today = datetime.now().strftime("%Y-%m-%d")
     exp_key = f"{today}:0"

@@ -1016,46 +1016,26 @@ class GammaEngine:
         top_pos = max(pos_items, key=lambda x: x[1])[0] if pos_items else None
         top_neg = min(neg_items, key=lambda x: x[1])[0] if neg_items else None
 
-        # Flip point: linear interpolation where net crosses zero near spot.
-        # Collect all crossings within ±3% band, then pick nearest to spot.
+        # Flip point: delegated to the module-level ``calc_flip_point``, which is
+        # THE implementation (strict crossing, sign persistence, nearest to spot).
+        # It used to be inlined here, and the 2026-08-19 hardening therefore
+        # reached this reading but not the briefing's — see calc_flip_point.
         #
-        # The comparison is STRICT (`< 0`, not `<= 0`) since 2026-08-19: a strike
-        # whose net GEX is exactly zero is the ABSENCE of data, not a level, and
-        # interpolating a "crossing" onto the boundary of a dead run invents a
-        # structural feature out of an untraded strike.
+        # Why the rules are what they are. Index chains list far more strikes
+        # than trade: measured 2026-08-19, $NDX carried ~135 zero-net strikes and
+        # $SPX ~45 inside the ±3% band, while SPY and QQQ carried NONE. Under a
+        # non-strict crossing test that manufactured 8.9 of $NDX's 23.6
+        # candidates per snapshot — and since the selection picks the crossing
+        # NEAREST SPOT, an inflated candidate set degenerates into "report a
+        # level near spot". That is why the index flip tracked spot (corr
+        # +0.85/+0.97) while the ETFs did not (-0.10/-0.47), and why the
+        # above/below bit every downstream consumer reads changed 31% of minutes
+        # for $NDX vs 1% for SPY.
         #
-        # This is not hypothetical. Index chains list far more strikes than
-        # trade: measured that day, $NDX carried ~135 zero-net strikes and $SPX
-        # ~45 inside this ±3% band, while SPY and QQQ carried NONE. Under the old
-        # non-strict test that manufactured 8.9 of $NDX's 23.6 candidates per
-        # snapshot -- and since the selection below picks the crossing NEAREST
-        # SPOT, an inflated candidate set degenerates into "report a level near
-        # spot". That is why the index flip tracked spot (corr +0.85/+0.97) while
-        # the ETFs did not (-0.10/-0.47), and why the above/below bit every
-        # downstream consumer reads changed 31% of minutes for $NDX vs 1% for SPY.
-        #
-        # The filter is a no-op for SPY/QQQ (no dead strikes), which is what makes
-        # it safe to ship alone. The selection rule is a SEPARATE question and is
-        # deliberately unchanged -- every alternative tested made the ETFs worse.
+        # The selection rule is a SEPARATE question and is deliberately
+        # unchanged — every alternative tested made the ETFs worse.
         # docs/plans/2026-08-19-gamma-flip-spot-tracking-design.md
-        strikes = sorted(gex.keys())
-        flip = None
-        candidates = []
-        for i in range(len(strikes) - 1):
-            s1, s2 = strikes[i], strikes[i + 1]
-            v1, v2 = gex[s1]["net"], gex[s2]["net"]
-            if v1 * v2 < 0 and (v2 - v1) != 0:
-                if abs(s1 - spot) <= spot * 0.03 or abs(s2 - spot) <= spot * 0.03:
-                    # The sign must HOLD either side, or this is oscillation
-                    # rather than a regime boundary. Without it, "nearest to
-                    # spot" below picks whichever wobble happens to sit closest
-                    # to price - which is why the index flip tracked spot.
-                    if not _flip_sign_persists(strikes, gex, i):
-                        continue
-                    interp = s1 + (s2 - s1) * (-v1) / (v2 - v1)
-                    candidates.append(round(interp, 2))
-        if candidates:
-            flip = min(candidates, key=lambda x: abs(x - spot))
+        flip = calc_flip_point(gex, spot)
 
         result = {"spot": spot, "flip": flip,
                   "top_pos_strike": top_pos, "top_neg_strike": top_neg,
@@ -1771,11 +1751,22 @@ _EXPLAIN_WHAT = {
         "Net directional inventory dealers must hedge. Unlike GEX, this tells "
         "you WHERE dealers are positioned directionally.",
         "",
-        "• Positive DEX: dealers long delta (from hedging puts) → latent "
+        # ⚠ The two attributions below were INVERTED until 2026-08-28 — positive
+        # DEX was credited to puts and negative to calls, the exact opposite of
+        # what the engine computes. calc_dex_from_chain adds Schwab's
+        # already-signed delta, so a call (delta > 0) pushes net UP and a put
+        # (delta < 0) pushes it DOWN; live $SPX that day read calls +46.95B, puts
+        # -9.69B, net +37.27B. Only the attributions moved — each bullet's
+        # hedging implication was already right, and matches the closing line.
+        "• Positive DEX: dealers long delta (from calls) → latent "
         "supply; a bearish headwind into expiry.",
-        "• Negative DEX: dealers short delta (from calls) → latent demand; "
+        "• Negative DEX: dealers short delta (from puts) → latent demand; "
         "bullish into expiry.",
         "",
+        # Note DEX and GEX do NOT share a dealer book: GEX flips the put sign by
+        # hand (dealers long calls, SHORT puts) while DEX reads as the delta of
+        # the open book held long. Their signs are not directly comparable —
+        # reconciling them is a product decision, not a bug fix.
         "Negative GEX + large positive DEX = an amplifying regime with shares "
         "to sell — can accelerate selloffs. Ignore across catalysts.",
     ],
@@ -1897,35 +1888,57 @@ def build_eod_probabilities(chain, em_upper, em_lower,
     }
 
 
-def calc_flip_point(gex, spot):
-    """Find the strike near spot where net GEX/Charm crosses from positive to negative.
+def calc_flip_point(gex, spot, band_pct=0.03):
+    """The gamma flip: where per-strike net GEX/Charm/DEX/Vanna crosses zero near spot.
 
-    Pure. Was a ``GammaWindow`` staticmethod, which forced pure engine code
-    (``build_analysis_dict``) to reach forward into the Tk GUI class; moved to
-    module scope when the window was split out to ``gamma_window_legacy.py``.
+    THE one implementation — ``GammaEngine.snapshot_summary`` delegates here, so
+    the level the collector stores and every dealer surface draws is the same
+    number ``build_analysis_dict`` puts in the Claude briefing prompt.
+
+    ⚠ It was not always. This function kept the pre-2026-08-19 rule — first
+    crossing found, ascending, no persistence check — while the hardening landed
+    in ``snapshot_summary`` alone. Measured on live $SPX 0-DTE on 2026-08-28,
+    that split had the briefing reading 7705.0 against the page's 7720.63: 7705
+    is a single-strike wobble (+3.9M between -702M and -106M) of exactly the kind
+    the persistence filter exists to reject, and "first ascending" walked into it
+    before reaching the real crossing. Two implementations of one level is how a
+    fix ships to half its callers; there is now one.
+
+    The rules, all deliberate (see docs/plans/2026-08-19-gamma-flip-spot-tracking-design.md):
+    candidates restricted to ±``band_pct`` of spot · a STRICT crossing test, since
+    a strike whose net is exactly zero is the ABSENCE of data and not a level ·
+    the sign required to persist ``_FLIP_PERSIST_STRIKES`` live strikes either
+    side · linear interpolation of the crossing · the candidate NEAREST SPOT wins.
+
+    Returns None when nothing qualifies — a real answer, not a failure.
     """
+    try:
+        spot = float(spot)
+    except (TypeError, ValueError):
+        return None
+    if not gex or spot <= 0:
+        return None
+
     strikes = sorted(gex.keys())
     if len(strikes) < 2:
         return None
 
-    # Look for zero-crossing near spot (within +/-3%)
-    lo, hi = spot * 0.97, spot * 1.03
-    nearby = [(s, gex[s]["net"]) for s in strikes if lo <= s <= hi]
-    if len(nearby) < 2:
+    candidates = []
+    for i in range(len(strikes) - 1):
+        s1, s2 = strikes[i], strikes[i + 1]
+        v1, v2 = gex[s1]["net"], gex[s2]["net"]
+        if v1 * v2 >= 0 or (v2 - v1) == 0:
+            continue
+        if not (abs(s1 - spot) <= spot * band_pct
+                or abs(s2 - spot) <= spot * band_pct):
+            continue
+        if not _flip_sign_persists(strikes, gex, i):
+            continue
+        candidates.append(round(s1 + (s2 - s1) * (-v1) / (v2 - v1), 2))
+
+    if not candidates:
         return None
-
-    # Find where sign changes
-    for i in range(len(nearby) - 1):
-        s1, v1 = nearby[i]
-        s2, v2 = nearby[i + 1]
-        if v1 * v2 < 0:  # sign change
-            # Linear interpolation
-            if v2 - v1 != 0:
-                flip = s1 + (s2 - s1) * (-v1) / (v2 - v1)
-                return round(flip, 1)
-            return round((s1 + s2) / 2, 1)
-
-    return None
+    return min(candidates, key=lambda x: abs(x - spot))
 
 
 def build_analysis_dict(

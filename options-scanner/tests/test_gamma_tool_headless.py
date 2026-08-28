@@ -77,8 +77,16 @@ def test_calc_flip_point_is_module_level():
     import gamma_tool as gt
 
     assert callable(gt.calc_flip_point)
-    # zero-crossing between 99 (+) and 101 (-) around spot 100 -> interpolated 100.0
-    gex = {99.0: {"net": 1.0}, 101.0: {"net": -1.0}}
+    # Five strikes, not two: the sign must be seen to HOLD two live strikes
+    # either side of the crossing, and a two-strike grid cannot show that (a
+    # crossing whose persistence cannot be CHECKED is not a level — accepting
+    # one at the edge of the grid is how an artifact gets promoted). Real
+    # chains carry hundreds. The crossing between 99 (+) and 101 (-) still
+    # interpolates to 100.0.
+    gex = {
+        95.0: {"net": 3.0}, 97.0: {"net": 2.0}, 99.0: {"net": 1.0},
+        101.0: {"net": -1.0}, 103.0: {"net": -2.0}, 105.0: {"net": -3.0},
+    }
     assert gt.calc_flip_point(gex, 100.0) == 100.0
     # no crossing -> None
     assert gt.calc_flip_point({99.0: {"net": 1.0}, 101.0: {"net": 2.0}}, 100.0) is None

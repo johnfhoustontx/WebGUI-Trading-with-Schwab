@@ -238,3 +238,49 @@ class TestFlipIgnoresDeadStrikes:
         }
         summary = GammaEngine.snapshot_summary(data)
         assert summary["flip"] is None
+
+
+class TestBriefingFlipMatchesTheStoredFlip:
+    """``calc_flip_point`` and ``snapshot_summary`` must return the same level.
+
+    They are two readings of ONE snapshot: ``snapshot_summary``'s flip is what
+    the collector stores and every dealer surface draws, while
+    ``calc_flip_point`` is what ``build_analysis_dict`` puts in the prompt the
+    Analyze button pays Claude to read. A disagreement means the briefing is
+    arguing about a level the screen never showed.
+
+    The fixture is the real $SPX 0-DTE shape measured 2026-08-28: a
+    single-strike wobble at 7705 (+3.9M sitting between -702M and -106M, half a
+    percent of its neighbours) ahead of the genuine crossing at ~7720.57. The
+    2026-08-19 persistence filter rejects the wobble — but it only ever landed
+    in ``snapshot_summary``, so the briefing read 7705 while the page read
+    7720.63, 15.6 points apart on the same second's data.
+    """
+
+    SPOT = 7748.88
+    GRID = {
+        7690.0: {"call": 0.0, "put": 0.0, "net": -800_000_000.0},
+        7695.0: {"call": 0.0, "put": 0.0, "net": -750_000_000.0},
+        7700.0: {"call": 0.0, "put": 0.0, "net": -702_000_000.0},
+        7705.0: {"call": 0.0, "put": 0.0, "net": 3_900_000.0},      # the wobble
+        7710.0: {"call": 0.0, "put": 0.0, "net": -106_000_000.0},
+        7715.0: {"call": 0.0, "put": 0.0, "net": -80_000_000.0},
+        7720.0: {"call": 0.0, "put": 0.0, "net": -52_000_000.0},
+        7725.0: {"call": 0.0, "put": 0.0, "net": 406_000_000.0},    # the real one
+        7730.0: {"call": 0.0, "put": 0.0, "net": 450_000_000.0},
+        7735.0: {"call": 0.0, "put": 0.0, "net": 500_000_000.0},
+    }
+
+    def test_a_single_strike_wobble_is_not_the_briefing_flip(self):
+        import gamma_tool as gt
+
+        assert gt.calc_flip_point(self.GRID, self.SPOT) == pytest.approx(
+            7720.57, abs=0.01)
+
+    def test_both_readings_of_one_snapshot_agree(self):
+        import gamma_tool as gt
+
+        stored = GammaEngine.snapshot_summary(
+            {"spot": self.SPOT, "gex": self.GRID})["flip"]
+        assert gt.calc_flip_point(self.GRID, self.SPOT) == pytest.approx(
+            stored, abs=0.01)

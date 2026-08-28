@@ -4,6 +4,61 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-28 (**The Claude briefing read a gamma flip the page had already rejected.**
+- **Two implementations of one level, and the 2026-08-19 hardening reached only one of them.**
+  `GammaEngine.snapshot_summary` got the strict crossing + `_flip_sign_persists` + nearest-to-spot
+  rules; `calc_flip_point` kept the pre-hardening rule — **first crossing found, ascending, no
+  persistence check**. Since `build_analysis_dict` is what `_gamma_blocks_for` sends to the paid
+  Analyze call, the briefing argued about a level no screen ever showed.
+- **Measured live on $SPX 0-DTE, not reasoned about:** briefing **7705.00** against the page's
+  **7720.63**, 15.6 points apart on the same second's snapshot. 7705 is a single-strike wobble —
+  `+3.9M` sitting between `-702M` and `-106M`, half a percent of its neighbours — i.e. precisely
+  the artifact the persistence filter exists to reject, and "first ascending" walked into it
+  before reaching the real crossing at 7720.57.
+- **There is now ONE implementation.** `calc_flip_point` carries the rules and `snapshot_summary`
+  delegates to it. Collapsing them is the point of the fix: the bug was not the rule, it was that
+  a rule could be fixed in one copy. All four views now agree on live data (GEX/Charm/DEX/Vanna).
+- ⚠ **An existing test had to have its FIXTURE widened, and that is the correct outcome, not a
+  concession.** `test_calc_flip_point_is_module_level` used a two-strike grid, which cannot offer
+  two live strikes either side — so persistence cannot be *checked*, and `_flip_sign_persists`
+  refuses it by design ("persistence that cannot be CHECKED is not persistence observed"). Six
+  strikes now; the same crossing still interpolates to 100.0. Same widening
+  `test_flip_picks_crossing_nearest_spot_when_multiple` already took when the filter first landed.
+- **Also: `_EXPLAIN_WHAT["dex"]` credited positive DEX to puts and negative to calls** — the
+  opposite of what the engine computes. `calc_dex_from_chain` adds Schwab's already-signed delta,
+  so calls push net up and puts push it down; live $SPX read calls `+46.95B`, puts `-9.69B`, net
+  `+37.27B`. The block is **unreferenced** (the live hover text in `page_help.py` makes no sign
+  claim), so nothing rendered it — but a wrong statement sitting in the file is what the next
+  reader picks up. Only the parentheticals moved; each bullet's hedging implication was already
+  right and matches the closing line.
+- ⚠ **DEX and GEX do NOT share a dealer book, and that is left open deliberately.** GEX flips the
+  put sign by hand (dealers long calls, SHORT puts); DEX reads as the delta of the open book held
+  long. **Sign-comparing a GEX number against a DEX number compares two different assumptions.**
+  Reconciling them moves a stored DB column, the chart and the flip — a product decision, not a
+  bug fix. Pinned by test at both sites so it cannot be "tidied" into agreement by accident.
+- **The review that prompted this was describing code that does not exist here.** `parse_chain_response`,
+  `OptionLeg`, `compute_gex_dex_charm`, `zone_aggregate`, `_safe_float`, `_SCHWAB_NA_SENTINELS`:
+  zero hits in the tree and zero in any commit reachable from any branch. Of its five substantive
+  claims, four were false (`M` is a hardcoded 100, not a `multiplier` field; the `-999` volatility
+  filter prunes charm and vanna only, never the gamma book; charm carries no sign flip at all; both
+  live flip implementations are per-strike and ±3%-banded, not cumulative over the whole chain).
+  **The two real bugs were ones it did not raise.** Probed live for the data-quality failure it did
+  claim — AAPL 3,428 contracts, SPY 7,444 ITM, $SPX 644 and $NDX 804 0-DTE: **zero** `-999` gamma,
+  zero NaN, zero missing, zero `-999` volatility. The 87% of $SPX 0-DTE contracts returning
+  `gamma == 0.0` are dead wings hours from expiry, which is correct rather than missing.
+- **Known and NOT fixed:** `gamma_tool`'s `c.get("gamma", 0) or 0` screens `None` but not NaN
+  (`float('nan') or 0` → `nan`, since NaN is truthy) or the `-999` sentinel — one would poison the
+  strike, `net_total` and the flip. `deepdive/engine.py`'s `clean()` already handles all three.
+  Latent only: not observed on any live chain probed. Also unfixed: `build_analysis_dict`'s zone
+  bands are asymmetric (`+0-2%`, `-0-2%`, `-2-5%` — **no `+2-5%`**), so the prompt shows 5% of
+  downside structure against 2% of upside. Costs nothing on 0-DTE (the excluded strikes are all
+  net-zero; zones still summed to 100.0% of `net_total` on a 322-strike live chain) but would bite
+  on a multi-day expiry with live wing gamma.
+- **options-scanner 1199 passed / 2 skipped / 0 failed; options_svc 1253 passed.** Verified against
+  the live proxy with the patched module, not only in tests.)
+
+---
+
 **Last updated:** 2026-08-28 (**The Heat Lattice's option-skew line was invisible on green tiles.**
 - **Measured live on the running board, not eyeballed.** In Skin B every tile is painted with
   its heat fill, which at full magnitude is `rgba(0,229,160,.36)` over the void — an effective
