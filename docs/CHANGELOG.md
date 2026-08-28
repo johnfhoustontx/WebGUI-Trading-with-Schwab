@@ -4,6 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-28 (**Tests could write to the production databases, and the guard against it had never worked.**
+- **Found via the ranking review, not a test failure.** Six batch rankings of 150 live
+  signals kept flagging rows whose greeks were impossible; chasing the signature found
+  **24 synthetic signals** — SPY @ underlying exactly 500.00 and QQQ @ 430.00, short
+  deltas on an exact **32nd ladder** (3/32…7/32), theta exactly 0, IV rank exactly 100,
+  strikes on consecutive integers — all `first_seen_date` **2026-07-16** and no other
+  date in the book. Plus **21 paper orders** in a 90-second burst with empty `legs: '[]'`.
+- **`options-scanner/tests/conftest.py` already had a fixture for this, and it was inert.**
+  It did `monkeypatch.setattr(signal_db, "DEFAULT_DB_PATH", tmp)` — but those functions are
+  `def f(..., db_path=DEFAULT_DB_PATH)` and **Python binds a default at `def` time**.
+  Measured: all 13 still pointed at the live path after the patch. `paper_account_db` was
+  never patched, which is how the orders got through. Protection that looks real, is inert,
+  and fails silently is worse than none — its docstring is now the correction.
+- **The fix is a repo-root `conftest.py` refusing `sqlite3.connect` into a live data dir.**
+  One chokepoint every store shares (verified: no module does `from sqlite3 import connect`),
+  so a store added tomorrow is covered without anyone remembering. Catches relative paths,
+  `file:…?mode=ro` URIs and `..` walks by comparing RESOLVED parents. `tmp_path`/`:memory:`
+  unaffected; `@pytest.mark.allow_live_db` is the escape hatch. Confirmed to apply to per-app
+  runs — the question that decided whether this approach was viable at all.
+- **It immediately caught two live leaks in `options_svc`** — including
+  `test_driver_paper_create_e2e_does_not_write_manual_db`, a test asserting cross-book
+  isolation *by reading the production manual book*. Both now redirect it to `tmp_path`.
+  `paper_account_db` resolves `db_path` at CALL time, so the redirect reaches the code under
+  test and the assertion stays discriminating; only the file moved.
+- **Cleanup:** 24 signals + 24 `signal_outcomes` + 21 `paper_orders` deleted from BOTH
+  environments behind online backups (`data/backup/*.20260828-fixture-purge.bak`, prod never
+  stopped). All 21 orders were REJECTED with `fill_price` NULL and no `paper_positions`
+  referenced them, so the account row is byte-identical — verified before and after. The 4
+  real 2026-07-16 signals survive, as does the one genuine zero-theta row (ADBE @ 272.96).
+- **Verified:** after the full ~7,600-test run, dev still reads 700 signals and prod 855,
+  with zero new fixture rows. options-scanner 1199/2 skipped · options_svc 1253 · webgui 2875 ·
+  sentiment_svc 331+1 xfail · driver_svc 239 · tools 960 · root tests 74 (+5 new). The two
+  `trade_svc` `test_earnings_calendar` failures are pre-existing date-fixture rot, unrelated.
+- ⚠ **Not done:** `trades.db`, `paper_account_driver.db`, `gamma_briefings.db` and
+  `gex_history.db` have NOT been audited for the same 2026-07-16 signature. The guard stops
+  new leaks; it does not clean old ones.)
+
+---
+
 **Last updated:** 2026-08-28 (**The Claude briefing read a gamma flip the page had already rejected.**
 - **Two implementations of one level, and the 2026-08-19 hardening reached only one of them.**
   `GammaEngine.snapshot_summary` got the strict crossing + `_flip_sign_persists` + nearest-to-spot

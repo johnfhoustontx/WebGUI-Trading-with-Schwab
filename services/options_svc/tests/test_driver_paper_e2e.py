@@ -64,6 +64,14 @@ def test_driver_paper_create_e2e_isolation(tmp_path, monkeypatch):
     driver_db = tmp_path / "paper_account_driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", driver_db)
     monkeypatch.setattr(paper_broker, "submit_order", _filled_broker(1.50))
+    # The MANUAL book is redirected to tmp as well. It used to be the REAL
+    # data/paper_account.db: this test proved cross-book isolation by reading
+    # production. paper_account_db resolves db_path at CALL time (db_path=None
+    # -> DEFAULT_DB_PATH), so patching the attribute redirects the code under
+    # test too — a wrongly-written manual position still lands here and still
+    # fails the assertion. The invariant is unchanged; only the file moves.
+    monkeypatch.setattr(paper_account_db, "DEFAULT_DB_PATH",
+                        tmp_path / "paper_account_manual.db")
 
     # The requested (guardrail-clamped) qty. width 2 / credit 1.5 → the engine
     # sizes to 5 off the fill; qty=1 is below that ceiling so exactly 1 opens.
@@ -74,6 +82,7 @@ def test_driver_paper_create_e2e_isolation(tmp_path, monkeypatch):
     # ── baseline the MANUAL account's open-position count BEFORE the cycle. We
     #    read it via the default path WITHOUT mutating it (fetch only). This is
     #    the read-only isolation reference; we re-read it after and assert == .
+    #    (Redirected to tmp above — this no longer reads the production file.)
     manual_db = paper_account_db.DEFAULT_DB_PATH
     manual_open_before = len(paper_account_db.fetch_open_positions(manual_db))
 
@@ -124,6 +133,9 @@ def test_driver_paper_create_e2e_does_not_write_manual_db(tmp_path, monkeypatch)
     driver_db = tmp_path / "paper_account_driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", driver_db)
     monkeypatch.setattr(paper_broker, "submit_order", _filled_broker(1.50))
+    # Manual book on tmp — see the sibling test. Was the real production file.
+    monkeypatch.setattr(paper_account_db, "DEFAULT_DB_PATH",
+                        tmp_path / "paper_account_manual.db")
 
     bus = Bus(fake=True)
     handlers.handle_command(

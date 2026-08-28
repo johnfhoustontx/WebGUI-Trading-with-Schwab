@@ -1717,6 +1717,33 @@ tests were relying on exactly that and broke when the fake stopped lying: one
 looped over three clock times and only passed because each pass could not see the
 cooldown map the previous one wrote. Call `reset_fake_bus()` and rebuild.
 
+**The suite CANNOT open a live SQLite store — enforced at `sqlite3.connect`, not
+at the defaults (2026-08-28).** The repo-root **`conftest.py`** carries an autouse
+fixture that refuses any connect resolving into a live data directory
+(`options-scanner/data`, `options-scanner` itself for `gex_history.db`,
+`shared/data`, `webgui/data`, `services/trade_svc/data`). `tmp_path` and
+`:memory:` are unaffected; a test that genuinely must read production shape marks
+itself **`@pytest.mark.allow_live_db`**. It is verified to apply to per-app runs
+(`cd options-scanner && pytest tests`) since the repo-root `pyproject.toml` is the
+configfile, so rootdir — and therefore conftest collection — starts here.
+
+⚠ **The layer is the whole point, and the previous attempt proves it.**
+`options-scanner/tests/conftest.py` had carried a fixture written for exactly this
+since the first leak, doing `monkeypatch.setattr(signal_db, "DEFAULT_DB_PATH", tmp)`
+— and it had **never worked**: those functions are declared
+`def f(..., db_path=DEFAULT_DB_PATH)` and **Python binds a default at `def` time**,
+so all 13 still resolved to the live path after the patch (measured).
+`paper_account_db` was never patched at all. The cost was 24 synthetic signals
+(SPY @ 500.00, QQQ @ 430.00, short deltas on an exact 32nd ladder, theta exactly 0)
+plus 21 rejected paper orders written into **both** environments on 2026-07-16 and
+not found until 2026-08-28, by which point they were feeding backtests. Redirecting
+defaults is per-module, per-function, and has to be remembered forever; the connect
+guard is one chokepoint every store shares, so a module added tomorrow is covered
+without anyone remembering to cover it. **Do not "simplify" it back to patching
+paths.** Note `paper_account_db` resolves correctly (`db_path=None` → look up
+`DEFAULT_DB_PATH` at CALL time) and `signal_db` does not — prefer the former shape
+in new stores.
+
 **`pyrightconfig.json` is a DELIBERATELY NARROW type check** — `shared/bus`,
 `shared/contracts`, `shared/config_toml.py`, `webgui/bus_client.py`. That is the
 one seam every tier crosses, and where the documented envelope-vs-payload bug

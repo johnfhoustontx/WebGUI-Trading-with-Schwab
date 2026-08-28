@@ -1,32 +1,38 @@
-"""Shared test fixtures + safety guards for the options-scanner suite.
+"""Shared test fixtures for the options-scanner suite.
 
 Production-DB isolation
 -----------------------
-`scanner_engine.run_full_scan` persists results via
-`signal_recorder.record_signals(...)` with **no** db_path, so it falls back to
-`signal_db.DEFAULT_DB_PATH` — the real `data/signals.db`. Tests that exercise
-`run_full_scan` (e.g. test_directional_screening's `test_run_full_scan_*`,
-which scan SPY at a synthetic spot of 500) therefore leaked fixture signals
-(SPY spreads around strike ~500) straight into the production database on every
-run.
+⚠ This file used to claim it guaranteed "the real `data/signals.db` is never
+touched by the suite". **It did not, and had never done so.** The fixture below
+patched `signal_db.DEFAULT_DB_PATH`, but every function in that module is
+declared ``def f(..., db_path=DEFAULT_DB_PATH)`` and Python binds a default at
+``def`` time — measured 2026-08-28, all 13 signal_db functions still resolved to
+the live path after the patch. `paper_account_db` was never patched at all.
 
-This autouse fixture redirects every *default-path* `record_signals` call to a
-per-test temp DB while still honouring any explicit `db_path` a test passes, so
-no test can write to the production store. It is defense-in-depth: individual
-tests should still isolate their own state, but this guarantees the real
-`data/signals.db` is never touched by the suite.
+The cost: on 2026-07-16 a run wrote 24 synthetic signals (SPY @ 500.00,
+QQQ @ 430.00, deltas on an exact 32nd ladder) and 21 rejected paper orders into
+BOTH environments' production stores, where they sat for six weeks feeding
+backtests. The inert patch has been removed rather than left to imply cover.
+
+**The real guarantee now lives in the repo-root `conftest.py`**, which refuses
+any ``sqlite3.connect`` resolving into a live data directory. That sits at a
+chokepoint every store shares, so it cannot be defeated by a module nobody
+remembered to patch. See that file for the reasoning and the
+``@pytest.mark.allow_live_db`` escape hatch.
+
+What survives here is the `record_signals` redirect, which DOES work — it wraps
+the function rather than reassigning a module attribute. Without it,
+`run_full_scan` tests would hit the root guard and fail; with it they write to a
+per-test temp DB. Explicit `db_path` arguments are still honoured.
 """
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _isolate_production_signal_db(tmp_path, monkeypatch):
-    import signal_db
     import signal_recorder
 
     test_db = tmp_path / "isolated_signals.db"
-    monkeypatch.setattr(signal_db, "DEFAULT_DB_PATH", test_db)
-
     real_record = signal_recorder.record_signals
 
     def _redirected(signals, scanner_type, db_path=None):
