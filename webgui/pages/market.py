@@ -416,7 +416,10 @@ def render():
         tx = tile_text(t)
         rc = _reactive_classes(t)
         oc = order_class(i)
-        # EVERY tile is exactly 152x94 (2026-08-16). It used to be `min-w-[104px]`
+        # EVERY tile is exactly 152x96 (2026-08-16; 94 -> 96 on 2026-08-28 when
+        # the descriptor went 9px -> 10px -- the floor has to clear the TALLEST
+        # tile or the two-height split below comes straight back, measured live
+        # at 95.5 vs 94). It used to be `min-w-[104px]`
         # with no height at all, which produced 6 distinct widths and 2 heights
         # across the 69 tiles:
         #   * WIDTH — a min-width in a wrapping flex row lets each tile grow to
@@ -432,7 +435,7 @@ def render():
         container = ui.column().classes(
             f"mb-tile {_T['MB_TILE_BG']} border {rc['border']} {rc['opacity']} "
             f"{rc['cvar']} {rc['wash']} {rc['heat']} {oc} "
-            "w-[152px] shrink-0 grow-0 min-h-[94px] "
+            "w-[152px] shrink-0 grow-0 min-h-[96px] "
             "px-[11px] pt-[9px] pb-[8px] gap-0")
         with container:
             ui.element("div").classes("mb-ig")
@@ -444,9 +447,12 @@ def render():
                 "tabular-nums mt-[3px] leading-tight")
             ch_lbl = ui.label(tx["change"]).classes(
                 f"{_T['MB_MONO']} {rc['chtext']} text-[10.5px] tabular-nums mt-[2px]")
+            # `mb-desc` is the hook the Skin-B text ramp needs (see
+            # `build_macro_css`): on the lattice this line carries the option
+            # skew over a bright heat fill, where `MB_FAINT` measured 1.08:1.
             ex_lbl = ui.label(descriptor_line(t)).classes(
-                f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9px] tracking-[.05em] "
-                "mt-[2px] truncate max-w-[128px]")
+                f"mb-desc {_T['MB_MONO']} {_T['MB_FAINT']} text-[10px] "
+                "tracking-[.05em] mt-[2px] truncate max-w-[128px]")
             ui.tooltip(t.get("description", ""))
         state["tiles"][t.get("display")] = {
             "el": container, "px": px_lbl, "ch": ch_lbl, "ex": ex_lbl,

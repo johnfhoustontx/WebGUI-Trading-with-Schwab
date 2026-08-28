@@ -233,6 +233,14 @@ _DEFAULTS = {
         "void": "#03060D", "panel": "#080D18", "tile": "#0A1020",
         "grid": "#0E1728", "edge": "#182741", "edge_hi": "#26405F",
         "txt": "#DCE8F8", "dim": "#6B7F9E", "faint": "#3D4F6B",
+        # Skin-B (Heat Lattice) text ramp. The tile's heat fill reaches
+        # rgba(0,229,160,.36) over the void, i.e. ~#015642 -- a background bright
+        # enough that the dark `dim`/`faint` ramp above collapses onto it: the
+        # skew line ("Call 31%") measured 1.08:1 live and the symbol 2.2:1, both
+        # effectively invisible. These two lift only the lattice skin (Skin A's
+        # tiles stay dark, so its ramp is unchanged) and keep the reading order
+        # price > symbol > descriptor while clearing 4.5:1 on the hottest tile.
+        "lattice_sym": "#C6D6EA", "lattice_desc": "#A9BFDA",
         "up": "#00E5A0", "dn": "#FF4D6D", "flat": "#5C6F8C", "cyan": "#35E0FF",
         "wash_in": "#0A1830",
         "sat_ceiling": 0.45,
@@ -918,7 +926,13 @@ def build_macro_css(theme):
     page ground, clip-path notches (panels + tiles), the flash keyframes
     (ignition bar + price flare, and the Skin-B bloom), the per-tile custom-prop
     washes, and the sheared breadth bar / pulsing live dot. Colours come from
-    ``[macro]`` so the palette stays config-driven."""
+    ``[macro]`` so the palette stays config-driven.
+
+    One colour pair is here rather than in ``.classes()`` and it is deliberate:
+    the Skin-B text ramp is scoped on the WRAPPER's skin class, and ``_set_skin``
+    swaps that class without rebuilding the 69 tiles -- so a Tailwind class on the
+    child cannot express "only when the lattice is on" without repainting every
+    tile on every toggle."""
     m = theme["macro"]
     return f"""
 .macro-board{{
@@ -961,6 +975,10 @@ def build_macro_css(theme):
 .macro-board.macro-b .mb-tile.fl{{animation:mblat .95s ease-out}}
 @keyframes mblat{{0%{{box-shadow:inset 0 0 0 1px var(--c,{m['flat']}),0 0 22px -4px var(--c,{m['flat']})}}100%{{box-shadow:inset 0 0 0 1px rgba(255,255,255,.045),0 0 0 0 transparent}}}}
 .macro-board.macro-b .mb-ig{{display:none}}
+/* Skin B text ramp -- the heat fill is bright enough to swallow the dark
+   dim/faint ramp, so lift the symbol + descriptor here only. */
+.macro-board.macro-b .mb-tile .mb-sym{{color:{m['lattice_sym']}}}
+.macro-board.macro-b .mb-tile .mb-desc{{color:{m['lattice_desc']}}}
 /* breadth bar shear + pulsing live dot */
 .macro-board .mb-shear{{transform:skewX(-16deg)}}
 .macro-board .mb-dot{{animation:mbbp 2s ease-in-out infinite}}

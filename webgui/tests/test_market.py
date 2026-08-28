@@ -100,6 +100,68 @@ def test_descriptor_line_prefers_skew_else_description():
     assert market.descriptor_line({}) == ""
 
 
+# ── Skin-B (Heat Lattice) legibility ─────────────────────────────────────────
+# The lattice paints the whole tile with the heat fill, which at full magnitude
+# is rgba(0,229,160,.36) over the void -- bright enough that the board's dark
+# text ramp collapses onto it. Measured live on 2026-08-28 the skew line
+# ("Call 31%") sat at 1.08:1 and the symbol at 2.2:1, i.e. not readable at all.
+# These pin the PROPERTY (contrast + reading order), never the hexes, so a
+# palette edit that re-breaks it fails here instead of shipping.
+def _srgb(hexstr):
+    h = hexstr.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _luminance(rgb):
+    def ch(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (ch(v) for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(fg_hex, bg_rgb):
+    a, b = _luminance(_srgb(fg_hex)), _luminance(bg_rgb)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _hottest_tile_bg(direction):
+    """The Skin-B tile background at full magnitude, composited over the void —
+    parsed out of `heat_class` so the test follows the real alpha ramp."""
+    cls = market.heat_class(direction, 1.0)
+    nums = cls[cls.index("(") + 1:cls.index(")")].split(",")
+    r, g, b, alpha = (float(n) for n in nums)
+    void = _srgb(market._MC["void"])
+    return tuple(alpha * c + (1 - alpha) * void[i]
+                 for i, c in enumerate((r, g, b)))
+
+
+def test_lattice_text_ramp_is_legible_on_the_hottest_tile():
+    from pages.options.theme import THEME
+    m = THEME["macro"]
+    for direction in ("up", "dn"):           # green is the worse of the two
+        bg = _hottest_tile_bg(direction)
+        desc = _contrast(m["lattice_desc"], bg)
+        sym = _contrast(m["lattice_sym"], bg)
+        price = _contrast(m["txt"], bg)
+        assert desc >= 4.5, f"{direction} descriptor {desc:.2f}:1"
+        assert sym >= 4.5, f"{direction} symbol {sym:.2f}:1"
+        # reading order must survive the lift: price > symbol > descriptor
+        assert price > sym > desc
+
+
+def test_lattice_ramp_is_scoped_to_skin_b_and_hooks_the_real_classes():
+    from pages.options.theme import MACRO_CSS, THEME
+    m = THEME["macro"]
+    for sel, colour in ((".mb-sym", m["lattice_sym"]),
+                        (".mb-desc", m["lattice_desc"])):
+        rule = f".macro-board.macro-b .mb-tile {sel}{{color:{colour}}}"
+        assert rule in MACRO_CSS
+    # Skin A keeps the dark ramp — the lift must not leak out of the lattice.
+    assert ".macro-a .mb-tile .mb-desc" not in MACRO_CSS
+
+
 # ── breadth counts over the four equity frames ───────────────────────────────
 def test_breadth_counts_only_the_equity_frames():
     # The rail's advance/decline is a read on the EQUITY tape, so it counts only

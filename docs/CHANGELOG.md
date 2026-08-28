@@ -4,6 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-28 (**The Heat Lattice's option-skew line was invisible on green tiles.**
+- **Measured live on the running board, not eyeballed.** In Skin B every tile is painted with
+  its heat fill, which at full magnitude is `rgba(0,229,160,.36)` over the void — an effective
+  `#015642`. Against that, the descriptor line's `MB_FAINT` `#3D4F6B` came out at **1.08:1**
+  and the symbol's `MB_DIM` at **2.2:1**. Even the *coolest* lattice tile only reached 2.26:1,
+  so the line was never really readable; green just made it total. Green is the worse of the
+  two directions because green carries most of the luminance in the sRGB coefficients.
+- **The fix is a Skin-B-only text ramp**, `[macro].lattice_sym` `#C6D6EA` +
+  `[macro].lattice_desc` `#A9BFDA`, emitted by `build_macro_css` under
+  `.macro-board.macro-b .mb-tile`. Skin A's tiles stay dark, so its ramp is untouched and
+  verified so.
+- ⚠ **The symbol had to move too, and that is not scope creep.** Lifting only the descriptor
+  past 4.5:1 would have put the tertiary line *above* the ticker that names the tile. The
+  test pins the reading order (price > symbol > descriptor) alongside the contrast floor.
+- **Why this colour pair lives in the CSS block rather than `.classes()`:** `_set_skin` swaps
+  the skin class on the WRAPPER and does not rebuild the 69 tiles, so a Tailwind class on the
+  child cannot say "only when the lattice is on" without repainting every tile per toggle.
+- **The descriptor also went 9px → 10px, which forced `min-h-[94px]` → `[96px]`.** Measured:
+  the bump alone produced 95.5px for tiles WITH a descriptor against 94px for those without —
+  exactly the two-height split the 2026-08-16 uniformity work removed. The floor has to clear
+  the tallest tile.
+- **Tests pin the property, never the hexes** — WCAG contrast recomputed from `heat_class`'s
+  own alpha ramp, so a palette edit that re-breaks it fails in `test_market.py`. Confirmed
+  discriminating by re-running it against the old ramp (fails at 1.04:1).
+- **Verified in the live browser:** worst skew tile **1.08 → 4.75:1**, symbol 2.2 → 6.06:1,
+  all 69 tiles uniform at 96px, Skin A still `rgb(61,79,107)`/`rgb(107,127,158)`, and the
+  rules win over the Tailwind arbitrary class with **no `!important`**. webgui **2875 passed**.)
+
+---
+
 **Last updated:** 2026-08-25 (**The Trade detail speedometer became a score bar, and the expansions were reordered.**
 - **The gauge is gone.** `svg.score_bar_svg` replaces the Highcharts angular gauge in the
   panel header — dark track, gradient fill running dark → the value's own `value_color`, a
