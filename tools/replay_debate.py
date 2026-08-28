@@ -155,6 +155,31 @@ def population_base_rate(conn, scanner=None, include_unsettled=False):
     return (row["w"] / row["n"]) if row and row["n"] else None
 
 
+def grade_spread(conn, scanner=None, include_unsettled=False):
+    """Good minus Marginal win rate — the separation ``entry_grade`` already has.
+
+    This is what a ranking must beat to justify building anything. Measured on
+    prod 2026-08-28: 85.3% − 73.7% = 11.6 points."""
+    sql = ("SELECT s.entry_grade g, COUNT(*) n, "
+           "SUM(CASE WHEN o.realized_pnl > 0 THEN 1 ELSE 0 END) w "
+           "FROM signals s JOIN signal_outcomes o USING(signal_id) "
+           "WHERE o.realized_pnl IS NOT NULL")
+    args = []
+    if scanner and scanner.lower() != "all":
+        sql += " AND s.scanner_type = ?"
+        args.append(scanner)
+    if not include_unsettled:
+        cutoff = settlement_cutoff(conn)
+        if cutoff:
+            sql += " AND s.first_seen_date < ?"
+            args.append(cutoff)
+    sql += " GROUP BY 1"
+    rates = {r["g"]: (r["w"] / r["n"]) for r in conn.execute(sql, args) if r["n"]}
+    if "Good" in rates and "Marginal" in rates:
+        return rates["Good"] - rates["Marginal"]
+    return None
+
+
 def load_cases(conn, scanner=None, limit=None, seed=DEFAULT_SEED,
                include_unsettled=False):
     """Eligible closed signals as scoring cases.
@@ -196,8 +221,14 @@ def load_cases(conn, scanner=None, limit=None, seed=DEFAULT_SEED,
             "symbol": row["symbol"],
             "entry_grade": row["entry_grade"],
             "outcome": outcome,
+            # Scoring only, never in `view` -- build_case's whitelist would
+            # refuse it anyway. Carried because an 80% win rate on credit
+            # spreads can still be negative expectancy, and the ranking
+            # report shows both.
+            "realized_pnl": row["realized_pnl"],
             "view": RS.build_case(row),
             "verdict": None,
+            "rank": None,
         })
 
     if limit and len(cases) > int(limit):
@@ -380,7 +411,54 @@ def _pct(v):
     return "  n/a" if v is None else f"{100 * v:5.1f}%"
 
 
+def _money(v):
+    return "     n/a" if v is None else f"{v:+8.2f}"
+
+
+def render_ranking_report(report):
+    s = report["score"]
+    L = ["", "=" * 66, "  RANKING REPLAY vs entry_grade", "=" * 66]
+    L.append("  manual run (Claude Chat). This measures ORDERING, not")
+    L.append("  calibration - the model was asked to rank, so 'decline")
+    L.append("  everything' was not an available answer.")
+    L.append(f"  usable cases     {s['n']}   (dropped {s['dropped']})")
+    L.append("")
+    L.append("  THE ORDERING - the model's own top half vs its bottom half:")
+    L.append(f"    {'half':<10}{'n':>5}{'win':>9}{'mean P&L':>12}")
+    for name in ("top", "bottom"):
+        h = s[name]
+        L.append(f"    {name:<10}{h['n']:>5}{_pct(h['win_rate']):>9}"
+                 f"{_money(h['mean_pnl']):>12}")
+    L.append("")
+    L.append(f"    spread         {_pct(s['spread'])}   <- the headline")
+    if s.get("ceiling") is not None:
+        L.append(f"    ceiling        {_pct(s['ceiling'])}   "
+                 "<- best any ordering could do here")
+    if s.get("grade_spread") is not None:
+        L.append(f"    entry_grade    {_pct(s['grade_spread'])}   "
+                 "<- what the stack already separates")
+    L.append("")
+
+    if s["status"] != "ok":
+        L.append(f"  ** NOT A RESULT ({s['status']}): fewer than "
+                 f"{RS.MIN_CASES} usable cases. **")
+    elif s.get("beats_grade") is False:
+        L.append("  ** The ordering did NOT beat entry_grade. A debate that")
+        L.append("     orders no better than the grade already does adds")
+        L.append("     nothing this stack cannot already do for free. **")
+    elif s.get("beats_grade"):
+        L.append("  ** The ordering BEAT entry_grade on this sample. Confirm")
+        L.append("     on more batches before reading it as an edge. **")
+    L.append("")
+    L.append("  Win rate and mean P&L can disagree: a book of credit spreads")
+    L.append("  can win most of the time and still lose money. Read both.")
+    L.append("=" * 66)
+    return "\n".join(L)
+
+
 def render_report(report):
+    if report.get("style") == "ranking":
+        return render_ranking_report(report)
     s = report["score"]
     L = []
     L.append("")
@@ -457,7 +535,8 @@ def render_report(report):
 
 
 def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
-                 signals_db=None, seed=DEFAULT_SEED, log=print):
+                 signals_db=None, seed=DEFAULT_SEED, style="verdict",
+                 log=print):
     """Write one paste-ready prompt per batch, plus a manifest.
 
     The manifest records which signal ids went into which batch, so ``ingest``
@@ -474,12 +553,12 @@ def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
     batches = RS.batch_views([c["view"] for c in cases], batch_size)
     manifest = {"prompt_version": PROMPT_VERSION, "scanner": scanner or "all",
                 "limit": limit, "batch_size": batch_size, "seed": seed,
-                "batches": []}
+                "style": style, "batches": []}
+    render = RS.render_ranking_prompt if style == "ranking" else RS.render_prompt
 
     for i, batch in enumerate(batches, 1):
         path = out_dir / f"batch_{i:02d}.md"
-        path.write_text(RS.render_prompt(batch, i, len(batches)),
-                        encoding="utf-8")
+        path.write_text(render(batch, i, len(batches)), encoding="utf-8")
         manifest["batches"].append(
             {"batch": i, "file": path.name,
              "signal_ids": [v["signal_id"] for v in batch]})
@@ -491,6 +570,41 @@ def emit_prompts(out_dir, scanner=None, limit=None, batch_size=25,
     log("Paste each into Claude Chat, save the reply next to it as "
         "reply_NN.txt, then run --ingest.")
     return manifest
+
+
+def _ingest_ranking(replies, cases, manifest, gspread, log):
+    """Apply ranked replies, one batch at a time.
+
+    Ranks are positional WITHIN a batch, so each reply is applied against its
+    own batch's ids. Pooling the parsed ranks first would put rank 1 of batch 3
+    in competition with rank 1 of batch 1 as though they were the same claim."""
+    by_id = {c["signal_id"]: c for c in cases}
+    batches = {b["batch"]: b["signal_ids"] for b in manifest.get("batches", [])}
+    applied = 0
+
+    for path in replies:
+        digits = "".join(ch for ch in path.stem if ch.isdigit())
+        ids = batches.get(int(digits)) if digits else None
+        if ids is None:
+            log(f"  {path.name}: cannot match this to a batch - skipped")
+            continue
+        batch_cases = [by_id[i] for i in ids if i in by_id]
+        got = RS.parse_rankings(path.read_text(encoding="utf-8",
+                                               errors="replace"))
+        res = RS.apply_rankings(batch_cases, got)
+        if res["ok"]:
+            applied += res["applied"]
+            log(f"  {path.name}: ranked {res['applied']}")
+        else:
+            # Refused whole: a rank's meaning is positional, so a duplicate or
+            # a gap makes every rank below it ambiguous.
+            log(f"  {path.name}: REFUSED ({res['reason']}) - the whole batch "
+                "is unscored, re-run it")
+
+    log(f"\nranked {applied} of {len(cases)}")
+    return {"mode": "manual", "style": "ranking", "errors": 0,
+            "model": "manual (Claude Chat)", "ingest": {"applied": applied},
+            "score": RS.score_ranking(cases, grade_spread=gspread)}
 
 
 def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
@@ -510,6 +624,7 @@ def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
             limit=limit if limit is not None else manifest.get("limit"),
             seed=manifest.get("seed", DEFAULT_SEED))
         pop = population_base_rate(conn, scanner=scanner)
+        gspread = grade_spread(conn, scanner=scanner)
     finally:
         conn.close()
 
@@ -517,6 +632,9 @@ def ingest(out_dir, scanner=None, limit=None, signals_db=None, log=print):
     if not replies:
         log(f"no reply_*.txt files in {out_dir}")
         return None
+
+    if manifest.get("style") == "ranking":
+        return _ingest_ranking(replies, cases, manifest, gspread, log)
 
     parsed = {}
     for path in replies:
@@ -546,6 +664,9 @@ def main(argv=None):
                          "of calling the API")
     ap.add_argument("--ingest", action="store_true",
                     help="score the reply_*.txt files in --out")
+    ap.add_argument("--style", default="verdict", choices=("verdict", "ranking"),
+                    help="verdict = take/pass per trade (measures calibration); "
+                         "ranking = order the batch (measures ordering skill)")
     ap.add_argument("--batch-size", type=int, default=25,
                     help="trades per prompt (1 = the faithful per-trade form)")
     ap.add_argument("--out", default=str(DEFAULT_PROMPT_DIR),
@@ -559,7 +680,8 @@ def main(argv=None):
 
     if args.emit_prompts:
         emit_prompts(args.out, scanner=args.scanner, limit=args.limit,
-                     batch_size=args.batch_size, signals_db=args.signals_db)
+                     batch_size=args.batch_size, signals_db=args.signals_db,
+                     style=args.style)
         return 0
 
     if args.ingest:

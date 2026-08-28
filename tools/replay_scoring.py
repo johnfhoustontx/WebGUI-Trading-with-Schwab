@@ -290,6 +290,204 @@ def apply_results(cases, results):
             "bad": bad}
 
 
+# ── the RANKING variant ─────────────────────────────────────────────────────
+#
+# The accept/reject prompt returned ``degenerate_pass_all`` on two samples with
+# opposite outcome distributions — which is either a finding about debate or a
+# finding about that prompt, and the two are confounded. v1 told the judge to
+# "pass on anything you would not actively choose" while showing it no
+# opportunity set: a one-sided instruction.
+#
+# Ranking removes the confound by construction. A permutation always
+# discriminates, so "declined everything" is not an available answer, and what
+# is left is the question the desk proposal actually needs: can the debate
+# ORDER trades better than ``entry_grade`` already does? ``entry_grade``
+# separates Good 85.3% from Marginal 73.7% — an 11.6-point spread, and the
+# benchmark any ranking has to clear.
+#
+# ⚠ This measures ORDERING, not calibration. A model can order perfectly and
+# still have no idea how many to take. The two prompts answer different
+# questions and neither subsumes the other.
+
+_ID_RANK = re.compile(
+    r"^\W*([0-9A-Za-z_-]{4,64})\s*(?:\||:|-|\t|\s)\s*\**\s*(\d{1,3})\b",
+    re.MULTILINE,
+)
+
+
+def render_ranking_prompt(views, batch_no=1, batch_total=1):
+    """A prompt asking for an ORDERING of the batch, best first.
+
+    Deliberately names no target count. Naming one would impose the approval
+    rate — the very quantity v1 was trying to measure — and would turn the
+    exercise into following an instruction."""
+    n = len(views)
+    lines = [
+        f"# Trade ranking - batch {batch_no} of {batch_total}",
+        "",
+        "You are a trading desk reviewing defined-risk options credit spreads",
+        "that were proposed for entry. Your job is to ORDER them, best first,",
+        "by risk-adjusted attractiveness.",
+        "",
+        "For each trade, weigh briefly what argues for it and what argues",
+        "against it - what has to be true for the credit to be earned, and what",
+        "the credit is not paying for. Then place the whole batch in order.",
+        "",
+        "Rank 1 is the trade you would most want on the book; rank",
+        f"{n} is the one you would least want. You are comparing these trades",
+        "against EACH OTHER, not against an absolute standard - every batch has",
+        "a best and a worst regardless of how it looks overall.",
+        "",
+        "Keep the per-trade reasoning to two sentences.",
+        "",
+        "## Trades",
+        "",
+    ]
+    for v in views:
+        lines.append(f"### {v.get('signal_id')}")
+        for key in CASE_FIELDS:
+            if key == "signal_id" or key not in v:
+                continue
+            lines.append(f"- {key}: {v[key]}")
+        lines.append("")
+    lines += [
+        "## Required output",
+        "",
+        "After the reasoning, end your reply with a single fenced code block",
+        "containing one line per trade, using the id exactly as given above:",
+        "",
+        "```",
+        "<id> | <rank>",
+        "```",
+        "",
+        f"Use each rank from 1 to {n} exactly once, and include every id above.",
+    ]
+    return "\n".join(lines)
+
+
+def parse_rankings(text):
+    """``{signal_id: rank}`` from a pasted reply. Never raises."""
+    if not isinstance(text, str):
+        return {}
+    out = {}
+    for match in _ID_RANK.finditer(text):
+        sid, rank = match.group(1), int(match.group(2))
+        out[sid] = rank
+    return out
+
+
+def apply_rankings(cases, rankings):
+    """Attach ranks to ``cases`` in place — but ONLY if the reply is a
+    permutation of exactly the ids sent.
+
+    A partial or duplicated ranking is REFUSED whole rather than applied to the
+    rows that happen to be well-formed. A rank's meaning is positional: if two
+    trades claim third place, every rank below them is ambiguous, so scoring
+    the readable subset would be scoring a different ordering than the model
+    gave. Nothing is written on refusal."""
+    rankings = dict(rankings or {})
+    cases = list(cases or [])
+    ids = {c.get("signal_id") for c in cases}
+    n = len(cases)
+
+    if any(sid not in ids for sid in rankings):
+        return {"ok": False, "reason": "unknown_id"}
+    if len(rankings) != n:
+        return {"ok": False, "reason": "incomplete"}
+    ranks = sorted(rankings.values())
+    if ranks != list(range(1, n + 1)):
+        return {"ok": False, "reason": "not_a_permutation"}
+
+    for case in cases:
+        case["rank"] = rankings[case["signal_id"]]
+        case["batch_size"] = n
+    return {"ok": True, "reason": None, "applied": n}
+
+
+def rank_percentile(rank, batch_size):
+    """Rank as a 0..1 position within its own batch, best = 0.
+
+    Ranks pool across batches only after this: rank 5 is top-quintile in a
+    batch of 25 and bottom-half in a batch of 8."""
+    r, n = _num(rank), _num(batch_size)
+    if r is None or n is None or n < 2:
+        return 0.0
+    return (r - 1.0) / (n - 1.0)
+
+
+def _half_stats(cases):
+    n = len(cases)
+    wins = sum(1 for c in cases if c["outcome"] == "win")
+    pnls = [_num(c.get("realized_pnl")) for c in cases]
+    pnls = [p for p in pnls if p is not None]
+    return {
+        "n": n,
+        "win_rate": _rate(wins, n),
+        # Reported beside the win rate because they can disagree: a book of
+        # credit spreads can win 80% of the time and still lose money, and a
+        # win-rate-only view hides exactly that.
+        "mean_pnl": (sum(pnls) / len(pnls)) if pnls else None,
+    }
+
+
+def score_ranking(cases, grade_spread=None):
+    """Score an ordering: does the model's top half beat its bottom half?
+
+    ``spread`` is top-half win rate minus bottom-half win rate — positive means
+    the ordering carried information. ``grade_spread`` is the separation
+    ``entry_grade`` already achieves (Good minus Marginal), so the report can
+    say whether the debate ordered BETTER than what the stack already has,
+    which is the only comparison that justifies building anything.
+
+    Cases without a rank, or without a matured outcome, are dropped and counted.
+    """
+    cases = list(cases or [])
+    usable = [c for c in cases
+              if _num(c.get("rank")) is not None
+              and c.get("outcome") in ("win", "loss")]
+    dropped = len(cases) - len(usable)
+
+    for c in usable:
+        c["rank_pct"] = rank_percentile(c.get("rank"), c.get("batch_size"))
+    ordered = sorted(usable, key=lambda c: c["rank_pct"])
+    half = len(ordered) // 2
+    top, bottom = ordered[:half], ordered[len(ordered) - half:]
+
+    out = {"n": len(usable), "dropped": dropped,
+           "top": _half_stats(top), "bottom": _half_stats(bottom),
+           "grade_spread": grade_spread}
+
+    if len(usable) < MIN_CASES or half < 1:
+        out["status"] = "thin"
+        out["spread"] = None
+        out["beats_grade"] = None
+        out["ceiling"] = None
+        out["spread_vs_ceiling"] = None
+        return out
+
+    tw, bw = out["top"]["win_rate"], out["bottom"]["win_rate"]
+    out["spread"] = (tw - bw) if (tw is not None and bw is not None) else None
+    out["status"] = "ok"
+
+    # The best spread ANY ordering could reach on this sample. With 82% winners
+    # a perfect order still only separates 36 points, because the top half runs
+    # out of losers to exclude. Without it a strong ordering reads as mediocre.
+    losses = sum(1 for c in usable if c["outcome"] == "loss")
+    if 0 < losses < len(usable):
+        best_top = min(half, len(usable) - losses)
+        best_bottom_wins = (len(usable) - losses) - best_top
+        out["ceiling"] = (best_top / half) - (best_bottom_wins / half)
+    else:
+        out["ceiling"] = None
+    out["spread_vs_ceiling"] = (
+        (out["spread"] / out["ceiling"])
+        if (out["spread"] is not None and out["ceiling"]) else None)
+    out["beats_grade"] = (
+        None if (out["spread"] is None or grade_spread is None)
+        else out["spread"] > grade_spread)
+    return out
+
+
 def _rate(wins, n):
     return (wins / n) if n else None
 
