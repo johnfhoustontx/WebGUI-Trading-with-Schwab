@@ -193,7 +193,11 @@ def test_emit_then_paste_back_scores_the_right_outcomes():
               f"{views[1]['signal_id']} | PASS")
     RS.apply_results(cases, RS.parse_results(pasted))
 
+    # Assert on COUNTS, not rates: this test is about whether each verdict
+    # landed on the right outcome. The rates are suppressed here anyway --
+    # two approvals is below MIN_CELL -- and asserting a suppressed rate would
+    # make an alignment test fail for a presentation reason.
     s = RS.score(cases)
     assert s["approved_n"] == 2
-    assert s["approved_rate"] == pytest.approx(1.0)
-    assert s["vetoed"]["would_have_lost"] == 2
+    assert s["approved"]["would_have_won"] == 2, "both approvals were winners"
+    assert s["vetoed"]["would_have_lost"] == 2, "both vetoes were losers"

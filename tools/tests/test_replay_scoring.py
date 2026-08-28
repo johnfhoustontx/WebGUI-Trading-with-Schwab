@@ -203,6 +203,31 @@ def test_score_is_ok_on_a_real_split_of_adequate_size():
     assert r["status"] == "ok"
 
 
+def test_lift_is_suppressed_when_the_approved_cell_is_too_small():
+    """The headline obeys the same floor as every other cell.
+
+    Caught on a real run: the debate approved ONE trade of 25, it happened to
+    win, and the report printed ``lift 20.0%`` as its headline — a rate off a
+    cell of one, sitting directly above a NOT A RESULT banner. Suppressing a
+    rate on a 3-row cell while headlining one off a 1-row cell was incoherent."""
+    cases = _cases([("Good", "PASS", "win", 19), ("Good", "PASS", "loss", 5),
+                    ("Good", "TAKE", "win", 1)])
+    r = RS.score(cases)
+    assert r["approved_n"] == 1
+    assert r["lift"] is None
+    assert r["approved_rate"] is None
+    # The informative cell is the veto, and it is big enough to speak.
+    assert r["vetoed"]["n"] == 24
+    assert r["vetoed"]["accuracy"] == pytest.approx(5 / 24)
+
+
+def test_lift_survives_once_the_approved_cell_clears_the_floor():
+    r = RS.score(_cases([("Good", "TAKE", "win", 10),
+                         ("Good", "PASS", "loss", 15)]))
+    assert r["approved_n"] == 10
+    assert r["lift"] is not None
+
+
 def test_score_suppresses_a_rate_on_a_cell_too_small_to_carry_one():
     """The disagreement cells are the smallest and the most over-read."""
     r = RS.score(_cases([("Good", "TAKE", "win", 60),

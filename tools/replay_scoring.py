@@ -314,6 +314,12 @@ def _subset_stats(cases):
     approved = [c for c in cases if c["verdict"] == "TAKE"]
     base = _rate(sum(1 for c in cases if c["outcome"] == "win"), n)
     app = _rate(sum(1 for c in approved if c["outcome"] == "win"), len(approved))
+    # The headline obeys the same floor as every other cell. A lift computed
+    # off an approved cell of one is not a small effect measured imprecisely,
+    # it is one coin flip expressed as a percentage — and it reads as the
+    # answer because it sits on the headline line.
+    if len(approved) < MIN_CELL:
+        app = None
     return {
         "n": n,
         "base_rate": base,
