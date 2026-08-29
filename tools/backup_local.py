@@ -15,8 +15,14 @@ WHAT IT COPIES
     mid-write is a torn database that passes a file-size check and fails
     ``PRAGMA integrity_check``, usually months later.
   * Redis, via ``--rdb`` (a real point-in-time RDB, not a key scan).
-  * the gitignored inputs that no clone carries: the watchlist workbook, the
-    swing model artifact, and the secret files.
+  * the gitignored DATA TREES, swept whole -- EOD report archives, the portfolio
+    ledger, app settings, generated reports, the watchlist workbook, the swing
+    model artifact -- plus the loose secret files.
+
+    ⚠ A SWEEP, not a list. The first version copied *.db plus a named list, and
+    that shape silently lost the EOD archives, entries.json and settings.json
+    during the migration. A list must be remembered whenever a feature starts
+    writing somewhere new; a sweep must not.
 
 WHAT IT DELIBERATELY DOES NOT DO
   * It does not run ``VACUUM``. A backup job is the wrong place to mutate the
@@ -47,7 +53,7 @@ from repo_paths import ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
 
 KEEP = 3
 
-# Gitignored and unrecoverable from git. A clone gives you code, never these.
+# Loose gitignored files that live OUTSIDE the data trees below.
 EXTRA_FILES = (
     "shared/appsettings.json",
     "shared/tokens.json",
@@ -55,10 +61,36 @@ EXTRA_FILES = (
     "shared/anthropic_key.txt",
     "shared/sentiment_bridge.json",
     "schwab-proxy/proxy_tokens.json",
-    "options-scanner/data/Top 20.xlsx",
-    "trade-analyzer/data/swing_model.json",
-    "trade-analyzer/data/swing_model_report.md",
     "config/env.local.toml",
+)
+
+# Gitignored data trees, swept WHOLE.
+#
+# ⚠ This is a SWEEP and not a list on purpose. The first version of this script
+# backed up *.db plus a named list, which is exactly the shape that lost the EOD
+# archives, portfolio-analyzer/data/entries.json (86 real trades -- the ledger)
+# and webgui/data/settings.json during the 2026-08-29 migration: anything living
+# one directory down fell straight through, silently, and the gap only surfaced
+# because someone went looking for a report.
+#
+# A named list has to be remembered every time a feature starts writing
+# somewhere new. A sweep does not.
+DATA_TREES = (
+    "webgui/data",
+    "options-scanner/data",
+    "sentiment-dashboard/data",
+    "trade-analyzer/data",
+    "portfolio-analyzer/data",
+    "shared/data",
+    "services/trade_svc/data",
+    "schwab-proxy/data",
+)
+
+# Excluded from the sweep, each for a stated reason -- never "it looked big".
+SWEEP_EXCLUDE = (
+    # Regenerated on demand by edge-tts from the phrase text. Restoring these
+    # buys nothing a first playback would not rebuild.
+    "webgui/data/voice",
 )
 
 
@@ -177,6 +209,25 @@ def main(argv=None):
         shutil.copy2(src, dst)
         os.chmod(dst, 0o600)
         print(f"  ok  {rel}")
+
+    swept = swept_bytes = 0
+    for tree in DATA_TREES:
+        root = REPO_ROOT / tree
+        if not root.is_dir():
+            continue
+        for src in sorted(root.rglob("*")):
+            if not src.is_file() or src.suffix in (".db", ".db-wal", ".db-shm"):
+                continue          # databases went through the online backup API
+            rel = src.relative_to(REPO_ROOT)
+            if any(str(rel).replace("\\", "/").startswith(x) for x in SWEEP_EXCLUDE):
+                continue
+            dst = out / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            swept += 1
+            swept_bytes += src.stat().st_size
+    print(f"  ok  swept {swept} files from the data trees "
+          f"({swept_bytes / 1e6:.1f} MB)")
 
     dropped = prune(dest_root, args.keep)
     if dropped:
