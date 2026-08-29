@@ -2,8 +2,10 @@
 Trading With Schwab monorepo. Apps prepend the repo root to sys.path and
 import the constants they need from here."""
 from pathlib import Path
+import datetime as _dt
 import sys
 import tomllib
+from zoneinfo import ZoneInfo as _ZoneInfo
 
 REPO_ROOT       = Path(__file__).resolve().parent
 SCHWAB_PROXY    = REPO_ROOT / "schwab-proxy"
@@ -318,3 +320,75 @@ REDIS_DB      = _derived["redis_db"]
 MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/{REDIS_DB}"
 SERVICE_PORTS = dict(_derived["service_ports"])
 SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
+
+
+# ── the clock this whole codebase assumes ────────────────────────────────────
+# A TZ-NAIVE datetime in this project means CENTRAL time. That is not a
+# convention anyone can opt out of: 95 naive `datetime.now()` / `date.today()`
+# calls in non-test code depend on it, and `options_calculator` settles option
+# expiries against it.
+#
+# On Windows it held because the box was set to CT, and NOTHING enforced it. On
+# a Linux host it is one command to get right and one omission to get wrong --
+# and getting it wrong is SILENT. Every session window, roll-date and expiry
+# calculation shifts five or six hours, and each one degrades to a plausible
+# number rather than an error. Containers default to UTC, which is why this
+# guard exists at all.
+#
+# Same zone string the pricing code already uses; deliberately not a second
+# spelling that could drift.
+NAIVE_WALLCLOCK_TZ = "America/Chicago"
+
+
+def _fmt_offset(td):
+    """A UTC offset as ``UTC-05:00``.
+
+    ``str(timedelta(hours=-5))`` renders ``-1 day, 19:00:00``, which is correct
+    and useless in an error message whose entire job is to tell an operator
+    which way the clock is wrong.
+    """
+    if td is None:
+        return "unknown"
+    total = int(td.total_seconds())
+    sign = "-" if total < 0 else "+"
+    total = abs(total)
+    return f"UTC{sign}{total // 3600:02d}:{total % 3600 // 60:02d}"
+
+
+def _is_central(local_utcoffset, when):
+    """True when `local_utcoffset` is Central's offset AT THE INSTANT `when`.
+
+    Compares OFFSETS, not zone names -- an OS may spell the zone differently
+    (``US/Central``, ``CST6CDT``) while keeping the same clock, and that is fine.
+    Comparing at a given instant is what makes it DST-correct: -5 is Central in
+    August and wrong in December.
+    """
+    return local_utcoffset == when.astimezone(_ZoneInfo(NAIVE_WALLCLOCK_TZ)).utcoffset()
+
+
+def assert_central_time(*, _force=False):
+    """Refuse to start on a host whose clock is not Central. Returns None.
+
+    ⚠ Inert under pytest, keyed on ``"pytest" in sys.modules`` and NOT on
+    ``PYTEST_CURRENT_TEST``. Measured 2026-08-29: that env var does not exist at
+    import/collection time and appears only once a test is RUNNING -- and this
+    module is imported at COLLECTION, by conftest and by ~40 others. Keying on
+    it would leave the guard live during collection, so a CI runner or a laptop
+    on another zone could not collect the suite at all.
+    """
+    if not _force and "pytest" in sys.modules:
+        return None
+    now = _dt.datetime.now(_dt.timezone.utc)
+    local = now.astimezone().utcoffset()
+    if _is_central(local, now):
+        return None
+    want = now.astimezone(_ZoneInfo(NAIVE_WALLCLOCK_TZ)).utcoffset()
+    raise RuntimeError(f"""refusing to start: this host's clock is not {NAIVE_WALLCLOCK_TZ}.
+  local UTC offset  : {_fmt_offset(local)}
+  {NAIVE_WALLCLOCK_TZ} is : {_fmt_offset(want)}
+A tz-naive datetime in this codebase MEANS Central; on the wrong clock every
+session window, roll-date and expiry silently shifts hours.
+Fix it with:  sudo timedatectl set-timezone America/Chicago""")
+
+
+assert_central_time()
