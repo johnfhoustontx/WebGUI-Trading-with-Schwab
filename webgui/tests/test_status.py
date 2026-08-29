@@ -179,40 +179,38 @@ def _target(key, kind):
 
 def test_restart_spec_proxy():
     spec = status.restart_spec(_target("proxy", "proxy"))
-    assert spec["kind"] == "script"
-    assert spec["script"].endswith("schwab_proxy.py")
-    assert spec["kill_port"] == status.PROXY_PORT
-    assert spec["wait_port"] == 0  # proxy has no dependency
+    assert spec["kind"] == "unit"
+    assert spec["name"] == "proxy"
 
 
-def test_restart_spec_service_waits_for_proxy():
+def test_restart_spec_service_names_the_unit_verbatim():
+    """`name` IS the unit suffix, so it must be `options_svc`, not `options`.
+    restart_command interpolates it with no translation table -- a mapping here
+    would be a second list of component names free to drift from this one."""
     spec = status.restart_spec(_target("options", "service"))
-    assert spec["kind"] == "script"
-    assert spec["script"] == r"services\options_svc\app.py"
-    assert spec["kill_port"] == status.SERVICE_PORTS["options"]
-    assert spec["wait_port"] == status.PROXY_PORT
+    assert spec["kind"] == "unit"
+    assert spec["name"] == "options_svc"
 
 
 def test_restart_spec_market_service():
     spec = status.restart_spec(_target("market", "service"))
-    assert spec["kind"] == "script"
-    assert spec["script"] == r"services\market_svc\app.py"
-    assert spec["kill_port"] == status.SERVICE_PORTS["market"]
-    assert spec["wait_port"] == status.PROXY_PORT
+    assert spec["kind"] == "unit"
+    assert spec["name"] == "market_svc"
 
 
-def test_restart_spec_memurai_is_a_service():
-    spec = status.restart_spec(_target("memurai", "memurai"))
-    assert spec["kind"] == "service"
-    assert spec["service"] == "Memurai"
+def test_restart_spec_redis_is_never_restartable(monkeypatch):
+    """Redis is a SYSTEM unit; `systemctl --user` cannot reach it, and one server
+    serves both environments. Read-only in prod as well as dev now -- previously
+    only dev withheld it."""
+    for is_dev in (True, False):
+        monkeypatch.setattr(status, "IS_DEV", is_dev)
+        assert status.restart_spec(_target("memurai", "memurai")) is None
 
 
 def test_restart_spec_self_restarts_webgui():
     spec = status.restart_spec(_target("webgui", "self"))
-    assert spec["kind"] == "script"
-    assert spec["script"].endswith("main.py")
-    assert spec["kill_port"] == status.NICEGUI_PORT
-    assert spec["wait_port"] == 0  # webgui doesn't need the proxy to start
+    assert spec["kind"] == "unit"
+    assert spec["name"] == "webgui"
 
 
 def test_every_component_target_is_restartable_except_auth(monkeypatch):
@@ -229,7 +227,9 @@ def test_every_component_target_is_restartable_except_auth(monkeypatch):
     monkeypatch.setattr(status, "OWNS_PROXY", True)
     for t in status.component_targets():
         spec = status.restart_spec(t)
-        if t["kind"] == "auth":
+        if t["kind"] in ("auth", "memurai"):
+            # auth's action is Authorize, not a restart; redis is a SYSTEM unit
+            # `systemctl --user` cannot reach, shared by both environments.
             assert spec is None
         else:
             assert spec is not None, f"{t['key']} should be restartable"
@@ -250,7 +250,7 @@ def test_proxy_restart_offered_when_owned(monkeypatch):
     monkeypatch.setattr(status, "OWNS_PROXY", True)
     spec = status.restart_spec(_target("proxy", "proxy"))
     assert spec is not None
-    assert spec["kill_port"] == status.PROXY_PORT
+    assert spec["name"] == "proxy"
 
 
 def test_proxy_label_says_whether_this_checkout_owns_it(monkeypatch):
@@ -274,12 +274,16 @@ def test_memurai_restart_withheld_in_dev(monkeypatch):
     assert status.restart_spec(_target("memurai", "memurai")) is None
 
 
-def test_memurai_restart_offered_in_prod(monkeypatch):
-    # Non-vacuity partner (cannot fail if the guard is deleted).
+def test_everything_else_stays_restartable_in_prod(monkeypatch):
+    """Non-vacuity partner for the Redis guard: withholding Redis must not
+    withhold everything. If this ever equals the empty set the guards have
+    over-fired and the Status page has no working buttons at all."""
     monkeypatch.setattr(status, "IS_DEV", False)
-    spec = status.restart_spec(_target("memurai", "memurai"))
-    assert spec is not None
-    assert spec["kind"] == "service"
+    monkeypatch.setattr(status, "OWNS_PROXY", True)
+    restartable = {t["key"] for t in status.component_targets()
+                   if status.restart_spec(t) is not None}
+    assert restartable == {"proxy", "sentiment", "options", "portfolio",
+                           "trade", "driver", "market", "webgui"}
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
@@ -295,38 +299,41 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
 
 
 # --- restart_command ----------------------------------------------------------
-def test_restart_command_script_is_windowless():
+def test_restart_command_is_a_systemctl_user_restart():
     spec = status.restart_spec(_target("proxy", "proxy"))
-    cmd = status.restart_command(spec)
-    assert cmd[:3] == ["cmd", "/c", r"tools\restart_one.bat"]
-    # No `start`/`cmd /k` → no console window is spawned (restart_one.bat runs the
-    # component hidden itself).
-    assert "start" not in cmd
-    assert "restart_one.bat" in " ".join(cmd)
-    assert cmd[-1].endswith("schwab_proxy.py")
-    # Carries the log name so restart_one.bat can redirect output to logs\.
-    assert "proxy" in cmd
+    assert status.restart_command(spec) == [
+        "systemctl", "--user", "restart", f"trading-{status.ENV_NAME}-proxy"]
 
 
-def test_restart_command_passes_ports_and_name_in_order():
+def test_restart_command_uses_the_spec_name_verbatim():
+    """`options` the card key vs `options_svc` the unit. Getting this wrong
+    restarts nothing and reports success, because systemctl exits 0 for a unit
+    it does not know about only when... it does not. It errors -- but the button
+    would still have named the wrong thing."""
     spec = status.restart_spec(_target("options", "service"))
     cmd = status.restart_command(spec)
-    # cmd /c restart_one.bat <kill_port> <wait_port> <name> <script>
-    assert cmd[3] == str(status.SERVICE_PORTS["options"])   # kill_port
-    assert cmd[4] == str(status.PROXY_PORT)                 # wait_port (proxy)
-    assert cmd[5] == "options_svc"                          # log name
-    assert cmd[6] == r"services\options_svc\app.py"         # script
+    assert cmd[-1] == f"trading-{status.ENV_NAME}-options_svc"
 
 
-def test_restart_command_service_uses_powershell():
-    spec = status.restart_spec(_target("memurai", "memurai"))
-    cmd = status.restart_command(spec)
-    joined = " ".join(cmd)
-    assert cmd[0] == "powershell"
-    # Restart if running, fall back to Start if stopped — works either way.
-    assert "Restart-Service" in joined
-    assert "Start-Service" in joined
-    assert "Memurai" in joined
+def test_restart_command_is_user_scoped_never_system():
+    """`--user` is what keeps this working with NO polkit rule and NO sudoers
+    entry. Dropping it would need root for a network-facing app."""
+    for tgt in status.component_targets():
+        spec = status.restart_spec(tgt)
+        if spec is None:
+            continue
+        cmd = status.restart_command(spec)
+        assert cmd[:3] == ["systemctl", "--user", "restart"], cmd
+
+
+def test_restart_command_carries_no_windows_machinery():
+    for tgt in status.component_targets():
+        spec = status.restart_spec(tgt)
+        if spec is None:
+            continue
+        joined = " ".join(status.restart_command(spec)).lower()
+        for banned in (".bat", "cmd", "powershell", "taskkill", "start-service"):
+            assert banned not in joined, (banned, joined)
 
 
 def test_restart_command_none_passthrough():

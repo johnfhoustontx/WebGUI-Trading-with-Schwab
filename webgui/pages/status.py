@@ -32,6 +32,7 @@ import bus_client
 import proxy
 from pages.options.theme import BTN_3D
 from repo_paths import (
+    ENV_NAME,
     IS_DEV,
     MEMURAI_PORT,
     NICEGUI_PORT,
@@ -245,95 +246,66 @@ def auth_status(health):
 
 # ── restart (pure spec/command builders + thin spawn) ────────────────────────
 def restart_spec(target):
-    """How to (re)start a component, or ``None`` if it can't be restarted here.
+    """What to restart for a Status card, or ``None`` when it is not restartable.
 
-    * **proxy / service** → a ``script`` spec: free the port then launch the
-      venv python on the entry script (services wait for the proxy first).
-    * **self** (the webgui) → a ``script`` spec too: it frees :8500 and relaunches
-      the webgui in a detached console, so the app CAN restart itself — the current
-      page just disconnects (reload after a moment).
-    * **memurai** → a ``service`` spec: restart the Memurai Windows service.
-    * **auth** / unknown → ``None`` — the auth card's action is Authorize, not a
-      process restart (the proxy card restarts the proxy).
-    * **proxy when this environment does NOT own it** → ``None``. Dev runs no
-      proxy of its own (one rotating Schwab OAuth refresh token, so there can be
-      only one) and borrows prod's on :8100 — so a dev checkout's ``PROXY_PORT``
-      *is* prod's, and this button would bounce the LIVE stack's market data
-      mid-session. Same hazard ``tools/stop_all.py`` drops the proxy for.
-    * **memurai in dev** → ``None``. One Redis server serves both environments,
-      separated by logical DB index rather than by a second install, so
-      restarting the Windows service from dev takes prod's Redis down with it.
+    Returns ``{"kind": "unit", "title": ..., "name": ...}``. ``name`` is the
+    systemd unit SUFFIX and is consumed verbatim by :func:`restart_command`, so
+    there is no translation table between card keys and unit names -- the same
+    reasoning that put the symbol universe in one config file.
 
-    Everything dev genuinely owns — its six services on offset ports, and its
-    own web GUI — stays restartable.
+    Not restartable:
+
+    * **auth** / unknown -- the auth card's action is Authorize, not a restart.
+    * **proxy when this environment does NOT own it.** Dev runs no proxy of its
+      own (one rotating Schwab OAuth refresh token, so there can be only one)
+      and borrows prod's, so a dev checkout's ``PROXY_PORT`` *is* prod's and
+      this button would bounce the LIVE stack's market data mid-session.
+    * **redis, in every environment.** It is a *system* unit -- ``systemctl
+      --user`` cannot reach it without root -- and one server serves both
+      environments, separated by logical DB rather than by a second install.
+      Restarting it from either side takes the other's bus down. Dev already
+      withheld this; prod now does too, which is the honest position rather
+      than a regression.
     """
     kind = target.get("kind")
     key = target.get("key")
     if kind == "proxy":
         if not OWNS_PROXY:
             return None
-        return {"kind": "script", "title": f"Schwab Proxy :{PROXY_PORT}",
-                "name": "proxy", "kill_port": PROXY_PORT, "wait_port": 0,
-                "script": r"schwab-proxy\schwab_proxy.py"}
+        return {"kind": "unit", "title": f"Schwab Proxy :{PROXY_PORT}",
+                "name": "proxy"}
     if kind == "service":
-        port = SERVICE_PORTS.get(key)
-        if port is None:
+        if key not in SERVICE_PORTS:
             return None
-        # Services wait for the proxy (:8100) before starting.
-        return {"kind": "script", "title": f"{key}_svc :{port}",
-                "name": f"{key}_svc", "kill_port": port, "wait_port": PROXY_PORT,
-                "script": rf"services\{key}_svc\app.py"}
+        return {"kind": "unit", "title": f"{key}_svc :{SERVICE_PORTS[key]}",
+                "name": f"{key}_svc"}
     if kind == "self":
-        # The web app restarts itself: free :8500 then relaunch (no proxy wait —
-        # the GUI shows a proxy-down banner and works without it).
-        return {"kind": "script", "title": f"Web GUI :{NICEGUI_PORT}",
-                "name": "webgui", "kill_port": NICEGUI_PORT, "wait_port": 0,
-                "script": r"webgui\main.py"}
-    if kind == "memurai":
-        if IS_DEV:
-            return None
-        return {"kind": "service", "title": "Memurai", "service": "Memurai"}
+        return {"kind": "unit", "title": f"Web GUI :{NICEGUI_PORT}",
+                "name": "webgui"}
     return None
 
 
-def restart_command(spec):
-    """argv to spawn for a restart spec (``None`` → ``None``).
+UNIT_PREFIX = f"trading-{ENV_NAME}-"
 
-    A ``script`` spec runs ``tools\\restart_one.bat`` — which frees the port, waits
-    for the dependency, then launches the component **hidden** (via ``pythonw`` +
-    ``Start-Process -WindowStyle Hidden``) with stdout/stderr redirected to
-    ``logs\\<name>.out.log`` / ``.err.log``. Combined with the ``CREATE_NO_WINDOW``
-    spawn in :func:`_do_restart`, the whole restart is **windowless** — nothing
-    flashes. A ``service`` spec restarts the Windows service via PowerShell
-    (``Restart-Service``, falling back to ``Start-Service`` if it's stopped).
+
+def restart_command(spec):
+    """argv to restart a component's systemd **user** unit (``None`` -> ``None``).
+
+    ``--user`` is load-bearing: it is what lets this app restart its own siblings
+    with no polkit rule and no sudoers entry. A system-unit equivalent would
+    require handing root to a network-facing process.
     """
     if not spec:
         return None
-    if spec["kind"] == "service":
-        svc = spec["service"]
-        return ["powershell", "-NoProfile", "-Command",
-                f"try {{ Restart-Service -Name '{svc}' -Force -ErrorAction Stop }} "
-                f"catch {{ Start-Service -Name '{svc}' }}"]
-    return ["cmd", "/c", r"tools\restart_one.bat", str(spec["kill_port"]),
-            str(spec["wait_port"]), spec["name"], spec["script"]]
-
-
-# Windows: run the restart with no console window. 0 elsewhere (import-safe).
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return ["systemctl", "--user", "restart", f"{UNIT_PREFIX}{spec['name']}"]
 
 
 def _do_restart(target):
-    """Spawn the restart for ``target`` windowless. Returns False if not restartable.
-
-    ``CREATE_NO_WINDOW`` keeps the spawned ``cmd``/``powershell`` off-screen; the
-    ``restart_one.bat`` script then launches the component itself hidden. The batch
-    kills the target port with ``taskkill /F /PID`` (no ``/T``), so the web app's
-    own self-restart doesn't take this spawn down with it.
-    """
+    """Spawn the restart for ``target``. Returns False if not restartable."""
     cmd = restart_command(restart_spec(target))
     if cmd is None:
         return False
-    subprocess.Popen(cmd, cwd=str(REPO_ROOT), creationflags=_NO_WINDOW)
+    subprocess.Popen(cmd, cwd=str(REPO_ROOT))
     return True
 
 
