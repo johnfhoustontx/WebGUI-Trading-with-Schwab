@@ -36,6 +36,8 @@
 
 Confine the `cd` to a subshell as shown. Commit after every task.
 
+⚠ **These commands are Phase 0–1 only.** From Task 13 on the work happens on the VPS and every one of them changes — see the boundary note at the head of Phase 2.
+
 **Baselines** (2026-08-20/21): webgui **2320 green**, `tools/tests` **816**, `tests` **69**. Compare the failing *set*, never the count — and note Phase 1 deletes tests, so totals will fall. That is the intended direction.
 
 ⚠ **The Phase-1 code changes must NOT be promoted to Windows prod.** They replace `.bat` supervision with `systemctl`, which Windows cannot run. They live on `claude/prod-linux-migration-596ad3`; the VPS clones **that branch**. Windows prod stays on `main`, fully working, until Task 25 decommissions it. Merge to `main` only at Task 21 (cutover), after the VPS is authoritative.
@@ -326,6 +328,24 @@ All three hook commands invoke bare `python`. Ubuntu 24.04 ships `python3` and n
 ---
 
 # Phase 2 — Stand the stack up on the VPS
+
+> ## ⚠ Every command changes here
+>
+> **Phase 1 ran on Windows. Everything from Task 13 on runs on the VPS over SSH.** The conventions block at the top of this plan is Phase-1 only — do not carry its commands across this line.
+>
+> | | Phase 0–1 (Windows) | Phase 2–6 (VPS) |
+> |---|---|---|
+> | Interpreter | `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe"` | `.venv/bin/python` |
+> | Checkout | `.claude/worktrees/prod-linux-migration-596ad3` | `/home/john/prod` (and later `/home/john/dev`) |
+> | Suite command | `(cd <worktree>/webgui && "<abs>/python.exe" -m pytest . -q)` | `(cd /home/john/prod/webgui && ../.venv/bin/python -m pytest . -q)` |
+>
+> **The venv sits in a different place, and that is not cosmetic.** On Windows the worktree has no venv, which is why every documented command reaches back to the repo root by absolute path. On the VPS the venv lives **inside the checkout** (`/home/john/prod/.venv`), so a relative `.venv/bin/python` works — until you make a git worktree there, which will have no venv either and needs the absolute `/home/john/prod/.venv/bin/python` again. Same trap, new spelling.
+>
+> **Baselines do not transfer cleanly, and Task 15 is where you find out.** Compare against the Windows numbers (webgui **2320**, `tools/tests` **816**, `tests` **69**, minus whatever Phase 1 deleted), but expect genuine differences: anything asserting a `\` path separator, and the two known-flaky cases (`test_flow_alert_window`, the date-relative `test_expected_move`). **A failing node ID that is new is a portability bug, not noise** — triage it, do not absorb it into a new baseline. Task 15's clean run *is* the Linux baseline; record it there.
+>
+> **`pytest -n auto` becomes worth using** now that the box has 4–8 cores and no real-time AV filter driver in the path. Use it for full-suite runs, not for the per-task runs where the failing set matters more than wall-clock.
+>
+> **Set `git config core.autocrlf false`** in both VPS checkouts. Phase 1 deletes the `*.bat`/`*.cmd` CRLF rules from `.gitattributes`, and nothing on Linux should be rewriting line endings.
 
 ## Task 13: Clone, venv, units
 
