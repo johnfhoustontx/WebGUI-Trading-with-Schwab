@@ -708,7 +708,7 @@ A big red stop button for the whole local stack.
 
 - Confirming stops the gateway, the services, and this web app — the page then goes
   unresponsive (that's expected).
-- Re-launch with `start_all.bat`. Memurai keeps running.
+- Re-launch with `systemctl --user start trading-<env>.target`. Redis keeps running.
 """,
 }
 

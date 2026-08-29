@@ -7,7 +7,7 @@ Hybrid checks:
     trade-analyzer        scan for trade_analyzer.py (on-demand; not required)
 
 Prints a status table. Exit code 0 only if every *required* app is healthy,
-non-zero otherwise — usable as a gate in scripts / start_all.bat.
+non-zero otherwise — usable as a gate in scripts and unit ExecStartPre.
 
 Paths and ports come from repo_paths.py — no hard-coded D:\ paths or ports.
 """

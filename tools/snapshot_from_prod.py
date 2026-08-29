@@ -187,7 +187,8 @@ def assert_dev_stack_is_down():
                 busy.append(f"{label}:{port}")
     if busy:
         sys.exit("refusing to run: dev is still up on " + ", ".join(busy)
-                 + "\nStop it first (stop_all.bat), then re-run.")
+                 + "\nStop it first (systemctl --user stop trading-dev.target),"
+                   " then re-run.")
 
 
 # ---------------------------------------------------------------------- copies
