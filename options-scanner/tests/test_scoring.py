@@ -105,6 +105,44 @@ class TestNormVegaRisk:
     def test_zero_max_loss_returns_neutral(self):
         assert norm_vega_risk(-0.05, 0, 50) == 50.0
 
+    # --- iv_rank handling: 0 is a READING, not a missing value ---------------
+    # This function exists to penalize high vega in LOW IV ("worst case for
+    # credit sellers", per its docstring). An IV Rank of exactly 0 - IV at its
+    # 52-week low - is that worst case. `(iv_rank or 50)` treated it as missing
+    # and substituted neutral, so the factor rewarded the very environment it
+    # exists to downrank, with a ~20-point cliff between iv_rank 0 and 1.
+
+    def test_iv_rank_zero_is_the_worst_case_not_a_missing_value(self):
+        at_zero = norm_vega_risk(net_vega=-5.0, max_loss=500.0, iv_rank=0)
+        at_one = norm_vega_risk(net_vega=-5.0, max_loss=500.0, iv_rank=1)
+        at_neutral = norm_vega_risk(net_vega=-5.0, max_loss=500.0, iv_rank=50)
+        assert at_zero < at_neutral, "IV at its 52wk LOW must not score as neutral"
+        assert abs(at_zero - at_one) < 1.0, (
+            "0 and 1 are the same market; they must not sit either side of a cliff")
+
+    def test_iv_rank_zero_still_differs_from_missing(self):
+        """None means 'no reading' -> neutral. 0 means 'the floor' -> penalised."""
+        assert norm_vega_risk(-5.0, 500.0, None) > norm_vega_risk(-5.0, 500.0, 0)
+
+    def test_the_iv_term_is_monotone_in_iv_rank(self):
+        """Higher IV rank is always safer for a credit seller, never a step down."""
+        scores = [norm_vega_risk(-5.0, 500.0, r) for r in (0, 10, 25, 50, 75, 100)]
+        assert scores == sorted(scores), f"not monotone: {scores}"
+
+    def test_a_non_finite_iv_rank_is_missing_not_maximum_safety(self):
+        """NaN reached `max(0, min(100, nan))`, which returns 100.0 - the
+        documented pins-the-bound trap. A data outage must not read as the
+        safest possible environment."""
+        neutral = norm_vega_risk(-5.0, 500.0, None)
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            assert norm_vega_risk(-5.0, 500.0, bad) == neutral
+
+    def test_out_of_range_iv_rank_is_clamped_like_its_sibling(self):
+        """norm_iv_rank clamps to 0..100; this one did not, so a bad feed at
+        999 scored maximum safety and at -10 undershot."""
+        assert norm_vega_risk(-5.0, 500.0, 999) == norm_vega_risk(-5.0, 500.0, 100)
+        assert norm_vega_risk(-5.0, 500.0, -10) == norm_vega_risk(-5.0, 500.0, 0)
+
 
 class TestNormTrendWithRSI:
     def test_pcs_overbought_penalized(self):

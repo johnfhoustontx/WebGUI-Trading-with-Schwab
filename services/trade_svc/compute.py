@@ -1528,6 +1528,7 @@ def journal_reading(result, db_path=None):
         conn = rec_journal.init_db(db_path or rec_journal.DEFAULT_DB_PATH)
         return rec_journal.record(conn, row)
     except Exception:
+        _degrade.degraded("trade.journal_reading")
         return False
     finally:
         if conn is not None:
@@ -1564,6 +1565,7 @@ def snapshot_fundamentals(symbol, fundamentals, sector_name, pe_median,
         conn = _fh.init_db(db_path or _fh.DEFAULT_DB_PATH)
         return _fh.record(conn, row)
     except Exception:
+        _degrade.degraded("trade.snapshot_fundamentals")
         return False
     finally:
         if conn is not None:
@@ -1696,6 +1698,7 @@ def analyze(symbol):
                                               regime=_regime)
             _peers = _peer_block(symbol, _snap, _art, swing_block, regime=_regime)
     except Exception:
+        _degrade.degraded("trade.analyze")
         swing_block = None
 
     sym_close = daily["close"]

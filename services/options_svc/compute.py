@@ -51,6 +51,7 @@ from iv_analysis import run_iv_analysis  # noqa: E402
 from services import _degrade  # noqa: E402
 from shared import driver_limits as _driver_limits  # noqa: E402
 from shared import scanner_config as _scanner_config  # noqa: E402
+from shared import driver_policy as _driver_policy  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
@@ -705,6 +706,51 @@ def collect_eod_summary(now_ct=None) -> dict:
 _DRIVER_MAX_RISK_PER_TRADE = _driver_limits.per_trade_max_risk()
 
 
+# Reject reasons for the OPEN-path guardrail re-check. Named constants because the
+# /driver decision log renders them and the tests assert on them.
+REJECT_NOT_ALLOWED = "structure not in allowlist / no defined risk"
+REJECT_MAX_CONCURRENT = "max concurrent driver positions reached"
+REJECT_RISK_BUDGET = "daily risk budget exhausted (open positions)"
+
+
+def _driver_open_positions():
+    """Open rows in the driver's paper book. Defensive -> [] (a read failure must
+    not silently DISABLE the capacity gates below, so the caller treats [] as
+    'no evidence of capacity used', which is the same thing an empty book means;
+    a hard failure would be worse than a conservative pass here because the
+    per-trade cap and buying-power checks still apply downstream)."""
+    try:
+        import paper_account_db   # lazy, as everywhere else on this path
+        return paper_account_db.list_open_positions(DRIVER_PAPER_DB) or []
+    except Exception:
+        _degrade.degraded("options._driver_open_positions")
+        return []
+
+
+def _driver_open_capacity_reason(signal, qty):
+    """A reject reason if opening this trade would breach the BOOK-level caps, else None.
+
+    This is the open path's own copy of the two capacity rules, measured against
+    the book rather than against one cycle:
+
+    * ``max_concurrent`` - the decision path counts slots across a cycle, so a
+      direct enqueue skipped it entirely.
+    * ``daily_risk_budget`` - the decision path resets the budget every 30-min
+      checkpoint and never subtracts risk already deployed, so the true aggregate
+      cap was ``max_concurrent x per_trade_max_risk`` (~2x the documented "half
+      the book"). Counting the OPEN positions makes the budget mean its name.
+    """
+    limits = _driver_limits.risk()
+    open_rows = _driver_open_positions()
+    if len(open_rows) >= int(limits["max_concurrent"]):
+        return REJECT_MAX_CONCURRENT
+    deployed = _driver_policy.open_risk_dollars(open_rows)
+    incoming = (_driver_policy.max_loss_dollars(signal) or 0.0) * max(1, int(qty or 1))
+    if deployed + incoming > float(limits["daily_risk_budget"]):
+        return REJECT_RISK_BUDGET
+    return None
+
+
 def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> dict:
     """Open ONE driver position into ``DRIVER_PAPER_DB`` at ``min(clamped qty,
     fill-sized)``.
@@ -759,6 +805,20 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
         paper_account_db.roll_session_if_needed(DRIVER_PAPER_DB, dt.date.today().isoformat())
         if paper_account_db.get_account(DRIVER_PAPER_DB)["halted"]:
             return {"status": "rejected", "reason": "halted"}
+        # ── Re-check the envelope HERE, not just on the decision path ──────────
+        # driver_svc/guardrails runs the full cycle-level pass, but it is a
+        # DIFFERENT SERVICE and this function is reachable on its own: the
+        # ``driver_paper_create`` command is just a Redis stream entry, and a
+        # replay (consumer groups start at id 0) or any local process can enqueue
+        # one. Everything below is a property of the SIGNAL or the BOOK, so it can
+        # be re-derived here; cycle-only concepts (max trades per cycle, the
+        # model's stand-down) are deliberately NOT re-checked - they are
+        # meaningless for a single open.
+        if not _driver_policy.is_allowed(signal):
+            return {"status": "rejected", "reason": REJECT_NOT_ALLOWED}
+        capacity = _driver_open_capacity_reason(signal, qty)
+        if capacity:
+            return {"status": "rejected", "reason": capacity}
         q = int(qty)   # the guardrail-clamped request (a CEILING — see the re-size below)
         order = {"signal_id": signal["signal_id"], "symbol": signal["symbol"],
                  "side": "SELL_TO_OPEN", "strategy": signal["strategy"],

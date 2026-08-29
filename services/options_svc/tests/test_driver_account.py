@@ -230,12 +230,24 @@ def test_open_driver_position_rejects_degenerate_fill(tmp_path, monkeypatch):
 
 
 def test_open_driver_position_never_raises(tmp_path, monkeypatch):
-    """A malformed signal degrades to {"status": "error"}, never raises."""
+    """A malformed signal returns a status dict, never raises.
+
+    It used to fall all the way through to a KeyError caught by the outer guard,
+    reporting the generic ``{"status": "error"}``. Since 2026-08-29 the open-path
+    envelope check catches it first and REJECTS it by name - a strictly better
+    outcome (a reason instead of a crash), and the property this test is really
+    about is unchanged: it returns, it does not raise.
+
+    Asserting ``== "error"`` pinned the old MECHANISM rather than the property -
+    the characterization-test shape this repo keeps finding.
+    """
     db = tmp_path / "driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
     compute.ensure_driver_account()
     res = compute.open_driver_position({"symbol": "MU"}, qty=1, broker=_fake_broker(1.50))
-    assert res["status"] == "error"
+    assert res["status"] in ("error", "rejected")
+    assert res["status"] == "rejected", "a malformed signal is now named, not just caught"
+    assert res["reason"] == compute.REJECT_NOT_ALLOWED
 
 
 def _poke_account(db, **fields):

@@ -4,6 +4,65 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-29 (**Security/runtime audit — batch 2: two logic bugs,
+one wrong number and one missing gate.**
+- **`norm_vega_risk` inverted its own penalty at IV Rank 0.** `options-scanner/scoring.py`
+  read `iv_safety = (iv_rank or 50) / 100.0`. An IV Rank of exactly **0** — IV at
+  its 52-week low — is a real reading, and per the function's own docstring it is
+  the *worst* case for a credit seller ("high vega + low IV Rank = expansion
+  risk"). `or 50` treated it as missing and substituted neutral, so the factor
+  **rewarded the environment it exists to downrank**. Measured: `iv_rank=0` scored
+  **68.0** while `iv_rank=1` scored **48.4** — a ~20-point cliff between two
+  identical markets, with 0 landing on the same score as neutral *and* as absent.
+- **It was self-inconsistent, too.** The same value goes to `norm_iv_rank`, which
+  correctly maps `0 → 0` and clamps to 0..100. One input, two contradictory
+  factors. The fix routes the vega term through `norm_iv_rank` itself, so there is
+  one contract: `None`/non-finite → neutral 50, anything else → clamped reading.
+- **Two more defects fell out of the same line.** A **NaN** reached
+  `max(0, min(100, nan))`, which returns **100.0** — a data outage read as the
+  *safest possible* environment (the documented pins-the-bound trap). And unlike
+  its sibling the function never clamped, so a bad feed at `999` also scored 100.0
+  and `-10` undershot at 44.0.
+- **Blast radius, measured.** The vega factor is 9/100 of the credit-spread
+  composite that ranks candidates and fills the driver's menu. **Only three inputs
+  changed value**: `0` (68.0 → 48.0), non-finite (100.0 → 68.0) and out-of-range.
+  Every legitimate reading 1–100 is byte-identical. Systematic in calm low-IV
+  regimes, where IV rank floors at 0.
+- **The driver's guardrails were absent from the path that actually opens.**
+  Every risk rule lived only in `driver_svc/guardrails.apply_guardrails`, on the
+  DECISION path. `options_svc.compute.open_driver_position` — reached by the
+  `driver_paper_create` command — checked only the halt flag, per-trade sizing,
+  min fill and buying power. It never called the guardrails; the word appeared
+  only in its comments. So anything that enqueued that command directly reached
+  the $25k paper book with **no structure check and no capacity check**: a Redis
+  stream replay (groups start at id `0`, so a fresh group re-delivers the
+  backlog), or any local process, since Memurai is unauthenticated.
+- **Why it could not simply call the guardrails:** they live in a service
+  `options_svc` may not import. So the *policy* moved to
+  **`shared/driver_policy.py`** — the PCS/CCS/IC allowlist, the finite-guarded
+  max-loss, the per-contract dollar multiplier — and `driver_svc/guardrails` now
+  **delegates** to it rather than defining its own. One allowlist, two enforcers;
+  the same answer `config/symbols.toml` gave the duplicated symbol lists, and
+  deliberately not a second copy.
+- **`daily_risk_budget` now means what its name says.** `apply_guardrails` resets
+  it to the full amount every 30-minute checkpoint and never subtracts risk
+  already deployed, so the real aggregate ceiling was
+  `max_concurrent × per_trade_max_risk` ≈ **$25k, about 2× the documented "half
+  the book"**. The open path measures deployed risk against the OPEN POSITIONS.
+  ⚠ `open_risk_dollars` drops a non-finite row instead of summing it — a NaN total
+  makes every `>` comparison False and silently switches the cap off.
+- **Scoped on purpose:** `max_trades_per_cycle`, the model's stand-down and the
+  VIX ceiling are NOT re-checked at the open path — the first two are meaningless
+  for a single open and the third needs the decision-time market read, which the
+  halt flag already covers.
+- 17 new tests drive `open_driver_position` **directly, the way a replayed command
+  does**. ⚠ They needed a tmp-path book: the repo-root conftest refuses any sqlite
+  connect into a live data directory, which is exactly the guard that exists
+  because a test run once wrote synthetic signals into both environments.
+  All 239 driver_svc tests still pass against the delegated allowlist.)
+
+---
+
 **Last updated:** 2026-08-28 (**Tests could write to the production databases, and the guard against it had never worked.**
 - **Found via the ranking review, not a test failure.** Six batch rankings of 150 live
   signals kept flagging rows whose greeks were impossible; chasing the signature found

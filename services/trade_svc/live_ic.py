@@ -27,6 +27,7 @@ the market's own direction.
 measurement, and it must not render as one.
 """
 import math
+from services import _degrade
 
 HORIZON_KEY = "fwd_20d"          # the model's own horizon
 HORIZON_KEY_BA = "fwd_20d_ba"
@@ -177,4 +178,5 @@ def compute(rows, artifact_oos_ic=None):
         out["short"] = _side(labelled, "SELL")
         return out
     except Exception:
+        _degrade.degraded("trade.compute")
         return out

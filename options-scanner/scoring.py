@@ -98,6 +98,22 @@ def norm_theta(net_theta, max_loss, all_theta_efficiencies=None):
         return min(100.0, efficiency / 0.5 * 100.0)
 
 
+def _finite_or_none(v):
+    """A usable float, or None for missing/NaN/inf.
+
+    Non-finite must degrade to "no reading" rather than reaching a clamp: the
+    house `max(lo, min(hi, nan))` idiom returns the HIGH bound, so an unguarded
+    NaN reads as the best possible value instead of an absent one.
+    """
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
 def norm_iv_rank(iv_rank):
     """IV Rank normalized. Already 0-100, pass through with floor at 0."""
     if iv_rank is None:
@@ -133,7 +149,17 @@ def norm_vega_risk(net_vega, max_loss, iv_rank):
         return 50.0
 
     vega_exposure = abs(net_vega) / max_loss
-    iv_safety = (iv_rank or 50) / 100.0  # 0.0 to 1.0
+    # `norm_iv_rank`'s contract, reused deliberately: None (or a non-finite
+    # reading) means NO DATA -> neutral 50; anything else is a real value,
+    # clamped to 0..100.
+    #
+    # This was `(iv_rank or 50)`, which made an IV Rank of exactly 0 - IV at its
+    # 52-week LOW, i.e. the worst case this function exists to penalise - score
+    # as neutral. Measured: iv_rank 0 scored 68.0 while iv_rank 1 scored 48.4, a
+    # ~20-point cliff between two identical markets, rewarding the environment it
+    # is meant to downrank. A NaN was worse still: max(0, min(100, nan)) returns
+    # 100.0, so a data outage read as maximum safety.
+    iv_safety = norm_iv_rank(_finite_or_none(iv_rank)) / 100.0  # 0.0 to 1.0
 
     # vega_exposure typically 0.001 to 0.05 range
     # Normalize: 0 at exposure 0.05+, 100 at exposure 0

@@ -23,87 +23,32 @@ sparse or malformed signal can never raise here — it simply fails the allowlis
 """
 
 import math
+from shared import driver_policy as _policy
 
 # Map of free-form structure spellings → the canonical code. Keys are matched
 # case-insensitively (the lookup lowercases first).
-_STRUCT_MAP = {
-    "put_credit_spread": "PCS", "pcs": "PCS",
-    "call_credit_spread": "CCS", "ccs": "CCS",
-    "iron_condor": "IC", "ic": "IC",
-}
+# ── The structure allowlist + risk primitives live in shared/driver_policy ────
+# They are re-exported here so this module's public surface is unchanged, but
+# there is exactly ONE definition. The reason they moved: the path that actually
+# OPENS a position is options_svc.compute.open_driver_position (reached by the
+# ``driver_paper_create`` command), a different service that cannot import this
+# one - so it had no way to re-check the allowlist and re-checked nothing. A
+# second copy over there would have been the mirror problem this repo keeps
+# fixing; a shared policy module is the same answer config/symbols.toml gave the
+# duplicated symbol lists.
+_STRUCT_MAP = _policy._STRUCT_MAP
+ALLOWED = _policy.ALLOWED
+CONTRACT_MULTIPLIER = _policy.CONTRACT_MULTIPLIER
 
-# The ONLY structures the autonomous driver may execute: defined-risk credit
-# spreads. Anything else (naked, debit, single-leg, futures, equities) is rejected
-# by ``is_allowed`` regardless of what the model proposed.
-ALLOWED = {"PCS", "CCS", "IC"}
+normalize_structure = _policy.normalize_structure
+signal_structure = _policy.signal_structure
 
-# An option contract is 100 shares. The scanner stores ``max_loss`` PER-SHARE
-# (e.g. 7.05 for a $SPX spread = width - credit), but the driver's risk caps
-# (``per_trade_max_risk`` / ``daily_risk_budget``) are DOLLARS. Affordability MUST
-# be evaluated in per-CONTRACT dollars (``max_loss * 100``) or a $705 position is
-# mis-counted as $7 and the guardrail under-enforces its own dollar cap by 100x —
-# the bug that let $SPX/MU past the driver only to be rejected ``RISK_TOO_HIGH`` by
-# the paper account's per-contract sizer (which correctly used ``(width-credit)*100``).
-CONTRACT_MULTIPLIER = 100
-
-
-def normalize_structure(s) -> str:
-    """Canonicalize a structure label to ``PCS`` / ``CCS`` / ``IC`` (else upper).
-
-    Falsy / ``None`` → ``""``. An unrecognized non-empty value is upper-cased and
-    returned as-is so callers can decide (it simply won't be in ``ALLOWED``).
-    """
-    if not s:
-        return ""
-    key = str(s).strip().lower()
-    return _STRUCT_MAP.get(key, str(s).strip().upper())
+# Backward-compatible private aliases (these were module-private helpers).
+_signal_structure = _policy.signal_structure
+_max_loss = _policy.max_loss_per_share
 
 
-def signal_structure(signal) -> str:
-    """Pull the structure code from a signal, tolerating either key family.
-
-    Reads ``structure`` (the projected menu item) first, then ``type`` (the raw
-    scanner signal's structure field — a real ``cache:options:scan`` signal stores
-    ``"PCS"``/``"CCS"``/``"IC"`` there), then ``trade_type`` (legacy/fallback), and
-    normalizes whichever is present. Public so ``compute.build_packet`` can reuse
-    the SAME structure resolution for the model-facing menu projection — the raw
-    scanner signal has no ``structure`` key, and ``trade_type`` is the DTE bucket
-    (``"0-DTE"``/``"SWING"``), not the structure, so reading the wrong key would
-    mislabel every real signal.
-    """
-    raw = signal.get("structure") or signal.get("type") or signal.get("trade_type")
-    return normalize_structure(raw)
-
-
-# Backward-compatible private alias (the function was promoted to public).
-_signal_structure = signal_structure
-
-
-def _max_loss(signal) -> float | None:
-    """The signal's max loss as a float, or ``None`` if missing/unparseable.
-
-    Never raises: a ``None``, non-numeric, or **non-finite** (``NaN`` / ``inf``)
-    ``max_loss`` returns ``None``, which the callers treat as "no defined risk →
-    reject". The finite check matters because the scanner derives ``max_loss`` by
-    rounding option marks (``round(nan, 2)`` is still ``NaN``), and ``NaN`` would
-    otherwise slip the ``> 0`` allowlist gate and crash ``math.floor`` downstream.
-    """
-    ml = signal.get("max_loss")
-    try:
-        v = float(ml) if ml is not None else None
-    except (TypeError, ValueError):
-        return None
-    return v if (v is not None and math.isfinite(v)) else None
-
-
-def _max_loss_dollars(signal) -> float | None:
-    """The signal's max loss in PER-CONTRACT DOLLARS (per-share ``max_loss`` * 100).
-
-    ``None`` when the per-share max loss is missing/unparseable/non-finite. This is
-    the risk unit the dollar caps must be compared against — see ``CONTRACT_MULTIPLIER``.
-    """
-    ml = _max_loss(signal)
-    return ml * CONTRACT_MULTIPLIER if ml is not None else None
+_max_loss_dollars = _policy.max_loss_dollars
 
 
 # Rejection reason for the directional gate (2026-07-09) — a defined-risk spread whose
@@ -158,17 +103,7 @@ def shadow_gate(executable, posture) -> dict:
     return {"posture": posture, "would_block": would, "n": len(would)}
 
 
-def is_allowed(signal) -> bool:
-    """True iff ``signal`` is a defined-risk credit spread with real risk.
-
-    Two gates: the structure must be in the allowlist (PCS/CCS/IC), AND the max
-    loss must be a positive number (``max_loss <= 0`` or ``None`` means no
-    defined risk / no real position, so it is rejected).
-    """
-    if _signal_structure(signal) not in ALLOWED:
-        return False
-    ml = _max_loss(signal)
-    return ml is not None and ml > 0
+is_allowed = _policy.is_allowed
 
 
 def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) -> int:

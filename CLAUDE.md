@@ -1791,6 +1791,40 @@ the failing SET, not the count" stops being something you have to remember to as
 for. `-rfs` was considered and rejected: the suites carry a couple of permanent
 `importorskip`s, and printing those every run trains people to ignore the summary.
 
+## The driver's risk envelope is enforced on BOTH paths
+
+**`shared/driver_policy.py` is the single allowlist**, and two different services
+enforce it independently:
+
+| path | module | enforces |
+|---|---|---|
+| **decision** | `driver_svc/guardrails.apply_guardrails` | the full cycle pass — halt, stand-down, budget across trades, slots, per-cycle cap, directional gate, one-per-symbol |
+| **open** | `options_svc.compute.open_driver_position` | re-checks what is a property of the SIGNAL or the BOOK — structure allowlist, defined risk, `max_concurrent`, deployed risk vs `daily_risk_budget` |
+
+⚠ **The second one is not redundant, and removing it re-opens a real hole.** The
+open path is reached by the `driver_paper_create` command on `cmd:options` — a
+Redis stream entry. Consumer groups are created at id `0`, so a fresh group
+**replays the backlog** (the documented "burned a day's API budget" incident),
+and Memurai is unauthenticated, so any local process can enqueue one. Until
+2026-08-29 that path checked only the halt flag, per-trade sizing, min fill and
+buying power: an arbitrary structure with no defined risk could be opened into
+the $25k paper book, and the book could grow past `max_concurrent` without limit,
+because the guardrails live in a service `options_svc` **cannot import**.
+
+**Cycle-only concepts are deliberately NOT re-checked at the open path** —
+`max_trades_per_cycle` and the model's stand-down are meaningless for a single
+open, and the VIX ceiling needs the decision-time market read. The halt flag
+already covers the "stop trading now" case.
+
+**`daily_risk_budget` now means what its name says.** `apply_guardrails` resets
+it to the full amount every 30-minute checkpoint and never subtracts risk already
+deployed, so the true aggregate cap was `max_concurrent × per_trade_max_risk`
+(~$25k, roughly **2×** the documented "half the book"). The open path measures
+against the OPEN POSITIONS, so the ceiling is real. ⚠ `driver_policy.open_risk_dollars`
+drops a non-finite row rather than summing it: a NaN total makes every `>`
+comparison False and silently switches the cap OFF — the pins-the-bound class one
+layer up.
+
 ## Observability — a swallowed exception must leave a trace
 
 **`services/_degrade.py` is the house guard-rail for the repo's most expensive bug
