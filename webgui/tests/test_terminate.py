@@ -4,16 +4,34 @@ import inspect
 from pages import terminate
 
 
-def test_stop_command_is_detached_start_of_the_bat():
-    cmd = terminate.stop_command()
-    # cmd /c start <title> <bat>  → fully detached, own console.
-    assert cmd[:3] == ["cmd", "/c", "start"]
-    assert cmd[-1].endswith("stop_all.bat")
+def test_stop_command_stops_this_environments_target():
+    from repo_paths import ENV_NAME
+    assert terminate.stop_command() == [
+        "systemctl", "--user", "--no-block", "stop", f"trading-{ENV_NAME}.target"]
 
 
-def test_stop_command_targets_the_repo_root_bat():
-    assert terminate.STOP_BAT.name == "stop_all.bat"
-    assert str(terminate.STOP_BAT) == terminate.stop_command()[-1]
+def test_stop_command_is_no_block_and_that_is_load_bearing():
+    """`--no-block` registers the stop job with the systemd MANAGER and returns.
+
+    This page kills the web app that issued the command. With --no-block the job
+    is owned by systemd, so this process dying partway cannot orphan the
+    shutdown -- which is strictly safer than the old `cmd /c start` detachment
+    trick it replaces, where an independent console was the only thing keeping
+    the batch alive."""
+    assert "--no-block" in terminate.stop_command()
+
+
+def test_stop_command_is_user_scoped():
+    """A system-scoped stop would need root. The whole supervision design rests
+    on `systemctl --user`."""
+    assert terminate.stop_command()[:2] == ["systemctl", "--user"]
+
+
+def test_no_windows_machinery_survives_anywhere_in_the_module():
+    src = inspect.getsource(terminate)
+    for banned in ("stop_all.bat", "STOP_BAT", "cmd /c", "taskkill",
+                   "start_all_wt.bat", "start_all.bat"):
+        assert banned not in src, banned
 
 
 # --- copy honesty -------------------------------------------------------------
@@ -36,5 +54,9 @@ def test_copy_states_that_stopping_the_proxy_is_ownership_conditional():
     """One wording that is true in BOTH environments, not dev-specific prose."""
     src = inspect.getsource(terminate)
     assert src.count("only in the environment that owns it") >= 2
-    # Memurai's "left running" note is unrelated to ownership and must survive.
-    assert "Memurai" in src
+    # The bus's "left running" note is unrelated to ownership and must survive.
+    # It is REDIS on Linux, not Memurai -- the Windows port is gone, and the
+    # reason it survives a stop is now structural: it is a SYSTEM unit, so a
+    # `systemctl --user` target stop cannot reach it even in principle.
+    assert "Redis" in src
+    assert "Memurai" not in src
