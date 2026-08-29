@@ -11,6 +11,26 @@ import sys
 from pathlib import Path
 
 
+def venv_python(repo):
+    """The venv interpreter for `repo`, or None when there is no venv.
+
+    ⚠ Checks BOTH layouts. This used to hardcode `.venv/Scripts/python.exe`, and
+    the very next line is `if not py.exists(): return 0` -- so on Linux, where
+    the interpreter lives at `.venv/bin/python`, this hook NO-OPPED AND RETURNED
+    SUCCESS. Ruff auto-fix would simply have stopped running, with nothing
+    anywhere saying so: a silent degrade in the tooling whose own repo documents
+    that exact bug class as its most expensive.
+
+    Windows first, then POSIX. Order is irrelevant to correctness -- only one
+    exists on a given host -- but it keeps the common case one stat call.
+    """
+    for rel in (("Scripts", "python.exe"), ("bin", "python")):
+        candidate = repo.joinpath(".venv", *rel)
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -20,8 +40,8 @@ def main() -> int:
     if not path.endswith(".py"):
         return 0
     repo = Path(__file__).resolve().parents[2]
-    py = repo / ".venv" / "Scripts" / "python.exe"
-    if not py.exists():
+    py = venv_python(repo)
+    if py is None:
         return 0
     try:
         subprocess.run([str(py), "-m", "ruff", "check", "--fix", path],

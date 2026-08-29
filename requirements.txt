@@ -49,7 +49,6 @@ Pillow                    # PIL — image generation/rendering (provides the `PI
 openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.xlsx
 
 # --- Windows desktop notifications (O, S) ---
-winotify                  # toast notifications (provides the `winotify` package)
 
 # --- Scheduling (D) ---
 apscheduler==3.10.4

@@ -44,7 +44,18 @@
       "Bash(D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe -m pytest *)",
       "Bash(D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe -m ruff *)",
       "Bash(\"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe\" -m pytest *)",
-      "Bash(\"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe\" -m ruff *)"
+      "Bash(\"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe\" -m ruff *)",
+      "Bash(.venv/bin/python -m pytest *)",
+      "Bash(../.venv/bin/python -m pytest *)",
+      "Bash(./.venv/bin/python -m pytest *)",
+      "Bash(.venv/bin/python -m ruff *)",
+      "Bash(../.venv/bin/python -m ruff *)",
+      "Bash(/home/administrator/prod/.venv/bin/python -m pytest *)",
+      "Bash(/home/administrator/prod/.venv/bin/python -m ruff *)",
+      "Bash(/home/administrator/dev/.venv/bin/python -m pytest *)",
+      "Bash(/home/administrator/dev/.venv/bin/python -m ruff *)",
+      "Bash(systemctl --user *)",
+      "Bash(journalctl --user *)"
     ]
   }
 }

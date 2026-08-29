@@ -1,0 +1,23 @@
+# Shell scripts must reach the working tree with LF line endings.
+#
+# This is the INVERSE of the rule that used to live here. That one forced CRLF
+# on *.bat, because cmd.exe mis-parses an LF-terminated batch file containing a
+# non-ASCII byte under codepage 65001. The batch files are gone; shell scripts
+# replaced them, and their failure mode is worse.
+#
+# A CRLF shell script does not mis-parse -- it does not run at all. The kernel
+# reads the shebang literally, so `#!/usr/bin/env bash\r` asks for an
+# interpreter named "bash\r" and the script dies with
+#     bad interpreter: /usr/bin/env bash^M: no such file or directory
+# which names neither the real problem nor the file that caused it.
+#
+# core.autocrlf=true is a per-USER setting and is true on the Windows dev box,
+# so without this rule a fresh clone there produces broken scripts. Pinning it
+# in the repo is what makes it independent of whose machine did the checkout.
+#
+# Guarded by tools/tests/test_shell_line_endings.py.
+*.sh text eol=lf
+
+# systemd units, if ever committed, are read by a C daemon on Linux only.
+*.service text eol=lf
+*.target  text eol=lf
