@@ -1,4 +1,4 @@
-# Security hardening — proxy CORS / auth + Memurai password
+# Security hardening — proxy CORS / auth + Redis password
 
 This is a single-user, localhost tool, but the **schwab-proxy holds live Schwab OAuth
 tokens and can place orders**, so it is worth closing the one real remote-risk path. The
@@ -38,11 +38,11 @@ To enable:
 The compare is timing-safe (`hmac.compare_digest`). Market-data endpoints are unguarded
 (they're read-only and non-sensitive).
 
-## 3. Memurai (Redis) password (OFF by default)
+## 3. Redis (Redis) password (OFF by default)
 
-The Bus connects to Memurai with no auth by default. To require a password:
+The Bus reads `MEMURAI_PASSWORD` (the env var kept its name). Prod sets it. To require a password:
 
-1. Set `requirepass <password>` in the Memurai/Redis config and restart the service.
+1. Set `requirepass <password>` in the Redis/Redis config and restart the service.
 2. Set the env var `MEMURAI_PASSWORD=<password>` for **every** process that starts a Bus
    (proxy is unaffected; the six services + the webgui all use the Bus). The simplest way
    is to set it machine-wide (`setx MEMURAI_PASSWORD ...`) or export it in the launcher.

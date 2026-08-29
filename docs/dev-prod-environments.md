@@ -12,15 +12,15 @@ Every port, path and command below was checked against the repo on 2026-08-08.
 
 | | prod | dev |
 |---|---|---|
-| Folder | `D:\WebGUI Trading Prod` | `D:\WebGUI Trading with Schwab` |
+| Folder | `/home/administrator/prod` | `/home/administrator/dev` |
 | Git | pinned to `main` | feature branches |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
-| Redis (Memurai `:6379`) | **db 0** | **db 1** |
+| Redis (Redis `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs\`, `webgui\data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Launcher | `start_all_wt.bat` (or `start_all_hidden.bat`) | `start_dev.bat` |
+| Launcher | `systemctl --user start trading-prod.target` (or `systemctl --user start trading-prod.target`) | `systemctl --user start trading-dev.target` |
 
 Prod's numbers are byte-identical to what this repo used before environments
 existed, so prod is a relocation, not a reconfiguration.
@@ -35,7 +35,7 @@ the four behaviour flags.
 
 ```toml
 name = "dev"                          # "dev" | "prod"
-peer_root = 'D:\WebGUI Trading Prod'  # optional; SINGLE quotes — see below
+peer_root = '/home/administrator/prod'  # optional; SINGLE quotes — see below
 ```
 
 Rules worth knowing:
@@ -44,7 +44,7 @@ Rules worth knowing:
   exactly as the repo did before environments existed.
 - Because it is gitignored, **`git pull` can never carry an identity between
   checkouts**, in either direction.
-- **`peer_root` must be single-quoted.** `"D:\WebGUI Trading Prod"` is an invalid
+- **`peer_root` must be single-quoted.** `"/home/administrator/prod"` is an invalid
   `\W` escape in a TOML *basic* string, and it discards the **whole document** —
   `name` included — so the checkout silently resolves to prod. A literal string
   (`'...'`) takes the path verbatim. Forward slashes in a double-quoted string
@@ -58,7 +58,7 @@ Rules worth knowing:
 Check what a checkout thinks it is:
 
 ```powershell
-.venv\Scripts\python -c "import repo_paths as r; print(r.ENV_NAME, r.SERVICE_PORTS, r.NICEGUI_PORT, r.PROXY_PORT, r.MEMURAI_URL)"
+.venv/bin/python -c "import repo_paths as r; print(r.ENV_NAME, r.SERVICE_PORTS, r.NICEGUI_PORT, r.PROXY_PORT, r.MEMURAI_URL)"
 ```
 
 Template: `config/env.local.example.toml`.
@@ -88,8 +88,8 @@ Do this once, with the market closed. Order matters.
 **1. Clone prod and pin it to `main`.**
 
 ```powershell
-git clone "D:\WebGUI Trading with Schwab" "D:\WebGUI Trading Prod"
-cd "D:\WebGUI Trading Prod"
+git clone "/home/administrator/dev" "/home/administrator/prod"
+cd "/home/administrator/prod"
 git checkout main
 ```
 
@@ -97,7 +97,7 @@ git checkout main
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.lock
+.venv/bin/python -m pip install -r requirements.lock
 ```
 
 **3. Copy the gitignored secrets** from the dev checkout into prod, same relative
@@ -119,8 +119,8 @@ base symbols and the Net Prem view's SPDR-sector group is empty.**
 **4. Stop the current stack, then copy the live data into prod once.**
 
 ```powershell
-cd "D:\WebGUI Trading with Schwab"
-stop_all.bat
+cd "/home/administrator/dev"
+systemctl --user stop trading-<env>.target
 ```
 
 Then copy, preserving relative paths (nothing is running, so a plain file copy is
@@ -140,54 +140,58 @@ After this, dev keeps its existing copy as its first snapshot.
 
 **5. Write the markers.**
 
-`D:\WebGUI Trading Prod\config\env.local.toml`:
+`/home/administrator/prod\config\env.local.toml`:
 
 ```toml
 name = "prod"
 ```
 
-`D:\WebGUI Trading with Schwab\config\env.local.toml`:
+`/home/administrator/dev\config\env.local.toml`:
 
 ```toml
 name = "dev"
-peer_root = 'D:\WebGUI Trading Prod'
+peer_root = '/home/administrator/prod'
 ```
 
 **6. Start prod.**
 
 ```powershell
-cd "D:\WebGUI Trading Prod"
-start_all_wt.bat
+cd "/home/administrator/prod"
+systemctl --user start trading-prod.target
 ```
 
 **7. Verify.** On `http://127.0.0.1:8500`:
 
 - **More → System Status** — overall banner green; proxy, all six services,
-  Memurai and webgui up.
+  Redis and webgui up.
 - The **Schwab Authorization** card says authorized. If not, click **Authorize**
   (it opens the proxy's `/auth`).
 - Header shows **no** `DEV` chip; tab title has no `DEV ·` prefix.
 
-**8. Repoint the desktop shortcut** at `D:\WebGUI Trading Prod\start_all_hidden.bat`.
+**8. Repoint the desktop shortcut** at `/home/administrator/prod\systemctl --user start trading-prod.target`.
 
 ---
 
 ## 3. Daily dev loop
 
 ```powershell
-cd "D:\WebGUI Trading with Schwab"
-stop_all.bat
-.venv\Scripts\python tools\snapshot_from_prod.py
-start_dev.bat
+cd "/home/administrator/dev"
+systemctl --user stop trading-<env>.target
+.venv/bin/python tools\snapshot_from_prod.py
+systemctl --user start trading-dev.target
 ```
 
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`start_dev.bat` launches **seven** processes (six services + webgui, no proxy) as
-tabs in one Windows Terminal window. `start_dev.bat nowindow` runs them hidden
-with output to `logs\<name>.out.log` / `.err.log`. It **refuses to run unless the
-checkout is marked dev**.
+`systemctl --user start trading-dev.target` brings up **eight** units (six
+services + webgui, and no proxy — dev borrows prod's). Output goes to the
+journal: `journalctl --user -u trading-dev-options_svc -f`.
+
+It cannot start the wrong stack. A unit's `ExecStart` and `WorkingDirectory` are
+generated from that checkout's own `repo_paths`, so `trading-dev-*` runs dev's
+code on dev's ports by construction — there is no shared launcher to point at
+the wrong tree, which is what the old `IS_DEV` refusal existed to catch.
 
 Prod keeps running the whole time. You do not stop it to snapshot.
 
@@ -196,7 +200,7 @@ Prod keeps running the whole time. You do not stop it to snapshot.
 ## 4. Snapshotting prod's data
 
 ```powershell
-.venv\Scripts\python tools\snapshot_from_prod.py [--dry-run] [--redis-only] [--skip-gex] [--peer PATH]
+.venv/bin/python tools\snapshot_from_prod.py [--dry-run] [--redis-only] [--skip-gex] [--peer PATH]
 ```
 
 | Flag | Effect |
@@ -241,7 +245,7 @@ themselves are what you are testing:
 
 ```powershell
 set TRADING_ENABLE_SCHEDULERS=1
-start_dev.bat
+systemctl --user start trading-dev.target
 ```
 
 It must be set in the shell **before** launching, and it applies to processes
@@ -266,15 +270,15 @@ git push
 In **prod**:
 
 ```powershell
-cd "D:\WebGUI Trading Prod"
-tools\promote.bat
+cd "/home/administrator/prod"
+tools/promote.sh
 ```
 
-`promote.bat` refuses in a dev checkout, refuses on a dirty tree (*before*
+`promote.sh` refuses in a dev checkout, refuses on a dirty tree (*before*
 stopping anything, so a refusal never leaves prod down), stops the stack, waits
 for `:8100` and `:8500` to actually free, `git checkout main` + `git pull
 --ff-only`, reinstalls dependencies **only if `requirements.lock` moved**, then
-restarts via `start_all_wt.bat nowindow`. Check `/status` afterwards.
+restarts via `systemctl --user start trading-prod.target nowindow`. Check `/status` afterwards.
 
 If it refuses on a dirty tree, look at the diff — an unexpected edit in the prod
 checkout is for a human to decide about, not a restart script.
@@ -292,11 +296,11 @@ prod's shared proxy. That is deliberate (dev needs on-demand fetches to be
 usable), but "dev makes no API calls" is only true while nobody is using it.
 
 **2. Dev needs prod's proxy running** for any on-demand fetch, because it borrows
-`:8100`. `start_dev.bat` waits for it and says so if it is missing; the services
+`:8100`. `systemctl --user start trading-dev.target` waits for it and says so if it is missing; the services
 start anyway and every fetch fails until prod is up.
 
-**3. Restarting Memurai affects both environments.** One server, two logical DBs.
-The Status page hides the Memurai restart button in dev for exactly this reason —
+**3. Restarting Redis affects both environments.** One server, two logical DBs.
+The Status page hides the Redis restart button in dev for exactly this reason —
 if you restart it from prod, dev goes with it.
 
 **4. `options_svc`'s `driver_paper_create` command handler is not env-guarded.**
@@ -307,7 +311,7 @@ trade in dev's own paper book, which prod never sees.
 **5. Dev's own behaviour cannot be verified by the test suite.** Under pytest,
 `repo_paths` pins identity *and* topology to prod, so every `IS_DEV=True` branch
 is only ever exercised via monkeypatch. Confirming that dev really withholds the
-proxy and Memurai restart buttons, and shows the `DEV` chip, is a **manual check
+proxy and Redis restart buttons, and shows the `DEV` chip, is a **manual check
 with the app running**.
 
 **6. The SQLite half of the snapshot has never been run for real.** The cutover
@@ -323,84 +327,44 @@ green before letting the ~1.4 GB go.
 
 ## 8. Gotchas
 
-- **Dev's Terminate stops only dev.** `tools/stop_all.py` drops the proxy from its
+- **Dev's Terminate stops only dev.** `the target's PartOf= scoping` drops the proxy from its
   kill list when `owns_proxy` is false, and matches the HUD by *this checkout's
-  root path*, so it cannot reach prod's. Memurai is left running either way.
+  root path*, so it cannot reach prod's. Redis is left running either way.
 - **A snapshot can never arm dev's autonomous driver** — two independent defences:
   the snapshot rewrites `cache:driver:control` disabled, and
   `run_autonomous_cycle` early-returns on the profile flag before it reads
   anything.
-- **`.bat` files must be CRLF.** A `.bat` saved with LF line endings fails in ways
-  that look like logic errors. Check before committing one.
+- **`.sh` files must be LF**, the exact inverse of the rule that used to live here
+  for `.bat`. A shell script with CRLF does not mis-parse — it does not run at
+  all: the kernel reads `#!/usr/bin/env bash` plus a stray CR as a request for an
+  interpreter named `bash`, and reports `bad interpreter: ...^M`, naming
+  neither the real problem nor the file. `.gitattributes` pins it and
+  `tools/tests/test_shell_line_endings.py` guards it — that guard caught
+  `promote.sh` the first time it ran, after an edit made on Windows.
 - **Ports are labels in the launchers, values in `repo_paths`.** The numbers
-  echoed by `start_dev.bat` are cosmetic; every process reads its own port from
+  echoed by `systemctl --user start trading-dev.target` are cosmetic; every process reads its own port from
   `repo_paths` (`config/ports.toml` + the profile's `port_offset`). If they
   disagree, `repo_paths` wins — and `tests/test_launcher_ports.py` should have
   caught it.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
-- **Two batch metacharacter traps, if you edit a launcher.** Both were hit while
-  making `start_webgui.bat` environment-aware, and neither announced itself — the
-  launcher just refused with *"could not read the web GUI port"*, in **both**
-  environments, which reads like a `repo_paths` problem rather than a quoting one.
+- **systemd owns the PIDs, so the process archaeology is over.** Two long gotchas
+  lived here: batch metacharacter traps (`for /f "usebackq"` eating quotes around
+  a path with spaces, `%` eaten inside a `cmd -c`), and the `pythonw.exe` re-exec
+  that made every service appear as a PARENT/CHILD PAIR — so a port check
+  reported the "wrong" interpreter and a duplicate-launch check had to tell pairs
+  apart from real duplicates.
 
-  **1. `for /f "usebackq"` strips the quotes around an interpreter path
-  containing spaces.** This looks correct and is not:
+  Both died with `cmd.exe` and `pythonw`. `systemctl --user status <unit>` reports
+  one MainPID, `PartOf=` scopes a stop to one environment's units, and
+  `systemctl start` on an already-running unit is a no-op rather than a ninth
+  process.
 
-  ```bat
-  for /f "usebackq delims=" %%p in (`"%PY%" -c "import repo_paths;print(repo_paths.NICEGUI_PORT)"`) do set "WEBPORT=%%p"
-  ```
-
-  With `PY=D:\WebGUI Trading Prod\.venv\Scripts\python.exe` that fails as
-  `'D:\WebGUI' is not recognized`. Both checkout paths contain spaces, so this
-  will bite every time.
-
-  **2. `%` inside a `-c` argument is consumed by cmd before Python sees it.**
-  `print('set X=%s' % v)` reaches Python as `print('set X= v)` — an unterminated
-  string literal.
-
-  **The shape that works:** have Python emit `set` lines into a temp batch, `call`
-  it, delete it — and build those lines with **concatenation, never
-  `%`-formatting**. Leave the emitted `set` unquoted (a port and `PROD`/`DEV` have
-  no spaces; quoting would put a double quote back inside the `-c` argument).
-
-  ```bat
-  set "_NSENV=%TEMP%\_neuralstrike_env_%RANDOM%.bat"
-  "%PY%" -c "import repo_paths as r; print('set WEBPORT=' + str(r.NICEGUI_PORT))" > "%_NSENV%" 2>nul
-  call "%_NSENV%" >nul 2>&1
-  del "%_NSENV%" >nul 2>&1
-  ```
-
-  `%%` would also escape trap 2, but no-percent-at-all cannot regress.
-  `tests/test_launcher_ports.py` rejects `%s`/`%d` in any `-c` line of that file.
-  Related, same family: in **Git Bash** `cmd /c` becomes `cmd C:\...` because `/c`
-  is path-mangled — use `cmd //c` there, or a full path from PowerShell.
-
-- **A healthy stack is 16 python processes per environment, not 8.** The venv's
-  `python.exe` is a redirector that re-execs the base interpreter, so every
-  component is a **parent/child pair**: the parent's command line carries the
-  checkout path, the child holds the port and does the work. Two environments
-  running at once is therefore ~32 processes, which is normal.
-
-  This misleads process-hunting in three specific ways, all observed while
-  standing prod up:
-
-  | You do | You see | Reality |
-  |---|---|---|
-  | count processes per service | 2 of each | one component, not a duplicate |
-  | grep command lines for the checkout path | only ~half match | children are launched with a **relative** script path, so the checkout never appears |
-  | check a port's owning process | interpreter is the **system** python, not `.venv` | it is the re-exec'd base interpreter; the venv is still what resolved the imports |
-
-  So: match on the **script name**, not the checkout path or the interpreter,
-  and expect pairs. `tools/stop_all.py` already handles this — `hud_root_pids`
-  returns **roots only**, because `taskkill /T` sweeps the child. To tell a real
-  duplicate from a pair, check whether one PID is the other's parent; if they
-  are independent, you genuinely started twice.
-
-  A second launch is mostly harmless — the losers fail to bind the already-held
-  ports and exit within a minute or two — but they do complete their startup
-  work first, so expect one duplicate round of collection (a sentiment backfill
-  is ~10 Schwab calls) in the logs before they die.
+  ⚠ One survives in a new form: **`is-active` going inactive is NOT proof the
+  ports are free.** Measured 2026-08-29 — the target reports inactive about a
+  second before its members' listening sockets close. systemd serialises
+  start-behind-stop per unit so it cannot race a `systemctl start`, but anything
+  else that binds must wait for the sockets. `tools/promote.sh` waits for both.
 
 ---
 
@@ -415,8 +379,8 @@ green before letting the ~1.4 GB go.
 | Claude gate | `options_svc/compute.py`, `market_svc/compute.py`, `driver_svc/decider.py` — the three client factories |
 | Scheduler gate | `services/_scaffold.py:_schedulers_enabled` / `make_app` |
 | Autonomous gate | `driver_svc/handlers.py:run_autonomous_cycle` |
-| Cross-env kill safety | `tools/stop_all.py` |
+| Cross-env kill safety | `the target's PartOf= scoping` |
 | Restart-button safety | `webgui/pages/status.py` |
 | Dev chip / tab title | `webgui/main.py` |
-| Launchers | `start_dev.bat`, `start_all_wt.bat`, `tools/promote.bat` |
+| Launchers | `systemctl --user start trading-dev.target`, `systemctl --user start trading-prod.target`, `tools/promote.sh` |
 | Snapshot | `tools/snapshot_from_prod.py` |

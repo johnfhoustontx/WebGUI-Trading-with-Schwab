@@ -4,6 +4,82 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-29 (**PROD MIGRATED TO LINUX. Nine `systemd --user`
+units on an Ubuntu 24.04 VPS replace twelve `.bat` launchers and the WMI/taskkill
+supervision layer. Cut over live the same day.**
+
+- **The application was already portable; the SUPERVISION layer was not.** Audited
+  before anything moved: **zero** `os.name`/`sys.platform`/`platform.system()`
+  branches, **zero** real `winotify`/`winsound` imports (a dead pin, now removed),
+  `repo_paths` already 100% `pathlib`, no `tkinter` in the prod path. What was
+  Windows-bound was **1,768 lines** of launcher and stop/restart code plus the
+  **974 lines** of tests pinning it — all deleted, replaced by nine generated
+  units of ~20 lines each.
+- **The units are GENERATED (`deploy/systemd/generate_units.py`), never
+  committed.** Every value derives from `repo_paths`, for the same reason ports
+  live in one config file: a committed unit is a second copy of the ports, the
+  root, the env name and the ownership flag, free to drift — and the drift would
+  surface only as a Restart button that errors in prod. It also fixed a defect
+  the hand-written plan already had: it hardcoded `/home/john/prod`, and the
+  account turned out to be `administrator`.
+- **Ownership is encoded in which units EXIST.** `components()` emits a proxy
+  unit only when `OWNS_PROXY`, so a dev checkout that borrows prod's proxy has
+  none for its target to pull up. Better than the batch version's kill-list
+  filter, which was a rule someone had to remember.
+- **`systemctl --user`, never system units.** That is what keeps the Status
+  page's Restart button working with **no polkit rule and no sudoers entry**; a
+  system-unit equivalent would mean handing root to a network-facing app.
+  `loginctl enable-linger` makes them start at boot — proven by a real reboot,
+  after which the stack came back with nobody logged in.
+- **`repo_paths.assert_central_time()` refuses to start on a non-Central clock.**
+  95 naive `datetime.now()`/`date.today()` calls MEAN Central; on Windows that
+  held only because the box was set to CT and nothing enforced it. Containers
+  default to UTC, which would shift every session window, roll-date and expiry
+  by 5–6 hours, each degrading to a plausible number. Verified on the VPS:
+  `America/Chicago` imports silently, `TZ=UTC` refuses, and
+  `TZ=America/New_York` — one hour out, the subtle case — also refuses.
+  ⚠ The plan specified keying the pytest escape on `PYTEST_CURRENT_TEST`;
+  measured, that variable does not exist at COLLECTION time, when `repo_paths` is
+  imported. It keys on `"pytest" in sys.modules`.
+- **Three plan defects were found by RUNNING it, not reading it.** `ufw` as
+  written locked you out of a public-IP box (allow SSH before enable). Editing
+  `/etc/ssh/sshd_config` is INERT on a cloud-init image — `Include` sits at line
+  12 and OpenSSH takes the FIRST value, so `50-cloud-init.conf` won: password
+  auth and `PermitRootLogin` were both still on, and only reading `sshd -T` (the
+  RUNNING config) exposed it. And `is-active` going inactive is **not** proof the
+  ports are free — the target reports inactive ~1s before its members' sockets
+  close.
+- **The first VPS was a CloudPanel image and was rebuilt.** FTP, SMTP, MySQL on
+  `*:3306`, ten PHP-FPM pools and a web admin panel on a public `:8443`, plus a
+  July-2024 login from an unrelated IP. None of it belonged near a brokerage
+  stack.
+- **Cutover, same day.** Windows prod stopped first (the Schwab refresh token is
+  a single rotating credential — exactly one proxy may hold it). Data carried
+  with SQLite's ONLINE backup API; the token file survived, so **no re-mint was
+  needed** — proven with real Schwab calls, not `has_token`. Driver defaults to
+  **disabled** on the fresh `db 0`.
+- **Backups, three layers, because the VPS is now the only live copy.**
+  `tools/backup_local.py` (online API + a real Redis RDB, integrity-checked at
+  write time), a 17:30 systemd timer with `Persistent=true`, and
+  `tools/pull_backups.ps1` pulling offsite over Tailscale. Restore TESTED, not
+  assumed. ⚠ Both the migration carry and the first backup used `*.db` plus a
+  NAMED LIST, and that shape silently lost the EOD archives, `entries.json` (86
+  real trades) and `settings.json`. Both now SWEEP the data trees.
+- **CI moved to `ubuntu-latest`.** The old doc claimed a Linux runner "would fail
+  at import time"; measured false — the full suite runs clean on Linux. A Windows
+  runner would no longer catch a CRLF `.sh`, a path assumption or a `systemctl`
+  argv, while passing on a platform nothing runs on.
+- **Not a performance project, and the docs say so.** Measured: the stack idles
+  at ~6.5% of one core, Redis answers in 0.155 ms, a 1-minute GEX write is ~14 ms
+  of SQLite. The bottleneck is Schwab's network plus the proxy's own 0.2 s call
+  spacing. What Linux buys is determinism — and, incidentally, a **26×** faster
+  `options_svc` suite (314 s → 12 s).
+
+Design + plan: [`2026-08-29-linux-migration-design.md`](plans/2026-08-29-linux-migration-design.md)
+/ [`-plan.md`](plans/2026-08-29-linux-migration-plan.md).
+
+---
+
 **Last updated:** 2026-08-29 (**Security/runtime audit — batch 4: hygiene. The
 lock was wrong in BOTH directions, and prod was missing a declared dependency.**
 - **`tweepy` was never in the lock, and prod does not have it.** It is a DECLARED

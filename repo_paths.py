@@ -250,7 +250,7 @@ def _resolve_env(root, under_pytest=None):
     # rule out. `name` is pinned for exactly the same reason, one level up: it
     # drives IS_DEV, so an unpinned name leaves every `if IS_DEV:` branch
     # checkout-dependent — found the hard way, when webgui/pages/status.py began
-    # withholding the Memurai restart in dev and its "every card is restartable"
+    # withholding the Redis restart in dev and its "every card is restartable"
     # test would have failed only inside a dev checkout. Pinning it here means an
     # IS_DEV consumer needs no special handling; a test that wants the dev branch
     # monkeypatches IS_DEV on the module that consumed it, as with OWNS_PROXY.

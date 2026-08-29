@@ -70,7 +70,7 @@ Steady state with the ticker on and the driver off: **~22 calls/day** (≈18 tic
 | New-signal push (Telegram/Discord/Fi-SMS) | options_svc | event-driven at scan/captured publish | date-scoped seen-set; silent seed on restart. **Credit spreads only** — directional is excluded (its Fit+Quality score isn't commensurable with the premium composite the `min_score` gate uses) |
 | Scanner day-union merge + publish | options_svc | event-driven, every rescan | pure `merge_day_signals` → `cache:options:scan_day` (date-scoped, CT-pinned, capped 2000/list). No API calls; `cache:options:scan` stays live-only for the driver |
 | EOD digest push | options_svc | 1×/day ~15:10 CT | Telegram/Discord/SMS |
-| Watchdog (opt-in, not in start_all) | tools/watchdog.py | continuous probe loop | restarts dead processes, ≤3 per 10 min |
+| Process supervision | systemd units | `Restart=on-failure` | restarts a dead process, storm-capped at 5 per 5 min then left down and logged |
 
 ## 4. Browser-side polling (webgui — Redis reads only)
 

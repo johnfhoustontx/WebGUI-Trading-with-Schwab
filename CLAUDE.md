@@ -69,10 +69,10 @@ does not import from it or depend on it at runtime.
 | Brokerage SDK    | `schwab-py` (`schwab` package) — auth, market data, streaming     |
 | Data / numerics  | pandas, numpy, scipy                                              |
 | Scheduling       | APScheduler (claude-driver)                                       |
-| Notifications    | winotify (Windows toast)                                          |
+| Notifications    | Telegram · Discord · SMS-over-SMTP · X — all HTTP/SMTP, no OS hooks |
 | Spreadsheet I/O  | openpyxl                                                          |
 | Testing          | pytest                                                            |
-| Runtime          | Python 3.11+, Windows-first, single-user                         |
+| Runtime          | Python 3.11+, **Linux** (Ubuntu 24.04 LTS), systemd user units, single-user |
 
 ## Architecture
 
@@ -94,7 +94,7 @@ client and market data through `http://127.0.0.1:8100`.
 ## 3-tier architecture (approved 2026-06-15 — migration COMPLETE)
 
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
-**Redis (Memurai) backbone**. **All six domains are migrated** — sentiment, options,
+**Redis backbone**. **All six domains are migrated** — sentiment, options,
 portfolio, trade, driver, market — and every page reads Redis. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
@@ -133,7 +133,7 @@ TIER 1 GUI         webgui/ NiceGUI (:8500) — render() only; reads Redis cache 
                    page build, subscribes to pub/sub for repaints, enqueues commands.
                    No engine imports, no Schwab calls, no sys.path glue.
         ▲ cache read / subscribe          │ commands
-TIER 3 STORE+COMM  Memurai (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_RESULTS),
+TIER 3 STORE+COMM  Redis (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_RESULTS),
                    events:{domain}:{view} pub/sub (replaces bridge file + version polling),
                    cmd:{domain} Redis Streams (GUI→service RPC). shared/contracts/ (typed
                    payloads = the API) + shared/bus/ (redis-py wrapper, fakeredis under pytest).
@@ -146,7 +146,7 @@ TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfo
                    DELETED, not ported). Calls schwab-proxy (:8100) for data.
 ```
 
-**`start_all` order: Memurai → proxy → services → webgui.** Ports: `memurai=6379` plus one
+**Unit order: Redis → proxy → services → webgui**, expressed as `Requires=`/`After=`.** Ports: `memurai=6379` plus one
 per service (8210–8215). One shim survives by decision — `sentiment_bridge.json` is still
 dual-written for `regime_filter`; retiring it (making `regime_filter` read Redis) is the last
 open migration item. Full design:
@@ -345,8 +345,8 @@ Routes:
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Memurai / proxy / Schwab auth / the six services / webgui, plus cache freshness; per-component windowless Restart. | built |
-| `/terminate` | Stop All Services — confirm-gated stop of the whole local stack (Memurai is left running). | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui, plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), **`flow_panels.py`** (PURE builders for the two Options Flow console
@@ -916,7 +916,7 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q`. The dated baseline, the
+**Tests:** `(cd webgui && ../.venv/bin/python -m pytest -q)`. The dated baseline, the
 standing warning about comparing the failing *set* rather than the count, and the
 worktree/subshell caveat all live in the **Tests** section — don't duplicate a count here.
 TDD pure functions; smoke-verify `render()` with a screenshot.
@@ -1431,93 +1431,103 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc →
-options_svc → portfolio_svc → trade_svc → driver_svc → web gui, opening the
-browser). It opens the proxy + 5 services + web gui in **7 separate console
-windows**.
+**The stack is nine `systemd --user` units on a Linux host.** There are no
+launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
+both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
+every one of them existed to work around something Windows lacks.
 
-**One-window alternative — `start_all_wt.bat`** (requires Windows Terminal):
-launches the same 8 processes as **8 tabs in a single Windows Terminal window**
-(live logs preserved, but far less desktop clutter). The processes stay 8
-separate OS processes — required, since merging services into one Python process
-would re-introduce the `config`/`scoring`/`notifier`/`src` top-level
-module-name collisions the 3-tier split exists to prevent. Each tab waits for the
-proxy (:8100) before starting via `tools\wait_and_run.bat <wait_port|0> <script>`
-(the proxy tab passes `0` to start immediately), preserving the same ordering as
-the multi-window launcher; tabs run under `cmd /k` so they stay open with live
-output. Close the window (or a tab) to stop the services.
-
-**Double-click launcher — `start_all_hidden.bat`**: the click-to-run entry point.
-Double-click it in Windows Explorer (or a desktop **shortcut** to it — right-click
-→ Send to → Desktop) to launch the whole stack **windowless**. Because a `.bat`
-double-clicked always opens its own console, it **relaunches itself hidden** (via
-`powershell Start-Process -WindowStyle Hidden`, so you see at most a brief flash)
-and then runs `start_all_wt.bat nowindow`. Net effect: click → nothing visible →
-the browser opens to the web GUI, with all 8 processes hidden. Stop with
-`stop_all.bat` or More → Terminate.
-
-**No-window mode — `start_all_wt.bat nowindow`** (aliases `-nowindow` /
-`/nowindow` / `hidden`): the same launcher, but every process runs **hidden with
-NO window at all** — each is spawned via PowerShell `Start-Process -WindowStyle
-Hidden` using the venv **`pythonw.exe`** (falls back to `python.exe`), with
-stdout/stderr redirected to `logs\<name>.out.log` / `.err.log` at the repo root.
-Same proxy-first ordering (it waits for :8100 before starting the six services +
-web GUI) and it still opens the browser. Since there are no consoles to close,
-**stop a windowless stack with `stop_all.bat`** (or the GUI's More → Terminate).
-The default (no-arg) mode is unchanged (WT tabs with live logs). NOTE: the
-proxy + six services already write their own rotating log files regardless; the
-redirect additionally captures the **web GUI** output, which otherwise only goes
-to its console. (The System Status page's per-component **Restart** buttons are
-**also windowless** — they spawn `tools\restart_one.bat` with `CREATE_NO_WINDOW`,
-which relaunches the component hidden via `pythonw` + `Start-Process -WindowStyle
-Hidden`, logs to `logs\<name>.out.log`.)
-
-**Stopping — `stop_all.bat`** (also reachable from the GUI's **More → Terminate**
-page): runs `tools\stop_all.py`, which reads the ports from `repo_paths` and kills
-whatever is LISTENING on the proxy + 5 service ports + the web GUI (web GUI last).
-**Memurai (:6379) is intentionally left running** — it's a shared Windows service,
-not something this repo starts. The Terminate button spawns the batch fully
-detached (`cmd /c start`) so it isn't in the web app's process tree (it taskkills
-the web app itself, so a child would otherwise kill itself mid-run).
-
-Manual order:
-
-```powershell
-# 1. Activate the venv
-.\.venv\Scripts\Activate.ps1
-
-# 2. Memurai (Redis backbone) must be running on :6379 — it installs as a native
-#    Windows service; start it from services.msc if needed. (3-tier cache/pub-sub/commands.)
-
-# 3. Start the proxy (waits to bind :8100) — everything reads market data through it
-python schwab-proxy\schwab_proxy.py
-
-# 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
-#    Sentiment + Options + Portfolio + Trade + Driver are all migrated.
-python services\sentiment_svc\app.py      # :8210  (composite + rotation
-                                          #          + the NIGHTLY momentum cascade at 16:20 CT
-                                          #            → cache:sentiment:momentum)
-python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator
-                                          #          + 1-min intraday GEX history collection, 08:00–15:20 CT)
-python services\portfolio_svc\app.py      # :8212  (sector breakdown + vs-sector perf + live-streaming P&L)
-python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
-python services\market_svc\app.py         # :8215  (live macro-ticker Market Dashboard: ~3s RTH / 15s off-hours poll of /quotes → cache:market:dashboard)
-python services\driver_svc\app.py         # :8214  (morning-agent order-approval queue: 09:28-ET run + approve/skip;
-                                          #          orders simulated — config.PAPER_TRADE=True)
-
-# 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
-python webgui\main.py      # serves http://127.0.0.1:8500
+```bash
+systemctl --user start trading-prod.target     # or stop / restart / status
 ```
 
-> **3-tier note:** Once a domain is migrated, the web GUI no longer computes anything
-> for it — its **service must be running** (and Memurai up) or the page shows a
-> "Waiting for … service" placeholder. **Sentiment, the entire Options section,
-> Portfolio, Trade, and Driver are migrated** (`services/sentiment_svc`,
-> `services/options_svc`, `services/portfolio_svc`, `services/trade_svc`,
-> `services/driver_svc`) — **every page now reads Redis**; the webgui imports no app
-> engines, so the documented `scoring`/`notifier` cross-app collision can no longer
-> occur. The exact allow-list (and why the familiar "+ `shared.contracts`" shorthand
-> is wrong) is in the "3-tier architecture" section.
+```bash
+systemctl --user list-units 'trading-prod*'
+```
+
+**The units are GENERATED, and no `.service` file is in git.**
+`deploy/systemd/generate_units.py` derives every value from `repo_paths` — ports,
+the checkout root, the environment name, and whether this environment owns a
+proxy. A committed unit would be a second copy of all of that, free to drift, and
+the drift would surface only as a Restart button that errors in prod.
+
+```bash
+.venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
+```
+
+Regenerate after anything that changes a port, a path, or the environment
+identity. `tools/promote.sh` already does it on every promote.
+
+| What it replaces | Directive |
+|---|---|
+| `wait_and_run.bat` port waiting | `After=` + `ExecStartPre=tools/wait_http.py` |
+| `start_all_wt.bat` ordering | `Requires=` / `After=` |
+| `start_all_hidden.bat` hidden relaunch | nothing — services have no console |
+| `tools/watchdog.py` storm-capped restarts | `Restart=on-failure` + `StartLimitBurst` |
+| `stop_all.py`'s WMI hunt for this checkout's PIDs | `PartOf=` — systemd owns the PIDs |
+| `check_stack_up/down.py` | `systemctl --user is-active` |
+| `restart_one.bat` + `CREATE_NO_WINDOW` | `systemctl --user restart` |
+| `logs\*.out.log` redirection | `journalctl --user -u <unit>` |
+
+⚠ **`StartLimitIntervalSec` / `StartLimitBurst` belong in `[Unit]`, not
+`[Service]`.** systemd moved them in v229 and **silently ignores them** in the
+wrong section, so the storm cap would look configured and not exist.
+
+⚠ **`--user`, never system units.** That is what lets the Status page restart its
+own siblings with no polkit rule and no sudoers entry; a system-unit equivalent
+would mean handing root to a network-facing app. `loginctl enable-linger <user>`
+is what makes them start at boot and survive logout — without it the whole stack
+dies when the login session ends.
+
+⚠ **Ownership is encoded in which units EXIST.** `components()` emits a proxy
+unit only when `OWNS_PROXY`, so a dev checkout that borrows prod's proxy simply
+has none for its target to pull up. There is no kill-list filter to remember.
+
+**Redis is a SYSTEM unit** (`redis-server`), not part of the target — a
+`systemctl --user` stop cannot reach it even in principle, which is why the
+Status page's Redis card is read-only in every environment.
+
+**Stopping** is the same target, and that is what the GUI's **More → Stop All
+Services** page runs (`systemctl --user --no-block stop trading-<env>.target`).
+`--no-block` registers the job with the systemd manager, so the web app being
+stopped partway cannot orphan the shutdown.
+
+⚠ **`is-active` going inactive is NOT proof the ports are free.** Measured
+2026-08-29: the target reports inactive about a second before its members'
+listening sockets close. systemd serialises start-behind-stop per unit so it
+cannot race a `systemctl start`, but anything else that binds must wait for the
+sockets, not the unit state. `tools/promote.sh` does both.
+
+**Logs** are the journal. `journalctl --user -u trading-prod-options_svc -f`.
+`webgui/logging_setup.py` still writes `logs/webgui.log` as well.
+
+**Reaching the app from a workstation.** The web GUI binds `127.0.0.1` on the
+host and has **no authentication of any kind** — correct for a desk-side app,
+and the whole problem on a server, since that UI can open paper positions, arm
+the autonomous driver and stop the stack. Use `tools/open_webgui.ps1` (a desktop
+shortcut on the Windows box), which forwards **both** `:8500` and `:8100` over
+SSH. The proxy port matters: the Schwab refresh token expires every 7 days and
+is re-minted at `http://127.0.0.1:8100/auth`.
+
+⚠ **Never change either bind to `0.0.0.0`.**
+
+**Manual start**, if you are debugging a single component rather than running the
+stack:
+
+```bash
+.venv/bin/python services/options_svc/app.py     # :8211
+```
+
+Same order as the units: Redis, then the proxy on :8100, then the six services
+(8210–8215), then `webgui/main.py` on :8500. Everything reads market data through
+the proxy, so it starts first.
+
+> **3-tier note:** Once a domain is migrated, the web GUI no longer computes
+> anything for it — its **service must be running** (and Redis up) or the page
+> shows a "Waiting for … service" placeholder. **All six domains are migrated**;
+> every page reads Redis, and the webgui imports no app engines, so the
+> documented `scoring`/`notifier` cross-app collision can no longer occur. The
+> exact allow-list (and why the familiar "+ `shared.contracts`" shorthand is
+> wrong) is in the "3-tier architecture" section.
 
 ## Environments (dev / prod)
 
@@ -1528,14 +1538,14 @@ Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 
 | | prod | dev |
 |---|---|---|
-| Folder | `D:\WebGUI Trading Prod` (clone, pinned to `main`) | `D:\WebGUI Trading with Schwab` |
-| schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
+| Folder | `/home/administrator/prod` | `/home/administrator/dev` |
+| schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
-| Redis (Memurai `:6379`) | **db 0** | **db 1** |
-| SQLite, `logs\`, `webgui\data` | its own | its own |
+| Redis (`:6379`) | **db 0** | **db 1** |
+| SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Launcher | `start_all_wt.bat` | `start_dev.bat` (7 processes, no proxy) |
+| Units | `trading-prod.target` (9 units) | `trading-dev.target` (8 — no proxy) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
@@ -1559,8 +1569,11 @@ Windows `peer_root` must be a TOML **literal** string (`'D:\WebGUI Trading Prod'
 import-order hazard). It exports `ENV_NAME` / `ENV_FLAGS` / `IS_DEV` /
 `OWNS_PROXY` / `REDIS_DB` / `PEER_ROOT`, and `SERVICE_PORTS` / `NICEGUI_PORT` /
 `PROXY_PORT` / `MEMURAI_URL` become profile-derived — so every existing consumer
-(services, launchers, `tools/stop_all.py`, `tools/restart_one.bat`, the Status
-page) follows the environment with no edit of its own. `[services]` in
+(services, `deploy/systemd/generate_units.py`, `tools/promote.sh`, the Status
+page) follows the environment with no edit of its own. The unit generator is the
+newest consumer and the clearest illustration: it emits ports, paths and even
+WHETHER A PROXY UNIT EXISTS straight from these values, so a unit file cannot
+disagree with the checkout it runs. `[services]` in
 `ports.toml` is offset automatically; a **top-level** port is not, which is
 correct for a process this repo does not start and a bug for one it does.
 
@@ -1587,18 +1600,27 @@ can reach Anthropic or a notification channel. **Consequence: dev's own `IS_DEV`
 branches are only ever exercised by monkeypatch** — patch a flag with
 `monkeypatch.setitem(repo_paths.ENV_FLAGS, …)`, but patch a by-value export like
 `IS_DEV`/`OWNS_PROXY` with `monkeypatch.setattr` **on the module that consumed
-it**. Verifying that dev really withholds the proxy/Memurai restart buttons is a
+it**. Verifying that dev really withholds the proxy restart button is a
 **manual check with the app running**.
 
-**Cross-environment safety rails:** `tools/stop_all.py` drops the proxy from its
-kill list when `owns_proxy` is false and matches the HUD by **this checkout's root
-path** (so dev's Terminate stops only dev's seven processes); the Status page
-renders the proxy card read-only as *"shared — owned by prod"* and **hides the
-Memurai restart in dev** (one Redis server serves both); dev's webgui carries a
-`DEV` chip in the header lockup and a `DEV ·` tab-title prefix.
+**Cross-environment safety rails.** Most of these are now structural rather
+than defensive, which is the real gain from systemd:
+
+* **A dev target has no proxy unit at all** when `owns_proxy` is false, so there
+  is nothing to stop, restart or accidentally start. The old rail was
+  `stop_all.py` *filtering* the proxy out of a kill list — a rule someone had to
+  remember to apply.
+* **`PartOf=` scopes a stop to one environment's units**, where `stop_all.py` had
+  to match processes by this checkout's root path to avoid reaching the other
+  stack's.
+* The Status page still renders the proxy card read-only as *"shared — owned by
+  prod"*, and the **Redis card is read-only in BOTH environments** now: it is a
+  system unit `systemctl --user` cannot reach, and one server serves both.
+* Dev's webgui still carries a `DEV` chip in the header lockup and a `DEV ·`
+  tab-title prefix.
 
 **THE DEVELOPMENT RULE (mandatory).** Work you are given lands in **dev**, is
-**verified running in dev**, and only then moves to prod — via `tools\promote.bat`
+**verified running in dev**, and only then moves to prod — via `tools/promote.sh`
 and nothing else. Never `git pull`, `merge`, `checkout` or `reset` in the prod
 checkout: that skips the dirty-tree refusal, the stop, the conditional dependency
 reinstall and the restart, all of which exist because prod is a live trading
@@ -1622,45 +1644,33 @@ match is **anchored at the start of the command**: an unanchored version also
 fired on commands that merely *wrote* the prod path into a file, which it did
 within a minute of going live.
 
-**Launcher guards (added 2026-08-09, after both bit in the first hour of use).**
-Two failures, one root: a launcher that starts the *wrong* stack, or a *second*
-copy of the right one, looks like success until you read the ports.
+**The launcher guards are GONE, with the launchers.** From 2026-08-09 to the
+Linux migration, `start_all*.bat` carried a `repo_paths.IS_DEV` refusal and a
+`check_stack_down.py` already-running probe, because a launcher that starts the
+*wrong* stack — or a *second* copy of the right one — looks like success until
+you read the ports. Both failures are now structurally impossible rather than
+guarded:
 
-- **A PROD launcher refuses in a dev checkout.** `start_all.bat`,
-  `start_all_wt.bat` and `start_all_hidden.bat` probe `repo_paths.IS_DEV` and
-  exit. This is the mirror of `start_dev.bat`'s existing guard and it is the one
-  that actually cost something: those launchers start a **proxy**, and dev's
-  `PROXY_PORT` *is* prod's `:8100`, so run from dev they bind prod's port while
-  prod never starts — the stack looks healthy while a dev-checkout process serves
-  its market data. In `start_all_hidden.bat` the guard sits ahead of the
-  `__hidden` dispatch, so it fires on the **visible** first pass, before the
-  self-relaunch and before the HUD.
-- **No launcher starts a stack that is already running.** All four call
-  `tools/check_stack_down.py`, which imports **`stop_all._targets()`** and carries
-  no port literal of its own — so the starter and the stopper cannot disagree
-  about what this environment owns. It names the busy ports and the checkout,
-  because with two stacks up "already running" is ambiguous. `--only LABEL`
-  narrows it for single-process launchers; a probe that cannot run degrades to
-  **allow** (its cost is a duplicate process, not a down stack).
-- **`start_webgui.bat` derives its port from `repo_paths`** instead of the `:8500`
-  it used to hardcode in its title, banner, proxy hint and browser helper — from
-  dev it started on `:9500` while announcing prod's port and opening a browser
-  there. `_open_webgui.bat` takes the port as an argument. ⚠ two batch
-  metacharacter traps live here and both were hit: `for /f "usebackq"` strips the
-  quotes around an interpreter path containing spaces, and **`%` in a `-c`
-  argument is eaten by cmd** (`'set X=%s' % v` → `'set X= v`). Emit `set` lines to
-  a temp batch and use concatenation, never `%`-formatting; a test rejects
-  `%s`/`%d` in any `-c` line of that file.
-- **`start_dev.bat`'s waits are bounded.** Its WT branch now calls
-  `:wait_prod_proxy` before opening seven tabs that would all sit blocked, and
-  `:wait_web` returns a failure instead of spinning forever — starting dev before
-  prod used to hang on a message naming the web GUI, one layer below the real
-  blocker.
+- **Wrong stack.** A unit's `ExecStart` and `WorkingDirectory` are generated from
+  that checkout's own `repo_paths`, so a dev unit cannot start prod's code. There
+  is no shared launcher to point at the wrong tree.
+- **Second copy.** systemd will not start a unit that is already active. The
+  `check_stack_down.py` probe existed because a batch file happily starts a
+  ninth process; `systemctl start` on a running unit is a no-op.
+- **Wrong ports.** Ports come from `repo_paths` at generation time, so
+  `trading-dev-*` binds 9210–9215 by construction. The `start_webgui.bat` bug —
+  announcing `:8500` while binding `:9500` — has no analogue.
+
+⚠ The batch metacharacter traps that section documented (`for /f "usebackq"`
+eating quotes, `%` eaten inside a `cmd -c`) are dead with `cmd.exe` and are NOT
+worth carrying forward. The shell-script equivalents that DO still bite are the
+CRLF one (see `.gitattributes`) and the fact that `is-active` is not proof the
+ports are free.
 
 **The cutover has been performed (2026-08-09).** Both environments run
 simultaneously and were verified live: prod on 8100/8210-8215/8500 from
 `D:\WebGUI Trading Prod`, dev on 9210-9215/9500 with all four suppressions
-active, one shared Memurai, and dev holding **no proxy of its own**.
+active, one shared Redis, and dev holding **no proxy of its own**.
 
 **Data flows one way.** `tools/snapshot_from_prod.py`, run **from dev**, copies
 prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
@@ -1668,7 +1678,7 @@ into db 1. It hard-refuses unless `ENV_NAME == "dev"`, refuses when the two Redi
 DBs resolve equal, and refuses while dev is up. It **excludes `cmd:*`** (a stream
 is a queue dev would drain and EXECUTE) and **rewrites `cache:driver:control`
 disabled**. **Promotion is explicit:** merge to `main` and push from dev, then run
-`tools\promote.bat` in prod (dev-checkout guard, dirty-tree guard *before*
+`tools/promote.sh` in prod (dev-checkout guard, dirty-tree guard *before*
 stopping anything, `git pull --ff-only`, reinstall only if `requirements.lock`
 moved, restart).
 
@@ -1681,7 +1691,7 @@ its `edge_tts` import and returns `None`, so the Desk's spoken alerts would have
 gone live on prod **completely silent**, with one log line and nothing on screen
 to say why. Caught before promoting only because prod's venv was checked
 directly. **Verify with a dry-run against the prod venv before promoting** —
-`"D:\WebGUI Trading Prod\.venv\Scripts\python.exe" -m pip install --dry-run -r requirements.lock`
+`/home/administrator/prod/.venv/bin/python -m pip install --dry-run -r requirements.lock`
 should name exactly the packages you intended and nothing else. Regenerating the
 whole lock with `pip freeze` is the wrong fix: the lock has drifted from the
 venv before (132 entries against 135 installed, `tweepy` missing entirely), so a
@@ -1729,7 +1739,7 @@ handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
 
 **The fake bus now matches prod's ONE-Redis semantics.** Every `Bus(fake=True)`
 used to build its own `FakeStrictRedis`, so two Bus objects in the same test
-shared nothing — while in production every Bus talks to the same Memurai. That is
+shared nothing — while in production every Bus talks to the same Redis. That is
 not harmless: **four production modules construct their OWN bus** rather than
 receiving one (`options_svc.compute._BRIEFING_BUS`, `trade_svc.compute._BUS`,
 `webgui/bus_client._bus`, `_scaffold`'s `the_bus or Bus()`), so a test handing a
@@ -1779,7 +1789,7 @@ in new stores.
 `shared/contracts`, `shared/config_toml.py`, `webgui/bus_client.py`. That is the
 one seam every tier crosses, and where the documented envelope-vs-payload bug
 class lives (`cache_get` returns a `CacheEnvelope`, not the payload). Run it with
-`.venv\Scripts\python -m pyright`; it is **clean, and must stay clean**.
+`.venv/bin/python -m pyright`; it is **clean, and must stay clean**.
 
 ⚠ **Do not widen it to the repo.** The services and pages are large, untyped, and
 full of deliberately loose payload dicts (contracts model rows as `list[dict]` on
@@ -1836,7 +1846,7 @@ enforce it independently:
 open path is reached by the `driver_paper_create` command on `cmd:options` — a
 Redis stream entry. Consumer groups are created at id `0`, so a fresh group
 **replays the backlog** (the documented "burned a day's API budget" incident),
-and Memurai is unauthenticated, so any local process can enqueue one. Until
+and Redis is reachable by any local process, so one can enqueue a command. Until
 2026-08-29 that path checked only the halt flag, per-trade sizing, min fill and
 buying power: an arbitrary structure with no defined risk could be opened into
 the $25k paper book, and the book could grow past `max_concurrent` without limit,
@@ -1944,7 +1954,7 @@ and died with the Windows Terminal tab.
 
 ## Performance characteristics & known hotspots
 
-Single-user, localhost Memurai — so most of these are *tolerable today* but are the
+Single-user, localhost Redis — so most of these are *tolerable today* but are the
 real levers if a page feels sluggish or a service churns CPU/network. Audited
 2026-06-19; ranked by impact. Fix the High items first if optimizing.
 
@@ -2197,52 +2207,50 @@ singletons. **Hygiene:** stale `*.log.err` manual stderr captures are now
 Each app's tests run from **inside that app folder** (entrypoints add the repo
 root to `sys.path` at runtime):
 
-```powershell
-cd schwab-proxy        ; python -m pytest tests
-cd options-scanner     ; python -m pytest tests -p no:randomly
-cd sentiment-dashboard ; python -m pytest tests
-cd trade-analyzer      ; python -m pytest .
-cd portfolio-analyzer  ; python -m pytest tests
-cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # transforms + shell smoke (see Tests for the baseline)
+```bash
+(cd schwab-proxy        && ../.venv/bin/python -m pytest tests)
+(cd options-scanner     && ../.venv/bin/python -m pytest tests -p no:randomly)
+(cd sentiment-dashboard && ../.venv/bin/python -m pytest tests)
+(cd trade-analyzer      && ../.venv/bin/python -m pytest .)
+(cd portfolio-analyzer  && ../.venv/bin/python -m pytest tests)
+(cd claude-driver       && ../.venv/bin/python -m pytest .)
+(cd webgui              && ../.venv/bin/python -m pytest .)
 ```
 
-> **In a worktree** (`.claude/worktrees/…`) there is no `.venv` — use the absolute
-> `D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe`. Confining the `cd` to a
-> **subshell** (`(cd webgui && …)`) is still the tidier habit, but it is **no longer
-> load-bearing**: the hooks in `.claude/settings.json` resolve their script from
-> **`${CLAUDE_PROJECT_DIR:-.}`** (fixed 2026-08-16), so a persistent `cd` out of the
-> repo root can no longer wedge the session. Before that fix the hook paths were
-> relative, and a single bare `cd` made every subsequent Bash/PowerShell/Edit call
-> fail with a hook error **that could not be recovered from** — the hook runs before
-> the command, so the shell could not `cd` back. Two facts about the hook
-> environment, both verified with a throwaway probe rather than assumed: it **does**
-> export `CLAUDE_PROJECT_DIR` (absent from an ordinary tool shell, so it cannot be
-> checked by echoing it), and hook commands run through a **POSIX shell, not
-> cmd.exe** — `${VAR:-default}` expands, `%VAR%` does not.
+> **The venv lives INSIDE the checkout** (`.venv/bin/python`), so a relative path
+> works — until you make a git **worktree**, which has no venv of its own and
+> needs the checkout's absolute path
+> (`/home/administrator/prod/.venv/bin/python`). The same trap the Windows layout
+> had, in a different spelling.
+>
+> Confining the `cd` to a **subshell** is the tidier habit but is **not**
+> load-bearing: the hooks in `.claude/settings.json` resolve their script from
+> **`${CLAUDE_PROJECT_DIR:-.}`** (fixed 2026-08-16), so a persistent `cd` out of
+> the repo root can no longer wedge the session. Before that fix a single bare
+> `cd` made every subsequent tool call fail with a hook error **that could not be
+> recovered from** — the hook runs before the command, so the shell could not
+> `cd` back. Verified rather than assumed: the hook environment **does** export
+> `CLAUDE_PROJECT_DIR`, and hook commands run through a **POSIX shell**, so
+> `${VAR:-default}` expands.
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
 all of them — that puts multiple hyphenated app dirs on `sys.path` at once and
 re-triggers the documented `config`/`scoring`/`notifier` module-name collisions).
 
-> **⚠ The venv is at the REPO ROOT, not inside a git worktree.** When working in
-> `.claude/worktrees/<name>/`, invoke it by absolute path:
-> `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest …`
-
-```powershell
-# from the repo root, one service at a time. ALL of these were re-measured
-# 2026-08-19 on the post-dependency-refresh venv — see the note below.
-.venv\Scripts\python -m pytest services\sentiment_svc  # 325 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc    # 1216
-.venv\Scripts\python -m pytest services\portfolio_svc  # 32
-.venv\Scripts\python -m pytest services\trade_svc      # 77
-.venv\Scripts\python -m pytest services\driver_svc     # 239
-.venv\Scripts\python -m pytest services\market_svc     # 77
-.venv\Scripts\python -m pytest shared\bus              # 25
-.venv\Scripts\python -m pytest shared\contracts        # 49 (no app-dir imports — safe together)
-.venv\Scripts\python -m pytest shared\tests            # 89
-.venv\Scripts\python -m pytest tests                   # 69  (env profiles + launcher guards)
-.venv\Scripts\python -m pytest tools\tests             # 816
+```bash
+# from the repo root, one service at a time. Counts re-measured 2026-08-29
+# on LINUX after the migration; compare the failing SET, never the count.
+.venv/bin/python -m pytest services/sentiment_svc  # 325 passed / 1 documented-baseline fail
+.venv/bin/python -m pytest services/options_svc    # 1216
+.venv/bin/python -m pytest services/portfolio_svc  # 32
+.venv/bin/python -m pytest services/trade_svc      # 77
+.venv/bin/python -m pytest services/driver_svc     # 239
+.venv/bin/python -m pytest services/market_svc     # 77
+.venv/bin/python -m pytest shared/bus              # 25
+.venv/bin/python -m pytest shared/contracts        # 49 (no app-dir imports — safe together)
+.venv/bin/python -m pytest shared/tests            # 89
+.venv/bin/python -m pytest tests                   # 69  (env profiles + launcher guards)
+.venv/bin/python -m pytest tools/tests             # 816
 ```
 
 **Every count above is a 2026-08-20 measurement** -- the accuracy-audit batch (ADX,

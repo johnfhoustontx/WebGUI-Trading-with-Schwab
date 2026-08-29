@@ -67,13 +67,19 @@ to `sys.path`); the **app folders run from inside the folder** (each has its own
 `conftest.py` / `sys.path` setup). The copied **legacy engine dirs are `soft`
 (`continue-on-error`)** — they surface for review without wedging the clean-stack gate.
 
-**Runner OS: `windows-latest`.** The stack is Windows-first — it imports `winotify`
-(Windows-only) and touches tkinter/Memurai — so a Linux runner would fail at import
-time. This is intentional, not a portability bug.
+**Runner OS: `ubuntu-latest`.** It was `windows-latest`, on the reasoning that the
+stack imported `winotify` and touched tkinter/Memurai, so a Linux runner would
+fail at import. That reasoning expired with the 2026-08-29 migration, and was
+measured false before this changed: the full suite runs clean on Linux — webgui
+2874, options_svc 1278, trade_svc 457, tools/tests 960, and the rest.
+
+⚠ The runner should match PROD, and prod is Ubuntu 24.04. A Windows runner would
+no longer catch the failures that matter — a `.sh` with CRLF, a path assumption,
+a `systemctl` argv — while passing happily on a platform nothing runs on.
 
 **No Redis service container needed.** Under pytest the bus falls back to
 **`fakeredis`** (`shared/bus/client.py` → `fakeredis.FakeStrictRedis`), and the Schwab
-proxy is mocked, so the suites need no live Memurai/Redis/network.
+proxy is mocked, so the suites need no live Redis or network.
 
 ### Known pre-existing `options-scanner` failures (do not "fix" as part of other work)
 

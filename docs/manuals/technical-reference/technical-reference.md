@@ -60,17 +60,17 @@ degrades rather than crashes.
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Operating system** | **Windows 10 / 11.** The stack is Windows-first: the launchers are `.bat`, desktop toasts use `winotify`, and the Redis backbone is Memurai (a Windows Redis). | Required |
+| **Operating system** | **Ubuntu Server 24.04 LTS.** The stack runs as nine `systemd --user` units; there are no launcher scripts. `loginctl enable-linger` is what makes them start at boot and survive logout. | Required |
 | **Python** | **3.11+** (developed/tested on **3.11.9**; CI pins **3.11**; `ruff` targets `py311`). | Required |
-| **Virtual environment** | A venv at the repo root: **`.venv`**. The launchers resolve `\.venv\Scripts\python.exe` explicitly and abort if it's missing. | Required |
+| **Virtual environment** | A venv at the repo root: **`.venv`**. The launchers resolve `\.venv/bin/python.exe` explicitly and abort if it's missing. | Required |
 | **Browser** | Any modern browser for the web GUI at `http://127.0.0.1:8500`. | Required |
-| **Windows Terminal** | Only for `start_all_wt.bat` (the one-window, tabbed launcher). | Optional |
+| **`uv`** | Installs Python 3.11 alongside the distro's. The lock is resolved against 3.11, and the system Python is externally-managed (PEP 668). | Required |
 
 Create the environment:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv/bin/python -m pip install -r requirements.txt
 ```
 
 ## Python dependencies
@@ -95,7 +95,7 @@ Load-bearing runtime packages:
 |---------|------|
 | `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
 | `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the six domain services. |
-| `redis==8.0.0` | Client for the Memurai backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
+| `redis==8.0.0` | Client for the Redis backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
 | `pydantic>=2.0` | The typed cross-tier contracts. |
 | `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
 | `requests==2.34.2`, `httpx==0.28.1` | HTTP clients. |
@@ -103,17 +103,17 @@ Load-bearing runtime packages:
 | `openpyxl` | Reads the sector/watchlist workbooks. |
 | `apscheduler==3.10.4` | Driver scheduling. |
 | `anthropic==0.112.0` | Claude tool-use calls (imported lazily — the suite runs without it configured). |
-| `matplotlib`, `Pillow`, `winotify`, `yfinance` | Charts/imaging, Windows toasts, optional fallback data. |
+| `matplotlib`, `Pillow`, `yfinance` | Charts/imaging, optional fallback data. Notifications are Telegram / Discord / SMS-over-SMTP / X — all HTTP or SMTP, no OS hooks. |
 
 > **Licensing — read this.** `nicegui[highcharts]` pulls in **Highcharts**, which is
 > free for **personal / non-commercial use only**. Commercial use requires a paid
 > Highcharts license. This is a licensing prerequisite, not a technical one.
 
-## Memurai (the Redis backbone)
+## Redis (the bus backbone)
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Memurai running on `:6379`** | Installs as a **native Windows service** (start it from `services.msc`). It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** The launchers check it but do **not** install or start it for you, and `stop_all.bat` deliberately leaves it running. | Required |
+| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
 | `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
 
 ## Schwab API credentials
@@ -159,7 +159,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 | Port | Process | Status |
 |------|---------|--------|
-| 6379 | Memurai (Redis) | Required |
+| 6379 | Redis | Required |
 | 8100 | schwab-proxy — **start first**, everything depends on it | Required |
 | 8210 | sentiment_svc | Required |
 | 8211 | options_svc | Required |
@@ -186,15 +186,16 @@ aren't running, those paths simply degrade.
 
 ## Startup order
 
-The dependency chain is strict: **Memurai → schwab-proxy → the six services → webgui.**
+The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
 Services wait on the proxy because every one of them resolves market data through it.
 
 | Launcher | Behavior |
 |----------|----------|
-| `start_all.bat` | Proxy + 6 services + webgui in **8 separate console windows**, then opens the browser. |
-| `start_all_wt.bat` | The same 8 processes as **tabs in one Windows Terminal window**. |
-| `start_all_wt.bat nowindow` / `start_all_hidden.bat` | Windowless (`pythonw`), logging to `logs\`. |
-| `stop_all.bat` | Stops the proxy, services, and webgui by port. **Leaves Memurai running.** |
+| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui. Also starts at boot. |
+| `systemctl --user stop trading-prod.target` | Stops all nine. **Redis survives** — it is a system unit this cannot reach. |
+| `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
+| `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
+| `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. |
 
 > The eight processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions
@@ -202,7 +203,7 @@ Services wait on the proxy because every one of them resolves market data throug
 
 ## Verifying the install
 
-1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Memurai,
+1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
    the proxy, Schwab authorization, all six services, and the webgui, plus a
    data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
@@ -211,8 +212,8 @@ Services wait on the proxy because every one of them resolves market data throug
    them — that re-triggers the module-name collisions):
 
 ```powershell
-.venv\Scripts\python -m pytest services\options_svc
-cd webgui ; ..\.venv\Scripts\python -m pytest -q
+.venv/bin/python -m pytest services\options_svc
+cd webgui ; ..\.venv/bin/python -m pytest -q
 ```
 
 ## Operational notes
@@ -232,13 +233,13 @@ cd webgui ; ..\.venv\Scripts\python -m pytest -q
 ## The three tiers
 
 The stack is split into three physically separate tiers communicating over a local
-Redis (Memurai) backbone. No two Tier-2 services talk to each other directly.
+Redis (Redis) backbone. No two Tier-2 services talk to each other directly.
 
 ```
 TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
                     subscribes to events, enqueues commands. No engine imports.
    ▲ cache read / subscribe                │ commands
-TIER 3  STORE+COMM  Memurai (:6379): cache:{domain}:{view}, events:{domain}:{view}
+TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     pub/sub, cmd:{domain} command streams. shared/contracts (typed
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
@@ -253,7 +254,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | Process | Port | Role |
 |---------|------|------|
 | schwab-proxy | 8100 | Schwab auth/token manager + market-data gateway. Start first. |
-| Memurai (Redis) | 6379 | Cache, pub/sub, command streams. |
+| Redis | 6379 | Cache, pub/sub, command streams. |
 | sentiment_svc | 8210 | Sentiment composite, trend, market regime, rotation, nightly momentum cascade. |
 | options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |

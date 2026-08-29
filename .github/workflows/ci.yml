@@ -61,7 +61,7 @@ jobs:
   # Lint — the mechanical bug backstop (ruff config lives in pyproject.toml).
   # ---------------------------------------------------------------------------
   lint:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +82,7 @@ jobs:
   # once the baseline is clean.
   # ---------------------------------------------------------------------------
   audit:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +103,7 @@ jobs:
   # the suite from INSIDE that folder. `soft: true` => continue-on-error.
   # ---------------------------------------------------------------------------
   test:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:

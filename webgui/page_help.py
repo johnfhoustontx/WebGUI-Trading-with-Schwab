@@ -661,7 +661,7 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
 
 Shows whether each part of the app is alive.
 
-- **Green/red cards** — Memurai, the Schwab gateway, your Schwab login, the six
+- **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
   services, and the web app.
 - **Data freshness** — flags data that's gone stale. A view is only judged when
   its publisher is actually due to run: the **scanner** only scans during the

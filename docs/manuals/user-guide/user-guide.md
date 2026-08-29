@@ -35,22 +35,23 @@ the plain-English checklist — the *Technical Reference* has the full detail
 
 ## The essentials (required)
 
-- **Windows 10 or 11.** The app is Windows-first — the launchers are `.bat` files,
-  the alert pop-ups use Windows notifications, and the data backbone (Memurai) is a
-  Windows service.
+- **A Linux host.** The stack runs on Ubuntu Server 24.04 LTS as `systemd` user
+  services. You do not need a desktop on it — you reach the app from your own
+  computer over an SSH tunnel (see *Opening the app*, below).
 - **Python 3.11 or newer.** Install it from python.org if you don't have it.
-- **A one-time setup** in the project folder, which creates the virtual environment
-  the launchers expect and installs everything:
+- **A one-time setup** in the project folder, which creates the virtual
+  environment the units expect and installs everything:
 
-  ```powershell
-  python -m venv .venv
-  .\.venv\Scripts\python -m pip install -r requirements.txt
+  ```bash
+  uv venv --python 3.11 .venv && uv pip install -r requirements.lock
   ```
 
-- **Memurai running.** Memurai is a Windows version of Redis — the local "backbone"
-  the app's parts talk through. It installs as a **Windows service on port 6379**;
-  start it from **services.msc** if it isn't already running. **Nothing works
-  without it** — every page will just say "Waiting for … service."
+  Use the **lock**, not `requirements.txt` — the lock is what the host installs,
+  and a package present in one but not the other ships missing.
+
+- **Redis running.** The local "backbone" the app's parts talk through, on port
+  6379. `sudo systemctl enable --now redis-server`. **Nothing works without it** —
+  every page shows a "Waiting for … service" placeholder.
 - **A modern web browser** to open the app at `http://127.0.0.1:8500`.
 
 ## Schwab account (required for live data)
@@ -85,7 +86,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Ports the app uses
 
 The app runs entirely on your own machine and needs these local ports free:
-**6379** (Memurai), **8100** (Schwab gateway), **8210–8215** (the six services),
+**6379** (Redis), **8100** (Schwab gateway), **8210–8215** (the six services),
 and **8500** (the web app). If another program is already using one of them, the
 matching piece won't start.
 
@@ -98,16 +99,25 @@ matching piece won't start.
 The app is made of several background services plus the web interface. Start them
 all together with one of the launcher scripts in the project root:
 
-| Launcher | What it does |
+| Command | What it does |
 |----------|--------------|
-| `start_all.bat` | Opens the gateway, the six domain services, and the web app in **eight separate console windows**, then opens your browser. |
-| `start_all_wt.bat` | Same eight processes, but as **eight tabs in one Windows Terminal window** (less desktop clutter; requires Windows Terminal). |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services and the web app. |
+| `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
+| `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
-After the windows finish loading, the app is available at:
+They also start **automatically when the machine boots** — you do not normally
+run anything by hand.
+
+**Opening the app.** The web app deliberately listens only on the host itself and
+has no password, so it is never exposed to the network. From your own computer,
+double-click the **Trading Web GUI** shortcut: it opens a secure tunnel and your
+browser at
 
 ```
 http://127.0.0.1:8500
 ```
+
+That address is your own machine — the tunnel carries it to the trading host.
 
 The browser usually opens automatically. If it does not, open that address
 yourself.
@@ -121,7 +131,7 @@ You don't interact with these directly, but it helps to know they exist:
   handles ordering for you).
 - **Six domain services** — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).
-- **Memurai (Redis)** — a local data backbone the services and the web app share.
+- **Redis** — a local data backbone the services and the web app share.
 
 ## The proxy-down banner
 
@@ -138,9 +148,10 @@ launcher, or restart the specific service from the **System Status** page.
 
 ## Stopping everything
 
-Use **Stop All Services** at the foot of the rail, or run `stop_all.bat`. This stops the
-gateway, the six services, and the web app. (Memurai is intentionally left
-running — it's a shared Windows service.)
+Use **Stop All Services** at the foot of the rail, or run
+`systemctl --user stop trading-prod.target`. This stops the
+gateway, the six services, and the web app. (Redis is intentionally left
+running — it is a *system* service the app's own units cannot reach.)
 
 ---
 
@@ -1324,7 +1335,7 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Memurai, the Schwab gateway, the six services, and the web
+- A **component grid** — Redis, the Schwab gateway, the six services, and the web
   app itself, each with Online/Offline and its tier. The gateway's card also shows
   the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
@@ -1338,7 +1349,7 @@ A health board for the whole stack.
 > **`token_expired: true` on the gateway is routine** — it refreshes itself. Only a
 > missing or expired *refresh* token needs **Re-authorize**.
 
-> **Restart order matters:** Memurai first, then the gateway, then services, then the
+> **Restart order matters:** Redis first, then the gateway, then services, then the
 > web app. A service restarted while the gateway is down will start and then fail to
 > fetch anything.
 
@@ -1403,8 +1414,8 @@ A guarded "stop the whole local stack" page. The red **Stop all services** butto
 (behind a confirmation) stops the gateway, the six services, and the web app.
 
 > **This also stops the page you're on** — it will become unresponsive right after
-> you confirm, by design. Memurai is left running. Re-launch with `start_all.bat`
-> or `start_all_wt.bat`.
+> you confirm, by design. Redis is left running. Re-launch with
+> `systemctl --user start trading-prod.target`.
 
 ---
 

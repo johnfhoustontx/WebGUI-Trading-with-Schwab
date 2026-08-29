@@ -50,7 +50,7 @@ keys that feed it. Menu order matches the rail.
 TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)
         ▲                                                  │
         │  read cache / subscribe events                   ▼
-TIER 3  Redis (Memurai, :6379)  ◀──cache_set + publish──  TIER 2  services
+TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
         ▲                                                  │
         │                                                  ▼  market data
         └──────────────  schwab-proxy (:8100)  ◀───────────┘
@@ -610,7 +610,7 @@ hard-code ports or `D:\` paths.
 | Component | Port | `repo_paths` |
 |-----------|------|--------------|
 | schwab-proxy | 8100 | `PROXY_PORT` / `PROXY_URL` |
-| Memurai (Redis) | 6379 | `MEMURAI_PORT` / `MEMURAI_URL` |
+| Redis | 6379 | `MEMURAI_PORT` / `MEMURAI_URL` |
 | sentiment_svc | 8210 | `SERVICE_PORTS["sentiment"]` / `SERVICE_URLS["sentiment"]` |
 | options_svc | 8211 | `SERVICE_PORTS["options"]` |
 | portfolio_svc | 8212 | `SERVICE_PORTS["portfolio"]` |
@@ -631,7 +631,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 |---|---|---|
 | `[services]` ports | 8210–8215 | **9210–9215** (`port_offset`) |
 | webgui | 8500 | **9500** |
-| Redis | Memurai db **0** | Memurai db **1** |
+| Redis | Redis db **0** | Redis db **1** |
 | schwab-proxy | **owns** it on 8100 | **borrows** prod's — starts none |
 
 Identity comes from `config/env.local.toml` (**gitignored**, so `git pull` can never

@@ -46,7 +46,7 @@ Three layers, running as separate programs on your machine:
 | **The services** | Six background programs (ports 8210–8215), one per subject area: sentiment, options, portfolio, trade, driver, market. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
 | **The web app** | What you look at, on port 8500. | It **only displays**. It never calculates anything itself. |
 
-Between them sits a small in-memory database (Memurai, the Windows build of Redis).
+Between them sits a small in-memory database (Redis).
 Services write their results into it; the web app reads them and repaints.
 
 The practical consequence: **a page showing stale or missing data is almost always a
@@ -2827,7 +2827,7 @@ merely running but actually *publishing*.
 
 | Component | Tier | Port |
 |---|---|---|
-| Memurai (Redis backbone) | 3 | 6379 |
+| Redis (bus backbone) | 3 | 6379 |
 | schwab-proxy (market data / auth) | 1 | 8100 |
 | sentiment_svc | 2 | 8210 |
 | options_svc | 2 | 8211 |
@@ -2856,7 +2856,7 @@ Almost every "this page is broken" symptom in this app is a service that has sto
 publishing. Reloading the browser cannot fix that. This page turns a five-minute
 investigation into a five-second one: find the stale row, restart that service.
 
-**The order matters when restarting.** Memurai first, then the proxy, then services, then
+**The order matters when restarting.** Redis first, then the proxy, then services, then
 the web app. A service restarted while the proxy is down will start and then fail to
 fetch anything.
 
@@ -2959,13 +2959,13 @@ number before that happens. The Claude counter does the same for money.
 *Menu: bottom of the rail, the red button · Route `/terminate`*
 
 A confirm-gated stop of the entire local stack — the gateway, all six services, and the
-web app itself. **Memurai is deliberately left running**, because it is a shared Windows
+web app itself. **Redis is deliberately left running**, because it is a *system*
 service this app does not own.
 
 After confirming, this page stops responding. That is expected: it has just stopped the
 program serving it.
 
-Restart with `start_all.bat` (or `start_all_hidden.bat` to run windowless).
+Restart with `systemctl --user start trading-prod.target`.
 
 It is rendered as a danger-outlined button and sits **last** in the menu so that
 overshooting Settings cannot land on it.

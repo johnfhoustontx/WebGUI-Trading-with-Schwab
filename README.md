@@ -3,7 +3,8 @@
 A self-contained **NiceGUI web app** for a personal Schwab options-trading stack:
 GEX/options scanning, dealer-gamma analytics, a multi-strategy calculator/simulator,
 market-sentiment scoring, a trade analyzer, portfolio analytics, and an autonomous
-(paper) trade "driver" backed by Claude. Single-user, localhost, Windows-first.
+(paper) trade "driver" backed by Claude. Single-user, localhost, Linux (Ubuntu
+24.04 LTS) under systemd user units.
 
 > **Working with the code?** Read [`CLAUDE.md`](CLAUDE.md) first — it is the living
 > architecture/decision record (per-feature deep-dives, gotchas, and the running
@@ -16,7 +17,7 @@ market-sentiment scoring, a trade analyzer, portfolio analytics, and an autonomo
 ```
 TIER 1  webgui/ (NiceGUI, :8500)            render-only; reads Redis, enqueues commands
    ▲ cache read / subscribe   │ commands
-TIER 3  Memurai/Redis (:6379)               cache:{domain}:{view} + events pub/sub + cmd:{domain} streams
+TIER 3  Redis (:6379)                       cache:{domain}:{view} + events pub/sub + cmd:{domain} streams
    ▲ publish                  │ consume     shared/contracts (typed payloads) + shared/bus (redis wrapper)
 TIER 2  services/{domain}_svc (:8210–8214)  FastAPI; own scheduler + command consumer; call the proxy
    │
@@ -34,8 +35,10 @@ never hard-code ports/paths.
 
 ## Requirements
 
-- **Python 3.11+** (Windows-first: uses `winotify`, tkinter, and a local **Memurai** Redis service).
-- **Memurai** (Redis for Windows) running on `:6379`.
+- **Python 3.11+** installed alongside the system Python (`uv python install 3.11`).
+  The lock is resolved against 3.11; do not `pip install` into the distro's Python
+  (PEP 668 marks it externally-managed).
+- **Redis** on `:6379`, with `requirepass` set (the bus reads `MEMURAI_PASSWORD`).
 - A Schwab developer app + OAuth tokens (see `shared/*.example.*` templates).
 - An `ANTHROPIC_API_KEY` (env or `shared/anthropic_key.txt`) for the driver + Gamma Analyze.
 
@@ -52,17 +55,34 @@ Copy the secret templates and fill in real values (all gitignored):
 
 ## Running
 
-Easiest — launch the whole stack (Memurai check → proxy → 5 services → web GUI):
+The stack is nine `systemd --user` units. There are no launcher scripts.
 
-```powershell
-start_all_wt.bat     # 7 tabs in one Windows Terminal window (live logs)
-# or start_all.bat   # 7 separate console windows
+```bash
+systemctl --user start trading-prod.target
 ```
 
-Then open http://127.0.0.1:8500. Stop with `stop_all.bat` (or the in-app **More → Terminate**
-page). Memurai is left running (it's a shared Windows service).
+```bash
+systemctl --user list-units 'trading-prod*'   # or: journalctl --user -u trading-prod-options_svc -f
+```
 
-Manual order: Memurai → `schwab-proxy\schwab_proxy.py` → `services\*_svc\app.py` (×5) → `webgui\main.py`.
+The units are **generated**, never committed — `deploy/systemd/generate_units.py`
+derives ports, paths and the environment identity from `repo_paths`, so a unit
+cannot disagree with the checkout it runs:
+
+```bash
+.venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
+```
+
+Stop the whole stack with `systemctl --user stop trading-prod.target`, or the
+in-app **More → Stop All Services** page. Redis survives structurally: it is a
+*system* unit a user-scoped systemctl cannot reach.
+
+The web GUI binds `127.0.0.1` and has **no authentication** — reach it over an
+SSH tunnel (`tools/open_webgui.ps1` from a Windows workstation forwards `:8500`
+and `:8100`), never by exposing the port.
+
+Manual order, for debugging one component: Redis → `schwab-proxy/schwab_proxy.py`
+→ `services/*_svc/app.py` (×6) → `webgui/main.py`.
 
 ## Testing
 
