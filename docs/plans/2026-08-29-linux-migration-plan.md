@@ -14,11 +14,11 @@
 
 ## What the VPS changes
 
-**1. The parallel run needs a private network and a code change.** The design says the Linux box borrows the Windows proxy (`owns_proxy = false`), because the Schwab refresh token is one rotating credential. That works today only because dev and prod share a machine — `repo_paths.py:305` hardcodes `PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"`. Across the internet it needs **Tailscale** (never a forwarded port — the proxy is unauthenticated) and a **`proxy_host` knob**. Task 9 adds it.
+**1. Dev moves to the VPS too** (decided 2026-08-29). Two checkouts under **one Linux user** — `/home/john/prod` and `/home/john/dev` — which is exactly today's shape. It *simplifies*: dev borrows prod's proxy at `127.0.0.1` again, `snapshot_from_prod.py` keeps working because it needs filesystem read access to prod's stores, and `trading-{ENV_NAME}-{name}` already makes the unit sets non-colliding. Task 23 stands it up. Consequence: **code is edited on the VPS over SSH**, so worktrees, the `.claude/` hooks and the scratchpad move with it — and Task 12 exists because one of those hooks fails silently if they do.
 
-**0. Dev moves to the VPS too** (decided 2026-08-29). Two checkouts under **one Linux user** — `/home/john/prod` and `/home/john/dev` — which is exactly today's shape. It *simplifies*: dev borrows prod's proxy at `127.0.0.1` again, `snapshot_from_prod.py` keeps working because it needs filesystem read access to prod's stores, and `trading-{ENV_NAME}-{name}` already makes the unit sets non-colliding. Task 23 stands it up. Consequence: **code is edited on the VPS over SSH**, so worktrees, the `.claude/` hooks and the scratchpad move with it — and Task 12 exists because one of those hooks fails silently if they do.
+**2. The parallel run needs a private network and a code change.** The design says the Linux box borrows the Windows proxy (`owns_proxy = false`), because the Schwab refresh token is one rotating credential. That works today only because dev and prod share a machine — `repo_paths.py:305` hardcodes `PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"`. Across the internet it needs **Tailscale** (never a forwarded port — the proxy is unauthenticated) and a **`proxy_host` knob**. Task 9 adds it.
 
-**2. Backups are no longer a drive you can touch.** The E:-drive robocopy routine dies with the Windows box. Phase 6 replaces it. Do not treat this as optional: `paper_account.db`, `paper_account_driver.db` and `signals.db` are the trading record, and `gex_history.db` is 1.52 GB of history that cannot be re-fetched.
+**3. Backups are no longer a drive you can touch.** The E:-drive robocopy routine dies with the Windows box. Phase 6 replaces it. Do not treat this as optional: `paper_account.db`, `paper_account_driver.db` and `signals.db` are the trading record, and `gex_history.db` is 1.52 GB of history that cannot be re-fetched.
 
 ---
 
@@ -129,7 +129,13 @@ sudo apt install -y redis-server && sudo systemctl enable --now redis-server
 
 Set `requirepass` in `/etc/redis/redis.conf`, restart, and confirm `redis-cli -a "$PW" ping` returns `PONG`.
 
-**Step 9: Enable lingering** so user units start at boot without a login session.
+**Step 9: `python-is-python3`.** Ubuntu ships `python3` and no `python`; all three `.claude` hooks invoke bare `python` and would fail "command not found", wedging every session.
+
+```bash
+sudo apt install -y python-is-python3
+```
+
+**Step 10: Enable lingering** so user units start at boot without a login session.
 
 ```bash
 sudo loginctl enable-linger $USER
@@ -269,11 +275,17 @@ Expected: an empty `Required-by:`. Commit.
 
 ---
 
-## Task 12: Teach the prod-promote guard the Linux path
+## Task 12: Make the `.claude` tooling survive the move
 
-**Files:** modify `.claude/hooks/guard_prod_promote.py`, add `tools/tests/test_guard_prod_promote.py`
+**Files:** modify `.claude/hooks/guard_prod_promote.py`, `.claude/hooks/ruff_fix.py`, `.claude/settings.json`; add `tools/tests/test_guard_prod_promote.py`
 
-⚠ **This guard goes INERT in the move, silently.** It identifies the prod checkout by the case-insensitive path fragment `"webgui trading prod"` (line 35) — chosen deliberately over an absolute path so a drive-letter change could not defeat it. `/home/john/prod` does not contain that fragment, so every mutating git verb in prod would sail straight through. The hook exists precisely because knowing the rule was not enough.
+`.claude/` is **tracked** (settings, launch.json, three hooks, one hook test), so it travels to the VPS with the repo — and four things in it are Windows-bound. Audited 2026-08-29. Two fail **silently**, which is why this is a task and not a footnote.
+
+**Every fix below is additive.** Windows must keep working for the whole migration window, including the parallel-run week — so match *both* layouts rather than replacing one with the other.
+
+### A. `guard_prod_promote.py` goes INERT, silently
+
+⚠ **The guard stops firing entirely.** It identifies the prod checkout by the case-insensitive path fragment `"webgui trading prod"` (line 35) — chosen deliberately over an absolute path so a drive-letter change could not defeat it. `/home/john/prod` does not contain that fragment, so every mutating git verb in prod would sail straight through. The hook exists precisely because knowing the rule was not enough.
 
 **Step 1: Failing tests.**
 
@@ -287,7 +299,29 @@ Expected: an empty `Required-by:`. Commit.
 
 **Step 3: Verify the hook actually fires**, since a hook that passes its unit tests can still be mis-wired. Attempt a blocked command and confirm exit 2.
 
-**Step 4: Run `tools/tests`, commit.**
+**Step 4: Run `tools/tests`.**
+
+### B. `ruff_fix.py` silently stops auto-fixing
+
+⚠ Line 23 builds `repo / ".venv" / "Scripts" / "python.exe"` and line 24 is `if not py.exists(): return 0`. On Linux that path does not exist, so the hook **no-ops and returns success** — ruff auto-fix quietly stops running and nothing anywhere says so. This is exactly the repo's most-documented bug class: a degrade path with no trace.
+
+**Step 5:** Resolve the interpreter for **either** layout — `.venv/Scripts/python.exe` **or** `.venv/bin/python` — and keep the existing "not found → skip" behaviour only when *neither* exists. Test both branches with a `tmp_path` fake venv.
+
+### C. Every pytest and ruff call would prompt
+
+All eleven `permissions.allow` entries name `.venv/Scripts/python[.exe]` or the absolute `D:/WebGUI Trading with Schwab/...`. None matches `.venv/bin/python`, so on the VPS every test run asks for approval. Not a breakage — just constant friction that makes a session unusable.
+
+**Step 6:** **Add** the `.venv/bin/python` equivalents. Do not remove the Windows entries.
+
+### D. `python` is not on PATH on Ubuntu
+
+All three hook commands invoke bare `python`. Ubuntu 24.04 ships `python3` and no `python`, so every hook would fail "command not found" — and CLAUDE.md already records how badly a failing hook wedges a session, since the hook runs *before* the command that would fix it.
+
+**Step 7:** Fix this in **provisioning, not in `settings.json`** — `sudo apt install -y python-is-python3` on the VPS (added to Task 3). One package beats editing a tracked, currently-portable config; `${CLAUDE_PROJECT_DIR:-.}` already expands correctly under the POSIX shell hooks run in.
+
+⚠ **`.claude/launch.json` is deliberately NOT fixed here.** Its `runtimeExecutable` is a single string (`.venv\Scripts\python.exe`) that cannot name both layouts, and it only drives the Browser-pane preview. It flips when dev moves, in Task 23.
+
+**Step 8: Commit.**
 
 ---
 
@@ -478,7 +512,9 @@ cd /home/john/dev && .venv/bin/python tools/snapshot_from_prod.py
 
 Expected: it refuses if dev is up (stop it first), copies prod's stores via the online-backup API with prod still running, and DUMPs db 0 into db 1 — excluding `cmd:*` and rewriting `cache:driver:control` disabled.
 
-**Step 6: Confirm the two webguis are independent** — prod on 8500, dev on 9500, dev carrying its `DEV` chip and tab-title prefix. Restart a dev service from dev's Status page and confirm via `systemctl --user status` that only the `trading-dev-` unit moved.
+**Step 6: Flip `.claude/launch.json`.** Both configurations set `"runtimeExecutable": ".venv\Scripts\python.exe"`; on Linux that is `.venv/bin/python`. A single string cannot name both layouts, which is why Task 12 deferred it to here — by now no Windows checkout is being previewed from. Keep `autoPort: false` and the 9500/8500 split.
+
+**Step 7: Confirm the two webguis are independent** — prod on 8500, dev on 9500, dev carrying its `DEV` chip and tab-title prefix. Restart a dev service from dev's Status page and confirm via `systemctl --user status` that only the `trading-dev-` unit moved.
 
 ## Task 24: Replace the E:-drive routine
 
