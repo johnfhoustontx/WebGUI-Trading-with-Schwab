@@ -371,16 +371,6 @@ def _log_event(conn, trade, event):
     trades_db.insert_event(conn, entry)
 
 
-def log_trade_event(trade, event):
-    """Standalone event append. Used by legacy callers that don't also
-    mutate the trade row in the same transaction."""
-    conn = trades_db.connect()
-    try:
-        _log_event(conn, trade, event)
-        conn.commit()
-    finally:
-        conn.close()
-
 #############################################
 # SUMMARY STATS
 #############################################

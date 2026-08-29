@@ -388,32 +388,3 @@ def snapshot_count(conn, symbol):
     ).fetchone()
     return int(row['n']) if row else 0
 
-
-def get_iv_series(conn, symbol, lookback_days=DEFAULT_LOOKBACK_DAYS):
-    """Pull the stored IV series for charting or export"""
-    if conn is None:
-        return pd.DataFrame()
-
-    symbol = symbol.lstrip('$').upper()
-    cutoff = (dt.date.today() - dt.timedelta(days=lookback_days)).isoformat()
-
-    return pd.read_sql_query(
-        """
-        SELECT snapshot_date, spot, cm30_iv, front_iv, rvol_20d, rvol_60d, vrp
-        FROM iv_snapshots
-        WHERE symbol = ? AND snapshot_date >= ?
-        ORDER BY snapshot_date
-        """,
-        conn,
-        params=(symbol, cutoff),
-    )
-
-
-def tracked_symbols(conn):
-    """Every symbol with stored history"""
-    if conn is None:
-        return []
-    rows = conn.execute(
-        'SELECT DISTINCT symbol FROM iv_snapshots ORDER BY symbol'
-    ).fetchall()
-    return [r['symbol'] for r in rows]

@@ -348,8 +348,7 @@ Routes:
 | `/status` | System Status — health board probing Memurai / proxy / Schwab auth / the six services / webgui, plus cache freshness; per-component windowless Restart. | built |
 | `/terminate` | Stop All Services — confirm-gated stop of the whole local stack (Memurai is left running). | built |
 
-The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
-strip), `detail.py` (collapsible Trade detail panel, reused by all signal
+The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), **`flow_panels.py`** (PURE builders for the two Options Flow console
 panels on the Gamma page's **Flow** + **Net Prem** subtabs — see the dedicated
 section below), `svg.py` (gradient-bar / range-marker SVG — the composite-score
@@ -1688,6 +1687,38 @@ whole lock with `pip freeze` is the wrong fix: the lock has drifted from the
 venv before (132 entries against 135 installed, `tweepy` missing entirely), so a
 wholesale refresh sweeps unrelated local state into the commit. Add the pins by
 hand.
+
+**The lock's invariant is COMPLETENESS, not tidiness — and it was violated in
+both directions (audited 2026-08-29).** `requirements.lock` is what prod
+installs, so the test that matters is: *every package declared in
+`requirements.txt` appears in the lock, and nothing else does.*
+
+- **Missing.** `tweepy` — a declared runtime dep (the X/Twitter push channel) —
+  was absent from the lock **along with both of its own deps** (`oauthlib`,
+  `requests-oauthlib`). Confirmed live: **prod's venv did not have it**. The
+  import in `options_svc/push_notify.py` is lazy, and `twitter.enabled` is unset,
+  so the channel silently did nothing instead of crashing — the same shape as the
+  edge-tts incident, just already latent.
+- **Extra.** The lock was a raw `pip freeze`, so prod also installed the dev
+  toolchain: `pytest`'s siblings `ruff`/`pip_audit` plus pip_audit's whole SBOM
+  tree (`cyclonedx-python-lib`, `license-expression`, `boolean.py`,
+  `packageurl-python`, `py-serializable`, `pip-api`, `pip-requirements-parser`,
+  `CacheControl`, `msgpack`, `defusedxml`), and `yfinance`'s orphans
+  (`beautifulsoup4`, `protobuf`, `soupsieve`).
+
+⚠ **Two entries look like dev tools and are NOT**: `autopep8` (+`pycodestyle`) is
+required by **schwab-py**, and `docutils` by **nicegui**. Check `pip show <pkg>`
+→ `Required-by:` before pruning anything. ⚠ `pytest` IS declared in
+`requirements.txt` under "Testing" — a prod checkout is expected to run the
+suite — so it stays locked; `ruff`/`pip_audit` are `requirements-dev.txt` only
+and do not.
+
+**The check is two greps, and worth running whenever the lock moves:** every
+name in `requirements.txt` must appear in `requirements.lock`, and
+`pip install --dry-run -r requirements.lock` against the PROD venv should install
+nothing. This still stands: **do not "fix" the lock with a wholesale
+`pip freeze`** — that is what swept the dev toolchain in. Add and remove pins by
+hand, verifying each with `Required-by:`.
 
 **Known limits (not defects) are listed in the runbook** — chiefly that dev is
 *quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan

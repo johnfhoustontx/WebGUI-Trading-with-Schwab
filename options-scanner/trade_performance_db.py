@@ -108,17 +108,6 @@ def get_iv_snapshots(path, trade_id):
         conn.close()
 
 
-def events_on_date(path, date_str):
-    conn = connect(path)
-    try:
-        rows = conn.execute(
-            "SELECT * FROM perf_events WHERE substr(ts,1,10)=? ORDER BY ts", (date_str,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
 def entry_ts(path, trade_id):
     conn = connect(path)
     try:

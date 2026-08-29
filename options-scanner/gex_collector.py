@@ -194,12 +194,6 @@ def next_boundary(now: datetime) -> datetime:
     return base.replace(minute=minute)
 
 
-def sleep_to_next_boundary() -> None:
-    now = datetime.now(TZ)
-    target = next_boundary(now)
-    time.sleep(max(0, (target - now).total_seconds()))
-
-
 def _maybe_lock(lock):
     return lock if lock is not None else contextlib.nullcontext()
 

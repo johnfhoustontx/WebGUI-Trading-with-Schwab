@@ -4,6 +4,65 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-29 (**Security/runtime audit — batch 4: hygiene. The
+lock was wrong in BOTH directions, and prod was missing a declared dependency.**
+- **`tweepy` was never in the lock, and prod does not have it.** It is a DECLARED
+  runtime dependency (`requirements.txt`, the X/Twitter push channel) and it was
+  absent from `requirements.lock` **together with both of its own deps**
+  (`oauthlib`, `requests-oauthlib`). Confirmed by dry-running the lock against
+  prod's venv, which offered to install all three: **prod's venv genuinely lacks
+  them.** `options_svc/push_notify.py` imports tweepy LAZILY and
+  `twitter.enabled` is unset, so the channel silently does nothing rather than
+  crashing — which is exactly why nobody noticed. Same shape as the edge-tts
+  incident the repo already has a rule about, except this one was already live.
+- **The lock also shipped the dev toolchain to prod.** It is a raw `pip freeze`,
+  so prod installed `ruff`, `pip_audit` and pip_audit's entire SBOM tree
+  (`cyclonedx-python-lib`, `license-expression`, `boolean.py`,
+  `packageurl-python`, `py-serializable`, `pip-api`,
+  `pip-requirements-parser`, `CacheControl`, `msgpack`, `defusedxml`) plus
+  `yfinance`'s orphans (`beautifulsoup4`, `protobuf`, `soupsieve`). Twelve
+  entries removed; the lock went 130 → 118 and is now COMPLETE for the first
+  time (every declared package is locked).
+- ⚠ **Two of the audit's "dev tool" candidates were wrong, and `Required-by`
+  caught both.** `autopep8` (and `pycodestyle`) is required by **schwab-py**;
+  `docutils` by **nicegui**. Removing either would have broken a fresh prod
+  install. A third — `pytest` — I removed and then restored: it IS declared in
+  `requirements.txt` under "Testing", because a prod checkout is expected to be
+  able to run the suite. `ruff`/`pip_audit` live in `requirements-dev.txt` only
+  and correctly stay out.
+- **The dead-code sweep found far less than the audit claimed, and that is the
+  finding.** Of ~2,100 proposed lines, most turned out to be **documented, tested,
+  offline tooling the repo deliberately keeps** — the same category as the
+  `validate_*.py` scripts. `claude-driver/feature_engineer.py` + its nine ML
+  probe scripts (~1,215 lines, the single biggest item) are described in that
+  folder's own CLAUDE.md and README as the feature builder for the **external ML
+  prediction servers**, explicitly "unrelated to the removed agent" — the audit's
+  premise that they were orphaned by `morning_agent`'s deletion was simply false.
+  `gex_direction_log.py` and `trades_import.py` are likewise documented research
+  / bootstrap CLIs with their own tests. None were deleted.
+- **512 lines were genuinely dead and went**, each verified to have ZERO
+  references repo-wide including tests: `webgui/pages/options/header.py` (104, and
+  root CLAUDE.md's claim that `pages/options/` "shares header.py" was stale) with
+  its test file; seven public functions in `shared/analysis_lib/technical.py`
+  (~286, Blueprint-Analyzer stragglers the earlier trim missed); and five uncalled
+  functions across `gex_collector`, `paper_trader`, `trade_performance_db` and
+  `deepdive/iv_history`.
+- ⚠ **One deletion was WRONG and the suite caught it.** `options_simulator/pnl.py`
+  was removed on the audit's claim that its only consumer (the Tk window) had gone
+  — but `test_options_simulator.py` imports `decompose` as
+  `from options_simulator.pnl import ...`, a form my `from .pnl` / `import pnl`
+  greps missed, and `test_simulator_headless.py` asserts
+  `from options_simulator import engine, data, pnl` as the package's public
+  surface. Restored. **The lesson is the grep**: a MODULE can be referenced as
+  `package.module`, so a bare-name sweep is required for modules exactly as it is
+  for functions — which is why the twelve function deletions were safe and this
+  one was not.
+- Deleting `header.py` broke `test_no_inline_style.py`, which names it in an
+  explicit file list — the Tailwind guard doing its job, and the reason that test
+  is worth having.)
+
+---
+
 **Last updated:** 2026-08-29 (**Security/runtime audit — batch 3: robustness. A
 broken sub-signal read as maximum conviction; a loss halt was a suggestion.**
 - **One NaN made the aggression axis maximally bullish at maximum confidence.**

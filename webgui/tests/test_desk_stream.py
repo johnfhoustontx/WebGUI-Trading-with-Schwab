@@ -19,7 +19,6 @@ import desk_stream as ds
 from pages import bullbear as _bb
 from pages import desk as d
 from pages.options import flow as _flow
-from pages.options import header as _hdr
 from pages.options import matrix as _mx
 
 
