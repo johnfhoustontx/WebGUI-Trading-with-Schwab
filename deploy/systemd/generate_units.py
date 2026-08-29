@@ -159,10 +159,54 @@ def _target_text():
             "WantedBy=default.target\n")
 
 
+def _backup_units():
+    """The nightly backup service + timer.
+
+    Deliberately NOT ``PartOf`` the stack target. Backups must not stop when the
+    stack does -- the moment you most want yesterday's copy is the moment the
+    stack is down. It is a oneshot on a timer, not a member of the fleet.
+
+    17:30 local, which is after everything that writes: collection stops 15:20,
+    the momentum cascade runs 16:20 and the calibration rebuild 16:30. Backing up
+    mid-cascade would capture a half-written night.
+
+    ``Persistent=true`` runs a missed occurrence at next boot -- a machine that
+    was off at 17:30 still gets its backup rather than silently skipping a day.
+    """
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - nightly backup
+# No PartOf: this must survive the stack being stopped.
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=TZ=America/Chicago
+EnvironmentFile={_env_file()}
+ExecStart={_python()} tools/backup_local.py
+"""
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - nightly backup timer
+
+[Timer]
+# After collection (15:20), the momentum cascade (16:20) and the calibration
+# rebuild (16:30) -- so the copy is of a settled night, not a half-written one.
+OnCalendar=*-*-* 17:30:00
+# Run a MISSED occurrence at boot rather than skipping the day.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-backup.service": svc,
+            f"trading-{ENV_NAME}-backup.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
     out[target_name()] = _target_text()
+    out.update(_backup_units())
     return out
 
 

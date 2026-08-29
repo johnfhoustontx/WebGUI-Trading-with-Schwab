@@ -53,6 +53,22 @@ def rendered():
     return {n: _parse(t) for n, t in units.render_all().items()}
 
 
+def stack_services():
+    """The units the TARGET pulls up -- the fleet, and nothing else.
+
+    Auxiliary units (the nightly backup) are deliberately excluded: they are not
+    PartOf the target, carry no restart policy because they are oneshots, and
+    must not stop when the stack does. The moment you most want yesterday's
+    backup is the moment the stack is down.
+
+    Derived from the target's own Wants= rather than a second list here, so a
+    unit added to the fleet is covered by every fleet test automatically."""
+    all_units = units.render_all()
+    target = all_units[f"trading-{ENV_NAME}.target"]
+    return {w for line in target.splitlines() if line.startswith("Wants=")
+            for w in line.split("=", 1)[1].split()}
+
+
 # --- naming: the seam with the Status page ----------------------------------
 def test_unit_names_match_what_the_status_page_restarts():
     """restart_spec builds `trading-{ENV_NAME}-{name}`; the generator must emit
@@ -73,7 +89,7 @@ def test_unit_names_match_what_the_status_page_restarts():
         if spec is not None:
             wanted.add(f"trading-{ENV_NAME}-{spec['name']}.service")
 
-    emitted = {n for n in units.render_all() if n.endswith(".service")}
+    emitted = stack_services()
     assert emitted == wanted, f"missing={wanted - emitted} extra={emitted - wanted}"
 
 
@@ -86,16 +102,18 @@ def test_every_unit_is_scoped_to_this_environment():
 def test_the_target_wants_every_service_and_nothing_else():
     all_units = units.render_all()
     target = all_units[f"trading-{ENV_NAME}.target"]
-    wanted = {w for line in target.splitlines() if line.startswith("Wants=")
-              for w in line.split("=", 1)[1].split()}
-    assert wanted == {n for n in all_units if n.endswith(".service")}
+    wanted = stack_services()
+    # Every wanted unit exists, and the set is exactly the fleet (the backup
+    # service is emitted too, and must NOT be pulled up by the target).
+    assert wanted <= set(all_units)
+    assert all(n.endswith(".service") for n in wanted)
+    assert f"trading-{ENV_NAME}-backup.service" not in wanted
 
 
 def test_stopping_the_target_stops_the_services(rendered):
     """PartOf= is what makes the Terminate page's single target stop work."""
-    for name, cp in rendered.items():
-        if name.endswith(".service"):
-            assert cp["Unit"]["PartOf"] == f"trading-{ENV_NAME}.target"
+    for name in stack_services():
+        assert rendered[name]["Unit"]["PartOf"] == f"trading-{ENV_NAME}.target"
 
 
 # --- restart policy ---------------------------------------------------------
@@ -103,9 +121,8 @@ def test_every_service_restarts_on_failure_with_a_storm_cap(rendered):
     """Replaces tools/watchdog.py, including its MAX_RESTARTS storm cap: a
     crash-looping component is retried a few times then LEFT DOWN and logged,
     rather than thrashed forever."""
-    for name, cp in rendered.items():
-        if not name.endswith(".service"):
-            continue
+    for name in stack_services():
+        cp = rendered[name]
         assert cp["Service"]["Restart"] == "on-failure", name
         assert int(cp["Service"]["RestartSec"]) > 0, name
         assert int(cp["Unit"]["StartLimitBurst"]) > 0, name
@@ -229,3 +246,32 @@ def test_units_are_pure_ascii():
     of encoding question from a file you debug at 6am."""
     for name, text in units.render_all().items():
         text.encode("ascii")   # raises if not
+
+
+
+# --- the nightly backup, which is NOT a fleet member -------------------------
+def test_the_backup_is_a_timer_not_a_stack_service(rendered):
+    """It must not be PartOf the target. A backup that stops when the stack
+    stops is missing at exactly the moment it is wanted."""
+    svc = rendered[f"trading-{ENV_NAME}-backup.service"]
+    assert "PartOf" not in svc["Unit"]
+    assert svc["Service"]["Type"] == "oneshot"
+
+
+def test_the_backup_timer_catches_up_after_downtime(rendered):
+    """Persistent=true runs a MISSED occurrence at next boot. Without it a box
+    that was off at 17:30 silently skips a day, and nobody notices until a
+    restore is needed."""
+    tmr = rendered[f"trading-{ENV_NAME}-backup.timer"]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Timer"]["OnCalendar"].endswith("17:30:00")
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_backup_runs_after_everything_that_writes():
+    """17:30 is after collection (15:20), the momentum cascade (16:20) and the
+    calibration rebuild (16:30). Backing up mid-cascade captures a half-written
+    night that looks complete."""
+    tmr = _parse(units.render_all()[f"trading-{ENV_NAME}-backup.timer"])
+    hh, mm, _ = tmr["Timer"]["OnCalendar"].split()[-1].split(":")
+    assert int(hh) * 60 + int(mm) > 16 * 60 + 30
