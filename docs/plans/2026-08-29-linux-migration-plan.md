@@ -74,7 +74,7 @@ Apply the measured sizing from the design doc. **The transfer cap is the spec mo
 |---|---|
 | vCPU | **4 minimum, 8 preferred** (the extra is for `pytest -n auto`, not the stack) |
 | RAM | **8 GB minimum, 16 GB preferred** (page cache for the 1.52 GB `gex_history.db`) |
-| Disk | **256 GB NVMe** |
+| Disk | **256 GB NVMe** — 140 GB is workable (the DB grows ~50–80 MB/day) but tight once two checkouts, two venvs, nightly backups and the journal share it |
 | **Monthly transfer** | **≥ 1 TB.** Measured need is ~13–16 GB/day ≈ **400–500 GB/month**. A 500 GB cap is a hard fail. |
 | Region | US, low latency to `api.schwabapi.com` (Task 1) |
 | Billing | Monthly, not annual, until after Task 22 |
@@ -84,6 +84,16 @@ Apply the measured sizing from the design doc. **The transfer cap is the spec mo
 ## Task 3: Provision and harden
 
 **Step 1: Install Ubuntu Server 24.04 LTS**, minimal, no desktop.
+
+⚠ **Inject your SSH key at build time** if the provider's panel offers the field. The box then comes up key-only and password auth is never enabled at all.
+
+⚠ **Verify the instance has no prior tenancy before any credential lands on it.** A resold or recycled VPS can arrive carrying another party's login history. The tells: a `Last login:` date predating your purchase, a non-standard admin account (Ubuntu images create `ubuntu`, not `administrator`), and an idle process count well above ~130.
+
+```bash
+last -20; sudo lastlog | grep -v 'Never logged in'; awk -F: '$3>=1000 && $3<65534' /etc/passwd; sudo ss -tlnp
+```
+
+This machine holds Schwab OAuth tokens for a live brokerage account. Rebuilding from a clean image costs twenty minutes and is never cheaper than before the migration starts. (Hit on 2026-08-29: the first instance showed a July 2024 login from an unrelated foreign IP and was rebuilt.)
 
 **Step 2: SSH keys only.** In `/etc/ssh/sshd_config`: `PasswordAuthentication no`, `PermitRootLogin no`. Reload, and **verify a new session works before closing the current one**.
 
@@ -101,13 +111,19 @@ Expected: `Time zone: America/Chicago (CDT, -0500)` and `System clock synchroniz
 curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
 ```
 
-**Step 5: Firewall — default deny, SSH over Tailscale only.**
+**Step 5: Firewall — default deny, and keep the door you came in through.**
+
+⚠ **Order matters and the obvious version locks you out.** This box is reached over its **public IP**, not Tailscale, so allowing only `tailscale0` before enabling `ufw` drops your own session and every future one. Allow SSH *first*, enable *after*:
 
 ```bash
-sudo ufw default deny incoming && sudo ufw allow in on tailscale0 && sudo ufw --force enable
+sudo ufw default deny incoming && sudo ufw allow 22/tcp && sudo ufw allow in on tailscale0 && sudo ufw --force enable
 ```
 
-⚠ If you are not yet on Tailscale from your desktop, `sudo ufw allow 22/tcp` first or you will lock yourself out. Tighten after Tailscale is confirmed working.
+Verify with `sudo ufw status verbose` **and open a second SSH session before closing the first** — that is the cheap insurance against a rule that looks right and is not.
+
+Once Tailscale is up and you have confirmed you can reach the box by its Tailscale name, you may drop the public rule with `sudo ufw delete allow 22/tcp` — but only then, and only if you are content that Tailscale is your sole route in.
+
+⚠ A public SSH port takes continuous brute-force traffic. With `PasswordAuthentication no` (Step 2) that is noise rather than risk, but `sudo apt install -y fail2ban` is cheap and stops it filling the journal.
 
 **Step 6: Swap.** VPS images often ship with none; a 4 GB file prevents an OOM-kill during a `VACUUM` or a parallel test run.
 
