@@ -17,6 +17,12 @@ import pytest
 from services.trade_svc import earnings_calendar as ec
 
 
+# Every test here that reads a date pins `as_of`, so `_CSV` stays LITERAL and
+# is stable forever. A relative fixture would break those pinned expectations.
+# The default-`as_of` path is covered separately by
+# TestStore::test_the_DEFAULT_as_of_is_today, which builds its own row.
+_AS_OF = dt.date(2026, 8, 22)
+
 _CSV = (
     "symbol,name,reportDate,fiscalDateEnding,estimate,currency\r\n"
     "NVDA,NVIDIA CORP,2026-08-26,2026-07-31,2.01,USD\r\n"
@@ -56,12 +62,28 @@ class TestStore:
 
     def test_round_trip(self, conn):
         ec.store_calendar(conn, ec.parse_calendar(_CSV))
-        assert ec.lookup(conn, "NVDA")["report_date"] == "2026-08-26"
+        assert ec.lookup(conn, "NVDA", as_of=_AS_OF)["report_date"] == "2026-08-26"
 
     def test_lookup_is_case_insensitive_and_missing_is_none(self, conn):
         ec.store_calendar(conn, ec.parse_calendar(_CSV))
-        assert ec.lookup(conn, "nvda") is not None
-        assert ec.lookup(conn, "NOPE") is None
+        assert ec.lookup(conn, "nvda", as_of=_AS_OF) is not None
+        assert ec.lookup(conn, "NOPE", as_of=_AS_OF) is None
+
+    def test_the_DEFAULT_as_of_is_today(self, conn):
+        """The two tests above pin `as_of`, like the rest of this file, so they
+        are stable forever. This one deliberately exercises the DEFAULT — and
+        must therefore build its own row RELATIVE to today.
+
+        ⚠ Do not fold this into the pinned tests by giving `_CSV` relative
+        dates. `_CSV` is shared with every `as_of=`-pinned test here, which
+        expects its literal 2026-08-26; making it relative breaks those instead.
+        The two shapes need separate data, which is the whole point of this
+        test being separate."""
+        soon = (dt.date.today() + dt.timedelta(days=14)).isoformat()
+        ec.store_calendar(conn, [
+            {"symbol": "FUT", "report_date": soon,
+             "fiscal_date_ending": "", "estimate": None}])
+        assert ec.lookup(conn, "FUT")["report_date"] == soon
 
     def test_the_nearest_FUTURE_date_wins(self, conn):
         """A symbol can carry several scheduled quarters. The gate cares about

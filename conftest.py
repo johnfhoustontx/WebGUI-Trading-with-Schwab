@@ -78,7 +78,18 @@ def is_protected(path):
         p = pathlib.Path(s).resolve()
     except (OSError, ValueError):
         return False
-    return any(p.parent == d.resolve() for d in _LIVE_DIRS if d.exists())
+    # ⚠ No `if d.exists()` filter. It was there, and it made the guard SILENTLY
+    # INERT on any checkout where a live data directory had not been created yet
+    # — a fresh clone, or a git worktree, where `options-scanner/data` is
+    # gitignored and therefore absent. That is precisely the moment the guard
+    # matters most: nothing is there to protect yet, so a leaking test creates
+    # the production store rather than corrupting it.
+    # `Path.resolve()` is non-strict, so a directory that does not exist still
+    # resolves fine and compares correctly. Measured 2026-08-29: with the filter,
+    # is_protected("options-scanner/data/signals.db") returned False in a
+    # worktree and True on a full checkout — the same call, two answers,
+    # decided by machine state.
+    return any(p.parent == d.resolve() for d in _LIVE_DIRS)
 
 
 _real_connect = sqlite3.connect

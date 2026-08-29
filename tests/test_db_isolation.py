@@ -19,30 +19,39 @@ at the one chokepoint every store shares: ``sqlite3.connect``.
 import sqlite3
 import pytest
 
-import repo_paths  # noqa: F401  (import guard: root must be importable)
-from conftest import live_db_paths, is_protected
+from repo_paths import OPTIONS_SCANNER
+from conftest import is_protected
+
+# ⚠ These address the live stores by CONSTRUCTED path, never by globbing the
+# filesystem. `live_db_paths()` enumerates .db files that actually exist, and
+# every one of them is GITIGNORED — so on a fresh clone it returns an empty set
+# and these tests failed with "no live signals.db found to test against",
+# reporting machine state as a code defect. (Hit on the Linux VPS, 2026-08-29;
+# it would fail identically on a fresh Windows clone.)
+#
+# The guard raises BEFORE it opens anything, so the file need not exist for the
+# behaviour under test to be exercised. What matters is that the PATH resolves
+# inside a live data directory, and that directory is tracked.
+_SIGNALS = OPTIONS_SCANNER / "data" / "signals.db"
+_PAPER = OPTIONS_SCANNER / "data" / "paper_account.db"
 
 
 def test_the_known_leak_paths_are_protected():
     """signals.db and paper_account.db — the two stores that actually leaked."""
-    protected = {p.name for p in live_db_paths()}
-    assert "signals.db" in protected
-    assert "paper_account.db" in protected
+    assert is_protected(str(_SIGNALS))
+    assert is_protected(str(_PAPER))
 
 
 def test_connecting_to_a_live_store_raises():
     """The backstop: no test can open a production database, by any route."""
-    target = next((p for p in live_db_paths() if p.name == "signals.db"), None)
-    assert target is not None, "no live signals.db found to test against"
     with pytest.raises(RuntimeError, match="live database"):
-        sqlite3.connect(str(target))
+        sqlite3.connect(str(_SIGNALS))
 
 
 def test_read_only_uri_is_blocked_too():
     """A read-only open is still a dependency on machine state."""
-    target = next((p for p in live_db_paths() if p.name == "signals.db"), None)
     with pytest.raises(RuntimeError, match="live database"):
-        sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+        sqlite3.connect(f"file:{_SIGNALS}?mode=ro", uri=True)
 
 
 def test_tmp_and_memory_databases_still_work(tmp_path):

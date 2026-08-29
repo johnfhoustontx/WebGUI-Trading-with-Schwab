@@ -104,8 +104,17 @@ def test_render_writes_html_as_utf8(monkeypatch):
     seen = {}
 
     def run(cmd, **kw):
-        from urllib.parse import unquote, urlparse
-        path = unquote(urlparse(_html_path(cmd)).path).lstrip("/")
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
+        # url2pathname, NOT `.lstrip("/")`. The URI is `src.as_uri()`, so on
+        # Windows it is file:///C:/... (path "/C:/..." — the leading slash IS
+        # spurious) and on POSIX it is file:///tmp/... (path "/tmp/..." — the
+        # leading slash is LOAD-BEARING). Stripping it unconditionally turned
+        # the POSIX path relative; open() then raised inside render_html_png's
+        # own except, which swallowed it, so this surfaced as a bare KeyError
+        # on `seen["html"]` rather than as a path error. url2pathname is the
+        # stdlib's platform-correct inverse of as_uri() and unquotes for us.
+        path = url2pathname(urlparse(_html_path(cmd)).path)
         seen["html"] = open(path, encoding="utf-8").read()
         with open(_screenshot_path(cmd), "wb") as fh:
             fh.write(_png(10, 100, 20))
