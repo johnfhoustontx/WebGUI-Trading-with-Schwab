@@ -95,7 +95,21 @@ last -20; sudo lastlog | grep -v 'Never logged in'; awk -F: '$3>=1000 && $3<6553
 
 This machine holds Schwab OAuth tokens for a live brokerage account. Rebuilding from a clean image costs twenty minutes and is never cheaper than before the migration starts. (Hit on 2026-08-29: the first instance showed a July 2024 login from an unrelated foreign IP and was rebuilt.)
 
-**Step 2: SSH keys only.** In `/etc/ssh/sshd_config`: `PasswordAuthentication no`, `PermitRootLogin no`. Reload, and **verify a new session works before closing the current one**.
+**Step 2: SSH keys only.** ⚠ **Editing `/etc/ssh/sshd_config` does NOT work on a cloud-init image, and fails silently.** That file carries `Include /etc/ssh/sshd_config.d/*.conf` near the top (line 12 on Ubuntu 24.04), and **OpenSSH uses the FIRST value it obtains** for each keyword — so `/etc/ssh/sshd_config.d/50-cloud-init.conf` with `PasswordAuthentication yes` beats a `no` written further down the main file. The edit applies, the file reads correctly, and password auth stays on. (Hit 2026-08-29; the same readout also showed `PermitRootLogin yes`.)
+
+Write a file that sorts **before** cloud-init's, so it wins on first-match and survives cloud-init rewriting its own file on reboot:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/00-hardening.conf >/dev/null <<'EOF'
+PasswordAuthentication no
+PermitRootLogin no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+EOF
+sudo chmod 600 /etc/ssh/sshd_config.d/00-hardening.conf && sudo sshd -t && sudo systemctl reload ssh
+```
+
+**Verify what is RUNNING, never what is written** — `sudo sshd -T | grep -iE 'passwordauthentication|permitrootlogin'`. Then open a new session before closing the current one, and confirm password auth is actually refused: a rejected attempt should report `Permission denied (publickey)`, not `(publickey,password)`.
 
 **Step 3: Timezone — the load-bearing one.**
 
