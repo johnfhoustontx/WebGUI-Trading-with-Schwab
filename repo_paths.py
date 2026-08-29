@@ -150,6 +150,14 @@ EARNINGS_CALENDAR_DB = TRADE_SVC_DATA / "earnings_calendar.db"
 _ENV_DEFAULTS = {
     "port_offset": 0,
     "proxy_port": None,        # None -> port_offset applies to ports.toml's proxy
+    # WHERE this checkout reaches the proxy. Loopback in both profiles, so a
+    # co-located dev behaves exactly as before. Overridable machine-locally from
+    # env.local.toml (like peer_root) for the case the two checkouts are on
+    # DIFFERENT HOSTS -- the migration's parallel-run week, where a VPS shadow
+    # borrows the Windows box's proxy over Tailscale.
+    # It moves PROXY_URL and nothing else: SERVICE_URLS / NICEGUI_URL /
+    # MEMURAI_URL stay on loopback because each host runs its own.
+    "proxy_host": "127.0.0.1",
     "redis_db": 0,
     "owns_proxy": True,
     "allow_claude": True,
@@ -160,10 +168,11 @@ _ENV_DEFAULTS = {
 
 
 def _read_env_marker(root):
-    """``(name, peer_root)`` from the gitignored ``config/env.local.toml``.
+    """``(name, peer_root, proxy_host)`` from gitignored ``config/env.local.toml``.
 
     NEVER raises. A missing, unreadable or malformed marker resolves to
-    ``("prod", None)`` — the behavior this repo had before environments existed.
+    ``("prod", None, None)`` — the behavior this repo had before environments
+    existed.
     Failing safe matters more than reporting the error: a half-applied profile on
     a live trading stack is worse than no profile.
 
@@ -179,16 +188,17 @@ def _read_env_marker(root):
     """
     path = root / "config" / "env.local.toml"
     if not path.exists():
-        return "prod", None
+        return "prod", None, None
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as exc:  # noqa: BLE001 — bad TOML, encoding, permissions.
         print(f"repo_paths: {path} exists but could not be read ({exc}); "
               f"resolving to prod", file=sys.stderr)
-        return "prod", None
+        return "prod", None, None
     name = str(raw.get("name") or "prod").strip().lower() or "prod"
     peer = raw.get("peer_root") or None
-    return name, (Path(str(peer)) if peer else None)
+    host = raw.get("proxy_host") or None
+    return name, (Path(str(peer)) if peer else None), (str(host) if host else None)
 
 
 def _resolve_env(root, under_pytest=None):
@@ -210,7 +220,7 @@ def _resolve_env(root, under_pytest=None):
     ``OWNS_PROXY`` with ``monkeypatch.setattr`` **on the module that consumed it**,
     since ``from repo_paths import OWNS_PROXY`` binds a copy.
     """
-    name, peer = _read_env_marker(root)
+    name, peer, local_host = _read_env_marker(root)
     try:
         profiles = tomllib.loads(
             (root / "config" / "environments.toml").read_text(encoding="utf-8-sig"))
@@ -222,6 +232,11 @@ def _resolve_env(root, under_pytest=None):
     over = profiles.get(name)
     if isinstance(over, dict):
         flags.update(over)
+    # A machine-local marker outranks the tracked profile, same precedence
+    # peer_root already has: the profile says what this ENVIRONMENT is, the
+    # marker says where this MACHINE sits.
+    if local_host:
+        flags["proxy_host"] = local_host
     # Under pytest the process PRESENTS AS PROD regardless of the marker — the
     # ports, the Redis DB index, proxy ownership, AND the environment's identity.
     # Tests are hermetic (the bus is already fakeredis), so these are inert
@@ -248,6 +263,7 @@ def _resolve_env(root, under_pytest=None):
     if under_pytest:
         name = "prod"
         flags.update(port_offset=0, proxy_port=None, redis_db=0, owns_proxy=True,
+                     proxy_host="127.0.0.1",
                      allow_claude=False, allow_notifications=False,
                      schedulers=False, autonomous_trading=False)
     return name, flags, peer
@@ -304,7 +320,8 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
 _derived = _derive_ports(_ports, ENV_FLAGS)
 
 PROXY_PORT       = _derived["proxy_port"]
-PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
+PROXY_HOST       = str(ENV_FLAGS.get("proxy_host") or "127.0.0.1")
+PROXY_URL        = f"http://{PROXY_HOST}:{PROXY_PORT}"
 ANALYTICS_URL    = f"http://127.0.0.1:{_ports['options_analytics']}"
 APPROVAL_PORT    = _ports["approval"]
 NICEGUI_PORT     = _derived["nicegui_port"]
