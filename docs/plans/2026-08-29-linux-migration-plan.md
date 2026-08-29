@@ -14,7 +14,7 @@
 
 ## What the VPS changes
 
-**1. Dev moves to the VPS too** (decided 2026-08-29). Two checkouts under **one Linux user** — `/home/john/prod` and `/home/john/dev` — which is exactly today's shape. It *simplifies*: dev borrows prod's proxy at `127.0.0.1` again, `snapshot_from_prod.py` keeps working because it needs filesystem read access to prod's stores, and `trading-{ENV_NAME}-{name}` already makes the unit sets non-colliding. Task 23 stands it up. Consequence: **code is edited on the VPS over SSH**, so worktrees, the `.claude/` hooks and the scratchpad move with it — and Task 12 exists because one of those hooks fails silently if they do.
+**1. Dev moves to the VPS too** (decided 2026-08-29). Two checkouts under **one Linux user** — `/home/administrator/prod` and `/home/administrator/dev` — which is exactly today's shape. It *simplifies*: dev borrows prod's proxy at `127.0.0.1` again, `snapshot_from_prod.py` keeps working because it needs filesystem read access to prod's stores, and `trading-{ENV_NAME}-{name}` already makes the unit sets non-colliding. Task 23 stands it up. Consequence: **code is edited on the VPS over SSH**, so worktrees, the `.claude/` hooks and the scratchpad move with it — and Task 12 exists because one of those hooks fails silently if they do.
 
 **2. The parallel run needs a private network and a code change.** The design says the Linux box borrows the Windows proxy (`owns_proxy = false`), because the Schwab refresh token is one rotating credential. That works today only because dev and prod share a machine — `repo_paths.py:305` hardcodes `PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"`. Across the internet it needs **Tailscale** (never a forwarded port — the proxy is unauthenticated) and a **`proxy_host` knob**. Task 9 adds it.
 
@@ -236,37 +236,37 @@ Delete `_NO_WINDOW` and the `creationflags=` argument in `_do_restart`. In `rest
 
 ⚠ This is the single highest-value task in Phase 1. A stack that refuses to start is recoverable; one silently reading a UTC clock produces confident wrong numbers across all 95 naive call sites.
 
-## Task 7: The unit files
+## Task 7: The unit generator  — DONE
 
-**Files:** add `deploy/systemd/*.service`, `deploy/systemd/trading-prod.target`, `deploy/systemd/README.md`; modify `.gitignore`
+**Files:** add `deploy/systemd/generate_units.py` (+ package `__init__`s); modify `.gitignore`
 
-**Step 1: Write the nine units** exactly as in the design doc, with `/home/john/prod` as `WorkingDirectory` (parameterise in the README, not in the files).
+⚠ **Deviation from the original plan, deliberately.** It called for nine static `.service` files with `/home/administrator/prod` hardcoded. Three things argued against that: the account turned out to be `administrator` rather than `john` (so the literal was already wrong), Task 23 needs a near-identical dev set (eighteen files, duplicated), and this repo's standing rule is never to hardcode a port. The generator derives everything from `repo_paths`, which fixes all three structurally.
 
-**Step 2: Gitignore the secrets file.** ⚠ **`.env` is NOT currently ignored** (checked 2026-08-29) — and it will hold `ANTHROPIC_API_KEY` and the Redis password. Add it beside the existing secret rules, which are the precedent:
+**Step 1: Write `deploy/systemd/generate_units.py`.** `render_all()` returns `{filename: text}`; `--install` writes into `~/.config/systemd/user`. `components()` emits a proxy unit **only when `OWNS_PROXY`**, so ownership lives in which units exist rather than in a filter someone must remember.
 
+**Step 2: Gitignore the secrets file.** ⚠ `.env` was NOT ignored, and it holds `ANTHROPIC_API_KEY` and the Redis password. Added beside `appsettings.json` and `env.local.toml`.
+
+**Step 3: Validate with real systemd**, not only the Python tests:
+
+```bash
+.venv/bin/python -m deploy.systemd.generate_units --dest /tmp/units && systemd-analyze --user verify /tmp/units/*
 ```
-# Per-checkout secrets read by the systemd units' EnvironmentFile=.
-# Never committed, same rule as appsettings.json / env.local.toml.
-.env
-```
 
-**Step 3: Commit.** The units are validated on the VPS in Task 13, not here — `systemd-analyze` does not exist on Windows.
+Silence is success. Both shapes verify clean; dev correctly emits 8 units and no proxy.
 
-## Task 8: The drift test
+**Step 4: Commit.**
+
+## Task 8: The drift test  — DONE
 
 **Files:** add `tests/test_systemd_units.py`
 
-This is the replacement for `test_stop_all.py`, and it closes drift the WMI tests could not see.
+The replacement for `test_stop_all.py`, and it closes drift the WMI tests could not see.
 
-**Step 1: Write it.** Parse `deploy/systemd/trading-prod.target` for its `Wants=` entries and assert:
-- every unit named there exists as a file in `deploy/systemd/`
-- the set of unit basenames equals `{f"trading-prod-{n}" for n in <the eight component names>}`, derived by calling `status.restart_spec` over every card kind — **not** from a hand-written list
-- every `.service` sets `TZ=America/Chicago`, `Restart=on-failure`, and a `StartLimitBurst`
-- every `.service` sets `EnvironmentFile=` **without a leading `-`** — the dash would let a unit start mute when the file is missing
-- **no `Environment=` line names a secret** (`KEY`, `TOKEN`, `PASSWORD`, `SECRET`, case-insensitive). `systemctl show` prints `Environment=` to any local user; this is the test that keeps one from creeping back in
-- every `ExecStart` path starts with `.venv/bin/python`
+**The sharpest test is `test_unit_names_match_what_the_status_page_restarts`:** it drives `status.restart_spec` over every card and asserts the emitted unit set equals what the Restart button would name. A rename that breaks that pairing is invisible to every other test — the button just errors at runtime, in prod, when someone needs it.
 
-**Step 2: Run, commit.**
+Also pinned: `PartOf=` on every service (what makes the Terminate target-stop work) · `Restart=on-failure` + a storm cap · **`StartLimit*` in `[Unit]`, not `[Service]`** (systemd moved them in v229 and silently ignores them in the wrong section, so the cap would look configured and not exist) · `TZ=America/Chicago` on every unit · `EnvironmentFile=` present and **dash-free** · no `Environment=` line naming `KEY`/`TOKEN`/`PASSWORD`/`SECRET` · paths derived from `REPO_ROOT` · no Windows machinery · ASCII-only.
+
+⚠ Two test-design points worth keeping. `importorskip` was **rejected** for the generator import — it is not optional, and a skip would turn "the generator is missing" into a passing suite. And `REPO_ROOT` is monkeypatched to a POSIX path for the whole file, because a unit is a Linux artifact unconditionally; without that the path assertions would mean one thing on Windows and another on the VPS.
 
 ## Task 9: The `proxy_host` knob
 
@@ -327,11 +327,11 @@ Expected: an empty `Required-by:`. Commit.
 
 ### A. `guard_prod_promote.py` goes INERT, silently
 
-⚠ **The guard stops firing entirely.** It identifies the prod checkout by the case-insensitive path fragment `"webgui trading prod"` (line 35) — chosen deliberately over an absolute path so a drive-letter change could not defeat it. `/home/john/prod` does not contain that fragment, so every mutating git verb in prod would sail straight through. The hook exists precisely because knowing the rule was not enough.
+⚠ **The guard stops firing entirely.** It identifies the prod checkout by the case-insensitive path fragment `"webgui trading prod"` (line 35) — chosen deliberately over an absolute path so a drive-letter change could not defeat it. `/home/administrator/prod` does not contain that fragment, so every mutating git verb in prod would sail straight through. The hook exists precisely because knowing the rule was not enough.
 
 **Step 1: Failing tests.**
 
-- a mutating verb with a leading `cd /home/john/prod` is blocked
+- a mutating verb with a leading `cd /home/administrator/prod` is blocked
 - the same with `cd "D:\WebGUI Trading Prod"` is **still** blocked — the Windows box stays protected for the whole migration window
 - read-only git (`status`/`log`/`diff`/`rev-parse`) is not blocked in either
 - a command that merely *writes* the prod path into a file is not blocked (the anchoring rule the hook already documents)
@@ -376,10 +376,10 @@ All three hook commands invoke bare `python`. Ubuntu 24.04 ships `python3` and n
 > | | Phase 0–1 (Windows) | Phase 2–6 (VPS) |
 > |---|---|---|
 > | Interpreter | `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe"` | `.venv/bin/python` |
-> | Checkout | `.claude/worktrees/prod-linux-migration-596ad3` | `/home/john/prod` (and later `/home/john/dev`) |
-> | Suite command | `(cd <worktree>/webgui && "<abs>/python.exe" -m pytest . -q)` | `(cd /home/john/prod/webgui && ../.venv/bin/python -m pytest . -q)` |
+> | Checkout | `.claude/worktrees/prod-linux-migration-596ad3` | `/home/administrator/prod` (and later `/home/administrator/dev`) |
+> | Suite command | `(cd <worktree>/webgui && "<abs>/python.exe" -m pytest . -q)` | `(cd /home/administrator/prod/webgui && ../.venv/bin/python -m pytest . -q)` |
 >
-> **The venv sits in a different place, and that is not cosmetic.** On Windows the worktree has no venv, which is why every documented command reaches back to the repo root by absolute path. On the VPS the venv lives **inside the checkout** (`/home/john/prod/.venv`), so a relative `.venv/bin/python` works — until you make a git worktree there, which will have no venv either and needs the absolute `/home/john/prod/.venv/bin/python` again. Same trap, new spelling.
+> **The venv sits in a different place, and that is not cosmetic.** On Windows the worktree has no venv, which is why every documented command reaches back to the repo root by absolute path. On the VPS the venv lives **inside the checkout** (`/home/administrator/prod/.venv`), so a relative `.venv/bin/python` works — until you make a git worktree there, which will have no venv either and needs the absolute `/home/administrator/prod/.venv/bin/python` again. Same trap, new spelling.
 >
 > **Baselines do not transfer cleanly, and Task 15 is where you find out.** Compare against the Windows numbers (webgui **2320**, `tools/tests` **816**, `tests` **69**, minus whatever Phase 1 deleted), but expect genuine differences: anything asserting a `\` path separator, and the two known-flaky cases (`test_flow_alert_window`, the date-relative `test_expected_move`). **A failing node ID that is new is a portability bug, not noise** — triage it, do not absorb it into a new baseline. Task 15's clean run *is* the Linux baseline; record it there.
 >
@@ -389,7 +389,7 @@ All three hook commands invoke bare `python`. Ubuntu 24.04 ships `python3` and n
 
 ## Task 13: Clone, venv, units
 
-**Step 1: Clone the branch** (not `main`) to `/home/john/prod`.
+**Step 1: Clone the branch** (not `main`) to `/home/administrator/prod`.
 
 **Step 2: Python 3.11 via uv.**
 
@@ -408,10 +408,10 @@ Expected: `Python 3.11.9`.
 **Step 4: Create the secrets file** the units read. ⚠ Do this **before** enabling anything — `EnvironmentFile=` carries no leading dash, so a unit whose file is missing fails to start. That is deliberate: the alternative is a stack that comes up mute, with Claude briefings and notifications silently doing nothing.
 
 ```bash
-umask 077 && cat > /home/john/prod/.env
+umask 077 && cat > /home/administrator/prod/.env
 ```
 
-Paste `ANTHROPIC_API_KEY=...` and `MEMURAI_PASSWORD=...`, then Ctrl-D. Confirm with `stat -c '%a %U' /home/john/prod/.env` that it reports `600 john`.
+Paste `ANTHROPIC_API_KEY=...` and `MEMURAI_PASSWORD=...`, then Ctrl-D. Confirm with `stat -c '%a %U' /home/administrator/prod/.env` that it reports `600 john`.
 
 **Step 5: Install and validate the units.**
 
@@ -557,18 +557,18 @@ Do not declare done on a green start. Confirm across a whole session: collection
 
 **Both environments now live on one host under one Linux user** — exactly today's shape, so this is a relocation rather than a reconfiguration.
 
-**Step 1: Clone to `/home/john/dev`** and build its own venv (Task 13's method). Separate checkout, separate venv, separate `logs/` and `*/data/`.
+**Step 1: Clone to `/home/administrator/dev`** and build its own venv (Task 13's method). Separate checkout, separate venv, separate `logs/` and `*/data/`.
 
 **Step 2: `config/env.local.toml`:**
 
 ```toml
 name = "dev"
-peer_root = '/home/john/prod'
+peer_root = '/home/administrator/prod'
 ```
 
 ⚠ **No `proxy_host`.** Dev borrows prod's proxy at `127.0.0.1:8100` again, exactly as on Windows — co-location is what makes Task 9's knob unnecessary in steady state. Note `peer_root` needs no TOML literal-string quoting on a POSIX path, but keeping the `'...'` form costs nothing and survives a copy back to Windows.
 
-**Step 3: Dev's own `/home/john/dev/.env`,** `chmod 600`. Separate file, separate secrets — dev's `allow_claude` and `allow_notifications` are both false, so it needs only `MEMURAI_PASSWORD`. Leaving `ANTHROPIC_API_KEY` out entirely is a second belt beside the profile flag.
+**Step 3: Dev's own `/home/administrator/dev/.env`,** `chmod 600`. Separate file, separate secrets — dev's `allow_claude` and `allow_notifications` are both false, so it needs only `MEMURAI_PASSWORD`. Leaving `ANTHROPIC_API_KEY` out entirely is a second belt beside the profile flag.
 
 **Step 4: Install the dev units.** `trading-dev-*` and `trading-dev.target`, identical to prod's but for `WorkingDirectory` and the offset ports (services 9210–9215, webgui 9500). The `trading-{ENV_NAME}-{name}` scheme means no collision is possible.
 
@@ -577,7 +577,7 @@ peer_root = '/home/john/prod'
 **Step 6: Prove `snapshot_from_prod.py` still works.** This is the capability co-location preserves, and the reason for one user rather than two — it reads prod's SQLite stores directly.
 
 ```bash
-cd /home/john/dev && .venv/bin/python tools/snapshot_from_prod.py
+cd /home/administrator/dev && .venv/bin/python tools/snapshot_from_prod.py
 ```
 
 Expected: it refuses if dev is up (stop it first), copies prod's stores via the online-backup API with prod still running, and DUMPs db 0 into db 1 — excluding `cmd:*` and rewriting `cache:driver:control` disabled.
@@ -606,7 +606,7 @@ Only after Task 22 is clean and Task 24's restore has been tested.
 
 **Both** Windows checkouts go, not just prod: archive `D:\WebGUI Trading Prod` **and** `D:\WebGUI Trading with Schwab` to the E: drive, then remove them. Dev moved in Task 23, so nothing is left running on the box.
 
-Update CLAUDE.md's Environments section: both environments are now VPS checkouts under one Linux user, `peer_root` is `/home/john/prod`, the launcher table is gone, and the `systemd --user` unit set replaces it. ⚠ **The proxy-borrow relationship is unchanged** — dev still borrows prod's proxy at `127.0.0.1:8100`, because co-location was preserved. Do not describe it as changed; only the *paths* moved.
+Update CLAUDE.md's Environments section: both environments are now VPS checkouts under one Linux user, `peer_root` is `/home/administrator/prod`, the launcher table is gone, and the `systemd --user` unit set replaces it. ⚠ **The proxy-borrow relationship is unchanged** — dev still borrows prod's proxy at `127.0.0.1:8100`, because co-location was preserved. Do not describe it as changed; only the *paths* moved.
 
 **The HUD no longer gates this task** (decided 2026-08-29 — it is being redesigned separately).
 

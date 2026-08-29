@@ -209,150 +209,74 @@ in `systemctl --user list-units`.
 
 ## The units
 
-### `trading-prod.target`
+**They are GENERATED, and there are no `.service` files in git.**
+`deploy/systemd/generate_units.py` derives every value from `repo_paths` — ports,
+the checkout root, the environment name, and whether this environment owns a
+proxy. A committed unit file would be a second copy of all of that, free to drift
+from the first, and the drift would surface only as a Restart button that errors
+in prod. Same argument that put the ports in one config file.
 
-```ini
-[Unit]
-Description=NeuralStrike prod stack
-Wants=trading-prod-proxy.service
-Wants=trading-prod-sentiment_svc.service trading-prod-options_svc.service
-Wants=trading-prod-portfolio_svc.service trading-prod-trade_svc.service
-Wants=trading-prod-driver_svc.service trading-prod-market_svc.service
-Wants=trading-prod-webgui.service
-
-[Install]
-WantedBy=default.target
-```
-
-### `trading-prod-proxy.service`
-
-```ini
-[Unit]
-Description=NeuralStrike prod - Schwab proxy (:8100)
-PartOf=trading-prod.target
-# Restart storm cap: 5 failures in 5 minutes leaves it DOWN and logged, rather
-# than thrashing forever. Mirrors tools/watchdog.py's MAX_RESTARTS/STORM_WINDOW.
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-WorkingDirectory=/home/john/prod
-Environment=PYTHONUNBUFFERED=1
-Environment=TZ=America/Chicago
-# Secrets ONLY here, never in Environment= -- see "Where secrets live".
-# No leading '-': a missing file must fail the unit, not start it mute.
-EnvironmentFile=/home/john/prod/.env
-ExecStart=/home/john/prod/.venv/bin/python schwab-proxy/schwab_proxy.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=trading-prod.target
-```
-
-### `trading-prod-options_svc.service` (the pattern for all six services)
-
-```ini
-[Unit]
-Description=NeuralStrike prod - options_svc (:8211)
-PartOf=trading-prod.target
-Requires=trading-prod-proxy.service
-After=trading-prod-proxy.service
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-WorkingDirectory=/home/john/prod
-Environment=PYTHONUNBUFFERED=1
-Environment=TZ=America/Chicago
-# Secrets ONLY here, never in Environment= -- see "Where secrets live".
-# No leading '-': a missing file must fail the unit, not start it mute.
-EnvironmentFile=/home/john/prod/.env
-# Wait for the proxy to ANSWER HTTP, not merely to hold the port. After= only
-# orders process START; it says nothing about readiness. tools/wait_http.py is
-# the existing, portable probe, and its header documents exactly why a TCP
-# connect is not good enough (a dead accept loop stays bound and passes one).
-ExecStartPre=/home/john/prod/.venv/bin/python tools/wait_http.py --port 8100 --timeout 120 --label "the proxy"
-ExecStart=/home/john/prod/.venv/bin/python services/options_svc/app.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=trading-prod.target
-```
-
-The other five are byte-identical but for `Description`, the port in it, and the
-`ExecStart` path: `sentiment_svc` (:8210), `portfolio_svc` (:8212),
-`trade_svc` (:8213), `driver_svc` (:8214), `market_svc` (:8215).
-
-### `trading-prod-webgui.service`
-
-```ini
-[Unit]
-Description=NeuralStrike prod - web GUI (:8500)
-PartOf=trading-prod.target
-# After=, but deliberately NOT Requires= and NO ExecStartPre wait. The GUI
-# renders a proxy-down banner and is fully usable without it -- restart_spec
-# already encodes this as "wait_port": 0. Ordering it after the proxy just means
-# first paint usually has data; a dead proxy must not keep the UI down.
-After=trading-prod-proxy.service
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-WorkingDirectory=/home/john/prod
-Environment=PYTHONUNBUFFERED=1
-Environment=TZ=America/Chicago
-# Secrets ONLY here, never in Environment= -- see "Where secrets live".
-# No leading '-': a missing file must fail the unit, not start it mute.
-EnvironmentFile=/home/john/prod/.env
-ExecStart=/home/john/prod/.venv/bin/python webgui/main.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=trading-prod.target
-```
-
-### Where secrets live
-
-**`Environment=` is world-readable.** `systemctl show <unit>` prints its
-`Environment=` properties to **any local user on the box** — no privilege needed.
-That is harmless for `TZ` and `PYTHONUNBUFFERED`, and unacceptable for
-`ANTHROPIC_API_KEY` or the Redis password. With `EnvironmentFile=`, `systemctl
-show` reports only the *path*.
-
-So: `/home/john/prod/.env`, **`chmod 600`**, owned by the running user, holding
-`ANTHROPIC_API_KEY` and `MEMURAI_PASSWORD`. Dev gets its own at
-`/home/john/dev/.env`. It is **gitignored and never committed** — the same rule
-that already governs `shared/appsettings.json` and `config/env.local.toml`.
-
-⚠ **No leading dash, deliberately.** `EnvironmentFile=-/path` would let the unit
-start when the file is missing — and the stack would come up *mute*: `allow_claude`
-falls into its no-API-key path so the briefings quietly stop, the notification
-channels no-op, and the bus fails to authenticate. That is the exact failure shape
-this repo keeps getting bitten by (edge-tts shipping silent to prod, `tweepy`
-absent and doing nothing). A unit that refuses to start is recoverable in
-seconds; one that runs without its secrets looks healthy for a day. Same reasoning
-as the timezone boot assertion.
-
-⚠ **`TZ` stays inline on purpose.** It is not a secret, it is a load-bearing
-invariant, and the Task 8 drift test asserts every unit declares it — moving it
-into the env file would put it beyond that test's reach and make a missing
-timezone invisible again.
-
-Install and validate:
+It also makes dev and prod one code path rather than eighteen near-identical
+files, and it removed a defect the hand-written version had: the design first
+hardcoded `/home/john/prod`, and the account turned out to be `administrator`.
 
 ```bash
-systemd-analyze --user verify ~/.config/systemd/user/trading-prod-proxy.service
+.venv/bin/python -m deploy.systemd.generate_units --install
 ```
 
 ```bash
 systemctl --user daemon-reload && systemctl --user enable --now trading-prod.target
 ```
+
+### What it emits
+
+```ini
+[Unit]
+Description=NeuralStrike prod - options_svc (:8211)
+PartOf=trading-prod.target
+After=trading-prod-proxy.service
+Requires=trading-prod-proxy.service
+# A crash-looping unit is retried this many times in this window, then
+# left down and logged. Replaces tools/watchdog.py's storm cap.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/administrator/prod
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+EnvironmentFile=/home/administrator/prod/.env
+ExecStartPre=/home/administrator/prod/.venv/bin/python tools/wait_http.py --port 8100 --timeout 120 --label 'the proxy'
+ExecStart=/home/administrator/prod/.venv/bin/python services/options_svc/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=trading-prod.target
+```
+
+The proxy unit drops `After=`/`Requires=`/`ExecStartPre=`; the webgui keeps
+`After=` but **not** `Requires=` and **no** readiness wait, because it renders a
+proxy-down banner and is fully usable without one — `restart_spec` already
+encodes that as `wait_port: 0`. The target `Wants=` every emitted service and is
+`WantedBy=default.target`.
+
+### Ownership is encoded in which units EXIST
+
+`components()` emits a proxy unit **only when `OWNS_PROXY`**. A dev checkout
+borrows prod's — the Schwab OAuth refresh token is a single rotating credential,
+so there can be only one holder — so dev's target simply has no proxy to pull up.
+That is better than the batch version's kill-list filter, which was a rule
+someone had to remember to apply. Verified on the VPS: the dev checkout emitted
+eight units and no proxy.
+
+⚠ **Validate with `systemd-analyze --user verify`, not with the Python tests.**
+The unit tests pin naming, dependency shape, the restart policy and the secrets
+rule; only systemd can say whether systemd will accept the file. Both shapes
+(dev's 8 units, prod's 9) verify clean.
 
 ## What each unit directive replaces
 
@@ -545,7 +469,7 @@ and that is now settled.
 
 ## Both environments move to the one VPS
 
-**Decided 2026-08-29.** Two checkouts, `/home/john/prod` and `/home/john/dev`,
+**Decided 2026-08-29.** Two checkouts, `/home/administrator/prod` and `/home/administrator/dev`,
 under **one Linux user**, on one host — which is exactly today's shape (two
 checkouts, one Windows login, one Redis, db 0 vs db 1). The relocation is
 therefore a relocation, not a reconfiguration, for the second time.
@@ -589,7 +513,7 @@ with nothing running on it — which is what lets plan Task 23 archive it outrig
 ⚠ **`.claude/hooks/guard_prod_promote.py` goes INERT in the move, silently.** It
 identifies the prod checkout by the case-insensitive path fragment
 `"webgui trading prod"` (line 35), chosen deliberately over an absolute path so a
-drive-letter change could not defeat it. `/home/john/prod` does not contain that
+drive-letter change could not defeat it. `/home/administrator/prod` does not contain that
 fragment, so **every mutating git verb in prod would sail straight through** — and
 the hook exists precisely because knowing the rule was not enough. Its guidance
 text also hardcodes `cd "D:\WebGUI Trading Prod" && tools\promote.bat`. Both must

@@ -23,6 +23,12 @@ shared/driver_model.txt
 # Absent = prod. See docs/plans/2026-08-08-dev-prod-environments-design.md.
 config/env.local.toml
 
+# Per-checkout secrets, read by the systemd units' EnvironmentFile=.
+# ANTHROPIC_API_KEY + MEMURAI_PASSWORD. Never committed -- same rule as
+# appsettings.json and env.local.toml above.
+.env
+
+
 # Databases & runtime state
 *.db
 *.db-shm
