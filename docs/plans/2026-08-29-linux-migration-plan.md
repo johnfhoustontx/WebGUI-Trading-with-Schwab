@@ -12,9 +12,11 @@
 
 ---
 
-## The VPS changes two things in the design doc
+## What the VPS changes
 
 **1. The parallel run needs a private network and a code change.** The design says the Linux box borrows the Windows proxy (`owns_proxy = false`), because the Schwab refresh token is one rotating credential. That works today only because dev and prod share a machine — `repo_paths.py:305` hardcodes `PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"`. Across the internet it needs **Tailscale** (never a forwarded port — the proxy is unauthenticated) and a **`proxy_host` knob**. Task 9 adds it.
+
+**0. Dev moves to the VPS too** (decided 2026-08-29). Two checkouts under **one Linux user** — `/home/john/prod` and `/home/john/dev` — which is exactly today's shape. It *simplifies*: dev borrows prod's proxy at `127.0.0.1` again, `snapshot_from_prod.py` keeps working because it needs filesystem read access to prod's stores, and `trading-{ENV_NAME}-{name}` already makes the unit sets non-colliding. Task 23 stands it up. Consequence: **code is edited on the VPS over SSH**, so worktrees, the `.claude/` hooks and the scratchpad move with it — and Task 12 exists because one of those hooks fails silently if they do.
 
 **2. Backups are no longer a drive you can touch.** The E:-drive robocopy routine dies with the Windows box. Phase 6 replaces it. Do not treat this as optional: `paper_account.db`, `paper_account_driver.db` and `signals.db` are the trading record, and `gex_history.db` is 1.52 GB of history that cannot be re-fetched.
 
@@ -36,7 +38,7 @@ Confine the `cd` to a subshell as shown. Commit after every task.
 
 **Baselines** (2026-08-20/21): webgui **2320 green**, `tools/tests` **816**, `tests` **69**. Compare the failing *set*, never the count — and note Phase 1 deletes tests, so totals will fall. That is the intended direction.
 
-⚠ **The Phase-1 code changes must NOT be promoted to Windows prod.** They replace `.bat` supervision with `systemctl`, which Windows cannot run. They live on `claude/prod-linux-migration-596ad3`; the VPS clones **that branch**. Windows prod stays on `main`, fully working, until Task 22 decommissions it. Merge to `main` only at Task 20 (cutover), after the VPS is authoritative.
+⚠ **The Phase-1 code changes must NOT be promoted to Windows prod.** They replace `.bat` supervision with `systemctl`, which Windows cannot run. They live on `claude/prod-linux-migration-596ad3`; the VPS clones **that branch**. Windows prod stays on `main`, fully working, until Task 25 decommissions it. Merge to `main` only at Task 21 (cutover), after the VPS is authoritative.
 
 ---
 
@@ -73,7 +75,7 @@ Apply the measured sizing from the design doc. **The transfer cap is the spec mo
 | Disk | **256 GB NVMe** |
 | **Monthly transfer** | **≥ 1 TB.** Measured need is ~13–16 GB/day ≈ **400–500 GB/month**. A 500 GB cap is a hard fail. |
 | Region | US, low latency to `api.schwabapi.com` (Task 1) |
-| Billing | Monthly, not annual, until after Task 21 |
+| Billing | Monthly, not annual, until after Task 22 |
 
 ⚠ Confirm the cap covers **inbound**. Some providers meter egress only (in which case you are fine), others meter both. Read the plan page, do not assume.
 
@@ -267,9 +269,31 @@ Expected: an empty `Required-by:`. Commit.
 
 ---
 
+## Task 12: Teach the prod-promote guard the Linux path
+
+**Files:** modify `.claude/hooks/guard_prod_promote.py`, add `tools/tests/test_guard_prod_promote.py`
+
+⚠ **This guard goes INERT in the move, silently.** It identifies the prod checkout by the case-insensitive path fragment `"webgui trading prod"` (line 35) — chosen deliberately over an absolute path so a drive-letter change could not defeat it. `/home/john/prod` does not contain that fragment, so every mutating git verb in prod would sail straight through. The hook exists precisely because knowing the rule was not enough.
+
+**Step 1: Failing tests.**
+
+- a mutating verb with a leading `cd /home/john/prod` is blocked
+- the same with `cd "D:\WebGUI Trading Prod"` is **still** blocked — the Windows box stays protected for the whole migration window
+- read-only git (`status`/`log`/`diff`/`rev-parse`) is not blocked in either
+- a command that merely *writes* the prod path into a file is not blocked (the anchoring rule the hook already documents)
+- the guidance text names a `promote.sh` invocation, not `tools\promote.bat`
+
+**Step 2: Implement.** Make `PROD_FRAGMENT` a tuple of fragments and match any. Do **not** replace the Windows fragment — matching both is what keeps the guard live at every point in the migration, including the parallel-run week when both prod checkouts exist at once.
+
+**Step 3: Verify the hook actually fires**, since a hook that passes its unit tests can still be mis-wired. Attempt a blocked command and confirm exit 2.
+
+**Step 4: Run `tools/tests`, commit.**
+
+---
+
 # Phase 2 — Stand the stack up on the VPS
 
-## Task 12: Clone, venv, units
+## Task 13: Clone, venv, units
 
 **Step 1: Clone the branch** (not `main`) to `/home/john/prod`.
 
@@ -299,7 +323,7 @@ systemd-analyze --user verify ~/.config/systemd/user/trading-prod-proxy.service
 
 Expected: no output. Any output is an error.
 
-## Task 13: Carry the gitignored artifacts
+## Task 14: Carry the gitignored artifacts
 
 ⚠ **Linux is case-sensitive.** On Windows a case-mismatched filename resolved anyway; here it will not.
 
@@ -319,7 +343,7 @@ ls -1 "options-scanner/data/Top 20.xlsx" && .venv/bin/python tools/check_env.py
 
 Expected: `('ok',)` and ~994,192 rows.
 
-## Task 14: Run the suites on Linux
+## Task 15: Run the suites on Linux
 
 **The first real test of portability.** Run every suite per the Tests section of CLAUDE.md, one folder at a time.
 
@@ -331,7 +355,7 @@ Expected failures to triage, not ignore: anything asserting a `\` path separator
 
 Validates systemd, timezone, paths, permissions and rendering **without a proxy** and without touching prod. Cheap and safe; do this before Phase 4.
 
-## Task 15: Load a snapshot and boot the stack
+## Task 16: Load a snapshot and boot the stack
 
 **Step 1:** With `name = "dev"` in `config/env.local.toml` (schedulers, Claude, notifications and autonomous trading all off), copy prod's Redis keys into the VPS Redis.
 
@@ -351,7 +375,7 @@ ssh -L 8500:127.0.0.1:8500 john@<tailscale-name>
 
 Open `http://127.0.0.1:8500`. Walk every page in the rail.
 
-## Task 16: Verify the three mechanisms that only exist here
+## Task 17: Verify the three mechanisms that only exist here
 
 **Step 1: Restart** a component from the System Status page. Confirm with `systemctl --user status trading-prod-options_svc` that the unit — not a stray process — bounced.
 
@@ -359,7 +383,7 @@ Open `http://127.0.0.1:8500`. Walk every page in the rail.
 
 **Step 3: Reboot the VPS.** Confirm all nine come back unattended (this is what `enable-linger` buys) and that `timedatectl` still reads CDT.
 
-## Task 17: Prove the timezone end-to-end
+## Task 18: Prove the timezone end-to-end
 
 Not by reading `timedatectl` — by reading the app's own arithmetic.
 
@@ -373,7 +397,7 @@ Expected: the two are **identical to the second**. Then confirm a session-window
 
 # Phase 4 — Live validation
 
-## Task 18: Borrow the Windows proxy over Tailscale
+## Task 19: Borrow the Windows proxy over Tailscale
 
 **Step 1: Install Tailscale on the Windows prod box.** Confirm the VPS can reach it:
 
@@ -387,7 +411,7 @@ curl -sS http://<windows-tailscale-ip>:8100/health
 
 **Step 3: Restart and confirm** on-demand fetches work: run a Trade Analyzer symbol from the UI and watch it return real data.
 
-## Task 19: One supervised collection window
+## Task 20: One supervised collection window
 
 ⚠ **The risk this task manages:** two stacks collecting through **one** proxy contend for its 0.2 s rate limiter, and prod can start missing 1-minute slots. Do not leave this running.
 
@@ -403,13 +427,13 @@ curl -sS http://<windows-tailscale-ip>:8100/health
 
 # Phase 5 — Cutover
 
-## Task 20: Switch authority
+## Task 21: Switch authority
 
 Pick a **weekend**, and confirm the Schwab refresh token is not near its 7-day expiry.
 
 **Step 1:** Stop the Windows stack. It stays installed and runnable as the fallback.
 
-**Step 2:** Re-copy the SQLite stores and Redis (Task 13's method) so the VPS has the final state. Prod has been writing all week; the Phase-3 snapshot is stale.
+**Step 2:** Re-copy the SQLite stores and Redis (Task 14's method) so the VPS has the final state. Prod has been writing all week; the Phase-3 snapshot is stale.
 
 **Step 3:** Flip the VPS's `env.local.toml` to `name = "prod"` and **remove `proxy_host`** — it now owns the proxy on `127.0.0.1`.
 
@@ -419,15 +443,44 @@ Pick a **weekend**, and confirm the Schwab refresh token is not near its 7-day e
 
 **Step 6: Merge the branch to `main`** and push.
 
-## Task 21: Watch one full trading day
+## Task 22: Watch one full trading day
 
 Do not declare done on a green start. Confirm across a whole session: collection slot completeness matches the Windows baseline, the scheduled Claude briefings fire once each, notifications arrive exactly once (**not twice** — proof the Windows stack is really down), and the driver's guardrails behave.
 
 ---
 
-# Phase 6 — Backups, then decommission
+# Phase 6 — Dev, backups, then decommission
 
-## Task 22: Replace the E:-drive routine
+## Task 23: Bring dev up on the VPS
+
+**Both environments now live on one host under one Linux user** — exactly today's shape, so this is a relocation rather than a reconfiguration.
+
+**Step 1: Clone to `/home/john/dev`** and build its own venv (Task 13's method). Separate checkout, separate venv, separate `logs/` and `*/data/`.
+
+**Step 2: `config/env.local.toml`:**
+
+```toml
+name = "dev"
+peer_root = '/home/john/prod'
+```
+
+⚠ **No `proxy_host`.** Dev borrows prod's proxy at `127.0.0.1:8100` again, exactly as on Windows — co-location is what makes Task 9's knob unnecessary in steady state. Note `peer_root` needs no TOML literal-string quoting on a POSIX path, but keeping the `'...'` form costs nothing and survives a copy back to Windows.
+
+**Step 3: Install the dev units.** `trading-dev-*` and `trading-dev.target`, identical to prod's but for `WorkingDirectory` and the offset ports (services 9210–9215, webgui 9500). The `trading-{ENV_NAME}-{name}` scheme means no collision is possible.
+
+**Step 4: Confirm the four suppressions are live** — schedulers, Claude, notifications and autonomous trading all off. Check `/health` on a dev service and confirm no scheduler is registered.
+
+**Step 5: Prove `snapshot_from_prod.py` still works.** This is the capability co-location preserves, and the reason for one user rather than two — it reads prod's SQLite stores directly.
+
+```bash
+cd /home/john/dev && .venv/bin/python tools/snapshot_from_prod.py
+```
+
+Expected: it refuses if dev is up (stop it first), copies prod's stores via the online-backup API with prod still running, and DUMPs db 0 into db 1 — excluding `cmd:*` and rewriting `cache:driver:control` disabled.
+
+**Step 6: Confirm the two webguis are independent** — prod on 8500, dev on 9500, dev carrying its `DEV` chip and tab-title prefix. Restart a dev service from dev's Status page and confirm via `systemctl --user status` that only the `trading-dev-` unit moved.
+
+## Task 24: Replace the E:-drive routine
 
 **This is not optional and it has no equivalent on the VPS.** `paper_account.db`, `paper_account_driver.db` and `signals.db` are the trading record; `gex_history.db` is 1.52 GB of history that cannot be re-fetched.
 
@@ -441,10 +494,14 @@ Do not declare done on a green start. Confirm across a whole session: collection
 
 **Step 5: Test a restore.** An untested backup is a hypothesis.
 
-## Task 23: Decommission Windows prod
+## Task 25: Decommission Windows prod
 
-Only after Task 21 is clean and Task 22's restore has been tested. Archive `D:\WebGUI Trading Prod` to the E: drive, then remove it. Update CLAUDE.md's Environments section — prod is now a VPS, dev's `peer_root` and proxy-borrow relationship have changed, and the launcher table is gone.
+Only after Task 22 is clean and Task 24's restore has been tested.
 
-**The HUD no longer gates this task** (decided 2026-08-29 — it is being redesigned separately), so the Windows box is archived outright with nothing left running on it.
+**Both** Windows checkouts go, not just prod: archive `D:\WebGUI Trading Prod` **and** `D:\WebGUI Trading with Schwab` to the E: drive, then remove them. Dev moved in Task 23, so nothing is left running on the box.
 
-⚠ **But do not delete `tools/nq_hud.py` from the repo.** Only `class Hud` (line 600) and `main()` are Tk; lines 1–599 are ~415 lines of pure, tested logic (`read_tape`, `read_gamma`, `BasisSmoother`, `build_pane`), and `test_nq_pane.py` + `test_nq_tape.py` import the module directly. Together with `nq_signal.py` / `nq_state.py` / `nq_signal_log.py` / `nq_instruments.py` that is **~1,512 lines the redesign will want**, plus 2,078 lines of tests already pinning it. Retiring the Tk layer belongs to the redesign, not to this migration — which only needed the HUD to stop being a *reason to keep a Windows desktop*. The modules are pure Python and should pass on Linux unchanged; Task 14 verifies that.
+Update CLAUDE.md's Environments section: both environments are now VPS checkouts under one Linux user, `peer_root` is `/home/john/prod`, the launcher table is gone, and the `systemd --user` unit set replaces it. ⚠ **The proxy-borrow relationship is unchanged** — dev still borrows prod's proxy at `127.0.0.1:8100`, because co-location was preserved. Do not describe it as changed; only the *paths* moved.
+
+**The HUD no longer gates this task** (decided 2026-08-29 — it is being redesigned separately).
+
+⚠ **But do not delete `tools/nq_hud.py` from the repo.** Only `class Hud` (line 600) and `main()` are Tk; lines 1–599 are ~415 lines of pure, tested logic (`read_tape`, `read_gamma`, `BasisSmoother`, `build_pane`), and `test_nq_pane.py` + `test_nq_tape.py` import the module directly. Together with `nq_signal.py` / `nq_state.py` / `nq_signal_log.py` / `nq_instruments.py` that is **~1,512 lines the redesign will want**, plus 2,078 lines of tests already pinning it. Retiring the Tk layer belongs to the redesign, not to this migration — which only needed the HUD to stop being a *reason to keep a Windows desktop*. The modules are pure Python and should pass on Linux unchanged; Task 15 verifies that.

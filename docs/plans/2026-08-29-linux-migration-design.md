@@ -507,11 +507,57 @@ Retiring the Tk layer is the redesign's business, not this migration's. This
 migration only needs the HUD to stop being a *reason to keep a Windows desktop*,
 and that is now settled.
 
-## Open decisions
+## Both environments move to the one VPS
 
-**The dev checkout** can stay on Windows, move to the same Linux host as a second
-user-unit set, or move to a second box. The `env.local.toml` mechanism is
-OS-agnostic and needs no change either way.
+**Decided 2026-08-29.** Two checkouts, `/home/john/prod` and `/home/john/dev`,
+under **one Linux user**, on one host — which is exactly today's shape (two
+checkouts, one Windows login, one Redis, db 0 vs db 1). The relocation is
+therefore a relocation, not a reconfiguration, for the second time.
+
+**This simplifies more than it complicates.** Three things the design worried
+about stop being problems:
+
+| Concern | Resolution |
+|---|---|
+| dev borrowing prod's proxy across the internet | **gone** — they share a host again, so `owns_proxy = false` works at `127.0.0.1:8100` exactly as it does today |
+| `tools/snapshot_from_prod.py` | **works unchanged** — it finds prod via `PEER_ROOT` and needs filesystem read access to prod's stores; same user makes that free |
+| Unit naming collisions | **already handled** — `trading-{ENV_NAME}-{name}` yields `trading-prod-options_svc` and `trading-dev-options_svc` |
+
+⚠ **`proxy_host` (plan Task 9) is still built, but its purpose narrows.** With
+both environments co-located it is unused in steady state; it exists for the
+**Phase-4 parallel run**, where the VPS must borrow the *Windows* box's proxy over
+Tailscale. Keep it — it also gives a laptop checkout the same capability — but do
+not let its presence imply the steady state needs it.
+
+**One user, not two.** Two Linux users would give stronger isolation, but the port
+offsets and the Redis db split already provide it, and two users would break
+`snapshot_from_prod.py`'s cross-checkout reads without deliberate permission
+grants. Isolation here is by *naming and configuration*, which is what it has
+always been.
+
+⚠ **Sizing already accounts for this.** The measured "~6.5% of one core" was taken
+with **both** stacks running (~15 processes), so the 4–8 core / 16 GB
+recommendation covers sixteen processes, not eight. Dev also runs with schedulers,
+Claude, notifications and autonomous trading all off, so it is by far the lighter
+of the two.
+
+**Backups (Phase 6) cover prod only.** Dev's stores are a disposable snapshot of
+prod by construction — that is what `snapshot_from_prod.py` is for.
+
+### The consequence to confirm: development moves to the VPS
+
+If dev lives on the VPS then **code is edited there**, over SSH. Worktrees, the
+`.claude/` hooks and the scratchpad all move with it, and the Windows box is left
+with nothing running on it — which is what lets plan Task 23 archive it outright.
+
+⚠ **`.claude/hooks/guard_prod_promote.py` goes INERT in the move, silently.** It
+identifies the prod checkout by the case-insensitive path fragment
+`"webgui trading prod"` (line 35), chosen deliberately over an absolute path so a
+drive-letter change could not defeat it. `/home/john/prod` does not contain that
+fragment, so **every mutating git verb in prod would sail straight through** — and
+the hook exists precisely because knowing the rule was not enough. Its guidance
+text also hardcodes `cd "D:\WebGUI Trading Prod" && tools\promote.bat`. Both must
+be updated in the same commit that creates the dev checkout, not afterwards.
 
 ## Out of scope
 
