@@ -240,6 +240,9 @@ Type=simple
 WorkingDirectory=/home/john/prod
 Environment=PYTHONUNBUFFERED=1
 Environment=TZ=America/Chicago
+# Secrets ONLY here, never in Environment= -- see "Where secrets live".
+# No leading '-': a missing file must fail the unit, not start it mute.
+EnvironmentFile=/home/john/prod/.env
 ExecStart=/home/john/prod/.venv/bin/python schwab-proxy/schwab_proxy.py
 Restart=on-failure
 RestartSec=5
@@ -264,6 +267,9 @@ Type=simple
 WorkingDirectory=/home/john/prod
 Environment=PYTHONUNBUFFERED=1
 Environment=TZ=America/Chicago
+# Secrets ONLY here, never in Environment= -- see "Where secrets live".
+# No leading '-': a missing file must fail the unit, not start it mute.
+EnvironmentFile=/home/john/prod/.env
 # Wait for the proxy to ANSWER HTTP, not merely to hold the port. After= only
 # orders process START; it says nothing about readiness. tools/wait_http.py is
 # the existing, portable probe, and its header documents exactly why a TCP
@@ -300,6 +306,9 @@ Type=simple
 WorkingDirectory=/home/john/prod
 Environment=PYTHONUNBUFFERED=1
 Environment=TZ=America/Chicago
+# Secrets ONLY here, never in Environment= -- see "Where secrets live".
+# No leading '-': a missing file must fail the unit, not start it mute.
+EnvironmentFile=/home/john/prod/.env
 ExecStart=/home/john/prod/.venv/bin/python webgui/main.py
 Restart=on-failure
 RestartSec=5
@@ -307,6 +316,33 @@ RestartSec=5
 [Install]
 WantedBy=trading-prod.target
 ```
+
+### Where secrets live
+
+**`Environment=` is world-readable.** `systemctl show <unit>` prints its
+`Environment=` properties to **any local user on the box** — no privilege needed.
+That is harmless for `TZ` and `PYTHONUNBUFFERED`, and unacceptable for
+`ANTHROPIC_API_KEY` or the Redis password. With `EnvironmentFile=`, `systemctl
+show` reports only the *path*.
+
+So: `/home/john/prod/.env`, **`chmod 600`**, owned by the running user, holding
+`ANTHROPIC_API_KEY` and `MEMURAI_PASSWORD`. Dev gets its own at
+`/home/john/dev/.env`. It is **gitignored and never committed** — the same rule
+that already governs `shared/appsettings.json` and `config/env.local.toml`.
+
+⚠ **No leading dash, deliberately.** `EnvironmentFile=-/path` would let the unit
+start when the file is missing — and the stack would come up *mute*: `allow_claude`
+falls into its no-API-key path so the briefings quietly stop, the notification
+channels no-op, and the bus fails to authenticate. That is the exact failure shape
+this repo keeps getting bitten by (edge-tts shipping silent to prod, `tweepy`
+absent and doing nothing). A unit that refuses to start is recoverable in
+seconds; one that runs without its secrets looks healthy for a day. Same reasoning
+as the timezone boot assertion.
+
+⚠ **`TZ` stays inline on purpose.** It is not a secret, it is a load-bearing
+invariant, and the Task 8 drift test asserts every unit declares it — moving it
+into the env file would put it beyond that test's reach and make a missing
+timezone invisible again.
 
 Install and validate:
 

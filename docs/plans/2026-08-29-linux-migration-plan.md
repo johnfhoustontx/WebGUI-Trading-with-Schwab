@@ -208,11 +208,19 @@ Delete `_NO_WINDOW` and the `creationflags=` argument in `_do_restart`. In `rest
 
 ## Task 7: The unit files
 
-**Files:** add `deploy/systemd/*.service`, `deploy/systemd/trading-prod.target`, `deploy/systemd/README.md`
+**Files:** add `deploy/systemd/*.service`, `deploy/systemd/trading-prod.target`, `deploy/systemd/README.md`; modify `.gitignore`
 
 **Step 1: Write the nine units** exactly as in the design doc, with `/home/john/prod` as `WorkingDirectory` (parameterise in the README, not in the files).
 
-**Step 2: Commit.** These are validated on the VPS in Task 12, not here — `systemd-analyze` does not exist on Windows.
+**Step 2: Gitignore the secrets file.** ⚠ **`.env` is NOT currently ignored** (checked 2026-08-29) — and it will hold `ANTHROPIC_API_KEY` and the Redis password. Add it beside the existing secret rules, which are the precedent:
+
+```
+# Per-checkout secrets read by the systemd units' EnvironmentFile=.
+# Never committed, same rule as appsettings.json / env.local.toml.
+.env
+```
+
+**Step 3: Commit.** The units are validated on the VPS in Task 13, not here — `systemd-analyze` does not exist on Windows.
 
 ## Task 8: The drift test
 
@@ -224,6 +232,8 @@ This is the replacement for `test_stop_all.py`, and it closes drift the WMI test
 - every unit named there exists as a file in `deploy/systemd/`
 - the set of unit basenames equals `{f"trading-prod-{n}" for n in <the eight component names>}`, derived by calling `status.restart_spec` over every card kind — **not** from a hand-written list
 - every `.service` sets `TZ=America/Chicago`, `Restart=on-failure`, and a `StartLimitBurst`
+- every `.service` sets `EnvironmentFile=` **without a leading `-`** — the dash would let a unit start mute when the file is missing
+- **no `Environment=` line names a secret** (`KEY`, `TOKEN`, `PASSWORD`, `SECRET`, case-insensitive). `systemctl show` prints `Environment=` to any local user; this is the test that keeps one from creeping back in
 - every `ExecStart` path starts with `.venv/bin/python`
 
 **Step 2: Run, commit.**
@@ -365,7 +375,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.11 && uv 
 
 Expected: `Python 3.11.9`.
 
-**Step 4: Install and validate the units.**
+**Step 4: Create the secrets file** the units read. ⚠ Do this **before** enabling anything — `EnvironmentFile=` carries no leading dash, so a unit whose file is missing fails to start. That is deliberate: the alternative is a stack that comes up mute, with Claude briefings and notifications silently doing nothing.
+
+```bash
+umask 077 && cat > /home/john/prod/.env
+```
+
+Paste `ANTHROPIC_API_KEY=...` and `MEMURAI_PASSWORD=...`, then Ctrl-D. Confirm with `stat -c '%a %U' /home/john/prod/.env` that it reports `600 john`.
+
+**Step 5: Install and validate the units.**
 
 ```bash
 cp deploy/systemd/* ~/.config/systemd/user/ && systemctl --user daemon-reload
@@ -520,11 +538,13 @@ peer_root = '/home/john/prod'
 
 ⚠ **No `proxy_host`.** Dev borrows prod's proxy at `127.0.0.1:8100` again, exactly as on Windows — co-location is what makes Task 9's knob unnecessary in steady state. Note `peer_root` needs no TOML literal-string quoting on a POSIX path, but keeping the `'...'` form costs nothing and survives a copy back to Windows.
 
-**Step 3: Install the dev units.** `trading-dev-*` and `trading-dev.target`, identical to prod's but for `WorkingDirectory` and the offset ports (services 9210–9215, webgui 9500). The `trading-{ENV_NAME}-{name}` scheme means no collision is possible.
+**Step 3: Dev's own `/home/john/dev/.env`,** `chmod 600`. Separate file, separate secrets — dev's `allow_claude` and `allow_notifications` are both false, so it needs only `MEMURAI_PASSWORD`. Leaving `ANTHROPIC_API_KEY` out entirely is a second belt beside the profile flag.
 
-**Step 4: Confirm the four suppressions are live** — schedulers, Claude, notifications and autonomous trading all off. Check `/health` on a dev service and confirm no scheduler is registered.
+**Step 4: Install the dev units.** `trading-dev-*` and `trading-dev.target`, identical to prod's but for `WorkingDirectory` and the offset ports (services 9210–9215, webgui 9500). The `trading-{ENV_NAME}-{name}` scheme means no collision is possible.
 
-**Step 5: Prove `snapshot_from_prod.py` still works.** This is the capability co-location preserves, and the reason for one user rather than two — it reads prod's SQLite stores directly.
+**Step 5: Confirm the four suppressions are live** — schedulers, Claude, notifications and autonomous trading all off. Check `/health` on a dev service and confirm no scheduler is registered.
+
+**Step 6: Prove `snapshot_from_prod.py` still works.** This is the capability co-location preserves, and the reason for one user rather than two — it reads prod's SQLite stores directly.
 
 ```bash
 cd /home/john/dev && .venv/bin/python tools/snapshot_from_prod.py
@@ -532,9 +552,9 @@ cd /home/john/dev && .venv/bin/python tools/snapshot_from_prod.py
 
 Expected: it refuses if dev is up (stop it first), copies prod's stores via the online-backup API with prod still running, and DUMPs db 0 into db 1 — excluding `cmd:*` and rewriting `cache:driver:control` disabled.
 
-**Step 6: Flip `.claude/launch.json`.** Both configurations set `"runtimeExecutable": ".venv\Scripts\python.exe"`; on Linux that is `.venv/bin/python`. A single string cannot name both layouts, which is why Task 12 deferred it to here — by now no Windows checkout is being previewed from. Keep `autoPort: false` and the 9500/8500 split.
+**Step 7: Flip `.claude/launch.json`.** Both configurations set `"runtimeExecutable": ".venv\Scripts\python.exe"`; on Linux that is `.venv/bin/python`. A single string cannot name both layouts, which is why Task 12 deferred it to here — by now no Windows checkout is being previewed from. Keep `autoPort: false` and the 9500/8500 split.
 
-**Step 7: Confirm the two webguis are independent** — prod on 8500, dev on 9500, dev carrying its `DEV` chip and tab-title prefix. Restart a dev service from dev's Status page and confirm via `systemctl --user status` that only the `trading-dev-` unit moved.
+**Step 8: Confirm the two webguis are independent** — prod on 8500, dev on 9500, dev carrying its `DEV` chip and tab-title prefix. Restart a dev service from dev's Status page and confirm via `systemctl --user status` that only the `trading-dev-` unit moved.
 
 ## Task 24: Replace the E:-drive routine
 
