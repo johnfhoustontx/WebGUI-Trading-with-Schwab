@@ -114,3 +114,51 @@ def test_blend_aggression_score_is_unchanged_by_the_confidence_fix():
     den = sum(aggression.AGG_WEIGHTS[k] * confs[k] for k in comps)
     assert aggression.blend_aggression(comps, confs)[0] == pytest.approx(
         round(num / den, 3), abs=1e-9)
+
+
+# --- non-finite inputs must be MISSING, never maximum ------------------------
+# `float(nan or 0.0)` is nan (NaN is truthy), so a single broken sub-signal
+# propagated into num/den; `den <= 0` does not catch it (nan <= 0 is False); and
+# `clamp(nan, -1, 1)` returns +1.0 - the documented pins-the-bound class. Measured
+# before the fix: a NaN component gave (1.0, 0.5) and a NaN CONFIDENCE gave
+# (1.0, 1.0) - maximum bullish aggression at maximum confidence, from no data.
+#
+# This value is stored in market_state_history_db, feeds the five-state
+# classifier's aggression axis, and drives the state-transition phone alert.
+
+NAN = float("nan")
+
+
+def test_a_non_finite_component_drops_out_rather_than_pinning_the_max():
+    score, conf = blend_aggression({"effort": NAN, "skew": -0.5},
+                                   {"effort": 1.0, "skew": 1.0})
+    assert score < 0, f"skew was the only real reading and it was negative; got {score}"
+    assert score == blend_aggression({"skew": -0.5}, {"skew": 1.0})[0]
+
+
+def test_a_non_finite_confidence_drops_out():
+    assert blend_aggression({"effort": 0.5}, {"effort": NAN}) == (0.0, 0.0)
+
+
+def test_an_infinite_component_is_missing_not_maximum():
+    assert blend_aggression({"effort": float("inf")}, {"effort": 1.0}) == (0.0, 0.0)
+    assert blend_aggression({"effort": float("-inf")}, {"effort": 1.0}) == (0.0, 0.0)
+
+
+def test_a_broken_signal_does_not_consume_weight():
+    """Dropping out means the confidence reflects what actually reported - a
+    broken sub-signal must not inflate the aggregate confidence."""
+    _, conf_broken = blend_aggression({"effort": NAN, "skew": 0.5},
+                                      {"effort": 1.0, "skew": 1.0})
+    _, conf_clean = blend_aggression({"skew": 0.5}, {"skew": 1.0})
+    assert conf_broken == conf_clean
+
+
+def test_every_input_broken_is_neutral_at_zero_confidence():
+    assert blend_aggression({"effort": NAN, "skew": NAN},
+                            {"effort": NAN, "skew": NAN}) == (0.0, 0.0)
+
+
+def test_clean_inputs_are_unchanged():
+    """Power check: the fix must not move a normal read."""
+    assert blend_aggression({"effort": 0.5}, {"effort": 1.0}) == (0.5, 0.269)

@@ -10,7 +10,7 @@ put demand arrives NEGATIVE. This function is sign-agnostic: it blends signed
 inputs and flips nothing.
 """
 from __future__ import annotations
-from ._common import clamp as _clamp
+from ._common import clamp as _clamp, num as _num
 
 
 # ⚠ These sum to 1.30, NOT 1.0 -- `rejection` and `option_flow` were added without
@@ -43,9 +43,24 @@ def blend_aggression(components, confs, weights=None):
     total_w = sum(weights.values()) or 1.0
     num = den = 0.0
     for k, w in weights.items():
-        c = float(confs.get(k, 0.0) or 0.0)
-        s = float(components.get(k, 0.0) or 0.0)
-        num += w * s * c
+        # A NON-FINITE input is MISSING, not extreme, and it drops the component
+        # out entirely rather than contributing a neutral 0 that still consumes
+        # weight. `float(x or 0.0)` did NOT do this: NaN is truthy, so it survived
+        # into num/den; `den <= 0` never caught it (nan <= 0 is False); and
+        # `clamp(nan, -1, 1)` returns +1.0. Measured before the fix, one NaN
+        # component read (1.0, 0.5) and one NaN CONFIDENCE read (1.0, 1.0) -
+        # maximum bullish aggression at maximum confidence, from no data. This
+        # value is stored in market_state_history_db and drives the
+        # state-transition phone alert.
+        #
+        # An ABSENT key still means neutral-0.0-with-its-confidence, as documented;
+        # only a broken NUMBER drops out.
+        c = _num(confs.get(k, 0.0))
+        raw = components.get(k, 0.0)
+        sv = _num(raw)
+        if c is None or sv is None:
+            continue
+        num += w * sv * c
         den += w * c
     if den <= 0:
         return 0.0, 0.0

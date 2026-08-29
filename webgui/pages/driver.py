@@ -9,7 +9,9 @@ execution, and performance aggregation all live in ``services/driver_svc`` /
 newest-first per-checkpoint decision log) and ``cache:driver:control``
 (``DriverControl`` — the enabled/halted master switch). It is a MONITOR + OVERRIDE:
 * **Enable / Disable** toggle → ``{"type":"enable"|"disable"}`` on ``cmd:driver`` —
-  the master switch (Enable also re-arms a prior day's halt).
+  the master switch. Enable clears a MANUAL stop and a stale (prior-day) halt,
+  but leaves a same-day RISK halt latched; **Resume today**
+  (``args={"clear_halt": true}``) is the deliberate override for that.
 * **STOP** (kill-switch, confirm-gated) → ``{"type":"stop"}`` — latches ``halted``
   so no further checkpoints run until the next-day re-arm.
 * **Run now** → ``{"type":"cycle"}`` — fire one decision checkpoint immediately.
@@ -263,6 +265,22 @@ def target_text(day_pnl, target):
     """``'+$250.00 / $500.00'`` — banked day P&L over the target."""
     tgt = "—" if target is None else f"${float(target):,.2f}"
     return f"{_money(day_pnl)} / {tgt}"
+
+
+MANUAL_STOP_REASON = "manual STOP"   # mirrors driver_svc.handlers (Tier 1 may not import it)
+
+
+def is_risk_halt(control) -> bool:
+    """True when the driver halted ITSELF and the latch still stands.
+
+    A manual STOP is the user's own switch and the Enable toggle clears it; a
+    risk halt (daily loss cap / banked target / VIX ceiling) is NOT cleared by a
+    re-arm any more, so the page offers a deliberate override instead. PURE, so
+    the button's visibility is unit-testable without a browser.
+    """
+    if not isinstance(control, dict) or not control.get("halted"):
+        return False
+    return str(control.get("reason") or "") != MANUAL_STOP_REASON
 
 
 def control_state_label(control):
@@ -746,6 +764,25 @@ def render():
                       on_click=lambda: (_do("stop", "Stopping…"),
                                         stop_dialog.close())).props("no-caps").classes(BTN_DANGER)
 
+    # ── confirm dialog for OVERRIDING a same-day RISK halt ────────────────────
+    # A halt the driver set itself (daily loss cap / banked target / VIX) is NOT
+    # cleared by the Enable toggle any more - a routine re-arm, or a replayed
+    # ``enable`` command, used to wipe "stop the bleed for the day" silently. The
+    # capability is kept, but it now takes this deliberate act.
+    with ui.dialog() as resume_dialog, ui.card():
+        ui.label("Resume trading after a risk halt?").classes("text-subtitle1")
+        ui.label("The driver halted ITSELF today (loss cap, banked target, or the "
+                 "VIX ceiling). Enable re-arms it for the next session but leaves "
+                 "the halt in place; this clears it and lets it open trades again "
+                 "TODAY.").classes("text-xs opacity-70")
+        with ui.row().classes("justify-end gap-2 w-full"):
+            ui.button("Cancel", on_click=resume_dialog.close).props("flat")
+            ui.button("Resume today", color=None,
+                      on_click=lambda: (_do("enable", "Clearing halt…",
+                                            clear_halt=True),
+                                        resume_dialog.close())
+                      ).props("no-caps").classes(BTN_DANGER)
+
     # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
     def _render_monitor():
         monitor_busy.hide()
@@ -795,6 +832,12 @@ def render():
                     ui.button("STOP", icon="stop", color=None,
                               on_click=stop_dialog.open) \
                         .props("no-caps").classes(f"{BTN_DANGER} text-weight-bold")
+                    # Only for a halt the DRIVER set itself: Enable no longer
+                    # clears one of those, so this is the way back in today.
+                    if is_risk_halt(ctrl_view):
+                        ui.button("Resume today", icon="lock_open", color=None,
+                                  on_click=resume_dialog.open) \
+                            .props("no-caps").classes(BTN)
 
                 # Day-P&L-vs-target progress.
                 with ui.row().classes("items-center gap-3 w-full"):
@@ -948,8 +991,8 @@ def render():
 
     # ── command enqueue ───────────────────────────────────────────────────────
     @guard
-    def _do(cmd, busy_msg):
-        bus_client.request("driver", {"type": cmd})
+    def _do(cmd, busy_msg, **args):
+        bus_client.request("driver", {"type": cmd, "args": args})
         monitor_busy.show()
         status.text = busy_msg
 

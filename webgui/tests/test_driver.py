@@ -312,3 +312,32 @@ def test_closed_summary_text_is_silent_about_truncation_when_there_is_none():
     rows = [{"realized_pnl": 10.0}, {"realized_pnl": -4.0}]
     totals = {"count": 2, "wins": 1, "losses": 1, "realized": 6.0, "truncated": False}
     assert "showing" not in driver.closed_summary_text(rows, totals).lower()
+
+
+# --- the deliberate risk-halt override --------------------------------------
+# Enable no longer clears a halt the driver set ITSELF (loss cap / banked target
+# / VIX), so the page offers a separate confirm-gated "Resume today". The button
+# must appear for exactly that case and never for a manual STOP.
+
+def test_is_risk_halt_only_for_a_self_set_halt():
+    assert driver.is_risk_halt({"halted": True, "reason": "daily loss cap"}) is True
+    assert driver.is_risk_halt({"halted": True, "reason": "banked target"}) is True
+
+
+def test_is_risk_halt_false_for_a_manual_stop():
+    """The Enable toggle already clears a manual STOP, and the STOP dialog
+    promises exactly that - offering a second override would be noise."""
+    assert driver.is_risk_halt(
+        {"halted": True, "reason": driver.MANUAL_STOP_REASON}) is False
+
+
+def test_is_risk_halt_false_when_not_halted():
+    assert driver.is_risk_halt({"halted": False, "reason": "daily loss cap"}) is False
+    assert driver.is_risk_halt({}) is False
+
+
+def test_is_risk_halt_tolerates_junk():
+    for junk in (None, [], "halted", {"halted": True, "reason": None}):
+        assert driver.is_risk_halt(junk) in (True, False)
+    # a halt with NO reason is not a manual stop, so it counts as a risk halt
+    assert driver.is_risk_halt({"halted": True, "reason": None}) is True

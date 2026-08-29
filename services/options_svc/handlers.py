@@ -114,6 +114,35 @@ def _is_stale_open(command) -> bool:
     return age is not None and age > STALE_OPEN_MAX_AGE_SEC
 
 
+# Side-effectful commands that are NOT trade-opens but must not re-run on a
+# replay. Consumer groups start at id ``0``, so a fresh group re-delivers the
+# whole backlog - the documented incident where a first launch "burned a day's
+# API budget in one go".
+#
+#   rescue_apply  - MUTATES the paper book. Its own guards are "is the position
+#                   still OPEN" and a 15% price-drift check, and a fast replay
+#                   passes BOTH, re-applying a partial close or paying a second
+#                   roll's commission.
+#   gamma_analyze - a PAID Claude call.
+#
+# ⚠ This is an age gate, not true idempotency: two genuinely FRESH duplicates
+# still both run. It closes the REPLAY case with machinery the service already
+# trusts; a dedup store keyed on the stream message id would be the stronger fix.
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze")
+
+
+def _is_stale_side_effect(command) -> bool:
+    """True if a replay-guarded command was enqueued too long ago to act on.
+
+    Same age budget and the same missing-ts back-compat rule as
+    ``_is_stale_open`` - a legacy command with no ``ts`` is never rejected.
+    """
+    if getattr(command, "type", None) not in _REPLAY_GUARDED:
+        return False
+    age = _command_age_seconds(command)
+    return age is not None and age > STALE_OPEN_MAX_AGE_SEC
+
+
 CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
 
@@ -1904,6 +1933,12 @@ def handle_command(bus, command) -> None:
         version = bus.cache_set(CACHE_GAMMA_EXPLAIN, res)
         bus.publish(EVENT_GAMMA_EXPLAIN, {"version": version})
     elif command.type == "gamma_analyze":
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale gamma_analyze: age %.0fs > %ds (ts=%s) — "
+                        "a replayed command must not re-bill a Claude call",
+                        _command_age_seconds(command) or -1,
+                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            return
         res = compute.gamma_analyze()
         version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
         bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})
@@ -1976,5 +2011,12 @@ def handle_command(bus, command) -> None:
         # the spec being the args dict itself as a fallback.
         run_rescue_adhoc(bus, command.args.get("spec") or command.args)
     elif command.type == "rescue_apply":
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale rescue_apply for position %s: age %.0fs > "
+                        "%ds (ts=%s) — a replayed adjustment would re-mutate the book",
+                        command.args.get("position_id"),
+                        _command_age_seconds(command) or -1,
+                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            return
         run_rescue_apply(bus, int(command.args["position_id"]),
                          command.args["candidate"])

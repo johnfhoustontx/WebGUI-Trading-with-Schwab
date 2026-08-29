@@ -1825,6 +1825,40 @@ drops a non-finite row rather than summing it: a NaN total makes every `>`
 comparison False and silently switches the cap OFF — the pins-the-bound class one
 layer up.
 
+## The halt latch, and what a replayed command may re-do
+
+**A halt the driver set ITSELF is not cleared by a routine re-arm.** `enable`
+used to do `set_control(enabled=True, halted=False, reason=None)`
+unconditionally. The distinction that matters is **what caused the halt**, not
+when:
+
+| halt | cleared by `enable`? |
+|---|---|
+| **manual STOP** (`MANUAL_STOP_REASON`) | **yes** — the user's own switch, and the /driver STOP dialog promises exactly this |
+| **stale** (prior-day, or no `halted_date`) | **yes** — this is the documented "re-arm next day" |
+| **same-day RISK halt** (loss cap / banked target / VIX) | **no** — `enable` arms the driver for the next session and leaves the latch |
+
+The override survives, but has to be deliberate: `{"type":"enable", "args":
+{"clear_halt": true}}`, surfaced as the confirm-gated **Resume today** button
+that the /driver page shows only when `driver.is_risk_halt(control)`. ⚠
+`halted_date` had been in the `DriverControl` contract from the start, documented
+as "re-arm next day", and was **written but never read** — so a halt never
+expired on its own either. A halt with no date is treated as stale, so a control
+written before the field was populated cannot become permanently unclearable.
+
+**Two side-effectful commands are replay-guarded.** Consumer groups are created
+at id `0`, so a fresh group re-delivers the whole backlog — the documented
+incident where a first launch "burned a day's API budget in one go". The service
+already refused a stale `driver_paper_create`; `rescue_apply` (which MUTATES the
+paper book, and whose own is-it-open + 15%-drift guards a fast replay passes) and
+`gamma_analyze` (a PAID Claude call) now share the same
+`STALE_OPEN_MAX_AGE_SEC` gate via `_is_stale_side_effect`.
+
+⚠ **That is an age gate, not idempotency** — two genuinely FRESH duplicates still
+both run. It closes the replay case with machinery the service already trusts; a
+dedup store keyed on the stream message id would be the stronger fix and is not
+built.
+
 ## Observability — a swallowed exception must leave a trace
 
 **`services/_degrade.py` is the house guard-rail for the repo's most expensive bug

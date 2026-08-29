@@ -76,6 +76,48 @@ def read_control(bus) -> dict:
     return env.payload if env else DriverControl().model_dump()
 
 
+# The reason recorded by the manual kill-switch. A halt carrying THIS reason is
+# the user's own switch and ``enable`` may un-flip it (the /driver STOP dialog
+# promises exactly that). Any OTHER reason is a risk control set by
+# ``guardrails.halt_state`` - daily loss cap, banked target, VIX ceiling.
+MANUAL_STOP_REASON = "manual STOP"
+
+
+def _halt_is_stale(control) -> bool:
+    """True when the latch was set on an earlier day (or carries no date).
+
+    ``halted_date`` has been in the DriverControl contract since the start,
+    documented as "re-arm next day" - but nothing ever READ it, so a halt never
+    expired on its own. A missing date is treated as stale for back-compat: a
+    control written before the field was populated must not become permanently
+    unclearable.
+    """
+    stamped = control.get("halted_date")
+    return not stamped or str(stamped) != date.today().isoformat()
+
+
+def _enable_driver(bus, *, clear_halt=False) -> dict:
+    """Arm the driver, clearing the halt only when that is the right thing to do.
+
+    ``enable`` used to clear the halt unconditionally. For a MANUAL stop that is
+    intended. For the automatic daily-loss / drawdown halt it turned "stop the
+    bleed for the day" into a soft flag that any routine re-arm cleared - and
+    because commands are Redis stream entries, a REPLAYED ``enable`` from earlier
+    in the day cleared it with nobody touching a button.
+
+    So a SAME-DAY risk halt stays latched: the driver is armed (so it resumes next
+    session) but opens nothing today. ``clear_halt=True`` is the deliberate
+    override, which keeps the operator in control while making the act explicit.
+    """
+    control = read_control(bus)
+    risk_halt_today = (control.get("halted")
+                       and control.get("reason") != MANUAL_STOP_REASON
+                       and not _halt_is_stale(control))
+    if risk_halt_today and not clear_halt:
+        return set_control(bus, enabled=True)
+    return set_control(bus, enabled=True, halted=False, reason=None)
+
+
 def set_control(bus, *, enabled=None, halted=None, reason=None, halted_date=None) -> dict:
     """Mutate + persist the control key, returning the new state dict.
 
@@ -375,9 +417,9 @@ def handle_command(bus, command) -> None:
     if command.type == "cycle":
         run_autonomous_cycle(bus)
     elif command.type == "enable":
-        set_control(bus, enabled=True, halted=False, reason=None)
+        _enable_driver(bus, clear_halt=bool((command.args or {}).get("clear_halt")))
     elif command.type == "disable":
         set_control(bus, enabled=False)
     elif command.type == "stop":
-        set_control(bus, halted=True, reason="manual STOP",
+        set_control(bus, halted=True, reason=MANUAL_STOP_REASON,
                     halted_date=date.today().isoformat())

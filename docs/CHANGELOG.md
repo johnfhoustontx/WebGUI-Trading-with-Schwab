@@ -4,6 +4,56 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-29 (**Security/runtime audit — batch 3: robustness. A
+broken sub-signal read as maximum conviction; a loss halt was a suggestion.**
+- **One NaN made the aggression axis maximally bullish at maximum confidence.**
+  `blend_aggression` did `float(confs.get(k, 0.0) or 0.0)` — and **NaN is truthy**,
+  so it survived into `num`/`den`; `den <= 0` never caught it (`nan <= 0` is
+  False); and `clamp(nan, -1, 1)` returns **+1.0**. Measured before the fix: a NaN
+  component read **(1.0, 0.5)** and a NaN *confidence* read **(1.0, 1.0)** — the
+  most bullish possible aggression, at full confidence, from no data. That value
+  is stored in `market_state_history_db`, feeds the five-state classifier and
+  drives the state-transition phone alert.
+- **The guard is at the input, and a broken number DROPS OUT** rather than
+  contributing a neutral 0 that still consumes weight — so the aggregate
+  confidence reflects what actually reported. An ABSENT key still means
+  "neutral 0.0 with its confidence", as documented; only a broken *number* drops.
+  Clean reads are byte-identical (`(0.5, 0.269)` before and after).
+- **A same-day risk halt is no longer cleared by a routine re-arm.** `enable` did
+  `set_control(enabled=True, halted=False, reason=None)` unconditionally, so
+  "stop the bleed for the day" was a soft flag — and since commands are Redis
+  stream entries, a **replayed `enable` from earlier in the day** cleared it with
+  nobody touching a button.
+- **The axis is WHAT caused the halt, not when.** A manual STOP is the user's own
+  switch and `enable` still clears it — the /driver STOP dialog literally promises
+  that, so changing it would have broken a documented affordance. A halt the
+  driver set itself (loss cap / banked target / VIX) now survives `enable`, which
+  still arms it for the next session.
+- **The override is kept, but made deliberate:** `args={"clear_halt": true}`,
+  surfaced as a confirm-gated **Resume today** button that appears only for a
+  self-set halt (`driver.is_risk_halt`). Without that the change would have
+  silently removed the operator's only way back in on the day.
+- ⚠ **`halted_date` was written but never read.** It has been in the
+  `DriverControl` contract from the start, documented as "re-arm next day" — so a
+  halt never expired on its own either. It is now the staleness test, and a halt
+  with NO date counts as stale so a pre-field control cannot become permanently
+  unclearable.
+- **Two side-effectful commands are replay-guarded.** Consumer groups start at id
+  `0`, so a fresh group re-delivers the backlog (the "burned a day's API budget in
+  one go" incident). The service already refused a stale `driver_paper_create`;
+  `rescue_apply` — which MUTATES the paper book, and whose own is-it-still-open +
+  15%-drift guards a *fast* replay passes — and `gamma_analyze`, a **paid Claude
+  call**, now share the same `STALE_OPEN_MAX_AGE_SEC` gate.
+- ⚠ **Recorded honestly: that is an age gate, not idempotency.** Two genuinely
+  FRESH duplicates still both run. It closes the replay case using machinery the
+  service already trusts; a dedup store keyed on the stream message id would be
+  the stronger fix and was not built.
+- Per-day risk accounting, the fourth item on this batch's list, shipped with
+  batch 2 — the open path already measures deployed risk against the OPEN
+  POSITIONS rather than resetting every checkpoint.)
+
+---
+
 **Last updated:** 2026-08-29 (**Security/runtime audit — batch 2: two logic bugs,
 one wrong number and one missing gate.**
 - **`norm_vega_risk` inverted its own penalty at IV Rank 0.** `options-scanner/scoring.py`
