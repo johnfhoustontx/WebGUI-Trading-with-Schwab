@@ -263,6 +263,8 @@ grep -rn "start_all\|stop_all\|restart_one\|wait_and_run\|check_stack" --include
 
 Expected: an empty `Required-by:`. Commit.
 
+⚠ **Remove `winotify` only — leave `customtkinter`.** It looks like the same dead-Windows-dep case and is not: it is still imported by `nq_hud.py`'s `class Hud`. It becomes removable when the HUD redesign retires that class, which is not this migration.
+
 ---
 
 # Phase 2 — Stand the stack up on the VPS
@@ -443,4 +445,6 @@ Do not declare done on a green start. Confirm across a whole session: collection
 
 Only after Task 21 is clean and Task 22's restore has been tested. Archive `D:\WebGUI Trading Prod` to the E: drive, then remove it. Update CLAUDE.md's Environments section — prod is now a VPS, dev's `peer_root` and proxy-borrow relationship have changed, and the launcher table is gone.
 
-⚠ **`tools/nq_hud.py` decides its own fate here.** It is Tk, and there is no desktop. Either it stays on Windows pointed at the VPS's Redis and DB over Tailscale — which means the Windows box does *not* get archived — or it is rebuilt as a webgui page. Decide before deleting anything.
+**The HUD no longer gates this task** (decided 2026-08-29 — it is being redesigned separately), so the Windows box is archived outright with nothing left running on it.
+
+⚠ **But do not delete `tools/nq_hud.py` from the repo.** Only `class Hud` (line 600) and `main()` are Tk; lines 1–599 are ~415 lines of pure, tested logic (`read_tape`, `read_gamma`, `BasisSmoother`, `build_pane`), and `test_nq_pane.py` + `test_nq_tape.py` import the module directly. Together with `nq_signal.py` / `nq_state.py` / `nq_signal_log.py` / `nq_instruments.py` that is **~1,512 lines the redesign will want**, plus 2,078 lines of tests already pinning it. Retiring the Tk layer belongs to the redesign, not to this migration — which only needed the HUD to stop being a *reason to keep a Windows desktop*. The modules are pure Python and should pass on Linux unchanged; Task 14 verifies that.

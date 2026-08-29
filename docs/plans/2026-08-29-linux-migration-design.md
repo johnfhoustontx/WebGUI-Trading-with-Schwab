@@ -466,11 +466,48 @@ extinction event:
 ⚠ Never `cp` a live SQLite file — use the online backup API. And **test a
 restore**: an untested backup is a hypothesis.
 
-## Open decisions
+## The HUD is dropped, but only its rendering
 
-**`tools/nq_hud.py`** is a Tk always-on-top desktop HUD and has no home on a
-headless server. Either it stays on the Windows desktop pointed at the Linux Redis
-and DB over the network, or it is rebuilt as a webgui page. No third option.
+**Decided 2026-08-29: the Tk HUD is being redesigned separately, so it does not
+constrain this migration** and the Windows box can be archived outright.
+
+⚠ **Do not delete `tools/nq_hud.py` wholesale.** Measured, the file is not the
+monolith its `tkinter` import suggests — the Tk surface is `class Hud`
+(line 600) and `main()` (line 1063) and nothing else. Everything above line 600
+is pure and tested:
+
+| Piece | Lines | Nature |
+|---|---|---|
+| `nq_hud.py` 1–599 — `read_tape`, `tape_usable`, `read_gamma`/`read_gamma_all`, `pick_source_symbol`, `BasisSmoother`, `build_pane` | ~415 | **pure** |
+| `nq_hud.py` `class Hud` + `main()` | ~500 | **Tk — the only part that cannot run headless** |
+| `nq_signal.py`, `nq_state.py`, `nq_signal_log.py`, `nq_instruments.py` | 1,097 | pure — `nq_signal`'s docstring states the contract: "every function takes scalars/dicts and returns scalars/dicts" |
+| `test_nq_*.py` + `test_basis_smoother.py` | 2,078 | pin the pure half; `test_nq_pane.py` and `test_nq_tape.py` import `nq_hud` directly |
+
+So **~1,512 lines of tested pure logic** survive and **~500 lines of Tk** go. The
+HUD was already built to the house pattern — `build_pane` returns a display model
+and `class Hud` merely paints it — which is exactly the seam a webgui page would
+mount against. Discarding the file wholesale would throw away the half the
+redesign wants, along with 377 lines of tests that already pin it.
+
+**None of it is even Tk-coupled at import.** `nq_hud.py` imports `tkinter`
+**lazily** (line 721) and `customtkinter` inside `class Hud`, and
+`test_nq_hud_import.py` exists precisely to pin that discipline — its docstring
+requires the module be importable "with no customtkinter, no tkinter, no
+gamma_tool, no gex_history_db and no redis pulled in at module scope." Measured
+2026-08-29: the eight HUD suites run **614 passed in 1.15 s**. They need no
+display, no Tk libraries, and no change to run on the VPS.
+
+⚠ **`customtkinter` becomes a dead pin, but not yet.** It is declared in both
+`requirements.txt` and `requirements.lock` and is imported only by `class Hud`,
+so it joins `winotify` as removable — *after* the redesign retires that class,
+not during this migration. The distinction matters: `winotify` is imported
+nowhere today, `customtkinter` still is.
+
+Retiring the Tk layer is the redesign's business, not this migration's. This
+migration only needs the HUD to stop being a *reason to keep a Windows desktop*,
+and that is now settled.
+
+## Open decisions
 
 **The dev checkout** can stay on Windows, move to the same Linux host as a second
 user-unit set, or move to a second box. The `env.local.toml` mechanism is
