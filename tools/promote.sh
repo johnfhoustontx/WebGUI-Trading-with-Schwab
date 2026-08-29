@@ -35,10 +35,20 @@ LOCK_BEFORE="$(git rev-parse HEAD:requirements.lock 2>/dev/null || echo none)"
 
 echo "[promote] stopping $TARGET"
 systemctl --user --no-block stop "$TARGET" || true
-# --no-block returns immediately; wait for the units to actually be down before
-# swapping the code under them.
+# --no-block returns immediately, so wait for the units to actually be down
+# before swapping the code under them.
+#
+# Measured 2026-08-29: the TARGET reports inactive about a second BEFORE its
+# member units' listening sockets close -- so is-active alone is not proof the
+# ports are free. systemd serialises a start behind a stop per unit, so this
+# cannot race a systemctl start; it matters for anything else that binds, and
+# this repo has a documented scar from a silent bind failure serving stale code.
 for _ in $(seq 1 30); do
   systemctl --user is-active --quiet "$TARGET" || break
+  sleep 1
+done
+for _ in $(seq 1 15); do
+  ss -tln 2>/dev/null | grep -qE ":(8[0-9]{3}|9[0-9]{3}) " || break
   sleep 1
 done
 
