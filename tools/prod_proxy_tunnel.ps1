@@ -36,24 +36,51 @@
   # Run in the foreground to watch it:
   powershell -ExecutionPolicy Bypass -File tools\prod_proxy_tunnel.ps1
 
-.EXAMPLE
-  # Survive logon/reboot (run once, from the repo root):
-  schtasks /Create /TN "ProdProxyTunnel" /SC ONLOGON /RL LIMITED /F `
-    /TR "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PWD\tools\prod_proxy_tunnel.ps1`""
+.NOTES
+  DEPLOYING. This file is the SOURCE. The RUNNING copy lives at
+
+      %LOCALAPPDATA%\ProdProxyTunnel\prod_proxy_tunnel.ps1
+
+  deliberately OUTSIDE every git checkout. Pointing the logon entry at a path
+  inside the repo makes the tunnel a hostage of git: removing the worktree,
+  switching branches, or merging at cutover would stop it SILENTLY at the next
+  logon -- and a tunnel that is simply absent looks identical to one that is
+  working, right up until something needs data.
+
+  Deploy or refresh it with:
+
+      Copy-Item tools\prod_proxy_tunnel.ps1 `
+        (Join-Path $env:LOCALAPPDATA 'ProdProxyTunnel\prod_proxy_tunnel.ps1') -Force
+
+  It is a COPY, not a link, so it can drift. Re-copy after editing here.
+
+  LOGON PERSISTENCE uses the per-user Startup folder, not a scheduled task:
+  `schtasks /SC ONLOGON` writes to the root task folder and needs elevation,
+  which is why it returns "Access is denied" unelevated. Startup needs none, and
+  running as the logged-on user is not a compromise here -- the tunnel needs
+  that user's SSH key from ~/.ssh.
+
+      %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ProdProxyTunnel.vbs
+
+  A .vbs rather than a .cmd, so there is no console flash at logon.
 #>
 [CmdletBinding()]
 param(
   [string]$SshHost = "vps",     # the Host alias in ~/.ssh/config
   [int]$Port       = 8100,      # proxy port, both ends
   [int]$MinBackoff = 5,
-  [int]$MaxBackoff = 120
+  [int]$MaxBackoff = 120,
+  # Deliberately NOT repo-relative. The deployed copy lives outside every git
+  # checkout (see .NOTES), so a path derived from $PSScriptRoot/.. would scatter
+  # logs wherever the script happened to be copied. LOCALAPPDATA is per-user,
+  # always writable, and untouched by any git operation.
+  [string]$LogPath = (Join-Path $env:LOCALAPPDATA "ProdProxyTunnel\prod_proxy_tunnel.log")
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
-$logDir = Join-Path $root "logs"
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
-$log = Join-Path $logDir "prod_proxy_tunnel.log"
+$logDir = Split-Path -Parent $LogPath
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$log = $LogPath
 
 function Write-Log($msg) {
   $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg
@@ -62,6 +89,30 @@ function Write-Log($msg) {
 }
 
 Write-Log "starting supervisor: ${SshHost} -R ${Port} (pid $PID)"
+
+# Reap ORPHANED forwards before claiming the port.
+#
+# An `ssh -R` child outlives its supervisor: kill the PowerShell and the tunnel
+# keeps working, unsupervised. That state is genuinely misleading -- the forward
+# answers, so everything looks healthy, while nothing is left to reconnect it
+# when it eventually drops. It also blocks the next supervisor, whose
+# ExitOnForwardFailure correctly refuses a port someone else already holds, so a
+# restart quietly fails to take over.
+#
+# Observed 2026-08-29 while testing the logon entry: an orphan kept answering
+# after its supervisor was gone, and the "new" tunnel that appeared to come up
+# was the old one all along.
+#
+# Scoped to this exact forward, so it cannot touch unrelated ssh sessions --
+# including the one an operator may be sitting in.
+$orphans = @(Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.CommandLine -and $_.CommandLine -match "-R\s+${Port}:127\.0\.0\.1:${Port}" -and $_.ProcessId -ne $PID })
+foreach ($o in $orphans) {
+  Write-Log "reaping orphaned tunnel ssh pid $($o.ProcessId)"
+  try { Stop-Process -Id $o.ProcessId -Force -ErrorAction Stop } catch { Write-Log "  could not kill: $_" }
+}
+if ($orphans.Count) { Start-Sleep -Seconds 3 }   # let the far end release the port
+
 $backoff = $MinBackoff
 
 while ($true) {
