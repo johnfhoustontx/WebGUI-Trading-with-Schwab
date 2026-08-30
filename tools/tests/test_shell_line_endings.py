@@ -58,3 +58,31 @@ def test_git_stores_them_with_lf():
         if blob.returncode != 0:
             continue          # not committed yet
         assert b"\r\n" not in blob.stdout, rel
+
+
+def test_git_stores_them_executable():
+    """The exec bit is part of the REPO, and on Windows nothing sets it.
+
+    Git records a mode per file (100644 / 100755). A script authored on Windows
+    is committed 100644, because there is no exec bit there for git to observe
+    -- and `core.fileMode` is false there, so `git status` never reports the
+    difference either. The result checks out on Linux as 664 and dies with
+
+        bash: tools/promote.sh: Permission denied
+
+    Found 2026-08-29: ALL THREE tools/*.sh were 100644, so `tools/promote.sh` --
+    spelled exactly that way in CLAUDE.md and the operator runbook -- had never
+    been runnable on the VPS. `bash tools/promote.sh` works and hides it, which
+    is why it survived the migration unnoticed.
+
+    Fix a new script with:  git update-index --chmod=+x tools/<name>.sh
+    """
+    out = subprocess.run(["git", "ls-files", "-s", "--", "tools/*.sh"],
+                         cwd=ROOT, capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        pytest.skip("not a git checkout, or no tracked tools/*.sh")
+    non_exec = [line.split("\t", 1)[1] for line in out.stdout.strip().splitlines()
+                if not line.startswith("100755 ")]
+    assert not non_exec, (
+        "tracked shell scripts are not executable in git, so they check out "
+        f"non-runnable on Linux: {non_exec}")

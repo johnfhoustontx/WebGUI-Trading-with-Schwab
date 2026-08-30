@@ -321,8 +321,22 @@ practice.
 In **dev**: merge to `main` and push.
 
 ```bash
-cd /home/administrator/dev && git checkout main && git merge <branch> && git push
+cd /home/administrator/dev && git checkout main && git merge --ff-only <branch> && git push
 ```
+
+⚠ **The VPS can fetch but cannot push** (measured 2026-08-29): the remote is
+HTTPS and the box holds no GitHub credential, so `git push` there dies with
+`could not read Username for 'https://github.com'`. Anonymous read works, which
+is why everything else in this runbook does. Until a deploy key or PAT is
+configured, do the push from a workstation that is authenticated:
+
+```bash
+git push origin <branch>:main
+```
+
+That fast-forwards `main` to the branch commit — identical in effect to the
+merge above, and the reason the merge is spelled `--ff-only`: if it would not
+fast-forward, the two routes are no longer equivalent and you want to know.
 
 In **prod** — and by this route only:
 
