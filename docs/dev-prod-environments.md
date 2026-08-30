@@ -166,15 +166,33 @@ unit for every environment, but dev's stores are a disposable copy of prod's by
 construction; enabling it would encrypt and ship ~1.5 GB of duplicate data every
 night. Prod's timer is the one that matters.
 
-**9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §8): the header
-carries a **DEV** chip and the tab title reads `DEV · NeuralStrike`. Then
-confirm the suppressions are real, not just configured:
+**9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §8) the tab title is
+prefixed `DEV ·` and the header carries a **DEV** chip; prod's is bare. Then
+confirm the four suppressions are **enforced**, not merely configured — read
+them from the enforcement points rather than from the profile, since the profile
+is the thing you would be checking against itself:
 
 ```bash
-curl -s 127.0.0.1:9215/health | python3 -m json.tool | head -20
+cd /home/administrator/dev && .venv/bin/python -c "
+import sys; sys.path.insert(0,'.')
+from services import _scaffold; import repo_paths as r
+from shared.notify import channels
+print('schedulers  :', _scaffold._schedulers_enabled())
+print('claude      :', r.ENV_FLAGS['allow_claude'])
+print('autonomous  :', r.ENV_FLAGS['autonomous_trading'])
+print('notify cfg  :', channels.load_config())"
 ```
 
-`has_scheduler` must be **false** on every dev service.
+All four must be false, and every `enabled` in the notification config must be
+false — `load_config` zeroes them recursively and **last**, so it overrides the
+`NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes too.
+
+⚠ **`/health` will not answer this question, and it looks as though it does.**
+`scheduler_alive` is `true` on a dev service: it means "the restart budget is
+not exhausted", not "a scheduler is running", and it defaults true. The field
+that actually discriminates is **`scheduler_last_tick_age_s`** — `null` in dev,
+because the task never started. (On prod it is the age since the scheduler last
+*started*, not since its last tick, so a large value there is normal.)
 ## 3. Daily dev loop
 
 ```bash

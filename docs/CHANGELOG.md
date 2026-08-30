@@ -4,6 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-29 (**DEV STOOD UP ON THE VPS. Both environments now
+run side by side under one Linux user, which is the shape the Windows box had —
+so the update loop is unchanged in principle and entirely relocated in
+practice.** Migration-plan Task 23.)
+
+- **`/home/administrator/dev`, eight units, `:9500`, Redis db 1** — its own
+  checkout, its own venv (118 packages, dry-run clean), its own `logs/` and
+  `*/data/`. **No proxy unit exists** for it, because ownership is encoded in
+  which units the generator emits rather than in a kill-list somebody has to
+  remember to apply.
+- **Dev holds NO Schwab credentials at all**, and that is a measurement, not a
+  policy: `APPSETTINGS` and `TOKENS` are read by `schwab-proxy/schwab_proxy.py`
+  and by nothing else in the tree, and dev runs no proxy. The cutover checklist
+  had listed them for prod, and copying them into dev would have put a second
+  copy of the single rotating refresh token on disk for no benefit.
+- **All four suppressions verified at their ENFORCEMENT points**, not read back
+  out of the profile they are configured in: `_schedulers_enabled()` False,
+  `allow_claude` False, `autonomous_trading` False, and every `enabled` in
+  `channels.load_config()` zeroed.
+  ⚠ **`/health` cannot answer this and looks as though it can** —
+  `scheduler_alive` is `true` on a dev service. It defaults true and means "the
+  restart budget is not exhausted". The field that discriminates is
+  `scheduler_last_tick_age_s`: `null` in dev because the task never started, and
+  on prod the age since the scheduler last *started*, not since its last tick.
+- **The snapshot tool was broken on the VPS and nobody could have known.**
+  `snapshot_from_prod.py` builds its own Redis clients and predates Redis
+  gaining `requirepass`, so it failed on `AuthenticationError` — at the very
+  last step, **after 1.5 GB of SQLite had landed**. That is precisely the
+  half-applied state its deferred `import redis` check exists to prevent,
+  reached through a door that check cannot cover: importability is not
+  reachability. Fixed via `redis_connect_kwargs`, with a **source-level** test
+  that fails on any new `redis.Redis(` bypassing it — a value check cannot see a
+  call site that does not exist yet, and that omission was the entire bug. The
+  other two consumers were already right (`shared/bus` reads the variable,
+  `backup_local.py` passes `REDISCLI_AUTH`), which is why it stayed hidden.
+- **Both halves of the snapshot have now run for real** — 1,542 MB across 14
+  stores in ~13 s with prod live and writing, then 91 Redis keys (96 less the 6
+  `cmd:*`, plus a hand-written disabled `cache:driver:control`), payload sizes
+  and version counters identical to prod's. Known limit #6 in the runbook is
+  retired.
+- ⚠ **Two things the runbook documented no longer worked under systemd**, both
+  silent. A manual `snapshot_from_prod.py` needs `MEMURAI_PASSWORD` in its
+  environment — only the *units* have an `EnvironmentFile`. And
+  `TRADING_ENABLE_SCHEDULERS=1` set in a shell is **inert**: a unit's
+  environment never comes from the shell that ran `systemctl`. It has to go in
+  dev's `.env`.
+- **`.claude/launch.json` flipped to the POSIX venv layout** — the last deferred
+  step of the Linux migration, held back because a single string cannot name
+  both layouts and no Windows checkout is previewed from any more.
+
+---
+
 **Last updated:** 2026-08-29 (**PROD MIGRATED TO LINUX. Nine `systemd --user`
 units on an Ubuntu 24.04 VPS replace twelve `.bat` launchers and the WMI/taskkill
 supervision layer. Cut over live the same day.**

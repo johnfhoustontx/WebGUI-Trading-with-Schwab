@@ -1667,10 +1667,15 @@ worth carrying forward. The shell-script equivalents that DO still bite are the
 CRLF one (see `.gitattributes`) and the fact that `is-active` is not proof the
 ports are free.
 
-**The cutover has been performed (2026-08-09).** Both environments run
-simultaneously and were verified live: prod on 8100/8210-8215/8500 from
-`D:\WebGUI Trading Prod`, dev on 9210-9215/9500 with all four suppressions
-active, one shared Redis, and dev holding **no proxy of its own**.
+**Both environments run simultaneously on the VPS, verified live 2026-08-29** —
+prod on 8100/8210-8215/8500 from `/home/administrator/prod`, dev on
+9210-9215/9500 from `/home/administrator/dev` with all four suppressions
+enforced (not merely configured), one shared Redis, and dev holding **no proxy
+of its own** and **no Schwab credentials on disk** (only `schwab_proxy.py` reads
+them). Dev is `enable`d at boot; its generated `trading-dev-backup.timer` is
+deliberately **not** enabled, since its stores are a disposable copy of prod's.
+⚠ `/health` cannot tell you whether schedulers are off — `scheduler_alive`
+defaults true and means "restart budget not exhausted". See the runbook.
 
 **Data flows one way.** `tools/snapshot_from_prod.py`, run **from dev**, copies
 prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
