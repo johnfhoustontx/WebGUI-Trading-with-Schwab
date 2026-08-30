@@ -486,6 +486,7 @@ its environment, because only the *units* have an `EnvironmentFile`.
 | Dev chip / tab title | `webgui/main.py` |
 | Unit generation | `deploy/systemd/generate_units.py` (nothing under `deploy/systemd/` is committed as a `.service`) |
 | Start / stop | `systemctl --user start\|stop trading-{dev,prod}.target`; the GUI's More → Stop All Services runs the same target stop |
+| Driving it from Windows | `tools/trading.bat` — `start` / `stop` / `restart [svc]` / `status` / `health` / `logs [svc]` / `tunnel`. Sends systemctl over SSH; supervises nothing |
 | Promotion | `tools/promote.sh` + `.claude/hooks/guard_prod_promote.py` |
 | Snapshot | `tools/snapshot_from_prod.py` |
 | Backups | `tools/backup_local.py`, `trading-prod-backup.timer`, `tools/pull_backups.ps1` |
