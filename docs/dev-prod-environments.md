@@ -373,8 +373,18 @@ prod's shared proxy. That is deliberate (dev needs on-demand fetches to be
 usable), but "dev makes no API calls" is only true while nobody is using it.
 
 **2. Dev needs prod's proxy running** for any on-demand fetch, because it borrows
-`:8100`. Each dev service's `ExecStartPre=tools/wait_http.py` waits for it; the
-services start anyway, and every fetch fails until prod is up.
+`:8100`. **Nothing waits for it** — `generate_units.py` emits the
+`ExecStartPre=tools/wait_http.py` probe only when `OWNS_PROXY` is true, so dev
+services have no readiness gate at all. They start cleanly and every fetch fails
+until a proxy answers. That is the right behaviour (a dev stack must come up to
+read its snapshot whether or not prod is running), but it does mean a missing
+proxy is invisible at startup and shows up only as failing fetches.
+
+⚠ This entry claimed the opposite until 2026-08-30 — that each dev service waited
+via `ExecStartPre`. It was inherited from the pre-systemd runbook and repeated
+through the Linux rewrite without being checked against the generator. Verified
+against `deploy/systemd/generate_units.py:140` and against a real dev stack
+started with no proxy present at all.
 
 **3. Restarting Redis affects both environments.** One server, two logical DBs.
 The Status page hides the Redis restart button in dev for exactly this reason —
