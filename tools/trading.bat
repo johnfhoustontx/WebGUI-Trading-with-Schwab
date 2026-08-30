@@ -109,15 +109,10 @@ goto end
 
 REM ---------------------------------------------------------------------------
 :do_tunnel
-echo Forwarding 8500 (web GUI) and 8100 (proxy /auth, /health) from %TRADING_HOST%.
-echo Both bind 127.0.0.1 on the server and have NO authentication, which is why
-echo this is a tunnel and not a public URL. Leave this window open; closing it
-echo closes the tunnel.
-echo.
-echo     web GUI      http://127.0.0.1:8500
-echo     proxy auth   http://127.0.0.1:8100/auth
-echo.
-ssh -N -L 8500:127.0.0.1:8500 -L 8100:127.0.0.1:8100 %TRADING_HOST%
+REM One implementation, in open_webgui.bat -- it also refuses to stack a second
+REM tunnel on a port already in use, and opens the browser once the forward is
+REM genuinely accepting rather than after a guessed delay.
+call "%~dp0open_webgui.bat"
 goto end
 
 REM ---------------------------------------------------------------------------
