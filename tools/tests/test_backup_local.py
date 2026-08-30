@@ -123,3 +123,65 @@ def test_secrets_are_still_carried_separately():
     for rel in ("shared/tokens.json", "shared/appsettings.json",
                 "config/env.local.toml"):
         assert rel in bl.EXTRA_FILES
+
+
+#############################################
+# Pruning the OFFSITE retry caches, not just the generations
+#############################################
+#
+# The encrypted archive is kept when an upload fails, deliberately, so a retry
+# does not re-encrypt 1.5 GB. But prune() only ever removed directories, so on a
+# run of failed uploads the .tar.age files accumulated at ~1.6 GB PER NIGHT and
+# nothing collected them -- on the box that runs the trading stack, where a full
+# disk is an outage. Found 2026-08-30 with the timer newly enabled and the Drive
+# remote not yet configured, which is precisely the state that triggers it.
+
+
+def _gen(root, name, *, archive=False):
+    """A dated generation directory, optionally with its encrypted archive."""
+    d = root / name
+    (d / "options-scanner").mkdir(parents=True)
+    (d / "options-scanner" / "signals.db").write_bytes(b"x")
+    if archive:
+        (root / f"{name}.tar.age").write_bytes(b"age-encryption.org/v1\n")
+    return d
+
+
+def test_prune_keeps_the_newest_generations(tmp_path):
+    """Non-vacuity: the behaviour that already worked must keep working."""
+    for n in ("prod_2026-08-01_2000", "prod_2026-08-02_2000", "prod_2026-08-03_2000",
+              "prod_2026-08-04_2000"):
+        _gen(tmp_path, n)
+    bl.prune(tmp_path, 3)
+    left = sorted(d.name for d in tmp_path.iterdir() if d.is_dir())
+    assert left == ["prod_2026-08-02_2000", "prod_2026-08-03_2000", "prod_2026-08-04_2000"]
+
+
+def test_prune_drops_the_archive_of_a_dropped_generation(tmp_path):
+    """The .tar.age is a retry cache for ITS generation. Once the generation is
+    gone the archive is unreachable by any retry, and is pure disk cost."""
+    for n in ("prod_2026-08-01_2000", "prod_2026-08-02_2000", "prod_2026-08-03_2000",
+              "prod_2026-08-04_2000"):
+        _gen(tmp_path, n, archive=True)
+    bl.prune(tmp_path, 3)
+    archives = sorted(p.name for p in tmp_path.glob("*.tar.age"))
+    assert archives == ["prod_2026-08-02_2000.tar.age",
+                        "prod_2026-08-03_2000.tar.age",
+                        "prod_2026-08-04_2000.tar.age"], (
+        "a dropped generation left its 1.6 GB archive behind")
+
+
+def test_prune_keeps_the_archive_of_a_kept_generation(tmp_path):
+    """The retry cache must survive for generations that still exist, or the
+    next run re-encrypts 1.5 GB for nothing."""
+    _gen(tmp_path, "prod_2026-08-04_2000", archive=True)
+    bl.prune(tmp_path, 3)
+    assert (tmp_path / "prod_2026-08-04_2000.tar.age").exists()
+
+
+def test_prune_reports_what_it_removed(tmp_path):
+    """The run prints this line, so it has to name the generations."""
+    for n in ("prod_2026-08-01_2000", "prod_2026-08-02_2000"):
+        _gen(tmp_path, n, archive=True)
+    dropped = bl.prune(tmp_path, 1)
+    assert dropped == ["prod_2026-08-01_2000"]

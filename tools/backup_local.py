@@ -243,11 +243,24 @@ def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
 
 
 def prune(root, keep):
-    """Drop all but the newest `keep` dated generations. Returns names removed."""
+    """Drop all but the newest `keep` dated generations. Returns names removed.
+
+    Takes each dropped generation's ``.tar.age`` with it. That archive is the
+    retry cache for ITS generation, kept when an upload fails so a retry need
+    not re-encrypt 1.5 GB -- but once the generation is gone no retry can reach
+    it, and it is pure disk cost.
+
+    ⚠ This mattered more than it sounds. Only directories were considered here,
+    so a RUN of failed uploads left ~1.6 GB behind every night and nothing ever
+    collected it -- on the box that runs the trading stack, where a full disk is
+    an outage. The trigger is exactly the state this is normally in while the
+    offsite remote is being set up, which is when nobody is watching disk.
+    """
     gens = sorted((d for d in root.iterdir() if d.is_dir()), reverse=True)
     dropped = []
     for d in gens[keep:]:
         shutil.rmtree(d, ignore_errors=True)
+        (root / f"{d.name}.tar.age").unlink(missing_ok=True)
         dropped.append(d.name)
     return dropped
 
