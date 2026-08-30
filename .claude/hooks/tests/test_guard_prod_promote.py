@@ -181,7 +181,7 @@ def test_the_sanctioned_path_is_the_shell_script_now():
 
 
 def test_the_hook_never_names_a_file_that_no_longer_exists():
-    """Its refusal message told people to run tools\promote.bat. A guard that
+    r"""Its refusal message told people to run tools\promote.bat. A guard that
     blocks you and then names a missing file reads as a bug and invites a
     workaround -- which is the one outcome it cannot afford."""
     src = HOOK.read_text(encoding="utf-8")
@@ -208,3 +208,86 @@ def test_an_ordinary_push_from_dev_is_still_allowed():
     """Non-vacuity: pushing is how work leaves dev."""
     assert run("git push origin Using_Highcharts", cwd=DEV) == ALLOWED
     assert run("git push origin main", cwd=LINUX_DEV) == ALLOWED
+
+
+###############################################
+# The command REACHES prod without standing in it
+###############################################
+#
+# Both shapes below sailed straight through until 2026-08-29. The ssh one is the
+# serious regression: since the Linux migration every prod command is issued
+# over ssh from a dev-side cwd, so the guard was blind on the ONLY path that
+# reaches prod any more -- a `git checkout` in prod ran unchallenged. This is
+# the third time this guard has gone quietly inert on a change of address (first
+# the Windows-only path fragment, then the start-anchor), so the tests are
+# written against the SHAPE of the access, not against one spelling of it.
+
+
+def test_blocks_a_mutating_verb_sent_over_ssh():
+    """The access path the whole stack now uses."""
+    assert run(f"ssh vps-ts 'cd {LINUX_PROD} && git checkout main'", cwd=DEV) == BLOCKED
+
+
+def test_blocks_it_regardless_of_the_quoting_or_ssh_options():
+    for cmd in (
+        f'ssh vps-ts "cd {LINUX_PROD} && git pull --ff-only"',
+        f"ssh -p 2222 vps-ts 'cd {LINUX_PROD} && git reset --hard origin/main'",
+        f"ssh administrator@10.0.0.5 'cd {LINUX_PROD} && git merge feature'",
+    ):
+        assert run(cmd, cwd=DEV) == BLOCKED, f"not blocked: {cmd!r}"
+
+
+def test_blocks_git_dash_C_pointed_at_prod():
+    """`git -C <path>` needs no cd at all, and is the natural one-liner -- the
+    repo's own notes suggested exactly this form."""
+    assert run(f"git -C {LINUX_PROD} checkout main", cwd=DEV) == BLOCKED
+    assert run(f'git -C "{PROD}" pull --ff-only', cwd=DEV) == BLOCKED
+    assert run(f"ssh vps-ts 'git -C {LINUX_PROD} reset --hard'", cwd=DEV) == BLOCKED
+
+
+def test_still_allows_read_only_git_over_ssh():
+    """Inspecting prod is how you decide whether to promote."""
+    for cmd in (f"ssh vps-ts 'cd {LINUX_PROD} && git status --porcelain'",
+                f"ssh vps-ts 'cd {LINUX_PROD} && git log --oneline -5'",
+                f"ssh vps-ts 'git -C {LINUX_PROD} rev-parse HEAD'",
+                f"ssh vps-ts 'cd {LINUX_PROD} && git fetch origin main'"):
+        assert run(cmd, cwd=DEV) == ALLOWED, f"over-blocked: {cmd!r}"
+
+
+def test_still_allows_the_sanctioned_path_over_ssh():
+    """The guard redirects to promote.sh, so it must not block promote.sh."""
+    assert run(f"ssh vps-ts 'cd {LINUX_PROD} && tools/promote.sh'", cwd=DEV) == ALLOWED
+    assert run(f"ssh vps-ts 'cd {LINUX_PROD} && bash tools/promote.sh'", cwd=DEV) == ALLOWED
+
+
+def test_still_allows_ordinary_dev_work_over_ssh():
+    """Non-vacuity: dev now lives on the VPS too, and is reached the same way."""
+    for cmd in (f"ssh vps-ts 'cd {LINUX_DEV} && git checkout main'",
+                f"ssh vps-ts 'cd {LINUX_DEV} && git merge feature'",
+                f"ssh vps-ts 'git -C {LINUX_DEV} pull --ff-only'"):
+        assert run(cmd, cwd=DEV) == ALLOWED, f"over-blocked: {cmd!r}"
+
+
+def test_naming_the_prod_path_over_ssh_is_still_not_running_a_verb_in_it():
+    """The anchor's original reason, carried into the new shapes. Widening the
+    match to "mentions prod anywhere" would fix ssh and immediately re-break
+    this -- which is the failure that motivated the anchor in the first place."""
+    naming = (
+        f"ssh vps-ts 'echo \"cd {LINUX_PROD} && git pull\" >> notes.txt'",
+        f"ssh vps-ts 'grep -rn \"git checkout\" {LINUX_PROD}/docs'",
+        f'echo "git -C {LINUX_PROD} pull" > fixture.txt',
+        f"ssh vps-ts 'cat {LINUX_PROD}/CLAUDE.md'",
+    )
+    for cmd in naming:
+        assert run(cmd, cwd=DEV) == ALLOWED, f"over-blocked: {cmd!r}"
+
+
+def test_the_refusal_message_names_the_checkout_that_actually_exists():
+    r"""It told people to `cd "D:\WebGUI Trading Prod"`, a path that is now an
+    archive on a decommissioned box. A guard that blocks you and then gives an
+    instruction that cannot work reads as a bug and invites a workaround."""
+    src = HOOK.read_text(encoding="utf-8")
+    start = src.index("Blocked: `git")
+    message = src[start:]
+    assert "/home/administrator/prod" in message
+    assert "D:" not in message, "refusal still points at the Windows checkout"

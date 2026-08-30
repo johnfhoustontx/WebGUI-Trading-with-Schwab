@@ -83,18 +83,64 @@ _PROD_CD = re.compile(
     r"[^\"'&;|]*[\"']?\s*(?:&&|;)", re.IGNORECASE)
 
 
+# `git -C <prod>` reaches the checkout with no `cd` at all, and is the natural
+# one-liner -- this repo's own notes suggested exactly that form. Anchored at a
+# COMMAND POSITION (start of line, or after && || ; ) for the same reason the cd
+# match is: `echo "git -C <prod> pull" > fixture` must stay allowed.
+_CMD_POS = r"(?:^|&&|\|\||;|\n)\s*"
+
+_PROD_GIT_C = re.compile(
+    _CMD_POS + r"git\s+(?:-c\s+\S+\s+)*-C\s+[\"']?[^\"'&;|]*" + _ANY_PROD,
+    re.IGNORECASE)
+
+# An ssh-wrapped command is the shape EVERY prod command now takes: both stacks
+# moved to the VPS, so the cwd is a dev-side checkout and the prod path lives
+# inside the quoted remote command, where neither test above could see it. The
+# guard was therefore blind on the only path that reaches prod any more -- the
+# third time it has gone quietly inert on a change of address (first the
+# Windows-only fragment, then the start-anchor).
+#
+# Unwrap rather than widen: the remote command is tested with the SAME anchored
+# rules as a local one, so `ssh host 'echo "cd <prod> && git pull" >> notes'`
+# stays allowed. Widening to "mentions prod anywhere" would fix ssh and
+# instantly re-break that, which is the regression the anchor exists for.
+_SSH_OPEN = re.compile(r"\s*ssh\b[^'\"]*(['\"])")
+
+
+def _ssh_payload(command: str):
+    """The remote command inside `ssh [opts] host '<...>'`, or None."""
+    m = _SSH_OPEN.match(command)
+    if not m:
+        return None
+    quote = m.group(1)
+    rest = command[m.end():]
+    end = rest.rfind(quote)
+    return rest[:end] if end != -1 else rest
+
+
 def _targets_prod(command: str, cwd: str) -> bool:
     """True when a git verb here would run INSIDE the prod checkout."""
     low_cwd = (cwd or "").lower()
     if any(f in low_cwd for f in PROD_FRAGMENTS):
         return True
-    return bool(_PROD_CD.search(command))
+    candidates = [command]
+    payload = _ssh_payload(command)
+    if payload:
+        candidates.append(payload)
+    return any(_PROD_CD.search(c) or _PROD_GIT_C.search(c) for c in candidates)
 
 
 def _mutating_git(command: str) -> str:
     """The mutating git verb in the command, or ''. Also catches `branch -f`."""
     low = command.lower()
-    for m in re.finditer(r"\bgit\s+(?:-c\s+\S+\s+)*([a-z-]+)", low):
+    # The option argument may be QUOTED and contain spaces -- `git -C "D:\WebGUI
+    # Trading Prod" pull`. With a bare \S+ the skip consumed only `"D:\WebGUI`
+    # and the verb read as `Trading`, so the whole command scanned as
+    # non-mutating. (`command` is lowercased here, so -C and -c are the same
+    # token by then; both take exactly one argument, which is why one branch
+    # covers `-c key=val` too.)
+    for m in re.finditer(
+            r"\bgit\s+(?:-c\s+(?:\"[^\"]*\"|'[^']*'|\S+)\s+)*([a-z-]+)", low):
         verb = m.group(1)
         if verb in MUTATING:
             return verb
@@ -128,7 +174,7 @@ def main() -> int:
         "Development work has to be COMPLETED AND VERIFIED IN DEV before it "
         "moves to prod. Land it in dev, run it there, then promote:\n"
         "\n"
-        '    cd "D:\\WebGUI Trading Prod" && tools\\promote.sh\n'
+        "    cd /home/administrator/prod && tools/promote.sh\n"
         "\n"
         "promote.sh refuses on a dirty tree, stops the stack before pulling, "
         "reinstalls only if requirements.lock moved, and restarts afterwards - "
