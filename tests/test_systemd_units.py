@@ -259,19 +259,35 @@ def test_the_backup_is_a_timer_not_a_stack_service(rendered):
 
 
 def test_the_backup_timer_catches_up_after_downtime(rendered):
-    """Persistent=true runs a MISSED occurrence at next boot. Without it a box
-    that was off at 17:30 silently skips a day, and nobody notices until a
-    restore is needed."""
+    """Persistent=true runs a MISSED occurrence at next boot. Kept even though the
+    VPS is always on: it costs nothing when the timer fires normally, and the box
+    does reboot. A silently skipped night is the failure this job exists to
+    prevent."""
     tmr = rendered[f"trading-{ENV_NAME}-backup.timer"]
     assert tmr["Timer"]["Persistent"].lower() == "true"
-    assert tmr["Timer"]["OnCalendar"].endswith("17:30:00")
+    assert tmr["Timer"]["OnCalendar"].endswith("20:00:00")
     assert tmr["Install"]["WantedBy"] == "timers.target"
 
 
 def test_the_backup_runs_after_everything_that_writes():
-    """17:30 is after collection (15:20), the momentum cascade (16:20) and the
+    """20:00 CT is after collection (15:20), the momentum cascade (16:20) and the
     calibration rebuild (16:30). Backing up mid-cascade captures a half-written
-    night that looks complete."""
+    night that looks complete. Asserted as an INEQUALITY against the last writer,
+    not as the literal time, so moving the backup an hour does not fail this and
+    moving it before the cascade does."""
     tmr = _parse(units.render_all()[f"trading-{ENV_NAME}-backup.timer"])
     hh, mm, _ = tmr["Timer"]["OnCalendar"].split()[-1].split(":")
     assert int(hh) * 60 + int(mm) > 16 * 60 + 30
+
+
+def test_the_backup_has_a_timeout_long_enough_to_finish(rendered):
+    """⚠ A oneshot inherits DefaultTimeoutStartSec, measured at 90s on this host.
+    The backup encrypts ~1.5 GB and uploads it -- 6m18s measured -- so without an
+    explicit TimeoutStartSec systemd SIGTERMs it mid-upload every night, leaving
+    a partial object in Drive and a unit in `failed`.
+
+    Asserted as a generous floor rather than the exact value: the point is that
+    it comfortably exceeds a real run, not that it equals any particular number.
+    """
+    svc = rendered[f"trading-{ENV_NAME}-backup.service"]
+    assert int(svc["Service"]["TimeoutStartSec"]) >= 1800

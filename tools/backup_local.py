@@ -34,14 +34,28 @@ WHAT IT DELIBERATELY DOES NOT DO
     against corruption and mistakes; they do NOT protect against losing the
     instance. That is what the offsite pull is for -- see tools/pull_backups.ps1.
 
+OFFSITE. Once the local generation is complete it is tarred, age-encrypted to
+the public key in ``~/.config/age/backup-key.txt``, uploaded to Google Drive and
+verified with ``rclone check`` (hashes, not just size). Drive never sees
+plaintext: the archive carries live Schwab OAuth tokens, the Schwab API keys, the
+Anthropic key and the notification credentials.
+
+⚠ THE PRIVATE KEY IS THE BACKUP. Lose every copy of
+``~/.config/age/backup-key.txt`` and the Drive archive is permanently
+unreadable -- 1.5 GB of noise. It is escrowed on the Windows workstation and
+belongs in a password manager too, and it must NEVER be uploaded to Drive: a key
+stored beside its ciphertext is not encryption.
+
 Usage:
-    .venv/bin/python tools/backup_local.py            # into ~/backups
+    .venv/bin/python tools/backup_local.py               # local + offsite
+    .venv/bin/python tools/backup_local.py --no-offsite  # local only
     .venv/bin/python tools/backup_local.py --dest /mnt/x --keep 7
 """
 import argparse
 import datetime as dt
 import os
 import pathlib
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -52,6 +66,16 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from repo_paths import ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
 
 KEEP = 3
+
+# Offsite: encrypt, then upload the CIPHERTEXT. Drive never sees plaintext.
+#
+# The archive carries live Schwab OAuth tokens, the Schwab API keys, the
+# Anthropic key and the notification credentials. Those must not sit in a
+# third-party service in the clear, where they can be cached, indexed, synced to
+# other devices and remain recoverable after deletion.
+AGE_IDENTITY = pathlib.Path.home() / ".config" / "age" / "backup-key.txt"
+RCLONE_REMOTE = "gdrive:TradingBackups"
+KEEP_REMOTE = 3
 
 # Loose gitignored files that live OUTSIDE the data trees below.
 EXTRA_FILES = (
@@ -153,6 +177,71 @@ def backup_redis(dst):
     return False, (p.stderr or p.stdout or "no output").strip()[:200]
 
 
+def age_recipient(identity=AGE_IDENTITY):
+    """The PUBLIC key from the age identity file, or None.
+
+    Read from the identity rather than hardcoded, so there is one source. A
+    second copy of the public key could drift from the private one, and the
+    failure would be an archive nobody can decrypt -- discovered during a
+    restore, which is the worst possible moment.
+    """
+    try:
+        for line in identity.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# public key:"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def encrypt_generation(gen_dir, out_path, recipient):
+    """tar the generation and age-encrypt it. Returns (ok, detail).
+
+    NOT compressed: gex_history.db is ~95% of the bytes and its grids are
+    already zlib-compressed, so gzip would burn CPU for almost nothing.
+    """
+    cmd = (f"tar cf - -C {shlex.quote(str(gen_dir.parent))} "
+           f"{shlex.quote(gen_dir.name)} | age -r {shlex.quote(recipient)} "
+           f"> {shlex.quote(str(out_path))}")
+    try:
+        p = subprocess.run(["bash", "-o", "pipefail", "-c", cmd],
+                           capture_output=True, text=True, timeout=3600)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    if p.returncode != 0:
+        return False, (p.stderr or "tar|age failed").strip()[:300]
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        return False, "produced no output"
+    return True, f"{out_path.stat().st_size:,} bytes"
+
+
+def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
+    """rclone copy `path` to `remote`, verify by checksum, prune old. (ok, detail).
+
+    ⚠ Verified with `rclone check`, not by exit code alone. A transfer can
+    report success and leave a short object; the check compares hashes.
+    """
+    try:
+        p = subprocess.run(["rclone", "copy", str(path), remote + "/", "--transfers", "1"],
+                           capture_output=True, text=True, timeout=7200)
+        if p.returncode != 0:
+            return False, (p.stderr or "rclone copy failed").strip()[:300]
+        c = subprocess.run(["rclone", "check", str(path.parent), remote + "/",
+                            "--include", path.name, "--one-way"],
+                           capture_output=True, text=True, timeout=3600)
+        if c.returncode != 0:
+            return False, "uploaded but CHECKSUM MISMATCH: " + (c.stderr or "").strip()[:200]
+        listing = subprocess.run(["rclone", "lsf", remote + "/"],
+                                 capture_output=True, text=True, timeout=300)
+        names = sorted(n for n in listing.stdout.split() if n.endswith(".tar.age"))
+        for old in names[:-keep] if len(names) > keep else []:
+            subprocess.run(["rclone", "deletefile", f"{remote}/{old}"],
+                           capture_output=True, text=True, timeout=300)
+        return True, f"verified; {min(len(names), keep)} generation(s) offsite"
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
 def prune(root, keep):
     """Drop all but the newest `keep` dated generations. Returns names removed."""
     gens = sorted((d for d in root.iterdir() if d.is_dir()), reverse=True)
@@ -167,6 +256,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dest", default=str(pathlib.Path.home() / "backups"))
     ap.add_argument("--keep", type=int, default=KEEP)
+    ap.add_argument("--no-offsite", action="store_true",
+                    help="skip encrypt + upload (local generation only)")
     args = ap.parse_args(argv)
 
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -234,6 +325,38 @@ def main(argv=None):
         print(f"pruned {len(dropped)} old generation(s): {', '.join(dropped)}")
 
     print(f"\n{total / 1e9:.2f} GB of databases, {len(failures)} failure(s)")
+    # ── offsite: encrypt, upload, verify ────────────────────────────────────
+    #
+    # Deliberately AFTER the local generation is complete and pruned. A Drive
+    # outage must not cost you the local backup, which is the copy you reach for
+    # first. It is still reported as a FAILURE (non-zero exit, so systemd marks
+    # the unit failed), because an offsite backup that quietly stopped happening
+    # is indistinguishable from one that is working until you need it.
+    if not args.no_offsite and not failures:
+        recipient = age_recipient()
+        if not recipient:
+            failures.append(f"offsite: no age identity at {AGE_IDENTITY}")
+            print(f"  FAIL offsite: no age identity at {AGE_IDENTITY}")
+        else:
+            enc = out.parent / (out.name + ".tar.age")
+            ok, detail = encrypt_generation(out, enc, recipient)
+            print(f"  {'ok  ' if ok else 'FAIL'}encrypted  {detail}")
+            if not ok:
+                failures.append(f"encrypt: {detail}")
+            else:
+                ok, detail = upload(enc)
+                print(f"  {'ok  ' if ok else 'FAIL'}uploaded   {detail}")
+                if not ok:
+                    failures.append(f"upload: {detail}")
+                else:
+                    # Redundant once Drive holds a checksum-verified copy, and it
+                    # doubles the disk cost of every generation. Kept on failure
+                    # so a retry need not re-encrypt 1.5 GB.
+                    enc.unlink(missing_ok=True)
+    elif failures:
+        print("  --  offsite SKIPPED: the local backup had failures, so there is "
+              "nothing worth shipping")
+
     if failures:
         for f in failures:
             print(f"  ! {f}")

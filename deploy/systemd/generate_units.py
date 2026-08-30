@@ -65,6 +65,10 @@ START_LIMIT_INTERVAL_SEC = 300
 # How long a service waits for the proxy to ANSWER HTTP before giving up.
 PROXY_WAIT_TIMEOUT_SEC = 120
 
+# The nightly backup encrypts ~1.5 GB and uploads it (6m18s measured). A oneshot
+# would otherwise inherit the 90s default and be killed mid-upload.
+BACKUP_TIMEOUT_SEC = 7200
+
 
 def target_name():
     return f"trading-{ENV_NAME}.target"
@@ -166,12 +170,15 @@ def _backup_units():
     stack does -- the moment you most want yesterday's copy is the moment the
     stack is down. It is a oneshot on a timer, not a member of the fleet.
 
-    17:30 local, which is after everything that writes: collection stops 15:20,
-    the momentum cascade runs 16:20 and the calibration rebuild 16:30. Backing up
-    mid-cascade would capture a half-written night.
+    20:00 Central, comfortably after everything that writes: collection stops
+    15:20, the momentum cascade runs 16:20 and the calibration rebuild 16:30.
+    Backing up mid-cascade would capture a half-written night that looks
+    complete. The host runs America/Chicago, so OnCalendar is already CT.
 
-    ``Persistent=true`` runs a missed occurrence at next boot -- a machine that
-    was off at 17:30 still gets its backup rather than silently skipping a day.
+    ``Persistent=true`` is KEPT even though the VPS is always on. It costs
+    nothing when the timer fires normally, and the box does reboot -- it was
+    rebooted during the migration itself. A missed night that silently never
+    happens is the failure this whole job exists to prevent.
     """
     svc = f"""[Unit]
 Description=NeuralStrike {ENV_NAME} - nightly backup
@@ -182,15 +189,21 @@ Type=oneshot
 WorkingDirectory={_workdir()}
 Environment=TZ=America/Chicago
 EnvironmentFile={_env_file()}
+# WITHOUT THIS systemd kills the job. A oneshot inherits
+# DefaultTimeoutStartSec (90s on this host); the backup encrypts ~1.5 GB and
+# then uploads it, which took 6m18s measured. It would be SIGTERMed mid-upload
+# every night, leaving a partial object in Drive and a failed unit.
+TimeoutStartSec={BACKUP_TIMEOUT_SEC}
 ExecStart={_python()} tools/backup_local.py
 """
     tmr = f"""[Unit]
 Description=NeuralStrike {ENV_NAME} - nightly backup timer
 
 [Timer]
+# 20:00 CENTRAL (the host TZ is America/Chicago, so this is already CT).
 # After collection (15:20), the momentum cascade (16:20) and the calibration
 # rebuild (16:30) -- so the copy is of a settled night, not a half-written one.
-OnCalendar=*-*-* 17:30:00
+OnCalendar=*-*-* 20:00:00
 # Run a MISSED occurrence at boot rather than skipping the day.
 Persistent=true
 RandomizedDelaySec=300
