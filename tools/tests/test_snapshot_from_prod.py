@@ -549,3 +549,59 @@ def test_redis_import_precedes_any_copying():
         "import redis moved after the copy loop — a missing dependency would "
         "now fail with a partially written snapshot"
     )
+
+
+#############################################
+# Redis AUTH — the server gained `requirepass` in the Linux migration
+#############################################
+#
+# This tool predates that change and built its two clients with no credential at
+# all, so on the VPS it failed at the very last step — AFTER ~1.5 GB of SQLite
+# had landed, which is precisely the half-applied state
+# ``test_redis_import_precedes_any_copying`` exists to prevent. The services were
+# unaffected because ``shared/bus/client.py`` already reads MEMURAI_PASSWORD, and
+# ``tools/backup_local.py`` because it passes REDISCLI_AUTH; this was the one
+# consumer left behind. Semantics are copied from the bus deliberately: unset or
+# empty means "no AUTH", so an unauthenticated Redis keeps working unchanged.
+
+
+def test_redis_connection_carries_the_password_the_services_authenticate_with(monkeypatch):
+    monkeypatch.setenv("MEMURAI_PASSWORD", "s3cret")
+    assert snap.redis_connect_kwargs(0)["password"] == "s3cret"
+
+
+def test_redis_connection_sends_no_password_when_none_is_configured(monkeypatch):
+    monkeypatch.delenv("MEMURAI_PASSWORD", raising=False)
+    assert snap.redis_connect_kwargs(0)["password"] is None
+
+
+def test_redis_connection_treats_an_empty_password_as_absent(monkeypatch):
+    """`password=""` is not "no password" to redis-py — it would send an AUTH."""
+    monkeypatch.setenv("MEMURAI_PASSWORD", "")
+    assert snap.redis_connect_kwargs(0)["password"] is None
+
+
+def test_redis_connection_targets_the_requested_db_on_the_shared_server():
+    """One server, two logical DBs — the index is the ONLY separation."""
+    assert snap.redis_connect_kwargs(1)["db"] == 1
+    assert snap.redis_connect_kwargs(0)["db"] == 0
+    assert snap.redis_connect_kwargs(0)["port"] == snap.MEMURAI_PORT
+
+
+def test_no_redis_client_is_built_outside_the_shared_kwargs_helper():
+    """Source-level, because a value check cannot see a NEW call site.
+
+    The bug this replaces was exactly that shape: one unauthenticated
+    ``redis.Redis(...)`` pair, correct everywhere else in the repo. A second
+    client added later with the same omission would fail the same way.
+    """
+    src = inspect.getsource(snap)
+    constructions = [
+        line.strip() for line in src.splitlines()
+        if "redis.Redis(" in line and not line.strip().startswith("#")
+    ]
+    assert constructions, "expected the tool to build Redis clients"
+    for line in constructions:
+        assert "redis_connect_kwargs" in line, (
+            f"Redis client built without the shared auth kwargs: {line}"
+        )

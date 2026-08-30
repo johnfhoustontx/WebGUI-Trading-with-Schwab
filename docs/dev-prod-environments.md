@@ -4,7 +4,10 @@ How to stand the two environments up, run them, snapshot data between them, and
 promote code. Reference only — for *why* it is shaped this way, see
 [the design](plans/2026-08-08-dev-prod-environments-design.md).
 
-Every port, path and command below was checked against the repo on 2026-08-08.
+Every port, path and command below was checked against the **running VPS** on
+2026-08-29, the day dev was stood up beside prod on it. Commands are bash on the
+Linux host — the PowerShell spellings that used to be here died with the Windows
+box, along with the twelve `.bat` launchers.
 
 ---
 
@@ -17,10 +20,14 @@ Every port, path and command below was checked against the repo on 2026-08-08.
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
-| Redis (Redis `:6379`) | **db 0** | **db 1** |
-| SQLite, `logs\`, `webgui\data` | its own | its own |
+| Redis (one server, `:6379`) | **db 0** | **db 1** |
+| SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Launcher | `systemctl --user start trading-prod.target` (or `systemctl --user start trading-prod.target`) | `systemctl --user start trading-dev.target` |
+| Units | `trading-prod.target` — **9** units | `trading-dev.target` — **8** (no proxy) |
+| Start / stop | `systemctl --user start trading-prod.target` | `systemctl --user start trading-dev.target` |
+| Nightly backup timer | **enabled** | **not enabled** — its data is a disposable snapshot of prod |
+| Secrets in `.env` | `MEMURAI_PASSWORD` | `MEMURAI_PASSWORD` only |
+| Schwab credentials on disk | `appsettings.json`, `tokens.json`, `proxy_tokens.json` | **none** — only `schwab-proxy` reads them, and dev runs no proxy |
 
 Prod's numbers are byte-identical to what this repo used before environments
 existed, so prod is a relocation, not a reconfiguration.
@@ -35,7 +42,7 @@ the four behaviour flags.
 
 ```toml
 name = "dev"                          # "dev" | "prod"
-peer_root = '/home/administrator/prod'  # optional; SINGLE quotes — see below
+peer_root = '/home/administrator/prod'  # optional; the snapshot tool's SOURCE
 ```
 
 Rules worth knowing:
@@ -44,142 +51,148 @@ Rules worth knowing:
   exactly as the repo did before environments existed.
 - Because it is gitignored, **`git pull` can never carry an identity between
   checkouts**, in either direction.
-- **`peer_root` must be single-quoted.** `"/home/administrator/prod"` is an invalid
-  `\W` escape in a TOML *basic* string, and it discards the **whole document** —
-  `name` included — so the checkout silently resolves to prod. A literal string
-  (`'...'`) takes the path verbatim. Forward slashes in a double-quoted string
-  also work.
-- Save it **UTF-8**. PowerShell's `>` and `Out-File` write UTF-8 *with BOM*; the
-  loader strips a BOM, but other readers may not.
-- A marker that exists but will not parse **warns on stderr** (captured to
-  `logs\<name>.err.log`) and then falls back to prod. If dev is behaving like
-  prod, read that log first.
+- **A parse error is silent in the direction that hurts.** A marker that exists
+  but will not parse warns on stderr and then falls back to **prod** — so a
+  broken dev marker gives you a second prod. On a POSIX path the old
+  single-quote rule no longer bites (`'...'` is kept only because it costs
+  nothing), but the failure MODE is unchanged: if dev is behaving like prod,
+  suspect the marker before anything else, and settle it with the check below
+  rather than by reading the file.
+- A **git worktree has no marker** — it is gitignored, so it cannot travel —
+  and therefore resolves to **prod** and binds `:8500`. On the VPS that is the
+  port the live stack is on. Drop a `name = "dev"` marker in the worktree
+  before previewing from one, or do not preview from one.
 
-Check what a checkout thinks it is:
+Check what a checkout thinks it is — do this **before** generating units, since
+`generate_units.py --install` writes units named for whatever it resolves:
 
-```powershell
-.venv/bin/python -c "import repo_paths as r; print(r.ENV_NAME, r.SERVICE_PORTS, r.NICEGUI_PORT, r.PROXY_PORT, r.MEMURAI_URL)"
+```bash
+cd /home/administrator/dev && .venv/bin/python -c "import repo_paths as r; print(r.ENV_NAME, r.SERVICE_PORTS, r.NICEGUI_PORT, r.PROXY_URL, r.REDIS_DB)"
 ```
+
+Expected in dev: `dev {…9210-9215} 9500 http://127.0.0.1:8100 1`.
 
 Template: `config/env.local.example.toml`.
 
 ---
 
-## 2. One-time cutover
+## 2. Standing a checkout up from scratch
 
-Do this once, with the market closed. Order matters.
+Both environments already exist. This is the procedure that built dev on
+2026-08-29, kept because it is what you would follow to rebuild either one —
+after a provider loss, or on a replacement host.
 
-> **Why the order matters: until step 5 writes dev's marker, BOTH checkouts
-> resolve to `prod`.** A missing marker means prod, and prod's own marker says
-> prod — so for the whole middle of this checklist there are two prod
-> checkouts on one machine, both wanting `:8100`, `:8210`-`:8215`, `:8500` and
-> Redis db 0.
->
-> Starting the new stack before the old one is stopped therefore collides on
-> every port. The failure is nastier than a clean refusal: whichever process
-> binds first wins, the rest die into log files, and the survivors are a mix of
-> the two checkouts' code — with a proxy that answers on `:8100` while being the
-> one you didn't mean to start. `/status` will look plausible.
->
-> So: **stop the old stack (step 4) before starting prod (step 6)**, and don't
-> start dev until its marker exists. The overlap ends the moment step 5 writes
-> `name = "dev"`, which moves that checkout to 9210-9215 / `:9500` / db 1.
+⚠ **Order matters, and step 3 is the dangerous one.** Until the marker is
+written, a fresh checkout resolves to **prod** — so `generate_units.py --install`
+run before it would emit `trading-prod-*` units pointing at the NEW checkout and
+overwrite the live stack's units. Write the marker, verify it, then generate.
 
-**1. Clone prod and pin it to `main`.**
+**1. Clone, and pin line endings.**
 
-```powershell
-git clone "/home/administrator/dev" "/home/administrator/prod"
-cd "/home/administrator/prod"
-git checkout main
+```bash
+git clone https://github.com/johnfhoustontx/WebGUI-Trading-with-Schwab.git /home/administrator/dev
+cd /home/administrator/dev && git config core.autocrlf false && git checkout main
 ```
 
-**2. Build prod's venv.**
+**2. Its own venv** — never shared, so a dependency bump in one environment
+cannot move the other.
 
-```powershell
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
+```bash
+uv venv --python 3.11 .venv && uv pip install -r requirements.lock
 ```
 
-**3. Copy the gitignored secrets** from the dev checkout into prod, same relative
-paths. None of these are in git, so a clone has none of them:
+Verify it is complete rather than assuming: `.venv/bin/python -m pip install
+--dry-run -r requirements.lock` must offer to install **nothing**.
 
-| File | Holds |
-|---|---|
-| `shared\appsettings.json` | Schwab API keys |
-| `shared\tokens.json` | Schwab OAuth tokens |
-| `shared\notifications.json` | Telegram / Discord / Fi-SMS / X creds |
-| `shared\anthropic_key.txt` | Anthropic API key |
-| `shared\driver_model.txt` | driver model override |
-| `schwab-proxy\proxy_tokens.json` | the proxy's own token store |
-| `options-scanner\data\Top 20.xlsx` | scanner watchlist |
-
-The workbook is not optional in practice: **without it the scanner degrades to
-base symbols and the Net Prem view's SPDR-sector group is empty.**
-
-**4. Stop the current stack, then copy the live data into prod once.**
-
-```powershell
-cd "/home/administrator/dev"
-systemctl --user stop trading-<env>.target
-```
-
-Then copy, preserving relative paths (nothing is running, so a plain file copy is
-safe here — the online-backup path in §4 exists for later, when prod *is*
-running):
-
-- `options-scanner\gex_history.db` (~1.4 GB)
-- `options-scanner\data\` — `trades.db`, `signals.db`, `paper_account.db`,
-  `paper_account_driver.db`, `gamma_briefings.db`, `daily_trade_log.db`
-- `sentiment-dashboard\data\` — `sentiment_intraday.db`, `sector_pcr.db`,
-  `momentum.db`, `market_state.db`
-- `services\trade_svc\data\iv_history.db`
-- `shared\sentiment_bridge.json`
-
-(That is exactly `SQLITE_STORES` + `FILE_STORES` in `tools/snapshot_from_prod.py`.)
-After this, dev keeps its existing copy as its first snapshot.
-
-**5. Write the markers.**
-
-`/home/administrator/prod\config\env.local.toml`:
-
-```toml
-name = "prod"
-```
-
-`/home/administrator/dev\config\env.local.toml`:
+**3. The marker**, `config/env.local.toml` — then run the identity check from §1
+and confirm it says `dev` before going further.
 
 ```toml
 name = "dev"
 peer_root = '/home/administrator/prod'
 ```
 
-**6. Start prod.**
+No `proxy_host`: dev borrows prod's proxy at `127.0.0.1:8100`, which co-location
+makes free.
 
-```powershell
-cd "/home/administrator/prod"
-systemctl --user start trading-prod.target
+**4. `.env`, mode 600.** The units read it via `EnvironmentFile=` with no
+leading dash, so a missing file fails the unit **loudly** — deliberately, since
+the alternative is a stack that comes up mute. Copy the one line dev needs
+without ever printing it:
+
+```bash
+umask 077 && grep '^MEMURAI_PASSWORD=' /home/administrator/prod/.env > /home/administrator/dev/.env
 ```
 
-**7. Verify.** On `http://127.0.0.1:8500`:
+⚠ **`ANTHROPIC_API_KEY` is deliberately absent from dev's file.** `allow_claude`
+is already false in the profile; leaving the key out is the second belt.
 
-- **More → System Status** — overall banner green; proxy, all six services,
-  Redis and webgui up.
-- The **Schwab Authorization** card says authorized. If not, click **Authorize**
-  (it opens the proxy's `/auth`).
-- Header shows **no** `DEV` chip; tab title has no `DEV ·` prefix.
+**5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
+including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
+one store no tool knows about:
 
-**8. Repoint the desktop shortcut** at `/home/administrator/prod\systemctl --user start trading-prod.target`.
+```bash
+mkdir -p trade-analyzer/data && cp -p /home/administrator/prod/trade-analyzer/data/swing_model.json trade-analyzer/data/
+```
 
----
+⚠ **Dev needs NO Schwab credentials.** `APPSETTINGS` and `TOKENS` are read by
+`schwab-proxy/schwab_proxy.py` and nothing else, and dev runs no proxy. Copying
+`tokens.json` in would put a second copy of the single rotating refresh token on
+disk for no benefit — the exact hazard `owns_proxy = false` exists to avoid.
 
+**6. Generate and install the units.** They are derived from `repo_paths`, never
+committed, so this is also how you repair them after any port or path change.
+
+```bash
+.venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
+```
+
+Confirm the shape before starting anything: **eight** `trading-dev-*` units and
+**no proxy unit** — ownership is encoded in which units exist, not in a kill-list
+filter. `systemd-analyze --user verify ~/.config/systemd/user/trading-dev.target`
+should print nothing at all; any output is an error.
+
+**7. Load the data** — §4. Do this before the first start, so the services come
+up on prod's snapshot rather than creating empty stores.
+
+**8. Start it, and enable it at boot.**
+
+```bash
+systemctl --user enable --now trading-dev.target
+```
+
+⚠ **Do not enable `trading-dev-backup.timer`.** The generator emits a backup
+unit for every environment, but dev's stores are a disposable copy of prod's by
+construction; enabling it would encrypt and ship ~1.5 GB of duplicate data every
+night. Prod's timer is the one that matters.
+
+**9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §8): the header
+carries a **DEV** chip and the tab title reads `DEV · NeuralStrike`. Then
+confirm the suppressions are real, not just configured:
+
+```bash
+curl -s 127.0.0.1:9215/health | python3 -m json.tool | head -20
+```
+
+`has_scheduler` must be **false** on every dev service.
 ## 3. Daily dev loop
 
-```powershell
-cd "/home/administrator/dev"
-systemctl --user stop trading-<env>.target
-.venv/bin/python tools\snapshot_from_prod.py
+```bash
+cd /home/administrator/dev && systemctl --user stop trading-dev.target
+```
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a && .venv/bin/python tools/snapshot_from_prod.py
+```
+
+```bash
 systemctl --user start trading-dev.target
 ```
+
+⚠ **The `. ./.env` is load-bearing.** Redis runs with `requirepass`, and the
+services get the password from their unit's `EnvironmentFile=` — a shell does
+not. Without it the SQLite half completes and the Redis half dies on
+`AuthenticationError`, leaving dev with fresh stores and stale cache.
 
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
@@ -199,8 +212,8 @@ Prod keeps running the whole time. You do not stop it to snapshot.
 
 ## 4. Snapshotting prod's data
 
-```powershell
-.venv/bin/python tools\snapshot_from_prod.py [--dry-run] [--redis-only] [--skip-gex] [--peer PATH]
+```bash
+set -a && . ./.env && set +a && .venv/bin/python tools/snapshot_from_prod.py [--dry-run] [--redis-only] [--skip-gex] [--peer PATH]
 ```
 
 | Flag | Effect |
@@ -215,7 +228,11 @@ writing**), then `FLUSHDB` on dev's db and a `DUMP`/`RESTORE` of every key from
 prod's, types and TTLs preserved. Expect roughly 30–60 s and ~1.5 GB, dominated by
 `gex_history.db`.
 
-Four structural guards, each of which will just refuse:
+⚠ **It needs `MEMURAI_PASSWORD` in the environment** — see §3. The tool builds
+its own Redis clients (`redis_connect_kwargs`), so it does not inherit the
+services' `EnvironmentFile`.
+
+Five structural guards, each of which will just refuse:
 
 - **Wrong direction** — it only writes into the checkout it is run from, and
   refuses unless that checkout resolves to `dev`. `--peer` names the SOURCE only;
@@ -227,6 +244,9 @@ Four structural guards, each of which will just refuse:
 - **Dev is still up** — dev's services hold DB handles and would write over the
   restore. It names the ports still listening. (Prod's proxy on `:8100` is
   deliberately not probed — a listener there is prod doing its job.)
+- **`redis` is missing from this interpreter** — checked *before* the first byte
+  is copied, not where it is used, so running under the system python fails
+  cleanly instead of after ~1.5 GB has landed.
 
 Two things it deliberately does **not** carry over:
 
@@ -243,13 +263,29 @@ Two things it deliberately does **not** carry over:
 Dev's schedulers are off. To run them for one session — only when the collectors
 themselves are what you are testing:
 
-```powershell
-set TRADING_ENABLE_SCHEDULERS=1
-systemctl --user start trading-dev.target
+⚠ **Setting it in your shell does nothing.** That was the `.bat` answer, and it
+does not survive the move to systemd: a unit's environment comes from its
+`Environment=` and `EnvironmentFile=`, never from the shell that ran
+`systemctl`. `_scaffold._schedulers_enabled` reads `os.environ`, so the variable
+has to reach the *unit*. Put it in dev's `EnvironmentFile` for the session:
+
+```bash
+echo 'TRADING_ENABLE_SCHEDULERS=1' >> /home/administrator/dev/.env && systemctl --user restart trading-dev.target
 ```
 
-It must be set in the shell **before** launching, and it applies to processes
-started from that shell only.
+Take it out the same way when you are done — this is a session escape hatch, not
+a setting:
+
+```bash
+sed -i '/^TRADING_ENABLE_SCHEDULERS=/d' /home/administrator/dev/.env && systemctl --user restart trading-dev.target
+```
+
+Confirm which state you are in from the service rather than the file:
+`curl -s 127.0.0.1:9215/health` reports `has_scheduler`.
+
+(`systemctl --user set-environment` also works, but it is **manager-wide** — it
+would apply to prod's units on their next restart too. Prefer the file, which is
+scoped to dev by construction.)
 
 **Why rarely:** this makes dev issue real Schwab calls, through prod's proxy, on
 top of prod's own ~68–76k calls/day. Everything else stays suppressed — no Claude,
@@ -259,26 +295,35 @@ no notifications, no autonomous trading.
 
 ## 6. Promotion
 
+**Work is verified running in dev first.** "Tests pass" is not "verified in dev"
+for anything with a runtime surface — the DEV chip, the Status-page restart
+gating and the old launcher guards were each green in tests and wrong in
+practice.
+
 In **dev**: merge to `main` and push.
 
-```powershell
-git checkout main
-git merge <branch>
-git push
+```bash
+cd /home/administrator/dev && git checkout main && git merge <branch> && git push
 ```
 
-In **prod**:
+In **prod** — and by this route only:
 
-```powershell
-cd "/home/administrator/prod"
-tools/promote.sh
+```bash
+cd /home/administrator/prod && tools/promote.sh
 ```
 
 `promote.sh` refuses in a dev checkout, refuses on a dirty tree (*before*
-stopping anything, so a refusal never leaves prod down), stops the stack, waits
-for `:8100` and `:8500` to actually free, `git checkout main` + `git pull
---ff-only`, reinstalls dependencies **only if `requirements.lock` moved**, then
-restarts via `systemctl --user start trading-prod.target nowindow`. Check `/status` afterwards.
+stopping anything, so a refusal never leaves prod down), stops the target, waits
+for both the units and their **listening sockets** to go (`is-active` clears
+about a second early), `git pull --ff-only origin main`, reinstalls dependencies
+**only if `requirements.lock` moved**, regenerates the units, restarts, and then
+probes `:8100` and `:8500` over **HTTP** — a dead accept loop stays bound and
+would pass a TCP connect. Check `/status` afterwards.
+
+⚠ **Never `git pull`, `merge`, `checkout` or `reset` in the prod checkout.**
+Every guard above is skipped, and prod is a live trading stack.
+`.claude/hooks/guard_prod_promote.py` blocks the mutating verbs mechanically —
+it knows both the old Windows path fragment and `/home/administrator/prod`.
 
 If it refuses on a dirty tree, look at the diff — an unexpected edit in the prod
 checkout is for a human to decide about, not a restart script.
@@ -296,8 +341,8 @@ prod's shared proxy. That is deliberate (dev needs on-demand fetches to be
 usable), but "dev makes no API calls" is only true while nobody is using it.
 
 **2. Dev needs prod's proxy running** for any on-demand fetch, because it borrows
-`:8100`. `systemctl --user start trading-dev.target` waits for it and says so if it is missing; the services
-start anyway and every fetch fails until prod is up.
+`:8100`. Each dev service's `ExecStartPre=tools/wait_http.py` waits for it; the
+services start anyway, and every fetch fails until prod is up.
 
 **3. Restarting Redis affects both environments.** One server, two logical DBs.
 The Status page hides the Redis restart button in dev for exactly this reason —
@@ -314,22 +359,31 @@ is only ever exercised via monkeypatch. Confirming that dev really withholds the
 proxy and Redis restart buttons, and shows the `DEV` chip, is a **manual check
 with the app running**.
 
-**6. The SQLite half of the snapshot has never been run for real.** The cutover
-was performed on **2026-08-09** and `--redis-only` has run successfully against
-the live stack (263 of 272 keys, the nine `cmd:*` streams excluded, prod's copy
-untouched, `cache:driver:control` arriving disabled). The **file** half has not:
-the dev checkout *is* the former prod, so it already had every database and never
-needed them copied. The first true `gex_history.db` transfer is therefore still
-ahead of you — keep running `--redis-only` first and confirm prod's `/status` is
-green before letting the ~1.4 GB go.
+**6. Both halves of the snapshot have now run for real** (2026-08-29, standing
+dev up on the VPS). The file half moved **1,542 MB across 14 stores** — the
+1.52 GB `gex_history.db` included — in about 13 s, with prod live and writing
+throughout. It had never run before that day: the old dev checkout *was* the
+former prod, so it already held every database and never needed them copied.
+
+⚠ **The Redis half failed on that first run**, and the failure is the useful
+part: the tool builds its own clients, and Redis gained `requirepass` during the
+Linux migration, so it died on `AuthenticationError` **after** the 1.5 GB had
+landed — the half-applied state the deferred `import redis` check exists to
+avoid, arriving through a door that check does not cover. Fixed
+(`redis_connect_kwargs`, mirroring `shared/bus/client.py`: unset or empty means
+no AUTH). The operational residue is in §3 — a manual run needs the password in
+its environment, because only the *units* have an `EnvironmentFile`.
 
 ---
 
 ## 8. Gotchas
 
-- **Dev's Terminate stops only dev.** `the target's PartOf= scoping` drops the proxy from its
-  kill list when `owns_proxy` is false, and matches the HUD by *this checkout's
-  root path*, so it cannot reach prod's. Redis is left running either way.
+- **Dev's Terminate stops only dev**, structurally rather than by a filter:
+  `systemctl --user --no-block stop trading-dev.target` reaches exactly the units
+  `PartOf=` binds to it, and dev has **no proxy unit to begin with** when
+  `owns_proxy` is false. Redis survives either way — it is a *system* unit a
+  `--user` stop cannot reach even in principle, which is also why the Status
+  page's Redis card is read-only in **both** environments.
 - **A snapshot can never arm dev's autonomous driver** — two independent defences:
   the snapshot rewrites `cache:driver:control` disabled, and
   `run_autonomous_cycle` early-returns on the profile flag before it reads
@@ -337,15 +391,21 @@ green before letting the ~1.4 GB go.
 - **`.sh` files must be LF**, the exact inverse of the rule that used to live here
   for `.bat`. A shell script with CRLF does not mis-parse — it does not run at
   all: the kernel reads `#!/usr/bin/env bash` plus a stray CR as a request for an
-  interpreter named `bash`, and reports `bad interpreter: ...^M`, naming
+  interpreter named `bash\r`, and reports `bad interpreter: ...^M`, naming
   neither the real problem nor the file. `.gitattributes` pins it and
   `tools/tests/test_shell_line_endings.py` guards it — that guard caught
   `promote.sh` the first time it ran, after an edit made on Windows.
-- **Ports are labels in the launchers, values in `repo_paths`.** The numbers
-  echoed by `systemctl --user start trading-dev.target` are cosmetic; every process reads its own port from
-  `repo_paths` (`config/ports.toml` + the profile's `port_offset`). If they
-  disagree, `repo_paths` wins — and `tests/test_launcher_ports.py` should have
-  caught it.
+- **A port in a unit's `Description=` is a label; `repo_paths` holds the value.**
+  Both come from the same generator run, so they cannot disagree unless the units
+  are stale — regenerate after any port or path change, which `promote.sh` does
+  for you.
+- **Reach either web GUI over an SSH tunnel.** Both bind `127.0.0.1` and have
+  **no authentication of any kind** — correct for a desk-side app, and the whole
+  problem on a server, since that UI opens paper positions, arms the autonomous
+  driver and stops the stack. `tools/open_webgui.ps1` forwards prod's `:8500`
+  **and** `:8100` (the proxy's `/auth`, needed every 7 days when the Schwab
+  refresh token expires). For dev, forward `:9500` the same way. ⚠ Never change
+  either bind to `0.0.0.0`.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
 - **systemd owns the PIDs, so the process archaeology is over.** Two long gotchas
@@ -379,8 +439,12 @@ green before letting the ~1.4 GB go.
 | Claude gate | `options_svc/compute.py`, `market_svc/compute.py`, `driver_svc/decider.py` — the three client factories |
 | Scheduler gate | `services/_scaffold.py:_schedulers_enabled` / `make_app` |
 | Autonomous gate | `driver_svc/handlers.py:run_autonomous_cycle` |
-| Cross-env kill safety | `the target's PartOf= scoping` |
+| Cross-env kill safety | `PartOf=` in the generated units — plus the absence of a dev proxy unit |
 | Restart-button safety | `webgui/pages/status.py` |
 | Dev chip / tab title | `webgui/main.py` |
-| Launchers | `systemctl --user start trading-dev.target`, `systemctl --user start trading-prod.target`, `tools/promote.sh` |
+| Unit generation | `deploy/systemd/generate_units.py` (nothing under `deploy/systemd/` is committed as a `.service`) |
+| Start / stop | `systemctl --user start\|stop trading-{dev,prod}.target`; the GUI's More → Stop All Services runs the same target stop |
+| Promotion | `tools/promote.sh` + `.claude/hooks/guard_prod_promote.py` |
 | Snapshot | `tools/snapshot_from_prod.py` |
+| Backups | `tools/backup_local.py`, `trading-prod-backup.timer`, `tools/pull_backups.ps1` |
+| Logs | `journalctl --user -u trading-{env}-{svc}`; webgui also writes `logs/webgui.log` |

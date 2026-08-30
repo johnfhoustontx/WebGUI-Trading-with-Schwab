@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "webgui-dev",
-      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["webgui/main.py"],
       "port": 9500,
       "autoPort": false
     },
     {
       "name": "webgui",
-      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["webgui/main.py"],
       "port": 8500,
       "autoPort": false

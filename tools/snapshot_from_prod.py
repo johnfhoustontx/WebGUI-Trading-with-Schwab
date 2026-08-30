@@ -37,6 +37,7 @@ Design: docs/plans/2026-08-08-dev-prod-environments-design.md
 import argparse
 import dataclasses
 import json
+import os
 import pathlib
 import shutil
 import socket
@@ -288,6 +289,26 @@ def _disabled_control_envelope(raw):
     return json.dumps(env).encode()
 
 
+def redis_connect_kwargs(db):
+    """Connection kwargs for one logical DB on the shared Redis server.
+
+    Both clients go through here so a credential cannot be omitted from one of
+    them. Redis on the Linux host runs with ``requirepass``; this tool predates
+    that and built both clients bare, which failed at the very last step of the
+    run — after ~1.5 GB of SQLite had already landed, the exact half-applied
+    state the deferred-import guard in :func:`main` exists to avoid.
+
+    Semantics are copied from ``shared/bus/client.py`` deliberately: unset OR
+    empty means no AUTH at all, so an unauthenticated server keeps working.
+    ``password=""`` would not — redis-py would send an empty AUTH.
+    """
+    return {
+        "port": MEMURAI_PORT,
+        "db": db,
+        "password": os.environ.get("MEMURAI_PASSWORD") or None,
+    }
+
+
 def copy_redis(src, dst):
     """DUMP/RESTORE every key from prod's DB into dev's, preserving type + TTL.
 
@@ -428,8 +449,8 @@ def main(argv=None):
           + ("  (dry run)" if args.dry_run else ""))
     if not args.dry_run:
         t0 = time.monotonic()
-        copy_redis(redis.Redis(port=MEMURAI_PORT, db=src_db),
-                   redis.Redis(port=MEMURAI_PORT, db=dst_db))
+        copy_redis(redis.Redis(**redis_connect_kwargs(src_db)),
+                   redis.Redis(**redis_connect_kwargs(dst_db)))
         print(f"              done in {time.monotonic() - t0:.1f}s")
     print("done.")
 
