@@ -50,6 +50,22 @@ practice.** Migration-plan Task 23.)
   `TRADING_ENABLE_SCHEDULERS=1` set in a shell is **inert**: a unit's
   environment never comes from the shell that ran `systemctl`. It has to go in
   dev's `.env`.
+- ⚠ **`tools/promote.sh` had never been runnable as documented.** All three
+  `tools/*.sh` were committed **100644** — a script authored on Windows has no
+  exec bit for git to observe, and `core.fileMode` is false there, so
+  `git status` never reported the difference either. On the VPS they check out
+  664 and `tools/promote.sh` — spelled exactly that way in CLAUDE.md and the
+  runbook — dies with `Permission denied`. `bash tools/promote.sh` works and
+  hides it, which is how it survived the migration. Fixed with
+  `git update-index --chmod=+x`, guarded in
+  `tools/tests/test_shell_line_endings.py` beside the CRLF checks: same file,
+  same root cause (a Linux execution property Windows cannot represent),
+  different bit.
+- ⚠ **The VPS can fetch but cannot push.** The remote is HTTPS and the box
+  holds no GitHub credential, so the runbook's "in dev: merge to `main` and
+  push" dies on `could not read Username`. Anonymous read is why everything else
+  works. Documented as a workstation `git push origin <branch>:main` until a
+  deploy key or PAT is configured — a credential decision, not a code one.
 - **`.claude/launch.json` flipped to the POSIX venv layout** — the last deferred
   step of the Linux migration, held back because a single string cannot name
   both layouts and no Windows checkout is previewed from any more.
