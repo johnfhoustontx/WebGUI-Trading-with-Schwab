@@ -61,6 +61,21 @@ practice.** Migration-plan Task 23.)
   `tools/tests/test_shell_line_endings.py` beside the CRLF checks: same file,
   same root cause (a Linux execution property Windows cannot represent),
   different bit.
+- ⚠ **The prod-promotion guard was blind to ssh — the only way prod is now
+  reached.** `guard_prod_promote.py` identifies a prod-targeting command by the
+  cwd or by a `cd` anchored at the START of the command; since both stacks moved
+  to the VPS every prod command is `ssh host 'cd /home/administrator/prod &&
+  …'` issued from a dev-side cwd, matching neither. A `git checkout` ran in the
+  live checkout unchallenged. **Third time this guard has gone quietly inert on a
+  change of address** (Windows-only path fragment → the start-anchor), so the new
+  tests pin the SHAPE of the access, not a spelling. Fixed by UNWRAPPING the
+  remote command and applying the same anchored rules to it — widening to
+  "mentions prod anywhere" would have re-broken the false positive the anchor
+  exists for. Two more holes closed alongside: `git -C <prod>` (no `cd` needed,
+  and the form this repo's own notes suggested), and a pre-existing
+  `_mutating_git` bug that could not parse a **quoted** option argument, so
+  `git -C "D:\WebGUI Trading Prod" pull` read `Trading` as the verb and scanned
+  as non-mutating. Verified live, not only in tests.
 - ⚠ **The VPS can fetch but cannot push.** The remote is HTTPS and the box
   holds no GitHub credential, so the runbook's "in dev: merge to `main` and
   push" dies on `could not read Username`. Anonymous read is why everything else
