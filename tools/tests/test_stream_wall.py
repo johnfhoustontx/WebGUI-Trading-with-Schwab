@@ -96,3 +96,36 @@ def test_does_not_flood_the_journal_with_encoder_progress():
     service and drops messages, so the spam suppresses the warnings you wanted."""
     text = SCRIPT.read_text()
     assert "-nostats" in text and "-loglevel" in text
+
+
+def _watchdog_body():
+    """The watchdog subshell, from `( while` to its closing `) &`.
+
+    Extracted rather than searched for whole-file, because the regression that
+    matters below is a line MOVING, not a line vanishing. A missing delimiter
+    raises ValueError, which is a failure -- never a quiet pass.
+    """
+    text = SCRIPT.read_text()
+    start = text.index("( while")
+    return text[start:text.index("\n) &", start)]
+
+
+def test_the_window_end_survives_a_mid_session_restart():
+    """RuntimeMaxSec caps ONE invocation. A watchdog restart at 14:00 would
+    otherwise get a fresh 7h20m and broadcast a frozen dashboard until 21:20.
+    The end is an absolute instant computed at startup, not a duration."""
+    text = SCRIPT.read_text()
+    assert "END_EPOCH" in text
+    assert "date +%s" in text
+
+
+def test_the_end_check_runs_every_poll_not_only_at_startup():
+    """The bug being fixed is precisely that a check which ran only at startup
+    cannot stop a session that STARTED inside the window. Moving the comparison
+    back out of the loop leaves END_EPOCH in the file and passes the test above,
+    while restoring the whole defect -- so the assertion has to be about WHERE
+    it lives, not whether it exists."""
+    body = _watchdog_body()
+    # Non-vacuity: prove we really extracted the loop and not an empty slice.
+    assert "kill -0" in body, "watchdog block not found - has the loop moved?"
+    assert "END_EPOCH" in body

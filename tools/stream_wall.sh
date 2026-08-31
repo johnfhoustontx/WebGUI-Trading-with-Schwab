@@ -67,10 +67,19 @@ sys.exit(0 if in_window("stream", datetime.datetime.now(CT)) else 42)' || {
 # An HTTP GET, not a TCP connect: a dead accept loop stays bound and passes a
 # connect test, which is how a promote once reported success and left prod
 # serving no UI at all. tools/wait_http.py treats ANY HTTP status as alive.
-read -r NICEGUI_PORT WALL_PATH <<<"$("$PYTHON" -c 'import sys
+# The third value is the stream window's END as an absolute Unix timestamp,
+# fixed HERE at startup -- see the watchdog for why it has to be an instant
+# rather than a duration. It rides along in this call because an interpreter
+# start is by far the most expensive part of it, and this one already pays for
+# itself twice over.
+read -r NICEGUI_PORT WALL_PATH END_EPOCH <<<"$("$PYTHON" -c 'import datetime, sys
 sys.path.insert(0, "webgui")
 import repo_paths, wall
-print(repo_paths.NICEGUI_PORT, wall.PAGE_ROUTE)')"
+from shared.market_calendar import window_bounds, CT
+_, end = window_bounds("stream")
+now = datetime.datetime.now(CT)
+end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+print(repo_paths.NICEGUI_PORT, wall.PAGE_ROUTE, int(end_dt.timestamp()))')"
 "$PYTHON" tools/wait_http.py --port "$NICEGUI_PORT" --timeout 120 --label "the web GUI"
 
 WALL_URL="http://127.0.0.1:${NICEGUI_PORT}${WALL_PATH}"
@@ -153,7 +162,7 @@ ffmpeg -nostats -loglevel warning \
        -c:a aac -b:a 128k -f flv "$RTMP_URL" &
 FFMPEG_PID=$!
 
-# ── Fail if the picture dies ─────────────────────────────────────────────────
+# ── Stop if the picture dies, or when the window closes ──────────────────────
 # ffmpeg grabs a FRAMEBUFFER, not a browser. If Chrome or Xvfb exits -- a
 # renderer crash, or the OOM killer on a 7.8 GB box with no swap after nine
 # hours -- ffmpeg carries on encoding whatever is left in that framebuffer,
@@ -171,12 +180,39 @@ FFMPEG_PID=$!
 # encoder instead makes `wait` below return 143 as an exit CODE, which is the
 # unclean exit systemd will actually restart.
 #
-# The loop condition is tested BEFORE the first sleep, so a child that is
-# already gone is caught at once rather than up to 30s later.
-( while kill -0 "$XVFB_PID" 2>/dev/null && kill -0 "$CHROME_PID" 2>/dev/null; do
+# Every check runs BEFORE the first sleep, so a child that is already gone is
+# caught at once rather than up to 30s later.
+#
+# The same loop also enforces the END OF THE WINDOW, which nothing else can.
+# RuntimeMaxSec in the unit caps ONE invocation, and the startup gate above runs
+# ONCE -- so a restart at 14:00 (this very watchdog firing, or an OOM on a
+# swapless box) would get a fresh 7h20m and broadcast a frozen after-hours
+# dashboard until 21:20, publicly, with nothing on screen to say it is stale.
+# Worse, that path is REACHED BY THE RECOVERY ITSELF: the better the watchdog
+# works, the likelier it is. systemd has no way to express "and also stop at
+# this wall-clock time regardless of when you started", so the end is carried as
+# an absolute INSTANT computed at startup, which a restart simply recomputes to
+# the same 15:20.
+#
+# `date +%s` rather than re-running in_window every 30s -- ~1,080 interpreter
+# starts a session to re-answer a question already answered at startup. Both
+# sides are epoch seconds, so the comparison holds whatever TZ the unit runs in.
+#
+# `-ge` stops AT 15:20:00. in_window's end is inclusive, so it is still true at
+# exactly that instant -- a difference of zero width, and swamped four orders of
+# magnitude by the 30s poll. Erring toward stopping is the right side for a
+# public broadcast anyway.
+( while :; do
+    if [ "$(date +%s)" -ge "$END_EPOCH" ]; then
+      echo "reached the end of the stream window - stopping" >&2
+      break
+    fi
+    kill -0 "$XVFB_PID" 2>/dev/null || {
+      echo "Xvfb exited - stopping the encoder so the unit restarts" >&2; break; }
+    kill -0 "$CHROME_PID" 2>/dev/null || {
+      echo "Chrome exited - stopping the encoder so the unit restarts" >&2; break; }
     sleep 30
   done
-  echo "Xvfb or Chrome exited - stopping the encoder so the unit restarts" >&2
   kill -TERM "$FFMPEG_PID" 2>/dev/null || true
 ) &
 WATCH_PID=$!
