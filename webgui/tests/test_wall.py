@@ -78,3 +78,32 @@ def test_rotation_timings_come_from_the_constants():
 def test_fade_is_shorter_than_the_dwell():
     # A fade longer than the dwell would mean never settling on a page.
     assert wall.FADE_MS < wall.DWELL_MS
+
+
+# ── the overlay ──────────────────────────────────────────────────────────────
+def test_overlay_uses_the_apps_own_brand_not_a_copy():
+    """A second hand-written wordmark would drift from config/theme.toml.
+    The stream must render whatever the app header renders."""
+    import main
+    from pages.options import theme
+    doc = wall.document()
+    assert theme.BRAND_NAME_A in doc and theme.BRAND_NAME_B in doc
+    assert main.brand_lockup_html(mark=False) in doc
+
+
+def test_overlay_carries_a_clock_and_a_page_label():
+    doc = wall.document()
+    assert 'id="clock"' in doc
+    assert 'id="page-label"' in doc
+
+
+def test_disclaimer_slot_exists_and_is_empty_by_decision():
+    """Left empty by operator decision. Kept as a single constant so turning it
+    on is a one-line change, not a redesign."""
+    assert wall.DISCLAIMER == ""
+    assert 'id="disclaimer"' in wall.document()
+
+
+def test_clock_is_central_time():
+    # The trading clock. A stream stamped in UTC is one nobody can use.
+    assert "America/Chicago" in wall.document()

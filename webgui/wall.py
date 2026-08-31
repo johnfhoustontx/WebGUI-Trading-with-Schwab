@@ -51,6 +51,7 @@ document — the documented out-of-scope case, the same one ``/desk/live`` and t
 EOD report sit in — so it carries its own ``<style>`` block. Its palette is still
 read out of ``pages/options/theme`` rather than hand-picked.
 """
+import html
 import json
 
 from pages.options import theme
@@ -73,6 +74,14 @@ PAGES = [
 # How long each page holds the screen, and how long the handover takes.
 DWELL_MS = 15_000
 FADE_MS = 400
+
+# The overlay's standing-text slot, DELIBERATELY EMPTY by operator decision.
+# ⚠ Worth revisiting rather than forgetting: this stream shows a paper book's
+# positions and P&L publicly and permanently, and an unlabelled P&L reads as a
+# track record. It lives here as a single constant precisely so switching it on
+# is one line rather than a redesign — the slot itself is already in the bar,
+# sized and placed, so turning it on cannot move anything else.
+DISCLAIMER = ""
 
 # The console palette — the same hexes ``/desk`` paints with, read from the theme
 # rather than copied, so a `config/theme.toml` edit reaches the stream.
@@ -104,6 +113,11 @@ body {{ background: {cell}; color: {text};
             padding: 8px 18px; background: {cell}d9;
             border-top: 1px solid {line}40; }}
 .page-label {{ font-size: 13px; letter-spacing: .22em; color: {label}; }}
+/* The clock is pushed to the far end and the disclaimer takes the slack, so an
+   empty disclaimer changes nothing about where the other two sit. */
+.disclaimer {{ flex: 1; font-size: 11px; letter-spacing: .08em; color: {dim}; }}
+.clock {{ font-size: 13px; letter-spacing: .12em; color: {text};
+          font-variant-numeric: tabular-nums; }}
 """
 
 _JS = """
@@ -120,6 +134,19 @@ function show(n) {{
 
 show(0);
 setInterval(() => {{ idx = (idx + 1) % PANELS.length; show(idx); }}, {dwell});
+
+/* CENTRAL time, explicitly, and not the host's idea of local: this is the
+   trading clock every window in this app is expressed in, and a public stream
+   stamped in UTC is one nobody watching can use. Reading the zone from the
+   browser would also make the stamp depend on how the capture box happens to be
+   configured, which is not a thing anyone would think to check. */
+function tick() {{
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-US', {{
+      timeZone: 'America/Chicago', hour12: false }});
+}}
+tick();
+setInterval(tick, 1000);
 """
 
 
@@ -128,9 +155,16 @@ def document():
 
     Nothing here is server-rendered but the shell. Every pixel a viewer sees is
     painted by the three real pages inside the iframes, on their own cadences.
+
+    ``main`` is imported HERE rather than at module scope, and that is not
+    style: ``main`` registers this route and therefore imports this module, so a
+    module-scope import would be a cycle. ``main._serve_manual`` imports
+    ``pages.manuals`` inside the handler for the same reason.
     """
+    import main
+
     css = _CSS.format(cell=_C["cell"], text=_C["text"], line=_C["line"],
-                      label=_C["label"], fade=FADE_MS)
+                      label=_C["label"], dim=_C["dim"], fade=FADE_MS)
     js = _JS.format(labels=json.dumps([p["label"] for p in PAGES]),
                     dwell=DWELL_MS)
     frames = "\n".join(
@@ -142,13 +176,18 @@ def document():
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wall</title>
+{fonts}
+<style>{brand}</style>
 <style>{css}</style>
 </head>
 <body>
 <div class="stage">
 {frames}
   <div class="overlay">
+    {lockup}
     <div class="page-label" id="page-label"></div>
+    <div class="disclaimer" id="disclaimer">{disclaimer}</div>
+    <div class="clock" id="clock">&mdash;</div>
   </div>
 </div>
 <script>
@@ -156,4 +195,12 @@ def document():
 </script>
 </body>
 </html>
-""".format(css=css, frames=frames, js=js)
+""".format(css=css, frames=frames, js=js,
+           fonts=theme.BRAND_FONT_HEAD_HTML, brand=theme.BRAND_CSS,
+           # The app's OWN wordmark, not a second one: a rename in
+           # config/theme.toml has to reach the stream, and two hand-written
+           # copies of a two-tone gradient lockup would drift the first time
+           # one of them was touched. ``mark=False`` because the logo image is
+           # the drawer's pin control on the real pages and has no job here.
+           lockup=main.brand_lockup_html(mark=False),
+           disclaimer=html.escape(DISCLAIMER))
