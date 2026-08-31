@@ -34,6 +34,7 @@ import bus_client  # noqa: E402
 import desk_stream  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
+import wall  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard  # noqa: E402
 from pages.ui_guard import guard_async  # noqa: E402
@@ -331,6 +332,25 @@ def _serve_desk_stream(request: Request):
         desk_stream.event_stream(request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── The wall display (/wall) ──────────────────────────────────────────────────
+# A raw route for the same reason ``/desk/live`` is one: this document carries no
+# NiceGUI runtime of its own. It is a static shell around three iframes onto the
+# real pages, opened once in the morning by a kiosk Chrome on the capture host
+# and left for nine hours — a fourth live client with a websocket and a reconnect
+# story would be machinery serving an interaction that never happens.
+#
+# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL`` /
+# ``EXTERNAL_RAIL_ROUTES``: those describe places a person navigates to, and this
+# is a display target for a camera. Listing it would put a rail row in front of
+# every user for a screen that only makes sense full-bleed on a 1920x1080
+# framebuffer, and would need a third ``_LANDING_ROUTES`` exemption in
+# ``test_shell.py`` for a page that renders no ``_layout`` at all.
+@app.get(wall.PAGE_ROUTE)
+def _serve_wall():
+    """The rotating wall document — self-contained, so its own <style> applies."""
+    return HTMLResponse(wall.document())
 
 
 @app.get("/manuals/file")

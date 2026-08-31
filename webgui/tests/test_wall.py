@@ -174,3 +174,19 @@ def test_staleness_is_tracked_per_panel_not_globally():
     last-reload timestamp."""
     doc = wall.document()
     assert "LOADED[i]" in doc
+
+
+# ── the route registration ────────────────────────────────────────────────────
+def test_route_is_registered_as_a_raw_html_response():
+    import main
+    paths = {r.path for r in main.app.routes if hasattr(r, "path")}
+    assert wall.PAGE_ROUTE in paths
+
+
+def test_wall_is_not_a_nav_page():
+    """A display target, not a destination. It must not appear in the rail, the
+    tab strips or the breadcrumb registry -- and specifically must not become a
+    third entry in test_shell's _LANDING_ROUTES exemption."""
+    import main
+    assert wall.PAGE_ROUTE not in main._NAV_LABEL
+    assert wall.PAGE_ROUTE not in main.EXTERNAL_RAIL_ROUTES
