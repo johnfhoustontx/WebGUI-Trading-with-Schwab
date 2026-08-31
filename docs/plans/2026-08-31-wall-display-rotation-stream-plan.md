@@ -345,6 +345,51 @@ git commit -m "feat(wall): brand, clock and page-label overlay"
 
 ---
 
+## Task 4b: Off-camera panel reload
+
+**Added mid-execution.** `desk_stream.py`'s own docstring records that a NiceGUI
+page is the **wrong** trade for a wall display — it wants "a page that paints,
+updates and survives a laptop sleeping with nothing to reconnect but an HTTP
+request." That is why `/desk/live` exists. This design nevertheless puts three
+NiceGUI pages in iframes and leaves them unattended for nine hours, during which
+the webgui will plausibly restart at least once (a promote, or `Restart=on-failure`
+after a blip). A NiceGUI client whose server went away renders a disconnected
+page — on camera, with nobody watching the server.
+
+**Files:** modify `webgui/wall.py`, `webgui/tests/test_wall.py`
+
+**Step 1: Write the failing tests**
+
+```python
+def test_panels_reload_on_a_long_interval():
+    doc = wall.document()
+    assert str(wall.RELOAD_MS) in doc
+    # Long enough that a reload is rare, short enough that a restart is repaired
+    # within one rotation cycle rather than lasting the session.
+    assert wall.RELOAD_MS >= 10 * 60 * 1000
+
+
+def test_a_panel_only_reloads_while_it_is_off_camera():
+    """A reload blanks an iframe for a beat. Doing that to the VISIBLE panel
+    would put the blank on the stream, which is the failure this is meant to
+    prevent, not cause."""
+    doc = wall.document()
+    assert "classList.contains('on')" in doc or "!== idx" in doc
+```
+
+**Step 2:** Run, confirm red.
+
+**Step 3:** Implement. The rule is *reload only a panel that is not currently
+showing*, so the blank never reaches the encoder. Reassigning `src` (rather than
+`contentWindow.location.reload()`) avoids any same-origin question and works
+even if the iframe is showing an error page.
+
+**Step 4:** Run the wall suite and the full webgui suite.
+
+**Step 5:** Commit as `feat(wall): reload panels off-camera so a nine-hour session cannot go stale`.
+
+---
+
 ## Task 5: Register the route
 
 **Files:**
