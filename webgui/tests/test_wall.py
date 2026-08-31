@@ -190,3 +190,43 @@ def test_wall_is_not_a_nav_page():
     import main
     assert wall.PAGE_ROUTE not in main._NAV_LABEL
     assert wall.PAGE_ROUTE not in main.EXTERNAL_RAIL_ROUTES
+
+
+# ── stripping the app shell inside each panel ────────────────────────────────
+def test_panel_chrome_is_stripped_inside_the_iframes():
+    """Each panel renders the full app shell -- rail, header, tab strip -- which
+    is ~170px of vertical and 68px of horizontal spent on navigation no viewer
+    can click, and it pushes real content off the bottom of a frame nobody can
+    scroll. Same-origin, so the wall page restyles them itself."""
+    doc = wall.document()
+    for sel in ("q-drawer", "q-header", "q-page-container", "compact-tabs"):
+        assert sel in doc
+
+
+def test_the_padding_override_is_important():
+    """Quasar writes .q-page-container's padding as an INLINE style at runtime.
+    A normal author declaration loses to it; only !important wins."""
+    css = wall.PANEL_CSS.replace(" ", "")
+    assert "padding-top:0!important" in css
+    assert "padding-left:0!important" in css
+
+
+def test_chrome_is_stripped_on_every_load_not_once_at_startup():
+    """Task 4b reassigns src every RELOAD_MS, which discards the injected
+    stylesheet. Binding to the load event is what makes the strip survive a
+    reload; a one-shot at startup breaks 15 minutes into a broadcast."""
+    doc = wall.document()
+    assert "addEventListener('load'" in doc or 'addEventListener("load"' in doc
+    # The discriminating half: bound to each PANEL, not once to the window. A
+    # window-level one-shot satisfies the line above and still goes stale on
+    # the first reload, so on its own that assertion would pass either way.
+    assert "p.addEventListener('load'" in doc
+
+
+def test_a_panel_whose_document_is_unreachable_keeps_its_chrome_not_a_throw():
+    """Degrading to 'slightly ugly' beats degrading to 'stopped': an exception
+    here would leave the rotation broken for the rest of the session."""
+    doc = wall.document()
+    body = doc[doc.index("function strip("):]
+    body = body[:body.index("PANELS.forEach")]
+    assert "try {" in body and "catch" in body

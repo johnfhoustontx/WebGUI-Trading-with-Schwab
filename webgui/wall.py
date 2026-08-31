@@ -96,6 +96,23 @@ DISCLAIMER = ""
 # rather than copied, so a `config/theme.toml` edit reaches the stream.
 _C = theme.CONSOLE_COLORS
 
+# What gets injected INTO each panel, not applied to this page: the app shell is
+# navigation, and nobody watching a broadcast can click it. Measured on real
+# 1920x1080 frames off the prod capture pipeline, the rail costs 68px of width
+# and the header plus tab strip ~170px of height — and since a live stream
+# cannot be scrolled, whatever that pushes past 1080px is seen by nobody, ever.
+#
+# ⚠ ``.q-page-container``'s padding is an INLINE style Quasar writes at runtime,
+# so the override MUST be `!important`: an important author declaration beats a
+# normal inline one, a normal author declaration does not. ``.compact-tabs`` is
+# absent on ``/desk`` (a rail page has no tab strip) and present on the other
+# two; a rule matching nothing costs nothing.
+PANEL_CSS = """
+header.q-header, aside.q-drawer { display: none !important; }
+.q-page-container { padding-top: 0 !important; padding-left: 0 !important; }
+.compact-tabs { display: none !important; }
+"""
+
 
 _CSS = """
 *, *::before, *::after {{ box-sizing: border-box; }}
@@ -180,6 +197,42 @@ function reloadStale() {{
   }});
 }}
 
+/* THE PANELS ARE SAME-ORIGIN -- this page and all three are served by the
+   webgui on one port -- so the parent can reach contentDocument and restyle
+   them itself. That is what keeps this a wall-page concern: no change to
+   main.py, to _layout, or to any of the three pages.
+
+   ⚠ Bound to each panel's LOAD event, never run once at startup. Task 4b
+   reassigns src every RELOAD_MS and a reload throws the injected stylesheet
+   away with the old document; the load listener fires again on reassignment,
+   so this one binding covers the first paint AND every refresh. A one-shot at
+   startup looks identical for fifteen minutes and then quietly stops working,
+   mid-broadcast, with nobody watching.
+
+   The whole thing is wrapped: if the document is unreachable for any reason the
+   panel must render WITH its chrome rather than throw and leave the rotation
+   broken. Slightly ugly beats stopped. */
+const STRIP_ID = 'wall-strip';
+const PANEL_CSS = {panel_css};
+
+function strip(p) {{
+  try {{
+    const d = p.contentDocument;
+    if (!d || !d.head || d.getElementById(STRIP_ID)) return;
+    const style = d.createElement('style');
+    style.id = STRIP_ID;
+    style.textContent = PANEL_CSS;
+    d.head.appendChild(style);
+  }} catch (e) {{
+    /* unreachable document, or one caught mid-navigation -- leave the chrome */
+  }}
+}}
+
+PANELS.forEach((p) => {{
+  p.addEventListener('load', () => strip(p));
+  strip(p);   /* in case a panel finished loading before this script ran */
+}});
+
 show(0);
 setInterval(() => {{
   idx = (idx + 1) % PANELS.length;
@@ -222,7 +275,8 @@ def document():
                       label=_C["label"], dim=_C["dim"], fade=FADE_MS)
     js = _JS.format(labels=json.dumps([p["label"] for p in PAGES]),
                     srcs=json.dumps([p["path"] for p in PAGES]),
-                    dwell=DWELL_MS, fade=FADE_MS, reload=RELOAD_MS)
+                    dwell=DWELL_MS, fade=FADE_MS, reload=RELOAD_MS,
+                    panel_css=json.dumps(PANEL_CSS))
     frames = "\n".join(
         '  <iframe class="panel" src="{path}" title="{label}"></iframe>'.format(
             path=p["path"], label=p["label"]) for p in PAGES)
