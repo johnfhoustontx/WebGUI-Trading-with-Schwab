@@ -46,7 +46,8 @@ from nicegui import ui
 BUSY_TIMEOUT_SEC = 30.0
 
 
-def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC):
+def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC,
+               elapsed_label=None):
     """Mount a hidden spinner covering ``target``. Returns a handle with
     ``element`` / ``show(msg=None)`` / ``hide()`` / ``visible``.
 
@@ -67,15 +68,28 @@ def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC):
                 "text-[12.5px] font-medium text-[#cdd7ec] tracking-[.02em]")
     scrim.set_visibility(False)
 
-    state = {"deadline": None}
+    state = {"deadline": None, "started": None}
 
     def _tick():
         # A deadline check on a 1 s timer that only runs WHILE busy, rather than a
         # one-shot timer per show(): a fresh timer on every refresh would leak one
         # element per fetch across a long session, and simply re-activating a
         # repeating one can fire early because its sleep phase is not reset.
-        if state["deadline"] is not None and _time.monotonic() >= state["deadline"]:
+        if state["deadline"] is None:
+            return
+        now = _time.monotonic()
+        if now >= state["deadline"]:
             hide()
+            return
+        # A static message for ninety seconds is indistinguishable from a hang --
+        # which is exactly how a 96s trade analysis read to its operator. The
+        # counter rides the watchdog's existing 1s tick rather than adding a
+        # second timer per panel.
+        if elapsed_label is not None and state["started"] is not None:
+            try:
+                label.text = elapsed_label(now - state["started"])
+            except Exception:  # noqa: BLE001 -- lose the counter, not the page
+                pass
 
     watchdog = ui.timer(1.0, _tick, active=False)
 
@@ -83,18 +97,23 @@ def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC):
         if msg is not None:
             label.text = msg
         scrim.set_visibility(True)
-        state["deadline"] = _time.monotonic() + timeout
+        now = _time.monotonic()
+        state["deadline"] = now + timeout
+        # Reset per show(), not per mount: the second analysis of a session must
+        # start its count at zero rather than wherever the first one reached.
+        state["started"] = now
         watchdog.active = True
 
     def hide():
         scrim.set_visibility(False)
         state["deadline"] = None
+        state["started"] = None
         watchdog.active = False
 
     # ``tick`` and ``timer`` are the watchdog's body and its schedule. They are on
     # the handle so the backstop is testable at all: it is the one behaviour here
     # that cannot be observed by calling show()/hide(), and an untested backstop
     # is exactly the kind of thing that silently stops working.
-    return SimpleNamespace(element=scrim, show=show, hide=hide,
+    return SimpleNamespace(element=scrim, label=label, show=show, hide=hide,
                            visible=lambda: scrim.visible,
                            tick=_tick, timer=watchdog)

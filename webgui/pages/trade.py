@@ -692,6 +692,36 @@ _SWING_COLS = [
 ]
 
 
+# How long a full analysis actually takes. MEASURED 2026-08-31: a COIN request
+# ran 14:20:08 -> 14:21:44, 96 seconds, most of it silent -- five timeframes plus
+# SPY, the sector ETF, fundamentals, the factor model and the swing model.
+TYPICAL_ANALYZE_SEC = 90
+
+# The busy backstop for THIS page. busy.BUSY_TIMEOUT_SEC is 30s, sized for the
+# Simulator's ~19s fetch; against a 96s analysis it hid the spinner at t=30 and
+# left an empty panel for another minute, which the operator reasonably read as
+# "it did not return anything". A backstop must outlast the work it guards --
+# busy.py's own docstring says a premature one is worse than none.
+ANALYZE_TIMEOUT_SEC = 300
+
+
+def analyzing_label(symbol, seconds, typical=TYPICAL_ANALYZE_SEC):
+    """The wait message, counting up. Pure, so the wording is testable.
+
+    Past `typical` it changes wording rather than going quiet: at that point the
+    reader is deciding for themselves whether it has died, and silence is the
+    least helpful answer. It never claims failure -- the analysis legitimately
+    runs long, and the backstop is what handles a genuine death."""
+    sym = str(symbol or "").strip() or "symbol"
+    try:
+        sec = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return f"Analyzing {sym}…"
+    if sec > typical:
+        return f"Analyzing {sym}… {sec}s (longer than usual)"
+    return f"Analyzing {sym}… {sec}s"
+
+
 def render():
     """Trade page: symbol input + Analyze button + verdict/MTF/momentum cards."""
     ui.add_css(QUASAR_INTERNAL_CSS)
@@ -742,7 +772,9 @@ def render():
     # One region for the whole result area: an analyze replaces every card on the
     # page, so a spinner over just one of them would leave the others showing the
     # PREVIOUS symbol's verdict beside the new symbol's name.
-    results_busy = _busy.build_busy(results_col, "Analyzing…")
+    results_busy = _busy.build_busy(
+        results_col, "Analyzing…", timeout=ANALYZE_TIMEOUT_SEC,
+        elapsed_label=lambda sec: analyzing_label(state.get("last_requested"), sec))
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
@@ -1043,7 +1075,7 @@ def render():
         state["last_ts"] = time.monotonic()
         bus_client.request("trade", {"type": "analyze", "args": {"symbol": sym}})
         status.text = f"Analyzing {sym}…"
-        results_busy.show(f"Analyzing {sym}…")
+        results_busy.show(analyzing_label(sym, 0))
 
     analyze_btn.on_click(_request_analyze)
     symbol_in.on("keydown.enter", lambda e: _request_analyze())

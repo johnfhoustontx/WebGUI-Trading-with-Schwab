@@ -577,3 +577,43 @@ def test_decay_is_only_claimed_from_the_COMPARABLE_statistic():
     comparable = dict(_LIC_OK, by_date_ic=0.004, comparable_to_artifact=True,
                       decay=-0.0166)
     assert "decay" in trade.live_ic_decay_note(comparable).lower()
+
+
+#############################################
+# The wait: a 96-second analysis must not look like a hang
+#############################################
+
+def test_analyzing_label_counts_up():
+    assert trade.analyzing_label("COIN", 0) == "Analyzing COIN… 0s"
+    assert trade.analyzing_label("COIN", 41.6) == "Analyzing COIN… 41s"
+
+
+def test_analyzing_label_says_so_once_it_runs_long_rather_than_going_quiet():
+    """Past the typical duration the wait needs a different word, or the reader
+    is left deciding for themselves whether it has died. It must NOT claim
+    failure -- the analysis genuinely does take this long sometimes."""
+    txt = trade.analyzing_label("COIN", trade.TYPICAL_ANALYZE_SEC + 20)
+    assert "COIN" in txt and "s" in txt
+    assert txt != trade.analyzing_label("COIN", 5)
+    assert "fail" not in txt.lower() and "error" not in txt.lower()
+
+
+def test_analyzing_label_survives_a_missing_symbol_or_clock():
+    for sym, sec in (("", 10), (None, 10), ("COIN", None), ("COIN", -1)):
+        out = trade.analyzing_label(sym, sec)
+        assert isinstance(out, str) and out
+
+
+def test_the_analyze_backstop_outlasts_a_real_analysis():
+    """MEASURED: a COIN analysis took 96s end to end on 2026-08-31.
+
+    busy.BUSY_TIMEOUT_SEC is 30s -- sized for the Simulator's ~19s fetch -- so
+    the spinner vanished at t=30 and left an empty panel for another 66 seconds.
+    The operator reported it as "did not return anything", which is exactly what
+    it looked like. The page's own backstop must clear the work it actually
+    waits for."""
+    from pages import busy
+    assert trade.ANALYZE_TIMEOUT_SEC > 96, \
+        "the backstop must outlast a measured analysis"
+    assert trade.ANALYZE_TIMEOUT_SEC > busy.BUSY_TIMEOUT_SEC, \
+        "the shared default is too short for this page and must be overridden"
