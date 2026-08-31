@@ -93,6 +93,28 @@ freeze and `getComputedStyle` lies" gotcha exists. Iframes inside one foreground
 document are never backgrounded, so none of the three pages is ever throttled. A
 three-tab implementation would have been.
 
+### The app shell is stripped inside each panel
+
+Each panel renders the **full NiceGUI shell** — the 68 px icon rail, the 60 px
+header with breadcrumb, and on `/market` and `/sentiment/momentum` the tab strip.
+That is ~170 px of vertical and 68 px of horizontal spent on navigation no viewer
+can click, and it pushed real content below a fold nobody watching a stream can
+scroll past. Measured on real 1920×1080 frames: the Macro Board was cut at SECTOR
+SPDR, the Desk showed 5 of its opportunity and position rows.
+
+`/wall` and all three panels are served from the **same origin**, so the wall
+document reaches `iframe.contentDocument` and injects `PANEL_CSS` — no change to
+`main.py`, `_layout`, or any of the three pages. After it: the Macro Board
+reaches FACTOR / MOMENTUM, the Desk shows 6 and 6.
+
+⚠ **Injection binds to each iframe's `load` event, not a one-shot at startup.**
+The off-camera reload reassigns `src` every `RELOAD_MS`, which discards the
+injected stylesheet — a startup-only version works perfectly and then breaks
+fifteen minutes into a broadcast. A second eager call covers the race where a
+panel finishes loading before the script runs. The whole thing is in a try/catch:
+an unreachable document must render *with* its chrome, never throw and strand the
+rotation.
+
 ### Overlay
 
 Branding via `theme.BRAND_CSS` / `theme.BRAND_FONT_HEAD_HTML` and
@@ -130,12 +152,52 @@ ffmpeg -f x11grab -draw_mouse 0 -framerate 30 -video_size 1920x1080 -i :99 \
        -c:a aac -b:a 128k -f flv "$RTMP_URL"
 ```
 
-Four choices worth recording:
+### Measured, not estimated (prod host, market hours, 2026-08-31)
+
+The design originally specified **1080p30 `veryfast`**. Measured against the real
+`/wall` page on the 4-core host, that was the most expensive option tested:
+
+| variant | ffmpeg CPU |
+|---|---|
+| 1080p30 veryfast (originally specified) | **153%** |
+| 1080p30 ultrafast | 100% |
+| **1080p15 veryfast — SHIPPED** | **72–87%** |
+| 720p30 veryfast | 106% |
+| capture 15 → output 30 | 140% |
+
+Chrome adds a constant **~52% CPU / 1.84 GB RSS across 16 processes** and Xvfb
+**~13% / 197 MB**, on any of these.
+
+Three results worth keeping:
+
+- **`-thread_queue_size 512` is worth ~20% on its own.** Without it the original
+  settings measured **193%** and ffmpeg logged `Thread message queue blocking`,
+  meaning x11grab was producing frames faster than the encoder consumed them —
+  dropping them. With it, 153% and clean.
+- **720p30 is dominated.** It costs *more* than 1080p30-ultrafast and loses
+  resolution as well. Do not "optimise" toward it.
+- **Capturing at 15 and outputting 30 does not pay off** (140%). Duplicated
+  frames still take near-full motion estimation; the idea is intuitive and wrong.
+
+**1080p15 was chosen** because for this content the framerate is the cheapest
+thing to give up — the data updates every 2 s and the panel rotates every 15 —
+while resolution is what matters, since it is dense small text read at a
+distance. It is technically off YouTube's recommended 30 fps, which it accepts in
+practice. Total system load lands ~35% against ~54% for the original settings, on
+a box with **no swap** that also runs the trading stack.
+
+⚠ The bitrate drops 4500k → 3500k but that is **more bits per frame**, not fewer
+(3500/15 > 4500/30), so text quality improves. Someone will otherwise "restore"
+the higher number.
+
+Other choices worth recording:
 
 - **The silent audio track is deliberate.** YouTube's ingest is unreliable with
   a video-only stream. `anullsrc` costs nothing.
-- **`-g 60` pins a 2-second keyframe interval**, which YouTube requires (it caps
-  the interval at 4 s). `-sc_threshold 0` keeps it strict.
+- **`-g` pins a 2-second keyframe interval**, which YouTube requires (it caps the
+  interval at 4 s). `-g` is in FRAMES, so it is framerate × 2 — 30 at 15 fps.
+  A framerate change that leaves `-g` behind silently doubles the interval.
+  `-sc_threshold 0` keeps it strict.
 - **`-tune zerolatency` is deliberately absent.** Latency does not matter for a
   dashboard broadcast, and omitting it lets x264 use B-frames and lookahead for
   better quality per bit.
