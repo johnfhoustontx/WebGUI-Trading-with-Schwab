@@ -85,24 +85,31 @@ def score_of(sentiment):
     return _finite(sentiment.get("total_score"))
 
 
-def dominant_regime(regime):
-    """``(key, display_label, share)`` for the heaviest membership.
+def committed_regime(regime):
+    """``(key, display_label, share)`` for the regime the app is COMMITTED to.
 
-    ``(None, "-", 0.0)`` when there is nothing to name -- absence must render as
-    a dash, never as the first key in a dict."""
-    memb = (regime or {}).get("memberships") if isinstance(regime, dict) else None
-    if not isinstance(memb, dict) or not memb:
-        return (None, "-", 0.0)
-    best_k, best_v = None, None
-    for k, v in memb.items():
-        f = _finite(v)
-        if f is None:
-            continue
-        if best_v is None or f > best_v:
-            best_k, best_v = k, f
-    if best_k is None:
-        return (None, "-", 0.0)
-    return (best_k, MC.REGIME_LABELS.get(best_k, str(best_k)), best_v)
+    MIRRORS ``market_console.dial_card_html``: ``label`` -> ``REGIME_LABELS``
+    keyed on ``committed_label`` -> "Unclear".
+
+    ⚠ NOT the argmax of ``memberships``, which is what the first draft used and
+    which is a different regime. The committed label carries hysteresis; the raw
+    mix does not, and it moves every tick. Measured on the live payload while
+    wiring this up: memberships peaked at ``crisis`` (0.536) while the committed
+    label was ``mean_reversion`` -- so the drawn card said "Stressed" while the
+    caption printed beside it in the SAME push said "Balanced", and the app said
+    Balanced too. Two panels of one product contradicting each other is the exact
+    failure CLAUDE.md documents between the sectors and rotation screens.
+
+    The share reported is the committed key's own membership, so the percentage
+    always describes the regime being named rather than some other band.
+    """
+    r = regime if isinstance(regime, dict) else {}
+    key = r.get("committed_label")
+    label = r.get("label") or MC.REGIME_LABELS.get(key) or "Unclear"
+    memb = r.get("memberships")
+    share = _finite(memb.get(key)) if isinstance(memb, dict) else None
+    return (key, str(label), share or 0.0)
+
 
 
 def _categories(dashboard):
@@ -176,7 +183,7 @@ def _render(dashboard, trend, sentiment, regime, slot, as_of):
     stone = TONES["flat"] if sscore is None else (
         TONES["pos"] if sscore > 5.5 else TONES["neg"] if sscore < 4.5 else TONES["flat"])
 
-    _key, rlabel, rshare = dominant_regime(regime)
+    _key, rlabel, rshare = committed_regime(regime)
     col_w = (inner - 2 * GAP) / 3
     _headline_block(d, PAD, y, col_w, "TREND",
                     "-" if tscore is None else f"{tscore:.1f}",

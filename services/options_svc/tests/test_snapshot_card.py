@@ -123,26 +123,46 @@ def test_an_unknown_tile_state_falls_back_rather_than_raising():
 
 
 #############################################
-# The regime words are MIRRORED, never re-spelled
+# The regime must agree with the rest of the product
 #############################################
 
-def test_regime_label_is_the_existing_mirror():
-    """CLAUDE.md pins the five display words across four tiers and a test guards
-    a fifth copy. This card must reuse market_console's, not add one."""
+def test_committed_regime_mirrors_the_html_renderer():
+    """market_console.dial_card_html: label -> REGIME_LABELS[committed_label]
+    -> "Unclear". The five display words are already mirrored across four tiers
+    with a test guarding a fifth copy; this card reuses them."""
     from services.options_svc import market_console as mc
-    assert sc.dominant_regime(REGIME)[0] == "crisis"
-    assert sc.dominant_regime(REGIME)[1] == mc.REGIME_LABELS["crisis"] == "Stressed"
+    r = {"label": "Balanced", "committed_label": "mean_reversion",
+         "memberships": {"mean_reversion": 0.31, "crisis": 0.26}}
+    key, label, share = sc.committed_regime(r)
+    assert (key, label) == ("mean_reversion", "Balanced")
+    assert share == pytest.approx(0.31), "the share must describe the NAMED regime"
+    assert mc.REGIME_LABELS["mean_reversion"] == "Balanced"
 
 
-def test_dominant_regime_survives_an_empty_or_broken_membership_map():
-    assert sc.dominant_regime({}) == (None, "-", 0.0)
-    assert sc.dominant_regime({"memberships": {}}) == (None, "-", 0.0)
-    assert sc.dominant_regime({"memberships": {"crisis": float("nan")}})[0] is None
+def test_committed_regime_is_not_the_argmax_of_memberships():
+    """THE regression this replaced, and it was live for one commit.
+
+    The committed label carries hysteresis; the raw mix moves every tick.
+    Measured on the real payload: memberships peaked at `crisis` while the
+    committed label was `mean_reversion`, so the card drew "Stressed" while the
+    caption in the SAME push said "Balanced"."""
+    r = {"label": "Balanced", "committed_label": "mean_reversion",
+         "memberships": {"mean_reversion": 0.31, "crisis": 0.54}}
+    assert sc.committed_regime(r)[1] == "Balanced", "argmax would say Stressed"
 
 
-def test_dominant_regime_reports_the_share_it_drew():
-    key, label, share = sc.dominant_regime(REGIME)
-    assert key == "crisis" and 0.53 < share < 0.54
+def test_committed_regime_falls_back_through_the_documented_order():
+    from services.options_svc import market_console as mc
+    assert sc.committed_regime({"committed_label": "crisis"})[1] ==         mc.REGIME_LABELS["crisis"] == "Stressed"
+    assert sc.committed_regime({})[1] == "Unclear"
+    assert sc.committed_regime(None)[1] == "Unclear"
+    assert sc.committed_regime({"memberships": {"crisis": 0.9}})[1] == "Unclear",         "memberships alone must NOT name a regime"
+
+
+def test_committed_regime_share_is_zero_when_unknown():
+    assert sc.committed_regime({"label": "Balanced"})[2] == 0.0
+    assert sc.committed_regime({"label": "X", "committed_label": "k",
+                                "memberships": {"k": float("nan")}})[2] == 0.0
 
 
 #############################################
