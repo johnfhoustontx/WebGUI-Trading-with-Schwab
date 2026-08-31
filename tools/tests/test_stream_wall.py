@@ -64,3 +64,35 @@ def test_waits_for_the_webgui_to_ANSWER_not_merely_to_be_bound():
     promote once left prod serving no UI at all. The repo's answer is
     tools/wait_http.py, which does a GET."""
     assert "wait_http.py" in SCRIPT.read_text()
+
+
+def test_fails_when_the_browser_dies_instead_of_streaming_black():
+    """ffmpeg grabs a framebuffer, not a browser. Without this the unit stays
+    "running" while broadcasting a black screen."""
+    text = SCRIPT.read_text()
+    assert "kill -0" in text
+    assert "WATCH_PID" in text
+
+
+def test_the_watchdog_signals_the_encoder_not_the_shell():
+    """`kill -TERM $$` is the obvious way to tear this down and it does not
+    work: bash re-raises, so the process dies BY SIGTERM -- and systemd counts
+    SIGHUP/SIGINT/SIGTERM/SIGPIPE as a clean exit, with Restart=on-failure
+    explicitly excluding those four. The unit would go down and stay down.
+    Killing the encoder instead makes `wait` return 143 as an exit CODE, which
+    is a failure systemd will restart. Measured both ways before it was written.
+
+    Comment lines are stripped first, deliberately: the script EXPLAINS this
+    trap in prose, and a test that banned the words would force the script to
+    stop naming the wrong answer it is steering away from.
+    """
+    code = "\n".join(ln for ln in SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "kill -TERM $$" not in code
+
+
+def test_does_not_flood_the_journal_with_encoder_progress():
+    """Two lines a second for nine hours a day. journalctl rate-limits per
+    service and drops messages, so the spam suppresses the warnings you wanted."""
+    text = SCRIPT.read_text()
+    assert "-nostats" in text and "-loglevel" in text
