@@ -229,6 +229,30 @@ with the checkout.
 **`[Unit]`, not `[Service]`** — systemd moved them in v229 and silently ignores
 them in the wrong section, so the storm cap would look configured and not exist.
 
+## YouTube's auto-stop is REQUIRED, not a preference (learned 2026-08-31)
+
+This stream stops every day at 15:20, which makes one YouTube setting
+load-bearing in a way it is not for a one-off broadcast.
+
+**With auto-stop disabled, YouTube keeps the broadcast in the `live` state after
+ingest stops.** Observed: the encoder went down at 10:50 and the channel was
+still showing as live nearly five hours later, on a frozen last frame. Nothing
+was leaving the host — measured at 0 connections on `:1935`, no encoder process,
+and 35 kbit/s total egress against ~2000 while streaming.
+
+Two consequences, the second worse than the first:
+
+- The channel advertises a live broadcast that is a still image.
+- **The next morning's start reconnects into that same stale broadcast** rather
+  than opening a new one, because the stream key is persistent. The archive
+  becomes one endless video with a 17-hour dead gap in the middle of it, instead
+  of one clean recording per trading day.
+
+⚠ **The diagnostic is the frozen frame.** A frozen picture means YouTube is
+holding a dead broadcast open; a *moving* picture with no encoder on this host
+means something else is pushing to the same key, which is a different and more
+urgent problem.
+
 ## The stream key
 
 The YouTube stream key is a credential. It is created **by the operator** at
