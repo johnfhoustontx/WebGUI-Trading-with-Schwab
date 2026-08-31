@@ -20,12 +20,39 @@ that re-derived so much as a rounding rule would be a fourth screen quietly
 disagreeing with the three it mirrors, which is the shape of a bug this repo
 already carries one documented instance of.
 
+**All three panels are ALWAYS laid out at full size, and rotation is nothing but
+``opacity`` and ``z-index``.** That is the load-bearing rule here, and it holds
+for three separate reasons:
+
+1. An iframe hidden with ``display:none`` has **zero layout size**, and this
+   app's Highcharts have no ResizeObserver — a chart that mounts at 0x0 renders
+   collapsed and never recovers. None of these three pages draws a chart today,
+   so the trap is latent rather than live; the day one gains a chart, or a
+   chart-heavy page like ``/options/gamma`` is rotated in, a hidden panel would
+   break silently and only on camera.
+2. All three stay painted and connected, so a handover is instant. Navigating
+   one iframe between the three would instead show a NiceGUI page rebuilding on
+   every rotation — a white flash and a websocket reconnect, four times a minute
+   for nine hours.
+3. A crossfade is **cheaper to encode than a cut**. The encoder runs with
+   scene-cut detection off to hold a strict 2-second keyframe interval, so an
+   instant full-frame change every 15 s is its worst case; a fade spreads that
+   cost over ``FADE_MS`` of frames.
+
+⚠ A related trap this avoids by construction: Chromium throttles timers and
+rendering in **backgrounded tabs** — the same mechanism behind the documented
+"transitions freeze and ``getComputedStyle`` lies" gotcha. Iframes inside one
+foreground document are never backgrounded, so none of the three is throttled. A
+three-tab implementation would have been.
+
 ⚠ This file is deliberately OUTSIDE the Tailwind-first standard, which binds
 NiceGUI components styled with ``.classes()``. It emits a raw ``HTMLResponse``
 document — the documented out-of-scope case, the same one ``/desk/live`` and the
 EOD report sit in — so it carries its own ``<style>`` block. Its palette is still
 read out of ``pages/options/theme`` rather than hand-picked.
 """
+import json
+
 from pages.options import theme
 
 # The route this module owns. A constant because ``main`` registers it and the
@@ -60,16 +87,52 @@ html, body {{ margin: 0; padding: 0; height: 100%; overflow: hidden; }}
 body {{ background: {cell}; color: {text};
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
 .stage {{ position: relative; width: 100vw; height: 100vh; }}
+
+/* Every panel is laid out at FULL SIZE, always -- see the module docstring.
+   There is deliberately no `display` and no `visibility` here, and a test
+   asserts their absence: both would collapse the iframe to zero layout size,
+   which is how a charted page silently breaks on camera. */
+.panel {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+          border: 0; opacity: 0; transition: opacity {fade}ms ease-in-out; }}
+/* `z-index` is not strictly needed once only one panel is opaque, but it makes
+   the VISIBLE panel the one that hit-tests -- so if anyone ever drives this
+   screen with a mouse, the clicks land where the eye is. */
+.panel.on {{ opacity: 1; z-index: 1; }}
+
+.overlay {{ position: absolute; z-index: 2; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; gap: 16px;
+            padding: 8px 18px; background: {cell}d9;
+            border-top: 1px solid {line}40; }}
+.page-label {{ font-size: 13px; letter-spacing: .22em; color: {label}; }}
+"""
+
+_JS = """
+/* PANELS and LABELS are index-aligned because both come from PAGES, server
+   side: the label can never name a screen other than the one fading in. */
+const PANELS = Array.from(document.querySelectorAll('.panel'));
+const LABELS = {labels};
+let idx = 0;
+
+function show(n) {{
+  PANELS.forEach((p, i) => p.classList.toggle('on', i === n));
+  document.getElementById('page-label').textContent = LABELS[n];
+}}
+
+show(0);
+setInterval(() => {{ idx = (idx + 1) % PANELS.length; show(idx); }}, {dwell});
 """
 
 
 def document():
-    """The wall page: styling, and the three dashboards stacked in one stage.
+    """The wall page: styling, the three stacked dashboards, and the rotation.
 
     Nothing here is server-rendered but the shell. Every pixel a viewer sees is
     painted by the three real pages inside the iframes, on their own cadences.
     """
-    css = _CSS.format(cell=_C["cell"], text=_C["text"], fade=FADE_MS)
+    css = _CSS.format(cell=_C["cell"], text=_C["text"], line=_C["line"],
+                      label=_C["label"], fade=FADE_MS)
+    js = _JS.format(labels=json.dumps([p["label"] for p in PAGES]),
+                    dwell=DWELL_MS)
     frames = "\n".join(
         '  <iframe class="panel" src="{path}" title="{label}"></iframe>'.format(
             path=p["path"], label=p["label"]) for p in PAGES)
@@ -84,7 +147,13 @@ def document():
 <body>
 <div class="stage">
 {frames}
+  <div class="overlay">
+    <div class="page-label" id="page-label"></div>
+  </div>
 </div>
+<script>
+{js}
+</script>
 </body>
 </html>
-""".format(css=css, frames=frames)
+""".format(css=css, frames=frames, js=js)
