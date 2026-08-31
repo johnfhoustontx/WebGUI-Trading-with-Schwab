@@ -185,3 +185,24 @@ def test_prune_reports_what_it_removed(tmp_path):
         _gen(tmp_path, n, archive=True)
     dropped = bl.prune(tmp_path, 1)
     assert dropped == ["prod_2026-08-01_2000"]
+
+
+def test_the_env_file_is_carried():
+    """`.env` holds MEMURAI_PASSWORD, ALPHAVANTAGE_API_KEY and anything else the
+    UNITS read -- and it is loaded as `EnvironmentFile=` with NO leading dash, so
+    a missing one does not degrade, it fails the unit.
+
+    It was absent from EXTRA_FILES while config/env.local.toml (its sibling, one
+    directory up from the same kind of machine-local config) was present, so a
+    restore produced a stack that would not start and nothing to restore it from.
+    Found 2026-08-31 while tracing where an API key lives."""
+    assert ".env" in bl.EXTRA_FILES
+
+
+def test_every_carried_secret_is_repo_relative():
+    """EXTRA_FILES entries are joined onto REPO_ROOT; an absolute path or a `..`
+    would silently write outside the generation."""
+    for rel in bl.EXTRA_FILES:
+        p = pathlib.Path(rel)
+        assert not p.is_absolute(), rel
+        assert ".." not in p.parts, rel

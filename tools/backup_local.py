@@ -86,6 +86,13 @@ EXTRA_FILES = (
     "shared/sentiment_bridge.json",
     "schwab-proxy/proxy_tokens.json",
     "config/env.local.toml",
+    # The units' EnvironmentFile -- MEMURAI_PASSWORD, ALPHAVANTAGE_API_KEY,
+    # EDGAR_USER_AGENT, anything else read from the process environment. It is
+    # loaded with NO leading dash, so a missing one does not degrade: the unit
+    # fails to start. It was omitted here while its sibling config/env.local.toml
+    # was carried, which meant a restore produced a stack that would not come up
+    # and nothing to fix it with.
+    ".env",
 )
 
 # Gitignored data trees, swept WHOLE.
