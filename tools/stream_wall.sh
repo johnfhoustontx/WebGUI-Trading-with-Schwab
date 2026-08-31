@@ -144,21 +144,55 @@ sleep 15
 # video-only input, and a dashboard has nothing to say -- a null source costs
 # essentially no bitrate and removes the whole failure mode.
 #
-# -g 60 at 30fps is a 2-second keyframe interval, which is what YouTube
-# recommends and half its 4-second cap; -sc_threshold 0 stops x264 inserting
-# extra keyframes on scene cuts, which the crossfade every 15s would otherwise
-# look like.
+# MEASURED on the prod host during market hours against the real /wall page, on
+# 4 cores. Chrome + Xvfb add a constant ~64% on top of each figure:
+#
+#     1080p30 veryfast      153%     <- what this used to be
+#     1080p30 ultrafast     100%
+#     1080p15 veryfast       72-87%  <- shipped
+#     720p30  veryfast      106%
+#     capture 15 -> out 30  140%
+#
+# 1080p at 15fps, because for THIS content the framerate is the cheapest thing
+# to give up: the data behind it updates every 2 seconds and the panel rotates
+# every 15. Resolution is the half that must not move -- the screen is dense
+# small text read at a distance, which is precisely what resolution buys.
+#
+# 720p30 is DOMINATED, not a middle option: it costs MORE than 1080p30 at
+# ultrafast and throws away resolution as well. Recorded so nobody optimises
+# toward it later.
+#
+# -thread_queue_size 512 is worth ~20% ON ITS OWN. Without it these same
+# settings measured 193% and ffmpeg logged "Thread message queue blocking" --
+# x11grab producing frames faster than the encoder drained them, which means
+# dropping them on the floor. With it: 153% and a clean log.
+#
+# The bitrate moving 4500k -> 3500k is MORE bits per frame, not fewer:
+# 3500/15 = 233 against 4500/30 = 150. Text quality goes UP. That is
+# counter-intuitive enough to write down, because otherwise someone reads the
+# smaller number as a downgrade and "restores" it.
+#
+# -g 30 is the 2-second keyframe interval YouTube recommends (its cap is 4s),
+# and it is FRAMERATE x 2 -- so it MUST move whenever -framerate does. Left at
+# 60 for a 15fps capture it would silently become a FOUR-second interval, right
+# at the cap, where players start slowly and rebuffer. -sc_threshold 0 stops
+# x264 adding its own keyframes on the crossfades.
+#
+# -y so ffmpeg never stops to ask about an existing output. Moot against an RTMP
+# URL, costs nothing, and saves the next person a measurement run lost to a
+# prompt when they point it at a file.
 #
 # Deliberately NO -tune zerolatency. Latency is irrelevant for an unattended
 # dashboard broadcast -- nobody is interacting with what they see -- and that
 # tune disables B-frames and lookahead, which are exactly what buy quality per
 # bit on a screen that is mostly flat colour and small text.
-ffmpeg -nostats -loglevel warning \
-       -f x11grab -draw_mouse 0 -framerate 30 -video_size "$SCREEN" -i ":$DISPLAY_NUM" \
+ffmpeg -y -nostats -loglevel warning \
+       -f x11grab -draw_mouse 0 -framerate 15 -video_size "$SCREEN" \
+       -thread_queue_size 512 -i ":$DISPLAY_NUM" \
        -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
        -c:v libx264 -preset veryfast -pix_fmt yuv420p \
-       -b:v 4500k -maxrate 4500k -bufsize 9000k \
-       -g 60 -keyint_min 60 -sc_threshold 0 \
+       -b:v 3500k -maxrate 3500k -bufsize 7000k \
+       -g 30 -keyint_min 30 -sc_threshold 0 \
        -c:a aac -b:a 128k -f flv "$RTMP_URL" &
 FFMPEG_PID=$!
 

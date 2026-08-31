@@ -40,11 +40,29 @@ def test_never_embeds_the_stream_key():
     assert not re.search(r"rtmp://[a-z0-9.]*/live2/\S", text)
 
 
-def test_pins_a_two_second_keyframe_interval():
-    """YouTube caps the keyframe interval at 4s and recommends 2s. At 30fps
-    that is -g 60, and -sc_threshold 0 keeps it strict."""
+def test_the_keyframe_interval_is_two_seconds_at_the_capture_framerate():
+    """YouTube caps the interval at 4s and recommends 2s. -g is frames, so it
+    must be framerate x 2 -- the two move together and a framerate change that
+    leaves -g behind silently doubles the interval.
+
+    Derived rather than hardcoded, which is the whole point: the literal version
+    of this test asserted `-g 60` and would have had to be edited by the same
+    person who forgot to edit `-g`.
+    """
     text = SCRIPT.read_text()
-    assert "-g 60" in text and "-sc_threshold 0" in text
+    fps = int(re.search(r"-framerate (\d+)", text).group(1))
+    assert f"-g {fps * 2}" in text
+    assert f"-keyint_min {fps * 2}" in text
+    # Kept from the literal version this replaces: without it x264 inserts its
+    # own keyframes on scene cuts and the interval stops being strict.
+    assert "-sc_threshold 0" in text
+
+
+def test_capture_and_encode_do_not_drop_frames_under_load():
+    """Without thread_queue_size, x11grab produced frames faster than the
+    encoder consumed them -- measured 193% CPU with a 'Thread message queue
+    blocking' warning, against 153% and clean with it."""
+    assert "-thread_queue_size" in SCRIPT.read_text()
 
 
 def test_sends_a_silent_audio_track():
