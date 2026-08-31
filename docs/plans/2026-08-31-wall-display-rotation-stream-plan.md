@@ -4,7 +4,7 @@
 
 **Goal:** Stream three existing dashboards (`/desk`, `/market`, `/sentiment/momentum`), rotating every 15 seconds, to a public YouTube live stream during market hours.
 
-**Architecture:** A new raw-`HTMLResponse` route `/wall` stacks the three pages as three always-laid-out iframes and rotates them with `opacity`/`z-index`. On the prod host, Xvfb + kiosk Chrome render that one page and `ffmpeg -f x11grab` encodes it to YouTube's RTMP ingest. A systemd timer starts and stops it around the session; a wrapper script gates on `shared.market_calendar.is_trading_day()`.
+**Architecture:** A new raw-`HTMLResponse` route `/wall` stacks the three pages as three always-laid-out iframes and rotates them with `opacity`/`z-index`. On the prod host, Xvfb + kiosk Chrome render that one page and `ffmpeg -f x11grab` encodes it to YouTube's RTMP ingest. A systemd timer starts and stops it around the session; a wrapper script gates on `shared.market_calendar.in_window("stream", now)`, which covers the window and the trading-day check in one call.
 
 **Tech Stack:** FastAPI (raw routes on NiceGUI's app), vanilla JS, Xvfb, Google Chrome (deb, not snap), ffmpeg/libx264, systemd user units.
 
@@ -21,7 +21,11 @@ Read these, in this order. They are not optional context — each one contains a
 3. `deploy/systemd/generate_units.py`, specifically `_backup_units()` — the timer precedent.
 4. CLAUDE.md, the "NiceGUI gotchas" block — in particular the `ui.highchart` collapse and the `vector-effect`/DOMPurify notes.
 
-**Where this work happens.** This worktree, then dev (`:9500`), then prod via `tools/promote.sh`. Never `git pull` in the prod checkout — a hook blocks it, and the hook is right.
+**Where this work happens.** This worktree, then prod via `tools/promote.sh`. Never `git pull`, `checkout`, `merge` or `reset` in the prod checkout.
+
+⚠ **There is no dev environment (measured 2026-08-31).** `/home/administrator/dev` is misleadingly named — its `config/env.local.toml` says `name = "prod"`, it resolves `ENV_NAME=prod` / port 8500 / `owns_proxy` / Redis db 0, and it is the only checkout on the box. Only `trading-prod-*` units exist; nothing listens on 9500. It was stood up as dev during the 2026-08-30 server migration and promoted in place.
+
+**Operator decision:** verify `/wall` directly on prod — adding a read-only route changes no existing behaviour — and run the Xvfb/Chrome/ffmpeg pipeline **by hand at a quiet time (after 15:20 CT)** before the timer is ever enabled. The accepted residual risk is that the unattended timer will have been proven only by hand, on the trading box.
 
 ---
 
@@ -418,9 +422,15 @@ SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "tools" / "stream_wall.sh
 
 def test_gates_on_the_market_calendar_not_a_holiday_literal():
     """systemd's timer knows Mon..Fri; it does not know Thanksgiving. The repo
-    rule is that no new holiday literal goes anywhere but market_calendar."""
+    rule is that no new holiday literal goes anywhere but market_calendar.
+
+    ONE call does it: `in_window("stream", now)` already gates on
+    `is_trading_day` internally (measured in Task 1), so it answers both "is the
+    market open today" and "are we inside the broadcast window" together. A
+    separate is_trading_day check would be a second source of the same truth.
+    """
     text = SCRIPT.read_text()
-    assert "is_trading_day" in text
+    assert 'in_window("stream"' in text or "in_window('stream'" in text
     assert not re.search(r"\b(thanksgiving|christmas|juneteenth)\b", text, re.I)
 
 
@@ -462,11 +472,16 @@ def test_cleans_up_its_children_on_exit():
 `tools/stream_wall.sh` — `set -euo pipefail`, a `trap ... EXIT` that kills Xvfb and Chrome, the trading-day gate (exit 0, not 1 — a holiday is a normal outcome, and a non-zero exit would trip `Restart=on-failure` into a storm), then Xvfb → Chrome → ffmpeg in the foreground so systemd tracks the encoder as the main process.
 
 ```bash
-"$PYTHON" -c 'import datetime,sys; sys.path.insert(0,".");
-from shared.market_calendar import is_trading_day;
-sys.exit(0 if is_trading_day(datetime.date.today()) else 42)' || {
-  echo "not a trading day - standing down"; exit 0; }
+"$PYTHON" -c 'import datetime, sys
+from shared.market_calendar import in_window, CT
+sys.exit(0 if in_window("stream", datetime.datetime.now(CT)) else 42)' || {
+  echo "outside the stream window (weekend, holiday, or off-hours) - standing down"
+  exit 0; }
 ```
+
+⚠ Exit **0**, not non-zero. A holiday is a normal outcome, and a failing exit
+would trip `Restart=on-failure` into a restart storm against the `StartLimitBurst`
+cap — the unit would end up in `failed` state on every market holiday.
 
 Use the exact ffmpeg invocation from the design doc.
 
@@ -553,7 +568,7 @@ git commit -m "feat(stream): generate the wall-stream service and timer"
 
 ## Task 8: Host provisioning (dev first)
 
-Not a TDD task — this changes the machine, not the repo. Run it against **dev**.
+Not a TDD task — this changes the machine, not the repo. Run it against **prod**, at a quiet time.
 
 **Step 1: Install the packages**
 
@@ -572,7 +587,7 @@ ssh vps2 'wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-c
 Ubuntu 24.04's AppArmor restriction on unprivileged user namespaces breaks Chrome's sandbox. Verify before reaching for `--no-sandbox`:
 
 ```bash
-ssh vps2 'Xvfb :99 -screen 0 1920x1080x24 & sleep 2; DISPLAY=:99 google-chrome --headless=new --dump-dom http://127.0.0.1:9500/wall | head -20'
+ssh vps2 'Xvfb :99 -screen 0 1920x1080x24 & sleep 2; DISPLAY=:99 google-chrome --headless=new --dump-dom http://127.0.0.1:8500/wall | head -20'
 ```
 
 If it fails on the sandbox, install the AppArmor profile Chrome's deb ships rather than disabling the sandbox — this browser loads only localhost, but "only localhost" is not a reason to run a browser unsandboxed on a box holding Schwab credentials.
@@ -580,7 +595,7 @@ If it fails on the sandbox, install the AppArmor profile Chrome's deb ships rath
 **Step 4: Screenshot `/wall` and actually look at it**
 
 ```bash
-ssh vps2 'DISPLAY=:99 google-chrome --headless=new --screenshot=/tmp/wall.png --window-size=1920,1080 http://127.0.0.1:9500/wall'
+ssh vps2 'DISPLAY=:99 google-chrome --headless=new --screenshot=/tmp/wall.png --window-size=1920,1080 http://127.0.0.1:8500/wall'
 scp vps2:/tmp/wall.png .
 ```
 
@@ -588,18 +603,41 @@ scp vps2:/tmp/wall.png .
 
 ---
 
-## Task 9: Verify in dev, end to end
+## Task 9: Verify on prod, end to end
 
-1. `git push`, then in the **dev** checkout fast-forward and restart the webgui unit.
-2. Load `http://127.0.0.1:9500/wall` through the SSH tunnel and watch a full rotation — all three panels, two crossfades, clock ticking, labels correct.
-3. Run `tools/stream_wall.sh` by hand against a **private or unlisted** YouTube stream first. Confirm the rotation survives on the far side, not just locally.
-4. Measure CPU **during market hours**, browser and encoder separately:
+There is no dev environment (see "Before you start"). Operator decision: verify
+the page on prod, hand-run the pipeline at a quiet time.
+
+**Order matters — do not enable the timer until step 5 passes.**
+
+1. Merge to `main`, push, then `tools/promote.sh` **in the prod checkout**. Adding
+   a read-only route changes no existing behaviour; this is the part of the
+   feature it is safe to land on a live stack.
+2. Confirm the webgui actually restarted onto your commit — a stack serves stale
+   code while looking perfectly healthy:
    ```bash
-   ssh vps2 'top -b -n1 | grep -E "chrome|ffmpeg|Xvfb"; cat /proc/loadavg'
+   ssh vps2 'systemctl --user show -p ActiveEnterTimestamp trading-prod-webgui.service; cd /home/administrator/dev && git log -1 --format=%cd --date=iso HEAD'
    ```
-   With no swap on this box, watch RSS as closely as CPU.
+   Unit older than the commit ⇒ stale, restart before believing anything.
+3. Load `http://127.0.0.1:8500/wall` through the SSH tunnel
+   (`tools/open_webgui.ps1`) and watch a **full rotation** — three panels, two
+   crossfades, clock ticking in CT, labels correct.
+4. **After 15:20 CT**, hand-run the pipeline against a **private or unlisted**
+   YouTube stream. Never the public one first. Confirm the rotation survives on
+   the far side, not just locally.
+5. Measure CPU and RSS with the pipeline up, browser and encoder separately:
+   ```bash
+   ssh vps2 'top -b -n1 | grep -E "chrome|ffmpeg|Xvfb"; cat /proc/loadavg; free -h'
+   ```
+   **This box has no swap**, so watch RSS as closely as CPU. Record the numbers in
+   the design doc — the design commits to measuring rather than estimating.
+6. Repeat step 5 **during market hours** before enabling the timer. An idle-hours
+   measurement proves nothing about contention with the trading stack.
 
-⚠ "Tests pass" is not "verified in dev". Nearly all of this is runtime surface.
+⚠ "Tests pass" is not "verified". Nearly all of this is runtime surface, and the
+accepted residual risk of the no-dev decision is that the unattended timer will
+have been proven only by hand, on the trading box. Step 6 is what keeps that risk
+small; do not skip it.
 
 ---
 
