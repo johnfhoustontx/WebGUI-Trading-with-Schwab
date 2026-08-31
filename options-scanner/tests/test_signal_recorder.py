@@ -1,5 +1,16 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
 import signal_recorder
 import signal_db
+
+TZ = ZoneInfo("America/Chicago")
+# Every capture time in this module is explicit. `record_signals` refuses to
+# record outside the regular cash session, so a test that let the recorder read
+# the wall clock would pass or fail depending on the hour the suite is run.
+RTH = datetime(2026, 8, 26, 10, 0, tzinfo=TZ)          # Wednesday, mid-session
 
 
 def _make_signal(score=60, symbol="SPY", type_="PCS", short=690, long=688, exp="2026-04-15", dte=0):
@@ -13,19 +24,19 @@ def _make_signal(score=60, symbol="SPY", type_="PCS", short=690, long=688, exp="
 
 def test_records_signal_above_threshold(tmp_path):
     db = tmp_path / "s.db"
-    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db) == 1
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db, now=RTH) == 1
 
 
 def test_filters_below_threshold(tmp_path):
     db = tmp_path / "s.db"
     # 55 < MIN_SCORE (58) -> filtered out.
-    assert signal_recorder.record_signals([_make_signal(score=55)], "0DTE", db_path=db) == 0
+    assert signal_recorder.record_signals([_make_signal(score=55)], "0DTE", db_path=db, now=RTH) == 0
 
 
 def test_threshold_exact_boundary_passes(tmp_path):
     db = tmp_path / "s.db"
     # Exact boundary == MIN_SCORE (58) passes.
-    assert signal_recorder.record_signals([_make_signal(score=58)], "0DTE", db_path=db) == 1
+    assert signal_recorder.record_signals([_make_signal(score=58)], "0DTE", db_path=db, now=RTH) == 1
 
 
 def test_score_floor_is_58():
@@ -36,8 +47,8 @@ def test_score_floor_is_58():
 def test_dedup_on_second_call(tmp_path):
     db = tmp_path / "s.db"
     sigs = [_make_signal(score=60)]
-    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db) == 1
-    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db) == 0
+    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db, now=RTH) == 1
+    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db, now=RTH) == 0
 
 
 def test_iron_condor_captures_call_strikes(tmp_path):
@@ -45,7 +56,7 @@ def test_iron_condor_captures_call_strikes(tmp_path):
     sig = _make_signal(type_="IC", score=60)
     sig["call_short"] = 710
     sig["call_long"] = 712
-    n = signal_recorder.record_signals([sig], "0DTE", db_path=db)
+    n = signal_recorder.record_signals([sig], "0DTE", db_path=db, now=RTH)
     assert n == 1
     rows = signal_db.get_open_signals(db_path=db)
     assert rows[0]["call_short"] == 710
@@ -56,19 +67,19 @@ def test_db_failure_does_not_raise(tmp_path, monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("db down")
     monkeypatch.setattr(signal_recorder, "_insert", boom)
-    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=tmp_path / "s.db") == 0
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=tmp_path / "s.db", now=RTH) == 0
 
 
 def test_scanner_type_is_tagged(tmp_path):
     db = tmp_path / "s.db"
-    signal_recorder.record_signals([_make_signal(score=60)], "SWING", db_path=db)
+    signal_recorder.record_signals([_make_signal(score=60)], "SWING", db_path=db, now=RTH)
     rows = signal_db.get_open_signals(db_path=db)
     assert rows[0]["scanner_type"] == "SWING"
 
 
 def test_empty_list_returns_zero(tmp_path):
     db = tmp_path / "s.db"
-    assert signal_recorder.record_signals([], "0DTE", db_path=db) == 0
+    assert signal_recorder.record_signals([], "0DTE", db_path=db, now=RTH) == 0
 
 
 def test_to_row_includes_position_perspective_fields():
@@ -143,7 +154,7 @@ def test_entry_credit_is_scored_credit_not_natural_bid():
 def test_record_signal_default_mode_is_premium(tmp_path):
     """Signals without explicit mode are recorded as mode='PREMIUM'."""
     db = tmp_path / "rec_default.db"
-    signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db)
+    signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db, now=RTH)
     rows = signal_db.get_open_signals(db_path=db)
     assert len(rows) == 1
     assert rows[0]["mode"] == "PREMIUM"
@@ -154,7 +165,76 @@ def test_record_signal_directional_mode_preserved(tmp_path):
     db = tmp_path / "rec_directional.db"
     sig = _make_signal(score=60)
     sig["mode"] = "DIRECTIONAL"
-    signal_recorder.record_signals([sig], "0DTE", db_path=db)
+    signal_recorder.record_signals([sig], "0DTE", db_path=db, now=RTH)
     rows = signal_db.get_open_signals(db_path=db)
     assert len(rows) == 1
     assert rows[0]["mode"] == "DIRECTIONAL"
+
+
+# ── Capture is gated to the regular cash session ───────────────────────────
+#
+# A signal recorded outside 08:30-15:00 CT records an entry the account could
+# not have taken: Schwab pins a chain's `underlyingPrice` to the PRIOR CLOSE
+# outside the regular session (the same freeze `gex_collector._reanchor_spots`
+# corrects for GEX), so a pre-open scan picks its strikes, deltas and credit off
+# yesterday's price and the open then gaps away from all of them.
+#
+# The gate lives here, at the recorder, rather than on the scan window: the scan
+# still runs pre-open and still populates the Market Scanner page. Only the
+# BOOKING is refused.
+
+PREMARKET = datetime(2026, 8, 26, 8, 2, tzinfo=TZ)     # the reported 08:02 capture
+AFTER_CLOSE = datetime(2026, 8, 26, 15, 2, tzinfo=TZ)  # a 15:00-slot scan landing late
+SATURDAY = datetime(2026, 8, 29, 10, 0, tzinfo=TZ)
+
+
+@pytest.mark.parametrize("when", [PREMARKET, AFTER_CLOSE, SATURDAY],
+                         ids=["premarket", "after_close", "weekend"])
+def test_capture_outside_regular_hours_records_nothing(tmp_path, when):
+    db = tmp_path / "s.db"
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE",
+                                          db_path=db, now=when) == 0
+    assert signal_db.get_open_signals(db_path=db) == []
+
+
+@pytest.mark.parametrize("when,expected", [
+    (datetime(2026, 8, 26, 8, 29, 59, tzinfo=TZ), 0),   # one second before the bell
+    (datetime(2026, 8, 26, 8, 30, 0, tzinfo=TZ), 1),    # the open
+    (datetime(2026, 8, 26, 15, 0, 0, tzinfo=TZ), 1),    # the cash close instant
+    (datetime(2026, 8, 26, 15, 0, 1, tzinfo=TZ), 0),    # one second past it
+], ids=["before_open", "at_open", "at_close", "after_close"])
+def test_capture_window_edges(tmp_path, when, expected):
+    """The boundary is `market_calendar.is_regular_hours`, compared at SECOND
+    granularity — so 15:00:01 is already out, not just 15:01. Pinned because a
+    scan launched in the 15:00 slot lands mid-minute and must not book."""
+    db = tmp_path / "s.db"
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE",
+                                          db_path=db, now=when) == expected
+
+
+def test_premarket_sighting_does_not_burn_the_dedup_slot(tmp_path):
+    """`dedup_key` is globally UNIQUE with no date component, so a recorded
+    pre-open row would claim the slot forever and INSERT OR IGNORE would then
+    silently discard the SAME spread's genuine post-open capture. Refusing the
+    pre-open sighting is what lets the real one through."""
+    db = tmp_path / "s.db"
+    sigs = [_make_signal(score=60)]
+    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db, now=PREMARKET) == 0
+
+    after_open = datetime(2026, 8, 26, 8, 35, tzinfo=TZ)
+    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db, now=after_open) == 1
+
+    rows = signal_db.get_open_signals(db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["first_seen_ts"] == after_open.isoformat()
+
+
+def test_wall_clock_is_gated_when_now_is_omitted(tmp_path, monkeypatch):
+    """The production call site passes no `now`, so gating only the injected
+    argument would leave the real path wide open. This drives the default."""
+    db = tmp_path / "s.db"
+    monkeypatch.setattr(signal_recorder, "_now", lambda: PREMARKET)
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db) == 0
+
+    monkeypatch.setattr(signal_recorder, "_now", lambda: RTH)
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db) == 1

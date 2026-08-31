@@ -35,10 +35,13 @@ def _isolate_production_signal_db(tmp_path, monkeypatch):
     test_db = tmp_path / "isolated_signals.db"
     real_record = signal_recorder.record_signals
 
-    def _redirected(signals, scanner_type, db_path=None):
+    def _redirected(signals, scanner_type, db_path=None, **kwargs):
         # db_path is None only when the caller relied on the production default
         # (the leak path). Send those to the per-test DB; honour explicit paths.
-        return real_record(signals, scanner_type, db_path=db_path or test_db)
+        # **kwargs passes the rest through untouched (e.g. the recorder's `now`),
+        # so widening record_signals' signature cannot silently break the suite
+        # here with a TypeError that looks nothing like the real change.
+        return real_record(signals, scanner_type, db_path=db_path or test_db, **kwargs)
 
     monkeypatch.setattr(signal_recorder, "record_signals", _redirected)
     yield
