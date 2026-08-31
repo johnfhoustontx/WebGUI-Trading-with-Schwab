@@ -30,9 +30,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from shared.bus import Bus  # noqa: E402
 
-# A view older than this is called out. Not a correctness threshold -- the
-# cadences here run from 30 s to nightly -- just the point past which "is that
-# supposed to be old?" is worth a human glance.
+# A named view older than this is called out. Deliberately applied ONLY when
+# keys were asked for by name, never in discover-everything mode: the cadences
+# here run from 30 s to nightly, so a single threshold flags about half of them
+# and a marker that fires on everything says nothing. Naming a key is the
+# expectation -- you asked about it because you thought it should be fresh.
 STALE_AFTER_MIN = 30
 
 PREFIX = "cache:"
@@ -94,8 +96,12 @@ def discover(bus):
     return sorted(found)
 
 
-def render(rows, stale_after_min=STALE_AFTER_MIN):
-    """The report, as a list of lines. Pure, so the formatting is testable."""
+def render(rows, stale_after_min=None):
+    """The report, as a list of lines. Pure, so the formatting is testable.
+
+    ``stale_after_min=None`` suppresses the staleness marker entirely, which is
+    what discover-everything mode wants -- see ``STALE_AFTER_MIN``.
+    """
     if not rows:
         return ["no cache views found"]
     width = max(len(k) for k, _s, _r in rows)
@@ -104,7 +110,7 @@ def render(rows, stale_after_min=STALE_AFTER_MIN):
         mark = ""
         if secs is None:
             mark = "  <- never written"
-        elif secs > stale_after_min * 60:
+        elif stale_after_min is not None and secs > stale_after_min * 60:
             mark = "  <- stale?"
         lines.append("%-*s  %-14s%s" % (width, key, format_age(secs), mark))
     return lines
@@ -126,7 +132,8 @@ def main(argv=None):
                     "\n    set -a && . ./.env && set +a")
         sys.stderr.write("could not read the cache: %s%s\n" % (exc, hint))
         return 2
-    for line in render(rows):
+    # Marker only when keys were named -- see STALE_AFTER_MIN.
+    for line in render(rows, STALE_AFTER_MIN if argv else None):
         print(line)
     return 0
 

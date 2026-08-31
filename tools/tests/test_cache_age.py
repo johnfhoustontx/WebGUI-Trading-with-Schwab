@@ -99,3 +99,32 @@ def test_an_auth_error_names_the_missing_environment_not_just_the_symptom():
         cache_age.Bus = real
     assert rc == 2
     assert "MEMURAI_PASSWORD" in message or ". ./.env" in message
+
+
+def test_discover_mode_does_not_mark_anything_stale():
+    """The cadences here span 30s to nightly, so one threshold flags about half
+    the views and a marker that fires on everything says nothing. Naming a key
+    IS the expectation; discovering them all is not."""
+    rows = [("cache:nightly", 60 * 60 * 20, "x"), ("cache:tick", 5, "x")]
+    assert "stale?" not in "\n".join(cache_age.render(rows, stale_after_min=None))
+    assert "stale?" in "\n".join(cache_age.render(rows, stale_after_min=30))
+
+
+def test_named_keys_are_judged_but_discovered_ones_are_not(monkeypatch):
+    """The distinction has to hold end to end, not just in render()."""
+    import datetime
+    bus = Bus(fake=True)
+    old = (datetime.datetime.now(datetime.timezone.utc)
+           - datetime.timedelta(hours=20)).isoformat()
+    bus._r.set("cache:nightly:thing:ts", old)
+    monkeypatch.setattr(cache_age, "Bus", lambda *a, **k: bus)
+
+    import io
+    for argv, expect_mark in (["nightly:thing"], True), ([], False):
+        out, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            cache_age.main(argv)
+            printed = sys.stdout.getvalue()
+        finally:
+            sys.stdout = out
+        assert ("stale?" in printed) is expect_mark, (argv, printed)
