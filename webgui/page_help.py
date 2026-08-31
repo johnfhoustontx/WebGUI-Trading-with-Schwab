@@ -354,6 +354,10 @@ Market Scanner signals you're **tracking over time** to see whether they're work
   closed today, the **booked** P&L of today's closes, and the **open** P&L across
   every signal still running. Open P&L shows a dash, not $0.00, until the signals
   have been priced — hover it to see how many of them carry a live mark.
+- **Nothing is captured outside 8:30–3:00 CT.** The scanner still runs before the
+  bell and you can still read its results on the Market Scanner — but a premarket
+  quote is priced off *yesterday's* close, so a signal booked then carries a
+  credit the open would have gapped away from. Only the booking waits for the bell.
 """,
     "/options/portfolio": """
 **Paper Account — the simple version**

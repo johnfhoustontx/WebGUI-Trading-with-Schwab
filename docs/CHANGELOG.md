@@ -4,6 +4,59 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-30 (**Captured Signals stopped booking trades outside
+the regular cash session.** The page was showing trades opened at 08:02 CT,
+28 minutes before the bell.)
+
+- **The mechanism.** `[windows.scan]` is 08:00–15:15 CT and covers premarket by
+  design, so the auto-scan's first slot fires at 08:00; a scan takes 30–90 s, so
+  `signal_recorder.record_signals` stamped `first_seen_ts` ≈ 08:02 with whatever
+  the clock said. Same at the other end — the 15:00 slot lands ~15:02, past the
+  cash close. The manual **Run scan** command answers to no window at all, which
+  is where the 06:35 / 07:10 / 16:42 captures in the archive came from.
+- **It was mispriced, not merely mistimed.** Schwab pins a chain's
+  `underlyingPrice` to the PRIOR CLOSE outside regular hours — the freeze
+  `gex_collector._reanchor_spots` already corrects for GEX collection and that
+  `scanner_engine` never did (it reads `chain["underlyingPrice"]` raw). So a
+  pre-open scan picked its strikes, deltas and credit off yesterday's price and
+  the open then gapped away from all of them. Measured in prod's `signals.db`:
+  **233 of 855 rows (27%) captured outside 08:30–15:00 CT**, clustered on the two
+  slot boundaries.
+- **It silently cost the good entry too.** `dedup_key` is globally UNIQUE with
+  **no date component**, so the 08:02 row claimed the slot permanently and
+  `INSERT OR IGNORE` discarded the SAME spread's genuine post-open capture.
+  Refusing the pre-bell sighting is what lets the real one through — the gate
+  removes junk rows *and* restores entries that were being thrown away.
+- **The gate is at the recorder, not the scan window.** Those are different
+  questions: the Market Scanner should keep showing what is setting up before the
+  bell, and only the BOOKING is refused. `record_signals` is also the single
+  insert chokepoint, so one gate covers the auto-scan, the manual Run-scan and
+  the legacy CLI alike. The predicate is the existing `mc.is_regular_hours` — no
+  new window constant, and it is trading-day gated, so holidays and weekends are
+  covered without a second rule.
+- **`now` is both the gate input and the recorded `first_seen_ts`**, one instant
+  for both, so the invariant is exact and checkable: every row's open time is
+  inside the session. Gating on the scan's START time instead would let a scan
+  launched at 15:00 stamp a row 15:02 — still an out-of-hours "Opened" time on
+  the page, which is the thing being fixed. ⚠ `is_regular_hours` compares at
+  **second** granularity, so 15:00:01 is already outside; in practice nothing
+  records in the closing minute, which is the intended answer.
+- ⚠ **The existing tests read the wall clock**, so the gate would have made them
+  pass or fail by the hour the suite ran. They now pass an explicit RTH `now`,
+  and `test_wall_clock_is_gated_when_now_is_omitted` drives the default via a
+  `_now()` indirection — gating only the injected argument would have left the
+  production call site, which passes no `now`, wide open.
+- The `options-scanner/tests/conftest.py` `record_signals` redirect takes
+  `**kwargs` now, so widening that signature can no longer surface as a TypeError
+  that looks nothing like the real edit.
+- **The 10 OPEN rows already captured outside RTH in prod were left in place** by
+  decision — they close or expire naturally within ~2 weeks, and closing them
+  without a real exit would distort the realized-outcome stats.
+- Suites: options-scanner **1213 passed / 2 skipped**, options_svc **1278
+  passed**, shared **193**, webgui captured **62**.
+
+---
+
 **Last updated:** 2026-08-29 (**DEV STOOD UP ON THE VPS. Both environments now
 run side by side under one Linux user, which is the shape the Windows box had —
 so the update loop is unchanged in principle and entirely relocated in
