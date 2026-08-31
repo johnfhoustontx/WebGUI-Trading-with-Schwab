@@ -65,10 +65,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- Open the browser once the forward is actually accepting ----------------
-REM Backgrounded so ssh can hold the foreground. It polls rather than sleeping a
-REM fixed interval, because the forward is ready when it is ready.
-start "" /b powershell -NoProfile -Command "for ($i=0; $i -lt 40; $i++) { try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', %WEBPORT%); $c.Close(); Start-Process 'http://127.0.0.1:%WEBPORT%'; exit } catch { Start-Sleep -Milliseconds 500 } }"
+REM --- Open the browser once the GUI actually ANSWERS -------------------------
+REM Backgrounded so ssh can hold the foreground.
+REM
+REM It waits for an HTTP 200, NOT for the local port to accept a connection.
+REM That distinction is the whole point: ssh binds the local end the instant it
+REM connects, whether or not anything is listening on the FAR end. A TCP check
+REM therefore always passes, and the browser opens onto a dead forward showing a
+REM generic error, while the real cause --
+REM
+REM     channel 3: open failed: connect failed: Connection refused
+REM
+REM -- scrolls past in this window. That is exactly what happened the first time
+REM the stack was left stopped overnight. An HTTP 200 can only come from the
+REM web GUI itself, so it cannot be faked by the forward existing.
+start "" /b powershell -NoProfile -Command "$u='http://127.0.0.1:%WEBPORT%/desk'; for ($i=0; $i -lt 60; $i++) { try { if ((Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200) { Start-Process 'http://127.0.0.1:%WEBPORT%'; exit } } catch { } Start-Sleep -Milliseconds 750 }; Write-Host ''; Write-Host '  The tunnel is UP, but nothing answered on the VPS.'; Write-Host '  The stack is almost certainly stopped. In another window run:'; Write-Host ''; Write-Host '      trading start'; Write-Host ''; Write-Host '  then reload http://127.0.0.1:%WEBPORT% - this tunnel stays usable.'; Write-Host ''"
 
 echo   Opening tunnel. The browser follows in a moment.
 echo   ssh prints nothing while it holds the forwards open - that is normal.
