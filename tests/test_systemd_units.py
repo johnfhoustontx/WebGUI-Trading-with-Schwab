@@ -269,6 +269,24 @@ def test_the_backup_timer_catches_up_after_downtime(rendered):
     assert tmr["Install"]["WantedBy"] == "timers.target"
 
 
+def test_the_backup_does_not_run_on_weekend_nights(rendered):
+    """Nothing writes at the weekend, so a Sat/Sun run ships ~1.5 GB of bytes
+    identical to Friday's -- encrypted, uploaded, and counted against
+    KEEP_REMOTE, which is the real cost: three weekend runs would push the last
+    three WEEKDAY archives off Drive and leave only copies of a closed market.
+
+    Sunday evening reopens the futures session, but collection windows are
+    market hours and Monday's 20:00 run captures anything written before it.
+
+    ⚠ Persistent=true still applies. A Friday run missed because the box was
+    down is executed at next boot even if that boot is a Saturday -- the day
+    filter picks the schedule, not what a catch-up is allowed to do.
+    """
+    oncal = rendered[f"trading-{ENV_NAME}-backup.timer"]["Timer"]["OnCalendar"]
+    assert oncal.startswith("Mon..Fri "), (
+        f"backup timer would fire at the weekend: OnCalendar={oncal!r}")
+
+
 def test_the_backup_runs_after_everything_that_writes():
     """20:00 CT is after collection (15:20), the momentum cascade (16:20) and the
     calibration rebuild (16:30). Backing up mid-cascade captures a half-written

@@ -200,10 +200,21 @@ ExecStart={_python()} tools/backup_local.py
 Description=NeuralStrike {ENV_NAME} - nightly backup timer
 
 [Timer]
-# 20:00 CENTRAL (the host TZ is America/Chicago, so this is already CT).
-# After collection (15:20), the momentum cascade (16:20) and the calibration
-# rebuild (16:30) -- so the copy is of a settled night, not a half-written one.
-OnCalendar=*-*-* 20:00:00
+# 20:00 CENTRAL on TRADING DAYS (the host TZ is America/Chicago, so this is
+# already CT). After collection (15:20), the momentum cascade (16:20) and the
+# calibration rebuild (16:30) -- so the copy is of a settled night, not a
+# half-written one.
+#
+# Mon..Fri, because nothing writes at the weekend: a Sat/Sun run ships ~1.5 GB
+# byte-identical to Friday's, and counts against KEEP_REMOTE. Three weekend
+# runs would push the last three WEEKDAY archives off Drive and leave only
+# copies of a closed market -- the cost is not the bandwidth, it is the
+# retention.
+#
+# Market holidays are NOT filtered. systemd has no calendar for them, and the
+# failure modes are asymmetric: a redundant holiday copy wastes one slot, a
+# missed real session loses a day of the trading record.
+OnCalendar=Mon..Fri *-*-* 20:00:00
 # Run a MISSED occurrence at boot rather than skipping the day.
 Persistent=true
 RandomizedDelaySec=300
