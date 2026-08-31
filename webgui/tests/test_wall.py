@@ -137,3 +137,40 @@ def test_the_incoming_panel_stacks_above_the_one_it_is_covering():
     on = re.search(r"\.panel\.on\s*\{[^}]*\}", doc,
                    re.S).group(0).replace(" ", "")
     assert "z-index:1" in on
+
+
+# ── staying alive for nine hours ─────────────────────────────────────────────
+# These four assert on the emitted JS as a STRING, which is a weak form of test
+# and worth naming as such: they pin the shape of the guard, not its behaviour.
+# They are still the discriminating ones available without a browser, and each
+# fails against the naive implementation it exists to rule out.
+def test_panels_reload_on_a_long_interval():
+    doc = wall.document()
+    assert str(wall.RELOAD_MS) in doc
+    assert wall.RELOAD_MS >= 10 * 60 * 1000
+
+
+def test_a_panel_only_reloads_while_it_is_off_camera():
+    """A reload blanks an iframe for a beat. Doing that to the VISIBLE panel
+    would put the blank on the stream -- the failure this exists to prevent,
+    not cause. Fails against the naive "reload them all" implementation."""
+    doc = wall.document()
+    assert "if (i === idx) return;" in doc
+
+
+def test_the_reload_check_waits_out_the_fade():
+    """At the instant of rotation the OUTGOING panel is still fully opaque
+    underneath -- that is what makes the crossfade work. Reloading it before
+    FADE_MS elapses would blank it on camera. Fails against a reloadStale()
+    called inline in the rotation."""
+    doc = wall.document()
+    assert f"setTimeout(reloadStale, {wall.FADE_MS})" in doc
+
+
+def test_staleness_is_tracked_per_panel_not_globally():
+    """One global 'reload everything now' tick would skip whichever panel was
+    showing and never come back to it -- so the panel that had been up longest
+    would be the only one that never refreshed. Fails against a single shared
+    last-reload timestamp."""
+    doc = wall.document()
+    assert "LOADED[i]" in doc

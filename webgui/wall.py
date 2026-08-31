@@ -75,6 +75,15 @@ PAGES = [
 DWELL_MS = 15_000
 FADE_MS = 400
 
+# How stale a panel may get before it reloads itself. This IS the worst-case
+# window a dead panel can sit on camera, so it is chosen against that rather
+# than against the cost: 15 minutes is ~36 reloads per panel over a nine-hour
+# session, and a reload is a NiceGUI page build whose cache reads measure in
+# single-digit milliseconds. Halving it would double that churn to shorten a
+# repair window nobody watching would notice the difference of; doubling it
+# risks half an hour of a visibly disconnected page on a public broadcast.
+RELOAD_MS = 15 * 60 * 1000
+
 # The overlay's standing-text slot, DELIBERATELY EMPTY by operator decision.
 # ⚠ Worth revisiting rather than forgetting: this stream shows a paper book's
 # positions and P&L publicly and permanently, and an unlabelled P&L reads as a
@@ -137,6 +146,7 @@ _JS = """
    side: the label can never name a screen other than the one fading in. */
 const PANELS = Array.from(document.querySelectorAll('.panel'));
 const LABELS = {labels};
+const RELOAD_MS = {reload};
 let idx = 0;
 
 function show(n) {{
@@ -144,8 +154,41 @@ function show(n) {{
   document.getElementById('page-label').textContent = LABELS[n];
 }}
 
+/* A NiceGUI page is a LIVE CLIENT, and these three sit unattended for a whole
+   session -- across at least one likely webgui restart (a promote, or
+   Restart=on-failure after a blip). A client whose server went away renders a
+   disconnected page: on camera, publicly, with nobody watching the server. So
+   each panel periodically reloads itself.
+
+   Per-panel timestamps, never one global tick. The showing panel is SKIPPED and
+   picked up on a later rotation, so a single shared clock would permanently skip
+   whichever panel happened to be up -- leaving the one that had been running
+   longest as the only one that never refreshed. */
+const SRCS = {srcs};
+const LOADED = PANELS.map(() => Date.now());
+
+function reloadStale() {{
+  const now = Date.now();
+  PANELS.forEach((p, i) => {{
+    if (i === idx) return;                 /* on camera -- never reload */
+    if (now - LOADED[i] < RELOAD_MS) return;
+    LOADED[i] = now;
+    /* Reassigning src rather than contentWindow.location.reload(): it raises no
+       same-origin question, and it works even when the iframe is currently
+       showing an error page -- which is precisely the case being repaired. */
+    p.src = SRCS[i];
+  }});
+}}
+
 show(0);
-setInterval(() => {{ idx = (idx + 1) % PANELS.length; show(idx); }}, {dwell});
+setInterval(() => {{
+  idx = (idx + 1) % PANELS.length;
+  show(idx);
+  /* Only AFTER the crossfade. At the instant of rotation the outgoing panel is
+     still fully opaque underneath -- that is what makes the fade work -- so
+     reloading it now would blank it on camera. */
+  setTimeout(reloadStale, {fade});
+}}, {dwell});
 
 /* CENTRAL time, explicitly, and not the host's idea of local: this is the
    trading clock every window in this app is expressed in, and a public stream
@@ -178,7 +221,8 @@ def document():
     css = _CSS.format(cell=_C["cell"], text=_C["text"], line=_C["line"],
                       label=_C["label"], dim=_C["dim"], fade=FADE_MS)
     js = _JS.format(labels=json.dumps([p["label"] for p in PAGES]),
-                    dwell=DWELL_MS)
+                    srcs=json.dumps([p["path"] for p in PAGES]),
+                    dwell=DWELL_MS, fade=FADE_MS, reload=RELOAD_MS)
     frames = "\n".join(
         '  <iframe class="panel" src="{path}" title="{label}"></iframe>'.format(
             path=p["path"], label=p["label"]) for p in PAGES)
