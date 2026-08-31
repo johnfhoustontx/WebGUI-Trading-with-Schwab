@@ -194,7 +194,13 @@ sleep 15
 # dashboard broadcast -- nobody is interacting with what they see -- and that
 # tune disables B-frames and lookahead, which are exactly what buy quality per
 # bit on a screen that is mostly flat colour and small text.
-ffmpeg -y -nostats -loglevel warning \
+# -nostdin: ffmpeg reads stdin for interactive commands, and it is backgrounded
+# here, so it inherits whatever stdin this script has. Under systemd that is
+# /dev/null and nothing happens -- but run this script by hand, or pipe it over
+# `ssh 'bash -s' <<EOF`, and ffmpeg silently EATS the rest of the script from
+# under the shell. Measured: it consumed the remaining commands and the run
+# never reached its own cleanup. Costs nothing; removes the whole class.
+ffmpeg -nostdin -y -nostats -loglevel warning \
        -f x11grab -draw_mouse 0 -framerate "$FPS" -video_size "$SCREEN" \
        -thread_queue_size 512 -i ":$DISPLAY_NUM" \
        -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \

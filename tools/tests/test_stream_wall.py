@@ -150,3 +150,15 @@ def test_the_end_check_runs_every_poll_not_only_at_startup():
     # Non-vacuity: prove we really extracted the loop and not an empty slice.
     assert "kill -0" in body, "watchdog block not found - has the loop moved?"
     assert "END_EPOCH" in body
+
+
+def test_the_encoder_does_not_read_stdin():
+    """ffmpeg reads stdin for interactive commands and is backgrounded here, so
+    it inherits the script's stdin. Under systemd that is /dev/null and nothing
+    happens -- but a hand run, or a pipe over `ssh 'bash -s' <<EOF`, hands it the
+    script itself, which it then EATS from under the shell. Measured: the run
+    consumed its own remaining commands and never reached its cleanup.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+    ffmpeg_line = next(ln for ln in text.splitlines() if ln.startswith("ffmpeg "))
+    assert "-nostdin" in ffmpeg_line
