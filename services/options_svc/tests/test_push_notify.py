@@ -1351,6 +1351,12 @@ def _ms_capture(monkeypatch, png=b"PNGDATA"):
         return png
 
     monkeypatch.setattr(pn.briefing_image, "render_html_png", _render)
+    # Stubbed alongside the browser: since snapshot_card was added, `png=None`
+    # means NO IMAGE IS OBTAINABLE (the text-fallback case), not merely "no
+    # browser" -- a failed HTML render now falls through to the drawn card,
+    # which succeeds on almost any payload.
+    monkeypatch.setattr(pn.snapshot_card, "render_snapshot_png",
+                        lambda *a, **k: png)
     monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: got["photo"].append(a))
     monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: got["file"].append(a))
     monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: got["tg_text"].append(a))
@@ -1470,3 +1476,53 @@ def test_the_browser_still_wins_when_one_exists(monkeypatch, briefing_cfg,
     assert pn.send_gamma_briefing(briefing_res, slot="midday",
                                   config=briefing_cfg) is True
     assert sent["rendered"] == ["<html>doc</html>"]
+
+
+def test_market_snapshot_falls_back_to_the_drawn_card(monkeypatch):
+    """The live condition on the Linux host: no browser, so the HTML render
+    returns None. Before snapshot_card existed that meant a bare text caption
+    every thirty minutes."""
+    got = {}
+    monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc",
+                        lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda *a, **k: None)
+
+    def _card(dashboard, trend, sentiment, regime, **kw):
+        got["args"] = (dashboard, trend, sentiment, regime)
+        got["slot"] = kw.get("slot")
+        return b"\x89PNG\r\n\x1a\ndrawn"
+
+    monkeypatch.setattr(pn.snapshot_card, "render_snapshot_png", _card)
+    monkeypatch.setattr(pn, "send_telegram_photo",
+                        lambda *a, **k: got.setdefault("t", a))
+    monkeypatch.setattr(pn, "send_discord_file",
+                        lambda *a, **k: got.setdefault("d", a))
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: got.setdefault("text", a))
+    cfg = {"enabled": True, "market_snapshot": {"enabled": True},
+           "telegram": {"bot_token": "b", "chat_id": 1},
+           "discord": {"webhook_url": "http://w"}}
+    assert pn.send_market_snapshot({"categories": []}, {"score": 1}, {"bias": "x"},
+                                   {"memberships": {}}, {}, {}, slot="10:30",
+                                   config=cfg) is True
+    assert got["args"][0] == {"categories": []}, "the card gets the STRUCTURED dashboard"
+    assert got["slot"] == "10:30"
+    assert "t" in got and "d" in got, "an image push"
+    assert "text" not in got, "text fallback must not fire when the card worked"
+
+
+def test_market_snapshot_text_fallback_when_both_renderers_fail(monkeypatch):
+    got = {}
+    monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc",
+                        lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda *a, **k: None)
+    monkeypatch.setattr(pn.snapshot_card, "render_snapshot_png", lambda *a, **k: None)
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: got.setdefault("text", a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: got.setdefault("emb", a))
+    monkeypatch.setattr(pn, "send_telegram_photo",
+                        lambda *a, **k: pytest.fail("no image should be pushed"))
+    cfg = {"enabled": True, "market_snapshot": {"enabled": True},
+           "telegram": {"bot_token": "b", "chat_id": 1},
+           "discord": {"webhook_url": "http://w"}}
+    assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="10:30",
+                                   config=cfg) is True
+    assert "text" in got and "emb" in got

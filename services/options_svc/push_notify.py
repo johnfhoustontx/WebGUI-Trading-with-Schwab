@@ -24,7 +24,7 @@ import requests  # noqa: F401 — module handle for test monkeypatching
 import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
-from services.options_svc import briefing_card, briefing_image
+from services.options_svc import briefing_card, briefing_image, snapshot_card
 from services.options_svc import market_snapshot
 from shared.notify.channels import (
     discord_target,
@@ -662,6 +662,25 @@ def market_snapshot_caption(trend, sentiment, regime) -> str:
     return f"📊 Market Snapshot — Trend: {t} · Sentiment: {s}/10 · Regime: {r}"
 
 
+def market_snapshot_as_of(composite_at):
+    """'11:11 CT' for the drawn card's header, or '' when there is nothing.
+
+    The console's DATA AS OF chip is the one thing in a STILL IMAGE that says
+    whether the numbers under it are current, so the drawn card carries it too.
+    Never raises: a malformed timestamp degrades to no chip, not to no push."""
+    if not composite_at:
+        return ""
+    try:
+        import datetime as _d
+        ts = _d.datetime.fromisoformat(str(composite_at))
+        if ts.tzinfo is not None:
+            from zoneinfo import ZoneInfo
+            ts = ts.astimezone(ZoneInfo("America/Chicago"))
+        return ts.strftime("%H:%M CT")
+    except Exception:  # noqa: BLE001 -- presentation only
+        return ""
+
+
 def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_hist,
                          *, slot: str, config: dict | None = None,
                          derived=None, snaps=None, composite_at=None) -> bool:
@@ -685,7 +704,19 @@ def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_h
                                               intraday, regime_hist, subtitle=f"{slot} CT",
                                               derived=derived, snaps=snaps,
                                               composite_at=composite_at)
+    # Browser first, drawn card second -- the same order as the gamma briefing,
+    # so a host WITH Chrome keeps shipping the 1450px infographic and installing
+    # one is never a silent change of what lands on the phone. Where there is no
+    # browser, snapshot_card draws from the same structured payloads the doc was
+    # built from; before it existed that condition pushed a bare caption every
+    # thirty minutes.
     png = briefing_image.render_html_png(doc, width=market_snapshot.DOC_WIDTH)
+    if not png:
+        png = snapshot_card.render_snapshot_png(
+            dashboard, trend, sentiment, regime, slot=slot,
+            as_of=market_snapshot_as_of(composite_at))
+        if png:
+            log.info("market snapshot %s: no browser — drew the card instead", slot)
     if not png:
         log.warning("market snapshot %s: render failed — pushing text only", slot)
         send_telegram(tok, chat, _html.escape(caption))

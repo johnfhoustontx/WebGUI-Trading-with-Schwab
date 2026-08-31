@@ -179,8 +179,11 @@ def test_fmt_pct_is_signed_because_direction_is_the_point():
 def test_a_font_is_always_returned(monkeypatch):
     """Every candidate missing must still yield a usable font, not None. A card
     in the fallback bitmap font is ugly; a crashed scheduler is worse."""
-    monkeypatch.setattr(bc, "_FONT_CANDIDATES", {"regular": ("/nope/x.ttf",),
-                                                 "bold": ("/nope/y.ttf",)})
+    from services.options_svc import card_kit
+    # Patched on card_kit, not bc: _font READS the candidates from its own
+    # module, so patching the re-exported name would silently do nothing.
+    monkeypatch.setattr(card_kit, "_FONT_CANDIDATES", {"regular": ("/nope/x.ttf",),
+                                                       "bold": ("/nope/y.ttf",)})
     bc._font.cache_clear()
     f = bc._font(24)
     assert f is not None
