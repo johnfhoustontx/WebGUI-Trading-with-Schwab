@@ -241,6 +241,9 @@ _DEFAULTS = {
         "collection": {"start": "08:00", "eth_start": "06:30", "stop": "15:20"},
         "session_flip": {"at": "08:00"},
         "market_snapshot": {"start": "08:30", "end": "15:00"},
+        # Held separate from ``collection`` even though the bounds match, so
+        # widening collection can never silently extend a public broadcast.
+        "stream": {"start": "08:00", "end": "15:20"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.

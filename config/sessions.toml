@@ -51,6 +51,15 @@ at = "08:00"
 start = "08:30"
 end   = "15:00"
 
+[windows.stream]
+# The public YouTube wall stream. The bounds match [windows.collection] on
+# purpose -- the broadcast should be live exactly when the dashboards have
+# moving data, because a stream of frozen overnight numbers is worse than no
+# stream. But it is held SEPARATE, like session_flip is: widening collection
+# must not silently extend a public broadcast.
+start = "08:00"   # 09:00 ET
+end   = "15:20"   # 16:20 ET
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new

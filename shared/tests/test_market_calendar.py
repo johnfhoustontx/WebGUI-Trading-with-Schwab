@@ -532,3 +532,27 @@ def test_grace_min_is_not_returned_as_a_slot(monkeypatch):
     """grace_min shares the table with the times; treating it as one would
     schedule a briefing at a nonsense hour."""
     assert "grace_min" not in mc.slot_times("analyze")
+
+
+def test_stream_window_bounds_and_membership():
+    """The stream runs 08:00-15:20 CT, matching when collection runs.
+
+    Held as its own window rather than borrowing [windows.collection]: the file
+    warns against conflating windows, and widening collection must not silently
+    extend a public broadcast.
+    """
+    mc.reset_config_cache()
+
+    start, end = mc.window_bounds("stream")
+    assert (start.hour, start.minute) == (8, 0)
+    assert (end.hour, end.minute) == (15, 20)
+
+    assert mc.in_window("stream", _ct(2026, 9, 2, 9, 0)) is True
+    assert mc.in_window("stream", _ct(2026, 9, 2, 7, 59)) is False
+    assert mc.in_window("stream", _ct(2026, 9, 2, 15, 21)) is False
+
+
+def test_stream_window_survives_a_missing_toml():
+    """Every config in this repo degrades to built-in defaults rather than
+    raising. A window present only in the TOML would break on a malformed file."""
+    assert mc._DEFAULTS["windows"]["stream"] == {"start": "08:00", "end": "15:20"}
