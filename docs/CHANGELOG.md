@@ -4,6 +4,60 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-30 (**The realized-outcome calibration stopped
+counting out-of-session captures.** The companion to the recorder gate above:
+that one stops new ones, this one stops the history feeding the EV number.)
+
+- **Why it matters more than the row count suggests.** `cache:options:calibration`
+  is the one independent estimate of `p` in the app — every other probability it
+  shows is extracted from the option's own price, which makes `EV = p*b - (1-p)`
+  ~0 by construction. **223 of 819** closed rows in the calibration join were
+  captured outside the regular session, priced off a chain whose
+  `underlyingPrice` Schwab pins to the prior close. Their credit, delta and
+  strikes describe a trade that was never available.
+- **Filtered at `load_rows`** — the single SQL chokepoint the nightly cache
+  (`options_svc.calibration.load_and_build`) and the CLI report both go through.
+  A filter in either one alone would have left the other reading the
+  contaminated sample, and the nightly cache is the one users actually see.
+- **The predicate is `mc.is_regular_hours`**, the same one `signal_recorder`
+  gates on, so the read side and the write side cannot drift. It is trading-day
+  gated, so **237 rows drop, not 223** — the extra 14 are weekend and holiday
+  captures that a time-of-day comparison keeps. That gap is the argument against
+  writing the filter as SQL on `substr(first_seen_ts, 12, 5)`.
+- **READ-side only — nothing is deleted.** The rows stay in `signals.db` for
+  audit and for the paper record, and `--include-out-of-hours` still reads them.
+  That flag is not decoration: it is how the before/after was measured.
+- **Measured on prod, 2026-08-30** (819 → 582 rows):
+
+  | bucket | n | EV(R) | speaks |
+  |---|---|---|---|
+  | `0DTE\|55-60` | 79 → 58 | 0.221 → 0.233 | yes → **no** |
+  | `0DTE\|60-65` | 113 → 63 | 0.318 → 0.310 | yes → yes |
+  | `0DTE\|65-70` | 56 → 29 | 0.497 → **0.345** | no → no |
+  | `0DTE\|70-75` | 34 → 23 | 0.333 → 0.281 | no → no |
+  | `SWING\|55-60` | 222 → 185 | 0.048 → 0.056 | no → no |
+  | `SWING\|60-65` | 205 → 145 | 0.248 → **0.147** | no → no |
+  | `SWING\|65-70` | 94 → 74 | 0.342 → 0.276 | yes → **no** |
+
+  **No bucket falls under `min_n`, so none goes dark.** Two stop *speaking*,
+  which is the correct outcome — they were making a claim on a sample that was a
+  quarter fiction. ⚠ The inflation sat in the **higher score bands** (−31% and
+  −41% on the two worst), exactly where a flattering number does the most
+  damage. ⚠ The sample also shrank 29%, so some of the movement is the smaller
+  sample rather than the removed contamination; do not read the deltas as a
+  measured effect size.
+- **An unreadable timestamp is EXCLUDED, not kept.** The contract is "every row
+  is a proven in-session capture". Prod has none — all 855 rows carry the same
+  32-char ISO form — but the policy is chosen rather than left to whichever way
+  `fromisoformat` falls over.
+- ⚠ The test fixture's `first_seen_ts=None` had to become a real sentinel: `None`
+  is a legacy row shape that must reach the INSERT as a SQL NULL, and while it
+  doubled as "use the default" the NULL case silently tested an in-session stamp
+  and passed.
+- Suites: tools + shared **1145 passed**, options_svc **1278 passed**.
+
+---
+
 **Last updated:** 2026-08-30 (**Captured Signals stopped booking trades outside
 the regular cash session.** The page was showing trades opened at 08:02 CT,
 28 minutes before the bell.)
