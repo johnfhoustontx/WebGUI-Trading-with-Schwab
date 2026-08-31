@@ -27,6 +27,7 @@ import argparse
 import pathlib
 import sqlite3
 import sys
+from datetime import datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from repo_paths import OPTIONS_SCANNER  # noqa: E402
@@ -35,16 +36,18 @@ from repo_paths import OPTIONS_SCANNER  # noqa: E402
 from shared.calibration import (  # noqa: E402,F401  (re-exported for callers)
     bucket_stats, breakeven_win_rate, calibrate, priced_win_rate, r_multiple,
     score_bin, split_calibrate)
+from shared import market_calendar as _mc  # noqa: E402
 
 DEFAULT_DB = OPTIONS_SCANNER / "data" / "signals.db"
 
 # The columns the report reads. `signal_id` is deliberately absent: this is an
 # aggregate over buckets, and a per-trade id in the row dict invites someone to
-# print one.
+# print one. `first_seen_ts` is here for the session filter below -- the DATE
+# alone cannot say whether a capture happened before the bell.
 _SELECT = """
 SELECT s.entry_grade, s.entry_score, s.entry_credit, s.entry_max_loss,
        s.entry_short_delta, s.entry_iv_rank, s.width, s.dte_at_entry,
-       s.scanner_type, s.strategy, s.symbol, s.first_seen_date,
+       s.scanner_type, s.strategy, s.symbol, s.first_seen_date, s.first_seen_ts,
        o.realized_pnl, o.exit_reason, o.close_date
 FROM signals s JOIN signal_outcomes o USING (signal_id)
 """
@@ -126,16 +129,54 @@ def format_split(sections, key="entry_score", split_by="scanner_type"):
 
 # ── I/O ──────────────────────────────────────────────────────────────────────
 
-def load_rows(db_path=DEFAULT_DB, where=None, params=()):
-    """Every closed signal joined to its outcome, as dicts. Read-only."""
+def captured_in_regular_session(ts) -> bool:
+    """Whether ``first_seen_ts`` names an instant inside the regular cash session.
+
+    An unreadable stamp is False, not True. The filter's contract is "every row
+    in the sample is a PROVEN in-session capture", and a stamp nobody can read
+    does not meet it. Prod carries none -- all 855 rows are the same 32-char ISO
+    form -- but the policy has to be chosen rather than left to whichever way
+    ``fromisoformat`` happens to fall over.
+    """
+    try:
+        when = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return False
+    return _mc.is_regular_hours(when)
+
+
+def load_rows(db_path=DEFAULT_DB, where=None, params=(), regular_hours_only=True):
+    """Every closed signal joined to its outcome, as dicts. Read-only.
+
+    Captures from outside the regular cash session are dropped by default. They
+    are not merely mistimed but MISPRICED: Schwab pins a chain's
+    ``underlyingPrice`` to the prior close outside regular hours, so a pre-open
+    scan picked its strikes, delta and credit off yesterday's price and the open
+    then gapped away from all of them. Measured in prod on 2026-08-30, 223 of
+    819 closed rows here were captured out of session -- a 27% contaminated
+    sample feeding the one independent estimate of ``p`` this repo holds.
+
+    ``signal_recorder`` refuses such captures now, so this covers the HISTORY
+    that predates that gate. It is a READ-side filter: nothing is deleted, the
+    rows stay in signals.db for audit and for the paper record, and
+    ``regular_hours_only=False`` (CLI: ``--include-out-of-hours``) still reads
+    them -- which is how you compare before against after.
+
+    The predicate is ``market_calendar.is_regular_hours``, the same one the
+    recorder gates on, so the two cannot drift and weekends and holidays are
+    covered without a second rule.
+    """
     uri = f"file:{pathlib.Path(db_path).as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
         conn.row_factory = sqlite3.Row
         sql = _SELECT + (f" WHERE {where}" if where else "")
-        return [dict(r) for r in conn.execute(sql, params)]
+        rows = [dict(r) for r in conn.execute(sql, params)]
     finally:
         conn.close()
+    if regular_hours_only:
+        rows = [r for r in rows if captured_in_regular_session(r.get("first_seen_ts"))]
+    return rows
 
 
 def main(argv=None):
@@ -152,6 +193,11 @@ def main(argv=None):
                     help="only outcomes closed on or after this date")
     ap.add_argument("--exclude-reason", default=None, metavar="REASON",
                     help="drop an exit_reason (e.g. MANUAL_CLOSE)")
+    ap.add_argument("--include-out-of-hours", action="store_true",
+                    help="also count signals captured outside the regular cash "
+                         "session. Off by default: those entries were priced off "
+                         "the prior close, not the live tape. Use it to compare "
+                         "the filtered sample against the raw history.")
     a = ap.parse_args(argv)
 
     clauses, params = [], []
@@ -163,7 +209,8 @@ def main(argv=None):
         params.append(a.exclude_reason)
 
     try:
-        rows = load_rows(a.db, " AND ".join(clauses) or None, tuple(params))
+        rows = load_rows(a.db, " AND ".join(clauses) or None, tuple(params),
+                         regular_hours_only=not a.include_out_of_hours)
     except sqlite3.Error as e:
         print(f"cannot read {a.db}: {e}", file=sys.stderr)
         return 2

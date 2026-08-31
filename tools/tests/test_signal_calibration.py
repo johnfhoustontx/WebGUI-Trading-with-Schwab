@@ -8,6 +8,7 @@ owns: reading the database, rendering the table, and the ``main`` wiring.
 Run from the repo root:
     .venv\\Scripts\\python -m pytest tools\\tests\\test_signal_calibration.py -v
 """
+import itertools
 import sqlite3
 
 import pytest
@@ -45,8 +46,15 @@ class TestLoadRows:
     It is about to have a SECOND consumer depending on the row shape it emits,
     so the join and the read-only guarantee are pinned now."""
 
+    # A Tuesday, mid-session. `_db` defaults to it so the tests that are not
+    # about the session filter are unaffected by it.
+    RTH_TS = "2026-06-16T10:14:02.101010-05:00"
+    # A sentinel, NOT None: an explicit first_seen_ts=None has to reach the
+    # INSERT as a SQL NULL, which is a legacy row shape worth covering.
+    DEFAULT_TS = object()
+
     @staticmethod
-    def _db(tmp_path, *, with_outcome=True):
+    def _db(tmp_path, *, with_outcome=True, first_seen_ts=DEFAULT_TS):
         p = tmp_path / "signals.db"
         conn = sqlite3.connect(p)
         conn.executescript("""
@@ -54,12 +62,16 @@ class TestLoadRows:
               entry_score REAL, entry_credit REAL, entry_max_loss REAL,
               entry_short_delta REAL, entry_iv_rank REAL, width REAL,
               dte_at_entry INT, scanner_type TEXT, strategy TEXT, symbol TEXT,
-              first_seen_date TEXT);
+              first_seen_date TEXT, first_seen_ts TEXT);
             CREATE TABLE signal_outcomes (signal_id TEXT PRIMARY KEY, realized_pnl REAL,
               exit_reason TEXT, close_date TEXT);
         """)
-        conn.execute("INSERT INTO signals VALUES "
-                     "('a','Good',63.1,0.56,1.44,-0.221,94.5,2.0,4,'0DTE','CCS','QQQ','2026-06-14')")
+        conn.execute(
+            "INSERT INTO signals VALUES "
+            "('a','Good',63.1,0.56,1.44,-0.221,94.5,2.0,4,'0DTE','CCS','QQQ',"
+            "'2026-06-14',?)",
+            (TestLoadRows.RTH_TS if first_seen_ts is TestLoadRows.DEFAULT_TS
+             else first_seen_ts,))
         if with_outcome:
             conn.execute("INSERT INTO signal_outcomes VALUES ('a',56.0,'EXPIRED','2026-06-18')")
         conn.commit()
@@ -135,3 +147,99 @@ class TestMain:
         db = TestLoadRows._db(tmp_path)
         assert C.main(["--db", str(db), "--split", "scanner_type"]) == 0
         assert "within scanner_type = 0DTE" in capsys.readouterr().out
+
+
+class TestOnlyInSessionCapturesAreCalibrated:
+    """Signals captured outside the regular cash session are excluded from the
+    sample.
+
+    They are not merely mistimed, they are mispriced: Schwab pins a chain's
+    `underlyingPrice` to the PRIOR CLOSE outside regular hours, so a pre-open
+    scan chose its strikes, delta and credit off yesterday's price and the open
+    then gapped away from all of them. Measured in prod on 2026-08-30, **223 of
+    819** closed rows in this join were captured out of session — a 27%
+    contaminated sample feeding the one independent estimate of `p` the app has.
+
+    `signal_recorder` refuses such captures now, so this filter is about the
+    HISTORY that predates the gate. It is a read-side filter and nothing is
+    deleted: the rows stay in signals.db for audit and for the paper record.
+    """
+
+    IN_SESSION = "2026-06-16T10:14:02.101010-05:00"   # Tuesday 10:14 CT
+    PRE_OPEN = "2026-06-16T08:02:33.270199-05:00"     # the 08:00 scan slot
+    POST_CLOSE = "2026-06-16T15:02:29.741769-05:00"   # the 15:00 scan slot
+    SATURDAY = "2026-06-20T10:14:02.101010-05:00"     # a manual weekend scan
+
+    _seq = itertools.count()
+
+    def _db(self, tmp_path, ts):
+        """A fresh database per call — `TestLoadRows._db` is not idempotent (it
+        CREATEs), and several tests here need two of them to compare."""
+        d = tmp_path / f"db{next(self._seq)}"
+        d.mkdir()
+        return TestLoadRows._db(d, first_seen_ts=ts)
+
+    @pytest.mark.parametrize("ts", [PRE_OPEN, POST_CLOSE, SATURDAY],
+                             ids=["pre_open", "post_close", "weekend"])
+    def test_an_out_of_session_capture_is_excluded(self, tmp_path, ts):
+        assert C.load_rows(self._db(tmp_path, ts)) == []
+
+    def test_an_in_session_capture_is_kept(self, tmp_path):
+        assert len(C.load_rows(self._db(tmp_path, self.IN_SESSION))) == 1
+
+    def test_the_weekend_case_needs_no_rule_of_its_own(self, tmp_path):
+        """A time-of-day comparison would keep a Saturday 10:14 capture. The
+        filter reuses `market_calendar.is_regular_hours`, which is trading-day
+        gated, so weekends and holidays come free rather than as a second rule
+        that can drift from the first."""
+        assert C.load_rows(self._db(tmp_path, self.SATURDAY)) == []
+        assert len(C.load_rows(self._db(tmp_path, self.IN_SESSION))) == 1
+
+    def test_a_timestamp_that_cannot_be_read_is_excluded(self, tmp_path):
+        """The filter's contract is 'every row is a PROVEN in-session capture',
+        so an unreadable stamp fails it. Prod has none — all 855 rows carry the
+        same 32-char ISO form — but the policy has to be stated, not left to
+        whichever way `fromisoformat` happens to fall over."""
+        for bad in ("", "not-a-timestamp", None):   # None reaches SQL as NULL
+            assert C.load_rows(self._db(tmp_path, bad)) == [], f"kept {bad!r}"
+
+    def test_the_history_is_still_reachable_on_request(self, tmp_path):
+        """Excluding by default must not mean the rows become unreadable — a
+        before/after comparison is exactly how you check what this filter did."""
+        db = self._db(tmp_path, self.PRE_OPEN)
+        assert C.load_rows(db) == []
+        assert len(C.load_rows(db, regular_hours_only=False)) == 1
+
+    def test_it_composes_with_the_where_clause(self, tmp_path):
+        """The session filter and the SQL predicate are ANDed, not alternatives."""
+        db = self._db(tmp_path, self.IN_SESSION)
+        assert len(C.load_rows(db, "o.close_date >= ?", ("2026-01-01",))) == 1
+        assert C.load_rows(db, "o.close_date >= ?", ("2026-07-01",)) == []
+
+    def test_the_cli_can_ask_for_the_unfiltered_history(self, tmp_path, capsys):
+        db = self._db(tmp_path, self.PRE_OPEN)
+        assert C.main(["--db", str(db)]) == 0
+        assert "no closed signals" in capsys.readouterr().out
+
+        assert C.main(["--db", str(db), "--include-out-of-hours"]) == 0
+        assert "no closed signals" not in capsys.readouterr().out
+
+
+class TestTheNightlyCacheInheritsTheFilter:
+    """The CLI report is a research tool; `cache:options:calibration` is what the
+    Trade detail panel actually shows. Filtering `load_rows` covers both, and
+    this is the test that says so — a filter applied only in the CLI would leave
+    the published EV reading off the contaminated sample."""
+
+    def test_load_and_build_excludes_out_of_session_rows(self, tmp_path):
+        from services.options_svc.calibration import load_and_build
+
+        first = tmp_path / "out"
+        first.mkdir()
+        db = TestLoadRows._db(first, first_seen_ts="2026-06-16T08:02:33.270199-05:00")
+        assert load_and_build(db, min_n=1)["rows"] == 0
+
+        second = tmp_path / "in"
+        second.mkdir()
+        db2 = TestLoadRows._db(second, first_seen_ts="2026-06-16T10:14:02.101010-05:00")
+        assert load_and_build(db2, min_n=1)["rows"] == 1
