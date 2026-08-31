@@ -156,3 +156,14 @@ def test_sentiment_score_parses_the_string_the_service_publishes():
     assert sc.score_of({"total_score": 4}) == 4.0
     assert sc.score_of({"total_score": "n/a"}) is None
     assert sc.score_of({}) is None
+
+
+def test_value_only_tiles_show_no_change_just_like_the_html():
+    """market_snapshot._fmt_change returns "" for a value_only tile -- $TICK,
+    $ADVN, Put/Call have a level but no meaningful day change. Printing a dash
+    there says "we could not get it", which is a different and wrong claim."""
+    assert sc.chip_change({"value_only": True, "change_pct": 1.2}) == ""
+    assert sc.chip_change({"value_only": True}) == ""
+    assert sc.chip_change({"change_pct": 1.2}) == "+1.20%"
+    assert sc.chip_change({"change_pct": None}) == "-", \
+        "a genuinely missing change is still a dash"

@@ -61,6 +61,18 @@ def tile_fg(state):
     return hex_to_rgb(MS._TILE_FG[key])
 
 
+def chip_change(tile):
+    """The change string for a tile, mirroring ``market_snapshot._fmt_change``.
+
+    A ``value_only`` tile -- $TICK, $ADVN, Put/Call -- has a level but no
+    meaningful day change, and the HTML renderer prints nothing there. A dash
+    would claim "we could not get it", which is a different and wrong statement
+    about a number that does not exist in the first place."""
+    if not isinstance(tile, dict) or tile.get("value_only"):
+        return ""
+    return fmt_pct(tile.get("change_pct"))
+
+
 def score_of(sentiment):
     """The composite score as a float, or None.
 
@@ -199,9 +211,10 @@ def _render(dashboard, trend, sentiment, regime, slot, as_of):
                      tile_bg(state), EDGE)
             d.text((x + 10, y + 6), str(t.get("display") or "-")[:12],
                    font=f_sym, fill=TEXT)
-            pct = fmt_pct(t.get("change_pct"))
-            d.text((x + CHIP_W - 10 - _text_w(d, pct, f_pct), y + 5), pct,
-                   font=f_pct, fill=tile_fg(state))
+            pct = chip_change(t)
+            if pct:
+                d.text((x + CHIP_W - 10 - _text_w(d, pct, f_pct), y + 5), pct,
+                       font=f_pct, fill=tile_fg(state))
             last = fmt(t.get("last"))
             d.text((x + 10, y + 26), last, font=f_tiny, fill=MUTED)
         y += CHIP_H + GAP
