@@ -107,3 +107,33 @@ def test_disclaimer_slot_exists_and_is_empty_by_decision():
 def test_clock_is_central_time():
     # The trading clock. A stream stamped in UTC is one nobody can use.
     assert "America/Chicago" in wall.document()
+
+
+def test_the_outgoing_panel_holds_opacity_until_the_incoming_covers_it():
+    """Fading both panels at once composites the body colour through the middle
+    of every handover -- a dark blink, ~2,160 times a session, on camera.
+
+    Stacked back to front (body, outgoing, incoming) the background's weight is
+    ``(1 - a_in) * (1 - a_out)``; with both panels sharing one easing curve that
+    is ``(1 - e) * e``, non-zero for the WHOLE fade and 0.25 at its midpoint.
+    The outgoing panel therefore holds at full opacity for FADE_MS and only then
+    snaps to 0, by which point the incoming panel fully occludes it.
+    """
+    doc = wall.document()
+    off = re.search(r"\.panel\s*\{[^}]*\}", doc, re.S).group(0).replace(" ", "")
+    on = re.search(r"\.panel\.on\s*\{[^}]*\}", doc,
+                   re.S).group(0).replace(" ", "")
+    # The off state changes opacity in zero time, after a full fade's delay.
+    assert f"0mslinear{wall.FADE_MS}ms" in off
+    # The on state is the only one that actually animates.
+    assert f"{wall.FADE_MS}msease-in-out0ms" in on
+
+
+def test_the_incoming_panel_stacks_above_the_one_it_is_covering():
+    """Load-bearing once the outgoing panel holds opaque: if the incoming panel
+    were painted UNDER it, a fully opaque outgoing panel would hide the fade
+    entirely and the crossfade would become a hard cut at FADE_MS."""
+    doc = wall.document()
+    on = re.search(r"\.panel\.on\s*\{[^}]*\}", doc,
+                   re.S).group(0).replace(" ", "")
+    assert "z-index:1" in on

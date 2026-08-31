@@ -91,8 +91,9 @@ _C = theme.CONSOLE_COLORS
 _CSS = """
 *, *::before, *::after {{ box-sizing: border-box; }}
 html, body {{ margin: 0; padding: 0; height: 100%; overflow: hidden; }}
-/* The ground the crossfade dips through: for {fade}ms neither panel is fully
-   opaque, so whatever sits behind them is briefly on camera. */
+/* The ground for the FIRST paint only -- what is on camera in the moment before
+   the opening panel has faded in. A handover never reaches it: the outgoing
+   panel holds opaque underneath until the incoming one covers it. */
 body {{ background: {cell}; color: {text};
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
 .stage {{ position: relative; width: 100vw; height: 100vh; }}
@@ -100,13 +101,24 @@ body {{ background: {cell}; color: {text};
 /* Every panel is laid out at FULL SIZE, always -- see the module docstring.
    There is deliberately no `display` and no `visibility` here, and a test
    asserts their absence: both would collapse the iframe to zero layout size,
-   which is how a charted page silently breaks on camera. */
+   which is how a charted page silently breaks on camera.
+
+   OFF also holds this panel at FULL opacity for the whole handover and only
+   then snaps to 0 -- a DELAY of {fade}ms, not a duration. By then the incoming
+   panel is opaque and covering it. Fading both at once instead would composite
+   0.5*in + 0.25*out + 0.25*body at the midpoint: stacked back to front, the
+   body's weight is (1 - a_in) * (1 - a_out), which is non-zero for the whole
+   fade when both sides share one easing curve. That is the near-black page
+   blinking through every handover, ~2,160 times a session, on a broadcast. */
 .panel {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-          border: 0; opacity: 0; transition: opacity {fade}ms ease-in-out; }}
-/* `z-index` is not strictly needed once only one panel is opaque, but it makes
-   the VISIBLE panel the one that hit-tests -- so if anyone ever drives this
-   screen with a mouse, the clicks land where the eye is. */
-.panel.on {{ opacity: 1; z-index: 1; }}
+          border: 0; opacity: 0; transition: opacity 0ms linear {fade}ms; }}
+/* ON is the only side that animates, and it must stack ABOVE the panel it is
+   covering -- with the outgoing panel now holding opaque, painting the incoming
+   one under it would hide the fade completely and turn the crossfade into a
+   hard cut. It also makes the visible panel the one that hit-tests, so if
+   anyone ever drives this screen with a mouse the clicks land where the eye is. */
+.panel.on {{ opacity: 1; z-index: 1;
+             transition: opacity {fade}ms ease-in-out 0ms; }}
 
 .overlay {{ position: absolute; z-index: 2; left: 0; right: 0; bottom: 0;
             display: flex; align-items: center; gap: 16px;
