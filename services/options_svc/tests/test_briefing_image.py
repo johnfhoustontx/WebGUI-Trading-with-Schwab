@@ -247,3 +247,24 @@ def test_crop_returns_none_when_content_reaches_the_bottom():
 
 def test_crop_returns_none_on_garbage_input():
     assert bi._crop_uniform_bottom(b"not a png") is None
+
+
+def test_browser_discovery_knows_the_linux_names(monkeypatch):
+    """The PATH list was Windows-only ("chrome", "msedge").
+
+    The stack now runs on Linux, where the binary is `chromium`,
+    `chromium-browser` or `google-chrome*` — so discovery failed even on a host
+    where a browser HAD been installed, and the failure read as "the install did
+    not work" rather than "we never looked for that name"."""
+    for name in ("google-chrome", "google-chrome-stable", "chromium",
+                 "chromium-browser"):
+        assert name in bi._PATH_NAMES, f"{name} is not looked for"
+
+
+def test_discovery_finds_a_linux_browser_on_path(monkeypatch):
+    """Behaviour, not just membership: a chromium on PATH must be selected."""
+    monkeypatch.setattr(bi.os.path, "exists", lambda p: False)   # no known paths
+    monkeypatch.delenv(bi._BROWSER_ENV, raising=False)
+    monkeypatch.setattr(bi.shutil, "which",
+                        lambda n: "/usr/bin/chromium" if n == "chromium" else None)
+    assert bi.find_browser() == "/usr/bin/chromium"

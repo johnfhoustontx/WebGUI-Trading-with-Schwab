@@ -1,0 +1,120 @@
+{
+ "regime": "Pinned / negative gamma \u2014 fade the walls, respect the put wall on dips",
+ "bias": -25.0,
+ "bias_label": "Mildly bearish",
+ "headline": "Fade rallies into the call walls \u2014 geopolitical risk and a hawkish Fed keep dealers pinned below the flip.",
+ "narrative": "Sell strength into the call walls (SPX 7,700-7,730, SPY 770-772, QQQ 717-720) and buy dips toward the put walls, but keep size light since spot sits below each gamma flip in heavy negative gamma. Expect chop with downside skew \u2014 Middle East escalation and a hawkish Fed are the tape's drivers, not a clean trend, so don't chase either side hard.",
+ "why": "Weekend US strikes near the Strait of Hormuz and Fed Chair Warsh's hawkish Jackson Hole remarks (lifting September hike odds) have pushed futures lower and yields/oil/dollar higher, and spot in all three indices is trading below their gamma flip levels, meaning dealers are short gamma and will amplify moves rather than dampen them.",
+ "macro_drivers": [
+  "US strikes on Iranian rocket launchers near Strait of Hormuz on Sunday spark futures selloff and oil surge",
+  "Fed Chair Kevin Warsh's hawkish Jackson Hole speech keeps rate-hike bets elevated, pressuring stocks and lifting yields",
+  "September rate-hike odds have jumped sharply",
+  "S&P 500 futures fall as risk-off tone spreads from Middle East escalation and hawkish Fed rhetoric compounding Friday's losses",
+  "Dollar and oil strength persist as traders digest hawkish Fed signals alongside geopolitical risk",
+  "VIX remains near 2026 lows but seasonal volatility pickup and Middle East risk cloud sentiment"
+ ],
+ "movers": [
+  {
+   "symbol": "IREN",
+   "day_pct": 3.27,
+   "last": 36.29,
+   "basis": "session",
+   "flow_alert_count": 0
+  },
+  {
+   "symbol": "PANW",
+   "day_pct": 3.27,
+   "last": 381.39,
+   "basis": "session",
+   "flow_alert_count": 0
+  },
+  {
+   "symbol": "TSLA",
+   "day_pct": 2.94,
+   "last": 359.02,
+   "basis": "prior_close",
+   "flow_alert_count": 4
+  },
+  {
+   "symbol": "QCOM",
+   "day_pct": 2.82,
+   "last": 169.51,
+   "basis": "session",
+   "flow_alert_count": 1
+  },
+  {
+   "symbol": "DELL",
+   "day_pct": 2.81,
+   "last": 467.39,
+   "basis": "session",
+   "flow_alert_count": 1
+  },
+  {
+   "symbol": "IONQ",
+   "day_pct": 2.66,
+   "last": 39.81,
+   "basis": "session",
+   "flow_alert_count": 0
+  }
+ ],
+ "indices": [
+  {
+   "symbol": "$SPX",
+   "spot": 7679.14,
+   "gamma_flip": 7708.0,
+   "call_wall": 7700.0,
+   "put_wall": 7650.0,
+   "max_pain": 7650.0,
+   "expected_move": 59.66,
+   "pc_ratio": 1.64,
+   "note": "Fade rallies into 7700-7730, buy dips toward 7650 with tight stops",
+   "close_outlook": "Into the close the call wall firms near 7695 with the put wall at 7675 \u2014 trim rallies into 7695-7700 and buy dips toward 7675, staying defensive since the flip projects lower to ~7550.",
+   "what_if": {
+    "rally": "A push through 7700-7715 into the call wall should be sold \u2014 trim longs there rather than chase.",
+    "selloff": "A drop toward the 7650 put wall/max pain is a dip-buy zone, but respect stops below 7640 given the heavy negative gamma.",
+    "chop": "Between 7650 and 7700 expect pinning into max pain \u2014 fade both edges and avoid the middle."
+   }
+  },
+  {
+   "symbol": "SPY",
+   "spot": 766.21,
+   "gamma_flip": 771.0,
+   "call_wall": 770.0,
+   "put_wall": 760.0,
+   "max_pain": 762.0,
+   "expected_move": 5.99,
+   "pc_ratio": 2.03,
+   "note": "Sell into 770-772, buy dips near 760-762 max pain",
+   "close_outlook": "Into the close the call wall firms near 771 and the put wall near 766 \u2014 trim into 771 and buy pullbacks toward 766, staying cautious given the projected flip drop to ~736.",
+   "what_if": {
+    "rally": "A move into 770-772 hits the call wall/flip \u2014 take profits, don't chase the breakout.",
+    "selloff": "A slide to the 760 put wall is a bounce zone, but keep stops tight given the deep negative gamma below spot.",
+    "chop": "Expect gravitation toward the 762 max pain \u2014 fade 760 and 770 edges, stay flat in between."
+   }
+  },
+  {
+   "symbol": "QQQ",
+   "spot": 715.24,
+   "gamma_flip": 717.0,
+   "call_wall": 720.0,
+   "put_wall": 715.0,
+   "max_pain": 705.0,
+   "expected_move": 8.32,
+   "pc_ratio": 0.91,
+   "note": "Spot is pinned right at the flip/put wall \u2014 trade the range, lean short below 717",
+   "close_outlook": "Into the close the call wall firms near 717 and put wall near 715 \u2014 fade pops into 717 and cover shorts near 715, watching for a slide toward the projected ~685 flip if selling accelerates.",
+   "what_if": {
+    "rally": "A break above 717-720 flips gamma positive \u2014 ride it but trim into the 720 call wall.",
+    "selloff": "A drop below 715 opens room toward 705 max pain \u2014 sell bounces rather than buy the dip early.",
+    "chop": "Pinning near 715-717 favors fading both edges of the 711-719 band rather than trading the middle."
+   }
+  }
+ ],
+ "_meta": {
+  "date": "2026-08-31",
+  "slot": "open",
+  "generated_at": "2026-08-31T08:50:00.110569-05:00",
+  "symbol_scope": "$SPX/SPY/QQQ",
+  "model": "claude-sonnet-5"
+ }
+}

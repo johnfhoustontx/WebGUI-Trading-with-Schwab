@@ -927,7 +927,15 @@ _FAKE_PNG = b"\x89PNG\r\n\x1a\nrendered-briefing"
 
 
 def _capture(monkeypatch, png=_FAKE_PNG):
-    """Stub every send path + the renderer. `png=None` simulates a render failure."""
+    """Stub every send path + BOTH renderers.
+
+    ``png=None`` means NO IMAGE IS OBTAINABLE — the text fallback case. It stubs
+    the drawn card as well as the browser, because since the card was added a
+    failed browser render no longer implies a text push: it falls through to
+    briefing_card, which succeeds on any non-empty analysis. Tests that want the
+    text path must therefore fail both, and tests about the card override the
+    card stub after calling this.
+    """
     sent = {"photo": [], "file": [], "tg_text": [], "dc_embed": [], "rendered": []}
 
     def _render(html, **kw):
@@ -935,6 +943,8 @@ def _capture(monkeypatch, png=_FAKE_PNG):
         return png
 
     monkeypatch.setattr(pn.briefing_image, "render_html_png", _render)
+    monkeypatch.setattr(pn.briefing_card, "render_briefing_png",
+                        lambda *a, **k: png)
     monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: sent["photo"].append(a))
     monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: sent["file"].append((a, k)))
     monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: sent["tg_text"].append(a))
@@ -1404,3 +1414,59 @@ def test_env_suppression_reaches_the_options_domain_wrapper(tmp_path, monkeypatc
     permissive = pn.load_config()
     assert permissive["enabled"] is True
     assert permissive["twitter"]["enabled"] is True
+
+
+#############################################
+# The Pillow card fallback (no browser on the host)
+#############################################
+
+def test_briefing_falls_back_to_the_drawn_card_when_no_browser(monkeypatch,
+                                                               briefing_cfg,
+                                                               briefing_res):
+    """With headless Chrome unavailable, the push must still carry an IMAGE.
+
+    This is the live condition on the Linux host: render_html_png returns None
+    because there is no browser, and before the card existed that meant every
+    briefing degraded to a bare text caption four times a day."""
+    sent = _capture(monkeypatch, png=None)          # browser render fails
+    drawn = {"called": []}
+
+    def _card(analysis, **kw):
+        drawn["called"].append((analysis, kw.get("slot")))
+        return b"\x89PNG\r\n\x1a\ndrawn-card"
+
+    monkeypatch.setattr(pn.briefing_card, "render_briefing_png", _card)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday",
+                                  config=briefing_cfg) is True
+    assert drawn["called"], "the card was never tried"
+    assert drawn["called"][0][0] == briefing_res["analysis"], \
+        "the card must be drawn from the STRUCTURED analysis, not the HTML"
+    assert drawn["called"][0][1] == "midday"
+    assert sent["photo"] and sent["file"], "an image push, not a text push"
+    assert not sent["tg_text"], "text fallback must not fire when the card worked"
+
+
+def test_briefing_text_fallback_survives_both_renderers_failing(monkeypatch,
+                                                                briefing_cfg,
+                                                                briefing_res):
+    """Belt and braces. If the card also fails the old text path must remain --
+    going silent is worse than a plain caption."""
+    sent = _capture(monkeypatch, png=None)
+    monkeypatch.setattr(pn.briefing_card, "render_briefing_png",
+                        lambda *a, **k: None)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday",
+                                  config=briefing_cfg) is True
+    assert sent["tg_text"] and sent["dc_embed"]
+    assert not sent["photo"]
+
+
+def test_the_browser_still_wins_when_one_exists(monkeypatch, briefing_cfg,
+                                                briefing_res):
+    """Non-vacuity: the card is a FALLBACK. A host with Chrome keeps shipping the
+    HTML infographic, so installing a browser is not a silent behaviour change."""
+    sent = _capture(monkeypatch)                     # browser render succeeds
+    monkeypatch.setattr(pn.briefing_card, "render_briefing_png",
+                        lambda *a, **k: pytest.fail("card must not be reached"))
+    assert pn.send_gamma_briefing(briefing_res, slot="midday",
+                                  config=briefing_cfg) is True
+    assert sent["rendered"] == ["<html>doc</html>"]

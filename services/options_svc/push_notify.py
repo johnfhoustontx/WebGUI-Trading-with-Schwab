@@ -24,7 +24,7 @@ import requests  # noqa: F401 — module handle for test monkeypatching
 import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
-from services.options_svc import briefing_image
+from services.options_svc import briefing_card, briefing_image
 from services.options_svc import market_snapshot
 from shared.notify.channels import (
     discord_target,
@@ -614,7 +614,17 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
     tok, chat = telegram_target(cfg, "gamma_briefing")
     webhook = discord_target(cfg, "gamma_briefing")
 
+    # Browser first, drawn card second. The HTML infographic stays the payload
+    # wherever headless Chrome exists, so installing one is not a silent change
+    # of what lands on the phone. Where it does NOT exist -- the Linux host, by
+    # choice: a browser is ~350 MB on a machine holding brokerage credentials --
+    # briefing_card draws the same briefing from the STRUCTURED analysis. Before
+    # it existed that condition degraded every briefing to a bare caption.
     png = briefing_image.render_html_png(html)
+    if not png:
+        png = briefing_card.render_briefing_png(res.get("analysis"), slot=slot)
+        if png:
+            log.info("gamma briefing %s: no browser — drew the card instead", slot)
     if not png:
         log.warning("gamma briefing %s: image render failed — pushing text only", slot)
         # send_telegram posts with parse_mode=HTML and the caption carries a

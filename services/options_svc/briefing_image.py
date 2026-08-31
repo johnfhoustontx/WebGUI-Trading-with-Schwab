@@ -33,7 +33,13 @@ _KNOWN_BROWSERS = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
 )
-_PATH_NAMES = ("chrome", "msedge")      # last resort: whatever is on PATH
+# Last resort: whatever is on PATH. The Linux names are NOT optional garnish --
+# this list was Windows-only, so on the Linux host discovery failed even after a
+# browser was installed, and the fix looked like it had not worked. `chromium`
+# and `chromium-browser` are the Debian/Ubuntu spellings; `google-chrome` and
+# `google-chrome-stable` are the .deb from Google.
+_PATH_NAMES = ("chrome", "msedge", "google-chrome", "google-chrome-stable",
+               "chromium", "chromium-browser")
 
 # ── render geometry ──────────────────────────────────────────────────────────
 # The doc is a fixed-width dark infographic. `width` is CSS px; `scale` is the
