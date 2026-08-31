@@ -147,21 +147,40 @@ def test_every_service_pins_central_time(rendered):
 
 
 # --- secrets ----------------------------------------------------------------
-def test_secrets_come_from_an_EnvironmentFile(rendered):
-    for name, cp in rendered.items():
+def _environment_files(text):
+    """EVERY `EnvironmentFile=` value in a unit, read from the raw text.
+
+    ⚠ Not from the parsed ini. systemd allows a unit to load several files and
+    the wall stream does -- the repo's .env plus the operator's stream key --
+    but configparser collapses repeated keys to the LAST one. Reading the
+    parsed value would therefore have silently stopped checking the repo .env
+    on exactly the unit that gained a second file, which is the opposite of
+    what a test asserting "every service loads its secrets from a file" is
+    for."""
+    return [line.split("=", 1)[1] for line in text.splitlines()
+            if line.startswith("EnvironmentFile=")]
+
+
+def test_secrets_come_from_an_EnvironmentFile():
+    for name, text in units.render_all().items():
         if name.endswith(".service"):
-            assert cp["Service"]["EnvironmentFile"] == str(POSIX_ROOT / ".env"), name
+            assert str(POSIX_ROOT / ".env") in _environment_files(text), name
 
 
-def test_the_environment_file_has_no_leading_dash(rendered):
+def test_the_environment_file_has_no_leading_dash():
     """`EnvironmentFile=-/path` starts the unit when the file is missing, and the
     stack comes up MUTE: allow_claude falls into its no-API-key path, the
     notification channels no-op, the bus fails to authenticate. A unit that
     refuses to start is recoverable in seconds; one running without its secrets
-    looks healthy for a day."""
-    for name, cp in rendered.items():
-        if name.endswith(".service"):
-            assert not cp["Service"]["EnvironmentFile"].startswith("-"), name
+    looks healthy for a day. The stream is the same shape one level out: a
+    missing key file means ffmpeg encodes nine hours into nowhere.
+
+    Checked over ALL of a unit's environment files, not just the last."""
+    for name, text in units.render_all().items():
+        if not name.endswith(".service"):
+            continue
+        for value in _environment_files(text):
+            assert not value.startswith("-"), (name, value)
 
 
 def test_no_secret_is_ever_in_an_Environment_line(rendered):
@@ -178,13 +197,26 @@ def test_no_secret_is_ever_in_an_Environment_line(rendered):
 # --- paths ------------------------------------------------------------------
 def test_units_run_from_this_checkout_with_its_own_venv(rendered):
     """Derived from REPO_ROOT, never a literal home directory. The plan first
-    hardcoded /home/john; the account turned out to be `administrator`."""
+    hardcoded /home/john; the account turned out to be `administrator`.
+
+    ⚠ Widened from "every ExecStart starts with the venv python" when the wall
+    stream arrived, because that unit runs a SHELL SCRIPT
+    (tools/stream_wall.sh -- it needs Xvfb, Chrome and ffmpeg around the Python,
+    not just Python). The invariant that actually mattered was never "the first
+    word is python": it was that a unit runs THIS checkout's code with THIS
+    checkout's interpreter, and can never be satisfied by whatever happens to be
+    on PATH. Both halves are still asserted -- the executable lives inside the
+    checkout, and any unit that names an interpreter names the checkout's venv.
+    The script resolves `$ROOT/.venv/bin/python` from its own location for the
+    same reason."""
+    venv_python = str(POSIX_ROOT / ".venv" / "bin" / "python")
     for name, cp in rendered.items():
         if not name.endswith(".service"):
             continue
+        exec_start = cp["Service"]["ExecStart"]
         assert cp["Service"]["WorkingDirectory"] == str(POSIX_ROOT), name
-        assert cp["Service"]["ExecStart"].startswith(
-            str(POSIX_ROOT / ".venv" / "bin" / "python")), name
+        assert exec_start.startswith(str(POSIX_ROOT) + "/"), name
+        assert "python" not in exec_start or exec_start.startswith(venv_python), name
 
 
 def test_no_unit_carries_a_windows_path_or_launcher():
@@ -309,3 +341,94 @@ def test_the_backup_has_a_timeout_long_enough_to_finish(rendered):
     """
     svc = rendered[f"trading-{ENV_NAME}-backup.service"]
     assert int(svc["Service"]["TimeoutStartSec"]) >= 1800
+
+
+# --- the wall stream, which is a TIMER-owned member of the stack -------------
+def test_stream_units_are_generated():
+    units_ = units.render_all()
+    assert f"trading-{ENV_NAME}-stream.service" in units_
+    assert f"trading-{ENV_NAME}-stream.timer" in units_
+
+
+def test_storm_cap_is_in_the_unit_section_not_the_service_section():
+    """systemd moved StartLimit* to [Unit] in v229 and SILENTLY IGNORES them in
+    [Service] -- the cap would look configured and not exist.
+
+    Split on the section HEADER (a whole line), not the bare substring: the unit
+    carries a comment saying these must not go in [Service], and a substring
+    split cuts the file in the middle of that comment -- failing the test for
+    documenting the very rule it checks."""
+    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
+    unit_section, service_section = svc.split("\n[Service]\n")
+    assert "StartLimitBurst=" in unit_section
+    assert "StartLimitBurst=" not in service_section
+
+
+def test_stream_stops_with_the_stack_but_does_not_start_with_it():
+    """PartOf so a stack stop takes it down; NOT WantedBy the target, because
+    the timer owns when it runs -- otherwise `systemctl start target` would
+    start a broadcast at any hour."""
+    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
+    assert f"PartOf={units.target_name()}" in svc
+    assert f"WantedBy={units.target_name()}" not in svc
+
+
+def test_the_target_does_not_pull_the_stream_up():
+    """The other half of the asymmetry, asserted where it can actually be
+    broken: PartOf is on the service, but a stray Wants= on the TARGET would
+    start a broadcast on every `systemctl start trading-<env>.target` -- which
+    is what a promote does, at whatever hour the promote happens."""
+    assert f"trading-{ENV_NAME}-stream.service" not in stack_services()
+
+
+def test_runtime_cap_matches_the_configured_window():
+    """Derived, never typed: the unit and config cannot disagree about when the
+    broadcast ends."""
+    from shared import market_calendar as mc
+    start, end = mc.window_bounds("stream")
+    expected = (end.hour * 60 + end.minute - start.hour * 60 - start.minute) * 60
+    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
+    assert f"RuntimeMaxSec={expected}" in svc
+
+
+def test_timer_fires_at_the_window_start_on_weekdays():
+    from shared import market_calendar as mc
+    start, _ = mc.window_bounds("stream")
+    tmr = units.render_all()[f"trading-{ENV_NAME}-stream.timer"]
+    assert f"Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00" in tmr
+
+
+def test_the_stream_key_file_must_exist_for_the_unit_to_start():
+    """No leading '-': a missing key must fail the unit loudly rather than
+    encode nine hours into nowhere."""
+    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
+    assert f"EnvironmentFile={units.STREAM_ENV_FILE}" in svc
+    assert f"EnvironmentFile=-{units.STREAM_ENV_FILE}" not in svc
+
+
+def test_the_stream_requires_the_webgui_and_does_not_duplicate_its_wait(rendered):
+    """Unlike every other unit, which only orders itself AFTER the proxy because
+    the UI degrades gracefully without it, a stream with no web GUI is nine
+    hours of a connection-refused page on a public channel. It genuinely
+    Requires= it.
+
+    And it carries NO ExecStartPre: tools/stream_wall.sh already calls
+    tools/wait_http.py itself, because it needs the port and the wall route out
+    of Python anyway. A second probe in the unit would be a second copy of the
+    timeout, free to disagree with the first."""
+    cp = rendered[f"trading-{ENV_NAME}-stream.service"]
+    webgui = units.unit_name("webgui")
+    assert cp["Unit"]["Requires"] == webgui
+    assert cp["Unit"]["After"] == webgui
+    assert "ExecStartPre" not in cp["Service"]
+
+
+def test_the_stream_timer_does_not_catch_up_after_downtime(rendered):
+    """The deliberate opposite of the backup timer. A missed backup is still
+    worth taking late; a missed BROADCAST WINDOW is gone. Persistent=true would
+    run a missed 08:00 occurrence at the next boot -- starting a public stream
+    at whatever time of day the box came back, which the script's own window
+    gate would then stand down from anyway, one spawn later."""
+    tmr = rendered[f"trading-{ENV_NAME}-stream.timer"]
+    assert "Persistent" not in tmr["Timer"]
+    assert tmr["Install"]["WantedBy"] == "timers.target"

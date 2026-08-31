@@ -34,6 +34,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from repo_paths import (ENV_NAME, NICEGUI_PORT, OWNS_PROXY,  # noqa: E402
                         PROXY_PORT, REPO_ROOT, SERVICE_PORTS)
+from shared.market_calendar import window_bounds  # noqa: E402
 
 
 
@@ -68,6 +69,13 @@ PROXY_WAIT_TIMEOUT_SEC = 120
 # The nightly backup encrypts ~1.5 GB and uploads it (6m18s measured). A oneshot
 # would otherwise inherit the 90s default and be killed mid-upload.
 BACKUP_TIMEOUT_SEC = 7200
+
+# The operator's 0600 file holding RTMP_URL -- the YouTube stream key. It lives
+# OUTSIDE the checkout on purpose: a key in the repo is a key in every clone, in
+# every backup archive, and one `git add -A` from being public. Named here as a
+# constant rather than buried in a template so the tests can assert the exact
+# path the unit loads, and so moving it is one edit.
+STREAM_ENV_FILE = "/etc/neuralstrike-stream/env"
 
 
 def target_name():
@@ -226,11 +234,143 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-backup.timer": tmr}
 
 
+def _stream_window_seconds():
+    """Length of ``[windows.stream]`` in seconds, derived -- never typed.
+
+    The unit and ``config/sessions.toml`` cannot disagree about when the
+    broadcast ends, which is the same reason ports live in one file. Both bounds
+    are wall-clock times on the same day, so this is minute arithmetic and not a
+    timedelta: there is no date to subtract, and no DST transition inside a
+    single trading session.
+    """
+    start, end = window_bounds("stream")
+    return (end.hour * 60 + end.minute - start.hour * 60 - start.minute) * 60
+
+
+def _stream_units():
+    """The public YouTube wall stream: a service the TIMER owns, plus its timer.
+
+    **PartOf the target but deliberately NOT WantedBy it.** Every other unit is
+    ``WantedBy`` the target, so ``systemctl start trading-<env>.target`` brings
+    it up -- which is exactly what a promote does, at whatever hour someone
+    promotes. A broadcast must not start that way. ``PartOf`` without
+    ``WantedBy`` gives precisely the asymmetry wanted: stopping the stack stops
+    the stream, starting the stack does not start it. The ``[Install]`` section
+    therefore belongs on the TIMER (``WantedBy=timers.target``) and the service
+    has none at all -- it is not a thing you enable, it is a thing the timer
+    starts.
+
+    **Requires= the web GUI, not merely After=.** The other units only order
+    themselves after the proxy, because the UI renders a proxy-down banner and
+    stays usable. A stream with no web GUI has no such degrade path: it is nine
+    hours of a connection-refused page on a public channel.
+
+    **No ExecStartPre.** ``tools/stream_wall.sh`` already calls
+    ``tools/wait_http.py`` itself -- it has to, since it reads the port and the
+    wall route out of Python in the same breath. A probe here would be a second
+    copy of the timeout, free to disagree with the first.
+
+    **RuntimeMaxSec, not a second timer.** The broadcast has to stop at the
+    window's close. A stop-timer could do it, but then the thing that ends the
+    stream is a separate unit that can fail to fire, be disabled, or be missed
+    over a reboot -- and its failure mode is a public stream of frozen overnight
+    numbers, unnoticed until a viewer says so. ``RuntimeMaxSec`` is enforced by
+    the same manager that started the process, so it cannot be missed.
+
+    ⚠ **The unit bounces once at the close, and that is accepted, not
+    overlooked.** When ``RuntimeMaxSec`` expires systemd terminates the unit with
+    result ``timeout``, which ``Restart=on-failure`` does restart. The restarted
+    script runs its own ``in_window`` gate, finds itself outside the window,
+    prints the stand-down line and exits **0** -- so systemd sees success and the
+    unit goes inactive. One wasted spawn, well inside ``StartLimitBurst``.
+    ``SuccessExitStatus`` does NOT prevent it: a RuntimeMaxSec kill sets the
+    failure *result* to ``timeout`` regardless of exit status, so nothing about
+    exit-code interpretation reaches it. Preventing the bounce would mean
+    dropping ``Restart=on-failure``, which is the entire recovery mechanism for
+    the mid-session case the script's Xvfb/Chrome watchdog exists to trigger.
+    A daily one-spawn bounce is a much cheaper price than a black stream nobody
+    restarts.
+
+    ⚠ **Known limit: a mid-session restart resets the RuntimeMaxSec clock.** The
+    cap is per invocation, so a crash-and-restart at 14:00 would run until 21:20
+    rather than 15:20. The window gate only runs at startup, so nothing else
+    stops it. Not fixed here -- it needs either a stop-timer or a window
+    re-check inside the script's watchdog loop, and the script is out of scope
+    for this change.
+    """
+    runtime = _stream_window_seconds()
+    start, _end = window_bounds("stream")
+    webgui = unit_name("webgui")
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - wall stream (YouTube)
+# PartOf, so stopping the stack stops the broadcast -- but NO [Install]
+# WantedBy the target, so starting the stack does NOT start one. The timer owns
+# when this runs; see this function's docstring.
+PartOf={target_name()}
+# Requires, not just After: unlike the services, a stream with no web GUI has
+# no degraded mode -- it is a connection-refused page on a public channel.
+Requires={webgui}
+After={webgui}
+# A crash-looping unit is retried this many times in this window, then left
+# down and logged.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=simple
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# TWO environment files, NEITHER with a leading '-'. The repo's .env for the
+# stack's own secrets; the operator's file for RTMP_URL. A missing file must
+# fail the unit loudly rather than encode nine hours into nowhere -- the same
+# rule the services follow, for the same reason.
+EnvironmentFile={_env_file()}
+EnvironmentFile={STREAM_ENV_FILE}
+# Stop at the window's close, enforced by the manager that started us rather
+# than by a second timer that could fail to fire. Derived from
+# config/sessions.toml [windows.stream]; never a literal.
+RuntimeMaxSec={runtime}
+# No ExecStartPre: the script calls tools/wait_http.py itself.
+ExecStart={_workdir()}/tools/stream_wall.sh
+Restart=on-failure
+RestartSec={RESTART_SEC}
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - wall stream timer
+
+[Timer]
+# The window's OWN start time (the host TZ is America/Chicago, so this is
+# already CT). Mon..Fri because the exchange is shut at the weekend.
+#
+# Market holidays are NOT filtered, and here that is fine: the script's own
+# in_window() gate covers them, standing down with exit 0. This is the OPPOSITE
+# of the backup timer's choice, deliberately -- there, an unfiltered holiday
+# run wastes a retention slot, so erring towards running is right. Here, an
+# unfiltered holiday run would put frozen numbers in front of an audience, so
+# the gate that CAN see the calendar has to be the one that decides.
+OnCalendar=Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00
+# Deliberately NO Persistent=true (the backup timer has it). A missed backup is
+# still worth taking late; a missed broadcast window is simply gone, and a
+# catch-up would start a public stream at whatever hour the box came back.
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-stream.service": svc,
+            f"trading-{ENV_NAME}-stream.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
     out[target_name()] = _target_text()
     out.update(_backup_units())
+    out.update(_stream_units())
     return out
 
 
