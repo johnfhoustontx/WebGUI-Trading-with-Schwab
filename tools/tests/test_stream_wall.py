@@ -40,22 +40,25 @@ def test_never_embeds_the_stream_key():
     assert not re.search(r"rtmp://[a-z0-9.]*/live2/\S", text)
 
 
-def test_the_keyframe_interval_is_two_seconds_at_the_capture_framerate():
-    """YouTube caps the interval at 4s and recommends 2s. -g is frames, so it
-    must be framerate x 2 -- the two move together and a framerate change that
-    leaves -g behind silently doubles the interval.
+def test_the_keyframe_interval_is_derived_from_the_framerate_not_typed():
+    """-g counts FRAMES, so a 2-second interval is FPS x 2. Deriving it means a
+    framerate change cannot silently leave a 4-second interval behind -- which
+    would show up as slow player start-up, not as an obviously wrong setting.
 
-    Derived rather than hardcoded, which is the whole point: the literal version
-    of this test asserted `-g 60` and would have had to be edited by the same
-    person who forgot to edit `-g`.
+    This asserts the DERIVATION exists, not the values it currently produces:
+    the form is what makes the property hold, so the form is what is pinned.
     """
     text = SCRIPT.read_text()
-    fps = int(re.search(r"-framerate (\d+)", text).group(1))
-    assert f"-g {fps * 2}" in text
-    assert f"-keyint_min {fps * 2}" in text
-    # Kept from the literal version this replaces: without it x264 inserts its
-    # own keyframes on scene cuts and the interval stops being strict.
-    assert "-sc_threshold 0" in text
+    fps = int(re.search(r"^FPS=(\d+)", text, re.M).group(1))
+    assert re.search(r"^GOP=\$\(\(FPS \* 2\)\)", text, re.M)
+    assert '-framerate "$FPS"' in text
+    assert '-g "$GOP"' in text and '-keyint_min "$GOP"' in text
+    assert "-sc_threshold 0" in text          # keep -- x264 must not add its own
+    # Plausibility, NOT the shipped value. `fps * 2 == 30` was considered and
+    # dropped: 15fps is an operator decision this test has no business pinning,
+    # and a test that fails on a legitimate framerate change is the stale-fixture
+    # shape this repo has already been bitten by. A range still catches a typo.
+    assert 1 <= fps <= 60
 
 
 def test_capture_and_encode_do_not_drop_frames_under_load():

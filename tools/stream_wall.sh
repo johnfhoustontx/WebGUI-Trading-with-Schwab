@@ -24,6 +24,15 @@ PYTHON="$ROOT/.venv/bin/python"
 DISPLAY_NUM=99
 SCREEN=1920x1080
 
+# Capture framerate, and the keyframe interval derived from it. YouTube caps the
+# interval at 4s and recommends 2s, and -g counts FRAMES -- so it is FPS x 2 and
+# the two must move together. Derived rather than typed: a framerate change that
+# left a literal -g behind would silently double the interval, which is the
+# failure that reads as slow player start-up and rebuffering rather than as a
+# broken setting.
+FPS=15
+GOP=$((FPS * 2))
+
 # ── Clean up our own children ────────────────────────────────────────────────
 # Every child here is backgrounded, so without this they outlive a stopped unit
 # and hold :99 -- the next start then dies with "Server is already active for
@@ -172,11 +181,10 @@ sleep 15
 # counter-intuitive enough to write down, because otherwise someone reads the
 # smaller number as a downgrade and "restores" it.
 #
-# -g 30 is the 2-second keyframe interval YouTube recommends (its cap is 4s),
-# and it is FRAMERATE x 2 -- so it MUST move whenever -framerate does. Left at
-# 60 for a 15fps capture it would silently become a FOUR-second interval, right
-# at the cap, where players start slowly and rebuffer. -sc_threshold 0 stops
-# x264 adding its own keyframes on the crossfades.
+# The keyframe interval is $GOP, derived from $FPS at the top of this file --
+# see there for why it is derived rather than typed. -sc_threshold 0 is the
+# other half of holding it: without it x264 adds its own keyframes on the
+# crossfades and the interval stops being strict.
 #
 # -y so ffmpeg never stops to ask about an existing output. Moot against an RTMP
 # URL, costs nothing, and saves the next person a measurement run lost to a
@@ -187,12 +195,12 @@ sleep 15
 # tune disables B-frames and lookahead, which are exactly what buy quality per
 # bit on a screen that is mostly flat colour and small text.
 ffmpeg -y -nostats -loglevel warning \
-       -f x11grab -draw_mouse 0 -framerate 15 -video_size "$SCREEN" \
+       -f x11grab -draw_mouse 0 -framerate "$FPS" -video_size "$SCREEN" \
        -thread_queue_size 512 -i ":$DISPLAY_NUM" \
        -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
        -c:v libx264 -preset veryfast -pix_fmt yuv420p \
        -b:v 3500k -maxrate 3500k -bufsize 7000k \
-       -g 30 -keyint_min 30 -sc_threshold 0 \
+       -g "$GOP" -keyint_min "$GOP" -sc_threshold 0 \
        -c:a aac -b:a 128k -f flv "$RTMP_URL" &
 FFMPEG_PID=$!
 
