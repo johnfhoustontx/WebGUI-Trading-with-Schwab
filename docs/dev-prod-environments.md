@@ -127,6 +127,49 @@ umask 077 && grep '^MEMURAI_PASSWORD=' /home/administrator/prod/.env > /home/adm
 ⚠ **`ANTHROPIC_API_KEY` is deliberately absent from dev's file.** `allow_claude`
 is already false in the profile; leaving the key out is the second belt.
 
+⚠ **QUOTE ANY VALUE CONTAINING A SPACE.** `.env` is read by **two parsers that
+disagree**, and only one of them complains:
+
+* **systemd** (`EnvironmentFile=`) is not a shell. `KEY=two words (x)` is taken
+  literally and works.
+* **bash**, when you `set -a && . ./.env` — which §3 and §4 tell you to do before
+  running `snapshot_from_prod.py`, because that tool needs `MEMURAI_PASSWORD` and
+  does not get the units' environment.
+
+So an unquoted value with a space starts the services perfectly and breaks the
+snapshot tool later, at a moment unconnected to the edit that caused it. Found
+2026-08-31 adding `EDGAR_USER_AGENT=NeuralStrike/1.0 (fernandesj@gmail.com)`:
+bash died on the parentheses. Write it as
+
+```
+EDGAR_USER_AGENT="NeuralStrike/1.0 (contact@example.com)"
+```
+
+systemd **strips** the surrounding quotes, so the service still sees the bare
+string — verify that rather than assuming, by reading the running process's
+environment:
+
+```bash
+tr '\0' '\n' < /proc/$(systemctl --user show -p MainPID --value trading-prod-trade_svc)/environ | grep EDGAR
+```
+
+Quotes still present there would mean the remote end sees them too, which for a
+User-Agent is a silent wrong value rather than an error.
+
+**What lives in `.env`, and why each is there:**
+
+| Key | Read by | Notes |
+|---|---|---|
+| `MEMURAI_PASSWORD` | every service via `shared/bus`, and `backup_local.py` via `REDISCLI_AUTH` | unset or empty = no AUTH, so an unauthenticated Redis still works |
+| `ALPHAVANTAGE_API_KEY` | `trade_svc` earnings calendar/history | absent = the earnings gate stays quiet, logged at INFO |
+| `EDGAR_USER_AGENT` | `trade_svc` EDGAR fundamentals | **not a key** — SEC issues none. A contact string their fair-access policy asks for; without one they answer **403** |
+| `ANTHROPIC_API_KEY` | the three Claude client factories | prod only; dev omits it beside `allow_claude = false` |
+| `TRADING_ENABLE_SCHEDULERS` | `_scaffold` | the §5 escape hatch, and only ever temporary |
+
+⚠ **`.env` is in the backup** (`backup_local.EXTRA_FILES`) — it was not until
+2026-08-31, which meant a restore produced a stack that could not start, from an
+archive that looked complete.
+
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
 one store no tool knows about:
