@@ -138,27 +138,46 @@ def test_start_limit_lives_in_the_Unit_section_not_Service(rendered):
 
 
 # --- the timezone, which is load-bearing ------------------------------------
-def test_every_service_pins_central_time(rendered):
+def test_every_service_pins_central_time():
     """Belt-and-braces against a host whose zone is wrong. repo_paths' boot
-    assertion is the other half; this makes the unit itself state it."""
-    for name, cp in rendered.items():
+    assertion is the other half; this makes the unit itself state it.
+
+    Read from every raw `Environment=` line rather than the parsed value -- see
+    `_directives`. The units put TZ last today, so the parsed read happened to
+    work, and would have kept working right up until it didn't."""
+    for name, text in units.render_all().items():
         if name.endswith(".service"):
-            assert "TZ=America/Chicago" in cp["Service"]["Environment"], name
+            assert "TZ=America/Chicago" in _directives(text, "Environment"), name
 
 
 # --- secrets ----------------------------------------------------------------
-def _environment_files(text):
-    """EVERY `EnvironmentFile=` value in a unit, read from the raw text.
+def _directives(text, key):
+    """EVERY raw value for `key` in a unit, in file order.
 
-    ⚠ Not from the parsed ini. systemd allows a unit to load several files and
-    the wall stream does -- the repo's .env plus the operator's stream key --
-    but configparser collapses repeated keys to the LAST one. Reading the
-    parsed value would therefore have silently stopped checking the repo .env
-    on exactly the unit that gained a second file, which is the opposite of
-    what a test asserting "every service loads its secrets from a file" is
-    for."""
+    ⚠ Not from the parsed ini, and that distinction is the whole point.
+    systemd lets several of these keys REPEAT and accumulate -- `Environment`,
+    `EnvironmentFile`, `ExecStartPre` and `OnCalendar` all do -- while
+    configparser (even at strict=False) collapses repeats to the LAST
+    occurrence. A test reading the parsed value is therefore blind to anything
+    placed on an earlier line.
+
+    That is not hypothetical. Every unit happens to emit
+    `Environment=TZ=America/Chicago` last, so a secret added on a FIRST
+    `Environment=` line sailed straight through the test whose entire purpose
+    was to catch it; and an extra `OnCalendar=Sat ...` ahead of the weekday line
+    would have left the backup's no-weekends test green while it ran Saturdays.
+
+    Matches `key=` exactly, so `Environment` does not also collect
+    `EnvironmentFile` lines.
+    """
+    want = key + "="
     return [line.split("=", 1)[1] for line in text.splitlines()
-            if line.startswith("EnvironmentFile=")]
+            if line.startswith(want)]
+
+
+def _environment_files(text):
+    """EVERY `EnvironmentFile=` value in a unit -- see `_directives`."""
+    return _directives(text, "EnvironmentFile")
 
 
 def test_secrets_come_from_an_EnvironmentFile():
@@ -183,15 +202,20 @@ def test_the_environment_file_has_no_leading_dash():
             assert not value.startswith("-"), (name, value)
 
 
-def test_no_secret_is_ever_in_an_Environment_line(rendered):
+def test_no_secret_is_ever_in_an_Environment_line():
     """`systemctl show <unit>` prints Environment= to ANY local user, with no
-    privilege. EnvironmentFile= shows only the path."""
-    for name, cp in rendered.items():
+    privilege. EnvironmentFile= shows only the path.
+
+    ⚠ Checked over EVERY `Environment=` line. Reading the parsed value made this
+    security test blind to a secret on any line but the last -- and since every
+    unit ends its block with `Environment=TZ=America/Chicago`, that is every
+    line a secret would realistically be added to."""
+    for name, text in units.render_all().items():
         if not name.endswith(".service"):
             continue
-        env = cp["Service"]["Environment"].upper()
-        for smell in ("KEY", "TOKEN", "PASSWORD", "SECRET"):
-            assert smell not in env, (name, smell)
+        for value in _directives(text, "Environment"):
+            for smell in ("KEY", "TOKEN", "PASSWORD", "SECRET"):
+                assert smell not in value.upper(), (name, smell, value)
 
 
 # --- paths ------------------------------------------------------------------
@@ -235,7 +259,13 @@ def test_services_wait_for_the_proxy_to_ANSWER_not_merely_to_bind(rendered):
         pytest.skip("no proxy unit in an environment that borrows one")
     for key in SERVICE_PORTS:
         cp = rendered[f"trading-{ENV_NAME}-{key}_svc.service"]
-        pre = cp["Service"]["ExecStartPre"]
+        # Every ExecStartPre=, not the collapsed last one: systemd runs them
+        # all in order, so a second one added later would hide this probe from
+        # the parsed read while leaving it in the unit -- or worse, replace it
+        # in the test's eyes while the real ordering guarantee moved.
+        pre = " ".join(_directives(
+            units.render_all()[f"trading-{ENV_NAME}-{key}_svc.service"],
+            "ExecStartPre"))
         assert "wait_http.py" in pre
         assert str(PROXY_PORT) in pre
         assert cp["Unit"]["Requires"] == f"trading-{ENV_NAME}-proxy.service"
@@ -295,9 +325,11 @@ def test_the_backup_timer_catches_up_after_downtime(rendered):
     VPS is always on: it costs nothing when the timer fires normally, and the box
     does reboot. A silently skipped night is the failure this job exists to
     prevent."""
+    text = units.render_all()[f"trading-{ENV_NAME}-backup.timer"]
     tmr = rendered[f"trading-{ENV_NAME}-backup.timer"]
     assert tmr["Timer"]["Persistent"].lower() == "true"
-    assert tmr["Timer"]["OnCalendar"].endswith("20:00:00")
+    schedule = _directives(text, "OnCalendar")
+    assert schedule and all(s.endswith("20:00:00") for s in schedule), schedule
     assert tmr["Install"]["WantedBy"] == "timers.target"
 
 
@@ -314,9 +346,16 @@ def test_the_backup_does_not_run_on_weekend_nights(rendered):
     down is executed at next boot even if that boot is a Saturday -- the day
     filter picks the schedule, not what a catch-up is allowed to do.
     """
-    oncal = rendered[f"trading-{ENV_NAME}-backup.timer"]["Timer"]["OnCalendar"]
-    assert oncal.startswith("Mon..Fri "), (
-        f"backup timer would fire at the weekend: OnCalendar={oncal!r}")
+    # EVERY OnCalendar=, because each one ADDS a trigger. The parsed value is
+    # the last line only, so `OnCalendar=Sat ...` inserted above the weekday
+    # line would leave this test green while the backup ran on Saturdays --
+    # exactly the failure the docstring above is about.
+    schedule = _directives(
+        units.render_all()[f"trading-{ENV_NAME}-backup.timer"], "OnCalendar")
+    assert schedule, "backup timer has no OnCalendar at all"
+    for oncal in schedule:
+        assert oncal.startswith("Mon..Fri "), (
+            f"backup timer would fire at the weekend: OnCalendar={oncal!r}")
 
 
 def test_the_backup_runs_after_everything_that_writes():
@@ -325,9 +364,12 @@ def test_the_backup_runs_after_everything_that_writes():
     night that looks complete. Asserted as an INEQUALITY against the last writer,
     not as the literal time, so moving the backup an hour does not fail this and
     moving it before the cascade does."""
-    tmr = _parse(units.render_all()[f"trading-{ENV_NAME}-backup.timer"])
-    hh, mm, _ = tmr["Timer"]["OnCalendar"].split()[-1].split(":")
-    assert int(hh) * 60 + int(mm) > 16 * 60 + 30
+    schedule = _directives(
+        units.render_all()[f"trading-{ENV_NAME}-backup.timer"], "OnCalendar")
+    assert schedule, "backup timer has no OnCalendar at all"
+    for oncal in schedule:   # every trigger must clear the last writer
+        hh, mm, _ = oncal.split()[-1].split(":")
+        assert int(hh) * 60 + int(mm) > 16 * 60 + 30, oncal
 
 
 def test_the_backup_has_a_timeout_long_enough_to_finish(rendered):
@@ -394,8 +436,11 @@ def test_runtime_cap_matches_the_configured_window():
 def test_timer_fires_at_the_window_start_on_weekdays():
     from shared import market_calendar as mc
     start, _ = mc.window_bounds("stream")
-    tmr = units.render_all()[f"trading-{ENV_NAME}-stream.timer"]
-    assert f"Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00" in tmr
+    text = units.render_all()[f"trading-{ENV_NAME}-stream.timer"]
+    schedule = _directives(text, "OnCalendar")
+    # Exactly one: a second OnCalendar= is a second start, and a second start
+    # inside the window is a second encoder pushing to the same RTMP key.
+    assert schedule == [f"Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00"], schedule
 
 
 def test_the_stream_key_file_must_exist_for_the_unit_to_start():
