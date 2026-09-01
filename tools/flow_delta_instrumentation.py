@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import pathlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -269,7 +270,14 @@ def read_live_alerts(db=LIVE_ALERTS_DB, port=None):
         except Exception:
             port = 6379
     try:
-        r = redis.Redis(host="127.0.0.1", port=port, db=db, socket_timeout=5)
+        # AUTH mirrors shared/bus/client.py: unset or empty -> password=None ->
+        # no AUTH, exactly as before. This client is built raw rather than via
+        # Bus (see LIVE_ALERTS_DB above -- Bus would resolve the WRONG db), so it
+        # does not inherit the bus's auth and has to repeat it. When requirepass
+        # went on this host the omission cost both reconciliations silently: the
+        # report degraded to "Not reconciled" and still exited 0.
+        r = redis.Redis(host="127.0.0.1", port=port, db=db, socket_timeout=5,
+                        password=os.environ.get("MEMURAI_PASSWORD") or None)
         raw = r.get(FLOW_ALERTS_KEY)
     except Exception as e:  # noqa: BLE001
         return None, f"could not reach Redis on :{port} db{db} ({e})"
