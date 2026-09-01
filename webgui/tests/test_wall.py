@@ -230,3 +230,31 @@ def test_a_panel_whose_document_is_unreachable_keeps_its_chrome_not_a_throw():
     body = doc[doc.index("function strip("):]
     body = body[:body.index("PANELS.forEach")]
     assert "try {" in body and "catch" in body
+
+
+def test_the_proxy_down_banner_is_hidden_on_the_wall():
+    """It is evaluated once at page build and never re-checked, and
+    proxy.health() reports up:False for ANY exception -- a single slow response
+    included. The stream starts at 08:00, the same instant the collection and
+    scan windows open, so a panel building during that burst bakes the banner
+    in until its next off-camera reload.
+
+    It would be noise even if the proxy really were down: the text tells the
+    reader to run `python schwab-proxy/schwab_proxy.py`, which is a developer
+    instruction addressed to a public broadcast audience.
+    """
+    css = wall.PANEL_CSS.replace(" ", "")
+    assert ".bg-red-2.text-red-10{display:none!important;}" in css
+
+
+def test_the_banner_selector_still_matches_what_main_renders():
+    """Class-based, so it breaks silently if the banner is restyled. Pin it
+    against main.py's actual classes rather than against a copy of them."""
+    import inspect
+    import main
+    src = inspect.getsource(main._layout)
+    banner = [ln for ln in src.splitlines() if "bg-red-2" in ln]
+    assert banner, "main._layout no longer renders a bg-red-2 banner"
+    for cls in ("bg-red-2", "text-red-10"):
+        assert cls in banner[0], (cls, banner[0])
+        assert cls in wall.PANEL_CSS, (cls, "PANEL_CSS no longer targets it")

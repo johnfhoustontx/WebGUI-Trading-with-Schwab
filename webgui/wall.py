@@ -111,6 +111,17 @@ PANEL_CSS = """
 header.q-header, aside.q-drawer { display: none !important; }
 .q-page-container { padding-top: 0 !important; padding-left: 0 !important; }
 .compact-tabs { display: none !important; }
+/* The proxy-down banner. It is evaluated ONCE at page build and never
+   re-checked, and `proxy.health()` reports `up: False` for any exception at
+   all -- including a single slow response. The stream starts at 08:00, the
+   same instant the collection and scan windows open and every service hits
+   the proxy at once, so a panel that happens to build during that burst bakes
+   the banner in until its next off-camera reload.
+   It would be noise here even when the proxy really is down: the text reads
+   "start it first (python schwab-proxy/schwab_proxy.py)", a developer
+   instruction addressed to a public audience who cannot act on it. Staleness
+   is already visible on the screens themselves. */
+.bg-red-2.text-red-10 { display: none !important; }
 """
 
 
