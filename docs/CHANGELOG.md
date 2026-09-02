@@ -4,6 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-02 (**The Live Mirror is removed** — the rail's
+`Live Mirror` row, `/desk/live`, `/desk/stream` and `webgui/desk_stream.py`, at
+the user's request. `/desk` and `/wall` are untouched.)
+
+- **What went:** `webgui/desk_stream.py` (1,031 lines) and its
+  `webgui/tests/test_desk_stream.py`; the two raw routes in `main.py`; the
+  `FLAT_NAV` row and the `NAV_SECTIONS` landing-block entry; the `/desk/live`
+  guide in `page_help.py`.
+- **`EXTERNAL_RAIL_ROUTES` and `_nav_link(..., new_tab=)` went with it**, because
+  the mirror was their only member and only caller — the set's own comment said as
+  much. That plumbing carried a real invariant (a row that opens elsewhere must
+  not paint the active wash, since no navigation happened), so CLAUDE.md keeps a
+  one-line note saying it existed and why, for anything that revives the shape.
+  `fastapi.Request` and `StreamingResponse` left `main.py`'s imports with the SSE
+  route — it was their only consumer.
+- **`/wall` is unaffected.** It iframes `/desk`, never `/desk/live`, and imports
+  nothing from the deleted module. Its two prose references to it were corrected,
+  and `test_wall_is_not_a_nav_page` — which asserted the wall was absent from
+  `EXTERNAL_RAIL_ROUTES` — now asserts absence from `FLAT_NAV` and `NAV_SECTIONS`
+  instead, keeping the test's intent rather than dropping a line from it.
+- **Rail counts moved, and they are asserted in three places**: the drawer is
+  **14 items**, `NAV_SECTIONS` lengths are `[1, 4, 4, 2]`, and `_LANDING_ROUTES`
+  in `test_shell.py` holds one route. All three are pinned by tests that fail
+  loudly rather than counts that quietly drift.
+- **Both manuals rebuilt.** The Live Mirror section is out of the User Guide and
+  the Reference Guide, and `build_docs.py` regenerated the `.html` + `.docx` — the
+  documented failure mode is prose that rots because nothing fails when it does.
+- **webgui suite: 2,869 passed, 0 failed.** The count FELL from the pre-change
+  baseline because the deleted tests went with their subject — the one case where
+  a dropping count is the healthy signal.
+
+---
+
 **Last updated:** 2026-08-30 (**The realized-outcome calibration stopped
 counting out-of-session captures.** The companion to the recorder gate above:
 that one stops new ones, this one stops the history feeding the EV number.)

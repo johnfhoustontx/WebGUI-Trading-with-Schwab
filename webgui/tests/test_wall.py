@@ -1,7 +1,7 @@
 """The public wall-display document (``webgui/wall.py``).
 
-Everything under test is the EMITTED STRING — no browser, no Redis, the same
-shape ``test_desk_stream.py`` takes. That is not a compromise: the page's whole
+Everything under test is the EMITTED STRING — no browser, no Redis. That is
+not a compromise: the page's whole
 job is to be a static shell around three iframes, so its correctness IS what the
 document says.
 
@@ -186,10 +186,13 @@ def test_route_is_registered_as_a_raw_html_response():
 def test_wall_is_not_a_nav_page():
     """A display target, not a destination. It must not appear in the rail, the
     tab strips or the breadcrumb registry -- and specifically must not become a
-    third entry in test_shell's _LANDING_ROUTES exemption."""
+    second entry in test_shell's _LANDING_ROUTES exemption."""
     import main
     assert wall.PAGE_ROUTE not in main._NAV_LABEL
-    assert wall.PAGE_ROUTE not in main.EXTERNAL_RAIL_ROUTES
+    assert wall.PAGE_ROUTE not in {p for p, _l, _i in main.FLAT_NAV}
+    rail = {e[1] for _c, entries in main.NAV_SECTIONS
+            for e in entries if e[0] == "page"}
+    assert wall.PAGE_ROUTE not in rail
 
 
 # ── stripping the app shell inside each panel ────────────────────────────────

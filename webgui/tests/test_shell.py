@@ -470,7 +470,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     # `_LANDING_ROUTES` is the explicit, enumerated exemption — a set rather than a
     # blanket "or len(trail) == 1", so a page that loses its section by accident
     # still fails here instead of being waved through as a second landing page.
-    _LANDING_ROUTES = {"/desk", "/desk/live"}
+    _LANDING_ROUTES = {"/desk"}
     sections = {c.title() for c, _e in main.NAV_SECTIONS if c} | {main.SYSTEM_SECTION}
     for route in main._NAV_LABEL:
         trail = main.breadcrumb_trail(route)
@@ -625,16 +625,16 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 15 drawer items (the 12
-    NAV_SECTIONS entries — the pinned landing block's Desk + Live Mirror, plus the
-    10 workflow ones — + the 3 SYSTEM_RAIL pages at the foot); child-page icons
-    are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 14 drawer items (the 11
+    NAV_SECTIONS entries — the pinned landing block's Desk, plus the 10 workflow
+    ones — + the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 15, f"expected 15 drawer items, got {len(items)}: {items}"
+    assert len(items) == 14, f"expected 14 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1183,19 +1183,15 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 4, 4, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 4, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
 
 
 def test_the_landing_block_is_pinned_above_every_caption():
-    """The home page and its Live Mirror sit above the captions — the rail's mirror
-    of the bottom-pinned SYSTEM_RAIL block — and render no section header.
-
-    The mirror belongs HERE rather than in a workflow section because it is the
-    same screen as Desk for a different display, not a destination of its own;
-    filing it under MARKETS would have made it look like a distinct read.
+    """The home page sits above the captions — the rail's mirror of the
+    bottom-pinned SYSTEM_RAIL block — and renders no section header.
 
     Pinned because three separate things have to agree for this to look right and
     none of the others would fail on its own: the block must be first, its caption
@@ -1207,7 +1203,7 @@ def test_the_landing_block_is_pinned_above_every_caption():
     import main
     caption, entries = main.NAV_SECTIONS[0]
     assert caption is None, "the landing block must carry NO caption"
-    assert entries == [main._sec_page("/desk"), main._sec_page("/desk/live")]
+    assert entries == [main._sec_page("/desk")]
     src = inspect.getsource(main._layout)
     assert "if caption is not None:" in src, (
         "the drawer must SKIP the header for a caption-less block")

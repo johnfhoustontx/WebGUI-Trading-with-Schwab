@@ -18,9 +18,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi import Request  # noqa: E402
-from fastapi.responses import (HTMLResponse, RedirectResponse,  # noqa: E402
-                               StreamingResponse)
+from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
@@ -31,7 +29,6 @@ from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 import alerts  # noqa: E402
 import app_settings  # noqa: E402
 import bus_client  # noqa: E402
-import desk_stream  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 import wall  # noqa: E402
@@ -308,45 +305,19 @@ def _serve_eod_file(date: str, which: str = "summary"):
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
-# ── Desk — the standalone streaming mirror (/desk/live + /desk/stream) ────────
-# Raw routes rather than a second ``@ui.page``: the whole point of this screen is
-# that it carries NO NiceGUI runtime, so a wall display, a phone or a sleeping
-# laptop reconnects with an HTTP request instead of a websocket. The document is
-# static and every number arrives over the event stream — see webgui/desk_stream.py.
-@app.get(desk_stream.PAGE_ROUTE)
-def _serve_desk_live():
-    """The Desk mirror document — self-contained, so its own <style> applies."""
-    return HTMLResponse(desk_stream.document())
-
-
-@app.get(desk_stream.STREAM_ROUTE)
-def _serve_desk_stream(request: Request):
-    """The Desk as server-sent events: ``desk`` on change, ``clock`` every second.
-
-    ``X-Accel-Buffering: no`` and the disabled cache are what stop a proxy (or a
-    browser's own buffering heuristics) holding frames back until some buffer
-    fills — an event stream that arrives in bursts is indistinguishable from a
-    frozen page, which is the one failure this screen exists to avoid.
-    """
-    return StreamingResponse(
-        desk_stream.event_stream(request),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
 # ── The wall display (/wall) ──────────────────────────────────────────────────
-# A raw route for the same reason ``/desk/live`` is one: this document carries no
-# NiceGUI runtime of its own. It is a static shell around three iframes onto the
+# A raw route rather than a ``@ui.page``: this document carries no NiceGUI
+# runtime of its own. It is a static shell around three iframes onto the
 # real pages, opened once in the morning by a kiosk Chrome on the capture host
 # and left for nine hours — a fourth live client with a websocket and a reconnect
 # story would be machinery serving an interaction that never happens.
 #
-# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL`` /
-# ``EXTERNAL_RAIL_ROUTES``: those describe places a person navigates to, and this
-# is a display target for a camera. Listing it would put a rail row in front of
-# every user for a screen that only makes sense full-bleed on a 1920x1080
-# framebuffer, and would need a third ``_LANDING_ROUTES`` exemption in
-# ``test_shell.py`` for a page that renders no ``_layout`` at all.
+# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL``: those
+# describe places a person navigates to, and this is a display target for a
+# camera. Listing it would put a rail row in front of every user for a screen
+# that only makes sense full-bleed on a 1920x1080 framebuffer, and would need a
+# second ``_LANDING_ROUTES`` exemption in ``test_shell.py`` for a page that
+# renders no ``_layout`` at all.
 @app.get(wall.PAGE_ROUTE)
 def _serve_wall():
     """The rotating wall document — self-contained, so its own <style> applies."""
@@ -435,10 +406,6 @@ TRADE_CHILDREN = [
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
-    # The Desk's streaming mirror (webgui/desk_stream.py). It sits DIRECTLY under
-    # Desk, in the same pinned landing block, because it is the same screen for a
-    # different display rather than a destination of its own.
-    ("/desk/live", "Live Mirror", "cast"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -531,7 +498,7 @@ def _sec_page(route: str):
 # filing it under one of the three workflow sections. Its breadcrumb is likewise
 # just ["Desk"], since there is no section to name above it.
 NAV_SECTIONS = [
-    (None, [_sec_page("/desk"), _sec_page("/desk/live")]),
+    (None, [_sec_page("/desk")]),
     ("MARKETS", [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
@@ -549,20 +516,6 @@ NAV_SECTIONS = [
         _sec_group("More"),
     ]),
 ]
-
-
-# Rail routes that are NOT shell pages, and so open in a NEW TAB.
-#
-# ``/desk/live`` is a raw HTMLResponse document with no ``_layout`` — no drawer,
-# no header, no breadcrumb. Navigating to it in the same tab would therefore
-# strand the reader: the only way back is the one link the document draws itself.
-# Opening it in a new tab is also what the page is FOR — you put the mirror on a
-# second display and keep working in the tab you were already in.
-#
-# A set rather than a flag on the nav tuple: every other rail entry is a shell
-# page, and widening the tuple would make ten call sites carry a field that only
-# one of them ever uses.
-EXTERNAL_RAIL_ROUTES = {"/desk/live"}
 
 
 def _group_children(active: str):
@@ -1619,11 +1572,9 @@ def _nav_icon(icon: str, count: int):
     return dot
 
 
-def _nav_link(path: str, label: str, icon: str, active: str,
-              new_tab: bool = False) -> None:
-    """One drawer row. ``new_tab`` is for the rail's non-shell routes — see
-    ``EXTERNAL_RAIL_ROUTES``; such a row never claims the active state, because
-    it does not replace the page you are looking at."""
+def _nav_link(path: str, label: str, icon: str, active: str) -> None:
+    """One drawer row. Every rail route is a shell page, so the row always
+    navigates in place and claims the active wash when it is the current page."""
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
     # nav-active is a plain CSS rule in _NAV_CSS (a soft rgba navy wash) — NOT a
@@ -1631,13 +1582,9 @@ def _nav_link(path: str, label: str, icon: str, active: str,
     # nor rgba(...) arbitraries reliably (plain-hex ones are fine), so the old
     # bg-[var(--q-primary)] silently produced no rule at all. The pill is now
     # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
-    # A new-tab row leaves the current page where it is, so it must not paint
-    # itself as "where you are" — the active wash would claim a navigation that
-    # never happened.
-    is_active = path == active and not new_tab
-    state = " nav-active" if is_active else ""
+    state = " nav-active" if path == active else ""
     n = _NAV_BADGES.get(path, 0)
-    with ui.link(target=path, new_tab=new_tab).classes(base + state):
+    with ui.link(target=path).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             rail_dot = _nav_icon(icon, n)
@@ -1912,8 +1859,7 @@ def _layout(active: str, title: str):
                         _nav_group_link(_label, _icon, _children, active)
                     else:
                         _kind, _path, _label, _icon = entry
-                        _nav_link(_path, _label, _icon, active,
-                                  new_tab=_path in EXTERNAL_RAIL_ROUTES)
+                        _nav_link(_path, _label, _icon, active)
             # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
             # the leftover column height so they sit at the bottom edge (the column
             # is h-full flex-col), while still reading as the last items when the

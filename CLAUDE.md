@@ -177,8 +177,7 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **15 items** — a top-pinned **Desk** + its **Live Mirror**
-(`/desk/live`, the streaming standalone view, added 2026-08-20) in a
+the left drawer holds **14 items** — a top-pinned **Desk** alone in a
 **caption-less leading `NAV_SECTIONS` block** (2026-08-18), 10 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**) — and the active group's
@@ -202,14 +201,14 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
-(Desk + Live Mirror) · **MARKETS** (Dealer
+(Desk alone) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
 at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
-it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its pages get
-a bare one-crumb breadcrumb since no section sits above them. ⚠ `first=(_i == 0)`
+it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its page gets
+a bare one-crumb breadcrumb since no section sits above it. ⚠ `first=(_i == 0)`
 in that loop is consequently **never True**, which is deliberate: the first
 *visible* caption keeps its `mt-4`, and that gap is what separates MARKETS from the
 Desk row above it. Entries reference their group/page **by name**
@@ -219,13 +218,11 @@ than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
 (it is now just the flat-route registry `_NAV_LABEL` iterates). Caption counts are
 **derived** from `len(entries)` — never written down. The sentiment group renamed
 **"Market Trend & Sentiment" → "Trend & Sentiment"** now the MARKETS caption
-carries the word. ⚠ **`/desk/live` is the ONE rail route that is not a shell page**, and it is
-therefore the one that opens in a **new tab** (`EXTERNAL_RAIL_ROUTES`, consumed by
-`_nav_link(..., new_tab=)`). It renders no `_layout` — no drawer, no breadcrumb —
-so a same-tab navigation would strand the reader on a page whose only way back is
-the link the document draws itself; and the row never claims the active wash,
-which would otherwise assert a navigation that did not happen. It is also why
-`_LANDING_ROUTES` in `test_shell.py` holds two routes rather than one. ⚠ The
+carries the word. **Every rail route is a shell page**, so `_nav_link` always
+navigates in place and `_LANDING_ROUTES` in `test_shell.py` holds the one route,
+`/desk`. (`EXTERNAL_RAIL_ROUTES` and `_nav_link`'s `new_tab=` existed solely for
+the Live Mirror and went with it on 2026-09-02 — a rail row that opens elsewhere
+must not claim the active wash, so anything reviving that shape needs both.) ⚠ The
 Options group sits under STRATEGY while Dealer Positioning
 / Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are
 market-WIDE reads, the Options group is the per-signal find → analyze → track →
@@ -320,7 +317,6 @@ Routes:
 |-------|------|--------|
 | `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
 | `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper+driver Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
-| `/desk/live` | **Desk (streaming mirror)** — the same screen as a STANDALONE HTML document + an SSE stream (`/desk/stream`): no NiceGUI, no websocket, so a wall display or a phone reconnects with an HTTP request. `webgui/desk_stream.py` — `snapshot()` is PURE and returns display-ready **strings** built by `pages/desk.py`'s OWN builders, so the mirror cannot drift from `/desk`; the browser only places colour. Two event types, deliberately on separate cadences: `desk` on a cache-version change (2 s probe), `clock` every second (which doubles as the SSE keep-alive). Panels are **always 2x2**, as `/desk` has been since 2026-08-20 — this screen gets pinned to a display, so it must not reflow. ⚠ Outside the Tailwind-first standard — a raw `HTMLResponse` document, the same out-of-scope case as the EOD report. | built |
 | `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. [Detail](docs/webgui-routes.md) | built |
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |

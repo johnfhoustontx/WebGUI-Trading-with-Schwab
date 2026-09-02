@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-24</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-02</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -87,7 +87,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
 <li><a href="#desk">Desk</a></li>
-<li><a href="#live-mirror">Live Mirror</a></li>
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
@@ -170,21 +169,21 @@ the plain-English checklist — the <em>Technical Reference</em> has the full de
 (exact package versions, environment variables, etc.).</p>
 <h2 id="the-essentials-required">The essentials (required)</h2>
 <ul>
-<li><strong>Windows 10 or 11.</strong> The app is Windows-first — the launchers are <code>.bat</code> files,
-  the alert pop-ups use Windows notifications, and the data backbone (Memurai) is a
-  Windows service.</li>
+<li><strong>A Linux host.</strong> The stack runs on Ubuntu Server 24.04 LTS as <code>systemd</code> user
+  services. You do not need a desktop on it — you reach the app from your own
+  computer over an SSH tunnel (see <em>Opening the app</em>, below).</li>
 <li><strong>Python 3.11 or newer.</strong> Install it from python.org if you don't have it.</li>
-<li><strong>A one-time setup</strong> in the project folder, which creates the virtual environment
-  the launchers expect and installs everything:</li>
+<li><strong>A one-time setup</strong> in the project folder, which creates the virtual
+  environment the units expect and installs everything:</li>
 </ul>
-<p><code>powershell
-  python -m venv .venv
-  .\.venv\Scripts\python -m pip install -r requirements.txt</code></p>
+<p><code>bash
+  uv venv --python 3.11 .venv &amp;&amp; uv pip install -r requirements.lock</code></p>
+<p>Use the <strong>lock</strong>, not <code>requirements.txt</code> — the lock is what the host installs,
+  and a package present in one but not the other ships missing.</p>
 <ul>
-<li><strong>Memurai running.</strong> Memurai is a Windows version of Redis — the local "backbone"
-  the app's parts talk through. It installs as a <strong>Windows service on port 6379</strong>;
-  start it from <strong>services.msc</strong> if it isn't already running. <strong>Nothing works
-  without it</strong> — every page will just say "Waiting for … service."</li>
+<li><strong>Redis running.</strong> The local "backbone" the app's parts talk through, on port
+  6379. <code>sudo systemctl enable --now redis-server</code>. <strong>Nothing works without it</strong> —
+  every page shows a "Waiting for … service" placeholder.</li>
 <li><strong>A modern web browser</strong> to open the app at <code>http://127.0.0.1:8500</code>.</li>
 </ul>
 <h2 id="schwab-account-required-for-live-data">Schwab account (required for live data)</h2>
@@ -218,7 +217,7 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Memurai), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
 and <strong>8500</strong> (the web app). If another program is already using one of them, the
 matching piece won't start.</p>
 <hr />
@@ -229,24 +228,34 @@ all together with one of the launcher scripts in the project root:</p>
 <table>
 <thead>
 <tr>
-<th>Launcher</th>
+<th>Command</th>
 <th>What it does</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>start_all.bat</code></td>
-<td>Opens the gateway, the six domain services, and the web app in <strong>eight separate console windows</strong>, then opens your browser.</td>
+<td><code>systemctl --user start trading-prod.target</code></td>
+<td>Starts the gateway, the six domain services and the web app.</td>
 </tr>
 <tr>
-<td><code>start_all_wt.bat</code></td>
-<td>Same eight processes, but as <strong>eight tabs in one Windows Terminal window</strong> (less desktop clutter; requires Windows Terminal).</td>
+<td><code>systemctl --user list-units 'trading-prod*'</code></td>
+<td>Shows what is running.</td>
+</tr>
+<tr>
+<td><code>journalctl --user -u trading-prod-options_svc -f</code></td>
+<td>Follows one service's log.</td>
 </tr>
 </tbody>
 </table>
-<p>After the windows finish loading, the app is available at:</p>
+<p>They also start <strong>automatically when the machine boots</strong> — you do not normally
+run anything by hand.</p>
+<p><strong>Opening the app.</strong> The web app deliberately listens only on the host itself and
+has no password, so it is never exposed to the network. From your own computer,
+double-click the <strong>Trading Web GUI</strong> shortcut: it opens a secure tunnel and your
+browser at</p>
 <pre><code>http://127.0.0.1:8500
 </code></pre>
+<p>That address is your own machine — the tunnel carries it to the trading host.</p>
 <p>The browser usually opens automatically. If it does not, open that address
 yourself.</p>
 <h2 id="what-runs-behind-the-scenes">What runs behind the scenes</h2>
@@ -257,7 +266,7 @@ yourself.</p>
   handles ordering for you).</li>
 <li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).</li>
-<li><strong>Memurai (Redis)</strong> — a local data backbone the services and the web app share.</li>
+<li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
 </ul>
 <h2 id="the-proxy-down-banner">The proxy-down banner</h2>
 <p>If you ever see a <strong>red banner</strong> across the top of every page saying the proxy is
@@ -269,9 +278,10 @@ restart components.</p>
 message, that service hasn't started or has stopped. Start the full stack with a
 launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
 <h2 id="stopping-everything">Stopping everything</h2>
-<p>Use <strong>Stop All Services</strong> at the foot of the rail, or run <code>stop_all.bat</code>. This stops the
-gateway, the six services, and the web app. (Memurai is intentionally left
-running — it's a shared Windows service.)</p>
+<p>Use <strong>Stop All Services</strong> at the foot of the rail, or run
+<code>systemctl --user stop trading-prod.target</code>. This stops the
+gateway, the six services, and the web app. (Redis is intentionally left
+running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
 <h1 id="the-interface">The Interface</h1>
 <h2 id="layout">Layout</h2>
@@ -510,57 +520,6 @@ you.</p>
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.</li>
 </ul>
-<hr />
-<h2 id="live-mirror">Live Mirror</h2>
-<p><strong>Route:</strong> <code>/desk/live</code> — pinned in the rail directly under <strong>Desk</strong>, and it
-<strong>opens in a new browser tab</strong>, so the tab you were working in stays where it was.</p>
-<p><strong>The Desk, on a screen you are not sitting at.</strong> Same panels, same numbers, same
-layout, built as a plain web page instead of an app page. It keeps updating on a
-wall display, a spare monitor, a tablet or a phone, and it picks itself back up on
-its own after the machine sleeps, the Wi-Fi drops, or the browser suspends the tab.</p>
-<p><strong>How to use it:</strong> open it once, drag the window to the display you want it on, and
-leave it. Clicking a row still opens the page it came from, and <strong>Open the full
-Desk</strong> at the top left brings you back to the app.</p>
-<p><strong>What is different from the Desk:</strong></p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Desk</th>
-<th>Live Mirror</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Panels</td>
-<td>2x2, stacking to one column on a narrow screen</td>
-<td><strong>always 2x2</strong></td>
-</tr>
-<tr>
-<td>After sleep or a dropped connection</td>
-<td>reload it</td>
-<td><strong>reconnects itself</strong></td>
-</tr>
-</tbody>
-</table>
-<p>The layout difference is deliberate: a screen you have pinned somewhere should not
-rearrange itself. On a narrow display the columns tighten and long values shorten
-with an ellipsis instead of the panels moving.</p>
-<p><strong>The indicator at the top right tells you whether to trust the screen:</strong></p>
-<ul>
-<li><strong>Live</strong> — connected, and what you are looking at is current.</li>
-<li><strong>Reconnecting</strong> — the connection dropped and the page is retrying by itself. The
-  numbers are the last good ones until it says Live again.</li>
-</ul>
-<p><strong>The countdown keeps ticking every second even when nothing else changes</strong>, and
-that is the point: a frozen page and a quiet market look identical from across the
-room, and the moving clock is how you tell them apart.</p>
-<p><strong>Every number comes from the Desk's own code</strong>, so the mirror cannot drift from
-it. If the two ever disagree, one of them has stopped updating — check the
-indicator. The same honesty rules apply, because they are the same rules: walls are
-hidden rather than zeroed when the gamma feed is stale, and a missing reading shows
-a dash rather than a zero.</p>
-<p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
 <p>The four rail entries in this section establish the conditions a trade would be
@@ -1498,7 +1457,7 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Memurai, the Schwab gateway, the six services, and the web
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, and the web
   app itself, each with Online/Offline and its tier. The gateway's card also shows
   the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
@@ -1512,7 +1471,7 @@ in a trading workflow, which is why they sit apart.</p>
 <blockquote>
 <p><strong><code>token_expired: true</code> on the gateway is routine</strong> — it refreshes itself. Only a
 missing or expired <em>refresh</em> token needs <strong>Re-authorize</strong>.</p>
-<p><strong>Restart order matters:</strong> Memurai first, then the gateway, then services, then the
+<p><strong>Restart order matters:</strong> Redis first, then the gateway, then services, then the
 web app. A service restarted while the gateway is down will start and then fail to
 fetch anything.</p>
 </blockquote>
@@ -1570,8 +1529,8 @@ group, next to EOD Report.</p>
 (behind a confirmation) stops the gateway, the six services, and the web app.</p>
 <blockquote>
 <p><strong>This also stops the page you're on</strong> — it will become unresponsive right after
-you confirm, by design. Memurai is left running. Re-launch with <code>start_all.bat</code>
-or <code>start_all_wt.bat</code>.</p>
+you confirm, by design. Redis is left running. Re-launch with
+<code>systemctl --user start trading-prod.target</code>.</p>
 </blockquote>
 <hr />
 <h1 id="faq-troubleshooting">FAQ &amp; Troubleshooting</h1>
