@@ -2625,3 +2625,38 @@ def test_column_headers_are_constants_one_per_grid_track():
                               ("positions", d.POS_HEADS, d.POS_GRID)):
         tracks = grid.split("grid-cols-[")[1].split("]")[0].count("_") + 1
         assert len(heads) == tracks, (name, len(heads), tracks)
+
+
+def test_use_lines_say_what_the_panel_is_for():
+    """Each head's second line is the reader's question, not the mechanism's
+    name. page_help.py already carried this voice; it was one hover away."""
+    heads = d.PANEL_HEADS
+    assert "dealers" in heads["dealer"][1]
+    assert "where to start looking" in heads["board"][1]
+    # The honest caveat the Flow panel owes its reader, and the reason the
+    # rows say Call/Put rather than bought/sold: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here knows who initiated.
+    assert "not who initiated" in heads["flow"][1]
+    assert "needs a decision" in heads["positions"][1]
+
+
+def test_a_use_line_fits_the_panel_it_stands_in():
+    """~125 characters at 11px in an 860px panel; 90 is the guard rail.
+
+    WIDTH, not height: this page is already taller than any window it is read
+    in (see ``DESK_SCROLLBAR_PX``), so a line too TALL costs nothing, while a
+    line too WIDE overflows a panel that cannot reflow."""
+    for key, (_title, use_line) in d.PANEL_HEADS.items():
+        assert len(use_line) <= 90, (key, len(use_line))
+
+
+def test_the_dropped_facts_are_the_columns_underneath_them():
+    """The symbol and book lists left the head because the SYMBOL and BOOK
+    columns already print them, row by row. The SORT ORDER did not — it is the
+    one fact in that slot the rows cannot show, so it survives into the
+    use-line, still interpolated from the cap."""
+    heads = d.PANEL_HEADS
+    assert "$SPX" not in heads["dealer"][1]
+    assert d.PAPER_SOURCE not in heads["positions"][1]
+    assert "hottest" in heads["board"][1].lower()
+    assert "newest" in heads["flow"][1].lower()

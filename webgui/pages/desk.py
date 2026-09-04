@@ -2249,11 +2249,30 @@ def _compact_card(title, arcs, pill_text, delta):
 # The row caps are INTERPOLATED, never written down. That is the property the old
 # "HOTTEST {N}" subtitle had and the reason it was built that way: a cap that
 # moved would otherwise leave a stale number standing on the panel.
+# The second element is a USE-LINE: what the reader does with the panel, not
+# what produced it. All of this was already written — in ``page_help.py``'s
+# ``/desk`` entry, one hover away — which is the wrong side of a tooltip for the
+# landing page.
+#
+# Two facts that used to stand here are gone, and one survived. ``$SPX · SPY ·
+# $NDX · QQQ`` and ``PAPER · CLAUDE · CAPTURED`` are literally the SYMBOL and
+# BOOK columns underneath them, printed row by row. The SORT ORDER is not
+# anywhere else on the panel, so it stays — still interpolated, never written
+# down.
 PANEL_HEADS = {
-    "dealer": ("DEALER POSITIONING", " · ".join(DESK_SYMBOLS)),
-    "board": ("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}"),
-    "flow": ("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}"),
-    "positions": ("POSITIONS", " · ".join(b["source"] for b in BOOKS)),
+    "dealer": ("DEALER POSITIONING",
+               "Above the flip, dealers damp moves; below it they feed them."),
+    "board": ("OPPORTUNITY BOARD",
+              f"The {BOARD_ROWS_N} hottest names right now — where to start "
+              f"looking."),
+    # Which side traded, never who initiated: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here can honestly say. The row
+    # vocabulary has always been careful about this; now the panel says so.
+    "flow": ("LIVE FLOW ALERTS",
+             f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
+             f"who initiated."),
+    "positions": ("POSITIONS",
+                  "What you and Claude are holding, and what needs a decision."),
 }
 
 # One label per grid track, hoisted for the same reason as the heads above: the
@@ -2268,22 +2287,28 @@ POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
              "STRIKES", "QTY", "UNREALIZED", "FLAG")
 
 
-def _panel(title, subtitle=""):
+def _panel(title, use_line=""):
     """A console card with a titled head; returns the BODY container.
 
     The head is built ONCE and the body is what each painter clears, so a
-    repaint can neither duplicate the title nor strand a handle to it."""
+    repaint can neither duplicate the title nor strand a handle to it.
+
+    ``use_line`` gets its OWN line under the title rather than the old
+    right-aligned subtitle slot, and that is not a layout preference. That slot
+    is ``whitespace-nowrap`` on the title row, which was right for the four
+    short facts it used to hold and would push a sentence straight out of the
+    narrowest panel (Flow's floor is 508px). It also wore ``.2em`` tracking —
+    correct for small caps, unreadable on prose.
+    """
     with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
-        with ui.row().classes(
-                f"items-baseline justify-between w-full gap-4 border-b "
-                f"{CONSOLE_RULE} pb-2"):
+        with ui.column().classes(
+                f"w-full gap-1 border-b {CONSOLE_RULE} pb-2"):
             ui.label(title).classes(
                 f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
                 f"{CON_TXT}")
-            if subtitle:
-                ui.label(subtitle).classes(
-                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
-                    f"{CON_TXT_DIM}")
+            if use_line:
+                ui.label(use_line).classes(
+                    f"text-[11px] leading-snug {CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
     return body
 
