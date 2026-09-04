@@ -531,3 +531,66 @@ def test_count_opened_on_zero_for_a_quiet_day(tmp_path):
     db = tmp_path / "s.db"
     signal_db.init_db(db)
     assert signal_db.count_opened_on("2026-08-19", db_path=db) == 0
+
+
+# ── the date-RANGE outcome reader (the captured score) ───────────────────────
+_SIG_COLS = ("signal_id, scanner_type, symbol, strategy, short_strike, "
+             "long_strike, width, expiration, dte_at_entry, entry_credit, "
+             "entry_max_loss, entry_score, entry_grade, entry_short_delta, "
+             "entry_net_theta, entry_iv_rank, entry_underlying, first_seen_ts, "
+             "first_seen_date, dedup_key, status")
+
+
+def _seed(conn, sid, *, seen_date, close_date, credit=1.00, pnl=50.0,
+          scanner="0DTE", reason="MONEY_STOP"):
+    """One signal opened on ``seen_date`` and closed on ``close_date``."""
+    conn.execute(
+        f"INSERT INTO signals({_SIG_COLS}) VALUES ({','.join('?' * 21)})",
+        (sid, scanner, "SPY", "PCS", 690, 688, 2, "2026-09-30", 1, credit, 1.4,
+         54, "Marginal", -0.15, 5.0, 30.0, 700.0, f"{seen_date}T10:00:00-05:00",
+         seen_date, f"k-{sid}", "CLOSED"))
+    conn.execute(
+        "INSERT INTO signal_outcomes(signal_id, close_ts, close_date, "
+        "exit_value, realized_pnl, exit_reason) VALUES (?,?,?,?,?,?)",
+        (sid, f"{close_date}T14:00:00-05:00", close_date, 0.50, pnl, reason))
+    conn.commit()
+
+
+def test_get_outcomes_in_range_spans_dates_and_carries_the_open_date(tmp_path):
+    """The weekly and monthly rows need BOTH dates: outcomes bucket by the close
+    date, while "opened" counts by the date the signal was first seen — and a
+    signal opened in August can close in September, so the open date routinely
+    falls OUTSIDE the window being read."""
+    db_path = tmp_path / "signals.db"
+    signal_db.init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    _seed(conn, "a", seen_date="2026-08-31", close_date="2026-09-01")
+    _seed(conn, "b", seen_date="2026-09-02", close_date="2026-09-03",
+          scanner="SWING")
+    conn.close()
+
+    rows = signal_db.get_outcomes_in_range("2026-09-01", "2026-09-03",
+                                           db_path=db_path)
+    assert [r["signal_id"] for r in rows] == ["a", "b"]        # oldest close first
+    assert rows[0]["first_seen_ts"].startswith("2026-08-31")   # BEFORE the window
+    assert rows[0]["scanner_type"] == "0DTE"
+    assert rows[1]["scanner_type"] == "SWING"
+    assert rows[0]["realized_pnl"] == 50.0
+    assert rows[0]["entry_credit"] == 1.00
+
+
+def test_get_outcomes_in_range_is_inclusive_at_both_ends(tmp_path):
+    """A half-open range would silently drop the newest day — which is exactly
+    the day the Daily row is made of."""
+    db_path = tmp_path / "signals.db"
+    signal_db.init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    _seed(conn, "a", seen_date="2026-09-03", close_date="2026-09-03")
+    conn.close()
+
+    assert len(signal_db.get_outcomes_in_range(
+        "2026-09-03", "2026-09-03", db_path=db_path)) == 1
+    assert signal_db.get_outcomes_in_range(
+        "2026-09-04", "2026-09-05", db_path=db_path) == []
+    assert signal_db.get_outcomes_in_range(
+        "2026-09-01", "2026-09-02", db_path=db_path) == []
