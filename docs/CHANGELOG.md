@@ -4,6 +4,54 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**The Paper Ledger's columns name the reading, and
+one of them was wrong.** Fourth page of the reader's-voice pass, and the first
+that ACTS rather than only reports.)
+
+- **⚠ `Credit` was not merely terse, it was false for half the book.** That column
+  holds `entry_credit_total`, and a **debit trade stores its debit as a negative
+  credit** — so every debit row rendered under a header contradicting the sign in
+  its own cell. It becomes **Entry**: the sign then carries credit-vs-debit, which
+  is what it was already doing, and it is `/desk`'s word for the same quantity.
+- **That made the rename a SWAP,** which is worth knowing before you next open the
+  page: `Entry` was taken by `entry_time`, which becomes **Opened**. A reader who
+  knows the old layout sees `Entry` move from a time to a price. `Opened` is the
+  better word for a timestamp regardless, and leaving `Credit` wrong was the worse
+  option.
+- **`Risk`→`Max loss`** (it *is* `max_loss_total`; "Risk" names no quantity) and
+  **`Exp`→`Expiry`**.
+- **`P&L` is deliberately NOT renamed to `/desk`'s `OPEN P&L`.** `trade_pnl`
+  returns REALIZED for a closed trade, so half these rows are not open at all —
+  copying the Desk's word here would have been consistency at the cost of being
+  right.
+- **⚠ A deliberate divergence from `/desk`, and the first one this pass has
+  produced.** `Strat` and `Qty` are spelled out here as **Strategy** and
+  **Contracts**. Those are exactly the two labels the Desk had to keep short: its
+  Positions grid has measured per-string `minmax()` floors, both tracks are
+  label-bound, and the words cost ~58px against 43px of slack — they would clip
+  the panel at the 1920px it is read at. This page is a `ui.table` with no such
+  limit. So the app now shows one concept under two spellings, on purpose: the
+  standing rule is to spell out casual shortenings, so the abbreviation stays a
+  width **concession** rather than becoming the app's word for the concept. Both
+  tests now point at each other, so the next reader finds the reason rather than
+  the inconsistency.
+- **The action copy, which is what makes this page different from the first
+  three.** The toolbar's `Close` becomes **Close trade** — the Analyze dialog
+  carries its own `Close`, which dismisses it. And the toasts said "Close
+  requested." / "Delete requested.": accurate, since these are commands on
+  `cmd:options` and the ledger changes when `options_svc` processes them, but
+  silent about what the reader should now watch for. They now name the symbol and
+  say the ledger updates **when the engine confirms** — the honesty kept, the
+  missing half added. Nothing claims a trade is already closed.
+- **`page_help.py` gained the sentence the column could not carry:** that Entry is
+  positive for a credit and negative for a debit, and that P&L is unrealised while
+  open and realised once closed.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2950 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-paper-ledger-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**The Opportunity Board's columns name the reading,
 not the field.** Third page of the reader's-voice pass, and the one that finally
 earned a shared home for the copy three screens show.)
