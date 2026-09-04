@@ -2660,3 +2660,37 @@ def test_the_dropped_facts_are_the_columns_underneath_them():
     assert d.PAPER_SOURCE not in heads["positions"][1]
     assert "hottest" in heads["board"][1].lower()
     assert "newest" in heads["flow"][1].lower()
+
+
+def test_headers_name_the_use_not_the_mechanism():
+    assert d.DEALER_HEADS == ("SYMBOL", "PRICE", "FLIP LEVEL",
+                              "PRICE VS WALLS", "CEILING", "FLOOR",
+                              "DEALER MODE")
+    assert d.BOARD_HEADS == ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV",
+                             "NET PREMIUM", "P/C", "SIGNAL", "SETUP")
+    assert d.FLOW_HEADS == ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+    assert d.POS_HEADS == ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY",
+                           "MARK", "STRIKES", "QTY", "OPEN P&L", "STATUS")
+
+
+def test_the_two_width_blocked_labels_stay_short():
+    """STRAT and QTY are the two tracks the HEAD LABEL binds rather than the
+    value (see POS_GRID's floor notes). At the 8.0px per character
+    ``test_every_column_label_fits_the_track_it_stands_over`` measures,
+    "STRATEGY" needs 64px of a 42px floor and "CONTRACTS" 72px of a 36px one;
+    widening both costs ~58px against the 43px of slack between this page's
+    minimum window and the 1920px it is read at.
+
+    So this is a deferral with arithmetic behind it, not an oversight — and it
+    gets a test because a comment saying so is the kind nobody reads before
+    "fixing" the inconsistency."""
+    assert "STRAT" in d.POS_HEADS and "STRATEGY" not in d.POS_HEADS
+    assert "QTY" in d.POS_HEADS and "CONTRACTS" not in d.POS_HEADS
+
+
+def test_trader_acronyms_survive_the_reword():
+    """The standing rule is: spell out casual shortenings, keep trader
+    acronyms. NET PREM was the casual one and got its word; ATM IV and P/C are
+    the vocabulary, not shorthand for it."""
+    assert "ATM IV" in d.BOARD_HEADS
+    assert "P/C" in d.BOARD_HEADS

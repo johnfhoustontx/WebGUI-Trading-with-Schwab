@@ -1944,8 +1944,16 @@ DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
 #
 # SCORE's 52px is the exception noted above: it holds a two-digit number, but
 # its LABEL is five caps on .2em tracking (~40px), and that is what binds it.
+#
+# NET PREMIUM's track is 88px, not the 66px its VALUE wants, for the same
+# reason: the label binds. It was "NET PREM" at 64px until the casual
+# shortening was spelled out, and the +22px is the whole price of that word.
+# Board's floor sum goes 783 -> 805, still inside the 860px a panel gets and
+# still under Positions' 839, which is the panel that sets the page's minimum
+# window — so this widening is affordable where the same move on STRAT or QTY
+# would not be.
 BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
-              "minmax(116px,1.2fr)_minmax(66px,1fr)_minmax(37px,0.8fr)_"
+              "minmax(116px,1.2fr)_minmax(88px,1fr)_minmax(37px,0.8fr)_"
               f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
@@ -2278,13 +2286,37 @@ PANEL_HEADS = {
 # One label per grid track, hoisted for the same reason as the heads above: the
 # mirror carries its own copy of all four lists, and a rename that reached one
 # screen and not the other would put two different words on one number.
-DEALER_HEADS = ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
-                "CALL WALL", "PUT WALL", "NET GEX / REGIME")
-BOARD_HEADS = ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
-               "SIGNAL", "SETUP")
-FLOW_HEADS = ("TIME", "SYMBOL", "DETAIL", "KIND")
+#
+# Each label names what the number is FOR. ``test_every_column_label_fits_the_
+# track_it_stands_over`` is the constraint every one of them was checked
+# against — a label on .2em tracking does not shrink with the data under it, so
+# a rename is a width change whether or not it was meant as one.
+#
+# ⚠ CEILING and FLOOR drop the call/put naming, and that is deliberate rather
+# than careless: the SIDE is still carried, in the cell's colour (each wall is
+# painted in its own marker's hue on the structure map beside it). The reader's
+# question at a glance is what stops price here, not which contract class the
+# level was derived from. The one thing lost is that a call wall is only a
+# ceiling while price sits BELOW it — which is exactly what the structure map
+# in the next column shows.
+DEALER_HEADS = ("SYMBOL", "PRICE", "FLIP LEVEL", "PRICE VS WALLS",
+                "CEILING", "FLOOR", "DEALER MODE")
+# NET PREMIUM is the one expansion that cost width: 88px against a 66px floor,
+# so BOARD_GRID's fifth track was widened to 88 (panel floor 783 -> 805, still
+# inside the 860px a panel gets). ATM IV and P/C stay — the standing rule is to
+# spell out casual shortenings and keep trader acronyms, and those two are the
+# vocabulary rather than shorthand for it.
+BOARD_HEADS = ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV", "NET PREMIUM",
+               "P/C", "SIGNAL", "SETUP")
+FLOW_HEADS = ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+# ⚠ STRAT and QTY are NOT abbreviations left by accident. They are the two
+# tracks whose floor the HEAD LABEL binds (see POS_GRID's notes), and at 8.0px
+# per character "STRATEGY" needs 64px of 42 and "CONTRACTS" 72px of 36.
+# Widening both costs ~58px against the 43px of slack between this page's
+# minimum supported window and the 1920px it is read at — i.e. it would clip
+# the panel on the screen it is read on. Pinned by test.
 POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
-             "STRIKES", "QTY", "UNREALIZED", "FLAG")
+             "STRIKES", "QTY", "OPEN P&L", "STATUS")
 
 
 def _panel(title, use_line=""):
