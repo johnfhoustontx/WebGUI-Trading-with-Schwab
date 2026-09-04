@@ -48,11 +48,13 @@ from pages import console_regime as _CR
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
+from pages.options.matrix import signal_summary as _signal_summary
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
                                  CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
@@ -682,8 +684,8 @@ BULLBEAR_ROUTE = "/sentiment/bullbear"
 # cascade rather than a 30 s poll, so "not published yet" means something a
 # reader can act on (wait for tonight) that the generic line does not. Wording
 # follows ``sentiment_bullbear.WAITING``.
-WAITING_BULLBEAR = ("Waiting for the sentiment service — the Bull / Bear map is "
-                    "built by the nightly cascade at 16:20 CT.")
+WAITING_BULLBEAR = ("No Bull / Bear map yet — it is rebuilt by the nightly "
+                    "cascade at 16:20 CT.")
 
 
 def _bullbear_rows(bullbear_view):
@@ -917,6 +919,39 @@ def _arc_value(arcs, i):
         return None
 
 
+# ── the Opportunity Board panel head ─────────────────────────────────────────
+# The three buckets, in the board page's own order.
+_BOARD_SIGNALS = ("buy", "neutral", "sell")
+
+
+def board_signal_facts(matrix):
+    """Buy / Neutral / Sell counts for the Opportunity Board panel head.
+
+    ``[{"key", "label", "count", "cls"}]``, or ``None`` when there is nothing
+    to count.
+
+    **Delegated, not recomputed.** ``matrix.signal_summary`` is the same
+    function that page's own summary band calls, and ``signal_class`` the same
+    palette its chips wear — so the head cannot report a different count, or a
+    different colour, from the screen it is quoting.
+
+    ⚠ These count the WHOLE published board while the panel draws only
+    ``BOARD_ROWS_N`` rows. That is deliberate and matches the board page, whose
+    band counts every row too: the head is a market-wide read and the rows
+    below it are the top of that read.
+
+    ⚠ A cold cache and an EMPTY board both return ``None``, never three
+    zeros. A zero here is a reading this page did not take — the rule behind
+    every em dash on this screen — and the body already says "Nothing ranked
+    yet" for the empty case, so a row of zeros beside it would be noise.
+    """
+    if not isinstance(matrix, dict) or not (matrix.get("rows") or []):
+        return None
+    counts = _signal_summary(matrix)
+    return [{"key": k, "label": k.upper(), "count": int(counts.get(k, 0)),
+             "cls": _signal_class(k)} for k in _BOARD_SIGNALS]
+
+
 # ── the session countdown ────────────────────────────────────────────────────
 # What the clock counts to, and what it calls itself. Two states only: the
 # session is open, or it is not — there is no third reading a trader acts on.
@@ -1053,7 +1088,7 @@ def flip_text(row):
 
 
 def flow_kind_text(row):
-    """'Unusual activity · Call' — the alert kind and the side it fired on.
+    """'Unusual volume · Call' — the alert kind and the side it fired on.
 
     One cell, because the flow rows are one line each now and the side is a
     qualifier on the kind rather than a reading of its own. "Call"/"Put" names
@@ -1944,8 +1979,16 @@ DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
 #
 # SCORE's 52px is the exception noted above: it holds a two-digit number, but
 # its LABEL is five caps on .2em tracking (~40px), and that is what binds it.
+#
+# NET PREMIUM's track is 88px, not the 66px its VALUE wants, for the same
+# reason: the label binds. It was "NET PREM" at 64px until the casual
+# shortening was spelled out, and the +22px is the whole price of that word.
+# Board's floor sum goes 783 -> 805, still inside the 860px a panel gets and
+# still under Positions' 839, which is the panel that sets the page's minimum
+# window — so this widening is affordable where the same move on STRAT or QTY
+# would not be.
 BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
-              "minmax(116px,1.2fr)_minmax(66px,1fr)_minmax(37px,0.8fr)_"
+              "minmax(116px,1.2fr)_minmax(88px,1fr)_minmax(37px,0.8fr)_"
               f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
@@ -2035,7 +2078,38 @@ _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 # the same words for both would make a dead service indistinguishable from a
 # quiet market — which is the whole reason this page must never print a zero it
 # did not read.
-WAITING_OPTIONS = "Waiting for the options service…"
+# The ONE copy lives in ``pages/copy.py`` (three screens show it, and the two
+# that are not this one cannot import ``desk`` without a cycle). Re-exported
+# under this name because several tests address it here, and that name is not
+# wrong.
+WAITING_OPTIONS = _copy.WAITING_OPTIONS
+
+# The four "the feed is fine and has nothing to say" lines, and the one warning
+# that qualifies a reading rather than replacing it.
+#
+# Constants for the same reason as ``PANEL_HEADS``: these were written out at
+# their four call sites, and a fifth reader (the standalone mirror, removed
+# 2026-09-02) had carried a byte-copy of every one of them — so one empty
+# cache could be described two different ways. Each says what is TRUE and, where
+# there is one, what makes it change: "the board fills once the scanner runs" is
+# a wait a reader can price; "No ranked symbols yet" is a full stop.
+EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
+                "gamma feed publishes.")
+EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
+EMPTY_FLOW = "Nothing unusual has traded yet today."
+EMPTY_POSITIONS = "Nothing open — no paper or Claude trades running."
+
+
+def stale_walls_note(label):
+    """Why the walls vanished from a dealer row, given a freshness label.
+
+    A silently wall-less row reads as a broken page. This reads as a stopped
+    feed, which is what it is — and it names the consequence rather than only
+    the state, because "stale · 12m" tells a reader the feed is old without
+    telling them what that costs (levels computed against a price that has
+    since moved)."""
+    return (f"Walls hidden — the gamma feed stopped updating "
+            f"({str(label).lower()}), so these levels would be out of date.")
 
 # ── the Bull / Bear chip ─────────────────────────────────────────────────────
 # The chip's frame. Its COLOUR is not here: ``bullbear.quadrant_class`` supplies
@@ -2237,24 +2311,113 @@ def _compact_card(title, arcs, pill_text, delta):
     card.on("click", lambda _e: ui.navigate.to("/sentiment"))
 
 
-def _panel(title, subtitle=""):
+# The panel heads, as DATA rather than four ``_panel(...)`` argument lists.
+#
+# One source for the four heads, rather than four ``_panel(...)`` argument
+# lists and a painter that has to agree with them. It began as the fix for a
+# real drift — the standalone mirror (removed 2026-09-02) restated these titles
+# as literals and rebuilt two of the subtitles with a ``.format`` of its own,
+# so one panel could be named two ways on two screens. The mirror is gone; the
+# reason to keep the heads as data is the line below.
+#
+# The row caps are INTERPOLATED, never written down. That is the property the old
+# "HOTTEST {N}" subtitle had and the reason it was built that way: a cap that
+# moved would otherwise leave a stale number standing on the panel.
+# The second element is a USE-LINE: what the reader does with the panel, not
+# what produced it. All of this was already written — in ``page_help.py``'s
+# ``/desk`` entry, one hover away — which is the wrong side of a tooltip for the
+# landing page.
+#
+# Two facts that used to stand here are gone, and one survived. ``$SPX · SPY ·
+# $NDX · QQQ`` and ``PAPER · CLAUDE · CAPTURED`` are literally the SYMBOL and
+# BOOK columns underneath them, printed row by row. The SORT ORDER is not
+# anywhere else on the panel, so it stays — still interpolated, never written
+# down.
+PANEL_HEADS = {
+    "dealer": ("DEALER POSITIONING",
+               "Above the flip, dealers damp moves; below it they feed them."),
+    "board": ("OPPORTUNITY BOARD",
+              f"The {BOARD_ROWS_N} hottest names right now — where to start "
+              f"looking."),
+    # Which side traded, never who initiated: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here can honestly say. The row
+    # vocabulary has always been careful about this; now the panel says so.
+    "flow": ("LIVE FLOW ALERTS",
+             f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
+             f"who initiated."),
+    "positions": ("POSITIONS",
+                  "What you and Claude are holding, and what needs a decision."),
+}
+
+# One label per grid track, hoisted for the same reason as the heads above: the
+# mirror carries its own copy of all four lists, and a rename that reached one
+# screen and not the other would put two different words on one number.
+#
+# Each label names what the number is FOR. ``test_every_column_label_fits_the_
+# track_it_stands_over`` is the constraint every one of them was checked
+# against — a label on .2em tracking does not shrink with the data under it, so
+# a rename is a width change whether or not it was meant as one.
+#
+# ⚠ CEILING and FLOOR drop the call/put naming, and that is deliberate rather
+# than careless: the SIDE is still carried, in the cell's colour (each wall is
+# painted in its own marker's hue on the structure map beside it). The reader's
+# question at a glance is what stops price here, not which contract class the
+# level was derived from. The one thing lost is that a call wall is only a
+# ceiling while price sits BELOW it — which is exactly what the structure map
+# in the next column shows.
+DEALER_HEADS = ("SYMBOL", "PRICE", "FLIP LEVEL", "PRICE VS WALLS",
+                "CEILING", "FLOOR", "DEALER MODE")
+# NET PREMIUM is the one expansion that cost width: 88px against a 66px floor,
+# so BOARD_GRID's fifth track was widened to 88 (panel floor 783 -> 805, still
+# inside the 860px a panel gets). ATM IV and P/C stay — the standing rule is to
+# spell out casual shortenings and keep trader acronyms, and those two are the
+# vocabulary rather than shorthand for it.
+BOARD_HEADS = ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV", "NET PREMIUM",
+               "P/C", "SIGNAL", "SETUP")
+FLOW_HEADS = ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+# ⚠ STRAT and QTY are NOT abbreviations left by accident. They are the two
+# tracks whose floor the HEAD LABEL binds (see POS_GRID's notes), and at 8.0px
+# per character "STRATEGY" needs 64px of 42 and "CONTRACTS" 72px of 36.
+# Widening both costs ~58px against the 43px of slack between this page's
+# minimum supported window and the 1920px it is read at — i.e. it would clip
+# the panel on the screen it is read on. Pinned by test.
+POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
+             "STRIKES", "QTY", "OPEN P&L", "STATUS")
+
+
+def _panel(title, use_line=""):
     """A console card with a titled head; returns the BODY container.
 
     The head is built ONCE and the body is what each painter clears, so a
-    repaint can neither duplicate the title nor strand a handle to it."""
+    repaint can neither duplicate the title nor strand a handle to it.
+
+    Returns ``(body, head_slot)``. ``body`` is what each painter clears;
+    ``head_slot`` is an empty right-aligned row on the TITLE line, for a fact
+    that moves with the data (the Opportunity Board's signal counts). A painter
+    that uses it must clear it too — the head is built once, the slot's
+    contents are not.
+
+    ``use_line`` gets its OWN line UNDER the title row, and that is not a
+    layout preference. The slot beside the title is ``whitespace-nowrap``,
+    which is right for a short fact and would push a sentence straight out of
+    the narrowest panel (Flow's floor is 508px); it also wears the small-caps
+    ``.2em`` tracking, which is unreadable on prose.
+    """
     with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
-        with ui.row().classes(
-                f"items-baseline justify-between w-full gap-4 border-b "
-                f"{CONSOLE_RULE} pb-2"):
-            ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
-                f"{CON_TXT}")
-            if subtitle:
-                ui.label(subtitle).classes(
-                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
-                    f"{CON_TXT_DIM}")
+        with ui.column().classes(
+                f"w-full gap-1 border-b {CONSOLE_RULE} pb-2"):
+            with ui.row().classes(
+                    "items-baseline justify-between w-full gap-4"):
+                ui.label(title).classes(
+                    f"{CONSOLE_DISPLAY} text-[19px] font-bold "
+                    f"tracking-[.16em] {CON_TXT}")
+                head_slot = ui.row().classes(
+                    "items-center gap-2 whitespace-nowrap shrink-0")
+            if use_line:
+                ui.label(use_line).classes(
+                    f"text-[11px] leading-snug {CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
-    return body
+    return body, head_slot
 
 
 def _grid_head(grid, labels):
@@ -2543,14 +2706,14 @@ def render():
         # the type standing in them, together (see the ladder above).
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
-            dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
-            # Both subtitles are DERIVED from their panel's row cap, because
-            # each used to be a word and a number written down separately — and
-            # both numbers have now moved.
-            board_body = _panel("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}")
-            flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
-            pos_body = _panel("POSITIONS", " · ".join(
-                b["source"] for b in BOOKS))
+            # All four heads come from ``PANEL_HEADS`` — one copy, with the
+            # row caps still interpolated rather than written down.
+            dealer_body, _ = _panel(*PANEL_HEADS["dealer"])
+            # Only the board uses its head slot today - the Opportunity Board's
+            # Buy / Neutral / Sell counts, quoted from that page's own summary.
+            board_body, board_signals = _panel(*PANEL_HEADS["board"])
+            flow_body, _ = _panel(*PANEL_HEADS["flow"])
+            pos_body, _ = _panel(*PANEL_HEADS["positions"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -2680,21 +2843,17 @@ def render():
                 return
             rows = dealer_rows(matrix, fresh["stale"])
             if not rows:
-                ui.label("No dealer positioning published for these symbols "
-                         "yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_DEALER).classes(_PLACEHOLDER)
                 return
             if fresh["stale"]:
                 # Say WHY the walls vanished. A silently wall-less row reads as
                 # a broken page; this reads as a stopped feed, which is true.
-                ui.label(
-                    f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[10px] {CON_WARN} pb-1")
+                ui.label(stale_walls_note(fresh["label"])).classes(
+                    f"text-[10px] {CON_WARN} pb-1")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
-            _grid_head(DEALER_GRID,
-                       ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
-                        "CALL WALL", "PUT WALL", "NET GEX / REGIME"))
+            _grid_head(DEALER_GRID, DEALER_HEADS)
             for row in rows:
                 _dealer_row(row)
 
@@ -2750,16 +2909,35 @@ def render():
                         f"self-start {regime_chip_class(row['regime_word'])}")
         el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
+    def _paint_signal_counts(matrix):
+        """The head's Buy / Neutral / Sell chips, rebuilt with the body.
+
+        Withheld entirely when ``board_signal_facts`` returns None, rather than
+        drawn as zeros - see that builder. The chips wear the board page's own
+        class, so a BUY here and a BUY in the SIGNAL column below are visibly
+        one thing."""
+        board_signals.clear()
+        facts = board_signal_facts(matrix)
+        if not facts:
+            return
+        with board_signals:
+            ui.label("SIGNALS").classes(_STRIP_EYEBROW)
+            for fact in facts:
+                ui.label(f"{fact['label']} {fact['count']}").classes(
+                    f"px-[5px] py-[2px] rounded-[2px] text-[9px] "
+                    f"tracking-[.1em] whitespace-nowrap {fact['cls']}")
+
     def _paint_board():
         board_body.clear()
         matrix = _view("options:matrix")
+        _paint_signal_counts(matrix)
         with board_body:
             if matrix is None:
                 ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
                 return
             rows = opportunity_rows(matrix)
             if not rows:
-                ui.label("No ranked symbols yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_BOARD).classes(_PLACEHOLDER)
                 return
             # Eight labels for eight tracks, ONE line per symbol. WHY and SETUP
             # were the two qualifiers riding under the symbol and the signal;
@@ -2770,11 +2948,9 @@ def render():
             # ATM IV cell on the same line.
             #
             # SCORE rather than HOTNESS because the first track cannot hold
-            # seven letters of 10px caps on .2em tracking — and the panel's own
-            # subtitle already says HOTTEST N, so nothing is lost.
-            _grid_head(BOARD_GRID,
-                       ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
-                        "SIGNAL", "SETUP"))
+            # seven letters of 10px caps on .2em tracking - and the panel's own
+            # use-line already says "the N hottest names", so nothing is lost.
+            _grid_head(BOARD_GRID, BOARD_HEADS)
             for row in rows:
                 _board_row(row)
 
@@ -2829,7 +3005,7 @@ def render():
                 return
             rows = flow_rows(view)
             if not rows:
-                ui.label("No alerts today.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_FLOW).classes(_PLACEHOLDER)
                 return
             # Four labels for four tracks, ONE line per alert. Every other panel
             # here stacks a qualifier under its value because it is short of
@@ -2838,13 +3014,13 @@ def render():
             # and cost a line of height per alert. Flat, the same panel carries
             # nearly twice as many alerts (see ``FLOW_ROWS_N``).
             #
-            # SIDE rides with KIND in the last track ("Unusual activity ·
+            # SIDE rides with KIND in the last track ("Unusual volume ·
             # Call"), which is where it was already being read from. It is
             # still "Call"/"Put", never bought/sold: Schwab publishes no
             # time-and-sales tape to this app, so nobody here knows who
             # initiated. DETAIL carries the premium the alert fired on, in the
             # Flow Alerts page's own wording.
-            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "DETAIL", "KIND"))
+            _grid_head(FLOW_GRID, FLOW_HEADS)
             for row in rows:
                 _flow_row(row)
 
@@ -2896,7 +3072,7 @@ def render():
                 f"text-[11px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
-                ui.label("No open positions.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_POSITIONS).classes(_PLACEHOLDER)
                 return
             # Ten labels for ten tracks, ONE line per row — the same move the
             # board and the flow feed just made, and here it is what pays for
@@ -2906,9 +3082,7 @@ def render():
             # of riding under the strikes. ENTRY and MARK are the pair the
             # unrealized figure is the difference of, so the row shows its own
             # arithmetic rather than only its result.
-            _grid_head(POS_GRID,
-                       ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
-                        "STRIKES", "QTY", "UNREALIZED", "FLAG"))
+            _grid_head(POS_GRID, POS_HEADS)
             for row in shown:
                 _position_row(row)
 

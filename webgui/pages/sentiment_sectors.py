@@ -35,6 +35,7 @@ from pages.options.theme import SECTOR_FONT_HEAD_HTML, SECTOR_TOKENS as _T
 from pages.sentiment import industry_rows, sector_table_rows
 from pages.view_watch import watch_view
 from pages.ui_guard import guard
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "sentiment:sectors"
 
@@ -153,7 +154,7 @@ def render():
         sec = state["sector"]
         if not sec:
             with grid_box:
-                ui.label("Waiting for the sentiment service…").classes(
+                ui.label(_copy.WAITING_SENTIMENT).classes(
                     f"{_T['SC_FAINT']} text-[13px] py-8")
             return
         sd = sec["sector_data"]
@@ -277,7 +278,7 @@ def render():
     @guard
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh"})
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
         sectors_busy.show()
 
     # ── paint ───────────────────────────────────────────────────────────────

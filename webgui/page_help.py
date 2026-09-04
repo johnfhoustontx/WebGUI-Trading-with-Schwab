@@ -60,19 +60,27 @@ on · what am I holding.*
   the Sentiment page's Signals column shows, read off the same composite score;
   the Desk never computes its own.
 - **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
-  **gamma flip** and how far price sits from it, the **call and put walls**, and
-  net gamma exposure. The little bar shows where price sits **between the two
-  walls**. *Long gamma · pins* means dealer hedging tends to **hold** price near
-  those walls; *short gamma · runs* means it **amplifies** moves instead.
-- **Opportunity Board** — the five hottest names right now, with what makes each
-  one interesting, its at-the-money implied volatility and whether that is rising
-  or falling, and a setup tag when one is active.
-- **Live Flow Alerts** — the five newest unusual-options events. Note these show
+  **flip level** and how far price sits from it, the **ceiling** and **floor**
+  (the call and put walls — the ceiling is coloured like its marker on the map,
+  and it only caps price while price is below it), and net gamma exposure. The
+  little bar shows where price sits **between the two**. Under *dealer mode*,
+  *Long gamma · pins* means dealer hedging tends to **hold** price near those
+  levels; *short gamma · runs* means it **amplifies** moves instead.
+- **Opportunity Board** — the hottest names right now, with what makes each one
+  interesting, its at-the-money implied volatility and whether that is rising or
+  falling, and a setup tag when one is active. The panel says how many it is
+  showing.
+  The **Buy / Neutral / Sell** counts in its header are the same ones the
+  Opportunity Board page shows, and they cover **every symbol on the watchlist**
+  — not just the few rows listed beneath them. So "Buy 12" over six rows is not
+  a contradiction: twelve names are rated Buy, and you are looking at the
+  hottest handful of all of them.
+- **Live Flow Alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
   tape, so nobody can honestly say which side traded.
 - **Positions** — your open paper trades and Claude's, together, with the live
-  mark and profit or loss, and a flag: **OK**, **Watch**, **At risk**, **Rescue**.
-  The header totals open trades, unrealised profit and loss, and how many need
+  mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
+  **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
 
 **Click any row** to open the page it came from, already set to that symbol.
@@ -81,11 +89,11 @@ Nothing on this page places or changes a trade.
 **It talks to you.** When a new flow alert or a newly-opened position appears, the
 Desk says it out loud — and that row **glows for ten seconds**, so your eye lands
 where the voice pointed. When the alert names a **contract** it is spoken in full:
-*"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover or a gamma flip is about
-the whole book rather than one contract, so it stays short — *"S P Y. Crossover
-alert, calls over."* A new position adds its strikes, expiry and entry price, and
+*"N D X. Unusual volume, 0-D T E 7 15 Put."* A premium shift or a hedging flip is
+about the whole book rather than one contract, so it stays short — *"S P Y.
+Premium shift alert, calls over."* A new position adds its strikes, expiry and entry price, and
 says **credit or debit** rather than leaving you to work out the sign. If several
-arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **flag** — OK to At risk to Rescue — glows
+arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **status** — OK to At risk to Rescue — glows
 amber and stays **silent**: it was already there, and the flag column has already
 told you.
 
@@ -123,6 +131,11 @@ plus single-leg directional trades on their own tab.
   RETURNED, per trade, as a multiple of what was risked. It comes from your own
   closed trades, not from the option's price, and it is **left out entirely**
   when there aren't enough of them to mean anything.
+- **Dropped at** — the table keeps every signal the day produced, not just the
+  ones still live. A signal the latest scan no longer finds is dimmed and stamped
+  with the time it went, so the day's record stays complete. Its price is frozen
+  at that moment, which is why a dropped row **cannot be paper-traded** — the
+  button is disabled rather than filling you at an hours-old credit.
 - It re-scans on its own — **Run scan** (at the right edge of the table) just
   forces a refresh.
 """,
@@ -260,8 +273,14 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
-- **Apply** dispatches a (simulated) paper adjustment. The board refreshes itself
-  as positions are re-priced.
+- **Apply** adjusts your paper position. No real money, and no live order is
+  placed. The board refreshes itself as positions are re-priced.
+- **Not every option has an Apply button.** One marked *Manual* is a trade you
+  place yourself — the app will not do it for you.
+- **If prices move while you're deciding, Apply is refused** and nothing is
+  changed: you'll see *"Prices moved — nothing was applied."* The numbers on the
+  card were priced a moment ago, and it will not fill you at them once they're
+  stale. Re-read the card and press it again.
 """,
     "/options/matrix": """
 **Opportunity Board — the simple version**
@@ -269,11 +288,16 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
 One **at-a-glance grid** of every tracked symbol, so you can scan the whole board
 without opening each page.
 
-- **Each row** is a ticker: spot, **Day %**, a **trend** arrow, call/put
-  **acceleration**, put/call ratio, net premium ($M), the **GEX** regime
-  (above/below the flip), how many live **signals** and **flow** alerts it has, an
-  overall **Signal** (buy / neutral / sell), and a **hotness** score.
-- **Click any column header** to sort — e.g. hottest names or biggest movers first.
+- **Each row** is one symbol: price, **Day %**, a price **trend** arrow, then
+  **Call flow** and **Put flow** — arrows for whether call and put activity is
+  heating up or cooling off, *not* prices — the put/call ratio, **Net premium
+  $M**, and **Vs flip**, which side of the dealer gamma flip price sits on.
+- **Open signals** and **Flow alerts** are counts: how many live scanner signals
+  and how many of today's flow alerts belong to that symbol. **Signal** is the
+  one overall verdict (buy / neutral / sell), and **Score** is how much is going
+  on altogether — the board's default sort.
+- **Click any column header** to sort — e.g. highest Score or biggest movers
+  first. Sorting is the only control here; rows do not open anything.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
     "/options/flow": """
@@ -282,12 +306,14 @@ without opening each page.
 Everything the options service flagged **today**, newest first — the same alerts
 that chime and hit your phone, kept somewhere you can actually read them.
 
-- **Crossover** — call premium overtook put premium on a symbol, or the reverse.
-- **Unusual activity** — one contract traded far more than its open interest.
-- **Gamma flip** — spot crossed the dealer gamma flip, so dealer hedging starts
-  damping the move instead of amplifying it (or the reverse).
-- **Big delta** — one contract carries an outsized share of that symbol's whole
-  directional exposure; the **Share** column is how big a share.
+- **Premium shift** — call premium overtook put premium on a symbol, or the
+  reverse.
+- **Unusual volume** — one contract traded far more than its open interest.
+- **Hedging flip** — spot crossed the dealer gamma flip, so dealer hedging starts
+  damping the move instead of amplifying it (or the reverse). The side says which
+  way: **now damping** or **now amplifying**.
+- **Outsized bet** — one contract carries an outsized share of that symbol's
+  whole directional exposure; **Share of flow** is how big a share.
 
 None of these can tell a **buy** from a **sell** — Schwab publishes no options
 tape — so read every row as "something large happened here", not as a direction.
@@ -305,8 +331,15 @@ A practice ledger of option trades — **no real money**.
 This is the **hand-kept ledger** — trades you sent here yourself. The automated
 engine's positions live on **Paper Account**.
 
-- **Each row** is a trade with its strikes, credit, max loss, and live P&L.
-- **Analyze** re-prices it now and shows current Greeks; **Close** records an exit.
+- **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
+  you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
+  and when you **Opened** it.
+- **Entry is positive for a credit and negative for a debit** — one column, and
+  the sign tells you which. **P&L** is unrealised while a trade is open and
+  realised once it is closed.
+- **Analyze** re-prices it now and shows current Greeks. **Close trade** records
+  an exit; **Delete** removes the row entirely. Both are sent to the engine, so
+  the ledger updates a moment later rather than instantly.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
@@ -316,11 +349,16 @@ Market Scanner signals you're **tracking over time** to see whether they're work
 
 - **Newest first** — the table opens with your most recently captured signal at
   the top. Click any column heading to re-sort it.
-- **Rec** — green = take profit, red = cut, amber = hold.
-- **Credit vs Cur Price** — what you took in against what it would cost to close
-  now; **P&L** is the difference, green in profit and red in loss.
-- **Refresh marks (live)** re-prices everything against fresh chains; you're
-  alerted when a stop or target is hit.
+- **Action** — what to do now: green = take profit, red = cut, amber = hold.
+- **Entry vs Mark** — what you took in against what it would cost to close now;
+  **Open P&L** is the difference, green in profit and red in loss. Entry is
+  positive for a credit and negative for a debit, so a **Directional** signal
+  (see **Style**) shows a negative Entry — that is a debit paid, not a loss.
+- **DTE at entry** and **Entry grade** are frozen at the moment you captured the
+  signal and do not move. Every other column is live. Use **Expiry** for how much
+  time is actually left.
+- **Reprice now** re-prices everything against fresh chains; you're alerted when
+  a stop or target is hit.
 - Click a row to load it into the **detail panel** on the right, and to pick it
   for **Close selected**.
 - **The footer** under the table sums the day: how many signals were captured and

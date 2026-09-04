@@ -1390,6 +1390,34 @@ value is about to be formatted. `num` alone had SIX byte-identical copies before
 2026-08-20. Options table helpers (`rescue_highlight`, `AT_RISK_STATES`) live in
 `pages/options/rescue.py` beside `heat_border_class`.
 
+**`webgui/pages/copy.py` is its sibling for shared SENTENCES** (2026-09-04) —
+text more than one screen shows for one condition, where two screens wording it
+differently is a defect rather than a style difference. It holds
+`WAITING_OPTIONS` / `WAITING_SENTIMENT` / `WAITING_MARKET` and imports nothing
+from `pages`, which is what makes it safe to import at any depth: `desk.py`
+imports `pages.options.flow` and `pages.options.matrix`, so neither of those can
+import `desk` back. ⚠ **These are the lines for a feed that has published
+NOTHING** — never for one that is fine and has nothing to report. Every screen
+drawing one keeps its own quiet-market line (`desk.EMPTY_*`,
+`flow.status_text`'s empty branch), because a dead service and a still tape
+rendering the same words is what the "never print a zero you did not read" rule
+exists to prevent. `webgui/tests/test_shared_copy.py` reads the source of every
+page module and fails on a reintroduced literal — the guard a per-page test
+cannot be, and it caught a site the hand-written grep behind it had missed.
+
+**The screen vocabulary is written from the READER's side (the 2026-09-04
+pass).** A label names what the number is FOR, not which mechanism produced it;
+an empty state says what is true rather than which service is cold; and an
+action toast says what to expect rather than that a command was enqueued. Two
+traps that pass turned up repeatedly and are worth assuming on any page not yet
+audited: **a `Credit` column is wrong wherever the book holds debits** (a debit
+is stored as a NEGATIVE credit — hit on the Paper Ledger, Captured Signals, Paper
+Account and the EOD report), and **an `entry_*` field rendered under a bare
+label reads as live** (`dte_at_entry` under "DTE" on a tracking page). Per-page
+decisions and the deliberate divergences — `/desk` keeping `STRAT`/`QTY` for
+width, `/options/paper` keeping plain `P&L` because its rows can be closed — are
+in the eight `docs/plans/2026-09-04-*-copy-design.md` docs, each pinned by test.
+
 **The version-gate poll idiom is `webgui/pages/view_watch.watch_view(view, on_change)`**
 — seed the version, probe the cheap `{key}:ver` on a timer, repaint only when it
 moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing

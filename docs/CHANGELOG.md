@@ -34,6 +34,402 @@ the user's request. `/desk` and `/wall` are untouched.)
 - **webgui suite: 2,869 passed, 0 failed.** The count FELL from the pre-change
   baseline because the deleted tests went with their subject — the one case where
   a dropping count is the healthy signal.
+**Last updated:** 2026-09-04 (**The reader's-voice pass is complete across the
+app.** The eighth and last entry in the series: the sweep of everything the seven
+per-page passes did not cover.)
+
+- **The audit's headline is how little was left.** Grepping the remaining ~20
+  pages for the four defect classes turned up a short specific list, not twenty
+  pages of work. The six Trend & Sentiment screens were rebuilt with reader-side
+  copy on 2026-08-17; `pages/portfolio.py` was already plain English; and
+  `/status`, `/terminate` and `/settings` are machine-facing screens where
+  "cache" and "service" ARE the subject matter — deliberately untouched.
+- **Two more shared sentences.** `WAITING_SENTIMENT` had **two spellings across
+  four screens** (with and without "the"); `WAITING_MARKET` has one site and lives
+  in `pages/copy.py` anyway, so the next screen to need it finds it rather than
+  inventing a fifth wording.
+- **Ten "requested" toasts.** "Refresh requested", "Paper trade requested.",
+  "Swing scan requested" — honest about the enqueue and useless to a reader. The
+  three `cmd:*` ones keep the "when the engine confirms" formula the earlier
+  passes established.
+- **⚠ `webgui/tests/test_shared_copy.py` is the guard a per-page test cannot
+  be**, and it earned its keep on the first run: it reads the source of every page
+  module, and found a **tenth** "requested" toast on the Gamma page that the
+  hand-written grep behind the design had missed. It also pins the two deliberate
+  exemptions by NAME rather than by pattern, so a new page cannot inherit them.
+- **Paper Account carried the most labels**: `Strat`/`Exp`/`Qty`/`Credit`/
+  `CurVal`/`P&L$` → `Strategy`/`Expiry`/`Contracts`/`Entry`/`Mark`/`Open P&L`.
+  `Credit` was wrong for the fourth time in this campaign — the engine's paper
+  book holds directional debits — and `CurVal` was a shortening *and* the wrong
+  idea, since it is the live price the rest of the app calls Mark.
+- **Claude Trades was printing one concept two ways on ONE screen**: its
+  closed-trades table said `Strategy` while its positions table said `Strat`.
+- **`/portfolio` counts SHARES, not contracts.** Every options page in this
+  campaign renamed `Qty` to "Contracts"; doing it here would have been consistency
+  at the cost of being wrong, since that is the equity book.
+- **Two deliberate deferrals, both tested.** `/desk` keeps `STRAT`/`QTY` (measured
+  label-bound grid floors; the words clip the panel at the 1920px it is read at),
+  and `leg_editor` keeps `Qty` (a 64px track in a dense widget mounted by three
+  pages). Same class, same treatment: a test recording the arithmetic, because a
+  comment saying "this is deliberate" is the kind nobody reads before "fixing" it.
+- **The two traps worth carrying forward**, now in CLAUDE.md: a `Credit` column is
+  wrong wherever the book holds debits (four pages), and an `entry_*` field under a
+  bare label reads as live (`dte_at_entry` under "DTE" on a page whose whole
+  purpose is tracking over time).
+- **Not browser-verified — and this is the one thing outstanding.** A worktree
+  resolves to prod and would bind `:8500`, so none of the eight passes has been
+  seen in a browser. Suite: **2980 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-remaining-pages-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Rescue — the stale-price guard now says nothing
+happened.** Seventh page of the reader's-voice pass, and the first that EXECUTES
+rather than reports, which is why one of its sentences mattered more than every
+column label on it.)
+
+- **⚠ The finding.** When prices drift, Apply **aborts without mutating** — the
+  engine states it twice (`paper_adjust.py`: *"stale (re-review) and nothing is
+  mutated"*; `handlers.py`: *"aborts (`stale`) without mutating when prices have
+  drifted"*). The reader was told only **"Prices moved — re-review"**. That says
+  prices moved; it does not say the adjustment was refused — and on a page whose
+  Apply button had just been pressed, "re-review" reads as easily as *"it went
+  through, go look"* as *"nothing happened"*. The toast now reads **"Prices
+  moved — nothing was applied. Check the new numbers and try again."** and the
+  `summary_line` prefix leads with **"Nothing applied — prices moved"**, since a
+  headline continues after it.
+- **`Strike Date` labelled `expiration`.** A spread carrying two strikes has no
+  such thing as a strike date. → **Expiry**, the word six pages have now settled
+  on. Third page running with a header naming the wrong quantity.
+- **One number, one screen, two names.** The at-risk table said `Δ short` while
+  the candidate cards' own metric list (`_CANDIDATE_METRICS`) said `Short delta`.
+  The table takes the cards' word.
+- **`Strat`→`Strategy`**, **`Comm`→`Commission`**, and **`P&L`→`Open P&L`** —
+  every row here is an at-risk *open* position, so this is the Captured Signals
+  case rather than the Paper Ledger one. `Gross` and `Net` stay: either side of
+  `Commission` in one money row, the pairing is self-evident.
+- **`State`→`Risk state`, deliberately not `Status`.** The Paper Ledger's
+  `Status` column means OPEN/CLOSED; this one means TESTED/CRITICAL. One word on
+  two different things is exactly the drift these passes close.
+- **The Apply dialog said it "dispatches a (simulated) paper adjustment"** —
+  implementation-speak for the most reassuring fact on the page. It now says
+  *"This adjusts your paper position. No real money, and no live order is
+  placed."* And an advisory-only card's lower-case *"manual — place yourself"*
+  now reads as the instruction it is.
+- **The help never mentioned the guard at all**, so a reader who saw "Prices
+  moved" had nothing to check it against. It now covers both the refusal and the
+  fact that a *Manual* option is one the app will not place for you.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2971 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-rescue-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Market Scanner — and the last spelling of the
+waiting line.** Sixth page of the reader's-voice pass. This one started in better
+shape than the five before it, so the change is narrow and two of its labels
+deliberately did NOT move.)
+
+- **Already good, and left alone:** `day_note` and `truncated_note` are written
+  from the reader's side; the three subtab tooltips explain 0-DTE / Swing /
+  Directional in a sentence each; and `status_line`'s word **live** is doing real
+  work — the tab headers carry the DAY's counts (hundreds by 3pm) while that line
+  sums the last SCAN (dozens), and the word is what stops the gap reading as a bug.
+- **`Type`→`Strategy`** (the cell holds `PCS` / `CCS` / `IC` — the structure, and
+  the word the Paper Ledger and Captured Signals already use), **`Exp`→`Expiry`**,
+  **`Max Loss`→`Max loss`**.
+- **`Dropped`→`Dropped at`** — the cell holds `stale_since`, a *timestamp*: when
+  the signal stopped appearing in a scan, not whether it did.
+- **⚠ `Credit` STAYS here, which is the opposite of the last two pages** — and it
+  now carries a test saying so, because three pages into a pattern this is the one
+  somebody "fixes". `signal_columns` is a credit-spread table **by construction**;
+  the Directional tab, which holds the debits, does not use these columns at all
+  (`directional_columns` deliberately carries no credit or R:R economics, since a
+  directional trade is scored by a model not commensurable with the premium one).
+- **⚠ `DTE` also stays bare**, where Captured Signals had to become "DTE at
+  entry". That page's value is frozen at capture; this scan reruns every 15
+  minutes. The two pages differ because the quantities do, and a test on each side
+  records it.
+- **The waiting line is now singular across the app.** `status_line` read
+  *"Waiting for options service…"* — no "the" — a **fourth** spelling of a
+  sentence that already had three. It takes `pages.copy.WAITING_OPTIONS`, and so
+  does the one remaining variant in `rescue.py`: that is a shared sentence, so it
+  belongs to that module's job rather than waiting for a Rescue-page pass. Grep
+  confirms no other spelling survives in the tree.
+- **`Scan requested`→`Scanning — results appear when the scan finishes.`** A full
+  scan takes tens of seconds, and "requested" left no clue whether to wait or
+  re-press.
+- **A help gap this pass FOUND rather than created.** Nothing told the reader why
+  a row goes grey, or why its paper-trade button stops working. A dropped signal's
+  price is frozen at the moment it went — which is precisely why `stamp_stale`
+  blocks paper-trading it — and the help now says so.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2963 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-market-scanner-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Captured Signals — three columns were wrong, not
+merely terse.** Fifth page of the reader's-voice pass, and the one that turned up
+the most genuine mislabelling.)
+
+- **⚠ Two columns on a tracking page did not track.** `DTE` holds `dte_at_entry`
+  and `Grade` holds `entry_grade` — both captured once, never updated. On a screen
+  whose entire purpose is watching a signal **over time**, a bare "DTE" is read as
+  days left and drifts further from the truth every session that passes. They
+  become **DTE at entry** and **Entry grade**, and the help now says outright that
+  these two are frozen while every other column is live.
+- **⚠ `Credit` again, same defect as the Paper Ledger.** `mode` is the
+  PREMIUM-vs-DIRECTIONAL tag, and a directional signal is a **debit** — so this
+  book was never all credits. It becomes **Entry**, with the sign carrying
+  credit-vs-debit. Two pages in a row have now had a column whose header
+  contradicted the sign in its own cell; worth assuming the next one does too.
+- **`Rec`→`Action`** — the cell literally holds `TAKE_PROFIT` / `HOLD` / `CUT`,
+  which is what to do, not a description of anything.
+- **`Mode`→`Style`**, deliberately **not** "Trade type": this app already uses
+  `trade_type` for 0-DTE / Swing / Directional, and reusing that phrase for the
+  PREMIUM/DIRECTIONAL split would put one name on two different things.
+- **`Strat`/`Exp`/`Cur Price`/`Risk` → `Strategy`/`Expiry`/`Mark`/`Max loss`**,
+  matching `/desk` and the Paper Ledger.
+- **`P&L`→`Open P&L` here, while the Paper Ledger keeps plain `P&L`** — and that
+  is a real difference, not a drift. A closed signal **leaves this table** (the
+  reason its Status column was dropped long ago), so every visible row is open.
+  The Paper Ledger keeps closed rows and its `trade_pnl` returns *realized* for
+  them, where "Open P&L" would be wrong for half the book. A test on each side
+  records the distinction, so neither gets "fixed" into agreement.
+- **`Refresh marks (live)`→`Reprice now`** — "marks" is jargon, and the page's own
+  status line already said "Repricing…". The close toast takes the Paper Ledger's
+  wording for the same reason: it is a `cmd:options` command, so it names the
+  symbol and says the list updates when the engine confirms.
+- **Untouched:** the four footer figures, which are already the clearest copy on
+  the page — including the em-dash-not-$0.00 rule for an unpriced book — plus
+  every colour map and the raw payload keys.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2957 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-captured-signals-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Paper Ledger's columns name the reading, and
+one of them was wrong.** Fourth page of the reader's-voice pass, and the first
+that ACTS rather than only reports.)
+
+- **⚠ `Credit` was not merely terse, it was false for half the book.** That column
+  holds `entry_credit_total`, and a **debit trade stores its debit as a negative
+  credit** — so every debit row rendered under a header contradicting the sign in
+  its own cell. It becomes **Entry**: the sign then carries credit-vs-debit, which
+  is what it was already doing, and it is `/desk`'s word for the same quantity.
+- **That made the rename a SWAP,** which is worth knowing before you next open the
+  page: `Entry` was taken by `entry_time`, which becomes **Opened**. A reader who
+  knows the old layout sees `Entry` move from a time to a price. `Opened` is the
+  better word for a timestamp regardless, and leaving `Credit` wrong was the worse
+  option.
+- **`Risk`→`Max loss`** (it *is* `max_loss_total`; "Risk" names no quantity) and
+  **`Exp`→`Expiry`**.
+- **`P&L` is deliberately NOT renamed to `/desk`'s `OPEN P&L`.** `trade_pnl`
+  returns REALIZED for a closed trade, so half these rows are not open at all —
+  copying the Desk's word here would have been consistency at the cost of being
+  right.
+- **⚠ A deliberate divergence from `/desk`, and the first one this pass has
+  produced.** `Strat` and `Qty` are spelled out here as **Strategy** and
+  **Contracts**. Those are exactly the two labels the Desk had to keep short: its
+  Positions grid has measured per-string `minmax()` floors, both tracks are
+  label-bound, and the words cost ~58px against 43px of slack — they would clip
+  the panel at the 1920px it is read at. This page is a `ui.table` with no such
+  limit. So the app now shows one concept under two spellings, on purpose: the
+  standing rule is to spell out casual shortenings, so the abbreviation stays a
+  width **concession** rather than becoming the app's word for the concept. Both
+  tests now point at each other, so the next reader finds the reason rather than
+  the inconsistency.
+- **The action copy, which is what makes this page different from the first
+  three.** The toolbar's `Close` becomes **Close trade** — the Analyze dialog
+  carries its own `Close`, which dismisses it. And the toasts said "Close
+  requested." / "Delete requested.": accurate, since these are commands on
+  `cmd:options` and the ledger changes when `options_svc` processes them, but
+  silent about what the reader should now watch for. They now name the symbol and
+  say the ledger updates **when the engine confirms** — the honesty kept, the
+  missing half added. Nothing claims a trade is already closed.
+- **`page_help.py` gained the sentence the column could not carry:** that Entry is
+  positive for a credit and negative for a debit, and that P&L is unrealised while
+  open and realised once closed.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2950 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-paper-ledger-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Opportunity Board's columns name the reading,
+not the field.** Third page of the reader's-voice pass, and the one that finally
+earned a shared home for the copy three screens show.)
+
+- **Two headers were actively misleading, not merely terse.** `Call` and `Put`
+  hold call/put **acceleration** arrows (hot / cool / steady / flat) — a reader
+  scanning that header row has every reason to expect a price or a volume in the
+  cell beneath. They become **Call flow** / **Put flow**. `GEX` labelled a column
+  whose values are literally `above` / `below`, so it becomes **Vs flip**.
+- **`Sig` and `Signal` were different quantities two columns apart** — a count of
+  live scanner signals, and the buy/neutral/sell verdict. The COUNT is what got
+  renamed, to **Open signals**. `Verdict` is arguably the clearer word for the
+  other one, but `/desk`'s board panel already prints SIGNAL for it, and a second
+  name for one quantity is the drift the first two passes closed. `Flow` (a count
+  of alerts, not an amount of flow) becomes **Flow alerts**.
+- **Four more took `/desk`'s words** for the same quantities its Opportunity
+  Board panel shows: `Ticker`→**Symbol**, `Spot`→**Price**, `Net $M`→**Net
+  premium $M**, `Hot`→**Score**. The unit rides on the premium label because that
+  cell is a bare number in millions. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The eyebrow now names the only control on the page.** This screen has no row
+  click-through: sorting is the whole interaction, and nothing on it said so.
+- **⚠ `webgui/pages/copy.py` is new, and the reason is worth recording.** This
+  page was the THIRD byte-copy of "Waiting for the options service…". `desk.py`
+  imports both `pages.options.flow` and `pages.options.matrix`, so neither can
+  import back — which is why the Flow pass settled for a restated literal plus a
+  test pinning it equal to the Desk's. That is the right answer for two copies
+  and the wrong one for three. The new module is a leaf importing nothing from
+  `pages`, on the model `pages/fmt.py` already set for shared *numeric*
+  vocabulary ("the ONE copy"); `flow._WAITING` is gone along with the guard that
+  justified it, and `desk.WAITING_OPTIONS` stays as an alias because
+  `desk_stream` and several tests address it there and that name is not wrong.
+- **The distinction that module must NOT collapse**, stated in its own docstring:
+  this is the line for a feed that has published nothing, never for a feed that
+  is fine and has nothing to report. Every screen drawing it keeps its own
+  quiet-market line, because a dead service and a still tape rendering the same
+  words is the failure this app's "never print a zero you did not read" rule
+  exists to prevent.
+- **`page_help.py` followed**, and gained the two things the columns could not
+  say: that Call flow / Put flow are *not* prices, and that rows do not open
+  anything.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2942 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-opportunity-board-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Flow Alerts names the event, not the detector.**
+Second page of the reader's-voice pass. `/options/flow` went next because the Desk
+pass left it holding the app's other copy of "Waiting for the options service…".)
+
+- **The four alert kinds were detector names.** `Crossover`, `Unusual activity`,
+  `Gamma flip`, `Big delta` are the four things `options_svc` runs. "Big delta ·
+  Call" told a reader which detector produced the row and nothing about what the
+  market did — the only reason the row is on screen. They become **Premium
+  shift**, **Unusual volume**, **Hedging flip**, **Outsized bet**.
+- **The two gamma SIDES had to move with them.** "Hedging flip · To positive"
+  reads *worse* than the name it replaced: "to positive" only parses once you
+  already know the subject is gamma sign, and that is precisely the word the new
+  kind name takes away. `To positive`/`To negative` become **Now damping** /
+  **Now amplifying**. `Calls over` / `Puts over` / `Call` / `Put` are untouched
+  and deliberately literal — this page can say which side traded and never who
+  initiated, because Schwab publishes no time-and-sales tape to this app.
+- **⚠ "Hedging flip", not "Hedging flipped", and that is load-bearing.**
+  `voice.flow_phrase` builds its contract-less form as `f"{kind} alert"` — the
+  form a gamma flip ALWAYS takes, since it names no contract — so a clause there
+  speaks as "Hedging flipped alert, now damping." Every kind label is a noun
+  phrase for that reason, and a test says so.
+- **The Desk, `/desk/live` and the SPOKEN alerts all followed**, because each
+  reads these labels rather than restating them. The squawk now says *"S P Y.
+  Premium shift alert, calls over."* and *"N D X. Unusual volume, 0-D T E 7 15
+  Put."* `voice.py`'s two deliberate copies (`_ALL_CAUSES`, `CONTRACT_KINDS` —
+  restated because the prewarm runs before any page is built) were updated; both
+  guards recompute through `flow.alert_kind_label`/`side_label`, so the rename
+  **failed the suite loudly** rather than desynchronising the audio. The
+  prewarmed clips under `webgui/data/voice/` are keyed by phrase text, so they
+  re-synthesize on first use and the old files are orphaned — gitignored,
+  self-healing, no action needed.
+- **Column labels match the Desk's words** for the same quantities: `Type`→**Alert
+  type**, `Detail`→**What traded**. `Alert` sat directly beside `Alert type`
+  naming a different thing and became **Summary**; `Share` never said share *of
+  what* and became **Share of flow**. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The status line, both branches.** The cold branch is a **guarded copy** of
+  `desk.WAITING_OPTIONS`, not an import: `desk.py` imports this module for
+  `alert_rows` and `_TONE`, so importing back is a cycle. Same pattern and same
+  justification as `voice._ALL_CAUSES`, with a test pinning the two equal. The
+  quiet branch now describes the MARKET rather than the page — "Nothing unusual
+  has traded yet today" against "No flow alerts yet today", which reads as a
+  screen with nothing on it.
+- **The raw payload keys did NOT change.** `crossover` / `uoa` / `gamma_flip` /
+  `big_delta` / `to_positive` are the `options_svc` contract, the
+  `config/flow_alerts.toml` section names and `_TONE`'s keys. Renaming a word is
+  this page's business; renaming a key would be a cross-tier migration for no
+  reader's benefit, and the page's design already separates the two.
+- **`page_help.py` followed on BOTH entries** — and the Desk's entry was stale in
+  a way the first pass missed: it quotes the spoken examples verbatim, and it
+  still said "changes **flag**" after that column became STATUS. The earlier
+  guard forbade `"a flag:"` but not the bolded form, which is how that file names
+  a screen element. Guard widened.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2936 passed** in `webgui`, no failures (the four affected suites were
+  411 before, 419 after).
+  [design](plans/2026-09-04-flow-alerts-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Desk speaks in the reader's voice.** Every
+label on `/desk` said which mechanism produced the number; the use-language was
+already written, one hover away in `page_help.py`. First of a planned pass; the
+landing page went first.)
+
+- **Four use-lines.** Each panel head gained a sentence saying what you do with
+  it — "Above the flip, dealers damp moves; below it they feed them." It gets its
+  OWN line, not the existing subtitle slot: that slot is `whitespace-nowrap` on
+  the title row (right for the four short facts it held, fatal to a sentence in
+  the 508px-floor Flow panel) and wears `.2em` tracking, which is correct for
+  small caps and unreadable on prose.
+- **Two facts dropped, one absorbed.** `$SPX · SPY · $NDX · QQQ` and
+  `PAPER · CLAUDE · CAPTURED` are literally the SYMBOL and BOOK columns beneath
+  them. The SORT ORDER is not anywhere else on the panel, so `HOTTEST`/`NEWEST`
+  survive into the use-line — still interpolated from the row cap, which is the
+  property the old subtitle was built for.
+- **Column labels name the use.** `SPOT`→`PRICE`, `GAMMA FLIP`→`FLIP LEVEL`,
+  `STRUCTURE MAP`→`PRICE VS WALLS`, `CALL WALL`/`PUT WALL`→`CEILING`/`FLOOR`,
+  `NET GEX / REGIME`→`DEALER MODE`, `WHY`→`WHY IT'S HOT`, `DETAIL`/`KIND`→
+  `WHAT TRADED`/`ALERT TYPE`, `UNREALIZED`/`FLAG`→`OPEN P&L`/`STATUS`.
+  `CEILING`/`FLOOR` drop the call/put naming deliberately — the side is carried
+  by the cell's COLOUR (each wall painted in its structure-map marker's hue), and
+  the caveat that a call wall only caps price from above is what the map beside
+  it shows.
+- **⚠ Two labels are width-blocked, and that is arithmetic rather than an
+  oversight.** On Positions the head label binds the track, not the value. At the
+  8.0px/char the existing width test measures, `STRATEGY` needs 64px of a 42px
+  floor and `CONTRACTS` 72px of a 36px one; widening both costs ~58px against the
+  43px of slack between this page's minimum window and the 1920px it is read at —
+  i.e. it would clip the panel on the screen it is read on. Pinned by test so the
+  next reader sees a deferral, not an inconsistency to tidy. `NET PREM`→`NET
+  PREMIUM` was affordable at +22px (track 66→88, Board's floor 783→805, inside
+  the 860px a panel gets).
+- **Empty states say what is true.** "Waiting for the options service…" is the
+  most-read text on the page off-hours and made a quiet market read as a fault.
+  Each now states the fact and, where there is one, what changes it — "the board
+  fills once the scanner runs" is a wait a reader can price.
+- **`/desk/live` was drifting-capable and is no longer.** CLAUDE.md said the
+  mirror "cannot drift from `/desk`" because `snapshot()` uses that page's own
+  builders. True of every NUMBER, false of every WORD around them: titles were
+  HTML literals, two subtitles were rebuilt with a local `.format`, and all four
+  column-label lists plus all five empty-state strings were byte-copies. Both
+  screens now read `desk.PANEL_HEADS`, the `*_HEADS` tuples and the `EMPTY_*` /
+  `stale_walls_note` constants. Because `_JS` is inserted verbatim and can never
+  be `.format`ed, the labels reach it through the `consts` injection — the route
+  `CALL_HEX` already took — paired with that screen's own width percentages by
+  `zipw`, so a renamed label reaches both screens and a re-tuned width reaches
+  one. The dealer panel also gained the `psub` element it never had.
+- **The hover guide was already stale and this exposed it.** `page_help.py` said
+  "the five hottest names" and "the five newest" against caps of 6 and 9 — now
+  visibly wrong, since the panel prints its own count. Fixed by stating no number
+  there at all rather than a second copy of one.
+- **Not in this pass, by choice:** the `BIAS`/`SIGNAL` tile captions, the trend
+  and regime words and the Bull/Bear headline are imported from `/sentiment`, so
+  rewording them changes that screen too; the Positions summary line and the
+  top-strip captions were deferred to keep the diff reviewable. `/options/flow`
+  still carries its own "Waiting for the options service…" — the natural next
+  page.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  The width claims are arithmetic against the floors `desk.py` documents and are
+  enforced by `test_every_column_label_fits_the_track_it_stands_over`; the
+  `NET PREMIUM` track widening wants eyeballing in dev before promote. Suite:
+  **2927 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-desk-user-perspective-copy-design.md) ·
+  [plan](plans/2026-09-04-desk-user-perspective-copy-plan.md)
 
 ---
 

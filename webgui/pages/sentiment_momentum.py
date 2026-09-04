@@ -747,7 +747,7 @@ def render(level="industry"):
     @guard
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_momentum"})
-        ui.notify("Recompute requested")
+        ui.notify("Recomputing — this one takes a moment.")
         mom_busy.show()
 
     _read()

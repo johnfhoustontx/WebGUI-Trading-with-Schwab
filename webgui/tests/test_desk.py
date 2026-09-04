@@ -13,6 +13,7 @@ import re
 import pytest
 import voice
 from pages import desk as d
+from pages.options import flow as _flow_page
 
 
 @pytest.fixture(autouse=True)
@@ -325,8 +326,8 @@ def test_flow_rows_delegates_to_the_flow_pages_own_builder():
 
 
 def test_flow_kind_text_joins_the_kind_and_the_side_it_fired_on():
-    assert d.flow_kind_text({"kind": "Unusual activity", "side": "Call"}) == \
-        "Unusual activity · Call"
+    assert d.flow_kind_text({"kind": "Unusual volume", "side": "Call"}) == \
+        "Unusual volume · Call"
 
 
 def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
@@ -340,7 +341,7 @@ def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
 def test_flow_kind_text_never_claims_who_initiated():
     """Call/Put names the side of the book that moved. Schwab publishes no
     time-and-sales tape to this app, so nobody here knows who bought it."""
-    blob = d.flow_kind_text({"kind": "Big delta", "side": "Call"}).lower()
+    blob = d.flow_kind_text({"kind": "Outsized bet", "side": "Call"}).lower()
     assert "buy" not in blob and "sell" not in blob
 
 
@@ -1525,7 +1526,11 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
     # The flow kind, now carrying the side it fired on in the same cell — the
     # rows are one line each, so the side is a qualifier rather than a column.
-    assert "Unusual activity · Call" in texts
+    # Built from the flow page's OWN labels, never restated: the Desk
+    # prints whatever that module stamps, so a rename there shows up here
+    # as agreement rather than as a stale literal for someone to chase.
+    assert (_flow_page.alert_kind_label({"type": "uoa"}) + " · "
+            + _flow_page.side_label({"side": "call"})) in texts
     assert "AT RISK" in texts                    # the position flag
     assert any(t.startswith("OPEN 1 ·") for t in texts)
     assert "Rallying" in texts                   # the regime word in the strip
@@ -1585,7 +1590,7 @@ def test_render_survives_junk_in_every_view(monkeypatch):
     # It degrades to the empty state rather than raising — but note it does NOT
     # degrade to the *waiting* state, because a malformed payload is not an
     # absent one and the page cannot tell the difference from here.
-    assert "No open positions." in texts
+    assert desk.EMPTY_POSITIONS in texts
 
 
 # ── the Bull / Bear sector strip, mounted ────────────────────────────────────
@@ -1742,12 +1747,21 @@ def _px(classes):
 
 
 def _head_calls():
-    """Every ``_grid_head(GRID, (labels...))`` in ``render``, resolved."""
+    """Every ``_grid_head(GRID, LABELS)`` in ``render``, both args resolved.
+
+    Both arguments are module constants now — the labels moved out of the
+    call so one tuple could serve the head and the rows (and, until it was
+    removed, the standalone mirror that had carried its own copy). A literal
+    tuple is still accepted, so this keeps working if a call is ever written
+    inline again."""
     tree = ast.parse(inspect.getsource(d.render).lstrip())
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_grid_head":
-            yield (getattr(d, node.args[0].id),
-                   [e.value for e in node.args[1].elts])
+            arg = node.args[1]
+            labels = ([e.value for e in arg.elts]
+                      if isinstance(arg, (ast.Tuple, ast.List))
+                      else list(getattr(d, arg.id)))
+            yield getattr(d, node.args[0].id), labels
 
 
 def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
@@ -2164,7 +2178,7 @@ def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
     s = d.arrival_state()
     s["first"] = False
     said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
-    assert said == "Q Q Q. Unusual activity, 0-D T E 7 37 Call."
+    assert said == "Q Q Q. Unusual volume, 0-D T E 7 37 Call."
 
 
 def test_a_new_position_speaks_its_contract_from_the_raw_payload():
@@ -2584,3 +2598,257 @@ def test_synthesis_never_runs_on_the_event_loop():
         if "_voice.ensure" in line:
             assert "run.io_bound" in line
     assert src.count("_voice.ensure") == 2      # the poll, and the unlock button
+
+
+# ── the panel heads and column labels, as one shared source ──────────────────
+def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
+    """The heads are DATA: one copy, rather than four argument lists.
+
+    The row caps must stay interpolated rather than written down: the old
+    "HOTTEST {N}" subtitle existed in that shape precisely so a cap change could
+    not leave a stale number standing on the panel.
+    """
+    heads = d.PANEL_HEADS
+    assert set(heads) == {"dealer", "board", "flow", "positions"}
+    for key, (title, use_line) in heads.items():
+        assert title == title.upper(), key
+        assert use_line, key
+    assert str(d.BOARD_ROWS_N) in heads["board"][1]
+    assert str(d.FLOW_ROWS_N) in heads["flow"][1]
+
+
+def test_column_headers_are_constants_one_per_grid_track():
+    """A header tuple must carry exactly as many labels as its grid has tracks.
+
+    The grids and their labels are declared in different places, and a track
+    added without its label silently shifts every label after it one column to
+    the left — which reads as a page that is merely wrong, not as one that
+    broke.
+    """
+    for name, heads, grid in (("dealer", d.DEALER_HEADS, d.DEALER_GRID),
+                              ("board", d.BOARD_HEADS, d.BOARD_GRID),
+                              ("flow", d.FLOW_HEADS, d.FLOW_GRID),
+                              ("positions", d.POS_HEADS, d.POS_GRID)):
+        tracks = grid.split("grid-cols-[")[1].split("]")[0].count("_") + 1
+        assert len(heads) == tracks, (name, len(heads), tracks)
+
+
+def test_use_lines_say_what_the_panel_is_for():
+    """Each head's second line is the reader's question, not the mechanism's
+    name. page_help.py already carried this voice; it was one hover away."""
+    heads = d.PANEL_HEADS
+    assert "dealers" in heads["dealer"][1]
+    assert "where to start looking" in heads["board"][1]
+    # The honest caveat the Flow panel owes its reader, and the reason the
+    # rows say Call/Put rather than bought/sold: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here knows who initiated.
+    assert "not who initiated" in heads["flow"][1]
+    assert "needs a decision" in heads["positions"][1]
+
+
+def test_a_use_line_fits_the_panel_it_stands_in():
+    """~125 characters at 11px in an 860px panel; 90 is the guard rail.
+
+    WIDTH, not height: this page is already taller than any window it is read
+    in (see ``DESK_SCROLLBAR_PX``), so a line too TALL costs nothing, while a
+    line too WIDE overflows a panel that cannot reflow."""
+    for key, (_title, use_line) in d.PANEL_HEADS.items():
+        assert len(use_line) <= 90, (key, len(use_line))
+
+
+def test_the_dropped_facts_are_the_columns_underneath_them():
+    """The symbol and book lists left the head because the SYMBOL and BOOK
+    columns already print them, row by row. The SORT ORDER did not — it is the
+    one fact in that slot the rows cannot show, so it survives into the
+    use-line, still interpolated from the cap."""
+    heads = d.PANEL_HEADS
+    assert "$SPX" not in heads["dealer"][1]
+    assert d.PAPER_SOURCE not in heads["positions"][1]
+    assert "hottest" in heads["board"][1].lower()
+    assert "newest" in heads["flow"][1].lower()
+
+
+def test_headers_name_the_use_not_the_mechanism():
+    assert d.DEALER_HEADS == ("SYMBOL", "PRICE", "FLIP LEVEL",
+                              "PRICE VS WALLS", "CEILING", "FLOOR",
+                              "DEALER MODE")
+    assert d.BOARD_HEADS == ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV",
+                             "NET PREMIUM", "P/C", "SIGNAL", "SETUP")
+    assert d.FLOW_HEADS == ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+    assert d.POS_HEADS == ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY",
+                           "MARK", "STRIKES", "QTY", "OPEN P&L", "STATUS")
+
+
+def test_the_two_width_blocked_labels_stay_short():
+    """STRAT and QTY are the two tracks the HEAD LABEL binds rather than the
+    value (see POS_GRID's floor notes). At the 8.0px per character
+    ``test_every_column_label_fits_the_track_it_stands_over`` measures,
+    "STRATEGY" needs 64px of a 42px floor and "CONTRACTS" 72px of a 36px one;
+    widening both costs ~58px against the 43px of slack between this page's
+    minimum window and the 1920px it is read at.
+
+    So this is a deferral with arithmetic behind it, not an oversight — and it
+    gets a test because a comment saying so is the kind nobody reads before
+    "fixing" the inconsistency.
+
+    /options/paper is a ui.table with no such limit and DOES spell both out
+    (``test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here``). The
+    app therefore shows one concept under two spellings, deliberately: the
+    standing rule is to spell out casual shortenings, so the abbreviation
+    stays a width concession HERE rather than becoming the app's word for
+    the concept."""
+    assert "STRAT" in d.POS_HEADS and "STRATEGY" not in d.POS_HEADS
+    assert "QTY" in d.POS_HEADS and "CONTRACTS" not in d.POS_HEADS
+
+
+def test_trader_acronyms_survive_the_reword():
+    """The standing rule is: spell out casual shortenings, keep trader
+    acronyms. NET PREM was the casual one and got its word; ATM IV and P/C are
+    the vocabulary, not shorthand for it."""
+    assert "ATM IV" in d.BOARD_HEADS
+    assert "P/C" in d.BOARD_HEADS
+
+
+# ── empty and waiting states ─────────────────────────────────────────────────
+def test_waiting_copy_states_what_is_true_not_which_service_is_cold():
+    """Off-hours this is the most-read text on the page, and naming an internal
+    service makes a quiet market read as a fault the reader should chase."""
+    assert "service" not in d.WAITING_OPTIONS.lower()
+    assert "hasn't published" in d.WAITING_OPTIONS
+
+
+def test_a_cold_feed_is_still_distinguishable_from_a_quiet_market():
+    """The pre-existing invariant, restated here because this pass rewrote both
+    sides of it: rendering the same words for a dead service and for a market
+    with nothing to say would make the two indistinguishable — the whole reason
+    this page must never print a zero it did not read.
+
+    The Bull / Bear line also keeps the one fact a reader can ACT on: the map
+    comes from a nightly cascade, so the answer is "tonight", not "refresh"."""
+    assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
+    assert "16:20" in d.WAITING_BULLBEAR
+
+
+def test_the_desk_and_the_map_still_say_the_same_thing_about_a_cold_map():
+    """``WAITING_BULLBEAR`` mirrors ``sentiment_bullbear.WAITING`` by explicit
+    intent — two screens describing one cold cache. They were reworded
+    together; this is what stops the next rewording moving only one."""
+    from pages import sentiment_bullbear as bb
+    assert "16:20 CT" in bb.WAITING and "16:20 CT" in d.WAITING_BULLBEAR
+    for page_text in (bb.WAITING, d.WAITING_BULLBEAR):
+        assert "Waiting for the sentiment service" not in page_text
+
+
+def test_the_desk_help_calls_things_what_the_screen_calls_them():
+    """``term in text`` is not coverage. This checks the RENAMED words are
+    present AND the superseded ones are gone — the pair is what catches a
+    rename that reached the screen and stopped at the hover guide."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    # The BOLD form is how this file names a thing on the screen, so that is
+    # what must move. The plain-text gloss "(the call and put walls ...)" is
+    # kept deliberately: a trader knows those words, and the help is where the
+    # new label gets tied back to them.
+    for gone in ("a flag:", "**flag**", "**call and put walls**",
+                 "unrealised profit and loss"):
+        assert gone not in text, gone
+    for want in ("ceiling", "floor", "status", "open P&L"):
+        assert want in text, want
+
+
+def test_the_desk_help_writes_no_row_count_down():
+    """It said "the five hottest names" and "the five newest" while the caps
+    were 6 and 9 — stale, and now visibly so, because the panel prints its own
+    count. The fix is to state no number here rather than a second copy of one:
+    nothing fails when a manual goes stale, which is why it does."""
+    import page_help
+    text = page_help.HELP_MD["/desk"].lower()
+    for phrase in ("five hottest", "five newest", "six hottest", "nine newest"):
+        assert phrase not in text, phrase
+
+
+# ── the Opportunity Board panel head: Buy / Neutral / Sell ───────────────────
+def test_board_signal_facts_delegate_to_the_boards_own_summary():
+    """Taken from the Opportunity Board, not recomputed here.
+
+    ``matrix.signal_summary`` is the function that page's own band calls, so
+    the two screens cannot report different counts for one payload — the whole
+    reason this page composes rather than restates."""
+    from pages.options import matrix as m
+    payload = {"rows": [{"signal": "buy"}, {"signal": "buy"},
+                        {"signal": "sell"}, {"signal": "neutral"},
+                        {"signal": None}]}
+    facts = d.board_signal_facts(payload)
+    counts = {f["key"]: f["count"] for f in facts}
+    assert counts == m.signal_summary(payload)
+    assert counts == {"buy": 2, "neutral": 2, "sell": 1}
+
+
+def test_board_signal_facts_keep_the_boards_order_and_chip_colours():
+    """Same order and the same chip class the board row below it wears, so the
+    head and the rows read as one vocabulary."""
+    from pages.options.matrix import signal_class
+    facts = d.board_signal_facts({"rows": [{"signal": "buy"}]})
+    assert [f["key"] for f in facts] == ["buy", "neutral", "sell"]
+    assert [f["label"] for f in facts] == ["BUY", "NEUTRAL", "SELL"]
+    for f in facts:
+        assert f["cls"] == signal_class(f["key"])
+
+
+def test_board_signal_facts_withhold_rather_than_print_three_zeros():
+    """A cold cache and an empty board both return None.
+
+    Three zeros would be a reading this page never took — the same rule that
+    makes every other cell here print an em dash rather than 0.00 — and the
+    panel body already says "Nothing ranked yet" for the empty case, so a
+    "BUY 0 · NEUTRAL 0 · SELL 0" beside it would be noise saying nothing."""
+    assert d.board_signal_facts(None) is None
+    assert d.board_signal_facts({}) is None
+    assert d.board_signal_facts({"rows": []}) is None
+    assert d.board_signal_facts("nonsense") is None
+
+
+def test_board_signal_facts_count_the_WHOLE_board_not_the_drawn_rows():
+    """Deliberate, and the one thing about this head worth knowing: the panel
+    draws BOARD_ROWS_N rows while these count every published symbol. That
+    matches the Opportunity Board's own band, which also counts every row — the
+    head is a market-wide read and the rows are the top of it."""
+    payload = {"rows": [{"signal": "buy"} for _ in range(d.BOARD_ROWS_N + 9)]}
+    facts = d.board_signal_facts(payload)
+    total = sum(f["count"] for f in facts)
+    assert total == d.BOARD_ROWS_N + 9
+    assert total > len(d.opportunity_rows(payload))
+
+
+def test_render_puts_the_signal_counts_in_the_board_panel_head(monkeypatch):
+    """The counts must reach the SCREEN, not just the builder — the head slot
+    is separate from the body the painter clears, so a painter that forgot it
+    would leave every builder test green and the head empty."""
+    _seed_bus(monkeypatch, _full_payloads())
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" in texts
+    facts = d.board_signal_facts(_full_payloads()["options:matrix"])
+    for fact in facts:
+        assert f"{fact['label']} {fact['count']}" in texts
+
+
+def test_render_shows_no_signal_counts_when_nothing_is_published(monkeypatch):
+    """The withholding rule, driven from the PRODUCER rather than asserted on a
+    hand-made payload: with every view cold the head must carry no chip at all,
+    not three zeros."""
+    _seed_bus(monkeypatch, {})
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" not in texts
+    for word in ("BUY 0", "NEUTRAL 0", "SELL 0"):
+        assert word not in texts
+
+
+def test_the_desk_help_explains_what_the_signal_counts_COUNT():
+    """The one genuinely confusable thing about this head: it reports every
+    published symbol while the rows under it are the top few. A reader seeing
+    "BUY 12" over six rows has no way to resolve that from the screen."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    low = text.lower()
+    assert "buy" in low and "neutral" in low and "sell" in low
+    assert "watchlist" in low or "whole board" in low or "every symbol" in low

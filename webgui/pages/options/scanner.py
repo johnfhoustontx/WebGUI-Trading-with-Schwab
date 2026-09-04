@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import busy as _busy
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 import page_help as _page_help
 from nicegui import run, ui
 
@@ -118,7 +119,9 @@ def _actions_col():
 
 
 # When a signal dropped out of the live scan. Only ever populated on a stale row.
-_DROPPED_COL = ("stale_since", "Dropped")
+# "Dropped at", not "Dropped": the cell holds ``stale_since``, a TIMESTAMP -
+# WHEN the signal stopped appearing in a scan, not whether it did.
+_DROPPED_COL = ("stale_since", "Dropped at")
 
 
 def signal_columns():
@@ -126,14 +129,25 @@ def signal_columns():
 
     Short + Long are merged into one compact 'Strikes' column and the expiration
     is shown MM/DD so the right-hand columns (Score/Grade/actions) fit."""
+    # WARNING: "Credit" is CORRECT here, and this is the one somebody will
+    # "fix". The Paper Ledger and Captured Signals both had a wrong column of
+    # that name, because those books mix credits and debits and a debit is
+    # stored as a negative credit. This table is credit spreads BY
+    # CONSTRUCTION - the Directional tab, which holds the debits, does not use
+    # these columns at all (see ``directional_columns``, which deliberately
+    # carries no credit or R:R economics).
+    #
+    # "DTE" likewise stays bare where Captured Signals had to say "DTE at
+    # entry": that page's value is frozen at capture, this scan reruns every
+    # 15 minutes. The two differ because the quantities do.
     spec = [
         ("symbol", "Symbol"),
-        ("type", "Type"),
-        ("expiration", "Exp"),
+        ("type", "Strategy"),          # PCS / CCS / IC - the structure
+        ("expiration", "Expiry"),
         ("dte", "DTE"),
         ("strikes", "Strikes"),
         ("credit", "Credit"),
-        ("max_loss", "Max Loss"),
+        ("max_loss", "Max loss"),
         ("rr_pct", "R/R %"),
         ("pop_pct", "PoP %"),
         ("iv_rank", "IV Rank"),
@@ -461,7 +475,7 @@ def status_line(results):
     gap legible. Empty results (service cold) -> a waiting note."""
     results = results or {}
     if not results:
-        return "Waiting for options service…"
+        return _copy.WAITING_OPTIONS
     n = sum(len(results.get(key) or []) for key in DAY_LISTS)
     parts = []
     when = _short_time(results.get("timestamp"))
@@ -750,7 +764,7 @@ def render():
     @guard
     def _request_scan():
         bus_client.request("options", {"type": "rescan"})
-        ui.notify("Scan requested")
+        ui.notify("Scanning — results appear when the scan finishes.")
         scan_busy.show()
 
     scan_btn.on_click(_request_scan)
