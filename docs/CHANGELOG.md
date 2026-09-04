@@ -4,6 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**Flow Alerts names the event, not the detector.**
+Second page of the reader's-voice pass. `/options/flow` went next because the Desk
+pass left it holding the app's other copy of "Waiting for the options service…".)
+
+- **The four alert kinds were detector names.** `Crossover`, `Unusual activity`,
+  `Gamma flip`, `Big delta` are the four things `options_svc` runs. "Big delta ·
+  Call" told a reader which detector produced the row and nothing about what the
+  market did — the only reason the row is on screen. They become **Premium
+  shift**, **Unusual volume**, **Hedging flip**, **Outsized bet**.
+- **The two gamma SIDES had to move with them.** "Hedging flip · To positive"
+  reads *worse* than the name it replaced: "to positive" only parses once you
+  already know the subject is gamma sign, and that is precisely the word the new
+  kind name takes away. `To positive`/`To negative` become **Now damping** /
+  **Now amplifying**. `Calls over` / `Puts over` / `Call` / `Put` are untouched
+  and deliberately literal — this page can say which side traded and never who
+  initiated, because Schwab publishes no time-and-sales tape to this app.
+- **⚠ "Hedging flip", not "Hedging flipped", and that is load-bearing.**
+  `voice.flow_phrase` builds its contract-less form as `f"{kind} alert"` — the
+  form a gamma flip ALWAYS takes, since it names no contract — so a clause there
+  speaks as "Hedging flipped alert, now damping." Every kind label is a noun
+  phrase for that reason, and a test says so.
+- **The Desk, `/desk/live` and the SPOKEN alerts all followed**, because each
+  reads these labels rather than restating them. The squawk now says *"S P Y.
+  Premium shift alert, calls over."* and *"N D X. Unusual volume, 0-D T E 7 15
+  Put."* `voice.py`'s two deliberate copies (`_ALL_CAUSES`, `CONTRACT_KINDS` —
+  restated because the prewarm runs before any page is built) were updated; both
+  guards recompute through `flow.alert_kind_label`/`side_label`, so the rename
+  **failed the suite loudly** rather than desynchronising the audio. The
+  prewarmed clips under `webgui/data/voice/` are keyed by phrase text, so they
+  re-synthesize on first use and the old files are orphaned — gitignored,
+  self-healing, no action needed.
+- **Column labels match the Desk's words** for the same quantities: `Type`→**Alert
+  type**, `Detail`→**What traded**. `Alert` sat directly beside `Alert type`
+  naming a different thing and became **Summary**; `Share` never said share *of
+  what* and became **Share of flow**. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The status line, both branches.** The cold branch is a **guarded copy** of
+  `desk.WAITING_OPTIONS`, not an import: `desk.py` imports this module for
+  `alert_rows` and `_TONE`, so importing back is a cycle. Same pattern and same
+  justification as `voice._ALL_CAUSES`, with a test pinning the two equal. The
+  quiet branch now describes the MARKET rather than the page — "Nothing unusual
+  has traded yet today" against "No flow alerts yet today", which reads as a
+  screen with nothing on it.
+- **The raw payload keys did NOT change.** `crossover` / `uoa` / `gamma_flip` /
+  `big_delta` / `to_positive` are the `options_svc` contract, the
+  `config/flow_alerts.toml` section names and `_TONE`'s keys. Renaming a word is
+  this page's business; renaming a key would be a cross-tier migration for no
+  reader's benefit, and the page's design already separates the two.
+- **`page_help.py` followed on BOTH entries** — and the Desk's entry was stale in
+  a way the first pass missed: it quotes the spoken examples verbatim, and it
+  still said "changes **flag**" after that column became STATUS. The earlier
+  guard forbade `"a flag:"` but not the bolded form, which is how that file names
+  a screen element. Guard widened.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2936 passed** in `webgui`, no failures (the four affected suites were
+  411 before, 419 after).
+  [design](plans/2026-09-04-flow-alerts-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**The Desk speaks in the reader's voice.** Every
 label on `/desk` said which mechanism produced the number; the use-language was
 already written, one hover away in `page_help.py`. First of a planned pass; the
