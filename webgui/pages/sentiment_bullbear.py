@@ -448,7 +448,7 @@ def render():
     @guard
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_bullbear"})
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
         state["refresh_until"] = monotonic() + REFRESH_WAIT_SEC
         map_busy.show()
 

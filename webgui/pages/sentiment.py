@@ -33,6 +33,7 @@ from pages import console_page
 from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 def _safe_float(v, default=0.0):
     return float_or(v, default)
@@ -891,7 +892,7 @@ def render():
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh"})
         console_busy.show()
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
 
     from datetime import timedelta
     @guard
@@ -907,7 +908,8 @@ def render():
             parts.append(f"Sectors {sa_str}")
         up = state.get("proxy_up")
         parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
-        status_lbl.text = "   ·   ".join(parts) if parts else "Waiting for sentiment service…"
+        status_lbl.text = ("   ·   ".join(parts) if parts
+                           else _copy.WAITING_SENTIMENT)
 
     @guard
     def _maybe_repaint():
@@ -931,7 +933,8 @@ def render():
         _render_status()
 
     ui.separator().classes("q-my-sm")
-    status_lbl = ui.label("Waiting for sentiment service…").classes("opacity-60 text-xs w-full")
+    status_lbl = ui.label(_copy.WAITING_SENTIMENT).classes(
+        "opacity-60 text-xs w-full")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     _apply()

@@ -31,3 +31,11 @@ import at any depth.
 # 2026-09-04, and off-hours — when it is the most-read text on three screens —
 # that made a closed market read as a fault worth chasing.
 WAITING_OPTIONS = "No data yet — the options feed hasn't published this session."
+
+# Same condition, other domains. The sentiment line had TWO spellings across
+# four screens (with and without "the"); the market one has a single site
+# today and lives here so the next screen to need it finds it rather than
+# inventing a fifth wording.
+WAITING_SENTIMENT = ("No data yet — the sentiment feed hasn't published "
+                     "this session.")
+WAITING_MARKET = "No data yet — the market feed hasn't published this session."

@@ -2513,7 +2513,8 @@ def render():
             ui.notify("Enter a symbol first.", type="warning")
             return
         bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
-        ui.notify(f"Gamma refresh requested for {sym}")
+        ui.notify(f"Refreshing {sym} — the panels update when the "
+                  f"new read lands.")
         chart_busy.show(f"Loading {sym}…")
         state["countdown"] = 120
 

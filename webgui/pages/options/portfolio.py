@@ -250,7 +250,8 @@ def render():
                     "options",
                     {"type": "paper_reset", "args": {"starting_balance": float(bal.value)}})
                 dlg.close()
-                ui.notify("Paper account reset requested.", type="positive")
+                ui.notify("Resetting the paper account — the book clears "
+                          "when the engine confirms.", type="positive")
                 status.text = "Resetting…"
 
             with ui.row():

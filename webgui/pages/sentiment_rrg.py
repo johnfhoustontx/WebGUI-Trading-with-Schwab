@@ -31,6 +31,7 @@ from pages.options.theme import (
 from pages.rotation_view import NB, NE, NT, TONE, eyebrow
 from pages.view_watch import watch_view
 from pages.ui_guard import guard
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "sentiment:rotation"
 PLOT_H = "h-[600px]"
@@ -218,12 +219,12 @@ def render():
         if a:
             _render(a, rot.get("weights") or {}, rot.get("risk_threshold"))
         else:
-            _blank(rot.get("error") or "Waiting for the sentiment service…")
+            _blank(rot.get("error") or _copy.WAITING_SENTIMENT)
 
     @guard
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_rotation"})
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
         rrg_busy.show()
 
     _apply()

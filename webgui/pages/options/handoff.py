@@ -236,7 +236,8 @@ def send_to_paper(signal):
                 "type": "paper_create",
                 "args": {"signal": signal, "qty": int(qty.value or 1)},
             })
-            ui.notify("Paper trade requested.", type="positive")
+            ui.notify("Sent to the paper ledger — it appears when the engine "
+                      "confirms.", type="positive")
             dlg.close()
 
         with ui.row():
