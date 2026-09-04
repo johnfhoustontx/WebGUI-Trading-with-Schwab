@@ -1585,7 +1585,7 @@ def test_render_survives_junk_in_every_view(monkeypatch):
     # It degrades to the empty state rather than raising — but note it does NOT
     # degrade to the *waiting* state, because a malformed payload is not an
     # absent one and the page cannot tell the difference from here.
-    assert "No open positions." in texts
+    assert desk.EMPTY_POSITIONS in texts
 
 
 # ── the Bull / Bear sector strip, mounted ────────────────────────────────────
@@ -2694,3 +2694,33 @@ def test_trader_acronyms_survive_the_reword():
     the vocabulary, not shorthand for it."""
     assert "ATM IV" in d.BOARD_HEADS
     assert "P/C" in d.BOARD_HEADS
+
+
+# ── empty and waiting states ─────────────────────────────────────────────────
+def test_waiting_copy_states_what_is_true_not_which_service_is_cold():
+    """Off-hours this is the most-read text on the page, and naming an internal
+    service makes a quiet market read as a fault the reader should chase."""
+    assert "service" not in d.WAITING_OPTIONS.lower()
+    assert "hasn't published" in d.WAITING_OPTIONS
+
+
+def test_a_cold_feed_is_still_distinguishable_from_a_quiet_market():
+    """The pre-existing invariant, restated here because this pass rewrote both
+    sides of it: rendering the same words for a dead service and for a market
+    with nothing to say would make the two indistinguishable — the whole reason
+    this page must never print a zero it did not read.
+
+    The Bull / Bear line also keeps the one fact a reader can ACT on: the map
+    comes from a nightly cascade, so the answer is "tonight", not "refresh"."""
+    assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
+    assert "16:20" in d.WAITING_BULLBEAR
+
+
+def test_the_desk_and_the_map_still_say_the_same_thing_about_a_cold_map():
+    """``WAITING_BULLBEAR`` mirrors ``sentiment_bullbear.WAITING`` by explicit
+    intent — two screens describing one cold cache. They were reworded
+    together; this is what stops the next rewording moving only one."""
+    from pages import sentiment_bullbear as bb
+    assert "16:20 CT" in bb.WAITING and "16:20 CT" in d.WAITING_BULLBEAR
+    for page_text in (bb.WAITING, d.WAITING_BULLBEAR):
+        assert "Waiting for the sentiment service" not in page_text

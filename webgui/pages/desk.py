@@ -682,8 +682,8 @@ BULLBEAR_ROUTE = "/sentiment/bullbear"
 # cascade rather than a 30 s poll, so "not published yet" means something a
 # reader can act on (wait for tonight) that the generic line does not. Wording
 # follows ``sentiment_bullbear.WAITING``.
-WAITING_BULLBEAR = ("Waiting for the sentiment service — the Bull / Bear map is "
-                    "built by the nightly cascade at 16:20 CT.")
+WAITING_BULLBEAR = ("No Bull / Bear map yet — it is rebuilt by the nightly "
+                    "cascade at 16:20 CT.")
 
 
 def _bullbear_rows(bullbear_view):
@@ -2043,7 +2043,33 @@ _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 # the same words for both would make a dead service indistinguishable from a
 # quiet market — which is the whole reason this page must never print a zero it
 # did not read.
-WAITING_OPTIONS = "Waiting for the options service…"
+WAITING_OPTIONS = "No data yet — the options feed hasn't published this session."
+
+# The four "the feed is fine and has nothing to say" lines, and the one warning
+# that qualifies a reading rather than replacing it.
+#
+# Constants for the same reason as ``PANEL_HEADS``: ``/desk/live`` carried a
+# byte-copy of every one of these, so the two screens could describe one empty
+# cache in two different ways. Each says what is TRUE and, where there is one,
+# what makes it change — "the board fills once the scanner runs" is a wait a
+# reader can price; "No ranked symbols yet" is a full stop.
+EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
+                "gamma feed publishes.")
+EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
+EMPTY_FLOW = "Nothing unusual has traded yet today."
+EMPTY_POSITIONS = "Nothing open — no paper or Claude trades running."
+
+
+def stale_walls_note(label):
+    """Why the walls vanished from a dealer row, given a freshness label.
+
+    A silently wall-less row reads as a broken page. This reads as a stopped
+    feed, which is what it is — and it names the consequence rather than only
+    the state, because "stale · 12m" tells a reader the feed is old without
+    telling them what that costs (levels computed against a price that has
+    since moved)."""
+    return (f"Walls hidden — the gamma feed stopped updating "
+            f"({str(label).lower()}), so these levels would be out of date.")
 
 # ── the Bull / Bear chip ─────────────────────────────────────────────────────
 # The chip's frame. Its COLOUR is not here: ``bullbear.quadrant_class`` supplies
@@ -2766,15 +2792,13 @@ def render():
                 return
             rows = dealer_rows(matrix, fresh["stale"])
             if not rows:
-                ui.label("No dealer positioning published for these symbols "
-                         "yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_DEALER).classes(_PLACEHOLDER)
                 return
             if fresh["stale"]:
                 # Say WHY the walls vanished. A silently wall-less row reads as
                 # a broken page; this reads as a stopped feed, which is true.
-                ui.label(
-                    f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[10px] {CON_WARN} pb-1")
+                ui.label(stale_walls_note(fresh["label"])).classes(
+                    f"text-[10px] {CON_WARN} pb-1")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
@@ -2843,7 +2867,7 @@ def render():
                 return
             rows = opportunity_rows(matrix)
             if not rows:
-                ui.label("No ranked symbols yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_BOARD).classes(_PLACEHOLDER)
                 return
             # Eight labels for eight tracks, ONE line per symbol. WHY and SETUP
             # were the two qualifiers riding under the symbol and the signal;
@@ -2911,7 +2935,7 @@ def render():
                 return
             rows = flow_rows(view)
             if not rows:
-                ui.label("No alerts today.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_FLOW).classes(_PLACEHOLDER)
                 return
             # Four labels for four tracks, ONE line per alert. Every other panel
             # here stacks a qualifier under its value because it is short of
@@ -2978,7 +3002,7 @@ def render():
                 f"text-[11px] tracking-[.16em] pb-2 "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
-                ui.label("No open positions.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_POSITIONS).classes(_PLACEHOLDER)
                 return
             # Ten labels for ten tracks, ONE line per row — the same move the
             # board and the flow feed just made, and here it is what pays for

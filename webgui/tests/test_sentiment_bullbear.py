@@ -164,7 +164,11 @@ def test_the_headline_is_empty_on_a_cold_payload_and_the_page_explains_instead()
     leading" reads as a maximally bearish tape when nothing was published — so
     the page owes the reader the reason in that slot."""
     assert P.headline_line([]) == ""
-    assert P.WAITING and "Waiting" in P.WAITING
+    # Not the word "Waiting" — the page was reworded to say what is TRUE
+    # rather than which service is cold. What must survive is the ACTIONABLE
+    # half: this map comes from a nightly cascade, so the answer is "tonight"
+    # rather than "refresh".
+    assert P.WAITING and "16:20 CT" in P.WAITING
 
 
 def test_the_count_strip_keeps_all_four_quadrants_even_at_zero():

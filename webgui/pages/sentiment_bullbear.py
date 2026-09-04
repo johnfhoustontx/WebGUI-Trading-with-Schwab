@@ -35,8 +35,8 @@ VIEW = "sentiment:bullbear"
 # The three level names, in the order ``compute.BULLBEAR_LEVELS`` writes them.
 LEVELS = ("sector", "industry", "stock")
 
-WAITING = ("Waiting for the sentiment service — no map has been published yet. "
-           "The tree is built by the nightly cascade at 16:20 CT.")
+WAITING = ("No Bull / Bear map yet — nothing has been published. The tree is "
+           "rebuilt by the nightly cascade at 16:20 CT.")
 NO_SCORES = "Scores not yet computed"
 NO_QUOTES = ("Live quotes unavailable — the day-move column is empty. The "
              "scores, quadrants and breadth below are unaffected.")

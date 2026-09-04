@@ -214,7 +214,13 @@ def test_a_stale_feed_withholds_the_walls_and_says_why():
     p["options:gex_status"] = {"age_seconds": 9_000.0}
     dealer = ds.snapshot(p, _NOW)["dealer"]
     assert dealer["rows"][0]["call_wall"] == "—"
-    assert "withheld" in dealer["warning"].lower()
+    # Not the word "withheld": the copy was reworded to name what the reader
+    # LOSES rather than what the code did. The invariant that matters is that
+    # the mirror builds this sentence with the Desk's own function, so one
+    # stopped feed cannot be explained two different ways on two screens.
+    label = d.freshness_facts(p["options:gex_status"])["label"]
+    assert dealer["warning"] == d.stale_walls_note(label)
+    assert label.lower() in dealer["warning"]
 
 
 def test_a_live_feed_carries_no_withheld_warning():
@@ -302,7 +308,7 @@ def test_an_empty_book_says_so_rather_than_waiting_forever():
     p = {"options:paper_account": {"positions": []},
          "options:driver_paper_account": {"positions": []},
          "options:captured": {"signals": []}}
-    assert ds.snapshot(p, _NOW)["positions"]["note"] == "No open positions."
+    assert ds.snapshot(p, _NOW)["positions"]["note"] == d.EMPTY_POSITIONS
 
 
 # ── bull / bear strip ────────────────────────────────────────────────────────

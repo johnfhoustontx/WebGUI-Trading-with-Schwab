@@ -305,8 +305,8 @@ def _dealer(payloads, stale):
                             else _hue(_d.regime_chip_class(r["regime_word"]))),
             "structure": r["structure"],
         })
-    note = "" if out else "No dealer positioning published for these symbols yet."
-    warning = ("Walls withheld — GEX feed {}".format(fresh["label"].lower())
+    note = "" if out else _d.EMPTY_DEALER
+    warning = (_d.stale_walls_note(fresh["label"])
                if stale and out else "")
     return {"rows": out, "note": note, "warning": warning}
 
@@ -335,7 +335,7 @@ def _board(payloads):
             "setup": r["setup"],
         })
     return {"rows": rows, "subtitle": subtitle,
-            "note": "" if rows else "No ranked symbols yet."}
+            "note": "" if rows else _d.EMPTY_BOARD}
 
 
 def _flow_panel(payloads):
@@ -357,7 +357,7 @@ def _flow_panel(payloads):
             "tone": FLOW_TONE_HEX.get(r["_tone_class"]) or _C["text"],
         })
     return {"rows": rows, "subtitle": subtitle,
-            "note": "" if rows else "No alerts today."}
+            "note": "" if rows else _d.EMPTY_FLOW}
 
 
 def _positions(payloads):
@@ -405,7 +405,7 @@ def _positions(payloads):
     return {"rows": rows, "subtitle": subtitle,
             "summary": _d.summary_line(summary, len(shown)),
             "at_risk": summary["at_risk"],
-            "note": "" if rows else "No open positions."}
+            "note": "" if rows else _d.EMPTY_POSITIONS}
 
 
 def _bullbear(payloads):
