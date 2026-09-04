@@ -4,6 +4,74 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**The Desk speaks in the reader's voice.** Every
+label on `/desk` said which mechanism produced the number; the use-language was
+already written, one hover away in `page_help.py`. First of a planned pass; the
+landing page went first.)
+
+- **Four use-lines.** Each panel head gained a sentence saying what you do with
+  it — "Above the flip, dealers damp moves; below it they feed them." It gets its
+  OWN line, not the existing subtitle slot: that slot is `whitespace-nowrap` on
+  the title row (right for the four short facts it held, fatal to a sentence in
+  the 508px-floor Flow panel) and wears `.2em` tracking, which is correct for
+  small caps and unreadable on prose.
+- **Two facts dropped, one absorbed.** `$SPX · SPY · $NDX · QQQ` and
+  `PAPER · CLAUDE · CAPTURED` are literally the SYMBOL and BOOK columns beneath
+  them. The SORT ORDER is not anywhere else on the panel, so `HOTTEST`/`NEWEST`
+  survive into the use-line — still interpolated from the row cap, which is the
+  property the old subtitle was built for.
+- **Column labels name the use.** `SPOT`→`PRICE`, `GAMMA FLIP`→`FLIP LEVEL`,
+  `STRUCTURE MAP`→`PRICE VS WALLS`, `CALL WALL`/`PUT WALL`→`CEILING`/`FLOOR`,
+  `NET GEX / REGIME`→`DEALER MODE`, `WHY`→`WHY IT'S HOT`, `DETAIL`/`KIND`→
+  `WHAT TRADED`/`ALERT TYPE`, `UNREALIZED`/`FLAG`→`OPEN P&L`/`STATUS`.
+  `CEILING`/`FLOOR` drop the call/put naming deliberately — the side is carried
+  by the cell's COLOUR (each wall painted in its structure-map marker's hue), and
+  the caveat that a call wall only caps price from above is what the map beside
+  it shows.
+- **⚠ Two labels are width-blocked, and that is arithmetic rather than an
+  oversight.** On Positions the head label binds the track, not the value. At the
+  8.0px/char the existing width test measures, `STRATEGY` needs 64px of a 42px
+  floor and `CONTRACTS` 72px of a 36px one; widening both costs ~58px against the
+  43px of slack between this page's minimum window and the 1920px it is read at —
+  i.e. it would clip the panel on the screen it is read on. Pinned by test so the
+  next reader sees a deferral, not an inconsistency to tidy. `NET PREM`→`NET
+  PREMIUM` was affordable at +22px (track 66→88, Board's floor 783→805, inside
+  the 860px a panel gets).
+- **Empty states say what is true.** "Waiting for the options service…" is the
+  most-read text on the page off-hours and made a quiet market read as a fault.
+  Each now states the fact and, where there is one, what changes it — "the board
+  fills once the scanner runs" is a wait a reader can price.
+- **`/desk/live` was drifting-capable and is no longer.** CLAUDE.md said the
+  mirror "cannot drift from `/desk`" because `snapshot()` uses that page's own
+  builders. True of every NUMBER, false of every WORD around them: titles were
+  HTML literals, two subtitles were rebuilt with a local `.format`, and all four
+  column-label lists plus all five empty-state strings were byte-copies. Both
+  screens now read `desk.PANEL_HEADS`, the `*_HEADS` tuples and the `EMPTY_*` /
+  `stale_walls_note` constants. Because `_JS` is inserted verbatim and can never
+  be `.format`ed, the labels reach it through the `consts` injection — the route
+  `CALL_HEX` already took — paired with that screen's own width percentages by
+  `zipw`, so a renamed label reaches both screens and a re-tuned width reaches
+  one. The dealer panel also gained the `psub` element it never had.
+- **The hover guide was already stale and this exposed it.** `page_help.py` said
+  "the five hottest names" and "the five newest" against caps of 6 and 9 — now
+  visibly wrong, since the panel prints its own count. Fixed by stating no number
+  there at all rather than a second copy of one.
+- **Not in this pass, by choice:** the `BIAS`/`SIGNAL` tile captions, the trend
+  and regime words and the Bull/Bear headline are imported from `/sentiment`, so
+  rewording them changes that screen too; the Positions summary line and the
+  top-strip captions were deferred to keep the diff reviewable. `/options/flow`
+  still carries its own "Waiting for the options service…" — the natural next
+  page.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  The width claims are arithmetic against the floors `desk.py` documents and are
+  enforced by `test_every_column_label_fits_the_track_it_stands_over`; the
+  `NET PREMIUM` track widening wants eyeballing in dev before promote. Suite:
+  **2927 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-desk-user-perspective-copy-design.md) ·
+  [plan](plans/2026-09-04-desk-user-perspective-copy-plan.md)
+
+---
+
 **Last updated:** 2026-08-30 (**The realized-outcome calibration stopped
 counting out-of-session captures.** The companion to the recorder gate above:
 that one stops new ones, this one stops the history feeding the EV number.)
