@@ -2724,3 +2724,31 @@ def test_the_desk_and_the_map_still_say_the_same_thing_about_a_cold_map():
     assert "16:20 CT" in bb.WAITING and "16:20 CT" in d.WAITING_BULLBEAR
     for page_text in (bb.WAITING, d.WAITING_BULLBEAR):
         assert "Waiting for the sentiment service" not in page_text
+
+
+def test_the_desk_help_calls_things_what_the_screen_calls_them():
+    """``term in text`` is not coverage. This checks the RENAMED words are
+    present AND the superseded ones are gone — the pair is what catches a
+    rename that reached the screen and stopped at the hover guide."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    # The BOLD form is how this file names a thing on the screen, so that is
+    # what must move. The plain-text gloss "(the call and put walls ...)" is
+    # kept deliberately: a trader knows those words, and the help is where the
+    # new label gets tied back to them.
+    for gone in ("a flag:", "**call and put walls**",
+                 "unrealised profit and loss"):
+        assert gone not in text, gone
+    for want in ("ceiling", "floor", "status", "open P&L"):
+        assert want in text, want
+
+
+def test_the_desk_help_writes_no_row_count_down():
+    """It said "the five hottest names" and "the five newest" while the caps
+    were 6 and 9 — stale, and now visibly so, because the panel prints its own
+    count. The fix is to state no number here rather than a second copy of one:
+    nothing fails when a manual goes stale, which is why it does."""
+    import page_help
+    text = page_help.HELP_MD["/desk"].lower()
+    for phrase in ("five hottest", "five newest", "six hottest", "nine newest"):
+        assert phrase not in text, phrase

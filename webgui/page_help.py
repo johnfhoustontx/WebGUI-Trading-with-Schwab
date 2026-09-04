@@ -60,19 +60,22 @@ on · what am I holding.*
   the Sentiment page's Signals column shows, read off the same composite score;
   the Desk never computes its own.
 - **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
-  **gamma flip** and how far price sits from it, the **call and put walls**, and
-  net gamma exposure. The little bar shows where price sits **between the two
-  walls**. *Long gamma · pins* means dealer hedging tends to **hold** price near
-  those walls; *short gamma · runs* means it **amplifies** moves instead.
-- **Opportunity Board** — the five hottest names right now, with what makes each
-  one interesting, its at-the-money implied volatility and whether that is rising
-  or falling, and a setup tag when one is active.
-- **Live Flow Alerts** — the five newest unusual-options events. Note these show
+  **flip level** and how far price sits from it, the **ceiling** and **floor**
+  (the call and put walls — the ceiling is coloured like its marker on the map,
+  and it only caps price while price is below it), and net gamma exposure. The
+  little bar shows where price sits **between the two**. Under *dealer mode*,
+  *Long gamma · pins* means dealer hedging tends to **hold** price near those
+  levels; *short gamma · runs* means it **amplifies** moves instead.
+- **Opportunity Board** — the hottest names right now, with what makes each one
+  interesting, its at-the-money implied volatility and whether that is rising or
+  falling, and a setup tag when one is active. The panel says how many it is
+  showing.
+- **Live Flow Alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
   tape, so nobody can honestly say which side traded.
 - **Positions** — your open paper trades and Claude's, together, with the live
-  mark and profit or loss, and a flag: **OK**, **Watch**, **At risk**, **Rescue**.
-  The header totals open trades, unrealised profit and loss, and how many need
+  mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
+  **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
 
 **Click any row** to open the page it came from, already set to that symbol.
