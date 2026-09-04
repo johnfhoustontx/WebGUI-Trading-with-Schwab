@@ -4,6 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**The Opportunity Board's columns name the reading,
+not the field.** Third page of the reader's-voice pass, and the one that finally
+earned a shared home for the copy three screens show.)
+
+- **Two headers were actively misleading, not merely terse.** `Call` and `Put`
+  hold call/put **acceleration** arrows (hot / cool / steady / flat) — a reader
+  scanning that header row has every reason to expect a price or a volume in the
+  cell beneath. They become **Call flow** / **Put flow**. `GEX` labelled a column
+  whose values are literally `above` / `below`, so it becomes **Vs flip**.
+- **`Sig` and `Signal` were different quantities two columns apart** — a count of
+  live scanner signals, and the buy/neutral/sell verdict. The COUNT is what got
+  renamed, to **Open signals**. `Verdict` is arguably the clearer word for the
+  other one, but `/desk`'s board panel already prints SIGNAL for it, and a second
+  name for one quantity is the drift the first two passes closed. `Flow` (a count
+  of alerts, not an amount of flow) becomes **Flow alerts**.
+- **Four more took `/desk`'s words** for the same quantities its Opportunity
+  Board panel shows: `Ticker`→**Symbol**, `Spot`→**Price**, `Net $M`→**Net
+  premium $M**, `Hot`→**Score**. The unit rides on the premium label because that
+  cell is a bare number in millions. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The eyebrow now names the only control on the page.** This screen has no row
+  click-through: sorting is the whole interaction, and nothing on it said so.
+- **⚠ `webgui/pages/copy.py` is new, and the reason is worth recording.** This
+  page was the THIRD byte-copy of "Waiting for the options service…". `desk.py`
+  imports both `pages.options.flow` and `pages.options.matrix`, so neither can
+  import back — which is why the Flow pass settled for a restated literal plus a
+  test pinning it equal to the Desk's. That is the right answer for two copies
+  and the wrong one for three. The new module is a leaf importing nothing from
+  `pages`, on the model `pages/fmt.py` already set for shared *numeric*
+  vocabulary ("the ONE copy"); `flow._WAITING` is gone along with the guard that
+  justified it, and `desk.WAITING_OPTIONS` stays as an alias because
+  `desk_stream` and several tests address it there and that name is not wrong.
+- **The distinction that module must NOT collapse**, stated in its own docstring:
+  this is the line for a feed that has published nothing, never for a feed that
+  is fine and has nothing to report. Every screen drawing it keeps its own
+  quiet-market line, because a dead service and a still tape rendering the same
+  words is the failure this app's "never print a zero you did not read" rule
+  exists to prevent.
+- **`page_help.py` followed**, and gained the two things the columns could not
+  say: that Call flow / Put flow are *not* prices, and that rows do not open
+  anything.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2942 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-opportunity-board-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**Flow Alerts names the event, not the detector.**
 Second page of the reader's-voice pass. `/options/flow` went next because the Desk
 pass left it holding the app's other copy of "Waiting for the options service…".)
