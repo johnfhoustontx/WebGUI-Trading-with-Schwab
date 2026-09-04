@@ -12,6 +12,7 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 """
 
 import page_help as _page_help
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from .inputs import bind_symbol_load, select_all_on_focus
 from .theme import BADGE_NEG, BADGE_POS, BADGE_WARN, BTN_3D
 
@@ -632,7 +633,7 @@ def render():
     # No page title — the tab strip names the page (2026-07-11 cleanup).
 
     # ── waiting-for-service placeholder ──────────────────────────────────────
-    waiting = ui.label("Waiting for options service…").classes("opacity-70")
+    waiting = ui.label(_copy.WAITING_OPTIONS).classes("opacity-70")
 
     # ── shared candidate-card rendering (per-container so each tab owns its own
     # cards column + advisory head; the board passes the confirm/apply factory,

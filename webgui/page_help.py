@@ -153,6 +153,11 @@ plus single-leg directional trades on their own tab.
   RETURNED, per trade, as a multiple of what was risked. It comes from your own
   closed trades, not from the option's price, and it is **left out entirely**
   when there aren't enough of them to mean anything.
+- **Dropped at** — the table keeps every signal the day produced, not just the
+  ones still live. A signal the latest scan no longer finds is dimmed and stamped
+  with the time it went, so the day's record stays complete. Its price is frozen
+  at that moment, which is why a dropped row **cannot be paper-traded** — the
+  button is disabled rather than filling you at an hours-old credit.
 - It re-scans on its own — **Run scan** (at the right edge of the table) just
   forces a refresh.
 """,
