@@ -15,6 +15,8 @@ from __future__ import annotations
 import datetime as _dt
 from zoneinfo import ZoneInfo
 
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
+
 VIEW = "options:flow_alerts"
 
 _CT_TZ = ZoneInfo("America/Chicago")
@@ -264,14 +266,6 @@ def symbol_options(rows):
     return sorted({r.get("symbol") for r in rows or [] if r.get("symbol")})
 
 
-# ⚠ A deliberate COPY of ``pages.desk.WAITING_OPTIONS``, not an import:
-# ``desk`` imports THIS module (for ``alert_rows`` and ``_TONE``), so importing
-# back would be a cycle. Guarded by
-# ``test_the_cold_status_line_matches_the_desks_word_for_word`` — the same
-# pattern, and the same justification, ``voice._ALL_CAUSES`` already carries.
-_WAITING = "No data yet — the options feed hasn't published this session."
-
-
 def status_text(view):
     """Status line. Distinguishes a quiet day from a service that isn't publishing —
     on an empty table those look identical otherwise.
@@ -281,7 +275,7 @@ def status_text(view):
     traded yet today" reads as a tape that has done nothing — the true statement,
     and already the Desk's wording for its own empty flow panel."""
     if not isinstance(view, dict) or not view:
-        return _WAITING
+        return _copy.WAITING_OPTIONS
     n = len(view.get("alerts") or [])
     date = view.get("date") or ""
     if not n:
@@ -342,7 +336,7 @@ def render():
                 symbol_sel = ui.select(["All"], value="All", label="Symbol") \
                     .classes("w-40").props("dense outlined")
 
-            status = ui.label(_WAITING).classes(EYEBROW)
+            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
             table_box = ui.element("div").classes("w-full")
             with table_box:
                 table = ui.table(columns=flow_columns(), rows=[], row_key="id",

@@ -299,11 +299,16 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
 One **at-a-glance grid** of every tracked symbol, so you can scan the whole board
 without opening each page.
 
-- **Each row** is a ticker: spot, **Day %**, a **trend** arrow, call/put
-  **acceleration**, put/call ratio, net premium ($M), the **GEX** regime
-  (above/below the flip), how many live **signals** and **flow** alerts it has, an
-  overall **Signal** (buy / neutral / sell), and a **hotness** score.
-- **Click any column header** to sort — e.g. hottest names or biggest movers first.
+- **Each row** is one symbol: price, **Day %**, a price **trend** arrow, then
+  **Call flow** and **Put flow** — arrows for whether call and put activity is
+  heating up or cooling off, *not* prices — the put/call ratio, **Net premium
+  $M**, and **Vs flip**, which side of the dealer gamma flip price sits on.
+- **Open signals** and **Flow alerts** are counts: how many live scanner signals
+  and how many of today's flow alerts belong to that symbol. **Signal** is the
+  one overall verdict (buy / neutral / sell), and **Score** is how much is going
+  on altogether — the board's default sort.
+- **Click any column header** to sort — e.g. highest Score or biggest movers
+  first. Sorting is the only control here; rows do not open anything.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
     "/options/flow": """

@@ -332,9 +332,14 @@ def test_column_labels_match_the_desks_words_for_the_same_columns():
 
 # ── the status line ──────────────────────────────────────────────────────────
 def test_the_cold_status_line_matches_the_desks_word_for_word():
-    """A deliberate COPY, not an import: ``pages.desk`` imports THIS module, so
-    importing back is a cycle. Guarded exactly the way ``voice._ALL_CAUSES``
-    guards its own copy, and for the same reason."""
+    """Both now resolve to ``pages.copy.WAITING_OPTIONS``, so this holds by
+    construction rather than by discipline.
+
+    It was a guarded COPY until the Opportunity Board became the third screen
+    showing this sentence — ``pages.desk`` imports this module, so importing
+    back is a cycle, and a restated literal plus this test was the answer for
+    two copies. Three earned a leaf both sides can reach. The assertion stays:
+    it is now what catches somebody giving one of the three a literal again."""
     from pages import desk
     assert flow.status_text(None) == desk.WAITING_OPTIONS
     assert flow.status_text({}) == desk.WAITING_OPTIONS

@@ -48,6 +48,7 @@ from pages import console_regime as _CR
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
@@ -2043,7 +2044,11 @@ _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 # the same words for both would make a dead service indistinguishable from a
 # quiet market — which is the whole reason this page must never print a zero it
 # did not read.
-WAITING_OPTIONS = "No data yet — the options feed hasn't published this session."
+# The ONE copy lives in ``pages/copy.py`` (three screens show it, and the two
+# that are not this one cannot import ``desk`` without a cycle). Re-exported
+# under this name because ``desk_stream`` and several tests address it here, and
+# that name is not wrong.
+WAITING_OPTIONS = _copy.WAITING_OPTIONS
 
 # The four "the feed is fine and has nothing to say" lines, and the one warning
 # that qualifies a reading rather than replacing it.
