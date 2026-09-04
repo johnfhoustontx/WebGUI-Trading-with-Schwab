@@ -295,8 +295,14 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
-- **Apply** dispatches a (simulated) paper adjustment. The board refreshes itself
-  as positions are re-priced.
+- **Apply** adjusts your paper position. No real money, and no live order is
+  placed. The board refreshes itself as positions are re-priced.
+- **Not every option has an Apply button.** One marked *Manual* is a trade you
+  place yourself — the app will not do it for you.
+- **If prices move while you're deciding, Apply is refused** and nothing is
+  changed: you'll see *"Prices moved — nothing was applied."* The numbers on the
+  card were priced a moment ago, and it will not fill you at them once they're
+  stale. Re-read the card and press it again.
 """,
     "/options/matrix": """
 **Opportunity Board — the simple version**

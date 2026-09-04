@@ -322,7 +322,12 @@ def summary_line(advisory):
         if res.get("ok"):
             prefix = f"Applied {action} ✓ · "
         elif res.get("stale"):
-            prefix = "Prices moved — re-review · "
+            # NOTHING WAS MUTATED - the engine says so twice (paper_adjust's
+            # "stale (re-review) and nothing is mutated", handlers' "aborts
+            # (stale) without mutating"). The old wording said only that prices
+            # moved, which on a page whose Apply button was just pressed reads
+            # as easily as "it went through" as "nothing happened".
+            prefix = "Nothing applied — prices moved · "
         elif res.get("error"):
             prefix = f"Apply failed: {res['error']} · "
         else:
@@ -549,14 +554,25 @@ def at_risk_columns():
     """Column defs for the at-risk ui.table."""
     return [
         {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
-        {"name": "strategy", "label": "Strat", "field": "strategy", "align": "left"},
+        {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
         {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
-        {"name": "strike_date", "label": "Strike Date", "field": "expiration",
+        # "Expiry", not "Strike Date": the field IS ``expiration``, and there is
+        # no such thing as a strike date on a spread carrying two strikes.
+        {"name": "strike_date", "label": "Expiry", "field": "expiration",
          "align": "left"},
-        {"name": "short_delta", "label": "Δ short", "field": "short_delta", "align": "right"},
-        {"name": "pnl", "label": "P&L", "field": "pnl", "align": "right"},
+        # The candidate cards' own metric list already calls this "Short delta"
+        # (``_CANDIDATE_METRICS``). One number on one screen gets one name.
+        {"name": "short_delta", "label": "Short delta", "field": "short_delta",
+         "align": "right"},
+        # Every row here is an at-risk OPEN position, so this is the Captured
+        # Signals case rather than the Paper Ledger one, where closed rows make
+        # "Open P&L" wrong for half the book.
+        {"name": "pnl", "label": "Open P&L", "field": "pnl", "align": "right"},
         {"name": "heat", "label": "Heat", "field": "heat", "align": "right"},
-        {"name": "state", "label": "State", "field": "state", "align": "left"},
+        # "Risk state", not "Status": the Paper Ledger's Status column means
+        # OPEN/CLOSED, and reusing the word for TESTED/CRITICAL would put one
+        # name on two different things.
+        {"name": "state", "label": "Risk state", "field": "state", "align": "left"},
     ]
 
 
@@ -652,11 +668,18 @@ def render():
                         ui.button("Apply", icon="play_arrow", color=None,
                                   on_click=apply_factory(card)).props("no-caps").classes(BTN_3D)
                     else:
-                        ui.label("manual — place yourself").classes("opacity-70 text-sm")
+                        # This marks a candidate the app will NOT execute for
+                        # you, so it reads as the instruction it is.
+                        ui.label("Manual — you place this one yourself") \
+                            .classes("opacity-70 text-sm")
                 # Gross / commission / net cash line (cash_text colors); the
                 # locked-in P&L follows when the action realizes one (close/partial).
                 with ui.row().classes("items-center gap-4"):
-                    cells = [("Gross", "gross_text"), ("Comm", "commission_text"),
+                    # Gross and Net stay: sitting either side of Commission in
+                    # one money row makes the pairing self-evident. "Comm" was a
+                    # casual shortening with no such excuse.
+                    cells = [("Gross", "gross_text"),
+                             ("Commission", "commission_text"),
                              ("Net", "net_text")]
                     if card.get("realized_text"):
                         cells.append(("Realized P&L", "realized_text"))
@@ -707,7 +730,10 @@ def render():
         if res.get("ok"):
             ui.notify("Rescue applied ✓", type="positive")
         elif res.get("stale"):
-            ui.notify("Prices moved — re-review", type="warning")
+            # The toast is where the full sentence belongs; the summary prefix
+            # above stays short because a headline continues after it.
+            ui.notify("Prices moved — nothing was applied. Check the new "
+                      "numbers and try again.", type="warning")
         else:
             ui.notify(f"Apply failed: {res.get('error') or 'unknown'}", type="negative")
 
@@ -828,7 +854,10 @@ def render():
         def _do():
             with ui.dialog() as dlg, ui.card():
                 ui.label(f"Apply rescue: {candidate.get('title') or 'this action'}?")
-                ui.label("This dispatches a (simulated) paper adjustment.") \
+                # The single most reassuring fact on the page, and it was
+                # implementation-speak.
+                ui.label("This adjusts your paper position. No real money, and "
+                         "no live order is placed.") \
                     .classes("opacity-70 text-sm")
                 with ui.row().classes("justify-end gap-2 w-full"):
                     ui.button("Cancel", on_click=dlg.close).props("flat")
