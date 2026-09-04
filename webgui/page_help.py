@@ -342,8 +342,15 @@ A practice ledger of option trades — **no real money**.
 This is the **hand-kept ledger** — trades you sent here yourself. The automated
 engine's positions live on **Paper Account**.
 
-- **Each row** is a trade with its strikes, credit, max loss, and live P&L.
-- **Analyze** re-prices it now and shows current Greeks; **Close** records an exit.
+- **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
+  you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
+  and when you **Opened** it.
+- **Entry is positive for a credit and negative for a debit** — one column, and
+  the sign tells you which. **P&L** is unrealised while a trade is open and
+  realised once it is closed.
+- **Analyze** re-prices it now and shows current Greeks. **Close trade** records
+  an exit; **Delete** removes the row entirely. Both are sent to the engine, so
+  the ledger updates a moment later rather than instantly.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """

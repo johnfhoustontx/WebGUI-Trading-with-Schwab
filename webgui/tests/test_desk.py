@@ -2688,7 +2688,14 @@ def test_the_two_width_blocked_labels_stay_short():
 
     So this is a deferral with arithmetic behind it, not an oversight — and it
     gets a test because a comment saying so is the kind nobody reads before
-    "fixing" the inconsistency."""
+    "fixing" the inconsistency.
+
+    /options/paper is a ui.table with no such limit and DOES spell both out
+    (``test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here``). The
+    app therefore shows one concept under two spellings, deliberately: the
+    standing rule is to spell out casual shortenings, so the abbreviation
+    stays a width concession HERE rather than becoming the app's word for
+    the concept."""
     assert "STRAT" in d.POS_HEADS and "STRATEGY" not in d.POS_HEADS
     assert "QTY" in d.POS_HEADS and "CONTRACTS" not in d.POS_HEADS
 
