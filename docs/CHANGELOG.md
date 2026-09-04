@@ -4,6 +4,47 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**Captured Signals — three columns were wrong, not
+merely terse.** Fifth page of the reader's-voice pass, and the one that turned up
+the most genuine mislabelling.)
+
+- **⚠ Two columns on a tracking page did not track.** `DTE` holds `dte_at_entry`
+  and `Grade` holds `entry_grade` — both captured once, never updated. On a screen
+  whose entire purpose is watching a signal **over time**, a bare "DTE" is read as
+  days left and drifts further from the truth every session that passes. They
+  become **DTE at entry** and **Entry grade**, and the help now says outright that
+  these two are frozen while every other column is live.
+- **⚠ `Credit` again, same defect as the Paper Ledger.** `mode` is the
+  PREMIUM-vs-DIRECTIONAL tag, and a directional signal is a **debit** — so this
+  book was never all credits. It becomes **Entry**, with the sign carrying
+  credit-vs-debit. Two pages in a row have now had a column whose header
+  contradicted the sign in its own cell; worth assuming the next one does too.
+- **`Rec`→`Action`** — the cell literally holds `TAKE_PROFIT` / `HOLD` / `CUT`,
+  which is what to do, not a description of anything.
+- **`Mode`→`Style`**, deliberately **not** "Trade type": this app already uses
+  `trade_type` for 0-DTE / Swing / Directional, and reusing that phrase for the
+  PREMIUM/DIRECTIONAL split would put one name on two different things.
+- **`Strat`/`Exp`/`Cur Price`/`Risk` → `Strategy`/`Expiry`/`Mark`/`Max loss`**,
+  matching `/desk` and the Paper Ledger.
+- **`P&L`→`Open P&L` here, while the Paper Ledger keeps plain `P&L`** — and that
+  is a real difference, not a drift. A closed signal **leaves this table** (the
+  reason its Status column was dropped long ago), so every visible row is open.
+  The Paper Ledger keeps closed rows and its `trade_pnl` returns *realized* for
+  them, where "Open P&L" would be wrong for half the book. A test on each side
+  records the distinction, so neither gets "fixed" into agreement.
+- **`Refresh marks (live)`→`Reprice now`** — "marks" is jargon, and the page's own
+  status line already said "Repricing…". The close toast takes the Paper Ledger's
+  wording for the same reason: it is a `cmd:options` command, so it names the
+  symbol and says the list updates when the engine confirms.
+- **Untouched:** the four footer figures, which are already the clearest copy on
+  the page — including the em-dash-not-$0.00 rule for an unpriced book — plus
+  every colour map and the raw payload keys.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2957 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-captured-signals-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**The Paper Ledger's columns name the reading, and
 one of them was wrong.** Fourth page of the reader's-voice pass, and the first
 that ACTS rather than only reports.)
