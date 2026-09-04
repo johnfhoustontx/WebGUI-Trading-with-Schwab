@@ -54,6 +54,7 @@ from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
+from pages.options.matrix import signal_summary as _signal_summary
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
                                  CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
@@ -916,6 +917,39 @@ def _arc_value(arcs, i):
         return arcs[i].get("value")
     except (IndexError, KeyError, AttributeError, TypeError):
         return None
+
+
+# ── the Opportunity Board panel head ─────────────────────────────────────────
+# The three buckets, in the board page's own order.
+_BOARD_SIGNALS = ("buy", "neutral", "sell")
+
+
+def board_signal_facts(matrix):
+    """Buy / Neutral / Sell counts for the Opportunity Board panel head.
+
+    ``[{"key", "label", "count", "cls"}]``, or ``None`` when there is nothing
+    to count.
+
+    **Delegated, not recomputed.** ``matrix.signal_summary`` is the same
+    function that page's own summary band calls, and ``signal_class`` the same
+    palette its chips wear — so the head cannot report a different count, or a
+    different colour, from the screen it is quoting.
+
+    ⚠ These count the WHOLE published board while the panel draws only
+    ``BOARD_ROWS_N`` rows. That is deliberate and matches the board page, whose
+    band counts every row too: the head is a market-wide read and the rows
+    below it are the top of that read.
+
+    ⚠ A cold cache and an EMPTY board both return ``None``, never three
+    zeros. A zero here is a reading this page did not take — the rule behind
+    every em dash on this screen — and the body already says "Nothing ranked
+    yet" for the empty case, so a row of zeros beside it would be noise.
+    """
+    if not isinstance(matrix, dict) or not (matrix.get("rows") or []):
+        return None
+    counts = _signal_summary(matrix)
+    return [{"key": k, "label": k.upper(), "count": int(counts.get(k, 0)),
+             "cls": _signal_class(k)} for k in _BOARD_SIGNALS]
 
 
 # ── the session countdown ────────────────────────────────────────────────────
@@ -2356,24 +2390,33 @@ def _panel(title, use_line=""):
     The head is built ONCE and the body is what each painter clears, so a
     repaint can neither duplicate the title nor strand a handle to it.
 
-    ``use_line`` gets its OWN line under the title rather than the old
-    right-aligned subtitle slot, and that is not a layout preference. That slot
-    is ``whitespace-nowrap`` on the title row, which was right for the four
-    short facts it used to hold and would push a sentence straight out of the
-    narrowest panel (Flow's floor is 508px). It also wore ``.2em`` tracking —
-    correct for small caps, unreadable on prose.
+    Returns ``(body, head_slot)``. ``body`` is what each painter clears;
+    ``head_slot`` is an empty right-aligned row on the TITLE line, for a fact
+    that moves with the data (the Opportunity Board's signal counts). A painter
+    that uses it must clear it too — the head is built once, the slot's
+    contents are not.
+
+    ``use_line`` gets its OWN line UNDER the title row, and that is not a
+    layout preference. The slot beside the title is ``whitespace-nowrap``,
+    which is right for a short fact and would push a sentence straight out of
+    the narrowest panel (Flow's floor is 508px); it also wears the small-caps
+    ``.2em`` tracking, which is unreadable on prose.
     """
     with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
         with ui.column().classes(
                 f"w-full gap-1 border-b {CONSOLE_RULE} pb-2"):
-            ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
-                f"{CON_TXT}")
+            with ui.row().classes(
+                    "items-baseline justify-between w-full gap-4"):
+                ui.label(title).classes(
+                    f"{CONSOLE_DISPLAY} text-[19px] font-bold "
+                    f"tracking-[.16em] {CON_TXT}")
+                head_slot = ui.row().classes(
+                    "items-center gap-2 whitespace-nowrap shrink-0")
             if use_line:
                 ui.label(use_line).classes(
                     f"text-[11px] leading-snug {CON_TXT_DIM}")
         body = ui.column().classes("w-full gap-0")
-    return body
+    return body, head_slot
 
 
 def _grid_head(grid, labels):
@@ -2664,10 +2707,12 @@ def render():
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
             # All four heads come from ``PANEL_HEADS`` — one copy, shared with
             # the ``/desk/live`` mirror, with the row caps still interpolated.
-            dealer_body = _panel(*PANEL_HEADS["dealer"])
-            board_body = _panel(*PANEL_HEADS["board"])
-            flow_body = _panel(*PANEL_HEADS["flow"])
-            pos_body = _panel(*PANEL_HEADS["positions"])
+            dealer_body, _ = _panel(*PANEL_HEADS["dealer"])
+            # Only the board uses its head slot today - the Opportunity Board's
+            # Buy / Neutral / Sell counts, quoted from that page's own summary.
+            board_body, board_signals = _panel(*PANEL_HEADS["board"])
+            flow_body, _ = _panel(*PANEL_HEADS["flow"])
+            pos_body, _ = _panel(*PANEL_HEADS["positions"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -2863,9 +2908,28 @@ def render():
                         f"self-start {regime_chip_class(row['regime_word'])}")
         el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
+    def _paint_signal_counts(matrix):
+        """The head's Buy / Neutral / Sell chips, rebuilt with the body.
+
+        Withheld entirely when ``board_signal_facts`` returns None, rather than
+        drawn as zeros - see that builder. The chips wear the board page's own
+        class, so a BUY here and a BUY in the SIGNAL column below are visibly
+        one thing."""
+        board_signals.clear()
+        facts = board_signal_facts(matrix)
+        if not facts:
+            return
+        with board_signals:
+            ui.label("SIGNALS").classes(_STRIP_EYEBROW)
+            for fact in facts:
+                ui.label(f"{fact['label']} {fact['count']}").classes(
+                    f"px-[5px] py-[2px] rounded-[2px] text-[9px] "
+                    f"tracking-[.1em] whitespace-nowrap {fact['cls']}")
+
     def _paint_board():
         board_body.clear()
         matrix = _view("options:matrix")
+        _paint_signal_counts(matrix)
         with board_body:
             if matrix is None:
                 ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
@@ -2883,8 +2947,8 @@ def render():
             # ATM IV cell on the same line.
             #
             # SCORE rather than HOTNESS because the first track cannot hold
-            # seven letters of 10px caps on .2em tracking — and the panel's own
-            # subtitle already says HOTTEST N, so nothing is lost.
+            # seven letters of 10px caps on .2em tracking - and the panel's own
+            # use-line already says "the N hottest names", so nothing is lost.
             _grid_head(BOARD_GRID, BOARD_HEADS)
             for row in rows:
                 _board_row(row)

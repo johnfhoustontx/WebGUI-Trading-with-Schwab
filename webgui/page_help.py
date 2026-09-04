@@ -70,6 +70,11 @@ on · what am I holding.*
   interesting, its at-the-money implied volatility and whether that is rising or
   falling, and a setup tag when one is active. The panel says how many it is
   showing.
+  The **Buy / Neutral / Sell** counts in its header are the same ones the
+  Opportunity Board page shows, and they cover **every symbol on the watchlist**
+  — not just the few rows listed beneath them. So "Buy 12" over six rows is not
+  a contradiction: twelve names are rated Buy, and you are looking at the
+  hottest handful of all of them.
 - **Live Flow Alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
   tape, so nobody can honestly say which side traded.

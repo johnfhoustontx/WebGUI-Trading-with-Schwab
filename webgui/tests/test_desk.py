@@ -2764,3 +2764,90 @@ def test_the_desk_help_writes_no_row_count_down():
     text = page_help.HELP_MD["/desk"].lower()
     for phrase in ("five hottest", "five newest", "six hottest", "nine newest"):
         assert phrase not in text, phrase
+
+
+# ── the Opportunity Board panel head: Buy / Neutral / Sell ───────────────────
+def test_board_signal_facts_delegate_to_the_boards_own_summary():
+    """Taken from the Opportunity Board, not recomputed here.
+
+    ``matrix.signal_summary`` is the function that page's own band calls, so
+    the two screens cannot report different counts for one payload — the whole
+    reason this page composes rather than restates."""
+    from pages.options import matrix as m
+    payload = {"rows": [{"signal": "buy"}, {"signal": "buy"},
+                        {"signal": "sell"}, {"signal": "neutral"},
+                        {"signal": None}]}
+    facts = d.board_signal_facts(payload)
+    counts = {f["key"]: f["count"] for f in facts}
+    assert counts == m.signal_summary(payload)
+    assert counts == {"buy": 2, "neutral": 2, "sell": 1}
+
+
+def test_board_signal_facts_keep_the_boards_order_and_chip_colours():
+    """Same order and the same chip class the board row below it wears, so the
+    head and the rows read as one vocabulary."""
+    from pages.options.matrix import signal_class
+    facts = d.board_signal_facts({"rows": [{"signal": "buy"}]})
+    assert [f["key"] for f in facts] == ["buy", "neutral", "sell"]
+    assert [f["label"] for f in facts] == ["BUY", "NEUTRAL", "SELL"]
+    for f in facts:
+        assert f["cls"] == signal_class(f["key"])
+
+
+def test_board_signal_facts_withhold_rather_than_print_three_zeros():
+    """A cold cache and an empty board both return None.
+
+    Three zeros would be a reading this page never took — the same rule that
+    makes every other cell here print an em dash rather than 0.00 — and the
+    panel body already says "Nothing ranked yet" for the empty case, so a
+    "BUY 0 · NEUTRAL 0 · SELL 0" beside it would be noise saying nothing."""
+    assert d.board_signal_facts(None) is None
+    assert d.board_signal_facts({}) is None
+    assert d.board_signal_facts({"rows": []}) is None
+    assert d.board_signal_facts("nonsense") is None
+
+
+def test_board_signal_facts_count_the_WHOLE_board_not_the_drawn_rows():
+    """Deliberate, and the one thing about this head worth knowing: the panel
+    draws BOARD_ROWS_N rows while these count every published symbol. That
+    matches the Opportunity Board's own band, which also counts every row — the
+    head is a market-wide read and the rows are the top of it."""
+    payload = {"rows": [{"signal": "buy"} for _ in range(d.BOARD_ROWS_N + 9)]}
+    facts = d.board_signal_facts(payload)
+    total = sum(f["count"] for f in facts)
+    assert total == d.BOARD_ROWS_N + 9
+    assert total > len(d.opportunity_rows(payload))
+
+
+def test_render_puts_the_signal_counts_in_the_board_panel_head(monkeypatch):
+    """The counts must reach the SCREEN, not just the builder — the head slot
+    is separate from the body the painter clears, so a painter that forgot it
+    would leave every builder test green and the head empty."""
+    _seed_bus(monkeypatch, _full_payloads())
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" in texts
+    facts = d.board_signal_facts(_full_payloads()["options:matrix"])
+    for fact in facts:
+        assert f"{fact['label']} {fact['count']}" in texts
+
+
+def test_render_shows_no_signal_counts_when_nothing_is_published(monkeypatch):
+    """The withholding rule, driven from the PRODUCER rather than asserted on a
+    hand-made payload: with every view cold the head must carry no chip at all,
+    not three zeros."""
+    _seed_bus(monkeypatch, {})
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" not in texts
+    for word in ("BUY 0", "NEUTRAL 0", "SELL 0"):
+        assert word not in texts
+
+
+def test_the_desk_help_explains_what_the_signal_counts_COUNT():
+    """The one genuinely confusable thing about this head: it reports every
+    published symbol while the rows under it are the top few. A reader seeing
+    "BUY 12" over six rows has no way to resolve that from the screen."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    low = text.lower()
+    assert "buy" in low and "neutral" in low and "sell" in low
+    assert "watchlist" in low or "whole board" in low or "every symbol" in low

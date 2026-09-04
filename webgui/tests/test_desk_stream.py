@@ -231,11 +231,13 @@ def test_a_live_feed_carries_no_withheld_warning():
 def test_board_rows_are_hottest_first_and_capped_at_the_desks_own_count():
     board = ds.snapshot(_payloads(), _NOW)["board"]
     assert [r["symbol"] for r in board["rows"]] == ["$SPX", "SPY"]
-    # The head is the Desk's now, but the point of this line is unchanged: the
-    # cap must still be INTERPOLATED into it, so a cap that moves cannot leave a
-    # stale number standing on the panel.
-    assert board["subtitle"] == d.PANEL_HEADS["board"][1]
-    assert str(d.BOARD_ROWS_N) in board["subtitle"]
+    # The cap still has to be interpolated into the head, so a cap that moves
+    # cannot leave a stale number standing - but the head's use-line is STATIC
+    # in the document now, so that invariant is asserted on PANEL_HEADS itself
+    # (test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated).
+    # What travels in the snapshot is the part that MOVES with the payload.
+    assert str(d.BOARD_ROWS_N) in d.PANEL_HEADS["board"][1]
+    assert "subtitle" not in board
     assert board["rows"][0]["hotness"] == d.fmt_hotness(91.0)
     assert board["rows"][0]["setup"] == d.setup_word("delta_wall_pin")
 
@@ -529,13 +531,48 @@ def test_the_mirror_carries_none_of_the_superseded_words():
         assert gone not in doc, gone
 
 
-def test_the_dealer_panel_finally_has_a_subtitle_slot():
-    """It was the one panel with no ``psub`` element, so the mirror could not
-    show a dealer head even when the snapshot carried one."""
-    assert 'id="dealer-sub"' in ds.document()
+def test_only_the_board_carries_a_head_slot():
+    """A ``psub`` slot is for a fact that MOVES with the payload, and the board's
+    signal counts are the only one.
+
+    Every panel's use-line became static in the document on 2026-09-04, and for
+    a few commits the snapshot ALSO shipped it as a ``subtitle`` that the JS
+    wrote into a ``psub`` - so three panels printed the same sentence twice.
+    The empty slots are gone with the duplication."""
+    doc = ds.document()
+    assert 'id="board-sub"' in doc
+    for gone in ('id="dealer-sub"', 'id="flow-sub"', 'id="pos-sub"'):
+        assert gone not in doc, gone
 
 
-def test_every_panel_snapshot_carries_the_shared_subtitle():
+def test_no_panel_snapshot_still_ships_a_duplicate_subtitle():
+    """The use-line is drawn ONCE, from the static document. A snapshot that
+    carried it again would put the same sentence on the screen twice."""
     snap = ds.snapshot(_payloads(), _NOW)
     for key in ("dealer", "board", "flow", "positions"):
-        assert snap[key]["subtitle"] == d.PANEL_HEADS[key][1], key
+        assert "subtitle" not in snap[key], key
+    # ...and it is still on screen exactly once, from the skeleton.
+    doc = ds.document()
+    for key in ("dealer", "board", "flow", "positions"):
+        assert doc.count(d.PANEL_HEADS[key][1]) == 1, key
+
+
+def test_the_mirror_carries_the_boards_signal_counts():
+    """The same counts /desk shows, from the same builder - which itself
+    delegates to the Opportunity Board's ``signal_summary``. Three screens, one
+    set of counts for one payload."""
+    board = ds.snapshot(_payloads(), _NOW)["board"]
+    facts = d.board_signal_facts(_payloads()["options:matrix"])
+    assert [s["label"] for s in board["signals"]] == [f["label"] for f in facts]
+    assert [s["count"] for s in board["signals"]] == [f["count"] for f in facts]
+    # Coloured from the board page's OWN chip palette, resolved to a hex.
+    assert [s["hex"] for s in board["signals"]] == [
+        ds.signal_hex(f["key"]) for f in facts]
+
+
+def test_the_mirror_withholds_the_counts_rather_than_showing_zeros():
+    """Driven from the PRODUCER: a cold matrix must yield an empty list, which
+    the client renders as no chips at all rather than three zeros."""
+    p = dict(_payloads())
+    p["options:matrix"] = None
+    assert ds.snapshot(p, _NOW)["board"]["signals"] == []

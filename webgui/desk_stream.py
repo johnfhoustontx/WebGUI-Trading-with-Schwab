@@ -308,18 +308,20 @@ def _dealer(payloads, stale):
     note = "" if out else _d.EMPTY_DEALER
     warning = (_d.stale_walls_note(fresh["label"])
                if stale and out else "")
-    # The dealer panel had no subtitle at all here — it was the one head the
-    # skeleton hardcoded with nothing to fill. It carries the shared one now,
-    # like its three siblings.
-    return {"rows": out, "note": note, "warning": warning,
-            "subtitle": _d.PANEL_HEADS["dealer"][1]}
+    return {"rows": out, "note": note, "warning": warning}
 
 
 def _board(payloads):
     view = payloads.get("options:matrix")
-    subtitle = _d.PANEL_HEADS["board"][1]
+    # The Opportunity Board's Buy / Neutral / Sell counts, from the Desk's own
+    # builder - which delegates to the board page's ``signal_summary``, so all
+    # three screens report one set of counts for one payload. An empty list is
+    # the withheld case (cold cache or an empty board), never three zeros.
+    signals = [{"label": f["label"], "count": f["count"],
+                "hex": signal_hex(f["key"])}
+               for f in _d.board_signal_facts(view) or []]
     if view is None:
-        return {"rows": [], "note": _d.WAITING_OPTIONS, "subtitle": subtitle}
+        return {"rows": [], "note": _d.WAITING_OPTIONS, "signals": signals}
     rows = []
     for r in _d.opportunity_rows(view):
         rows.append({
@@ -338,15 +340,14 @@ def _board(payloads):
             # setup", where a "NEUTRAL" chip would read as a finding.
             "setup": r["setup"],
         })
-    return {"rows": rows, "subtitle": subtitle,
+    return {"rows": rows, "signals": signals,
             "note": "" if rows else _d.EMPTY_BOARD}
 
 
 def _flow_panel(payloads):
     view = payloads.get("options:flow_alerts")
-    subtitle = _d.PANEL_HEADS["flow"][1]
     if view is None:
-        return {"rows": [], "note": _d.WAITING_OPTIONS, "subtitle": subtitle}
+        return {"rows": [], "note": _d.WAITING_OPTIONS}
     rows = []
     for r in _d.flow_rows(view):
         rows.append({
@@ -360,7 +361,7 @@ def _flow_panel(payloads):
             "kind": _d.flow_kind_text(r),
             "tone": FLOW_TONE_HEX.get(r["_tone_class"]) or _C["text"],
         })
-    return {"rows": rows, "subtitle": subtitle,
+    return {"rows": rows,
             "note": "" if rows else _d.EMPTY_FLOW}
 
 
@@ -375,10 +376,9 @@ def _positions(payloads):
     paper = payloads.get("options:paper_account")
     driver = payloads.get("options:driver_paper_account")
     captured = payloads.get("options:captured")
-    subtitle = _d.PANEL_HEADS["positions"][1]
     if paper is None and driver is None and captured is None:
         return {"rows": [], "note": _d.WAITING_OPTIONS, "summary": "",
-                "subtitle": subtitle, "at_risk": 0}
+                "at_risk": 0}
     book = _d.position_rows(paper, driver, captured)
     summary = _d.positions_summary(book)
     shown = book[:_d.POSITION_ROWS_N]
@@ -406,7 +406,7 @@ def _positions(payloads):
                           else _hue(_d.flag_chip_class(r["flag"]))),
             "href": _d.POSITION_ROUTES.get(r["source"], "/options/paper"),
         })
-    return {"rows": rows, "subtitle": subtitle,
+    return {"rows": rows,
             "summary": _d.summary_line(summary, len(shown)),
             "at_risk": summary["at_risk"],
             "note": "" if rows else _d.EMPTY_POSITIONS}
@@ -637,7 +637,11 @@ a {{ color: inherit; text-decoration: none; }}
 .phead {{ display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px;
           border-bottom: 1px solid {line}40; }}
 .ptitle {{ font-size: 14px; letter-spacing: .2em; color: {text}; }}
-.psub {{ font-size: 11px; letter-spacing: .16em; color: {label}; margin-left: auto; }}
+.psub {{ font-size: 11px; letter-spacing: .16em; color: {label}; margin-left: auto;
+         display: flex; align-items: center; gap: 6px; white-space: nowrap; }}
+.sig-eyebrow {{ font-size: 10px; letter-spacing: .22em; color: {dim}; }}
+.sig-chip {{ font-size: 10px; letter-spacing: .1em; color: #fff; padding: 2px 5px;
+             border-radius: 2px; }}
 /* The use-line: prose, so NORMAL tracking and its own row under the head -
    the .16em above is right for a short fact and unreadable on a sentence. */
 .puse {{ font-size: 13px; line-height: 1.35; color: {dim}; padding: 6px 0 2px; }}
@@ -705,6 +709,20 @@ function tint(node, hex, alpha) {
   node.style.borderColor = hex;
   if (alpha) node.style.background = hex + alpha;
   return node;
+}
+/* The Opportunity Board head's Buy / Neutral / Sell chips. An EMPTY list is
+   the withheld case - a cold cache or an empty board - and clears the slot
+   rather than drawing three zeros, which would be a reading nothing took. */
+function signalCounts(signals) {
+  const head = $('#board-sub');
+  head.replaceChildren();
+  if (!signals || !signals.length) return;
+  head.appendChild(el('span', 'sig-eyebrow', 'SIGNALS'));
+  signals.forEach((sig) => {
+    const chip = el('span', 'sig-chip', sig.label + ' ' + sig.count);
+    chip.style.background = sig.hex;
+    head.appendChild(chip);
+  });
 }
 function panel(id, note, warning) {
   const body = $(id);
@@ -872,7 +890,7 @@ function paint(s) {
     });
   }
 
-  $('#board-sub').textContent = s.board.subtitle;
+  signalCounts(s.board.signals);
   b = panel('#board', s.board.note);
   if (b) {
     const tb = table(b, zipw(HEADS.board, [7, 11, 28, 14, 12, 8, 10, 10]));
@@ -897,7 +915,6 @@ function paint(s) {
     });
   }
 
-  $('#flow-sub').textContent = s.flow.subtitle;
   b = panel('#flow', s.flow.note);
   if (b) {
     const tb = table(b, zipw(HEADS.flow, [10, 13, 44, 33]));
@@ -910,7 +927,6 @@ function paint(s) {
     });
   }
 
-  $('#pos-sub').textContent = s.positions.subtitle;
   const sum = $('#pos-summary');
   sum.textContent = s.positions.summary;
   sum.className = s.positions.at_risk ? 'summary risk' : 'summary';
@@ -1019,8 +1035,7 @@ def document():
 
   <div class="grid">
     <div class="panel">
-      <div class="phead"><div class="ptitle">{dealer_title}</div>
-        <div class="psub" id="dealer-sub"></div></div>
+      <div class="phead"><div class="ptitle">{dealer_title}</div></div>
       <div class="puse">{dealer_use}</div>
       <div class="pbody" id="dealer"></div>
     </div>
@@ -1031,14 +1046,12 @@ def document():
       <div class="pbody" id="board"></div>
     </div>
     <div class="panel">
-      <div class="phead"><div class="ptitle">{flow_title}</div>
-        <div class="psub" id="flow-sub"></div></div>
+      <div class="phead"><div class="ptitle">{flow_title}</div></div>
       <div class="puse">{flow_use}</div>
       <div class="pbody" id="flow"></div>
     </div>
     <div class="panel">
-      <div class="phead"><div class="ptitle">{pos_title}</div>
-        <div class="psub" id="pos-sub"></div></div>
+      <div class="phead"><div class="ptitle">{pos_title}</div></div>
       <div class="puse">{pos_use}</div>
       <div class="summary" id="pos-summary"></div>
       <div class="pbody" id="positions"></div>
