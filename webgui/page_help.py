@@ -360,11 +360,16 @@ Market Scanner signals you're **tracking over time** to see whether they're work
 
 - **Newest first** — the table opens with your most recently captured signal at
   the top. Click any column heading to re-sort it.
-- **Rec** — green = take profit, red = cut, amber = hold.
-- **Credit vs Cur Price** — what you took in against what it would cost to close
-  now; **P&L** is the difference, green in profit and red in loss.
-- **Refresh marks (live)** re-prices everything against fresh chains; you're
-  alerted when a stop or target is hit.
+- **Action** — what to do now: green = take profit, red = cut, amber = hold.
+- **Entry vs Mark** — what you took in against what it would cost to close now;
+  **Open P&L** is the difference, green in profit and red in loss. Entry is
+  positive for a credit and negative for a debit, so a **Directional** signal
+  (see **Style**) shows a negative Entry — that is a debit paid, not a loss.
+- **DTE at entry** and **Entry grade** are frozen at the moment you captured the
+  signal and do not move. Every other column is live. Use **Expiry** for how much
+  time is actually left.
+- **Reprice now** re-prices everything against fresh chains; you're alerted when
+  a stop or target is hit.
 - Click a row to load it into the **detail panel** on the right, and to pick it
   for **Close selected**.
 - **The footer** under the table sums the day: how many signals were captured and

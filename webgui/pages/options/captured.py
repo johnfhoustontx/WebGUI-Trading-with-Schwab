@@ -114,12 +114,33 @@ def captured_columns():
     # redundant Status column are dropped — a closed signal leaves the table, so
     # every visible row is OPEN. "Cur Price" is the live spread mark (current
     # option price), shown next to the entry Credit for an at-a-glance comparison.
+    # Each label names the READING. Three of these were wrong rather than terse.
+    #
+    # WARNING: "DTE at entry" and "Entry grade" hold ``dte_at_entry`` and
+    # ``entry_grade``. Both are captured once and NEVER MOVE. On a page whose
+    # whole purpose is tracking a signal over time, a bare "DTE" is read as days
+    # left - and drifts further from the truth every session that passes.
+    #
+    # WARNING: "Entry", not "Credit". ``mode`` is the PREMIUM-vs-DIRECTIONAL tag
+    # and a directional signal is a DEBIT, so this book is not all credits. Same
+    # defect the Paper Ledger carried in its same-named column, fixed the same
+    # way: the sign carries credit-vs-debit.
+    #
+    # "Open P&L" is right HERE and wrong on the Paper Ledger, which is not a
+    # drift. A closed signal LEAVES this table (the reason the Status column was
+    # dropped above), so every visible row is open. That ledger keeps closed rows
+    # and its ``trade_pnl`` returns REALIZED for them.
+    #
+    # "Style" for ``mode``, deliberately NOT "Trade type": this app already uses
+    # ``trade_type`` for 0-DTE / Swing / Directional, and reusing the phrase
+    # would put one name on two different splits.
     spec = [
-        ("recommendation", "Rec"),
-        ("symbol", "Symbol"), ("strategy", "Strat"), ("mode", "Mode"),
-        ("opened", "Opened"), ("expiration", "Exp"), ("dte", "DTE"),
-        ("credit", "Credit"), ("current_value", "Cur Price"),
-        ("max_loss", "Risk"), ("unrealized_pnl", "P&L"), ("grade", "Grade"),
+        ("recommendation", "Action"),
+        ("symbol", "Symbol"), ("strategy", "Strategy"), ("mode", "Style"),
+        ("opened", "Opened"), ("expiration", "Expiry"),
+        ("dte", "DTE at entry"), ("credit", "Entry"),
+        ("current_value", "Mark"), ("max_loss", "Max loss"),
+        ("unrealized_pnl", "Open P&L"), ("grade", "Entry grade"),
     ]
     cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
@@ -363,7 +384,7 @@ def render():
             with ui.row().classes("items-center gap-3 w-full justify-end"):
                 ui.button("Reload", icon="refresh", color=None,
                           on_click=lambda: _reload()).props("no-caps").classes(BTN)
-                ui.button("Refresh marks (live)", icon="published_with_changes", color=None,
+                ui.button("Reprice now", icon="published_with_changes", color=None,
                           on_click=lambda: _reprice()).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Close selected", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
@@ -532,7 +553,9 @@ def render():
                              "reason": reason.value or "MANUAL_CLOSE"},
                 })
                 dlg.close()
-                ui.notify("Close requested.", type="positive")
+                ui.notify(
+                    f"Closing {sig.get('symbol', '')} — the list updates "
+                    f"when the engine confirms.", type="positive")
                 status.text = "Closing…"
 
             with ui.row():
