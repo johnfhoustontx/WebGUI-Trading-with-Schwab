@@ -262,22 +262,26 @@ def test_say_strikes_drops_only_the_unusable_half():
 # The rows below are the shape ``pages.options.flow.alert_rows`` publishes:
 # ``kind`` and ``side`` are already the DISPLAY labels, not the raw keys.
 def test_flow_phrase_names_the_ticker_then_the_cause():
-    row = {"symbol": "SPY", "kind": "Crossover", "side": "Calls over"}
-    assert voice.flow_phrase(row) == "S P Y. Crossover alert, calls over."
+    row = {"symbol": "SPY", "kind": "Premium shift", "side": "Calls over"}
+    assert voice.flow_phrase(row) == "S P Y. Premium shift alert, calls over."
 
 
 # ⚠ These rows carry NO strike/expiry, so the two contract-carrying kinds land on
 # the DEGRADE path here on purpose — the short form is what a uoa alert with an
 # unreadable contract still says. The contract form has its own block below.
+# ⚠ Every kind here is a NOUN phrase, and that is load-bearing rather than
+# stylistic: this form is f"{kind} alert", so the clause "Hedging flipped" would
+# speak as "Hedging flipped alert, now damping." A gamma flip names no contract,
+# so it ALWAYS takes this path.
 _FLOW_CASES = {
-    ("SPY", "Crossover", "Calls over"): "S P Y. Crossover alert, calls over.",
-    ("SPY", "Crossover", "Puts over"): "S P Y. Crossover alert, puts over.",
-    ("NDX", "Unusual activity", "Put"): "N D X. Unusual activity alert, put.",
-    ("NDX", "Unusual activity", "Call"): "N D X. Unusual activity alert, call.",
-    ("QQQ", "Gamma flip", "To negative"): "Q Q Q. Gamma flip alert, to negative.",
-    ("QQQ", "Gamma flip", "To positive"): "Q Q Q. Gamma flip alert, to positive.",
-    ("AMD", "Big delta", "Call"): "A M D. Big delta alert, call.",
-    ("AMD", "Big delta", "Put"): "A M D. Big delta alert, put.",
+    ("SPY", "Premium shift", "Calls over"): "S P Y. Premium shift alert, calls over.",
+    ("SPY", "Premium shift", "Puts over"): "S P Y. Premium shift alert, puts over.",
+    ("NDX", "Unusual volume", "Put"): "N D X. Unusual volume alert, put.",
+    ("NDX", "Unusual volume", "Call"): "N D X. Unusual volume alert, call.",
+    ("QQQ", "Hedging flip", "Now amplifying"): "Q Q Q. Hedging flip alert, now amplifying.",
+    ("QQQ", "Hedging flip", "Now damping"): "Q Q Q. Hedging flip alert, now damping.",
+    ("AMD", "Outsized bet", "Call"): "A M D. Outsized bet alert, call.",
+    ("AMD", "Outsized bet", "Put"): "A M D. Outsized bet alert, put.",
 }
 
 
@@ -293,7 +297,7 @@ def test_flow_phrase_cases_are_complete_against_the_flow_pages_own_labels():
     ``flow_phrase`` reads the DISPLAY labels ``pages.options.flow`` stamps, so
     the spoken vocabulary and the printed one are the same words by
     construction — but only for labels somebody remembered to test. Add a fifth
-    alert kind, or relabel "Big delta", and every assertion above stays green
+    alert kind, or relabel "Outsized bet", and every assertion stays green
     while the new phrase is never once spoken aloud in a test. Drift between
     the spoken and the printed vocabulary is invisible otherwise, which is the
     documented sectors-vs-rotation failure in a new place.
@@ -311,36 +315,36 @@ def test_flow_phrase_cases_are_complete_against_the_flow_pages_own_labels():
 
 # ── flow_phrase: the CONTRACT ────────────────────────────────────────────────
 # Two of the four alert kinds name a specific contract, and until 2026-08-21 the
-# squawk threw that away: "N D X. Unusual activity alert, put." told the listener
+# squawk threw that away: "N D X. Unusual volume alert, put." told the listener
 # something was moving and then refused to say WHAT, so every alert cost a look
 # at the screen anyway. These are the user's own reference phrases.
 def test_flow_phrase_speaks_the_contract_for_unusual_activity():
-    row = {"symbol": "$NDX", "kind": "Unusual activity", "side": "Put",
+    row = {"symbol": "$NDX", "kind": "Unusual volume", "side": "Put",
            "strike": 715.0, "expiry": "2026-08-18", "dte": 0}
-    assert voice.flow_phrase(row) == "N D X. Unusual activity, 0-D T E 7 15 Put."
+    assert voice.flow_phrase(row) == "N D X. Unusual volume, 0-D T E 7 15 Put."
 
 
 def test_flow_phrase_speaks_a_five_digit_index_strike():
-    row = {"symbol": "$NDX", "kind": "Unusual activity", "side": "Put",
+    row = {"symbol": "$NDX", "kind": "Unusual volume", "side": "Put",
            "strike": 21500.0, "expiry": "2026-08-18", "dte": 0}
     assert voice.flow_phrase(row) == \
-        "N D X. Unusual activity, 0-D T E 2 1 5 hundred Put."
+        "N D X. Unusual volume, 0-D T E 2 1 5 hundred Put."
 
 
 def test_flow_phrase_speaks_the_contract_for_big_delta():
-    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+    row = {"symbol": "AMD", "kind": "Outsized bet", "side": "Call",
            "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
-    assert voice.flow_phrase(row) == "A M D. Big delta, 8 - 28 4 72. point 5 Call."
+    assert voice.flow_phrase(row) == "A M D. Outsized bet, 8 - 28 4 72. point 5 Call."
 
 
 def test_the_contract_form_drops_the_word_alert_and_moves_the_side_last():
     """Both changes are deliberate, and both are the user's wording.
 
-    "Unusual activity alert, put, 8 - 28 4 72. point 5" would put the side
+    "Unusual volume alert, put, 8 - 28 4 72. point 5" would put the side
     before the contract it belongs to; naming the contract and THEN its side is
     how the contract is spoken aloud everywhere else.
     """
-    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+    row = {"symbol": "AMD", "kind": "Outsized bet", "side": "Call",
            "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
     said = voice.flow_phrase(row)
     assert "alert" not in said
@@ -348,61 +352,61 @@ def test_the_contract_form_drops_the_word_alert_and_moves_the_side_last():
 
 
 def test_the_contract_less_kinds_are_untouched():
-    """Crossover and gamma flip carry no contract, so their phrase does not move.
+    """A premium shift and a hedging flip carry no contract, so the phrase stays.
 
     They keep the word "alert" precisely because there is nothing to put in its
     place — the shortening was paid for by the detail that replaced it.
     """
     assert voice.flow_phrase(
-        {"symbol": "SPY", "kind": "Crossover", "side": "Calls over",
+        {"symbol": "SPY", "kind": "Premium shift", "side": "Calls over",
          "strike": None, "expiry": None, "dte": None}) == \
-        "S P Y. Crossover alert, calls over."
+        "S P Y. Premium shift alert, calls over."
     assert voice.flow_phrase(
-        {"symbol": "QQQ", "kind": "Gamma flip", "side": "To negative",
+        {"symbol": "QQQ", "kind": "Hedging flip", "side": "Now amplifying",
          "strike": None, "expiry": None, "dte": None}) == \
-        "Q Q Q. Gamma flip alert, to negative."
+        "Q Q Q. Hedging flip alert, now amplifying."
 
 
 def test_a_contract_alert_takes_the_burst_tail_too():
-    row = {"symbol": "AMD", "kind": "Big delta", "side": "Call",
+    row = {"symbol": "AMD", "kind": "Outsized bet", "side": "Call",
            "strike": 472.5, "expiry": "2026-08-28", "dte": 3}
     assert voice.flow_phrase(row, extra=2) == \
-        "A M D. Big delta, 8 - 28 4 72. point 5 Call. Plus 2 more."
+        "A M D. Outsized bet, 8 - 28 4 72. point 5 Call. Plus 2 more."
 
 
 # ── flow_phrase: the DEGRADE path ────────────────────────────────────────────
 # ⚠ The rule is SHORTER, never HALF. A missing strike must not produce
-# "Big delta, 8 - 28  Call." with a hole in it — a terse alert is worth having,
+# "Outsized bet, 8 - 28  Call." with a hole in it — a terse alert is worth having,
 # a broken sentence is not, and silence is worse than both.
 @pytest.mark.parametrize("missing", ["strike", "expiry", "side"])
 def test_a_contract_alert_missing_a_piece_falls_back_to_the_short_form(missing):
-    row = {"symbol": "NDX", "kind": "Unusual activity", "side": "Put",
+    row = {"symbol": "NDX", "kind": "Unusual volume", "side": "Put",
            "strike": 715.0, "expiry": "2026-08-18", "dte": 3}
     row[missing] = None
     said = voice.flow_phrase(row)
     if missing == "side":
-        assert said == "N D X. Unusual activity alert."
+        assert said == "N D X. Unusual volume alert."
     else:
-        assert said == "N D X. Unusual activity alert, put."
+        assert said == "N D X. Unusual volume alert, put."
     assert ",," not in said and "  " not in said
 
 
 def test_an_unreadable_strike_degrades_rather_than_speaking_nonsense():
     for junk in ("abc", float("nan"), True, ""):
-        row = {"symbol": "NDX", "kind": "Unusual activity", "side": "Put",
+        row = {"symbol": "NDX", "kind": "Unusual volume", "side": "Put",
                "strike": junk, "expiry": "2026-08-18", "dte": 3}
-        assert voice.flow_phrase(row) == "N D X. Unusual activity alert, put.", junk
+        assert voice.flow_phrase(row) == "N D X. Unusual volume alert, put.", junk
 
 
 def test_flow_phrase_omits_a_missing_side_without_a_dangling_comma():
-    row = {"symbol": "SPY", "kind": "Crossover", "side": ""}
-    assert voice.flow_phrase(row) == "S P Y. Crossover alert."
+    row = {"symbol": "SPY", "kind": "Premium shift", "side": ""}
+    assert voice.flow_phrase(row) == "S P Y. Premium shift alert."
 
 
 def test_flow_phrase_folds_the_burst_count_into_the_same_sentence():
-    row = {"symbol": "SPY", "kind": "Crossover", "side": "Calls over"}
+    row = {"symbol": "SPY", "kind": "Premium shift", "side": "Calls over"}
     assert voice.flow_phrase(row, extra=5) == \
-        "S P Y. Crossover alert, calls over. Plus 5 more."
+        "S P Y. Premium shift alert, calls over. Plus 5 more."
 
 
 def test_flow_phrase_survives_a_junk_row():
@@ -868,21 +872,21 @@ def test_importing_voice_does_not_import_edge_tts():
 def test_prewarm_texts_covers_every_symbol_and_cause():
     texts = voice.prewarm_texts(["SPY", "QQQ"])
     assert len(texts) == 2 * len(voice.FLOW_CAUSES)
-    assert "S P Y. Crossover alert, calls over." in texts
-    assert "Q Q Q. Gamma flip alert, to negative." in texts
+    assert "S P Y. Premium shift alert, calls over." in texts
+    assert "Q Q Q. Hedging flip alert, now amplifying." in texts
 
 
 def test_the_prewarm_skips_the_kinds_whose_phrase_embeds_a_contract():
     """Warming those would synthesize clips that can NEVER be played.
 
     A uoa phrase now names a strike and an expiry, so its phrase space is the
-    whole chain — the eight-pair list warmed "N D X. Unusual activity alert,
+    whole chain — the eight-pair list warmed "N D X. Unusual volume alert,
     put.", a sentence no live alert produces any more. Pure network and disk for
     nothing, on every first Desk open.
     """
     warmed_kinds = {kind for kind, _side in voice.FLOW_CAUSES}
     assert warmed_kinds.isdisjoint(voice.CONTRACT_KINDS)
-    assert warmed_kinds == {"Crossover", "Gamma flip"}
+    assert warmed_kinds == {"Premium shift", "Hedging flip"}
     assert len(voice.FLOW_CAUSES) == 4          # was 8 before the contract form
     for text in voice.prewarm_texts(["SPY"]):
         assert "alert" in text                  # only the short form is warmable

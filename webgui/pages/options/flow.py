@@ -19,11 +19,32 @@ VIEW = "options:flow_alerts"
 
 _CT_TZ = ZoneInfo("America/Chicago")
 
-_KIND_LABEL = {"crossover": "Crossover", "uoa": "Unusual activity",
-               "gamma_flip": "Gamma flip", "big_delta": "Big delta"}
+# The words a reader sees, keyed by the words the service sends. The KEYS are
+# the ``options_svc`` contract, the ``config/flow_alerts.toml`` section names and
+# ``_TONE``'s own keys, and they do not change — that separation is what lets the
+# label be chosen for the reader rather than for the detector.
+#
+# And these name the EVENT, not the detector. "Big delta · Call" said which of
+# the four things the service runs produced the row; it said nothing about what
+# the market did, which is the only reason the row is on screen.
+# ⚠ Every one of these is a NOUN PHRASE, and "Hedging flip" is not a typo for
+# "Hedging flipped". ``voice.flow_phrase`` builds its contract-less form as
+# f"{kind} alert" — the form a gamma flip ALWAYS takes, since it names no
+# contract — and a clause there speaks as "Hedging flipped alert, now damping."
+_KIND_LABEL = {"crossover": "Premium shift", "uoa": "Unusual volume",
+               "gamma_flip": "Hedging flip", "big_delta": "Outsized bet"}
+# ⚠ The two gamma sides had to move WITH their kind. "Hedging flipped · To
+# positive" would read worse than the name it replaced: "to positive" is only
+# interpretable once you already know the subject is gamma sign, and that is
+# precisely the word the new kind name takes away.
+#
+# The other four are untouched, and deliberately literal. This page can say
+# WHICH SIDE traded and never who initiated — Schwab publishes no time-and-sales
+# tape to this app — so "Call" must keep meaning the contract class and nothing
+# more.
 _SIDE_LABEL = {"calls_over": "Calls over", "puts_over": "Puts over",
                "call": "Call", "put": "Put",
-               "to_positive": "To positive", "to_negative": "To negative"}
+               "to_positive": "Now damping", "to_negative": "Now amplifying"}
 
 # Direction → a FIXED Tailwind class (the finite-set mapping the UI standard
 # requires — never a computed color, never an inline style).
@@ -243,29 +264,47 @@ def symbol_options(rows):
     return sorted({r.get("symbol") for r in rows or [] if r.get("symbol")})
 
 
+# ⚠ A deliberate COPY of ``pages.desk.WAITING_OPTIONS``, not an import:
+# ``desk`` imports THIS module (for ``alert_rows`` and ``_TONE``), so importing
+# back would be a cycle. Guarded by
+# ``test_the_cold_status_line_matches_the_desks_word_for_word`` — the same
+# pattern, and the same justification, ``voice._ALL_CAUSES`` already carries.
+_WAITING = "No data yet — the options feed hasn't published this session."
+
+
 def status_text(view):
     """Status line. Distinguishes a quiet day from a service that isn't publishing —
-    on an empty table those look identical otherwise."""
+    on an empty table those look identical otherwise.
+
+    The quiet-day line describes the MARKET, not this page: "No flow alerts yet
+    today" reads as a screen with nothing on it, where "Nothing unusual has
+    traded yet today" reads as a tape that has done nothing — the true statement,
+    and already the Desk's wording for its own empty flow panel."""
     if not isinstance(view, dict) or not view:
-        return "Waiting for the options service…"
+        return _WAITING
     n = len(view.get("alerts") or [])
     date = view.get("date") or ""
     if not n:
-        return f"No flow alerts yet today · {date}".rstrip(" ·")
+        return f"Nothing unusual has traded yet today · {date}".rstrip(" ·")
     return f"{n} alert{'' if n == 1 else 's'} today · {date}".rstrip(" ·")
 
 
 def flow_columns():
+    # "Alert type" and "What traded" are the DESK's words for these same two
+    # quantities — its flow panel prints both — because one number labelled two
+    # ways on two screens is the drift that page exists to avoid. "Alert" became
+    # "Summary": it sat directly beside "Alert type" and named a different thing.
     spec = [("time", "Time"), ("age", "Age"), ("symbol", "Symbol"),
-            ("kind", "Type"), ("side", "Side"), ("detail", "Detail"),
-            ("text", "Alert")]
+            ("kind", "Alert type"), ("side", "Side"),
+            ("detail", "What traded"), ("text", "Summary")]
     cols = [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
             for f, l in spec]
     # Share = big_delta's % of its symbol's gross delta-notional (numeric, so the
     # table sorts by conviction — click it to rank the day's fires biggest-first).
     # Blank for the other alert types. Sits just before the Alert text.
-    cols.insert(6, {"name": "share", "label": "Share", "field": "share_pct",
-                    "sortable": True, "align": "right"})
+    # "Share" alone never said share OF WHAT.
+    cols.insert(6, {"name": "share", "label": "Share of flow",
+                    "field": "share_pct", "sortable": True, "align": "right"})
     return cols
 
 
@@ -298,11 +337,12 @@ def render():
             with ui.row().classes("items-center gap-3 flex-wrap pt-1"):
                 kind_sel = ui.select(
                     dict(_KIND_LABEL), value=list(_KIND_LABEL), multiple=True,
-                    label="Type").classes("w-72").props("dense outlined use-chips")
+                    label="Alert type").classes("w-72").props(
+                        "dense outlined use-chips")
                 symbol_sel = ui.select(["All"], value="All", label="Symbol") \
                     .classes("w-40").props("dense outlined")
 
-            status = ui.label("Waiting for the options service…").classes(EYEBROW)
+            status = ui.label(_WAITING).classes(EYEBROW)
             table_box = ui.element("div").classes("w-full")
             with table_box:
                 table = ui.table(columns=flow_columns(), rows=[], row_key="id",

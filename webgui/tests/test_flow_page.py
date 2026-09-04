@@ -91,17 +91,26 @@ def test_alert_rows_leave_the_contract_empty_where_the_alert_has_none():
 
 
 def test_kind_labels_are_whole_words():
-    """UI labels spell things out; 'UOA' means nothing at a glance."""
-    assert flow.alert_kind_label(_XO) == "Crossover"
-    assert flow.alert_kind_label(_UOA) == "Unusual activity"
-    assert flow.alert_kind_label(_GF) == "Gamma flip"
+    """UI labels spell things out; 'UOA' means nothing at a glance.
+
+    The four labels themselves are asserted by
+    ``test_alert_kinds_say_what_happened_not_which_detector_fired``; what is
+    unique here is that a row REACHES one, and that an unknown type still names
+    itself rather than rendering blank."""
+    for a in (_XO, _UOA, _GF):
+        assert flow.alert_kind_label(a) == flow._KIND_LABEL[a["type"]]
+        assert " " in flow.alert_kind_label(a) or len(
+            flow.alert_kind_label(a)) > 4
     assert flow.alert_kind_label({}) == "Flow"
 
 
 def test_side_labels_read_directionally():
+    """The words are pinned by the two vocabulary tests below; this one holds
+    the wiring and the EMPTY fallback — a side the map does not know renders as
+    nothing, never as a made-up direction."""
     assert flow.side_label(_XO) == "Calls over"
     assert flow.side_label(_UOA) == "Call"
-    assert flow.side_label(_GF) == "To negative"
+    assert flow.side_label(_GF) == "Now amplifying"
     assert flow.side_label({}) == ""
 
 
@@ -217,8 +226,11 @@ def test_symbol_options_are_sorted_and_deduped():
 def test_status_text_distinguishes_quiet_from_cold():
     """'Nothing has fired' and 'the service isn't publishing' look identical on an
     empty table -- they must not read the same."""
-    assert flow.status_text(None) == "Waiting for the options service…"
-    assert "No flow alerts yet" in flow.status_text({"date": "2026-08-09", "alerts": []})
+    cold = flow.status_text(None)
+    quiet = flow.status_text({"date": "2026-08-09", "alerts": []})
+    assert cold != quiet
+    assert "hasn't published" in cold          # the feed
+    assert "has traded" in quiet               # the market
     assert flow.status_text(_VIEW) == "3 alerts today · 2026-08-09"
     assert flow.status_text({"date": "2026-08-09", "alerts": [_XO]}) == "1 alert today · 2026-08-09"
 
@@ -263,3 +275,95 @@ def test_alert_rows_stamp_share_for_big_delta():
     rows = {r["symbol"]: r for r in flow.alert_rows({"date": "d", "alerts": [_UOA, _BD]})}
     assert rows["SPY"]["share_pct"] == 24.0
     assert rows["QQQ"]["share_pct"] is None
+
+
+# ── the alert vocabulary names the EVENT, not the detector ───────────────────
+def test_alert_kinds_say_what_happened_not_which_detector_fired():
+    """"Big delta · Call" tells a reader which of the four things options_svc
+    runs produced the row. It does not tell them what the market did, which is
+    the only reason the row is on screen."""
+    assert flow.alert_kind_label({"type": "crossover"}) == "Premium shift"
+    assert flow.alert_kind_label({"type": "uoa"}) == "Unusual volume"
+    # A NOUN phrase, not "Hedging flipped": voice speaks a contract-less alert
+    # as "<kind> alert", and a gamma flip always takes that path.
+    assert flow.alert_kind_label({"type": "gamma_flip"}) == "Hedging flip"
+    assert flow.alert_kind_label({"type": "big_delta"}) == "Outsized bet"
+
+
+def test_the_gamma_sides_moved_with_their_kind():
+    """"Hedging flipped · To positive" would be LESS legible than the name it
+    replaced: "to positive" is only interpretable once you know the subject is
+    gamma sign, and that is exactly the word the new kind name removes."""
+    assert flow.side_label({"side": "to_positive"}) == "Now damping"
+    assert flow.side_label({"side": "to_negative"}) == "Now amplifying"
+
+
+def test_the_call_put_sides_are_untouched():
+    """The "call or put, never bought or sold" caveat this page owes its reader
+    depends on these staying exactly that literal — Schwab publishes no
+    time-and-sales tape, so nobody here knows who initiated."""
+    assert flow.side_label({"side": "calls_over"}) == "Calls over"
+    assert flow.side_label({"side": "puts_over"}) == "Puts over"
+    assert flow.side_label({"side": "call"}) == "Call"
+    assert flow.side_label({"side": "put"}) == "Put"
+
+
+def test_the_raw_payload_keys_are_NOT_renamed():
+    """The keys are the options_svc contract, the config/flow_alerts.toml
+    section names and _TONE's own keys. Renaming a WORD is this page's business;
+    renaming a KEY would be a cross-tier migration for no reader's benefit."""
+    assert set(flow._KIND_LABEL) == {"crossover", "uoa", "gamma_flip",
+                                     "big_delta"}
+    assert {t for t, _s in flow._TONE} == set(flow._KIND_LABEL)
+
+
+# ── column headers, matched to the Desk's words ──────────────────────────────
+def test_column_labels_match_the_desks_words_for_the_same_columns():
+    """The Desk's flow panel prints these same two quantities. One number
+    labelled two ways on two screens is the drift the Desk pass just closed."""
+    labels = {c["name"]: c["label"] for c in flow.flow_columns()}
+    assert labels["kind"] == "Alert type"
+    assert labels["detail"] == "What traded"
+    # "Alert" sat beside "Alert type" and named a different thing.
+    assert labels["text"] == "Summary"
+    # "Share" alone never said share OF WHAT.
+    assert labels["share"] == "Share of flow"
+
+
+# ── the status line ──────────────────────────────────────────────────────────
+def test_the_cold_status_line_matches_the_desks_word_for_word():
+    """A deliberate COPY, not an import: ``pages.desk`` imports THIS module, so
+    importing back is a cycle. Guarded exactly the way ``voice._ALL_CAUSES``
+    guards its own copy, and for the same reason."""
+    from pages import desk
+    assert flow.status_text(None) == desk.WAITING_OPTIONS
+    assert flow.status_text({}) == desk.WAITING_OPTIONS
+
+
+def test_a_quiet_day_describes_the_MARKET_not_the_page():
+    """"No flow alerts yet today" reads as a page that has nothing. "Nothing
+    unusual has traded yet today" reads as a market that has done nothing —
+    which is the true statement, and already the Desk's wording for its own
+    empty flow panel."""
+    line = flow.status_text({"date": "2026-08-09", "alerts": []})
+    assert line.startswith("Nothing unusual has traded yet today")
+    assert "2026-08-09" in line
+
+
+def test_a_busy_day_still_counts_and_still_dates_itself():
+    assert flow.status_text({"date": "2026-08-09", "alerts": [_XO]}) == \
+        "1 alert today · 2026-08-09"
+    assert flow.status_text({"date": "2026-08-09", "alerts": [_XO, _UOA]}) == \
+        "2 alerts today · 2026-08-09"
+
+
+def test_the_flow_help_calls_the_alerts_what_the_screen_calls_them():
+    """Present-and-absent, because ``term in text`` alone cannot catch a rename
+    that reached the screen and stopped at the hover guide."""
+    import page_help
+    text = page_help.HELP_MD["/options/flow"]
+    for label in flow._KIND_LABEL.values():
+        assert f"**{label}**" in text, label
+    for gone in ("**Crossover**", "**Unusual activity**", "**Gamma flip**",
+                 "**Big delta**", "the **Share** column"):
+        assert gone not in text, gone

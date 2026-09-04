@@ -228,7 +228,7 @@ def _sentence(symbol, body, extra):
 
 
 def flow_phrase(row, extra=0):
-    """``'N D X. Unusual activity, 0-D T E 7 15 Put.'``
+    """``'N D X. Unusual volume, 0-D T E 7 15 Put.'``
 
     Every field is read straight off the row that
     ``pages.options.flow.alert_rows`` built, so the spoken words are the SAME
@@ -238,8 +238,8 @@ def flow_phrase(row, extra=0):
     new place. It is also why ``strike``/``expiry``/``dte`` were added to
     ``alert_rows`` rather than read here out of the raw payload.
 
-    **Two forms, chosen by what the alert CARRIES.** Unusual activity and big
-    delta name a specific contract, so they say it: kind, expiry, strike, side,
+    **Two forms, chosen by what the alert CARRIES.** Unusual volume and an
+    outsized bet name a specific contract, so they say it: kind, expiry, strike, side,
     with the word "alert" dropped (the detail earned its place) and the side
     moved AFTER the strike it belongs to. A crossover is a symbol-level fact and
     a gamma flip a book-level one — neither has a contract to name, so both keep
@@ -247,7 +247,7 @@ def flow_phrase(row, extra=0):
 
     **The fallback is SHORTER, never HALF.** A contract-carrying alert whose
     strike or expiry will not parse drops to the short form rather than emitting
-    "Big delta, 8 - 28  Call." with a hole in it. The rows arrive off a cache
+    "Outsized bet, 8 - 28  Call." with a hole in it. The rows arrive off a cache
     read, so this is a live path and not a hypothetical: a terse alert is worth
     having, a broken sentence is not, and silence is worse than both. Which is
     also why the choice is made on the PARSED values and not on the alert kind —
@@ -513,18 +513,18 @@ def ensure(text, voice_name=None, rate=RATE, warn=True, timeout=None):
 # prewarm runs before any page is built.
 # ``test_voice.test_all_causes_cover_every_pair_the_flow_page_can_emit`` is
 # what keeps the copy honest — it compares this tuple against ``flow._TONE``.
-_ALL_CAUSES = (("Crossover", "Calls over"), ("Crossover", "Puts over"),
-               ("Unusual activity", "Call"), ("Unusual activity", "Put"),
-               ("Gamma flip", "To positive"), ("Gamma flip", "To negative"),
-               ("Big delta", "Call"), ("Big delta", "Put"))
+_ALL_CAUSES = (("Premium shift", "Calls over"), ("Premium shift", "Puts over"),
+               ("Unusual volume", "Call"), ("Unusual volume", "Put"),
+               ("Hedging flip", "Now damping"), ("Hedging flip", "Now amplifying"),
+               ("Outsized bet", "Call"), ("Outsized bet", "Put"))
 
 # The kinds whose phrase embeds a CONTRACT (see ``flow_phrase``). Their phrase
 # space is the option chain, so it is unbounded and nothing in it can be warmed
 # in advance.
-CONTRACT_KINDS = ("Unusual activity", "Big delta")
+CONTRACT_KINDS = ("Unusual volume", "Outsized bet")
 
 # ...which is why the prewarm list is the OTHER four. Warming the contract kinds
-# synthesized "N D X. Unusual activity alert, put." — a sentence no live alert
+# synthesized "N D X. Unusual volume alert, put." — a sentence no live alert
 # produces any more, since a real one always carries a strike and an expiry. It
 # was half the prewarm's network, disk and time, spent on clips that could never
 # be played. DERIVED rather than written out a second time: a hand-kept subset

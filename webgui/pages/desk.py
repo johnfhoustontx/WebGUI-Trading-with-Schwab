@@ -1053,7 +1053,7 @@ def flip_text(row):
 
 
 def flow_kind_text(row):
-    """'Unusual activity · Call' — the alert kind and the side it fired on.
+    """'Unusual volume · Call' — the alert kind and the side it fired on.
 
     One cell, because the flow rows are one line each now and the side is a
     qualifier on the kind rather than a reading of its own. "Call"/"Put" names
@@ -2944,7 +2944,7 @@ def render():
             # and cost a line of height per alert. Flat, the same panel carries
             # nearly twice as many alerts (see ``FLOW_ROWS_N``).
             #
-            # SIDE rides with KIND in the last track ("Unusual activity ·
+            # SIDE rides with KIND in the last track ("Unusual volume ·
             # Call"), which is where it was already being read from. It is
             # still "Call"/"Put", never bought/sold: Schwab publishes no
             # time-and-sales tape to this app, so nobody here knows who

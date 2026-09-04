@@ -13,6 +13,7 @@ import re
 import pytest
 import voice
 from pages import desk as d
+from pages.options import flow as _flow_page
 
 
 @pytest.fixture(autouse=True)
@@ -325,8 +326,8 @@ def test_flow_rows_delegates_to_the_flow_pages_own_builder():
 
 
 def test_flow_kind_text_joins_the_kind_and_the_side_it_fired_on():
-    assert d.flow_kind_text({"kind": "Unusual activity", "side": "Call"}) == \
-        "Unusual activity · Call"
+    assert d.flow_kind_text({"kind": "Unusual volume", "side": "Call"}) == \
+        "Unusual volume · Call"
 
 
 def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
@@ -340,7 +341,7 @@ def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
 def test_flow_kind_text_never_claims_who_initiated():
     """Call/Put names the side of the book that moved. Schwab publishes no
     time-and-sales tape to this app, so nobody here knows who bought it."""
-    blob = d.flow_kind_text({"kind": "Big delta", "side": "Call"}).lower()
+    blob = d.flow_kind_text({"kind": "Outsized bet", "side": "Call"}).lower()
     assert "buy" not in blob and "sell" not in blob
 
 
@@ -1525,7 +1526,11 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
     # The flow kind, now carrying the side it fired on in the same cell — the
     # rows are one line each, so the side is a qualifier rather than a column.
-    assert "Unusual activity · Call" in texts
+    # Built from the flow page's OWN labels, never restated: the Desk
+    # prints whatever that module stamps, so a rename there shows up here
+    # as agreement rather than as a stale literal for someone to chase.
+    assert (_flow_page.alert_kind_label({"type": "uoa"}) + " · "
+            + _flow_page.side_label({"side": "call"})) in texts
     assert "AT RISK" in texts                    # the position flag
     assert any(t.startswith("OPEN 1 ·") for t in texts)
     assert "Rallying" in texts                   # the regime word in the strip
@@ -2172,7 +2177,7 @@ def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
     s = d.arrival_state()
     s["first"] = False
     said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
-    assert said == "Q Q Q. Unusual activity, 0-D T E 7 37 Call."
+    assert said == "Q Q Q. Unusual volume, 0-D T E 7 37 Call."
 
 
 def test_a_new_position_speaks_its_contract_from_the_raw_payload():
@@ -2736,7 +2741,7 @@ def test_the_desk_help_calls_things_what_the_screen_calls_them():
     # what must move. The plain-text gloss "(the call and put walls ...)" is
     # kept deliberately: a trader knows those words, and the help is where the
     # new label gets tied back to them.
-    for gone in ("a flag:", "**call and put walls**",
+    for gone in ("a flag:", "**flag**", "**call and put walls**",
                  "unrealised profit and loss"):
         assert gone not in text, gone
     for want in ("ceiling", "floor", "status", "open P&L"):
