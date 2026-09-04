@@ -1742,12 +1742,20 @@ def _px(classes):
 
 
 def _head_calls():
-    """Every ``_grid_head(GRID, (labels...))`` in ``render``, resolved."""
+    """Every ``_grid_head(GRID, LABELS)`` in ``render``, both args resolved.
+
+    Both arguments are module constants now — the labels moved out of the call
+    so the ``/desk/live`` mirror could read the same tuple instead of carrying
+    its own copy. A literal tuple is still accepted, so this keeps working if a
+    call is ever written inline again."""
     tree = ast.parse(inspect.getsource(d.render).lstrip())
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_grid_head":
-            yield (getattr(d, node.args[0].id),
-                   [e.value for e in node.args[1].elts])
+            arg = node.args[1]
+            labels = ([e.value for e in arg.elts]
+                      if isinstance(arg, (ast.Tuple, ast.List))
+                      else list(getattr(d, arg.id)))
+            yield getattr(d, node.args[0].id), labels
 
 
 def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
@@ -2584,3 +2592,36 @@ def test_synthesis_never_runs_on_the_event_loop():
         if "_voice.ensure" in line:
             assert "run.io_bound" in line
     assert src.count("_voice.ensure") == 2      # the poll, and the unlock button
+
+
+# ── the panel heads and column labels, as one shared source ──────────────────
+def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
+    """The heads are DATA, so /desk and /desk/live can read ONE copy.
+
+    The row caps must stay interpolated rather than written down: the old
+    "HOTTEST {N}" subtitle existed in that shape precisely so a cap change could
+    not leave a stale number standing on the panel.
+    """
+    heads = d.PANEL_HEADS
+    assert set(heads) == {"dealer", "board", "flow", "positions"}
+    for key, (title, use_line) in heads.items():
+        assert title == title.upper(), key
+        assert use_line, key
+    assert str(d.BOARD_ROWS_N) in heads["board"][1]
+    assert str(d.FLOW_ROWS_N) in heads["flow"][1]
+
+
+def test_column_headers_are_constants_one_per_grid_track():
+    """A header tuple must carry exactly as many labels as its grid has tracks.
+
+    The grids and their labels are declared in different places, and a track
+    added without its label silently shifts every label after it one column to
+    the left — which reads as a page that is merely wrong, not as one that
+    broke.
+    """
+    for name, heads, grid in (("dealer", d.DEALER_HEADS, d.DEALER_GRID),
+                              ("board", d.BOARD_HEADS, d.BOARD_GRID),
+                              ("flow", d.FLOW_HEADS, d.FLOW_GRID),
+                              ("positions", d.POS_HEADS, d.POS_GRID)):
+        tracks = grid.split("grid-cols-[")[1].split("]")[0].count("_") + 1
+        assert len(heads) == tracks, (name, len(heads), tracks)

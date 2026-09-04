@@ -2237,6 +2237,37 @@ def _compact_card(title, arcs, pill_text, delta):
     card.on("click", lambda _e: ui.navigate.to("/sentiment"))
 
 
+# The panel heads, as DATA rather than four ``_panel(...)`` argument lists.
+#
+# ``/desk/live`` renders these same four panels from its own HTML skeleton, and
+# until this constant existed it restated the titles as literals and rebuilt two
+# of the subtitles with a ``.format`` of its own. That is exactly the drift this
+# file's opening principle exists to prevent — and CLAUDE.md's "the mirror cannot
+# drift from /desk" note covers the ROWS, which are built by this module's own
+# functions, not the heads, which were not. Both screens read this now.
+#
+# The row caps are INTERPOLATED, never written down. That is the property the old
+# "HOTTEST {N}" subtitle had and the reason it was built that way: a cap that
+# moved would otherwise leave a stale number standing on the panel.
+PANEL_HEADS = {
+    "dealer": ("DEALER POSITIONING", " · ".join(DESK_SYMBOLS)),
+    "board": ("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}"),
+    "flow": ("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}"),
+    "positions": ("POSITIONS", " · ".join(b["source"] for b in BOOKS)),
+}
+
+# One label per grid track, hoisted for the same reason as the heads above: the
+# mirror carries its own copy of all four lists, and a rename that reached one
+# screen and not the other would put two different words on one number.
+DEALER_HEADS = ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
+                "CALL WALL", "PUT WALL", "NET GEX / REGIME")
+BOARD_HEADS = ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
+               "SIGNAL", "SETUP")
+FLOW_HEADS = ("TIME", "SYMBOL", "DETAIL", "KIND")
+POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
+             "STRIKES", "QTY", "UNREALIZED", "FLAG")
+
+
 def _panel(title, subtitle=""):
     """A console card with a titled head; returns the BODY container.
 
@@ -2543,14 +2574,12 @@ def render():
         # the type standing in them, together (see the ladder above).
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
-            dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
-            # Both subtitles are DERIVED from their panel's row cap, because
-            # each used to be a word and a number written down separately — and
-            # both numbers have now moved.
-            board_body = _panel("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}")
-            flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
-            pos_body = _panel("POSITIONS", " · ".join(
-                b["source"] for b in BOOKS))
+            # All four heads come from ``PANEL_HEADS`` — one copy, shared with
+            # the ``/desk/live`` mirror, with the row caps still interpolated.
+            dealer_body = _panel(*PANEL_HEADS["dealer"])
+            board_body = _panel(*PANEL_HEADS["board"])
+            flow_body = _panel(*PANEL_HEADS["flow"])
+            pos_body = _panel(*PANEL_HEADS["positions"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -2692,9 +2721,7 @@ def render():
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
-            _grid_head(DEALER_GRID,
-                       ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
-                        "CALL WALL", "PUT WALL", "NET GEX / REGIME"))
+            _grid_head(DEALER_GRID, DEALER_HEADS)
             for row in rows:
                 _dealer_row(row)
 
@@ -2772,9 +2799,7 @@ def render():
             # SCORE rather than HOTNESS because the first track cannot hold
             # seven letters of 10px caps on .2em tracking — and the panel's own
             # subtitle already says HOTTEST N, so nothing is lost.
-            _grid_head(BOARD_GRID,
-                       ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
-                        "SIGNAL", "SETUP"))
+            _grid_head(BOARD_GRID, BOARD_HEADS)
             for row in rows:
                 _board_row(row)
 
@@ -2844,7 +2869,7 @@ def render():
             # time-and-sales tape to this app, so nobody here knows who
             # initiated. DETAIL carries the premium the alert fired on, in the
             # Flow Alerts page's own wording.
-            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "DETAIL", "KIND"))
+            _grid_head(FLOW_GRID, FLOW_HEADS)
             for row in rows:
                 _flow_row(row)
 
@@ -2906,9 +2931,7 @@ def render():
             # of riding under the strikes. ENTRY and MARK are the pair the
             # unrealized figure is the difference of, so the row shows its own
             # arithmetic rather than only its result.
-            _grid_head(POS_GRID,
-                       ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
-                        "STRIKES", "QTY", "UNREALIZED", "FLAG"))
+            _grid_head(POS_GRID, POS_HEADS)
             for row in shown:
                 _position_row(row)
 
