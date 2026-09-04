@@ -4,6 +4,55 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**The reader's-voice pass is complete across the
+app.** The eighth and last entry in the series: the sweep of everything the seven
+per-page passes did not cover.)
+
+- **The audit's headline is how little was left.** Grepping the remaining ~20
+  pages for the four defect classes turned up a short specific list, not twenty
+  pages of work. The six Trend & Sentiment screens were rebuilt with reader-side
+  copy on 2026-08-17; `pages/portfolio.py` was already plain English; and
+  `/status`, `/terminate` and `/settings` are machine-facing screens where
+  "cache" and "service" ARE the subject matter — deliberately untouched.
+- **Two more shared sentences.** `WAITING_SENTIMENT` had **two spellings across
+  four screens** (with and without "the"); `WAITING_MARKET` has one site and lives
+  in `pages/copy.py` anyway, so the next screen to need it finds it rather than
+  inventing a fifth wording.
+- **Ten "requested" toasts.** "Refresh requested", "Paper trade requested.",
+  "Swing scan requested" — honest about the enqueue and useless to a reader. The
+  three `cmd:*` ones keep the "when the engine confirms" formula the earlier
+  passes established.
+- **⚠ `webgui/tests/test_shared_copy.py` is the guard a per-page test cannot
+  be**, and it earned its keep on the first run: it reads the source of every page
+  module, and found a **tenth** "requested" toast on the Gamma page that the
+  hand-written grep behind the design had missed. It also pins the two deliberate
+  exemptions by NAME rather than by pattern, so a new page cannot inherit them.
+- **Paper Account carried the most labels**: `Strat`/`Exp`/`Qty`/`Credit`/
+  `CurVal`/`P&L$` → `Strategy`/`Expiry`/`Contracts`/`Entry`/`Mark`/`Open P&L`.
+  `Credit` was wrong for the fourth time in this campaign — the engine's paper
+  book holds directional debits — and `CurVal` was a shortening *and* the wrong
+  idea, since it is the live price the rest of the app calls Mark.
+- **Claude Trades was printing one concept two ways on ONE screen**: its
+  closed-trades table said `Strategy` while its positions table said `Strat`.
+- **`/portfolio` counts SHARES, not contracts.** Every options page in this
+  campaign renamed `Qty` to "Contracts"; doing it here would have been consistency
+  at the cost of being wrong, since that is the equity book.
+- **Two deliberate deferrals, both tested.** `/desk` keeps `STRAT`/`QTY` (measured
+  label-bound grid floors; the words clip the panel at the 1920px it is read at),
+  and `leg_editor` keeps `Qty` (a 64px track in a dense widget mounted by three
+  pages). Same class, same treatment: a test recording the arithmetic, because a
+  comment saying "this is deliberate" is the kind nobody reads before "fixing" it.
+- **The two traps worth carrying forward**, now in CLAUDE.md: a `Credit` column is
+  wrong wherever the book holds debits (four pages), and an `entry_*` field under a
+  bare label reads as live (`dte_at_entry` under "DTE" on a page whose whole
+  purpose is tracking over time).
+- **Not browser-verified — and this is the one thing outstanding.** A worktree
+  resolves to prod and would bind `:8500`, so none of the eight passes has been
+  seen in a browser. Suite: **2980 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-remaining-pages-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**Rescue — the stale-price guard now says nothing
 happened.** Seventh page of the reader's-voice pass, and the first that EXECUTES
 rather than reports, which is why one of its sentences mattered more than every
