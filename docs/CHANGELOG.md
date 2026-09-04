@@ -4,6 +4,48 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**Rescue — the stale-price guard now says nothing
+happened.** Seventh page of the reader's-voice pass, and the first that EXECUTES
+rather than reports, which is why one of its sentences mattered more than every
+column label on it.)
+
+- **⚠ The finding.** When prices drift, Apply **aborts without mutating** — the
+  engine states it twice (`paper_adjust.py`: *"stale (re-review) and nothing is
+  mutated"*; `handlers.py`: *"aborts (`stale`) without mutating when prices have
+  drifted"*). The reader was told only **"Prices moved — re-review"**. That says
+  prices moved; it does not say the adjustment was refused — and on a page whose
+  Apply button had just been pressed, "re-review" reads as easily as *"it went
+  through, go look"* as *"nothing happened"*. The toast now reads **"Prices
+  moved — nothing was applied. Check the new numbers and try again."** and the
+  `summary_line` prefix leads with **"Nothing applied — prices moved"**, since a
+  headline continues after it.
+- **`Strike Date` labelled `expiration`.** A spread carrying two strikes has no
+  such thing as a strike date. → **Expiry**, the word six pages have now settled
+  on. Third page running with a header naming the wrong quantity.
+- **One number, one screen, two names.** The at-risk table said `Δ short` while
+  the candidate cards' own metric list (`_CANDIDATE_METRICS`) said `Short delta`.
+  The table takes the cards' word.
+- **`Strat`→`Strategy`**, **`Comm`→`Commission`**, and **`P&L`→`Open P&L`** —
+  every row here is an at-risk *open* position, so this is the Captured Signals
+  case rather than the Paper Ledger one. `Gross` and `Net` stay: either side of
+  `Commission` in one money row, the pairing is self-evident.
+- **`State`→`Risk state`, deliberately not `Status`.** The Paper Ledger's
+  `Status` column means OPEN/CLOSED; this one means TESTED/CRITICAL. One word on
+  two different things is exactly the drift these passes close.
+- **The Apply dialog said it "dispatches a (simulated) paper adjustment"** —
+  implementation-speak for the most reassuring fact on the page. It now says
+  *"This adjusts your paper position. No real money, and no live order is
+  placed."* And an advisory-only card's lower-case *"manual — place yourself"*
+  now reads as the instruction it is.
+- **The help never mentioned the guard at all**, so a reader who saw "Prices
+  moved" had nothing to check it against. It now covers both the refusal and the
+  fact that a *Manual* option is one the app will not place for you.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2971 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-rescue-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**Market Scanner — and the last spelling of the
 waiting line.** Sixth page of the reader's-voice pass. This one started in better
 shape than the five before it, so the change is narrow and two of its labels
