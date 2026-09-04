@@ -382,3 +382,73 @@ def test_captured_closed_section_in_both_fragments():
     assert "Captured — closed today" in det
     assert "Captured — closed today" in summ
     assert "AAPL" in det                                  # rows rendered in detail
+
+
+# ── captured signals as the third performance book ───────────────────────────
+import datetime as _dt
+
+_CAP_ROW = {
+    "symbol": "SPY", "strategy": "PCS", "trade_type": "0DTE", "status": "CLOSED",
+    "first_seen_ts": "2026-09-02T10:00:00-05:00",
+    "close_ts": "2026-09-03T14:00:00-05:00",
+    "realized_pnl": 25.0, "entry_credit_total": 55.0,
+}
+
+
+def test_normalize_trades_reads_the_captured_shape():
+    """Captured rows carry their own timestamp field names, so the kind branch
+    exists to point ``_date_of`` at them — the same job it does for the other
+    two books, not a second date parser."""
+    rows = eod.normalize_trades([_CAP_ROW], kind="captured")
+    assert rows[0]["entry_date"] == "2026-09-02"
+    assert rows[0]["exit_date"] == "2026-09-03"
+    assert rows[0]["realized_pnl"] == 25.0
+    assert rows[0]["credit"] == 55.0            # already one-contract dollars
+    assert rows[0]["trade_type"] == "0DTE"
+
+
+def test_captured_is_the_third_book():
+    snap = {"captured_perf": {"rows": [_CAP_ROW]}}
+    assert [label for label, _n, _s in eod._books(snap)] == [
+        "Manual paper", "Driver", "Captured signals"]
+
+
+def test_the_captured_book_reuses_the_shared_period_buckets():
+    """No new aggregation. All three books go through ``period_buckets``, so
+    they cannot disagree about what "this week" means."""
+    snap = {"captured_perf": {"rows": [_CAP_ROW]}}
+    norm = [n for label, n, _s in eod._books(snap) if label == "Captured signals"][0]
+    b = eod.period_buckets(norm, _dt.date(2026, 9, 3))
+    assert b["daily"]["realized"] == 25.0 and b["daily"]["closed"] == 1
+    assert b["daily"]["wins"] == 1 and b["daily"]["losses"] == 0
+    assert b["mtd"]["opened"] == 1            # opened 09-02, still inside MTD
+    assert b["mtd"]["credit"] == 55.0
+
+
+def test_the_captured_book_has_no_account_line():
+    """It is a tracking book with no account behind it, so the point-in-time
+    line the other two print must stay empty rather than invent an equity."""
+    snap = {"captured_perf": {"rows": [_CAP_ROW]}}
+    now_snap = [s for label, _n, s in eod._books(snap)
+                if label == "Captured signals"][0]
+    assert now_snap is None
+    assert eod._book_now_line(now_snap) == ""
+
+
+def test_a_cold_captured_view_still_builds_the_section():
+    """A missing view must cost the numbers, never the report."""
+    for snap in ({}, {"captured_perf": {}}, {"captured_perf": {"rows": []}}):
+        norm = [n for label, n, _s in eod._books(snap)
+                if label == "Captured signals"][0]
+        assert norm == []
+
+
+def test_the_captured_section_says_the_dollars_are_one_contract():
+    """Without it, a -$1,251 month reads as an account loss. These signals were
+    tracked to see whether the scanner was right; they were never sized and
+    never traded."""
+    _toc, html = eod._performance_block({"captured_perf": {"rows": [_CAP_ROW]}},
+                                        _dt.date(2026, 9, 4))
+    low = html.lower()
+    assert "one contract" in low
+    assert "not" in low and ("traded" in low or "taken" in low)

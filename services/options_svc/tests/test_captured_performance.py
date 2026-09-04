@@ -136,3 +136,62 @@ def test_the_published_view_carries_the_rows_and_the_window(monkeypatch):
     payload = bus.cache_get(handlers.CACHE_CAPTURED_PERF).payload
     assert payload["rows"] == [{"symbol": "SPY"}]
     assert payload["window"] == {"start": "2026-09-01", "end": "2026-09-04"}
+
+
+# ── open signals belong in the rows too ──────────────────────────────────────
+def test_an_open_signal_becomes_a_row_with_no_close():
+    """⚠ Without this the "Opened" column silently under-counts.
+
+    ``opened`` and ``credit`` bucket on the ENTRY date, independent of the exit,
+    so a signal opened this week and still running belongs in those two columns
+    — and publishing only CLOSED outcomes would drop every one of them. There
+    were 7 open on prod the day this shipped. The other two books include their
+    open positions, which is why theirs were already right.
+    """
+    row = compute.captured_perf_rows([{**_RAW, "close_ts": None,
+                                       "close_date": None,
+                                       "realized_pnl": None}])[0]
+    assert row["status"] == "OPEN"
+    assert row["close_ts"] is None
+    assert row["realized_pnl"] is None
+    assert row["entry_credit_total"] == 55.0     # still counts toward credit
+
+
+def test_a_closed_row_is_still_marked_closed():
+    assert compute.captured_perf_rows([_RAW])[0]["status"] == "CLOSED"
+
+
+def test_captured_performance_merges_open_signals_with_closed_outcomes(monkeypatch):
+    """One row list, both states — which is exactly what the ledger book hands
+    ``period_buckets`` and why its Opened column has always been right."""
+    import sys
+    stub = type(sys)("signal_db")
+    stub.get_outcomes_in_range = lambda lo, hi: [_RAW]
+    stub.get_open_signals = lambda: [{
+        "signal_id": "open1", "symbol": "QQQ", "strategy": "CCS",
+        "scanner_type": "SWING", "entry_credit": 0.80,
+        "first_seen_ts": "2026-09-03T11:00:00-05:00",
+        "first_seen_date": "2026-09-03"}]
+    monkeypatch.setitem(sys.modules, "signal_db", stub)
+
+    out = compute.captured_performance()
+    states = sorted(r["status"] for r in out["rows"])
+    assert states == ["CLOSED", "OPEN"]
+    opened = [r for r in out["rows"] if r["status"] == "OPEN"][0]
+    assert opened["symbol"] == "QQQ" and opened["close_ts"] is None
+    assert opened["entry_credit_total"] == 80.0
+
+
+def test_an_open_signal_from_BEFORE_the_window_is_left_out(monkeypatch):
+    """It cannot contribute to any period in the table, and carrying it would
+    put rows in the payload no row of the report can reach."""
+    import sys
+    stub = type(sys)("signal_db")
+    stub.get_outcomes_in_range = lambda lo, hi: []
+    stub.get_open_signals = lambda: [{
+        "signal_id": "old", "symbol": "IWM", "strategy": "PCS",
+        "scanner_type": "SWING", "entry_credit": 0.40,
+        "first_seen_ts": "2026-07-04T11:00:00-05:00",
+        "first_seen_date": "2026-07-04"}]
+    monkeypatch.setitem(sys.modules, "signal_db", stub)
+    assert compute.captured_performance()["rows"] == []

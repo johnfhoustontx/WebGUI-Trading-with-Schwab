@@ -251,11 +251,24 @@ def _date_of(ts):
 def normalize_trades(raw, *, kind):
     """Map a book's raw trade dicts into one uniform shape:
     {symbol, strategy, trade_type, status, entry_date, exit_date, realized_pnl, credit}.
-    ``kind`` = 'ledger' (manual paper_trades) | 'driver' (driver positions)."""
+    ``kind`` = 'ledger' (manual paper_trades) | 'driver' (driver positions)
+    | 'captured' (scanner signals tracked to a close)."""
     out = []
     for t in raw or []:
         t = t or {}
-        if kind == "driver":
+        if kind == "captured":
+            # A captured row carries the signal's OWN timestamp names, so this
+            # branch only points ``_date_of`` at them - the same job it does for
+            # the other two books, not a second date parser.
+            #
+            # The credit arrives already multiplied: ``compute.captured_perf_rows``
+            # puts it on the ONE-CONTRACT basis that ``realized_pnl`` uses, since
+            # a captured signal is never sized and the two figures on a row must
+            # share a basis to be read together.
+            entry, exit_ = "first_seen_ts", "close_ts"
+            credit = _num(t.get("entry_credit_total"))
+            trade_type = t.get("trade_type")
+        elif kind == "driver":
             entry, exit_ = "entry_ts", "exit_ts"
             qty = _num(t.get("quantity"), 1) or 1
             per = _num(t.get("entry_credit"))
@@ -424,15 +437,23 @@ def breakdown_table_html(rows):
 # Per-book performance (shared by summary + detail)
 # ----------------------------------------------------------------------------- #
 def _books(snap):
-    """[(label, norm_trades, now_snapshot)] for each paper book (manual + driver)."""
+    """[(label, norm_trades, now_snapshot)] for each book.
+
+    Three of them: the two paper books, plus the captured signals scored from
+    2026-09-01. Captured passes ``None`` for the snapshot because it has no
+    account behind it - it is a TRACKING book, and ``_book_now_line`` already
+    renders nothing for an absent snapshot rather than inventing an equity."""
     snap = snap or {}
     led = normalize_trades((snap.get("paper_trades") or {}).get("trades"), kind="ledger")
     dacc = snap.get("driver_paper_account") or {}
     drv_raw = list(dacc.get("positions") or []) + list(dacc.get("closed_positions") or [])
     drv = normalize_trades(drv_raw, kind="driver")
+    cap = normalize_trades((snap.get("captured_perf") or {}).get("rows"),
+                           kind="captured")
     return [
         ("Manual paper", led, (snap.get("paper_account") or {}).get("snapshot")),
         ("Driver", drv, dacc.get("snapshot")),
+        ("Captured signals", cap, None),
     ]
 
 
@@ -451,6 +472,18 @@ def _book_now_line(snapshot):
     )
 
 
+# ⚠ Captured figures assume ONE contract, because a captured signal is never
+# sized - ``/desk`` refuses to print a quantity for one on the grounds that a
+# printed number would be inventing a position. Without this line a -$1,251
+# month reads as an account loss rather than as what it is: the scanner's picks
+# scored under the auto-manage rules.
+CAPTURED_BASIS_NOTE = (
+    "Figures assume ONE contract per signal - a captured signal is never sized. "
+    "These are the scanner's picks scored under the auto-manage rules, not "
+    "trades that were taken."
+)
+
+
 def _book_slug(label):
     """Deterministic anchor slug from a book label ('Manual paper' → 'manual')."""
     return label.split()[0].lower()
@@ -467,6 +500,9 @@ def _performance_block(snap, today):
         toc_entries.append((anchor, label))
         body = _book_now_line(now_snap) + performance_table_html(
             period_buckets(norm, today))
+        if label == "Captured signals":
+            body += f'<p class="book-note">{escape(CAPTURED_BASIS_NOTE)}</p>'
+
         sections.append(details_section(anchor, f"{label} — performance", body))
     return toc_entries, "".join(sections)
 
@@ -593,6 +629,7 @@ def read_snapshot() -> dict:
         "scan": bus_client.read("options:scan") or {},
         "captured": bus_client.read("options:captured") or {},
         "captured_closed": bus_client.read("options:captured_closed") or {},
+        "captured_perf": bus_client.read("options:captured_perf") or {},
         "paper_trades": bus_client.read("options:paper_trades") or {},
         "paper_account": bus_client.read("options:paper_account") or {},
         "driver_paper_account": bus_client.read("options:driver_paper_account") or {},

@@ -1639,13 +1639,17 @@ def captured_perf_rows(raw):
         if not isinstance(r, dict):
             continue
         credit = _num(r.get("entry_credit"))
+        close_ts = r.get("close_ts") or r.get("close_date")
         out.append({
             "symbol": r.get("symbol"),
             "strategy": r.get("strategy"),
             "trade_type": r.get("scanner_type"),
-            "status": "CLOSED",
+            # DERIVED, never hardcoded: an OPEN signal is a legitimate row
+            # here (see ``captured_performance``), and it is the one that makes
+            # the report's "Opened" column right.
+            "status": "CLOSED" if close_ts else "OPEN",
             "first_seen_ts": r.get("first_seen_ts"),
-            "close_ts": r.get("close_ts") or r.get("close_date"),
+            "close_ts": close_ts,
             "realized_pnl": _num(r.get("realized_pnl")),
             "entry_credit_total": (round(credit * 100.0, 2)
                                    if credit is not None else None),
@@ -1671,7 +1675,23 @@ def captured_performance() -> dict:
     except Exception:
         log.exception("captured_performance read degraded -> empty")
         raw = []
-    return {"rows": captured_perf_rows(raw),
+    # ⚠ The OPEN signals belong here too. "Opened" and "credit" bucket on the
+    # ENTRY date independent of the exit, so a signal opened this week and still
+    # running belongs in both columns - and publishing only closed outcomes
+    # would drop every one of them, under-counting the column silently. This is
+    # what the ledger book has always done; its Opened column was right for
+    # exactly this reason.
+    #
+    # Filtered to the window: an older open signal cannot reach any period in
+    # the table, and carrying it would put rows in the payload no row of the
+    # report can read.
+    try:
+        open_rows = [r for r in signal_db.get_open_signals() or []
+                     if str((r or {}).get("first_seen_date") or "") >= lo.isoformat()]
+    except Exception:
+        log.exception("captured_performance open-signal read degraded -> empty")
+        open_rows = []
+    return {"rows": captured_perf_rows(list(raw) + open_rows),
             "window": {"start": lo.isoformat(), "end": hi.isoformat()}}
 
 

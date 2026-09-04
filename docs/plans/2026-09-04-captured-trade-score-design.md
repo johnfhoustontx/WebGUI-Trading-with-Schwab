@@ -80,11 +80,16 @@ account loss.
 
 Measured on prod, 2026-09-01 → 09-04:
 
-| period | realized | closed (W-L) | win % |
-|---|---|---|---|
-| Daily (09-04) | **+$329** | 4 (4-0) | 100% |
-| Weekly (WTD) | **−$1,251** | 45 (5-40) | 11% |
-| MTD | **−$1,251** | 45 (5-40) | 11% |
+| period | realized | closed (W-L) | win % | opened |
+|---|---|---|---|---|
+| Daily (09-04) | **+$329** | 4 (4-0) | 100% | 4 |
+| Weekly (WTD) | **−$1,251** | 45 (5-39) | 11% | 20 |
+| MTD | **−$1,251** | 45 (5-39) | 11% | 9 |
+
+⚠ **5-39, not 5-40** — one outcome closed at exactly $0.00, and
+`period_buckets` counts a scratch as neither a win nor a loss. An earlier draft
+of this table said 5-40, derived by subtracting wins from closes, which assumed
+no scratches. Verified against prod after building it.
 
 By exit reason: `DELTA_STOP` 17 (−$975) · `BREAKEVEN_STOP` 13 (−$154) ·
 `TIME_STOP` 8 (−$115) · `EXPIRED` 4 (**+$329**) · `MONEY_STOP` 3 (−$336).
@@ -92,6 +97,25 @@ By type: 0DTE −$636 / Swing −$615.
 
 **The only four winners expired; every managed stop lost money.** That is the
 finding, and the report exists to keep showing it rather than to flatter it.
+
+## 5a. Open signals are rows too
+
+Found while verifying §5 against prod, and worth recording because the first
+draft had it wrong: `opened` and `credit` bucket on the **entry** date,
+independent of the exit. Publishing only CLOSED outcomes therefore
+under-counted the Opened column by every signal opened in the window and still
+running — 4 of them on the day this shipped, on a Daily row that read 0.
+
+`captured_performance` merges the in-window OPEN signals in, as rows with no
+close. That is exactly what the ledger book hands `period_buckets`, and why its
+Opened column was right all along.
+
+⚠ **Known, transient:** the first week of September straddles the epoch — its
+Monday is 31 August. So the weekly `Opened` count includes signals opened on
+31 August that have since closed, but not ones opened on 31 August still
+running (those are filtered at the epoch). It affects the Opened column only,
+in one week, and resolves on Monday 7 September when the week begins inside the
+month.
 
 ## 6. Out of scope
 
