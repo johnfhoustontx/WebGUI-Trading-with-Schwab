@@ -41,7 +41,7 @@ STATUS_TEXT_CLASSES = f"{TXT_UP} {TXT_DOWN} {TXT_MUTED}"
 HOLDINGS_COLS = [
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
     {"name": "sector", "label": "Sector", "field": "sector", "align": "left"},
-    {"name": "quantity", "label": "Qty", "field": "quantity"},
+    {"name": "quantity", "label": "Shares", "field": "quantity"},
     {"name": "market_value", "label": "Market Value", "field": "market_value"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
     {"name": "total_pl", "label": "Total P/L", "field": "total_pl"},

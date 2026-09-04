@@ -131,11 +131,14 @@ def captured_section(cache) -> str:
             + "</tr>"
         )
     return _table(
-        ["Symbol", "Entry score", "Current", "Drift", "Rec", "Unrealized P&L"],
+        ["Symbol", "Entry score", "Current", "Drift", "Action", "Open P&L"],
         rows, empty="No captured signals.")
 
 
-_CLOSED_COLS = ["Symbol", "Strategy", "Credit", "Exit", "Realized", "Reason", "Time (CT)"]
+# "Entry", matching the Paper Ledger and Captured Signals: this book holds
+# debits too, and a debit is stored as a negative credit.
+_CLOSED_COLS = ["Symbol", "Strategy", "Entry", "Exit", "Realized", "Reason",
+                "Time (CT)"]
 
 
 def _closed_time(ts) -> str:

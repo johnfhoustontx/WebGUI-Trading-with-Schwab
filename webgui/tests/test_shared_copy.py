@@ -63,3 +63,44 @@ def test_no_page_reports_that_a_command_was_merely_requested():
         if pattern.search(src):
             offenders.append(path.name)
     assert not offenders, offenders
+
+
+# ── the tree-wide label vocabulary ───────────────────────────────────────────
+def test_no_page_still_abbreviates_strategy_or_expiry_in_a_label():
+    """Two of the campaign's most-repeated shortenings, guarded at the source.
+
+    ``/desk`` is the documented exception: its Positions grid has measured
+    per-string ``minmax()`` floors and those two tracks are LABEL-bound, so the
+    words would clip the panel at the 1920px it is read at. It is excluded by
+    name rather than by pattern, so a new page cannot inherit the exemption."""
+    pattern = re.compile(r'"label":\s*"(Strat|Exp)"|,\s*"(Strat|Exp)"\)')
+    offenders = []
+    for path, src in _page_sources():
+        if path.name == "desk.py":
+            continue
+        if pattern.search(src):
+            offenders.append(path.name)
+    assert not offenders, offenders
+
+
+def test_the_leg_editor_keeps_Qty_and_that_is_a_width_deferral():
+    """The other documented exception, and it gets a test for the same reason
+    ``/desk``'s does: a comment saying "this is deliberate" is the kind nobody
+    reads before "fixing" the inconsistency.
+
+    ``Qty`` sits in a ``w-16`` (64px) track in a dense multi-leg widget mounted
+    by the Calculator, the Simulator and Rescue. "Contracts" does not fit, and
+    widening the track reflows a shared component on three pages."""
+    src = (PAGES / "options" / "leg_editor.py").read_text(encoding="utf-8")
+    assert '"Qty"' in src
+    assert "w-16" in src
+
+
+def test_the_equity_book_counts_SHARES_not_contracts():
+    """``/portfolio`` is the equity portfolio. Every options page in this
+    campaign renamed ``Qty`` to "Contracts"; doing that here would have been
+    consistency at the cost of being wrong."""
+    from pages import portfolio
+    labels = {c["label"] for c in portfolio.HOLDINGS_COLS}
+    assert "Shares" in labels
+    assert "Contracts" not in labels
