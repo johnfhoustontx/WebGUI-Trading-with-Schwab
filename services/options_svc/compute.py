@@ -1594,6 +1594,107 @@ def run_captured_manage_cycle() -> dict:
     return {"closed": closed, "armed": armed}
 
 
+# ── the captured score (Daily / Weekly / MTD) ────────────────────────────────
+# The score's inception. Nothing before this date is part of it: signal_outcomes
+# reaches back to 2026-06-15, from a period whose captures predate the
+# regular-hours recorder gate. The period windows never reach that far on their
+# own - this constant is what guarantees they cannot.
+CAPTURED_SCORE_EPOCH = _dt.date(2026, 9, 1)
+
+
+def captured_score_window(today):
+    """``(lo, hi)`` INCLUSIVE dates the score must read to fill Daily/Weekly/MTD.
+
+    The earlier of the WEEK start and the MONTH start - **not** month-to-date.
+
+    Month-to-date looks like the right bound, because MTD is the widest row in
+    the table. It is wrong: on Thursday 1 October the WTD row starts Monday
+    28 September, before the month began. Bounding the read at the month start
+    would return no rows for 28-30 September and the weekly row would silently
+    under-count on the first days of every month, with nothing on screen to say
+    it had.
+
+    Floored at ``CAPTURED_SCORE_EPOCH``. The width is also what bounds the
+    payload - at most about five weeks of closes.
+    """
+    month_start = today.replace(day=1)
+    week_start = today - _dt.timedelta(days=today.weekday())      # Monday
+    return max(min(month_start, week_start), CAPTURED_SCORE_EPOCH), today
+
+
+def captured_perf_rows(raw):
+    """Outcome rows -> the shape ``eod.normalize_trades(kind="captured")`` reads.
+
+    ``entry_credit_total`` is ``entry_credit * 100``: ONE contract, matching
+    ``close_signal_manually``'s ``(entry_credit - exit_value) * 100``. A captured
+    signal is never sized, so one contract is the only basis either number has -
+    and they must share it, or the two figures on one row describe different
+    position sizes.
+
+    Total over a malformed row. This feeds a nightly report, and one bad row must
+    not cost the whole section.
+    """
+    out = []
+    for r in raw or []:
+        if not isinstance(r, dict):
+            continue
+        credit = _num(r.get("entry_credit"))
+        close_ts = r.get("close_ts") or r.get("close_date")
+        out.append({
+            "symbol": r.get("symbol"),
+            "strategy": r.get("strategy"),
+            "trade_type": r.get("scanner_type"),
+            # DERIVED, never hardcoded: an OPEN signal is a legitimate row
+            # here (see ``captured_performance``), and it is the one that makes
+            # the report's "Opened" column right.
+            "status": "CLOSED" if close_ts else "OPEN",
+            "first_seen_ts": r.get("first_seen_ts"),
+            "close_ts": close_ts,
+            "realized_pnl": _num(r.get("realized_pnl")),
+            "entry_credit_total": (round(credit * 100.0, 2)
+                                   if credit is not None else None),
+            "exit_reason": r.get("exit_reason"),
+        })
+    return out
+
+
+def captured_performance() -> dict:
+    """The captured score's rows plus the window they were read over.
+
+    ``{"rows": [...], "window": {"start": iso, "end": iso}}``. The window ships
+    with the rows so a reader can say WHICH days a total covers rather than
+    inferring it. Defensive -> empty on any failure, like its sibling
+    ``captured_closed_today``.
+    """
+    import signal_db
+
+    today = _dt.datetime.now(_PROJ_CT_TZ).date()
+    lo, hi = captured_score_window(today)
+    try:
+        raw = signal_db.get_outcomes_in_range(lo.isoformat(), hi.isoformat())
+    except Exception:
+        log.exception("captured_performance read degraded -> empty")
+        raw = []
+    # ⚠ The OPEN signals belong here too. "Opened" and "credit" bucket on the
+    # ENTRY date independent of the exit, so a signal opened this week and still
+    # running belongs in both columns - and publishing only closed outcomes
+    # would drop every one of them, under-counting the column silently. This is
+    # what the ledger book has always done; its Opened column was right for
+    # exactly this reason.
+    #
+    # Filtered to the window: an older open signal cannot reach any period in
+    # the table, and carrying it would put rows in the payload no row of the
+    # report can read.
+    try:
+        open_rows = [r for r in signal_db.get_open_signals() or []
+                     if str((r or {}).get("first_seen_date") or "") >= lo.isoformat()]
+    except Exception:
+        log.exception("captured_performance open-signal read degraded -> empty")
+        open_rows = []
+    return {"rows": captured_perf_rows(list(raw) + open_rows),
+            "window": {"start": lo.isoformat(), "end": hi.isoformat()}}
+
+
 def captured_closed_today() -> dict:
     """Today's (CT) closed captured outcomes + a day realized total.
 

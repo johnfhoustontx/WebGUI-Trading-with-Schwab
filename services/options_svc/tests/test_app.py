@@ -66,7 +66,8 @@ def test_autoscan_due_logic():
 # the loop test below — see there for why this list has to be complete.
 _BRANCH_HANDLERS = (
     "refresh_paper_account", "refresh_paper_trades", "refresh_captured",
-    "publish_captured_closed", "refresh_gamma", "publish_gamma_symbols",
+    "publish_captured_closed", "publish_captured_performance",
+    "refresh_gamma", "publish_gamma_symbols",
     "publish_gex_status", "publish_gamma_briefing_index", "refresh_header",
     "collect_gex_history", "refresh_gamma_current",
     "run_driver_manage_and_refresh", "run_captured_manage_and_publish",

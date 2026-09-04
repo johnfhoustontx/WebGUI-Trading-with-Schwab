@@ -4,6 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**Captured signals get a Daily / Weekly / MTD
+score, backdated to 1 September.** The EOD report's performance section gains a
+third book beside the Paper Ledger and Claude's.)
+
+- **Nothing new is recorded.** `signal_outcomes` already carried `close_date`
+  (indexed), `realized_pnl` and `exit_reason` back to 2026-06-15 — 868 rows on
+  prod. So "starting 1 September" is a **floor on what the report counts**, not
+  the point where recording begins, which is why the MTD row was backdated the
+  moment it shipped rather than starting to accumulate from the build date.
+- **The service publishes ROWS; Tier-1 buckets them.** `captured_closed_today`
+  is today-only and cannot feed a weekly row, so `options_svc.captured_performance`
+  publishes `cache:options:captured_perf`. Aggregating service-side would have
+  duplicated `period_buckets`, which already exists in Tier-1, is already tested,
+  and already renders the exact table the other two books use — so all three now
+  cannot disagree about what "this week" means. `/eod` is Tier-1 and may not open
+  SQLite; the rows reach it through Redis or not at all.
+- **⚠ The read window is `min(month_start, week_start)`, not month-to-date.**
+  Month-to-date looks right because MTD is the widest ROW. It is wrong: on
+  1 October the WTD row starts Monday 28 September, before the month began, so a
+  month-to-date read returns nothing for 28–30 September and the weekly row
+  under-counts on the first days of every month, silently. Floored at a
+  2026-09-01 epoch, which also bounds the payload to about five weeks of closes.
+- **⚠ Open signals are rows too**, and the first draft got this wrong. `opened`
+  and `credit` bucket on the **entry** date independent of the exit, so
+  publishing only CLOSED outcomes under-counted the Opened column by every signal
+  still running — 4 of them, on a Daily row that read **0**. Found by rendering
+  the section against prod rather than by reasoning about it.
+- **The dollars are per ONE contract, and the section says so.**
+  `close_signal_manually` computes `(entry_credit − exit_value) × 100`, and a
+  captured signal is never sized — `/desk` already refuses to print a quantity
+  for one. Credit is put on the same basis, because two figures on one row that
+  do not share a basis describe different positions. Without the note, a −$1,251
+  month reads as an account loss instead of the scanner's picks scored under the
+  auto-manage rules.
+- **The first reading, verified against a direct SQL read of prod:** Daily
+  **+$329** (4 closed, 4-0) · WTD **−$1,251** (45 closed, 5-39, 11%) · MTD the
+  same. By exit: `DELTA_STOP` 17 (−$975) · `BREAKEVEN_STOP` 13 (−$154) ·
+  `TIME_STOP` 8 (−$115) · `EXPIRED` 4 (**+$329**) · `MONEY_STOP` 3 (−$336). By
+  type: 0DTE −$636 / Swing −$615. **The only four winners expired; every managed
+  stop lost money.** The report exists to keep showing that rather than to
+  flatter it.
+  ⚠ **5-39, not 5-40** — one outcome closed at exactly $0.00 and `period_buckets`
+  counts a scratch as neither. The design doc had said 5-40, derived by
+  subtracting wins from closes; corrected in place.
+- **⚠ A lesson about baselining.** The first full `options_svc` run failed on an
+  unrelated test — `test_rescue_singles`'s `inspect.getsource` guard — because
+  `compute.py` was being edited WHILE that run was in flight, and `inspect`
+  resolves source by line numbers cached at import. It passes in isolation. The
+  second run surfaced the REAL failure: `test_app`'s loop guard, which scans
+  `scheduler.py` for every `handlers.<name>` it can submit and demands each be
+  stubbed — so the new publisher had been left running for real inside the loop
+  test, exactly the failure that test's docstring predicts. **Never baseline a
+  suite against a tree you are still editing.**
+- **Suites:** `webgui` **2995 passed**, `options_svc` **1358 passed**,
+  `test_signal_db` **33 passed**, all clean.
+  [design](plans/2026-09-04-captured-trade-score-design.md) ·
+  [plan](plans/2026-09-04-captured-trade-score-plan.md)
+
+---
+
 **Last updated:** 2026-09-02 (**The Live Mirror is removed** — the rail's
 `Live Mirror` row, `/desk/live`, `/desk/stream` and `webgui/desk_stream.py`, at
 the user's request. `/desk` and `/wall` are untouched.)

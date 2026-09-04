@@ -548,6 +548,8 @@ async def loop(bus):
     # Guarded so a cold DB never stops the loop from starting.
     try:
         await loop_.run_in_executor(None, handlers.publish_captured_closed, bus)
+        await loop_.run_in_executor(
+            None, handlers.publish_captured_performance, bus)
     except Exception:
         log.exception("startup publish_captured_closed degraded")
     # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma

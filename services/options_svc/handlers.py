@@ -181,6 +181,8 @@ EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 # Settings auto-close master toggle (default ON; only an explicit False disables).
 CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
 EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
+CACHE_CAPTURED_PERF = "cache:options:captured_perf"
+EVENT_CAPTURED_PERF = "events:options:captured_perf"
 CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
 
 # MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
@@ -781,6 +783,23 @@ def publish_captured_closed(bus) -> None:
     bus.publish(EVENT_CAPTURED_CLOSED, {"version": version})
 
 
+def publish_captured_performance(bus) -> None:
+    """Publish the captured score's rows (``cache:options:captured_perf``).
+
+    Read-only, and published regardless of the auto-close toggle for the same
+    reason ``publish_captured_closed`` is: MANUAL closes land in
+    ``signal_outcomes`` too, so a score gated on auto-close would quietly stop
+    counting the ones you closed yourself.
+
+    ``compute.captured_performance`` is fully defensive - it returns an empty
+    row list rather than raising, so a bad read costs the EOD section its
+    numbers and never the publish.
+    """
+    data = compute.captured_performance()
+    version = bus.cache_set(CACHE_CAPTURED_PERF, data)
+    bus.publish(EVENT_CAPTURED_PERF, {"version": version})
+
+
 def autoclose_enabled(bus) -> bool:
     """Whether captured auto-close is enabled. Defaults **True** on a missing /
     unreadable key — so only an EXPLICIT ``{"enabled": False}`` (from the Settings
@@ -835,6 +854,7 @@ def run_captured_manage_and_publish(bus) -> None:
     res = compute.run_captured_manage_cycle()
     refresh_captured(bus)
     publish_captured_closed(bus)
+    publish_captured_performance(bus)
     try:
         _notify_captured_closes(bus, (res or {}).get("closed"))
     except Exception:  # noqa: BLE001
