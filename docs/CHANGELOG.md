@@ -4,6 +4,50 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-04 (**Market Scanner — and the last spelling of the
+waiting line.** Sixth page of the reader's-voice pass. This one started in better
+shape than the five before it, so the change is narrow and two of its labels
+deliberately did NOT move.)
+
+- **Already good, and left alone:** `day_note` and `truncated_note` are written
+  from the reader's side; the three subtab tooltips explain 0-DTE / Swing /
+  Directional in a sentence each; and `status_line`'s word **live** is doing real
+  work — the tab headers carry the DAY's counts (hundreds by 3pm) while that line
+  sums the last SCAN (dozens), and the word is what stops the gap reading as a bug.
+- **`Type`→`Strategy`** (the cell holds `PCS` / `CCS` / `IC` — the structure, and
+  the word the Paper Ledger and Captured Signals already use), **`Exp`→`Expiry`**,
+  **`Max Loss`→`Max loss`**.
+- **`Dropped`→`Dropped at`** — the cell holds `stale_since`, a *timestamp*: when
+  the signal stopped appearing in a scan, not whether it did.
+- **⚠ `Credit` STAYS here, which is the opposite of the last two pages** — and it
+  now carries a test saying so, because three pages into a pattern this is the one
+  somebody "fixes". `signal_columns` is a credit-spread table **by construction**;
+  the Directional tab, which holds the debits, does not use these columns at all
+  (`directional_columns` deliberately carries no credit or R:R economics, since a
+  directional trade is scored by a model not commensurable with the premium one).
+- **⚠ `DTE` also stays bare**, where Captured Signals had to become "DTE at
+  entry". That page's value is frozen at capture; this scan reruns every 15
+  minutes. The two pages differ because the quantities do, and a test on each side
+  records it.
+- **The waiting line is now singular across the app.** `status_line` read
+  *"Waiting for options service…"* — no "the" — a **fourth** spelling of a
+  sentence that already had three. It takes `pages.copy.WAITING_OPTIONS`, and so
+  does the one remaining variant in `rescue.py`: that is a shared sentence, so it
+  belongs to that module's job rather than waiting for a Rescue-page pass. Grep
+  confirms no other spelling survives in the tree.
+- **`Scan requested`→`Scanning — results appear when the scan finishes.`** A full
+  scan takes tens of seconds, and "requested" left no clue whether to wait or
+  re-press.
+- **A help gap this pass FOUND rather than created.** Nothing told the reader why
+  a row goes grey, or why its paper-trade button stops working. A dropped signal's
+  price is frozen at the moment it went — which is precisely why `stamp_stale`
+  blocks paper-trading it — and the help now says so.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2963 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-market-scanner-user-perspective-copy-design.md)
+
+---
+
 **Last updated:** 2026-09-04 (**Captured Signals — three columns were wrong, not
 merely terse.** Fifth page of the reader's-voice pass, and the one that turned up
 the most genuine mislabelling.)
