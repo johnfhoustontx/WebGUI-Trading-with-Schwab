@@ -308,12 +308,16 @@ def _dealer(payloads, stale):
     note = "" if out else _d.EMPTY_DEALER
     warning = (_d.stale_walls_note(fresh["label"])
                if stale and out else "")
-    return {"rows": out, "note": note, "warning": warning}
+    # The dealer panel had no subtitle at all here — it was the one head the
+    # skeleton hardcoded with nothing to fill. It carries the shared one now,
+    # like its three siblings.
+    return {"rows": out, "note": note, "warning": warning,
+            "subtitle": _d.PANEL_HEADS["dealer"][1]}
 
 
 def _board(payloads):
     view = payloads.get("options:matrix")
-    subtitle = "HOTTEST {}".format(_d.BOARD_ROWS_N)
+    subtitle = _d.PANEL_HEADS["board"][1]
     if view is None:
         return {"rows": [], "note": _d.WAITING_OPTIONS, "subtitle": subtitle}
     rows = []
@@ -340,7 +344,7 @@ def _board(payloads):
 
 def _flow_panel(payloads):
     view = payloads.get("options:flow_alerts")
-    subtitle = "NEWEST {}".format(_d.FLOW_ROWS_N)
+    subtitle = _d.PANEL_HEADS["flow"][1]
     if view is None:
         return {"rows": [], "note": _d.WAITING_OPTIONS, "subtitle": subtitle}
     rows = []
@@ -371,7 +375,7 @@ def _positions(payloads):
     paper = payloads.get("options:paper_account")
     driver = payloads.get("options:driver_paper_account")
     captured = payloads.get("options:captured")
-    subtitle = " · ".join(b["source"] for b in _d.BOOKS)
+    subtitle = _d.PANEL_HEADS["positions"][1]
     if paper is None and driver is None and captured is None:
         return {"rows": [], "note": _d.WAITING_OPTIONS, "summary": "",
                 "subtitle": subtitle, "at_risk": 0}
@@ -634,6 +638,9 @@ a {{ color: inherit; text-decoration: none; }}
           border-bottom: 1px solid {line}40; }}
 .ptitle {{ font-size: 14px; letter-spacing: .2em; color: {text}; }}
 .psub {{ font-size: 11px; letter-spacing: .16em; color: {label}; margin-left: auto; }}
+/* The use-line: prose, so NORMAL tracking and its own row under the head -
+   the .16em above is right for a short fact and unreadable on a sentence. */
+.puse {{ font-size: 13px; line-height: 1.35; color: {dim}; padding: 6px 0 2px; }}
 .note {{ font-size: 15px; color: {muted}; padding: 16px 0; }}
 .warn {{ font-size: 13px; color: {warning}; padding: 6px 0 0; }}
 .summary {{ font-size: 14px; letter-spacing: .16em; padding: 8px 0 2px; color: {muted}; }}
@@ -675,6 +682,13 @@ th {{ white-space: normal; overflow: visible; line-height: 1.25; }}
 _FONTS = _d.DESK_FONT_HEAD_HTML
 
 _JS = """
+// The column LABELS come from the Desk (injected as HEADS); the width
+// percentages are this screen's own layout and stay here. zipw pairs them, so
+// a renamed label reaches both screens and a re-tuned width reaches only this
+// one.
+function zipw(labels, widths) {
+  return labels.map((label, i) => [label, widths[i]]);
+}
 const $ = (s) => document.querySelector(s);
 
 /* Every cell is written with textContent, never innerHTML: these strings are
@@ -831,9 +845,7 @@ function paint(s) {
 
   let b = panel('#dealer', s.dealer.note, s.dealer.warning);
   if (b) {
-    const tb = table(b, [['SYMBOL', 9], ['SPOT', 17], ['GAMMA FLIP', 17],
-                         ['STRUCTURE MAP', 15], ['CALL WALL', 13],
-                         ['PUT WALL', 13], ['NET GEX / REGIME', 16]]);
+    const tb = table(b, zipw(HEADS.dealer, [9, 17, 17, 15, 13, 13, 16]));
     s.dealer.rows.forEach((r) => {
       const tr = row(tb, '/options/gamma');
       cell(tr, 'sym', r.symbol);
@@ -863,9 +875,7 @@ function paint(s) {
   $('#board-sub').textContent = s.board.subtitle;
   b = panel('#board', s.board.note);
   if (b) {
-    const tb = table(b, [['SCORE', 7], ['SYMBOL', 11], ['WHY', 28],
-                         ['ATM IV', 14], ['NET PREM', 12], ['P/C', 8],
-                         ['SIGNAL', 10], ['SETUP', 10]]);
+    const tb = table(b, zipw(HEADS.board, [7, 11, 28, 14, 12, 8, 10, 10]));
     s.board.rows.forEach((r) => {
       const tr = row(tb, '/options/matrix');
       cell(tr, 'val', r.hotness, ACCENT);
@@ -890,8 +900,7 @@ function paint(s) {
   $('#flow-sub').textContent = s.flow.subtitle;
   b = panel('#flow', s.flow.note);
   if (b) {
-    const tb = table(b, [['TIME', 10], ['SYMBOL', 13], ['DETAIL', 44],
-                         ['KIND', 33]]);
+    const tb = table(b, zipw(HEADS.flow, [10, 13, 44, 33]));
     s.flow.rows.forEach((r) => {
       const tr = row(tb, '/options/flow');
       cell(tr, 'dim', r.time);
@@ -907,10 +916,8 @@ function paint(s) {
   sum.className = s.positions.at_risk ? 'summary risk' : 'summary';
   b = panel('#positions', s.positions.note);
   if (b) {
-    const tb = table(b, [['BOOK', 7], ['SYMBOL', 9], ['STRAT', 11],
-                         ['EXPIRY', 13], ['ENTRY', 9], ['MARK', 9],
-                         ['STRIKES', 11], ['QTY', 5], ['UNREALIZED', 16],
-                         ['FLAG', 10]]);
+    const tb = table(b, zipw(HEADS.positions,
+                             [7, 9, 11, 13, 9, 9, 11, 5, 16, 10]));
     s.positions.rows.forEach((r) => {
       const tr = row(tb, r.href);
       const book = cell(tr, null, null);
@@ -957,10 +964,20 @@ def document():
                       dim=_C["dim"], line=_C["line"], cell=_C["cell"],
                       accent=_C["accent"], positive=_C["positive"],
                       negative=_C["negative"], warning=_C["warning"])
+    # ``HEADS`` rides in with the other constants because ``_JS`` is inserted
+    # VERBATIM (it is full of braces and template literals, so it is the one
+    # string here that must not be ``.format``ed). This is the same route
+    # ``CALL_HEX`` already takes, and it is what stops the mirror carrying a
+    # second set of column labels that a rename could miss.
     consts = ("const STREAM = {stream};\nconst ACCENT = {accent};\n"
-              "const CALL_HEX = {call};\nconst PUT_HEX = {put};\n").format(
+              "const CALL_HEX = {call};\nconst PUT_HEX = {put};\n"
+              "const HEADS = {heads};\n").format(
         stream=json.dumps(STREAM_ROUTE), accent=json.dumps(_C["accent"]),
-        call=json.dumps(_d.CALL_HEX), put=json.dumps(_d.PUT_HEX))
+        call=json.dumps(_d.CALL_HEX), put=json.dumps(_d.PUT_HEX),
+        heads=json.dumps({"dealer": list(_d.DEALER_HEADS),
+                          "board": list(_d.BOARD_HEADS),
+                          "flow": list(_d.FLOW_HEADS),
+                          "positions": list(_d.POS_HEADS)}))
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1002,22 +1019,27 @@ def document():
 
   <div class="grid">
     <div class="panel">
-      <div class="phead"><div class="ptitle">DEALER POSITIONING</div></div>
+      <div class="phead"><div class="ptitle">{dealer_title}</div>
+        <div class="psub" id="dealer-sub"></div></div>
+      <div class="puse">{dealer_use}</div>
       <div class="pbody" id="dealer"></div>
     </div>
     <div class="panel">
-      <div class="phead"><div class="ptitle">OPPORTUNITY BOARD</div>
+      <div class="phead"><div class="ptitle">{board_title}</div>
         <div class="psub" id="board-sub"></div></div>
+      <div class="puse">{board_use}</div>
       <div class="pbody" id="board"></div>
     </div>
     <div class="panel">
-      <div class="phead"><div class="ptitle">LIVE FLOW ALERTS</div>
+      <div class="phead"><div class="ptitle">{flow_title}</div>
         <div class="psub" id="flow-sub"></div></div>
+      <div class="puse">{flow_use}</div>
       <div class="pbody" id="flow"></div>
     </div>
     <div class="panel">
-      <div class="phead"><div class="ptitle">POSITIONS</div>
+      <div class="phead"><div class="ptitle">{pos_title}</div>
         <div class="psub" id="pos-sub"></div></div>
+      <div class="puse">{pos_use}</div>
       <div class="summary" id="pos-summary"></div>
       <div class="pbody" id="positions"></div>
     </div>
@@ -1028,4 +1050,12 @@ def document():
 </script>
 </body>
 </html>
-""".format(fonts=_FONTS, css=css, consts=consts, js=_JS)
+""".format(fonts=_FONTS, css=css, consts=consts, js=_JS,
+           dealer_title=_d.PANEL_HEADS["dealer"][0],
+           dealer_use=_d.PANEL_HEADS["dealer"][1],
+           board_title=_d.PANEL_HEADS["board"][0],
+           board_use=_d.PANEL_HEADS["board"][1],
+           flow_title=_d.PANEL_HEADS["flow"][0],
+           flow_use=_d.PANEL_HEADS["flow"][1],
+           pos_title=_d.PANEL_HEADS["positions"][0],
+           pos_use=_d.PANEL_HEADS["positions"][1])

@@ -231,7 +231,11 @@ def test_a_live_feed_carries_no_withheld_warning():
 def test_board_rows_are_hottest_first_and_capped_at_the_desks_own_count():
     board = ds.snapshot(_payloads(), _NOW)["board"]
     assert [r["symbol"] for r in board["rows"]] == ["$SPX", "SPY"]
-    assert board["subtitle"] == "HOTTEST {}".format(d.BOARD_ROWS_N)
+    # The head is the Desk's now, but the point of this line is unchanged: the
+    # cap must still be INTERPOLATED into it, so a cap that moves cannot leave a
+    # stale number standing on the panel.
+    assert board["subtitle"] == d.PANEL_HEADS["board"][1]
+    assert str(d.BOARD_ROWS_N) in board["subtitle"]
     assert board["rows"][0]["hotness"] == d.fmt_hotness(91.0)
     assert board["rows"][0]["setup"] == d.setup_word("delta_wall_pin")
 
@@ -489,3 +493,49 @@ def test_both_routes_are_registered_on_the_app():
     assert ds.PAGE_ROUTE in paths
     assert ds.STREAM_ROUTE in paths
     assert main is not None
+
+
+# ── the panel heads and column labels come from /desk, not from here ─────────
+def test_the_mirror_takes_its_panel_heads_from_the_desk():
+    """Titles and use-lines were literals in the HTML skeleton, and two of the
+    subtitles were rebuilt here with a ``.format`` of this module's own. The
+    module docstring's promise — that the mirror DELEGATES — held for the rows
+    and not for the heads."""
+    doc = ds.document()
+    for key in ("dealer", "board", "flow", "positions"):
+        title, use_line = d.PANEL_HEADS[key]
+        assert title in doc, key
+        assert use_line in doc, key
+
+
+def test_the_mirror_takes_its_column_labels_from_the_desk():
+    """The label lists live in ``_JS``, which is inserted verbatim rather than
+    ``.format``ed — so they reach it through the same ``consts`` injection
+    ``CALL_HEX`` already uses, not as a second set of literals."""
+    doc = ds.document()
+    for heads in (d.DEALER_HEADS, d.BOARD_HEADS, d.FLOW_HEADS, d.POS_HEADS):
+        for label in heads:
+            assert json.dumps(label)[1:-1] in doc, label
+
+
+def test_the_mirror_carries_none_of_the_superseded_words():
+    """The half that a presence check cannot do. A rename applied to /desk and
+    not here would leave both words in the app, on two screens showing one
+    number — which is the exact failure this page was built to avoid."""
+    doc = ds.document()
+    for gone in ("GAMMA FLIP", "CALL WALL", "PUT WALL", "NET GEX / REGIME",
+                 "STRUCTURE MAP", "UNREALIZED", "NET PREM<", "HOTTEST",
+                 "NEWEST"):
+        assert gone not in doc, gone
+
+
+def test_the_dealer_panel_finally_has_a_subtitle_slot():
+    """It was the one panel with no ``psub`` element, so the mirror could not
+    show a dealer head even when the snapshot carried one."""
+    assert 'id="dealer-sub"' in ds.document()
+
+
+def test_every_panel_snapshot_carries_the_shared_subtitle():
+    snap = ds.snapshot(_payloads(), _NOW)
+    for key in ("dealer", "board", "flow", "positions"):
+        assert snap[key]["subtitle"] == d.PANEL_HEADS[key][1], key
