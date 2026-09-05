@@ -85,6 +85,13 @@ into one reading.
   with no live fields has no intraday reading, and painting the quarter's reading
   in today's colours is the outcome the feature exists to prevent. Because there
   is one rule, a strip/map disagreement is always a difference of *horizon*.
+  ⚠ **Accepted residual, per row rather than per strip:** once the strip is live,
+  a symbol the proxy *returns* with unusable percent fields still reads a literal
+  `0.0`, and `0.0` is not `> 0` — so that one chip paints falling. The calendar
+  switch bounds the damage to individual rows mid-session; what it makes
+  impossible is the whole strip reading bearish off no data. A zero here is
+  therefore no proof of a flat tape, the same trap `bullbear.signed_pct` states
+  for the day-move cell.
 - **Order is `bullbear.by_day_move`, with bucket hysteresis.** The move is
   quantised into `DAY_SORT_MARGIN_PCT`-wide buckets and the row's seat in the
   previous paint breaks ties, so order holds *inside* a bucket and a chip changes
