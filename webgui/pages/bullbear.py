@@ -248,6 +248,56 @@ def by_strength(rows):
     return sorted((r for r in rows or [] if r is not None), key=_sort_key)
 
 
+# The strip repaints every ~30s, so an exact sort would reshuffle on noise. One
+# margin, in percentage points, is the width of a bucket AND therefore the move
+# a chip must make before it is allowed to change seats.
+DAY_SORT_MARGIN_PCT = 0.05
+
+
+def by_day_move(rows, previous=None, margin=DAY_SORT_MARGIN_PCT):
+    """Rows by TODAY's move, biggest riser first, with hysteresis -> a new list.
+
+    Deliberately NOT :func:`by_strength`'s order, and the one place two screens
+    ordering the same rows differently is the point rather than a defect: the
+    Desk strip asks what is working TODAY where the map asks what has worked
+    this quarter. The strip captions itself with what it sorted by, so the
+    disagreement reads as a difference of horizon and never of rule.
+
+    A strip that moves under the eye cannot be glanced at, so the move is
+    QUANTISED into margin-wide buckets and the row's position in ``previous``
+    breaks the tie. Inside a bucket the order it already had survives, and a
+    chip changes seats only when it crosses a boundary — hysteresis as a pure
+    function of ``(rows, previous)``, with no pairwise state machine and no
+    clock. A row ``previous`` does not name has no seat and takes the back of
+    its bucket: an arriving chip must not shove a settled one sideways.
+
+    ``math.floor``, never ``int``. Truncation rounds toward zero, which would
+    make the single bucket spanning flat twice as wide as every other one and
+    let a sector down 0.04% hold a seat above one up 0.04%. Separating today's
+    risers from today's fallers is the whole reason the strip is sorted this
+    way, so flat is the LAST boundary to blur; floored, any two rows a full
+    margin apart are ordered by the move wherever they sit on the scale.
+
+    ``margin`` is an argument because the constant is bound as a default HERE,
+    at def time — patching the module attribute would never reach this call, so
+    the parameter is what makes the boundary testable without a browser.
+
+    Unreadable moves go last, through ``_num``, for the reason ``_sort_key``
+    states: ``sorted`` is where a NaN orders unpredictably and an sNaN raises. A
+    null row is dropped exactly as :func:`by_strength` drops one; a non-dict row
+    is a different document and raises rather than being half-ordered.
+    """
+    seats = {sym: i for i, sym in enumerate(previous or [])}
+
+    def key(row):
+        pct = _num(row.get("day_pct"))
+        seat = seats.get(row.get("symbol"), len(seats))
+        return (1, 0, seat) if pct is None \
+            else (0, -math.floor(pct / margin), seat)
+
+    return sorted((r for r in rows or [] if r is not None), key=key)
+
+
 def _level(levels, name):
     """One named level of a payload, ordered by :func:`by_strength`."""
     return by_strength(levels.get(name))

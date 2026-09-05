@@ -560,6 +560,117 @@ def test_by_strength_orders_bare_rows_exactly_as_the_tree_orders_sectors():
     assert [s["label"] for s in B.build_tree({"sector": rows})] == ["V", "U", "E"]
 
 
+def test_by_day_move_orders_strongest_first():
+    rows = [{"symbol": "A", "day_pct": 0.2}, {"symbol": "B", "day_pct": 1.4}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] == ["B", "A"]
+
+
+def test_by_day_move_holds_position_inside_the_margin():
+    """B leads A by 0.01pp — inside the margin, so the previous order survives
+    rather than the strip reshuffling on noise it repaints every ~30 seconds."""
+    rows = [{"symbol": "A", "day_pct": 1.00}, {"symbol": "B", "day_pct": 1.01}]
+    out = B.by_day_move(rows, previous=["A", "B"])
+    assert [r["symbol"] for r in out] == ["A", "B"]
+
+
+def test_by_day_move_reorders_once_the_margin_is_cleared():
+    """Hysteresis is a damper, not a freeze: a move worth reading still moves."""
+    rows = [{"symbol": "A", "day_pct": 1.00}, {"symbol": "B", "day_pct": 1.40}]
+    out = B.by_day_move(rows, previous=["A", "B"])
+    assert [r["symbol"] for r in out] == ["B", "A"]
+
+
+def test_by_day_move_puts_unreadable_rows_last():
+    rows = [{"symbol": "A", "day_pct": None}, {"symbol": "B", "day_pct": -2.0}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] == ["B", "A"]
+
+
+def test_by_day_move_buckets_uniformly_so_the_pair_straddling_flat_still_orders():
+    """``math.floor``, never ``int``. Truncation rounds toward zero, which makes
+    the one bucket spanning flat twice as wide as every other — and separating
+    today's risers from today's fallers is the whole reason the strip is sorted
+    this way, so flat is the LAST boundary to blur. These two are 0.08pp apart,
+    more than a full margin, so the riser leads whoever sat first; under ``int``
+    both land in bucket 0 and the stale seat decides."""
+    rows = [{"symbol": "DOWN", "day_pct": -0.04},
+            {"symbol": "UP", "day_pct": 0.04}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["DOWN", "UP"])] \
+        == ["UP", "DOWN"]
+
+
+def test_by_day_move_seats_a_newcomer_behind_the_chips_already_placed():
+    """A sector the last repaint did not carry has no seat, so it takes the back
+    of its bucket: an arriving chip must not shove a settled one sideways."""
+    rows = [{"symbol": "NEW", "day_pct": 1.02}, {"symbol": "OLD", "day_pct": 1.01}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["OLD"])] \
+        == ["OLD", "NEW"]
+
+
+def test_by_day_move_takes_the_margin_as_an_argument():
+    """The module constant is bound as a default HERE, at def time, so patching
+    the module attribute would never reach this call — the trap ``signal_db``'s
+    ``db_path`` defaults fell into. The parameter is what makes the boundary
+    testable at all, which is why it exists with no caller passing it."""
+    rows = [{"symbol": "A", "day_pct": 1.0}, {"symbol": "B", "day_pct": 1.4}]
+    assert [r["symbol"] for r in
+            B.by_day_move(rows, previous=["A", "B"])] == ["B", "A"]
+    assert [r["symbol"] for r in
+            B.by_day_move(rows, previous=["A", "B"], margin=1.0)] == ["A", "B"]
+
+
+def test_by_day_move_drops_a_null_row_and_handles_an_empty_payload():
+    """``by_strength``'s policy, one axis over: a null in a JSON array is a row
+    we do not have and can be no chip, while a non-dict row is a different
+    document and raises rather than being half-ordered."""
+    assert [r["symbol"] for r in
+            B.by_day_move([None, {"symbol": "A", "day_pct": 0.2}, None])] == ["A"]
+    assert B.by_day_move([]) == []
+    assert B.by_day_move(None) == []
+    with pytest.raises(AttributeError):
+        B.by_day_move(["XLV"])
+
+
+def test_by_day_move_sorts_a_non_finite_day_move_as_unreadable_not_unpredictably():
+    """Through ``_num``, as every other reader of these fields is. A bare
+    ``float()`` would let a NaN order by comparisons that are all False, and let
+    a signalling Decimal raise inside ``sorted``. A NaN is no reading, so it goes
+    last with the absent ones — deterministically, and behind a row that
+    genuinely fell, which is a reading."""
+    rows = [{"symbol": "NAN", "day_pct": float("nan")},
+            {"symbol": "SNAN", "day_pct": Decimal("sNaN")},
+            {"symbol": "DOWN", "day_pct": -3.0},
+            {"symbol": "UP", "day_pct": 3.0}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] \
+        == ["UP", "DOWN", "NAN", "SNAN"]
+
+
+def test_by_day_move_holds_a_chip_still_across_a_run_of_repaints():
+    """Hysteresis is a claim about a SEQUENCE, and one repaint cannot show it.
+
+    Six ticks of jitter inside one bucket, each output's order fed back as the
+    next ``previous`` — exactly what the strip does every ~30 seconds — while
+    the payload hands the rows in a different order each time. Seated, the strip
+    is still; unseated, the same ticks follow whatever order the payload
+    happened to hand over, which is the reshuffle a glanceable strip cannot
+    have."""
+    ticks = [(1.21, 1.22), (1.23, 1.22), (1.21, 1.235),
+             (1.24, 1.21), (1.22, 1.22), (1.215, 1.245)]
+
+    def payload(i, a, b):
+        rows = [{"symbol": "A", "day_pct": a}, {"symbol": "B", "day_pct": b}]
+        return rows if i % 2 == 0 else rows[::-1]
+
+    order = ["A", "B"]
+    for i, (a, b) in enumerate(ticks):
+        order = [r["symbol"] for r in
+                 B.by_day_move(payload(i, a, b), previous=order)]
+        assert order == ["A", "B"], f"reshuffled on repaint {i}"
+
+    unseated = {tuple(r["symbol"] for r in B.by_day_move(payload(i, a, b)))
+                for i, (a, b) in enumerate(ticks)}
+    assert len(unseated) == 2
+
+
 def test_build_tree_returns_one_node_per_sector_row_not_one_per_label():
     """The ordered list, not the lookup index keyed on ``label``. Sector labels
     are unique in the live payload (11 of 11 on 2026-08-19) and unique upstream
