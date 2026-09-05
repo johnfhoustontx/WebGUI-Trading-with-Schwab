@@ -962,8 +962,47 @@ Then `publish_income(bus, symbols=None)`:
 - rank the merged list and validate through `IncomeScan(...)` before writing;
 - `bus.cache_set(CACHE_INCOME, snap.model_dump(), event=EVENT_INCOME, skip_unchanged=True)`.
 
-Wire the call into the service loop where `action_alert_due` is consumed, gated on
-`income_slot_due`. Add an `income_scan` command to `handle_command` so the page's
+**Wiring it into the service loop — copy the house branch pattern exactly.**
+Every periodic job in `services/options_svc/scheduler.py` has the same three
+parts, and the income pass is no different:
+
+```python
+        # INCOME window -- one 30-45 DTE pass a day. The blocking scan (~23 chain
+        # fetches) runs in the executor; independently guarded so a failure never
+        # skips the work above or kills the loop.
+        inc_slot = None
+        try:
+            inc_slot = income_slot_due(now, income_ran)
+        except Exception:
+            log.exception("income_slot_due gate degraded")
+
+        async def _income_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.publish_income, bus)
+            except Exception:
+                log.exception("publish_income branch degraded")
+
+        if inc_slot:
+            income_ran.add((now.date().isoformat(), inc_slot))
+            branches.append(("income", _income_branch()))
+```
+
+Three things that are load-bearing, all visible in the neighbouring branches:
+
+1. **The gate gets its own `try/except` with a falsy fallback.** A gate that
+   raises must not take down the loop or skip the branches around it.
+2. **The blocking work goes through `loop_.run_in_executor`.** A ~23-symbol chain
+   fan-out on the event loop would stall every other branch on the tick.
+3. **Record the slot in `income_ran` at DISPATCH, not inside the branch.**
+   `launch_branches` starts branches as keyed background tasks with a
+   still-running skip, so a slow scan can only ever delay *itself* — but only if
+   the slot is already marked. Marking it inside the branch re-fires it on the
+   next tick.
+
+Declare `income_ran = set()` beside `action_alert_ran` in the loop's setup block
+(`scheduler.py:510`).
+
+Add an `income_scan` command to `handle_command` so the page's Refresh button can force a pass. Add an `income_scan` command to `handle_command` so the page's
 Refresh button can force a pass, and extend the `handle_command` docstring — it is
 the dispatch's only index.
 
