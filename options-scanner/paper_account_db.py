@@ -100,6 +100,31 @@ CREATE TABLE IF NOT EXISTS position_adjustments (
     ts TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_adj_position ON position_adjustments(position_id);
+
+-- Share inventory. A lot is cash that has been CONVERTED INTO SHARES; it never
+-- holds reserved buying power. That is why it is a table of its own rather than
+-- a `kind` column on paper_positions: reconcile_buying_power recomputes
+-- buying_power_reserved as Σ OPEN paper_positions.max_loss_total and corrects
+-- the drift against cash, so anything reserving outside that sum is silently
+-- zeroed at the next service start. Keeping lots out of paper_positions also
+-- keeps every one of that table's many readers correct without learning to
+-- filter — and any one of them forgetting would be a silent miscount.
+CREATE TABLE IF NOT EXISTS equity_lots (
+    lot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    shares INTEGER NOT NULL,
+    cost_basis REAL NOT NULL,          -- per share
+    opened_ts TEXT,
+    source TEXT,                       -- 'assignment' | 'manual'
+    source_position_id INTEGER,        -- the assigned short put, when source='assignment'
+    status TEXT DEFAULT 'OPEN',
+    closed_ts TEXT,
+    exit_price REAL,
+    realized_pnl REAL,
+    exit_reason TEXT                   -- 'called_away' | 'sold'
+);
+CREATE INDEX IF NOT EXISTS idx_lots_status ON equity_lots(status);
+CREATE INDEX IF NOT EXISTS idx_lots_symbol ON equity_lots(symbol);
 """
 
 _initialised: set = set()
@@ -119,6 +144,10 @@ def init_db(db_path=None):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
         # idempotent migration for older DBs — additive nullable columns only.
+        # A whole new TABLE needs no entry here: executescript above runs the
+        # full SCHEMA every time, and each statement is CREATE ... IF NOT EXISTS,
+        # so an existing DB gains it (empty) on the next open. Only a new COLUMN
+        # on a table that already exists needs an ALTER.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(paper_positions)")}
         for name, decl in (("parent_position_id", "INTEGER"), ("mae", "REAL"),
                            ("mfe", "REAL"), ("entry_context", "TEXT"),
@@ -524,6 +553,113 @@ def list_adjustments(db_path, position_id):
             d["legs"] = []
         out.append(d)
     return out
+
+
+#############################################
+# EQUITY LOTS (share inventory)
+#############################################
+
+# ⚠ THE INVARIANT for everything below: a lot is cash already converted into
+# shares, NEVER a buying-power reservation. `reconcile_buying_power` recomputes
+# `buying_power_reserved` from Σ OPEN paper_positions.max_loss_total and returns
+# any excess to cash, so a lot that reserved would be silently zeroed at the next
+# service start. Nothing here touches `buying_power_reserved`, and nothing may.
+#
+# ⚠ Every signature below is `def f(db_path=None, ...)` with DEFAULT_DB_PATH
+# resolved inside `connect`, never `db_path=DEFAULT_DB_PATH` in the signature:
+# Python binds a default at `def` time, which is exactly why `signal_db`'s
+# test-isolation monkeypatch was inert for weeks and leaked 24 synthetic signals
+# into both live environments.
+
+
+def insert_equity_lot(db_path=None, lot=None):
+    """Record one lot of shares. Returns the new ``lot_id``.
+
+    ``status`` defaults to 'OPEN' from the DDL, and ``opened_ts`` is stamped when
+    the caller does not supply one so a lot can always be aged (the covered-call
+    screen wants holding period).
+    """
+    import datetime
+    lot = dict(lot or {})
+    if not lot.get("opened_ts"):
+        lot["opened_ts"] = datetime.datetime.now().isoformat(timespec="seconds")
+    cols = ("symbol", "shares", "cost_basis", "opened_ts", "source",
+            "source_position_id")
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            f"INSERT INTO equity_lots ({','.join(cols)}) "
+            f"VALUES ({','.join('?' for _ in cols)})",
+            tuple(lot.get(c) for c in cols))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def fetch_open_lots(db_path=None):
+    """Every lot still held, oldest first — 'what stock do I own right now'."""
+    conn = connect(db_path)
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM equity_lots WHERE status='OPEN' ORDER BY lot_id")]
+    finally:
+        conn.close()
+
+
+def close_equity_lot(db_path=None, lot_id=None, exit_price=None, reason=None,
+                     closed_ts=None):
+    """Dispose of a whole lot. Returns the realized P&L it booked.
+
+    One lot per assignment, closed whole — multi-lot cost-basis accounting
+    (FIFO / LIFO / specific-ID) is deliberately not built, so realized P&L is
+    simply the whole-lot move off the basis. A missing ``lot_id`` raises rather
+    than degrading to a plausible zero: a caller closing a lot that is not there
+    is a bug, and a silent 0.0 would book it as a flat trade.
+    """
+    import datetime
+    if closed_ts is None:
+        closed_ts = datetime.datetime.now().isoformat(timespec="seconds")
+    conn = connect(db_path)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT shares, cost_basis FROM equity_lots WHERE lot_id=?",
+                (lot_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"no equity lot {lot_id!r} in {db_path}")
+            realized = round((float(exit_price) - float(row["cost_basis"]))
+                             * int(row["shares"]), 2)
+            conn.execute(
+                "UPDATE equity_lots SET status='CLOSED', closed_ts=?, "
+                "exit_price=?, realized_pnl=?, exit_reason=? WHERE lot_id=?",
+                (closed_ts, exit_price, realized, reason, lot_id))
+        return realized
+    finally:
+        conn.close()
+
+
+def _equity_at_cost_conn(conn):
+    """Σ(open lots: shares × cost_basis) on an ALREADY-OPEN connection.
+
+    Exists so ``roll_session_if_needed`` can add this term inside its existing
+    ``with conn:`` transaction instead of opening a second connection mid-write.
+    ``COALESCE`` so a cold table reads 0.0 and never None — the caller adds this
+    straight onto cash.
+    """
+    r = conn.execute("SELECT COALESCE(SUM(shares * cost_basis), 0) AS c "
+                     "FROM equity_lots WHERE status='OPEN'").fetchone()
+    return round(float(r["c"]), 2)
+
+
+def equity_at_cost(db_path=None):
+    """Capital committed to shares, at basis. Open lots only — a closed lot is
+    cash again, and counting it here would double it."""
+    conn = connect(db_path)
+    try:
+        return _equity_at_cost_conn(conn)
+    finally:
+        conn.close()
 
 
 #############################################
