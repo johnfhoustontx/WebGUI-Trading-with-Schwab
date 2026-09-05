@@ -2065,9 +2065,17 @@ class TestDirectionalSignals:
         correctly emitted.
 
         Asserting an empty list therefore no longer tests the cut — it tests the
-        bug. The invariant the cut actually promises is asserted instead, which
-        is strictly stronger than the old `== []` (that would have passed on a
-        cut which dropped everything, including qualifying rows).
+        bug. The invariant the cut actually promises is asserted instead.
+
+        ⚠ The per-row loop below is NOT on its own stronger than the old
+        `== []`: it has the same hole, and an earlier revision of this docstring
+        claimed otherwise. Mutation-verified — with `SINGLE_LEG_MIN_SCORE` forced
+        to 999 the cut emits nothing, the loop iterates zero times, `uncut >
+        with_cut` still holds at `16 > 0`, and the whole test passed. That is
+        exactly the regression Task 2.6 exists to prevent, sailing through green.
+        The two assertions that close it are the non-empty check and the
+        surviving-naked-short check; the latter is the only assertion anywhere in
+        this suite that would notice the annualisation being undone end to end.
 
         ⚠ Do NOT read those three rows as evidence a 1-DTE naked short is a good
         trade. This fixture's chain is synthetic and degenerate — a flat 440.57
@@ -2090,6 +2098,12 @@ class TestDirectionalSignals:
         # and the cut must actually have DROPPED some — otherwise the loop above
         # passes for free on a list nothing was ever removed from.
         assert results["signals_0dte"], "fixture produced no scan at all"
+        assert results["signals_directional"], (
+            "the cut emitted nothing — every candidate is Weak again")
+        assert any(s["type"] in ("SHORT_PUT", "SHORT_CALL")
+                   for s in results["signals_directional"]), (
+            "no naked short survived the cut — the Task 2.6 annualisation has "
+            "regressed")
         with_cut = len(results["signals_directional"])
         uncut = len(_directional_uncut(fake_client, self.SYMBOLS))
         assert uncut > with_cut, (
