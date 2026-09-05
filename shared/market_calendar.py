@@ -420,6 +420,22 @@ def is_regular_hours(now) -> bool:
     return session_at(now) is Session.REGULAR
 
 
+def regular_session_has_opened(now) -> bool:
+    """True on a trading day at or after the 08:30 CT open, close included.
+
+    Distinct from :func:`is_regular_hours`, which goes False at 15:00 CT. A
+    consumer asking "is today's move real yet?" wants True from the opening
+    bell until the session date rolls -- the day's change does not stop being a
+    fact at the close. False on weekends and holidays, where a quote's percent
+    field is a stale prior close or the proxy's literal 0.0 fallback.
+    """
+    ct = _ct_of(now)
+    if not is_trading_day(ct.date()):
+        return False
+    reg_start, _reg_end = _session_bounds("regular")
+    return ct.time() >= reg_start
+
+
 def mins_to_close(now):
     """Minutes remaining in the regular session (to 15:00 CT = 4pm ET cash
     close), or ``None`` when ``now`` is outside it.

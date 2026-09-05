@@ -556,3 +556,19 @@ def test_stream_window_survives_a_missing_toml():
     """Every config in this repo degrades to built-in defaults rather than
     raising. A window present only in the TOML would break on a malformed file."""
     assert mc._DEFAULTS["windows"]["stream"] == {"start": "08:00", "end": "15:20"}
+
+
+def test_regular_session_has_opened_is_false_before_the_open():
+    """08:00 CT on a Tuesday, before the 08:30 open."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 8, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_during_and_after_the_session():
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 9, 30)) is True
+    # After the cash close the day's move is still real, so this stays True.
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 15, 45)) is True
+
+
+def test_regular_session_has_opened_is_false_at_the_weekend():
+    """2026-09-05 is a Saturday."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 5, 12, 0)) is False
