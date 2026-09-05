@@ -826,8 +826,10 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             if not (dte_min <= dte <= dte_max):
                 continue
 
-            # Earnings avoidance (swing trades only)
-            if earnings_date and trade_type == "SWING":
+            # Earnings avoidance (multi-day holds only). 0-DTE cannot straddle a
+            # report; SWING and INCOME both can, and at 30-45 DTE it is the
+            # common case rather than the exception.
+            if earnings_date and trade_type in ("SWING", "INCOME"):
                 if check_earnings_conflict(earnings_date, exp_str):
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue

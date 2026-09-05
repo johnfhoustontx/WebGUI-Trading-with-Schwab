@@ -821,6 +821,59 @@ class TestEarningsAvoidance:
         assert check_earnings_conflict(self._d(-70), self._d(10)) is False
 
 
+class TestIncomeEarningsGate:
+    """The earnings gate must cover the INCOME window, not only SWING.
+
+    At 30-45 DTE a straddled report is the common case rather than the
+    exception, so a SWING-only gate would emit income candidates over earnings
+    from the very first scan.
+    """
+
+    def _chain(self, dte, underlying=100.0):
+        """Put-only ladder 85-99 whose marks decay steeply enough that every
+        auto-selected width clears both min_cr_pct and the |delta|+EDGE_MARGIN
+        edge floor. Delta -0.25 sits inside the requested band AND below
+        MAX_ENTRY_SHORT_DELTA, so the short legs are not filtered on delta.
+
+        The expiration STRING is a real date `dte` days out, because
+        check_earnings_conflict compares dates, not the `:dte` suffix.
+        """
+        exp = (date.today() + timedelta(days=dte)).isoformat()
+
+        def leg(k):
+            mark = 0.20 + (k - 85) * 0.50
+            return [{"strikePrice": float(k), "delta": -0.25, "mark": mark,
+                     "bid": round(mark - 0.02, 2), "ask": round(mark + 0.02, 2),
+                     "theta": -0.02, "vega": 0.05, "gamma": 0.01,
+                     "volatility": 25.0,
+                     "totalVolume": 500, "openInterest": 500}]
+
+        return {
+            "underlyingPrice": underlying,
+            "callExpDateMap": {},
+            "putExpDateMap": {
+                f"{exp}:{dte}": {f"{k}.0": leg(k) for k in range(85, 100)},
+            },
+        }
+
+    def test_fixture_produces_signals_without_an_earnings_date(self):
+        """Non-vacuity guard for the test below: `sigs == []` only means the
+        gate fired if the same chain yields spreads when nothing is gating."""
+        sigs = screen_spreads(
+            self._chain(dte=35), "AAPL", 30, 45, -0.30, -0.20, 0.20, 0.30, 0.12,
+            "INCOME", spot=100.0, earnings_date=None)
+        assert sigs, "fixture produced no spreads - the gate test would pass vacuously"
+
+    def test_income_window_skips_expirations_straddling_earnings(self):
+        earnings = (date.today() + timedelta(days=20)).isoformat()
+
+        sigs = screen_spreads(
+            self._chain(dte=35), "AAPL", 30, 45, -0.30, -0.20, 0.20, 0.30, 0.12,
+            "INCOME", spot=100.0, earnings_date=earnings)
+
+        assert sigs == []
+
+
 class TestDynamicMinCredit:
     def test_wide_spread_uses_pct(self):
         min_cr = calc_effective_min_credit(width=25, min_cr_pct=0.15)
