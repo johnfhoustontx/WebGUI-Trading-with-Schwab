@@ -288,7 +288,13 @@ def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
         # green against a `dte or 1` style fallback that silently annualises a
         # 0-DTE signal by 365x.
         assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
-        assert not sc.evaluate_gates(_naked(dte=dte))["passed_min"], dte
+        # Assert the exact reason set, not just the boolean: this fixture's
+        # liquidity and PoP both pass, so "capital efficiency" alone is the
+        # discriminating outcome -- a gate that started failing for a second
+        # dimension would otherwise still read as green here.
+        g = sc.evaluate_gates(_naked(dte=dte))
+        assert not g["passed_min"], dte
+        assert g["reasons"] == ["capital efficiency"], (dte, g["reasons"])
 
 
 def _same_day_chain(spot=100.0):
@@ -370,7 +376,9 @@ def test_gates_naked_missing_dte_fails_rather_than_passing():
         del sig["dte"]
         sig.update(absent)
         assert sc._reward_metric(sig, "NAKED") is None, absent
-        assert not sc.evaluate_gates(sig)["passed_min"], absent
+        g = sc.evaluate_gates(sig)
+        assert not g["passed_min"], absent
+        assert g["reasons"] == ["capital efficiency"], (absent, g["reasons"])
 
 
 def test_gates_naked_low_capital_efficiency_fails_reward():

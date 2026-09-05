@@ -1931,9 +1931,7 @@ class TestPerExpiryExpectedMove:
 
 def _directional_uncut(fake_client, symbols):
     """Re-run the scan with the min-score cut lifted, for non-vacuity checks."""
-    import contextlib
-    with contextlib.ExitStack() as stack:
-        mp = stack.enter_context(pytest.MonkeyPatch.context())
+    with pytest.MonkeyPatch.context() as mp:
         mp.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
         mp.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
         return scanner_engine.run_full_scan(

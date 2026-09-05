@@ -91,8 +91,18 @@ GATE_BARS = {
     # STRONG_MIN, so "Strong" is effectively unreachable for naked shorts —
     # intended (a naked short is rarely your best trade). Note the gate carries
     # that intent through the `composite >= STRONG_MIN` conjunct, NOT through
-    # these bars: the composite reads the UN-annualised q_capital_eff and tops
-    # out near 56 for a naked short, so no capeff bar here can mint a Strong.
+    # these bars: the composite reads the UN-annualised q_capital_eff, which
+    # measured over real economics tops out at 52.8 for a naked short (the sweep
+    # below; `tools/sweep_naked_capeff.py` prints it), so no capeff bar here can
+    # mint a Strong.
+    #
+    # ⚠ That 56 is a MEASURED ceiling over real inputs, not one the function
+    # enforces. `q_capital_eff` returns 100.0 for a NaN max_profit or capital —
+    # `_clamp(nan)` is `max(0, min(100, nan))` == 100, the pin-the-maximum trap
+    # the root CLAUDE.md documents at length. It is contained today only because
+    # the gate fails on that same input and caps the composite at GATE_FAIL_CAP;
+    # the containment is accidental, not designed. Read the sentence above as
+    # "over real economics", and do not lean on it as a bound.
     #
     # ⚠ UNITS: `capeff` is PER YEAR for this profile only (see _reward_metric) —
     # 0.10 means 10% return on committed capital annualised, not 10% per trade.
@@ -101,16 +111,28 @@ GATE_BARS = {
     # Weak-and-cut (a 35-DTE CSP returns 1.70%/trade = 17.8%/yr).
     #
     # The 0.10/0.20 numbers are unchanged, and that is a measured choice, not an
-    # oversight. Swept over 1-60 DTE on a Black-Scholes chain (spot 100, IV
-    # 0.28), annualised capeff runs 0.59-3.78 for SHORT_CALL and 0.14-0.73 for
-    # SHORT_PUT — the ~4.7x gap being the capital basis (a short call is
-    # capitalised at the margin proxy, a short put at its true stock-to-zero max
-    # loss). So the two structures are separated by CAPITAL, not by horizon, and
-    # raising the bar to discourage short-dated shorts cuts on the wrong axis:
-    # 0.20/yr would admit every short call at every DTE while cutting the 35-,
-    # 45- and 60-DTE cash-secured puts this fix exists to admit. The short end is
-    # already braked by q_breakeven_vs_em — a 1-DTE naked short scores ~49.6
-    # composite, under the 50.0 publish floor both callers apply.
+    # oversight. RE-RUN THE MEASUREMENT: `python tools/sweep_naked_capeff.py
+    # --rows` prints every figure below — pure Black-Scholes through these same
+    # scorers, no Schwab call and no DB. Swept over 1-60 DTE (spot 100, IV 0.28,
+    # 0.50-wide strikes), annualised capeff runs 0.55-3.78 for SHORT_CALL and
+    # 0.14-0.73 for SHORT_PUT — the ~4.4x mean gap being the CAPITAL BASIS (a
+    # short call is capitalised at the 20%-of-spot margin proxy, a short put at
+    # its true stock-to-zero max loss). So the two structures are separated by
+    # capital, not by horizon, and raising the bar to discourage short-dated
+    # shorts cuts on the wrong axis: 0.20/yr would admit every short call at
+    # every DTE (its floor is 0.55) while cutting every cash-secured put from 20
+    # DTE out — 0.21 at 20, 0.18 at 35, 0.16 at 45, 0.14 at 60 — which is the
+    # class this fix exists to admit. The short end is already braked by
+    # q_breakeven_vs_em: a 1-DTE naked short composites 48.8-48.9, under the 50.0
+    # publish floor both callers apply.
+    #
+    # ⚠ Quote those figures WITH their parameters — they move with the strike
+    # ladder (a 2.5-wide ladder lifts the SHORT_CALL ceiling to 10.5/yr). They
+    # shifted slightly on 2026-09-05 when the sweep was committed as a script:
+    # the prose here had read 0.59-3.78 / ~4.7x / ~49.6 from a sweep that existed
+    # only in a session transcript. The argument is unchanged; the numbers are
+    # now re-runnable. (The script also reproduces the two `_naked()` fixtures in
+    # test_strategy_scoring.py exactly, at its 35-DTE row.)
     "NAKED":   {"min": {"liq": 40, "capeff": 0.10, "pop": 65},
                 "excellent": {"liq": 70, "capeff": 0.20, "pop": 78}},
     "DEBIT":   {"min": {"liq": 45, "rr": 0.6,  "pop": 30},
