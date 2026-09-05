@@ -227,6 +227,50 @@ class TestLiquidityThresholds:
     def test_swing_long_leg_thresholds(self):
         assert LIQUIDITY_THRESHOLDS["SWING"]["min_oi_long"] == 10
 
+    # ── INCOME (30-45 DTE) ──────────────────────────────────────────────────
+    def test_thresholds_has_income_key(self):
+        """Without this entry `passes_liquidity_gate` fails OPEN for INCOME —
+        no OI floor, no volume floor, no spread cap — which is exactly how a
+        30-45 DTE premium screen would surface untradeable strikes."""
+        assert "INCOME" in LIQUIDITY_THRESHOLDS
+
+    def test_income_min_oi_is_at_least_swings(self):
+        """A monthly strike ACCUMULATES open interest over weeks, so the
+        resting-size floor can be stricter here than at 1-15 DTE, never looser."""
+        assert (LIQUIDITY_THRESHOLDS["INCOME"]["min_oi"]
+                >= LIQUIDITY_THRESHOLDS["SWING"]["min_oi"])
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_oi"] == 100
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_oi_long"] == 20
+
+    def test_income_min_volume_is_below_swings(self):
+        """The same strike TRADES less per day than a near-dated weekly, so a
+        SWING-sized volume floor would reject liquid monthlies. This is the one
+        axis where the income window must be more permissive."""
+        assert (LIQUIDITY_THRESHOLDS["INCOME"]["min_volume"]
+                < LIQUIDITY_THRESHOLDS["SWING"]["min_volume"])
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_volume"] == 5
+
+    def test_income_max_spread_pct(self):
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["max_spread_pct"] == 0.20
+
+
+class TestScannedTradeTypesAreAllGated:
+    """`passes_liquidity_gate` fails OPEN on an unknown trade_type, and that
+    silence is the bug: INCOME shipped with no gate at all and nothing said so.
+
+    The default stays `return True` deliberately — other callers pass trade
+    types this dict has never covered, and a blanket fail-closed would silently
+    empty them. This test is the guard instead."""
+
+    def test_every_scanned_trade_type_has_a_liquidity_floor(self):
+        assert set(scanner_engine.SCANNED_TRADE_TYPES) <= set(LIQUIDITY_THRESHOLDS)
+
+    def test_the_fail_open_default_is_still_there(self):
+        """Pins the deliberate default, so a future "fix" that flips it to
+        fail-closed has to argue with a test rather than slip through."""
+        assert passes_liquidity_gate({"oi": 0, "volume": 0, "bid": 0, "ask": 0},
+                                     "NOT-A-WINDOW") is True
+
 
 class TestPassesLiquidityGate:
     """Unit tests for passes_liquidity_gate() helper.
