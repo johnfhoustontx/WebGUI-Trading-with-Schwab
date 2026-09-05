@@ -551,10 +551,42 @@ def _reward_metric(signal, profile):
         # `dte` itself and the PoP model's sqrt(dte/365) — this is a screening
         # rate, not a settlement price, so trading days would be false precision.
         #
-        # dte <= 0 or absent -> None, NOT a division: an expired or unknown
-        # horizon would otherwise annualise towards infinity and clear any bar.
-        # Absence means "cannot judge", and a reward we cannot judge does not
-        # pass — the same contract as an unknown R:R below.
+        # dte <= 0 / absent / non-numeric -> None, NOT a division. ⚠ THIS
+        # EXCLUDES THE WHOLE 0-DTE NAKED-SHORT CLASS, not merely "an expired or
+        # unknown horizon": `strategy_scanner._dte_for` returns `max(0, ...)`, so
+        # a contract expiring TODAY carries dte == 0; `scanner_engine`'s
+        # `zerodte_min_dte` is 0, so the 0-DTE scan window genuinely builds naked
+        # shorts at dte == 0; and the Strategy Finder's DTE-min input defaults to
+        # 0. `_dte_for`'s `except: return 0` folds an unparseable expiration into
+        # the same bucket, so a data fault and a same-day contract are
+        # indistinguishable here.
+        #
+        # ACCEPTED CONSEQUENCE: the NAKED reward gate is UNREACHABLE for 0-DTE —
+        # every same-day naked short fails it, grades Weak and is cut, however
+        # rich the credit (a same-day short at max_profit/capital = 0.15 cleared
+        # the old per-trade bar and categorically cannot clear this one). The
+        # trader is also told "Reward too thin for the capital tied up" about a
+        # reward that was never computed, because `evaluate_gates` has one reward
+        # dimension per profile and no separate "unjudgeable horizon" reason.
+        #
+        # Flooring dte at 1 is WORSE than the cut, not a fix: it would annualise
+        # a same-day credit by 365x, so ANY 0-DTE naked short clears ANY bar —
+        # the pin-the-maximum failure this repo keeps re-learning. Admitting
+        # 0-DTE naked shorts needs its own per-horizon bar (a day's credit judged
+        # as a day's credit), not a yearly rate applied to a horizon of zero.
+        # Until that exists, absence means "cannot judge", and a reward we cannot
+        # judge does not pass — the same contract as an unknown R:R below. Pinned
+        # from the BUILDER, not the primitive, by
+        # tests/test_strategy_scoring.py::
+        #   test_same_day_naked_short_is_cut_for_the_horizon_not_for_thin_reward
+        #
+        # ⚠ The `not isinstance(dte, bool)` clause is deliberately on `dte` ALONE.
+        # `dte` is the divisor THIS change introduced, and bool True -> 1 creates
+        # a NEW 365x amplification. `max_profit`/`capital` were equally
+        # bool-permissive before it (measured: capital=True yields reward 1675.87
+        # and passes), so guarding them here would be a fresh behaviour change
+        # rather than a regression fix. Do not "fix" the asymmetry, and do not
+        # copy it to a new numerator — put a bool guard on a DIVISOR you add.
         if (isinstance(mp, (int, float)) and isinstance(cap, (int, float)) and cap > 0
                 and isinstance(dte, (int, float)) and not isinstance(dte, bool)
                 and dte > 0):

@@ -7,6 +7,9 @@ Covers strategy_scoring.py:
   - score_strategy / score_all (Task 10)
 """
 
+import datetime as _dt
+
+import strategy_scanner as ss
 import strategy_scoring as sc
 from strategy_scoring import state_family_tilt, STATE_TILT_MAX
 
@@ -286,6 +289,77 @@ def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
         # 0-DTE signal by 365x.
         assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
         assert not sc.evaluate_gates(_naked(dte=dte))["passed_min"], dte
+
+
+def _same_day_chain(spot=100.0):
+    """A chain whose only expiration is TODAY -> `_dte_for` yields dte == 0.
+
+    Deliberately RICH: the 0.28-delta short call carries a 3.05 mark, so its
+    un-annualised max_profit/capital is 0.152 -- comfortably over the 0.10 bar,
+    and over the per-TRADE bar that stood before Task 2.6. No real 0-DTE chain
+    prices like this; that is the point. It removes "the reward was thin" as an
+    explanation for the cut, leaving only the horizon guard.
+    """
+    today = _dt.date.today().isoformat()
+
+    def c(strike, delta, mark):
+        return {"delta": delta, "mark": mark, "bid": mark - 0.02, "ask": mark + 0.02,
+                "theta": -0.20, "vega": 0.02, "gamma": 0.03, "volatility": 28.0,
+                "totalVolume": 5000, "openInterest": 12000}
+
+    return {
+        "underlyingPrice": spot,
+        "callExpDateMap": {f"{today}:0": {
+            "100.0": [c(100.0, 0.50, 4.00)],
+            "101.0": [c(101.0, 0.28, 3.05)],
+            "102.0": [c(102.0, 0.12, 2.00)]}},
+        "putExpDateMap": {f"{today}:0": {
+            "100.0": [c(100.0, -0.50, 4.00)],
+            "99.0": [c(99.0, -0.28, 3.05)],
+            "98.0": [c(98.0, -0.12, 2.00)]}},
+    }
+
+
+def test_same_day_naked_short_is_cut_for_the_horizon_not_for_thin_reward():
+    """The 0-DTE naked-short class is unreachable for the NAKED reward gate.
+
+    Driven from the BUILDER, not from `_reward_metric` -- this repo's own
+    `signal_band` lesson is that a consumer-side guard proves nothing until a
+    test drives it from the producer. `build_directional` really does emit naked
+    shorts at dte == 0 (`_dte_for` clamps with max(0, ...), `zerodte_min_dte` is
+    0, the Strategy Finder's DTE-min input defaults to 0), so this is a live
+    population and not a hypothetical.
+
+    Asserts the REASON, not just the cut: the un-annualised capital efficiency
+    clears the bar, so a future change that starts failing this row for thin
+    reward -- or one that floors dte at 1 and lets every 0-DTE naked short
+    through on a 365x rescale -- is visible here rather than silent.
+    """
+    sigs = ss.build_directional(_same_day_chain(), "SPY", spot=100.0, atm_iv=0.28,
+                                dte_min=0, dte_max=1)
+    short_call = next(s for s in sigs if s["type"] == "SHORT_CALL")
+
+    # The population: the builder itself produced a same-day horizon.
+    assert short_call["dte"] == 0, "fixture no longer builds a same-day contract"
+
+    # Not thin: un-annualised, this reward clears the 0.10 min bar outright.
+    per_trade = short_call["max_profit"] / short_call["capital"]
+    assert per_trade > sc.GATE_BARS["NAKED"]["min"]["capeff"], (
+        f"fixture reward {per_trade:.3f} is thin on its own -- the cut below "
+        "would no longer be attributable to the horizon guard")
+
+    # The horizon guard: the reward was never computed, not computed and judged.
+    assert sc._reward_metric(short_call, "NAKED") is None
+
+    # ...and the row is cut, on the reward dimension alone (liquidity + PoP pass).
+    gates = sc.evaluate_gates(short_call)
+    assert not gates["passed_min"]
+    assert gates["reasons"] == ["capital efficiency"]
+
+    scored = sc.score_strategy(dict(short_call), sc.infer_market_view({}, {}),
+                               atm_iv=0.28, em_1sd=1.5)
+    assert scored["grade"] == "Weak"
+    assert scored["grade_reason"] == "Fails: capital efficiency"
 
 
 def test_gates_naked_missing_dte_fails_rather_than_passing():
