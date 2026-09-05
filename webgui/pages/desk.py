@@ -856,6 +856,15 @@ def bullbear_headline(bullbear_view, now=None):
     and leading" that silently changes meaning at the open is worse than either
     count alone. ``now`` is threaded so one paint can decide the horizon ONCE
     and hand the same instant to both the chips and this line.
+
+    ⚠ That threading is the whole reason this function may make its OWN
+    :func:`strip_is_live` call and re-run :func:`_bullbear_rows` rather than
+    taking the flag the way :func:`bullbear_caption` does: on the same instant
+    both mechanisms are the same answer, so the second one costs a little work
+    and buys the caller a one-argument signature. Hand it a second clock and
+    they diverge — at the opening bell, a headline saying "on the quarter" over
+    chips already drawn on today's axes. Nothing in the SIGNATURE prevents that,
+    so ``test_one_paint_decides_the_horizon_once`` pins the call site instead.
     """
     live = strip_is_live(bullbear_view, now)
     line = _bbmap.headline_line(_bullbear_rows(bullbear_view, live=live),
@@ -2238,9 +2247,18 @@ _BB_CHIP = ("flex-1 min-w-[124px] border border-l-[3px] rounded-[2px] "
 # without either pretending to be the other. A fixed finite palette of static
 # classes, mapped from ``bullbear.QUADRANTS`` — never an f-string built from a
 # payload — and it tracks ``bullbear._CLASSES``' ramp so one quadrant is not
-# emerald in the fill and amber on the edge. Lower opacity than the fill
-# throughout: the stripe is the reference reading, not the headline one.
+# emerald in the fill and amber on the edge. HIGHER opacity than the fill
+# (/70 /40 /70 /70 /50 against the fills' /15 /5 /10 /15 /10), because 3px of
+# edge has to carry at a glance what a whole chip's wash carries.
 # Degrades to ``unknown`` exactly as ``quadrant_class`` does.
+#
+# ⚠ These win over ``quadrant_class``' ``border-*`` shorthand for a reason that
+# is NOT DOM class order: NiceGUI ships Tailwind v4, whose compiler emits rules
+# sorted by a canonical CSS-property list in which every per-side property
+# (``border-left-color``) follows its shorthand (``border-color``). At equal
+# specificity the later rule wins, so the stripe holds the left edge however the
+# two class strings are concatenated. ``pages/options/leg_editor.py``'s leg-card
+# accents (``accent_long``/``accent_short``) already depend on this.
 _BB_STRIPE = {
     "rising_leading": "border-l-emerald-400/70",
     "rising_lagging": "border-l-emerald-400/40",
@@ -2261,11 +2279,17 @@ def stripe_class(q):
 
 
 def stripe_tooltip(q):
-    """The stripe's hover text — what the quarter says, spelled out."""
+    """The chip's hover text, naming what the left edge marks.
+
+    It hangs on the whole chip rather than the 3px edge — a stripe is too small
+    a hover target to be the only way to read it — so the
+    :data:`STRIPE_TOOLTIP_PREFIX` carries the disambiguation: without "On the
+    quarter" the reader would take it for a second name for the fill.
+    """
     return f"{STRIPE_TOOLTIP_PREFIX}{_bb.quadrant_label(q)}"
 
 
-_BB_NAME ="text-[13px] font-semibold leading-none min-w-0 truncate"
+_BB_NAME = "text-[13px] font-semibold leading-none min-w-0 truncate"
 _BB_QUAD = "text-[10px] leading-none tracking-[.1em] opacity-80 truncate"
 # The day move is deliberately NOT coloured by its sign: ``signed_pct`` prints
 # the sign already, and a second green/red inside a chip that is itself green or
@@ -2965,14 +2989,18 @@ def render():
                 _bullbear_chip(chip)
 
     def _bullbear_chip(chip):
-        classes = f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}"
+        el = ui.column().classes(
+            f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
+        # The stripe ONLY on a live strip: off-session both quadrants are the
+        # same value and an edge repeating the fill says nothing. Colour and
+        # words come off ONE decision on ONE field — a chip carrying the stripe
+        # without its tooltip would make colour the sole carrier of a reading.
+        # Adding the class after the frame's is safe: see ``_BB_STRIPE`` — the
+        # left edge wins on Tailwind's property order, not on class order.
         if chip["live"]:
-            # The stripe ONLY on a live strip: off-session both quadrants are
-            # the same value and an edge repeating the fill says nothing.
-            classes += f" {stripe_class(chip['structural_quadrant'])}"
-        el = ui.column().classes(classes)
-        if chip["live"]:
-            el.tooltip(stripe_tooltip(chip["structural_quadrant"]))
+            quad = chip["structural_quadrant"]
+            el.classes(stripe_class(quad))
+            el.tooltip(stripe_tooltip(quad))
         with el:
             with ui.row().classes(
                     "items-baseline justify-between w-full gap-2 flex-nowrap"):

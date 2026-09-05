@@ -2109,7 +2109,42 @@ def test_the_strip_feeds_its_own_seat_order_into_the_next_paint(monkeypatch):
     assert seen[1] == ["XLK", "XLU"]
 
 
-def test_a_measured_zero_mid_session_still_reads_as_falling_and_lagging():
+def test_one_paint_decides_the_horizon_once(monkeypatch):
+    """One paint, ONE clock — threaded into both the chips and the headline.
+
+    Each of the two decides its own horizon from a ``strip_is_live`` call of its
+    own (``bullbear_headline``'s docstring says why that is safe), so they agree
+    only because they are handed the same instant. Give them a clock each and a
+    paint straddling the opening bell renders a headline saying "on the quarter"
+    over chips already drawn on today's axes — precisely the one-word ambiguity
+    ``/sentiment/bullbear`` exists to remove, and precisely what a reader of the
+    strip cannot detect.
+
+    Nothing in either SIGNATURE prevents it: taking a second ``datetime.now()``
+    for the headline leaves the whole suite green. Hence this test, and hence
+    identity rather than equality — two ``now()`` calls microseconds apart
+    compare unequal only sometimes, and a guard that fails only sometimes is
+    not a guard.
+    """
+    seen = []
+    monkeypatch.setattr(
+        d, "bullbear_chips",
+        lambda view, now=None, previous=None: seen.append(("chips", now)) or [])
+    monkeypatch.setattr(
+        d, "bullbear_headline",
+        lambda view, now=None: seen.append(("headline", now)) or "")
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+
+    from pages import desk
+    desk.render()
+
+    assert [where for where, _ in seen] == ["chips", "headline"]
+    # A real instant, not each side quietly falling back to its own default.
+    assert seen[0][1] is not None
+    assert seen[0][1] is seen[1][1]
+
+
+def test_a_measured_zero_mid_session_is_a_known_false_bearish_reading():
     """KNOWN, DELIBERATE trade-off — recorded so it cannot change silently.
 
     ``SchwabProxyClient._extract_change_pct`` falls through to a literal
