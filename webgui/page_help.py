@@ -59,6 +59,25 @@ on · what am I holding.*
   (Rallying / Balanced / Whipsaw / Stressed…). Bias and Signal are the same two
   the Sentiment page's Signals column shows, read off the same composite score;
   the Desk never computes its own.
+- **Bull / Bear sectors** — a chip for each of the eleven sectors, and every chip
+  shows **two different time frames at once**. The **colour, and the order left to
+  right, are today**: whichever sector is doing best on the session sits first.
+  The **thin line down the left edge is the last three months** — hover a chip and
+  it spells that out in words. **The two often disagree, and that is the most
+  useful thing on the strip**: a sector that has led all quarter but is red today
+  is being sold into, and one that has lagged all quarter but is green today is
+  where money went this morning. **Rising · Leading** means going up *and* beating
+  the S&P; **Falling · Leading** means going down, just less than the index — the
+  reading a relative-strength screen mistakes for a buy. The small line under the
+  count says what the strip is sorted by, and the count itself names its time
+  frame ("4 of 11 sectors rising and leading **today**"). Chips only change places
+  when a move is big enough to matter, so the strip does not shuffle under your
+  eye. Click one to open the full **Bull / Bear Map**, which always shows the
+  three-month view.
+  ⚠ **Before the opening bell — and at weekends — there is no session move to
+  read yet**, so every chip falls back to the three-month view and the strip says
+  so under the count. A colour you see pre-open is **not** a statement about
+  today.
 - **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
   **flip level** and how far price sits from it, the **ceiling** and **floor**
   (the call and put walls — the ceiling is coloured like its marker on the map,

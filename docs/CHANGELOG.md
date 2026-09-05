@@ -4,6 +4,115 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-05 (**The Desk's Bull / Bear sector strip is re-keyed
+to TODAY.** The chip's fill colour and the strip's left-to-right order now follow
+the session's move; the nightly quarter-horizon quadrant survives as a thin left
+border stripe. `/sentiment/bullbear` itself is untouched.)
+
+- **The problem was that three of the four signals on a chip could not move.**
+  The quadrant (`raw.trend` × `raw.excess`, 90/63-bar windows), the order
+  (`by_strength`) and the breadth bar were all the nightly cascade's, frozen
+  until 16:20 CT. Only the smallest text on the chip — the day % — was live. That
+  is the right answer for the map, whose whole purpose is an honest structural
+  read; it is the wrong answer for a short-term trading screen.
+- **It cost no new request.** `merge_live` already attached `day_pct` from ONE
+  batched `/quotes` call (374 symbols in a single call, measured 2026-08-19).
+  The missing half of an intraday *relative* axis was the benchmark, and
+  `bullbear_symbols` derives purely from tree rows — so **SPY was not in that
+  fan-out**. Adding it is one more symbol on a call that already happens: no new
+  request, no new schedule, no new cost. Rows gain top-level `day_excess`
+  (`day_pct` less the benchmark's) and the payload gains `benchmark_day_pct`.
+- **`day_excess` is `None`, never `0.0`, when either side is missing** —
+  inheriting `merge_live`'s existing contract, where `None` means *the proxy
+  omitted this symbol* and never *unchanged*. `_quoted_day_pct` is the ONE
+  spelling of that read, called by both the per-row merge and the benchmark
+  lookup, and it is deliberately **stricter than `_as_finite`** at two ends:
+  `bool` is rejected (`float(True)` is a finite 1.0, and a True here is a shape
+  error, not a 1% move) and a numeric **string** is rejected (this reads one
+  specific producer, the flattened `get_quotes` mapping, so a string means that
+  shape changed, and coercing it would hide the change behind a plausible
+  number).
+- **⚠ The live/structural switch asks the CALENDAR, never the numbers, and that
+  is the whole design.** `SchwabProxyClient._extract_change_pct` falls through to
+  a literal `0.0` when every percent field is missing or zero, and `0.0` is not
+  `> 0` — so a switch written as "is any row's day move non-zero?" would render
+  **all eleven sectors `falling_lagging` every pre-open, every weekend and
+  through any proxy hiccup**: a confident, maximally bearish reading of no data
+  at all, the failure class CLAUDE.md documents five times over. `strip_is_live`
+  instead asks the new `shared.market_calendar.regular_session_has_opened`, plus
+  a `benchmark_day_pct` clause for what a calendar cannot see — a dead proxy
+  mid-session. That clause reads through the STRICT `pages.fmt.num`, so a NaN
+  counts as absent while a **measured** `0.0` — a genuinely flat tape — stays
+  live; a truthiness test there would be the same bug one field over.
+- **`regular_session_has_opened`, not `is_regular_hours`.** The latter goes False
+  at the cash close, and the day's move does not stop being today's move at the
+  close — this strip is read after the bell as often as during the session. It is
+  False for weekends, holidays and the pre-open alike, all three sharing one
+  trap: a quote's percent field is then a stale prior close or the proxy's
+  literal fallback, neither of which is today.
+- **The fallback is NOT a neutral or empty state.** Pre-open is exactly when the
+  strip is read to plan the session, so every chip is still drawn — on the
+  structural horizon — and the strip labels itself.
+- **One classifier over both horizons.** `row_day_axes(row)` reads the top-level
+  live fields and feeds the EXISTING `quadrant()` unchanged, so the two horizons
+  cannot diverge by rule and a strip/map disagreement is always a difference of
+  *horizon*. It has no fallback to `raw`: painting the quarter's reading in
+  today's colours is the one outcome the feature exists to prevent. ⚠ A
+  `day_quadrant` wrapper was specified in the design and **dropped during
+  implementation** — its only future justification would be a deadband on the
+  noisier intraday axis, which the design rejects, and a parity test over a body
+  of `return quadrant(...)` *cannot fail*: it would read as if it pinned the
+  invariant while pinning nothing.
+- **Ordering has hysteresis, and the precise claim matters.** `by_day_move`
+  quantises the move into margin-wide buckets (`DAY_SORT_MARGIN_PCT = 0.05`) and
+  breaks ties on the row's seat in the previous paint, so order survives *inside*
+  a bucket and a chip changes seats only when it crosses a boundary — a pure
+  function of `(rows, previous)`, no pairwise state machine and no clock. This is
+  **not** "a chip moves only when it beats its neighbour by a margin": a pair
+  sitting a whisker apart either side of a boundary still swaps on every repaint.
+  That residual is accepted, bounded to adjacent seats (such a pair is by
+  construction within one margin of each other), and pinned by
+  `test_by_day_move_still_swaps_a_pair_straddling_a_bucket_boundary`.
+  `math.floor`, never `int` — truncation rounds toward zero, which would make the
+  single bucket spanning flat twice as wide as every other one and let a sector
+  down 0.04% hold a seat above one up 0.04%, blurring the one boundary the strip
+  is sorted this way to show. `margin` is a parameter because the constant binds
+  as a default at `def` time, so patching the module attribute would never reach
+  the call.
+- **⚠ This deliberately breaks `by_strength`'s stated invariant** — *"two screens
+  ordering the same rows differently is a defect neither shows"* — because the
+  two screens answer different questions: the strip asks what is working today,
+  the map asks what has worked this quarter. That is honest **only** because the
+  strip says what it sorted by (`bullbear_caption`) and the headline names the
+  horizon it counted (`bullbear_headline` appends "today" / "on the quarter" to
+  the map's own sentence). Remove either and the divergence goes silent. An
+  unlabelled count that changes meaning at the opening bell is worse than either
+  count alone; an empty headline takes no horizon word either, since naming the
+  horizon of a count nobody made makes the claim worse rather than better.
+- **The stripe costs no chip height and no reflow.** `border-l-[3px]` sits on the
+  frame at BOTH horizons — off-session the left border simply takes the
+  quadrant's own colour — so the strip does not shift 3px sideways when the bell
+  flips it. The stripe is drawn only when the fill is today's, since off-session
+  an edge repeating the fill says nothing, and it never carries meaning alone:
+  the whole chip hovers to "On the quarter: Falling · Leading", in `bullbear`'s
+  own words. ⚠ The stripe classes win the left edge on **Tailwind v4's canonical
+  property ordering** (`border-left-color` follows `border-color`), not on DOM
+  class order — the same thing `leg_editor`'s long/short accents already rely on.
+- **One clock per paint.** `_paint_bullbear` takes a single `now` and hands it to
+  both the chips and the headline; two clocks would let a headline say "on the
+  quarter" over chips already drawn on today's axes at the opening bell. Nothing
+  in the signatures prevents that, so `test_one_paint_decides_the_horizon_once`
+  pins the call site. The seat order the strip last drew lives in page state (one
+  client, one strip, one memory) and is fed back into the sorter — without it the
+  margin buys nothing and the strip re-sorts from scratch on every ~30 s repaint.
+- **Out of scope, deliberately:** `/sentiment/bullbear` is unchanged and remains
+  the structural read; the industry and stock levels are unchanged; the nightly
+  cascade, its windows and its scoring are untouched.
+  [design](plans/2026-09-05-desk-bullbear-intraday-design.md) ·
+  [plan](plans/2026-09-05-desk-bullbear-intraday-plan.md)
+
+---
+
 **Last updated:** 2026-09-04 (**Captured signals get a Daily / Weekly / MTD
 score, backdated to 1 September.** The EOD report's performance section gains a
 third book beside the Paper Ledger and Claude's.)
