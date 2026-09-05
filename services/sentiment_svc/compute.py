@@ -2187,16 +2187,22 @@ def compute_momentum(session_date=None, conn=None, client=None):
 # The nightly cascade above already scores all three levels with their parent
 # links. This adds only the live layer: ONE batched /quotes call for every
 # distinct symbol, merged onto a COPY of the cached rows.
+#
+# The relative axis is measured against MOMENTUM_BENCHMARK — the same SPY the
+# nightly cascade scores excess against, deliberately not a second spelling of
+# it — and that symbol rides the same batched call as the rows.
 # See docs/plans/2026-08-19-bull-bear-map-design.md.
 
 BULLBEAR_LEVELS = ("sector", "industry", "stock")
 
 
 def bullbear_symbols(levels):
-    """Every distinct symbol across the three levels, order preserved.
+    """Every distinct symbol across the three levels, plus the benchmark.
 
-    Deduped because an industry ETF is usually a scored stock as well, and the
-    batched quote call should ask for it once.
+    Deduped because an industry ETF is usually a scored stock as well — and
+    MOMENTUM_BENCHMARK can itself be a scored row — and the batched quote call
+    should ask for each one once. Order preserved; the benchmark goes last when
+    no row already carries it.
     """
     out, seen = [], set()
     for name in BULLBEAR_LEVELS:
@@ -2205,6 +2211,11 @@ def bullbear_symbols(levels):
             if symbol and symbol not in seen:
                 seen.add(symbol)
                 out.append(symbol)
+    # One more symbol, not one more request: 374 came back in a single call
+    # (measured 2026-08-19), so the Desk strip's intraday quadrant gets the
+    # benchmark's own day move for no new proxy round-trip and no new schedule.
+    if MOMENTUM_BENCHMARK not in seen:
+        out.append(MOMENTUM_BENCHMARK)
     return out
 
 

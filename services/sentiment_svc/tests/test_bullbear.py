@@ -23,13 +23,32 @@ def test_bullbear_symbols_covers_all_three_levels_deduped():
     """An industry ETF is often a scored stock too; ask the quote call once."""
     levels = {"sector": [{"symbol": "XLV"}], "industry": [{"symbol": "XBI"}],
               "stock": [{"symbol": "AMGN"}, {"symbol": "XBI"}]}
-    assert compute.bullbear_symbols(levels) == ["XLV", "XBI", "AMGN"]
+    assert compute.bullbear_symbols(levels) == [
+        "XLV", "XBI", "AMGN", compute.MOMENTUM_BENCHMARK]
 
 
 def test_bullbear_symbols_skips_rows_with_no_usable_symbol():
     levels = {"sector": [{"symbol": ""}, {"symbol": None}, {}, None,
                          {"symbol": "XLV"}]}
-    assert compute.bullbear_symbols(levels) == ["XLV"]
+    assert compute.bullbear_symbols(levels) == [
+        "XLV", compute.MOMENTUM_BENCHMARK]
+
+
+def test_bullbear_symbols_appends_the_benchmark_when_no_row_carries_it():
+    """The Desk strip's relative axis needs SPY's own day move, and SPY is not
+    a row in most trees. It rides the SAME batched call — one more symbol, not
+    one more request."""
+    out = compute.bullbear_symbols({"sector": [{"symbol": "XLK"}]})
+    assert out == ["XLK", compute.MOMENTUM_BENCHMARK]
+
+
+def test_bullbear_symbols_does_not_ask_twice_for_a_benchmark_already_scored():
+    """SPY can legitimately be a scored stock row; the quote call asks once."""
+    levels = {"sector": [{"symbol": "XLK"}], "industry": [],
+              "stock": [{"symbol": compute.MOMENTUM_BENCHMARK}]}
+    out = compute.bullbear_symbols(levels)
+    assert out.count(compute.MOMENTUM_BENCHMARK) == 1
+    assert out == ["XLK", compute.MOMENTUM_BENCHMARK]
 
 
 def test_merge_live_attaches_the_day_move_at_every_level():
@@ -140,7 +159,7 @@ def test_bullbear_view_asks_for_quotes_once_for_every_distinct_symbol(monkeypatc
     compute.bullbear_view({"levels": {
         "sector": [{"symbol": "XLV"}],
         "stock": [{"symbol": "XLV"}, {"symbol": "AMGN"}]}})
-    assert calls == [["XLV", "AMGN"]]
+    assert calls == [["XLV", "AMGN", compute.MOMENTUM_BENCHMARK]]
 
 
 def test_bullbear_view_degrades_to_the_nightly_tree_when_the_quote_call_fails(
