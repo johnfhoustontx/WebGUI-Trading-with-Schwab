@@ -60,6 +60,7 @@ varies run to run):
 | suite | baseline |
 |---|---|
 | `options-scanner` | **1215 passed, 2 skipped, 0 failed** |
+| `services/options_svc` | **1358 passed, 0 failed** |
 
 Commit after every task. Do not batch.
 
@@ -320,8 +321,51 @@ def income_scan(symbol, chain=None, spot=None, atm_iv=None, earnings_date=None,
             "errors": []}
 ```
 
-Two details to settle while implementing, both of which you should verify in code
-rather than assume:
+### ⚠ `INCOME` has no liquidity floor — add one, and guard the fail-open
+
+Found while reviewing Task 2, verified in code. `LIQUIDITY_THRESHOLDS`
+(`scanner_engine.py:448`) defines **only** `"0-DTE"` and `"SWING"`, and
+`passes_liquidity_gate` (`:558`) does:
+
+```python
+    thresholds = LIQUIDITY_THRESHOLDS.get(trade_type)
+    if thresholds is None:
+        return True  # unknown trade type — don't filter
+```
+
+So an `INCOME` scan as of Task 2 runs with **no liquidity gate whatsoever**. That
+matters more here than at any other horizon: a 30–45 DTE chain carries far more
+dead strikes than a 0-DTE one, and an untradeable spread with a fat theoretical
+credit is exactly what a premium screen must not surface.
+
+Add an `INCOME` entry. Do **not** copy SWING's numbers unthinkingly — the two
+differ in a specific way you should reason about and write down: a monthly strike
+*accumulates* open interest but trades *less per day* than a weekly, so `min_oi`
+should be at least SWING's while `min_volume` cannot be. Justify whatever you pick
+in a comment.
+
+Then close the fail-open, because the next window will hit it too:
+
+```python
+def test_every_scanned_trade_type_has_a_liquidity_floor():
+    """passes_liquidity_gate fails OPEN on an unknown trade_type, so a window
+    added without an entry here silently runs unfiltered — which is how INCOME
+    shipped gateless in the first place."""
+    assert set(se.SCANNED_TRADE_TYPES) <= set(se.LIQUIDITY_THRESHOLDS)
+```
+
+Introduce `SCANNED_TRADE_TYPES = ("0-DTE", "SWING", "INCOME")` beside the
+thresholds dict as the single list of windows the scanner emits. This is the one
+new constant the plan sanctions: it exists to make a silent fail-open loud, which
+is not the same as a config knob nobody asked for.
+
+⚠ Do **not** flip the `return True` to `return False`. Other callers pass trade
+types this dict has never covered, and a blanket fail-closed would silently empty
+them. The test is the guard; the default stays.
+
+### Two more details to settle while implementing
+
+Verify both in code rather than assuming:
 
 1. **Scoring.** `swing_scan` runs its candidates through `ssc.score_all(...)` and
    then `_passes_swing_cut`. Decide whether the income window reuses
