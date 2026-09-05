@@ -732,6 +732,21 @@ Run: `.venv/bin/python -m pytest services/options_svc/tests/test_income_slot.py 
 
 Expected: FAIL — `income_slot_due` does not exist.
 
+> ⚠ **This task touches THREE files, not two.** `market_calendar._slot_group`
+> does a bare `_DEFAULTS["slots"][name]` (`shared/market_calendar.py:546`), so a
+> slot name absent from that dict raises `KeyError` — at scheduler *import*, which
+> is a hard service-startup failure, not a degraded tick. That is the documented
+> config contract in this repo: **the built-in defaults are the real values and
+> the TOML only overrides.** Add `income` to `_DEFAULTS["slots"]` FIRST.
+>
+> Note the two existing slot shapes and pick the one matching the gate you write:
+> `analyze`/`action_alert` are `{grace_min, <name>: "HH:MM", …}` (multiple named
+> firings, gate returns the slot NAME); `momentum`/`calibration` are `{"at":
+> "HH:MM"}` (a single firing). A once-daily income pass fits either — but
+> `income_slot_due(now, ran_slots)` as sketched returns a name, so the named form
+> is the consistent choice. `slot_times()` excludes `grace_min` from its result
+> deliberately; do not add it back.
+
 **Step 3: Add the config**
 
 In `config/sessions.toml`, after `[slots.action_alert]`:
