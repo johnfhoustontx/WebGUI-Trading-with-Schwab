@@ -1862,6 +1862,83 @@ symbol, and any time you have a directional opinion and want the best way to exp
 
 ---
 
+## Income
+
+*Menu: STRATEGY → Options → Income · Route `/options/income`*
+
+### What it is
+
+The premium-selling board at a **30–45 day** horizon: put credit spreads, call credit
+spreads and cash-secured puts, scanned across the whole watchlist and ranked together
+on one list. It is the same *find* step [Market Scanner](#market-scanner) and
+[Strategy Finder](#strategy-finder) perform, at a longer horizon and with an income
+rather than a directional thesis.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:income` |
+| Trigger | A scheduled once-daily pass (`[slots.income]` in `config/sessions.toml`) |
+| Cost | One option chain per watchlist symbol, once per trading day |
+
+### Reading the screen
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · Credit $ · Capital $ ·
+Return on capital · PoP % · Breakeven · Earnings · Score. The board arrives already
+ranked by score; the headers re-sort it.
+
+**Side** names the position rather than the engine's structure code: *Put spread*,
+*Call spread*, *Cash-secured put*.
+
+**Credit and Capital are per contract, in dollars.** For a defined-risk credit spread
+Capital is its maximum loss; for a cash-secured put it is the strike down to zero —
+genuinely the cash committed, not a margin figure.
+
+**Return on capital** is Credit divided by Capital. It exists because dollars alone
+cannot rank these three structures against each other: a $60 credit on a $441 spread
+and a $640 credit on a $39,361 cash-secured put are 13.3% and 1.6% respectively, and
+the second number is the one that decides.
+
+**Earnings** carries the three-state result of the earnings-calendar check, which is
+deliberately not a yes/no:
+
+| Value | Means |
+|---|---|
+| **None scheduled** | The calendar covers this symbol and has no report before expiration |
+| **After expiry** | A report is scheduled, and it falls after this expiration |
+| **Not checked** | The calendar has no entry for this symbol at all |
+
+Any expiration that *straddles* a known report was dropped from the scan before it
+reached this board, so nothing listed here is knowingly exposed to one.
+
+### Why it matters
+
+At 30–45 days a straddled earnings report is close to certain for most names, which is
+why the gate matters more here than at any shorter horizon — and why the third state
+matters. A symbol the calendar has never heard of and a symbol it knows is clear both
+leave the date blank; collapsing them would let the gate fail open silently on exactly
+the names most likely to be traded.
+
+**Where it is weak.** Without an Alpha Vantage API key configured, the earnings
+calendar is empty and **every** row reads *Not checked*. That is honest but it is not
+protection — check reports yourself before selling premium into one.
+
+The board is also a once-daily snapshot. Prices move after it is taken, so treat the
+credits as a shortlist to re-price, not as fills.
+
+### When to use it
+
+In the morning, when you are looking for premium to sell rather than a direction to
+express. Take a candidate to [Calculator](#calculator) to price it as it stands now.
+
+### Related pages
+
+[Strategy Finder](#strategy-finder) · [Calculator](#calculator) ·
+[Paper Ledger](#paper-ledger).
+
+---
+
 ## Expected Move
 
 *Menu: STRATEGY → Options → Expected Move · Route `/options/expected-move`*

@@ -1,0 +1,269 @@
+"""The Income board's PURE builders — /options/income, reader of cache:options:income.
+
+Two things this file exists to prevent, both of which a naive test suite would
+miss:
+
+1. **The row shapes are heterogeneous.** An adapted credit spread (``PCS``/``CCS``)
+   carries BOTH the flat ``short_strike``/``rr_pct`` contract and the normalized
+   ``legs`` one; the cash-secured put (``SHORT_PUT``) carries ONLY the normalized
+   shape. A builder that reaches for ``short_strike`` renders two of the three
+   structures and silently blanks the third — so every row assertion here runs a
+   ``PCS`` row and a ``SHORT_PUT`` row through the SAME call.
+
+2. **A dead service and a still tape must not render the same words.** ``status_text``
+   has three states, not two, and the middle one (scan ran, found nothing) is the
+   one that would otherwise be spelled with the cold-feed line.
+
+⚠ VACUITY: ``candidate_rows`` returning ``[]`` for input it does not understand
+would satisfy every ``all(...)``/``not any(...)`` assertion trivially, so each
+test asserts the row COUNT alongside the content.
+"""
+from pages import copy as _copy
+from pages.options import income
+
+
+# One row of each published structure. Field values are the NORMALIZED,
+# per-contract ones ``_normalize_credit``/``payoff_metrics`` emit, because those
+# are the only fields BOTH shapes carry.
+_PCS = {
+    "type": "PCS", "symbol": "AAPL", "expiration": "2026-10-16", "dte": 41,
+    # The flat spread contract the SHORT_PUT row does not have...
+    "short_strike": 195.0, "long_strike": 190.0, "credit": 0.60, "rr_pct": 13.6,
+    # ...alongside the normalized one it does.
+    "legs": [{"side": "short", "kind": "put", "strike": 195.0},
+             {"side": "long", "kind": "put", "strike": 190.0}],
+    "net_credit": 60.0, "max_profit": 58.7, "max_loss": 441.3, "capital": 441.3,
+    "rr": 0.133, "pop_pct": 78.4, "breakevens": [194.40],
+    "composite_score": 72.0, "earnings_status": "none_scheduled",
+}
+_CCS = dict(_PCS, type="CCS", short_strike=215.0, long_strike=220.0,
+            legs=[{"side": "short", "kind": "call", "strike": 215.0},
+                  {"side": "long", "kind": "call", "strike": 220.0}],
+            breakevens=[215.60], composite_score=64.0,
+            earnings_status="upcoming")
+# The cash-secured put: NO short_strike, NO credit, NO rr_pct — only the
+# normalized shape. Reading it correctly is the whole point of this file.
+_CSP = {
+    "type": "SHORT_PUT", "symbol": "MSFT", "expiration": "2026-10-16", "dte": 41,
+    "legs": [{"side": "short", "kind": "put", "strike": 400.0}],
+    "net_credit": 640.0, "max_profit": 638.7, "max_loss": 39361.3,
+    "capital": 39361.3, "rr": 0.016, "pop_pct": 74.1, "breakevens": [393.60],
+    "composite_score": 58.0, "earnings_status": "not_listed",
+}
+
+
+# ── the three status states ─────────────────────────────────────────────────
+
+def test_a_cold_feed_says_nothing_has_published():
+    """No payload at all — the service has never written this view."""
+    assert income.status_text(None) == _copy.WAITING_OPTIONS
+    assert income.status_text({}) == _copy.WAITING_OPTIONS
+
+
+def test_a_pass_that_found_nothing_does_not_borrow_the_cold_feed_line():
+    """The scan RAN. Saying "hasn't published" would report a healthy pass as an
+    outage — the exact confusion pages/copy.py's own docstring warns about."""
+    text = income.status_text({"candidates": [], "scanned_symbols": 23})
+    assert text != _copy.WAITING_OPTIONS
+    # It must name what was actually scanned, not print a bare zero.
+    assert "23" in text
+
+
+def test_a_pass_with_candidates_counts_both_the_rows_and_the_symbols():
+    text = income.status_text({"candidates": [_PCS, _CSP], "scanned_symbols": 23})
+    assert text != _copy.WAITING_OPTIONS
+    assert "2" in text and "23" in text
+
+
+def test_failed_symbols_are_disclosed_not_swallowed():
+    """publish_income lands a per-symbol failure in ``errors`` precisely so the
+    page can say so. A whole-watchlist outage otherwise reads as a quiet tape."""
+    text = income.status_text({"candidates": [], "scanned_symbols": 23,
+                               "errors": ["AAPL: KeyError: x", "MSFT: ValueError: y"]})
+    assert "2" in text
+    assert "fail" in text.lower() or "error" in text.lower()
+
+
+def test_the_scan_time_is_shown_when_the_payload_carries_one():
+    """A once-daily view: without a stamp there is no way to tell this morning's
+    board from Friday's."""
+    text = income.status_text({"candidates": [_PCS], "scanned_symbols": 1,
+                               "ts": "2026-09-05T08:35:00-05:00"})
+    assert "8:35" in text
+
+
+def test_an_unparseable_stamp_is_dropped_rather_than_printed_raw():
+    text = income.status_text({"candidates": [_PCS], "scanned_symbols": 1,
+                               "ts": "not a timestamp"})
+    assert "not a timestamp" not in text
+
+
+# ── the heterogeneous rows ──────────────────────────────────────────────────
+
+def test_every_published_structure_makes_a_row():
+    """VACUITY GUARD for every assertion below: they all index into the result,
+    and a builder that silently dropped the shape it did not recognise would
+    satisfy the negative ones by returning nothing."""
+    rows = income.candidate_rows([_PCS, _CCS, _CSP])
+    assert len(rows) == 3
+
+
+def test_rows_label_the_side_a_reader_can_act_on():
+    """"PCS" is engine vocabulary. The board is two-sided plus a single, and the
+    side is the first thing a reader picks on."""
+    rows = income.candidate_rows([_PCS, _CCS, _CSP])
+    assert len(rows) == 3
+    assert [r["side"] for r in rows] == [
+        "Put spread", "Call spread", "Cash-secured put"]
+
+
+def test_an_unknown_structure_still_makes_a_row_labelled_honestly():
+    """A shape drift must not vanish from a board a human picks trades from —
+    but it must not be mislabelled as one of the three either."""
+    rows = income.candidate_rows([{"type": "WAT", "symbol": "AAPL"}])
+    assert len(rows) == 1
+    assert rows[0]["side"] == "WAT"
+
+
+def test_the_strikes_come_from_legs_so_both_shapes_render():
+    """The single carries no ``short_strike`` at all. A builder keying off that
+    field renders the two spreads and blanks the cash-secured put — which looks
+    like a thin row, not like a bug."""
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert len(rows) == 2
+    assert rows[0]["legs"] == "S 195P / L 190P"
+    assert rows[1]["legs"] == "S 400P"
+
+
+def test_the_credit_column_reads_the_field_both_shapes_carry():
+    """Per-CONTRACT dollars. The spread ALSO has a per-share ``credit`` of 0.60;
+    reading that one would put a $0.60 row next to a $640 row on one board."""
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert len(rows) == 2
+    assert [r["credit"] for r in rows] == ["60.00", "640.00"]
+
+
+def test_capital_at_risk_renders_for_both_shapes():
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert len(rows) == 2
+    assert [r["capital"] for r in rows] == ["441.30", "39361.30"]
+
+
+def test_return_on_capital_is_what_makes_the_two_shapes_comparable():
+    """A $60 credit on $441 and a $640 credit on $39,361 are not comparable as
+    dollars. 13.3% against 1.6% is the reading the window is actually screened
+    on."""
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert len(rows) == 2
+    assert rows[0]["roc"] == "13.3%"
+    assert rows[1]["roc"] == "1.6%"
+
+
+def test_the_breakeven_comes_from_the_list_both_shapes_carry():
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert len(rows) == 2
+    assert rows[0]["breakeven"] == "194.40"
+    assert rows[1]["breakeven"] == "393.60"
+
+
+def test_the_columns_and_the_row_keys_agree():
+    """A column whose ``field`` no row stamps renders a permanently blank cell,
+    and nothing else in the suite would notice."""
+    rows = income.candidate_rows([_PCS, _CSP])
+    assert rows
+    for col in income.income_columns():
+        assert col["field"] in rows[0], f"column {col['name']} has no row field"
+
+
+# ── an absent reading is a dash, never a zero ───────────────────────────────
+
+def test_a_missing_credit_renders_a_dash_never_a_zero():
+    """Never print a number you did not read: 0.00 claims a measurement."""
+    rows = income.candidate_rows([{"type": "PCS", "symbol": "AAPL"}])
+    assert len(rows) == 1
+    assert rows[0]["credit"] == "—"
+
+
+def test_every_unread_numeric_cell_is_a_dash():
+    rows = income.candidate_rows([{"type": "SHORT_PUT", "symbol": "MSFT"}])
+    assert len(rows) == 1
+    row = rows[0]
+    for field in ("credit", "capital", "roc", "pop", "breakeven", "expiration",
+                  "dte"):
+        assert row[field] == "—", f"{field} rendered {row[field]!r}, not a dash"
+
+
+def test_a_nan_is_an_absence_not_a_reading():
+    """The documented trap: every comparison against NaN is False, so an
+    unguarded NaN sails past a `> 0` guard and formats as 'nan%'."""
+    rows = income.candidate_rows([dict(_PCS, net_credit=float("nan"),
+                                       capital=float("nan"))])
+    assert len(rows) == 1
+    assert rows[0]["credit"] == "—"
+    assert rows[0]["roc"] == "—"
+
+
+def test_zero_capital_does_not_divide_and_does_not_render_infinity():
+    rows = income.candidate_rows([dict(_PCS, capital=0.0)])
+    assert len(rows) == 1
+    assert rows[0]["roc"] == "—"
+
+
+def test_a_real_zero_credit_is_still_printed_as_zero():
+    """The other half of the dash rule, and the one that makes it a rule rather
+    than a blanket falsy check: 0.00 that was MEASURED is a fact."""
+    rows = income.candidate_rows([dict(_PCS, net_credit=0.0)])
+    assert len(rows) == 1
+    assert rows[0]["credit"] == "0.00"
+
+
+# ── the earnings check must be visible ──────────────────────────────────────
+
+def test_the_three_earnings_states_read_differently():
+    """A row whose earnings check could not RUN must not look like one that
+    passed it. There is no Alpha Vantage key in most checkouts, so ``not_listed``
+    is the common case — it must read as unknown, not as an alarm."""
+    rows = income.candidate_rows([_PCS, _CCS, _CSP])
+    assert len(rows) == 3
+    labels = [r["earnings"] for r in rows]
+    assert len(set(labels)) == 3, f"the three states collapsed to {labels}"
+    assert labels == [income.EARNINGS_LABEL["none_scheduled"],
+                      income.EARNINGS_LABEL["upcoming"],
+                      income.EARNINGS_LABEL["not_listed"]]
+
+
+def test_an_unchecked_symbol_is_not_coloured_like_an_alarm():
+    """``not_listed`` gets the NEUTRAL class, not the warning one — it is the
+    common case, and painting the whole board amber trains the reader to ignore
+    the colour."""
+    rows = income.candidate_rows([_CSP])
+    assert len(rows) == 1
+    assert rows[0]["_earnings_class"] == income.EARNINGS_CLASS["not_listed"]
+    assert (income.EARNINGS_CLASS["not_listed"]
+            != income.EARNINGS_CLASS["none_scheduled"])
+
+
+def test_a_row_with_no_earnings_field_is_unknown_not_clear():
+    """Absence of the stamp is absence of the check. Defaulting to the cleared
+    label is the fail-open shape shared/earnings.coverage exists to refuse."""
+    rows = income.candidate_rows([{"type": "PCS", "symbol": "AAPL"}])
+    assert len(rows) == 1
+    assert rows[0]["earnings"] != income.EARNINGS_LABEL["none_scheduled"]
+
+
+def test_the_earnings_classes_are_static_not_runtime_hex():
+    """The Tailwind-first standard: a finite state maps to a fixed palette class.
+    A runtime-built ``text-[{hex}]`` is what this repo bans."""
+    for cls in income.EARNINGS_CLASS.values():
+        assert "{" not in cls and "}" not in cls
+
+
+# ── ordering ────────────────────────────────────────────────────────────────
+
+def test_the_service_ranking_is_preserved():
+    """publish_income already sorts the merged board by composite score, with an
+    absent/NaN score pinned LAST so a non-reading can never top a board a human
+    picks a trade from. Re-sorting here would either duplicate that rule or
+    quietly contradict it."""
+    rows = income.candidate_rows([_CSP, _PCS, _CCS])
+    assert [r["symbol"] for r in rows] == ["MSFT", "AAPL", "AAPL"]

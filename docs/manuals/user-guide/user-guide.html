@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-02</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -107,6 +107,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#market-scanner">Market Scanner</a></li>
 <li><a href="#strategy-finder">Strategy Finder</a></li>
+<li><a href="#income">Income</a></li>
 <li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#captured-signals">Captured Signals</a></li>
 <li><a href="#paper-ledger">Paper Ledger</a></li>
@@ -1034,6 +1035,40 @@ parameters and press <strong>Scan</strong>:</p>
 </ul>
 <p>Results appear in the same signal table (with the same Score chip, Grade, and the
 three per-row action buttons) and detail panel as the Market Scanner.</p>
+<h2 id="income">Income</h2>
+<p><strong>Route:</strong> <code>/options/income</code>.</p>
+<p>A read-only board of premium worth <strong>selling</strong> 30 to 45 days out, ranked across the
+whole watchlist. There is nothing to press: the scan runs once each morning on its
+own schedule, and the status line tells you how many symbols it covered, when it ran,
+and whether any of them failed.</p>
+<p>Three structures share the board:</p>
+<ul>
+<li><strong>Put spread</strong> — a put credit spread, for a symbol you do not expect to fall much.</li>
+<li><strong>Call spread</strong> — a call credit spread, for one you do not expect to rise much.</li>
+<li><strong>Cash-secured put</strong> — a single short put, for a symbol you would be content to own
+  at that strike.</li>
+</ul>
+<p><strong>The columns:</strong> Symbol · Side · Strikes · Expiry · DTE · <strong>Credit $</strong> · <strong>Capital $</strong>
+· <strong>Return on capital</strong> · PoP % · Breakeven · <strong>Earnings</strong> · Score. Click any column
+to re-sort.</p>
+<p><strong>Credit and Capital are both per contract, in dollars.</strong> Capital is the cash the
+trade actually commits — for a spread that is its width less the credit; for a
+cash-secured put it is the strike all the way down to zero, which is far larger.
+<strong>Return on capital</strong> is the credit measured against that, and it is the only column
+that makes the two comparable: a $60 credit and a $640 credit say nothing until you
+know that one risks $441 and the other $39,361.</p>
+<p><strong>The Earnings column</strong> reports what the earnings calendar knows about the symbol:</p>
+<ul>
+<li><strong>None scheduled</strong> — checked, and nothing is coming.</li>
+<li><strong>After expiry</strong> — a report is scheduled, but it lands after this expiration.
+  Anything reporting <em>before</em> expiration was already removed from the scan.</li>
+<li><strong>Not checked</strong> — the calendar has no entry for that symbol, so the check could not
+  run. This means <em>unknown</em>, not <em>clear</em>. Without an Alpha Vantage API key configured
+  it is what every row will say.</li>
+</ul>
+<p>An empty board is a normal outcome, not a fault — the status line says how many
+symbols were scanned so you can tell "nothing qualified today" from "the scan never
+ran".</p>
 <h2 id="expected-move">Expected Move</h2>
 <p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
 <p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to

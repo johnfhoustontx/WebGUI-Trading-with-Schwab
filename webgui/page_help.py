@@ -173,6 +173,25 @@ family for it — directional, spreads, and neutral.
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
 """,
+    "/options/income": """
+**Income Window — the simple version**
+
+Premium to **sell** 30 to 45 days out, across the whole watchlist, scanned once
+each morning. Three kinds of trade sit on one ranked board:
+
+- **Put spread** — you think it won't fall much. Risk is capped at the spread width.
+- **Call spread** — you think it won't rise much. Also capped.
+- **Cash-secured put** — you'd be happy to *own* the shares at that strike. Risk is
+  capped too, but the cap is the whole stock down to zero, so it ties up far more cash.
+- **Capital $** is the cash actually committed, and **Return on capital** is the
+  credit measured against it — that is the only way a $60 spread and a $640
+  cash-secured put can be compared on one screen. Dollars alone cannot.
+- **Earnings** says what the calendar knows: *None scheduled* means it was checked
+  and found nothing, *After expiry* means a report is coming but lands past this
+  expiration, and **Not checked** means the calendar has no entry for that symbol —
+  unknown, not clear. Without an Alpha Vantage key that is every row.
+- Nothing here is traded for you. It is a shortlist you act on by hand.
+""",
     "/options/calculator": """
 **Calculator — the simple version**
 

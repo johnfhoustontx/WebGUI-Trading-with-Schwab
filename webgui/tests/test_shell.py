@@ -13,7 +13,7 @@ def test_shell_registers_all_pages():
     routes = set(Client.page_routes.values())
     expected = (
         "/options/scanner", "/options/paper", "/options/captured", "/options/portfolio",
-        "/options/calculator", "/options/swing", "/options/gamma",
+        "/options/calculator", "/options/swing", "/options/income", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
         "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
@@ -1119,7 +1119,8 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
     # The Options strip keeps its find -> analyze -> track -> repair workflow.
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
-        "/options/scanner", "/options/swing", "/options/expected-move", "/options/captured",
+        "/options/scanner", "/options/swing", "/options/income",
+        "/options/expected-move", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
     assert [r for r, _l, _i in main.OPTIONS_RAIL] == [

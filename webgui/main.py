@@ -351,6 +351,11 @@ def _serve_manual(name: str):
 OPTIONS_CHILDREN = [
     ("/options/scanner", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
+    # The 30-45 DTE income window sits in the FIND phase beside the other two
+    # scanners — it is the same find -> analyze -> track -> repair workflow at a
+    # longer horizon, which is why it is a tab here and not a new rail group
+    # (design doc 2026-09-05, "Menu placement").
+    ("/options/income", "Income", "savings"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
@@ -795,6 +800,10 @@ _TAB_COLOR = {
     "/options/portfolio": "#26a69a",      # Paper Account — teal
     "/options/calculator": "#ffa726",     # Calculator — amber
     "/options/swing": "#ec407a",          # Strategy Finder — pink
+    # Emerald: hue 147, the widest gap left in this map's hue circle (the next
+    # neighbours are Paper Ledger's 123 and Paper Account's 172). A route with no
+    # entry here silently inherits the Market Scanner's blue.
+    "/options/income": "#3dd983",         # Income Window — emerald
     "/options/gamma": "#7e57c2",          # Dealer Positioning — deep purple
     "/options/simulator": "#29b6f6",      # Simulator — light blue
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
@@ -2117,6 +2126,13 @@ def options_swing_page() -> None:
     with _layout("/options/swing", "Options · Strategy Finder"):
         from pages.options import swing
         swing.render()
+
+
+@ui.page("/options/income")
+def options_income_page() -> None:
+    with _layout("/options/income", "Options · Income"):
+        from pages.options import income
+        income.render()
 
 
 @ui.page("/options/gamma")

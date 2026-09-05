@@ -861,6 +861,46 @@ parameters and press **Scan**:
 Results appear in the same signal table (with the same Score chip, Grade, and the
 three per-row action buttons) and detail panel as the Market Scanner.
 
+## Income
+
+**Route:** `/options/income`.
+
+A read-only board of premium worth **selling** 30 to 45 days out, ranked across the
+whole watchlist. There is nothing to press: the scan runs once each morning on its
+own schedule, and the status line tells you how many symbols it covered, when it ran,
+and whether any of them failed.
+
+Three structures share the board:
+
+- **Put spread** — a put credit spread, for a symbol you do not expect to fall much.
+- **Call spread** — a call credit spread, for one you do not expect to rise much.
+- **Cash-secured put** — a single short put, for a symbol you would be content to own
+  at that strike.
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · **Credit $** · **Capital $**
+· **Return on capital** · PoP % · Breakeven · **Earnings** · Score. Click any column
+to re-sort.
+
+**Credit and Capital are both per contract, in dollars.** Capital is the cash the
+trade actually commits — for a spread that is its width less the credit; for a
+cash-secured put it is the strike all the way down to zero, which is far larger.
+**Return on capital** is the credit measured against that, and it is the only column
+that makes the two comparable: a $60 credit and a $640 credit say nothing until you
+know that one risks $441 and the other $39,361.
+
+**The Earnings column** reports what the earnings calendar knows about the symbol:
+
+- **None scheduled** — checked, and nothing is coming.
+- **After expiry** — a report is scheduled, but it lands after this expiration.
+  Anything reporting *before* expiration was already removed from the scan.
+- **Not checked** — the calendar has no entry for that symbol, so the check could not
+  run. This means *unknown*, not *clear*. Without an Alpha Vantage API key configured
+  it is what every row will say.
+
+An empty board is a normal outcome, not a fault — the status line says how many
+symbols were scanned so you can tell "nothing qualified today" from "the scan never
+ran".
+
 ## Expected Move
 
 **Route:** `/options/expected-move`.
