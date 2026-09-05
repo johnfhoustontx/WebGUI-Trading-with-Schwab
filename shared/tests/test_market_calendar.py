@@ -563,12 +563,33 @@ def test_regular_session_has_opened_is_false_before_the_open():
     assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 8, 0)) is False
 
 
-def test_regular_session_has_opened_is_true_during_and_after_the_session():
+def test_regular_session_has_opened_is_true_during_the_session():
+    """09:30 CT on a Tuesday, an hour into the regular session."""
     assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 9, 30)) is True
-    # After the cash close the day's move is still real, so this stays True.
-    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 15, 45)) is True
+
+
+def test_regular_session_has_opened_stays_true_after_the_cash_close():
+    """15:45 CT is the ONE moment the two predicates disagree, and the whole
+    reason this function exists: past the 15:00 close ``is_regular_hours`` goes
+    False, while the day's move does not stop being a fact. Both are asserted
+    together so a degrade into an ``is_regular_hours`` alias fails loudly here
+    rather than passing every other test in this group."""
+    after_close = dt.datetime(2026, 9, 8, 15, 45)
+    assert mc.regular_session_has_opened(after_close) is True
+    assert mc.is_regular_hours(after_close) is False
 
 
 def test_regular_session_has_opened_is_false_at_the_weekend():
     """2026-09-05 is a Saturday."""
     assert mc.regular_session_has_opened(dt.datetime(2026, 9, 5, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_false_on_a_holiday():
+    """2026-09-07 is Labor Day -- and a MONDAY, so this fixture also proves the
+    guard is ``is_trading_day`` and not a bare weekday check. Noon is well past
+    the 08:30 open, so nothing but the trading-day guard can answer False. The
+    weekend case alone would leave a broken holiday branch undetected."""
+    labor_day = date(2026, 9, 7)
+    assert labor_day.weekday() == 0            # Monday -- the point of the fixture
+    assert mc.is_holiday(labor_day) is True
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 7, 12, 0)) is False
