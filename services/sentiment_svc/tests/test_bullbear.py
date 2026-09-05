@@ -563,3 +563,65 @@ def test_publish_bullbear_still_holds_the_stamp_through_the_memo(monkeypatch):
         handlers.publish_bullbear(bus)
         versions.append(bus.cache_get(handlers.CACHE_BULLBEAR).version)
     assert versions == [versions[0]] * 3
+
+
+# --- the coercion guard -------------------------------------------------------
+
+@pytest.mark.parametrize("bad", [
+    float("nan"), float("inf"), float("-inf"), True, False, "1.5", "abc", None,
+    [1.5], {"change_pct": 1.5},
+])
+def test_quoted_day_pct_admits_only_a_real_finite_number(bad):
+    """A NaN here is worse than a missing quote, not better: it PASSES the
+    downstream ``is None`` usability gate, so the relative axis reads usable
+    while every ``day_excess`` is NaN; it then loses every ``> 0`` quadrant
+    test and renders as a confident falling/lagging row — a missing reading
+    shown as a directional one, which is the whole thing this column exists to
+    avoid. ``True`` is a shape error rather than a 1% move, and a numeric
+    string means ``get_quotes`` stopped returning the shape this reads.
+
+    ``False``/``0`` are deliberately NOT symmetric: 0.0 from the proxy is a
+    measured flat tape (see the zero tests above), ``False`` is not a number at
+    all.
+    """
+    assert compute._quoted_day_pct({"XLV": {"change_pct": bad}}, "XLV") is None
+
+
+def test_quoted_day_pct_keeps_a_real_reading_including_zero():
+    assert compute._quoted_day_pct({"XLV": {"change_pct": 0}}, "XLV") == 0.0
+    assert compute._quoted_day_pct({"XLV": {"change_pct": -1.25}}, "XLV") == -1.25
+
+
+def test_merge_live_treats_a_nan_quote_as_no_quote():
+    """Driven from the producer, not the helper: a guard proved only in
+    isolation is the shape this repo has shipped broken before."""
+    levels = {"sector": [{"symbol": "XLK"}]}
+    quotes = {"XLK": {"change_pct": float("nan")},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": 0.5}}
+    row = compute.merge_live(levels, quotes)["sector"][0]
+    assert row["day_pct"] is None
+    assert row["day_excess"] is None
+
+
+def test_merge_live_drops_the_whole_axis_when_the_benchmark_quote_is_nan():
+    """A NaN benchmark must fail the same way an absent one does — otherwise
+    every row's excess is NaN while the row's own day_pct is fine."""
+    levels = {"sector": [{"symbol": "XLK"}]}
+    quotes = {"XLK": {"change_pct": 1.0},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": float("nan")}}
+    row = compute.merge_live(levels, quotes)["sector"][0]
+    assert row["day_pct"] == 1.0
+    assert row["day_excess"] is None
+
+
+def test_bullbear_view_publishes_no_benchmark_for_a_non_finite_quote(monkeypatch):
+    """``benchmark_day_pct: nan`` would pass a Tier-1 ``is None`` check and
+    declare the relative axis usable, and — being unequal to itself — would
+    defeat ``skip_unchanged`` forever, republishing every poll."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {
+        "XLV": {"change_pct": 2.0},
+        compute.MOMENTUM_BENCHMARK: {"change_pct": float("inf")}})
+    view = compute.bullbear_view({"levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["benchmark_day_pct"] is None
+    assert view["levels"]["sector"][0]["day_pct"] == 2.0
+    assert view["levels"]["sector"][0]["day_excess"] is None

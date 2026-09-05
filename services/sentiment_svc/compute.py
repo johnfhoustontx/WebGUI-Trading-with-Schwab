@@ -2219,7 +2219,7 @@ def bullbear_symbols(levels):
 
 
 def _quoted_day_pct(quotes, symbol):
-    """``change_pct`` for one symbol, or None when the proxy omitted it.
+    """``change_pct`` for one symbol, or None when there is no usable number.
 
     ONE spelling of this extraction, called by both the per-row merge and the
     benchmark lookup: the mapping, the missing-symbol fallthrough and the
@@ -2229,9 +2229,28 @@ def _quoted_day_pct(quotes, symbol):
     None means OMITTED, never "unchanged" — ``_extract_change_pct``
     (schwab-proxy/proxy_client.py) falls through to a literal 0.0 for a symbol
     it does return, so 0.0 is a reading and absence is not one.
+
+    Deliberately STRICTER than ``_as_finite`` alone on both ends, matching the
+    Tier-1 ``webgui/pages/fmt.num`` contract:
+
+    * ``bool`` is rejected. ``float(True)`` is a finite 1.0, so ``_as_finite``
+      would pass it through — and a True in this field is a shape error, not a
+      1% move.
+    * a numeric STRING is rejected. ``_as_finite("1.5")`` returns 1.5, but this
+      reads one specific producer — the flattened ``get_quotes`` mapping, whose
+      ``change_pct`` is already a float or a literal 0.0 — so a string means
+      that shape changed, and coercing it would hide the change behind a
+      plausible number.
+
+    ``_as_finite`` owns the finiteness half, so NaN/±inf cannot reach the
+    payload: a NaN PASSES the downstream ``is None`` usability gate, then loses
+    every ``> 0`` quadrant test and renders as a confident falling/lagging row,
+    and — being unequal to itself — permanently defeats ``skip_unchanged``.
     """
     pct = ((quotes or {}).get(symbol) or {}).get("change_pct")
-    return float(pct) if isinstance(pct, (int, float)) else None
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+        return None
+    return _as_finite(pct)
 
 
 def merge_live(levels, quotes):
@@ -2249,7 +2268,7 @@ def merge_live(levels, quotes):
     "unchanged", a different and false claim.
 
     ``day_excess`` is the relative axis: today's move less MOMENTUM_BENCHMARK's
-    today, resolved ONCE for the whole tree.
+    today, resolved once per merge, from the same batched quotes the rows use.
     """
     bench = _quoted_day_pct(quotes, MOMENTUM_BENCHMARK)
     merged = {}
@@ -2259,8 +2278,7 @@ def merge_live(levels, quotes):
             out_row = dict(row or {})
             day = _quoted_day_pct(quotes, out_row.get("symbol"))
             out_row["day_pct"] = day
-            # None when EITHER side is absent. 0.0 would say "moved exactly with
-            # the benchmark", a measured fact -- absence is not that claim.
+            # None when EITHER side is absent.
             out_row["day_excess"] = (
                 (day - bench) if (day is not None and bench is not None) else None)
             rows.append(out_row)
@@ -2322,8 +2340,7 @@ def bullbear_view(momentum) -> dict:
         "quoted_at": quoted_at,
         "regime": momentum.get("regime"),
         # The axis every row's day_excess is measured against, published so the
-        # page can label it and can tell "flat vs the benchmark" (0.0) apart
-        # from "no benchmark" (None, and then no day_excess anywhere).
+        # page can label it.
         "benchmark_day_pct": _quoted_day_pct(quotes, MOMENTUM_BENCHMARK),
         "levels": merge_live(levels, quotes),
     }
