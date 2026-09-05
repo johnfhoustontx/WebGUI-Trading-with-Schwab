@@ -601,7 +601,8 @@ def test_regular_session_has_opened_is_false_on_a_holiday():
 def test_regular_session_has_opened_is_true_at_the_opening_bell():
     """08:30 itself is INSIDE: the bell opens the session, it does not precede
     it. The pair straddles the boundary, so a ``>`` in place of the ``>=``
-    fails here and nowhere else."""
+    fails here, at the REAL configured boundary -- the config-reuse test below
+    also catches it, but only at its stubbed 09:05 one."""
     assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 29)) is False
     assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 30)) is True
 
