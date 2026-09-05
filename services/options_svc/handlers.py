@@ -22,8 +22,10 @@ from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
-from shared.contracts.options import MatrixSnapshot, NetPremiumSnapshot, ScanResult
+from shared.contracts.options import (IncomeScan, MatrixSnapshot,
+                                      NetPremiumSnapshot, ScanResult)
 from services import _degrade
+from services._parallel import parallel_map
 
 log = logging.getLogger(__name__)
 
@@ -124,11 +126,19 @@ def _is_stale_open(command) -> bool:
 #                   passes BOTH, re-applying a partial close or paying a second
 #                   roll's commission.
 #   gamma_analyze - a PAID Claude call.
+#   income_scan   - ~23 /chains fetches. It mutates nothing and bills no vendor,
+#                   so it is here for the THIRD reason: external budget. The
+#                   income window's whole design premise is call-count
+#                   minimisation - one pass a day instead of the autoscan's
+#                   cadence, ~23 calls against ~690 - and a backlog replay runs
+#                   it once per queued Refresh click with nobody watching. The
+#                   scheduled slot republishes the same board anyway, so a
+#                   dropped replay costs a reader nothing.
 #
 # ⚠ This is an age gate, not true idempotency: two genuinely FRESH duplicates
 # still both run. It closes the REPLAY case with machinery the service already
 # trusts; a dedup store keyed on the stream message id would be the stronger fix.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze")
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan")
 
 
 def _is_stale_side_effect(command) -> bool:
@@ -157,6 +167,12 @@ EVENT_HEADER = "events:options:header"
 
 CACHE_SWING = "cache:options:swing"
 EVENT_SWING = "events:options:swing"
+
+# The 30-45 DTE income window's published board. One view for the WHOLE
+# watchlist (see publish_income) — unlike cache:options:swing, which is one
+# on-demand symbol at a time.
+CACHE_INCOME = "cache:options:income"
+EVENT_INCOME = "events:options:income"
 
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
@@ -535,6 +551,130 @@ def swing_scan(bus, args: dict) -> None:
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
+
+
+# ── the 30-45 DTE income window ─────────────────────────────────────────────
+# One pass a day over the watchlist (scheduler.income_slot_due), plus the page's
+# Refresh command. Design:
+# docs/plans/2026-09-05-income-window-and-share-inventory-design.md.
+
+# Fan-out width for the per-symbol chain fetches. Kept at the shared default
+# (<= 8 by house rule): the proxy only SPACES upstream calls ~0.2 s apart, so a
+# wider pool queues rather than going faster, and this pass has no deadline.
+_INCOME_WORKERS = 6
+
+
+def _income_symbols():
+    """The income window's universe: the autoscan's watchlist, verbatim.
+
+    ``scanner_engine.run_full_scan`` scans ``watchlist.get_scan_symbols()``, so
+    that is what this reads — an income board over a DIFFERENT universe than the
+    scanner's would be a silently different product (a name you can find a 0-DTE
+    signal on but never a 35-DTE one, with nothing on either screen to say why).
+    The accessor is mtime-cached in options-scanner, so calling it per pass costs
+    a ``stat``.
+
+    Imported LAZILY, per this tier's cross-app collision discipline. Degrades to
+    ``[]`` — publish an honest empty pass — rather than guessing a universe.
+    """
+    try:
+        import watchlist
+        return list(watchlist.get_scan_symbols())
+    except Exception:  # noqa: BLE001 — a missing workbook must not kill the pass.
+        _degrade.degraded("options.income_symbols")
+        return []
+
+
+def _income_rank(row) -> float:
+    """Sort key for the merged board: ``composite_score``, absent/NaN LAST.
+
+    ``score_all`` neutralizes an unscorable signal to 0.0, but the key can be
+    missing outright on a shape drift — and ``sorted`` over a mixed None/float
+    raises, which would lose the whole pass for one bad row. ``-inf`` (with
+    ``reverse=True``) also refuses the documented NaN trap in the other
+    direction: a non-reading must never sort to the TOP of a board a human picks
+    a trade from.
+    """
+    try:
+        v = float(row.get("composite_score"))
+    except (TypeError, ValueError, AttributeError):
+        return float("-inf")
+    return v if v == v else float("-inf")       # NaN != NaN
+
+
+def publish_income(bus, symbols=None) -> None:
+    """Scan the 30-45 DTE income window across the watchlist; publish one view.
+
+    ``compute.income_scan`` answers for ONE symbol (``swing_scan``'s per-symbol
+    ``signals``/``view``/``filtered_out`` shape). This merges every symbol's rows
+    into ONE jointly-ranked ``candidates`` list, because a reader picking today's
+    income trade compares across the whole watchlist rather than within a symbol
+    — hence the deliberate naming split the ``IncomeScan`` contract documents.
+
+    **Fanned out concurrently** (``parallel_map``): ~23 symbols x one chain
+    round-trip is the house shape for an I/O-bound proxy loop, and serially that
+    is minutes of an executor thread for work the proxy overlaps happily.
+
+    **One symbol's failure must not cost the other 22** — a halted name, a thin
+    off-hours book, a proxy blip. Each one lands in ``errors`` (so the page can
+    say which) AND in ``_degrade`` (so /health counts the case where the outage
+    took all 23). An error list alone would leave a whole-watchlist failure
+    looking like a quiet tape to everyone not reading that page.
+
+    ``scanned_symbols`` is what was ATTEMPTED, not what succeeded: reporting 1
+    after 22 failures would read as a thin market rather than a broken pass.
+
+    ``market_state`` is read ONCE per pass (not per symbol) from
+    ``cache:sentiment:composite`` and threaded to every scan, mirroring
+    ``swing_scan`` above — the handler is the natural cross-service reader, which
+    keeps ``compute`` proxy-only. Every level is guarded; a missing composite
+    means no family-ranking tilt, exactly as it does on the Swing page.
+
+    Only each scan's ``signals`` are forwarded. That is not incidental tidiness:
+    ``cache:options:calc_chain`` reached 8.77 MB — 53% of all prod Redis string
+    bytes — by caching a raw chain beside what the page reads, and a 30-45 DTE
+    chain is wider than the 0-DTE one that caused it.
+    """
+    syms = list(symbols) if symbols is not None else _income_symbols()
+    env = bus.cache_get("cache:sentiment:composite")
+    payload = env.payload if env is not None else None
+    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+
+    def _scan_one(symbol):
+        """``(rows, error or None)``. Self-contained + defensive, as
+        ``parallel_map`` requires — a raising ``fn`` propagates on result
+        iteration exactly as it would in the serial loop it replaces."""
+        try:
+            out = compute.income_scan(symbol, market_state=market_state) or {}
+            return (list(out.get("signals") or []), None)
+        except Exception as exc:  # noqa: BLE001 — see the docstring.
+            _degrade.degraded("options.publish_income", detail=symbol)
+            return ([], f"{symbol}: {type(exc).__name__}: {exc}")
+
+    candidates: list = []
+    errors: list = []
+    for rows, err in parallel_map(_scan_one, syms, workers=_INCOME_WORKERS):
+        candidates.extend(rows)
+        if err:
+            errors.append(err)
+    candidates.sort(key=_income_rank, reverse=True)
+
+    # Validation gate BEFORE the write, like rescan/publish_matrix: a gross shape
+    # drift raises here rather than reaching the page as a half-valid board.
+    snap = IncomeScan(
+        candidates=candidates,
+        scanned_symbols=len(syms),
+        errors=errors,
+        # CT, tz-aware: the page renders this as "scanned at 08:35", and the two
+        # other user-facing stamps in this module are CT for the same reason.
+        ts=_dt.datetime.now(mc.CT).isoformat(),
+    )
+    # ⚠ ``skip_unchanged`` cannot fire while ``ts`` moves on every pass (the same
+    # thing publish_net_premium documents about its own fresh ``ts``). It is kept
+    # because it is the safe default on a republisher and costs one small read on
+    # a twice-a-day path — not because it suppresses anything today.
+    bus.cache_set(CACHE_INCOME, snap.model_dump(), event=EVENT_INCOME,
+                  skip_unchanged=True)
 
 
 def _coerce_pid(pid):
@@ -1761,7 +1901,10 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
 
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
-    ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
+    ``swing_scan`` → on-demand parameterized swing scan; ``income_scan`` → force
+    a 30-45 DTE income pass over the watchlist (replay-guarded — see
+    ``_REPLAY_GUARDED``; normally runs on its own once-daily slot);
+    ``refresh_paper`` →
     re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
     (guarded on an existing account) then refresh; ``paper_reset`` → reset the
     account then refresh; ``paper_create`` (args signal, qty) → create + persist a
@@ -1822,6 +1965,17 @@ def handle_command(bus, command) -> None:
         refresh_calibration(bus)
     elif command.type == "swing_scan":
         swing_scan(bus, command.args)
+    elif command.type == "income_scan":
+        # The page's Refresh. Replay-guarded (see _REPLAY_GUARDED): ~23 chain
+        # fetches is the largest per-command Schwab spend on this stream, and a
+        # backlog replay would run one pass per queued click.
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale income_scan: age %.0fs > %ds (ts=%s) — "
+                        "a replayed command must not re-spend ~23 chain fetches",
+                        _command_age_seconds(command) or -1,
+                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            return
+        publish_income(bus)
     elif command.type == "refresh_paper":
         refresh_paper_account(bus)
     elif command.type == "paper_entry":
