@@ -108,6 +108,10 @@ border stripe. `/sentiment/bullbear` itself is untouched.)
 - **Out of scope, deliberately:** `/sentiment/bullbear` is unchanged and remains
   the structural read; the industry and stock levels are unchanged; the nightly
   cascade, its windows and its scoring are untouched.
+- **Suites:** `webgui` **3006 passed**, `sentiment_svc` **354 passed / 1 xfailed**
+  (the documented `test_daily_history_wins_over_session_latch`), `shared/tests`
+  **203 passed**, all clean. Commits `70387fb`…`e4e3f78` on
+  `claude/new-session-8a07f5`.
   [design](plans/2026-09-05-desk-bullbear-intraday-design.md) ·
   [plan](plans/2026-09-05-desk-bullbear-intraday-plan.md)
 
