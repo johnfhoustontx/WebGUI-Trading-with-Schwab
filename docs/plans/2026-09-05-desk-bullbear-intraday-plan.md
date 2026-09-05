@@ -129,23 +129,25 @@ Expected: FAIL — `assert 'SPY' in ['XLK']`
 
 **Step 3: Implement**
 
-Add the module constant near `BULLBEAR_LEVELS`:
+⚠ **Corrected during execution.** The plan originally invented a new
+`BULLBEAR_BENCHMARK` constant. `compute.MOMENTUM_BENCHMARK = "SPY"` already
+exists in this same module and is *the* benchmark the nightly cascade scores
+excess against (`bench = admitted.get(MOMENTUM_BENCHMARK)`); the Bull/Bear tree
+IS that cascade's `levels`, so its relative axis is measured against exactly
+that symbol. **Reuse it — do not add a second spelling, and do not add an alias.**
+`rotation_tool.BENCHMARK` is a different module's constant and is not reused.
+
+At the end of `bullbear_symbols`, before `return out`:
 
 ```python
-# The Bull/Bear relative axis is measured against this, and the Desk strip's
-# intraday quadrant needs its day move alongside the sectors'. It rides the
-# SAME batched call -- 374 symbols came back in one request (measured
-# 2026-08-19), so this is one more symbol, not one more request.
-BULLBEAR_BENCHMARK = "SPY"
-```
-
-Then, at the end of `bullbear_symbols`, before `return out`:
-
-```python
-    if BULLBEAR_BENCHMARK not in seen:
-        out.append(BULLBEAR_BENCHMARK)
+    if MOMENTUM_BENCHMARK not in seen:
+        out.append(MOMENTUM_BENCHMARK)
     return out
 ```
+
+The existing `seen` set is what keeps this from asking twice when SPY is already
+a scored stock row. Update the docstring: "every distinct symbol across the
+three levels" stops being the whole truth.
 
 **Step 4: Run to verify it passes**
 
@@ -199,7 +201,7 @@ Expected: FAIL — `KeyError: 'day_excess'`
 In `merge_live`, before the level loop:
 
 ```python
-    bench = ((quotes or {}).get(BULLBEAR_BENCHMARK) or {}).get("change_pct")
+    bench = ((quotes or {}).get(MOMENTUM_BENCHMARK) or {}).get("change_pct")
     bench = float(bench) if isinstance(bench, (int, float)) else None
 ```
 
