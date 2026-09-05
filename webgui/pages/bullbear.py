@@ -122,6 +122,28 @@ def row_axes(row):
     return _num(raw.get("trend")), _num(raw.get("excess"))
 
 
+def row_day_axes(row):
+    """A row's ``(day_pct, day_excess)`` — the SAME quadrant rule, today's numbers.
+
+    Today's % move, and that move minus the benchmark's: the intraday mirror of
+    :func:`row_axes`, feeding :func:`quadrant` unchanged. One classifier over
+    both horizons is deliberate — a strip/map disagreement then reads as a
+    difference of horizon and never of rule — and there is no deadband, so a
+    sector genuinely oscillating around the benchmark's return is shown
+    oscillating, which is true.
+
+    These live at the TOP level, not under ``raw``: ``raw`` is the nightly
+    cascade's own output and ``merge_live`` deliberately copies beside it rather
+    than writing into it. There is NO fallback to ``raw`` — a row with no live
+    fields has no intraday reading, and painting the quarter's reading in
+    today's colours is the one outcome this pair exists to avoid. Note the
+    service publishes None and never 0.0 for an absent reading, because 0.0 here
+    is measured and means "moved exactly with the benchmark".
+    """
+    row = row or {}
+    return _num(row.get("day_pct")), _num(row.get("day_excess"))
+
+
 def quadrant_counts(rows):
     """{quadrant: n} over rows, every bucket present even at zero.
 

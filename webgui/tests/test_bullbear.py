@@ -269,6 +269,81 @@ def test_row_axes_reads_both_axes_through_the_same_policy_as_quadrant():
     assert B.quadrant(*B.row_axes(_row(1.0, 0.1))) == "rising_leading"
 
 
+# ── the intraday axes: today's move, and today's move vs the benchmark ───────
+def test_row_day_axes_reads_the_top_level_live_fields():
+    """``day_pct``/``day_excess`` are SIBLINGS of ``raw``, not entries in it —
+    ``raw`` is the nightly cascade's own output and the service's ``merge_live``
+    deliberately copies beside it rather than writing into it. The fixture
+    carries a contradicting structural pair so the assertion can only pass by
+    reading the right block."""
+    row = {"day_pct": 1.2, "day_excess": 0.3, "raw": {"trend": 9.0, "excess": 9.0}}
+    assert B.row_day_axes(row) == (1.2, 0.3)
+
+
+def test_row_day_axes_does_not_fall_back_to_the_structural_block():
+    """The one outcome this whole re-keying exists to avoid. A row with no live
+    fields has no intraday reading, and (None, None) renders it as such. Falling
+    back to ``raw`` would paint the QUARTER's reading in today's colours —
+    indistinguishable from a real intraday one, on a strip whose entire promise
+    is that it shows today. Absence of a reading is not a reason to substitute a
+    different quantity that happens to be in reach."""
+    structural = _row(2.0, 0.5, symbol="XLV", label="Health Care")
+    assert B.row_day_axes(structural) == (None, None)
+    assert B.row_day_axes({"raw": {"trend": 2.0, "excess": 0.5}}) == (None, None)
+    assert B.row_day_axes({}) == (None, None)
+    assert B.row_day_axes(None) == (None, None)
+
+
+def test_row_day_axes_reads_through_the_same_num_policy_as_the_structural_pair():
+    """One notion of "is this a reading" across both horizons. A NaN day_pct that
+    slipped through would otherwise fall to the falling branch and paint a
+    confident bearish sector out of a missing quote, and a bool would print as a
+    1% move. Note 0.0 SURVIVES: it is a measured reading meaning "moved exactly
+    with the benchmark", which is why the service publishes None, never 0.0, for
+    an absent one."""
+    assert B.row_day_axes({"day_pct": "1.2", "day_excess": "-0.3"}) == (1.2, -0.3)
+    assert B.row_day_axes({"day_pct": 0.0, "day_excess": 0.0}) == (0.0, 0.0)
+    assert B.row_day_axes({"day_pct": float("nan"), "day_excess": 0.3}) \
+        == (None, 0.3)
+    assert B.row_day_axes({"day_pct": True, "day_excess": 0.3}) == (None, 0.3)
+    assert B.row_day_axes({"day_pct": 1.2, "day_excess": "abc"}) == (1.2, None)
+
+
+def test_the_intraday_horizon_classifies_through_the_one_quadrant_rule():
+    """Rule parity between the horizons, which is the invariant that matters:
+    the strip and the map must differ ONLY in which numbers they read, so a
+    disagreement between them is always readable as a horizon difference and
+    never as a rule one. Pinned as the exact call-site expression the Desk strip
+    uses, over a grid that straddles zero on BOTH axes — the tie rule is where a
+    second implementation would drift first, and 0.0 is reachable on day_excess
+    whenever a sector tracks the benchmark exactly.
+
+    There is deliberately no ``day_quadrant`` wrapper: one classifier means
+    parity is structural rather than tested. This asserts the axes reader feeds
+    it unchanged, which is the part that can still break."""
+    for pct in (-1.0, -0.01, 0.0, 0.01, 1.0):
+        for excess in (-1.0, -0.01, 0.0, 0.01, 1.0):
+            row = {"day_pct": pct, "day_excess": excess}
+            assert B.quadrant(*B.row_day_axes(row)) == B.quadrant(pct, excess)
+    # The tie rule, spelled out at the horizon that reaches it: a sector that
+    # moved exactly with the benchmark is not "leading", and a flat tape is not
+    # "rising".
+    assert B.quadrant(*B.row_day_axes({"day_pct": 1.2, "day_excess": 0.0})) \
+        == "rising_lagging"
+    assert B.quadrant(*B.row_day_axes({"day_pct": 0.0, "day_excess": 0.3})) \
+        == "falling_leading"
+
+
+def test_a_row_with_no_intraday_reading_is_unknown_not_a_direction():
+    """The absence path end to end. Off-hours, before the first publish, and for
+    a symbol the proxy omits, both fields are None — and the strip must render
+    "No reading" rather than borrowing the cautious falling_lagging bucket that
+    an unguarded pair of Nones would reach."""
+    assert B.quadrant(*B.row_day_axes({})) == "unknown"
+    assert B.quadrant(*B.row_day_axes(_row(2.0, 0.5))) == "unknown"
+    assert B.quadrant(*B.row_day_axes({"day_pct": 1.2})) == "unknown"
+
+
 def test_headline_is_empty_when_there_is_nothing_to_count():
     """"0 of 0 sectors rising and leading" reads as a maximally bearish tape
     where nothing was in fact published — the invented reading this module
