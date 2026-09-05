@@ -712,10 +712,9 @@ def strip_is_live(bullbear_view, now=None):
     as absent while a **measured** ``0.0`` — a genuinely flat tape — stays
     live. A truthiness test here would be the same bug one field over.
 
-    False is not a neutral or empty state — a CONTRACT on the caller, not a
-    description of one, since nothing calls this yet: pre-open is exactly when
-    this strip is read to plan the session, so a caller must still draw every
-    chip, on its structural horizon, and label it.
+    False is not a neutral or empty state: pre-open is exactly when this strip
+    is read to plan the session, so ``bullbear_chips`` and ``bullbear_headline``
+    both still draw every chip, on its structural horizon, and label it.
 
     ``now`` defaults to an AWARE local clock. ``market_calendar`` reads a naive
     datetime as Central, which is right on prod (its unit sets TZ) and silently
@@ -814,8 +813,12 @@ def bullbear_chips(bullbear_view, now=None, previous=None):
 # the calendar's answer, and a printed bell time here would be a second copy of
 # a value ``config/sessions.toml`` already owns.
 BB_CAPTION_LIVE = "sorted by today's move — the left edge marks the quarter"
-BB_CAPTION_STRUCTURAL = ("sorted by the quarter's strength — no session move "
-                         "to read yet")
+# ⚠ The reason clause deliberately does NOT say "no session move to read".
+# Every chip still prints a day-% cell, and off-session that cell is a stale
+# prior-session percent or the proxy's literal 0.00% — so a caption denying a
+# move sits directly over eleven of them, on the one screen whose thesis is not
+# printing a reading nobody took. It says which horizon it sorted by, and stops.
+BB_CAPTION_STRUCTURAL = "sorted by the quarter's strength — the session has not opened"
 
 # The horizon the headline's count was taken on. Two words, appended to the
 # map's own sentence rather than replacing it, so the count and its horizon
@@ -2248,8 +2251,10 @@ _BB_CHIP = ("flex-1 min-w-[124px] border border-l-[3px] rounded-[2px] "
 # classes, mapped from ``bullbear.QUADRANTS`` — never an f-string built from a
 # payload — and it tracks ``bullbear._CLASSES``' ramp so one quadrant is not
 # emerald in the fill and amber on the edge. HIGHER opacity than the fill
-# (/70 /40 /70 /70 /50 against the fills' /15 /5 /10 /15 /10), because 3px of
-# edge has to carry at a glance what a whole chip's wash carries.
+# (/70 /40 /70 /70 /50; the edges it actually out-paints are
+# ``quadrant_class``' border-* /30 /15 /25 /30 /20, and its bg-* washes are
+# fainter still at /15 /5 /10 /15 /10), because 3px of edge has to carry at a
+# glance what a whole chip's wash carries.
 # Degrades to ``unknown`` exactly as ``quadrant_class`` does.
 #
 # ⚠ These win over ``quadrant_class``' ``border-*`` shorthand for a reason that

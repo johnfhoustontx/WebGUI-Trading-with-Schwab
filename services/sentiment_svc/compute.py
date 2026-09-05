@@ -2339,8 +2339,10 @@ def bullbear_view(momentum) -> dict:
         "computed_at": momentum.get("computed_at"),
         "quoted_at": quoted_at,
         "regime": momentum.get("regime"),
-        # The axis every row's day_excess is measured against, published so the
-        # page can label it.
+        # The axis every row's day_excess is measured against. Tier 1 reads it
+        # as a LIVENESS sentinel, not to label: None here is the only in-band
+        # tell that the quote call came back without the benchmark, which the
+        # calendar cannot see.
         "benchmark_day_pct": _quoted_day_pct(quotes, MOMENTUM_BENCHMARK),
         "levels": merge_live(levels, quotes),
     }
