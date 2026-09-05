@@ -298,7 +298,20 @@ def test_gates_naked_low_capital_efficiency_fails_reward():
     g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5,
         "pop_pct": 70, "max_profit": 3.5, "capital": 900.0, "dte": 35,
         "legs": [{"bid": 3.4, "ask": 3.6, "mark": 3.5, "volume": 300, "oi": 800}]})
-    assert not g["passed_min"] and "R:R" in " ".join(g["reasons"])
+    assert not g["passed_min"] and "capital efficiency" in " ".join(g["reasons"])
+
+
+def test_gates_naked_reward_failure_is_labelled_capital_efficiency_not_rr():
+    """A naked short has no R:R -- its reward gate IS capital efficiency, so
+    reporting "R:R" names a dimension the profile does not even compare."""
+    g = sc.evaluate_gates(_naked(max_profit=1.0))
+    assert g["reasons"] == ["capital efficiency"]
+
+
+def test_gates_non_naked_reward_failure_is_still_labelled_rr():
+    g = sc.evaluate_gates({"type": "BULL_CALL", "rr": 0.1, "pop_pct": 40,
+        "legs": [{"bid": 1.0, "ask": 1.02, "mark": 1.01, "volume": 500, "oi": 1000}]})
+    assert "R:R" in g["reasons"] and "capital efficiency" not in g["reasons"]
 
 
 def test_gates_fail_illiquid():

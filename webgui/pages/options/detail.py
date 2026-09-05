@@ -220,6 +220,11 @@ _SWING_KEYS = frozenset(("fit_dir", "fit_vol", "q_rr", "q_be", "q_pop", "q_liq")
 _GATE_FLAGS = {
     "liquidity": ("gate_liquidity", "Thin liquidity"),
     "R:R": ("gate_rr", "Reward too thin for the risk"),
+    # A naked short has no R:R (unbounded loss), so evaluate_gates names its
+    # reward dimension "capital efficiency" instead. Same chip key as R:R: both
+    # are the one reward gate, only one can ever appear on a given signal, and a
+    # reader does not care which arithmetic the engine used to reach it.
+    "capital efficiency": ("gate_rr", "Reward too thin for the capital tied up"),
     "PoP": ("gate_pop", "Low probability of profit"),
 }
 

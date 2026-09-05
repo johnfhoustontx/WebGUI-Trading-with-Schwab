@@ -592,7 +592,8 @@ def evaluate_gates(signal):
 
     Returns ``{"passed_min": bool, "passed_excellent": bool, "reasons": [...]}``
     where ``reasons`` lists the dimensions that failed the MIN bars ("liquidity",
-    "R:R", "PoP"). Breakeven-vs-EM is intentionally NOT a gate (it's a ranking
+    "R:R" -- or "capital efficiency" for the NAKED profile, whose reward gate is
+    capital efficiency rather than an undefined R:R -- and "PoP"). Breakeven-vs-EM is intentionally NOT a gate (it's a ranking
     quality factor, not a hard filter). Defensive: a missing key -> that dimension
     treated as a fail (reward/pop); liquidity uses the already-defensive q_liq.
     """
@@ -621,7 +622,14 @@ def evaluate_gates(signal):
     if not liq_min:
         reasons.append("liquidity")
     if not reward_min:
-        reasons.append("R:R")
+        # Name the dimension actually compared. A naked short has no R:R (its
+        # loss is unbounded, so the ratio is undefined) -- its reward gate is
+        # capital efficiency, and reporting "R:R" pointed the reader at a bar
+        # the profile does not even have. Display-only: `reward_key` above still
+        # decides the compare. The webgui's _GATE_FLAGS carries the matching
+        # chip; an unmapped dimension there degrades to a generated label rather
+        # than vanishing, so the two tiers cannot silently disagree.
+        reasons.append("capital efficiency" if profile == "NAKED" else "R:R")
     if not pop_min:
         reasons.append("PoP")
     passed_min = liq_min and reward_min and pop_min
