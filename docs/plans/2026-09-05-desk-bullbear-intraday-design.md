@@ -112,10 +112,21 @@ strip is being read to plan the session, so it must still say something true.
 
 ### Ordering
 
-Day-ranked, strongest first, **with hysteresis**: a chip changes position only
-when its day move crosses its neighbour's by a margin. Without it a strip that
+Day-ranked, strongest first, **with hysteresis**: the day move is quantised into
+margin-sized buckets and the row's previous seat breaks ties, so a chip changes
+position only when it crosses a **bucket boundary**. Without it a strip that
 repaints every ~30 s reshuffles on sub-basis-point noise, and a glanceable strip
 that moves under the eye is not glanceable.
+
+⚠ **Stated precisely, because the looser phrasing was wrong.** This is not "a
+chip moves only when it beats its neighbour by a margin" — that would be a
+pairwise state machine, which the plan deliberately did not choose. Quantisation
+holds order *inside* a bucket, not across one, so a pair sitting a whisker apart
+either side of a boundary still swaps on every repaint. That residual is
+accepted and pinned by
+`test_by_day_move_still_swaps_a_pair_straddling_a_bucket_boundary`: it is
+bounded to adjacent seats, since such a pair is by construction within one
+margin of each other, and it is never a reshuffle of the strip.
 
 ### Headline
 

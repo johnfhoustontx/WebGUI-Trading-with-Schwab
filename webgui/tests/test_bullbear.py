@@ -567,10 +567,33 @@ def test_by_day_move_orders_strongest_first():
 
 def test_by_day_move_holds_position_inside_the_margin():
     """B leads A by 0.01pp — inside the margin, so the previous order survives
-    rather than the strip reshuffling on noise it repaints every ~30 seconds."""
-    rows = [{"symbol": "A", "day_pct": 1.00}, {"symbol": "B", "day_pct": 1.01}]
+    rather than the strip reshuffling on noise it repaints every ~30 seconds.
+
+    ⚠ The rows are handed in the OPPOSITE order to the expectation on purpose.
+    With them already in ``["A", "B"]`` this test passed with ``previous``
+    ignored entirely: both quantise to one bucket, the keys tie, and ``sorted``
+    is stable, so it pinned quantisation and never the seat — the named test for
+    hysteresis, carrying none of it.
+    """
+    rows = [{"symbol": "B", "day_pct": 1.01}, {"symbol": "A", "day_pct": 1.00}]
     out = B.by_day_move(rows, previous=["A", "B"])
     assert [r["symbol"] for r in out] == ["A", "B"]
+
+
+def test_by_day_move_still_swaps_a_pair_straddling_a_bucket_boundary():
+    """The residual this design accepts, recorded rather than left to be found.
+
+    Quantisation gives hysteresis INSIDE a bucket, not across one. Two chips a
+    whisker apart either side of a boundary land in different buckets, so the
+    move decides and the seat never gets a say — they swap on every repaint. A
+    pairwise state machine would hold them; the plan chose quantisation, and
+    this is the price. It is bounded: the pair is by construction within one
+    margin of each other, so the swap is between adjacent seats and never a
+    reshuffle of the strip.
+    """
+    rows = [{"symbol": "A", "day_pct": 1.199}, {"symbol": "B", "day_pct": 1.201}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["A", "B"])] == ["B", "A"]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["B", "A"])] == ["B", "A"]
 
 
 def test_by_day_move_reorders_once_the_margin_is_cleared():
