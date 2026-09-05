@@ -162,10 +162,15 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
                             {"iv_rank": 50.0,
                              "expected_moves": {"daily": {"move_dollars": 5.0}}})[1])
 
+    # ``earnings_date`` mirrors the real ``screen_spreads`` signature — the
+    # income window threads a date through it, and a double narrower than the
+    # function it doubles breaks on every future thread-through.
     def _screen(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
-                call_d_min, call_d_max, min_cr, kind, spot=None, daily_expected_move=None):
+                call_d_min, call_d_max, min_cr, kind, spot=None,
+                daily_expected_move=None, earnings_date=None):
         calls["screen"] = dict(min_cr=min_cr, kind=kind, spot=spot,
-                               dem=daily_expected_move)
+                               dem=daily_expected_move,
+                               earnings_date=earnings_date)
         return [{"symbol": symbol, "type": "PCS", "short_strike": 530.0,
                  "long_strike": 525.0, "short_mark": 1.2, "long_mark": 0.6,
                  "credit": 0.6, "max_loss": 4.4, "expiration": "2026-07-15",
@@ -186,8 +191,10 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
     assert calls["quote_symbol"] == "SPY"
     assert calls["iv_price"] == 540.0
 
-    # screen_spreads still called with SWING + spot + the daily EM.
+    # screen_spreads still called with SWING + spot + the daily EM, and no
+    # earnings date — the swing window has never consulted the calendar.
     assert calls["screen"]["kind"] == "SWING"
+    assert calls["screen"]["earnings_date"] is None
     assert calls["screen"]["spot"] == 540.0
     assert calls["screen"]["dem"] == 5.0
 

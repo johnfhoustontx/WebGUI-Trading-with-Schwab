@@ -269,7 +269,8 @@ def _passes_swing_cut(sig):
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
-               market_state=None) -> dict:
+               market_state=None, trade_type="SWING", structures=None,
+               earnings_date=None) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -300,6 +301,23 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     the schwab-py-compatible client passed into the engine calls, while
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
+
+    Three parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
+    and all three default to today's behaviour, because nine existing call sites
+    pass none of them:
+
+    * ``trade_type`` is threaded to the ONE ``se.screen_spreads`` call below. It
+      is the single thread that makes the earnings gate, the liquidity floor and
+      the calibration bucket all key off the window actually being scanned.
+    * ``structures``, when given, keeps only candidates whose ``type`` is in it.
+      Applied AFTER building and BEFORE ``score_all``, so ``filtered_out`` keeps
+      meaning "the quality cut removed N" rather than silently absorbing rows
+      the window never wanted.
+    * ``earnings_date``, when given, reaches ``screen_spreads`` (which drops a
+      conflicting expiration on the spread side) AND gates the candidates the
+      BUILDERS produced. ``strategy_scanner`` does not consult the calendar at
+      all, so without the second half a 35-DTE cash-secured put would sail
+      straight over the report the spreads were just protected from.
 
     ``strategy_scanner`` / ``strategy_scoring`` are imported lazily here (not at
     module top) to avoid binding the process-wide ``sys.modules`` entries merely by
@@ -364,13 +382,29 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if {"VERTICAL", "NEUTRAL"} & fams:
         spreads = list(se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min,
                                          put_d_max, call_d_min, call_d_max,
-                                         min_cr_fraction, "SWING", spot=spot,
-                                         daily_expected_move=dem))
+                                         min_cr_fraction, trade_type, spot=spot,
+                                         daily_expected_move=dem,
+                                         earnings_date=earnings_date))
     if "VERTICAL" in fams:
         signals += ssn.build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max)
         signals += [ssn.adapt_credit_spread(s) for s in spreads]
     if "NEUTRAL" in fams:
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
+
+    # Window filters, BEFORE scoring — a candidate this window does not trade is
+    # not a candidate the quality bar rejected, and ``filtered_out`` below is
+    # rendered as the latter. Both are no-ops on the default arguments.
+    if structures is not None:
+        wanted = set(structures)
+        signals = [s for s in signals if s.get("type") in wanted]
+    if earnings_date:
+        # Uniform over every family rather than only the builders' output: the
+        # adapted credit spreads were already gated inside ``screen_spreads``,
+        # so re-checking them is idempotent, and one predicate cannot drift out
+        # of step with itself the way two would.
+        signals = [s for s in signals
+                   if not se.check_earnings_conflict(earnings_date,
+                                                     s.get("expiration"))]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
 
@@ -388,6 +422,124 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     for s in signals:
         s["iv_rank"] = iv_rank
     return {"signals": signals, "view": view, "filtered_out": filtered_out}
+
+
+# ── INCOME window (30-45 DTE) ────────────────────────────────────────────────
+# A THIRD scan window beside 0-DTE and swing, on its own morning slot. Two-sided
+# by construction: screen_spreads loops BOTH expiry maps out of the same chain
+# object, so the CCS side costs no extra Schwab call. See
+# docs/plans/2026-09-05-income-window-and-share-inventory-design.md.
+INCOME_DTE_MIN = 30
+INCOME_DTE_MAX = 45
+
+# Short-delta band for the income window. Deliberately NOT
+# _scanner_config.directional_delta_range(): those bands (PCS -0.55..-0.30, CCS
+# 0.30..0.55) are for mode="DIRECTIONAL", which is explicitly exempt from the
+# PREMIUM-mode ceiling MAX_ENTRY_SHORT_DELTA (0.27). They sit entirely ABOVE it,
+# so every candidate would pass the band and then be dropped by the ceiling --
+# and that `continue` increments no reject counter, so the window would have
+# returned zero spreads forever while every stubbed test passed.
+#
+# 0.15-0.25 brackets the ~0.20-delta income convention with clearance on BOTH
+# sides, so a small drift in either the band or the ceiling cannot silently
+# empty the scan. Hugging 0.27 would put every candidate one tick from filtered.
+INCOME_PUT_DELTA = (-0.25, -0.15)
+INCOME_CALL_DELTA = (0.15, 0.25)
+
+# PCS/CCS are the two-sided premium core; SHORT_PUT is the cash-secured put.
+# Everything else build_directional / the VERTICAL family emits is a different
+# trade with a different thesis (a long call at 35 DTE is a direction bet;
+# SHORT_CALL is undefined risk; the debit verticals pay rather than collect), so
+# it is filtered rather than scored and ranked against these.
+#
+# ⚠ SHORT_PUT is the SCAN-side spelling. NAKED_PUT is the Calculator/rescue one
+# (compute._SINGLE_STRATEGIES). Do not introduce a third.
+_INCOME_STRUCTURES = ("PCS", "CCS", "SHORT_PUT")
+
+
+def _income_earnings(symbol, db_path=None):
+    """``(coverage, next report date or None)`` for the income window's gate.
+
+    Consumes :func:`shared.earnings.coverage`'s THREE-valued vocabulary
+    unchanged — ``"upcoming"`` / ``"none_scheduled"`` / ``"not_listed"`` — because
+    the last two both leave the date None and conflating them makes the gate
+    fail open silently on exactly the names most likely to be traded.
+
+    ⚠ ``"not_listed"`` must NOT drop the symbol. With no Alpha Vantage key and no
+    populated calendar it is the answer for EVERY symbol, so failing closed
+    would empty the whole scan and the feature would look broken rather than
+    uninformed. The row is stamped instead (``earnings_status``), which is this
+    repo's *never print a number you did not read* rule applied to a gate: a row
+    that skipped the check must not look like a row that passed it.
+
+    Never raises — a gate that raises costs the user the scan. ``db_path=None``
+    is resolved at CALL time (the ``paper_account_db`` shape), not bound as a
+    ``def``-time default, which is the trap that left ``signal_db``'s test
+    isolation inert for weeks.
+
+    ⚠ Reading a shared store is not a cross-service import — ``shared/earnings.py``
+    exists precisely so ``options_svc`` need not import ``trade_svc``.
+    """
+    import os
+
+    from shared import earnings as _earn
+
+    path = db_path or _earn.DEFAULT_DB_PATH
+    # The repo-root conftest refuses a sqlite3.connect into a live data dir, and
+    # init_db would CREATE the store besides. Mirrors trade_svc.earnings_coverage.
+    if db_path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return ("not_listed", None)
+    conn = None
+    try:
+        conn = _earn.init_db(path)
+        status = _earn.coverage(conn, symbol)
+        row = _earn.lookup(conn, symbol) if status == "upcoming" else None
+        return (status, row["report_date"] if row is not None else None)
+    except Exception:  # noqa: BLE001
+        log.warning("income earnings lookup failed for %s", symbol, exc_info=True)
+        return ("not_listed", None)
+    finally:
+        if conn is not None:
+            _earn.close_db(conn)
+
+
+def income_scan(symbol, market_state=None) -> dict:
+    """The 30-45 DTE income window for one symbol: PCS + CCS + cash-secured put.
+
+    A thin wrapper over :func:`swing_scan`, not a second pipeline: that function
+    already fetches the chain/quote/history, derives ``atm_iv`` past a documented
+    percent/decimal trap, guards a null chain and a null spot, scores, cuts,
+    assigns ids and stamps IV rank. Duplicating it is how ``clamp`` came to have
+    nine copies.
+
+    ⚠ Two row SHAPES land in one ranked list, exactly as ``swing_scan`` already
+    produces: the adapted spreads carry BOTH the flat ``short_strike`` contract
+    and ``legs``; ``SHORT_PUT`` carries only the normalized ``legs`` one, with
+    ``capital`` / ``max_loss`` / ``breakevens`` (a list) / ``rr`` (a ratio).
+    Readers must not assume either — see the ScanResult docstring.
+
+    The credit floor reuses ``min_credit_pct()["SWING"]`` (0.12) rather than
+    growing an ``income`` knob, and that is deliberate even though 0.12 is
+    commented in the TOML as the 1-15 DTE floor: it is DOMINATED here and
+    therefore inert. The binding constraint is the delta-aware edge floor
+    ``credit/width >= abs(delta) + EDGE_MARGIN(0.02)``, which at a 0.15-0.25
+    delta short demands 17-27%, and the credit floor is
+    ``max(0.12, MIN_ABS_CREDIT/width)`` = 0.12 at any width >= 2. A separate knob
+    would be a second constant that changes nothing until EDGE_MARGIN moves.
+    """
+    status, earnings_date = _income_earnings(symbol)
+    out = swing_scan(symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
+                     INCOME_PUT_DELTA[0], INCOME_PUT_DELTA[1],
+                     INCOME_CALL_DELTA[0], INCOME_CALL_DELTA[1],
+                     _scanner_config.min_credit_pct()["SWING"],
+                     families=("VERTICAL", "DIRECTIONAL"),
+                     market_state=market_state,
+                     trade_type="INCOME",
+                     structures=_INCOME_STRUCTURES,
+                     earnings_date=earnings_date)
+    for s in out["signals"]:
+        s["earnings_status"] = status
+    return out
 
 
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
