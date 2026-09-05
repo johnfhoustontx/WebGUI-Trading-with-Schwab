@@ -1511,6 +1511,27 @@ row for the assigned symbol, struck at or above basis.
   rule. A user-visible behaviour change lands in the manuals, not only the
   CHANGELOG.
 
+**Step 3b: Fix `options-scanner/CLAUDE.md`, which contradicts itself**
+
+Found 2026-09-05 while measuring baselines. That file states two different
+baselines for the same suite, and neither matches reality:
+
+| where | claims |
+|---|---|
+| "Commands" section, near the top | `1180 passed, 0 failed, 2 skipped` (re-measured 2026-08-21) |
+| "Commit conventions" section | `1311 passed / 17 failed` |
+| **measured on this branch, 2026-09-05** | **1215 passed, 2 skipped, 0 failed** (before this work) |
+
+The second is the worse of the two: it tells the next reader to expect a
+**standing red baseline of 17 failures**, which is exactly the condition that
+file's own audit section argues against — *"once '8 failures' is normal, a 9th is
+invisible"*. It also cites a `-p no:randomly` habit the same file elsewhere
+records as a **no-op**, since `pytest-randomly` is not installed in this venv.
+
+Correct both **in place** — the root `CLAUDE.md` rule is to edit the sentence, never
+to append a correction — and delete the stale failing-count guidance rather than
+updating it, since the suite is green.
+
 **Step 4: Update `CLAUDE.md` — but only the invariants**
 
 A shipped feature is not an entry there. What *is*: the new route rows in the
