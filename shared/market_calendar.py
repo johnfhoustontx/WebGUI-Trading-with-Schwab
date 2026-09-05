@@ -421,13 +421,19 @@ def is_regular_hours(now) -> bool:
 
 
 def regular_session_has_opened(now) -> bool:
-    """True on a trading day at or after the 08:30 CT open, close included.
+    """True on a trading day from the 08:30 CT open through end of day.
 
     Distinct from :func:`is_regular_hours`, which goes False at 15:00 CT. A
     consumer asking "is today's move real yet?" wants True from the opening
-    bell until the session date rolls -- the day's change does not stop being a
-    fact at the close. False on weekends and holidays, where a quote's percent
-    field is a stale prior close or the proxy's literal 0.0 fallback.
+    bell until midnight CT -- the day's change does not stop being a fact at
+    the close.
+
+    False whenever the bell has NOT rung: weekends, holidays, and the pre-open
+    hours alike. All three share one trap -- a quote's percent field is then a
+    stale prior close or the proxy's literal 0.0 fallback, neither of which is
+    today's move. The pre-open branch is the one a caller is most likely to
+    loosen later to catch a GTH print; it is a real move, but it is not the one
+    this predicate is asked about.
     """
     ct = _ct_of(now)
     if not is_trading_day(ct.date()):

@@ -580,7 +580,10 @@ def test_regular_session_has_opened_stays_true_after_the_cash_close():
 
 
 def test_regular_session_has_opened_is_false_at_the_weekend():
-    """2026-09-05 is a Saturday."""
+    """2026-09-05 is a Saturday -- asserted, not merely commented, so the
+    fixture cannot quietly become a weekday and take the test's meaning with
+    it (the holiday case below does the same)."""
+    assert dt.date(2026, 9, 5).weekday() == 5
     assert mc.regular_session_has_opened(dt.datetime(2026, 9, 5, 12, 0)) is False
 
 
@@ -593,3 +596,29 @@ def test_regular_session_has_opened_is_false_on_a_holiday():
     assert labor_day.weekday() == 0            # Monday -- the point of the fixture
     assert mc.is_holiday(labor_day) is True
     assert mc.regular_session_has_opened(dt.datetime(2026, 9, 7, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_at_the_opening_bell():
+    """08:30 itself is INSIDE: the bell opens the session, it does not precede
+    it. The pair straddles the boundary, so a ``>`` in place of the ``>=``
+    fails here and nowhere else."""
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 29)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 30)) is True
+
+
+def test_regular_session_has_opened_converts_a_non_ct_datetime():
+    """13:00 UTC == 08:00 CDT -> before the open; 14:00 UTC == 09:00 -> after.
+    A caller handing this an aware non-CT clock must not read the raw hour."""
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 13, 0, tzinfo=dt.timezone.utc)) is False
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 14, 0, tzinfo=dt.timezone.utc)) is True
+
+
+def test_regular_session_has_opened_reads_the_configured_regular_start(monkeypatch):
+    """It carries no time literal of its own -- move sessions.regular.start and
+    the boundary moves with it, exactly as ``next_regular_open`` does."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(9, 5), dt.time(15, 0)))
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 0)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 5)) is True
