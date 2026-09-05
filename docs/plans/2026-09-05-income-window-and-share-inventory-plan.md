@@ -1343,6 +1343,19 @@ settled ITM. Three moves, in this order:
 3. debit cash `strike × 100 × qty` and `insert_equity_lot(..., cost_basis=strike,
    source="assignment", source_position_id=pos["position_id"])`.
 
+⚠ **`_close` ALREADY releases the buying power — do not release it again.**
+`paper_engine._close` (`options-scanner/paper_engine.py:283`) calls
+`close_position`, then `release_buying_power(pos["max_loss_total"])`, then
+`realize_pnl`. So step 2 of the three-move sequence is done for you by the call
+you are already making; adding your own release would credit the reservation to
+cash **twice** and silently inflate the account. The only new move is step 3 —
+debit cash for the shares and insert the lot.
+
+Verify the invariant the way the design says: after a real assignment,
+`reconcile_buying_power` must return `0.0`. A double release shows up there
+immediately, which is why that assertion is in the task rather than a
+nice-to-have.
+
 Do **not** add a second detection path. The branch already defers a cycle when no
 underlying quote is available; an assignment that defers settles next cycle. Two
 mechanisms that can disagree is worse than one that is occasionally a cycle late.
