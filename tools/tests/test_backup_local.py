@@ -206,3 +206,111 @@ def test_every_carried_secret_is_repo_relative():
         p = pathlib.Path(rel)
         assert not p.is_absolute(), rel
         assert ".." not in p.parts, rel
+
+
+# ── the offsite upload, and the duplicate-name gap ───────────────────────────
+# WHY THESE EXIST. ``upload()`` had no tests, and it carried an assumption the
+# destination breaks: that a name identifies at most one object. Google Drive
+# lets two objects share a name, and on 2026-09-04 two did. The consequences
+# were not theoretical -- ``rclone check`` reported "sizes differ" on a backup
+# that had uploaded PERFECTLY (hash-verified against the local file afterwards),
+# and the retention counted the duplicate as a generation and evicted a real one
+# offsite. Nothing said so; the run just went red for the wrong reason.
+import json
+import types
+
+
+class _FakeRun:
+    """Stands in for subprocess.run over the four rclone calls upload() makes."""
+
+    def __init__(self, listing, copy_rc=0, check_rc=0):
+        self.listing = listing          # [(name, size, md5, id)]
+        self.copy_rc, self.check_rc = copy_rc, check_rc
+        self.deleted = []
+
+    def __call__(self, cmd, **kw):
+        verb = cmd[1]
+        if verb == "copy":
+            return types.SimpleNamespace(returncode=self.copy_rc, stdout="", stderr="")
+        if verb == "check":
+            return types.SimpleNamespace(returncode=self.check_rc, stdout="",
+                                         stderr="sizes differ")
+        if verb == "lsjson":
+            rows = [{"Name": n, "Size": s, "ID": i, "Hashes": {"md5": m}}
+                    for n, s, m, i in self.listing]
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+        if verb == "deletefile":
+            self.deleted.append(cmd[2])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected rclone verb: {verb}")
+
+
+def _archive(tmp_path, name="prod_2026-09-05_0736.tar.age", body=b"x" * 32):
+    p = tmp_path / name
+    p.write_bytes(body)
+    return p
+
+
+def test_a_duplicate_name_is_reported_rather_than_mis_verified(tmp_path, monkeypatch):
+    """The false alarm. Two objects, one name: ``rclone check`` picks one and
+    reports "sizes differ" about a backup that is actually fine. The operator
+    then cannot tell a broken upload from a duplicated one."""
+    arc = _archive(tmp_path)
+    fake = _FakeRun([("prod_2026-09-04_2004.tar.age", 10, "aaa", "id1"),
+                     ("prod_2026-09-05_0736.tar.age", 32, "good", "id2"),
+                     ("prod_2026-09-05_0736.tar.age", 99, "bad", "id3")])
+    monkeypatch.setattr(bl.subprocess, "run", fake)
+    ok, detail = bl.upload(arc, remote="gdrive:X", keep=3)
+    assert ok is False
+    assert "duplicate" in detail.lower()
+    assert "id2" in detail and "id3" in detail      # names the objects to triage
+    assert not fake.deleted                          # never deletes on its own
+
+
+def test_a_duplicate_never_costs_a_real_generation(tmp_path, monkeypatch):
+    """The half that lost data. ``rclone lsf`` lists OBJECTS, so a duplicated
+    name was counted twice and the retention evicted a genuine generation to
+    make room for it. Retention counts DISTINCT names."""
+    arc = _archive(tmp_path)
+    fake = _FakeRun([("prod_2026-09-01_2002.tar.age", 10, "a", "i1"),
+                     ("prod_2026-09-03_2001.tar.age", 10, "b", "i2"),
+                     ("prod_2026-09-04_2004.tar.age", 10, "c", "i3"),
+                     ("prod_2026-09-04_2004.tar.age", 11, "d", "i4"),
+                     ("prod_2026-09-05_0736.tar.age", 32, "good", "i5")])
+    monkeypatch.setattr(bl.subprocess, "run", fake)
+    bl.upload(arc, remote="gdrive:X", keep=3)
+    # Four DISTINCT generations, keep 3 -> exactly the oldest one goes.
+    assert fake.deleted == ["gdrive:X/prod_2026-09-01_2002.tar.age"]
+
+
+def test_the_offsite_count_reports_generations_not_objects(tmp_path, monkeypatch):
+    """"3 generation(s) offsite" must mean three restorable points, not three
+    rows in a listing."""
+    arc = _archive(tmp_path)
+    fake = _FakeRun([("prod_2026-09-04_2004.tar.age", 10, "c", "i3"),
+                     ("prod_2026-09-04_2004.tar.age", 11, "d", "i4"),
+                     ("prod_2026-09-05_0736.tar.age", 32, "good", "i5")])
+    monkeypatch.setattr(bl.subprocess, "run", fake)
+    _ok, detail = bl.upload(arc, remote="gdrive:X", keep=3)
+    assert "2 generation(s) offsite" in detail       # not 3
+
+
+def test_the_clean_path_still_verifies_and_prunes(tmp_path, monkeypatch):
+    arc = _archive(tmp_path)
+    fake = _FakeRun([("prod_2026-09-02_2001.tar.age", 10, "a", "i1"),
+                     ("prod_2026-09-03_2001.tar.age", 10, "b", "i2"),
+                     ("prod_2026-09-04_2004.tar.age", 10, "c", "i3"),
+                     ("prod_2026-09-05_0736.tar.age", 32, "good", "i5")])
+    monkeypatch.setattr(bl.subprocess, "run", fake)
+    ok, detail = bl.upload(arc, remote="gdrive:X", keep=3)
+    assert ok is True and "verified" in detail
+    assert fake.deleted == ["gdrive:X/prod_2026-09-02_2001.tar.age"]
+
+
+def test_a_real_checksum_failure_is_still_a_failure(tmp_path, monkeypatch):
+    """The duplicate handling must not swallow the case the check exists for."""
+    arc = _archive(tmp_path)
+    fake = _FakeRun([("prod_2026-09-05_0736.tar.age", 32, "good", "i5")], check_rc=1)
+    monkeypatch.setattr(bl.subprocess, "run", fake)
+    ok, detail = bl.upload(arc, remote="gdrive:X", keep=3)
+    assert ok is False and "CHECKSUM MISMATCH" in detail

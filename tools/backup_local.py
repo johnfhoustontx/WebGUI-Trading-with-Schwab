@@ -53,6 +53,7 @@ Usage:
 """
 import argparse
 import datetime as dt
+import json
 import os
 import pathlib
 import shlex
@@ -222,6 +223,38 @@ def encrypt_generation(gen_dir, out_path, recipient):
     return True, f"{out_path.stat().st_size:,} bytes"
 
 
+def _md5(path, chunk=1 << 20):
+    """Streaming md5 of a local file. Only ever called on the duplicate path,
+    where 1.5 GB of hashing buys the one fact that resolves it."""
+    import hashlib
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _remote_objects(remote):
+    """``[{name, size, md5, id}]`` for every object on the remote.
+
+    ``lsjson``, not ``lsf``. ``lsf`` returns a bare list of NAMES, in which two
+    objects sharing one name are indistinguishable from two generations -- which
+    is exactly the state that cost a restore point. Degrades to ``[]`` rather
+    than raising: a listing failure must not lose the upload that preceded it.
+    """
+    r = subprocess.run(["rclone", "lsjson", remote + "/", "--hash"],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return []
+    try:
+        rows = json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+    return [{"name": o.get("Name", ""), "size": o.get("Size"),
+             "md5": (o.get("Hashes") or {}).get("md5"), "id": o.get("ID")}
+            for o in rows]
+
+
 def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
     """rclone copy `path` to `remote`, verify by checksum, prune old. (ok, detail).
 
@@ -233,14 +266,48 @@ def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
                            capture_output=True, text=True, timeout=7200)
         if p.returncode != 0:
             return False, (p.stderr or "rclone copy failed").strip()[:300]
+        objects = _remote_objects(remote)
+
+        # ⚠ DUPLICATE NAMES, checked BEFORE the checksum. The destination is
+        # Google Drive, where two objects may share one name -- and on
+        # 2026-09-04 two did, 30 seconds apart, differing by 92 KB. The cause of
+        # the second object was never established; what matters is that the code
+        # below assumed a name identifies one object, and both things it does
+        # with a name break when it does not:
+        #
+        #   * ``rclone check`` picks one of them and reports "sizes differ" --
+        #     about an upload that was in fact PERFECT. The good object was
+        #     hash-verified against the local file afterwards, by hand.
+        #   * the retention counted the duplicate as a generation and evicted a
+        #     real one offsite, silently, leaving two restore points where the
+        #     policy says three.
+        #
+        # So a duplicate is now reported, loudly and with the object IDs and
+        # hashes needed to tell which is which. It is NOT auto-deleted: this is
+        # the only offsite copy of the trading record, and "newest" and
+        # "largest" -- the obvious rclone dedupe modes -- would BOTH have kept
+        # the wrong object that night. Only the local hash can say.
+        same_name = [o for o in objects if o["name"] == path.name]
+        if len(same_name) > 1:
+            mine = _md5(path)
+            lines = "; ".join(
+                f"id={o['id']} {o['size']}B md5={o['md5']}"
+                f"{' <- MATCHES LOCAL' if o['md5'] == mine else ''}"
+                for o in same_name)
+            return False, (f"DUPLICATE NAME on the remote: {len(same_name)} objects "
+                           f"named {path.name}. Local md5={mine}. {lines}. "
+                           f"Retention skipped; delete the non-matching object(s) "
+                           f"by id, never by newest/largest.")
+
         c = subprocess.run(["rclone", "check", str(path.parent), remote + "/",
                             "--include", path.name, "--one-way"],
                            capture_output=True, text=True, timeout=3600)
         if c.returncode != 0:
             return False, "uploaded but CHECKSUM MISMATCH: " + (c.stderr or "").strip()[:200]
-        listing = subprocess.run(["rclone", "lsf", remote + "/"],
-                                 capture_output=True, text=True, timeout=300)
-        names = sorted(n for n in listing.stdout.split() if n.endswith(".tar.age"))
+
+        # DISTINCT names, not objects: a generation is a name, and counting rows
+        # is what let one duplicate evict a real restore point.
+        names = sorted({o["name"] for o in objects if o["name"].endswith(".tar.age")})
         for old in names[:-keep] if len(names) > keep else []:
             subprocess.run(["rclone", "deletefile", f"{remote}/{old}"],
                            capture_output=True, text=True, timeout=300)
