@@ -1095,6 +1095,19 @@ def test_strip_is_not_live_before_the_bell_on_a_trading_day():
     assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 7, 0)) is False
 
 
+def test_strip_is_not_live_before_the_bell_on_a_stale_non_zero_benchmark():
+    """The case that DISCRIMINATES, which the zero above does not.
+
+    A benchmark of 0.0 pre-open is rejected by a numbers-based switch too, so
+    that test alone cannot tell a calendar switch from a numbers one. Here the
+    proxy hands back a stale prior-close percent that is a perfectly ordinary
+    number — nothing in the payload says the bell has not rung. Only the
+    calendar knows.
+    """
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 7, 0)) is False
+
+
 def test_strip_is_not_live_when_the_benchmark_is_missing():
     view = {"levels": {"sector": []}, "benchmark_day_pct": None}
     assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is False
@@ -1181,7 +1194,13 @@ def test_strip_is_live_asks_the_calendar_not_the_numbers():
     # And it must not read the sector rows AT ALL: inferring "there is day data
     # today" from the numbers is precisely the inference that cannot be made,
     # and the rows are where those numbers live.
-    for row_reader in ("levels", "row_day_axes", "by_day_move", "day_excess"):
+    # ``_bullbear_rows`` is the ergonomic accessor twelve lines below, so it is
+    # the spelling a regression would actually use. Without it this loop only
+    # caught a direct ``view["levels"]`` walk — the LEAST likely one — and a
+    # rewrite that kept the calendar call and merely ANDed a rows clause sailed
+    # past a guard that read like coverage.
+    for row_reader in ("levels", "_bullbear_rows", "row_day_axes",
+                       "by_day_move", "day_excess"):
         assert row_reader not in body
 
 

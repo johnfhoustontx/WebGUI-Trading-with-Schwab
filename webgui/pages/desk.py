@@ -706,14 +706,16 @@ def strip_is_live(bullbear_view, now=None):
     read after the close as often as during the session.
 
     The benchmark clause catches what a calendar cannot see — a dead proxy
-    mid-session, where ``compute.merge_live`` leaves ``benchmark_day_pct``
-    None. It goes through ``pages.fmt.num``, the STRICT reader, so a NaN counts
+    mid-session, where ``compute.bullbear_view`` leaves ``benchmark_day_pct``
+    None (``merge_live`` attaches the per-row fields; the top-level one is
+    ``bullbear_view``'s). It goes through ``pages.fmt.num``, the STRICT reader, so a NaN counts
     as absent while a **measured** ``0.0`` — a genuinely flat tape — stays
     live. A truthiness test here would be the same bug one field over.
 
-    False is not a neutral or empty state: pre-open is exactly when this strip
-    is read to plan the session, so the caller still draws every chip, on its
-    structural horizon, and says so.
+    False is not a neutral or empty state — a CONTRACT on the caller, not a
+    description of one, since nothing calls this yet: pre-open is exactly when
+    this strip is read to plan the session, so a caller must still draw every
+    chip, on its structural horizon, and label it.
 
     ``now`` defaults to an AWARE local clock. ``market_calendar`` reads a naive
     datetime as Central, which is right on prod (its unit sets TZ) and silently
