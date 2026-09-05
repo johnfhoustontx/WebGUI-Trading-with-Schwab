@@ -646,6 +646,15 @@ matters more here than at any other horizon: a 30–45 DTE chain carries far mor
 dead strikes than a 0-DTE one, and an untradeable spread with a fat theoretical
 credit is exactly what a premium screen must not surface.
 
+⚠ **This covers the SPREAD side only — the cash-secured put has a DIFFERENT
+liquidity gate, and it already works.** `SHORT_PUT` comes from
+`build_directional`, never touches `screen_spreads`, and is therefore never
+measured against `LIQUIDITY_THRESHOLDS` at all. It is gated by
+`strategy_scoring._liquidity_ok` (`q_liq` plus per-leg `OI_FLOOR`/`VOL_FLOOR`),
+which is trade-type-agnostic and passed cleanly in the 35-DTE probe. Adding the
+`INCOME` entry fixes PCS/CCS and changes nothing for the CSP — do not assume one
+gate covers both, and do not "unify" them in this task.
+
 Add an `INCOME` entry. Do **not** copy SWING's numbers unthinkingly — the two
 differ in a specific way you should reason about and write down: a monthly strike
 *accumulates* open interest but trades *less per day* than a weekly, so `min_oi`
