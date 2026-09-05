@@ -1687,7 +1687,7 @@ def test_countdown_takes_every_session_bound_from_the_shared_calendar():
 
 
 # ── render() smoke ───────────────────────────────────────────────────────────
-# ``render()`` is otherwise unexercised: /desk has no route yet, so no shell
+# ``render()`` is otherwise thinly exercised here, so no shell
 # smoke test reaches it. These build the page against the auto-index client and
 # read the text back out — enough to catch a bad name, a stale handle, or (the
 # one that matters) a cold service rendering as a confident zero.

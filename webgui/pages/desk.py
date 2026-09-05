@@ -742,9 +742,11 @@ def _bullbear_rows(bullbear_view, live=False, previous=None):
     which always sorts by strength: the two screens answer different questions
     — the strip asks what is working today, the map asks what has worked this
     quarter — and a strip that coloured by today while ranking by the quarter
-    would be the one genuinely incoherent combination. The divergence is
-    legible rather than silent because the strip captions itself with what it
-    sorted by. ``previous`` is the day sorter's hysteresis seat order and does
+    would be the one genuinely incoherent combination. ⚠ That divergence is
+    only defensible once the strip SAYS what it sorted by, and nothing captions
+    it yet — so this function and the caption must ship together, and until
+    they do the divergence is silent. ``previous`` is the day sorter's
+    hysteresis seat order and does
     nothing on the structural horizon, which does not move between paints.
     """
     view = bullbear_view if isinstance(bullbear_view, dict) else {}
@@ -785,7 +787,7 @@ def bullbear_chips(bullbear_view, now=None, previous=None):
     """
     live = strip_is_live(bullbear_view, now)
     out = []
-    for row in _bullbear_rows(bullbear_view, live, previous):
+    for row in _bullbear_rows(bullbear_view, live=live, previous=previous):
         share = _bb.row_participation(row)
         out.append({
             "label": str(row.get("label") or row.get("symbol") or ""),
