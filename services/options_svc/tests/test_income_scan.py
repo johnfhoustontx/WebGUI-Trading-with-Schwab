@@ -316,3 +316,42 @@ def test_swing_scan_defaults_are_unchanged(income_seams):
         s["type"] for s in out["signals"]}
     # And no earnings_status is invented on a swing row.
     assert all("earnings_status" not in s for s in out["signals"])
+
+
+def test_a_dated_row_never_costs_a_second_read(tmp_path, monkeypatch):
+    """ONE read decides both halves, and that is a correctness property.
+
+    ``coverage`` calls ``lookup`` itself and ``lookup`` swallows its own failure
+    to None, so asking each in turn is two INDEPENDENT reads: the first can
+    answer "upcoming" while the second fails alone, yielding
+    ``("upcoming", None)`` -- a row stamped as CHECKED whose gate never fired.
+    Both halves degrade quietly, so nothing would surface it.
+
+    Pinned structurally rather than by simulating a partial failure: when a row
+    exists, ``coverage`` must not be consulted at all, so the two cannot
+    disagree by construction.
+    """
+    import datetime as _dt
+
+    from shared import earnings as _earn
+
+    db = tmp_path / "e.db"
+    conn = _earn.init_db(db)
+    soon = (_dt.date.today() + _dt.timedelta(days=20)).isoformat()
+    conn.execute("INSERT INTO earnings (symbol, report_date) VALUES (?, ?)",
+                 ("AAPL", soon))
+    conn.commit()
+    _earn.close_db(conn)
+
+    calls = []
+    real_coverage = _earn.coverage
+    monkeypatch.setattr(_earn, "coverage",
+                        lambda *a, **k: (calls.append(a[1]), real_coverage(*a, **k))[1])
+
+    assert compute._income_earnings("AAPL", db_path=db) == ("upcoming", soon)
+    assert calls == [], "coverage was consulted despite a row being found"
+
+    # The converse: with no row, coverage IS what draws none_scheduled vs
+    # not_listed, so it must still be reached.
+    assert compute._income_earnings("NOSUCH", db_path=db) == ("not_listed", None)
+    assert calls == ["NOSUCH"]

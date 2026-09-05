@@ -397,11 +397,19 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if structures is not None:
         wanted = set(structures)
         signals = [s for s in signals if s.get("type") in wanted]
-    if earnings_date:
+    if earnings_date and trade_type in se.EARNINGS_GATED_TRADE_TYPES:
         # Uniform over every family rather than only the builders' output: the
         # adapted credit spreads were already gated inside ``screen_spreads``,
-        # so re-checking them is idempotent, and one predicate cannot drift out
-        # of step with itself the way two would.
+        # so re-checking them is idempotent.
+        #
+        # ⚠ The trade_type condition MIRRORS screen_spreads' own gate and is not
+        # decoration. Without it the two halves disagree for any window the
+        # engine deliberately exempts: a 0-DTE caller passing an earnings_date
+        # would have its BUILDER candidates dropped here while its SPREAD
+        # candidates were kept, since a 0-DTE position is flat by the close and
+        # cannot be held through a report. Unreachable today — income_scan is
+        # the only caller that passes a date — which is exactly why it would
+        # have been found the hard way.
         signals = [s for s in signals
                    if not se.check_earnings_conflict(earnings_date,
                                                      s.get("expiration"))]
@@ -492,9 +500,19 @@ def _income_earnings(symbol, db_path=None):
     conn = None
     try:
         conn = _earn.init_db(path)
-        status = _earn.coverage(conn, symbol)
-        row = _earn.lookup(conn, symbol) if status == "upcoming" else None
-        return (status, row["report_date"] if row is not None else None)
+        # ONE read decides both halves. ``coverage`` calls ``lookup`` itself
+        # (shared/earnings.py:127) and ``lookup`` swallows its own failure to
+        # None, so asking each in turn is two independent reads: the first can
+        # answer "upcoming" while the second fails alone, returning
+        # ("upcoming", None) -- a row stamped as CHECKED whose gate never fired.
+        # That is the precise inverse of what this helper exists to protect, and
+        # it is invisible because both halves degrade quietly.
+        row = _earn.lookup(conn, symbol)
+        if row is not None:
+            return ("upcoming", row["report_date"])
+        # No row: only now does the none_scheduled / not_listed distinction
+        # matter, and ``coverage`` is the thing that draws it.
+        return (_earn.coverage(conn, symbol), None)
     except Exception:  # noqa: BLE001
         log.warning("income earnings lookup failed for %s", symbol, exc_info=True)
         return ("not_listed", None)

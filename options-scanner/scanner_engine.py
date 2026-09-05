@@ -497,6 +497,18 @@ LIQUIDITY_THRESHOLDS = {
 # (tests/test_scanner_engine.py::TestScannedTradeTypesAreAllGated).
 SCANNED_TRADE_TYPES = ("0-DTE", "SWING", "INCOME")
 
+# The windows whose positions are HELD across sessions, and so can be held
+# through an earnings report. 0-DTE is absent because it is flat by the close --
+# a hold-duration argument, NOT a claim that check_earnings_conflict would
+# return False for a same-day expiry (its window is [today - 5d, expiration], so
+# a report earlier this week falls inside it).
+#
+# Exported because the gate is applied in TWO places: screen_spreads' own loop,
+# and services/options_svc.compute.swing_scan's post-build filter over the
+# builder families, which screen_spreads never sees. They must agree, and a
+# shared tuple is the only way they cannot drift.
+EARNINGS_GATED_TRADE_TYPES = ("SWING", "INCOME")
+
 # Absolute spread cents below which the percentage gate is bypassed.
 # Penny-wide markets on cheap options (e.g. $0.05 mid, $0.01 ask-bid) are
 # the tightest possible markets — rejecting them as "wide" because 1¢/5¢
@@ -872,7 +884,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             # check_earnings_conflict would return False for a 0-DTE: its window
             # is [today - 5d, expiration], so a report earlier this week falls
             # inside it. 0-DTE is exempt because it is flat by the close.)
-            if earnings_date and trade_type in ("SWING", "INCOME"):
+            if earnings_date and trade_type in EARNINGS_GATED_TRADE_TYPES:
                 if check_earnings_conflict(earnings_date, exp_str):
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
