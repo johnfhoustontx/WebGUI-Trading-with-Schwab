@@ -252,6 +252,94 @@ several hyphenated app dirs on `sys.path` at once.
 
 ---
 
+## Task 2.6: Annualise the NAKED capital-efficiency bar
+
+**Why this task exists.** Measured while de-risking Task 3: a healthy 35-DTE
+cash-secured put is graded **Weak and cut**, and so is a short call. Neither can
+reach the Strategy Finder today — `build_directional` builds all four singles on
+every scan and `_passes_swing_cut` silently discards the two short ones.
+
+The failing dimension is `capeff` (`max_profit / capital`) against
+`GATE_BARS["NAKED"]["min"]["capeff"] = 0.10`, and **the bar carries no DTE
+normalisation** — 10% return on capital *per trade*, whether the trade lasts one
+day or forty-five. Measured on a Black-Scholes 35-DTE chain at IV 0.28:
+
+| structure | profile | capeff | bar | pop | pop bar |
+|---|---|---|---|---|---|
+| `SHORT_PUT` | NAKED | **0.0170** | 0.10 | 74.1 | 65 ✅ |
+| `SHORT_CALL` | NAKED | **0.0718** | 0.10 | 80.4 | 65 ✅ |
+
+That put returns **1.70% over 35 days = 17.8% annualised**, which is a perfectly
+ordinary cash-secured put. Both clear liquidity and PoP comfortably; only the
+un-annualised reward bar stops them.
+
+⚠ **There is an asymmetry worth understanding before touching the bar.**
+`payoff_metrics` capitalises a short CALL at the margin proxy (`spot × 0.20 ×
+100` = $2,001) but a short PUT at its true stock-to-zero max loss ($9,439). So
+the put is measured against ~4.7× the capital on the same bar. That is correct
+for a genuinely *cash-secured* put — the full notional really is committed — and
+it is exactly why an un-annualised bar cannot serve both.
+
+**This is a bug, not the design.** The `GATE_BARS` comment states the intent:
+naked shorts' low capital efficiency *"keeps its composite below `STRONG_MIN`, so
+'Strong' is effectively unreachable — intended (a naked short is rarely your best
+trade)"*. Unreachable-**Strong** is the stated intent. Uniformly-**Weak-and-cut**
+is not, and nothing in the file argues for it.
+
+**Files:**
+- Modify: `options-scanner/strategy_scoring.py` — `_reward_metric` (or the NAKED branch of `evaluate_gates`) and the reason label
+- Test: `options-scanner/tests/test_strategy_scoring.py`
+
+### Part A — annualise
+
+Compare return-on-capital **per year** for the NAKED profile, so a `0.10` bar
+means 10%/yr and finally means what it says. `dte` is on the signal already.
+
+⚠ **Do not simply keep the 0.10 bar and assume you are done — MEASURE.**
+Annualising helps long-dated trades and helps short-dated ones *enormously*: a
+1-DTE naked short at 2% capeff annualises to **730%**. The bar may need raising to
+compensate, or the metric may need a floor on `dte`. Required before you pick a
+number:
+
+1. Sweep DTE (1, 7, 14, 21, 35, 45) on a realistic chain and tabulate annualised
+   capeff for `SHORT_PUT` and `SHORT_CALL`.
+2. State what the chosen bars admit and exclude at each end.
+3. Confirm the change does **not** flood the existing Strategy Finder with
+   short-dated naked shorts — that page is a live surface and this is a shared
+   scoring module.
+
+Guard `dte <= 0` and a missing `dte`: an expired or unknown-horizon signal must
+not annualise to infinity and sail through. Absence means "cannot judge", which
+here means **do not pass** — the reward metric returns `None` and the gate fails,
+which is the existing behaviour for an unknown reward.
+
+### Part B — the reason label
+
+`evaluate_gates` hardcodes `reasons.append("R:R")` for every profile
+(`strategy_scoring.py:587`), so a naked short failing on capital efficiency
+reports `"R:R"`. Display-only, and it cost twenty minutes of diagnosing the wrong
+gate. Report `"capital efficiency"` when the profile is NAKED.
+
+**Commit A and B separately** — one is a scoring change with a live blast radius,
+the other is a string.
+
+### Verify
+
+Both suites, failing SET and skipped SET, against:
+
+| suite | baseline |
+|---|---|
+| `options-scanner` | 1217 passed, 2 skipped, 0 failed |
+| `services/options_svc` | 1358 passed, 0 failed |
+
+Any pre-existing test that pins a naked short as Weak is a **characterization
+test of the bug** — this repo has a documented incident where exactly that
+(`test_adx_uses_wilder_smoothing` pinning 47.0052 against a textbook 32.5) bought
+three weeks of a wrong indicator. Update it to assert the corrected behaviour and
+say so in the commit; do not preserve it.
+
+---
+
 ## Task 3: The `income_scan` compute function
 
 **Files:**
