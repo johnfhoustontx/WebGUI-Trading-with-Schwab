@@ -110,29 +110,51 @@ GATE_BARS = {
     # trade as of a 45-day one and so graded EVERY ordinary cash-secured put
     # Weak-and-cut (a 35-DTE CSP returns 1.70%/trade = 17.8%/yr).
     #
+    # ⚠ The annualisation HORIZON is floored at `MIN_ANNUALISE_DTE` (5), so
+    # below 5 DTE the bar stops being a pure rate and becomes "must earn about
+    # five days' worth". Every figure in this block is quoted at that floor,
+    # which changes only the 1-DTE and 3-DTE columns; nothing at 5 DTE or beyond
+    # moves. See MIN_ANNUALISE_DTE for the measurement behind the 5.
+    #
     # The 0.10/0.20 numbers are unchanged, and that is a measured choice, not an
     # oversight. RE-RUN THE MEASUREMENT: `python tools/sweep_naked_capeff.py
     # --rows` prints every figure below — pure Black-Scholes through these same
     # scorers, no Schwab call and no DB. Swept over 1-60 DTE (spot 100, IV 0.28,
-    # 0.50-wide strikes), annualised capeff runs 0.55-3.78 for SHORT_CALL and
-    # 0.14-0.73 for SHORT_PUT — the ~4.4x mean gap being the CAPITAL BASIS (a
+    # 0.50-wide strikes), annualised capeff runs 0.55-2.03 for SHORT_CALL and
+    # 0.14-0.40 for SHORT_PUT — the ~4.4x mean gap being the CAPITAL BASIS (a
     # short call is capitalised at the 20%-of-spot margin proxy, a short put at
     # its true stock-to-zero max loss). So the two structures are separated by
     # capital, not by horizon, and raising the bar to discourage short-dated
     # shorts cuts on the wrong axis: 0.20/yr would admit every short call at
     # every DTE (its floor is 0.55) while cutting every cash-secured put from 20
     # DTE out — 0.21 at 20, 0.18 at 35, 0.16 at 45, 0.14 at 60 — which is the
-    # class this fix exists to admit. The short end is already braked by
-    # q_breakeven_vs_em: a 1-DTE naked short composites 48.8-48.9, under the 50.0
-    # publish floor both callers apply.
+    # class this fix exists to admit. THE HORIZON AXIS HAS ITS OWN LEVER, and it
+    # is `MIN_ANNUALISE_DTE`, not this bar.
     #
     # ⚠ Quote those figures WITH their parameters — they move with the strike
-    # ladder (a 2.5-wide ladder lifts the SHORT_CALL ceiling to 10.5/yr). They
-    # shifted slightly on 2026-09-05 when the sweep was committed as a script:
-    # the prose here had read 0.59-3.78 / ~4.7x / ~49.6 from a sweep that existed
-    # only in a session transcript. The argument is unchanged; the numbers are
-    # now re-runnable. (The script also reproduces the two `_naked()` fixtures in
-    # test_strategy_scoring.py exactly, at its 35-DTE row.)
+    # ladder (a 2.5-wide ladder reads 0.39-2.10 for SHORT_CALL). Two corrections
+    # rather than one, because this block has now shipped stale numbers twice:
+    #   * 2026-09-05, committing the sweep as a script: the prose had read
+    #     0.59-3.78 / ~4.7x from a sweep that existed only in a session
+    #     transcript.
+    #   * 2026-09-05, Task 2.7: the ceilings fell (3.78 -> 2.03, 0.73 -> 0.40,
+    #     and the 2.5-wide SHORT_CALL 10.5 -> 2.10) because they were all set at
+    #     1 DTE, which `MIN_ANNUALISE_DTE` now divides by 5 instead of 1. Every
+    #     figure at 5 DTE or beyond, including the whole 20-60 DTE argument
+    #     above, is untouched.
+    # The argument is unchanged across both; the numbers are re-runnable, which
+    # is the only reason either correction was possible. (The script also
+    # reproduces the two `_naked()` fixtures in test_strategy_scoring.py exactly,
+    # at its 35-DTE row.)
+    #
+    # ⚠ A DELETED CLAIM, recorded so it cannot come back: this block used to end
+    # "the short end is already braked by q_breakeven_vs_em: a 1-DTE naked short
+    # composites 48.8-48.9, under the 50.0 publish floor". Those two composites
+    # are real at that one grid point and nothing more — the repo's own
+    # `fake_client` fixture emits 1-DTE naked shorts at 52.1 and 53.2 through the
+    # production cut, so the short end was NOT braked, and Task 2.7 exists
+    # because it was not. Do not re-derive a general brake from a single
+    # synthetic chain.
     "NAKED":   {"min": {"liq": 40, "capeff": 0.10, "pop": 65},
                 "excellent": {"liq": 70, "capeff": 0.20, "pop": 78}},
     "DEBIT":   {"min": {"liq": 45, "rr": 0.6,  "pop": 30},
@@ -156,6 +178,38 @@ _TYPE_PROFILE = {
 # absent data never false-fails the liquidity gate).
 OI_FLOOR = 50
 VOL_FLOOR = 5
+
+# Floor on the ANNUALISATION HORIZON (days) for the NAKED reward metric: the
+# divisor is `max(dte, MIN_ANNUALISE_DTE)`, so a trade shorter than this must
+# earn roughly this many days' worth of return to clear a bar quoted per year.
+#
+# ⚠ It floors the DIVISOR, not the validity guard. `dte <= 0` still returns
+# None (see _reward_metric) -- a zero or unknown horizon is unjudgeable, not
+# merely short, and this constant must never be read as making it judgeable.
+#
+# MEASURED, not picked: `python tools/sweep_naked_capeff.py --floors` sweeps
+# 3/5/7/10/14 and prints every figure below. 5 is the LARGEST value that
+# rescales only horizons the 0-DTE scan window owns. `run_full_scan` scans
+# 0-DTE at 0-4 DTE and SWING at 5-15 (`options_svc._SWING_DEFAULTS` opens the
+# Strategy Finder at the same 5), so F=5 rescales exactly dte 1-4 -- the whole
+# judgeable part of the 0-DTE window -- while 7 discounts 5-6 DTE swing
+# candidates, 10 discounts 5-9 and 14 discounts 5-13. Those are genuine swing
+# trades and not the problem this floor exists to fix. Below 5 the dampening is
+# thin: F=3 rescales only dte 1-2 and still annualises a one-day credit 121.7x.
+#
+# What 5 buys, at the sweep's Black-Scholes chain (spot 100, IV 0.28): the
+# one-day multiplier falls 365.0x -> 73.0x, so a 1-DTE naked short must earn
+# 0.137% per trade rather than 0.027% to clear the 0.10/yr min bar. It also
+# makes the 0-DTE window horizon-NEUTRAL -- dte 1, 2, 3 and 4 all divide by 5,
+# so within that window capeff ranks on per-trade return alone, which is the
+# honest reading at horizons too short to annualise.
+#
+# What it does NOT do, deliberately: it cuts nothing that F=0 admitted. A 1-DTE
+# SHORT_PUT reads 0.73 -> 0.15 /yr and a 1-DTE SHORT_CALL 3.78 -> 0.76, both
+# still over the bar. Capping the amplification is the goal; REMOVING
+# short-dated naked shorts is what 10 (1-DTE SHORT_PUT 0.07) and 14 (0.05) do,
+# and that is the cliff this task exists to replace, re-cut one window over.
+MIN_ANNUALISE_DTE = 5
 
 
 def gate_profile(signal):
@@ -558,9 +612,10 @@ def _reward_metric(signal, profile):
 
     LONG:  R:R; but None R:R with a set net_debit == unbounded profit -> AUTO-PASS
            (infinite upside clears any R:R bar), signalled by returning +inf.
-    NAKED: ANNUALISED capital efficiency = (max_profit / capital) x (365 / dte),
-           i.e. return on committed capital PER YEAR (R:R is undefined under
-           unbounded loss). Missing/invalid -> None (fail).
+    NAKED: ANNUALISED capital efficiency = (max_profit / capital) x
+           (365 / max(dte, MIN_ANNUALISE_DTE)), i.e. return on committed capital
+           PER YEAR over a horizon floored at MIN_ANNUALISE_DTE (R:R is
+           undefined under unbounded loss). Missing/invalid -> None (fail).
     else:  R:R. None/<=0 -> None (fail).
     """
     if profile == "NAKED":
@@ -572,6 +627,12 @@ def _reward_metric(signal, profile):
         # cash-secured put Weak (see the GATE_BARS note). Calendar days, matching
         # `dte` itself and the PoP model's sqrt(dte/365) — this is a screening
         # rate, not a settlement price, so trading days would be false precision.
+        #
+        # The DIVISOR is floored at MIN_ANNUALISE_DTE (Task 2.7), which caps the
+        # short-end amplification annualising introduced: unfloored, a 1-DTE
+        # short was rescaled 365x, so ~0.2% per trade read as ~73%/yr and
+        # cleared a 10%/yr bar on nothing. See that constant for the measurement
+        # and for why 5, and `tools/sweep_naked_capeff.py --floors` to re-run it.
         #
         # dte <= 0 / absent / non-numeric -> None, NOT a division. ⚠ THIS
         # EXCLUDES THE WHOLE 0-DTE NAKED-SHORT CLASS, not merely "an expired or
@@ -591,20 +652,25 @@ def _reward_metric(signal, profile):
         # reward that was never computed, because `evaluate_gates` has one reward
         # dimension per profile and no separate "unjudgeable horizon" reason.
         #
-        # Flooring dte at 1 is WORSE than the cut, not a fix: it would annualise
-        # a same-day credit by 365x, so ANY 0-DTE naked short clears ANY bar —
-        # the pin-the-maximum failure this repo keeps re-learning. Admitting
-        # 0-DTE naked shorts needs its own per-horizon bar (a day's credit judged
-        # as a day's credit), not a yearly rate applied to a horizon of zero.
-        # Until that exists, absence means "cannot judge", and a reward we cannot
-        # judge does not pass — the same contract as an unknown R:R below. Pinned
-        # from the BUILDER, not the primitive, by
-        # tests/test_strategy_scoring.py::
+        # ⚠ MIN_ANNUALISE_DTE DOES NOT REACH THIS GUARD, and must never be made
+        # to. It floors the DIVISOR for a horizon that exists; the guard asks
+        # whether one exists at all. Letting dte == 0 through as
+        # `max(0, MIN_ANNUALISE_DTE)` would still be worse than the cut, because
+        # a data fault (`_dte_for`'s `except: return 0`) and a same-day contract
+        # are indistinguishable here — so it would silently price an unparseable
+        # expiration as a five-day trade. Admitting 0-DTE naked shorts needs its
+        # own per-horizon bar (a day's credit judged as a day's credit), not a
+        # yearly rate applied to a horizon of zero. Until that exists, absence
+        # means "cannot judge", and a reward we cannot judge does not pass — the
+        # same contract as an unknown R:R below. Pinned from the BUILDER, not the
+        # primitive, by tests/test_strategy_scoring.py::
         #   test_same_day_naked_short_is_cut_for_the_horizon_not_for_thin_reward
         #
         # ⚠ The `not isinstance(dte, bool)` clause is deliberately on `dte` ALONE.
-        # `dte` is the divisor THIS change introduced, and bool True -> 1 creates
-        # a NEW 365x amplification. `max_profit`/`capital` were equally
+        # `dte` is the divisor annualising introduced, and bool True -> 1 walks
+        # into the floor rather than round it: the amplification is
+        # 365/MIN_ANNUALISE_DTE, not 365x, but a bool is still not a horizon and
+        # must not be read as one. `max_profit`/`capital` were equally
         # bool-permissive before it (measured: capital=True yields reward 1675.87
         # and passes), so guarding them here would be a fresh behaviour change
         # rather than a regression fix. Do not "fix" the asymmetry, and do not
@@ -612,7 +678,7 @@ def _reward_metric(signal, profile):
         if (isinstance(mp, (int, float)) and isinstance(cap, (int, float)) and cap > 0
                 and isinstance(dte, (int, float)) and not isinstance(dte, bool)
                 and dte > 0):
-            return (mp / cap) * (365.0 / dte)
+            return (mp / cap) * (365.0 / max(dte, MIN_ANNUALISE_DTE))
         return None
 
     rr = signal.get("rr")

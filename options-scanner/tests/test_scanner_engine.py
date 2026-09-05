@@ -2077,9 +2077,20 @@ class TestDirectionalSignals:
 
         ⚠ Do NOT read those three rows as evidence a 1-DTE naked short is a good
         trade. This fixture's chain is synthetic and degenerate — a flat 440.57
-        credit at PoP 99.8 — which no real chain offers. Measured on a
-        Black-Scholes chain (spot 100, IV 0.28), a 1-DTE naked short composites
-        ~49.6, just under this same 50.0 floor.
+        credit at PoP 99.8 — which no real chain offers.
+
+        ⚠ A CORRECTED CLAIM (Task 2.7). This paragraph used to continue
+        "measured on a Black-Scholes chain (spot 100, IV 0.28), a 1-DTE naked
+        short composites ~49.6, just under this same 50.0 floor", and both
+        halves were wrong. The number was 48.8-48.9, not 49.6 (re-measured by
+        `tools/sweep_naked_capeff.py`, which had not existed when the prose was
+        written); and one grid point of one synthetic chain is not a general
+        brake on the short end — THESE THREE ROWS are the counter-example, sitting
+        in the same file. The 1-DTE class was reaching users unbraked, which is
+        why `strategy_scoring.MIN_ANNUALISE_DTE` now floors the annualisation
+        horizon. The rows still emit at the same composites: the fixture's naked
+        shorts return 0.90-5.12% per trade, so the floor would have to exceed 32
+        before any of their reward gates failed (sweep section (e)).
 
         Scope: this half of the pair proves the cut lets nothing bad THROUGH.
         The other direction — that it does not over-cut and suppress qualifying

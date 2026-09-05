@@ -297,6 +297,127 @@ def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
         assert g["reasons"] == ["capital efficiency"], (dte, g["reasons"])
 
 
+# --- Task 2.7: the annualisation-horizon floor ------------------------------
+#
+# `_reward_metric` divides by `max(dte, MIN_ANNUALISE_DTE)`. Every test below is
+# written against the CONSTANT rather than against 5, so tuning it re-runs the
+# same properties instead of turning them red -- except the two that assert the
+# floor's own bounds, which is where a tune SHOULD have to argue.
+
+
+def _capeff(dte, per_trade=0.0170):
+    """Per-trade return `per_trade` at `dte`, through the production metric."""
+    return sc._reward_metric(
+        _naked(max_profit=per_trade * 10000.0, capital=10000.0, dte=dte), "NAKED")
+
+
+def test_reward_metric_floors_the_annualisation_horizon_below_the_threshold():
+    """Under the floor, the divisor is the floor -- not the trade's own dte.
+
+    Asserted as an EQUALITY against the floored expression and an INEQUALITY
+    against the unfloored one, because "smaller than 365x" alone would also hold
+    for any other divisor someone substituted.
+    """
+    f = sc.MIN_ANNUALISE_DTE
+    pt = 0.0170
+    for dte in range(1, f):
+        got = _capeff(dte, pt)
+        assert abs(got - pt * 365.0 / f) < 1e-9, dte
+        assert got < pt * 365.0 / dte, (dte, got)
+    # Non-vacuity: the loop must have run. A floor of 1 would make it empty and
+    # every assertion above free.
+    assert f > 1, "MIN_ANNUALISE_DTE <= 1 floors nothing -- the loop is vacuous"
+
+
+def test_reward_metric_does_not_floor_at_or_above_the_threshold():
+    """At and above the floor the metric is the plain annualised rate, so the
+    horizons this task is not about are untouched."""
+    f = sc.MIN_ANNUALISE_DTE
+    pt = 0.0170
+    for dte in (f, f + 1, 7, 21, 35, 45, 60):
+        assert abs(_capeff(dte, pt) - pt * 365.0 / dte) < 1e-9, dte
+
+
+def test_the_floor_is_continuous_at_the_threshold():
+    """No cliff of its own: dte == MIN_ANNUALISE_DTE reads the same either way.
+
+    A floor implemented as `dte < F and F or dte`-style branching, or applied
+    one off the boundary, would step here.
+    """
+    f = sc.MIN_ANNUALISE_DTE
+    assert abs(_capeff(f) - _capeff(f - 1)) < 1e-9
+
+
+def test_zero_dte_is_still_none_the_floor_is_on_the_divisor_not_the_guard():
+    """The floor caps the annualisation; it does not make a missing horizon
+    judgeable. `max(0, MIN_ANNUALISE_DTE)` is a perfectly good divisor -- the
+    point is that it is never reached, because dte <= 0 fails the guard first.
+    """
+    for dte in (0, -1, -sc.MIN_ANNUALISE_DTE):
+        assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
+
+
+def test_one_dte_naked_short_reward_is_bounded_by_the_floor_not_by_365():
+    """The bug this task fixes: a one-day credit annualised 365x cleared the bar
+    on ~0.03% per trade.
+
+    `per_trade` is chosen to sit between the two thresholds -- comfortably over
+    the unfloored requirement (bar x 1/365) and comfortably under the floored one
+    (bar x F/365) -- so this test fails BOTH if the floor is removed and if it is
+    applied at the wrong end.
+    """
+    bar = sc.GATE_BARS["NAKED"]["min"]["capeff"]
+    f = sc.MIN_ANNUALISE_DTE
+    unfloored_needs = bar / 365.0
+    floored_needs = bar * f / 365.0
+    assert floored_needs > unfloored_needs * 2, (
+        "MIN_ANNUALISE_DTE is too small for this test to discriminate")
+    per_trade = (unfloored_needs + floored_needs) / 2.0
+
+    reward = _capeff(1, per_trade)
+    assert reward < bar, (
+        f"a 1-DTE short returning {per_trade * 100:.3f}% per trade still clears "
+        f"the {bar}/yr bar at {reward:.4f} -- the horizon floor is not applied")
+    # ...and the gate cuts it, on the reward dimension alone.
+    sig = _naked(max_profit=per_trade * 10000.0, capital=10000.0, dte=1)
+    g = sc.evaluate_gates(sig)
+    assert not g["passed_min"]
+    assert g["reasons"] == ["capital efficiency"], g["reasons"]
+    # Non-vacuity, and the whole point: unfloored, this same row PASSED.
+    assert per_trade * 365.0 >= bar, (
+        "fixture no longer clears the bar under the old 365x metric -- this test "
+        "would pass even with the annualisation reverted")
+
+
+def test_the_floor_does_not_reach_into_the_swing_scan_window():
+    """MIN_ANNUALISE_DTE's upper bound, made executable.
+
+    5 was chosen as the LARGEST floor that rescales only horizons the 0-DTE scan
+    window owns; 7 discounts 5-6 DTE swing candidates, 10 discounts 5-9. Read
+    from `run_full_scan`'s source because the windows are locals there, following
+    `test_scanner_engine.test_run_full_scan_applies_gex_gate`. If the scrape stops
+    matching, the window was RENAMED, not removed -- fix the pattern, do not
+    delete the test.
+    """
+    import inspect
+    import re
+
+    import scanner_engine
+
+    src = inspect.getsource(scanner_engine.run_full_scan)
+    m = re.search(r"^\s*swing_min_dte\s*=\s*(\d+)\s*$", src, re.M)
+    assert m is not None, (
+        "could not read swing_min_dte out of run_full_scan -- the local was "
+        "renamed; re-point this pattern rather than dropping the bound")
+    swing_min = int(m.group(1))
+    assert sc.MIN_ANNUALISE_DTE <= swing_min, (
+        f"MIN_ANNUALISE_DTE {sc.MIN_ANNUALISE_DTE} rescales "
+        f"{[d for d in range(swing_min, sc.MIN_ANNUALISE_DTE)]} DTE, which the "
+        f"SWING window ({swing_min}+) owns -- it would discount genuine swing "
+        "candidates, which is not what the floor is for. Re-run "
+        "`tools/sweep_naked_capeff.py --floors` before raising it.")
+
+
 def _same_day_chain(spot=100.0):
     """A chain whose only expiration is TODAY -> `_dte_for` yields dte == 0.
 
