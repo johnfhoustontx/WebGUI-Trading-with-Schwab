@@ -96,7 +96,17 @@ equity = cash + buying_power_reserved + Σ(open lots: shares × cost_basis)
 
 Share *unrealized* stays excluded, matching how options are treated. Omitting the
 term entirely would understate session-start equity for any session that opens
-holding stock, quietly loosening the drawdown guard.
+holding stock.
+
+⚠ **Corrected 2026-09-05, measured rather than assumed.** An earlier draft of
+this paragraph said omitting it would "quietly loosen the drawdown guard". That
+is **not true today**: `session_start_equity` is written in three places in
+`paper_account_db.py` and **read nowhere** in `services/`, `webgui/` or
+`options-scanner/`. The live guard is `should_halt`, which compares
+`session_realized_pnl + open_unrealized` against the absolute-dollar
+`config_paper.MAX_SESSION_DRAWDOWN` and never consults it. The term is still
+worth adding — a stored value should be right for its first reader — but the
+justification is correctness, not an active safety hole.
 
 ### 3. Covered calls are struck at or above basis, and that is a hard floor
 
