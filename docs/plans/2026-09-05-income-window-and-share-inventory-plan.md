@@ -42,6 +42,25 @@ re-triggers the documented `scoring` / `notifier` collisions.
 .venv/bin/python -m pytest services/options_svc -q
 ```
 
+⚠ **That path is the Linux (dev/prod VPS) layout.** If you are working in a
+**Windows worktree**, there is no venv in the worktree at all and the interpreter
+lives at the main checkout under `Scripts/`, so every command needs the absolute
+path:
+
+```bash
+"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest services/options_svc -q
+```
+
+`options-scanner` additionally needs `-p no:randomly`.
+
+**Baselines measured on this branch before Phase A** (compare the failing *set*,
+never the count — and compare the **skipped** set too, since which test self-skips
+varies run to run):
+
+| suite | baseline |
+|---|---|
+| `options-scanner` | **1215 passed, 2 skipped, 0 failed** |
+
 Commit after every task. Do not batch.
 
 ---
@@ -148,6 +167,28 @@ git commit -m "feat(scanner): apply the earnings gate to the INCOME window too"
 - Modify: `services/options_svc/compute.py`
 - Test: `services/options_svc/tests/test_income_scan.py` (create)
 
+> ⚠ **Corrected 2026-09-05 after reading the code.** The first draft of this task
+> invented a `_cash_secured_puts` builder, called the structure `NAKED_PUT`, and
+> asserted `max_loss_total == strike × 100 × qty`. All three were wrong:
+>
+> * **The scan-side name is `SHORT_PUT`.** `NAKED_PUT` is the Calculator/rescue
+>   spelling (`compute._SINGLE_STRATEGIES`); `strategy_scanner._DIRECTIONAL` and
+>   the `ScanResult` contract both say `SHORT_PUT`. Do not introduce a third.
+> * **The builder already exists.** `strategy_scanner.build_directional` emits
+>   `SHORT_PUT` at `_SHORT_DELTA = 0.28` — inside the 0.20–0.30 band this window
+>   wants. Reuse it with the INCOME DTE range; write no new builder.
+> * **Collateral is already computed, and more correctly than the draft.** For a
+>   short put `payoff_metrics` has no call legs, so `max_loss` is taken at S=0 —
+>   `(strike − credit) × 100 + commission`, the true stock-to-zero risk,
+>   commission-inclusive. The strike notional the draft asserted is both wrong
+>   and worse.
+>
+> The row shape is therefore the **normalized single-leg contract**: `legs`,
+> `type`, `dte`, `capital`, `max_loss`, `breakevens` (a list), `rr` (a ratio) —
+> NOT the spread path's flat `short_strike` / `rr_pct` / `breakeven`. The
+> `ScanResult` docstring warns about exactly this split; read it before writing
+> assertions.
+
 **Step 1: Write the failing tests**
 
 ```python
@@ -167,12 +208,24 @@ def test_income_scan_emits_both_spread_sides(fake_chain_30_45):
     assert "CCS" in kinds
 
 
-def test_income_scan_emits_cash_secured_puts(fake_chain_30_45):
+def test_income_scan_emits_a_cash_secured_put(fake_chain_30_45):
     out = compute.income_scan("AAPL", chain=fake_chain_30_45, spot=100.0)
-    csps = [c for c in out["candidates"] if c["type"] == "NAKED_PUT"]
+    csps = [c for c in out["candidates"] if c["type"] == "SHORT_PUT"]
     assert csps, "the cash-secured put is the whole point of a 30-45 DTE window"
-    # Sized as cash-secured: collateral is the strike notional, not a spread width.
-    assert csps[0]["max_loss_total"] == csps[0]["short_strike"] * 100 * csps[0]["quantity"]
+
+
+def test_the_cash_secured_put_carries_stock_to_zero_collateral(fake_chain_30_45):
+    """payoff_metrics already gets this right: a short put has no call leg, so
+    max_loss is read at S=0 — (strike - credit) x 100 + commission. Assert the
+    SHAPE is the normalized single-leg one, not the flat spread one."""
+    csp = [c for c in compute.income_scan("AAPL", chain=fake_chain_30_45,
+                                          spot=100.0)["candidates"]
+           if c["type"] == "SHORT_PUT"][0]
+    assert len(csp["legs"]) == 1
+    assert csp["legs"][0]["side"] == "short"
+    assert csp["legs"][0]["kind"] == "put"
+    assert csp["capital"] > 0
+    assert "short_strike" not in csp, "single-leg rows carry legs, not flat strikes"
 
 
 def test_income_scan_uses_the_income_dte_window(fake_chain_30_45):
@@ -190,7 +243,13 @@ def test_income_scan_publishes_no_chain(fake_chain_30_45):
 
 Build `fake_chain_30_45` as a fixture in this file, modelled on the chain fixtures
 already used by `services/options_svc/tests/test_compute.py`. It needs put and call
-expiry maps at ~35 DTE with strikes either side of 100.
+expiry maps at ~35 DTE with strikes either side of 100, and enough delta spread
+that `nearest_by_delta` can find a 0.28-delta put.
+
+⚠ Verify the fixture produces a non-empty result with `earnings_date=None` before
+trusting any `assert ... == []`-shaped test. A vacuously-passing test over an
+empty chain asserts nothing — this repo has a documented incident where three
+tests passed for exactly that reason.
 
 **Step 2: Run to verify they fail**
 
@@ -202,6 +261,11 @@ Expected: FAIL — `AttributeError: module ... has no attribute 'income_scan'`.
 
 Add to `services/options_svc/compute.py`, near the other scan entry points:
 
+Model this on `swing_scan` in the same file — it already composes
+`screen_spreads` with `strategy_scanner` builders and `strategy_scoring.score_all`,
+which is exactly the shape needed here. The only new things are the DTE window and
+the `SHORT_PUT` filter.
+
 ```python
 # ── INCOME window (30-45 DTE) ────────────────────────────────────────────────
 # A THIRD scan window beside 0-DTE and swing, on its own morning slot. Two-sided
@@ -211,16 +275,28 @@ Add to `services/options_svc/compute.py`, near the other scan entry points:
 INCOME_DTE_MIN = 30
 INCOME_DTE_MAX = 45
 
+# The cash-secured put is the ONE directional structure this window wants: at
+# 30-45 DTE a long call is a different trade with a different thesis, and
+# SHORT_CALL is undefined-risk. build_directional emits all four, so filter.
+_INCOME_SINGLES = ("SHORT_PUT",)
 
-def income_scan(symbol, chain=None, spot=None, earnings_date=None,
-                account_size=100_000):
+
+def income_scan(symbol, chain=None, spot=None, atm_iv=None, earnings_date=None,
+                view=None, market_state=None, account_size=100_000):
     """Scored 30-45 DTE candidates for one symbol: PCS + CCS + cash-secured puts.
 
     ``chain`` is injected so this is testable without a proxy call; the handler
     fetches it once per symbol and passes it in. Returns a dict with a
     ``candidates`` list and NOTHING chain-shaped — the view must stay small.
+
+    ⚠ Two row SHAPES land in one list, exactly as ``swing_scan`` already does:
+    the spreads carry the flat ``short_strike``/``rr_pct`` contract, the
+    ``SHORT_PUT`` carries the normalized ``legs``/``rr``/``breakevens`` one.
+    Readers must not assume either — see the ScanResult docstring.
     """
     import scanner_engine as se
+    import strategy_scanner as ssn
+    import strategy_scoring as ssc
 
     if not chain:
         return {"symbol": symbol, "candidates": [], "errors": ["no chain"]}
@@ -235,18 +311,29 @@ def income_scan(symbol, chain=None, spot=None, earnings_date=None,
         spot=spot, earnings_date=earnings_date,
         account_size=account_size, mode="PREMIUM")
 
-    csps = _cash_secured_puts(chain, symbol, spot, earnings_date)
+    singles = [s for s in ssn.build_directional(chain, symbol, spot, atm_iv,
+                                                INCOME_DTE_MIN, INCOME_DTE_MAX)
+               if s["type"] in _INCOME_SINGLES]
 
     return {"symbol": symbol,
-            "candidates": list(spreads) + list(csps),
+            "candidates": list(spreads) + singles,
             "errors": []}
 ```
 
-Then `_cash_secured_puts` — a short-put single-leg builder collateralised at
-strike notional. Model it on the existing single-leg path
-(`_SINGLE_STRATEGIES` / `_adhoc_single` in this file), reusing its normalised
-shape so the page's row builders do not need a second shape to understand. Apply
-the same earnings gate (`se.check_earnings_conflict`) and the `[iv_rank]` floor.
+Two details to settle while implementing, both of which you should verify in code
+rather than assume:
+
+1. **Scoring.** `swing_scan` runs its candidates through `ssc.score_all(...)` and
+   then `_passes_swing_cut`. Decide whether the income window reuses
+   `SWING_MIN_SCORE` or needs its own knob. Prefer **reusing** it unless you find
+   a concrete reason not to — a second constant with the same value is a liability
+   until the two genuinely diverge. If you do add one, it belongs in
+   `config/scanner.toml` under `[scores]`, not as a literal.
+2. **The earnings gate on the single.** `screen_spreads` gates earnings itself
+   (task 2). `build_directional` does **not**. Apply `se.check_earnings_conflict`
+   to the single's expiration too, or a 35-DTE cash-secured put sails straight over
+   the report the spreads were just protected from. Add a test for this
+   specifically — it is the easiest thing here to leave half-done.
 
 **Step 4: Run to verify they pass**
 
@@ -273,12 +360,12 @@ git commit -m "feat(options): two-sided 30-45 DTE income scan with cash-secured 
 
 ```python
 def test_income_scan_accepts_a_sparse_payload():
-    """Candidates are heterogeneous (PCS/CCS/NAKED_PUT/covered calls), so the
+    """Candidates are heterogeneous (PCS/CCS/SHORT_PUT/covered calls), so the
     contract gates the ENVELOPE, not each row — same call the ScanResult
     docstring makes and for the same reason."""
     from shared.contracts.options import IncomeScan
 
-    snap = IncomeScan(candidates=[{"type": "PCS"}, {"type": "NAKED_PUT"}],
+    snap = IncomeScan(candidates=[{"type": "PCS"}, {"type": "SHORT_PUT"}],
                       scanned_symbols=2, ts="2026-09-05T14:00:00Z")
     assert len(snap.candidates) == 2
 
@@ -546,7 +633,7 @@ def test_rows_label_the_side_a_reader_can_act_on():
     rows = income.candidate_rows([
         {"type": "PCS", "symbol": "AAPL", "short_strike": 95.0, "credit": 1.2},
         {"type": "CCS", "symbol": "AAPL", "short_strike": 110.0, "credit": 1.1},
-        {"type": "NAKED_PUT", "symbol": "MSFT", "short_strike": 400.0, "credit": 5.0},
+        {"type": "SHORT_PUT", "symbol": "MSFT", "legs": [{"strike": 400.0}], "net_credit": 500.0},
     ])
     assert [r["side"] for r in rows] == ["Put spread", "Call spread", "Cash-secured put"]
 
@@ -637,7 +724,7 @@ Then read it back:
 .venv/bin/python -c "from shared.bus import Bus; import collections; print(collections.Counter(c['type'] for c in Bus().cache_get('cache:options:income').payload['candidates']))"
 ```
 
-Expected: `PCS`, `CCS` and `NAKED_PUT` all non-zero on a normal tape. If `CCS` is
+Expected: `PCS`, `CCS` and `SHORT_PUT` all non-zero on a normal tape. If `CCS` is
 zero, check whether `regime_filter` is blocking it — that is correct behaviour in a
 committed bullish regime, not a bug. Confirm which before moving on.
 
@@ -1054,7 +1141,7 @@ git commit -m "docs: income window + share inventory, verified live in dev"
 
 - [ ] Every suite touched shows no NEW failures — compared by **node-id set**, and by the **skipped** set too, since which test self-skips varies run to run.
 - [ ] `.venv/bin/python -m pyright` is clean (it covers `shared/contracts` and `shared/bus`, both touched here).
-- [ ] The income view carries `PCS`, `CCS` and `NAKED_PUT` rows live in dev.
+- [ ] The income view carries `PCS`, `CCS` and `SHORT_PUT` rows live in dev.
 - [ ] `reconcile_buying_power` returns `0.0` after a real assignment in dev.
 - [ ] The nine-tab strip does not wrap at the narrowest width you can produce.
 - [ ] Manuals, `page_help.py`, routes doc and CHANGELOG all updated.
