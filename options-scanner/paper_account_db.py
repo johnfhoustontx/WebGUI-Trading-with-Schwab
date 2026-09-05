@@ -321,7 +321,20 @@ def roll_session_if_needed(db_path, today):
                 return False
             # Committed capital at roll; open unrealized P&L is deliberately excluded
             # (should_halt tracks realized + unrealized separately for the drawdown guard).
-            equity = a["cash"] + a["buying_power_reserved"]
+            # Shares are in this sum for exactly that reason, and AT COST: a lot's
+            # cost basis is committed capital by the same definition that puts
+            # buying_power_reserved here, while its mark is unrealized and so stays
+            # out, matching how options are treated. Omitting the term would
+            # understate equity for any session that opens holding stock.
+            # ⚠ Measured 2026-09-05: NOTHING reads session_start_equity yet — the
+            # live drawdown guard is should_halt against the absolute-dollar
+            # config_paper.MAX_SESSION_DRAWDOWN, which never consults it. So this
+            # is about storing the correct number for the first reader, not about
+            # fixing a guard that is loose today; do not cite it as a live fix.
+            # `_equity_at_cost_conn` takes the open connection so this stays one
+            # transaction rather than opening a second connection mid-`with`.
+            equity = (a["cash"] + a["buying_power_reserved"]
+                      + _equity_at_cost_conn(conn))
             _update_account(conn, session_date=today, session_start_equity=equity,
                             session_realized_pnl=0.0, halted=0)
             log.info("rolled paper session -> %s", today)

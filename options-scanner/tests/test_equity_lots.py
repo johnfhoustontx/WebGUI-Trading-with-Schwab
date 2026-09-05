@@ -102,6 +102,41 @@ def test_a_lot_does_not_disturb_reconcile_buying_power(tmp_path):
     assert a["cash"] == 25_000.0
 
 
+def test_session_start_equity_includes_shares_at_cost(tmp_path):
+    """Shares held at cost basis are committed capital by the same definition
+    that puts buying_power_reserved in this sum. Omitting them understates
+    equity for any session that opens holding stock.
+
+    ⚠ Measured 2026-09-05: nothing reads `session_start_equity` yet — the live
+    drawdown guard is `should_halt` against the absolute-dollar
+    `config_paper.MAX_SESSION_DRAWDOWN`. This pins the stored value for the
+    first reader; it is not a fix to a guard that is loose today.
+    """
+    db = tmp_path / "acct.db"
+    pad.init_db(db)
+    pad.ensure_account(db, starting_balance=25_000.0, session_date="2026-09-07")
+    pad.insert_equity_lot(db, {"symbol": "AAPL", "shares": 100, "cost_basis": 95.0})
+
+    pad.roll_session_if_needed(db, "2026-09-08")
+
+    assert pad.get_account(db)["session_start_equity"] == 25_000.0 + 9_500.0
+
+
+def test_session_start_equity_excludes_a_closed_lot(tmp_path):
+    """A called-away lot is cash again — counting it here would double it, since
+    the disposal proceeds already landed in `cash`."""
+    db = tmp_path / "acct.db"
+    pad.init_db(db)
+    pad.ensure_account(db, starting_balance=25_000.0, session_date="2026-09-07")
+    lot_id = pad.insert_equity_lot(db, {"symbol": "AAPL", "shares": 100,
+                                        "cost_basis": 95.0})
+    pad.close_equity_lot(db, lot_id, exit_price=99.0, reason="called_away")
+
+    pad.roll_session_if_needed(db, "2026-09-08")
+
+    assert pad.get_account(db)["session_start_equity"] == 25_000.0
+
+
 def test_reconcile_would_zero_a_lot_that_reserved(tmp_path):
     """The negative half of the invariant: proves the guard above is not vacuous.
 
