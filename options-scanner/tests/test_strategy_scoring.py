@@ -280,14 +280,23 @@ def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
     """dte <= 0 must not divide to infinity and sail through: an expired or
     same-day horizon is unjudgeable, and unjudgeable means do not pass."""
     for dte in (0, -1):
-        g = sc.evaluate_gates(_naked(dte=dte))
-        assert not g["passed_min"], dte
+        # Assert the METRIC, not just the gate: this fixture's per-trade capeff
+        # (1.7%) is under the bar anyway, so a gate-only assertion would stay
+        # green against a `dte or 1` style fallback that silently annualises a
+        # 0-DTE signal by 365x.
+        assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
+        assert not sc.evaluate_gates(_naked(dte=dte))["passed_min"], dte
 
 
 def test_gates_naked_missing_dte_fails_rather_than_passing():
-    sig = _naked()
-    del sig["dte"]
-    assert not sc.evaluate_gates(sig)["passed_min"]
+    """Absence means "cannot judge", and unjudgeable does not pass -- the same
+    contract evaluate_gates already applies to an unknown R:R."""
+    for absent in ({}, {"dte": None}, {"dte": "35"}, {"dte": True}):
+        sig = _naked()
+        del sig["dte"]
+        sig.update(absent)
+        assert sc._reward_metric(sig, "NAKED") is None, absent
+        assert not sc.evaluate_gates(sig)["passed_min"], absent
 
 
 def test_gates_naked_low_capital_efficiency_fails_reward():
