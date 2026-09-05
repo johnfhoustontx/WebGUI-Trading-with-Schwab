@@ -192,8 +192,16 @@ git commit -m "feat(scanner): apply the earnings gate to the INCOME window too"
 
 **Step 1: Write the failing tests**
 
+`swing_scan` does its own I/O, so these tests monkeypatch the same seven seams the
+existing `swing_scan` tests do. **Copy that setup from
+`services/options_svc/tests/test_compute.py` (around line 145) rather than
+inventing one** — it already stubs `se.fetch_option_chain`, `_proxy.schwab_client.get_quote`,
+`se.fetch_price_history`, `se.calc_technicals`, `run_iv_analysis`,
+`se.screen_spreads` and `se.build_iron_condors`, and its `_screen` stub records
+the `kind` positional, which is exactly the argument this task changes.
+
 ```python
-"""The INCOME window: 30-45 DTE, two-sided, plus cash-secured puts.
+"""The INCOME window: 30-45 DTE, two-sided, plus the cash-secured put.
 
 The two-sidedness is the point — see the design doc. A test that only asserts
 PCS would pass on a long-only implementation, which is exactly the regression
@@ -202,55 +210,69 @@ this file exists to prevent.
 import services.options_svc.compute as compute
 
 
-def test_income_scan_emits_both_spread_sides(fake_chain_30_45):
-    out = compute.income_scan("AAPL", chain=fake_chain_30_45, spot=100.0)
-    kinds = {c["type"] for c in out["candidates"]}
+def test_income_scan_screens_as_INCOME_not_SWING(income_seams):
+    """The trade_type reaches screen_spreads, which is what makes the earnings
+    gate, the liquidity floor and the calibration bucket all key off INCOME."""
+    compute.income_scan("AAPL")
+    assert income_seams["screen"]["kind"] == "INCOME"
+
+
+def test_income_scan_screens_the_30_45_window(income_seams):
+    compute.income_scan("AAPL")
+    assert (income_seams["screen"]["dte_min"],
+            income_seams["screen"]["dte_max"]) == (30, 45)
+
+
+def test_income_scan_emits_both_spread_sides(income_seams):
+    kinds = {c["type"] for c in compute.income_scan("AAPL")["signals"]}
     assert "PCS" in kinds
     assert "CCS" in kinds
 
 
-def test_income_scan_emits_a_cash_secured_put(fake_chain_30_45):
-    out = compute.income_scan("AAPL", chain=fake_chain_30_45, spot=100.0)
-    csps = [c for c in out["candidates"] if c["type"] == "SHORT_PUT"]
+def test_income_scan_emits_the_cash_secured_put(income_seams):
+    csps = [c for c in compute.income_scan("AAPL")["signals"]
+            if c["type"] == "SHORT_PUT"]
     assert csps, "the cash-secured put is the whole point of a 30-45 DTE window"
-
-
-def test_the_cash_secured_put_carries_stock_to_zero_collateral(fake_chain_30_45):
-    """payoff_metrics already gets this right: a short put has no call leg, so
-    max_loss is read at S=0 — (strike - credit) x 100 + commission. Assert the
-    SHAPE is the normalized single-leg one, not the flat spread one."""
-    csp = [c for c in compute.income_scan("AAPL", chain=fake_chain_30_45,
-                                          spot=100.0)["candidates"]
-           if c["type"] == "SHORT_PUT"][0]
+    csp = csps[0]
     assert len(csp["legs"]) == 1
     assert csp["legs"][0]["side"] == "short"
     assert csp["legs"][0]["kind"] == "put"
     assert csp["capital"] > 0
-    assert "short_strike" not in csp, "single-leg rows carry legs, not flat strikes"
 
 
-def test_income_scan_uses_the_income_dte_window(fake_chain_30_45):
-    out = compute.income_scan("AAPL", chain=fake_chain_30_45, spot=100.0)
-    assert all(30 <= c["dte"] <= 45 for c in out["candidates"])
+def test_income_scan_drops_structures_this_window_does_not_want(income_seams):
+    """A long call at 35 DTE is a different thesis and SHORT_CALL is undefined
+    risk — neither should be ranked against the premium core."""
+    kinds = {c["type"] for c in compute.income_scan("AAPL")["signals"]}
+    assert not (kinds & {"LONG_CALL", "LONG_PUT", "SHORT_CALL",
+                         "BULL_CALL", "BEAR_PUT"})
 
 
-def test_income_scan_publishes_no_chain(fake_chain_30_45):
-    """Payload discipline: cache:options:calc_chain was once 53% of all prod
-    Redis string bytes. Only scored candidates go in the view."""
-    out = compute.income_scan("AAPL", chain=fake_chain_30_45, spot=100.0)
-    assert "chain" not in out
-    assert "putExpDateMap" not in repr(out)
+def test_swing_scan_defaults_are_unchanged(income_seams):
+    """Nine existing call sites depend on these defaults. A default-args call
+    must still screen as SWING and filter no structure."""
+    compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert income_seams["screen"]["kind"] == "SWING"
 ```
 
-Build `fake_chain_30_45` as a fixture in this file, modelled on the chain fixtures
-already used by `services/options_svc/tests/test_compute.py`. It needs put and call
-expiry maps at ~35 DTE with strikes either side of 100, and enough delta spread
-that `nearest_by_delta` can find a 0.28-delta put.
+Build `income_seams` as a fixture returning the `calls` dict, with the `_screen`
+stub extended to record `dte_min`/`dte_max` and to return **both** a PCS and a CCS
+row so the two-sidedness assertion is real.
 
-⚠ Verify the fixture produces a non-empty result with `earnings_date=None` before
-trusting any `assert ... == []`-shaped test. A vacuously-passing test over an
-empty chain asserts nothing — this repo has a documented incident where three
-tests passed for exactly that reason.
+⚠ **Two vacuity traps here, and both are easy to fall into.**
+
+1. `test_income_scan_drops_structures_this_window_does_not_want` passes trivially
+   if the builders produced none of those types to begin with. Assert first — in
+   the same test or a sibling — that an *unfiltered* call **does** produce them,
+   or the test proves nothing.
+2. `assert csp["capital"] > 0` needs the stubbed chain to carry a put near
+   0.28 delta with a real mark, or `build_directional` returns nothing and the
+   list-index raises rather than asserting. Verify the fixture yields a non-empty
+   `signals` list before trusting any of these.
+
+This repo has a documented incident where three tests passed only because every
+fixture had drifted into a state that took the same early-out. Do not add a
+fourth.
 
 **Step 2: Run to verify they fail**
 
@@ -260,12 +282,47 @@ Expected: FAIL — `AttributeError: module ... has no attribute 'income_scan'`.
 
 **Step 3: Implement**
 
-Add to `services/options_svc/compute.py`, near the other scan entry points:
 
-Model this on `swing_scan` in the same file — it already composes
-`screen_spreads` with `strategy_scanner` builders and `strategy_scoring.score_all`,
-which is exactly the shape needed here. The only new things are the DTE window and
-the `SHORT_PUT` filter.
+
+> ⚠ **Corrected again — do not write a parallel scan function.** `swing_scan`
+> (`compute.py:270`) is not a pure function over an injected chain: it fetches
+> the chain, quote and price history itself, then derives `atm_iv`, `em_1sd` and
+> the market `view`, guards a null chain and a null spot, scores, applies the
+> quality cut, assigns ids and stamps `iv_rank`. That is ~60 lines of correct
+> machinery including a **documented percent/decimal trap** in the `atm_iv`
+> derivation. A second function taking `chain=`/`atm_iv=` would duplicate all of
+> it, and this repo has been bitten badly enough by duplication (`clamp` nine
+> times, `num` seven) that the plan should not add more.
+
+**Extend `swing_scan` with two backward-compatible parameters, then make
+`income_scan` a thin wrapper.**
+
+```python
+def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
+               call_d_min, call_d_max, min_cr_fraction, families=None,
+               market_state=None, trade_type="SWING", structures=None) -> dict:
+```
+
+* `trade_type` is threaded to the **one** `se.screen_spreads(...)` call in the
+  body, replacing the hardcoded `"SWING"`. This is what makes the earnings gate
+  (task 2), the liquidity floor (above) and the calibration bucket all key off
+  `INCOME`.
+* `structures`, when given, keeps only candidates whose `type` is in it — applied
+  **once, after building and before `score_all`**, so `filtered_out` still counts
+  what the quality cut removed rather than what the window never wanted.
+
+One filter handles both exclusions this window needs: `build_directional` emits
+all four singles (only `SHORT_PUT` is wanted — a long call is a different thesis
+and `SHORT_CALL` is undefined-risk), and the `VERTICAL` family brings debit
+verticals along with the adapted credit spreads.
+
+`adapt_credit_spread` **preserves every source field**, so an adapted spread keeps
+`type` `"PCS"`/`"CCS"` while gaining `legs`. The filter is therefore uniform across
+all three wanted structures.
+
+Both parameters default to today's behaviour, so all nine existing `swing_scan`
+call sites keep passing untouched. **Add a test that pins exactly that** — a
+default-args call must still pass `"SWING"` to `screen_spreads` and filter nothing.
 
 ```python
 # ── INCOME window (30-45 DTE) ────────────────────────────────────────────────
@@ -276,50 +333,42 @@ the `SHORT_PUT` filter.
 INCOME_DTE_MIN = 30
 INCOME_DTE_MAX = 45
 
-# The cash-secured put is the ONE directional structure this window wants: at
-# 30-45 DTE a long call is a different trade with a different thesis, and
-# SHORT_CALL is undefined-risk. build_directional emits all four, so filter.
-_INCOME_SINGLES = ("SHORT_PUT",)
+# PCS/CCS are the two-sided premium core; SHORT_PUT is the cash-secured put.
+# Everything else build_directional / the VERTICAL family emits is a different
+# trade with a different thesis, so it is filtered rather than scored and ranked
+# against these.
+_INCOME_STRUCTURES = ("PCS", "CCS", "SHORT_PUT")
 
 
-def income_scan(symbol, chain=None, spot=None, atm_iv=None, earnings_date=None,
-                view=None, market_state=None, account_size=100_000):
-    """Scored 30-45 DTE candidates for one symbol: PCS + CCS + cash-secured puts.
+def income_scan(symbol, market_state=None) -> dict:
+    """The 30-45 DTE income window for one symbol: PCS + CCS + cash-secured put.
 
-    ``chain`` is injected so this is testable without a proxy call; the handler
-    fetches it once per symbol and passes it in. Returns a dict with a
-    ``candidates`` list and NOTHING chain-shaped — the view must stay small.
-
-    ⚠ Two row SHAPES land in one list, exactly as ``swing_scan`` already does:
-    the spreads carry the flat ``short_strike``/``rr_pct`` contract, the
-    ``SHORT_PUT`` carries the normalized ``legs``/``rr``/``breakevens`` one.
-    Readers must not assume either — see the ScanResult docstring.
+    ⚠ Two row SHAPES land in one ranked list, exactly as ``swing_scan`` already
+    produces: the adapted spreads carry BOTH the flat ``short_strike`` contract
+    and ``legs``; ``SHORT_PUT`` carries only the normalized ``legs`` one. Readers
+    must not assume either — see the ScanResult docstring.
     """
-    import scanner_engine as se
-    import strategy_scanner as ssn
-    import strategy_scoring as ssc
-
-    if not chain:
-        return {"symbol": symbol, "candidates": [], "errors": ["no chain"]}
-
-    pd_min, pd_max = _scanner_config.directional()["pcs_delta"]
-    cd_min, cd_max = _scanner_config.directional()["ccs_delta"]
-
-    spreads = se.screen_spreads(
-        chain, symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
-        pd_min, pd_max, cd_min, cd_max,
-        _scanner_config.credit()["swing"], "INCOME",
-        spot=spot, earnings_date=earnings_date,
-        account_size=account_size, mode="PREMIUM")
-
-    singles = [s for s in ssn.build_directional(chain, symbol, spot, atm_iv,
-                                                INCOME_DTE_MIN, INCOME_DTE_MAX)
-               if s["type"] in _INCOME_SINGLES]
-
-    return {"symbol": symbol,
-            "candidates": list(spreads) + singles,
-            "errors": []}
+    pd_min, pd_max = _scanner_config.directional_delta_range()["PCS"]
+    cd_min, cd_max = _scanner_config.directional_delta_range()["CCS"]
+    return swing_scan(symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
+                      pd_min, pd_max, cd_min, cd_max,
+                      _scanner_config.min_credit_pct()["SWING"],
+                      families=("VERTICAL", "DIRECTIONAL"),
+                      trade_type="INCOME",
+                      structures=_INCOME_STRUCTURES,
+                      market_state=market_state)
 ```
+
+⚠ The delta bands and credit floor above are a **first guess at the right
+accessors, not verified**. Check `shared/scanner_config.py` for the real shapes —
+`directional_delta_range()` and `min_credit_pct()` both exist but their keying
+must be confirmed, and `min_credit_pct()["SWING"]` may be the 1–15 DTE floor
+rather than one appropriate to 30–45 DTE. If the income window needs its own
+credit floor, it belongs in `config/scanner.toml`, not as a literal.
+
+Note the chain fetch inside `swing_scan` is bounded `today … dte_max + 2`, so a
+45-DTE window pulls **one** chain of ~47 days — which is the ~23 calls/day the
+design costed.
 
 ### ⚠ `INCOME` has no liquidity floor — add one, and guard the fail-open
 
@@ -572,10 +621,10 @@ git commit -m "feat(options): add the [slots.income] once-daily scan gate"
 ```python
 def test_publish_income_writes_the_view_and_bumps_the_version(monkeypatch):
     bus = Bus(fake=True)
+    # income_scan returns swing_scan's shape: {"signals", "view", "filtered_out"}.
     monkeypatch.setattr(handlers.compute, "income_scan",
-                        lambda sym, **kw: {"symbol": sym,
-                                           "candidates": [{"type": "PCS"}],
-                                           "errors": []})
+                        lambda sym, **kw: {"signals": [{"type": "PCS"}],
+                                           "view": {}, "filtered_out": 0})
     handlers.publish_income(bus, symbols=["AAPL", "MSFT"])
 
     env = bus.cache_get(handlers.CACHE_INCOME)
@@ -588,7 +637,7 @@ def test_publish_income_survives_one_symbol_failing(monkeypatch):
     def _scan(sym, **kw):
         if sym == "BAD":
             raise RuntimeError("no chain")
-        return {"symbol": sym, "candidates": [{"type": "PCS"}], "errors": []}
+        return {"signals": [{"type": "PCS"}], "view": {}, "filtered_out": 0}
 
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "income_scan", _scan)
