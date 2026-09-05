@@ -539,6 +539,7 @@ async def loop(bus):
     calibration_session = None  # nightly calibration session sentinel (see calibration_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
+    income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
@@ -821,6 +822,29 @@ async def loop(bus):
 
         if aa_slot:
             branches.append(("action_alert", _action_alert_branch(aa_slot)))
+
+        # INCOME window — one 30-45 DTE pass a day over the watchlist. The slot is
+        # latched in income_ran BEFORE the blocking scan so a slow pass can't
+        # double-fire on the next tick (launch_branches' still-running skip means a
+        # slow scan only ever delays ITSELF — but only once the slot is marked).
+        # The ~23 chain fetches run in the executor; independently guarded so a
+        # failure never skips the work above or kills the loop.
+        try:
+            inc_slot = income_slot_due(now, income_ran)
+            if inc_slot:
+                income_ran.add((now.date().isoformat(), inc_slot))
+        except Exception:
+            log.exception("income_slot_due gate degraded")
+            inc_slot = None
+
+        async def _income_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.publish_income, bus)
+            except Exception:
+                log.exception("publish_income branch degraded")
+
+        if inc_slot:
+            branches.append(("income", _income_branch()))
 
         # Nightly realized-outcome calibration -> cache:options:calibration, the
         # EV the Trade detail panel shows. The session is latched BEFORE the

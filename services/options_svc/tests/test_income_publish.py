@@ -342,3 +342,40 @@ def test_a_fresh_income_scan_command_still_runs(monkeypatch):
 def test_the_command_is_in_the_replay_guarded_set(kind):
     assert kind in handlers._REPLAY_GUARDED
 
+# ── the scheduler branch ─────────────────────────────────────────────────────
+
+def test_the_loop_latches_the_income_slot_at_DISPATCH():
+    """``launch_branches`` starts branches as keyed background tasks with a
+    still-running skip, so a slow scan can only ever delay ITSELF — but only
+    once the slot is marked. Latching inside the branch instead re-fires it on
+    the very next tick, which for this pass means re-spending 23 chain calls."""
+    import inspect
+
+    from services.options_svc import scheduler
+
+    src = inspect.getsource(scheduler.loop)
+    assert "income_ran = set()" in src
+    assert "income_slot_due(now, income_ran)" in src
+    assert src.index("income_ran.add(") < src.index('branches.append(("income"')
+
+
+def test_the_income_branch_runs_OFF_the_event_loop_and_is_guarded():
+    """~23 chain fetches on the event loop would stall every other branch on the
+    tick; an unguarded branch would take the loop down with it."""
+    import inspect
+
+    from services.options_svc import scheduler
+
+    src = inspect.getsource(scheduler.loop)
+    assert "run_in_executor(None, handlers.publish_income, bus)" in src
+    assert "publish_income branch degraded" in src
+
+
+def test_the_income_gate_cannot_skip_the_branches_around_it():
+    """A raising gate must degrade to a falsy slot, not propagate."""
+    import inspect
+
+    from services.options_svc import scheduler
+
+    src = inspect.getsource(scheduler.loop)
+    assert "income_slot_due gate degraded" in src
