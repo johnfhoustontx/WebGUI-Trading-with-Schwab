@@ -2074,6 +2074,13 @@ class TestDirectionalSignals:
         credit at PoP 99.8 — which no real chain offers. Measured on a
         Black-Scholes chain (spot 100, IV 0.28), a 1-DTE naked short composites
         ~49.6, just under this same 50.0 floor.
+
+        Scope: this half of the pair proves the cut lets nothing bad THROUGH.
+        The other direction — that it does not over-cut and suppress qualifying
+        rows — is `test_directional_emits_candidates_at_or_above_the_min_score`,
+        which stubs the scores and so cannot be moved by a scoring change.
+        Deliberately not asserted here as a non-empty list: that would re-pin
+        this synthetic fixture's exact output and break on any future bar tune.
         """
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         for s in results["signals_directional"]:
