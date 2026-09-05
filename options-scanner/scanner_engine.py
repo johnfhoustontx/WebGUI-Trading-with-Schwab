@@ -826,9 +826,14 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             if not (dte_min <= dte <= dte_max):
                 continue
 
-            # Earnings avoidance (multi-day holds only). 0-DTE cannot straddle a
-            # report; SWING and INCOME both can, and at 30-45 DTE it is the
-            # common case rather than the exception.
+            # Earnings avoidance — for the windows whose positions are HELD
+            # across sessions. A 0-DTE position opens and closes inside one, so
+            # it cannot be held through a report; SWING and INCOME both can, and
+            # at 30-45 DTE straddling one is the common case rather than the
+            # exception. (Note this is a hold-duration argument, not a claim that
+            # check_earnings_conflict would return False for a 0-DTE: its window
+            # is [today - 5d, expiration], so a report earlier this week falls
+            # inside it. 0-DTE is exempt because it is flat by the close.)
             if earnings_date and trade_type in ("SWING", "INCOME"):
                 if check_earnings_conflict(earnings_date, exp_str):
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")

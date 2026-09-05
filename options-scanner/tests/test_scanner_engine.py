@@ -829,15 +829,28 @@ class TestIncomeEarningsGate:
     from the very first scan.
     """
 
-    def _chain(self, dte, underlying=100.0):
+    def _chain(self, dte):
         """Put-only ladder 85-99 whose marks decay steeply enough that every
         auto-selected width clears both min_cr_pct and the |delta|+EDGE_MARGIN
         edge floor. Delta -0.25 sits inside the requested band AND below
         MAX_ENTRY_SHORT_DELTA, so the short legs are not filtered on delta.
 
+        ⚠ The 0.50 per-strike mark slope IS the spread's credit/width, so it
+        must exceed |delta| + EDGE_MARGIN — 0.27 here. Measured: 0.20 yields
+        ZERO signals, 0.28 and 0.50 both yield 14. The neighbouring
+        TestPerExpiryExpectedMove._chain uses 0.20, which is enough at ITS delta
+        of -0.10 and is NOT enough at -0.25 — so do not "harmonise" this fixture
+        toward that one. (Doing so is caught loudly rather than silently, by
+        test_fixture_produces_signals_without_an_earnings_date below.)
+
+        Underlying is fixed at 100.0 rather than parameterised: both call sites
+        pass a matching spot=100.0 independently, and a varying parameter could
+        desynchronise the two with no signal.
+
         The expiration STRING is a real date `dte` days out, because
         check_earnings_conflict compares dates, not the `:dte` suffix.
         """
+        underlying = 100.0
         exp = (date.today() + timedelta(days=dte)).isoformat()
 
         def leg(k):
