@@ -167,10 +167,17 @@ candidates in `cache:options:income`; never the chain.
 
 ## Open risks
 
-1. **`bucket_key` and calibration.** `shared/calibration.bucket_key` mirrors
-   `scanner_type` ↔ `trade_type` across tiers, and `test_cross_tier_mirrors.py`
-   exists to catch exactly that drift. Adding a third `trade_type` may need a
-   bucket; Task 1 verifies this rather than assuming either way.
+1. ~~**`bucket_key` and calibration.**~~ **Settled 2026-09-05 — no change needed.**
+   `shared/calibration.family_key` passes an unrecognised family through
+   **upper-cased rather than guessed**, and says why in its own docstring: *"a new
+   scanner type should show up as its own bucket, not be folded into an existing
+   one."* `_FAMILY_ALIASES` exists only to reconcile `scanner_type` `'0DTE'` with
+   `trade_type` `'0-DTE'`; `INCOME` has no hyphenated variant, so it needs no
+   alias and `test_cross_tier_mirrors.py` needs no edit. `INCOME` buckets appear
+   on their own as outcomes accrue.
+   ⚠ The one thing to hold to: the recorder must write **`INCOME`** as the
+   `scanner_type` too. Two spellings would silently produce two buckets, which is
+   the exact failure `_FAMILY_ALIASES` was added to fix for 0-DTE.
 2. **Assignment is detected at settlement, from the underlying quote.** The
    settlement branch already defers a cycle when no quote is available. An
    assignment that defers past 15:00 CT on expiry day settles on the next cycle —
