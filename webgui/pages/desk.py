@@ -728,30 +728,47 @@ def strip_is_live(bullbear_view, now=None):
     return _cal.regular_session_has_opened(now or datetime.now().astimezone())
 
 
-def _bullbear_rows(bullbear_view):
-    """The payload's sector rows, ordered strongest-first and null-free.
+def _bullbear_rows(bullbear_view, live=False, previous=None):
+    """The payload's sector rows, ordered for the horizon asked for, null-free.
 
     Shape-guarded at BOTH levels because ``render()`` seeds every view at build
     time: a half-written key, an older writer or a service caught mid-restart
     can put a non-dict in either position, and ``or {}`` would pass a truthy
     malformed payload straight through to the first ``.get``.
 
-    Ordering is ``bullbear.by_strength`` — the map's own — so the strip and the
-    page it links to can never list the same sectors in different orders.
+    Ordering is ``bullbear.by_day_move`` when ``live`` and ``by_strength``
+    otherwise, so the order matches the horizon the chips are coloured by.
+    On a live strip that DELIBERATELY diverges from ``/sentiment/bullbear``,
+    which always sorts by strength: the two screens answer different questions
+    — the strip asks what is working today, the map asks what has worked this
+    quarter — and a strip that coloured by today while ranking by the quarter
+    would be the one genuinely incoherent combination. The divergence is
+    legible rather than silent because the strip captions itself with what it
+    sorted by. ``previous`` is the day sorter's hysteresis seat order and does
+    nothing on the structural horizon, which does not move between paints.
     """
     view = bullbear_view if isinstance(bullbear_view, dict) else {}
     levels = view.get("levels")
     levels = levels if isinstance(levels, dict) else {}
-    return _bb.by_strength(levels.get("sector"))
+    rows = levels.get("sector")
+    return _bb.by_day_move(rows, previous) if live else _bb.by_strength(rows)
 
 
-def bullbear_chips(bullbear_view):
+def bullbear_chips(bullbear_view, now=None, previous=None):
     """One chip per scored sector — everything the strip draws, as plain dicts.
 
     Every DECISION here belongs to ``pages/bullbear.py``: the ordering, the
     quadrant, the breadth width and its thin threshold, and the day-move
     formatting. This function picks the sector level out of the payload and
     names the fields; it computes nothing.
+
+    Each chip carries BOTH horizons. ``quadrant`` is the one the chip is
+    coloured by — today's once the bell has rung, the cascade's quarter
+    otherwise — and ``structural_quadrant`` is always the quarter's, so a live
+    chip can show what today's colour is departing from. ``live`` says which,
+    once, for the whole strip: :func:`strip_is_live` is asked ONE time per paint
+    rather than per row, since two chips in a single paint disagreeing about the
+    horizon would make the strip's caption true of only some of it.
 
     ``payload["regime"]`` is deliberately never read. ``/sentiment/sectors`` and
     ``/sentiment/rotation`` already print OPPOSITE risk-on/risk-off headlines
@@ -766,13 +783,19 @@ def bullbear_chips(bullbear_view):
     (schwab-proxy/proxy_client.py) falls through to a literal ``0.0`` when every
     percent field is missing or zero. So "0.00%" is not proof of a flat tape.
     """
+    live = strip_is_live(bullbear_view, now)
     out = []
-    for row in _bullbear_rows(bullbear_view):
+    for row in _bullbear_rows(bullbear_view, live, previous):
         share = _bb.row_participation(row)
         out.append({
             "label": str(row.get("label") or row.get("symbol") or ""),
             "symbol": str(row.get("symbol") or ""),
-            "quadrant": _bb.quadrant(*_bb.row_axes(row)),
+            "quadrant": (_bb.quadrant(*_bb.row_day_axes(row)) if live
+                         else _bb.quadrant(*_bb.row_axes(row))),
+            # Rendered only when live: off-session the two are the same value,
+            # and a stripe repeating the fill says nothing.
+            "structural_quadrant": _bb.quadrant(*_bb.row_axes(row)),
+            "live": live,
             "day_text": _bb.signed_pct(row.get("day_pct")),
             # None ("no reading at all") and 0 ("nothing confirms") are two
             # different drawings, so this stays the raw None rather than being

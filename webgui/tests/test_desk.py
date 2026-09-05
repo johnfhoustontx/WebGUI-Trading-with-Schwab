@@ -1204,6 +1204,133 @@ def test_strip_is_live_asks_the_calendar_not_the_numbers():
         assert row_reader not in body
 
 
+# ── the chip's two horizons ──────────────────────────────────────────────────
+# Deliberately CONTRADICTORY: rising and leading today, falling and lagging on
+# the quarter. Neither axis can be read out of the wrong block and still pass.
+LIVE_ROW = {"symbol": "XLK", "label": "Information Technology",
+            "day_pct": 1.2, "day_excess": 0.4,
+            "raw": {"trend": -0.5, "excess": -0.2}, "participation": 0.8}
+
+
+def test_chip_colour_follows_today_and_keeps_structure_as_a_stripe():
+    view = {"levels": {"sector": [LIVE_ROW]}, "benchmark_day_pct": 0.8}
+    chip = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))[0]
+    assert chip["quadrant"] == "rising_leading"             # today
+    assert chip["structural_quadrant"] == "falling_lagging"  # the quarter
+    assert chip["live"] is True
+
+
+def test_a_cold_tape_never_paints_the_whole_strip_bearish():
+    """The producer-shaped no-data case: a payload with no day moves at all.
+
+    Driven from the shape the SERVICE writes, because a consumer-side guard
+    proves nothing until a test drives it from the producer.
+    """
+    rows = [{"symbol": s, "label": s, "day_pct": None, "day_excess": None,
+             "raw": {"trend": 0.4, "excess": 0.1}} for s in ("XLK", "XLF", "XLV")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": None}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert [c["quadrant"] for c in chips] == ["rising_leading"] * 3
+    assert all(c["live"] is False for c in chips)
+
+
+def test_off_session_the_stripe_repeats_the_fill():
+    """Both quadrants are the structural one when the strip is not live — which
+    is why Task 8 draws the stripe only when ``live``: a stripe repeating the
+    fill says nothing."""
+    view = {"levels": {"sector": [LIVE_ROW]}, "benchmark_day_pct": 0.8}
+    chip = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))[0]
+    assert chip["quadrant"] == chip["structural_quadrant"] == "falling_lagging"
+    assert chip["live"] is False
+
+
+def test_a_live_strip_orders_by_todays_move_and_a_cold_one_by_strength():
+    """The ordering really switches horizons with the colour, and the two
+    orders genuinely disagree on this fixture — asserted against
+    ``bullbear``'s own sorters rather than a hand-written order that happens to
+    agree today."""
+    from pages import bullbear as B
+    rows = [_brow("A", "Alpha", 0.9, 0.2, day_pct=-1.0, day_excess=-1.5),
+            _brow("B", "Beta", 0.1, 0.2, day_pct=2.0, day_excess=1.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+
+    live = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    assert [c["label"] for c in live] == \
+        [r["label"] for r in B.by_day_move(rows)] == ["Beta", "Alpha"]
+
+    cold = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert [c["label"] for c in cold] == \
+        [r["label"] for r in B.by_strength(rows)] == ["Alpha", "Beta"]
+
+
+def test_previous_reaches_the_day_sorter_so_the_strip_holds_its_seats():
+    """Two sectors inside one margin-wide bucket: only ``previous`` can decide
+    which sits first, so an order following it proves the argument is threaded
+    through rather than dropped on the floor."""
+    rows = [_brow("A", "Alpha", 0.5, 0.1, day_pct=1.21, day_excess=0.7),
+            _brow("B", "Beta", 0.5, 0.1, day_pct=1.23, day_excess=0.7)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    now = datetime.datetime(2026, 9, 8, 10, 0)
+    assert [c["symbol"] for c in
+            d.bullbear_chips(view, now=now, previous=["B", "A"])] == ["B", "A"]
+    assert [c["symbol"] for c in
+            d.bullbear_chips(view, now=now, previous=["A", "B"])] == ["A", "B"]
+
+
+def test_a_row_with_no_live_fields_on_a_live_strip_is_unknown_not_a_direction():
+    """The per-row half of the cold-tape rule. ``row_day_axes`` has no fallback
+    to ``raw`` on purpose, so a sector the proxy omitted must come out
+    ``unknown`` — painting the quarter's reading in today's colours is the one
+    outcome the pair exists to avoid — while its structural stripe still
+    reports what the cascade did measure."""
+    rows = [_brow("A", "Alpha", 0.9, 0.4),            # no day fields at all
+            _brow("B", "Beta", -0.9, -0.4, day_pct=1.0, day_excess=0.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    by_symbol = {c["symbol"]: c for c in chips}
+    assert by_symbol["A"]["quadrant"] == "unknown"
+    assert by_symbol["A"]["structural_quadrant"] == "rising_leading"
+    assert by_symbol["B"]["quadrant"] == "rising_leading"
+
+
+def test_the_horizon_is_decided_once_per_paint_not_once_per_row(monkeypatch):
+    """Per-row would be both wasteful and a chance for two chips in ONE paint to
+    disagree about the horizon — the strip's caption would then be true of some
+    of it."""
+    calls = []
+    real = d.strip_is_live
+
+    def counted(view, now=None):
+        calls.append(now)
+        return real(view, now)
+
+    monkeypatch.setattr(d, "strip_is_live", counted)
+    rows = [_brow(s, s, 0.4, 0.1, day_pct=1.0, day_excess=0.2)
+            for s in ("XLK", "XLF", "XLV", "XLE")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    assert len(chips) == 4
+    assert len(calls) == 1
+
+
+def test_the_existing_chip_keys_all_survive_the_second_horizon():
+    """The renderer and its tests read these by name; Task 8 adds to the dict,
+    it does not rewrite it."""
+    view = {"levels": {"sector": [
+        _brow("XLV", "Health Care", 1.0, 0.1, participation=0.75, day_pct=0.4)]}}
+    chip = d.bullbear_chips(view)[0]
+    assert chip["label"] == "Health Care" and chip["symbol"] == "XLV"
+    assert chip["day_text"] == "+0.40%"
+    assert chip["breadth"] == 75 and chip["thin"] is False
+
+
+def test_bullbear_chips_and_headline_still_work_on_their_old_call():
+    """``_paint_bullbear`` passes the view alone today, and Task 8 wires the
+    rest — nothing may break in between."""
+    view = {"levels": {"sector": [_brow("XLV", "Health Care", 1.0, 0.1)]}}
+    assert d.bullbear_chips(view)[0]["label"] == "Health Care"
+    assert "1 of 1" in d.bullbear_headline(view)
+
 # ── the poll contract ────────────────────────────────────────────────────────
 def test_every_region_only_depends_on_views_the_page_actually_polls():
     """A region wired to a view outside ``VIEWS`` would never repaint: the poll
