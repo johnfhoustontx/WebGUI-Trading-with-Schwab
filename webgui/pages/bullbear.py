@@ -151,17 +151,27 @@ def row_day_axes(row):
     return _num(row.get("day_pct")), _num(row.get("day_excess"))
 
 
-def quadrant_counts(rows):
+def quadrant_counts(rows, live=False):
     """{quadrant: n} over rows, every bucket present even at zero.
+
+    ``live`` picks the HORIZON the count is taken on — :func:`row_day_axes` for
+    today, :func:`row_axes` for the cascade's quarter — and nothing else about
+    the count changes, because :func:`quadrant` is the one classifier over both.
+    It defaults to the quarter, which is the map's horizon and every existing
+    caller's. The Desk strip is the caller that needs the other one: it colours
+    and orders by today once the bell has rung, and a headline still counting
+    ``raw`` under a sentence naming today would be an unlabelled count that
+    silently changes meaning at the open — worse than either count alone.
 
     Indexes directly rather than defensively. quadrant() is total, so a KeyError
     here means that invariant broke — where a setdefault would answer with a
     sixth bucket nobody named and a distribution that no longer sums to what the
     headline claims.
     """
+    axes = row_day_axes if live else row_axes
     counts = {q: 0 for q in QUADRANTS}
     for row in rows or []:
-        counts[quadrant(*row_axes(row))] += 1
+        counts[quadrant(*axes(row))] += 1
     return counts
 
 

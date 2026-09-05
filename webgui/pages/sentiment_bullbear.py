@@ -76,14 +76,18 @@ def day_tone(day_pct):
     return {"+": "up", "-": "down"}.get(B.signed_pct(day_pct)[:1], "flat")
 
 
-def headline_line(sector_rows):
+def headline_line(sector_rows, live=False):
     """The count headline, pluralised here because ``B.headline`` will not.
 
     It renders ``noun`` verbatim and would emit "1 of 1 sectors". Its empty
     string on an empty payload is deliberate too — ``_rebuild`` substitutes
     :data:`WAITING` rather than leave a blank strip.
+
+    ``live`` forwards to :func:`bullbear.quadrant_counts` — this page always
+    counts the quarter, but the Desk strip counts today once the bell has rung
+    and must not grow a second copy of the pluralisation to do it.
     """
-    counts = B.quadrant_counts(sector_rows)
+    counts = B.quadrant_counts(sector_rows, live=live)
     total = sum(counts.values())
     return B.headline(counts, "sector" if total == 1 else "sectors")
 

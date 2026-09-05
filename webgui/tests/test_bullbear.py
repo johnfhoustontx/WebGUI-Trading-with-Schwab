@@ -792,3 +792,41 @@ def test_build_tree_drops_a_null_row_but_still_refuses_a_different_document():
 def test_build_tree_handles_an_empty_payload():
     assert B.build_tree({}) == []
     assert B.build_tree(None) == []
+
+
+# ── the horizon a count is taken on ──────────────────────────────────────────
+def _day_row(trend, excess, day_pct, day_excess, **fields):
+    """A row whose two horizons DISAGREE — the only fixture that can prove
+    which axis a count was taken on."""
+    return _row(trend, excess, day_pct=day_pct, day_excess=day_excess, **fields)
+
+
+def test_quadrant_counts_default_to_the_cascades_own_axes():
+    """The map's horizon, unchanged: every existing caller passes rows alone and
+    must keep counting ``raw``."""
+    rows = [_day_row(1.0, 0.1, -2.0, -1.0), _day_row(1.0, 0.1, -2.0, -1.0)]
+    assert B.quadrant_counts(rows)["rising_leading"] == 2
+    assert B.quadrant_counts(rows)["falling_lagging"] == 0
+
+
+def test_quadrant_counts_switch_to_todays_axes_when_live():
+    """Same rows, other horizon. Without this the Desk's headline would count
+    the quarter under a sentence naming today."""
+    rows = [_day_row(1.0, 0.1, -2.0, -1.0), _day_row(1.0, 0.1, -2.0, -1.0)]
+    counts = B.quadrant_counts(rows, live=True)
+    assert counts["falling_lagging"] == 2
+    assert counts["rising_leading"] == 0
+
+
+def test_a_live_count_never_falls_back_to_the_quarter():
+    """``row_day_axes`` has no fallback to ``raw`` on purpose: a sector the
+    proxy omitted is unscored TODAY, and lending it the cascade's reading is
+    the one outcome the pair exists to avoid."""
+    rows = [_row(1.0, 0.5)]                       # no live fields at all
+    assert B.quadrant_counts(rows, live=True)["unknown"] == 1
+    assert B.quadrant_counts(rows, live=True)["rising_leading"] == 0
+
+
+def test_a_live_count_still_reports_every_bucket_and_nothing_at_all():
+    assert set(B.quadrant_counts([], live=True)) == set(B.QUADRANTS)
+    assert B.quadrant_counts(None, live=True) == {q: 0 for q in B.QUADRANTS}

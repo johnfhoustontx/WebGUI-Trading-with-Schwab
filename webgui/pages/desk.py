@@ -743,10 +743,10 @@ def _bullbear_rows(bullbear_view, live=False, previous=None):
     — the strip asks what is working today, the map asks what has worked this
     quarter — and a strip that coloured by today while ranking by the quarter
     would be the one genuinely incoherent combination. ⚠ That divergence is
-    only defensible once the strip SAYS what it sorted by, and nothing captions
-    it yet — so this function and the caption must ship together, and until
-    they do the divergence is silent. ``previous`` is the day sorter's
-    hysteresis seat order and does
+    only defensible because the strip SAYS what it sorted by
+    (:func:`bullbear_caption`) and its headline names the horizon it counted
+    (:func:`bullbear_headline`) — remove either and the divergence goes silent.
+    ``previous`` is the day sorter's hysteresis seat order and does
     nothing on the structural horizon, which does not move between paints.
     """
     view = bullbear_view if isinstance(bullbear_view, dict) else {}
@@ -808,14 +808,59 @@ def bullbear_chips(bullbear_view, now=None, previous=None):
     return out
 
 
-def bullbear_headline(bullbear_view):
-    """The map's own count sentence, over the same rows the chips draw.
+# What the strip sorted itself by, said out loud. The live line also names the
+# stripe, because a colour on an edge is not self-explanatory and colour is
+# never the sole carrier of a reading. No clock time in either: the horizon is
+# the calendar's answer, and a printed bell time here would be a second copy of
+# a value ``config/sessions.toml`` already owns.
+BB_CAPTION_LIVE = "sorted by today's move — the left edge marks the quarter"
+BB_CAPTION_STRUCTURAL = ("sorted by the quarter's strength — no session move "
+                         "to read yet")
+
+# The horizon the headline's count was taken on. Two words, appended to the
+# map's own sentence rather than replacing it, so the count and its horizon
+# cannot be read apart.
+BB_HORIZON = {True: "today", False: "on the quarter"}
+
+
+def bullbear_caption(live):
+    """Which horizon the strip sorted and coloured by, in words.
+
+    The strip DELIBERATELY diverges from ``/sentiment/bullbear``'s order — the
+    strip asks what is working today, the map asks what has worked this quarter
+    — and that is only defensible once the strip SAYS what it sorted by.
+    Otherwise two screens rank one payload differently and neither admits it,
+    which is the ``/sentiment/sectors``-vs-``/sentiment/rotation`` failure
+    (CLAUDE.md, 2026-08-17) reopened one screen earlier.
+
+    Takes the flag rather than the view: ``_paint_bullbear`` already knows the
+    horizon from the chips it just built, and asking :func:`strip_is_live` a
+    second time on a second clock is how a caption ends up true of a strip that
+    was drawn on the other side of the bell.
+    """
+    return BB_CAPTION_LIVE if live else BB_CAPTION_STRUCTURAL
+
+
+def bullbear_headline(bullbear_view, now=None):
+    """The map's own count sentence, over the same rows the chips draw, NAMING
+    the horizon it counted.
 
     ``sentiment_bullbear.headline_line`` handles the pluralisation and returns
     "" on an empty payload — where "0 of 0 sectors rising and leading" would
-    state a maximally bearish tape that nobody measured.
+    state a maximally bearish tape that nobody measured. An empty line takes no
+    horizon word either: naming the horizon of a count nobody made would make
+    that claim worse rather than better.
+
+    The count follows the chips onto today's axes once :func:`strip_is_live`
+    says the bell has rung, because a sentence reading "4 of 11 sectors rising
+    and leading" that silently changes meaning at the open is worse than either
+    count alone. ``now`` is threaded so one paint can decide the horizon ONCE
+    and hand the same instant to both the chips and this line.
     """
-    return _bbmap.headline_line(_bullbear_rows(bullbear_view))
+    live = strip_is_live(bullbear_view, now)
+    line = _bbmap.headline_line(_bullbear_rows(bullbear_view, live=live),
+                                live=live)
+    return f"{line} {BB_HORIZON[live]}" if line else ""
 
 
 # ── freshness ────────────────────────────────────────────────────────────────
@@ -2181,9 +2226,46 @@ def stale_walls_note(label):
 # text, background and border from its own five-literal palette, and the chip's
 # inner labels inherit that text colour rather than setting one — so the strip
 # and the map cannot colour the same quadrant differently.
-_BB_CHIP = ("flex-1 min-w-[124px] border rounded-[2px] px-[8px] py-[6px] "
-            "gap-[5px] cursor-pointer")
-_BB_NAME = "text-[13px] font-semibold leading-none min-w-0 truncate"
+# ``border-l-[3px]`` lives HERE, on the frame, not on the stripe class: every
+# chip reserves the stripe's width at both horizons, so the strip does not
+# reflow 3px sideways when the opening bell flips it. Off-session the left
+# border simply takes the quadrant's own colour, like the other three edges.
+_BB_CHIP = ("flex-1 min-w-[124px] border border-l-[3px] rounded-[2px] "
+            "px-[8px] py-[6px] gap-[5px] cursor-pointer")
+
+# The structural stripe: the quarter's quadrant on the chip's left edge, drawn
+# only when the fill is TODAY's, so the chip carries both horizons at once
+# without either pretending to be the other. A fixed finite palette of static
+# classes, mapped from ``bullbear.QUADRANTS`` — never an f-string built from a
+# payload — and it tracks ``bullbear._CLASSES``' ramp so one quadrant is not
+# emerald in the fill and amber on the edge. Lower opacity than the fill
+# throughout: the stripe is the reference reading, not the headline one.
+# Degrades to ``unknown`` exactly as ``quadrant_class`` does.
+_BB_STRIPE = {
+    "rising_leading": "border-l-emerald-400/70",
+    "rising_lagging": "border-l-emerald-400/40",
+    "falling_leading": "border-l-amber-400/70",
+    "falling_lagging": "border-l-rose-400/70",
+    "unknown": "border-l-slate-400/50",
+}
+
+# Colour is never the sole carrier of a reading, so the stripe says its quadrant
+# in words too — in ``bullbear``'s words, so the strip and the map cannot name
+# one quadrant two ways.
+STRIPE_TOOLTIP_PREFIX = "On the quarter: "
+
+
+def stripe_class(q):
+    """A structural quadrant -> its left-edge classes; an unknown key degrades."""
+    return _BB_STRIPE.get(q, _BB_STRIPE["unknown"])
+
+
+def stripe_tooltip(q):
+    """The stripe's hover text — what the quarter says, spelled out."""
+    return f"{STRIPE_TOOLTIP_PREFIX}{_bb.quadrant_label(q)}"
+
+
+_BB_NAME ="text-[13px] font-semibold leading-none min-w-0 truncate"
 _BB_QUAD = "text-[10px] leading-none tracking-[.1em] opacity-80 truncate"
 # The day move is deliberately NOT coloured by its sign: ``signed_pct`` prints
 # the sign already, and a second green/red inside a chip that is itself green or
@@ -2730,6 +2812,11 @@ def render():
                 # so the two screens cannot report different counts.
                 bb_headline = ui.label("").classes(
                     f"text-[13px] leading-none {CON_TXT_MUTED}")
+                # What it was sorted by. Dimmer than the count, because it
+                # qualifies that sentence rather than adding a second reading —
+                # and empty until there is something sorted to describe.
+                bb_caption = ui.label("").classes(
+                    f"text-[11px] leading-none {CON_TXT_DIM}")
             bb_box = ui.row().classes("w-full items-stretch gap-2 flex-wrap")
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
@@ -2850,10 +2937,25 @@ def render():
                           _CC.delta_parts(_arc_value(t_arcs, 0),
                                           _arc_value(t_arcs, 2), "MONTH"))
 
+    # The seat order the strip last drew, fed back into ``by_day_move`` so its
+    # hysteresis has something to hold: the sorter is a pure function of
+    # (rows, previous), so without this the margin buys nothing and the strip
+    # re-sorts from scratch on every 30 s repaint. Page state in a local dict,
+    # never a module global — one client, one strip, one memory.
+    bb_seats = {"order": None}
+
     def _paint_bullbear():
         view = _view("sentiment:bullbear")
-        bb_headline.text = bullbear_headline(view)
-        chips = bullbear_chips(view)
+        # ONE clock for the whole paint, as ``_paint`` takes one for the page:
+        # two would let the headline name a horizon the chips were not drawn on.
+        now = datetime.now().astimezone()
+        chips = bullbear_chips(view, now=now, previous=bb_seats["order"])
+        bb_seats["order"] = [c["symbol"] for c in chips]
+        bb_headline.text = bullbear_headline(view, now=now)
+        # The horizon comes off the chips rather than from a third
+        # ``strip_is_live`` call — every chip in one paint carries the same
+        # flag, and nothing was sorted at all when there are none.
+        bb_caption.text = bullbear_caption(chips[0]["live"]) if chips else ""
         bb_box.clear()
         with bb_box:
             if not chips:
@@ -2863,8 +2965,14 @@ def render():
                 _bullbear_chip(chip)
 
     def _bullbear_chip(chip):
-        el = ui.column().classes(
-            f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
+        classes = f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}"
+        if chip["live"]:
+            # The stripe ONLY on a live strip: off-session both quadrants are
+            # the same value and an edge repeating the fill says nothing.
+            classes += f" {stripe_class(chip['structural_quadrant'])}"
+        el = ui.column().classes(classes)
+        if chip["live"]:
+            el.tooltip(stripe_tooltip(chip["structural_quadrant"]))
         with el:
             with ui.row().classes(
                     "items-baseline justify-between w-full gap-2 flex-nowrap"):

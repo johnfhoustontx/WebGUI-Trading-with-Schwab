@@ -1877,12 +1877,15 @@ def test_render_mounts_a_chip_per_sector_over_the_maps_own_count_sentence(
         monkeypatch):
     """The sentence is ``sentiment_bullbear.headline_line`` — the map's own,
     pluralisation included — so the two screens cannot report different counts
-    off one payload."""
+    off one payload. The HORIZON word after it is the Desk's own: this payload
+    carries no benchmark, so the strip is not live and the sentence must say it
+    counted the quarter rather than leaving the reader to assume today."""
     _seed_bus(monkeypatch, {"sentiment:bullbear": _bullbear_payload()})
     texts = [t for t in _rendered_texts() if t]
     assert "Technology" in texts and "Utilities" in texts
     assert "Rising · Leading" in texts and "Falling · Leading" in texts
-    assert "1 of 2 sectors rising and leading" in texts
+    assert ("1 of 2 sectors rising and leading "
+            + d.BB_HORIZON[False]) in texts
     assert "+1.20%" in texts and "-0.30%" in texts
 
 
@@ -1907,6 +1910,233 @@ def test_render_gives_the_bullbear_strip_its_own_cold_message():
     assert d.WAITING_BULLBEAR in texts
     assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
     assert not any("rising and leading" in t for t in texts)
+
+
+# ── Task 8: the structural stripe, the caption and the horizon headline ──────
+def _live_bullbear_payload():
+    """The strip's payload with today's numbers CONTRADICTING the quarter's, so
+    no assertion below can pass by reading the wrong horizon."""
+    return {"benchmark_day_pct": 0.5, "levels": {"sector": [
+        _brow("XLK", "Technology", -0.42, -0.11, participation=0.8,
+              day_pct=1.2, day_excess=0.7),
+        _brow("XLU", "Utilities", 0.30, 0.20, participation=0.6,
+              day_pct=-0.3, day_excess=-0.8)]}}
+
+
+def _live_now(monkeypatch, live=True):
+    """Pin the horizon switch, since ``_paint_bullbear`` reads the real clock."""
+    monkeypatch.setattr(d, "strip_is_live", lambda view, now=None: live)
+
+
+def test_stripe_class_answers_for_every_quadrant_and_degrades_like_the_fill():
+    """A static class per member of the finite set, and an unrecognised key
+    takes ``unknown`` exactly as ``bullbear.quadrant_class`` does — never a
+    runtime-built colour, which is the Tailwind-first standard's one hard rule
+    for a data-driven colour."""
+    from pages import bullbear as B
+    for quad in B.QUADRANTS:
+        assert d.stripe_class(quad).strip()
+        assert "border-l-" in d.stripe_class(quad)
+    assert d.stripe_class("no_such_quadrant") == d.stripe_class("unknown")
+    assert d.stripe_class(None) == d.stripe_class("unknown")
+    # Five distinct marks, or two quadrants would be indistinguishable on the
+    # edge that is supposed to tell them apart.
+    assert len({d.stripe_class(q) for q in B.QUADRANTS}) == len(B.QUADRANTS)
+
+
+def test_the_chip_reserves_the_stripes_width_at_both_horizons():
+    """The border-left width lives on the FRAME, not on the stripe class, so a
+    chip is the same size live and cold. Otherwise the whole strip reflows at
+    the opening bell — eleven chips jumping 3px sideways for no reading a user
+    asked for."""
+    assert "border-l-[3px]" in d._BB_CHIP
+
+
+def test_the_stripe_is_drawn_only_on_a_live_strip(monkeypatch):
+    """Off-session the two quadrants are the same value, and a stripe repeating
+    the fill says nothing. Read off the mounted classes: the stripe is drawn,
+    never written."""
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    live_classes = " ".join(_rendered_classes())
+    # Technology is falling and lagging on the quarter while rising today.
+    assert d.stripe_class("falling_lagging") in live_classes
+    assert d.stripe_class("rising_leading") in live_classes
+
+    _live_now(monkeypatch, live=False)
+    cold_classes = " ".join(_rendered_classes())
+    for quad in ("falling_lagging", "rising_leading", "rising_lagging",
+                 "falling_leading", "unknown"):
+        assert d.stripe_class(quad) not in cold_classes
+
+
+def test_the_stripe_names_its_quadrant_in_words_too(monkeypatch):
+    """Colour is never the sole carrier of a reading. The tooltip spells the
+    structural quadrant out with ``bullbear.quadrant_label``, so the strip and
+    the map cannot name one quadrant two ways."""
+    from pages import bullbear as B
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    texts = [t for t in _rendered_texts() if t]
+    assert d.stripe_tooltip("falling_lagging") in texts
+    assert B.quadrant_label("falling_lagging") in d.stripe_tooltip(
+        "falling_lagging")
+
+    _live_now(monkeypatch, live=False)
+    cold = [t for t in _rendered_texts() if t]
+    assert not any(t.startswith(d.STRIPE_TOOLTIP_PREFIX) for t in cold)
+
+
+def test_the_caption_says_which_horizon_the_strip_was_sorted_by():
+    """The strip DELIBERATELY diverges from /sentiment/bullbear's order, and
+    that is only defensible once it says what it sorted by — otherwise two
+    screens rank one payload differently and neither admits it."""
+    assert d.bullbear_caption(True) != d.bullbear_caption(False)
+    assert d.bullbear_caption(True).strip()
+    assert d.bullbear_caption(False).strip()
+
+
+def test_the_caption_is_painted_and_switches_with_the_horizon(monkeypatch):
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    assert d.bullbear_caption(True) in [t for t in _rendered_texts() if t]
+
+    _live_now(monkeypatch, live=False)
+    cold = [t for t in _rendered_texts() if t]
+    assert d.bullbear_caption(False) in cold
+    assert d.bullbear_caption(True) not in cold
+
+
+def test_a_cold_strip_captions_nothing_it_did_not_sort(monkeypatch):
+    """No chips means nothing was sorted, so neither caption is true. The
+    placeholder is the whole message."""
+    texts = [t for t in _rendered_texts() if t]
+    assert d.bullbear_caption(True) not in texts
+    assert d.bullbear_caption(False) not in texts
+
+
+def test_the_headline_counts_todays_quadrants_and_says_so():
+    """An unlabelled count that silently changes meaning at the opening bell is
+    worse than either count alone. Technology is rising and leading today while
+    falling and lagging on the quarter, so the two horizons must disagree here
+    or the fixture is not testing anything."""
+    view = _live_bullbear_payload()
+    live = d.bullbear_headline(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    cold = d.bullbear_headline(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert live.startswith("1 of 2 sectors rising and leading")
+    assert cold.startswith("1 of 2 sectors rising and leading")
+    assert live != cold
+    assert live.endswith(d.BB_HORIZON[True])
+    assert cold.endswith(d.BB_HORIZON[False])
+
+
+def test_the_headline_really_changes_axis_not_only_wording():
+    """A fixture where the COUNTS differ, so a headline that named the horizon
+    while still counting ``raw`` would fail here."""
+    rows = [_brow("A", "Alpha", 0.9, 0.4, day_pct=-1.0, day_excess=-1.5),
+            _brow("B", "Beta", 0.9, 0.4, day_pct=-1.0, day_excess=-1.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    assert d.bullbear_headline(
+        view, now=datetime.datetime(2026, 9, 8, 10, 0)).startswith("0 of 2")
+    assert d.bullbear_headline(
+        view, now=datetime.datetime(2026, 9, 5, 12, 0)).startswith("2 of 2")
+
+
+def test_the_headline_still_says_nothing_about_a_payload_it_never_read():
+    """A count of "0 of 0 sectors rising and leading" states a maximally bearish
+    tape that nobody measured — and naming a horizon after it would make it
+    worse, not better."""
+    for view in (None, {}, {"levels": {"sector": []}}):
+        assert d.bullbear_headline(view) == ""
+        assert d.bullbear_headline(
+            view, now=datetime.datetime(2026, 9, 8, 10, 0)) == ""
+
+
+def test_the_headline_keeps_the_maps_pluralisation():
+    view = {"levels": {"sector": [_brow("XLV", "Health Care", 1.0, 0.1)]}}
+    assert d.bullbear_headline(view).startswith("1 of 1 sector rising")
+
+
+def _desk_paint():
+    """``render()``'s own ``_paint``, so a test can drive a SECOND paint.
+
+    The seat memory is closure state on purpose — page state belongs in a local
+    dict, never a module global — so nothing about feeding it back is visible
+    from one ``render()`` call. It is reached through the poll timer's callback,
+    which is the only handle ``render()`` leaves on the page's elements.
+    """
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    for key, el in ui.context.client.elements.items():
+        if key in before:
+            continue
+        fn = getattr(getattr(el, "callback", None), "__wrapped__", None)
+        names = getattr(fn, "__code__", None) and fn.__code__.co_freevars
+        if not names or "_paint" not in names:
+            continue
+        return fn.__closure__[names.index("_paint")].cell_contents
+    raise AssertionError("render() left no handle on _paint")
+
+
+def test_the_strip_feeds_its_own_seat_order_into_the_next_paint(monkeypatch):
+    """``by_day_move``'s hysteresis is a pure function of (rows, previous), so
+    without the feedback the margin buys nothing and the strip reshuffles on
+    noise. Proven across TWO paints: one call cannot show a value being carried.
+    """
+    seen = []
+    real = d.bullbear_chips
+
+    def recorder(view, now=None, previous=None):
+        seen.append(previous)
+        return real(view, now=now, previous=previous)
+
+    payload = _live_bullbear_payload()
+    _seed_bus(monkeypatch, {"sentiment:bullbear": payload})
+    _live_now(monkeypatch, live=True)
+    monkeypatch.setattr(d, "bullbear_chips", recorder)
+
+    paint = _desk_paint()
+    paint({"sentiment:bullbear": payload})
+
+    assert len(seen) == 2
+    assert seen[0] is None                       # nothing was drawn before
+    # The first paint's order, symbol for symbol — not a truthy stand-in.
+    assert seen[1] == [c["symbol"] for c in
+                       real(payload, now=None, previous=None)]
+    assert seen[1] == ["XLK", "XLU"]
+
+
+def test_a_measured_zero_mid_session_still_reads_as_falling_and_lagging():
+    """KNOWN, DELIBERATE trade-off — recorded so it cannot change silently.
+
+    ``SchwabProxyClient._extract_change_pct`` falls through to a literal
+    ``0.0`` when every percent field is missing or zero, so a proxy returning
+    junk quotes mid-session yields eleven honest-looking zeros. ``strip_is_live``
+    asks the calendar rather than the numbers, so it is True; ``quadrant`` ties
+    to the cautious side, so ``0.0`` is not ``> 0`` and every such chip renders
+    ``falling_lagging`` — a maximally bearish strip drawn from no data.
+
+    The alternative is worse: a deadband or a truthiness test would fold a
+    GENUINELY flat sector, which moved exactly with the benchmark, into "no
+    reading", and would make the whole strip disappear on the quiet tapes it is
+    most useful on. The dash reserved for an OMITTED symbol is the only absence
+    this payload can express, and a returned 0.0 is not that. Fix it upstream in
+    the proxy or not at all.
+    """
+    rows = [_brow(s, s, 0.9, 0.4, day_pct=0.0, day_excess=0.0)
+            for s in ("XLK", "XLF", "XLV")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.0}
+    now = datetime.datetime(2026, 9, 8, 10, 0)
+    assert d.strip_is_live(view, now=now) is True
+    chips = d.bullbear_chips(view, now=now)
+    assert [c["quadrant"] for c in chips] == ["falling_lagging"] * 3
+    # …while the stripe still reports what the cascade really did measure, which
+    # is the one thing that keeps the strip readable through this.
+    assert [c["structural_quadrant"] for c in chips] == ["rising_leading"] * 3
+    assert d.bullbear_headline(view, now=now).startswith("0 of 3")
 
 
 def test_render_wires_every_bullbear_chip_through_to_the_map(monkeypatch):
