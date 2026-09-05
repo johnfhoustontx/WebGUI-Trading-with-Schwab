@@ -526,6 +526,13 @@ def income_scan(symbol, market_state=None) -> dict:
     delta short demands 17-27%, and the credit floor is
     ``max(0.12, MIN_ABS_CREDIT/width)`` = 0.12 at any width >= 2. A separate knob
     would be a second constant that changes nothing until EDGE_MARGIN moves.
+
+    The quality cut is likewise ``swing_scan``'s own ``SWING_MIN_SCORE`` /
+    ``SWING_EXCLUDED_GRADES``, unchanged and deliberately NOT duplicated as an
+    ``income_min``. The bar is a statement about the Fit+Quality composite, which
+    is horizon-agnostic; a second constant carrying the same value would be a
+    liability until the two genuinely diverge, and if they ever do it belongs in
+    ``config/scanner.toml`` under ``[scores]``, never as a literal here.
     """
     status, earnings_date = _income_earnings(symbol)
     out = swing_scan(symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
