@@ -2218,8 +2218,24 @@ def bullbear_symbols(levels):
     return out
 
 
+def _quoted_day_pct(quotes, symbol):
+    """``change_pct`` for one symbol, or None when the proxy omitted it.
+
+    ONE spelling of this extraction, called by both the per-row merge and the
+    benchmark lookup: the mapping, the missing-symbol fallthrough and the
+    coercion have to agree, and this repo has a history of the same read
+    existing in several spellings that then drift.
+
+    None means OMITTED, never "unchanged" — ``_extract_change_pct``
+    (schwab-proxy/proxy_client.py) falls through to a literal 0.0 for a symbol
+    it does return, so 0.0 is a reading and absence is not one.
+    """
+    pct = ((quotes or {}).get(symbol) or {}).get("change_pct")
+    return float(pct) if isinstance(pct, (int, float)) else None
+
+
 def merge_live(levels, quotes):
-    """Attach ``day_pct`` to a COPY of every row.
+    """Attach ``day_pct`` and ``day_excess`` to a COPY of every row.
 
     Copies rather than mutates: ``levels`` comes from the cached momentum
     payload, which /sentiment/momentum renders too — a live field written into
@@ -2231,14 +2247,22 @@ def merge_live(levels, quotes):
     no nested ``quote`` envelope. A symbol the proxy left out leaves ``day_pct``
     None, which renders as a dash; defaulting to 0.0 would render as
     "unchanged", a different and false claim.
+
+    ``day_excess`` is the relative axis: today's move less MOMENTUM_BENCHMARK's
+    today, resolved ONCE for the whole tree.
     """
+    bench = _quoted_day_pct(quotes, MOMENTUM_BENCHMARK)
     merged = {}
     for name in BULLBEAR_LEVELS:
         rows = []
         for row in (levels or {}).get(name) or []:
             out_row = dict(row or {})
-            pct = ((quotes or {}).get(out_row.get("symbol")) or {}).get("change_pct")
-            out_row["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
+            day = _quoted_day_pct(quotes, out_row.get("symbol"))
+            out_row["day_pct"] = day
+            # None when EITHER side is absent. 0.0 would say "moved exactly with
+            # the benchmark", a measured fact -- absence is not that claim.
+            out_row["day_excess"] = (
+                (day - bench) if (day is not None and bench is not None) else None)
             rows.append(out_row)
         merged[name] = rows
     return merged
@@ -2297,5 +2321,9 @@ def bullbear_view(momentum) -> dict:
         "computed_at": momentum.get("computed_at"),
         "quoted_at": quoted_at,
         "regime": momentum.get("regime"),
+        # The axis every row's day_excess is measured against, published so the
+        # page can label it and can tell "flat vs the benchmark" (0.0) apart
+        # from "no benchmark" (None, and then no day_excess anywhere).
+        "benchmark_day_pct": _quoted_day_pct(quotes, MOMENTUM_BENCHMARK),
         "levels": merge_live(levels, quotes),
     }
