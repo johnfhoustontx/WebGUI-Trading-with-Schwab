@@ -35,20 +35,25 @@ def test_bullbear_symbols_skips_rows_with_no_usable_symbol():
 
 
 def test_bullbear_symbols_appends_the_benchmark_when_no_row_carries_it():
-    """The Desk strip's relative axis needs SPY's own day move, and SPY is not
-    a row in most trees. It rides the SAME batched call — one more symbol, not
-    one more request."""
+    """A live relative axis needs SPY's own day move, and SPY is not a row in
+    most trees. It rides the SAME batched call — one more symbol, not one more
+    request."""
     out = compute.bullbear_symbols({"sector": [{"symbol": "XLK"}]})
     assert out == ["XLK", compute.MOMENTUM_BENCHMARK]
 
 
 def test_bullbear_symbols_does_not_ask_twice_for_a_benchmark_already_scored():
-    """SPY can legitimately be a scored stock row; the quote call asks once."""
-    levels = {"sector": [{"symbol": "XLK"}], "industry": [],
-              "stock": [{"symbol": compute.MOMENTUM_BENCHMARK}]}
+    """SPY can legitimately be a scored stock row; the quote call asks once.
+
+    The benchmark is deliberately the FIRST row here: with it last, the expected
+    order would hold whether the guard fired or not, so this pins both halves —
+    not re-appended, AND not dragged to the end of a list it already leads.
+    """
+    levels = {"sector": [{"symbol": compute.MOMENTUM_BENCHMARK}],
+              "industry": [], "stock": [{"symbol": "XLK"}]}
     out = compute.bullbear_symbols(levels)
     assert out.count(compute.MOMENTUM_BENCHMARK) == 1
-    assert out == ["XLK", compute.MOMENTUM_BENCHMARK]
+    assert out == [compute.MOMENTUM_BENCHMARK, "XLK"]
 
 
 def test_merge_live_attaches_the_day_move_at_every_level():
@@ -151,8 +156,9 @@ def test_bullbear_view_stamps_quoted_at_now_and_offset_aware(monkeypatch):
 
 
 def test_bullbear_view_asks_for_quotes_once_for_every_distinct_symbol(monkeypatch):
-    """Measured 374 symbols returning in a SINGLE call; a per-row fetch would be
-    374 proxy round-trips every 30 s."""
+    """Measured 2026-08-19: the tree's 374 symbols returned in a SINGLE call, so
+    asking for those plus the benchmark is still one; a per-row fetch would be
+    375 proxy round-trips every 30 s."""
     calls = []
     monkeypatch.setattr(compute, "_bullbear_quotes",
                         lambda s: calls.append(list(s)) or {})

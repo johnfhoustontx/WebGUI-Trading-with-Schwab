@@ -2190,7 +2190,7 @@ def compute_momentum(session_date=None, conn=None, client=None):
 #
 # The relative axis is measured against MOMENTUM_BENCHMARK — the same SPY the
 # nightly cascade scores excess against, deliberately not a second spelling of
-# it — and that symbol rides the same batched call as the rows.
+# it.
 # See docs/plans/2026-08-19-bull-bear-map-design.md.
 
 BULLBEAR_LEVELS = ("sector", "industry", "stock")
@@ -2199,10 +2199,9 @@ BULLBEAR_LEVELS = ("sector", "industry", "stock")
 def bullbear_symbols(levels):
     """Every distinct symbol across the three levels, plus the benchmark.
 
-    Deduped because an industry ETF is usually a scored stock as well — and
-    MOMENTUM_BENCHMARK can itself be a scored row — and the batched quote call
-    should ask for each one once. Order preserved; the benchmark goes last when
-    no row already carries it.
+    Deduped because an industry ETF is usually a scored stock as well, and
+    MOMENTUM_BENCHMARK can itself be a scored row. Order preserved; the
+    benchmark goes last, and only when no row already carries it.
     """
     out, seen = [], set()
     for name in BULLBEAR_LEVELS:
@@ -2212,7 +2211,7 @@ def bullbear_symbols(levels):
                 seen.add(symbol)
                 out.append(symbol)
     # One more symbol, not one more request: 374 came back in a single call
-    # (measured 2026-08-19), so the Desk strip's intraday quadrant gets the
+    # (measured 2026-08-19), so a live relative axis can be computed against the
     # benchmark's own day move for no new proxy round-trip and no new schedule.
     if MOMENTUM_BENCHMARK not in seen:
         out.append(MOMENTUM_BENCHMARK)
@@ -2248,8 +2247,8 @@ def merge_live(levels, quotes):
 def _bullbear_quotes(symbols):
     """One batched ``/quotes`` call for every symbol.
 
-    Measured 2026-08-19: all 374 come back in a SINGLE call, so this is one
-    request per poll and not one per name.
+    Measured 2026-08-19: the tree's 374 came back in a SINGLE call, so asking
+    for those plus the benchmark is one request per poll and not one per name.
     """
     from services import _proxy
 
