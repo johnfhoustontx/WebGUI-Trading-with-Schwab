@@ -43,6 +43,43 @@ class ScanResult(_Base):
     warnings: list = []
 
 
+class IncomeScan(_Base):
+    """cache:options:income — the 30-45 DTE income window's published candidates.
+
+    ⚠ **Rows are heterogeneous**, so ``candidates`` is modelled loosely as
+    ``list[dict]`` — the same judgement ``ScanResult`` makes above, for the same
+    reason. ``compute.income_scan`` adapts two-leg credit spreads (``PCS`` /
+    ``CCS``), which carry BOTH the flat ``short_strike``/``rr_pct`` contract and
+    a normalized ``legs`` list, into ONE jointly-ranked list beside
+    ``SHORT_PUT``, which carries only the normalized shape (``legs`` / ``rr``, a
+    ratio, not a percent / ``breakevens``, a list, not a scalar). Code reading
+    these rows must not assume either shape. This contract validates the
+    ENVELOPE (the containers exist and have the right types) as a gate against
+    gross drift; it deliberately does not over-specify a row.
+
+    ⚠ **The chain is deliberately absent.** Publishing it alongside the
+    candidates would repeat the ``cache:options:calc_chain`` incident — 8.77 MB,
+    **53% of all prod Redis string bytes**, until ``thin_calc_chain`` cut it 92%
+    — and worse here, since a 30-45 DTE chain is wider than the 0-DTE one that
+    caused it. A page needing marks re-reads the chain view it already has.
+
+    Note the naming, and do not "harmonise" it: ``compute.income_scan`` returns
+    ``swing_scan``'s per-SYMBOL shape (``signals`` / ``view`` / ``filtered_out``)
+    for one symbol, while this is the PUBLISHED view merging many symbols into
+    one ranked list — hence ``candidates`` rather than ``signals``. The two are
+    different objects at different tiers.
+
+    Every field carries a default: Redis persists this view across a service
+    restart, so a payload written before a field existed must still validate.
+    """
+
+    candidates: list[dict] = []      # heterogeneous ranked rows (see above)
+    scanned_symbols: int = 0         # how many symbols the pass actually covered
+    errors: list = []
+    warnings: list = []
+    ts: str | None = None            # publish time
+
+
 class RescueLeg(_Base):
     side: str = ""        # "BUY" | "SELL"
     right: str = ""       # "PUT" | "CALL"
