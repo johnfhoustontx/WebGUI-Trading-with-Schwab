@@ -55,18 +55,30 @@ why it is `None` — never `0.0` — whenever either side is missing.
 
 ### Classification (pure, `webgui/pages/bullbear.py`)
 
-A sibling of the existing classifier, deliberately the same shape, same
-vocabulary, same tie rule:
+A new `row_day_axes(row)` reads the top-level live fields and feeds the
+**existing** classifier:
 
 ```
-day_quadrant(day_pct, day_excess) -> rising_leading | rising_lagging
-                                   | falling_leading | falling_lagging | unknown
+quadrant(*row_day_axes(row)) -> rising_leading | rising_lagging
+                              | falling_leading | falling_lagging | unknown
 ```
 
 Ties go to the cautious side; a missing axis yields `unknown` rather than a
-default bucket. Keeping it byte-for-byte parallel to `quadrant()` is the point —
-the two horizons must classify identically so that a difference between the
-strip and the map is always a difference in *horizon*, never in *rule*.
+default bucket.
+
+⚠ **Built as `row_day_axes` alone.** A `day_quadrant` wrapper was specified here
+and dropped during implementation, deliberately. Its only future justification
+would be a deadband on the noisier intraday axis — which decision 4 above
+rejects — so the seam would exist for a change already ruled out. And a parity
+test over a body of `return quadrant(...)` **cannot fail**: it would read as if
+it pinned the invariant while pinning nothing. **One classifier makes rule parity
+structural** — the two horizons cannot diverge by rule because there is only one
+rule, so a difference between the strip and the map is always a difference in
+*horizon*.
+
+`row_day_axes` must NOT fall back to the `raw` block when the live fields are
+absent. That fallback would paint the structural reading in today's colours —
+precisely the outcome this feature exists to prevent.
 
 ### The live / structural switch
 
@@ -133,8 +145,11 @@ paragraph, not conclude one of them is broken.
   gets its own test driven from a producer-shaped payload, because a
   consumer-side guard proves nothing until a test drives it from the producer.
 * **`day_excess` is `None`, never `0.0`**, whenever either side is missing.
-* **Rule parity**: `day_quadrant` and `quadrant` agree on every input pair,
-  including the boundary values, so the horizons cannot diverge by rule.
+* **Rule parity**: `quadrant(*row_day_axes(row))` agrees with `quadrant(pct, excess)`
+  over a grid straddling zero on both axes, so the axes reader cannot start
+  altering what it feeds the classifier.
+* **No structural fallback**: `row_day_axes` on a row with no live fields returns
+  `(None, None)`, never the `raw` pair.
 * `test_no_inline_style.py` already covers `desk.py`.
 
 ## Out of scope

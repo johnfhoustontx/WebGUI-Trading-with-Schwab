@@ -4,7 +4,7 @@
 
 **Goal:** Re-key the Desk's Bull / Bear sector strip so its colour and ordering follow **today's** price action, while the quarter-horizon reading survives as a left border stripe.
 
-**Architecture:** `sentiment_svc` adds SPY to the existing single batched `/quotes` call and attaches `day_excess` per row. A new pure `day_quadrant` in `webgui/pages/bullbear.py` mirrors the existing `quadrant` exactly, so the two horizons differ only in horizon, never in rule. The Desk decides live-vs-structural from `shared.market_calendar` rather than inferring absence from zeros.
+**Architecture:** `sentiment_svc` adds SPY to the existing single batched `/quotes` call and attaches `day_excess` per row. A new pure `row_day_axes` in `webgui/pages/bullbear.py` feeds the EXISTING `quadrant`, so the two horizons share one classifier and differ only in which fields they read. The Desk decides live-vs-structural from `shared.market_calendar` rather than inferring absence from zeros.
 
 **Tech Stack:** Python 3.11, NiceGUI (Tier 1), FastAPI services (Tier 2), Redis bus, pytest.
 
@@ -237,75 +237,35 @@ git commit -m "feat(sentiment_svc): day_excess vs SPY on every bullbear row"
 
 ---
 
-## Task 4: `day_quadrant` — the intraday classifier
+## Task 4: the intraday axes
 
-**Files:**
-- Modify: `webgui/pages/bullbear.py` (add after `row_axes`, ~line 123)
-- Test: `webgui/tests/test_bullbear.py`
+⚠ **Corrected during execution.** This task originally specified a `day_quadrant`
+wrapper delegating to `quadrant`. It was dropped, deliberately, and the reasoning
+should not be re-litigated:
 
-**Step 1: Write the failing tests**
+* The only plausible reason for the two horizons to diverge is a **deadband** on
+  the noisier intraday axis — which the design explicitly rejects. The seam would
+  have been built for a change already ruled out. That is YAGNI exactly.
+* The rule-parity test over a body of `return quadrant(...)` **cannot fail**. It
+  would read as if it pinned the invariant while pinning nothing. With one
+  classifier, parity is *structural* — a stronger guarantee than any test.
+* `row_day_axes` already carries the horizon at the call site:
+  `quadrant(*row_day_axes(row))` reads as "the quadrant of the day axes".
 
-```python
-def test_day_quadrant_matches_the_structural_rule_exactly():
-    # Same rule, different horizon: identical inputs must classify identically,
-    # so any strip/map disagreement is a horizon difference and never a rule one.
-    for t in (-1.0, -0.01, 0.0, 0.01, 1.0):
-        for e in (-1.0, -0.01, 0.0, 0.01, 1.0):
-            assert B.day_quadrant(t, e) == B.quadrant(t, e)
+**Only `row_day_axes` was added.** Every later task calls
+`_bb.quadrant(*_bb.row_day_axes(row))` — NOT `_bb.day_quadrant(...)`.
 
+`row_day_axes` reads the TOP-level `day_pct` / `day_excess` through the shared
+strict `_num`, and **must not fall back to the `raw` block** — that fallback would
+paint the structural reading in today's colours, the one outcome this feature
+exists to prevent. It is pinned by a test whose fixture carries a *contradicting*
+structural pair, so it can only pass by reading the right block.
 
-def test_day_quadrant_is_unknown_when_either_axis_is_missing():
-    assert B.day_quadrant(None, 0.4) == "unknown"
-    assert B.day_quadrant(0.4, None) == "unknown"
-    assert B.day_quadrant(float("nan"), 0.4) == "unknown"
+The retained rule-parity test is pointed at what the call sites actually use, over
+a 5x5 grid straddling zero on both axes, so it pins the part that can still break:
+that the axes reader feeds the classifier unchanged.
 
-
-def test_row_day_axes_reads_the_top_level_live_fields():
-    row = {"day_pct": 1.2, "day_excess": 0.3, "raw": {"trend": 9.0, "excess": 9.0}}
-    assert B.row_day_axes(row) == (1.2, 0.3)
-```
-
-**Step 2: Run to verify they fail**
-
-Run: `cd webgui && "$PY" -m pytest tests/test_bullbear.py -k day_quadrant -q`
-Expected: FAIL — `AttributeError: module 'pages.bullbear' has no attribute 'day_quadrant'`
-
-**Step 3: Implement**
-
-```python
-def row_day_axes(row):
-    """A row's ``(day_pct, day_excess)`` -- day_quadrant()'s input.
-
-    These live at the TOP level, not under ``raw``: ``raw`` is the nightly
-    cascade's own output and ``merge_live`` deliberately copies rather than
-    writes into it.
-    """
-    row = row or {}
-    return _num(row.get("day_pct")), _num(row.get("day_excess"))
-
-
-def day_quadrant(day_pct, day_excess):
-    """Today's move x today's move vs SPY -> one of QUADRANTS.
-
-    Deliberately delegates to :func:`quadrant`: the two horizons MUST classify
-    identically, tie rule included, or a strip/map disagreement stops being
-    readable as a horizon difference. No deadband -- a sector genuinely
-    oscillating around SPY's return is shown oscillating, which is true.
-    """
-    return quadrant(day_pct, day_excess)
-```
-
-**Step 4: Run to verify they pass**
-
-Run: `cd webgui && "$PY" -m pytest tests/test_bullbear.py -q`
-Expected: PASS (47 existing + new)
-
-**Step 5: Commit**
-
-```bash
-git add webgui/pages/bullbear.py webgui/tests/test_bullbear.py
-git commit -m "feat(bullbear): day_quadrant, the intraday twin of quadrant"
-```
+**Delivered:** commit `d2e389b` — `webgui/pages/bullbear.py`, `webgui/tests/test_bullbear.py`.
 
 ---
 
@@ -511,7 +471,7 @@ and `_bb.by_strength` otherwise. `bullbear_chips(view, now=None, previous=None)`
 gains, per chip:
 
 ```python
-            "quadrant": (_bb.day_quadrant(*_bb.row_day_axes(row)) if live
+            "quadrant": (_bb.quadrant(*_bb.row_day_axes(row)) if live
                          else _bb.quadrant(*_bb.row_axes(row))),
             # Rendered only when live: off-session the two are the same value,
             # and a stripe repeating the fill says nothing.
