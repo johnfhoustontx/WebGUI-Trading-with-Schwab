@@ -136,10 +136,17 @@ def row_day_axes(row):
     cascade's own output and ``merge_live`` deliberately copies beside it rather
     than writing into it. There is NO fallback to ``raw`` — a row with no live
     fields has no intraday reading, and painting the quarter's reading in
-    today's colours is the one outcome this pair exists to avoid. Note the
-    service publishes None and never 0.0 for an absent reading, because 0.0 here
-    is measured and means "moved exactly with the benchmark".
+    today's colours is the one outcome this pair exists to avoid.
+
+    ⚠ ``None`` here means the proxy OMITTED the symbol — it is not a general
+    "no reading" flag. A symbol the proxy returns with junk fields still yields
+    ``0.0``, so a zero is no proof of a flat tape; see :func:`signed_pct`, which
+    states the same trap for the day-move cell. What ``0.0`` DOES mean when it
+    is real is "moved exactly with the benchmark", which is why it must survive
+    ``_num`` rather than being folded into absence.
     """
+    # Same null-row policy as ``_raw``, one level up: a null row is a reading we
+    # do not have, a non-dict row is a different document and raises.
     row = row or {}
     return _num(row.get("day_pct")), _num(row.get("day_excess"))
 

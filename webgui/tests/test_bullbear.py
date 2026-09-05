@@ -292,6 +292,11 @@ def test_row_day_axes_does_not_fall_back_to_the_structural_block():
     assert B.row_day_axes({"raw": {"trend": 2.0, "excess": 0.5}}) == (None, None)
     assert B.row_day_axes({}) == (None, None)
     assert B.row_day_axes(None) == (None, None)
+    # The module's standing split, inherited by construction and pinned here so
+    # an `isinstance(row, dict)` tidy-up cannot widen the contract silently: a
+    # NULL row is a reading we lack, a NON-DICT row is a different document.
+    with pytest.raises(AttributeError):
+        B.row_day_axes("SPY")
 
 
 def test_row_day_axes_reads_through_the_same_num_policy_as_the_structural_pair():
