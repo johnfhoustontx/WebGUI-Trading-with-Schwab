@@ -197,14 +197,37 @@ the names most likely to be traded — which is the same failure shape as the
 `LIQUIDITY_THRESHOLDS` fail-open and the five NaN incidents. Preserve it and pin
 it:
 
+⚠ **`coverage()` is a THREE-STATE, not a boolean** — corrected after reading
+`trade_svc/compute.py:1327`, which already solved this and says why:
+
+> `"upcoming"` / `"none_scheduled"` / `"not_listed"` … Kept SEPARATE from
+> `days_to_earnings` because the last two both leave that None, and conflating
+> them lets the earnings gate fail open silently: the vendor's coverage is
+> measurably patchy, so "we have no date" must be distinguishable from "there is
+> no date".
+
+That vocabulary already exists and Task 3 consumes it directly. Do not reduce it
+to a boolean, and do not invent a fourth state.
+
 ```python
-def test_absence_from_the_calendar_is_unknown_not_clear(tmp_path):
-    """A symbol the calendar has never heard of must NOT read as 'no earnings'.
-    That distinction is the whole safety property: absence-as-clear fails open."""
-    conn = earnings.connect(tmp_path / "e.db")
-    earnings.init_db(tmp_path / "e.db")
-    assert earnings.lookup(conn, "NOSUCH") is None
-    assert earnings.coverage(conn, "NOSUCH") is False   # cannot speak for it
+def test_absence_from_the_calendar_is_not_listed_not_none_scheduled(tmp_path):
+    """The whole safety property. A symbol the calendar has never heard of and a
+    symbol it knows has nothing coming BOTH leave days_to_earnings None -- so if
+    coverage collapses them, the gate fails open on exactly the names most
+    likely to be traded."""
+    db = tmp_path / "e.db"
+    conn = earnings.init_db(db)
+    assert earnings.coverage(conn, "NOSUCH") == "not_listed"
+    assert earnings.days_to_earnings(conn, "NOSUCH") is None
+
+
+def test_a_known_symbol_with_no_upcoming_report_reads_none_scheduled(tmp_path):
+    """The other half of the same distinction -- and the one a truthiness
+    'simplification' would silently destroy."""
+    db = tmp_path / "e.db"
+    conn = earnings.init_db(db)
+    earnings.store_calendar(conn, [_past_report_row("KNOWN")])
+    assert earnings.coverage(conn, "KNOWN") == "none_scheduled"
 ```
 
 ⚠ **The repo-root `conftest.py` refuses `sqlite3.connect` into a live data
@@ -456,6 +479,49 @@ Use module constants beside `INCOME_DTE_MIN/MAX`:
 INCOME_PUT_DELTA = (-0.25, -0.15)
 INCOME_CALL_DELTA = (0.15, 0.25)
 ```
+
+### The earnings gate — consume the three-state, and NEVER drop a symbol for it
+
+Task 2.5 puts `lookup` / `coverage` / `days_to_earnings` in `shared/earnings.py`.
+`income_scan` reads the symbol's state and acts on it:
+
+| `coverage()` | meaning | what the window does |
+|---|---|---|
+| `"upcoming"` | a dated report is coming | pass the date to `screen_spreads`; conflicting expirations are dropped |
+| `"none_scheduled"` | the calendar knows this name and has nothing | emit normally |
+| `"not_listed"` | the calendar **cannot speak for this name** | emit, but stamp the row |
+
+⚠ **Do not skip a `not_listed` symbol.** It is tempting — fail closed, be safe —
+and it is wrong here for a measurable reason: **there is no earnings DB and no
+Alpha Vantage key in this checkout** (`shared/alphavantage_key.txt` absent,
+`services/trade_svc/data/` absent), so `coverage()` returns `"not_listed"` for
+**every symbol**. Failing closed would empty the entire income scan and the
+feature would look broken rather than uninformed.
+
+Stamp every candidate with an explicit `earnings_status` carrying that same
+three-state vocabulary, and let the page render it. That is this repo's standing
+rule — *never print a number you did not read* — applied to a gate rather than a
+number: a row that silently omits the check must not look like a row that passed
+it.
+
+```python
+def test_a_symbol_the_calendar_cannot_speak_for_is_flagged_not_dropped(seams):
+    """There is no Alpha Vantage key in most checkouts, so not_listed is the
+    COMMON case. Dropping on it would empty the scan; emitting silently would
+    imply a check that never ran."""
+    sigs = compute.income_scan("NOSUCH")["signals"]
+    assert sigs, "not_listed must not empty the scan"
+    assert all(s["earnings_status"] == "not_listed" for s in sigs)
+
+
+def test_a_dated_report_inside_the_window_removes_the_expiration(seams):
+    ...
+```
+
+**Prerequisite this feature now carries:** the gate does nothing real until an
+Alpha Vantage key exists and the nightly refresh has populated the DB. That is an
+operator step, not a code one — record it in the CHANGELOG entry at Task 8 so it
+is not mistaken for a bug later.
 
 ### The credit floor — reuse `["SWING"]`, add no knob
 
