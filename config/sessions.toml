@@ -95,6 +95,15 @@ morning = "10:00"
 midday  = "13:00"
 close   = "15:00"     # pre-close sweep
 
+[slots.income]
+# The 30-45 DTE income scan (two-sided credit spreads + cash-secured puts).
+# ONE pass a day by design: a 35-DTE candidate does not meaningfully re-rank
+# inside fifteen minutes, and running it on the autoscan's cadence would cost
+# ~690 extra /chains calls a day instead of ~23. After the open so the chain
+# carries real marks rather than overnight stubs.
+grace_min = 20
+morning = "08:45"     # 09:45 ET
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]

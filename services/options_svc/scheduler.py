@@ -345,6 +345,37 @@ def action_alert_due(now, ran_slots):
     return None
 
 
+# ── Income-window scan cadence (see config/sessions.toml [slots.income]) ────
+# ONE pass a day, by design. A 30-45 DTE candidate does not meaningfully
+# re-rank inside fifteen minutes, so putting this on the autoscan's cadence
+# would change nothing in the ranking and cost ~690 extra /chains calls a day
+# against ~23 — the single largest lever on this service's Schwab budget.
+# Mirrors analyze_slot_due / action_alert_due: each slot fires once per trading
+# day inside the grace window, never backfilling a long-stale one.
+_INCOME_SLOTS = {k: (t.hour, t.minute)
+                 for k, t in mc.slot_times("income").items()}
+_INCOME_GRACE_MIN = mc.slot_grace_min("income")
+
+
+def income_slot_due(now, ran_slots):
+    """Name of the income-scan slot due now, or None.
+
+    Fires each slot ONCE per trading day when ``target <= now < target + grace``
+    and that ``(date, slot)`` isn't already in ``ran_slots``. The caller records
+    the returned ``(date, slot)`` so it won't refire. Mirrors ``action_alert_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _INCOME_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_INCOME_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduled end-of-day summary cadence (~15:10 CT) ─────────────────────────
 # A once-daily push AFTER the regular-session close (15:00 CT / 4pm ET) + 0-DTE
 # settlement, summarizing the day's result per paper book. 15:10 gives the driver's
