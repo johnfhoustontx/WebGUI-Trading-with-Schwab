@@ -269,6 +269,86 @@ def test_row_axes_reads_both_axes_through_the_same_policy_as_quadrant():
     assert B.quadrant(*B.row_axes(_row(1.0, 0.1))) == "rising_leading"
 
 
+# ── the intraday axes: today's move, and today's move vs the benchmark ───────
+def test_row_day_axes_reads_the_top_level_live_fields():
+    """``day_pct``/``day_excess`` are SIBLINGS of ``raw``, not entries in it —
+    ``raw`` is the nightly cascade's own output and the service's ``merge_live``
+    deliberately copies beside it rather than writing into it. The fixture
+    carries a contradicting structural pair so the assertion can only pass by
+    reading the right block."""
+    row = {"day_pct": 1.2, "day_excess": 0.3, "raw": {"trend": 9.0, "excess": 9.0}}
+    assert B.row_day_axes(row) == (1.2, 0.3)
+
+
+def test_row_day_axes_does_not_fall_back_to_the_structural_block():
+    """The one outcome this whole re-keying exists to avoid. A row with no live
+    fields has no intraday reading, and (None, None) renders it as such. Falling
+    back to ``raw`` would paint the QUARTER's reading in today's colours —
+    indistinguishable from a real intraday one, on a strip whose entire promise
+    is that it shows today. Absence of a reading is not a reason to substitute a
+    different quantity that happens to be in reach."""
+    structural = _row(2.0, 0.5, symbol="XLV", label="Health Care")
+    assert B.row_day_axes(structural) == (None, None)
+    assert B.row_day_axes({"raw": {"trend": 2.0, "excess": 0.5}}) == (None, None)
+    assert B.row_day_axes({}) == (None, None)
+    assert B.row_day_axes(None) == (None, None)
+    # The module's standing split, inherited by construction and pinned here so
+    # an `isinstance(row, dict)` tidy-up cannot widen the contract silently: a
+    # NULL row is a reading we lack, a NON-DICT row is a different document.
+    with pytest.raises(AttributeError):
+        B.row_day_axes("SPY")
+
+
+def test_row_day_axes_reads_through_the_same_num_policy_as_the_structural_pair():
+    """One notion of "is this a reading" across both horizons. A NaN day_pct that
+    slipped through would otherwise fall to the falling branch and paint a
+    confident bearish sector out of a missing quote, and a bool would print as a
+    1% move. Note 0.0 SURVIVES: it is a measured reading meaning "moved exactly
+    with the benchmark", which is why the service publishes None, never 0.0, for
+    an absent one."""
+    assert B.row_day_axes({"day_pct": "1.2", "day_excess": "-0.3"}) == (1.2, -0.3)
+    assert B.row_day_axes({"day_pct": 0.0, "day_excess": 0.0}) == (0.0, 0.0)
+    assert B.row_day_axes({"day_pct": float("nan"), "day_excess": 0.3}) \
+        == (None, 0.3)
+    assert B.row_day_axes({"day_pct": True, "day_excess": 0.3}) == (None, 0.3)
+    assert B.row_day_axes({"day_pct": 1.2, "day_excess": "abc"}) == (1.2, None)
+
+
+def test_the_intraday_horizon_classifies_through_the_one_quadrant_rule():
+    """Rule parity between the horizons, which is the invariant that matters:
+    the strip and the map must differ ONLY in which numbers they read, so a
+    disagreement between them is always readable as a horizon difference and
+    never as a rule one. Pinned as the exact call-site expression the Desk strip
+    uses, over a grid that straddles zero on BOTH axes — the tie rule is where a
+    second implementation would drift first, and 0.0 is reachable on day_excess
+    whenever a sector tracks the benchmark exactly.
+
+    There is deliberately no ``day_quadrant`` wrapper: one classifier means
+    parity is structural rather than tested. This asserts the axes reader feeds
+    it unchanged, which is the part that can still break."""
+    for pct in (-1.0, -0.01, 0.0, 0.01, 1.0):
+        for excess in (-1.0, -0.01, 0.0, 0.01, 1.0):
+            row = {"day_pct": pct, "day_excess": excess}
+            assert B.quadrant(*B.row_day_axes(row)) == B.quadrant(pct, excess)
+    # The tie rule, spelled out at the horizon that reaches it: a sector that
+    # moved exactly with the benchmark is not "leading", and a flat tape is not
+    # "rising".
+    assert B.quadrant(*B.row_day_axes({"day_pct": 1.2, "day_excess": 0.0})) \
+        == "rising_lagging"
+    assert B.quadrant(*B.row_day_axes({"day_pct": 0.0, "day_excess": 0.3})) \
+        == "falling_leading"
+
+
+def test_a_row_with_no_intraday_reading_is_unknown_not_a_direction():
+    """The absence path end to end. Off-hours, before the first publish, and for
+    a symbol the proxy omits, both fields are None — and the strip must render
+    "No reading" rather than borrowing the cautious falling_lagging bucket that
+    an unguarded pair of Nones would reach."""
+    assert B.quadrant(*B.row_day_axes({})) == "unknown"
+    assert B.quadrant(*B.row_day_axes(_row(2.0, 0.5))) == "unknown"
+    assert B.quadrant(*B.row_day_axes({"day_pct": 1.2})) == "unknown"
+
+
 def test_headline_is_empty_when_there_is_nothing_to_count():
     """"0 of 0 sectors rising and leading" reads as a maximally bearish tape
     where nothing was in fact published — the invented reading this module
@@ -480,6 +560,140 @@ def test_by_strength_orders_bare_rows_exactly_as_the_tree_orders_sectors():
     assert [s["label"] for s in B.build_tree({"sector": rows})] == ["V", "U", "E"]
 
 
+def test_by_day_move_orders_strongest_first():
+    rows = [{"symbol": "A", "day_pct": 0.2}, {"symbol": "B", "day_pct": 1.4}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] == ["B", "A"]
+
+
+def test_by_day_move_holds_position_inside_the_margin():
+    """B leads A by 0.01pp — inside the margin, so the previous order survives
+    rather than the strip reshuffling on noise it repaints every ~30 seconds.
+
+    ⚠ The rows are handed in the OPPOSITE order to the expectation on purpose.
+    With them already in ``["A", "B"]`` this test passed with ``previous``
+    ignored entirely: both quantise to one bucket, the keys tie, and ``sorted``
+    is stable, so it pinned quantisation and never the seat — the named test for
+    hysteresis, carrying none of it.
+    """
+    rows = [{"symbol": "B", "day_pct": 1.01}, {"symbol": "A", "day_pct": 1.00}]
+    out = B.by_day_move(rows, previous=["A", "B"])
+    assert [r["symbol"] for r in out] == ["A", "B"]
+
+
+def test_by_day_move_still_swaps_a_pair_straddling_a_bucket_boundary():
+    """The residual this design accepts, recorded rather than left to be found.
+
+    Quantisation gives hysteresis INSIDE a bucket, not across one. Two chips a
+    whisker apart either side of a boundary land in different buckets, so the
+    move decides and the seat never gets a say — they swap on every repaint. A
+    pairwise state machine would hold them; the plan chose quantisation, and
+    this is the price. It is bounded: the pair is by construction within one
+    margin of each other, so the swap is between adjacent seats and never a
+    reshuffle of the strip.
+    """
+    rows = [{"symbol": "A", "day_pct": 1.199}, {"symbol": "B", "day_pct": 1.201}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["A", "B"])] == ["B", "A"]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["B", "A"])] == ["B", "A"]
+
+
+def test_by_day_move_reorders_once_the_margin_is_cleared():
+    """Hysteresis is a damper, not a freeze: a move worth reading still moves."""
+    rows = [{"symbol": "A", "day_pct": 1.00}, {"symbol": "B", "day_pct": 1.40}]
+    out = B.by_day_move(rows, previous=["A", "B"])
+    assert [r["symbol"] for r in out] == ["B", "A"]
+
+
+def test_by_day_move_puts_unreadable_rows_last():
+    rows = [{"symbol": "A", "day_pct": None}, {"symbol": "B", "day_pct": -2.0}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] == ["B", "A"]
+
+
+def test_by_day_move_buckets_uniformly_so_the_pair_straddling_flat_still_orders():
+    """``math.floor``, never ``int``. Truncation rounds toward zero, which makes
+    the one bucket spanning flat twice as wide as every other — and separating
+    today's risers from today's fallers is the whole reason the strip is sorted
+    this way, so flat is the LAST boundary to blur. These two are 0.08pp apart,
+    more than a full margin, so the riser leads whoever sat first; under ``int``
+    both land in bucket 0 and the stale seat decides."""
+    rows = [{"symbol": "DOWN", "day_pct": -0.04},
+            {"symbol": "UP", "day_pct": 0.04}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["DOWN", "UP"])] \
+        == ["UP", "DOWN"]
+
+
+def test_by_day_move_seats_a_newcomer_behind_the_chips_already_placed():
+    """A sector the last repaint did not carry has no seat, so it takes the back
+    of its bucket: an arriving chip must not shove a settled one sideways."""
+    rows = [{"symbol": "NEW", "day_pct": 1.02}, {"symbol": "OLD", "day_pct": 1.01}]
+    assert [r["symbol"] for r in B.by_day_move(rows, previous=["OLD"])] \
+        == ["OLD", "NEW"]
+
+
+def test_by_day_move_takes_the_margin_as_an_argument():
+    """The module constant is bound as a default HERE, at def time, so patching
+    the module attribute would never reach this call — the trap ``signal_db``'s
+    ``db_path`` defaults fell into. The parameter is what makes the boundary
+    testable at all, which is why it exists with no caller passing it."""
+    rows = [{"symbol": "A", "day_pct": 1.0}, {"symbol": "B", "day_pct": 1.4}]
+    assert [r["symbol"] for r in
+            B.by_day_move(rows, previous=["A", "B"])] == ["B", "A"]
+    assert [r["symbol"] for r in
+            B.by_day_move(rows, previous=["A", "B"], margin=1.0)] == ["A", "B"]
+
+
+def test_by_day_move_drops_a_null_row_and_handles_an_empty_payload():
+    """``by_strength``'s policy, one axis over: a null in a JSON array is a row
+    we do not have and can be no chip, while a non-dict row is a different
+    document and raises rather than being half-ordered."""
+    assert [r["symbol"] for r in
+            B.by_day_move([None, {"symbol": "A", "day_pct": 0.2}, None])] == ["A"]
+    assert B.by_day_move([]) == []
+    assert B.by_day_move(None) == []
+    with pytest.raises(AttributeError):
+        B.by_day_move(["XLV"])
+
+
+def test_by_day_move_sorts_a_non_finite_day_move_as_unreadable_not_unpredictably():
+    """Through ``_num``, as every other reader of these fields is. A bare
+    ``float()`` would let a NaN order by comparisons that are all False, and let
+    a signalling Decimal raise inside ``sorted``. A NaN is no reading, so it goes
+    last with the absent ones — deterministically, and behind a row that
+    genuinely fell, which is a reading."""
+    rows = [{"symbol": "NAN", "day_pct": float("nan")},
+            {"symbol": "SNAN", "day_pct": Decimal("sNaN")},
+            {"symbol": "DOWN", "day_pct": -3.0},
+            {"symbol": "UP", "day_pct": 3.0}]
+    assert [r["symbol"] for r in B.by_day_move(rows)] \
+        == ["UP", "DOWN", "NAN", "SNAN"]
+
+
+def test_by_day_move_holds_a_chip_still_across_a_run_of_repaints():
+    """Hysteresis is a claim about a SEQUENCE, and one repaint cannot show it.
+
+    Six ticks of jitter inside one bucket, each output's order fed back as the
+    next ``previous`` — exactly what the strip does every ~30 seconds — while
+    the payload hands the rows in a different order each time. Seated, the strip
+    is still; unseated, the same ticks follow whatever order the payload
+    happened to hand over, which is the reshuffle a glanceable strip cannot
+    have."""
+    ticks = [(1.21, 1.22), (1.23, 1.22), (1.21, 1.235),
+             (1.24, 1.21), (1.22, 1.22), (1.215, 1.245)]
+
+    def payload(i, a, b):
+        rows = [{"symbol": "A", "day_pct": a}, {"symbol": "B", "day_pct": b}]
+        return rows if i % 2 == 0 else rows[::-1]
+
+    order = ["A", "B"]
+    for i, (a, b) in enumerate(ticks):
+        order = [r["symbol"] for r in
+                 B.by_day_move(payload(i, a, b), previous=order)]
+        assert order == ["A", "B"], f"reshuffled on repaint {i}"
+
+    unseated = {tuple(r["symbol"] for r in B.by_day_move(payload(i, a, b)))
+                for i, (a, b) in enumerate(ticks)}
+    assert len(unseated) == 2
+
+
 def test_build_tree_returns_one_node_per_sector_row_not_one_per_label():
     """The ordered list, not the lookup index keyed on ``label``. Sector labels
     are unique in the live payload (11 of 11 on 2026-08-19) and unique upstream
@@ -578,3 +792,41 @@ def test_build_tree_drops_a_null_row_but_still_refuses_a_different_document():
 def test_build_tree_handles_an_empty_payload():
     assert B.build_tree({}) == []
     assert B.build_tree(None) == []
+
+
+# ── the horizon a count is taken on ──────────────────────────────────────────
+def _day_row(trend, excess, day_pct, day_excess, **fields):
+    """A row whose two horizons DISAGREE — the only fixture that can prove
+    which axis a count was taken on."""
+    return _row(trend, excess, day_pct=day_pct, day_excess=day_excess, **fields)
+
+
+def test_quadrant_counts_default_to_the_cascades_own_axes():
+    """The map's horizon, unchanged: every existing caller passes rows alone and
+    must keep counting ``raw``."""
+    rows = [_day_row(1.0, 0.1, -2.0, -1.0), _day_row(1.0, 0.1, -2.0, -1.0)]
+    assert B.quadrant_counts(rows)["rising_leading"] == 2
+    assert B.quadrant_counts(rows)["falling_lagging"] == 0
+
+
+def test_quadrant_counts_switch_to_todays_axes_when_live():
+    """Same rows, other horizon. Without this the Desk's headline would count
+    the quarter under a sentence naming today."""
+    rows = [_day_row(1.0, 0.1, -2.0, -1.0), _day_row(1.0, 0.1, -2.0, -1.0)]
+    counts = B.quadrant_counts(rows, live=True)
+    assert counts["falling_lagging"] == 2
+    assert counts["rising_leading"] == 0
+
+
+def test_a_live_count_never_falls_back_to_the_quarter():
+    """``row_day_axes`` has no fallback to ``raw`` on purpose: a sector the
+    proxy omitted is unscored TODAY, and lending it the cascade's reading is
+    the one outcome the pair exists to avoid."""
+    rows = [_row(1.0, 0.5)]                       # no live fields at all
+    assert B.quadrant_counts(rows, live=True)["unknown"] == 1
+    assert B.quadrant_counts(rows, live=True)["rising_leading"] == 0
+
+
+def test_a_live_count_still_reports_every_bucket_and_nothing_at_all():
+    assert set(B.quadrant_counts([], live=True)) == set(B.QUADRANTS)
+    assert B.quadrant_counts(None, live=True) == {q: 0 for q in B.QUADRANTS}

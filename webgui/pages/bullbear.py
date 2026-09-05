@@ -122,17 +122,56 @@ def row_axes(row):
     return _num(raw.get("trend")), _num(raw.get("excess"))
 
 
-def quadrant_counts(rows):
+def row_day_axes(row):
+    """A row's ``(day_pct, day_excess)`` — the SAME quadrant rule, today's numbers.
+
+    Today's % move, and that move minus the benchmark's: the intraday mirror of
+    :func:`row_axes`, feeding :func:`quadrant` unchanged. One classifier over
+    both horizons is deliberate — a strip/map disagreement then reads as a
+    difference of horizon and never of rule — and there is no deadband, so a
+    sector genuinely oscillating around the benchmark's return is shown
+    oscillating, which is true.
+
+    These live at the TOP level, not under ``raw``: ``raw`` is the nightly
+    cascade's own output and ``merge_live`` deliberately copies beside it rather
+    than writing into it. There is NO fallback to ``raw`` — a row with no live
+    fields has no intraday reading, and painting the quarter's reading in
+    today's colours is the one outcome this pair exists to avoid.
+
+    ⚠ ``None`` here means the proxy OMITTED the symbol — it is not a general
+    "no reading" flag. A symbol the proxy returns with junk fields still yields
+    ``0.0``, so a zero is no proof of a flat tape; see :func:`signed_pct`, which
+    states the same trap for the day-move cell. What ``0.0`` DOES mean when it
+    is real is "moved exactly with the benchmark", which is why it must survive
+    ``_num`` rather than being folded into absence.
+    """
+    # Same null-row policy as ``_raw``, one level up: a null row is a reading we
+    # do not have, a non-dict row is a different document and raises.
+    row = row or {}
+    return _num(row.get("day_pct")), _num(row.get("day_excess"))
+
+
+def quadrant_counts(rows, live=False):
     """{quadrant: n} over rows, every bucket present even at zero.
+
+    ``live`` picks the HORIZON the count is taken on — :func:`row_day_axes` for
+    today, :func:`row_axes` for the cascade's quarter — and nothing else about
+    the count changes, because :func:`quadrant` is the one classifier over both.
+    It defaults to the quarter, which is the map's horizon and every existing
+    caller's. The Desk strip is the caller that needs the other one: it colours
+    and orders by today once the bell has rung, and a headline still counting
+    ``raw`` under a sentence naming today would be an unlabelled count that
+    silently changes meaning at the open — worse than either count alone.
 
     Indexes directly rather than defensively. quadrant() is total, so a KeyError
     here means that invariant broke — where a setdefault would answer with a
     sixth bucket nobody named and a distribution that no longer sums to what the
     headline claims.
     """
+    axes = row_day_axes if live else row_axes
     counts = {q: 0 for q in QUADRANTS}
     for row in rows or []:
-        counts[quadrant(*row_axes(row))] += 1
+        counts[quadrant(*axes(row))] += 1
     return counts
 
 
@@ -217,6 +256,56 @@ def by_strength(rows):
     is unknown; a non-dict row still raises, through ``_raw`` in the sort key.
     """
     return sorted((r for r in rows or [] if r is not None), key=_sort_key)
+
+
+# The strip repaints every ~30s, so an exact sort would reshuffle on noise. One
+# margin, in percentage points, is the width of a bucket AND therefore the move
+# a chip must make before it is allowed to change seats.
+DAY_SORT_MARGIN_PCT = 0.05
+
+
+def by_day_move(rows, previous=None, margin=DAY_SORT_MARGIN_PCT):
+    """Rows by TODAY's move, biggest riser first, with hysteresis -> a new list.
+
+    Deliberately NOT :func:`by_strength`'s order, and the one place two screens
+    ordering the same rows differently is the point rather than a defect: the
+    Desk strip asks what is working TODAY where the map asks what has worked
+    this quarter. The strip captions itself with what it sorted by, so the
+    disagreement reads as a difference of horizon and never of rule.
+
+    A strip that moves under the eye cannot be glanced at, so the move is
+    QUANTISED into margin-wide buckets and the row's position in ``previous``
+    breaks the tie. Inside a bucket the order it already had survives, and a
+    chip changes seats only when it crosses a boundary — hysteresis as a pure
+    function of ``(rows, previous)``, with no pairwise state machine and no
+    clock. A row ``previous`` does not name has no seat and takes the back of
+    its bucket: an arriving chip must not shove a settled one sideways.
+
+    ``math.floor``, never ``int``. Truncation rounds toward zero, which would
+    make the single bucket spanning flat twice as wide as every other one and
+    let a sector down 0.04% hold a seat above one up 0.04%. Separating today's
+    risers from today's fallers is the whole reason the strip is sorted this
+    way, so flat is the LAST boundary to blur; floored, any two rows a full
+    margin apart are ordered by the move wherever they sit on the scale.
+
+    ``margin`` is an argument because the constant is bound as a default HERE,
+    at def time — patching the module attribute would never reach this call, so
+    the parameter is what makes the boundary testable without a browser.
+
+    Unreadable moves go last, through ``_num``, for the reason ``_sort_key``
+    states: ``sorted`` is where a NaN orders unpredictably and an sNaN raises. A
+    null row is dropped exactly as :func:`by_strength` drops one; a non-dict row
+    is a different document and raises rather than being half-ordered.
+    """
+    seats = {sym: i for i, sym in enumerate(previous or [])}
+
+    def key(row):
+        pct = _num(row.get("day_pct"))
+        seat = seats.get(row.get("symbol"), len(seats))
+        return (1, 0, seat) if pct is None \
+            else (0, -math.floor(pct / margin), seat)
+
+    return sorted((r for r in rows or [] if r is not None), key=key)
 
 
 def _level(levels, name):

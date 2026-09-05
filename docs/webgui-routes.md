@@ -53,6 +53,87 @@ module.
   a scaled `viewBox` would need `vector-effect: non-scaling-stroke`, which DOMPurify
   strips, smearing strokes while the server-side string stays perfectly correct.
 
+**The Bull / Bear sector strip — two horizons on one chip (re-keyed 2026-09-05).**
+A row of chips under the top strip, one per scored sector, reading the same
+`cache:sentiment:bullbear` view `/sentiment/bullbear` does and clicking through to
+it. Since 2026-09-05 a chip carries **both** horizons at once: the **fill colour
+and the strip's left-to-right order are TODAY**, and the nightly cascade's
+quarter-horizon quadrant survives as a **3px left border stripe**. That
+combination is the point — a sector that has led all quarter and is falling today
+is the most useful thing the chip can say — so nothing here may collapse the two
+into one reading.
+- **The horizon is decided ONCE per paint, by the calendar, never by the numbers**
+  (`strip_is_live`). `_extract_change_pct` (schwab-proxy) falls through to a
+  literal `0.0` when every percent field is missing or zero, and `0.0` is not
+  `> 0`, so a "is any day move non-zero?" test would paint **all eleven sectors
+  `falling_lagging` every pre-open and every weekend** — a maximally bearish
+  reading of nothing. It asks `shared.market_calendar.regular_session_has_opened`
+  (open through end of day, **not** `is_regular_hours`, which goes False at the
+  cash close — the day's move does not stop being today's at 15:00 CT), AND that
+  `benchmark_day_pct` reads through the strict `pages.fmt.num`, which is the only
+  thing that catches a dead proxy mid-session. A NaN counts as absent; a
+  **measured** `0.0` — a genuinely flat tape — stays live.
+- **The off-session state is the structural horizon, not a blank.** Pre-open is
+  when this strip is read to plan the session: every chip is still drawn, on the
+  quarter, and the caption says so. ⚠ It is therefore never safe to read a
+  pre-open colour as a claim about today, which is exactly what the caption and
+  the headline's horizon word exist to prevent.
+- **One classifier, two horizons.** `bullbear.row_day_axes(row)` returns
+  `(day_pct, day_excess)` from the row's **top level** — `raw` is the cascade's
+  own block, which `merge_live` copies beside rather than into — and feeds the
+  unchanged `quadrant()`. There is deliberately **no fallback to `raw`**: a row
+  with no live fields has no intraday reading, and painting the quarter's reading
+  in today's colours is the outcome the feature exists to prevent. Because there
+  is one rule, a strip/map disagreement is always a difference of *horizon*.
+  ⚠ **Accepted residual, per row rather than per strip:** once the strip is live,
+  a symbol the proxy *returns* with unusable percent fields still reads a literal
+  `0.0`, and `0.0` is not `> 0` — so that one chip paints falling. The calendar
+  switch bounds the damage to individual rows mid-session; what it makes
+  impossible is the whole strip reading bearish off no data. A zero here is
+  therefore no proof of a flat tape, the same trap `bullbear.signed_pct` states
+  for the day-move cell.
+- **Order is `bullbear.by_day_move`, with bucket hysteresis.** The move is
+  quantised into `DAY_SORT_MARGIN_PCT`-wide buckets and the row's seat in the
+  previous paint breaks ties, so order holds *inside* a bucket and a chip changes
+  seats only on crossing a boundary — a pure function of `(rows, previous)`, no
+  state machine and no clock. The seat list lives in page state and is fed back
+  each paint; without it the margin buys nothing. ⚠ Two accepted residuals, both
+  pinned by test: a pair straddling a bucket boundary **still swaps** on every
+  repaint (bounded to adjacent seats, since such a pair is within one margin),
+  and `margin` must stay a parameter — the constant binds as a default at `def`
+  time, so patching the module attribute never reaches the call. `math.floor`,
+  never `int`: truncation would double the width of the bucket spanning flat.
+- **⚠ The order deliberately diverges from `/sentiment/bullbear`'s `by_strength`,
+  and two labels are what make that legal.** `bullbear_caption` states what the
+  strip sorted by (and names the stripe, since a colour on an edge is not
+  self-explanatory) and `bullbear_headline` appends the horizon word — "… today"
+  against "… on the quarter" — to the map's own count sentence. Remove either and
+  two screens rank one payload differently with neither admitting it, which is
+  the `/sentiment/sectors`-vs-`/sentiment/rotation` failure one screen earlier.
+  An empty headline takes no horizon word.
+- **`border-l-[3px]` lives on the chip FRAME at both horizons**, so the strip does
+  not reflow 3px sideways when the bell flips it; off-session the left border just
+  takes the quadrant's colour. The stripe class is only added when live, together
+  with its tooltip — `"On the quarter: …"`, in `bullbear.quadrant_label`'s words,
+  hung on the whole chip because 3px is too small a hover target to be the sole
+  carrier of a reading. ⚠ The stripe wins the left edge on **Tailwind v4's
+  canonical property order** (`border-left-color` follows `border-color`), not on
+  DOM class order; `pages/options/leg_editor.py`'s accents depend on the same
+  thing.
+- **One clock per paint.** `_paint_bullbear` takes a single `now` for the chips
+  and the headline. Two would let the headline name a horizon the chips were not
+  drawn on, at the opening bell; nothing in the signatures prevents it, so
+  `test_one_paint_decides_the_horizon_once` pins the call site instead.
+- **Tier 2 supplies the second axis for free.** `bullbear_symbols` yields the
+  benchmark, so SPY rides the ONE batched `/quotes` call the tree already makes;
+  `merge_live` attaches `day_excess = day_pct - benchmark`, and the payload gains
+  `benchmark_day_pct`. `day_excess` is `None`, never `0.0`, whenever either side
+  is missing — `None` means the proxy omitted the symbol, never "unchanged". Both
+  reads go through the single `_quoted_day_pct`, which rejects `bool` and numeric
+  strings on top of `_as_finite`'s non-finites.
+
+Design: [`2026-09-05-desk-bullbear-intraday-design.md`](plans/2026-09-05-desk-bullbear-intraday-design.md).
+
 **Spoken arrival alerts + the neon glow (2026-08-21).** A new **flow alert** or a
 **newly-opened position** is announced out loud — ticker spelled squawk-style, then
 the CONTRACT where the alert names one ("N D X. Unusual activity, 0-D T E 7 15

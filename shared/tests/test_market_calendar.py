@@ -556,3 +556,70 @@ def test_stream_window_survives_a_missing_toml():
     """Every config in this repo degrades to built-in defaults rather than
     raising. A window present only in the TOML would break on a malformed file."""
     assert mc._DEFAULTS["windows"]["stream"] == {"start": "08:00", "end": "15:20"}
+
+
+def test_regular_session_has_opened_is_false_before_the_open():
+    """08:00 CT on a Tuesday, before the 08:30 open."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 8, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_during_the_session():
+    """09:30 CT on a Tuesday, an hour into the regular session."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 9, 30)) is True
+
+
+def test_regular_session_has_opened_stays_true_after_the_cash_close():
+    """15:45 CT is the ONE moment the two predicates disagree, and the whole
+    reason this function exists: past the 15:00 close ``is_regular_hours`` goes
+    False, while the day's move does not stop being a fact. Both are asserted
+    together so a degrade into an ``is_regular_hours`` alias fails loudly here
+    rather than passing every other test in this group."""
+    after_close = dt.datetime(2026, 9, 8, 15, 45)
+    assert mc.regular_session_has_opened(after_close) is True
+    assert mc.is_regular_hours(after_close) is False
+
+
+def test_regular_session_has_opened_is_false_at_the_weekend():
+    """2026-09-05 is a Saturday -- asserted, not merely commented, so the
+    fixture cannot quietly become a weekday and take the test's meaning with
+    it (the holiday case below does the same)."""
+    assert dt.date(2026, 9, 5).weekday() == 5
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 5, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_false_on_a_holiday():
+    """2026-09-07 is Labor Day -- and a MONDAY, so this fixture also proves the
+    guard is ``is_trading_day`` and not a bare weekday check. Noon is well past
+    the 08:30 open, so nothing but the trading-day guard can answer False. The
+    weekend case alone would leave a broken holiday branch undetected."""
+    labor_day = date(2026, 9, 7)
+    assert labor_day.weekday() == 0            # Monday -- the point of the fixture
+    assert mc.is_holiday(labor_day) is True
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 7, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_at_the_opening_bell():
+    """08:30 itself is INSIDE: the bell opens the session, it does not precede
+    it. The pair straddles the boundary, so a ``>`` in place of the ``>=``
+    fails here, at the REAL configured boundary -- the config-reuse test below
+    also catches it, but only at its stubbed 09:05 one."""
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 29)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 30)) is True
+
+
+def test_regular_session_has_opened_converts_a_non_ct_datetime():
+    """13:00 UTC == 08:00 CDT -> before the open; 14:00 UTC == 09:00 -> after.
+    A caller handing this an aware non-CT clock must not read the raw hour."""
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 13, 0, tzinfo=dt.timezone.utc)) is False
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 14, 0, tzinfo=dt.timezone.utc)) is True
+
+
+def test_regular_session_has_opened_reads_the_configured_regular_start(monkeypatch):
+    """It carries no time literal of its own -- move sessions.regular.start and
+    the boundary moves with it, exactly as ``next_regular_open`` does."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(9, 5), dt.time(15, 0)))
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 0)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 5)) is True

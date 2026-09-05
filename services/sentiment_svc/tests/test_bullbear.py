@@ -23,13 +23,37 @@ def test_bullbear_symbols_covers_all_three_levels_deduped():
     """An industry ETF is often a scored stock too; ask the quote call once."""
     levels = {"sector": [{"symbol": "XLV"}], "industry": [{"symbol": "XBI"}],
               "stock": [{"symbol": "AMGN"}, {"symbol": "XBI"}]}
-    assert compute.bullbear_symbols(levels) == ["XLV", "XBI", "AMGN"]
+    assert compute.bullbear_symbols(levels) == [
+        "XLV", "XBI", "AMGN", compute.MOMENTUM_BENCHMARK]
 
 
 def test_bullbear_symbols_skips_rows_with_no_usable_symbol():
     levels = {"sector": [{"symbol": ""}, {"symbol": None}, {}, None,
                          {"symbol": "XLV"}]}
-    assert compute.bullbear_symbols(levels) == ["XLV"]
+    assert compute.bullbear_symbols(levels) == [
+        "XLV", compute.MOMENTUM_BENCHMARK]
+
+
+def test_bullbear_symbols_appends_the_benchmark_when_no_row_carries_it():
+    """A live relative axis needs SPY's own day move, and SPY is not a row in
+    most trees. It rides the SAME batched call — one more symbol, not one more
+    request."""
+    out = compute.bullbear_symbols({"sector": [{"symbol": "XLK"}]})
+    assert out == ["XLK", compute.MOMENTUM_BENCHMARK]
+
+
+def test_bullbear_symbols_does_not_ask_twice_for_a_benchmark_already_scored():
+    """SPY can legitimately be a scored stock row; the quote call asks once.
+
+    The benchmark is deliberately the FIRST row here: with it last, the expected
+    order would hold whether the guard fired or not, so this pins both halves —
+    not re-appended, AND not dragged to the end of a list it already leads.
+    """
+    levels = {"sector": [{"symbol": compute.MOMENTUM_BENCHMARK}],
+              "industry": [], "stock": [{"symbol": "XLK"}]}
+    out = compute.bullbear_symbols(levels)
+    assert out.count(compute.MOMENTUM_BENCHMARK) == 1
+    assert out == [compute.MOMENTUM_BENCHMARK, "XLK"]
 
 
 def test_merge_live_attaches_the_day_move_at_every_level():
@@ -72,6 +96,47 @@ def test_merge_live_leaves_the_cached_momentum_payload_untouched():
     before = copy.deepcopy(levels)
     compute.merge_live(levels, {"XLV": {"change_pct": 1.0}})
     assert levels == before
+
+
+def test_merge_live_attaches_day_excess_against_the_benchmark():
+    """The relative axis the quadrant needs: today's move less SPY's today."""
+    levels = {"sector": [{"symbol": "XLK"}], "industry": [], "stock": []}
+    quotes = {"XLK": {"change_pct": 1.25},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": 0.25}}
+    row = compute.merge_live(levels, quotes)["sector"][0]
+    assert row["day_pct"] == 1.25
+    assert row["day_excess"] == pytest.approx(1.0)
+
+
+def test_merge_live_leaves_day_excess_none_when_the_benchmark_is_missing():
+    """No benchmark quote means no relative axis for ANY row — not a tree of
+    zeroes, which would read as "every sector in line with SPY"."""
+    levels = {"sector": [{"symbol": "XLK"}], "industry": [], "stock": []}
+    rows = compute.merge_live(levels, {"XLK": {"change_pct": 1.0}})["sector"]
+    assert rows[0]["day_pct"] == 1.0
+    assert rows[0]["day_excess"] is None
+
+
+def test_merge_live_leaves_day_excess_none_when_the_row_itself_is_missing():
+    """A symbol the proxy omitted has no move to subtract from. 0.0 would claim
+    it moved exactly with the benchmark — a measurement, not an absence."""
+    levels = {"sector": [{"symbol": "XLK"}], "industry": [], "stock": []}
+    quotes = {compute.MOMENTUM_BENCHMARK: {"change_pct": 0.5}}
+    rows = compute.merge_live(levels, quotes)["sector"]
+    assert rows[0]["day_pct"] is None and rows[0]["day_excess"] is None
+
+
+def test_merge_live_keeps_a_measured_zero_day_excess():
+    """0.0 is a reading and must survive as one: a row that moved exactly with
+    the benchmark — including the benchmark's own scored row, whose excess
+    against itself is legitimately zero."""
+    levels = {"sector": [{"symbol": "XLK"}],
+              "stock": [{"symbol": compute.MOMENTUM_BENCHMARK}]}
+    quotes = {"XLK": {"change_pct": 0.5},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": 0.5}}
+    merged = compute.merge_live(levels, quotes)
+    assert merged["sector"][0]["day_excess"] == 0.0
+    assert merged["stock"][0]["day_excess"] == 0.0
 
 
 class _RecordingClient:
@@ -132,15 +197,16 @@ def test_bullbear_view_stamps_quoted_at_now_and_offset_aware(monkeypatch):
 
 
 def test_bullbear_view_asks_for_quotes_once_for_every_distinct_symbol(monkeypatch):
-    """Measured 374 symbols returning in a SINGLE call; a per-row fetch would be
-    374 proxy round-trips every 30 s."""
+    """Measured 2026-08-19: the tree's 374 symbols returned in a SINGLE call, so
+    asking for those plus the benchmark is still one; a per-row fetch would be
+    375 proxy round-trips every 30 s."""
     calls = []
     monkeypatch.setattr(compute, "_bullbear_quotes",
                         lambda s: calls.append(list(s)) or {})
     compute.bullbear_view({"levels": {
         "sector": [{"symbol": "XLV"}],
         "stock": [{"symbol": "XLV"}, {"symbol": "AMGN"}]}})
-    assert calls == [["XLV", "AMGN"]]
+    assert calls == [["XLV", "AMGN", compute.MOMENTUM_BENCHMARK]]
 
 
 def test_bullbear_view_degrades_to_the_nightly_tree_when_the_quote_call_fails(
@@ -179,6 +245,43 @@ def test_bullbear_view_does_not_swallow_a_malformed_momentum_tree(monkeypatch):
     monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {})
     with pytest.raises(Exception):
         compute.bullbear_view({"levels": {"sector": ["XLV"]}})
+
+
+def test_bullbear_view_publishes_the_benchmark_day_move(monkeypatch):
+    """The page needs the benchmark's own move to label the relative axis, and
+    to tell "flat vs SPY" apart from "no SPY"."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {
+        "XLV": {"change_pct": 2.0},
+        compute.MOMENTUM_BENCHMARK: {"change_pct": 0.75}})
+    view = compute.bullbear_view({"levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["benchmark_day_pct"] == 0.75
+    assert view["levels"]["sector"][0]["day_excess"] == pytest.approx(1.25)
+
+
+def test_bullbear_view_leaves_benchmark_day_pct_none_when_spy_did_not_quote(
+        monkeypatch):
+    """The proxy answered, but without the benchmark. The whole relative axis is
+    absent, and the payload says so rather than publishing a zero."""
+    monkeypatch.setattr(compute, "_bullbear_quotes",
+                        lambda s: {"XLV": {"change_pct": 2.0}})
+    view = compute.bullbear_view({"levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["benchmark_day_pct"] is None
+    assert view["levels"]["sector"][0]["day_pct"] == 2.0
+    assert view["levels"]["sector"][0]["day_excess"] is None
+
+
+def test_bullbear_view_leaves_benchmark_day_pct_none_when_the_quote_call_fails(
+        monkeypatch):
+    """The degrade path hands merge_live an empty mapping; the benchmark field
+    must follow the day-move column into absence, not into 0.0."""
+    def _boom(symbols):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute, "_bullbear_quotes", _boom)
+    view = compute.bullbear_view({"levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["quoted_at"] is None
+    assert view["benchmark_day_pct"] is None
+    assert view["levels"]["sector"][0]["day_excess"] is None
 
 
 # --- publish + schedule (handlers / scheduler) --------------------------------
@@ -460,3 +563,65 @@ def test_publish_bullbear_still_holds_the_stamp_through_the_memo(monkeypatch):
         handlers.publish_bullbear(bus)
         versions.append(bus.cache_get(handlers.CACHE_BULLBEAR).version)
     assert versions == [versions[0]] * 3
+
+
+# --- the coercion guard -------------------------------------------------------
+
+@pytest.mark.parametrize("bad", [
+    float("nan"), float("inf"), float("-inf"), True, False, "1.5", "abc", None,
+    [1.5], {"change_pct": 1.5},
+])
+def test_quoted_day_pct_admits_only_a_real_finite_number(bad):
+    """A NaN here is worse than a missing quote, not better: it PASSES the
+    downstream ``is None`` usability gate, so the relative axis reads usable
+    while every ``day_excess`` is NaN; it then loses every ``> 0`` quadrant
+    test and renders as a confident falling/lagging row — a missing reading
+    shown as a directional one, which is the whole thing this column exists to
+    avoid. ``True`` is a shape error rather than a 1% move, and a numeric
+    string means ``get_quotes`` stopped returning the shape this reads.
+
+    ``False``/``0`` are deliberately NOT symmetric: 0.0 from the proxy is a
+    measured flat tape (see the zero tests above), ``False`` is not a number at
+    all.
+    """
+    assert compute._quoted_day_pct({"XLV": {"change_pct": bad}}, "XLV") is None
+
+
+def test_quoted_day_pct_keeps_a_real_reading_including_zero():
+    assert compute._quoted_day_pct({"XLV": {"change_pct": 0}}, "XLV") == 0.0
+    assert compute._quoted_day_pct({"XLV": {"change_pct": -1.25}}, "XLV") == -1.25
+
+
+def test_merge_live_treats_a_nan_quote_as_no_quote():
+    """Driven from the producer, not the helper: a guard proved only in
+    isolation is the shape this repo has shipped broken before."""
+    levels = {"sector": [{"symbol": "XLK"}]}
+    quotes = {"XLK": {"change_pct": float("nan")},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": 0.5}}
+    row = compute.merge_live(levels, quotes)["sector"][0]
+    assert row["day_pct"] is None
+    assert row["day_excess"] is None
+
+
+def test_merge_live_drops_the_whole_axis_when_the_benchmark_quote_is_nan():
+    """A NaN benchmark must fail the same way an absent one does — otherwise
+    every row's excess is NaN while the row's own day_pct is fine."""
+    levels = {"sector": [{"symbol": "XLK"}]}
+    quotes = {"XLK": {"change_pct": 1.0},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": float("nan")}}
+    row = compute.merge_live(levels, quotes)["sector"][0]
+    assert row["day_pct"] == 1.0
+    assert row["day_excess"] is None
+
+
+def test_bullbear_view_publishes_no_benchmark_for_a_non_finite_quote(monkeypatch):
+    """``benchmark_day_pct: nan`` would pass a Tier-1 ``is None`` check and
+    declare the relative axis usable, and — being unequal to itself — would
+    defeat ``skip_unchanged`` forever, republishing every poll."""
+    monkeypatch.setattr(compute, "_bullbear_quotes", lambda s: {
+        "XLV": {"change_pct": 2.0},
+        compute.MOMENTUM_BENCHMARK: {"change_pct": float("inf")}})
+    view = compute.bullbear_view({"levels": {"sector": [{"symbol": "XLV"}]}})
+    assert view["benchmark_day_pct"] is None
+    assert view["levels"]["sector"][0]["day_pct"] == 2.0
+    assert view["levels"]["sector"][0]["day_excess"] is None
