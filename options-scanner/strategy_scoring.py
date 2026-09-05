@@ -89,7 +89,28 @@ GATE_BARS = {
     # NAKED: by design, a naked short's low capital-efficiency (max_profit is the
     # credit against a large margin-based capital) keeps its composite below
     # STRONG_MIN, so "Strong" is effectively unreachable for naked shorts —
-    # intended (a naked short is rarely your best trade).
+    # intended (a naked short is rarely your best trade). Note the gate carries
+    # that intent through the `composite >= STRONG_MIN` conjunct, NOT through
+    # these bars: the composite reads the UN-annualised q_capital_eff and tops
+    # out near 56 for a naked short, so no capeff bar here can mint a Strong.
+    #
+    # ⚠ UNITS: `capeff` is PER YEAR for this profile only (see _reward_metric) —
+    # 0.10 means 10% return on committed capital annualised, not 10% per trade.
+    # It was per-trade until 2026-09-05, which demanded the same 10% of a 1-day
+    # trade as of a 45-day one and so graded EVERY ordinary cash-secured put
+    # Weak-and-cut (a 35-DTE CSP returns 1.70%/trade = 17.8%/yr).
+    #
+    # The 0.10/0.20 numbers are unchanged, and that is a measured choice, not an
+    # oversight. Swept over 1-60 DTE on a Black-Scholes chain (spot 100, IV
+    # 0.28), annualised capeff runs 0.59-3.78 for SHORT_CALL and 0.14-0.73 for
+    # SHORT_PUT — the ~4.7x gap being the capital basis (a short call is
+    # capitalised at the margin proxy, a short put at its true stock-to-zero max
+    # loss). So the two structures are separated by CAPITAL, not by horizon, and
+    # raising the bar to discourage short-dated shorts cuts on the wrong axis:
+    # 0.20/yr would admit every short call at every DTE while cutting the 35-,
+    # 45- and 60-DTE cash-secured puts this fix exists to admit. The short end is
+    # already braked by q_breakeven_vs_em — a 1-DTE naked short scores ~49.6
+    # composite, under the 50.0 publish floor both callers apply.
     "NAKED":   {"min": {"liq": 40, "capeff": 0.10, "pop": 65},
                 "excellent": {"liq": 70, "capeff": 0.20, "pop": 78}},
     "DEBIT":   {"min": {"liq": 45, "rr": 0.6,  "pop": 30},
@@ -515,15 +536,29 @@ def _reward_metric(signal, profile):
 
     LONG:  R:R; but None R:R with a set net_debit == unbounded profit -> AUTO-PASS
            (infinite upside clears any R:R bar), signalled by returning +inf.
-    NAKED: capital efficiency = max_profit / capital (R:R undefined under
+    NAKED: ANNUALISED capital efficiency = (max_profit / capital) x (365 / dte),
+           i.e. return on committed capital PER YEAR (R:R is undefined under
            unbounded loss). Missing/invalid -> None (fail).
     else:  R:R. None/<=0 -> None (fail).
     """
     if profile == "NAKED":
         mp = signal.get("max_profit")
         cap = signal.get("capital")
-        if isinstance(mp, (int, float)) and isinstance(cap, (int, float)) and cap > 0:
-            return mp / cap
+        dte = signal.get("dte")
+        # Annualise so the bar means a RATE. Un-normalised, the same 10% was
+        # demanded of a 1-day and a 45-day trade, which graded every ordinary
+        # cash-secured put Weak (see the GATE_BARS note). Calendar days, matching
+        # `dte` itself and the PoP model's sqrt(dte/365) — this is a screening
+        # rate, not a settlement price, so trading days would be false precision.
+        #
+        # dte <= 0 or absent -> None, NOT a division: an expired or unknown
+        # horizon would otherwise annualise towards infinity and clear any bar.
+        # Absence means "cannot judge", and a reward we cannot judge does not
+        # pass — the same contract as an unknown R:R below.
+        if (isinstance(mp, (int, float)) and isinstance(cap, (int, float)) and cap > 0
+                and isinstance(dte, (int, float)) and not isinstance(dte, bool)
+                and dte > 0):
+            return (mp / cap) * (365.0 / dte)
         return None
 
     rr = signal.get("rr")
@@ -567,6 +602,8 @@ def evaluate_gates(signal):
 
     profile = gate_profile(signal)
     bars = GATE_BARS[profile]
+    # NAKED compares an ANNUALISED capital efficiency (return/yr); every other
+    # profile compares a horizon-free R:R.
     reward_key = "capeff" if profile == "NAKED" else "rr"
 
     reward = _reward_metric(signal, profile)

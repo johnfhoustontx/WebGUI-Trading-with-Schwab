@@ -244,9 +244,59 @@ def test_gates_long_unbounded_profit_passes_reward():
     assert g["passed_min"]
 
 
+# The NAKED reward bar is ANNUALISED (Task 2.6), so every naked-short fixture
+# below carries a ``dte`` -- without one the metric is None and the gate fails
+# for want of a horizon rather than for the reason the test names.
+def _naked(stype="SHORT_PUT", max_profit=160.70, capital=9439.0, dte=35, pop=74.1):
+    """A 35-DTE cash-secured put off a Black-Scholes chain (spot 100, IV 0.28).
+
+    1.70% over 35 days == 17.8%/yr: an ordinary CSP, and the exact trade that
+    was graded Weak-and-cut while the bar was per-trade.
+    """
+    return {"type": stype, "rr": None, "max_profit": max_profit, "capital": capital,
+            "dte": dte, "pop_pct": pop,
+            "legs": [{"bid": 1.60, "ask": 1.64, "mark": 1.62, "volume": 500, "oi": 2000}]}
+
+
+def test_reward_metric_naked_is_return_on_capital_per_year():
+    # 160.70 / 9439 = 1.702% over 35 days -> x365/35 = 17.75%/yr.
+    assert abs(sc._reward_metric(_naked(), "NAKED") - 0.1775) < 0.001
+
+
+def test_gates_naked_healthy_cash_secured_put_passes_min():
+    """A 17.8%/yr CSP clears the 10%/yr bar. Was Weak-and-cut when the bar was
+    10% PER TRADE regardless of horizon -- the Task 2.6 bug."""
+    g = sc.evaluate_gates(_naked())
+    assert g["passed_min"] and not g["reasons"]
+
+
+def test_gates_naked_healthy_short_call_passes_min():
+    # Same chain, 35 DTE: 143.70 / 2001 = 7.18% over 35 days = 74.9%/yr.
+    g = sc.evaluate_gates(_naked("SHORT_CALL", max_profit=143.70, capital=2001.0, pop=80.4))
+    assert g["passed_min"] and not g["reasons"]
+
+
+def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
+    """dte <= 0 must not divide to infinity and sail through: an expired or
+    same-day horizon is unjudgeable, and unjudgeable means do not pass."""
+    for dte in (0, -1):
+        g = sc.evaluate_gates(_naked(dte=dte))
+        assert not g["passed_min"], dte
+
+
+def test_gates_naked_missing_dte_fails_rather_than_passing():
+    sig = _naked()
+    del sig["dte"]
+    assert not sc.evaluate_gates(sig)["passed_min"]
+
+
 def test_gates_naked_low_capital_efficiency_fails_reward():
-    g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5, "pop_pct": 70,
-        "max_profit": 3.5, "capital": 90.0,
+    # UPDATED (Task 2.6): the old fixture carried NO dte and a per-trade capeff
+    # of 3.5/90 = 3.9%, which annualises to 40%/yr at 35 DTE -- it would now pass
+    # on reward and only "fail" because the horizon was missing. Re-stated as a
+    # genuinely thin naked short: 3.5/900 over 35 days = 4.1%/yr, under the bar.
+    g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5,
+        "pop_pct": 70, "max_profit": 3.5, "capital": 900.0, "dte": 35,
         "legs": [{"bid": 3.4, "ask": 3.6, "mark": 3.5, "volume": 300, "oi": 800}]})
     assert not g["passed_min"] and "R:R" in " ".join(g["reasons"])
 

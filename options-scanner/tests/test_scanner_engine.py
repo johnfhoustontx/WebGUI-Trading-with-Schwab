@@ -1929,15 +1929,30 @@ class TestPerExpiryExpectedMove:
         assert all(96.5 <= k <= 98.5 for k in legacy), legacy
 
 
+def _directional_uncut(fake_client, symbols):
+    """Re-run the scan with the min-score cut lifted, for non-vacuity checks."""
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        mp = stack.enter_context(pytest.MonkeyPatch.context())
+        mp.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
+        mp.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+        return scanner_engine.run_full_scan(
+            fake_client, symbols=symbols)["signals_directional"]
+
+
 @pytest.fixture
 def unfiltered_directional(monkeypatch):
     """Drop the min-score cut for tests that are about the build/score pipeline.
 
-    Every directional candidate this fixture chain produces grades Weak (the
-    fake chain's liquidity/PoP fail the hard gates), so with the production
-    ``SINGLE_LEG_MIN_SCORE`` in force the emitted list is empty and every
-    assertion about shape, window coverage or ordering goes vacuous. These
-    tests predate the cut and are not about it — the cut has its own tests.
+    MOST directional candidates this fixture chain produces grade Weak (the fake
+    chain's liquidity/PoP fail the hard gates), so with the production
+    ``SINGLE_LEG_MIN_SCORE`` in force nearly everything is cut and assertions
+    about shape, window coverage or ordering go vacuous or lose their probe.
+    These tests predate the cut and are not about it — the cut has its own tests.
+
+    ⚠ "Every candidate grades Weak" until Task 2.6, which is when the naked
+    shorts stopped being uniformly Weak (their reward bar is now annualised).
+    Three of them now clear the cut, so the word is "most", not "every".
     """
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
@@ -2005,12 +2020,13 @@ class TestDirectionalSignals:
         and drives q_be toward 0 -- under-scoring the swing side of this single
         jointly-sorted list.
 
-        QQQ's 7-DTE LONG_CALL is the probe because it is the ONLY swing
-        candidate this fixture produces that is NOT pinned to GATE_FAIL_CAP
-        (39.0) by a failed hard gate -- i.e. the only one where q_be is
-        observable at all. Measured: 36.2 scored per-window vs 31.6 under the
-        spec's single 1-day em_1sd; the 34.0 bar sits between them, so a revert
-        to the spec fails here.
+        QQQ's 7-DTE LONG_CALL is the probe because q_be is observable on it --
+        it is not pinned to GATE_FAIL_CAP (39.0) by a failed hard gate.
+        Measured: 36.2 scored per-window vs 31.6 under the spec's single 1-day
+        em_1sd; the 34.0 bar sits between them, so a revert to the spec fails
+        here. (It was the ONLY such swing candidate until Task 2.6 annualised
+        the naked reward bar; QQQ's 7-DTE SHORT_CALL now scores 50.7 and is
+        un-capped too. The probe is unchanged -- it is still a valid one.)
         """
         sigs = scanner_engine.run_full_scan(
             fake_client, symbols=self.SYMBOLS)["signals_directional"]
@@ -2036,13 +2052,42 @@ class TestDirectionalSignals:
     # --- Minimum-score cut ---------------------------------------------------
 
     def test_weak_directional_candidates_are_not_emitted(self, fake_client):
-        """Every candidate this fixture builds grades Weak (~23-39), so the
-        production cut must emit NOTHING — no Weak signal reaches the tab."""
+        """No Weak / sub-floor candidate reaches the tab, end to end.
+
+        UPDATED (Task 2.6). This asserted `signals_directional == []` on the
+        premise, stated in its own docstring and in `unfiltered_directional`,
+        that "every candidate this fixture builds grades Weak (~23-39)". That
+        premise was a CHARACTERIZATION OF THE BUG, not a property of the
+        fixture: naked shorts were uniformly Weak because the NAKED reward bar
+        demanded 10% return on capital per TRADE at any horizon, so no short
+        put or short call could ever clear it. With the bar annualised, three of
+        this fixture's naked shorts grade Marginal at 50.7-53.2 and are
+        correctly emitted.
+
+        Asserting an empty list therefore no longer tests the cut — it tests the
+        bug. The invariant the cut actually promises is asserted instead, which
+        is strictly stronger than the old `== []` (that would have passed on a
+        cut which dropped everything, including qualifying rows).
+
+        ⚠ Do NOT read those three rows as evidence a 1-DTE naked short is a good
+        trade. This fixture's chain is synthetic and degenerate — a flat 440.57
+        credit at PoP 99.8 — which no real chain offers. Measured on a
+        Black-Scholes chain (spot 100, IV 0.28), a 1-DTE naked short composites
+        ~49.6, just under this same 50.0 floor.
+        """
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
-        assert results["signals_directional"] == []
-        # Non-vacuity: the builder must actually have produced candidates for
-        # the cut to have anything to drop, else this passes for free.
+        for s in results["signals_directional"]:
+            assert s["grade"] not in scanner_engine.SINGLE_LEG_EXCLUDED_GRADES
+            assert (s.get("composite_score") or 0) >= scanner_engine.SINGLE_LEG_MIN_SCORE
+        # Non-vacuity, both halves: the builder must have produced candidates,
+        # and the cut must actually have DROPPED some — otherwise the loop above
+        # passes for free on a list nothing was ever removed from.
         assert results["signals_0dte"], "fixture produced no scan at all"
+        with_cut = len(results["signals_directional"])
+        uncut = len(_directional_uncut(fake_client, self.SYMBOLS))
+        assert uncut > with_cut, (
+            f"cut dropped nothing ({uncut} built, {with_cut} emitted) — "
+            "the assertions above are vacuous")
 
     def test_directional_emits_candidates_at_or_above_the_min_score(
             self, fake_client, monkeypatch):
