@@ -162,6 +162,73 @@ git commit -m "feat(scanner): apply the earnings gate to the INCOME window too"
 
 ---
 
+## Task 2.5: Hoist the earnings-calendar READ into `shared/`
+
+**Why this task exists.** Task 2 extended the earnings gate — and investigation
+for Task 3 then established that **the gate has never fired in production**. All
+four `screen_spreads` call sites omit `earnings_date`, and nothing in
+`scanner_engine.py` computes one; the only occurrence outside tests is the
+parameter default itself. `TestEarningsAvoidance` passes because it calls the
+function directly with a date. Task 2 widened a dead branch.
+
+The forward calendar lives in `services/trade_svc/earnings_calendar.py`, which
+`options_svc` **may not import** — Tier 2 services import only their own engines.
+But **reading a shared store is not a cross-service import**: `shared/market_calendar.py`
+and `shared/symbols.py` are the standing precedent, and `EARNINGS_CALENDAR_DB` is
+already a `repo_paths` constant.
+
+So: **split read from write.** `trade_svc` keeps the WRITE path (`api_key`,
+`fetch_calendar`, `parse_calendar`, `store_calendar`, `refresh` — the nightly
+Alpha Vantage pull). The READ path moves to a new `shared/earnings.py`, and
+`trade_svc` imports it back so there is exactly one implementation.
+
+**Files:**
+- Create: `shared/earnings.py` — `lookup`, `coverage`, `days_to_earnings`, plus a connect helper over `EARNINGS_CALENDAR_DB`
+- Modify: `services/trade_svc/earnings_calendar.py` — re-export the three from `shared.earnings`; delete the local bodies
+- Test: `shared/tests/test_earnings.py` (create)
+
+**The one behaviour that must survive the move: `coverage()`.**
+
+A symbol absent from the calendar is **not** a symbol with no upcoming report —
+it is a symbol the calendar cannot speak for. The module's own docstring already
+warns that "an empty calendar must never be mistaken for 'nobody reports soon'".
+A gate that treats absence as "no earnings" fails **open**, silently, on exactly
+the names most likely to be traded — which is the same failure shape as the
+`LIQUIDITY_THRESHOLDS` fail-open and the five NaN incidents. Preserve it and pin
+it:
+
+```python
+def test_absence_from_the_calendar_is_unknown_not_clear(tmp_path):
+    """A symbol the calendar has never heard of must NOT read as 'no earnings'.
+    That distinction is the whole safety property: absence-as-clear fails open."""
+    conn = earnings.connect(tmp_path / "e.db")
+    earnings.init_db(tmp_path / "e.db")
+    assert earnings.lookup(conn, "NOSUCH") is None
+    assert earnings.coverage(conn, "NOSUCH") is False   # cannot speak for it
+```
+
+⚠ **The repo-root `conftest.py` refuses `sqlite3.connect` into a live data
+directory, and `services/trade_svc/data` is on that list.** Every test here must
+use `tmp_path`, or carry `@pytest.mark.allow_live_db`. Do not "fix" a refusal by
+redirecting a module default — that guard exists because the previous
+per-module approach had never worked and leaked 24 synthetic signals into both
+live environments.
+
+**Steps:** move the three functions unchanged (this is a move, not a rewrite —
+any behaviour change here is out of scope), re-export from the old module so
+`trade_svc`'s existing callers and tests keep working untouched, verify both
+suites, commit.
+
+```bash
+"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest shared/tests services/trade_svc -q
+```
+
+⚠ Run those two paths separately if a collection error appears — the
+`pytest services` warning in **Before you start** applies to any run that puts
+several hyphenated app dirs on `sys.path` at once.
+
+---
+
 ## Task 3: The `income_scan` compute function
 
 **Files:**
@@ -359,12 +426,50 @@ def income_scan(symbol, market_state=None) -> dict:
                       market_state=market_state)
 ```
 
-⚠ The delta bands and credit floor above are a **first guess at the right
-accessors, not verified**. Check `shared/scanner_config.py` for the real shapes —
-`directional_delta_range()` and `min_credit_pct()` both exist but their keying
-must be confirmed, and `min_credit_pct()["SWING"]` may be the 1–15 DTE floor
-rather than one appropriate to 30–45 DTE. If the income window needs its own
-credit floor, it belongs in `config/scanner.toml`, not as a literal.
+### ⚠ The delta band — SETTLED, and the plan's first sketch was unusable
+
+`_scanner_config.directional_delta_range()` returns the `[directional]` bands
+**PCS (-0.55, -0.30) / CCS (0.30, 0.55)**, and `screen_spreads` in PREMIUM mode
+drops any short with `abs(d) > MAX_ENTRY_SHORT_DELTA` (0.27) at
+`scanner_engine.py:914`. **Those two ranges are disjoint** — every candidate would
+pass the band check and then be dropped by the ceiling, silently, since that
+`continue` increments no reject counter. The window would have returned zero
+spreads forever while every stubbed test passed.
+
+That accessor is for `mode="DIRECTIONAL"`, which is explicitly exempt from the
+ceiling; `config/scanner.toml` says so in prose. **Do not use it here.**
+
+Use module constants beside `INCOME_DTE_MIN/MAX`:
+
+```python
+# Short-delta band for the income window. Deliberately NOT
+# _scanner_config.directional_delta_range(): those bands are for mode=
+# "DIRECTIONAL", which is exempt from the PREMIUM-mode ceiling
+# MAX_ENTRY_SHORT_DELTA (0.27) -- they sit entirely ABOVE it, so a PREMIUM call
+# with them returns nothing at all.
+#
+# 0.15-0.25 brackets the ~0.20-delta income convention with clearance on BOTH
+# sides, so a small drift in either the band or the ceiling cannot silently
+# empty the scan. The Grok-thread spec said 0.20-0.30; the top of that is
+# unreachable in premium mode, and hugging 0.27 would put every candidate one
+# tick from being filtered.
+INCOME_PUT_DELTA = (-0.25, -0.15)
+INCOME_CALL_DELTA = (0.15, 0.25)
+```
+
+### The credit floor — reuse `["SWING"]`, add no knob
+
+Verified: `min_credit_pct()` returns `{"0-DTE": {regime: pct}, "SWING": 0.12}`.
+The TOML comments 0.12 as the 1-15 DTE floor, so it looks wrong for this window —
+but it is **dominated and therefore inert here**. The binding constraint is the
+delta-aware edge floor `credit/width >= abs(delta) + EDGE_MARGIN(0.02)`, which at
+a 0.15-0.25 delta short demands 17-27%; the credit floor is
+`max(0.12, MIN_ABS_CREDIT/width)` = 0.12 at any width >= 2. So 0.12 can never
+bind for any delta this window trades.
+
+A separate `income` knob would be a second constant that changes nothing until
+`EDGE_MARGIN` moves. **Reuse `["SWING"]` and record that reasoning in a comment**,
+so the next reader does not "fix" the apparent mismatch.
 
 Note the chain fetch inside `swing_scan` is bounded `today … dte_max + 2`, so a
 45-DTE window pulls **one** chain of ~47 days — which is the ~23 calls/day the
