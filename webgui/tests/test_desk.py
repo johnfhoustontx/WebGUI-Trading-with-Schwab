@@ -1069,6 +1069,122 @@ def test_desk_bullbear_strip_degrades_a_row_it_cannot_score():
     assert [c["quadrant"] for c in chips] == ["unknown", "unknown"]
 
 
+# ── which horizon the strip paints ───────────────────────────────────────────
+# 2026-09-05 is a Saturday; 2026-09-07 is Labor Day, so that week's first
+# session is Tuesday 2026-09-08. Both are asserted against the shared calendar
+# rather than trusted, because a fixture that has quietly become a non-trading
+# day would make every one of these pass for the wrong reason.
+def test_the_horizon_fixtures_are_the_days_this_module_thinks_they_are():
+    from shared import market_calendar as mc
+    assert mc.is_trading_day(datetime.date(2026, 9, 5)) is False   # Saturday
+    assert mc.is_trading_day(datetime.date(2026, 9, 7)) is False   # Labor Day
+    assert mc.is_trading_day(datetime.date(2026, 9, 8)) is True
+
+
+def test_strip_is_not_live_outside_a_session():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 5, 12, 0)) is False
+
+
+def test_strip_is_not_live_before_the_bell_on_a_trading_day():
+    """The case the calendar is here for. Pre-open the proxy's percent fields
+    are a stale prior close or its literal 0.0 fallback — numbers that look
+    exactly like a measured flat tape, which is why the switch cannot ask
+    them."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.0}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 7, 0)) is False
+
+
+def test_strip_is_not_live_when_the_benchmark_is_missing():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": None}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_when_the_benchmark_key_is_absent():
+    """A payload written before the field existed, or a service caught
+    mid-restart — indistinguishable from an explicit None, and treated so."""
+    assert d.strip_is_live({"levels": {"sector": []}},
+                           now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_on_a_nan_benchmark():
+    """NaN is the app's documented trap: every comparison against it is False,
+    so an unguarded check reads it as a real number. ``pages.fmt.num`` is the
+    strict copy that rejects it."""
+    assert d.strip_is_live({"benchmark_day_pct": float("nan")},
+                           now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_on_a_malformed_view():
+    for bad in (None, "nonsense", [], 3.0):
+        assert d.strip_is_live(bad,
+                               now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_live_during_a_session_with_a_benchmark():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is True
+
+
+def test_strip_is_live_on_a_benchmark_of_exactly_zero():
+    """A MEASURED flat tape is a reading, not an absence. A truthiness check
+    would drop the strip to its structural horizon on the one day it is most
+    worth reading live, and nothing else in this suite would see it."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.0}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is True
+
+
+def test_strip_is_live_after_the_close_on_a_trading_day():
+    """``regular_session_has_opened``, not ``is_regular_hours``: the day's move
+    does not stop being today's move at the cash close, and the strip is read
+    after it as often as during the session."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": -0.8}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 18, 0)) is True
+
+
+def test_strip_is_live_reads_a_naive_now_as_central():
+    """Callers may pass either. A naive datetime is CT — ``market_calendar``'s
+    own rule — so 08:00 CT is pre-open and 09:00 CT is not, on the same day a
+    UTC reading of both would put after the bell."""
+    view = {"benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 8, 0)) is False
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 9, 0)) is True
+
+
+def test_strip_is_live_accepts_an_aware_now():
+    """And an aware one converts rather than being read as CT: 15:00 UTC is
+    10:00 CT, inside the session; 12:00 UTC is 07:00 CT, before the bell."""
+    view = {"benchmark_day_pct": 0.4}
+    utc = datetime.timezone.utc
+    assert d.strip_is_live(
+        view, now=datetime.datetime(2026, 9, 8, 15, 0, tzinfo=utc)) is True
+    assert d.strip_is_live(
+        view, now=datetime.datetime(2026, 9, 8, 12, 0, tzinfo=utc)) is False
+
+
+def test_strip_is_live_defaults_now_to_an_aware_local_clock():
+    """The default must not hand ``market_calendar`` a naive host clock: it
+    would be read as CT, so on any host that is not CT the strip would switch
+    horizons at the wrong hour. ``.astimezone()`` makes the local time aware,
+    which is identical on a CT box and correct everywhere else."""
+    src = inspect.getsource(d.strip_is_live)
+    assert "datetime.now().astimezone()" in src
+
+
+def test_strip_is_live_asks_the_calendar_not_the_numbers():
+    """The whole point of the function. A future 'simplification' to a
+    ``day_pct > 0`` test would class all eleven sectors as falling+lagging
+    every pre-open and every weekend — a confident, maximally bearish reading
+    of no data."""
+    body = inspect.getsource(d.strip_is_live).split('"""')[-1]
+    assert "_cal.regular_session_has_opened" in body
+    # And it must not read the sector rows AT ALL: inferring "there is day data
+    # today" from the numbers is precisely the inference that cannot be made,
+    # and the rows are where those numbers live.
+    for row_reader in ("levels", "row_day_axes", "by_day_move", "day_excess"):
+        assert row_reader not in body
+
+
 # ── the poll contract ────────────────────────────────────────────────────────
 def test_every_region_only_depends_on_views_the_page_actually_polls():
     """A region wired to a view outside ``VIEWS`` would never repaint: the poll

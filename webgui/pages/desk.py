@@ -688,6 +688,44 @@ WAITING_BULLBEAR = ("No Bull / Bear map yet — it is rebuilt by the nightly "
                     "cascade at 16:20 CT.")
 
 
+def strip_is_live(bullbear_view, now=None):
+    """Should the chips paint TODAY's quadrant rather than the structural one?
+
+    **This asks the CALENDAR, never the numbers, and that is the whole point.**
+    ``SchwabProxyClient._extract_change_pct`` (schwab-proxy/proxy_client.py)
+    falls through to a literal ``0.0`` when every percent field is missing or
+    zero — so a switch written as "is any row's day move non-zero?" would see
+    eleven honest-looking zeros every pre-open, every weekend and through any
+    proxy hiccup, and ``0.0`` is not ``> 0``: all eleven sectors would render
+    ``falling_lagging``. A confident, maximally bearish reading of no data at
+    all, which is the failure class CLAUDE.md documents five times over. The
+    bell either rang today or it did not, and only the calendar knows which.
+
+    ``regular_session_has_opened`` rather than ``is_regular_hours``: the day's
+    move does not stop being today's move at the cash close, and this strip is
+    read after the close as often as during the session.
+
+    The benchmark clause catches what a calendar cannot see — a dead proxy
+    mid-session, where ``compute.merge_live`` leaves ``benchmark_day_pct``
+    None. It goes through ``pages.fmt.num``, the STRICT reader, so a NaN counts
+    as absent while a **measured** ``0.0`` — a genuinely flat tape — stays
+    live. A truthiness test here would be the same bug one field over.
+
+    False is not a neutral or empty state: pre-open is exactly when this strip
+    is read to plan the session, so the caller still draws every chip, on its
+    structural horizon, and says so.
+
+    ``now`` defaults to an AWARE local clock. ``market_calendar`` reads a naive
+    datetime as Central, which is right on prod (its unit sets TZ) and silently
+    wrong on any other host; ``.astimezone()`` is identical on a CT box and
+    correct everywhere else. A caller may still pass either form.
+    """
+    view = bullbear_view if isinstance(bullbear_view, dict) else {}
+    if _finite(view.get("benchmark_day_pct")) is None:
+        return False
+    return _cal.regular_session_has_opened(now or datetime.now().astimezone())
+
+
 def _bullbear_rows(bullbear_view):
     """The payload's sector rows, ordered strongest-first and null-free.
 
