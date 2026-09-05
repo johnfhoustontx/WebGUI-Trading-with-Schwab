@@ -593,7 +593,8 @@ def evaluate_gates(signal):
     Returns ``{"passed_min": bool, "passed_excellent": bool, "reasons": [...]}``
     where ``reasons`` lists the dimensions that failed the MIN bars ("liquidity",
     "R:R" -- or "capital efficiency" for the NAKED profile, whose reward gate is
-    capital efficiency rather than an undefined R:R -- and "PoP"). Breakeven-vs-EM is intentionally NOT a gate (it's a ranking
+    capital efficiency rather than an undefined R:R -- and "PoP").
+    Breakeven-vs-EM is intentionally NOT a gate (it's a ranking
     quality factor, not a hard filter). Defensive: a missing key -> that dimension
     treated as a fail (reward/pop); liquidity uses the already-defensive q_liq.
     """
