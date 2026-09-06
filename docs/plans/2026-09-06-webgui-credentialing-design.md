@@ -55,8 +55,8 @@ Internet ──443──► Caddy (system unit)
                     │
                     └── app.neuralstrike.co
                           ├─ /wall*          → 404, never leaves the box
-                          ├─ /login          → rate-limited (own zone)
                           └─ everything else → 127.0.0.1:8500 + header_up X-Edge
+                                               (throttling is in the app, not here)
                                                     │
                                           webgui AuthMiddleware (pure ASGI)
                                           session valid? ──no──► 303 /login?next=…
@@ -354,7 +354,21 @@ reaches the login form, and you will be bookmarking it anyway.
 
 ### Five mitigations, all cheap
 
-1. **Rate-limit `/login` at Caddy**, so a flood never reaches Python at all.
+1. ~~**Rate-limit `/login` at Caddy**~~ — **dropped 2026-09-06, deliberately.**
+   Caddy's `rate_limit` is not in any prebuilt binary; it needs an `xcaddy`
+   build, and then every future Caddy update is a manual rebuild with no apt
+   security updates. The maintenance is real and permanent.
+
+   What it would have bought is now largely bought twice over: mitigation 5's
+   form token rejects a blind POST for the cost of an HMAC, and `LockoutState`
+   refuses **before Argon2 runs**. Measured, a flood therefore costs an HTTP
+   request, a cookie parse and a dict lookup — not 19 MiB. The plugin would have
+   saved the Python round-trip on top of that, which is a far smaller gain than
+   owning a custom Caddy build forever.
+
+   **Stock Caddy from the official repo; rate limiting in the app.** If the
+   round-trip ever does show up in `sar` during stream hours, the plugin is
+   still there to add.
 2. **Check the lockout counter *before* calling Argon2**, never after — otherwise
    the throttle sits behind the expensive thing it is throttling, which is no
    throttle at all.

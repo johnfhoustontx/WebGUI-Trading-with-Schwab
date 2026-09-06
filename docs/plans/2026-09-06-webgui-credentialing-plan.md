@@ -1329,25 +1329,17 @@ app.neuralstrike.co {
     # The wall never leaves the box. The kiosk reaches it on loopback.
     handle /wall* { respond 404 }
 
-    # Mitigation 1: a login flood must never reach Python, where Argon2 is.
-    # Its OWN zone, so marketing traffic on the apex cannot trip it.
-    handle /login* {
-        rate_limit { zone app_login { key {remote_host}  events 10  window 1m } }
-        reverse_proxy 127.0.0.1:<NICEGUI_PORT> { header_up X-Edge 1 }
-    }
-
     handle { reverse_proxy 127.0.0.1:<NICEGUI_PORT> { header_up X-Edge 1 } }
 }
 ```
 
-> ⚠ **`rate_limit` is not in stock Caddy** — it needs the
-> `caddyserver/rate-limit` plugin and an `xcaddy` build. If you would rather not
-> build Caddy, move mitigation 1 into the app (reject before Argon2 using
-> `LockoutState` from Task 6, which you already have) and drop the block.
-> **Record which you chose in the design doc**, because it currently promises edge
-> rate-limiting. Note that mitigation 5's form token covers much of the same
-> traffic for free, so dropping the plugin is a defensible choice rather than a
-> hole.
+> ⚠ **No `rate_limit` block — decided 2026-09-06.** Caddy's rate limiter is not
+> in any prebuilt binary; it needs an `xcaddy` build and a manual rebuild on every
+> future Caddy update, with no apt security updates. Rate limiting lives in the
+> app instead: `LockoutState` (Task 6) refuses **before Argon2**, and the form
+> token (Task 7) rejects a blind POST for the cost of an HMAC. **Install stock
+> Caddy from the official repo.** Do not reintroduce the plugin without measuring
+> that the Python round-trip actually costs something during stream hours.
 
 **Step: write these tests first.** They need no Caddy — they assert on the
 generated string.
