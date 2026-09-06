@@ -260,6 +260,11 @@ _DEFAULTS = {
                     "midday": "11:30", "close": "15:15"},
         "action_alert": {"grace_min": 20, "morning": "10:00", "midday": "13:00",
                          "close": "15:00"},
+        # The 30-45 DTE income scan. One firing, but the NAMED shape (not
+        # ``{"at": …}``) because its gate returns a slot name, matching
+        # ``analyze``/``action_alert`` -- and because a second daily pass, if it
+        # is ever wanted, is then one line rather than a reshaped table.
+        "income": {"grace_min": 20, "morning": "08:45"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
     },

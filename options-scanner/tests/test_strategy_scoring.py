@@ -7,6 +7,9 @@ Covers strategy_scoring.py:
   - score_strategy / score_all (Task 10)
 """
 
+import datetime as _dt
+
+import strategy_scanner as ss
 import strategy_scoring as sc
 from strategy_scoring import state_family_tilt, STATE_TILT_MAX
 
@@ -244,11 +247,283 @@ def test_gates_long_unbounded_profit_passes_reward():
     assert g["passed_min"]
 
 
+# The NAKED reward bar is ANNUALISED (Task 2.6), so every naked-short fixture
+# below carries a ``dte`` -- without one the metric is None and the gate fails
+# for want of a horizon rather than for the reason the test names.
+def _naked(stype="SHORT_PUT", max_profit=160.70, capital=9439.0, dte=35, pop=74.1):
+    """A 35-DTE cash-secured put off a Black-Scholes chain (spot 100, IV 0.28).
+
+    1.70% over 35 days == 17.8%/yr: an ordinary CSP, and the exact trade that
+    was graded Weak-and-cut while the bar was per-trade.
+    """
+    return {"type": stype, "rr": None, "max_profit": max_profit, "capital": capital,
+            "dte": dte, "pop_pct": pop,
+            "legs": [{"bid": 1.60, "ask": 1.64, "mark": 1.62, "volume": 500, "oi": 2000}]}
+
+
+def test_reward_metric_naked_is_return_on_capital_per_year():
+    # 160.70 / 9439 = 1.702% over 35 days -> x365/35 = 17.75%/yr.
+    assert abs(sc._reward_metric(_naked(), "NAKED") - 0.1775) < 0.001
+
+
+def test_gates_naked_healthy_cash_secured_put_passes_min():
+    """A 17.8%/yr CSP clears the 10%/yr bar. Was Weak-and-cut when the bar was
+    10% PER TRADE regardless of horizon -- the Task 2.6 bug."""
+    g = sc.evaluate_gates(_naked())
+    assert g["passed_min"] and not g["reasons"]
+
+
+def test_gates_naked_healthy_short_call_passes_min():
+    # Same chain, 35 DTE: 143.70 / 2001 = 7.18% over 35 days = 74.9%/yr.
+    g = sc.evaluate_gates(_naked("SHORT_CALL", max_profit=143.70, capital=2001.0, pop=80.4))
+    assert g["passed_min"] and not g["reasons"]
+
+
+def test_gates_naked_zero_dte_cannot_be_annualised_and_fails():
+    """dte <= 0 must not divide to infinity and sail through: an expired or
+    same-day horizon is unjudgeable, and unjudgeable means do not pass."""
+    for dte in (0, -1):
+        # Assert the METRIC, not just the gate: this fixture's per-trade capeff
+        # (1.7%) is under the bar anyway, so a gate-only assertion would stay
+        # green against a `dte or 1` style fallback that silently annualises a
+        # 0-DTE signal by 365x.
+        assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
+        # Assert the exact reason set, not just the boolean: this fixture's
+        # liquidity and PoP both pass, so "capital efficiency" alone is the
+        # discriminating outcome -- a gate that started failing for a second
+        # dimension would otherwise still read as green here.
+        g = sc.evaluate_gates(_naked(dte=dte))
+        assert not g["passed_min"], dte
+        assert g["reasons"] == ["capital efficiency"], (dte, g["reasons"])
+
+
+# --- Task 2.7: the annualisation-horizon floor ------------------------------
+#
+# `_reward_metric` divides by `max(dte, MIN_ANNUALISE_DTE)`. Every test below is
+# written against the CONSTANT rather than against 5, so tuning it re-runs the
+# same properties instead of turning them red -- except the two that assert the
+# floor's own bounds, which is where a tune SHOULD have to argue.
+
+
+def _capeff(dte, per_trade=0.0170):
+    """Per-trade return `per_trade` at `dte`, through the production metric."""
+    return sc._reward_metric(
+        _naked(max_profit=per_trade * 10000.0, capital=10000.0, dte=dte), "NAKED")
+
+
+def test_reward_metric_floors_the_annualisation_horizon_below_the_threshold():
+    """Under the floor, the divisor is the floor -- not the trade's own dte.
+
+    Asserted as an EQUALITY against the floored expression and an INEQUALITY
+    against the unfloored one, because "smaller than 365x" alone would also hold
+    for any other divisor someone substituted.
+    """
+    f = sc.MIN_ANNUALISE_DTE
+    pt = 0.0170
+    for dte in range(1, f):
+        got = _capeff(dte, pt)
+        assert abs(got - pt * 365.0 / f) < 1e-9, dte
+        assert got < pt * 365.0 / dte, (dte, got)
+    # Non-vacuity: the loop must have run. A floor of 1 would make it empty and
+    # every assertion above free.
+    assert f > 1, "MIN_ANNUALISE_DTE <= 1 floors nothing -- the loop is vacuous"
+
+
+def test_reward_metric_does_not_floor_at_or_above_the_threshold():
+    """At and above the floor the metric is the plain annualised rate, so the
+    horizons this task is not about are untouched."""
+    f = sc.MIN_ANNUALISE_DTE
+    pt = 0.0170
+    for dte in (f, f + 1, 7, 21, 35, 45, 60):
+        assert abs(_capeff(dte, pt) - pt * 365.0 / dte) < 1e-9, dte
+
+
+def test_the_floor_is_continuous_at_the_threshold():
+    """No cliff of its own: dte == MIN_ANNUALISE_DTE reads the same either way.
+
+    A floor implemented as `dte < F and F or dte`-style branching, or applied
+    one off the boundary, would step here.
+    """
+    f = sc.MIN_ANNUALISE_DTE
+    assert abs(_capeff(f) - _capeff(f - 1)) < 1e-9
+
+
+def test_zero_dte_is_still_none_the_floor_is_on_the_divisor_not_the_guard():
+    """The floor caps the annualisation; it does not make a missing horizon
+    judgeable. `max(0, MIN_ANNUALISE_DTE)` is a perfectly good divisor -- the
+    point is that it is never reached, because dte <= 0 fails the guard first.
+    """
+    for dte in (0, -1, -sc.MIN_ANNUALISE_DTE):
+        assert sc._reward_metric(_naked(dte=dte), "NAKED") is None, dte
+
+
+def test_one_dte_naked_short_reward_is_bounded_by_the_floor_not_by_365():
+    """The bug this task fixes: a one-day credit annualised 365x cleared the bar
+    on ~0.03% per trade.
+
+    `per_trade` is chosen to sit between the two thresholds -- comfortably over
+    the unfloored requirement (bar x 1/365) and comfortably under the floored one
+    (bar x F/365) -- so this test fails BOTH if the floor is removed and if it is
+    applied at the wrong end.
+    """
+    bar = sc.GATE_BARS["NAKED"]["min"]["capeff"]
+    f = sc.MIN_ANNUALISE_DTE
+    unfloored_needs = bar / 365.0
+    floored_needs = bar * f / 365.0
+    assert floored_needs > unfloored_needs * 2, (
+        "MIN_ANNUALISE_DTE is too small for this test to discriminate")
+    per_trade = (unfloored_needs + floored_needs) / 2.0
+
+    reward = _capeff(1, per_trade)
+    assert reward < bar, (
+        f"a 1-DTE short returning {per_trade * 100:.3f}% per trade still clears "
+        f"the {bar}/yr bar at {reward:.4f} -- the horizon floor is not applied")
+    # ...and the gate cuts it, on the reward dimension alone.
+    sig = _naked(max_profit=per_trade * 10000.0, capital=10000.0, dte=1)
+    g = sc.evaluate_gates(sig)
+    assert not g["passed_min"]
+    assert g["reasons"] == ["capital efficiency"], g["reasons"]
+    # Non-vacuity, and the whole point: unfloored, this same row PASSED.
+    assert per_trade * 365.0 >= bar, (
+        "fixture no longer clears the bar under the old 365x metric -- this test "
+        "would pass even with the annualisation reverted")
+
+
+def test_the_floor_does_not_reach_into_the_swing_scan_window():
+    """MIN_ANNUALISE_DTE's upper bound, made executable.
+
+    5 was chosen as the LARGEST floor that rescales only horizons the 0-DTE scan
+    window owns; 7 discounts 5-6 DTE swing candidates, 10 discounts 5-9. Read
+    from `run_full_scan`'s source because the windows are locals there, following
+    `test_scanner_engine.test_run_full_scan_applies_gex_gate`. If the scrape stops
+    matching, the window was RENAMED, not removed -- fix the pattern, do not
+    delete the test.
+    """
+    import inspect
+    import re
+
+    import scanner_engine
+
+    src = inspect.getsource(scanner_engine.run_full_scan)
+    m = re.search(r"^\s*swing_min_dte\s*=\s*(\d+)\s*$", src, re.M)
+    assert m is not None, (
+        "could not read swing_min_dte out of run_full_scan -- the local was "
+        "renamed; re-point this pattern rather than dropping the bound")
+    swing_min = int(m.group(1))
+    assert sc.MIN_ANNUALISE_DTE <= swing_min, (
+        f"MIN_ANNUALISE_DTE {sc.MIN_ANNUALISE_DTE} rescales "
+        f"{[d for d in range(swing_min, sc.MIN_ANNUALISE_DTE)]} DTE, which the "
+        f"SWING window ({swing_min}+) owns -- it would discount genuine swing "
+        "candidates, which is not what the floor is for. Re-run "
+        "`tools/sweep_naked_capeff.py --floors` before raising it.")
+
+
+def _same_day_chain(spot=100.0):
+    """A chain whose only expiration is TODAY -> `_dte_for` yields dte == 0.
+
+    Deliberately RICH: the 0.28-delta short call carries a 3.05 mark, so its
+    un-annualised max_profit/capital is 0.152 -- comfortably over the 0.10 bar,
+    and over the per-TRADE bar that stood before Task 2.6. No real 0-DTE chain
+    prices like this; that is the point. It removes "the reward was thin" as an
+    explanation for the cut, leaving only the horizon guard.
+    """
+    today = _dt.date.today().isoformat()
+
+    def c(strike, delta, mark):
+        return {"delta": delta, "mark": mark, "bid": mark - 0.02, "ask": mark + 0.02,
+                "theta": -0.20, "vega": 0.02, "gamma": 0.03, "volatility": 28.0,
+                "totalVolume": 5000, "openInterest": 12000}
+
+    return {
+        "underlyingPrice": spot,
+        "callExpDateMap": {f"{today}:0": {
+            "100.0": [c(100.0, 0.50, 4.00)],
+            "101.0": [c(101.0, 0.28, 3.05)],
+            "102.0": [c(102.0, 0.12, 2.00)]}},
+        "putExpDateMap": {f"{today}:0": {
+            "100.0": [c(100.0, -0.50, 4.00)],
+            "99.0": [c(99.0, -0.28, 3.05)],
+            "98.0": [c(98.0, -0.12, 2.00)]}},
+    }
+
+
+def test_same_day_naked_short_is_cut_for_the_horizon_not_for_thin_reward():
+    """The 0-DTE naked-short class is unreachable for the NAKED reward gate.
+
+    Driven from the BUILDER, not from `_reward_metric` -- this repo's own
+    `signal_band` lesson is that a consumer-side guard proves nothing until a
+    test drives it from the producer. `build_directional` really does emit naked
+    shorts at dte == 0 (`_dte_for` clamps with max(0, ...), `zerodte_min_dte` is
+    0, the Strategy Finder's DTE-min input defaults to 0), so this is a live
+    population and not a hypothetical.
+
+    Asserts the REASON, not just the cut: the un-annualised capital efficiency
+    clears the bar, so a future change that starts failing this row for thin
+    reward -- or one that floors dte at 1 and lets every 0-DTE naked short
+    through on a 365x rescale -- is visible here rather than silent.
+    """
+    sigs = ss.build_directional(_same_day_chain(), "SPY", spot=100.0, atm_iv=0.28,
+                                dte_min=0, dte_max=1)
+    short_call = next(s for s in sigs if s["type"] == "SHORT_CALL")
+
+    # The population: the builder itself produced a same-day horizon.
+    assert short_call["dte"] == 0, "fixture no longer builds a same-day contract"
+
+    # Not thin: un-annualised, this reward clears the 0.10 min bar outright.
+    per_trade = short_call["max_profit"] / short_call["capital"]
+    assert per_trade > sc.GATE_BARS["NAKED"]["min"]["capeff"], (
+        f"fixture reward {per_trade:.3f} is thin on its own -- the cut below "
+        "would no longer be attributable to the horizon guard")
+
+    # The horizon guard: the reward was never computed, not computed and judged.
+    assert sc._reward_metric(short_call, "NAKED") is None
+
+    # ...and the row is cut, on the reward dimension alone (liquidity + PoP pass).
+    gates = sc.evaluate_gates(short_call)
+    assert not gates["passed_min"]
+    assert gates["reasons"] == ["capital efficiency"]
+
+    scored = sc.score_strategy(dict(short_call), sc.infer_market_view({}, {}),
+                               atm_iv=0.28, em_1sd=1.5)
+    assert scored["grade"] == "Weak"
+    assert scored["grade_reason"] == "Fails: capital efficiency"
+
+
+def test_gates_naked_missing_dte_fails_rather_than_passing():
+    """Absence means "cannot judge", and unjudgeable does not pass -- the same
+    contract evaluate_gates already applies to an unknown R:R."""
+    for absent in ({}, {"dte": None}, {"dte": "35"}, {"dte": True}):
+        sig = _naked()
+        del sig["dte"]
+        sig.update(absent)
+        assert sc._reward_metric(sig, "NAKED") is None, absent
+        g = sc.evaluate_gates(sig)
+        assert not g["passed_min"], absent
+        assert g["reasons"] == ["capital efficiency"], (absent, g["reasons"])
+
+
 def test_gates_naked_low_capital_efficiency_fails_reward():
-    g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5, "pop_pct": 70,
-        "max_profit": 3.5, "capital": 90.0,
+    # UPDATED (Task 2.6): the old fixture carried NO dte and a per-trade capeff
+    # of 3.5/90 = 3.9%, which annualises to 40%/yr at 35 DTE -- it would now pass
+    # on reward and only "fail" because the horizon was missing. Re-stated as a
+    # genuinely thin naked short: 3.5/900 over 35 days = 4.1%/yr, under the bar.
+    g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5,
+        "pop_pct": 70, "max_profit": 3.5, "capital": 900.0, "dte": 35,
         "legs": [{"bid": 3.4, "ask": 3.6, "mark": 3.5, "volume": 300, "oi": 800}]})
-    assert not g["passed_min"] and "R:R" in " ".join(g["reasons"])
+    assert not g["passed_min"] and "capital efficiency" in " ".join(g["reasons"])
+
+
+def test_gates_naked_reward_failure_is_labelled_capital_efficiency_not_rr():
+    """A naked short has no R:R -- its reward gate IS capital efficiency, so
+    reporting "R:R" names a dimension the profile does not even compare."""
+    g = sc.evaluate_gates(_naked(max_profit=1.0))
+    assert g["reasons"] == ["capital efficiency"]
+
+
+def test_gates_non_naked_reward_failure_is_still_labelled_rr():
+    g = sc.evaluate_gates({"type": "BULL_CALL", "rr": 0.1, "pop_pct": 40,
+        "legs": [{"bid": 1.0, "ask": 1.02, "mark": 1.01, "volume": 500, "oi": 1000}]})
+    assert "R:R" in g["reasons"] and "capital efficiency" not in g["reasons"]
 
 
 def test_gates_fail_illiquid():

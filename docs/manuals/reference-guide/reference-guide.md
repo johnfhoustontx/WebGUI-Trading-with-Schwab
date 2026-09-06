@@ -1862,6 +1862,107 @@ symbol, and any time you have a directional opinion and want the best way to exp
 
 ---
 
+## Income
+
+*Menu: STRATEGY → Options → Income · Route `/options/income`*
+
+### What it is
+
+The premium-selling board at a **30–45 day** horizon: put credit spreads, call credit
+spreads, cash-secured puts and **covered calls against stock the paper account already
+holds**, scanned across the whole watchlist and ranked together on one list. It is the same *find* step [Market Scanner](#market-scanner) and
+[Strategy Finder](#strategy-finder) perform, at a longer horizon and with an income
+rather than a directional thesis.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:income` |
+| Trigger | A scheduled once-daily pass (`[slots.income]` in `config/sessions.toml`) |
+| Cost | One option chain per watchlist symbol, once per trading day |
+
+### Reading the screen
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · Credit $ · Capital $ ·
+Return on capital · Yield on cost · Total return if called · PoP % · Breakeven ·
+Earnings · Score. The board arrives already ranked by score; the headers re-sort it.
+
+**Side** names the position rather than the engine's structure code: *Put spread*,
+*Call spread*, *Cash-secured put*, *Covered call*.
+
+**Yield on cost** and **Total return if called** are covered-call columns and read a
+dash on every other row — a spread owns no shares, so there is no cost basis to divide
+by, and a 0.00% there would sort among real readings.
+
+| Column | On a covered call |
+|---|---|
+| **Yield on cost** | Premium ÷ (cost basis × 100). What the call alone pays on money already sunk in the stock. |
+| **Total return if called** | ((strike − basis) × 100 + premium) ÷ (basis × 100). The gain to the strike *plus* the premium — the outcome the trade is written for. |
+
+Read them together. A 0.4% yield at a strike 12% above basis and a 2% yield at a strike
+0.5% above it rank opposite ways depending on which column you look at, and premium
+alone is the misleading one.
+
+⚠ **Total return if called is not a duplicate of Return on capital**, though on a
+covered call the two land within a few hundredths: Return on capital is net of the
+opening commission, this one is gross, and Return on capital is the only one of the two
+the other three structures carry.
+
+**Covered calls carry no Score.** The composite scale is calibrated on defined-risk
+option structures against an inferred market view, and a covered call's economics are
+dominated by a stock position that scorer never sees — so the row is published without
+one and sorts to the FOOT of the board rather than being given an invented number. The
+two ratios above are what you rank these on instead.
+
+**Credit and Capital are per contract, in dollars.** For a defined-risk credit spread
+Capital is its maximum loss; for a cash-secured put it is the strike down to zero —
+genuinely the cash committed, not a margin figure.
+
+**Return on capital** is Credit divided by Capital. It exists because dollars alone
+cannot rank these three structures against each other: a $60 credit on a $441 spread
+and a $640 credit on a $39,361 cash-secured put are 13.3% and 1.6% respectively, and
+the second number is the one that decides.
+
+**Earnings** carries the three-state result of the earnings-calendar check, which is
+deliberately not a yes/no:
+
+| Value | Means |
+|---|---|
+| **None scheduled** | The calendar covers this symbol and has no report before expiration |
+| **After expiry** | A report is scheduled, and it falls after this expiration |
+| **Not checked** | The calendar has no entry for this symbol at all |
+
+Any expiration that *straddles* a known report was dropped from the scan before it
+reached this board, so nothing listed here is knowingly exposed to one.
+
+### Why it matters
+
+At 30–45 days a straddled earnings report is close to certain for most names, which is
+why the gate matters more here than at any shorter horizon — and why the third state
+matters. A symbol the calendar has never heard of and a symbol it knows is clear both
+leave the date blank; collapsing them would let the gate fail open silently on exactly
+the names most likely to be traded.
+
+**Where it is weak.** Without an Alpha Vantage API key configured, the earnings
+calendar is empty and **every** row reads *Not checked*. That is honest but it is not
+protection — check reports yourself before selling premium into one.
+
+The board is also a once-daily snapshot. Prices move after it is taken, so treat the
+credits as a shortlist to re-price, not as fills.
+
+### When to use it
+
+In the morning, when you are looking for premium to sell rather than a direction to
+express. Take a candidate to [Calculator](#calculator) to price it as it stands now.
+
+### Related pages
+
+[Strategy Finder](#strategy-finder) · [Calculator](#calculator) ·
+[Paper Ledger](#paper-ledger).
+
+---
+
 ## Expected Move
 
 *Menu: STRATEGY → Options → Expected Move · Route `/options/expected-move`*
@@ -2140,6 +2241,87 @@ The fills log is also the best available audit trail when a position behaves une
 
 [Paper Ledger](#paper-ledger) · [Captured Signals](#captured-signals) (the entry source)
 · [Claude Trades](#claude-trades) · [EOD Report](#eod-report).
+
+---
+
+## Shares
+
+*Menu: STRATEGY → Options → Shares · Route `/options/shares`*
+
+### What it is
+
+The **equity inventory** of the paper account — the stock it owns, lot by lot. It is a
+second reader of the same account [Paper Account](#paper-account) shows, not a separate
+book: options live on that page, shares live here.
+
+Shares get into the book one way in normal operation. A **cash-secured put** that
+finishes in the money is exercised against you at expiration, and the engine converts
+it into 100 shares per contract at the strike, debiting the cash it had already
+reserved. That is the whole point of selling one, and it is what makes a covered call
+possible afterwards.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:paper_account` |
+| Trigger | Republished on every paper-account refresh — the hourly entry/manage cycle and every manual paper action |
+| Store | `equity_lots` in the manual paper account database |
+
+### Reading the screen
+
+**The columns:** Symbol · Shares · Cost basis $/share · Cost $ · Mark (not tracked) ·
+Unrealized $ · How acquired · Held since · Covering call.
+
+**How acquired** carries the lot's provenance, and it is not decoration:
+
+| Value | Means |
+|---|---|
+| **Assigned** | A short put was exercised against you. Cost basis is the strike you sold, not the market price when the shares arrived. |
+| **Bought** | The lot was entered by hand. |
+| **—** | The lot records no source. Unknown, not "bought". |
+
+**Covering call** is the call currently written against that symbol, shown as strike and
+expiry with a contract count when it exceeds one. Blank means the shares are uncovered.
+
+### Why it matters
+
+An assigned lot is the point where an options position quietly becomes a stock position,
+and the two are managed completely differently — the option had defined risk and an
+expiry, the stock has neither. A screen that shows only the option book makes that
+transition invisible, which is exactly when it goes unmanaged.
+
+The provenance column is what makes the cost basis readable. A basis of 195 on a lot
+*bought* at 195 says the market was there; the same basis on an *assigned* lot says only
+that 195 is the strike you chose to sell, and the shares may have been worth
+considerably less on arrival.
+
+### Caveats and gotchas
+
+- **There is no live mark, and the page says so.** Nothing in this application re-prices
+  a bare equity symbol, so **Mark** and **Unrealized** render an em-dash on every row.
+  That is honest rather than useful: the alternative was to print the cost basis in a
+  column labelled Mark, or a 0.00 unrealized, both of which would read as measurements.
+  Price the shares in your broker or on [Market Dashboard](#market-dashboard).
+- **Coverage is recorded per symbol, not per lot.** The paper book stores no link from a
+  covered call back to the specific lot it was written against, so one open call shows on
+  every lot of that symbol. With two lots of one name and one call written, the screen
+  cannot tell you which hundred shares are covered — because the book does not know.
+- A call **credit spread** on a symbol you hold is not a covering call and is
+  deliberately not matched. Reporting it as one would say the shares are protected when
+  they are not.
+- Nothing here is an action. Lots are created and closed by the engine's settlement pass.
+
+### When to use it
+
+Before writing a covered call, to see what you actually hold and at what basis; and
+after any expiry day on which you had short puts near the money, to see whether one was
+assigned. [Income](#income) screens calls against these lots automatically, never below
+their cost basis.
+
+### Related pages
+
+[Paper Account](#paper-account) · [Income](#income) · [Paper Ledger](#paper-ledger).
 
 ---
 

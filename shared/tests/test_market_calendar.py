@@ -623,3 +623,38 @@ def test_regular_session_has_opened_reads_the_configured_regular_start(monkeypat
                         lambda name: (dt.time(9, 5), dt.time(15, 0)))
     assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 0)) is False
     assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 5)) is True
+
+
+# --- every slot name a service reads must exist in the built-in defaults -----
+def test_every_slot_name_read_in_the_tree_has_a_builtin_default():
+    """``_slot_group`` does a bare ``_DEFAULTS["slots"][name]``, so a name that
+    lives only in sessions.toml raises KeyError.
+
+    That is not a degraded tick: the services resolve their slot tables at
+    MODULE level (``_ANALYZE_SLOTS = ... mc.slot_times("analyze")``), so the
+    KeyError lands at import and the service will not start at all. It is also
+    the repo's config contract stated plainly -- the built-in defaults are the
+    real values and the TOML only overrides -- which means a TOML-only slot is
+    broken even when the file is perfectly well-formed.
+
+    This scans SOURCE rather than importing anything: pulling a service module in
+    here would put a hyphenated app dir on ``sys.path`` and re-trigger the
+    documented ``scoring``/``notifier`` module-name collisions (same reason
+    ``test_cross_tier_mirrors.py`` parses instead of imports).
+    """
+    import re
+
+    call = re.compile(r"""\bslot_(?:times|grace_min)\(\s*["']([A-Za-z_]\w*)["']""")
+    known = set(mc._DEFAULTS["slots"])
+    seen = {}
+    for path in (repo_paths.REPO_ROOT / "services").rglob("*.py"):
+        if "test" in path.name:          # tests legitimately probe unknown names
+            continue
+        for name in call.findall(path.read_text(encoding="utf-8", errors="replace")):
+            seen.setdefault(name, path)
+
+    assert seen, "found no slot lookups at all - has the call site been renamed?"
+    missing = {n: str(p) for n, p in seen.items() if n not in known}
+    assert not missing, (
+        f"slot names read with no _DEFAULTS['slots'] entry: {missing}. "
+        "Add the default in shared/market_calendar.py; the TOML only overrides.")

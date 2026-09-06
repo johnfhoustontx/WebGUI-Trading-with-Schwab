@@ -111,3 +111,54 @@ def test_matrix_snapshot_normalises_date_objects():
     assert m.ts == "2026-08-21T09:15:00"
     # plain strings still pass through untouched
     assert MatrixSnapshot(session_date="2026-08-21").session_date == "2026-08-21"
+
+
+def test_income_scan_accepts_a_sparse_heterogeneous_payload():
+    """Candidates are heterogeneous (adapted PCS/CCS plus SHORT_PUT), so the
+    contract gates the ENVELOPE, not each row — the same call the ScanResult
+    docstring makes, and for the same reason."""
+    from shared.contracts.options import IncomeScan
+
+    snap = IncomeScan(
+        candidates=[
+            # adapted credit spread: BOTH the flat contract and normalized legs
+            {"type": "PCS", "short_strike": 490.0, "rr_pct": 24.0,
+             "legs": [{"side": "SELL"}, {"side": "BUY"}]},
+            # cash-secured put: ONLY the normalized shape
+            {"type": "SHORT_PUT", "legs": [{"side": "SELL"}], "rr": 0.24,
+             "breakevens": [487.6]},
+        ],
+        scanned_symbols=2,
+        ts="2026-09-05T14:00:00",
+    )
+    assert len(snap.candidates) == 2
+    assert snap.scanned_symbols == 2
+    # neither row shape is coerced or dropped
+    assert snap.candidates[0]["short_strike"] == 490.0
+    assert "short_strike" not in snap.candidates[1]
+
+
+def test_income_scan_defaults_let_a_pre_upgrade_payload_validate():
+    """Redis persists cache views across restarts, so a payload written before a
+    field existed must still validate — every field carries a default."""
+    from shared.contracts.options import IncomeScan
+
+    snap = IncomeScan()
+    assert snap.candidates == []
+    assert snap.scanned_symbols == 0
+    assert snap.errors == [] and snap.warnings == []
+    assert snap.ts is None
+
+
+def test_income_scan_survives_the_json_round_trip():
+    """cache_set JSON-encodes the payload; the published view must come back the
+    same shape the page reads."""
+    from shared.contracts.options import IncomeScan
+
+    snap = IncomeScan(candidates=[{"type": "SHORT_PUT", "breakevens": (487.6,)}],
+                      scanned_symbols=1, warnings=["no chain for XYZ"])
+    back = IncomeScan.from_json(snap.to_json())
+    assert back.scanned_symbols == 1
+    assert back.warnings == ["no chain for XYZ"]
+    # JSON has no tuple type — a tuple inside a row normalizes to a list
+    assert back.candidates[0]["breakevens"] == [487.6]

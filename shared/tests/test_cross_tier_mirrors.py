@@ -74,6 +74,57 @@ def test_sentiment_svc_delegates_rather_than_copying():
     assert "\"mean_reversion\": \"Balanced\"" not in src
 
 
+# --- the covered-call identifier --------------------------------------------
+# ONE string, "COVERED_CALL", in three tiers that cannot import each other:
+#
+#   services/options_svc/compute.py  COVERED_CALL_TYPE       - the scan-row TYPE
+#   options-scanner/paper_engine.py  COVERED_CALL_STRATEGIES - the position
+#                                                              STRATEGY it settles
+#   webgui/pages/options/shares.py   COVERED_CALL_STRATEGIES - the position
+#                                                              STRATEGY it displays
+#
+# ⚠ Those are two DIFFERENT FIELDS, and until ``compute.open_income_position``
+# existed the mirror was not real: a scan row's ``type`` and a paper position's
+# ``strategy`` merely happened to spell the same word, with nothing carrying one
+# into the other. That function is the link — it stores ``strategy = row["type"]``
+# — so the three now genuinely have to agree, and this is the test that says so.
+# ``shares.py`` claimed to be "pinned by a test on both sides" for a while when
+# no such test existed; writing it was cheaper than deleting the claim.
+
+COVERED_CALL_WORD = "COVERED_CALL"
+
+
+def test_the_covered_call_identifier_is_one_word_in_three_tiers():
+    scan_type = _const("services/options_svc/compute.py", "COVERED_CALL_TYPE")
+    engine = _const("options-scanner/paper_engine.py", "COVERED_CALL_STRATEGIES")
+    page = _const("webgui/pages/options/shares.py", "COVERED_CALL_STRATEGIES")
+    assert scan_type == COVERED_CALL_WORD, (
+        "the scan-row type changed; the position strategy written by "
+        "open_income_position changes with it, so both engine and page must move")
+    assert tuple(engine) == (COVERED_CALL_WORD,)
+    assert tuple(page) == (COVERED_CALL_WORD,)
+    assert scan_type in engine and scan_type in page, (
+        "open_income_position stores the scan row's TYPE as the position's "
+        "STRATEGY, so a type the engine cannot recognise is a covered call that "
+        "is never called away and a lot that can never leave the book.")
+
+
+def test_the_openable_income_structures_are_the_two_single_leg_products():
+    """Non-vacuity for the pin above, and a guard on the page's own gate.
+
+    ``handoff.INCOME_OPENABLE_TYPES`` decides which rows GET an Open button and
+    ``compute.INCOME_OPEN_STRUCTURES`` decides which the service will accept. A
+    button on a row the service refuses is a dead control; a row the service
+    accepts with no button is a feature nobody can reach.
+    """
+    page = tuple(_const("webgui/pages/options/handoff.py", "INCOME_OPENABLE_TYPES"))
+    assert page == ("SHORT_PUT", COVERED_CALL_WORD)
+    # The service side names the covered call through COVERED_CALL_TYPE rather
+    # than a literal, so its tuple is not a literal AST node - read the source.
+    src = (ROOT / "services/options_svc/compute.py").read_text(encoding="utf-8")
+    assert 'INCOME_OPEN_STRUCTURES = ("SHORT_PUT", COVERED_CALL_TYPE)' in src
+
+
 # --- the manuals dual registration ------------------------------------------
 # A manual has to be registered in TWO places: docs/manuals/build_docs.py to be
 # BUILT, and webgui/pages/manuals.py to be SERVED (that dict is also the path

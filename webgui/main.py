@@ -351,10 +351,25 @@ def _serve_manual(name: str):
 OPTIONS_CHILDREN = [
     ("/options/scanner", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
+    # The 30-45 DTE income window sits in the FIND phase beside the other two
+    # scanners — it is the same find -> analyze -> track -> repair workflow at a
+    # longer horizon, which is why it is a tab here and not a new rail group
+    # (design doc 2026-09-05, "Menu placement").
+    ("/options/income", "Income", "savings"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
     ("/options/portfolio", "Paper Account", "account_balance_wallet"),
+    # Shares sits in the TRACK phase beside the two paper screens: put
+    # assignment turns an option position into stock, so the inventory is part
+    # of what the book holds, not a separate workflow (design doc 2026-09-05).
+    #
+    # ⚠ This makes NINE tabs in the Options strip — seven was the most it had
+    # carried before Income and Shares landed together — and wrapping at a
+    # narrow width is UNVERIFIED (nobody has opened a browser on it). The
+    # design's stated fallback if it wraps is to move THIS page under ACCOUNT
+    # beside /portfolio.
+    ("/options/shares", "Shares", "inventory_2"),
     ("/options/rescue", "Rescue", "healing"),
 ]
 
@@ -795,6 +810,13 @@ _TAB_COLOR = {
     "/options/portfolio": "#26a69a",      # Paper Account — teal
     "/options/calculator": "#ffa726",     # Calculator — amber
     "/options/swing": "#ec407a",          # Strategy Finder — pink
+    # Emerald: hue 147, the widest gap left in this map's hue circle (the next
+    # neighbours are Paper Ledger's 123 and Paper Account's 172). A route with no
+    # entry here silently inherits the Market Scanner's blue.
+    "/options/income": "#3dd983",         # Income Window — emerald
+    # Periwinkle: hue 249, the midpoint of the widest gap left in the Options
+    # strip's hue circle (Market Scanner's 207 and Captured Signals' 291).
+    "/options/shares": "#7c6ff0",         # Shares — periwinkle
     "/options/gamma": "#7e57c2",          # Dealer Positioning — deep purple
     "/options/simulator": "#29b6f6",      # Simulator — light blue
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
@@ -2105,6 +2127,13 @@ def options_portfolio_page() -> None:
         portfolio.render()
 
 
+@ui.page("/options/shares")
+def options_shares_page() -> None:
+    with _layout("/options/shares", "Options · Shares"):
+        from pages.options import shares
+        shares.render()
+
+
 @ui.page("/options/calculator")
 def options_calculator_page() -> None:
     with _layout("/options/calculator", "Calculator"):
@@ -2117,6 +2146,13 @@ def options_swing_page() -> None:
     with _layout("/options/swing", "Options · Strategy Finder"):
         from pages.options import swing
         swing.render()
+
+
+@ui.page("/options/income")
+def options_income_page() -> None:
+    with _layout("/options/income", "Options · Income"):
+        from pages.options import income
+        income.render()
 
 
 @ui.page("/options/gamma")

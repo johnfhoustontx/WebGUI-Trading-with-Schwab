@@ -288,6 +288,17 @@ def test_swing_failed_gates_become_tripped_flags():
     assert all(f["state"] == "tripped" for f in flags)
 
 
+def test_swing_naked_capital_efficiency_gate_becomes_a_readable_flag():
+    """evaluate_gates names a NAKED reward failure "capital efficiency", not
+    "R:R" (a naked short has no R:R). It must map to a real chip rather than
+    falling through to the generated "Fails ... quality gate" label."""
+    sig = {"type": "SHORT_PUT", "factor_scores": dict(_SWING_FS),
+           "grade_reason": "Fails: capital efficiency"}
+    flags = detail.flags_for(sig)
+    assert [f["key"] for f in flags] == ["gate_rr"]
+    assert flags[0]["label"] == "Reward too thin for the capital tied up"
+
+
 def test_swing_passing_gates_raise_no_flags():
     for reason in ("Passes all quality gates", "Excellent on all quality gates",
                    "Fillable but middling quality"):

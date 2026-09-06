@@ -861,6 +861,89 @@ parameters and press **Scan**:
 Results appear in the same signal table (with the same Score chip, Grade, and the
 three per-row action buttons) and detail panel as the Market Scanner.
 
+## Income
+
+**Route:** `/options/income`.
+
+A board of premium worth **selling** 30 to 45 days out, ranked across the whole
+watchlist. The scan runs once each morning on its own schedule — there is no
+Refresh — and the status line tells you how many symbols it covered, when it ran,
+and whether any of them failed.
+
+Three structures share the board:
+
+- **Put spread** — a put credit spread, for a symbol you do not expect to fall much.
+- **Call spread** — a call credit spread, for one you do not expect to rise much.
+- **Cash-secured put** — a single short put, for a symbol you would be content to own
+  at that strike.
+- **Covered call** — a call written against stock the paper account already holds
+  (see **Shares**), never struck below what the shares cost.
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · **Credit $** · **Capital $**
+· **Return on capital** · **Yield on cost** · **Total return if called** · PoP % ·
+Breakeven · **Earnings** · Score. Click any column to re-sort.
+
+**Yield on cost** and **Total return if called** apply to covered calls only, and the
+other three structures show a dash — they own no shares, so there is no cost to
+measure against. Yield on cost is the premium alone as a percentage of what the shares
+cost you. Total return if called adds the gain up to the strike, which is what you
+actually collect if the stock is called away — and it is the number that decides
+between a fat premium at a strike barely above your basis and a thin one well above
+it. (It reads almost the same as Return on capital on these rows, but not quite:
+Return on capital is after the commission, and it is the only one of the two the
+spreads and the cash-secured put have at all.)
+
+**Credit and Capital are both per contract, in dollars.** Capital is the cash the
+trade actually commits — for a spread that is its width less the credit; for a
+cash-secured put it is the strike all the way down to zero, which is far larger.
+**Return on capital** is the credit measured against that, and it is the only column
+that makes the two comparable: a $60 credit and a $640 credit say nothing until you
+know that one risks $441 and the other $39,361.
+
+**The Earnings column** reports what the earnings calendar knows about the symbol:
+
+- **None scheduled** — checked, and nothing is coming.
+- **After expiry** — a report is scheduled, but it lands after this expiration.
+  Anything reporting *before* expiration was already removed from the scan.
+- **Not checked** — the calendar has no entry for that symbol, so the check could not
+  run. This means *unknown*, not *clear*. Without an Alpha Vantage API key configured
+  it is what every row will say.
+
+An empty board is a normal outcome, not a fault — the status line says how many
+symbols were scanned so you can tell "nothing qualified today" from "the scan never
+ran".
+
+### Opening one in the paper account
+
+A **cash-secured put** and a **covered call** carry a wallet button at the end of
+their row. It opens that trade in the **paper account** — the book with cash and
+share lots behind it, which is the one an assignment can turn into stock. The two
+credit spreads do not have the button: their route is **Send to Paper trade** on
+the Market Scanner, which writes the paper *ledger*, a separate book that tracks
+marks rather than cash.
+
+Press it, confirm the number of contracts, and the account answers in a moment —
+either a confirmation, or a refusal saying exactly what stopped it. It will refuse
+when:
+
+- the account cannot secure the put (the message names the collateral needed and
+  the cash you have);
+- there is no share lot behind a covered call, or the lot was already called away
+  since this morning's scan;
+- a covered call would not cover the lot **whole** — 300 shares is three contracts,
+  not one, because the book delivers a lot in one piece (the message names the
+  number that works);
+- a covered call is already open on that symbol — the book records coverage per
+  symbol, so it cannot tell a second one apart from the first;
+- the price has moved more than 15% from what the board shows, which after a
+  morning scan is common enough to be worth checking rather than filling;
+- there is no live quote for the contract at all, or the account is halted for the
+  session.
+
+**You are filled at the live price, not the board's.** The board was scanned this
+morning; the number you see is what ranked the row, and the number you get is what
+the contract is worth when you press the button.
+
 ## Expected Move
 
 **Route:** `/options/expected-move`.
@@ -934,6 +1017,48 @@ The account view for the automated paper-trading engine.
 > 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
 > is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
 > autonomous driver's separate account re-prices every minute; this one does not.)
+
+## Shares
+
+**Route:** `/options/shares`.
+
+The **stock** the paper account holds. Options normally expire worthless or are closed;
+a **cash-secured put** that finishes below its strike does neither — it is exercised
+against you and becomes 100 shares per contract, bought at the strike. Every such lot
+appears here.
+
+**The columns:** Symbol · Shares · **Cost basis $/share** · **Cost $** ·
+**Mark (not tracked)** · Unrealized $ · **How acquired** · Held since ·
+**Covering call**. Click any column to re-sort.
+
+**How acquired** says where the lot came from. *Assigned* means a short put was
+exercised against you — which is how nearly every lot arrives — and *Bought* means it
+was entered by hand. The two are not interchangeable: an assigned lot's cost basis is
+the strike you sold, which may be well above what the shares were worth when they
+landed.
+
+**Mark and Unrealized are deliberately blank.** Nothing in this app re-prices a bare
+share, so there is no current value to report, and printing the cost basis in the Mark
+column would look like a live quote. To see what a holding is worth right now, look the
+symbol up on **Market Dashboard** or in your broker.
+
+**Covering call** shows the call already written against that symbol, as strike and
+expiry — for example `210c 10/16`, with `×2` if more than one contract. A blank cell
+means the shares are uncovered: all the upside is yours and no premium is being
+collected. A call *spread* on the same symbol is not a covering call and is not shown
+here. The match is by **symbol, not by lot** — the book keeps no record of which
+shares a call was written against — so if you hold two lots of one name and have
+written one call, that call appears on both rows.
+
+There is nothing to press. Lots appear when the engine settles an in-the-money short
+put, and disappear when a covered call written against them finishes **above** its
+strike — the shares are called away at that strike, and the cash comes back with the
+gain booked as realised P&L. (A call that finishes at or below its strike expires
+worthless: you keep the premium and the shares stay.) There is no way to sell a lot
+by hand; being called away is the only exit the book has.
+
+What lots are *for* is the **Income** tab, which screens covered calls against them
+and never offers a strike below their cost basis.
 
 ## Rescue
 

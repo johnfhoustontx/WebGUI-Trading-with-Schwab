@@ -66,7 +66,12 @@ def test_phase3c_pages_have_no_inline_style():
 
 # Standalone Tier-1 reader pages: Tailwind tokens + colored-cell slots binding
 # stamped `_*_class` fields (no `.style(`, no Vue `:style=`).
-OPTIONS_MATRIX_FILES = ["matrix.py", "flow.py"]
+# income.py is the same shape: a read-only board whose only dynamic colours are
+# the earnings state and the score zone, both stamped as fixed palette classes
+# and bound through a slot's ``:class``.
+# shares.py is the same shape again: a read-only table whose one dynamic colour
+# is the unrealized sign, stamped as a fixed palette class and bound via ``:class``.
+OPTIONS_MATRIX_FILES = ["matrix.py", "flow.py", "income.py", "shares.py"]
 
 
 def test_options_matrix_page_has_no_inline_style():

@@ -74,6 +74,10 @@ _BRANCH_HANDLERS = (
     "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",
     "run_action_alert", "run_eod_summary", "run_market_snapshot",
     "refresh_calibration",
+    # The income branch is due at the fixed 09:00 CT clock these tests pin
+    # (slot 08:45 + 20 min grace), and unstubbed it fans out ~23 LIVE chain
+    # fetches through the proxy on a background thread.
+    "publish_income",
 )
 
 

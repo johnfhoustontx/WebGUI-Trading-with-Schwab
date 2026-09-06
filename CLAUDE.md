@@ -325,6 +325,8 @@ Routes:
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
 | `/options/calculator` | Calculator — a three-step screen (① STRATEGY / ② SYMBOL / ③ LEGS) over six metric cards + the P&L matrix on real chain strikes, in its own `[calc]` palette. Multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — multi-strategy single-symbol scan (directional / spreads / neutral) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. [Detail](docs/webgui-routes.md) | built |
+| `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
+| `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
 | `/options/simulator` | Simulator — Replay / What-if / IV-shock over the shared multi-leg builder; persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
@@ -1277,10 +1279,12 @@ Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyz
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
 nightly **`calibration`** rebuild (16:30 CT, after `[windows.collection] stop`
 so the day's outcomes have settled — it reads `signals.db` only and costs no
-Schwab or Claude call). They
+Schwab or Claude call), and the once-daily **`income`** scan (08:45 CT — the
+30–45 DTE window, ~23 `/chains` calls against the ~690 the autoscan cadence would
+cost). They
 are named clock marks, the same thing `[windows]` already models, and **each
-`analyze` slot is a paid Claude call**, so the table is the direct control on
-that spend.
+`analyze` slot is a paid Claude call** while `income` is the largest scheduled
+Schwab spend on that table, so it is the direct control on both.
 
 **`shared/config_toml.py:toml_loader(path, defaults)` is the one loader.** It
 returns `(load, reset)` and encodes the contract every config file here follows:
@@ -1894,6 +1898,69 @@ against the OPEN POSITIONS, so the ceiling is real. ⚠ `driver_policy.open_risk
 drops a non-finite row rather than summing it: a NaN total makes every `>`
 comparison False and silently switches the cap OFF — the pins-the-bound class one
 layer up.
+
+## An equity lot is cash CONVERTED, never a buying-power reservation
+
+The manual paper book holds shares as well as options (`equity_lots` in
+`paper_account_db`, created by put assignment at expiry). **The rule that makes
+that safe is that a lot never touches `buying_power_reserved`, and nothing may
+make it.** `reconcile_buying_power` recomputes `buying_power_reserved` as
+`Σ OPEN paper_positions.max_loss_total` and hands the difference back to cash, so
+**anything that reserves outside that sum is silently zeroed at the next service
+start**. A lot is cash already spent on stock; the reservation the short put held
+is released by `_close` on the ordinary settlement path, and `debit_cash` then
+pays for the shares.
+
+That is the whole reason `equity_lots` is a separate table rather than a `kind`
+column on `paper_positions` — every one of that table's many readers stays
+correct without learning to filter, and any one of them forgetting would be a
+silent miscount. Three corollaries, each of which has a test because each is
+invisible when wrong:
+
+* **Do not add a second `release_buying_power` to `_assign_shares`.** `_close`
+  already returned it, and for a cash-secured put that reservation IS the strike
+  notional — a second release credits it twice and the resulting lot looks
+  identical. The one assertion that catches it is
+  `reconcile_buying_power(db) == 0.0`.
+* **Do not book the purchase through `realize_pnl`.** It would report the
+  purchase price as a realized loss and, at a whole strike notional, trip the
+  session drawdown halt on a trade that lost nothing. Hence `debit_cash`, which
+  touches neither reserved BP nor realized P&L.
+* **`session_start_equity` includes `Σ(open lots: shares × cost_basis)`** — at
+  cost only, since a lot's basis is committed capital by the same definition that
+  puts `buying_power_reserved` there, while its mark is unrealized and stays out.
+  `reset_account` therefore clears `equity_lots` too, or the next session opens
+  claiming committed capital the account no longer has.
+
+## The NAKED reward gate is a RATE (per year), not a per-trade return
+
+`strategy_scoring._reward_metric`'s NAKED branch returns
+`(max_profit / capital) × (365 / max(dte, MIN_ANNUALISE_DTE))` — **annualised
+capital efficiency**, so `GATE_BARS["NAKED"]`'s `capeff` 0.10 / 0.20 mean 10% and
+20% **per year**. It was a per-trade return until 2026-09-05, which demanded the
+same 10% of a 1-day trade as of a 45-day one and so cut **every** `SHORT_PUT` /
+`SHORT_CALL` the scanner has ever emitted (a 35-DTE cash-secured put returns
+~1.70%/trade ≈ 17.8%/yr). Two invariants:
+
+* **`MIN_ANNUALISE_DTE = 5` floors the DIVISOR**, capping the short-end
+  amplification annualising introduces (unfloored, a 1-DTE short is rescaled
+  365×). It is the horizon lever; the bars are the capital lever, and the ~4.4×
+  SHORT_CALL/SHORT_PUT gap is a **capital basis** difference (margin proxy vs
+  stock-to-zero), not a horizon one — so raising a bar to discourage short-dated
+  shorts cuts on the wrong axis.
+* **`dte <= 0` returns `None`, and `MIN_ANNUALISE_DTE` must never reach that
+  guard.** The floor is for a horizon that exists; the guard asks whether one
+  exists at all. `strategy_scanner._dte_for` returns `max(0, …)` **and** folds an
+  unparseable expiration into the same bucket, so a data fault and a same-day
+  contract are indistinguishable there. **Accepted consequence: the NAKED reward
+  gate is unreachable for 0-DTE** — every same-day naked short fails it, however
+  rich the credit. Admitting them needs its own per-horizon bar, not a yearly
+  rate over a horizon of zero.
+
+Every figure in that block is re-runnable: `python tools/sweep_naked_capeff.py`
+(`--rows` / `--floors`) is pure Black-Scholes through the same scorers, no Schwab
+call and no DB. **Quote its numbers with their parameters** — they move with the
+strike ladder, and this block has shipped stale ones twice.
 
 ## The halt latch, and what a replayed command may re-do
 

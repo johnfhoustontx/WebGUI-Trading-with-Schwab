@@ -4,6 +4,411 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-05 (**Phase B stops being dead machinery: the wheel now
+turns end to end.** A whole-branch review found the two gaps that made the share
+inventory unreachable outside a test fixture — nothing opened a cash-secured put
+into the paper ACCOUNT, and `close_equity_lot` had no production caller. Both are
+wired. ⚠ **Still not verified running in dev.**)
+
+- **C1 — nothing opened a cash-secured put into the account, so the entire
+  downstream chain was reachable only from hand-built fixtures.**
+  `run_entry_cycle` sizes every candidate off `sig["width"]`, which a single-leg
+  short has none of, so it died in that function's broad `except`;
+  `publish_income` calls no recorder, so income candidates never became captured
+  signals; and `paper_create` writes the *ledger*, not the account. The result
+  was that `is_cash_secured_put`, `_assign_shares`, `equity_lots`,
+  `/options/shares` and the covered-call half of the Income board all existed and
+  none of them could be reached. `compute.open_income_position` +
+  `handlers.run_income_open` (`income_open` on `cmd:options`) are the missing
+  path, driven by a per-row wallet button on the Income board.
+- **C2 — once a lot existed it could never leave, and the moment C1 landed that
+  became a money bug:** cash permanently debited, `equity_at_cost` permanently
+  inflating `session_start_equity`, and three documents already promising a
+  disposal that did not exist. `paper_engine.is_called_away` /
+  `_call_away_shares` are the mirror of assignment, in the same settlement
+  branch. **The disposal shipped WITH the open path, not after it.**
+- **⚠ The cash moves in TWO pieces on disposal and only their sum is
+  `strike × shares`.** `credit_cash(cost_basis × shares)` — a new mirror of
+  `debit_cash`, and the same argument for existing — returns the conversion, and
+  `realize_pnl` carries the gain, because `realize_pnl` moves cash as well as
+  booking P&L. Crediting the full `strike × shares` and *then* booking the lot's
+  P&L credits the gain twice, and the lot, the exit price and the share count all
+  still read correctly: only the balance is wrong. That is the disposal-side
+  mirror of the double *release* the assignment path is guarded against, and the
+  assertion that catches either is
+  `cash + reserved + equity_at_cost == start + realized_pnl`. Traced by hand on
+  the full loop and pinned by `test_the_full_wheel_turns`.
+- **A covered call reserves NOTHING and stores `max_loss_total = 0.0`.** The
+  shares are the collateral and `equity_at_cost` already counts them; reserving
+  would double-count, and `reconcile_buying_power` would hand it straight back at
+  the next service start, so the double-count would also be unstable. Storing 0
+  is what keeps `_close`'s unconditional `release_buying_power` a **no-op** on it
+  — pinned from a book holding real collateral on another position, so a release
+  of the wrong amount cannot hide behind a zero total.
+- **Called away is STRICTLY above the strike**, the mirror of assignment's strict
+  `<`. A call settling exactly at its strike is worth nothing and is abandoned;
+  `>=` would deliver stock for a contract that expired worthless.
+  Mutation-verified along with the cash arithmetic — eight mutations
+  (double-credit, dropped credit, dropped P&L booking, `>`→`>=`, `>`→`<`, the
+  commission branch, the strategy gate, the lot lookup) each killed by the test
+  written for it.
+- **`_position_legs` needed an `is_covered_call` branch and it is not cosmetic.**
+  The fallback below it reads a call-side strike as an iron condor, and a covered
+  call stores its strike in exactly that field — so without the branch a one-leg
+  position is charged **four** legs, on both the open and the settlement.
+- **⚠ A covered call must cover a lot WHOLE.** `close_equity_lot` disposes of a
+  lot whole (multi-lot cost-basis accounting is deliberately not built), so a
+  partial call could never be delivered against it. The open path refuses and
+  **names the contract count that would work**; the settlement path resolves the
+  lot by symbol + exact share match, and with no match settles the option, leaves
+  the lot alone and logs a WARNING rather than guessing.
+- **Five refusals, each carrying a machine `reason` AND a whole sentence.** A
+  code alone reaches the user as `insufficient_cash`; a sentence alone cannot be
+  asserted on without matching prose. Every outcome — refusals included — is
+  published to `cache:options:income_open` and toasted by the page, because a
+  refusal that stayed in the log is a button that appears to do nothing. A
+  refusal renders as a **warning, not an error**: "the account has $8,000 and
+  this needs $10,000" is the system working, and painting a rule red trains the
+  reader to read a rule as a fault.
+- **The open is priced LIVE, and the board's price is only a sanity check.** The
+  board is scanned once each morning, so a drift past 15% (deliberately
+  `paper_adjust.apply_adjustment`'s fraction — the Rescue board's Execute already
+  refuses on exactly this rule) refuses and names both numbers. ⚠
+  `income_price_drift` **rounds to 6 places**: unrounded, `abs(1.70-2.00)/2.00`
+  is 0.15000000000000002 while `abs(2.30-2.00)/2.00` is 0.1499999999999999, so a
+  15% *fall* was refused and a 15% *rise* allowed, from nothing but binary
+  representation. Caught by parametrising both signs.
+- **`income_open` takes `_is_stale_open`**, the trade-opening replay gate, for
+  the reason it exists: consumer groups are created at id `0`, and this command
+  reserves collateral and writes a position. Only a *successful* open republishes
+  the account view — a refusal changed nothing.
+- **The covered-call identifier is now a REAL mirror rather than a claimed one.**
+  `shares.py` said it was "pinned by a test on both sides" and no such test
+  existed — and the two constants were different FIELDS (a scan-row `type`
+  against a paper-position `strategy`). They only genuinely have to agree because
+  `open_income_position` stores the row's type as the position's strategy;
+  `shared/tests/test_cross_tier_mirrors.py` now pins all three tiers, plus the
+  page gate against `INCOME_OPEN_STRUCTURES` (a button on a row the service
+  refuses is a dead control; a structure it accepts with no button is a feature
+  nobody can reach). Writing the test was cheaper than deleting the claim.
+- **Three more stale comments the same review found**, corrected in place:
+  `main.py` said "TEN tabs — nine was already the most" where `OPTIONS_CHILDREN`
+  has **nine** and had **seven**; `IncomeScan.scanned_symbols` said "actually
+  covered" against its producer's own "ATTEMPTED, not succeeded"; and
+  `income.return_on_capital` reversed its own correct premise, claiming
+  `capital > 0` rejects a NaN when `nan <= 0` is False.
+- **Manuals in the same commit** (they rot silently): the User Guide's Income
+  section gains the open action and its refusals, its Shares section stops
+  promising a hand-sale that does not exist, `page_help.py` gains both, and
+  `docs/webgui-routes.md` documents the command, the collateral rule, the
+  two-piece cash move and the whole-lot constraint.
+- **Suites:** webgui **3081 green** (was 3072, +9); options_svc **1487 green**
+  (was 1450, +37); shared **313 green** across its three sub-suites (bus 34 ·
+  contracts 53 · tests 226, +2); options-scanner `test_assignment.py` + the new
+  `test_called_away.py` **19 green** (+12). No failures and no skips in any of
+  them. ⚠ The shared total is **313, not the 277** carried into this session as
+  a baseline — the delta from HEAD is provably +2 (both in
+  `test_cross_tier_mirrors.py`), so 277 was already stale before this work.
+  Compare the failing SET, as ever; the count was the thing that misled.
+
+**Prior —** 2026-09-05 (**A two-sided 30–45 DTE `INCOME` window, and the
+paper account learns to hold shares.** Two new Options tabs — `/options/income`
+and `/options/shares` — a third scan horizon on its own once-daily slot, put
+assignment into an `equity_lots` table, and covered calls struck at or above
+cost basis. ⚠ **Nothing below has been verified running in dev.**)
+
+- **⚠ Read this first: every suite is green and NOTHING here has run against
+  Redis, the proxy, or a browser.** No page has been opened, no scan has fired,
+  no put has been assigned outside a test. The DEVELOPMENT RULE is explicit that
+  "tests pass" is not "verified in dev" for anything with a runtime surface, and
+  this branch is almost entirely runtime surface: a scheduler slot, ~23 live
+  chain fetches, a new SQLite table, two NiceGUI pages and a ten-tab nav strip.
+  Treat the whole entry as *built and unit-tested*, not as *working*.
+- **⚠ The operator prerequisite, so it is not later chased as a bug.** The
+  earnings gate does nothing real until an Alpha Vantage key exists at
+  `shared/alphavantage_key.txt` (or `ALPHAVANTAGE_API_KEY`) **and** the nightly
+  refresh has populated `EARNINGS_CALENDAR_DB`. Until both are true,
+  `shared.earnings.coverage()` returns `not_listed` for **every** symbol, every
+  row on the board reads **"Not checked"**, and no expiration is dropped for a
+  report. That is the three-state vocabulary working exactly as designed —
+  *unknown*, never *clear* — and it is deliberately not a fail-closed, because
+  failing closed would empty the whole scan on a checkout with no key and make
+  the feature look broken rather than uninformed.
+
+**Phase A — the `INCOME` window.**
+
+- **What it is:** a third scan horizon beside 0-DTE and swing, at **30–45 DTE**,
+  screening put credit spreads, call credit spreads and cash-secured puts across
+  the autoscan's own watchlist, published as one jointly-ranked board on
+  `cache:options:income`. `compute.income_scan` is a thin wrapper over
+  `swing_scan` — new `trade_type` / `structures` / `earnings_date` /
+  `return_chain` parameters — not a second pipeline, because duplicating it is
+  how `clamp` came to have nine copies.
+- **Two-sided by construction, and the second side is free.** `screen_spreads`
+  already loops BOTH expiry maps out of the same chain object, so the CCS side
+  costs no extra Schwab call. A long-only "wheel" would have been the one
+  asymmetric screen in a stack where every other gate — the momentum veto, the
+  regime filter, the wall check, directional mode — is two-sided.
+- **One pass a day, and that is the whole cost argument.** `[slots.income]` in
+  `config/sessions.toml` (08:45 CT, 20-minute grace) with
+  `scheduler.income_slot_due` mirroring `analyze_slot_due`. A 35-DTE candidate
+  does not meaningfully re-rank inside fifteen minutes, so running it at autoscan
+  cadence would change nothing in the ranking and cost **~690 extra `/chains`
+  calls a day against ~23** — against the audited ~68–76k/day, ~0.03%.
+  `income_scan` is also added to `_REPLAY_GUARDED`, for the third reason that
+  list exists: it mutates nothing and bills no vendor, but a backlog replay would
+  re-spend those ~23 fetches once per queued command.
+- **The delta band is 0.15–0.25 and NOT `directional_delta_range()`.** Those
+  bands (PCS −0.55…−0.30) sit entirely above the PREMIUM-mode ceiling
+  `MAX_ENTRY_SHORT_DELTA` (0.27), and the `continue` that drops them increments
+  no reject counter — so the window would have returned zero spreads forever
+  while every stubbed test passed. 0.15–0.25 brackets the ~0.20 income
+  convention with clearance on both sides.
+- **The credit floor and the quality cut are reused, deliberately.**
+  `min_credit_pct()["SWING"]` (0.12) is **dominated** here — the binding
+  constraint is the delta-aware edge floor `credit/width >= |delta| + 0.02`,
+  which demands 17–27% at these strikes — so an `income` knob would be a second
+  constant that changes nothing until `EDGE_MARGIN` moves. Same for
+  `SWING_MIN_SCORE`: the bar is a statement about a horizon-agnostic composite.
+- **The earnings gate was SWING-only, and 30–45 DTE is where it matters most.**
+  At 5–15 DTE a straddled report is occasional; at 30–45 days it is close to
+  certain, since most names report inside any 35-day window. `screen_spreads`
+  now gates on the exported `EARNINGS_GATED_TRADE_TYPES = ("SWING", "INCOME")`,
+  shared with `options_svc.compute`'s post-build filter over the builder families
+  that `screen_spreads` never sees — a tuple rather than two conditions, because
+  the two must agree and could otherwise drift. 0-DTE stays exempt on a
+  **hold-duration** argument (it is flat by the close), not because
+  `check_earnings_conflict` would clear it — its window is `[today − 5d,
+  expiration]`, so a report earlier in the week falls inside it.
+- **`shared/earnings.py` is the calendar's READ path, hoisted.** `lookup`,
+  `coverage`, `days_to_earnings` and the store helpers moved out of
+  `services/trade_svc/earnings_calendar.py` and are **re-exported** there, so
+  every existing caller is unaffected and there is still exactly one
+  implementation. The vendor key, the HTTP call and the CSV parser stayed
+  behind: they belong to that service alone. `options_svc` may not import
+  `trade_svc`, but reading a shared store is not a cross-service import —
+  `shared/market_calendar.py` and `shared/symbols.py` are the precedent. The
+  gate costs **zero API**: one bulk Alpha Vantage call a night, and a local
+  SQLite read per symbol.
+- **`LIQUIDITY_THRESHOLDS["INCOME"]`, and the fail-open that made it necessary.**
+  `passes_liquidity_gate` falls open on a trade type the dict does not carry
+  ("unknown trade type — don't filter"), silently — so the income window would
+  have run with **no OI floor, no volume floor and no spread cap at all**. The
+  default is correct and stays (other callers legitimately pass uncovered
+  types); the guard is the new `SCANNED_TRADE_TYPES` tuple and a test over it.
+  The thresholds are deliberately **not** a copy of SWING's, and move in opposite
+  directions on two axes: `min_oi` **100** (above swing's 50 — open interest is a
+  stock, not a flow, and a monthly strike has had weeks to accumulate resting
+  size, so 50 there is a far weaker signal of tradeability), `min_volume` **5**
+  (below swing's 10 — the same strike trades less per day the further out it is,
+  as interest spreads across more listed expirations), `max_spread_pct` **0.20**
+  (between 0-DTE's 0.15 and swing's 0.25 — the gate is a ratio and the mark is
+  much larger at 35 DTE, so the same cents-wide market reads as a smaller
+  percentage).
+- **⚠ A live defect fixed on the way past: the NAKED gate had ALWAYS discarded
+  every `SHORT_PUT`/`SHORT_CALL` the scanner emitted.** `build_directional`
+  produces them on every scan, and `_reward_metric`'s NAKED branch compared a
+  **per-trade** capital efficiency against a 10% bar — demanding the same 10% of
+  a 1-day trade as of a 45-day one. An ordinary 35-DTE cash-secured put returns
+  ~1.70% per trade (≈17.8%/yr), so it graded Weak and was cut, every time,
+  invisibly. The metric is now **annualised**:
+  `(max_profit / capital) × (365 / max(dte, MIN_ANNUALISE_DTE))`, so the bar
+  means a rate. The 0.10/0.20 bars are unchanged, and that is measured rather
+  than lazy — `tools/sweep_naked_capeff.py` (pure Black-Scholes through the same
+  scorers, no Schwab call and no DB) prints every figure: annualised capeff runs
+  0.55–2.03 for SHORT_CALL and 0.14–0.40 for SHORT_PUT, a ~4.4× gap that is the
+  **capital basis** (a short call is capitalised at the 20%-of-spot margin proxy,
+  a short put at its true stock-to-zero max loss) and not the horizon. So raising
+  the bar to discourage short-dated shorts would cut on the wrong axis.
+- **`MIN_ANNUALISE_DTE = 5` is the horizon lever, and it too was swept
+  (`--floors`).** Unfloored, annualising rescales a 1-DTE short **365×**, so
+  ~0.2% per trade reads as ~73%/yr and clears a 10%/yr bar on nothing. 5 is the
+  **largest** value that rescales only horizons the 0-DTE window owns (0-DTE
+  scans 0–4 DTE, SWING opens at 5), and it makes that window horizon-neutral —
+  dte 1, 2, 3 and 4 all divide by 5, so within it capeff ranks on per-trade
+  return alone, which is the honest reading at horizons too short to annualise.
+  It cuts nothing the old bar admitted.
+- **⚠ Two prose corrections inside that block, recorded because it shipped stale
+  numbers twice.** The first sweep existed only in a session transcript
+  (0.59–3.78 / ~4.7×) and was committed as a re-runnable script; the ceilings
+  then fell again (3.78 → 2.03) once `MIN_ANNUALISE_DTE` divided the 1-DTE rows
+  by 5. Everything at 5 DTE and beyond is untouched, and the argument never
+  changed — the numbers were correctable only because the sweep is a script. A
+  third claim was **deleted** rather than corrected: "the short end is already
+  braked by `q_breakeven_vs_em`" was derived from a single synthetic grid point,
+  and the repo's own `fake_client` fixture emits 1-DTE naked shorts at 52.1 and
+  53.2 through the production cut. The short end was not braked.
+- **`dte <= 0` returns `None`, which excludes the whole 0-DTE naked-short class**
+  — an accepted consequence, stated rather than discovered later. `_dte_for`
+  returns `max(0, …)` and folds an unparseable expiration into the same bucket,
+  so a data fault and a same-day contract are indistinguishable there; a yearly
+  rate over a horizon of zero is not a judgement. `MIN_ANNUALISE_DTE` floors the
+  **divisor** for a horizon that exists and must never be made to reach this
+  guard. Admitting 0-DTE naked shorts needs its own per-horizon bar.
+- **`evaluate_gates` now says "capital efficiency" for the NAKED profile**, where
+  it used to report "R:R" about a ratio that profile does not have (its loss is
+  unbounded, so it is undefined). Display only — `reward_key` still decides the
+  compare — and `detail.py`'s `_GATE_FLAGS` carries the matching chip.
+- **`IncomeScan` (`shared/contracts/options.py`) validates the ENVELOPE, not the
+  rows**, the same judgement `ScanResult` makes: the board is genuinely
+  heterogeneous, since an adapted spread carries **both** the flat
+  `short_strike`/`credit`/`rr_pct` contract and the normalized `legs` one while a
+  natively-built `SHORT_PUT` carries only the latter. **The chain is deliberately
+  absent** — publishing it beside the candidates would repeat the
+  `cache:options:calc_chain` incident (8.77 MB, 53% of all prod Redis string
+  bytes), and worse, since a 30–45 DTE chain is wider than the 0-DTE one that
+  caused it.
+- **`handlers.publish_income` merges every symbol into ONE ranked list**, fanned
+  out through `parallel_map` at 6 workers. One symbol's failure lands in
+  `errors` (so the page can say which) **and** in `_degrade` (so `/health`
+  counts the case where an outage took all 23) — an error list alone would leave
+  a whole-watchlist failure looking like a quiet tape. `scanned_symbols` is what
+  was **attempted**, so 1 after 22 failures cannot read as a thin market.
+  `_income_rank` sends an absent or NaN score to `-inf`: a non-reading must never
+  sort to the top of a board a human picks a trade from.
+
+**Phase B — share inventory.**
+
+- **`equity_lots` is a new table, and it never holds reserved buying power.**
+  That is the load-bearing decision and the reason it is not a `kind` column on
+  `paper_positions`: `reconcile_buying_power` recomputes
+  `buying_power_reserved` as `Σ OPEN paper_positions.max_loss_total` and corrects
+  the drift against cash, so anything reserving outside that sum is **silently
+  zeroed** at the next service start. A lot is cash already **converted into
+  shares**. `reconcile_buying_power` needed no change at all, and every one of
+  `paper_positions`' many readers stays correct without learning to filter.
+- **`debit_cash` exists because the two functions either side of it are both
+  wrong for a purchase.** Reserving would be undone by the reconcile above;
+  booking it through `realize_pnl` would report the purchase price as a realized
+  loss and, at a whole strike notional, trip the session drawdown halt on a trade
+  that lost nothing.
+- **Assignment is three moves the account already knew how to make.** The short
+  put closes `EXPIRED` with `exit_reason='ASSIGNED'` and keeps its full credit
+  (`intrinsic_value` returns 0 outside PCS/CCS/IC, and the loss is not lost — it
+  lives in the share basis); `_close` already returns the reservation, which for
+  a cash-secured put **is** the strike notional; then cash is debited
+  `strike × 100 × qty` and a lot is inserted at `cost_basis = strike`. ⚠ Adding a
+  second `release_buying_power` to "complete" the sequence credits the notional
+  twice and silently inflates the account, and the resulting lot looks identical
+  — the one assertion that catches it is `reconcile_buying_power(db) == 0.0`.
+- **`is_cash_secured_put` tests BOTH structure and strategy**, because each is
+  ambiguous alone: `short_strike`/`long_strike` hold the CALL strikes for a CCS,
+  so "one strike, no long leg, no call side" equally describes a naked short
+  *call*, which assigns stock short. Two spellings for the one structure already
+  existed (`SHORT_PUT` on the scan side, `NAKED_PUT` on the Calculator/rescue
+  side) and both assign. A spread that finishes in the money settles its legs
+  against each other and produces no shares.
+- **Settlement is strictly below the strike** — matching `max(strike − spot, 0)`.
+  A put settling exactly at its strike is worth nothing and is abandoned.
+- **There is deliberately no second detection path.** The settlement branch
+  already defers a cycle when no quote is available, so an assignment can appear
+  a cycle late — better than two mechanisms that can disagree.
+- **Shares count toward session-start equity, at cost.** `roll_session_if_needed`
+  computes `cash + buying_power_reserved`, excluding open unrealized; a lot's
+  cost basis is committed capital by exactly that definition, while its mark is
+  unrealized and stays out. ⚠ **Measured, and the design doc's first draft was
+  corrected in place for it:** `session_start_equity` is written in three places
+  and **read nowhere** in `services/`, `webgui/` or `options-scanner/`. The live
+  guard is `should_halt` against the absolute-dollar
+  `config_paper.MAX_SESSION_DRAWDOWN`, which never consults it. So this is about
+  storing the right number for its first reader — not a loose safety guard, and
+  it must not be cited as one.
+- **`reset_account` clears the lots too.** A lot surviving a reset reports shares
+  against a wiped balance, and `equity_at_cost` would keep counting it into the
+  next session's opening equity.
+- **A cash-secured put is ONE leg for commission, not two.** `_position_legs`
+  defers to `is_cash_secured_put` rather than restating the test, so the one
+  single-leg structure in this book is recognised by one definition — the same
+  one the assignment path uses.
+- **Covered calls are struck at or above basis, and the builder refuses
+  otherwise** — not a warning, not a score penalty. Called away, such a call
+  books a guaranteed loss on the shares that the premium rarely covers. The floor
+  is applied to the ladder **before** the delta pick, so an underwater lot gets
+  the nearest usable strike above basis rather than the conventional 0.20-delta
+  strike below it. One candidate per expiry, not per strike: the horizon is the
+  reader's choice, the strike is pinned by the convention, and a ladder would
+  swamp a board picked by hand.
+- **They cost 0–10 extra chain calls, and that is the design's whole trick.**
+  `income_scan(return_chain=True)` hands back the chain for a **held** symbol the
+  watchlist was scanning anyway — zero extra calls, requested per symbol so the
+  pass retains a handful rather than all 23. Only a held symbol *outside* the
+  watchlist is fetched, and then through `income_chain` (chain + quote, two
+  calls) rather than a full scan, which would cost more **and** silently widen
+  the board past the watchlist it documents itself as mirroring. The earnings map
+  over the held names costs nothing: local SQLite.
+- **A covered call carries NO `composite_score`, deliberately.** The Fit+Quality
+  scale is calibrated on defined-risk option structures against an inferred
+  market view, and a covered call's economics are dominated by a stock position
+  that scorer never sees. Inventing a number so the row sorts higher would be
+  fabricating a reading, so it sorts to the **foot** of the board and is ranked
+  on `yield_on_cost` / `total_return_if_called` instead — the two numbers that
+  actually decide a covered call, and which this repo computed nowhere before.
+  Its dollars are **per contract** like every other row, with `quantity`
+  separate: scaling by lot size would put a 3× row beside 1× rows and make the
+  board incomparable.
+
+**The two pages, and where they are weak.**
+
+- **`/options/income`** — read-only, Tier-1 reader of `cache:options:income`.
+  Every cell reads a field **both** row shapes carry (`legs` / `net_credit` /
+  `capital` / `max_profit` / `breakevens`); reaching for `short_strike` would
+  render the spreads and silently blank the single. Dollars are per **contract**
+  everywhere (`net_credit`, 60.00) and never the per-share `credit` (0.60) — a
+  $0.60 row beside a $640 row is exactly what that field invites. **Return on
+  capital** is the column that makes the board comparable at all. The status line
+  has three states, not two: a pass that ran and found nothing says so by naming
+  what it scanned, because wording it like a cold feed would report a quiet
+  market as an outage.
+- **`/options/shares`** — a second READER of `cache:options:paper_account`, not a
+  second book. The lots ride the account view rather than a new key, so one
+  database has one publish cadence and a lot cannot exist on one screen and not
+  the other.
+- **⚠ There is no live equity mark, and the page says so in the column header.**
+  Nothing in this app re-prices a bare share, so **Mark (not tracked)** and
+  **Unrealized** render an em-dash on every row. Printing the cost basis under a
+  Mark header, or a 0.00 unrealized, would fabricate exactly the reading the page
+  is opened for. The builders do read a `mark` off a lot if one is ever attached
+  upstream, so filling those columns later is a service change with no page edit.
+- **⚠ Coverage is per SYMBOL, not per lot.** The paper book stores no link from a
+  covered call back to the lot it was written against, so one open call shows
+  against **every** lot of that symbol. Showing it on all of them is the honest
+  rendering of what is stored — hiding it on all but one would imply those shares
+  are uncovered. A call **credit spread** on the same symbol is deliberately not
+  matched: reporting it as covering would say the shares are protected when they
+  are not.
+- **⚠ The Options tab strip is now TEN tabs**, and nine was already the most it
+  has carried. Whether it wraps at a narrow width is **unverified** — nobody has
+  opened a browser on it, and no test can tell you. The design's stated fallback
+  is to move **Shares** under ACCOUNT beside `/portfolio`, it being the more
+  separable of the two.
+
+**Deliberately not built:** LEAPS (shares no machinery with either half — own
+design, later) · naked calls as a "short wheel" (`driver_policy`'s structure
+allowlist refuses undefined risk on principle; the bearish expression at this
+horizon is the CCS the window already screens) · autonomous trading of these
+signals (`config/driver.toml` is unchanged and `INCOME` is not in the driver's
+allowlist — this is a screen a human acts on) · multi-lot cost-basis accounting
+(FIFO / LIFO / specific-ID; one lot per assignment, closed whole).
+
+**Calibration needs no change** — `shared.calibration.family_key` passes an
+unrecognised family through **upper-cased rather than guessed**, so `INCOME`
+buckets appear on their own as outcomes accrue. `_FAMILY_ALIASES` exists only to
+reconcile `scanner_type` `'0DTE'` with `trade_type` `'0-DTE'`, and `INCOME` has
+no hyphenated variant. ⚠ The one thing to hold to: the recorder must write
+`INCOME` as the `scanner_type` too — two spellings would silently produce two
+buckets, the exact failure the alias table was added to fix.
+
+- **Suites:** `webgui` **3072 passed**, `options_svc` **1450 passed**,
+  `shared/contracts` **53 passed**, `shared/tests` **224 passed**, all clean.
+  `options-scanner` is green (0 failed, 2 skipped) but its count is deliberately
+  not quoted: another session held uncommitted work in that folder while this was
+  measured, so the number is not attributable. Commits `7fe0d70`…`9e2b7a5` on
+  `claude/grok-bot-options-desk-9786fc`.
+  [design](plans/2026-09-05-income-window-and-share-inventory-design.md) ·
+  [plan](plans/2026-09-05-income-window-and-share-inventory-plan.md)
+
+---
+
 **Last updated:** 2026-09-05 (**The Desk's Bull / Bear sector strip is re-keyed
 to TODAY.** The chip's fill colour and the strip's left-to-right order now follow
 the session's move; the nightly quarter-horizon quadrant survives as a thin left

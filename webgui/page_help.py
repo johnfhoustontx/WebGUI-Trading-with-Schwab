@@ -173,6 +173,44 @@ family for it — directional, spreads, and neutral.
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
 """,
+    "/options/income": """
+**Income Window — the simple version**
+
+Premium to **sell** 30 to 45 days out, across the whole watchlist, scanned once
+each morning. Three kinds of trade sit on one ranked board:
+
+- **Put spread** — you think it won't fall much. Risk is capped at the spread width.
+- **Call spread** — you think it won't rise much. Also capped.
+- **Cash-secured put** — you'd be happy to *own* the shares at that strike. Risk is
+  capped too, but the cap is the whole stock down to zero, so it ties up far more cash.
+- **Covered call** — a call sold against shares you already hold (see **Shares**),
+  never below what those shares cost you.
+- **Yield on cost** and **Total return if called** are the two numbers that decide a
+  covered call, and they show a dash on everything else — a spread owns no shares, so
+  there is nothing to measure a return against. Yield on cost is the premium alone
+  against what the stock cost; total return if called adds the gain up to the strike,
+  which is what you keep if the shares are called away. A fat premium at a strike
+  barely above your basis and a thin one well above it look opposite depending on
+  which you read, so read both.
+- **Capital $** is the cash actually committed, and **Return on capital** is the
+  credit measured against it — that is the only way a $60 spread and a $640
+  cash-secured put can be compared on one screen. Dollars alone cannot.
+- **Earnings** says what the calendar knows: *None scheduled* means it was checked
+  and found nothing, *After expiry* means a report is coming but lands past this
+  expiration, and **Not checked** means the calendar has no entry for that symbol —
+  unknown, not clear. Without an Alpha Vantage key that is every row.
+- **The wallet button** on a cash-secured put or a covered call opens that trade in
+  the **paper account** — the book with cash and share lots, so a put assigned there
+  really does become stock on the **Shares** tab. The two spreads have no button:
+  their route is *Send to Paper trade* on the Market Scanner, which writes the paper
+  *ledger* instead. You are filled at the **live** price, not the morning board's,
+  and the account answers in a moment with either a confirmation or a refusal that
+  says what stopped it — not enough cash, no lot behind the call, a lot already
+  covered, a call that would not cover the lot whole, or a price that has moved more
+  than 15% since the scan.
+- Nothing here is traded automatically. The board is a shortlist; the button is
+  yours to press.
+""",
     "/options/calculator": """
 **Calculator — the simple version**
 
@@ -403,6 +441,39 @@ Trades you sent by hand live on **Paper Ledger**.
   each hour, 09:00–14:00 CT** (there is no 15:00 run) — so a target hit at 09:15 is
   acted on at 10:00 unless you press **Run manage cycle** yourself.
 - **Reset** sets a new starting balance.
+""",
+    "/options/shares": """
+**Shares — the simple version**
+
+The **stock** the paper account owns. Options usually expire; a **cash-secured put**
+that finishes below its strike does not — it turns into 100 shares per contract, at
+the strike. Those shares land here.
+
+- **How acquired** — *Assigned* means a short put was exercised against you, which
+  is how nearly every lot appears. *Bought* means it was entered by hand. It matters:
+  an assigned lot's cost basis is the strike you sold, not what the stock was worth.
+- **Cost basis $/share** and **Cost $** — what you paid per share, and the cash that
+  bought the whole lot.
+- **Mark** and **Unrealized** are **blank on purpose.** Nothing here re-prices a bare
+  share, so there is no current value to show — and a number nothing measured is
+  worse than an empty cell. To see what a holding is worth right now, look it up on
+  **Market Dashboard** or in your broker.
+- **Covering call** — the call already written against that symbol, if there is one.
+  Blank means the shares are uncovered: you keep all the upside, and you are
+  collecting no premium. A call **spread** on the same symbol is *not* a covering
+  call and is deliberately not shown here. ⚠ The call is matched by **symbol, not
+  by lot** — the book records no link from a call back to the shares it was
+  written against — so with two lots of one name and one call written, the same
+  call shows on both rows and the screen cannot tell you which hundred shares are
+  covered.
+- Shares owned are what make a **covered call** possible. The **Income** tab screens
+  calls against these lots, never below their cost basis.
+- Nothing on this page is an action. A lot appears when the engine settles an
+  in-the-money short put, and leaves when a covered call written against it finishes
+  **above** its strike — the shares are called away at that strike and the cash comes
+  back with the gain booked as realised profit. A call finishing at or below its
+  strike expires worthless: you keep the premium and the shares stay. Being called
+  away is the only exit; there is no sell-by-hand.
 """,
     "/sentiment": """
 **Sentiment — the simple version**
