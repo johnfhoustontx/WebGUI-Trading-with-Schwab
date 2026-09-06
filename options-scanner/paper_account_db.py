@@ -701,13 +701,20 @@ def equity_at_cost(db_path=None):
 #############################################
 
 def reset_account(db_path=None, starting_balance=25_000.0, session_date=None):
-    """Clear all positions + orders and reset the account row to starting values.
-    For the Portfolio tab's 'Reset paper account' action — intentional, explicit."""
+    """Clear all positions + orders + share lots and reset the account row.
+    For the Portfolio tab's 'Reset paper account' action — intentional, explicit.
+
+    `equity_lots` goes with them: a lot is cash this account already spent, so a
+    lot surviving a reset reports shares against a wiped balance. `equity_at_cost`
+    would keep counting it, and `roll_session_if_needed` feeds that term into
+    `session_start_equity` — the next session would open claiming committed
+    capital the account no longer has."""
     conn = connect(db_path)
     try:
         with conn:
             conn.execute("DELETE FROM paper_positions")
             conn.execute("DELETE FROM paper_orders")
+            conn.execute("DELETE FROM equity_lots")
             conn.execute(
                 "UPDATE account SET cash=?, buying_power_reserved=0, realized_pnl=0, "
                 "session_date=?, session_start_equity=?, session_realized_pnl=0, "

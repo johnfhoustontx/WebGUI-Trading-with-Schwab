@@ -153,3 +153,26 @@ def test_reconcile_would_zero_a_lot_that_reserved(tmp_path):
 
     assert pad.reconcile_buying_power(db) == 9_500.0        # zeroed, not honoured
     assert pad.get_account(db)["buying_power_reserved"] == 0.0
+
+
+def test_reset_account_clears_the_share_inventory(tmp_path):
+    """A reset wipes the account, so it must wipe the shares it bought.
+
+    `reset_account` deletes `paper_positions` and `paper_orders` and returns cash
+    to the starting balance. A lot surviving that would report shares against a
+    wiped account — `equity_at_cost` would still count them, and
+    `roll_session_if_needed` feeds exactly that term into `session_start_equity`,
+    so the next session would open claiming committed capital the account no
+    longer has.
+    """
+    db = tmp_path / "acct.db"
+    pad.init_db(db)
+    pad.ensure_account(db, starting_balance=25_000.0, session_date="2026-09-08")
+    pad.insert_equity_lot(db, {"symbol": "AAPL", "shares": 100, "cost_basis": 95.0,
+                               "source": "assignment"})
+    assert pad.equity_at_cost(db) == 9_500.0      # not vacuous: the lot is there
+
+    pad.reset_account(db, starting_balance=25_000.0, session_date="2026-09-09")
+
+    assert pad.fetch_open_lots(db) == []
+    assert pad.equity_at_cost(db) == 0.0
