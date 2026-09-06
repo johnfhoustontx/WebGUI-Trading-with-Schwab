@@ -88,6 +88,7 @@ python-multipart==0.0.32
 python-socketio==5.16.2
 pytz==2026.2
 PyYAML==6.0.3
+qrcode==8.2
 redis==8.0.0
 requests==2.34.2
 requests-oauthlib==2.0.0

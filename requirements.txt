@@ -67,6 +67,12 @@ nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/R
 # --- Web GUI login (NEW: password + TOTP auth for the NiceGUI app) ---
 argon2-cffi==25.1.0       # webgui login: Argon2id password hashing
 pyotp==2.10.0             # webgui login: TOTP second factor
+qrcode>=8.0               # tools/webgui_credentials.py: the terminal QR square for TOTP
+                          #   enrolment. Pure Python; on Linux it needs NOTHING (its only
+                          #   Requires-Dist is colorama, marked sys_platform == "win32", and
+                          #   colorama is already locked). The import is LAZY and every
+                          #   failure degrades to "no square, here is the URI", so a box
+                          #   without it can still enrol -- see qr_lines().
 
 # --- Storage / communication backbone (NEW: 3-tier) ---
 redis==8.0.0              # pinned (was >=5.0) — Redis client (talks to a local Memurai server on Windows)
