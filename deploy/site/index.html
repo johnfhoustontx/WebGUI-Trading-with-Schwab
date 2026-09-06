@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REPLACE-ME site title</title>
+
+<!--
+  The public one-pager. PLACEHOLDER COPY - every REPLACE-ME below is for the
+  owner to write.
+
+  Three constraints, none of them taste:
+
+  1. NOTHING DYNAMIC AND NOTHING SECRET. No form, no call to the app, no
+     analytics needing a key. This file is served by Caddy's file_server out of
+     deploy/site/ and is world-readable by definition. If it ever needs live
+     data, that is a design change, not an edit.
+
+  2. NO LINK TO THE APP. Recorded as noise reduction rather than as a security
+     control - the subdomain is in Certificate Transparency logs regardless -
+     but the public face should not advertise the door.
+
+  3. SINGLE SELF-CONTAINED FILE. No build step, no framework, no directory
+     listing. Inline CSS is deliberate: this is a standalone document, the same
+     exemption the EOD reports and /wall carry from the repo's Tailwind-first
+     rule, which binds NiceGUI components and nothing else.
+
+  The stream slot is a LINK, not an iframe. Swapping in an embed later is one
+  line, and until someone wants it this keeps Google's script off the page.
+-->
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0f1c;
+    --card: #101a30;
+    --line: #213152;
+    --text: #cdd8ee;
+    --title: #eaf0fb;
+    --muted: #7f8db0;
+    --accent: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.25rem;
+    background: radial-gradient(circle at 50% 0%, #16243f, #0c1424 55%, var(--bg));
+    color: var(--text);
+    font: 16px/1.6 "IBM Plex Sans", system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  main { width: 100%; max-width: 32rem; text-align: center; }
+  h1 {
+    margin: 0 0 .5rem;
+    font-size: clamp(2rem, 9vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -.02em;
+    color: var(--title);
+  }
+  .tagline { margin: 0 0 2.5rem; color: var(--muted); font-size: 1.05rem; }
+  .links { display: flex; flex-direction: column; gap: .75rem; }
+  a.link {
+    display: block;
+    padding: .9rem 1.25rem;
+    border: 1px solid var(--line);
+    border-radius: .6rem;
+    background: var(--card);
+    color: var(--title);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  a.link:hover, a.link:focus-visible { border-color: var(--accent); outline: none; }
+  a.link .what { display: block; font-weight: 400; font-size: .875rem; color: var(--muted); }
+  footer { margin-top: 3rem; font-size: .8rem; color: var(--muted); }
+</style>
+</head>
+
+<body>
+<main>
+  <!-- The wordmark. -->
+  <h1>REPLACE-ME</h1>
+
+  <!-- One line saying what this is. -->
+  <p class="tagline">REPLACE-ME tagline</p>
+
+  <nav class="links">
+    <!-- The YouTube live stream. A link, deliberately, not an embed. -->
+    <a class="link" href="REPLACE-ME-youtube-url">
+      Watch live
+      <span class="what">REPLACE-ME what the stream shows</span>
+    </a>
+
+    <a class="link" href="REPLACE-ME-discord-invite">
+      Discord
+      <span class="what">REPLACE-ME what the server is for</span>
+    </a>
+
+    <a class="link" href="REPLACE-ME-telegram-url">
+      Telegram
+      <span class="what">REPLACE-ME what the channel posts</span>
+    </a>
+  </nav>
+
+  <footer>REPLACE-ME footer</footer>
+</main>
+</body>
+</html>
