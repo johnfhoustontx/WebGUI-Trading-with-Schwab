@@ -64,6 +64,10 @@ nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/R
                              # Highcharts' license. PERSONAL/NON-COMMERCIAL USE ONLY (Highcharts is
                              # free for personal use; commercial use requires a paid license).
 
+# --- Web GUI login (NEW: password + TOTP auth for the NiceGUI app) ---
+argon2-cffi==25.1.0       # webgui login: Argon2id password hashing
+pyotp==2.10.0             # webgui login: TOTP second factor
+
 # --- Storage / communication backbone (NEW: 3-tier) ---
 redis==8.0.0              # pinned (was >=5.0) — Redis client (talks to a local Memurai server on Windows)
 fakeredis>=2.20           # in-memory Redis for pytest (tests need no live server)
