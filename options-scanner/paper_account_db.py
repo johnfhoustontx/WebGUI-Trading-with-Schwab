@@ -289,6 +289,27 @@ def release_buying_power(db_path, amount):
         conn.close()
 
 
+def debit_cash(db_path, amount):
+    """Move cash OUT of the account, touching neither reserved BP nor realized P&L.
+
+    Buying shares on assignment is a CONVERSION of cash into stock — it is
+    neither a reservation nor a loss, and the two functions either side of this
+    one are both wrong for it. Reserving would be undone: ``reconcile_buying_power``
+    recomputes ``buying_power_reserved`` from the open-position sum and hands any
+    excess straight back to cash. Booking it through ``realize_pnl`` would report
+    the purchase price as a realized loss and, at a whole strike notional, trip
+    the session drawdown halt on a trade that lost nothing. Hence a plain cash
+    move; the shares it bought are recorded in ``equity_lots``.
+    """
+    conn = connect(db_path)
+    try:
+        with conn:
+            a = conn.execute("SELECT cash FROM account WHERE id=1").fetchone()
+            _update_account(conn, cash=round(a["cash"] - amount, 2))
+    finally:
+        conn.close()
+
+
 def realize_pnl(db_path, pnl):
     conn = connect(db_path)
     try:
