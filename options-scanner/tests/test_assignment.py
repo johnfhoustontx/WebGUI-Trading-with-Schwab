@@ -172,6 +172,83 @@ def test_an_otm_short_put_expires_worthless_and_makes_no_lot(tmp_path, monkeypat
     assert pdb.reconcile_buying_power(db) == 0.0
 
 
+def test_a_naked_put_spelling_is_assigned_too(tmp_path, monkeypatch):
+    """``NAKED_PUT`` is the spelling ``compute._SINGLE_STRATEGIES`` writes, and
+    ``SHORT_PUT`` the one ``_INCOME_STRUCTURES`` writes. Both name the same
+    trade, so both must assign — without this, half of
+    ``paper_engine.SHORT_PUT_STRATEGIES`` can be deleted with the suite green
+    and every Calculator-side cash-secured put silently expires worthless."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, qty=1,
+                             strategy="NAKED_PUT")
+    _no_repricer(monkeypatch)
+
+    pe.run_manage_cycle(_QuoteClient(92.0), _EXPIRY, db_path=db,
+                        now_ct=_expiry_close_ct())
+
+    lots = pdb.fetch_open_lots(db)
+    assert len(lots) == 1, "NAKED_PUT must assign exactly as SHORT_PUT does"
+    assert lots[0]["cost_basis"] == 100.0
+    assert lots[0]["source_position_id"] == pos_id
+    assert _settled(db, pos_id)["exit_reason"] == "ASSIGNED"
+    assert pdb.reconcile_buying_power(db) == 0.0
+
+
+def test_a_short_put_settling_exactly_at_the_strike_is_abandoned(tmp_path, monkeypatch):
+    """The boundary ``is_assignment``'s own docstring calls out: settlement
+    STRICTLY below the strike, matching ``max(strike - spot, 0)``. At exactly
+    the strike the put is worth nothing and is abandoned, so relaxing ``<`` to
+    ``<=`` would buy stock for a contract that expired worthless.
+
+    ``EXPIRED`` is asserted alongside the empty lot list because "no lot" is
+    trivially true in a world where settlement never ran at all."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, qty=1)
+    _no_repricer(monkeypatch)
+
+    pe.run_manage_cycle(_QuoteClient(100.0), _EXPIRY, db_path=db,
+                        now_ct=_expiry_close_ct())
+
+    row = _settled(db, pos_id)
+    assert row["status"] == "EXPIRED"
+    assert row["exit_reason"] == "EXPIRED"
+    assert pdb.fetch_open_lots(db) == []
+    assert pdb.equity_at_cost(db) == 0.0
+    assert pdb.reconcile_buying_power(db) == 0.0
+
+
+def test_a_single_leg_short_call_is_not_assigned(tmp_path, monkeypatch):
+    """THE money path. A naked short CALL matches ``is_cash_secured_put``'s
+    STRUCTURE test exactly — one short strike, no long leg, no call-side legs,
+    as that function's own docstring concedes — so the strategy test is the only
+    thing standing between it and an assignment.
+
+    Getting this wrong is not a cosmetic mislabel: the short call would buy
+    LONG stock at the strike and debit cash for it, when a real assignment on a
+    short call delivers stock SHORT. Deleting the strategy gate from
+    ``is_cash_secured_put`` was measured to pass the entire suite without this
+    test.
+
+    ``EXPIRED`` is asserted alongside the empty lot list so the test cannot
+    pass in the world where settlement never ran."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, qty=1,
+                             strategy="SHORT_CALL")
+    _no_repricer(monkeypatch)
+
+    # Below the strike — the settlement that WOULD assign a short put, so the
+    # only thing separating the two cases here is the strategy.
+    pe.run_manage_cycle(_QuoteClient(92.0), _EXPIRY, db_path=db,
+                        now_ct=_expiry_close_ct())
+
+    row = _settled(db, pos_id)
+    assert row["status"] == "EXPIRED"
+    assert row["exit_reason"] == "EXPIRED"
+    assert pdb.fetch_open_lots(db) == []
+    assert pdb.equity_at_cost(db) == 0.0
+    assert pdb.reconcile_buying_power(db) == 0.0
+
+
 def test_an_expiring_spread_does_not_produce_shares(tmp_path, monkeypatch):
     """A defined-risk spread that finishes ITM settles its two legs against each
     other. It does not buy stock, however deep in the money the short leg is."""
