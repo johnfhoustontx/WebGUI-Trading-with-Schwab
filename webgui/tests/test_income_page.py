@@ -70,9 +70,13 @@ def test_a_pass_that_found_nothing_does_not_borrow_the_cold_feed_line():
 
 
 def test_a_pass_with_candidates_counts_both_the_rows_and_the_symbols():
+    """⚠ Assert the PHRASE, not the digit. ``scanned_symbols`` is 23, so a bare
+    ``"2" in text`` is satisfied by the "23" already in the sentence — hard-wiring
+    the line to "1 candidate" was measured to pass that form."""
     text = income.status_text({"candidates": [_PCS, _CSP], "scanned_symbols": 23})
     assert text != _copy.WAITING_OPTIONS
-    assert "2" in text and "23" in text
+    assert "2 candidates" in text
+    assert "23 symbols" in text
 
 
 def test_failed_symbols_are_disclosed_not_swallowed():
@@ -80,8 +84,9 @@ def test_failed_symbols_are_disclosed_not_swallowed():
     page can say so. A whole-watchlist outage otherwise reads as a quiet tape."""
     text = income.status_text({"candidates": [], "scanned_symbols": 23,
                                "errors": ["AAPL: KeyError: x", "MSFT: ValueError: y"]})
-    assert "2" in text
-    assert "fail" in text.lower() or "error" in text.lower()
+    # The phrase, not the digit: "23" carries a "2" of its own, so the looser
+    # form passed against a hard-wired literal that named no count at all.
+    assert "2 symbols failed" in text
 
 
 def test_the_scan_time_is_shown_when_the_payload_carries_one():

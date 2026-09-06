@@ -276,7 +276,10 @@ def test_page_help_explains_why_the_mark_is_blank():
 
     md = page_help.help_md("/options/shares")
     assert md != page_help._DEFAULT
-    assert "mark" in md.lower()
+    # ⚠ ``"mark" in md.lower()`` was matched by "Market Dashboard" in the very
+    # next sentence, so deleting the whole explanation passed. Assert a phrase
+    # only the explanation itself carries.
+    assert "blank on purpose" in md
 
 
 # ── the tier boundary ───────────────────────────────────────────────────────
