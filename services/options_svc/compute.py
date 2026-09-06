@@ -567,6 +567,243 @@ def income_scan(symbol, market_state=None) -> dict:
     return out
 
 
+# ── covered calls against held shares ───────────────────────────────────────
+# The income window's THIRD product, and the only one that is not a screen over
+# a universe: it screens the paper account's open equity lots. The builder is
+# pure over injected data (lots + chains + spots) so every rule below is
+# testable without a proxy call or a database, and so the caller decides where
+# the chains come from — which is what lets ``publish_income`` reuse the ones
+# the watchlist pass already fetched instead of doubling the API cost.
+#
+# Design: docs/plans/2026-09-05-income-window-and-share-inventory-design.md,
+# Decision 3.
+COVERED_CALL_TYPE = "COVERED_CALL"
+
+# A standard US equity option controls 100 shares. The name is spelled out
+# because this constant appears in BOTH a sizing floor and a dollar scale, and
+# a bare 100 in either place reads as the other.
+SHARES_PER_CONTRACT = 100
+
+# The strike convention is the window's own short-delta band, not a second
+# number: a covered call written at 0.20 delta is the same trade the CCS side
+# already expresses, minus the long wing. Taking the midpoint keeps the two in
+# step automatically if the band ever moves.
+_COVERED_TARGET_DELTA = (INCOME_CALL_DELTA[0] + INCOME_CALL_DELTA[1]) / 2.0
+
+
+def yield_on_cost(net_credit, cost_basis):
+    """Premium collected as a fraction of what the shares cost. None if unread.
+
+    ``net_credit`` is PER CONTRACT (160.00) and the denominator is therefore
+    ``cost_basis * 100`` — the trap the income page was rebuilt around, since an
+    adapted spread carries a per-SHARE ``credit`` beside its per-contract
+    ``net_credit`` and the two differ by exactly this factor.
+
+    Both operands go through ``_num`` (the module's strict finite coercion,
+    defined below) rather than ``float()``: a NaN here would reach a ranking
+    comparison, which is this repo's most-documented bug class, and a plausible
+    0.0 is worse than a None because it sorts among real readings. A
+    non-positive basis is likewise a non-reading, not a divide.
+    """
+    credit = _num(net_credit)
+    basis = _num(cost_basis)
+    if credit is None or basis is None or basis <= 0:
+        return None
+    return credit / (basis * SHARES_PER_CONTRACT)
+
+
+def total_return_if_called(net_credit, strike, cost_basis):
+    """Total return if the shares are called away, as a fraction of cost.
+
+    ``((strike - basis) * 100 + net_credit) / (basis * 100)`` — the capital gain
+    to the strike PLUS the premium. This is the number that actually ranks a
+    covered call: a 0.4% yield at a strike 12% above basis and a 2% yield at a
+    strike 0.5% above it are not comparable on premium alone.
+
+    Same strictness as :func:`yield_on_cost`, for the same reason.
+    """
+    credit = _num(net_credit)
+    k = _num(strike)
+    basis = _num(cost_basis)
+    if credit is None or k is None or basis is None or basis <= 0:
+        return None
+    return ((k - basis) * SHARES_PER_CONTRACT + credit) / (basis * SHARES_PER_CONTRACT)
+
+
+def _covered_pop(spot, breakeven, leg_iv, dte):
+    """P(profit at expiry) as a percent, or None when it cannot be read.
+
+    A covered call is profitable above its breakeven, so this is
+    ``P(S_T > basis - premium)`` under the SAME normal-on-price model
+    ``strategy_scanner.pop_from_payoff`` uses, so the column compares against
+    the rest of the board rather than mixing two probability models.
+
+    ⚠ ``extract_options`` copies the chain's ``volatility`` through unchanged,
+    and Schwab reports it as a PERCENT (28.0, not 0.28). The >1.5 test is the
+    repo's documented percent/decimal idiom (``swing_scan`` uses the same one on
+    ``current_iv``); a decimal IV above 1.5 is not a real equity reading.
+    """
+    s = _num(spot)
+    be = _num(breakeven)
+    iv = _num(leg_iv)
+    d = _num(dte)
+    if s is None or be is None or iv is None or d is None or s <= 0 or iv <= 0:
+        return None
+    iv_dec = iv / 100.0 if iv > 1.5 else iv
+    sigma = s * iv_dec * math.sqrt(max(d, 0.5) / 365.0)
+    if sigma <= 0:
+        return None
+    z = (be - s) / sigma
+    return round((1.0 - 0.5 * (1 + math.erf(z / math.sqrt(2)))) * 100.0, 1)
+
+
+def _covered_row(symbol, lot, quantity, basis, exp, dte, leg_data, spot, status):
+    """One covered-call candidate, or None when the contract has no usable mark.
+
+    ⚠ **The dollars are PER CONTRACT and ``quantity`` is separate.** Every other
+    row on this board is one contract, so scaling a covered call by the lot size
+    would put a 3x row beside 1x rows on the Credit and Capital columns and make
+    the board incomparable — the exact thing ``return_on_capital`` exists to fix.
+    ``quantity`` says how many contracts the lot supports; the reader multiplies.
+
+    ⚠ **``composite_score`` is deliberately ABSENT.** ``strategy_scoring``'s
+    Fit+Quality scale is calibrated on defined-risk option structures against an
+    inferred market view; a covered call's economics are dominated by a stock
+    position the scorer never sees. Inventing a number so the row sorts higher
+    would be fabricating a reading. ``handlers._income_rank`` sends an absent
+    score to ``-inf``, so these rows land at the FOOT of the merged board — which
+    is the honest place for a row scored on a different question, and the two
+    ratios above are the columns a reader sorts these on instead.
+    """
+    leg_mark = _num(leg_data.get("mark"))
+    if leg_mark is None or leg_mark <= 0:
+        # No premium is no trade. A zero-mark contract would produce a zero
+        # yield that still sorts and still renders as a candidate.
+        return None
+    # ``_leg_from`` is strategy_scanner's own normalized-leg constructor. Reached
+    # through its underscore deliberately: re-spelling the leg contract here is
+    # how ``clamp`` came to have nine copies, and the leg shape is exactly what
+    # the page and the detail panel read.
+    import strategy_scanner as ssn
+
+    leg = ssn._leg_from(leg_data, "call", "short", exp)
+    strike = float(leg["strike"])
+
+    # Opening commission only. Assignment legs cost nothing (``commission_for``
+    # says so in its own docstring), and being called away IS the max-profit
+    # path — charging a round trip against it would overstate the cost of the
+    # outcome the row is ranked on.
+    comm = commission.commission_for(1, symbol, 1)
+
+    net_credit = round(leg_mark * SHARES_PER_CONTRACT, 2)
+    capital = round(basis * SHARES_PER_CONTRACT, 2)
+    max_profit = round((strike - basis) * SHARES_PER_CONTRACT + net_credit - comm, 2)
+    # Bounded below: the payoff floors at S=0, where the shares are worthless and
+    # the credit is kept. Unlike a NAKED call this position has no unbounded
+    # side, which is the whole reason ``payoff_metrics`` is not used here — it
+    # would read a lone short call as undefined risk and price capital off a
+    # spot*0.20 margin proxy.
+    max_loss = round(capital - net_credit + comm, 2)
+    breakeven = round(basis - leg_mark, 4)
+
+    row = {
+        "id": f"{symbol}_{COVERED_CALL_TYPE}_{exp}_{strike}",
+        "symbol": symbol, "type": COVERED_CALL_TYPE, "family": "COVERED",
+        "strategy_label": "Covered Call", "bias": "neutral",
+        "covered": True,
+        "legs": [leg],
+        # The flat contract too: unlike the adapted spreads there is exactly one
+        # short strike here and it is the decision the reader is making.
+        "short_strike": strike,
+        "expiration": exp, "dte": dte,
+        "quantity": quantity,
+        "shares": int(lot.get("shares") or 0),
+        "cost_basis": basis,
+        "lot_id": lot.get("lot_id"),
+        "net_credit": net_credit,
+        "commission": comm,
+        "capital": capital,
+        "max_profit": max_profit,
+        "max_loss": max_loss,
+        "breakevens": [breakeven],
+        "rr": round(max_profit / max_loss, 3) if max_loss else None,
+        "pop_pct": _covered_pop(spot, breakeven, leg_data.get("iv"), dte),
+        "underlying_price": _num(spot),
+        "yield_on_cost": yield_on_cost(net_credit, basis),
+        "total_return_if_called": total_return_if_called(net_credit, strike, basis),
+        "timestamp": _dt.datetime.now().isoformat(),
+    }
+    if status is not None:
+        # Absence of the stamp is absence of the check — never the cleared
+        # label. Only stamp what was actually looked up.
+        row["earnings_status"] = status
+    return row
+
+
+def covered_call_candidates(lots, chains, spots, earnings=None):
+    """Covered-call candidates over open equity lots. Pure over injected data.
+
+    ``lots`` are ``paper_account_db.fetch_open_lots`` rows; ``chains`` and
+    ``spots`` are ``{symbol: ...}`` maps the caller supplies (see
+    ``handlers.publish_income``, which reuses the chains the watchlist pass
+    already fetched). ``earnings`` is ``{symbol: (status, report date or None)}``
+    from :func:`income_earnings_map` — a local read, zero API.
+
+    **The hard floor: a call struck BELOW cost basis is never emitted.** Not a
+    warning, not a score penalty — the builder refuses. Called away, such a call
+    books a guaranteed loss on the shares, and the premium rarely covers it. The
+    floor is applied to the eligible ladder BEFORE the delta pick, so an
+    underwater lot gets the nearest usable strike above its basis rather than
+    the conventional 0.20-delta strike below it.
+
+    One candidate per expiry in the window, not one per eligible strike: the
+    horizon is genuinely the reader's choice while the strike is pinned by the
+    delta convention, and a strike ladder would swamp a board picked by hand.
+
+    A lot is skipped whole — never emitted with None ratios — when it holds
+    fewer than ``SHARES_PER_CONTRACT`` shares (nothing to cover), or when its
+    basis is not a positive finite reading (there is no floor to apply against a
+    basis you cannot read; note a NaN basis fails EVERY ``>=`` comparison, so an
+    unguarded version would silently emit nothing anyway, for the wrong reason).
+    """
+    import strategy_scanner as ssn
+
+    out = []
+    for lot in lots or []:
+        lot = lot or {}
+        symbol = lot.get("symbol")
+        chain = (chains or {}).get(symbol)
+        if not symbol or not chain:
+            continue
+        shares = _num(lot.get("shares"))
+        basis = _num(lot.get("cost_basis"))
+        if shares is None or basis is None or basis <= 0:
+            continue
+        quantity = int(shares) // SHARES_PER_CONTRACT
+        if quantity < 1:
+            continue
+
+        status, earn_date = (earnings or {}).get(symbol) or (None, None)
+        spot = (spots or {}).get(symbol)
+        by_exp = ssn.extract_options(chain, "call", INCOME_DTE_MIN, INCOME_DTE_MAX)
+        for exp in sorted(by_exp):
+            data = by_exp[exp]
+            # The same gate the spreads went through. At 30-45 DTE a straddled
+            # report is close to certain, which is why the window extends it.
+            if earn_date and se.check_earnings_conflict(earn_date, exp):
+                continue
+            eligible = {k: v for k, v in (data.get("strikes") or {}).items()
+                        if k >= basis}
+            leg_data = ssn.nearest_by_delta(eligible, _COVERED_TARGET_DELTA)
+            if not leg_data:
+                continue
+            row = _covered_row(symbol, lot, quantity, basis, exp,
+                               data.get("dte"), leg_data, spot, status)
+            if row is not None:
+                out.append(row)
+    return out
+
+
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
 # The page read the paper account directly (snapshot + open positions + fills)
 # and ran the entry/manage/reset actions itself. Those reads + actions now live
