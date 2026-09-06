@@ -29,6 +29,7 @@ thin wiring.
 import dataclasses
 import logging
 import subprocess
+import time as _time
 
 from nicegui import ui
 
@@ -39,6 +40,31 @@ from pages.ui_guard import guard
 from repo_paths import ENV_NAME, REPO_ROOT
 
 log = logging.getLogger("webgui.terminate")
+
+# The step-up's own backoff, DELIBERATELY SEPARATE from the login's.
+#
+# Without one, a stolen session cookie can grind the six-digit space unbounded --
+# ~3 valid codes per window out of 10**6, which is hours of scripted attempts, not
+# a wall. With one it is 5 tries and then a wait.
+#
+# Separate, because sharing `login_page`'s counter would mean fumbling a stop code
+# locks you out of the LOGIN FORM -- coupling an everyday screen to a rare one.
+#
+# And a single GLOBAL key rather than a per-client one, which would be wrong on the
+# login form and is right here: `verify_stop_code` takes no request context (that is
+# what keeps it testable), the action it guards is global, and the worst an attacker
+# achieves by grinding it is locking the owner out of the STOP BUTTON -- who still
+# has SSH. On the login form that same reasoning fails, which is why `main._client_ip`
+# exists.
+_LOCKOUT = auth.LockoutState()
+_STOP_CLIENT = "stop-all-services"
+
+
+def reset_stop_lockout():
+    """Test hook: forget every recorded attempt."""
+    global _LOCKOUT
+    _LOCKOUT = auth.LockoutState()
+
 
 STOP_TARGET = f"trading-{ENV_NAME}.target"
 
@@ -53,6 +79,9 @@ CODE_REQUIRED = "Enter the 6-digit code from your authenticator app to confirm."
 CODE_REJECTED = ("That code was not accepted — it is wrong, expired, or has "
                  "already been used. Nothing has been stopped. Wait for the next "
                  "code and try again.")
+THROTTLED = ("Too many rejected codes. Wait a minute and try again — or, if this "
+             "is urgent, stop the stack from a terminal with "
+             f"`systemctl --user stop {STOP_TARGET}`.")
 CANNOT_VERIFY = ("The stored sign-in credentials could not be read, so the code "
                  "cannot be checked. Refusing to stop the stack.")
 CANNOT_RECORD = ("The code was valid but could not be recorded as used, so it is "
@@ -86,6 +115,13 @@ def verify_stop_code(code, *, now=None):
     write leaves this function looking correct while the code stays live for the
     rest of its window (90 s, with drift).
     """
+    now_ts = _time.time() if now is None else now
+    locked = _LOCKOUT.locked_until(_STOP_CLIENT, now=now_ts)
+    if locked:
+        log.warning("Stop All Services REFUSED: throttled for another %.0f s.",
+                    locked - now_ts)
+        return False, THROTTLED
+
     try:
         creds = auth_store.load()
     except auth_store.CredentialsError as exc:
@@ -108,6 +144,7 @@ def verify_stop_code(code, *, now=None):
     if not ok:
         log.warning("Stop All Services REFUSED: the code was wrong, expired or "
                     "already used.")
+        _LOCKOUT.record_failure(_STOP_CLIENT, now=now_ts)
         return False, CODE_REJECTED
 
     try:
@@ -120,6 +157,7 @@ def verify_stop_code(code, *, now=None):
 
     log.warning("Stop All Services AUTHORIZED by a valid authenticator code — "
                 "stopping %s", STOP_TARGET)
+    _LOCKOUT.record_success(_STOP_CLIENT)
     return True, ""
 
 

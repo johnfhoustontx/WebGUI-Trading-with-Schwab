@@ -110,12 +110,20 @@ def creds(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_lockout():
-    """``login_page`` holds ONE LockoutState, shared by every test in the run.
-    The cross-path tests below drive real sign-ins through it, so they clean up
-    after themselves rather than leaking failures into whatever runs next."""
+    """``login_page`` and ``terminate`` each hold ONE LockoutState, shared by
+    every test in the run. The cross-path tests below drive real sign-ins and
+    real rejected stop codes through them, so they clean up after themselves
+    rather than leaking failures into whatever runs next.
+
+    ⚠ The stop's counter matters here even more than the login's: several tests
+    below deliberately reject a code, and five rejections is the throttle
+    threshold. Without this reset the sixth test in the file starts throttled and
+    fails for a reason that has nothing to do with what it asserts."""
     login_page.reset_lockout()
+    terminate.reset_stop_lockout()
     yield
     login_page.reset_lockout()
+    terminate.reset_stop_lockout()
 
 
 def test_a_valid_code_authorizes_the_stop(creds):
@@ -282,3 +290,69 @@ def test_the_dialog_still_carries_its_warnings_and_a_way_out():
     src = inspect.getsource(terminate.render)
     assert "This also stops THIS web app" in src
     assert "Cancel" in src
+
+
+# --- the step-up's own throttle (2026-09-06) ---------------------------------
+#
+# Without it a stolen session cookie can grind the six-digit space unbounded.
+# It is a SEPARATE counter from the login's on purpose: sharing one would mean a
+# fumbled stop code locking you out of the sign-in form.
+
+def test_grinding_rejected_codes_eventually_throttles(creds):
+    for _ in range(auth.LOCKOUT_THRESHOLD):
+        ok, msg = terminate.verify_stop_code("000000", now=T0)
+        assert ok is False and msg is terminate.CODE_REJECTED
+    ok, msg = terminate.verify_stop_code("000000", now=T0)
+    assert ok is False
+    assert msg is terminate.THROTTLED
+
+
+def test_a_correct_code_is_refused_while_throttled(creds):
+    """The throttle outranks a valid code, or it is not a throttle."""
+    for _ in range(auth.LOCKOUT_THRESHOLD):
+        terminate.verify_stop_code("000000", now=T0)
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is False
+    assert msg is terminate.THROTTLED
+
+
+def test_the_throttle_lets_go_once_the_backoff_expires(creds):
+    for _ in range(auth.LOCKOUT_THRESHOLD):
+        terminate.verify_stop_code("000000", now=T0)
+    later = T0 + auth.LOCKOUT_MAX_SEC + 1
+    ok, _msg = terminate.verify_stop_code(_code(at=later), now=later)
+    assert ok is True, "a lockout that never expires locks the owner out for good"
+
+
+def test_the_stop_throttle_does_not_lock_the_sign_in_form(creds):
+    """The whole reason the counters are separate."""
+    for _ in range(auth.LOCKOUT_THRESHOLD + 2):
+        terminate.verify_stop_code("000000", now=T0)
+    assert login_page.lockout_state().locked_until("1.1.1.1", now=T0) == 0
+
+
+def test_a_broken_store_is_not_counted_as_an_attempt(creds, monkeypatch):
+    """A corrupt credentials file is OUR fault, not an attacker's.
+
+    Counting it would let one bug of ours lock the owner out of the control they
+    would reach for precisely when something is wrong.
+    """
+    real_load = auth_store.load
+    broken = {"yes": True}
+
+    def _load(*a, **k):
+        if broken["yes"]:
+            raise auth_store.CredentialsError("corrupt")
+        return real_load(*a, **k)
+
+    # NOT monkeypatch.undo() -- that would also revert the `creds` fixture's
+    # DEFAULT_PATH patch, so the final call would read the real (empty) store and
+    # the test would pass or fail for a reason unrelated to throttling.
+    monkeypatch.setattr(auth_store, "load", _load)
+    for _ in range(auth.LOCKOUT_THRESHOLD + 2):
+        ok, msg = terminate.verify_stop_code("000000", now=T0)
+        assert msg is terminate.CANNOT_VERIFY
+
+    broken["yes"] = False
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is True, "our own failure must not throttle the operator"
