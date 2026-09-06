@@ -1200,10 +1200,22 @@ Add near the other module-scope setup (after the static mounts, ~line 68):
 import auth_middleware  # noqa: E402
 import login_page       # noqa: E402
 
-app.add_middleware(auth_middleware.AuthGate,
-                   session_key=login_page.session_key,
-                   epoch=login_page.current_epoch)
+app.add_middleware(auth_middleware.AuthGate)   # its DEFAULT providers, deliberately
 ```
+
+⚠ **Use the gate's default credential providers. Do NOT inject your own.**
+An earlier draft of this plan passed `session_key=login_page.session_key,
+epoch=login_page.current_epoch`. Those functions do not exist, and writing them
+would be pure risk for no benefit: `auth_middleware.default_session_key` /
+`default_epoch` already catch `CredentialsError` and return `None`, which the gate
+reads as default-deny. Measured against the real wiring — a missing file, a
+truncated JSON file, and an empty `session_secret` all produce a **303, never a
+500**, and the kiosk's `/wall` is refused too.
+
+A hand-rolled provider that lets `CredentialsError` escape turns a corrupt
+credentials file from "a login page" into "an unhandled exception on every route",
+which is a worse failure and a public one. The gate is the security boundary; give
+it the providers it ships with.
 
 **Step 2: Add the `/login` GET, `/login` POST and `/logout` routes**
 

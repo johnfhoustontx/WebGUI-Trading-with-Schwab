@@ -130,12 +130,30 @@ for the proxy and as lockout insurance; see [Ops](#ops).
 One pure-ASGI middleware, in `webgui/auth_middleware.py`:
 
 ```
-scope not http/websocket                       → pass
-path ∈ /login, /favicon.ico                    → pass
-wall kiosk exemption (all three conditions below) → pass
-valid session OR valid remember-device cookie  → pass
+scope neither http nor websocket                  → pass (lifespan MUST pass, or the app never boots)
+path ∈ /login, /favicon.ico                       → pass
+no usable credentials                             → REFUSE, ahead of everything below
+wall kiosk exemption (all three conditions below)  → pass
+valid SESSION cookie                              → pass
 otherwise → http: 303 /login?next=…   ·   websocket: close 1008
 ```
+
+⚠ **The remember-device cookie authorises NOTHING at the gate.** An earlier draft
+of this line read "valid session **or** valid remember-device cookie → pass",
+and that is wrong. The remember cookie is a 30-day credential sitting on disk
+whose entire intended power is letting the *next* sign-in skip the TOTP prompt —
+which still demands the password. Honouring it at the gate would make a stolen
+month-old cookie equivalent to a full session with **neither** factor, promoting
+the weakest and longest-lived credential in the system into the strongest. That
+is precisely the substitution the `kind` discriminator was added to prevent;
+accepting it here re-opens the same hole from the other end.
+
+⚠ **Default-deny sits ABOVE the kiosk branch, not merely above the cookie
+check.** The tempting alternative — let the kiosk through when nothing is
+configured, since its exemption never rested on a credential — makes "an
+unconfigured app serves nothing" a rule with an exception, and an exception on a
+security boundary is a thing to remember rather than a thing that holds. The cost
+is that the wall is blank until setup, which is the correct thing for it to be.
 
 **Pure ASGI, not `BaseHTTPMiddleware`.** The latter only sees `http` scopes, and
 this is a websocket app. It also has known interactions with streaming responses.
