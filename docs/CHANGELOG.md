@@ -4,6 +4,93 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-06 (**The web GUI is on the public internet, behind a
+password and TOTP.** `https://app.neuralstrike.co` reaches the trading desk from
+any browser; `https://neuralstrike.co` serves a public one-pager. Verified live
+from an external network: 9 secret paths and 4 traversal attempts all 404,
+`/desk` 303s to the login, `/wall` 404s at the edge while still serving the kiosk
+on loopback.)
+
+- **The shape.** Caddy 2.11.4 as a **system** unit (it needs :443 and must not die
+  with a login session) terminates TLS for both hostnames and reverse-proxies to
+  `127.0.0.1:8500`, which **still binds loopback**. One pure-ASGI middleware
+  (`webgui/auth_middleware.py`) default-denies every `http` and `websocket` scope
+  except `/login` and `/favicon.ico`, plus a three-condition loopback exemption
+  for the wall kiosk. Design + plan:
+  [`2026-09-06-webgui-credentialing-design.md`](plans/2026-09-06-webgui-credentialing-design.md).
+
+- **⚠ THE DEPLOY GOTCHA NOBODY WILL GUESS: Caddy could not read the served
+  directory, and the symptom looked like success.** `deploy/site` lives under
+  `/home/administrator`, which is `drwxr-x---`. Caddy runs as user `caddy`, not in
+  that group, so it could not *traverse* into the home directory — every path on
+  the apex returned **403**, including the homepage.
+
+  The trap is what that did to the security check. The runbook's first
+  verification is "fetch `/shared/tokens.json` and confirm 404", and it returned
+  403 — which reads as *protected* and is actually *Caddy cannot reach anything*.
+  **The secret-exposure sweep proved nothing until traversal worked**, and only
+  after the fix does a 404 mean the `root *` line is correctly scoped. Re-run that
+  sweep after any permissions change.
+
+  Fixed with `setfacl -m u:caddy:x /home/administrator` — traverse for the `caddy`
+  user alone. ⚠ **Not** `usermod -aG administrator caddy`: that group has `rw` on
+  files like `config/env.local.toml`, which would hand a network-facing service
+  account write access to the checkout. Every real secret is `-rw-------`
+  (`.env`, `proxy_tokens.json`, `appsettings.json`, `anthropic_key.txt`,
+  `notifications.json`, `webgui_auth.json`), so the ACL exposes only source code
+  that is already public on GitHub.
+
+- **Three fail-open holes were found in review and fixed before deploy**, each
+  reproduced before being believed. (1) The session and remember-device tokens
+  carried only `{epoch, issued_at}`, making them **byte-identical** — a stolen
+  30-day cookie replayed in the session slot was a full session with neither
+  factor. (2) `base32` decodes `""` to a valid empty HMAC key, so an empty
+  `totp_secret` did not disable the second factor, it made the code **publicly
+  computable from the clock**; `verify_totp("", "489721", …)` returned *accepted*.
+  (3) The drift window was unpinned — widening `TOTP_DRIFT_STEPS` 1 → 2, a 90 s →
+  150 s attack surface, left **all 16 tests green**, because `T0` sat 20 s into its
+  window so the `+90` case was three steps away, not two.
+
+- **The lockout would have been global, not per-client.** Behind a reverse proxy
+  every request arrives from `127.0.0.1`, so keying on the peer files the whole
+  internet under one address — and that counter ramps to 900 s where the global one
+  is deliberately 60 s. `main._client_ip` reads the **last** `X-Forwarded-For` hop,
+  and only when `X-Edge` is present; safe because Caddy *appends* the peer it
+  observed, so a client-supplied prefix can lengthen the list but not change its
+  tail. Measured: a spoofed `9.9.9.9, 203.0.113.9` still counts against
+  `203.0.113.9`. **The Caddyfile must never suppress `X-Forwarded-For`.**
+
+- **An unquoted `root *` truncates at the first space.** Rendered on a Windows
+  checkout it emitted `root * D:/WebGUI` against a real root of
+  `D:/WebGUI Trading with Schwab/…`. Prod's path has no spaces so it was latent,
+  not absent — and the failure is either a parse error taking down **both**
+  hostnames, or a root *above* the checkout. Quoted, with a test that renders a
+  spaced path; the POSIX-root fixture could never have caught it.
+
+- **Rejected: the Caddy `rate_limit` plugin.** It is in no prebuilt binary and
+  needs an `xcaddy` rebuild on every future Caddy update with no apt security
+  updates. The throttling it would add is already bought twice — the login form
+  token rejects a blind POST for the cost of an HMAC, and `LockoutState` refuses
+  **before Argon2 runs** — so a flood costs an HTTP request and a dict lookup, not
+  19 MiB. Revisit only if `sar` shows the Python round-trip costing something
+  during stream hours.
+
+- **Load, measured rather than estimated.** The eight-unit stack costs **~0.07 of
+  one core**; the wall stream (Xvfb + kiosk Chrome + ffmpeg) costs **~2.2 cores** and
+  is 97% of the load on the box. Argon2 at the tuned 19 MiB / t=2 measures **23.5 ms
+  and 19 MiB** per verification, so ten concurrent attempts need 0.19 GiB against
+  0.63 GiB at argon2-cffi's 64 MiB default. Steady state after this change: ~55% →
+  ~56% of four cores, not measurable in practice.
+
+- **Still open.** Redis runs with **no `requirepass`** — `config/env.local.toml`
+  flagged it as "close this before trusting the box further", written when nothing
+  on the machine was public. `GET /login` reads the credentials file per request
+  and sits outside the lockout (which covers POSTs only), so a GET flood is an
+  unmetered disk read; caching would defeat instant epoch revocation, so it needs a
+  decision rather than a memo. The box also has a pending kernel upgrade.
+
+---
+
 **Last updated:** 2026-09-05 (**Phase B stops being dead machinery: the wheel now
 turns end to end.** A whole-branch review found the two gaps that made the share
 inventory unreachable outside a test fixture — nothing opened a cash-secured put

@@ -1496,8 +1496,29 @@ why it is written out.
    `dig +short <name>` **before** starting Caddy — an ACME challenge against a
    name that does not resolve fails and enters a retry backoff.
 4. **ufw** — `sudo ufw allow 80,443/tcp`. Confirm `sudo ufw status`.
-5. **Caddy** — install, `generate_caddyfile.py --install`, `systemctl enable --now
-   caddy`. Watch the cert issue: `journalctl -u caddy -f`.
+5. **Caddy** — install, `generate_caddyfile.py --install`, `caddy validate`, then
+   `systemctl reload caddy`. Watch the cert issue: `journalctl -u caddy -f`.
+
+   ⚠ **Open ufw BEFORE the reload.** Caddy requests certificates on reload and the
+   ACME challenge must reach it from the internet; with the ports still closed the
+   challenge fails into a retry backoff, and you will read Caddy logs while the
+   problem is the firewall.
+
+   ⚠ **Grant the `caddy` user traverse into the checkout, or every apex path 403s
+   — including the homepage.** `deploy/site` lives under `/home/administrator`,
+   which is `drwxr-x---`; Caddy runs as user `caddy` and is not in that group.
+
+   ```bash
+   sudo apt install -y acl && sudo setfacl -m u:caddy:x /home/administrator
+   ```
+
+   **Not** `usermod -aG administrator caddy` — that group has `rw` on files like
+   `config/env.local.toml`, which would give a network-facing service account
+   *write* access to the checkout. The ACL grants traverse to one user and nothing
+   else; every real secret is `-rw-------` regardless.
+
+   **This is measured in the deploy, not in a test**, because it is a property of
+   the host's filesystem rather than of anything this repo generates.
 6. **`MemoryMax=` on the webgui unit and a raised `CPUWeight` on the stream unit**
    (design mitigation 4 and the contention policy). Both go in
    `generate_units.py`, not hand-edited into a unit file — a hand-edit is
@@ -1510,6 +1531,14 @@ why it is written out.
      Then `curl -s https://neuralstrike.co/config/env.local.toml` → **404.**
      A `file_server` root one level too high leaks every secret on the box and
      the site still looks perfect. **Check this before anything else.**
+
+     ⚠ **A 403 here is NOT a pass, and on 2026-09-06 it fooled exactly this
+     check.** Before the ACL in step 5, every apex path returned 403 — including
+     the homepage — because Caddy could not traverse into the checkout at all.
+     403 reads as "protected" and actually meant "Caddy cannot reach anything",
+     so the sweep proved nothing about the `root *` line. **Confirm the homepage
+     returns 200 first**; only then does a 404 on a secret mean the root is
+     correctly scoped. Re-run the sweep after any permissions change.
    - `curl -sI https://neuralstrike.co/` → **200**, and confirm it is the
      one-pager, not a directory listing.
    - `curl -sI https://app.neuralstrike.co/desk` → **303 to /login**
