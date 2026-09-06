@@ -913,6 +913,16 @@ Key points for whoever writes it:
   standalone HTML document, so it is explicitly out of scope for the Tailwind-first
   rule — same category as the EOD reports and `/wall`.
 - Log every failure via the `webgui` logger at WARNING with the client address.
+- **A corrupt credentials file must refuse, not 500.** `verify_password` fails
+  closed on a malformed hash (Task 3), but `verify_totp` propagates
+  `binascii.Error` on a secret that is not valid base32 — the asymmetry was found
+  in Task 4 and deliberately left there, because the secret comes from our own
+  store rather than the request, and silently swallowing it inside a pure
+  function would hide a real fault. **The call site is where it gets handled:**
+  a truncated or hand-edited `webgui_auth.json` should produce the generic
+  "Sign-in failed" plus a WARNING naming the file, never a traceback on a public
+  page. Test it by saving a `Credentials` with `totp_secret="not-base32!"` and
+  asserting `attempt()` returns `ok is False`.
 
 **Step 4: Run the tests**
 
