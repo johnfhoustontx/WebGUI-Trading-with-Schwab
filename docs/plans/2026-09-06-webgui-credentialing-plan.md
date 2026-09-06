@@ -1032,6 +1032,18 @@ def test_a_page_outside_the_wall_set_is_refused_even_from_loopback(client):
     assert "/options/gamma" not in auth_middleware.WALL_PATHS
 
 
+def test_an_app_with_no_credentials_configured_refuses_everything(client_no_creds):
+    """`auth_store.load()` returns None for BOTH 'no file yet' and 'not
+    configured', so the fail-closed duty lands here, on the caller.
+
+    The tempting bug is the friendly one: treat "no password set" as "nothing to
+    check" and let requests through, so first-boot is easy. On a public hostname
+    that is an open door, and it would look like the app simply working.
+    """
+    r = client_no_creds.get("/desk", headers=_edge(), follow_redirects=False)
+    assert r.status_code == 303, "an unconfigured app must refuse, not admit"
+
+
 def test_an_unauthenticated_websocket_is_closed(client):
     from starlette.websockets import WebSocketDisconnect
     with pytest.raises(WebSocketDisconnect):
