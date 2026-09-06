@@ -225,6 +225,28 @@ maintain, expire or leak; "sign out everywhere" is `epoch += 1`. The trade-off,
 stated plainly: **you can revoke all devices, not one.** For a single user with two
 or three machines, re-trusting them beats maintaining a registry.
 
+⚠ **Each token carries a `kind`, and the two are not interchangeable.** The first
+implementation put only `{epoch, issued_at}` in the payload, which made the
+session and remember tokens **byte-identical** — the sole difference being which
+`max_age_sec` the verifier happened to pass. Measured: a remember-device token
+was accepted in the session slot and vice versa. That silently promotes the
+weaker, longer-lived, on-disk credential into the stronger one: a stolen 30-day
+remember cookie replayed as a session cookie is a **full authenticated session,
+no password and no TOTP** — where its intended power was only "skip the TOTP
+prompt at next login". `kind` is keyword-only with **no default** on both mint and
+verify, because a default is exactly how a future call site would silently
+re-open it.
+
+⚠ **An unusable TOTP secret must REFUSE, not degrade — it is a fail-OPEN
+otherwise.** `base64.b32decode("")` succeeds and yields an empty HMAC key, so
+`pyotp.TOTP("")` derives a valid-looking code from the clock alone. Measured:
+`verify_totp("", "489721", ...)` returned **accepted**. An empty secret therefore
+does not *disable* the second factor — it replaces it with a sequence anyone can
+compute. `_usable_secret` refuses anything empty, shorter than
+`MIN_TOTP_SECRET_LEN` (16 chars / 80 bits), or not base32, and logs a WARNING
+naming the cause; this also converts the corrupt-file `binascii.Error` into a
+refusal rather than a traceback on a public page.
+
 **Failure handling.** One generic "Sign-in failed" that never distinguishes a bad
 password from a bad code. Per-IP *and* global failed-attempt backoff, held in
 memory — it resets on restart, which is acceptable, and it keeps a disk write off
