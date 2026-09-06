@@ -626,16 +626,16 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 14 drawer items (the 11
+    ``icon`` arg; the dot is retired. Scope is the 15 drawer items (the 11
     NAV_SECTIONS entries — the pinned landing block's Desk, plus the 10 workflow
-    ones — + the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
+    ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons are not rail
     affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 14, f"expected 14 drawer items, got {len(items)}: {items}"
+    assert len(items) == 15, f"expected 15 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1255,22 +1255,110 @@ def test_sec_helpers_refuse_an_unknown_group_or_route():
         main._sec_page("/no/such/route")
 
 
-def test_stop_all_services_is_a_danger_button_and_sits_last():
+def test_stop_all_services_is_a_danger_button_and_never_sits_last():
     """The one irreversible item in the rail must not look like — or sit among —
-    the navigation rows it neighbours."""
+    the navigation rows it neighbours.
+
+    Its POSITION reasoning inverted on 2026-09-06. It used to sit last so nothing
+    could be overshot INTO it; the app is now used from a phone, where the bottom
+    edge is the easiest thing to hit, so the last slot is the worst place for it.
+    Sign out took that slot: overshooting the stop now costs a re-login, not a
+    trading day.
+    """
     import inspect
     import main
-    assert main.SYSTEM_RAIL[-1][0] == main.SYSTEM_DANGER_ROUTE == "/terminate"
+    assert main.SYSTEM_DANGER_ROUTE == "/terminate"
+    assert main.SYSTEM_RAIL[-1][0] != main.SYSTEM_DANGER_ROUTE, (
+        "the destructive item must not own the phone's easiest tap target")
     # Settings must come BEFORE it: aiming for Settings and overshooting should
     # not land on "stop the whole stack".
     assert [p for p, _l, _i in main.SYSTEM_RAIL] == [
-        "/status", "/settings", "/terminate"]
+        "/status", "/settings", "/terminate", "/logout"]
     src = inspect.getsource(main._layout)
     assert "_nav_danger_link(" in src, "the danger route gets its own renderer"
     # It claims no active state (a navy active wash under a rose outline reads as
     # a rendering bug) and carries no dot.
     danger = inspect.getsource(main._nav_danger_link)
     assert "nav-active" not in danger and "_alert_dot" not in danger
+
+
+def test_the_rail_order_comment_states_the_reasoning_that_now_applies():
+    """The comment above ``SYSTEM_DANGER_ROUTE`` argues for a POSITION, and the
+    argument inverted when Sign out took the last slot. A comment left asserting
+    the superseded rationale is worse than none: it is the only place the reader
+    is told why the order is what it is, and it would now be telling them the
+    opposite of the truth.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "main.py").read_text(encoding="utf-8")
+    assert "never sits mid-list where Settings is aimed for" not in src, (
+        "the old last-slot rationale survived the reorder")
+    # Scoped to the block that actually argues the position: a match anywhere in
+    # a 2,300-line file would prove nothing about THIS comment.
+    head, _sep, _rest = src.partition("SYSTEM_DANGER_ROUTE = ")
+    block = head[head.rindex("\n\n"):]
+    assert "overshoot" in block.lower(), (
+        "the comment above SYSTEM_DANGER_ROUTE no longer says why the "
+        f"destructive item sits where it does:\n{block}")
+
+
+def test_sign_out_is_the_rails_last_item_and_reuses_the_one_logout_route():
+    """Sign out is a rail row, and it points at the route that already exists.
+
+    ``/logout`` was URL-only until 2026-09-06 — it worked and nothing on screen
+    offered it. The row is deliberately the LAST item: on a phone the bottom edge
+    is the easiest target, so the harmless control belongs there and the
+    destructive one above it.
+
+    The target is read from ``login_page.LOGOUT_ROUTE`` rather than restated, so
+    a second logout path cannot appear by a literal drifting out of step with the
+    ``@app.get`` that clears the cookies.
+    """
+    import main
+    import login_page
+    route, label, icon = main.SYSTEM_RAIL[-1]
+    assert route == login_page.LOGOUT_ROUTE == "/logout"
+    assert label == "Sign out"
+    assert icon, "the collapsed 68px rail shows the icon and nothing else"
+
+
+def test_sign_out_cannot_claim_the_active_wash():
+    """A rail row that leaves the app must never highlight as "you are here".
+
+    ``_nav_link`` washes on ``path == active`` and ``active`` is always the route
+    of the shell page being rendered — so the guarantee is that ``/logout``
+    renders no shell page at all. It is a raw ``@app.get`` returning a 303, which
+    is what makes it un-highlightable by construction rather than by accident.
+    """
+    import main  # noqa: F401  -- importing registers the @ui.page routes
+
+    assert "/logout" not in set(Client.page_routes.values()), (
+        "/logout became a shell page — it would now claim the active wash, and "
+        "the cookie-clearing redirect would stop being what the row does")
+
+
+def test_sign_out_row_renders_no_alert_dot_and_navigates_in_place():
+    """Nothing counts toward signing out, and the row is an ordinary in-place
+    link — not a new tab. ``EXTERNAL_RAIL_ROUTES`` and ``_nav_link(new_tab=)``
+    were deleted with the Live Mirror on 2026-09-02; this must not revive them."""
+    import inspect
+
+    from nicegui import ui
+
+    import main
+    assert not hasattr(main, "EXTERNAL_RAIL_ROUTES")
+    assert "new_tab" not in inspect.signature(main._nav_link).parameters
+
+    main._NAV_BADGES.clear()
+    main._alert_refs.clear()
+    with ui.card():
+        holder = ui.element("div")
+        with holder:
+            main._nav_link("/logout", "Sign out", "logout", "/status")
+    link = holder.default_slot.children[0]
+    assert "nav-active" not in link.classes
+    assert main._NAV_BADGES.get("/logout", 0) == 0
 
 
 def test_stop_all_services_lines_up_with_every_other_drawer_row():

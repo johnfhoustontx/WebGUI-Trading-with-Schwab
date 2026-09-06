@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Reference Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-05</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-06</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -379,6 +379,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
+<li><a href="#sign-out">Sign out</a></li>
 </ul>
 </li>
 <li><a href="#appendix-a-subtab-index">Appendix A — Subtab index</a></li>
@@ -575,9 +576,12 @@ one. Refreshing your browser will not help; restarting the service will.</p>
 </tr>
 </tbody>
 </table>
-<p>At the very bottom of the menu sit three machine-level controls — <strong>System Status</strong>,
-<strong>Settings</strong>, and a red <strong>Stop All Services</strong> button. They are separated deliberately:
-none of them is a step in a trading workflow.</p>
+<p>At the very bottom of the menu sit the machine-level controls — <strong>System Status</strong>,
+<strong>Settings</strong>, a red <strong>Stop All Services</strong> button, and <strong>Sign out</strong> last of all. They
+are separated deliberately: none of them is a step in a trading workflow. Sign out
+takes the bottom slot on purpose, because on a phone the bottom edge is the easiest
+thing to hit and it is the one control down there that costs nothing to press by
+mistake.</p>
 <h2 id="a-trading-day-page-by-page">A trading day, page by page</h2>
 <p>This is the intended path through the app. You will not use every page every day.</p>
 <p><strong>Before the open (07:00–08:30 CT).</strong>
@@ -4108,8 +4112,34 @@ service this app does not own.</p>
 <p>After confirming, this page stops responding. That is expected: it has just stopped the
 program serving it.</p>
 <p>Restart with <code>systemctl --user start trading-prod.target</code>.</p>
-<p>It is rendered as a danger-outlined button and sits <strong>last</strong> in the menu so that
-overshooting Settings cannot land on it.</p>
+<p><strong>The confirmation is a step-up, not just a click.</strong> The dialog asks for the current
+6-digit code from your authenticator app, and the stop runs only when that code
+verifies. A wrong, missing or already-spent code refuses the stop and says which it
+was — you are already signed in, so there is nothing to be coy about. The code is
+recorded as used against the same counter the sign-in form checks, so one code
+cannot do both jobs.</p>
+<p>Why this control and no other: the app is reachable from the internet behind a single
+session cookie, and a stolen cookie or an unlocked phone would cost the rest of the
+trading day — the session's options collection, a live stream dropped mid-broadcast,
+the driver stood down. The arm switch on Claude Trades and Rescue's <strong>Apply</strong> are
+deliberately <em>not</em> gated this way; a code demanded everywhere is a code nobody reads.</p>
+<p>It is rendered as a danger-outlined button, and <strong>Sign out</strong> sits below it — on a
+phone the bottom edge is the easiest target, so the harmless control takes that slot
+and an overshoot costs a re-login rather than a trading day.</p>
+<hr />
+<h2 id="sign-out">Sign out</h2>
+<p><em>Menu: the last row of the rail · Route <code>/logout</code></em></p>
+<p>Ends this browser's session and returns you to the sign-in form. It clears <strong>both</strong>
+credentials the app issues: the session, and the <em>trusted device</em> token — so the next
+sign-in on this machine asks for the authenticator code again. That second half is
+the reason to use it on a borrowed or shared browser; clearing only the session would
+leave a device that still skips the second factor.</p>
+<p>It signs out this browser only. The tokens are stateless by design, so there is no
+"sign out everywhere" button here — other devices stay signed in until their own
+tokens expire.</p>
+<p><strong>It stops nothing.</strong> Services, collectors, scheduled scans and the autonomous driver
+all keep running; signing out only ends your view of them. The page directly above it
+in the rail is the one that stops things.</p>
 <hr />
 <h1 id="appendix-a-subtab-index">Appendix A — Subtab index</h1>
 <p>Pages carrying their own subtab row, and what each subtab does.</p>

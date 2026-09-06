@@ -95,9 +95,12 @@ The left menu is grouped into three captioned sections. Each answers one questio
 | **More** ▸ EOD Report | You want the day's results across every book. |
 | ▸ User Manuals | You want this guide and the other three. |
 
-At the very bottom of the menu sit three machine-level controls — **System Status**,
-**Settings**, and a red **Stop All Services** button. They are separated deliberately:
-none of them is a step in a trading workflow.
+At the very bottom of the menu sit the machine-level controls — **System Status**,
+**Settings**, a red **Stop All Services** button, and **Sign out** last of all. They
+are separated deliberately: none of them is a step in a trading workflow. Sign out
+takes the bottom slot on purpose, because on a phone the bottom edge is the easiest
+thing to hit and it is the one control down there that costs nothing to press by
+mistake.
 
 ## A trading day, page by page
 
@@ -3084,8 +3087,42 @@ program serving it.
 
 Restart with `systemctl --user start trading-prod.target`.
 
-It is rendered as a danger-outlined button and sits **last** in the menu so that
-overshooting Settings cannot land on it.
+**The confirmation is a step-up, not just a click.** The dialog asks for the current
+6-digit code from your authenticator app, and the stop runs only when that code
+verifies. A wrong, missing or already-spent code refuses the stop and says which it
+was — you are already signed in, so there is nothing to be coy about. The code is
+recorded as used against the same counter the sign-in form checks, so one code
+cannot do both jobs.
+
+Why this control and no other: the app is reachable from the internet behind a single
+session cookie, and a stolen cookie or an unlocked phone would cost the rest of the
+trading day — the session's options collection, a live stream dropped mid-broadcast,
+the driver stood down. The arm switch on Claude Trades and Rescue's **Apply** are
+deliberately *not* gated this way; a code demanded everywhere is a code nobody reads.
+
+It is rendered as a danger-outlined button, and **Sign out** sits below it — on a
+phone the bottom edge is the easiest target, so the harmless control takes that slot
+and an overshoot costs a re-login rather than a trading day.
+
+---
+
+## Sign out
+
+*Menu: the last row of the rail · Route `/logout`*
+
+Ends this browser's session and returns you to the sign-in form. It clears **both**
+credentials the app issues: the session, and the *trusted device* token — so the next
+sign-in on this machine asks for the authenticator code again. That second half is
+the reason to use it on a borrowed or shared browser; clearing only the session would
+leave a device that still skips the second factor.
+
+It signs out this browser only. The tokens are stateless by design, so there is no
+"sign out everywhere" button here — other devices stay signed in until their own
+tokens expire.
+
+**It stops nothing.** Services, collectors, scheduled scans and the autonomous driver
+all keep running; signing out only ends your view of them. The page directly above it
+in the rail is the one that stops things.
 
 ---
 

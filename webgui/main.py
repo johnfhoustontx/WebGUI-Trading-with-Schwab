@@ -667,15 +667,30 @@ SETTINGS_CHILDREN = [
 # their own block at the foot of the rail (the conventional place for them). Like
 # OPTIONS_RAIL they are standalone: no tab strip, breadcrumb is just the page name.
 # (route, label, icon)
+#
+# ``Sign out`` is the exception to "rail routes are shell pages": ``/logout`` is
+# a raw ``@app.get`` that clears both cookies and 303s to the form. ``_nav_link``
+# needs nothing special for it — the row is an ordinary in-place link, and the
+# active wash is unreachable by construction, since ``active`` is always the
+# route of a shell page being rendered and this route renders none.
 SYSTEM_RAIL = [
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
     ("/terminate", "Stop All Services", "power_settings_new"),
+    (login_page.LOGOUT_ROUTE, "Sign out", "logout"),
 ]
 
 # The one DESTRUCTIVE item in the rail. It is rendered as a danger-outlined
-# button rather than a fourth navigation row (see ``_nav_danger_link``) and sits
-# last, so "stop everything" never sits mid-list where Settings is aimed for.
+# button rather than a plain navigation row (see ``_nav_danger_link``).
+#
+# It used to sit LAST, on the reasoning that nothing could then be overshot into
+# it. That inverted on 2026-09-06, when the app went public and became something
+# used from a phone: on a touch screen the bottom edge is the EASIEST thing to
+# hit, so the last slot is the worst place for the irreversible control. Sign
+# out took it instead — overshooting the stop now costs a re-login rather than
+# the rest of the trading day. Settings still sits above the stop for the same
+# reason it always did, and the stop itself now also demands a TOTP code
+# (``pages/terminate.py``), so a mis-tap is two barriers from doing anything.
 SYSTEM_DANGER_ROUTE = "/terminate"
 
 # ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────

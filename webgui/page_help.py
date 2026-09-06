@@ -814,6 +814,19 @@ A big red stop button for the whole local stack.
 - Confirming stops the gateway, the services, and this web app — the page then goes
   unresponsive (that's expected).
 - Re-launch with `systemctl --user start trading-<env>.target`. Redis keeps running.
+- Confirming also asks for the 6-digit code from your authenticator app. A wrong,
+  missing or already-used code refuses the stop; nothing is stopped.
+""",
+    "/logout": """
+**Sign out — the simple version**
+
+Ends this browser's session and returns you to the sign-in page.
+
+- It also forgets a **trusted device**, so the next sign-in asks for your
+  authenticator code again — which is the point on a borrowed or shared machine.
+- It signs out THIS browser only. Other devices stay signed in.
+- Nothing running is affected: the services, the collectors and the driver all
+  carry on. Signing out is not stopping anything.
 """,
 }
 

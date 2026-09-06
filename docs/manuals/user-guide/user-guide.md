@@ -148,7 +148,8 @@ launcher, or restart the specific service from the **System Status** page.
 
 ## Stopping everything
 
-Use **Stop All Services** at the foot of the rail, or run
+Use **Stop All Services** at the foot of the rail — it asks for your
+authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
 gateway, the six services, and the web app. (Redis is intentionally left
 running — it is a *system* service the app's own units cannot reach.)
@@ -203,9 +204,11 @@ question, plus a block of machine controls pinned to the bottom.
 | **More** (group) | EOD Report · User Manuals |
 
 **System controls** sit at the foot of the rail, below a separator: **System
-Status**, **Settings**, and a red-outlined **Stop All Services** button. They are
-kept apart because none of them is a step in a trading workflow, and the
-destructive one is placed last so overshooting Settings cannot land on it.
+Status**, **Settings**, a red-outlined **Stop All Services** button, and **Sign
+out**. They are kept apart because none of them is a step in a trading workflow.
+Sign out is last on purpose: on a phone the bottom edge is the easiest thing to
+hit, so the slot goes to the control that costs nothing if you hit it by mistake,
+and the destructive one sits above it.
 
 Two groupings are worth explaining because they are deliberate:
 
@@ -1438,7 +1441,7 @@ A health board for the whole stack.
 **Route:** `/settings` — a standalone item at the **foot of the rail**, with System
 Status and Stop All Services.
 
-Preferences, all saved on your machine (there is no login):
+Preferences, all saved on your machine:
 
 - **Scanner alerts** — enable the audio alert, pick the sound (chime / bell /
   ping), a **Test sound** button, a **Volume** slider, an **only during market
@@ -1493,9 +1496,36 @@ group, next to EOD Report.
 A guarded "stop the whole local stack" page. The red **Stop all services** button
 (behind a confirmation) stops the gateway, the six services, and the web app.
 
+**The confirmation asks for your authenticator code.** Type the current 6-digit
+code from your authenticator app into the dialog and press **Stop everything**. A
+wrong, missing, or already-used code refuses the stop and says so — nothing is
+stopped, and you can wait for the next code and try again. A code you spend here
+cannot then be used to sign in (and vice versa), so if you have just signed in,
+wait for the next one.
+
 > **This also stops the page you're on** — it will become unresponsive right after
 > you confirm, by design. Redis is left running. Re-launch with
 > `systemctl --user start trading-prod.target`.
+
+---
+
+## Sign out
+
+**Route:** `/logout` — the last item in the rail, below Stop All Services.
+
+Ends this browser's session and returns you to the sign-in page. It also forgets a
+**trusted device**, so the next sign-in asks for your authenticator code again —
+which is the point on a borrowed or shared machine.
+
+- It signs out **this browser only**. Other devices you are signed in on stay
+  signed in.
+- Nothing running is affected. The services, the collectors, the scheduled scans
+  and the autonomous driver all carry on. Signing out is not stopping anything —
+  that is the page above it.
+
+It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
+the easiest thing to hit, so the harmless control gets that slot and the
+stop-everything button sits above it.
 
 ---
 

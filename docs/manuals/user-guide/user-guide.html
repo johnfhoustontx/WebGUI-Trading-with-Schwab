@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-05</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-06</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -138,6 +138,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#system-status">System Status</a></li>
 <li><a href="#settings">Settings</a></li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
+<li><a href="#sign-out">Sign out</a></li>
 </ul>
 </li>
 <li><a href="#faq-troubleshooting">FAQ &amp; Troubleshooting</a></li>
@@ -283,7 +284,8 @@ restart components.</p>
 message, that service hasn't started or has stopped. Start the full stack with a
 launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
 <h2 id="stopping-everything">Stopping everything</h2>
-<p>Use <strong>Stop All Services</strong> at the foot of the rail, or run
+<p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
+authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
 gateway, the six services, and the web app. (Redis is intentionally left
 running — it is a <em>system</em> service the app's own units cannot reach.)</p>
@@ -379,9 +381,11 @@ question, plus a block of machine controls pinned to the bottom.</p>
 </tbody>
 </table>
 <p><strong>System controls</strong> sit at the foot of the rail, below a separator: <strong>System
-Status</strong>, <strong>Settings</strong>, and a red-outlined <strong>Stop All Services</strong> button. They are
-kept apart because none of them is a step in a trading workflow, and the
-destructive one is placed last so overshooting Settings cannot land on it.</p>
+Status</strong>, <strong>Settings</strong>, a red-outlined <strong>Stop All Services</strong> button, and <strong>Sign
+out</strong>. They are kept apart because none of them is a step in a trading workflow.
+Sign out is last on purpose: on a phone the bottom edge is the easiest thing to
+hit, so the slot goes to the control that costs nothing if you hit it by mistake,
+and the destructive one sits above it.</p>
 <p>Two groupings are worth explaining because they are deliberate:</p>
 <ul>
 <li><strong>Dealer Positioning, Opportunity Board and Flow Alerts sit under MARKETS, not
@@ -1589,7 +1593,7 @@ fetch anything.</p>
 <h2 id="settings">Settings</h2>
 <p><strong>Route:</strong> <code>/settings</code> — a standalone item at the <strong>foot of the rail</strong>, with System
 Status and Stop All Services.</p>
-<p>Preferences, all saved on your machine (there is no login):</p>
+<p>Preferences, all saved on your machine:</p>
 <ul>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
@@ -1638,11 +1642,33 @@ group, next to EOD Report.</p>
 <p><strong>Route:</strong> <code>/terminate</code> — the red button at the foot of the rail.</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
 (behind a confirmation) stops the gateway, the six services, and the web app.</p>
+<p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
+code from your authenticator app into the dialog and press <strong>Stop everything</strong>. A
+wrong, missing, or already-used code refuses the stop and says so — nothing is
+stopped, and you can wait for the next code and try again. A code you spend here
+cannot then be used to sign in (and vice versa), so if you have just signed in,
+wait for the next one.</p>
 <blockquote>
 <p><strong>This also stops the page you're on</strong> — it will become unresponsive right after
 you confirm, by design. Redis is left running. Re-launch with
 <code>systemctl --user start trading-prod.target</code>.</p>
 </blockquote>
+<hr />
+<h2 id="sign-out">Sign out</h2>
+<p><strong>Route:</strong> <code>/logout</code> — the last item in the rail, below Stop All Services.</p>
+<p>Ends this browser's session and returns you to the sign-in page. It also forgets a
+<strong>trusted device</strong>, so the next sign-in asks for your authenticator code again —
+which is the point on a borrowed or shared machine.</p>
+<ul>
+<li>It signs out <strong>this browser only</strong>. Other devices you are signed in on stay
+  signed in.</li>
+<li>Nothing running is affected. The services, the collectors, the scheduled scans
+  and the autonomous driver all carry on. Signing out is not stopping anything —
+  that is the page above it.</li>
+</ul>
+<p>It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
+the easiest thing to hit, so the harmless control gets that slot and the
+stop-everything button sits above it.</p>
 <hr />
 <h1 id="faq-troubleshooting">FAQ &amp; Troubleshooting</h1>
 <p><strong>A red "proxy unreachable" banner is on every page.</strong>

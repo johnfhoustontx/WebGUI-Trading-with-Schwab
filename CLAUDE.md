@@ -183,10 +183,10 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **14 items** — a top-pinned **Desk** alone in a
+the left drawer holds **15 items** — a top-pinned **Desk** alone in a
 **caption-less leading `NAV_SECTIONS` block** (2026-08-18), 10 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
-**Settings**, **Stop All Services**) — and the active group's
+**Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with
 `.compact-tabs` small padding — q-tab min-height 30px — clicking a tab
@@ -234,10 +234,24 @@ Options group sits under STRATEGY while Dealer Positioning
 market-WIDE reads, the Options group is the per-signal find → analyze → track →
 repair workflow. `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
 is the guard that matters: a regrouping that drops or doubles an item is invisible
-to every other test. **Stop All Services** is now a **danger-outlined button**
-(`_nav_danger_link`) sitting LAST in `SYSTEM_RAIL` (`SYSTEM_DANGER_ROUTE`) — the
-one irreversible item in the rail, moved out from between System Status and
-Settings so an overshoot can't land on it. A **live service-status card**
+to every other test. **Stop All Services** is a **danger-outlined button**
+(`_nav_danger_link`, `SYSTEM_DANGER_ROUTE`) — the one irreversible item in the
+rail. ⚠ **Its position argument INVERTED on 2026-09-06 and the comment in
+`main.py` records the current one** — it sat last so nothing could be overshot
+INTO it, but the app is now used from a phone, where the bottom edge is the
+easiest target, so the last slot is the worst place for it. **`Sign out` took
+that slot** (`login_page.LOGOUT_ROUTE`, the one existing raw `@app.get` that
+clears both cookies and 303s to `/login`): an overshoot now costs a re-login,
+not the rest of the trading day. It is the one `SYSTEM_RAIL` route that is
+**not a shell page**, which is exactly why `_nav_link` needs nothing special for
+it — `active` is always a rendered page's route, so the wash is unreachable by
+construction. The stop itself also demands a **fresh TOTP code** in its confirm
+dialog (`pages/terminate.verify_stop_code`, persisting the accepted counter to
+the SAME `auth_store` file the login form reads, so a code spent on one cannot
+serve the other). ⚠ `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
+does NOT cover `SYSTEM_RAIL` — it asserts those routes stay OUT of the sections
+— so a footer row dropped or doubled is caught only by the drawer-icon
+count/distinctness test and the two `test_shell.py` sign-out tests. A **live service-status card**
 (`_status_card` / PURE `status_card_facts`) sits above that block: it reads the
 throttled `/health` fan-out the watcher ALREADY runs (no new probe; latency is the
 mean of services that ANSWERED — a timed-out probe would report the failure, not

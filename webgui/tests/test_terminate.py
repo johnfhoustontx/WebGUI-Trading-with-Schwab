@@ -60,3 +60,225 @@ def test_copy_states_that_stopping_the_proxy_is_ownership_conditional():
     # `systemctl --user` target stop cannot reach it even in principle.
     assert "Redis" in src
     assert "Memurai" not in src
+
+
+# --- TOTP step-up ------------------------------------------------------------
+# Stopping the stack is reachable from the public internet behind ONE session
+# cookie, and it costs a trading day: the GEX slots for the rest of the session,
+# a live YouTube stream mid-broadcast, the driver stood down. So the confirm
+# dialog asks for a fresh authenticator code as well.
+#
+# Like the sibling auth suites, every test here passes ``now=`` explicitly and
+# never patches a clock, so nothing depends on which side of a 30 s TOTP window
+# the run happens to land on.
+import logging
+
+import pyotp
+import pytest
+
+import auth
+import auth_store
+import login_page
+
+T0 = 1_757_000_000.0
+PASSWORD = "hunter2"
+SECRET = "JBSWY3DPEHPK3PXP" * 2      # 32 chars, comfortably over the 16 floor
+KEY = "k" * 43
+
+
+def _code(at=T0):
+    return pyotp.TOTP(SECRET, interval=auth.TOTP_PERIOD_SEC).at(at)
+
+
+@pytest.fixture
+def creds(tmp_path, monkeypatch):
+    """A real credentials file on a tmp path.
+
+    ``auth_store.load()`` is called with NO path so it resolves DEFAULT_PATH at
+    CALL time -- which is what makes patching the module attribute enough, and is
+    the shape this repo prefers after a fixture that patched a captured default
+    wrote into the live database for six weeks.
+    """
+    c = auth_store.Credentials(password_hash=auth.hash_password(PASSWORD),
+                               totp_secret=SECRET, session_secret=KEY,
+                               epoch=1, last_totp_counter=0)
+    path = tmp_path / "webgui_auth.json"
+    auth_store.save(c, path)
+    monkeypatch.setattr(auth_store, "DEFAULT_PATH", path)
+    return c
+
+
+@pytest.fixture(autouse=True)
+def _fresh_lockout():
+    """``login_page`` holds ONE LockoutState, shared by every test in the run.
+    The cross-path tests below drive real sign-ins through it, so they clean up
+    after themselves rather than leaking failures into whatever runs next."""
+    login_page.reset_lockout()
+    yield
+    login_page.reset_lockout()
+
+
+def test_a_valid_code_authorizes_the_stop(creds):
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is True
+    assert msg == ""
+
+
+def test_a_wrong_code_refuses_and_says_so_plainly(creds):
+    """NOT the login form's generic sentence. The visitor here has already
+    authenticated, so withholding which gate they hit protects nobody and just
+    leaves them retyping a code that was never going to work."""
+    ok, msg = terminate.verify_stop_code("000000", now=T0)
+    assert ok is False
+    assert msg == terminate.CODE_REJECTED
+    assert msg != login_page.GENERIC_FAILURE
+    assert "code" in msg.lower()
+
+
+def test_a_missing_or_blank_code_refuses(creds):
+    for empty in (None, "", "   "):
+        ok, msg = terminate.verify_stop_code(empty, now=T0)
+        assert ok is False, empty
+        assert msg == terminate.CODE_REQUIRED, empty
+
+
+def test_a_short_or_non_numeric_code_refuses(creds):
+    for bad in ("12345", "1234567", "12345a", "12 456"):
+        ok, _msg = terminate.verify_stop_code(bad, now=T0)
+        assert ok is False, bad
+
+
+def test_a_code_spent_on_the_stop_cannot_then_sign_in(creds):
+    """The whole reason the accepted counter is PERSISTED.
+
+    Verifying without saving looks identical from inside this module -- the stop
+    is authorized either way -- and silently leaves the code usable at the login
+    form for the rest of its window (90 s, with drift). This is the test that
+    fails when the save is skipped.
+    """
+    code = _code()
+    assert terminate.verify_stop_code(code, now=T0)[0] is True
+
+    token = login_page.mint_form_token(creds.session_secret, epoch=creds.epoch,
+                                       now=T0)
+    result = login_page.attempt(password=PASSWORD, code=code, client="1.2.3.4",
+                                form_token=token, remember_token=None, now=T0)
+    assert result.ok is False
+
+
+def test_a_code_spent_on_a_sign_in_cannot_then_stop_the_stack(creds):
+    """The converse, and it is not implied by the first: the stop path has to
+    READ ``last_totp_counter`` from the store on every call, not from a value it
+    captured at import."""
+    code = _code()
+    token = login_page.mint_form_token(creds.session_secret, epoch=creds.epoch,
+                                       now=T0)
+    assert login_page.attempt(password=PASSWORD, code=code, client="1.2.3.4",
+                              form_token=token, remember_token=None,
+                              now=T0).ok is True
+
+    ok, msg = terminate.verify_stop_code(code, now=T0)
+    assert ok is False
+    assert msg == terminate.CODE_REJECTED
+
+
+def test_the_same_code_cannot_stop_the_stack_twice(creds):
+    code = _code()
+    assert terminate.verify_stop_code(code, now=T0)[0] is True
+    assert terminate.verify_stop_code(code, now=T0)[0] is False
+
+
+def test_an_unconfigured_credentials_file_refuses_rather_than_raising(
+        tmp_path, monkeypatch):
+    """``auth_store.load()`` returns None when nothing is configured. Refusing is
+    the right call: if the code cannot be checked, the destructive action does
+    not happen -- and it must not 500 the page either."""
+    monkeypatch.setattr(auth_store, "DEFAULT_PATH", tmp_path / "nothing.json")
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is False
+    assert msg == terminate.CANNOT_VERIFY
+
+
+def test_a_corrupt_credentials_file_refuses_rather_than_raising(
+        tmp_path, monkeypatch):
+    """``auth_store.load()`` RAISES CredentialsError on a corrupt file -- by
+    design, since a config-style "fall back to defaults" would mean "no
+    password". That exception must not reach the page."""
+    path = tmp_path / "webgui_auth.json"
+    path.write_text("{ this is not json", encoding="utf-8")
+    monkeypatch.setattr(auth_store, "DEFAULT_PATH", path)
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is False
+    assert msg == terminate.CANNOT_VERIFY
+
+
+def test_an_unusable_secret_refuses_rather_than_waving_the_stop_through(
+        tmp_path, monkeypatch):
+    """An empty TOTP secret does not disable the second factor -- ``auth`` makes
+    every code fail rather than pass, and the stop must inherit that."""
+    c = auth_store.Credentials(password_hash=auth.hash_password(PASSWORD),
+                               totp_secret="", session_secret=KEY)
+    path = tmp_path / "webgui_auth.json"
+    auth_store.save(c, path)
+    monkeypatch.setattr(auth_store, "DEFAULT_PATH", path)
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is False
+    assert msg == terminate.CODE_REJECTED
+
+
+def test_a_counter_that_cannot_be_recorded_refuses_the_stop(creds, monkeypatch):
+    """Same call the login route makes: a code we cannot record is a code we
+    cannot stop being replayed, so the otherwise-valid attempt is refused."""
+    def _boom(*_a, **_kw):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(auth_store, "save", _boom)
+    ok, msg = terminate.verify_stop_code(_code(), now=T0)
+    assert ok is False
+    assert msg == terminate.CANNOT_RECORD
+
+
+def test_both_outcomes_leave_a_warning_in_the_log(creds, caplog):
+    """Stopping a trading stack should leave a trace, and so should a failed try
+    at it -- WARNING either way, because "someone tried to stop the stack" is the
+    line an operator wants to find after the fact."""
+    with caplog.at_level(logging.WARNING, logger="webgui.terminate"):
+        terminate.verify_stop_code("000000", now=T0)
+        assert [r for r in caplog.records if r.levelno == logging.WARNING], \
+            "a refused stop attempt logged nothing"
+
+        caplog.clear()
+        terminate.verify_stop_code(_code(), now=T0)
+        allowed = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert allowed, "an authorized stop logged nothing"
+    assert any(terminate.STOP_TARGET in r.getMessage() for r in allowed), \
+        "the authorized-stop line must name what is being stopped"
+
+
+def test_a_refusal_never_rewinds_the_replay_guard(creds):
+    """A rejected code hands ``last_counter`` straight back, so a refusal must
+    never write a LOWER counter than the one already stored."""
+    assert terminate.verify_stop_code(_code(), now=T0)[0] is True
+    after = auth_store.load()
+    terminate.verify_stop_code("000000", now=T0)
+    assert auth_store.load().last_totp_counter == after.last_totp_counter
+
+
+def test_the_stop_is_reachable_only_through_the_code_check():
+    """Wiring guard: the dialog must not reach ``_spawn_stop`` without going
+    through ``verify_stop_code`` first. The handler cannot be driven under pytest
+    (no client), so this reads the source -- the idiom test_shell.py uses."""
+    src = inspect.getsource(terminate.render)
+    assert "verify_stop_code(" in src
+    before = src.split("verify_stop_code(", 1)[0]
+    assert "_spawn_stop()" not in before, \
+        "render() reaches _spawn_stop() before the code is verified"
+
+
+def test_the_dialog_still_carries_its_warnings_and_a_way_out():
+    """The step-up is an ADDITION. Everything the page already said about what a
+    stop costs -- including that it kills the page you are looking at -- and the
+    way to back out of it both survive."""
+    src = inspect.getsource(terminate.render)
+    assert "This also stops THIS web app" in src
+    assert "Cancel" in src
