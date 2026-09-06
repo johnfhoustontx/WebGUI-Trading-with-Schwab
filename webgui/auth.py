@@ -92,3 +92,100 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None,
         if hmac.compare_digest(totp.at(moment), code):
             return True, counter
     return False, last_counter
+
+
+# ---------------------------------------------------------------------------
+# Session and remember-device tokens.
+#
+# Both cookies carry the SAME kind of stateless bearer token; only the max age
+# the verifier applies differs -- 12 h for the session cookie, 30 days for the
+# "trust this device" cookie that lets a later login skip the TOTP prompt.
+#
+# There is deliberately NO server-side registry of issued tokens: nothing to
+# expire, leak, or keep in sync with the credentials file. The accepted cost is
+# that revocation is all-or-nothing -- bump ``epoch`` and every outstanding token
+# on every device dies at once ("sign out everywhere"), then re-trust your two or
+# three machines. For one user that beats maintaining a device table.
+#
+# CLOCK (decided -- please do not re-litigate). This signs with the UNTIMED
+# ``URLSafeSerializer`` and stamps ``issued_at`` into the payload itself, rather
+# than using ``URLSafeTimedSerializer``, which reads ``time.time()`` inside the
+# library and gives the caller no way to pass an instant in. Owning the timestamp
+# is what lets ``now=`` be a real argument, so the expiry rules below are plain
+# arithmetic over a value this module chose. The alternative is monkeypatching
+# the module-level ``time`` inside ``itsdangerous.timed``, which tests the
+# library's clock as much as ours -- and this repo has an expensive precedent for
+# tests that end up pinning whatever the code happens to do
+# (``test_adx_uses_wilder_smoothing`` pinned a wrong ADX for years). An expiry
+# check on an internet-facing login is the last place that should happen.
+import math
+
+import itsdangerous
+
+SESSION_MAX_AGE_SEC = 12 * 3600
+REMEMBER_MAX_AGE_SEC = 30 * 24 * 3600
+
+# Mixed into the HMAC key derivation, so changing it invalidates every
+# outstanding token exactly as an epoch bump does. Version it; never edit it.
+_SALT = "webgui-auth-v1"
+
+
+def _serializer(key: str) -> itsdangerous.URLSafeSerializer:
+    return itsdangerous.URLSafeSerializer(key, salt=_SALT)
+
+
+def mint_token(key: str, *, epoch: int, now: float | None = None) -> str:
+    """A stateless bearer token carrying only the epoch it was issued under.
+
+    There is NO server-side token registry on purpose: nothing to expire, leak or
+    keep in sync. The cost, stated in the design, is that revocation is
+    all-or-nothing -- bump ``epoch`` and re-trust your devices.
+
+    The payload is signed, not encrypted, so whoever holds the token can read the
+    epoch and the issue time. Neither is a secret; the security is that the token
+    cannot be PRODUCED without ``key``.
+    """
+    at = time.time() if now is None else now
+    return _serializer(key).dumps({"epoch": int(epoch), "iat": float(at)})
+
+
+def verify_token(token: str | None, key: str, *, epoch: int,
+                 max_age_sec: int, now: float | None = None) -> bool:
+    """True only for an untampered, unexpired token issued under ``epoch``.
+
+    Never raises on the TOKEN, whatever it contains: that argument is fully
+    attacker-controlled cookie input on a public endpoint, where an exception is
+    a 500 rather than a refusal. ``key`` and ``epoch`` come from our own
+    credentials file and are deliberately NOT defended -- a malformed one is a
+    bug that should be loud, not a login that quietly fails shut.
+    """
+    if not isinstance(token, str) or not token:
+        return False
+    try:
+        payload = _serializer(key).loads(token)
+    except (itsdangerous.BadData, ValueError):
+        # BadData covers every "this is not our token" case. ValueError is here
+        # for UnicodeEncodeError, which is NOT a BadData subclass: itsdangerous
+        # encodes to UTF-8 before it can judge the value, so a lone surrogate in
+        # a cookie would otherwise escape as a 500 on the login route.
+        return False
+    if not isinstance(payload, dict) or payload.get("epoch") != int(epoch):
+        return False
+
+    issued_at = payload.get("iat")
+    if isinstance(issued_at, bool) or not isinstance(issued_at, (int, float)) or not math.isfinite(issued_at):
+        return False
+
+    age = (time.time() if now is None else now) - issued_at
+    # Both bounds, stated as one range on purpose. A NEGATIVE age means the token
+    # is dated into the future -- a clock that has since moved backwards, and the
+    # shape anyone trying to stretch a 12 h session would aim for -- so it is
+    # refused rather than tolerated.
+    #
+    # This range spelling is ALSO what refuses a non-finite age today, since
+    # every comparison against NaN is False. Measured, so state it accurately:
+    # the ``math.isfinite`` clause above is redundant while this line reads as it
+    # does, and is kept as belt-and-braces for the obvious future refactor --
+    # ``if age > max_age_sec: return False`` then ``return True`` -- which would
+    # otherwise hand a NaN-dated token a pass that never expires.
+    return 0 <= age <= max_age_sec
