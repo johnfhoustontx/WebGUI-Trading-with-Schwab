@@ -1167,7 +1167,9 @@ symbol up on <strong>Market Dashboard</strong> or in your broker.</p>
 expiry — for example <code>210c 10/16</code>, with <code>×2</code> if more than one contract. A blank cell
 means the shares are uncovered: all the upside is yours and no premium is being
 collected. A call <em>spread</em> on the same symbol is not a covering call and is not shown
-here.</p>
+here. The match is by <strong>symbol, not by lot</strong> — the book keeps no record of which
+shares a call was written against — so if you hold two lots of one name and have
+written one call, that call appears on both rows.</p>
 <p>There is nothing to press. Lots appear when the engine settles an in-the-money short
 put and disappear when the shares are sold or called away. What they are <em>for</em> is the
 <strong>Income</strong> tab, which screens covered calls against these lots and never offers a

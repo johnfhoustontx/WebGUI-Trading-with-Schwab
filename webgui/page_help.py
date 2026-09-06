@@ -451,7 +451,11 @@ the strike. Those shares land here.
 - **Covering call** — the call already written against that symbol, if there is one.
   Blank means the shares are uncovered: you keep all the upside, and you are
   collecting no premium. A call **spread** on the same symbol is *not* a covering
-  call and is deliberately not shown here.
+  call and is deliberately not shown here. ⚠ The call is matched by **symbol, not
+  by lot** — the book records no link from a call back to the shares it was
+  written against — so with two lots of one name and one call written, the same
+  call shows on both rows and the screen cannot tell you which hundred shares are
+  covered.
 - Shares owned are what make a **covered call** possible. The **Income** tab screens
   calls against these lots, never below their cost basis.
 - Nothing on this page is an action. Lots appear and disappear as the engine settles
