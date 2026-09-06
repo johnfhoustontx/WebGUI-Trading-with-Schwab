@@ -358,6 +358,11 @@ reaches the login form, and you will be bookmarking it anyway.
    fetch the form first. That case is the lockout counter's job. This filters
    volume, and volume is what the Discord and Telegram links will bring.
 
+   ⚠ **The form token is a THIRD `kind`, never a reused session kind.** Minting
+   it as `KIND_SESSION` would mean `GET /login` hands every anonymous visitor a
+   valid session token — the login page issuing the credential it exists to
+   withhold. Three kinds, all distinct, all keyword-only with no default.
+
 ### Watching whether the public site becomes a load problem
 
 The one-pager is served from this box by choice — one config, one deploy path,
