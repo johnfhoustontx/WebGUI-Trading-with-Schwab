@@ -338,8 +338,14 @@ def test_the_redirect_never_carries_an_offsite_or_forged_next(path, expected):
     assert _location(path) == expected
 
 
-def _location(path: str, query: bytes = b"") -> str:
-    """Run one unauthenticated GET through the gate and read ``Location:``."""
+def _location(path: str, query: bytes = b"", *, peer=REMOTE_PEER,
+              edge: bool = True) -> str:
+    """Run one unauthenticated GET through the gate and read ``Location:``.
+
+    ``peer``/``edge`` default to the ordinary outside caller. They are arguments
+    so the kiosk's own scope -- loopback, no ``X-Edge`` -- can be driven too,
+    which is the only way to reach the wall exemption from a hand-built scope.
+    """
     import asyncio
 
     sent = []
@@ -356,8 +362,8 @@ def _location(path: str, query: bytes = b"") -> str:
     gate = auth_middleware.AuthGate(app, session_key=lambda: KEY,
                                     epoch=lambda: 1)
     asyncio.run(gate({"type": "http", "path": path, "query_string": query,
-                      "headers": [(b"x-edge", b"1")],
-                      "client": REMOTE_PEER}, receive, send))
+                      "headers": [(b"x-edge", b"1")] if edge else [],
+                      "client": peer}, receive, send))
     headers = dict(sent[0]["headers"])
     return headers[b"location"].decode()
 
@@ -465,3 +471,36 @@ def test_an_unknown_scope_type_is_passed_through():
 
     asyncio.run(gate({"type": "something_new"}, noop, noop))
     assert seen == ["something_new"]
+
+
+# --- the wall prefixes are a scope, not a substring test --------------------
+
+@pytest.mark.parametrize("path", [
+    "/static/../settings",
+    "/static/../../etc/passwd",
+    "/_nicegui_ws/../terminate",
+])
+def test_a_dot_dot_segment_never_takes_the_kiosk_exemption(path):
+    """``scope["path"]`` is percent-decoded but NOT normalised.
+
+    So ``/static/../settings`` really does start with ``/static/`` and would
+    take the prefix branch of condition 3. Not exploitable today -- the router
+    matches the same unnormalised path, so it reaches ``StaticFiles``, which
+    refuses traversal itself -- but that leaves this module's scoping claim
+    resting on two other components' behaviour. The exemption says "the paths
+    the wall renders"; a path with a ``..`` segment is not one of them.
+
+    Driven through a hand-built scope: no HTTP client will send this, because
+    URL resolution folds ``..`` before the request line is written.
+    """
+    assert _location(path, peer=LOOPBACK_PEER, edge=False).startswith("/login")
+
+
+def test_the_kiosk_still_reaches_an_ordinary_static_asset(client):
+    """The negative above must not have cost the thing it is scoping.
+
+    A real asset path has no ``..`` segment, so the kiosk's iframes still load
+    their CSS and sounds. (404 from the app, not 303 from the gate: this test
+    app registers no ``/static`` mount, and the distinction is the whole point.)
+    """
+    assert client.get("/static/sounds/chime.wav").status_code == 404

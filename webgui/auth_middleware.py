@@ -261,10 +261,24 @@ class AuthGate:
            to reach the whole app: ``/settings`` can rotate the credentials and
            ``/terminate`` stops the stack, so the grant is scoped to the three
            framed pages and the runtime they need.
+
+        ⚠ A ``..`` SEGMENT DISQUALIFIES THE PATH ENTIRELY, before condition 3 is
+        asked. ``scope["path"]`` is percent-decoded but NOT normalised, so
+        ``/static/../settings`` -- and its ``%2e%2e`` and ``..%2f`` spellings --
+        genuinely starts with ``/static/`` and would take the prefix branch. It
+        is not exploitable today (the router matches the same unnormalised path,
+        so it lands on ``StaticFiles``, which refuses traversal itself), but
+        that leaves this module's scoping claim resting on two other
+        components' behaviour. Condition 3 says the grant is scoped to what the
+        wall renders; this is what makes that sentence true here rather than
+        true by luck. Nothing legitimate is refused -- a browser folds ``..``
+        during URL resolution, before the request line is written.
         """
         if not _is_loopback(_peer(scope)):
             return False
         if _header(scope, EDGE_HEADER) is not None:
+            return False
+        if ".." in path.split("/"):
             return False
         return path in WALL_PATHS or path.startswith(WALL_PREFIXES)
 

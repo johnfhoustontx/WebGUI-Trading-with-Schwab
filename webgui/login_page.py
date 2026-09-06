@@ -64,6 +64,29 @@ GENERIC_FAILURE = "Sign-in failed."
 
 DEFAULT_NEXT = "/desk"
 
+# The route this module's form posts to, and the five field names it emits.
+#
+# Constants rather than literals in both places because the drift is SILENT: the
+# route reads the form by name, so renaming a field in the template while the
+# handler still asks for the old one produces a login that refuses every correct
+# password, with a generic "Sign-in failed" and nothing in the log to say the
+# field was simply absent. The remember checkbox is the worst of the five --
+# there the symptom is only that trusting a device quietly stops working, which
+# nobody would report as a bug.
+ROUTE = "/login"
+LOGOUT_ROUTE = "/logout"
+
+FIELD_NEXT = "next"
+FIELD_FORM_TOKEN = "form_token"
+FIELD_PASSWORD = "password"
+FIELD_CODE = "code"
+FIELD_REMEMBER = "remember"
+
+# An unchecked box submits NOTHING at all -- the browser omits the field
+# entirely rather than sending a falsy value -- so the route tests presence, and
+# this is only the value a ticked box carries.
+REMEMBER_ON = "1"
+
 
 # ---------------------------------------------------------------------------
 # The failed-attempt counter.
@@ -121,17 +144,70 @@ def verify_form_token(token: str | None, creds: auth_store.Credentials, *,
                              max_age_sec=FORM_TOKEN_MAX_AGE_SEC, now=now)
 
 
-def issue_form_token(*, now: float | None = None) -> str | None:
-    """The token ``GET /login`` embeds in the form, or None when it cannot.
+# ---------------------------------------------------------------------------
+# The two cookie tokens.
+#
+# Their ``kind`` and their ``max_age_sec`` are paired HERE and nowhere else, so
+# the route never names either. That is not tidiness: ``auth.mint_token`` and
+# ``auth.verify_token`` both take ``kind`` keyword-only with no default
+# precisely because a call site that gets it wrong re-opens the substitution the
+# discriminator was added to close -- and a route that had to write
+# ``kind=auth.KIND_SESSION, max_age_sec=auth.SESSION_MAX_AGE_SEC`` by hand is
+# exactly such a call site. There is one place to read, and one to change.
+
+def mint_session_token(key: str, *, epoch: int, now: float | None = None) -> str:
+    return auth.mint_token(key, kind=auth.KIND_SESSION, epoch=epoch, now=now)
+
+
+def mint_remember_token(key: str, *, epoch: int, now: float | None = None) -> str:
+    return auth.mint_token(key, kind=auth.KIND_REMEMBER, epoch=epoch, now=now)
+
+
+def verify_remember_token(token: str | None, creds: auth_store.Credentials, *,
+                          now: float | None = None) -> bool:
+    """True for an untampered, unexpired remember-device token of THIS epoch.
+
+    Its one power is waiving the TOTP prompt inside ``attempt`` -- never the
+    password, and never admission on its own (the gate does not read this
+    cookie at all). ``epoch`` comes from the credentials file, so "sign out
+    everywhere" kills trusted devices along with live sessions.
+    """
+    return auth.verify_token(token, creds.session_secret, kind=auth.KIND_REMEMBER,
+                             epoch=creds.epoch,
+                             max_age_sec=auth.REMEMBER_MAX_AGE_SEC, now=now)
+
+
+def _issue(kind: str, *, now: float | None = None) -> str | None:
+    """Mint a token of ``kind`` against the CURRENT store, or None.
 
     None rather than an exception: an unconfigured or corrupt credentials file
     must render a login page that refuses, not a traceback on a public URL. The
-    reason is logged; the visitor is told nothing.
+    reason is logged by ``_load_credentials``; the visitor is told nothing.
+
+    The store is read at CALL time on every one of these, which matters most for
+    the session token: ``attempt`` has just written the advanced TOTP counter,
+    so minting from a value captured earlier would sign against a stale record.
     """
     creds = _load_credentials()
     if creds is None:
         return None
-    return mint_form_token(creds.session_secret, epoch=creds.epoch, now=now)
+    return auth.mint_token(creds.session_secret, kind=kind, epoch=creds.epoch,
+                           now=now)
+
+
+def issue_form_token(*, now: float | None = None) -> str | None:
+    """The token ``GET /login`` embeds in the form, or None when it cannot."""
+    return _issue(FORM_TOKEN_KIND, now=now)
+
+
+def issue_session_token(*, now: float | None = None) -> str | None:
+    """The session cookie's value after a successful ``attempt``, or None."""
+    return _issue(auth.KIND_SESSION, now=now)
+
+
+def issue_remember_token(*, now: float | None = None) -> str | None:
+    """The remember-device cookie's value, or None. Only when asked for."""
+    return _issue(auth.KIND_REMEMBER, now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +305,22 @@ def _refuse(client: str, reason: str, *, now: float) -> AttemptResult:
 
 
 def attempt(*, password: str, code: str | None, client: str,
-            form_token: str | None, now: float | None = None) -> AttemptResult:
+            form_token: str | None, remember_token: str | None,
+            now: float | None = None) -> AttemptResult:
     """One sign-in attempt. The order of the checks IS the security here.
 
-    ``form_token`` is keyword-only with NO default, matching ``auth``'s ``kind``
-    and for the same reason: a default is precisely how a future call site
-    skips the check without anyone noticing the omission at the call.
+    ``form_token`` and ``remember_token`` are keyword-only with NO default,
+    matching ``auth``'s ``kind`` and for the same reason: a default is precisely
+    how a future call site skips the check -- or, for the remember cookie,
+    silently stops honouring a trusted device -- without anyone noticing the
+    omission at the call.
+
+    **What ``remember_token`` may do, exhaustively: waive the TOTP factor.** It
+    never waives the password, it is checked only AFTER the password has already
+    verified, and it admits nobody on its own -- the gate does not read that
+    cookie at all (``auth_middleware.REMEMBER_COOKIE``). A stolen month-old
+    cookie is therefore worth exactly one thing to an attacker who ALSO has the
+    password, which is the trade the design accepted.
     """
     at = time.time() if now is None else now
 
@@ -253,30 +339,41 @@ def attempt(*, password: str, code: str | None, client: str,
     if not verify_form_token(form_token, creds, now=at):
         return _refuse(client, "missing or invalid form token", now=at)
 
-    # 3. Only now is it worth paying for a hash.
+    # 3. Only now is it worth paying for a hash. THE PASSWORD IS UNCONDITIONAL
+    #    -- this check sits ABOVE the remember-device branch below, so a trusted
+    #    device is a device that skips the CODE, not one that skips the login.
     if not auth.verify_password(creds.password_hash, password):
         return _refuse(client, "password", now=at)
 
-    ok, counter = auth.verify_totp(creds.totp_secret, code,
-                                   now=at, last_counter=creds.last_totp_counter)
-    if not ok:
-        return _refuse(client, "code", now=at)
+    # 4. The second factor, unless this device is already trusted.
+    if verify_remember_token(remember_token, creds, now=at):
+        # No counter to persist: nothing was consumed, so there is nothing that
+        # could be replayed. Worth an INFO line -- "signed in without a code" is
+        # the one accepted-sign-in shape an operator might want to account for.
+        log.info("Sign-in accepted for %s on a remembered device (no code)",
+                 client)
+    else:
+        ok, counter = auth.verify_totp(
+            creds.totp_secret, code, now=at,
+            last_counter=creds.last_totp_counter)
+        if not ok:
+            return _refuse(client, "code", now=at)
 
-    # 4. Persist the accepted step BEFORE declaring success. Without this write
-    #    the replay guard never advances and the code just used stays valid for
-    #    the rest of its window.
-    try:
-        auth_store.save(dataclasses.replace(creds, last_totp_counter=counter))
-    except OSError as exc:
-        # Refuse rather than accept: a code we cannot record is a code we cannot
-        # stop being replayed. Loud in the log, generic on the page.
-        log.warning("Could not persist the TOTP counter to %s, so this "
-                    "otherwise-valid sign-in is refused: %s",
-                    auth_store.DEFAULT_PATH, exc)
-        return _refuse(client, "counter persist failed", now=at)
+        # Persist the accepted step BEFORE declaring success. Without this write
+        # the replay guard never advances and the code just used stays valid for
+        # the rest of its window.
+        try:
+            auth_store.save(dataclasses.replace(creds, last_totp_counter=counter))
+        except OSError as exc:
+            # Refuse rather than accept: a code we cannot record is a code we
+            # cannot stop being replayed. Loud in the log, generic on the page.
+            log.warning("Could not persist the TOTP counter to %s, so this "
+                        "otherwise-valid sign-in is refused: %s",
+                        auth_store.DEFAULT_PATH, exc)
+            return _refuse(client, "counter persist failed", now=at)
+        log.info("Sign-in accepted for %s", client)
 
     _lockout.record_success(client)
-    log.info("Sign-in accepted for %s", client)
     return _SUCCESS
 
 
@@ -334,6 +431,13 @@ _CSS = """
     font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer;
   }
   button:hover { background: #1d4fd1; }
+  /* The trust-this-device row. A LABEL wrapping the box, so the words are part
+     of the hit target -- this is typed on a phone as often as a desk. */
+  .trust {
+    display: flex; align-items: center; gap: 8px;
+    margin: 2px 0 6px; font-size: 12px; color: #8794b4; cursor: pointer;
+  }
+  .trust input { margin: 0; accent-color: #2563eb; }
   .error {
     margin: 0 0 18px; padding: 10px 12px; border-radius: 6px;
     background: rgba(248, 113, 113, .10); border: 1px solid #7f3341;
@@ -382,15 +486,20 @@ def render_form(*, next_path: str, error: str | None,
   <main class="card">
     <h1>Sign in</h1>
     <p class="eyebrow">Password and authenticator code</p>
-{banner}    <form method="post" action="/login" autocomplete="on">
-      <input type="hidden" name="next" value="{esc_next}">
-      <input type="hidden" name="form_token" value="{esc_token}">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autofocus
-             autocomplete="current-password">
-      <label for="code">Authenticator code</label>
-      <input type="text" id="code" name="code" required
+{banner}    <form method="post" action="{ROUTE}" autocomplete="on">
+      <input type="hidden" name="{FIELD_NEXT}" value="{esc_next}">
+      <input type="hidden" name="{FIELD_FORM_TOKEN}" value="{esc_token}">
+      <label for="{FIELD_PASSWORD}">Password</label>
+      <input type="password" id="{FIELD_PASSWORD}" name="{FIELD_PASSWORD}"
+             required autofocus autocomplete="current-password">
+      <label for="{FIELD_CODE}">Authenticator code</label>
+      <input type="text" id="{FIELD_CODE}" name="{FIELD_CODE}" required
              inputmode="numeric" autocomplete="one-time-code">
+      <label class="trust" for="{FIELD_REMEMBER}">
+        <input type="checkbox" id="{FIELD_REMEMBER}" name="{FIELD_REMEMBER}"
+               value="{REMEMBER_ON}">
+        Trust this device for 30 days (skip the code, never the password)
+      </label>
       <button type="submit">Sign in</button>
     </form>
   </main>

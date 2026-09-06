@@ -18,7 +18,8 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
+from fastapi import Request  # noqa: E402
+from fastapi.responses import HTMLResponse, RedirectResponse, Response  # noqa: E402
 from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
@@ -28,7 +29,10 @@ from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 
 import alerts  # noqa: E402
 import app_settings  # noqa: E402
+import auth  # noqa: E402
+import auth_middleware  # noqa: E402
 import bus_client  # noqa: E402
+import login_page  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 import wall  # noqa: E402
@@ -69,6 +73,44 @@ except OSError:
     logging.getLogger("webgui").warning(
         "voice clip directory unavailable — Desk spoken alerts are off",
         exc_info=True)
+
+
+# ── Authentication ────────────────────────────────────────────────────────────
+# The gate is mounted at MODULE scope, not inside the ``__main__`` guard at the
+# foot of this file. ``ui.run()`` lives in that guard, so a middleware added
+# there would not exist under pytest -- tests and production would run different
+# wiring, which is precisely the bug class this repo keeps paying for (a guard
+# green against a shape the producer never emits).
+#
+# ⚠ AND IT MUST BE IDEMPOTENT. Pages ``import main`` lazily at request time (see
+# the ``__main__`` block's note on ``app.on_startup``), and because this script
+# runs as ``__main__`` in production that import re-executes this file as a
+# SECOND module object -- after NiceGUI has started. Starlette's
+# ``add_middleware`` raises ``RuntimeError`` once the middleware stack is built,
+# so an unguarded call here would not merely double the gate: it would 500 every
+# page that lazily imports ``main``. The flag lives on ``app``, which is the one
+# NiceGUI singleton both module objects share.
+_AUTH_GATE_FLAG = "_neuralstrike_auth_gate_installed"
+
+
+def install_auth_gate() -> bool:
+    """Mount ``AuthGate`` once. True if this call is the one that mounted it.
+
+    The gate gets its OWN default credential providers, deliberately.
+    ``auth_middleware.default_session_key`` / ``default_epoch`` already catch
+    ``CredentialsError`` and return None, which the gate reads as default-deny;
+    a provider hand-rolled here that let that error escape would turn a corrupt
+    credentials file from "a login page" into an unhandled exception on every
+    route, publicly.
+    """
+    if getattr(app, _AUTH_GATE_FLAG, False):
+        return False
+    app.add_middleware(auth_middleware.AuthGate)
+    setattr(app, _AUTH_GATE_FLAG, True)
+    return True
+
+
+install_auth_gate()
 
 _CT = _ZoneInfo("America/Chicago")
 
@@ -158,6 +200,187 @@ def explain_html(payload):
     friendly placeholder)."""
     html = (payload or {}).get("html")
     return html if isinstance(html, str) and html.strip() else _EXPLAIN_EMPTY
+
+
+# ── Sign in / sign out ───────────────────────────────────────────────────────
+# Raw routes, not ``@ui.page``s, and that is the load-bearing choice: a NiceGUI
+# login would need ``/_nicegui_ws/`` and ``/_nicegui/*`` open before
+# authentication, which is what stops the websocket being a real boundary. It
+# would also submit over that websocket, where a cookie cannot be set. So the
+# whole open list is ``/login`` plus the favicon -- see
+# ``auth_middleware.OPEN_PATHS``, and do not widen it.
+#
+# ``/logout`` is deliberately NOT open. Clearing a cookie nobody presented is a
+# no-op, and the gate already sends a signed-out visitor to the same place this
+# route would.
+
+# The cookie attributes, in ONE place, applied to both cookies.
+#
+# ⚠ ``Secure`` is unconditional and must never be derived from the request
+# scheme. Behind Caddy this app sees plain HTTP on loopback, so a
+# scheme-conditional flag would ship Secure-less cookies in production while
+# looking perfectly correct in every local test -- the single most likely way to
+# get this wrong.
+#
+# ⚠ No ``domain=``. A ``Domain=neuralstrike.co`` cookie is sent to that host and
+# EVERY subdomain, so the session that arms the trading driver would travel to
+# the public marketing page and its third-party YouTube and Discord embeds on
+# every page view. Host-only is what makes the separate hostname a boundary at
+# all; ``set_cookie`` omits the attribute when ``domain`` is None, and a test
+# pins that it stays absent.
+_COOKIE_KW = dict(path="/", httponly=True, secure=True, samesite="lax")
+
+
+def _set_auth_cookie(response: Response, name: str, value: str,
+                     max_age: int) -> None:
+    response.set_cookie(name, value, max_age=max_age, **_COOKIE_KW)
+
+
+def _clear_auth_cookie(response: Response, name: str) -> None:
+    response.delete_cookie(name, **_COOKIE_KW)
+
+
+def login_target(candidate) -> str:
+    """Where a successful sign-in lands: ``next`` if it is safe, else the Desk.
+
+    ``login_page.safe_next`` is the ONE validator for the site-relative part --
+    not re-implemented here. What this adds is the one path that is safe and
+    still wrong: ``/logout``. The gate refuses a signed-out visitor's
+    ``GET /logout`` with ``?next=/logout``, so honouring it would sign the user
+    in and immediately back out, leaving them at the login form they just
+    completed with no error and nothing to do differently.
+    """
+    target = login_page.safe_next(candidate)
+    return login_page.DEFAULT_NEXT if target == login_page.LOGOUT_ROUTE else target
+
+
+def _client_ip(request: Request) -> str:
+    """The address the failed-attempt backoff counts against.
+
+    ⚠ BEHIND A REVERSE PROXY THE PEER IS THE PROXY. Every request through Caddy
+    arrives from 127.0.0.1, so keying the per-client lockout on the peer would
+    file the whole internet under one address -- and the per-client penalty
+    ramps to 900 s where the global one is deliberately 60 s. Any bot spraying
+    the advertised hostname would lock the owner out of the UI that arms the
+    driver and stops the stack, which is exactly the denial of service the
+    design's short global penalty exists to avoid.
+
+    So when -- and only when -- the request carries ``X-Edge``, the LAST entry
+    of ``X-Forwarded-For`` is used. Caddy sets ``X-Edge`` with ``header_up``,
+    which REPLACES any client-supplied value, so its presence is evidence the
+    request came through our proxy; and Caddy APPENDS the peer it observed to
+    ``X-Forwarded-For``, so the last entry is the one hop we wrote ourselves. A
+    client-supplied prefix can lengthen that list but cannot change its tail.
+
+    With no edge header the peer is used unchanged, which is the direct
+    (loopback or Tailscale) case. If the edge is ever fronted without
+    ``X-Forwarded-For`` this degrades to the peer -- one bucket, the safe-but-
+    blunt behaviour -- rather than trusting a header nobody wrote.
+    """
+    peer = request.client.host if request.client else ""
+    if request.headers.get(auth_middleware.EDGE_HEADER) is not None:
+        hops = [h.strip() for h in
+                request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return peer or "unknown"
+
+
+def _login_response(*, next_path: str, error: str | None) -> HTMLResponse:
+    """The login document, always with a FRESH form token.
+
+    Re-rendering after a failure with the token that was just submitted would
+    make the second attempt fail for the wrong reason -- the token is single-use
+    only in the sense that it expires, but a re-render that happens near the
+    five-minute edge would hand back one about to die. Minting per render costs
+    an HMAC.
+
+    ``no-store`` because the document carries a per-visitor token, and because a
+    cached login page served to the next visitor is a stale token plus a
+    confusing screen.
+    """
+    return HTMLResponse(
+        login_page.render_form(next_path=next_path, error=error,
+                               form_token=login_page.issue_form_token()),
+        headers={"cache-control": "no-store"})
+
+
+@app.get(login_page.ROUTE)
+def _login_form(next: str | None = None):   # noqa: A002 - the query param's name
+    return _login_response(next_path=login_target(next), error=None)
+
+
+@app.post(login_page.ROUTE)
+async def _login_submit(request: Request):
+    """One sign-in attempt, then a cookie or the same form again.
+
+    Everything that decides the outcome lives in ``login_page.attempt`` -- the
+    lockout, the form token, Argon2, TOTP, the counter persist, and their order.
+    This route reads the form, names the client, and turns the boolean into HTTP.
+
+    The form parse is guarded: content type and body are attacker-controlled on
+    a public endpoint, where an exception is a 500 rather than a refusal. An
+    unparseable body is treated as an empty form, which fails the form-token
+    check and is recorded as a failure like any other -- a blind POST must not
+    be a cheaper way to reach us than a well-formed one.
+    """
+    try:
+        form = await request.form()
+    except Exception:   # noqa: BLE001 - any malformed body is just "no fields"
+        form = {}
+
+    target = login_target(form.get(login_page.FIELD_NEXT))
+    result = login_page.attempt(
+        password=str(form.get(login_page.FIELD_PASSWORD) or ""),
+        code=form.get(login_page.FIELD_CODE),
+        client=_client_ip(request),
+        form_token=form.get(login_page.FIELD_FORM_TOKEN),
+        # Read even when the box is not ticked: an already-trusted device must
+        # keep skipping the code without re-ticking it every time.
+        remember_token=request.cookies.get(auth_middleware.REMEMBER_COOKIE),
+    )
+    if not result.ok:
+        # 200, not 401. RFC 9110 requires a 401 to carry WWW-Authenticate, and
+        # sending one would put a browser's own credential dialog in front of
+        # this form. The page IS the answer.
+        return _login_response(next_path=target, error=result.message)
+
+    session = login_page.issue_session_token()
+    if not session:
+        # The store went unreadable between the attempt and here. Refuse rather
+        # than redirect to a page the gate will bounce straight back.
+        return _login_response(next_path=target, error=login_page.GENERIC_FAILURE)
+
+    response = RedirectResponse(url=target, status_code=303)
+    _set_auth_cookie(response, auth_middleware.SESSION_COOKIE, session,
+                     auth.SESSION_MAX_AGE_SEC)
+
+    # Only when asked. An unchecked box submits no field at all, so presence is
+    # the test -- and a device already trusted does NOT silently renew: the user
+    # ticks the box again, which is the one moment they are choosing to leave a
+    # 30-day credential on this machine.
+    if form.get(login_page.FIELD_REMEMBER) is not None:
+        remember = login_page.issue_remember_token()
+        if remember:
+            _set_auth_cookie(response, auth_middleware.REMEMBER_COOKIE, remember,
+                             auth.REMEMBER_MAX_AGE_SEC)
+    return response
+
+
+@app.get(login_page.LOGOUT_ROUTE)
+def _logout():
+    """Drop both cookies and go back to the form.
+
+    BOTH, and the remember cookie is the one that matters: clearing only the
+    session would leave a device that still skips the second factor, so "sign
+    out" on a borrowed machine would mean less than it says. What it cannot do
+    is reach the other devices -- the tokens are stateless by design, and
+    "sign out everywhere" is an epoch bump in the credentials file.
+    """
+    response = RedirectResponse(url=login_page.ROUTE, status_code=303)
+    _clear_auth_cookie(response, auth_middleware.SESSION_COOKIE)
+    _clear_auth_cookie(response, auth_middleware.REMEMBER_COOKIE)
+    return response
 
 
 @app.get("/options/explain")

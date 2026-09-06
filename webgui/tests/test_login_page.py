@@ -58,6 +58,23 @@ def creds(tmp_path, monkeypatch):
     return c
 
 
+def _attempt(**kw):
+    """``login_page.attempt`` with an EMPTY trusted-device slot by default.
+
+    Every test in this file predates the remember-device cookie and is about
+    something else -- the ordering, the lockout, the generic message -- so
+    each would otherwise carry a ``remember_token=None`` that says nothing.
+    The route's own call site passes it explicitly, and the two tests directly
+    above ORDERING 3 pin that ``attempt`` still refuses to run without it, so
+    this convenience cannot hide the omission it exists to shorten.
+
+    The remember-device behaviour itself is tested in ``test_login_routes.py``,
+    end to end through the real POST handler.
+    """
+    kw.setdefault("remember_token", None)
+    return login_page.attempt(**kw)
+
+
 def _token(creds, *, now=T0):
     return login_page.mint_form_token(creds.session_secret, epoch=creds.epoch,
                                       now=now)
@@ -236,7 +253,7 @@ def test_issue_form_token_returns_none_rather_than_raising_on_a_corrupt_file(
 # attempt() -- the happy path and the one generic message.
 
 def test_a_correct_triple_succeeds_and_advances_the_totp_counter(creds):
-    res = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    res = _attempt(password=PASSWORD, code=_good_code(creds),
                              client="1.1.1.1", form_token=_token(creds), now=T0)
     assert res.ok is True
     assert res.message == ""
@@ -254,10 +271,10 @@ def test_the_persisted_counter_refuses_a_replay_of_the_same_code(creds):
     its whole drift window, with every other test in this file still green.
     """
     code = _good_code(creds)
-    first = login_page.attempt(password=PASSWORD, code=code, client="1.1.1.1",
+    first = _attempt(password=PASSWORD, code=code, client="1.1.1.1",
                                form_token=_token(creds), now=T0)
     assert first.ok is True
-    second = login_page.attempt(password=PASSWORD, code=code, client="1.1.1.1",
+    second = _attempt(password=PASSWORD, code=code, client="1.1.1.1",
                                 form_token=_token(creds), now=T0 + 1)
     assert second.ok is False
     assert second.message == login_page.GENERIC_FAILURE
@@ -276,7 +293,7 @@ def test_a_counter_that_cannot_be_persisted_refuses_the_sign_in(creds, monkeypat
         raise OSError("read-only file system")
     monkeypatch.setattr(auth_store, "save", _boom)
     with caplog.at_level(logging.WARNING):
-        res = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+        res = _attempt(password=PASSWORD, code=_good_code(creds),
                                  client="6.6.6.6", form_token=_token(creds),
                                  now=T0)
     assert res.ok is False and res.message == login_page.GENERIC_FAILURE
@@ -285,18 +302,18 @@ def test_a_counter_that_cannot_be_persisted_refuses_the_sign_in(creds, monkeypat
 
 
 def test_a_failed_attempt_never_rewinds_the_persisted_counter(creds):
-    login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    _attempt(password=PASSWORD, code=_good_code(creds),
                        client="1.1.1.1", form_token=_token(creds), now=T0)
     high = auth_store.load().last_totp_counter
-    login_page.attempt(password="wrong", code="000000", client="1.1.1.1",
+    _attempt(password="wrong", code="000000", client="1.1.1.1",
                        form_token=_token(creds), now=T0 + 1)
     assert auth_store.load().last_totp_counter == high
 
 
 def test_the_same_message_is_shown_for_a_bad_password_and_a_bad_code(creds):
-    a = login_page.attempt(password="wrong", code=_good_code(creds),
+    a = _attempt(password="wrong", code=_good_code(creds),
                            client="1.1.1.1", form_token=_token(creds), now=T0)
-    b = login_page.attempt(password=PASSWORD, code="000000",
+    b = _attempt(password=PASSWORD, code="000000",
                            client="1.1.1.1", form_token=_token(creds), now=T0)
     assert a.ok is False and b.ok is False
     assert a.message == b.message == login_page.GENERIC_FAILURE
@@ -310,15 +327,15 @@ def test_every_refusal_carries_the_identical_message(creds, tmp_path, monkeypatc
     that the lockout exists at all.
     """
     messages = {
-        login_page.attempt(password="wrong", code="000000", client="a",
+        _attempt(password="wrong", code="000000", client="a",
                            form_token=_token(creds), now=T0).message,
-        login_page.attempt(password=PASSWORD, code="000000", client="a",
+        _attempt(password=PASSWORD, code="000000", client="a",
                            form_token=_token(creds), now=T0).message,
-        login_page.attempt(password=PASSWORD, code=_good_code(creds), client="a",
+        _attempt(password=PASSWORD, code=_good_code(creds), client="a",
                            form_token=None, now=T0).message,
-        login_page.attempt(password=PASSWORD, code=_good_code(creds), client="a",
+        _attempt(password=PASSWORD, code=_good_code(creds), client="a",
                            form_token="garbage", now=T0).message,
-        login_page.attempt(password=PASSWORD, code=_good_code(creds), client="a",
+        _attempt(password=PASSWORD, code=_good_code(creds), client="a",
                            form_token=_token(creds),
                            now=T0 + login_page.FORM_TOKEN_MAX_AGE_SEC + 1).message,
     }
@@ -326,16 +343,16 @@ def test_every_refusal_carries_the_identical_message(creds, tmp_path, monkeypatc
     # the five attempts above happening to reach it -- retuning that constant
     # must move this test with the code, not turn it red.
     for _ in range(auth.LOCKOUT_THRESHOLD):
-        login_page.attempt(password="wrong", code="000000", client="locked",
+        _attempt(password="wrong", code="000000", client="locked",
                            form_token=_token(creds), now=T0)
-    locked = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    locked = _attempt(password=PASSWORD, code=_good_code(creds),
                                 client="locked", form_token=_token(creds), now=T0)
     assert locked.ok is False
     messages.add(locked.message)
     # ...and the three that need a different store underneath.
     for setup in (_unconfigured, _corrupt_file, _unusable_secret):
         setup(tmp_path, monkeypatch)
-        messages.add(login_page.attempt(password=PASSWORD, code="000000",
+        messages.add(_attempt(password=PASSWORD, code="000000",
                                         client="b", form_token="t",
                                         now=T0).message)
     assert messages == {login_page.GENERIC_FAILURE}
@@ -348,7 +365,7 @@ def test_an_unconfigured_app_refuses_rather_than_raising(tmp_path, monkeypatch,
                                                          caplog):
     _unconfigured(tmp_path, monkeypatch)
     with caplog.at_level(logging.WARNING):
-        res = login_page.attempt(password=PASSWORD, code="000000",
+        res = _attempt(password=PASSWORD, code="000000",
                                  client="1.1.1.1", form_token="t", now=T0)
     assert res.ok is False and res.message == login_page.GENERIC_FAILURE
     assert any("absent.json" in r.getMessage() for r in caplog.records)
@@ -358,7 +375,7 @@ def test_a_corrupt_credentials_file_refuses_and_names_the_file(
         tmp_path, monkeypatch, caplog):
     _corrupt_file(tmp_path, monkeypatch)
     with caplog.at_level(logging.WARNING):
-        res = login_page.attempt(password=PASSWORD, code="000000",
+        res = _attempt(password=PASSWORD, code="000000",
                                  client="1.1.1.1", form_token="t", now=T0)
     assert res.ok is False and res.message == login_page.GENERIC_FAILURE
     assert any("corrupt.json" in r.getMessage() for r in caplog.records)
@@ -372,7 +389,7 @@ def test_an_unusable_totp_secret_refuses_rather_than_raising(tmp_path, monkeypat
     """
     _unusable_secret(tmp_path, monkeypatch)
     c = auth_store.load()
-    res = login_page.attempt(password=PASSWORD, code="000000", client="1.1.1.1",
+    res = _attempt(password=PASSWORD, code="000000", client="1.1.1.1",
                              form_token=_token(c), now=T0)
     assert res.ok is False and res.message == login_page.GENERIC_FAILURE
 
@@ -380,7 +397,7 @@ def test_an_unusable_totp_secret_refuses_rather_than_raising(tmp_path, monkeypat
 def test_an_unparseable_password_hash_refuses_rather_than_raising(creds):
     auth_store.save(_creds(password_hash="not-an-argon2-hash"),
                     auth_store.DEFAULT_PATH)
-    res = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    res = _attempt(password=PASSWORD, code=_good_code(creds),
                              client="1.1.1.1", form_token=_token(creds), now=T0)
     assert res.ok is False and res.message == login_page.GENERIC_FAILURE
 
@@ -400,11 +417,11 @@ def test_lockout_is_consulted_before_the_hash_is_computed(creds, monkeypatch):
     monkeypatch.setattr(auth, "verify_password",
                         lambda *a, **k: (calls.append(1), False)[1])
     for _ in range(auth.LOCKOUT_THRESHOLD + 2):
-        login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+        _attempt(password="wrong", code="000000", client="9.9.9.9",
                            form_token=_token(creds), now=T0)
     before = len(calls)
     assert before > 0, "the hash was never reached, so this test proves nothing"
-    res = login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+    res = _attempt(password="wrong", code="000000", client="9.9.9.9",
                              form_token=_token(creds), now=T0)
     assert res.ok is False
     assert len(calls) == before, "Argon2 ran despite the client being locked out"
@@ -418,21 +435,21 @@ def test_a_locked_out_client_does_not_even_reach_the_credentials_file(
     passes that one, and fails this one.
     """
     for _ in range(auth.LOCKOUT_THRESHOLD):
-        login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+        _attempt(password="wrong", code="000000", client="9.9.9.9",
                            form_token=_token(creds), now=T0)
     loads = []
     monkeypatch.setattr(auth_store, "load",
                         lambda *a, **k: (loads.append(1), None)[1])
-    login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+    _attempt(password="wrong", code="000000", client="9.9.9.9",
                        form_token="t", now=T0)
     assert loads == []
 
 
 def test_a_correct_triple_is_still_refused_while_the_client_is_locked_out(creds):
     for _ in range(auth.LOCKOUT_THRESHOLD):
-        login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+        _attempt(password="wrong", code="000000", client="9.9.9.9",
                            form_token=_token(creds), now=T0)
-    res = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    res = _attempt(password=PASSWORD, code=_good_code(creds),
                              client="9.9.9.9", form_token=_token(creds), now=T0)
     assert res.ok is False
 
@@ -445,7 +462,7 @@ def test_a_post_without_a_form_token_never_reaches_the_hash(creds, monkeypatch):
     calls = []
     monkeypatch.setattr(auth, "verify_password",
                         lambda *a, **k: (calls.append(1), False)[1])
-    res = login_page.attempt(password=PASSWORD, code="000000", client="2.2.2.2",
+    res = _attempt(password=PASSWORD, code="000000", client="2.2.2.2",
                              form_token=None, now=T0)
     assert res.ok is False
     assert calls == [], "Argon2 ran on a request with no form token"
@@ -458,7 +475,7 @@ def test_a_form_token_from_another_session_key_never_reaches_the_hash(
                         lambda *a, **k: (calls.append(1), False)[1])
     forged = auth.mint_token("z" * 43, kind=login_page.FORM_TOKEN_KIND,
                              epoch=1, now=T0)
-    res = login_page.attempt(password=PASSWORD, code="000000", client="2.2.2.2",
+    res = _attempt(password=PASSWORD, code="000000", client="2.2.2.2",
                              form_token=forged, now=T0)
     assert res.ok is False
     assert calls == [], "Argon2 ran on a request with a forged form token"
@@ -468,7 +485,7 @@ def test_an_expired_form_token_never_reaches_the_hash(creds, monkeypatch):
     calls = []
     monkeypatch.setattr(auth, "verify_password",
                         lambda *a, **k: (calls.append(1), False)[1])
-    res = login_page.attempt(
+    res = _attempt(
         password=PASSWORD, code="000000", client="2.2.2.2",
         form_token=_token(creds),
         now=T0 + login_page.FORM_TOKEN_MAX_AGE_SEC + 1)
@@ -484,6 +501,18 @@ def test_attempt_will_not_run_without_being_told_about_the_form_token(creds):
     """
     with pytest.raises(TypeError):
         login_page.attempt(password=PASSWORD, code="000000", client="2.2.2.2")
+
+
+def test_attempt_will_not_run_without_being_told_about_the_remembered_device(creds):
+    """``remember_token`` has no default either, and for the mirror reason.
+
+    ``form_token``'s omission would skip a check; this one's would silently
+    stop honouring a trusted device -- a failure whose only symptom is that
+    "trust this device" quietly does nothing, which nobody reports as a bug.
+    """
+    with pytest.raises(TypeError):
+        login_page.attempt(password=PASSWORD, code="000000", client="2.2.2.2",
+                           form_token="t")
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +534,7 @@ def test_each_failure_path_records_a_failure(creds, kwargs):
     kw = dict(kwargs)
     if kw["form_token"] is ...:
         kw["form_token"] = _token(creds)
-    res = login_page.attempt(client="3.3.3.3", now=T0, **kw)
+    res = _attempt(client="3.3.3.3", now=T0, **kw)
     assert res.ok is False
     assert login_page.lockout_state().tracked_failures("3.3.3.3") == 1
 
@@ -514,7 +543,7 @@ def test_a_broken_store_still_records_a_failure(tmp_path, monkeypatch):
     for setup in (_unconfigured, _corrupt_file):
         login_page.reset_lockout()
         setup(tmp_path, monkeypatch)
-        login_page.attempt(password=PASSWORD, code="000000", client="3.3.3.3",
+        _attempt(password=PASSWORD, code="000000", client="3.3.3.3",
                            form_token="t", now=T0)
         assert login_page.lockout_state().tracked_failures("3.3.3.3") == 1
 
@@ -528,10 +557,10 @@ def test_an_attempt_while_locked_out_still_records_a_failure(creds):
     """
     st = login_page.lockout_state()
     for _ in range(auth.LOCKOUT_THRESHOLD):
-        login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+        _attempt(password="wrong", code="000000", client="9.9.9.9",
                            form_token=_token(creds), now=T0)
     before = st.tracked_failures("9.9.9.9")
-    login_page.attempt(password="wrong", code="000000", client="9.9.9.9",
+    _attempt(password="wrong", code="000000", client="9.9.9.9",
                        form_token=_token(creds), now=T0)
     assert st.tracked_failures("9.9.9.9") == before + 1
 
@@ -542,10 +571,10 @@ def test_an_attempt_while_locked_out_still_records_a_failure(creds):
 def test_a_success_clears_that_clients_backoff(creds):
     st = login_page.lockout_state()
     for _ in range(auth.LOCKOUT_THRESHOLD - 1):
-        login_page.attempt(password="wrong", code="000000", client="4.4.4.4",
+        _attempt(password="wrong", code="000000", client="4.4.4.4",
                            form_token=_token(creds), now=T0)
     assert st.tracked_failures("4.4.4.4") == auth.LOCKOUT_THRESHOLD - 1
-    res = login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    res = _attempt(password=PASSWORD, code=_good_code(creds),
                              client="4.4.4.4", form_token=_token(creds), now=T0)
     assert res.ok is True
     assert st.tracked_failures("4.4.4.4") == 0
@@ -558,9 +587,9 @@ def test_a_success_clears_that_clients_backoff(creds):
 def test_a_half_correct_attempt_does_not_clear_the_backoff(creds, password, code):
     """``record_success`` placed after the password check clears it on a bad code."""
     st = login_page.lockout_state()
-    login_page.attempt(password="wrong", code="000000", client="5.5.5.5",
+    _attempt(password="wrong", code="000000", client="5.5.5.5",
                        form_token=_token(creds), now=T0)
-    login_page.attempt(password=password,
+    _attempt(password=password,
                        code=_good_code(creds) if code == "good" else code,
                        client="5.5.5.5", form_token=_token(creds), now=T0)
     assert st.tracked_failures("5.5.5.5") == 2
@@ -571,7 +600,7 @@ def test_a_half_correct_attempt_does_not_clear_the_backoff(creds, password, code
 
 def test_every_failure_is_logged_at_warning_with_the_client_address(creds, caplog):
     with caplog.at_level(logging.WARNING):
-        login_page.attempt(password="wrong", code="000000", client="7.7.7.7",
+        _attempt(password="wrong", code="000000", client="7.7.7.7",
                            form_token=_token(creds), now=T0)
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warnings
@@ -580,7 +609,7 @@ def test_every_failure_is_logged_at_warning_with_the_client_address(creds, caplo
 
 def test_a_failure_log_line_never_carries_the_password_or_the_code(creds, caplog):
     with caplog.at_level(logging.DEBUG):
-        login_page.attempt(password=PASSWORD, code="123456", client="7.7.7.7",
+        _attempt(password=PASSWORD, code="123456", client="7.7.7.7",
                            form_token=_token(creds), now=T0)
     joined = " ".join(r.getMessage() for r in caplog.records)
     assert PASSWORD not in joined
@@ -604,10 +633,10 @@ def test_the_store_is_resolved_at_call_time(creds, tmp_path, monkeypatch):
     other = tmp_path / "elsewhere.json"
     auth_store.save(_creds(password_hash=auth.hash_password("different")), other)
     monkeypatch.setattr(auth_store, "DEFAULT_PATH", other)
-    assert login_page.attempt(password=PASSWORD, code=_good_code(creds),
+    assert _attempt(password=PASSWORD, code=_good_code(creds),
                               client="8.8.8.8", form_token=_token(creds),
                               now=T0).ok is False
-    assert login_page.attempt(password="different", code=_good_code(creds),
+    assert _attempt(password="different", code=_good_code(creds),
                               client="8.8.8.8", form_token=_token(creds),
                               now=T0).ok is True
     assert json.loads(other.read_text(encoding="utf-8"))["last_totp_counter"] > 0
