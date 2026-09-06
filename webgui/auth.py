@@ -1,15 +1,22 @@
-"""Pure credential logic for the webgui login: password, TOTP, tokens, lockout.
+"""Credential logic for the webgui login: password, TOTP, tokens, lockout.
 
-Everything here is a pure function over its arguments plus the credentials
-dataclass, so it tests without a server, a browser or a clock monkeypatch. The
-module logger is the one permitted side effect, and it fires only on the two
-"your credentials file is broken" paths -- never on an ordinary wrong password
-or a mistyped code, or the warning would mean nothing.
+Every function here is pure over its arguments plus the credentials dataclass,
+so it tests without a server, a browser or a clock monkeypatch. The module
+logger is the one permitted side effect, and it fires only on the two "your
+credentials file is broken" paths -- never on an ordinary wrong password or a
+mistyped code, or the warning would mean nothing.
+
+``LockoutState`` is the single exception and the only stateful thing in the
+module: failure counters have to remember. The state lives entirely inside the
+instance -- there is deliberately no module-level singleton -- so the login
+route owns exactly one and the tests own their own, and ``now=`` stays an
+argument here as it is everywhere else.
 """
 from __future__ import annotations
 
 import base64
 import binascii
+import collections
 import hmac
 import logging
 import math
@@ -275,3 +282,192 @@ def verify_token(token: str | None, key: str, *, kind: str, epoch: int,
     # ``if age > max_age_sec: return False`` then ``return True`` -- which would
     # otherwise hand a NaN-dated token a pass that never expires.
     return 0 <= age <= max_age_sec
+
+
+# ---------------------------------------------------------------------------
+# Failed-attempt backoff.
+#
+# THE GLOBAL LOCK IS DELIBERATELY BRIEF -- please do not "tidy" it back up to
+# LOCKOUT_MAX_SEC. This is a SINGLE-USER app whose hostname is advertised in a
+# Discord and a Telegram, and which bots will find within an hour of its TLS
+# certificate reaching the Certificate Transparency logs. Fifty failures in a
+# quarter of an hour is not an attack scenario, it is a Tuesday. A global
+# penalty as long as the per-client one therefore hands any bored stranger a
+# one-command lockout of the owner, from the owner's own machine, out of the UI
+# that arms their trading driver and stops their stack.
+#
+# The counter still has to exist, because its job is NOT brute-force prevention
+# -- the per-client backoff does that -- it is RESOURCE protection, and the
+# resource is global. Each Argon2 verification costs 19 MiB and ~24 ms locally
+# (expect 2-3x on the VPS), the box has four cores and NO SWAP, and the video
+# encoder holds ~2.2 of those cores during market hours. An unthrottled flood is
+# how a login form turns into dropped frames on a public broadcast.
+#
+# GLOBAL_LOCKOUT_SEC = 60 keeps essentially all of that protection while making
+# the owner-facing failure self-healing. Under a sustained flood the steady
+# state is ~GLOBAL_THRESHOLD attempts per minute -- under one Argon2 call per
+# second, a few percent of one core -- instead of a hard stop. State the cost
+# honestly: while a flood is actually in progress the owner is still refused,
+# because each fresh failure re-arms the window. What changes is that access
+# returns a minute after the flood stops rather than a quarter of an hour, and
+# the Tailscale path stays open throughout.
+#
+# The durable fix is to let the global lock refuse only the EXPENSIVE path -- a
+# caller presenting a valid session or remember-device token costs nothing to
+# check and is self-evidently not the flood. That needs the token checks wired
+# into the login route, so it belongs with that work, not here.
+
+# Per-client and global failures are both counted over FAILURE_WINDOW_SEC.
+LOCKOUT_THRESHOLD = 5           # failures from one address before it backs off
+GLOBAL_THRESHOLD = 50           # failures from ANY address in the window
+LOCKOUT_BASE_SEC = 5
+LOCKOUT_MAX_SEC = 900
+GLOBAL_LOCKOUT_SEC = 60         # see the GLOBAL LOCK note above
+FAILURE_WINDOW_SEC = 900
+
+# A rotating-source flood must not grow this table without bound: with no swap
+# the failure mode is an OOM kill, not a slowdown. 4096 clients at a capped
+# history each is low single-digit MB.
+MAX_TRACKED_CLIENTS = 4096
+
+
+def _saturating_failure_count() -> int:
+    """The failure count at which the exponential backoff already reaches its cap.
+
+    DERIVED from the constants rather than written down, so retuning
+    ``LOCKOUT_BASE_SEC`` or ``LOCKOUT_MAX_SEC`` cannot quietly turn the history
+    cap below into something that changes behaviour.
+    """
+    n = LOCKOUT_THRESHOLD
+    while (LOCKOUT_BASE_SEC * (2 ** (n - LOCKOUT_THRESHOLD)) < LOCKOUT_MAX_SEC
+           and n < LOCKOUT_THRESHOLD + 64):
+        n += 1
+    return n
+
+
+# Keeping more failures than this per client cannot change any answer -- the
+# delay is already clamped to LOCKOUT_MAX_SEC and only the NEWEST stamp is read
+# -- so truncating to the most recent few is exactly behaviour-preserving.
+MAX_TRACKED_FAILURES = _saturating_failure_count()
+
+
+class LockoutState:
+    """Failed-attempt backoff, held in memory.
+
+    In memory on purpose: it resets on restart (acceptable for one user) and it
+    keeps a disk write off the authentication path, which is exactly the path an
+    attacker is trying to make expensive.
+
+    The GLOBAL counter is not redundant with the per-address one. A per-IP
+    threshold is not a throttle against anyone holding a /64, and the resource
+    being protected -- ~1.7 free cores and no swap during stream hours -- is
+    global, not per-client. Its PENALTY is short, for the reason given above.
+
+    ``locked_until`` reads at most ``MAX_TRACKED_FAILURES + GLOBAL_THRESHOLD``
+    timestamps and allocates nothing that outlives the call, so it is cheap
+    enough to be called BEFORE Argon2 -- which is the only ordering that makes
+    it a throttle at all. Behind the expensive thing it is throttling, it would
+    be decoration.
+
+    Not thread-safe, and deliberately not locked: the login route is the only
+    caller, every operation is short, and the worst outcome of a race is one
+    extra attempt getting through. A mutex on the authentication path would be a
+    contention target of its own.
+    """
+
+    def __init__(self) -> None:
+        self._per_client: dict[str, list[float]] = collections.defaultdict(list)
+        self._global: list[float] = []
+
+    # -- reads ------------------------------------------------------------
+    def locked_until(self, client: str, *, now: float) -> float:
+        """0 when the client may attempt, else the epoch second it may retry.
+
+        Uses ``.get``, never ``[]``: an unauthenticated read must not populate
+        the table, or the read path becomes the growth vector it is guarding.
+
+        The two locks compose as a MAX rather than as an early return on
+        whichever is checked first. That matters now the global penalty is the
+        SHORTER of the two -- returning it early would hand a persistently
+        failing client its access back ahead of its own backoff, so a flood
+        would end up protecting the attacker.
+        """
+        until = 0.0
+        glob = self._prune(self._global, now)
+        if len(glob) >= GLOBAL_THRESHOLD:
+            until = max(until, max(glob) + GLOBAL_LOCKOUT_SEC)
+
+        mine = self._prune(self._per_client.get(client, []), now)
+        if len(mine) >= LOCKOUT_THRESHOLD:
+            over = len(mine) - LOCKOUT_THRESHOLD
+            delay = min(LOCKOUT_BASE_SEC * (2 ** over), LOCKOUT_MAX_SEC)
+            until = max(until, max(mine) + delay)
+
+        # A retry instant that has already passed is not a lock. Returning it
+        # regardless would satisfy every "is it locked" test written as
+        # ``> now`` while never actually releasing, and it contradicts the
+        # first line of this docstring.
+        return until if until > now else 0
+
+    def tracked_clients(self) -> int:
+        """Distinct addresses currently held -- for tests and diagnostics.
+
+        The three ``tracked_*`` readers exist so the memory bounds can be
+        asserted without a test reaching into the representation and freezing
+        it in place.
+        """
+        return len(self._per_client)
+
+    def tracked_failures(self, client: str) -> int:
+        return len(self._per_client.get(client, []))
+
+    def tracked_global(self) -> int:
+        return len(self._global)
+
+    # -- writes -----------------------------------------------------------
+    def record_failure(self, client: str, *, now: float) -> None:
+        self._per_client[client] = self._trim(
+            self._prune(self._per_client[client], now) + [now],
+            MAX_TRACKED_FAILURES)
+        self._global = self._trim(
+            self._prune(self._global, now) + [now], GLOBAL_THRESHOLD)
+        if len(self._per_client) > MAX_TRACKED_CLIENTS:
+            self._evict(now)
+
+    def record_success(self, client: str) -> None:
+        self._per_client.pop(client, None)
+
+    # -- internals --------------------------------------------------------
+    @staticmethod
+    def _prune(stamps: list[float], now: float) -> list[float]:
+        return [t for t in stamps if now - t < FAILURE_WINDOW_SEC]
+
+    @staticmethod
+    def _trim(stamps: list[float], keep: int) -> list[float]:
+        """Keep only the most recent ``keep`` stamps.
+
+        Both counters read a length against a threshold and the MAXIMUM stamp,
+        so discarding the oldest beyond the point each saturates changes no
+        answer -- it only stops one address, or one flood, growing a list for a
+        whole window.
+        """
+        return stamps[-keep:] if len(stamps) > keep else stamps
+
+    def _evict(self, now: float) -> None:
+        """Bound the table: expired entries first, then the least recent.
+
+        Halving rather than trimming exactly to the cap is what keeps this
+        amortized -- it buys ``MAX_TRACKED_CLIENTS // 2`` insertions before the
+        next sweep, instead of a sort on every failure once the table is full.
+
+        Accepted: an attacker with enough addresses can evict their OWN record
+        and reset their backoff. Doing so takes thousands of distinct sources,
+        which is precisely the case the global counter -- fixed size, and not
+        evictable -- exists to cover.
+        """
+        live = {c: kept for c, stamps in self._per_client.items()
+                if (kept := self._prune(stamps, now))}
+        if len(live) > MAX_TRACKED_CLIENTS:
+            newest = sorted(live, key=lambda c: max(live[c]), reverse=True)
+            live = {c: live[c] for c in newest[:MAX_TRACKED_CLIENTS // 2]}
+        self._per_client = collections.defaultdict(list, live)
