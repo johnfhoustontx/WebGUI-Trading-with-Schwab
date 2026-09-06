@@ -975,6 +975,41 @@ The account view for the automated paper-trading engine.
 > is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
 > autonomous driver's separate account re-prices every minute; this one does not.)
 
+## Shares
+
+**Route:** `/options/shares`.
+
+The **stock** the paper account holds. Options normally expire worthless or are closed;
+a **cash-secured put** that finishes below its strike does neither — it is exercised
+against you and becomes 100 shares per contract, bought at the strike. Every such lot
+appears here.
+
+**The columns:** Symbol · Shares · **Cost basis $/share** · **Cost $** ·
+**Mark (not tracked)** · Unrealized $ · **How acquired** · Held since ·
+**Covering call**. Click any column to re-sort.
+
+**How acquired** says where the lot came from. *Assigned* means a short put was
+exercised against you — which is how nearly every lot arrives — and *Bought* means it
+was entered by hand. The two are not interchangeable: an assigned lot's cost basis is
+the strike you sold, which may be well above what the shares were worth when they
+landed.
+
+**Mark and Unrealized are deliberately blank.** Nothing in this app re-prices a bare
+share, so there is no current value to report, and printing the cost basis in the Mark
+column would look like a live quote. To see what a holding is worth right now, look the
+symbol up on **Market Dashboard** or in your broker.
+
+**Covering call** shows the call already written against that symbol, as strike and
+expiry — for example `210c 10/16`, with `×2` if more than one contract. A blank cell
+means the shares are uncovered: all the upside is yours and no premium is being
+collected. A call *spread* on the same symbol is not a covering call and is not shown
+here.
+
+There is nothing to press. Lots appear when the engine settles an in-the-money short
+put and disappear when the shares are sold or called away. What they are *for* is the
+**Income** tab, which screens covered calls against these lots and never offers a
+strike below their cost basis.
+
 ## Rescue
 
 **Route:** `/options/rescue`.

@@ -2220,6 +2220,87 @@ The fills log is also the best available audit trail when a position behaves une
 
 ---
 
+## Shares
+
+*Menu: STRATEGY → Options → Shares · Route `/options/shares`*
+
+### What it is
+
+The **equity inventory** of the paper account — the stock it owns, lot by lot. It is a
+second reader of the same account [Paper Account](#paper-account) shows, not a separate
+book: options live on that page, shares live here.
+
+Shares get into the book one way in normal operation. A **cash-secured put** that
+finishes in the money is exercised against you at expiration, and the engine converts
+it into 100 shares per contract at the strike, debiting the cash it had already
+reserved. That is the whole point of selling one, and it is what makes a covered call
+possible afterwards.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:paper_account` |
+| Trigger | Republished on every paper-account refresh — the hourly entry/manage cycle and every manual paper action |
+| Store | `equity_lots` in the manual paper account database |
+
+### Reading the screen
+
+**The columns:** Symbol · Shares · Cost basis $/share · Cost $ · Mark (not tracked) ·
+Unrealized $ · How acquired · Held since · Covering call.
+
+**How acquired** carries the lot's provenance, and it is not decoration:
+
+| Value | Means |
+|---|---|
+| **Assigned** | A short put was exercised against you. Cost basis is the strike you sold, not the market price when the shares arrived. |
+| **Bought** | The lot was entered by hand. |
+| **—** | The lot records no source. Unknown, not "bought". |
+
+**Covering call** is the call currently written against that symbol, shown as strike and
+expiry with a contract count when it exceeds one. Blank means the shares are uncovered.
+
+### Why it matters
+
+An assigned lot is the point where an options position quietly becomes a stock position,
+and the two are managed completely differently — the option had defined risk and an
+expiry, the stock has neither. A screen that shows only the option book makes that
+transition invisible, which is exactly when it goes unmanaged.
+
+The provenance column is what makes the cost basis readable. A basis of 195 on a lot
+*bought* at 195 says the market was there; the same basis on an *assigned* lot says only
+that 195 is the strike you chose to sell, and the shares may have been worth
+considerably less on arrival.
+
+### Caveats and gotchas
+
+- **There is no live mark, and the page says so.** Nothing in this application re-prices
+  a bare equity symbol, so **Mark** and **Unrealized** render an em-dash on every row.
+  That is honest rather than useful: the alternative was to print the cost basis in a
+  column labelled Mark, or a 0.00 unrealized, both of which would read as measurements.
+  Price the shares in your broker or on [Market Dashboard](#market-dashboard).
+- **Coverage is recorded per symbol, not per lot.** The paper book stores no link from a
+  covered call back to the specific lot it was written against, so one open call shows on
+  every lot of that symbol. With two lots of one name and one call written, the screen
+  cannot tell you which hundred shares are covered — because the book does not know.
+- A call **credit spread** on a symbol you hold is not a covering call and is
+  deliberately not matched. Reporting it as one would say the shares are protected when
+  they are not.
+- Nothing here is an action. Lots are created and closed by the engine's settlement pass.
+
+### When to use it
+
+Before writing a covered call, to see what you actually hold and at what basis; and
+after any expiry day on which you had short puts near the money, to see whether one was
+assigned. [Income](#income) screens calls against these lots automatically, never below
+their cost basis.
+
+### Related pages
+
+[Paper Account](#paper-account) · [Income](#income) · [Paper Ledger](#paper-ledger).
+
+---
+
 ## Rescue
 
 *Menu: STRATEGY → Options → Rescue · Route `/options/rescue`*

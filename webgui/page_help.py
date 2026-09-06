@@ -423,6 +423,31 @@ Trades you sent by hand live on **Paper Ledger**.
   acted on at 10:00 unless you press **Run manage cycle** yourself.
 - **Reset** sets a new starting balance.
 """,
+    "/options/shares": """
+**Shares — the simple version**
+
+The **stock** the paper account owns. Options usually expire; a **cash-secured put**
+that finishes below its strike does not — it turns into 100 shares per contract, at
+the strike. Those shares land here.
+
+- **How acquired** — *Assigned* means a short put was exercised against you, which
+  is how nearly every lot appears. *Bought* means it was entered by hand. It matters:
+  an assigned lot's cost basis is the strike you sold, not what the stock was worth.
+- **Cost basis $/share** and **Cost $** — what you paid per share, and the cash that
+  bought the whole lot.
+- **Mark** and **Unrealized** are **blank on purpose.** Nothing here re-prices a bare
+  share, so there is no current value to show — and a number nothing measured is
+  worse than an empty cell. To see what a holding is worth right now, look it up on
+  **Market Dashboard** or in your broker.
+- **Covering call** — the call already written against that symbol, if there is one.
+  Blank means the shares are uncovered: you keep all the upside, and you are
+  collecting no premium. A call **spread** on the same symbol is *not* a covering
+  call and is deliberately not shown here.
+- Shares owned are what make a **covered call** possible. The **Income** tab screens
+  calls against these lots, never below their cost basis.
+- Nothing on this page is an action. Lots appear and disappear as the engine settles
+  expirations.
+""",
     "/sentiment": """
 **Sentiment — the simple version**
 

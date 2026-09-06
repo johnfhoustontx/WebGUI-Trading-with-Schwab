@@ -884,11 +884,19 @@ def covered_call_candidates(lots, chains, spots, earnings=None):
 
 
 def paper_account_view() -> dict:
-    """Read the paper account view: snapshot + open positions + fills + flag.
+    """Read the paper account view: snapshot + positions + fills + lots + flag.
 
     Each sub-read is defensively guarded (snapshot→None, lists→[] on failure),
     mirroring the page's per-read try/except. ``has_account`` lets the GUI show
-    the no-account state without a separate read."""
+    the no-account state without a separate read.
+
+    ``lots`` is the open SHARE inventory, and it rides this view rather than a
+    new one on purpose: ``/options/shares`` is a second reader of the paper book,
+    not a second book. A separate cache view would give one database two publish
+    cadences, so a lot could be visible on one screen and absent from the other.
+    Tier 1 cannot open the store itself, so this is the only way the lots reach a
+    page at all.
+    """
     import paper_account_db
     import paper_engine
 
@@ -905,6 +913,13 @@ def paper_account_view() -> dict:
     except Exception:
         orders = []
     try:
+        lots = paper_account_db.fetch_open_lots()
+    except Exception:
+        # Same degrade as the lists above. An empty list is honest here — the
+        # page tells "no shares held" apart from "the feed is cold" by whether
+        # the payload exists at all, not by this value.
+        lots = []
+    try:
         has_account = paper_account_db.get_account() is not None
     except Exception:
         has_account = False
@@ -913,6 +928,7 @@ def paper_account_view() -> dict:
         "snapshot": snapshot,
         "positions": positions,
         "orders": orders,
+        "lots": lots,
         "has_account": has_account,
     }
 

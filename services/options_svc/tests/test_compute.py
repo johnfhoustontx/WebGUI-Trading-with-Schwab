@@ -467,7 +467,35 @@ def test_paper_account_view_defensive_on_failure(monkeypatch):
 
     out = compute.paper_account_view()
     assert out == {"snapshot": None, "positions": [], "orders": [],
-                   "has_account": False}
+                   "lots": [], "has_account": False}
+
+
+def test_paper_account_view_carries_the_open_equity_lots(monkeypatch):
+    """The share inventory rides the EXISTING paper-account view.
+
+    ``/options/shares`` is a second READER of the paper book, not a second book:
+    a separate cache view would give the two pages two publish cadences over one
+    database, so a lot could exist on one screen and not the other. Tier 1
+    cannot open the SQLite store itself, so the lots have to arrive here.
+    """
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    lots = [{"lot_id": 1, "symbol": "AAPL", "shares": 100, "cost_basis": 195.0,
+             "source": "assignment", "source_position_id": 7}]
+    fake_engine = _types.SimpleNamespace(account_snapshot=lambda: {"equity": 1.0})
+    fake_db = _types.SimpleNamespace(
+        fetch_open_positions=lambda db: [],
+        fetch_orders=lambda db, limit=None, status=None: [],
+        fetch_open_lots=lambda: (seen.__setitem__("lots_called", True), lots)[1],
+        get_account=lambda: {"id": 1})
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+    monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
+
+    out = compute.paper_account_view()
+    assert seen.get("lots_called") is True
+    assert out["lots"] == lots
 
 
 def test_run_entry_cycle_calls_engine_with_signals(monkeypatch):

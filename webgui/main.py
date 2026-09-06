@@ -360,6 +360,15 @@ OPTIONS_CHILDREN = [
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
     ("/options/portfolio", "Paper Account", "account_balance_wallet"),
+    # Shares sits in the TRACK phase beside the two paper screens: put
+    # assignment turns an option position into stock, so the inventory is part
+    # of what the book holds, not a separate workflow (design doc 2026-09-05).
+    #
+    # ⚠ This makes TEN tabs in the Options strip — nine was already the most it
+    # has carried, and wrapping at a narrow width is UNVERIFIED (nobody has
+    # opened a browser on it). The design's stated fallback if it wraps is to
+    # move THIS page under ACCOUNT beside /portfolio.
+    ("/options/shares", "Shares", "inventory_2"),
     ("/options/rescue", "Rescue", "healing"),
 ]
 
@@ -804,6 +813,9 @@ _TAB_COLOR = {
     # neighbours are Paper Ledger's 123 and Paper Account's 172). A route with no
     # entry here silently inherits the Market Scanner's blue.
     "/options/income": "#3dd983",         # Income Window — emerald
+    # Periwinkle: hue 249, the midpoint of the widest gap left in the Options
+    # strip's hue circle (Market Scanner's 207 and Captured Signals' 291).
+    "/options/shares": "#7c6ff0",         # Shares — periwinkle
     "/options/gamma": "#7e57c2",          # Dealer Positioning — deep purple
     "/options/simulator": "#29b6f6",      # Simulator — light blue
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
@@ -2112,6 +2124,13 @@ def options_portfolio_page() -> None:
     with _layout("/options/portfolio", "Options · Paper Account"):
         from pages.options import portfolio
         portfolio.render()
+
+
+@ui.page("/options/shares")
+def options_shares_page() -> None:
+    with _layout("/options/shares", "Options · Shares"):
+        from pages.options import shares
+        shares.render()
 
 
 @ui.page("/options/calculator")
