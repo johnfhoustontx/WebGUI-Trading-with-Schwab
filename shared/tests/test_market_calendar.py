@@ -508,6 +508,17 @@ def test_momentum_is_a_single_nightly_slot():
     assert mc.slot_times("momentum") == {"at": _t(16, 20)}
 
 
+def test_earnings_is_a_single_nightly_slot():
+    """The nightly Alpha Vantage calendar pull that feeds the earnings gate.
+
+    20:00 CT, deliberately clear of the 16:20 momentum and 16:30 calibration
+    marks and of the 08:45 CT income scan that CONSUMES this store the next
+    morning. A KeyError here is not a degraded tick: ``trade_svc.scheduler``
+    resolves this at module level, so it would be a hard startup failure."""
+    assert mc.slot_times("earnings") == {"at": _t(20, 0)}
+    assert mc.slot_grace_min("earnings") == 60
+
+
 def test_unknown_slot_group_raises():
     """A typo'd group is a programming error, not something to degrade past -
     mirrors _window()."""

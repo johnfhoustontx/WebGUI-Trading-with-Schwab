@@ -27,3 +27,39 @@ def test_app_wires_command_handler():
     from services.trade_svc import app as app_module
 
     assert app_module.handlers.handle_command is handlers.handle_command
+
+
+def test_app_passes_the_nightly_scheduler_to_make_app():
+    """``scheduler=`` must actually reach ``make_app`` — the whole feature.
+
+    Asserted behaviourally rather than by grepping the source: the failure this
+    guards against is silent (no scheduler means no nightly earnings pull, and
+    the store simply goes stale over weeks with nothing on ``/health`` to say
+    so), and a comment mentioning ``scheduler.loop`` must not be able to satisfy
+    it. ``app.py`` does ``from services._scaffold import make_app``, so patching
+    the attribute on the scaffold and reloading the module captures the real
+    call."""
+    import importlib
+
+    import pytest
+
+    import services._scaffold as scaffold
+    from services.trade_svc import app as app_module
+    from services.trade_svc import scheduler
+
+    seen = {}
+    real = scaffold.make_app
+
+    def _capture(domain, **kw):
+        seen.update(kw)
+        return real(domain, **kw)
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(scaffold, "make_app", _capture)
+        importlib.reload(app_module)
+    finally:
+        mp.undo()
+        importlib.reload(app_module)   # leave the real app for the other tests
+
+    assert seen.get("scheduler") is scheduler.loop

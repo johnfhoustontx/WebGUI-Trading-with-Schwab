@@ -1200,6 +1200,46 @@ def _refresh_earnings_calendar(conn):
         _degrade.degraded("trade.refresh_earnings_calendar")
 
 
+def refresh_earnings_calendar():
+    """The SCHEDULED half of the calendar pull (``trade_svc.scheduler``).
+
+    Never raises: this service's real job is on-demand analysis, and a vendor
+    outage must not take the scheduler loop down with it. Returns True when the
+    store was opened and the latched refresh ran, False when it degraded — the
+    caller only logs it.
+
+    ⚠ **It goes through the same ``_refresh_earnings_calendar`` day latch the
+    lazy path uses, and that sharing is the point.** The free tier allows 25
+    requests a day and the bulk CSV needs one, so a scheduled pull at 20:00 and
+    a user's analyze at 09:00 on the same CT date must not each spend one. The
+    latch makes the pair idempotent per day whichever fires first; the schedule
+    only guarantees that one of them DOES fire, which is what was missing —
+    nothing pulled the calendar unless somebody happened to open Trade Analyzer.
+    """
+    conn = None
+    try:
+        from services.trade_svc import earnings_calendar as _ec
+        path = _earnings_db_path()
+        # Same isolation rule as `_enrich_earnings_date`: unguarded this opens a
+        # SQLite file in the repo and issues a live vendor request during the
+        # suite. A test that wants the pull patches the path.
+        if _under_pytest() and path == _ec.DEFAULT_DB_PATH:
+            return False
+        conn = _ec.init_db(path)
+        _refresh_earnings_calendar(conn)
+        return True
+    except Exception:
+        _degrade.degraded("trade.refresh_earnings_calendar_scheduled")
+        return False
+    finally:
+        if conn is not None:
+            try:
+                from services.trade_svc import earnings_calendar as _ec2
+                _ec2.close_db(conn)
+            except Exception:
+                pass
+
+
 def _enrich_earnings_date(fundamentals, symbol):
     """Fill ``days_to_earnings`` from the calendar, in place. Never raises.
 
