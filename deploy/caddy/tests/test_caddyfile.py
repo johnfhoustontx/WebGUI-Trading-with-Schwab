@@ -83,9 +83,30 @@ def _block(text, host):
 # --- A. the served root ------------------------------------------------------
 def test_the_file_server_root_is_the_site_dir_and_never_the_checkout_root(cfg):
     """One level too high and the secrets are on the internet, silently."""
-    root = re.search(r"root \* (\S+)", cfg).group(1)
+    root = re.search(r'root \* "([^"]+)"', cfg).group(1)
     assert root.endswith("/deploy/site")
     assert pathlib.Path(root).name == "site"
+
+
+def test_a_checkout_path_containing_a_space_stays_one_argument(monkeypatch):
+    r"""The served root is QUOTED, and this is why.
+
+    Caddy splits a directive on whitespace, so an unquoted
+    ``root * /home/my dir/deploy/site`` is two arguments. The failure is either a
+    parse error -- which takes down BOTH hostnames, since one bad file stops
+    Caddy loading at all -- or, far worse, a root of ``/home/my`` that quietly
+    serves a tree ABOVE the checkout. That is exactly the catastrophe the test
+    above exists to prevent, arriving through a door it cannot see, because the
+    POSIX-root fixture never contains a space.
+
+    Not hypothetical: rendered on the Windows dev checkout
+    (``D:/WebGUI Trading with Schwab/...``) the unquoted form truncated to
+    ``D:/WebGUI``.
+    """
+    spaced = pathlib.PurePosixPath("/home/my dir/deploy/site")
+    monkeypatch.setattr(caddy, "_site_root", lambda: spaced)
+    root = re.search(r'root \* "([^"]+)"', caddy.render()).group(1)
+    assert root == str(spaced), "the whole path must survive as one argument"
 
 
 def test_the_served_root_is_a_posix_path(cfg):
@@ -95,7 +116,7 @@ def test_the_served_root_is_a_posix_path(cfg):
     which Caddy would take as a relative path and serve the wrong tree -- and
     the test above would pass, because ``.name`` is backslash-aware on Windows.
     """
-    root = re.search(r"root \* (\S+)", cfg).group(1)
+    root = re.search(r'root \* "([^"]+)"', cfg).group(1)
     assert "\\" not in root
     assert root.startswith("/")
 

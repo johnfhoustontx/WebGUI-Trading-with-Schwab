@@ -98,7 +98,7 @@ def _public_block():
     encode zstd gzip
 
     # STATIC ONLY. This tree is world-readable by definition; see the docstring.
-    root * {_site_root()}
+    root * "{_site_root()}"
     file_server
 
     header Strict-Transport-Security "{HSTS}"

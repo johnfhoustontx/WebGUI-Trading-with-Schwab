@@ -2362,6 +2362,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv/bin/python -m pytest shared/tests            # 89
 .venv/bin/python -m pytest tests                   # 69  (env profiles + launcher guards)
 .venv/bin/python -m pytest tools/tests             # 816
+.venv/bin/python -m pytest deploy/caddy            # 18  (the generated Caddyfile)
 ```
 
 **Every count above is a 2026-08-20 measurement** -- the accuracy-audit batch (ADX,
