@@ -252,6 +252,28 @@ password from a bad code. Per-IP *and* global failed-attempt backoff, held in
 memory — it resets on restart, which is acceptable, and it keeps a disk write off
 the authentication path. Every failure to `logs/webgui.log`.
 
+⚠ **The global counter's penalty is 60 s, not the per-client 900 s, and the
+asymmetry is the whole point.** This is a single-user app: a global lock that
+lasts a quarter of an hour hands any bored stranger a trivial denial of service
+against the owner — spray 50 failures at `/login` and the one person who matters
+is locked out of the UI that arms the trading driver and stops the stack. Since
+the domain is advertised in a Discord and a Telegram and is probed within an hour
+of its certificate hitting CT logs, 50 failures in 15 minutes is a Tuesday, not
+an attack.
+
+Removing the global counter is equally wrong: its job is **resource** protection,
+not brute-force prevention. Measured, a 60 s penalty holds a sustained flood to
+50 attempts per minute — **0.83 Argon2/s**, well under one core-second per second
+even at 3× the local 24 ms — which is the entire benefit, while making the
+owner-facing failure self-healing in a minute.
+
+**It does not eliminate the owner-DoS, it bounds the recovery.** While a flood is
+actually in progress the owner is still refused, because each new failure re-arms
+the window. The durable fix is to let the global lock refuse only the *expensive*
+path — a caller presenting a valid session or remember-device token costs nothing
+to check and is self-evidently not the flood — and that belongs with the route
+wiring, not with the counter.
+
 ## Load and exposure
 
 Measured on the live box, not estimated.
