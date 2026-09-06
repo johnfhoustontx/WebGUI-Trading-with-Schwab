@@ -256,7 +256,15 @@ def _dte_remaining(expiration, now_date):
 
 
 def _position_legs(pos):
-    """Leg count for commission: 4 for an iron condor (call side present), else 2."""
+    """Leg count for commission: 1 for a cash-secured put, 4 for an iron condor
+    (call side present), else 2 for a vertical.
+
+    The single-leg case is deferred to ``is_cash_secured_put`` rather than
+    restated here, so the one structure in this book that has a single leg is
+    recognised by ONE definition — the same one the assignment path uses.
+    """
+    if is_cash_secured_put(pos):
+        return 1
     return 4 if pos.get("call_short") is not None else 2
 
 
