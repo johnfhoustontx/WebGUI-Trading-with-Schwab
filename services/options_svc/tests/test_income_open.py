@@ -12,6 +12,8 @@ attribute redirects the code under test — the shape ``signal_db`` gets wrong, 
 the reason the repo-root conftest also refuses a ``sqlite3.connect`` into a live
 data directory.
 """
+import datetime as _dt
+
 import pytest
 
 from services.options_svc import compute, handlers
@@ -19,17 +21,37 @@ from shared.bus import Bus
 from shared.contracts.envelope import Command
 
 START_CASH = 25_000.0
-_EXPIRY = "2026-10-16"
+
+# ⚠ DERIVED, not a literal. A future expiry hardcoded here reads fine until the
+# day it arrives, and then the row it builds describes a contract in the past
+# with a positive `dte` beside it. The session-date literal one fixture down was
+# exactly this mistake and stayed green for one calendar day; this is the same
+# class, just slower. `_DTE` is the single source — the expiry follows it.
+_DTE = 41
+_EXPIRY = (_dt.date.today() + _dt.timedelta(days=_DTE)).isoformat()
 
 
 @pytest.fixture
 def paper_db(tmp_path, monkeypatch):
-    """A tmp manual paper account, seeded with cash. Yields its path."""
+    """A tmp manual paper account, seeded with cash. Yields its path.
+
+    ⚠ The session date is TODAY, not a literal. ``open_income_position`` calls
+    ``roll_session_if_needed`` before reading the halt flag, and that roll
+    CLEARS ``halted`` whenever the stored session date is not today — correct
+    production behaviour (a stale prior-day halt expires; a same-day one is
+    preserved) and fatal to a fixture pinned to a date.
+
+    This shipped as ``"2026-09-05"`` and was green for exactly one day:
+    ``test_a_halted_account_opens_nothing`` set the halt, the roll cleared it on
+    the next line, and the open succeeded. It is the failure class this repo
+    documents at length — a fixture derived from the constant cannot rot the way
+    an absolute date does.
+    """
     import paper_account_db
 
     db = tmp_path / "paper_account_manual.db"
     monkeypatch.setattr(paper_account_db, "DEFAULT_DB_PATH", db)
-    paper_account_db.ensure_account(None, START_CASH, "2026-09-05")
+    paper_account_db.ensure_account(None, START_CASH, _dt.date.today().isoformat())
     return db
 
 
@@ -57,7 +79,7 @@ def _csp_row(**kw):
     back out.
     """
     row = {"id": "AAPL_SHORT_PUT_1", "type": "SHORT_PUT", "symbol": "AAPL",
-           "short_strike": 100.0, "expiration": _EXPIRY, "dte": 41,
+           "short_strike": 100.0, "expiration": _EXPIRY, "dte": _DTE,
            "net_credit": 200.0, "capital": 10_000.0}
     row.update(kw)
     return row
@@ -66,7 +88,7 @@ def _csp_row(**kw):
 def _cc_row(**kw):
     """A covered-call row, carrying the ``lot_id`` ``_covered_row`` stamps."""
     row = {"id": "AAPL_COVERED_CALL_1", "type": "COVERED_CALL", "symbol": "AAPL",
-           "short_strike": 110.0, "expiration": _EXPIRY, "dte": 41,
+           "short_strike": 110.0, "expiration": _EXPIRY, "dte": _DTE,
            "net_credit": 200.0, "quantity": 1, "lot_id": 1,
            "shares": 100, "cost_basis": 100.0}
     row.update(kw)
@@ -567,3 +589,29 @@ def test_a_refusal_does_not_republish_the_account_view(paper_db):
         type="income_open", args={"row": _csp_row(), "qty": 99}))
 
     assert bus.cache_version(handlers.CACHE_PAPER) == before
+
+
+def test_a_STALE_halt_expires_on_the_session_roll(paper_db):
+    """The other half of the halt contract, and the behaviour that broke the
+    fixture above: a halt from a PRIOR session clears when the day rolls.
+
+    ``open_income_position`` calls ``roll_session_if_needed`` before reading the
+    flag precisely so a drawdown halt cannot outlive its session. Same-day is
+    preserved (``test_a_halted_account_opens_nothing``); prior-day expires.
+    Neither half was pinned until a date-pinned fixture made the suite green on
+    one calendar day only.
+    """
+    import paper_account_db
+
+    paper_account_db.set_halted(paper_db, True)
+    # Backdate the stored session so the next open sees a NEW day.
+    conn = paper_account_db.connect(paper_db)
+    with conn:
+        conn.execute("UPDATE account SET session_date = ? WHERE id = 1",
+                     ((_dt.date.today() - _dt.timedelta(days=1)).isoformat(),))
+    conn.close()
+
+    result = compute.open_income_position(_csp_row(), qty=1)
+
+    assert result["status"] == "opened", result
+    assert paper_account_db.get_account(paper_db)["halted"] == 0
