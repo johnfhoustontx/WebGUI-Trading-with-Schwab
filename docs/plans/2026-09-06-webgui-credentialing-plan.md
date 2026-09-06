@@ -1333,6 +1333,29 @@ app.neuralstrike.co {
 }
 ```
 
+> ⚠ **`X-Forwarded-For` is now load-bearing — do NOT suppress it.** Caddy sets it
+> by default, and Task 10's `main._client_ip` depends on that: behind a reverse
+> proxy every request arrives from `127.0.0.1`, so keying the per-client lockout
+> on the peer would file **the whole internet under one address**, and that
+> counter ramps to 900 s where the global one is deliberately 60 s. Any bot
+> spraying the advertised hostname would lock the owner out of the UI that arms
+> the driver and stops the stack — the exact denial of service the short global
+> penalty exists to avoid.
+>
+> The app reads the **last** `X-Forwarded-For` hop, and only when `X-Edge` is
+> present. That is safe precisely because Caddy **appends** the peer it observed:
+> a client-supplied prefix can lengthen the list but cannot change its tail
+> (verified — a spoofed `9.9.9.9, 203.0.113.9` still counts against
+> `203.0.113.9`). Two things follow for this Caddyfile:
+>
+> - never add `header_up -X-Forwarded-For` or replace it with a fixed value;
+> - `header_up X-Edge 1` must be on **every** `reverse_proxy`, since without it
+>   the app degrades to the peer and the per-client backoff silently becomes
+>   global again.
+>
+> A test should assert both: every `reverse_proxy` carries the `X-Edge` line, and
+> nothing in the generated file suppresses `X-Forwarded-For`.
+
 > ⚠ **No `rate_limit` block — decided 2026-09-06.** Caddy's rate limiter is not
 > in any prebuilt binary; it needs an `xcaddy` build and a manual rebuild on every
 > future Caddy update, with no apt security updates. Rate limiting lives in the
