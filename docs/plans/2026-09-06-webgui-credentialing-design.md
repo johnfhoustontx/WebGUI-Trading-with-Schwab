@@ -86,33 +86,45 @@ for the proxy and as lockout insurance; see [Ops](#ops).
 One pure-ASGI middleware, in `webgui/auth_middleware.py`:
 
 ```
-scope not http/websocket                                   → pass
-path ∈ /login, /_nicegui/*, /_nicegui_ws/*, /favicon.ico    → pass
-wall kiosk exemption (both conditions below)                → pass
-valid session OR valid remember-device cookie               → pass
+scope not http/websocket                       → pass
+path ∈ /login, /favicon.ico                    → pass
+wall kiosk exemption (all three conditions below) → pass
+valid session OR valid remember-device cookie  → pass
 otherwise → http: 303 /login?next=…   ·   websocket: close 1008
 ```
 
 **Pure ASGI, not `BaseHTTPMiddleware`.** The latter only sees `http` scopes, and
 this is a websocket app. It also has known interactions with streaming responses.
 
-### The open list is not a weakness, and it is worth being honest about why
+### The login page carries no NiceGUI runtime, and that is what keeps the open list to two entries
 
-`/_nicegui_ws/` and `/_nicegui/{version}/*` **must** be reachable before login, or
-the login page cannot render or submit — and `/_nicegui_ws/` carries socket.io's
-HTTP long-polling transport as well as the websocket, so it cannot be gated on
-scope type either. Verified against the installed NiceGUI 3.13.0
-(`nicegui.py:54,65`).
+`/login` is a **plain `HTMLResponse` form posting to a plain `@app.post("/login")`**
+— not a `@ui.page`. It joins the nine raw routes `main.py` already serves, and the
+repo already documents standalone HTML documents (the EOD reports, the wall, the
+Explain infographics) as out of scope for the Tailwind-first rule.
 
-So **the websocket is not the security boundary. The page gate is.** That is
-sound, but only for a specific reason worth writing down: NiceGUI client ids are
-random, minted server-side at page render, and scoped to one page's element tree.
-To open a socket that can do anything you need a client id, and you only get one
-for `/desk` by rendering `/desk` — which the HTTP gate refuses. An unauthenticated
-caller can obtain a client id for `/login` and nothing else.
+That choice is load-bearing three times over, and each one is a trap avoided:
 
-The websocket branch in the gate is therefore **defence in depth, not the
-control**. Do not let a later refactor treat it as the control.
+1. **A `@ui.page` login would force `/_nicegui_ws/` and `/_nicegui/{version}/*`
+   open before authentication**, and `/_nicegui_ws/` carries socket.io's HTTP
+   long-polling transport as well as the websocket, so it could not be gated on
+   scope type either (verified against the installed NiceGUI 3.13.0 —
+   `nicegui.py:54,65`). With a raw form, nothing needs them before login, so
+   **both are gated** and the websocket is a real boundary rather than defence in
+   depth.
+2. **A NiceGUI form submits over the websocket, where you cannot set a cookie.**
+   That single fact is why the standard NiceGUI auth pattern reaches for
+   `app.storage.user` and its browser-id indirection at all. A plain POST sets the
+   session cookie on an ordinary HTTP response and needs none of it.
+3. **`ui.run()` sits inside `if __name__ in {"__main__", "__mp_main__"}`**
+   (`main.py:2335`), so under pytest `storage_secret` is never applied and
+   `SessionMiddleware` is never installed. Anything built on `app.storage.user`
+   would be untestable without re-creating that wiring in a fixture — a fixture
+   that would then be asserting against a setup prod does not use.
+
+So the session is an `itsdangerous`-signed cookie this app sets and verifies
+itself, `storage_secret` is not needed, and the entire gate is drivable by
+Starlette's `TestClient`.
 
 ### The wall exemption requires two conditions, and that is the point
 
@@ -123,7 +135,9 @@ The kiosk Chrome that feeds the YouTube stream runs *on the box* and opens
 1. the peer address is loopback, **and**
 2. the request carries no `X-Edge` header (Caddy sets it with `header_up`, which
    *replaces* any client-supplied value), **and**
-3. the path is one of `/wall`, `/desk`, `/market`, `/sentiment/momentum`
+3. the path is one of `/wall`, `/desk`, `/market`, `/sentiment/momentum`, or a
+   NiceGUI runtime path (`/_nicegui/*`, `/_nicegui_ws/*`, `/static/*`) — the
+   iframes are real NiceGUI pages and need their own assets and socket
 
 Either condition alone would be a bypass. Requiring both means that if the bind
 is ever widened by accident, or a port gets forwarded, an external client's peer
@@ -145,11 +159,13 @@ token files anyway, so this grants nothing new.
 |---|---|
 | Password | Argon2id hash, in `shared/webgui_auth.json` |
 | Second factor | TOTP (`pyotp`), ±1 step drift, last-accepted counter persisted so a code cannot be replayed inside its own window |
-| Session | `app.storage.user` over Starlette `SessionMiddleware`, `https_only=True`, `same_site="lax"`, bounded `max_age` |
+| Session | `itsdangerous`-signed cookie set by this app, `Secure` + `HttpOnly` + `SameSite=Lax`, bounded `max_age` |
 | Remember device | Stateless `itsdangerous`-signed cookie carrying `{issued_at, epoch}` |
 
-`ui.run()` currently passes **no** `storage_secret`, which is why `app.storage.user`
-is inert today; it gains one, plus `session_middleware_kwargs`.
+Both cookies are signed with a `session_secret` generated into
+`shared/webgui_auth.json`. Neither NiceGUI's `storage_secret` nor
+`app.storage.user` is used — see [the login page](#the-login-page-carries-no-nicegui-runtime-and-that-is-what-keeps-the-open-list-to-two-entries)
+for why that is the simplification and not a shortcut.
 
 **TOTP over passkeys, for one reason: reliability on a machine you do not own.**
 WebAuthn is phishing-proof and genuinely stronger, and a public login page is
@@ -249,14 +265,15 @@ GUI is sluggish. Reverse it if that judgement ever changes.
 |---|---|
 | `webgui/auth.py` | Pure logic — verify password, verify TOTP with drift + replay window, mint/verify the remember-device token, lockout arithmetic. Pure functions, so they test without a browser or a server. |
 | `webgui/auth_middleware.py` | The ASGI gate. |
-| `webgui/pages/login.py` | `@ui.page("/login")`, in the existing dark-navy token vocabulary. |
+| `webgui/login_page.py` | The `/login` GET form and POST handler — raw `HTMLResponse`, no NiceGUI runtime. Styled to match the dark-navy palette by hand, as the other standalone documents are. |
 | `tools/webgui_credentials.py` | CLI: `set-password`, `enroll-totp` (prints the `otpauth://` URI and a terminal QR), `revoke-devices`, `show`. |
 | `deploy/caddy/generate_caddyfile.py` | Generates `/etc/caddy/Caddyfile` from `repo_paths`. |
 | `shared/webgui_auth.json` + `.example.json` | Gitignored, mode 600, beside `appsettings.json` / `tokens.json`. |
 
-**Modified:** `webgui/main.py` (`ui.run(storage_secret=…)`, register the
-middleware, `/logout`), `config/env.local.toml` (`public_host`),
-`requirements.txt` **and `requirements.lock`**.
+**Modified:** `webgui/main.py` (register the middleware at **module scope**, not
+inside the `__main__` guard, so tests and prod share one wiring; mount `/login`
+and `/logout`), `config/env.local.toml` (`public_host`), `requirements.txt`
+**and `requirements.lock`**.
 
 ### Three placement decisions, each following an existing rule
 
