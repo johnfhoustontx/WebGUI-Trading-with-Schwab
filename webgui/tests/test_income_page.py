@@ -173,11 +173,28 @@ def test_the_breakeven_comes_from_the_list_both_shapes_carry():
 
 def test_the_columns_and_the_row_keys_agree():
     """A column whose ``field`` no row stamps renders a permanently blank cell,
-    and nothing else in the suite would notice."""
+    and nothing else in the suite would notice.
+
+    ``actions`` is exempt and is the ONLY exemption: its cell is drawn entirely
+    by a Quasar body-cell slot, so it has no row field by design — the same
+    shape the captured / paper / scanner / strategy tables use.
+    """
     rows = income.candidate_rows([_PCS, _CSP])
     assert rows
     for col in income.income_columns():
+        if col["name"] == "actions":
+            continue
         assert col["field"] in rows[0], f"column {col['name']} has no row field"
+
+
+def test_the_board_carries_an_action_column_for_the_open_button():
+    """Non-vacuity for the exemption above: without this, deleting the column
+    entirely would pass the test it is exempt from."""
+    names = [c["name"] for c in income.income_columns()]
+    assert names[-1] == "actions", "the action column must be last"
+    actions = income.income_columns()[-1]
+    assert actions["label"] == "", "an action column carries no header text"
+    assert not actions.get("sortable"), "a button is not a reading to sort on"
 
 
 # ── an absent reading is a dash, never a zero ───────────────────────────────
@@ -386,3 +403,83 @@ def test_return_on_capital_and_total_return_if_called_are_not_duplicates():
     # ...and not the same number. Return on capital is the smaller: it has paid
     # the commission that being called away actually costs.
     assert roc < tric
+
+
+# ── the open action: which rows get a button, and what the answer looks like ──
+# The board's one control. Two halves, and each is worthless without the other:
+# a button on a row the SERVICE refuses is a dead control, and an outcome the
+# page never shows is a button that appears to do nothing.
+
+def test_only_the_two_single_leg_products_get_an_open_button():
+    """The paper ACCOUNT can hold a cash-secured put and a covered call. A
+    credit spread's route is the paper LEDGER, which is a different book — and
+    the service refuses it, so a button here would only ever be refused."""
+    rows = income.candidate_rows([_PCS, _CCS, _CSP, _COVERED])
+    assert len(rows) == 4
+    allowed = {r["side"]: r["_allow_open"] for r in rows}
+    assert allowed == {"Put spread": False, "Call spread": False,
+                       "Cash-secured put": True, "Covered call": True}
+
+
+def test_an_unreadable_row_gets_no_button():
+    """Absent reads as falsy → no button, which fails safe in the direction that
+    matters for a control that books a trade."""
+    rows = income.candidate_rows([{"symbol": "AAPL"}, {"type": None}])
+    assert len(rows) == 2
+    assert not any(r["_allow_open"] for r in rows)
+
+
+def test_the_page_gate_and_the_service_gate_name_the_same_structures():
+    """A button the service will refuse, or a structure with no way to reach it.
+    ``shared/tests/test_cross_tier_mirrors.py`` pins the constants themselves;
+    this pins that the PAGE actually applies them."""
+    from pages.options import handoff
+
+    for kind in handoff.INCOME_OPENABLE_TYPES:
+        assert income.candidate_rows([{"type": kind}])[0]["_allow_open"] is True
+    assert handoff.income_openable({"type": "pcs"}) is False
+    assert handoff.income_openable({"type": " short_put "}) is True
+    assert handoff.income_openable(None) is False
+
+
+def test_an_outcome_is_shown_with_the_services_own_sentence():
+    """The service is the only place that knows the numbers behind a refusal —
+    what the collateral was, what the account held — so the page shows its
+    sentence rather than restating it less truthfully."""
+    assert income.open_result_display({
+        "status": "opened", "message": "Opened 1 AAPL 100 put at $2.00."}) == (
+        "Opened 1 AAPL 100 put at $2.00.", "positive")
+
+
+def test_a_refusal_is_a_warning_not_an_error():
+    """"The account has $8,000 and this needs $10,000" is the system working.
+    Painting a rule red trains the reader to read a rule as a fault."""
+    _msg, tone = income.open_result_display(
+        {"status": "rejected", "reason": "insufficient_cash", "message": "Short."})
+    assert tone == "warning"
+    _msg, tone = income.open_result_display({"status": "error", "message": "Boom."})
+    assert tone == "negative"
+
+
+def test_a_cold_result_view_is_not_an_outcome():
+    """Toasting an empty payload on page build would report a click nobody made."""
+    assert income.open_result_display(None) is None
+    assert income.open_result_display({}) is None
+
+
+def test_an_unreadable_result_says_so_rather_than_inventing_one():
+    """A payload with no sentence and no status we know is not an "opened" and
+    is not a silence — the reader pressed a button and is owed an answer."""
+    message, tone = income.open_result_display({"status": "wat"})
+    assert message == income.OPEN_RESULT_UNKNOWN
+    assert tone == "warning"
+    message, _tone = income.open_result_display({"status": "opened"})
+    assert message == income.OPEN_RESULT_UNKNOWN
+
+
+def test_the_result_view_is_not_the_board_view():
+    """They repaint for different reasons: the board is a once-daily reading of
+    the market, the result is the answer to one click. Sharing a key would
+    repaint every reader's table for one reader's button."""
+    assert income.OPEN_RESULT_VIEW != income.VIEW
+    assert income.OPEN_RESULT_VIEW == "options:income_open"

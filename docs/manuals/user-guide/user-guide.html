@@ -107,7 +107,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#market-scanner">Market Scanner</a></li>
 <li><a href="#strategy-finder">Strategy Finder</a></li>
-<li><a href="#income">Income</a></li>
+<li><a href="#income">Income</a><ul>
+<li><a href="#opening-one-in-the-paper-account">Opening one in the paper account</a></li>
+</ul>
+</li>
 <li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#captured-signals">Captured Signals</a></li>
 <li><a href="#paper-ledger">Paper Ledger</a></li>
@@ -1038,9 +1041,9 @@ parameters and press <strong>Scan</strong>:</p>
 three per-row action buttons) and detail panel as the Market Scanner.</p>
 <h2 id="income">Income</h2>
 <p><strong>Route:</strong> <code>/options/income</code>.</p>
-<p>A read-only board of premium worth <strong>selling</strong> 30 to 45 days out, ranked across the
-whole watchlist. There is nothing to press: the scan runs once each morning on its
-own schedule, and the status line tells you how many symbols it covered, when it ran,
+<p>A board of premium worth <strong>selling</strong> 30 to 45 days out, ranked across the whole
+watchlist. The scan runs once each morning on its own schedule — there is no
+Refresh — and the status line tells you how many symbols it covered, when it ran,
 and whether any of them failed.</p>
 <p>Three structures share the board:</p>
 <ul>
@@ -1081,6 +1084,34 @@ know that one risks $441 and the other $39,361.</p>
 <p>An empty board is a normal outcome, not a fault — the status line says how many
 symbols were scanned so you can tell "nothing qualified today" from "the scan never
 ran".</p>
+<h3 id="opening-one-in-the-paper-account">Opening one in the paper account</h3>
+<p>A <strong>cash-secured put</strong> and a <strong>covered call</strong> carry a wallet button at the end of
+their row. It opens that trade in the <strong>paper account</strong> — the book with cash and
+share lots behind it, which is the one an assignment can turn into stock. The two
+credit spreads do not have the button: their route is <strong>Send to Paper trade</strong> on
+the Market Scanner, which writes the paper <em>ledger</em>, a separate book that tracks
+marks rather than cash.</p>
+<p>Press it, confirm the number of contracts, and the account answers in a moment —
+either a confirmation, or a refusal saying exactly what stopped it. It will refuse
+when:</p>
+<ul>
+<li>the account cannot secure the put (the message names the collateral needed and
+  the cash you have);</li>
+<li>there is no share lot behind a covered call, or the lot was already called away
+  since this morning's scan;</li>
+<li>a covered call would not cover the lot <strong>whole</strong> — 300 shares is three contracts,
+  not one, because the book delivers a lot in one piece (the message names the
+  number that works);</li>
+<li>a covered call is already open on that symbol — the book records coverage per
+  symbol, so it cannot tell a second one apart from the first;</li>
+<li>the price has moved more than 15% from what the board shows, which after a
+  morning scan is common enough to be worth checking rather than filling;</li>
+<li>there is no live quote for the contract at all, or the account is halted for the
+  session.</li>
+</ul>
+<p><strong>You are filled at the live price, not the board's.</strong> The board was scanned this
+morning; the number you see is what ranked the row, and the number you get is what
+the contract is worth when you press the button.</p>
 <h2 id="expected-move">Expected Move</h2>
 <p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
 <p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to
@@ -1171,9 +1202,13 @@ here. The match is by <strong>symbol, not by lot</strong> — the book keeps no 
 shares a call was written against — so if you hold two lots of one name and have
 written one call, that call appears on both rows.</p>
 <p>There is nothing to press. Lots appear when the engine settles an in-the-money short
-put and disappear when the shares are sold or called away. What they are <em>for</em> is the
-<strong>Income</strong> tab, which screens covered calls against these lots and never offers a
-strike below their cost basis.</p>
+put, and disappear when a covered call written against them finishes <strong>above</strong> its
+strike — the shares are called away at that strike, and the cash comes back with the
+gain booked as realised P&amp;L. (A call that finishes at or below its strike expires
+worthless: you keep the premium and the shares stay.) There is no way to sell a lot
+by hand; being called away is the only exit the book has.</p>
+<p>What lots are <em>for</em> is the <strong>Income</strong> tab, which screens covered calls against them
+and never offers a strike below their cost basis.</p>
 <h2 id="rescue">Rescue</h2>
 <p><strong>Route:</strong> <code>/options/rescue</code>.</p>
 <p>An advisory <strong>and</strong> one-click-apply tool for <strong>tested credit spreads</strong> — put credit

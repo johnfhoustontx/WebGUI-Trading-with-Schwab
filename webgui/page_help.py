@@ -199,7 +199,17 @@ each morning. Three kinds of trade sit on one ranked board:
   and found nothing, *After expiry* means a report is coming but lands past this
   expiration, and **Not checked** means the calendar has no entry for that symbol —
   unknown, not clear. Without an Alpha Vantage key that is every row.
-- Nothing here is traded for you. It is a shortlist you act on by hand.
+- **The wallet button** on a cash-secured put or a covered call opens that trade in
+  the **paper account** — the book with cash and share lots, so a put assigned there
+  really does become stock on the **Shares** tab. The two spreads have no button:
+  their route is *Send to Paper trade* on the Market Scanner, which writes the paper
+  *ledger* instead. You are filled at the **live** price, not the morning board's,
+  and the account answers in a moment with either a confirmation or a refusal that
+  says what stopped it — not enough cash, no lot behind the call, a lot already
+  covered, a call that would not cover the lot whole, or a price that has moved more
+  than 15% since the scan.
+- Nothing here is traded automatically. The board is a shortlist; the button is
+  yours to press.
 """,
     "/options/calculator": """
 **Calculator — the simple version**
@@ -458,8 +468,12 @@ the strike. Those shares land here.
   covered.
 - Shares owned are what make a **covered call** possible. The **Income** tab screens
   calls against these lots, never below their cost basis.
-- Nothing on this page is an action. Lots appear and disappear as the engine settles
-  expirations.
+- Nothing on this page is an action. A lot appears when the engine settles an
+  in-the-money short put, and leaves when a covered call written against it finishes
+  **above** its strike — the shares are called away at that strike and the cash comes
+  back with the gain booked as realised profit. A call finishing at or below its
+  strike expires worthless: you keep the premium and the shares stay. Being called
+  away is the only exit; there is no sell-by-hand.
 """,
     "/sentiment": """
 **Sentiment — the simple version**

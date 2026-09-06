@@ -41,11 +41,16 @@ from nicegui import run, ui
 
 from pages.ui_guard import guard_async
 
+from . import handoff as _handoff
 from . import scanner as _scanner
 from . import strategy_table as _st
 from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS, TXT_NEUTRAL, TXT_POS
 
 VIEW = "options:income"
+
+# The ANSWER to one Open click — a separate view from the board, written on
+# every outcome including a refusal. See ``handlers.CACHE_INCOME_OPEN``.
+OPEN_RESULT_VIEW = "options:income_open"
 
 # The service stamps ``ts`` in CENTRAL time (tz-aware), unlike the matrix view's
 # UTC — see publish_income. Parse the offset it carries rather than assuming
@@ -119,9 +124,8 @@ def return_on_capital(row):
     This is the column that makes the board comparable at all: a $60 credit
     against $441 of spread risk and a $640 credit against $39,361 of collateral
     are not comparable as dollars. ``num`` (not ``float_or``) on both, because
-    a NaN capital would otherwise pass ``> 0`` — every comparison against NaN is
-    False, so ``capital > 0`` correctly rejects it, but ``max_profit / nan`` is
-    the reachable half — and a zero capital must not divide.
+    a NaN capital reaching ``max_profit / capital`` would produce a NaN percent
+    that formats and sorts — and a zero capital must not divide.
     """
     profit = _fmt.num((row or {}).get("max_profit"))
     capital = _fmt.num((row or {}).get("capital"))
@@ -212,6 +216,10 @@ def candidate_rows(candidates):
             "_earnings_class": earn_class,
             "score": score,
             "_score_class": _scanner.score_zone_class(score),
+            # Gates the per-row Open button. Only the two single-leg products
+            # can go into the paper ACCOUNT; the spreads have the ledger route
+            # instead. Absent reads as falsy → no button, which fails safe.
+            "_allow_open": _handoff.income_openable(c),
         })
     return rows
 
@@ -243,8 +251,47 @@ def income_columns():
         ("breakeven", "Breakeven"), ("earnings", "Earnings"),
         ("score", "Score"),
     ]
-    return [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
             for f, l in spec]
+    # The action column. Unlabelled, centred and NOT sortable — the cell holds a
+    # button, not a reading — spelled exactly as every other signal table in
+    # this app spells it (captured / paper / scanner / strategy_table).
+    cols.append({"name": "actions", "label": "", "field": "actions",
+                 "align": "center"})
+    return cols
+
+
+# ── the answer to a click ───────────────────────────────────────────────────
+# Three outcomes, three tones. A refusal is a WARNING, not an error: "the
+# account has $8,000 and this needs $10,000" is the system working, and painting
+# it red would train the reader to read a rule as a fault. Only a genuine
+# failure of the open is negative.
+_OPEN_RESULT_TONE = {
+    "opened": "positive",
+    "rejected": "warning",
+    "error": "negative",
+}
+# Neither a sentence the service wrote nor a status we know — say that, rather
+# than inventing an outcome for a payload shape we cannot read.
+OPEN_RESULT_UNKNOWN = "The paper account gave no answer to that request."
+
+
+def open_result_display(payload):
+    """``(message, notify type)`` for an ``income_open`` result, or None.
+
+    None for an empty payload: a cold view is not an outcome, and toasting one
+    on page build would report a click nobody made. The ``message`` is the
+    service's own sentence — it is the only place that knows the numbers behind
+    the refusal (what the collateral was, what the account held), so restating
+    it page-side could only make it less true.
+    """
+    p = payload or {}
+    if not p:
+        return None
+    status = str(p.get("status") or "").strip().lower()
+    message = str(p.get("message") or "").strip()
+    return (message or OPEN_RESULT_UNKNOWN,
+            _OPEN_RESULT_TONE.get(status, "warning"))
 
 
 def _short_ts(iso) -> str:
@@ -322,9 +369,10 @@ def render():
     """Build the Income page body: the ranked 30-45 DTE board, repainting when
     ``cache:options:income`` publishes.
 
-    Read-only. The scan is a once-daily service slot, so there is no button here
-    — the page's whole job is to present this morning's board and say when it
-    was taken.
+    The scan itself is a once-daily service slot, so there is no Refresh here —
+    the page's job is to present this morning's board and say when it was taken.
+    The one action is per row: opening a cash-secured put or a covered call into
+    the paper ACCOUNT, which is the only route this app has into a share lot.
     """
     ui.add_css(QUASAR_INTERNAL_CSS)
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
@@ -333,7 +381,8 @@ def render():
             ui.label("Premium to sell 30 to 45 days out — put and call credit "
                      "spreads plus cash-secured puts, ranked across the whole "
                      "watchlist. Scanned once each morning. Click any column to "
-                     "re-sort.").classes(EYEBROW)
+                     "re-sort; the wallet button on a cash-secured put or covered "
+                     "call opens it in the paper account.").classes(EYEBROW)
             status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
             table_box = ui.element("div").classes("w-full")
             with table_box:
@@ -347,8 +396,17 @@ def render():
     # "nothing qualified today" — which is a real and common outcome here.
     board_busy = _busy.build_busy(table_box, "Loading the board…")
 
+    # The display rows carry formatted strings; the service needs the numbers.
+    # Rebuilt on every paint so a click can never send a candidate the board no
+    # longer shows.
+    raw_by_id: dict = {}
+    _handoff.add_income_row_actions(table, lambda r: raw_by_id.get((r or {}).get("id")))
+
     def _paint(payload):
-        table.rows = candidate_rows((payload or {}).get("candidates"))
+        candidates = (payload or {}).get("candidates") or []
+        raw_by_id.clear()
+        raw_by_id.update({c.get("id"): c for c in candidates if (c or {}).get("id")})
+        table.rows = candidate_rows(candidates)
         table.update()
         status.text = status_text(payload)
         board_busy.hide()
@@ -358,6 +416,15 @@ def render():
         # The bus read is blocking; keep it off the event loop (house pattern).
         _paint(await run.io_bound(bus_client.read, VIEW))
 
+    @guard_async
+    async def _open_result():
+        shown = open_result_display(await run.io_bound(bus_client.read,
+                                                      OPEN_RESULT_VIEW))
+        if shown is not None:
+            message, tone = shown
+            # Long enough to read a refusal that names two dollar amounts.
+            ui.notify(message, type=tone, timeout=8000, multi_line=True)
+
     payload = bus_client.read(VIEW)
     if payload:
         _paint(payload)
@@ -366,3 +433,8 @@ def render():
     # One line for the version-gated repaint idiom: seeds the current version, so
     # the first tick does not fire, and a cold view still fills in on first publish.
     watch_view(VIEW, _reread)
+    # The same idiom for the answer to a click. Seeding matters MORE here: the
+    # result view outlives the click that wrote it, so without the seed every
+    # navigation back to this page would re-toast the last outcome as if it had
+    # just happened.
+    watch_view(OPEN_RESULT_VIEW, _open_result)

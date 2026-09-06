@@ -174,6 +174,23 @@ EVENT_SWING = "events:options:swing"
 CACHE_INCOME = "cache:options:income"
 EVENT_INCOME = "events:options:income"
 
+# The OUTCOME of one ``income_open`` — what the Income page turns into a toast.
+# A separate view from the board, because it is a different kind of thing: the
+# board is a once-daily reading of the market and this is the answer to one
+# click. Folding a per-click result into the board would repaint every reader's
+# table for one reader's button, and would make the board's own version — which
+# the page uses to decide whether to repaint — move for a reason that has
+# nothing to do with the candidates.
+#
+# ⚠ Written on EVERY outcome including a refusal, and short-TTL'd. A refusal
+# that is not published is a button that does nothing, which is the single worst
+# reading here: the user cannot tell "the account refused" from "the service is
+# down". The TTL keeps a stale answer from being read as a fresh one after a
+# restart.
+CACHE_INCOME_OPEN = "cache:options:income_open"
+EVENT_INCOME_OPEN = "events:options:income_open"
+INCOME_OPEN_TTL_SEC = 600
+
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
 # Manual (scanner-baseline) book performance analytics — the benchmark to compare the
@@ -2005,11 +2022,76 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 
+def _publish_income_open(bus, result: dict) -> None:
+    """Cache one ``income_open`` outcome and publish its event.
+
+    Stamps ``ts`` so the page can age it, and — load-bearing — a ``seq`` that
+    increments per publish. Two identical refusals in a row (click Open twice on
+    the same under-funded row) would otherwise be a byte-identical payload, and
+    ``cache_set`` would be right to skip the write; the reader would see one
+    toast for two clicks and reasonably conclude the second did nothing. The
+    default ``skip_unchanged=False`` already writes, but the version alone is
+    what the page gates on, so the counter makes the difference visible in the
+    payload as well.
+    """
+    global _INCOME_OPEN_SEQ
+    _INCOME_OPEN_SEQ += 1
+    payload = dict(result or {})
+    payload["seq"] = _INCOME_OPEN_SEQ
+    payload.setdefault("ts", _dt.datetime.now(mc.CT).isoformat())
+    version = bus.cache_set(CACHE_INCOME_OPEN, payload, ttl=INCOME_OPEN_TTL_SEC)
+    bus.publish(EVENT_INCOME_OPEN, {"version": version})
+
+
+_INCOME_OPEN_SEQ = 0
+
+
+def run_income_open(bus, command) -> None:
+    """Open one Income-board candidate into the manual paper ACCOUNT.
+
+    ``income_open`` is a trade-OPENING command, so it takes ``_is_stale_open`` —
+    the same gate ``paper_create`` and ``driver_paper_create`` take, for the same
+    reason and on the same budget. A consumer group created at id ``0`` replays
+    the whole backlog, and this one MUTATES the book: it reserves collateral and
+    writes a position. ``_is_stale_side_effect`` would work identically, but it
+    is the gate for commands that are *not* opens, and this is an open.
+
+    Every outcome — opened, refused, or failed — is published to
+    ``cache:options:income_open``. A refusal that stayed in the log would leave
+    the reader unable to tell a rule they broke from a service that is down.
+    The paper view is refreshed on a successful open only: a refusal changed
+    nothing, and republishing the account for it would repaint three screens to
+    say so.
+    """
+    args = getattr(command, "args", None) or {}
+    row = args.get("row") or {}
+    if _is_stale_open(command):
+        age = _command_age_seconds(command)
+        log.warning("REJECTED stale income_open for %s: age %.0fs > %ds "
+                    "(enqueue ts=%s)", row.get("symbol"), age or -1,
+                    STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+        _publish_income_open(bus, {
+            "status": "rejected", "reason": "stale_command",
+            "symbol": row.get("symbol"), "age_sec": round(age or 0, 1),
+            "message": ("That request sat too long to act on — nothing was "
+                        "opened. Try again from the current board.")})
+        return
+    result = compute.open_income_position(row, args.get("qty", 1))
+    _publish_income_open(bus, result)
+    if (result or {}).get("status") == "opened":
+        # The book changed: the account view feeds the Paper Account page, the
+        # Shares page and the nav badge, and all three are now out of date.
+        refresh_paper_account(bus)
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``income_scan`` → force
     a 30-45 DTE income pass over the watchlist (replay-guarded — see
     ``_REPLAY_GUARDED``; normally runs on its own once-daily slot);
+    ``income_open`` (args row, qty) → open one income candidate (a cash-secured
+    put or a covered call) into the manual paper ACCOUNT — note the ACCOUNT, not
+    the ledger ``paper_create`` writes;
     ``refresh_paper`` →
     re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
     (guarded on an existing account) then refresh; ``paper_reset`` → reset the
@@ -2082,6 +2164,8 @@ def handle_command(bus, command) -> None:
                         STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
             return
         publish_income(bus)
+    elif command.type == "income_open":
+        run_income_open(bus, command)
     elif command.type == "refresh_paper":
         refresh_paper_account(bus)
     elif command.type == "paper_entry":

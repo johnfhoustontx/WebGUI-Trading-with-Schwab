@@ -867,6 +867,278 @@ def covered_call_candidates(lots, chains, spots, earnings=None):
     return out
 
 
+# ── opening an income candidate into the paper ACCOUNT ──────────────────────
+# The Income board's two single-leg products are the only structures on it that
+# the paper ACCOUNT can hold: a cash-secured put and a covered call. (The two
+# credit spreads already have a route — ``paper_create``, which writes the
+# LEDGER — and the ledger and the account are different books.)
+#
+# ⚠ This exists because nothing else opens one. ``paper_engine.run_entry_cycle``
+# sizes every candidate off ``sig["width"]``, which a single-leg short has none
+# of, so it dies in that function's broad ``except`` — which is exactly why
+# ``tests/test_assignment.py`` had to hand-build its short put. Everything
+# downstream of a lot (assignment, the share inventory, the covered-call half of
+# this board, the called-away disposal) was reachable only from a test fixture
+# until this function existed.
+INCOME_OPEN_STRUCTURES = ("SHORT_PUT", COVERED_CALL_TYPE)
+
+# The board is scanned ONCE each morning, so its prices are hours old by the
+# time anyone clicks. We open at the LIVE mark, never the board's — but a live
+# mark that has drifted this far from the printed one is a materially different
+# trade from the one the reader picked, so it is refused and both numbers are
+# shown rather than silently filled. The fraction is
+# ``paper_adjust.apply_adjustment``'s, deliberately: the rescue board's Execute
+# button already refuses on exactly this rule, and a second tolerance would mean
+# two answers to "has this moved too much".
+INCOME_PRICE_DRIFT_TOLERANCE = 0.15
+
+# A cash-secured put's collateral is the FULL strike notional — that is what
+# makes it cash-SECURED, and it is the reservation
+# ``paper_engine._assign_shares`` relies on already being back in cash when the
+# put is assigned. A covered call reserves NOTHING: the shares are the
+# collateral, and they are already counted in ``equity_at_cost``, so reserving
+# against them would count the same capital twice.
+COVERED_CALL_RESERVATION = 0.0
+
+
+def income_open_strike(row) -> float | None:
+    """The short strike of an income row, or None (PURE).
+
+    ``short_strike`` first — both single-leg builders stamp it, and
+    ``_covered_row``'s comment says why (there is exactly one strike here and it
+    is the decision the reader is making). The ``legs`` fallback covers a row
+    shape that carries only the normalized contract.
+    """
+    row = row or {}
+    k = _num(row.get("short_strike"))
+    if k is not None:
+        return k
+    for leg in row.get("legs") or []:
+        if (leg or {}).get("side") == "short":
+            return _num(leg.get("strike"))
+    return None
+
+
+def income_price_drift(board_per_share, live_per_share) -> float | None:
+    """``|live - board| / board`` as a fraction, or None when either is unread.
+
+    The denominator is the BOARD price and is not floored, unlike
+    ``paper_adjust``'s: that one compares whole-position net cash in dollars,
+    where a near-zero candidate would blow the ratio up, while this compares a
+    per-share option mark that ``_covered_row`` and the spread builders already
+    refuse to emit at or below zero. A board price that is not a positive
+    reading is a non-reading, and returns None so the caller can say so rather
+    than dividing.
+
+    ⚠ **Rounded, and not for tidiness.** ``abs(1.70 - 2.00) / 2.00`` is
+    0.15000000000000002 in binary floating point while ``abs(2.30 - 2.00) /
+    2.00`` is 0.1499999999999999 — so an unrounded comparison against a 0.15
+    tolerance refuses a 15% drop and allows a 15% rise, from nothing but
+    representation error. A user-facing refusal decided at the seventeenth
+    significant digit is arbitrary, and asymmetrically arbitrary is worse. Six
+    places is far finer than any tolerance this is compared against and removes
+    the noise entirely.
+    """
+    board = _num(board_per_share)
+    live = _num(live_per_share)
+    if board is None or live is None or board <= 0:
+        return None
+    return round(abs(live - board) / board, 6)
+
+
+def open_covered_call_conflict(positions, symbol):
+    """The open covered call already written on ``symbol``, or None (PURE).
+
+    ⚠ Per SYMBOL, not per lot, and that is not a shortcut — it is what the book
+    can express. ``paper_positions`` records no link from a call back to the
+    shares it was written against, which is why
+    ``webgui/pages/options/shares.covering_call`` shows one call against every
+    lot of a name. Allowing a second call while the first is open would make
+    that display a lie in the one direction that matters: it would report shares
+    as covered once when they are written twice over.
+    """
+    want = str(symbol or "").strip().upper()
+    for pos in positions or []:
+        pos = pos or {}
+        if str(pos.get("symbol") or "").strip().upper() != want:
+            continue
+        if str(pos.get("strategy") or "").strip().upper() == COVERED_CALL_TYPE:
+            return pos
+    return None
+
+
+def _reject(reason: str, message: str, **extra) -> dict:
+    """A refusal the Income page can render as one sentence.
+
+    ``reason`` is the machine code (logged, and asserted on in tests);
+    ``message`` is the whole sentence a reader sees. Both, always: a code alone
+    reaches the user as ``insufficient_cash`` and a sentence alone cannot be
+    tested for without matching prose.
+    """
+    return {"status": "rejected", "reason": reason, "message": message, **extra}
+
+
+def open_income_position(row, qty: int = 1) -> dict:
+    """Open one Income-board candidate into the MANUAL paper account.
+
+    Returns ``{"status": "opened"|"rejected"|"error", ...}`` and NEVER raises —
+    the command consumer must survive a malformed row, and every refusal carries
+    a ``message`` the page shows verbatim.
+
+    The sequence is ``paper_engine.run_entry_cycle``'s, minus the broker: reserve
+    the collateral, then insert the position. ``paper_broker.simulate_fill_price``
+    handles PCS/CCS/IC only and raises ``FillError`` on anything else, so a
+    single leg is priced directly off the chain through ``_make_leg_pricer`` —
+    the same live pricer ``run_rescue_apply`` uses for its own stale guard.
+
+    ⚠ **The opening credit is NOT credited to cash here**, and that is not an
+    omission. This book realizes an option's credit at CLOSE, through
+    ``paper_engine._close`` → ``realize_pnl``; ``run_entry_cycle`` and
+    ``open_driver_position`` both open the same way. Crediting it at open would
+    double it at settlement.
+    """
+    import datetime as dt
+
+    import paper_account_db
+
+    try:
+        row = dict(row or {})
+        kind = str(row.get("type") or "").strip().upper()
+        if kind not in INCOME_OPEN_STRUCTURES:
+            return _reject(
+                "unsupported_structure",
+                "Only a cash-secured put or a covered call can be opened into "
+                "the paper account from this board.", symbol=row.get("symbol"))
+
+        symbol = str(row.get("symbol") or "").strip().upper()
+        expiration = row.get("expiration")
+        strike = income_open_strike(row)
+        if not symbol or not expiration or strike is None or strike <= 0:
+            return _reject("bad_row",
+                           "That row is missing a symbol, an expiry or a strike, "
+                           "so nothing can be opened from it.", symbol=symbol or None)
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty < 1:
+            return _reject("bad_quantity", "Quantity must be at least 1 contract.",
+                           symbol=symbol)
+
+        if not has_paper_account():
+            return _reject("no_account",
+                           "There is no paper account yet — open one on the Paper "
+                           "Account page before trading into it.", symbol=symbol)
+        # A STALE (prior-day) drawdown halt clears on the session roll; a
+        # SAME-day halt is preserved. Same call, same reason, as the driver's
+        # open path two functions down.
+        paper_account_db.roll_session_if_needed(None, dt.date.today().isoformat())
+        if paper_account_db.get_account(None)["halted"]:
+            return _reject("halted",
+                           "The paper account is halted for this session, so "
+                           "nothing new can be opened.", symbol=symbol)
+
+        # ── the live mark ────────────────────────────────────────────────────
+        right = "PUT" if kind == "SHORT_PUT" else "CALL"
+        live = _num(_make_leg_pricer(symbol)(symbol, expiration, right, strike))
+        if live is None or live <= 0:
+            return _reject(
+                "no_quote",
+                f"No live quote for the {symbol} {strike:g} {right.lower()} right "
+                "now, so there is no price to open at. This board was scanned "
+                "this morning.", symbol=symbol)
+        board = _num(row.get("net_credit"))
+        board = None if board is None else board / SHARES_PER_CONTRACT
+        drift = income_price_drift(board, live)
+        if drift is not None and drift > INCOME_PRICE_DRIFT_TOLERANCE:
+            return _reject(
+                "stale_price",
+                f"The price has moved: the board shows ${board:.2f} and it is "
+                f"${live:.2f} now. Nothing was opened — re-read the row after the "
+                "next scan.", symbol=symbol, board_price=round(board, 2),
+                live_price=round(live, 2))
+
+        # ── the collateral ───────────────────────────────────────────────────
+        lot = None
+        if kind == "SHORT_PUT":
+            reservation = round(strike * SHARES_PER_CONTRACT * qty, 2)
+            cash = _num(paper_account_db.get_account(None)["cash"]) or 0.0
+            if reservation > cash:
+                return _reject(
+                    "insufficient_cash",
+                    f"A cash-secured put on {symbol} at {strike:g} ties up "
+                    f"${reservation:,.2f} of collateral and the account has "
+                    f"${cash:,.2f}.", symbol=symbol)
+        else:
+            reservation = COVERED_CALL_RESERVATION
+            shares_needed = SHARES_PER_CONTRACT * qty
+            lots = paper_account_db.fetch_open_lots()
+            lot_id = row.get("lot_id")
+            lot = next((l for l in lots if l.get("lot_id") == lot_id), None)
+            if lot is None:
+                return _reject(
+                    "no_lot",
+                    f"The paper account no longer holds that {symbol} lot, and a "
+                    "covered call needs the shares behind it.", symbol=symbol)
+            held = int(_num(lot.get("shares")) or 0)
+            # Whole-lot only: ``close_equity_lot`` disposes of a lot WHOLE, so a
+            # call covering part of one could never be delivered against it. The
+            # message names the number that WOULD work rather than just refusing.
+            if held != shares_needed:
+                return _reject(
+                    "partial_lot",
+                    f"That lot holds {held:,} {symbol} shares, so a covered call "
+                    f"on it is {held // SHARES_PER_CONTRACT} contract"
+                    f"{'' if held // SHARES_PER_CONTRACT == 1 else 's'}, not "
+                    f"{qty} — this book delivers a lot whole.", symbol=symbol)
+            open_positions = paper_account_db.fetch_open_positions(None)
+            if open_covered_call_conflict(open_positions, symbol) is not None:
+                return _reject(
+                    "already_covered",
+                    f"A covered call on {symbol} is already open. Coverage is "
+                    "recorded per symbol here, so a second one cannot be told "
+                    "apart from the first.", symbol=symbol)
+
+        # ── the two-step open ────────────────────────────────────────────────
+        if reservation:
+            paper_account_db.reserve_buying_power(None, reservation)
+        position_id = paper_account_db.insert_position(None, {
+            "signal_id": row.get("id"), "symbol": symbol, "strategy": kind,
+            # The put's strike goes in ``short_strike`` and the call's in BOTH
+            # ``call_short`` and ``short_strike``: ``is_cash_secured_put``
+            # requires ``call_short is None``, so a populated call side is what
+            # keeps a covered call from ever being read as an assignable put,
+            # and ``shares.covering_text`` reads ``call_short`` first.
+            "short_strike": strike,
+            "long_strike": None,
+            "call_short": strike if kind == COVERED_CALL_TYPE else None,
+            "call_long": None,
+            "width": None,
+            "expiration": expiration,
+            "dte_at_entry": int(_num(row.get("dte")) or 0),
+            "quantity": qty,
+            "entry_credit": round(live, 2),
+            "entry_order_id": None,
+            "max_loss_per": strike if kind == "SHORT_PUT" else COVERED_CALL_RESERVATION,
+            "max_loss_total": reservation,
+            "entry_ts": _dt.datetime.now().isoformat(),
+        })
+        log.info("income open %s %s x%s @ %.2f (collateral %.2f)",
+                 symbol, kind, qty, live, reservation)
+        return {"status": "opened", "reason": None, "symbol": symbol,
+                "structure": kind, "position_id": position_id, "qty": qty,
+                "strike": strike, "entry_credit": round(live, 2),
+                "collateral": reservation,
+                "lot_id": (lot or {}).get("lot_id"),
+                "message": (f"Opened {qty} {symbol} {strike:g} "
+                            f"{'put' if kind == 'SHORT_PUT' else 'call'} "
+                            f"at ${live:.2f} in the paper account.")}
+    except Exception as exc:  # noqa: BLE001 — the consumer must survive a bad row.
+        _degrade.degraded("options.open_income_position")
+        return {"status": "error", "reason": "error", "error": str(exc),
+                "message": f"The open failed: {type(exc).__name__}: {exc}"}
+
+
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
 # The page read the paper account directly (snapshot + open positions + fills)
 # and ran the entry/manage/reset actions itself. Those reads + actions now live

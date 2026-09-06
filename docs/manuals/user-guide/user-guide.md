@@ -865,9 +865,9 @@ three per-row action buttons) and detail panel as the Market Scanner.
 
 **Route:** `/options/income`.
 
-A read-only board of premium worth **selling** 30 to 45 days out, ranked across the
-whole watchlist. There is nothing to press: the scan runs once each morning on its
-own schedule, and the status line tells you how many symbols it covered, when it ran,
+A board of premium worth **selling** 30 to 45 days out, ranked across the whole
+watchlist. The scan runs once each morning on its own schedule — there is no
+Refresh — and the status line tells you how many symbols it covered, when it ran,
 and whether any of them failed.
 
 Three structures share the board:
@@ -912,6 +912,37 @@ know that one risks $441 and the other $39,361.
 An empty board is a normal outcome, not a fault — the status line says how many
 symbols were scanned so you can tell "nothing qualified today" from "the scan never
 ran".
+
+### Opening one in the paper account
+
+A **cash-secured put** and a **covered call** carry a wallet button at the end of
+their row. It opens that trade in the **paper account** — the book with cash and
+share lots behind it, which is the one an assignment can turn into stock. The two
+credit spreads do not have the button: their route is **Send to Paper trade** on
+the Market Scanner, which writes the paper *ledger*, a separate book that tracks
+marks rather than cash.
+
+Press it, confirm the number of contracts, and the account answers in a moment —
+either a confirmation, or a refusal saying exactly what stopped it. It will refuse
+when:
+
+- the account cannot secure the put (the message names the collateral needed and
+  the cash you have);
+- there is no share lot behind a covered call, or the lot was already called away
+  since this morning's scan;
+- a covered call would not cover the lot **whole** — 300 shares is three contracts,
+  not one, because the book delivers a lot in one piece (the message names the
+  number that works);
+- a covered call is already open on that symbol — the book records coverage per
+  symbol, so it cannot tell a second one apart from the first;
+- the price has moved more than 15% from what the board shows, which after a
+  morning scan is common enough to be worth checking rather than filling;
+- there is no live quote for the contract at all, or the account is halted for the
+  session.
+
+**You are filled at the live price, not the board's.** The board was scanned this
+morning; the number you see is what ranked the row, and the number you get is what
+the contract is worth when you press the button.
 
 ## Expected Move
 
@@ -1020,9 +1051,14 @@ shares a call was written against — so if you hold two lots of one name and ha
 written one call, that call appears on both rows.
 
 There is nothing to press. Lots appear when the engine settles an in-the-money short
-put and disappear when the shares are sold or called away. What they are *for* is the
-**Income** tab, which screens covered calls against these lots and never offers a
-strike below their cost basis.
+put, and disappear when a covered call written against them finishes **above** its
+strike — the shares are called away at that strike, and the cash comes back with the
+gain booked as realised P&L. (A call that finishes at or below its strike expires
+worthless: you keep the premium and the shares stay.) There is no way to sell a lot
+by hand; being called away is the only exit the book has.
+
+What lots are *for* is the **Income** tab, which screens covered calls against them
+and never offers a strike below their cost basis.
 
 ## Rescue
 

@@ -364,10 +364,11 @@ OPTIONS_CHILDREN = [
     # assignment turns an option position into stock, so the inventory is part
     # of what the book holds, not a separate workflow (design doc 2026-09-05).
     #
-    # ⚠ This makes TEN tabs in the Options strip — nine was already the most it
-    # has carried, and wrapping at a narrow width is UNVERIFIED (nobody has
-    # opened a browser on it). The design's stated fallback if it wraps is to
-    # move THIS page under ACCOUNT beside /portfolio.
+    # ⚠ This makes NINE tabs in the Options strip — seven was the most it had
+    # carried before Income and Shares landed together — and wrapping at a
+    # narrow width is UNVERIFIED (nobody has opened a browser on it). The
+    # design's stated fallback if it wraps is to move THIS page under ACCOUNT
+    # beside /portfolio.
     ("/options/shares", "Shares", "inventory_2"),
     ("/options/rescue", "Rescue", "healing"),
 ]

@@ -310,6 +310,32 @@ def debit_cash(db_path, amount):
         conn.close()
 
 
+def credit_cash(db_path, amount):
+    """Move cash INTO the account, touching neither reserved BP nor realized P&L.
+
+    The exact mirror of :func:`debit_cash`, and it exists for the exact mirror of
+    that function's reason: shares being called away is a CONVERSION of stock
+    back into cash, not a gain. The gain is the difference between the exit price
+    and the basis, and it is booked separately through ``realize_pnl``.
+
+    ⚠ **Credit the BASIS here, never the exit price.** ``realize_pnl`` moves cash
+    too, so a caller crediting ``strike x shares`` here AND booking the lot's P&L
+    would credit the gain twice — the disposal-side mirror of the double-release
+    the assignment path is guarded against, and just as invisible: the lot closes,
+    the share count is right, the exit price is right, and only the account
+    balance is wrong. ``paper_engine._call_away_shares`` credits
+    ``cost_basis x shares`` and lets ``realize_pnl`` carry the rest, so the two
+    together move exactly ``strike x shares``.
+    """
+    conn = connect(db_path)
+    try:
+        with conn:
+            a = conn.execute("SELECT cash FROM account WHERE id=1").fetchone()
+            _update_account(conn, cash=round(a["cash"] + amount, 2))
+    finally:
+        conn.close()
+
+
 def realize_pnl(db_path, pnl):
     conn = connect(db_path)
     try:

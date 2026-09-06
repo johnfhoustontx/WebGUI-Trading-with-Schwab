@@ -75,9 +75,16 @@ def source_label(lot) -> str:
 
 
 # ── the covering call ───────────────────────────────────────────────────────
-# The one structure in this book that is a call written against stock. Mirrors
-# the engine's own covered-call identifier; restated rather than imported
-# because Tier 1 takes no service import, and pinned by a test on both sides.
+# The one structure in this book that is a call written against stock. Restated
+# rather than imported because Tier 1 takes no engine or service import.
+#
+# ⚠ The word is the same in three tiers but it is not the same FIELD in all of
+# them: this is a paper-position ``strategy``, while the income scanner's
+# ``COVERED_CALL_TYPE`` is a scan-row ``type``. They have to agree anyway,
+# because the open path stores the row's type as the position's strategy — so a
+# drift here does not merely mislabel a column, it produces a covered call the
+# settlement branch cannot recognise, which is a lot that can never leave the
+# book. ``shared/tests/test_cross_tier_mirrors.py`` pins all three.
 #
 # ⚠ Matching on SYMBOL alone is the trap. An open call CREDIT SPREAD on the same
 # symbol is not a call written against the shares — reporting it as one would

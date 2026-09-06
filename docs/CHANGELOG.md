@@ -4,7 +4,114 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-05 (**A two-sided 30–45 DTE `INCOME` window, and the
+**Last updated:** 2026-09-05 (**Phase B stops being dead machinery: the wheel now
+turns end to end.** A whole-branch review found the two gaps that made the share
+inventory unreachable outside a test fixture — nothing opened a cash-secured put
+into the paper ACCOUNT, and `close_equity_lot` had no production caller. Both are
+wired. ⚠ **Still not verified running in dev.**)
+
+- **C1 — nothing opened a cash-secured put into the account, so the entire
+  downstream chain was reachable only from hand-built fixtures.**
+  `run_entry_cycle` sizes every candidate off `sig["width"]`, which a single-leg
+  short has none of, so it died in that function's broad `except`;
+  `publish_income` calls no recorder, so income candidates never became captured
+  signals; and `paper_create` writes the *ledger*, not the account. The result
+  was that `is_cash_secured_put`, `_assign_shares`, `equity_lots`,
+  `/options/shares` and the covered-call half of the Income board all existed and
+  none of them could be reached. `compute.open_income_position` +
+  `handlers.run_income_open` (`income_open` on `cmd:options`) are the missing
+  path, driven by a per-row wallet button on the Income board.
+- **C2 — once a lot existed it could never leave, and the moment C1 landed that
+  became a money bug:** cash permanently debited, `equity_at_cost` permanently
+  inflating `session_start_equity`, and three documents already promising a
+  disposal that did not exist. `paper_engine.is_called_away` /
+  `_call_away_shares` are the mirror of assignment, in the same settlement
+  branch. **The disposal shipped WITH the open path, not after it.**
+- **⚠ The cash moves in TWO pieces on disposal and only their sum is
+  `strike × shares`.** `credit_cash(cost_basis × shares)` — a new mirror of
+  `debit_cash`, and the same argument for existing — returns the conversion, and
+  `realize_pnl` carries the gain, because `realize_pnl` moves cash as well as
+  booking P&L. Crediting the full `strike × shares` and *then* booking the lot's
+  P&L credits the gain twice, and the lot, the exit price and the share count all
+  still read correctly: only the balance is wrong. That is the disposal-side
+  mirror of the double *release* the assignment path is guarded against, and the
+  assertion that catches either is
+  `cash + reserved + equity_at_cost == start + realized_pnl`. Traced by hand on
+  the full loop and pinned by `test_the_full_wheel_turns`.
+- **A covered call reserves NOTHING and stores `max_loss_total = 0.0`.** The
+  shares are the collateral and `equity_at_cost` already counts them; reserving
+  would double-count, and `reconcile_buying_power` would hand it straight back at
+  the next service start, so the double-count would also be unstable. Storing 0
+  is what keeps `_close`'s unconditional `release_buying_power` a **no-op** on it
+  — pinned from a book holding real collateral on another position, so a release
+  of the wrong amount cannot hide behind a zero total.
+- **Called away is STRICTLY above the strike**, the mirror of assignment's strict
+  `<`. A call settling exactly at its strike is worth nothing and is abandoned;
+  `>=` would deliver stock for a contract that expired worthless.
+  Mutation-verified along with the cash arithmetic — eight mutations
+  (double-credit, dropped credit, dropped P&L booking, `>`→`>=`, `>`→`<`, the
+  commission branch, the strategy gate, the lot lookup) each killed by the test
+  written for it.
+- **`_position_legs` needed an `is_covered_call` branch and it is not cosmetic.**
+  The fallback below it reads a call-side strike as an iron condor, and a covered
+  call stores its strike in exactly that field — so without the branch a one-leg
+  position is charged **four** legs, on both the open and the settlement.
+- **⚠ A covered call must cover a lot WHOLE.** `close_equity_lot` disposes of a
+  lot whole (multi-lot cost-basis accounting is deliberately not built), so a
+  partial call could never be delivered against it. The open path refuses and
+  **names the contract count that would work**; the settlement path resolves the
+  lot by symbol + exact share match, and with no match settles the option, leaves
+  the lot alone and logs a WARNING rather than guessing.
+- **Five refusals, each carrying a machine `reason` AND a whole sentence.** A
+  code alone reaches the user as `insufficient_cash`; a sentence alone cannot be
+  asserted on without matching prose. Every outcome — refusals included — is
+  published to `cache:options:income_open` and toasted by the page, because a
+  refusal that stayed in the log is a button that appears to do nothing. A
+  refusal renders as a **warning, not an error**: "the account has $8,000 and
+  this needs $10,000" is the system working, and painting a rule red trains the
+  reader to read a rule as a fault.
+- **The open is priced LIVE, and the board's price is only a sanity check.** The
+  board is scanned once each morning, so a drift past 15% (deliberately
+  `paper_adjust.apply_adjustment`'s fraction — the Rescue board's Execute already
+  refuses on exactly this rule) refuses and names both numbers. ⚠
+  `income_price_drift` **rounds to 6 places**: unrounded, `abs(1.70-2.00)/2.00`
+  is 0.15000000000000002 while `abs(2.30-2.00)/2.00` is 0.1499999999999999, so a
+  15% *fall* was refused and a 15% *rise* allowed, from nothing but binary
+  representation. Caught by parametrising both signs.
+- **`income_open` takes `_is_stale_open`**, the trade-opening replay gate, for
+  the reason it exists: consumer groups are created at id `0`, and this command
+  reserves collateral and writes a position. Only a *successful* open republishes
+  the account view — a refusal changed nothing.
+- **The covered-call identifier is now a REAL mirror rather than a claimed one.**
+  `shares.py` said it was "pinned by a test on both sides" and no such test
+  existed — and the two constants were different FIELDS (a scan-row `type`
+  against a paper-position `strategy`). They only genuinely have to agree because
+  `open_income_position` stores the row's type as the position's strategy;
+  `shared/tests/test_cross_tier_mirrors.py` now pins all three tiers, plus the
+  page gate against `INCOME_OPEN_STRUCTURES` (a button on a row the service
+  refuses is a dead control; a structure it accepts with no button is a feature
+  nobody can reach). Writing the test was cheaper than deleting the claim.
+- **Three more stale comments the same review found**, corrected in place:
+  `main.py` said "TEN tabs — nine was already the most" where `OPTIONS_CHILDREN`
+  has **nine** and had **seven**; `IncomeScan.scanned_symbols` said "actually
+  covered" against its producer's own "ATTEMPTED, not succeeded"; and
+  `income.return_on_capital` reversed its own correct premise, claiming
+  `capital > 0` rejects a NaN when `nan <= 0` is False.
+- **Manuals in the same commit** (they rot silently): the User Guide's Income
+  section gains the open action and its refusals, its Shares section stops
+  promising a hand-sale that does not exist, `page_help.py` gains both, and
+  `docs/webgui-routes.md` documents the command, the collateral rule, the
+  two-piece cash move and the whole-lot constraint.
+- **Suites:** webgui **3081 green** (was 3072, +9); options_svc **1487 green**
+  (was 1450, +37); shared **313 green** across its three sub-suites (bus 34 ·
+  contracts 53 · tests 226, +2); options-scanner `test_assignment.py` + the new
+  `test_called_away.py` **19 green** (+12). No failures and no skips in any of
+  them. ⚠ The shared total is **313, not the 277** carried into this session as
+  a baseline — the delta from HEAD is provably +2 (both in
+  `test_cross_tier_mirrors.py`), so 277 was already stale before this work.
+  Compare the failing SET, as ever; the count was the thing that misled.
+
+**Prior —** 2026-09-05 (**A two-sided 30–45 DTE `INCOME` window, and the
 paper account learns to hold shares.** Two new Options tabs — `/options/income`
 and `/options/shares` — a third scan horizon on its own once-daily slot, put
 assignment into an `equity_lots` table, and covered calls struck at or above

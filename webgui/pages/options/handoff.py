@@ -246,6 +246,104 @@ def send_to_paper(signal):
     dlg.open()
 
 
+# ── the Income board's open action ──────────────────────────────────────────
+# ⚠ This targets the paper ACCOUNT, not the paper LEDGER ``send_to_paper``
+# writes, and they are two different books: the ledger tracks a trade's marks,
+# the account holds cash, reserved collateral and — the point of this action —
+# share lots. A cash-secured put opened here is what eventually becomes stock;
+# the same trade sent to the ledger never can.
+#
+# The two structures below are the only ones the ACCOUNT can hold from this
+# board. The two credit spreads already have a route (the ledger), and the
+# service refuses anything else anyway; the gate here just keeps a button off a
+# row it would only be refused on. Spelled as row ``type`` values, matching
+# ``income.SIDE_LABELS``.
+INCOME_OPENABLE_TYPES = ("SHORT_PUT", "COVERED_CALL")
+
+
+def income_openable(row) -> bool:
+    """True when an income row can be opened into the paper ACCOUNT (PURE).
+
+    An unreadable row is not openable — absent reads as falsy, which fails safe
+    in the direction that matters for a button that books a trade.
+    """
+    return str((row or {}).get("type") or "").strip().upper() in INCOME_OPENABLE_TYPES
+
+
+def open_in_paper_account(row):
+    """Confirm-then-enqueue an ``income_open`` for one Income-board row.
+
+    The quantity defaults to what the row itself says it supports — for a
+    covered call that is the whole lot, which is the only quantity the book can
+    deliver — so the common case is one click and a confirm.
+
+    The toast here promises only that the request went out; the ACCOUNT's answer
+    (opened, or refused and why) comes back asynchronously on
+    ``cache:options:income_open`` and the page shows it. Claiming a fill here
+    would be the ``driver-executed-but-nothing-opened`` shape: reporting the
+    enqueue as the outcome.
+    """
+    if not row:
+        ui.notify("Select a row first.", type="warning")
+        return
+    if not income_openable(row):
+        ui.notify("Only a cash-secured put or a covered call can be opened into "
+                  "the paper account.", type="warning")
+        return
+    default_qty = 1
+    try:
+        default_qty = max(1, int(float(row.get("quantity") or 1)))
+    except (TypeError, ValueError):
+        default_qty = 1
+
+    with ui.dialog() as dlg, ui.card():
+        ui.label(f"Open {row.get('symbol')} "
+                 f"{'cash-secured put' if row.get('type') == 'SHORT_PUT' else 'covered call'} "
+                 f"{row.get('expiration', '')}").classes("text-subtitle1")
+        ui.label("This opens into the paper ACCOUNT — collateral is reserved and "
+                 "an assignment becomes shares.").classes("text-xs")
+        qty = ui.number("Contracts", value=default_qty, min=1, max=100)
+
+        def confirm():
+            bus_client.request("options", {
+                "type": "income_open",
+                "args": {"row": row, "qty": int(qty.value or 1)},
+            })
+            ui.notify("Sent to the paper account — the result appears here in a "
+                      "moment.", type="positive")
+            dlg.close()
+
+        with ui.row():
+            ui.button("Open", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
+            ui.button("Cancel", on_click=dlg.close).props("flat")
+    dlg.open()
+
+
+# One per-row action for the Income board: open into the paper account. Gated on
+# ``props.row._allow_open`` — every caller MUST stamp it (an absent field reads
+# as falsy → no button, which fails safe, exactly as ``_allow_paper`` does).
+_INCOME_ACTION_SLOT = """
+<q-td :props="props" auto-width>
+  <q-btn v-if="props.row._allow_open" dense flat round size="sm" icon="account_balance_wallet"
+         color="secondary"
+         @click.stop="() => $parent.$emit('to_account', props.row)">
+    <q-tooltip>Open in the paper account</q-tooltip>
+  </q-btn>
+</q-td>
+"""
+
+
+def add_income_row_actions(table, get_row):
+    """Add the per-row 'open in the paper account' button to the Income board.
+
+    ``get_row(display_row)`` maps a clicked display row back to its raw
+    candidate — the display row carries formatted strings, and the service needs
+    the numbers.
+    """
+    table.add_slot("body-cell-actions", _INCOME_ACTION_SLOT)
+    table.on("to_account", lambda e: open_in_paper_account(get_row(e.args)))
+
+
 # Three tiny per-row action buttons (Send to Calculator / Paper trade / Expected
 # Move) for a signal table's "actions" column. Emits to_calc / to_paper / to_em
 # (Calculator / Paper trade / Expected Move) with the row dict.

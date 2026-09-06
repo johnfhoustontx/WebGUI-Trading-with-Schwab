@@ -74,7 +74,11 @@ class IncomeScan(_Base):
     """
 
     candidates: list[dict] = []      # heterogeneous ranked rows (see above)
-    scanned_symbols: int = 0         # how many symbols the pass actually covered
+    # What the pass ATTEMPTED, not what succeeded — publish_income's own words,
+    # and the page repeats them. A symbol whose chain fetch failed is counted
+    # here and named in ``errors``; reporting 1 after 22 failures would read as
+    # a thin market rather than a broken pass.
+    scanned_symbols: int = 0
     errors: list = []
     warnings: list = []
     ts: str | None = None            # publish time

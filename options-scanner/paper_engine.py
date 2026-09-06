@@ -259,11 +259,18 @@ def _position_legs(pos):
     """Leg count for commission: 1 for a cash-secured put, 4 for an iron condor
     (call side present), else 2 for a vertical.
 
-    The single-leg case is deferred to ``is_cash_secured_put`` rather than
-    restated here, so the one structure in this book that has a single leg is
-    recognised by ONE definition — the same one the assignment path uses.
+    The single-leg cases are deferred to ``is_cash_secured_put`` /
+    ``is_covered_call`` rather than restated here, so the two structures in this
+    book that have a single leg are recognised by ONE definition each — the same
+    ones the assignment and called-away paths use.
+
+    ⚠ A covered call MUST be tested before the ``call_short`` fallback below.
+    That fallback reads a call-side strike as "this is an iron condor", and a
+    covered call stores its strike in exactly that field — so without the branch
+    a one-leg position would be charged FOUR legs of commission, on both the
+    open and the called-away settlement.
     """
-    if is_cash_secured_put(pos):
+    if is_cash_secured_put(pos) or is_covered_call(pos):
         return 1
     return 4 if pos.get("call_short") is not None else 2
 
@@ -375,6 +382,139 @@ def _assign_shares(db_path, pos):
         "source": "assignment", "source_position_id": pos["position_id"]})
     log.info("%s ASSIGNED %s %s shares @ %.2f (cost %.2f)", _default_broker.PREFIX,
              pos["symbol"], shares, strike, cost)
+
+
+# ── Called away ────────────────────────────────────────────────────────────
+# The disposal half of the wheel, and the exact mirror of assignment above: a
+# covered call that finishes IN the money hands the shares over at the strike.
+#
+# ⚠ ONE spelling, unlike the short put. The covered call is written by exactly
+# one producer (``options_svc.compute.open_income_position``, from the Income
+# board's ``COVERED_CALL`` row type) and read by exactly one screen
+# (``webgui/pages/options/shares.COVERED_CALL_STRATEGIES``). A second spelling
+# here would be a NEW divergence rather than an inherited one — the SHORT_PUT /
+# NAKED_PUT pair exists only because two producers were built before either knew
+# about the other. ``shared/tests/test_cross_tier_mirrors.py`` pins the two
+# remaining copies against this constant.
+COVERED_CALL_STRATEGIES = ("COVERED_CALL",)
+
+
+def is_covered_call(pos):
+    """True for a single-leg short call written against held shares (PURE).
+
+    Tested BOTH by strategy and by structure, for the same reason
+    ``is_cash_secured_put`` is: structure alone ("one call strike, no long call,
+    no put side") equally describes a NAKED short call, which is undefined-risk
+    and owns no shares to deliver — calling one away would close a lot that was
+    never pledged to it and credit the account for stock it does not hold.
+    """
+    return (str(pos.get("strategy") or "").upper() in COVERED_CALL_STRATEGIES
+            and covered_call_strike(pos) is not None
+            and pos.get("long_strike") is None
+            and pos.get("call_long") is None)
+
+
+def covered_call_strike(pos):
+    """The short call's strike, or None (PURE).
+
+    ``call_short`` FIRST: this schema stores a call structure's strike in
+    ``short_strike`` too, but a row naming the call side explicitly is the one to
+    believe — the same precedence ``webgui/pages/options/shares.covering_text``
+    reads these rows with, and reversing it here would price a disposal off the
+    other field on a row that carries both.
+    """
+    for field in ("call_short", "short_strike"):
+        try:
+            v = pos.get(field)
+            if v is not None:
+                return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def is_called_away(pos, settlement):
+    """True when this position delivers its shares at expiry (PURE).
+
+    A covered call that finished IN the money — settlement STRICTLY above the
+    strike, matching ``max(spot - strike, 0)``. A call settling exactly AT its
+    strike is worth nothing and is abandoned, so the shares stay. The mirror of
+    ``is_assignment``'s strict ``<``, and wrong in the same expensive way if
+    relaxed to ``>=``: it would sell stock to satisfy a contract that expired
+    worthless.
+    """
+    if not is_covered_call(pos):
+        return False
+    strike = covered_call_strike(pos)
+    try:
+        return strike is not None and float(settlement) > strike
+    except (TypeError, ValueError):
+        return False
+
+
+def lot_for_call_away(lots, symbol, shares):
+    """The open lot a called-away covered call delivers, or None (PURE).
+
+    The one lot on ``symbol`` holding EXACTLY ``shares``, oldest first.
+    ``paper_account_db.close_equity_lot`` disposes of a lot WHOLE — multi-lot
+    cost-basis accounting is deliberately not built (see its docstring and the
+    2026-09-05 income-window design) — so an inexact match is not a lot this can
+    close. ``open_income_position`` enforces the same equality at OPEN time, so
+    the exact lot is there by construction; this returns None rather than
+    guessing when it is not, and the caller leaves the lot alone and says so.
+    """
+    want = str(symbol or "").strip().upper()
+    for lot in lots or []:
+        lot = lot or {}
+        if str(lot.get("symbol") or "").strip().upper() != want:
+            continue
+        try:
+            if int(lot.get("shares") or 0) == int(shares):
+                return lot
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _call_away_shares(db_path, pos):
+    """Deliver an ITM covered call's shares: the lot is sold AT THE STRIKE.
+
+    ⚠ The cash moves in TWO pieces and only their SUM is ``strike x shares``.
+    ``credit_cash`` returns the lot's COST (``cost_basis x shares``) — the mirror
+    of the ``debit_cash`` that bought it — and ``realize_pnl`` carries the gain,
+    because ``realize_pnl`` moves cash as well as booking P&L. Crediting the full
+    ``strike x shares`` here and THEN booking the lot's P&L would credit the gain
+    twice; the lot, the exit price and the share count would all still read
+    correctly and only the balance would be wrong. The assertion that catches it
+    is ``cash + reserved + equity_at_cost == start + realized_pnl`` — see
+    ``tests/test_called_away.py::test_the_full_wheel_turns``.
+
+    ⚠ ``_close`` has ALREADY run ``release_buying_power(max_loss_total)``. A
+    covered call reserves nothing (the shares are the collateral), so it stores
+    ``max_loss_total = 0.0`` and that call is a no-op. Do not "complete" the
+    sequence with a release here — and do not store a notional in
+    ``max_loss_total`` either, which would credit cash that was never taken.
+    """
+    qty = int(pos["quantity"] or 0)
+    shares = MULTIPLIER * qty
+    strike = covered_call_strike(pos)
+    lot = lot_for_call_away(paper_account_db.fetch_open_lots(db_path),
+                            pos["symbol"], shares)
+    if lot is None or strike is None:
+        # Nothing to deliver against. The option is already settled (the credit
+        # is kept), so the account is coherent — it is the SHARES that would be
+        # wrong if we guessed a lot, which is why this says so and stops.
+        log.warning("%s CALLED AWAY %s: no open lot of exactly %s shares — the "
+                    "option settled but no lot was disposed", _default_broker.PREFIX,
+                    pos["symbol"], shares)
+        return
+    basis = float(lot["cost_basis"])
+    realized = paper_account_db.close_equity_lot(
+        db_path, lot_id=lot["lot_id"], exit_price=strike, reason="called_away")
+    paper_account_db.credit_cash(db_path, round(basis * shares, 2))
+    paper_account_db.realize_pnl(db_path, realized)
+    log.info("%s CALLED AWAY %s %s shares @ %.2f (basis %.2f, pnl %.2f)",
+             _default_broker.PREFIX, pos["symbol"], shares, strike, basis, realized)
 
 
 # Options settle on the expiration date at the 4pm ET close = 15:00 CT. Only
@@ -501,15 +641,25 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             # second detection path: the deferral above means an assignment with
             # no quote settles on the next cycle, so a lot can appear a cycle
             # late — better than two mechanisms that can disagree.
+            # ...and an ITM covered call delivers them. The two are mutually
+            # exclusive by construction (a position cannot be both a single-leg
+            # short put and a single-leg short call), so the order of these two
+            # tests carries no meaning — but the settlement itself is identical
+            # for all three outcomes, which is why only the REASON and the share
+            # step differ below. Like assignment, there is deliberately no second
+            # detection path: the no-quote deferral above means a called-away lot
+            # can close a cycle late, which beats two mechanisms that disagree.
             assigned = is_assignment(pos, settlement)
+            called = is_called_away(pos, settlement)
+            reason = "ASSIGNED" if assigned else ("CALLED_AWAY" if called else "EXPIRED")
             _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
-                   realized_pnl=realized,
-                   reason="ASSIGNED" if assigned else "EXPIRED", status="EXPIRED")
+                   realized_pnl=realized, reason=reason, status="EXPIRED")
             if assigned:
                 _assign_shares(db_path, pos)
+            elif called:
+                _call_away_shares(db_path, pos)
             log.info("%s %s %s %s x%s pnl %.2f (net of fees)", _default_broker.PREFIX,
-                     "ASSIGNED" if assigned else "EXPIRED",
-                     pos["symbol"], pos["strategy"], qty, realized)
+                     reason, pos["symbol"], pos["strategy"], qty, realized)
             continue
 
         if per_contract is None:
