@@ -236,12 +236,22 @@ def test_a_known_clear_symbol_is_stamped_none_scheduled(income_seams, monkeypatc
 
 def test_a_dated_report_reaches_screen_spreads(income_seams, monkeypatch):
     """``screen_spreads`` owns the spread-side gate (it drops the conflicting
-    expiration). It can only do that if the date arrives."""
-    report = (dt.date.today() + dt.timedelta(days=10)).isoformat()
+    expiration). It can only do that if the date arrives.
+
+    ⚠ The report date is deliberately PAST the expiration. A conflicting date
+    empties ``signals`` outright — ``swing_scan``'s own gate drops every row
+    whose expiration straddles the report — and an ``all()`` over an empty list
+    is vacuously true, so the ``upcoming`` stamp below would assert nothing.
+    The stamp is orthogonal to the conflict: ``income_scan`` writes it on every
+    surviving row whatever the date, and mutating it to publish the CLEARED
+    label was measured to pass the whole suite while this test used +10 days.
+    """
+    report = (dt.date.today() + dt.timedelta(days=_DTE + 20)).isoformat()
     monkeypatch.setattr(compute, "_income_earnings",
                         lambda symbol: ("upcoming", report))
     out = compute.income_scan("AAPL")
     assert income_seams["screen"]["earnings_date"] == report
+    assert out["signals"], "an empty list makes the stamp assertion vacuous"
     assert all(s["earnings_status"] == "upcoming" for s in out["signals"])
 
 

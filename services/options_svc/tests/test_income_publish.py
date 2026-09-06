@@ -359,23 +359,136 @@ def test_the_loop_latches_the_income_slot_at_DISPATCH():
     assert src.index("income_ran.add(") < src.index('branches.append(("income"')
 
 
-def test_the_income_branch_runs_OFF_the_event_loop_and_is_guarded():
+def _drive_one_tick(monkeypatch, **overrides):
+    """Run exactly ONE iteration of ``scheduler.loop``; return what it launched.
+
+    Behavioural, not a source grep. The two tests below used to assert only that
+    a log STRING appeared in ``inspect.getsource(scheduler.loop)`` — which is
+    satisfied by a ``log.exception(...)`` immediately followed by ``raise``.
+    Adding exactly that after BOTH of the income guards was measured to pass all
+    32 tests in this file, while the gate killed the tick and the branch took its
+    task down: precisely the two failures those docstrings name.
+
+    Hermetic in the same way ``test_app``'s loop driver is, and for the same
+    reason (see its docstring — a leaked branch runs REAL gamma/manage work on a
+    thread that outlives the test). Every ``handlers.*`` name the scheduler can
+    submit is stubbed, and the list is DERIVED from the module source rather
+    than hand-maintained, so a new branch cannot quietly start running for real.
+
+    ``overrides`` are handler stubs applied AFTER the wholesale no-op pass, so a
+    caller's own stub is not silently overwritten by it.
+
+    Returns ``(keys, tasks)`` — the branch keys launched this tick, and
+    ``key -> asyncio.Task`` so a caller can inspect how a branch finished.
+    """
+    import asyncio
+    import pathlib
+    import re
+    from datetime import datetime
+
+    from services.options_svc import compute, scheduler
+
+    src = pathlib.Path(scheduler.__file__).read_text(encoding="utf-8")
+    for name in sorted(set(re.findall(r"handlers\.([a-z_]+)", src))):
+        monkeypatch.setattr(handlers, name, lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(compute, "reconcile_paper_buying_power", lambda *a, **k: {})
+    for name, fn in overrides.items():
+        monkeypatch.setattr(handlers, name, fn, raising=False)
+
+    # A fixed in-window weekday. 09:00 CT is deliberate: it is a tick on which
+    # the income slot is due AND branches are due both BEFORE it (rescan,
+    # analyze) and AFTER it (market_snapshot), which is what makes "the branches
+    # around it still ran" an assertion rather than a hope.
+    monkeypatch.setattr(scheduler, "_market_now",
+                        lambda: datetime(2026, 6, 15, 9, 0, tzinfo=scheduler._CT))
+
+    keys, tasks = [], {}
+    _real_launch = scheduler.launch_branches
+
+    def _record(running, branches, create_task):
+        launched = _real_launch(running, branches, create_task)
+        keys.extend(launched)
+        tasks.update({k: running[k] for k in launched})
+        return launched
+
+    monkeypatch.setattr(scheduler, "launch_branches", _record)
+
+    async def _boom(*a, **k):          # break out of the infinite loop
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler.asyncio, "sleep", _boom)
+
+    lp = asyncio.new_event_loop()
+    try:
+        try:
+            lp.run_until_complete(scheduler.loop(Bus(fake=True)))
+        except asyncio.CancelledError:
+            pass                        # the sleep stub — the tick COMPLETED
+        pending = [t for t in asyncio.all_tasks(lp) if not t.done()]
+        if pending:
+            # Drain the background branches so a task's outcome is inspectable.
+            lp.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    finally:
+        # Wait for the executor threads BEFORE closing — close() only calls
+        # shutdown(wait=False), which returns while they are still running.
+        lp.run_until_complete(lp.shutdown_default_executor())
+        lp.close()
+    return keys, tasks
+
+
+def test_the_income_branch_runs_OFF_the_event_loop_and_is_guarded(monkeypatch):
     """~23 chain fetches on the event loop would stall every other branch on the
-    tick; an unguarded branch would take the loop down with it."""
-    import inspect
+    tick; an unguarded branch would take the loop down with it.
+
+    ``launch_branches``'s docstring states the contract this pins — "each branch
+    carries its own try/except, so a task never raises" — so the assertion is on
+    how the TASK finished, not on the text of the guard.
+    """
+    import asyncio
+    import threading
+
+    ran_on = []
+
+    def _boom(bus):
+        ran_on.append(threading.get_ident())
+        raise RuntimeError("the ~23 chain fetches failed")
+
+    keys, tasks = _drive_one_tick(monkeypatch, publish_income=_boom)
+
+    assert "income" in keys, "the branch must be due on this tick"
+    assert ran_on, "publish_income never ran"
+    assert ran_on[0] != threading.get_ident(), (
+        "publish_income ran on the event-loop thread; ~23 chain fetches there "
+        "stall every other branch on the tick")
+
+    task = tasks["income"]
+    assert task.done()
+    assert task.exception() is None, (
+        "the branch re-raised — launch_branches' contract is that a task never "
+        "does, and an unretrieved exception takes the loop's health with it")
+    # The tick itself survived: every branch after income still launched.
+    assert "market_snapshot" in keys
+
+
+def test_the_income_gate_cannot_skip_the_branches_around_it(monkeypatch):
+    """A raising gate must degrade to a falsy slot, not propagate.
+
+    Driven from the GATE rather than the source: ``income_slot_due`` reads a
+    module-level slot table and a ``ran`` set, so a malformed
+    ``config/sessions.toml`` is a real way for it to raise mid-tick.
+    """
+    def _boom(now, ran):
+        raise ValueError("malformed [slots.income]")
 
     from services.options_svc import scheduler
+    monkeypatch.setattr(scheduler, "income_slot_due", _boom)
 
-    src = inspect.getsource(scheduler.loop)
-    assert "run_in_executor(None, handlers.publish_income, bus)" in src
-    assert "publish_income branch degraded" in src
+    # Reaching here at all is half the assertion: a propagating gate escapes
+    # _drive_one_tick as ValueError instead of the sleep stub's CancelledError.
+    keys, _tasks = _drive_one_tick(monkeypatch)
 
-
-def test_the_income_gate_cannot_skip_the_branches_around_it():
-    """A raising gate must degrade to a falsy slot, not propagate."""
-    import inspect
-
-    from services.options_svc import scheduler
-
-    src = inspect.getsource(scheduler.loop)
-    assert "income_slot_due gate degraded" in src
+    assert "income" not in keys, "a raising gate must degrade to a falsy slot"
+    # The branches on BOTH sides of the gate still ran.
+    assert "rescan" in keys
+    assert "analyze" in keys
+    assert "market_snapshot" in keys
