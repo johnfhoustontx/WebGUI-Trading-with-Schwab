@@ -107,7 +107,13 @@ page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
-report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
+report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
+three **credential primitives** the login uses — `argon2` (password hashing),
+`pyotp` (the TOTP second factor) and `itsdangerous` (the signed session and
+remember-device cookies). They join the list on the same footing `edge_tts` did:
+none is an engine, none touches a DB or Schwab, and each is a leaf library over
+bytes. They live in `auth.py`, `auth_store.py`, `auth_middleware.py` and
+`login_page.py` and nowhere else. **Zero** engine imports, zero
 `sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
 a hyphenated app folder (`webgui/proxy.py` held the last of it for two dead
 client singletons; `test_proxy.py` now guards it at source level). ⚠ The
@@ -1528,15 +1534,24 @@ sockets, not the unit state. `tools/promote.sh` does both.
 **Logs** are the journal. `journalctl --user -u trading-prod-options_svc -f`.
 `webgui/logging_setup.py` still writes `logs/webgui.log` as well.
 
-**Reaching the app from a workstation.** The web GUI binds `127.0.0.1` on the
-host and has **no authentication of any kind** — correct for a desk-side app,
-and the whole problem on a server, since that UI can open paper positions, arm
-the autonomous driver and stop the stack. Use `tools/open_webgui.ps1` (a desktop
-shortcut on the Windows box), which forwards **both** `:8500` and `:8100` over
-SSH. The proxy port matters: the Schwab refresh token expires every 7 days and
-is re-minted at `http://127.0.0.1:8100/auth`.
+**Reaching the app from a workstation.** The normal route is
+**`https://app.neuralstrike.co`** — Caddy (a *system* unit, since it needs :443)
+terminates TLS and reverse-proxies to the app, which **still binds `127.0.0.1`**.
+Behind it sits a password + TOTP login: `webgui/auth_middleware.py` default-denies
+every `http` and `websocket` scope except `/login` and `/favicon.ico`, plus a
+three-condition loopback exemption for the wall kiosk. Design + plan:
+[`docs/plans/2026-09-06-webgui-credentialing-{design,plan}.md`](docs/plans/2026-09-06-webgui-credentialing-design.md).
 
-⚠ **Never change either bind to `0.0.0.0`.**
+`tools/open_webgui.ps1` survives as the **fallback**: if the cert or Caddy breaks,
+the way in must not depend on the thing that broke. The proxy on `:8100` is
+**never** on the public domain — it is published on the tailnet by
+`tailscale serve`, which is also how the Schwab refresh token gets re-minted at
+`/auth` every 7 days.
+
+⚠ **Never change either bind to `0.0.0.0`.** The login is a second control, not a
+replacement for the first — Caddy is the only thing that should ever talk to
+`:8500`, and the wall exemption's loopback condition is what stops a widened bind
+turning into an open door.
 
 **Manual start**, if you are debugging a single component rather than running the
 stack:

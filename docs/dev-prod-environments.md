@@ -484,13 +484,25 @@ its environment, because only the *units* have an `EnvironmentFile`.
   Both come from the same generator run, so they cannot disagree unless the units
   are stale — regenerate after any port or path change, which `promote.sh` does
   for you.
-- **Reach either web GUI over an SSH tunnel.** Both bind `127.0.0.1` and have
-  **no authentication of any kind** — correct for a desk-side app, and the whole
-  problem on a server, since that UI opens paper positions, arms the autonomous
-  driver and stops the stack. `tools/open_webgui.ps1` forwards prod's `:8500`
-  **and** `:8100` (the proxy's `/auth`, needed every 7 days when the Schwab
-  refresh token expires). For dev, forward `:9500` the same way. ⚠ Never change
-  either bind to `0.0.0.0`.
+- **Reach prod's web GUI at `https://app.neuralstrike.co`** (Caddy + a password
+  and TOTP login, since 2026-09-06). `tools/open_webgui.ps1` is the **fallback**
+  for when the cert or Caddy breaks, and remains the only route to the proxy's
+  `:8100` `/auth` — needed every 7 days when the Schwab refresh token expires —
+  which is deliberately not on the public domain. **Dev is not on the domain at
+  all**; forward `:9500`, or reach it over the tailnet. ⚠ Never change either
+  bind to `0.0.0.0`: the gate's wall exemption is scoped by a loopback check, so
+  a widened bind turns a local carve-out into an open door.
+- ⚠ **DEV NEEDS ITS OWN CREDENTIALS, or you cannot log into it.** The gate is
+  registered at module scope in `main.py`, so **dev runs it too** — deliberately,
+  since a dev that skipped authentication would be taking a code path prod never
+  takes, which is exactly what the four suppression flags are careful not to do.
+  But `auth_store.DEFAULT_PATH` is `<checkout>/shared/webgui_auth.json` and
+  `shared/` is gitignored, so **prod's credentials do not travel to dev and
+  `promote.sh` does not carry them**. Run `python tools/webgui_credentials.py
+  set-password` and `enroll-totp` **inside the dev checkout** once. Two entries in
+  your authenticator is the intended outcome; they can share a password if you
+  like, but not a file. Symptom if you skip it: a normal-looking login page on
+  `:9500` where every attempt fails — that is default-deny working, not a bug.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
 - **systemd owns the PIDs, so the process archaeology is over.** Two long gotchas
