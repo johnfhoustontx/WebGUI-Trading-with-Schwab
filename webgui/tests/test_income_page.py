@@ -267,3 +267,32 @@ def test_the_service_ranking_is_preserved():
     quietly contradict it."""
     rows = income.candidate_rows([_CSP, _PCS, _CCS])
     assert [r["symbol"] for r in rows] == ["MSFT", "AAPL", "AAPL"]
+
+
+def test_a_covered_call_is_named_not_shouted():
+    """The board now carries a fourth structure. Without a label it falls
+    through to the raw engine identifier and the Side column reads
+    "COVERED_CALL" beside "Put spread" — the one thing ``side_label`` exists to
+    prevent."""
+    assert income.side_label({"type": "COVERED_CALL"}) == "Covered call"
+
+
+def test_a_covered_call_row_renders_off_the_shape_both_products_share():
+    """It carries the normalized shape (``legs`` / ``net_credit`` / ``capital``),
+    so every cell reads without the page learning a fourth row shape."""
+    row = income.candidate_rows([{
+        "id": "AAPL_COVERED_CALL_2026-10-16_110.0",
+        "symbol": "AAPL", "type": "COVERED_CALL",
+        "legs": [{"kind": "call", "side": "short", "strike": 110.0, "qty": 1,
+                  "expiration": "2026-10-16"}],
+        "expiration": "2026-10-16", "dte": 35,
+        "net_credit": 160.0, "capital": 9500.0, "max_profit": 1658.7,
+        "breakevens": [93.4], "pop_pct": 61.2,
+        "earnings_status": "not_listed",
+    }])[0]
+
+    assert row["side"] == "Covered call"
+    assert row["credit"] == "160.00"
+    assert row["capital"] == "9500.00"
+    # max_profit / capital, the column that makes the board comparable at all.
+    assert row["roc"] == "17.5%"

@@ -1,7 +1,8 @@
 """Income Window — Tier-1 reader of ``cache:options:income``.
 
-The 30-45 DTE premium-selling board: put credit spreads, call credit spreads and
-the cash-secured put, jointly ranked across the whole watchlist by
+The 30-45 DTE premium-selling board: put credit spreads, call credit spreads,
+the cash-secured put and covered calls against shares the paper account actually
+holds, jointly ranked across the whole watchlist by
 ``handlers.publish_income``. Pure builders (columns / rows / status line) are
 module-level and NiceGUI-free so they are unit-tested without a browser;
 ``render()`` mounts the table and version-polls the bus.
@@ -54,12 +55,15 @@ _CT_TZ = ZoneInfo("America/Chicago")
 
 # ── the side a reader picks on ──────────────────────────────────────────────
 # Engine vocabulary ("PCS") names the builder; a board a human trades off names
-# the position. Three known structures -> three fixed labels; anything else falls
-# through as its raw type rather than being mislabelled as one of the three.
+# the position. Each known structure gets a fixed label; anything else falls
+# through as its raw type rather than being mislabelled as one of them — which
+# is why COVERED_CALL is listed here rather than left to that fallback, where it
+# would render as the engine's own shouting identifier.
 SIDE_LABELS = {
     "PCS": "Put spread",
     "CCS": "Call spread",
     "SHORT_PUT": "Cash-secured put",
+    "COVERED_CALL": "Covered call",
 }
 
 
