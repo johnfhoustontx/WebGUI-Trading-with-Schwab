@@ -1442,7 +1442,7 @@ they go stale**. Three statements become wrong the moment this ships:
 1. `tools/open_webgui.ps1` — "Both services bind 127.0.0.1 on the VPS and have **NO
    AUTHENTICATION OF ANY KIND**". Now false for the webgui, still true for the
    proxy. Rewrite it as: the tunnel is the fallback; the normal route is
-   `https://trading.<domain>`; the proxy is on the tailnet.
+   `https://app.neuralstrike.co`; the proxy is on the tailnet.
 2. `SECURITY.md` — the threat model is built on the loopback bind being the primary
    control. Add the public hostname, the login, the CT-log discovery point, and the
    four load mitigations. **While there, fix the already-stale claim** that the
