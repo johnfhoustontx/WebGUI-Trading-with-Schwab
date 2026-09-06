@@ -1,0 +1,7 @@
+{
+  "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$REPLACE$REPLACE",
+  "totp_secret": "REPLACE-WITH-A-BASE32-SECRET",
+  "session_secret": "REPLACE-WITH-43-URLSAFE-BASE64-CHARS",
+  "epoch": 1,
+  "last_totp_counter": 0
+}
