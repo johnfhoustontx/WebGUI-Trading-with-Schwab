@@ -75,8 +75,10 @@ grep -nE "^(cffi|pycparser|argon2|pyotp)" requirements.lock
 
 ```bash
 # every name in requirements.txt must appear in the lock
+# NOTE the `s/\[.*\]//` — without it, `nicegui[highcharts]` can never match the
+# lock's `nicegui` and the check reports a false positive on a complete lock.
 comm -23 \
-  <(sed 's/[#;].*//' requirements.txt | sed 's/[<>=!~].*//' | tr -d ' ' | grep -v '^$' | tr 'A-Z_' 'a-z-' | sort -u) \
+  <(sed 's/[#;].*//' requirements.txt | sed 's/\[.*\]//' | sed 's/[<>=!~].*//' | tr -d ' ' | grep -v '^$' | tr 'A-Z_' 'a-z-' | sort -u) \
   <(sed 's/[<>=!~].*//' requirements.lock | tr -d ' ' | grep -v '^$' | tr 'A-Z_' 'a-z-' | sort -u)
 ```
 
