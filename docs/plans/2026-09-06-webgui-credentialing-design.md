@@ -47,13 +47,19 @@ route #44 is added without an auth decision**.
 ## Shape
 
 ```
-Internet ──443──► Caddy (system unit)  trading.<yourdomain>
-                    ├─ /wall*          → 404, never leaves the box
-                    ├─ /login          → rate-limited
-                    └─ everything else → 127.0.0.1:8500  + header_up X-Edge
-                                              │
-                                    webgui AuthMiddleware (pure ASGI)
-                                    session valid? ──no──► 303 /login?next=…
+Internet ──443──► Caddy (system unit)
+                    │
+                    ├── neuralstrike.co, www.neuralstrike.co
+                    │     └─ file_server → deploy/site/   PUBLIC, no login
+                    │        (YouTube live link, Discord, Telegram)
+                    │
+                    └── app.neuralstrike.co
+                          ├─ /wall*          → 404, never leaves the box
+                          ├─ /login          → rate-limited (own zone)
+                          └─ everything else → 127.0.0.1:8500 + header_up X-Edge
+                                                    │
+                                          webgui AuthMiddleware (pure ASGI)
+                                          session valid? ──no──► 303 /login?next=…
 
 Tailnet ──────────► tailscale serve ──► 127.0.0.1:8100  proxy /auth + /health
                                     └─► 127.0.0.1:9500  dev webgui
@@ -64,6 +70,44 @@ Loopback ─────────► kiosk Chrome ─────► 127.0.0.
 **The webgui keeps its `127.0.0.1` bind.** Caddy is the only thing that talks to
 it, so the standing "never change either bind to `0.0.0.0`" rule survives intact
 — this design does not weaken it, it puts a gate in front of it.
+
+## Two origins, and why not two paths
+
+`neuralstrike.co` carries a public one-page site — the YouTube live link, Discord
+and Telegram. `app.neuralstrike.co` carries the trading GUI behind the login. They
+are **separate Caddy site blocks on separate hostnames**, not two paths on one.
+
+A path split (`/` public, `/app/*` gated) was rejected on mechanics first: NiceGUI
+emits absolute `/_nicegui/...` URLs, so serving it under a prefix means rewriting
+them, and that is a fragile thing to put between you and your login page.
+
+**But the real reason is origin isolation, and it is the load-bearing one.** The
+public page carries **third-party embeds** — a YouTube iframe, likely a Discord
+widget. Those are other people's scripts and frames. Sharing an origin with the
+app would mean an XSS or a compromised widget on the marketing page is an XSS *in
+the app origin*, with the session cookie in reach. Separate hostnames make that
+structurally impossible instead of something to keep getting right.
+
+Three rules follow, and each is one attribute or header away from being wrong:
+
+- **Cookies are host-only. Never `Domain=.neuralstrike.co`.** A `Domain=` cookie
+  goes to the parent domain *and every subdomain, forever* — so the session would
+  travel to the public page on every view, and to any subdomain added later. It is
+  a one-word "convenience" that silently undoes the split above.
+- **`Content-Security-Policy: frame-ancestors 'self'` on the app origin.** Blocks
+  external framing while still permitting `/wall`'s three same-origin iframes.
+- **Per-host certificates, not a wildcard.** A wildcard's private key covers every
+  subdomain you will ever have. Rate-limit zones are per-host too, so marketing
+  traffic can never trip the login limiter.
+
+### The public site is a `file_server`, and its root is a trap
+
+Caddy serves `deploy/site/` directly out of the checkout, so a `promote.sh` updates
+the site. **The root must be exactly that directory and never the repo root** — a
+`file_server` rooted one level too high serves `shared/webgui_auth.json`,
+`shared/tokens.json` and `config/env.local.toml` to the internet. This is the
+single most damaging mistake available in this design, it is one wrong path away,
+and nothing about the site would look broken. Task 12 pins it with a test.
 
 ## Why Caddy and not a tunnel
 
@@ -159,8 +203,9 @@ token files anyway, so this grants nothing new.
 |---|---|
 | Password | Argon2id hash, in `shared/webgui_auth.json` |
 | Second factor | TOTP (`pyotp`), ±1 step drift, last-accepted counter persisted so a code cannot be replayed inside its own window |
-| Session | `itsdangerous`-signed cookie set by this app, `Secure` + `HttpOnly` + `SameSite=Lax`, bounded `max_age` |
-| Remember device | Stateless `itsdangerous`-signed cookie carrying `{issued_at, epoch}` |
+| Session | `itsdangerous`-signed cookie set by this app — `Secure` + `HttpOnly` + `SameSite=Lax`, bounded `max_age`, and **host-only (no `Domain=`)** |
+| Remember device | Stateless `itsdangerous`-signed cookie carrying `{issued_at, epoch}`, same attributes |
+| Form token | Signed, short-lived, issued by `GET /login` and required by the POST — see mitigation 5 |
 
 Both cookies are signed with a `session_secret` generated into
 `shared/webgui_auth.json`. Neither NiceGUI's `storage_secret` nor
@@ -229,13 +274,23 @@ symptom would not be a slow login page — it would be **the public YouTube stre
 dropping frames** because a bot found the login form. With no swap, a memory spike
 does not degrade gracefully; it gets OOM-killed.
 
-**This is not hypothetical, because of how the hostname gets found.** Every
+**This is not hypothetical, and the public site makes it less so.** Every
 Let's Encrypt certificate is published to Certificate Transparency logs, and bots
-watch that firehose. The hostname will be probed **within an hour of issuance**,
-whether or not anyone is told it exists. Expect a permanent background of
-`/wp-login.php`, `/.env` and `/admin` requests from day one.
+watch that firehose — so `app.neuralstrike.co` is probed within an hour of
+issuance whether or not anyone is told it exists. On top of that background,
+`neuralstrike.co` is going to be **advertised in a Discord, a Telegram and a
+YouTube description**. That is no longer passive scanning; it is people and bots
+deliberately enumerating what else lives on the domain.
 
-### Four mitigations, all cheap
+Expect a permanent background of `/wp-login.php`, `/.env` and `/admin` requests
+from day one, and more of it than a private hostname would draw.
+
+A related judgement, recorded because it looks like a security decision and is
+not: **the public page carries no link to the app.** Obscurity is not a control
+and the subdomain is in CT logs regardless — this is purely about how much junk
+reaches the login form, and you will be bookmarking it anyway.
+
+### Five mitigations, all cheap
 
 1. **Rate-limit `/login` at Caddy**, so a flood never reaches Python at all.
 2. **Check the lockout counter *before* calling Argon2**, never after — otherwise
@@ -246,6 +301,27 @@ whether or not anyone is told it exists. Expect a permanent background of
    amplification factor 3.4×.
 4. **`MemoryMax=` on the webgui unit.** With no swap this is the difference
    between a bounded spike and the OOM killer choosing its own victim.
+5. **A signed, short-lived form token**, issued by `GET /login` and required by
+   `POST /login`, checked **before Argon2**.
+
+   This is the mitigation the public site earns. The overwhelming majority of
+   credential-stuffing bots POST blind at `/login` without ever fetching the
+   form; every one of those is now rejected for the cost of an HMAC instead of
+   19 MiB and ~100 ms. It is a third pre-hash rejection alongside the lockout
+   counter and the edge limiter, and it closes login-CSRF as a side effect.
+
+   **What it is not:** protection against a targeted attacker, who will simply
+   fetch the form first. That case is the lockout counter's job. This filters
+   volume, and volume is what the Discord and Telegram links will bring.
+
+### Watching whether the public site becomes a load problem
+
+The one-pager is served from this box by choice — one config, one deploy path,
+and a static page is genuinely cheap. The exposure is that a widely-shared link
+lands on the same four cores encoding the stream, where TLS handshakes cost more
+than the bytes do. The number to watch is `sar -u` during stream hours against
+the ~55% baseline in the table above; moving the apex block to a static host is
+a config change, not a redesign.
 
 ### Contention policy
 
@@ -267,7 +343,8 @@ GUI is sluggish. Reverse it if that judgement ever changes.
 | `webgui/auth_middleware.py` | The ASGI gate. |
 | `webgui/login_page.py` | The `/login` GET form and POST handler — raw `HTMLResponse`, no NiceGUI runtime. Styled to match the dark-navy palette by hand, as the other standalone documents are. |
 | `tools/webgui_credentials.py` | CLI: `set-password`, `enroll-totp` (prints the `otpauth://` URI and a terminal QR), `revoke-devices`, `show`. |
-| `deploy/caddy/generate_caddyfile.py` | Generates `/etc/caddy/Caddyfile` from `repo_paths`. |
+| `deploy/caddy/generate_caddyfile.py` | Generates `/etc/caddy/Caddyfile` from `repo_paths` — both site blocks. |
+| `deploy/site/` | The public one-pager. **The `file_server` root, and nothing above it.** |
 | `shared/webgui_auth.json` + `.example.json` | Gitignored, mode 600, beside `appsettings.json` / `tokens.json`. |
 
 **Modified:** `webgui/main.py` (register the middleware at **module scope**, not

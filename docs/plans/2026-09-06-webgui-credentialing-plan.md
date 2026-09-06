@@ -4,7 +4,7 @@
 
 **Goal:** Put the NiceGUI web GUI behind a password + TOTP login on a public HTTPS hostname, so it is reachable from any browser while the app keeps its `127.0.0.1` bind.
 
-**Architecture:** Caddy (a *system* systemd unit) terminates TLS on `trading.<domain>` and reverse-proxies to `127.0.0.1:8500`, stamping an `X-Edge` header. Inside the app, one **pure-ASGI** middleware default-denies every `http` and `websocket` scope except `/login`, `/favicon.ico`, and a three-condition loopback exemption for the YouTube wall kiosk. `/login` is a raw HTML form (no NiceGUI runtime) posting to a plain FastAPI route, so the session is an ordinary `itsdangerous`-signed cookie and the whole gate is testable with `TestClient`.
+**Architecture:** Caddy (a *system* systemd unit) serves **two hostnames**: `neuralstrike.co` is a public static one-pager (YouTube live link, Discord, Telegram) from `deploy/site/`, and `app.neuralstrike.co` terminates TLS and reverse-proxies to `127.0.0.1:8500`, stamping an `X-Edge` header. Separate origins, so the public page's third-party embeds can never reach the app's cookies. Inside the app, one **pure-ASGI** middleware default-denies every `http` and `websocket` scope except `/login`, `/favicon.ico`, and a three-condition loopback exemption for the YouTube wall kiosk. `/login` is a raw HTML form (no NiceGUI runtime) posting to a plain FastAPI route, so the session is an ordinary `itsdangerous`-signed cookie and the whole gate is testable with `TestClient`.
 
 **Tech Stack:** Python 3.11, NiceGUI 3.13.0, FastAPI 0.137.0 / Starlette, `argon2-cffi`, `pyotp`, `itsdangerous` (already in the lock), pytest, Caddy 2, systemd, Tailscale.
 
@@ -852,6 +852,23 @@ def test_a_correct_pair_succeeds_and_advances_the_totp_counter(creds):
     assert auth_store.load().last_totp_counter > 0
 
 
+def test_a_post_without_a_form_token_never_reaches_the_hash(creds, monkeypatch):
+    """Design mitigation 5. A bot that POSTs blind must cost an HMAC, not 19 MiB."""
+    calls = []
+    monkeypatch.setattr(auth, "verify_password",
+                        lambda *a, **k: (calls.append(1), False)[1])
+    res = login_page.attempt(password="hunter2", code="000000",
+                             client="2.2.2.2", form_token=None)
+    assert res.ok is False
+    assert calls == [], "Argon2 ran on a request with no form token"
+
+
+def test_a_form_token_from_another_session_key_is_refused(creds):
+    res = login_page.attempt(password="hunter2", code="000000", client="2.2.2.2",
+                             form_token=auth.mint_token("z" * 43, epoch=1))
+    assert res.ok is False
+
+
 def test_lockout_is_consulted_before_the_hash_is_computed(creds, monkeypatch):
     """Mitigation 2 in the design. If the throttle sits behind the expensive
     thing it throttles, it is not a throttle -- an attacker still pays you the
@@ -879,9 +896,16 @@ Key points for whoever writes it:
 - `safe_next` must reject anything not matching `^/(?!/)` — note `//evil` and
   `/\evil` both leave the site; a bare `startswith("/")` check is **not enough**.
 - `render_form` escapes with `html.escape(..., quote=True)`.
-- `attempt()` order is: `locked_until` → `verify_password` → `verify_totp` →
-  persist `last_totp_counter` → `record_success`. On any failure,
-  `record_failure` and return the **one** generic message.
+- `attempt()` order is: `locked_until` → **`verify_form_token`** →
+  `verify_password` → `verify_totp` → persist `last_totp_counter` →
+  `record_success`. On any failure, `record_failure` and return the **one**
+  generic message.
+- **`GET /login` issues a signed form token; `POST /login` requires it.** Mint it
+  with `auth.mint_token(key, epoch=…)` reusing Task 5's machinery, with a short
+  `max_age` (5 minutes is ample). Design mitigation 5: most credential-stuffing
+  bots POST blind without fetching the form, and rejecting those for an HMAC
+  instead of 19 MiB is the whole point. It must be checked **before Argon2**,
+  same as the lockout.
 - Style the form by hand against the design's palette (page `#0c1424`, card
   `#101a30`, border `#213152`, text `#cdd8ee`, primary `#2563eb`). This is a
   standalone HTML document, so it is explicitly out of scope for the Tailwind-first
@@ -1162,6 +1186,25 @@ app.add_middleware(auth_middleware.AuthGate,
 Place them with the other raw `@app.get` routes (~line 163) so they are visible
 alongside `/eod/file` and the rest.
 
+**Step 2b: Pin the cookie attributes with a test before moving on**
+
+```python
+def test_cookies_are_host_only_secure_httponly_and_lax(client):
+    """Host-only is the one that matters and the one most easily lost.
+
+    A Domain= cookie is sent to neuralstrike.co and EVERY subdomain, forever --
+    so the session would travel to the public marketing page, alongside its
+    YouTube and Discord embeds, on every page view. One attribute undoes the
+    whole origin split.
+    """
+    r = client.post("/login", data=_good_credentials(), follow_redirects=False)
+    for raw in r.headers.get_list("set-cookie"):
+        assert "domain=" not in raw.lower(), f"cookie is not host-only: {raw}"
+        assert "httponly" in raw.lower()
+        assert "samesite=lax" in raw.lower()
+        assert "secure" in raw.lower()
+```
+
 **Step 3: Run the guard from Task 9 — it must now go green**
 
 Run: `(cd webgui && ../.venv/bin/python -m pytest tests/test_auth_covers_every_route.py -q)`
@@ -1212,31 +1255,48 @@ secret material.
 
 ---
 
-## Task 12: Generate the Caddyfile
+## Task 12: Generate the Caddyfile — two site blocks
 
 **Files:**
 - Create: `deploy/caddy/generate_caddyfile.py`
 - Create: `deploy/caddy/__init__.py`
+- Create: `deploy/site/index.html` (placeholder — you will replace the content)
 - Test: `deploy/caddy/tests/test_generate_caddyfile.py`
-- Modify: `config/env.local.example.toml` (document `public_host`)
-- Modify: `repo_paths.py` (export `PUBLIC_HOST`)
+- Modify: `config/env.local.example.toml` (document `site_host` / `app_host`)
+- Modify: `repo_paths.py` (export `SITE_HOST`, `APP_HOST`, `SITE_ROOT`)
 
 Mirror `deploy/systemd/generate_units.py` exactly — same `--install` flag, same
 "derive everything from `repo_paths`" rule, same reason: a committed config is a
 second copy of the ports and the checkout root, free to drift.
 
-The generated config must contain:
+`config/env.local.toml` gains `site_host = "neuralstrike.co"`; `app_host` defaults
+to `app.{site_host}` and may be overridden. `SITE_ROOT` is
+`<checkout>/deploy/site`.
+
+The generated config must contain **two blocks**:
 
 ```
-trading.<host> {
+neuralstrike.co, www.neuralstrike.co {
     encode zstd gzip
+    root * <SITE_ROOT>            # deploy/site -- NEVER the repo root
+    file_server
+    header Strict-Transport-Security "max-age=31536000"
+}
+
+app.neuralstrike.co {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        Content-Security-Policy "frame-ancestors 'self'"
+    }
 
     # The wall never leaves the box. The kiosk reaches it on loopback.
     handle /wall* { respond 404 }
 
     # Mitigation 1: a login flood must never reach Python, where Argon2 is.
+    # Its OWN zone, so marketing traffic on the apex cannot trip it.
     handle /login* {
-        rate_limit { zone login { key {remote_host}  events 10  window 1m } }
+        rate_limit { zone app_login { key {remote_host}  events 10  window 1m } }
         reverse_proxy 127.0.0.1:<NICEGUI_PORT> { header_up X-Edge 1 }
     }
 
@@ -1244,19 +1304,99 @@ trading.<host> {
 }
 ```
 
-> ⚠ `rate_limit` is **not** in stock Caddy — it needs the
-> `caddyserver/rate-limit` plugin and a `xcaddy` build. If you would rather not
-> build Caddy, the fallback is to move mitigation 1 into the app (reject before
-> Argon2 using `LockoutState`, which Task 6 already gives you) and drop the block.
-> **Decide this in Task 12 and record which you chose in the design doc**, because
-> the design currently promises edge rate-limiting.
+> ⚠ **`rate_limit` is not in stock Caddy** — it needs the
+> `caddyserver/rate-limit` plugin and an `xcaddy` build. If you would rather not
+> build Caddy, move mitigation 1 into the app (reject before Argon2 using
+> `LockoutState` from Task 6, which you already have) and drop the block.
+> **Record which you chose in the design doc**, because it currently promises edge
+> rate-limiting. Note that mitigation 5's form token covers much of the same
+> traffic for free, so dropping the plugin is a defensible choice rather than a
+> hole.
 
-Tests (no Caddy needed — assert on the generated string): the port comes from
-`repo_paths.NICEGUI_PORT`; `/wall` is refused; `header_up X-Edge` is present on
-**every** `reverse_proxy`; the generator **refuses to run in a dev checkout**
-(`ENV_NAME != "prod"`), the same guard `generate_units.py` uses for the proxy.
+**Step: write these tests first.** They need no Caddy — they assert on the
+generated string.
 
-**Commit:** `feat(deploy): generate the Caddyfile from repo_paths, like the units`
+```python
+def test_the_file_server_root_is_the_site_dir_and_never_the_checkout_root():
+    """The single most damaging mistake available in this design.
+
+    A root one level too high serves shared/webgui_auth.json, shared/tokens.json
+    and config/env.local.toml to the internet -- and nothing about the site would
+    look broken.
+    """
+    cfg = generate_caddyfile.render()
+    root = re.search(r"root \* (\S+)", cfg).group(1)
+    assert root.endswith("/deploy/site")
+    assert pathlib.Path(root).name == "site"
+
+
+def test_no_reverse_proxy_appears_in_the_public_block():
+    public, app = generate_caddyfile.render().split("app.")
+    assert "reverse_proxy" not in public
+
+
+def test_the_public_block_serves_no_path_that_could_reach_the_app():
+    assert "127.0.0.1" not in generate_caddyfile.render().split("app.")[0]
+
+
+def test_every_reverse_proxy_stamps_the_edge_header():
+    cfg = generate_caddyfile.render()
+    assert cfg.count("reverse_proxy") == cfg.count("header_up X-Edge 1")
+
+
+def test_the_wall_is_refused_at_the_edge():
+    assert "handle /wall* { respond 404 }" in _normalised(generate_caddyfile.render())
+
+
+def test_the_port_comes_from_repo_paths_not_a_literal():
+    assert str(repo_paths.NICEGUI_PORT) in generate_caddyfile.render()
+
+
+def test_the_generator_refuses_to_run_in_a_dev_checkout(monkeypatch):
+    monkeypatch.setattr(repo_paths, "ENV_NAME", "dev")
+    with pytest.raises(SystemExit):
+        generate_caddyfile.main(["--install"])
+```
+
+**And one test that is worth more than the rest**, because it fails on a mistake
+made *outside* this file:
+
+```python
+def test_the_site_directory_holds_nothing_but_site_assets():
+    """A stray symlink, a copied config, or a debug dump in deploy/site is
+    published to the internet the moment it lands there."""
+    allowed = {".html", ".css", ".js", ".svg", ".png", ".jpg", ".ico", ".webp", ".txt"}
+    for p in pathlib.Path(repo_paths.SITE_ROOT).rglob("*"):
+        assert not p.is_symlink(), f"{p} is a symlink out of the served root"
+        if p.is_file():
+            assert p.suffix.lower() in allowed, f"{p} is not a site asset"
+```
+
+**Commit:** `feat(deploy): generate both Caddy site blocks from repo_paths`
+
+---
+
+## Task 12b: The public one-pager
+
+**Files:**
+- Modify: `deploy/site/index.html`
+
+A single static page: the YouTube live embed or link, Discord, Telegram. No build
+step, no framework, no `file_server` browse.
+
+Three constraints that come from the design rather than from taste:
+
+- **No link to `app.neuralstrike.co`.** Recorded in the design as a
+  noise-reduction judgement, not a security control — the subdomain is in CT logs
+  regardless.
+- **The embeds are third-party frames** (YouTube, possibly a Discord widget).
+  They live on this origin and *only* this origin; that separation is the reason
+  the app is on its own hostname at all.
+- **Nothing dynamic, nothing secret.** No form, no API call to the app, no
+  analytics that needs a key. If this page ever needs to read something live, that
+  is a design change, not an edit.
+
+**Commit:** `feat(site): public one-pager with the stream and community links`
 
 ---
 
@@ -1300,8 +1440,10 @@ why it is written out.
 2. **Set credentials on the prod box** — `python tools/webgui_credentials.py
    set-password` then `enroll-totp`. Scan the QR and **confirm a code before
    logging out of your SSH session.**
-3. **DNS** — A record `trading.<domain>` → the VPS public IP. Confirm with
-   `dig +short trading.<domain>`.
+3. **DNS** — three A records to the VPS public IP: `neuralstrike.co`,
+   `www.neuralstrike.co`, `app.neuralstrike.co`. Confirm each with
+   `dig +short <name>` **before** starting Caddy — an ACME challenge against a
+   name that does not resolve fails and enters a retry backoff.
 4. **ufw** — `sudo ufw allow 80,443/tcp`. Confirm `sudo ufw status`.
 5. **Caddy** — install, `generate_caddyfile.py --install`, `systemctl enable --now
    caddy`. Watch the cert issue: `journalctl -u caddy -f`.
@@ -1311,10 +1453,19 @@ why it is written out.
    overwritten on the next promote.
 7. **`tailscale serve`** for the proxy's `:8100`. Confirm `/health` from a phone
    on the tailnet.
-8. **Verify, in this order:**
-   - `curl -I https://trading.<domain>/desk` → **303 to /login**
-   - `curl -I https://trading.<domain>/wall` → **404**
-   - `curl -I http://127.0.0.1:8500/wall` **on the box** → **200**
+8. **Verify, in this order. The first two are the ones that matter most:**
+   - `curl -s https://neuralstrike.co/../shared/webgui_auth.json` and
+     `curl -s https://neuralstrike.co/shared/tokens.json` → **404, no content.**
+     Then `curl -s https://neuralstrike.co/config/env.local.toml` → **404.**
+     A `file_server` root one level too high leaks every secret on the box and
+     the site still looks perfect. **Check this before anything else.**
+   - `curl -sI https://neuralstrike.co/` → **200**, and confirm it is the
+     one-pager, not a directory listing.
+   - `curl -sI https://app.neuralstrike.co/desk` → **303 to /login**
+   - `curl -sI https://app.neuralstrike.co/wall` → **404**
+   - `curl -sI http://127.0.0.1:8500/wall` **on the box** → **200**
+   - `curl -sI https://app.neuralstrike.co/login | grep -i set-cookie` →
+     **no `Domain=`** on any cookie
    - log in from a phone on cellular (not your tailnet) — proves the public path
    - confirm the **wall stream is still up** and has not dropped frames
 9. **Watch for the scanners.** Within an hour of the cert appearing in CT logs you
@@ -1332,3 +1483,5 @@ why it is written out.
 - [ ] `git status --porcelain shared/webgui_auth.json` — empty
 - [ ] The Task 9 guard passes, and **fails** when you temporarily add a route without gating it
 - [ ] Live: `/desk` 303s, `/wall` 404s at the edge and 200s on loopback, the stream is unbroken
+- [ ] Live: `neuralstrike.co` serves the one-pager and **cannot reach any file above `deploy/site/`**
+- [ ] Live: no cookie carries `Domain=`
