@@ -2310,6 +2310,16 @@ considerably less on arrival.
 - A call **credit spread** on a symbol you hold is not a covering call and is
   deliberately not matched. Reporting it as one would say the shares are protected when
   they are not.
+- **No ex-dividend dates, anywhere in this application — an accepted risk, not an
+  oversight.** A covered call written across an ex-dividend date carries a real chance of
+  **early assignment**: when the remaining time value of an in-the-money call is worth
+  less than the dividend, exercising the day before the ex-date is the rational move for
+  whoever holds it, and the shares are called away early. This screen will not warn you,
+  because the application has no source for ex-dates. It was weighed on 2026-09-06 and
+  accepted: the book is paper, so the cost of being surprised is a lesson rather than
+  money. If that ever stops being true — a real account, or dividend payers becoming a
+  large share of the lots — this is the gap to close first. Check the ex-date in your
+  broker before writing a call on a dividend payer.
 - Nothing here is an action. Lots are created and closed by the engine's settlement pass.
 
 ### When to use it

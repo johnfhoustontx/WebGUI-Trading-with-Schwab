@@ -468,6 +468,11 @@ the strike. Those shares land here.
   covered.
 - Shares owned are what make a **covered call** possible. The **Income** tab screens
   calls against these lots, never below their cost basis.
+- ⚠ **Ex-dividend dates are not tracked anywhere in this app, and that is a known,
+  accepted gap.** If a call you wrote is in the money the day before a dividend's
+  ex-date, whoever holds it may exercise early to capture the dividend, and the shares
+  go before expiry. Nothing here will warn you. Check the ex-date in your broker before
+  writing a call on a dividend payer.
 - Nothing on this page is an action. A lot appears when the engine settles an
   in-the-money short put, and leaves when a covered call written against it finishes
   **above** its strike — the shares are called away at that strike and the cash comes
