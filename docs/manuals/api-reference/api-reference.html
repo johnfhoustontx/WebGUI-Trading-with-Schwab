@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">API / Developer Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-06</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -246,7 +246,7 @@ keys that feed it. Menu order matches the rail.</p>
 <pre><code>TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)
         ▲                                                  │
         │  read cache / subscribe events                   ▼
-TIER 3  Redis (Memurai, :6379)  ◀──cache_set + publish──  TIER 2  services
+TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
         ▲                                                  │
         │                                                  ▼  market data
         └──────────────  schwab-proxy (:8100)  ◀───────────┘
@@ -1238,7 +1238,7 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>PROXY_PORT</code> / <code>PROXY_URL</code></td>
 </tr>
 <tr>
-<td>Memurai (Redis)</td>
+<td>Redis</td>
 <td>6379</td>
 <td><code>MEMURAI_PORT</code> / <code>MEMURAI_URL</code></td>
 </tr>
@@ -1307,8 +1307,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 </tr>
 <tr>
 <td>Redis</td>
-<td>Memurai db <strong>0</strong></td>
-<td>Memurai db <strong>1</strong></td>
+<td>Redis db <strong>0</strong></td>
+<td>Redis db <strong>1</strong></td>
 </tr>
 <tr>
 <td>schwab-proxy</td>

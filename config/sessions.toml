@@ -118,6 +118,29 @@ at = "16:30"
 # score stale bars.
 at = "16:20"
 
+[slots.earnings]
+# The nightly forward earnings-calendar pull (trade_svc). ONE Alpha Vantage
+# request a night against a free-tier allowance of 25 a day: the vendor answers
+# EARNINGS_CALENDAR with one bulk CSV for the whole market, so the whole
+# 12-month horizon costs a single call.
+#
+# 20:00 CT is chosen against three constraints, not by taste:
+#   * AFTER the day has settled -- ~5 h past the 15:00 CT cash close, so issuers'
+#     post-close announcements and date changes have reached the vendor's file.
+#   * BEFORE the 08:45 CT [slots.income] scan that CONSUMES this store, with the
+#     whole night as margin: a late service start, a restart, or a slow vendor
+#     response still lands hours before the reader wakes up.
+#   * CLEAR of everything else -- outside [windows.collection] (08:00-15:20) so
+#     the blocking HTTP call and bulk upsert never compete with the market-hours
+#     branches, and well away from the 16:20 momentum / 16:30 calibration marks.
+# The vendor calendar is not intraday data, so the exact minute buys nothing;
+# what it buys is that nothing else is happening at it.
+#
+# ⚠ This slot is NOT gated on the trading calendar -- it fires every day,
+# weekends and holidays included. See services/trade_svc/scheduler.py for why.
+grace_min = 60
+at = "20:00"
+
 [alerts]
 # Fire phone pushes / in-app toasts during extended sessions. Off by default:
 # a 06:30 CT push on a handful of thin GTH prints is noise, and the execution

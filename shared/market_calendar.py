@@ -267,6 +267,16 @@ _DEFAULTS = {
         "income": {"grace_min": 20, "morning": "08:45"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
+        # The nightly Alpha Vantage earnings-calendar pull (trade_svc). ONE
+        # firing, so the ``{"at": …}`` shape momentum/calibration use -- but it
+        # carries its own ``grace_min`` because its gate is the grace-window
+        # kind, not the at-or-after kind: a calendar stamped as the evening's
+        # read must not be pulled at breakfast, minutes before the income scan
+        # that consumes it. An hour, not the usual 20 minutes: nothing here is
+        # clock-sensitive (the vendor file is the same at 20:00 and at 20:59),
+        # and the wider window covers an evening restart of a service that is
+        # otherwise on-demand and may well be restarted in the evening.
+        "earnings": {"at": "20:00", "grace_min": 60},
     },
     "alerts": {"fire_in_extended_hours": False},
 }
