@@ -1,15 +1,25 @@
 """Pure credential logic for the webgui login: password, TOTP, tokens, lockout.
 
 Everything here is a pure function over its arguments plus the credentials
-dataclass, so it tests without a server, a browser or a clock monkeypatch.
+dataclass, so it tests without a server, a browser or a clock monkeypatch. The
+module logger is the one permitted side effect, and it fires only on the two
+"your credentials file is broken" paths -- never on an ordinary wrong password
+or a mistyped code, or the warning would mean nothing.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
+import logging
+import math
 import time
 
 import argon2
+import itsdangerous
 import pyotp
+
+log = logging.getLogger(__name__)
 
 # Argon2id parameters, deliberately BELOW argon2-cffi's defaults (t=3, 64 MiB, p=4).
 #
@@ -38,15 +48,59 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
-    """True when the password matches. Fails CLOSED on a malformed hash."""
+    """True when the password matches. Fails CLOSED on a malformed hash.
+
+    The security decision is the same either way -- "no" -- but the two causes are
+    not. argon2-cffi separates them: ``VerifyMismatchError``/``VerificationError``
+    is the ordinary wrong password, ``InvalidHashError`` means the stored hash
+    cannot be parsed at all. On a SINGLE-USER app that second case is a truncated
+    or hand-edited ``shared/webgui_auth.json`` locking the only user out of the
+    only UI that can stop the stack -- and the login screen shows the same generic
+    "Sign-in failed" a typo produces, so this log line is the only place the
+    difference exists. Warn on that one alone; warning on both would make the
+    signal indistinguishable from someone fat-fingering their password.
+    """
     try:
         return bool(_hasher.verify(stored_hash, password))
-    except Exception:       # noqa: BLE001 - every failure mode means "no".
+    except argon2.exceptions.InvalidHashError:
+        log.warning(
+            "Stored password hash is unparseable -- refusing every password. "
+            "The credentials file is corrupt, not the password.", exc_info=True)
+        return False
+    except Exception:       # noqa: BLE001 - every other failure mode means "no".
         return False
 
 
 TOTP_PERIOD_SEC = 30
 TOTP_DRIFT_STEPS = 1           # +/- one 30 s window
+
+# 16 base32 chars = 80 bits. ``pyotp.random_base32()`` emits 32 chars / 160 bits,
+# so a real secret clears this by a wide margin and the floor only ever catches a
+# truncated or hand-typed one.
+MIN_TOTP_SECRET_LEN = 16
+
+
+def _usable_secret(secret: str | None) -> bool:
+    """A secret we cannot use must REFUSE -- never accept, never raise.
+
+    base32-decoding "" succeeds and yields an empty HMAC key, so pyotp derives a
+    publicly computable code from it. That is a fail-OPEN, not a fail-closed:
+    login keeps working and the second factor is silently gone. A very short
+    secret is the same failure with more arithmetic in front of it.
+
+    The decode mirrors ``pyotp.OTP.byte_secret`` exactly -- same padding, same
+    casefold -- so this predicate accepts precisely the set pyotp would, and a
+    secret that clears it cannot then raise ``binascii.Error`` out of the login
+    route. Pure: the caller does the logging.
+    """
+    if not isinstance(secret, str) or len(secret) < MIN_TOTP_SECRET_LEN:
+        return False
+    padded = secret + "=" * (-len(secret) % 8)
+    try:
+        base64.b32decode(padded, casefold=True)
+    except (binascii.Error, ValueError):    # binascii.Error IS a ValueError.
+        return False
+    return True
 
 
 def verify_totp(secret: str, code: str | None, *, now: float | None = None,
@@ -82,6 +136,18 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None,
     if len(code) != 6 or not (code.isascii() and code.isdigit()):
         return False, last_counter
 
+    # AFTER the format checks and BEFORE any comparison. An unusable secret is a
+    # broken credentials file, not a failed login, so it is worth a log line --
+    # but only once the input is well-formed, or a bot spraying junk at the login
+    # route would fill the file with them.
+    if not _usable_secret(secret):
+        log.warning(
+            "TOTP secret is unusable (empty, shorter than %d chars, or not "
+            "base32) -- refusing every code. An empty secret does not disable "
+            "the second factor, it makes the code publicly computable, so this "
+            "refuses rather than degrades.", MIN_TOTP_SECRET_LEN)
+        return False, last_counter
+
     at = time.time() if now is None else now
     totp = pyotp.TOTP(secret, interval=TOTP_PERIOD_SEC)
     for step in range(-TOTP_DRIFT_STEPS, TOTP_DRIFT_STEPS + 1):
@@ -97,9 +163,19 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None,
 # ---------------------------------------------------------------------------
 # Session and remember-device tokens.
 #
-# Both cookies carry the SAME kind of stateless bearer token; only the max age
-# the verifier applies differs -- 12 h for the session cookie, 30 days for the
-# "trust this device" cookie that lets a later login skip the TOTP prompt.
+# Both cookies carry the same KIND of stateless bearer token, but the payload
+# names which one it is and the verifier demands a match. That discriminator is
+# load-bearing, not bookkeeping: without it the two are byte-identical and the
+# only thing separating a 12 h session from a 30-day "trust this device" cookie
+# is which ``max_age_sec`` the verifier happens to pass. The remember cookie is
+# the one that sits on disk for a month, and its INTENDED power is merely to skip
+# the TOTP prompt -- so stealing it and replaying it in the session slot would
+# otherwise hand over a full authenticated session with no password and no TOTP,
+# silently promoting the weaker, longer-lived credential into the stronger one.
+#
+# ``kind`` is keyword-only with NO default on both functions, on purpose. A
+# default is exactly how a future call site would re-open this hole without
+# anyone noticing the omission at the call.
 #
 # There is deliberately NO server-side registry of issued tokens: nothing to
 # expire, leak, or keep in sync with the credentials file. The accepted cost is
@@ -118,9 +194,9 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None,
 # tests that end up pinning whatever the code happens to do
 # (``test_adx_uses_wilder_smoothing`` pinned a wrong ADX for years). An expiry
 # check on an internet-facing login is the last place that should happen.
-import math
 
-import itsdangerous
+KIND_SESSION = "session"
+KIND_REMEMBER = "remember"
 
 SESSION_MAX_AGE_SEC = 12 * 3600
 REMEMBER_MAX_AGE_SEC = 30 * 24 * 3600
@@ -134,30 +210,35 @@ def _serializer(key: str) -> itsdangerous.URLSafeSerializer:
     return itsdangerous.URLSafeSerializer(key, salt=_SALT)
 
 
-def mint_token(key: str, *, epoch: int, now: float | None = None) -> str:
-    """A stateless bearer token carrying only the epoch it was issued under.
+def mint_token(key: str, *, kind: str, epoch: int, now: float | None = None) -> str:
+    """A stateless bearer token naming its kind and the epoch it was issued under.
+
+    ``kind`` is ``KIND_SESSION`` or ``KIND_REMEMBER`` and is what stops the
+    long-lived remember-device cookie being replayed as a session -- see the
+    section comment above.
 
     There is NO server-side token registry on purpose: nothing to expire, leak or
     keep in sync. The cost, stated in the design, is that revocation is
     all-or-nothing -- bump ``epoch`` and re-trust your devices.
 
     The payload is signed, not encrypted, so whoever holds the token can read the
-    epoch and the issue time. Neither is a secret; the security is that the token
-    cannot be PRODUCED without ``key``.
+    kind, the epoch and the issue time. None is a secret; the security is that the
+    token cannot be PRODUCED without ``key``.
     """
     at = time.time() if now is None else now
-    return _serializer(key).dumps({"epoch": int(epoch), "iat": float(at)})
+    return _serializer(key).dumps(
+        {"kind": kind, "epoch": int(epoch), "iat": float(at)})
 
 
-def verify_token(token: str | None, key: str, *, epoch: int,
+def verify_token(token: str | None, key: str, *, kind: str, epoch: int,
                  max_age_sec: int, now: float | None = None) -> bool:
-    """True only for an untampered, unexpired token issued under ``epoch``.
+    """True only for an untampered, unexpired ``kind`` token issued under ``epoch``.
 
     Never raises on the TOKEN, whatever it contains: that argument is fully
     attacker-controlled cookie input on a public endpoint, where an exception is
-    a 500 rather than a refusal. ``key`` and ``epoch`` come from our own
-    credentials file and are deliberately NOT defended -- a malformed one is a
-    bug that should be loud, not a login that quietly fails shut.
+    a 500 rather than a refusal. ``key``, ``kind`` and ``epoch`` come from our own
+    code and credentials file and are deliberately NOT defended -- a malformed one
+    is a bug that should be loud, not a login that quietly fails shut.
     """
     if not isinstance(token, str) or not token:
         return False
@@ -170,6 +251,11 @@ def verify_token(token: str | None, key: str, *, epoch: int,
         # a cookie would otherwise escape as a 500 on the login route.
         return False
     if not isinstance(payload, dict) or payload.get("epoch") != int(epoch):
+        return False
+    # A token minted before ``kind`` existed has no such key, so ``.get`` returns
+    # None and it is refused -- which is the correct treatment for the ambiguous
+    # bytes this discriminator was added to disambiguate.
+    if payload.get("kind") != kind:
         return False
 
     issued_at = payload.get("iat")
