@@ -249,7 +249,7 @@ def test_the_committed_market_state_is_threaded_to_every_scan(monkeypatch):
     its only caller — and the two boards would rank the same spread differently."""
     seen = []
     monkeypatch.setattr(handlers.compute, "income_scan",
-                        lambda sym, market_state=None: (
+                        lambda sym, market_state=None, **kw: (
                             seen.append(market_state) or
                             {"signals": [], "view": {}, "filtered_out": 0}))
     bus = Bus(fake=True)
@@ -264,7 +264,7 @@ def test_the_committed_market_state_is_threaded_to_every_scan(monkeypatch):
 def test_a_cold_sentiment_service_means_no_tilt_not_a_crash(monkeypatch):
     seen = []
     monkeypatch.setattr(handlers.compute, "income_scan",
-                        lambda sym, market_state=None: (
+                        lambda sym, market_state=None, **kw: (
                             seen.append(market_state) or
                             {"signals": [], "view": {}, "filtered_out": 0}))
     bus = Bus(fake=True)          # nothing published under cache:sentiment:composite

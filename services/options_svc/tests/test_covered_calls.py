@@ -328,3 +328,229 @@ def test_no_spot_means_no_pop_rather_than_a_confident_number(near_only):
 
     assert out, "a missing spot must not lose the candidate — only its PoP"
     assert out[0]["pop_pct"] is None
+
+
+# ── the wiring: covered calls reach the published board ─────────────────────
+# ``handlers.publish_income`` owns the impure half — reading the lots, deciding
+# which chains it already has, and fetching only the ones it does not. These
+# tests pin the API-cost rule, because a naive implementation doubles the pass
+# and nothing about the output would say so.
+
+def _bus():
+    from shared.bus import Bus
+    return Bus(fake=True)
+
+
+def _spread_row(symbol, score=50.0):
+    return {"type": "PCS", "symbol": symbol, "composite_score": score,
+            "short_strike": 100.0, "credit": 1.2}
+
+
+def test_income_scan_hands_back_the_chain_only_when_asked(monkeypatch):
+    """The chain rides back IN MEMORY so the covered-call screen can reuse it.
+    Off by default: nine call sites want the signals and nothing else, and a
+    chain retained for no reason is the payload problem this window is careful
+    about."""
+    seen = {}
+
+    def _swing(symbol, *a, **kw):
+        seen["return_chain"] = kw.get("return_chain")
+        out = {"signals": [], "view": {}, "filtered_out": 0}
+        if kw.get("return_chain"):
+            out["chain"], out["spot"] = {"callExpDateMap": {}}, 123.0
+        return out
+
+    monkeypatch.setattr(compute, "swing_scan", _swing)
+
+    plain = compute.income_scan("AAPL")
+    assert seen["return_chain"] is False
+    assert "chain" not in plain
+
+    asked = compute.income_scan("AAPL", return_chain=True)
+    assert asked["chain"] == {"callExpDateMap": {}}
+    assert asked["spot"] == 123.0
+
+
+def test_a_held_watchlist_symbol_costs_no_extra_chain_fetch(monkeypatch, near_only):
+    """The API-cost rule. AAPL is scanned anyway, so its chain is REUSED —
+    ``income_chain`` (a second round-trip) must not be called for it."""
+    from services.options_svc import handlers
+
+    fetched = []
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [_lot()])
+    monkeypatch.setattr(handlers.compute, "income_chain",
+                        lambda sym: fetched.append(sym) or (None, None))
+    monkeypatch.setattr(handlers.compute, "income_earnings_map",
+                        lambda syms: {s: ("not_listed", None) for s in syms})
+
+    def _scan(sym, **kw):
+        out = {"signals": [_spread_row(sym)], "view": {}, "filtered_out": 0}
+        if kw.get("return_chain"):
+            out["chain"], out["spot"] = near_only, _SPOT
+        return out
+
+    monkeypatch.setattr(handlers.compute, "income_scan", _scan)
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL", "MSFT"])
+
+    assert fetched == [], "a scanned symbol's chain must be reused, not refetched"
+    rows = bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+    assert any(r.get("type") == compute.COVERED_CALL_TYPE for r in rows)
+    assert any(r.get("type") == "PCS" for r in rows), "the spreads still publish"
+
+
+def test_a_held_symbol_outside_the_watchlist_is_fetched_once(monkeypatch, near_only):
+    """The 0-10 extra calls the design costed. One chain fetch, and it adds ONLY
+    covered calls — running the full scan there would silently widen the board's
+    universe past the watchlist it is documented to mirror."""
+    from services.options_svc import handlers
+
+    fetched = []
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [_lot()])
+    monkeypatch.setattr(handlers.compute, "income_earnings_map",
+                        lambda syms: {s: ("not_listed", None) for s in syms})
+
+    def _chain_for(sym):
+        fetched.append(sym)
+        return (near_only, _SPOT)
+
+    monkeypatch.setattr(handlers.compute, "income_chain", _chain_for)
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [_spread_row(sym)],
+                                           "view": {}, "filtered_out": 0})
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["MSFT"])
+
+    assert fetched == ["AAPL"]
+    rows = bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+    covered = [r for r in rows if r.get("type") == compute.COVERED_CALL_TYPE]
+    assert covered and covered[0]["symbol"] == "AAPL"
+    # The universe is unchanged: no AAPL SPREAD row appeared.
+    assert [r["symbol"] for r in rows if r.get("type") == "PCS"] == ["MSFT"]
+
+
+def test_covered_calls_sort_below_a_scored_spread(monkeypatch, near_only):
+    """They carry no ``composite_score`` on purpose, and ``_income_rank`` sends
+    an absent reading to -inf. Pinning it so a later "fix" that fabricates a
+    score has to argue with a test."""
+    from services.options_svc import handlers
+
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [_lot()])
+    monkeypatch.setattr(handlers.compute, "income_earnings_map",
+                        lambda syms: {s: ("not_listed", None) for s in syms})
+    monkeypatch.setattr(handlers.compute, "income_chain", lambda sym: (None, None))
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [_spread_row(sym, 61.0)],
+                                           "view": {}, "filtered_out": 0,
+                                           "chain": near_only, "spot": _SPOT})
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    rows = bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+    assert rows[0]["type"] == "PCS"
+    assert rows[-1]["type"] == compute.COVERED_CALL_TYPE
+
+
+def test_no_lots_still_publishes_the_spreads(monkeypatch):
+    """A fresh clone has no paper database. The scan must not be lost with it."""
+    from services.options_svc import handlers
+
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [])
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [_spread_row(sym)],
+                                           "view": {}, "filtered_out": 0})
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    rows = bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+    assert [r["type"] for r in rows] == ["PCS"]
+
+
+def test_a_failing_lots_read_degrades_audibly_and_still_publishes(monkeypatch,
+                                                                 tmp_path):
+    """A swallowed failure with no trace is this repo's costliest bug class:
+    ``errors`` tells the page, ``_degrade`` tells /health."""
+    from services import _degrade
+    from services.options_svc import handlers
+
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [_spread_row(sym)],
+                                           "view": {}, "filtered_out": 0})
+    _degrade.reset()
+
+    # A path that is not a database at all -> the read raises inside the guard.
+    bad = tmp_path / "not-a-db.sqlite"
+    bad.write_text("this is not sqlite")
+    assert handlers._income_lots(db_path=str(bad)) == []
+    assert _degrade.counts().get("options.income_lots") == 1
+
+    # Bind the real function BEFORE patching the name, or the lambda recurses
+    # into its own replacement.
+    real = handlers._income_lots
+    monkeypatch.setattr(handlers, "_income_lots", lambda: real(db_path=str(bad)))
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    assert bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+
+
+def test_covered_calls_survive_a_builder_failure(monkeypatch, near_only):
+    """The spreads are the bulk of the board; a covered-call bug must not cost
+    them. One guard, and it speaks."""
+    from services import _degrade
+    from services.options_svc import handlers
+
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [_lot()])
+    monkeypatch.setattr(handlers.compute, "income_earnings_map", lambda syms: {})
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [_spread_row(sym)],
+                                           "view": {}, "filtered_out": 0,
+                                           "chain": near_only, "spot": _SPOT})
+
+    def _boom(*a, **kw):
+        raise RuntimeError("bad lot")
+
+    monkeypatch.setattr(handlers.compute, "covered_call_candidates", _boom)
+    _degrade.reset()
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    assert bus.cache_get(handlers.CACHE_INCOME).payload["candidates"]
+    assert _degrade.counts().get("options.covered_calls") == 1
+
+
+def test_the_lots_read_does_not_touch_the_live_store_under_pytest():
+    """``db_path=None`` under pytest returns [] rather than connecting: the
+    repo-root conftest refuses that connect, and ``fetch_open_lots`` would open
+    the real paper account otherwise. Same shape as ``_income_earnings``."""
+    from services.options_svc import handlers
+
+    assert handlers._income_lots() == []
+
+
+def test_a_scanned_symbol_with_no_chain_is_not_refetched(monkeypatch):
+    """Off-hours ``income_scan`` returns no chain at all (its own two guards).
+    That symbol was already tried; asking again spends a call to be told the
+    same thing, and off-hours is exactly when every held name would do it."""
+    from services.options_svc import handlers
+
+    fetched = []
+    monkeypatch.setattr(handlers, "_income_lots", lambda: [_lot()])
+    monkeypatch.setattr(handlers.compute, "income_earnings_map", lambda syms: {})
+    monkeypatch.setattr(handlers.compute, "income_chain",
+                        lambda sym: fetched.append(sym) or (None, None))
+    # The no-chain degrade path: signals empty, and no ``chain`` key at all.
+    monkeypatch.setattr(handlers.compute, "income_scan",
+                        lambda sym, **kw: {"signals": [], "view": {},
+                                           "filtered_out": 0})
+
+    bus = _bus()
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    assert fetched == []
+    assert bus.cache_get(handlers.CACHE_INCOME).payload["candidates"] == []

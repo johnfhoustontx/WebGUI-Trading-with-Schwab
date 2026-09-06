@@ -270,7 +270,7 @@ def _passes_swing_cut(sig):
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
-               earnings_date=None) -> dict:
+               earnings_date=None, return_chain=False) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -302,8 +302,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
 
-    Three parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
-    and all three default to today's behaviour, because nine existing call sites
+    Four parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
+    and all four default to today's behaviour, because nine existing call sites
     pass none of them:
 
     * ``trade_type`` is threaded to the ONE ``se.screen_spreads`` call below. It
@@ -318,6 +318,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       BUILDERS produced. ``strategy_scanner`` does not consult the calendar at
       all, so without the second half a 35-DTE cash-secured put would sail
       straight over the report the spreads were just protected from.
+    * ``return_chain`` adds the fetched ``chain`` + ``spot`` to the returned
+      dict so the covered-call screen can reuse them (see the return statement).
 
     ``strategy_scanner`` / ``strategy_scoring`` are imported lazily here (not at
     module top) to avoid binding the process-wide ``sys.modules`` entries merely by
@@ -429,7 +431,21 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
-    return {"signals": signals, "view": view, "filtered_out": filtered_out}
+    result = {"signals": signals, "view": view, "filtered_out": filtered_out}
+    if return_chain:
+        # Handed back IN MEMORY so a second screen over the SAME symbol (the
+        # covered-call one, see publish_income) can reuse this chain instead of
+        # paying for a second round-trip. Off by default because nine call sites
+        # want the signals and nothing else, and an unwanted chain is retained
+        # for the life of the caller's dict.
+        #
+        # ⚠ It must never be PUBLISHED — cache:options:calc_chain reached 8.77 MB
+        # exactly this way, and a 30-45 DTE chain is wider still. The IncomeScan
+        # contract says so in its own docstring. The two early-return guards
+        # above deliberately do not carry the key: there is no chain in either
+        # case, so ``.get("chain")`` is None, which is the honest answer.
+        result["chain"], result["spot"] = chain, spot
+    return result
 
 
 # ── INCOME window (30-45 DTE) ────────────────────────────────────────────────
@@ -521,7 +537,47 @@ def _income_earnings(symbol, db_path=None):
             _earn.close_db(conn)
 
 
-def income_scan(symbol, market_state=None) -> dict:
+def income_earnings_map(symbols) -> dict:
+    """``{symbol: (status, report date or None)}`` for the window's earnings gate.
+
+    Local SQLite reads only — **zero API cost**, which is what lets the gate
+    cover every held symbol as well as every scanned one. Deduped on the way in
+    so a symbol held in two lots is looked up once.
+
+    Exists so ``handlers`` need not reach for the private ``_income_earnings``:
+    the DB read belongs on this side of the tier boundary, beside the one
+    ``income_scan`` already does.
+    """
+    return {s: _income_earnings(s) for s in dict.fromkeys(symbols or []) if s}
+
+
+def income_chain(symbol):
+    """``(chain, spot)`` for one symbol — the MINIMUM fetch a covered call needs.
+
+    Two proxy calls, against ``income_scan``'s six-ish. It exists for the held
+    symbol the watchlist does not cover: running a full ``income_scan`` there
+    would cost the extra calls AND silently widen the board's universe past the
+    watchlist ``_income_symbols`` documents it as mirroring, publishing spreads
+    on a name the reader never asked to scan.
+
+    Degrades to ``(None, None)`` on a null chain or a null spot, matching
+    ``swing_scan``'s own two guards — off-hours the chain fetch can return None
+    and the quote can miss while the chain dict lacks ``underlyingPrice``. The
+    caller treats that as "no covered calls for this symbol today".
+    """
+    import datetime as dt
+
+    today = dt.date.today()
+    chain = se.fetch_option_chain(_proxy.schwab_py_client, symbol, from_date=today,
+                                  to_date=today + dt.timedelta(days=INCOME_DTE_MAX + 2))
+    if not chain:
+        return (None, None)
+    quote = _proxy.schwab_client.get_quote(symbol) or {}
+    spot = quote.get("last") or chain.get("underlyingPrice")
+    return (chain, spot) if spot else (None, None)
+
+
+def income_scan(symbol, market_state=None, return_chain=False) -> dict:
     """The 30-45 DTE income window for one symbol: PCS + CCS + cash-secured put.
 
     A thin wrapper over :func:`swing_scan`, not a second pipeline: that function
@@ -551,6 +607,12 @@ def income_scan(symbol, market_state=None) -> dict:
     is horizon-agnostic; a second constant carrying the same value would be a
     liability until the two genuinely diverge, and if they ever do it belongs in
     ``config/scanner.toml`` under ``[scores]``, never as a literal here.
+
+    ``return_chain`` threads straight through to ``swing_scan``: it hands the
+    fetched chain + spot back in memory so ``publish_income`` can run the
+    covered-call screen over a symbol it was scanning anyway, at no extra API
+    cost. Requested per SYMBOL (only for names the paper account actually
+    holds), never for the whole watchlist.
     """
     status, earnings_date = _income_earnings(symbol)
     out = swing_scan(symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
@@ -561,7 +623,8 @@ def income_scan(symbol, market_state=None) -> dict:
                      market_state=market_state,
                      trade_type="INCOME",
                      structures=_INCOME_STRUCTURES,
-                     earnings_date=earnings_date)
+                     earnings_date=earnings_date,
+                     return_chain=return_chain)
     for s in out["signals"]:
         s["earnings_status"] = status
     return out

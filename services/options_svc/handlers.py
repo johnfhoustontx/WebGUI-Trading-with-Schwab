@@ -585,6 +585,37 @@ def _income_symbols():
         return []
 
 
+def _income_lots(db_path=None):
+    """Open equity lots from the paper account — the covered-call screen's input.
+
+    ``options_svc`` is Tier 2 and already imports these engines, so this is a
+    normal import rather than a tier violation; it stays LAZY for the same
+    reason ``_income_symbols`` does (this module must not bind a hyphenated
+    app dir's module names merely by being imported).
+
+    Degrades to ``[]``. A checkout with no paper database has no shares, which
+    must cost the covered calls and NOTHING ELSE — losing the whole 23-symbol
+    spread scan because a fresh clone has no ``paper_account.db`` would be the
+    tail wagging the dog. ``_degrade`` keeps it from being silent.
+
+    ``db_path=None`` resolves at CALL time (``paper_account_db``'s own shape,
+    the one ``signal_db`` gets wrong). Under pytest with no explicit path it
+    returns ``[]`` without connecting: the repo-root conftest refuses a connect
+    into a live data directory, and this is the same guard ``_income_earnings``
+    carries two functions up. Tests pass a tmp path to exercise the real read.
+    """
+    import os
+
+    if db_path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return []
+    try:
+        import paper_account_db
+        return list(paper_account_db.fetch_open_lots(db_path))
+    except Exception:  # noqa: BLE001 — a missing paper DB must not kill the pass.
+        _degrade.degraded("options.income_lots")
+        return []
+
+
 def _income_rank(row) -> float:
     """Sort key for the merged board: ``composite_score``, absent/NaN LAST.
 
@@ -634,29 +665,104 @@ def publish_income(bus, symbols=None) -> None:
     ``cache:options:calc_chain`` reached 8.77 MB — 53% of all prod Redis string
     bytes — by caching a raw chain beside what the page reads, and a 30-45 DTE
     chain is wider than the 0-DTE one that caused it.
+
+    **Covered calls join the SAME ranked list**, and the interesting part is
+    what they cost. A covered call needs a chain for each HELD symbol, and a
+    naive version would fetch one per lot and double the pass. Instead:
+
+    * a held symbol the watchlist already scans has its chain handed back in
+      memory by ``income_scan(return_chain=True)`` — **zero** extra calls, and
+      the chain is requested per symbol so the pass retains a handful rather
+      than all 23;
+    * only a held symbol OUTSIDE the watchlist is fetched, and then through
+      ``compute.income_chain`` (chain + quote, two calls) rather than a full
+      scan — which would cost more AND publish spreads on a name outside the
+      universe this board documents itself as mirroring.
+
+    That is the design's *0-10 extra calls/day*. The earnings gate over the held
+    names costs nothing at all: ``income_earnings_map`` is a local SQLite read.
+
+    Three separate guards, because these are three independent failures and
+    collapsing them would let one cost the others: the lots read (a fresh clone
+    has no paper database), the per-symbol chain fetch, and the builder itself.
+    The spreads are the bulk of the board and must survive all three.
     """
     syms = list(symbols) if symbols is not None else _income_symbols()
     env = bus.cache_get("cache:sentiment:composite")
     payload = env.payload if env is not None else None
     market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
 
+    # The covered-call half. ``held`` decides which chains are worth carrying
+    # back out of the scan, so the pass retains a handful of chains rather than
+    # all 23 — the fan-out already holds up to _INCOME_WORKERS of them anyway,
+    # and a chain per watchlist symbol for no reader is exactly the payload
+    # mistake this window's contract warns about.
+    lots = _income_lots()
+    held = {(lot or {}).get("symbol") for lot in lots}
+    held.discard(None)
+    held.discard("")
+
+    chains: dict = {}
+    spots: dict = {}
+
     def _scan_one(symbol):
-        """``(rows, error or None)``. Self-contained + defensive, as
-        ``parallel_map`` requires — a raising ``fn`` propagates on result
-        iteration exactly as it would in the serial loop it replaces."""
+        """``(symbol, rows, error or None, chain, spot)``. Self-contained +
+        defensive, as ``parallel_map`` requires — a raising ``fn`` propagates on
+        result iteration exactly as it would in the serial loop it replaces.
+
+        ⚠ The SYMBOL rides back explicitly. Keying the reuse map off the rows
+        would drop the chain for exactly the held name that produced no spreads
+        — which is a normal outcome, and the one case where the covered call is
+        the only thing this pass has to say about a stock the account owns."""
         try:
-            out = compute.income_scan(symbol, market_state=market_state) or {}
-            return (list(out.get("signals") or []), None)
+            out = compute.income_scan(symbol, market_state=market_state,
+                                      return_chain=symbol in held) or {}
+            return (symbol, list(out.get("signals") or []), None,
+                    out.get("chain"), out.get("spot"))
         except Exception as exc:  # noqa: BLE001 — see the docstring.
             _degrade.degraded("options.publish_income", detail=symbol)
-            return ([], f"{symbol}: {type(exc).__name__}: {exc}")
+            return (symbol, [], f"{symbol}: {type(exc).__name__}: {exc}", None, None)
 
     candidates: list = []
     errors: list = []
-    for rows, err in parallel_map(_scan_one, syms, workers=_INCOME_WORKERS):
+    for symbol, rows, err, chain, spot in parallel_map(_scan_one, syms,
+                                                       workers=_INCOME_WORKERS):
         candidates.extend(rows)
         if err:
             errors.append(err)
+        if chain is not None:
+            chains[symbol] = chain
+            spots[symbol] = spot
+
+    def _fetch_one(symbol):
+        """One chain + quote for a held symbol the scan did not cover."""
+        try:
+            return (symbol, *compute.income_chain(symbol))
+        except Exception:  # noqa: BLE001 — one held name must not cost the pass.
+            _degrade.degraded("options.income_chain", detail=symbol)
+            return (symbol, None, None)
+
+    # ONLY a held symbol the watchlist does not cover — the design's 0-10 extra
+    # calls. Membership of ``syms``, not of ``chains``: a scanned symbol whose
+    # chain came back None already tried and failed (off-hours, halted, no
+    # book), and refetching it would spend a call to be told the same thing.
+    scanned = set(syms)
+    missing = [s for s in sorted(held) if s not in scanned]
+    if missing:
+        for symbol, chain, spot in parallel_map(_fetch_one, missing,
+                                                workers=_INCOME_WORKERS):
+            if chain is not None:
+                chains[symbol] = chain
+                spots[symbol] = spot
+
+    if lots and chains:
+        try:
+            candidates.extend(compute.covered_call_candidates(
+                lots, chains, spots,
+                earnings=compute.income_earnings_map(sorted(held))))
+        except Exception:  # noqa: BLE001 — the spreads are the bulk of the board.
+            _degrade.degraded("options.covered_calls")
+
     candidates.sort(key=_income_rank, reverse=True)
 
     # Validation gate BEFORE the write, like rescan/publish_matrix: a gross shape
