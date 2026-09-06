@@ -1048,10 +1048,21 @@ and whether any of them failed.</p>
 <li><strong>Call spread</strong> — a call credit spread, for one you do not expect to rise much.</li>
 <li><strong>Cash-secured put</strong> — a single short put, for a symbol you would be content to own
   at that strike.</li>
+<li><strong>Covered call</strong> — a call written against stock the paper account already holds
+  (see <strong>Shares</strong>), never struck below what the shares cost.</li>
 </ul>
 <p><strong>The columns:</strong> Symbol · Side · Strikes · Expiry · DTE · <strong>Credit $</strong> · <strong>Capital $</strong>
-· <strong>Return on capital</strong> · PoP % · Breakeven · <strong>Earnings</strong> · Score. Click any column
-to re-sort.</p>
+· <strong>Return on capital</strong> · <strong>Yield on cost</strong> · <strong>Total return if called</strong> · PoP % ·
+Breakeven · <strong>Earnings</strong> · Score. Click any column to re-sort.</p>
+<p><strong>Yield on cost</strong> and <strong>Total return if called</strong> apply to covered calls only, and the
+other three structures show a dash — they own no shares, so there is no cost to
+measure against. Yield on cost is the premium alone as a percentage of what the shares
+cost you. Total return if called adds the gain up to the strike, which is what you
+actually collect if the stock is called away — and it is the number that decides
+between a fat premium at a strike barely above your basis and a thin one well above
+it. (It reads almost the same as Return on capital on these rows, but not quite:
+Return on capital is after the commission, and it is the only one of the two the
+spreads and the cash-secured put have at all.)</p>
 <p><strong>Credit and Capital are both per contract, in dollars.</strong> Capital is the cash the
 trade actually commits — for a spread that is its width less the credit; for a
 cash-secured put it is the strike all the way down to zero, which is far larger.

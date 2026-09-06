@@ -1869,8 +1869,8 @@ symbol, and any time you have a directional opinion and want the best way to exp
 ### What it is
 
 The premium-selling board at a **30–45 day** horizon: put credit spreads, call credit
-spreads and cash-secured puts, scanned across the whole watchlist and ranked together
-on one list. It is the same *find* step [Market Scanner](#market-scanner) and
+spreads, cash-secured puts and **covered calls against stock the paper account already
+holds**, scanned across the whole watchlist and ranked together on one list. It is the same *find* step [Market Scanner](#market-scanner) and
 [Strategy Finder](#strategy-finder) perform, at a longer horizon and with an income
 rather than a directional thesis.
 
@@ -1885,11 +1885,35 @@ rather than a directional thesis.
 ### Reading the screen
 
 **The columns:** Symbol · Side · Strikes · Expiry · DTE · Credit $ · Capital $ ·
-Return on capital · PoP % · Breakeven · Earnings · Score. The board arrives already
-ranked by score; the headers re-sort it.
+Return on capital · Yield on cost · Total return if called · PoP % · Breakeven ·
+Earnings · Score. The board arrives already ranked by score; the headers re-sort it.
 
 **Side** names the position rather than the engine's structure code: *Put spread*,
-*Call spread*, *Cash-secured put*.
+*Call spread*, *Cash-secured put*, *Covered call*.
+
+**Yield on cost** and **Total return if called** are covered-call columns and read a
+dash on every other row — a spread owns no shares, so there is no cost basis to divide
+by, and a 0.00% there would sort among real readings.
+
+| Column | On a covered call |
+|---|---|
+| **Yield on cost** | Premium ÷ (cost basis × 100). What the call alone pays on money already sunk in the stock. |
+| **Total return if called** | ((strike − basis) × 100 + premium) ÷ (basis × 100). The gain to the strike *plus* the premium — the outcome the trade is written for. |
+
+Read them together. A 0.4% yield at a strike 12% above basis and a 2% yield at a strike
+0.5% above it rank opposite ways depending on which column you look at, and premium
+alone is the misleading one.
+
+⚠ **Total return if called is not a duplicate of Return on capital**, though on a
+covered call the two land within a few hundredths: Return on capital is net of the
+opening commission, this one is gross, and Return on capital is the only one of the two
+the other three structures carry.
+
+**Covered calls carry no Score.** The composite scale is calibrated on defined-risk
+option structures against an inferred market view, and a covered call's economics are
+dominated by a stock position that scorer never sees — so the row is published without
+one and sorts to the FOOT of the board rather than being given an invented number. The
+two ratios above are what you rank these on instead.
 
 **Credit and Capital are per contract, in dollars.** For a defined-risk credit spread
 Capital is its maximum loss; for a cash-secured put it is the strike down to zero —

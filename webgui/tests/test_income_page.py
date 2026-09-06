@@ -296,3 +296,88 @@ def test_a_covered_call_row_renders_off_the_shape_both_products_share():
     assert row["capital"] == "9500.00"
     # max_profit / capital, the column that makes the board comparable at all.
     assert row["roc"] == "17.5%"
+
+
+# ── the two covered-call ratios ─────────────────────────────────────────────
+# ``compute.covered_call_candidates`` has emitted ``yield_on_cost`` and
+# ``total_return_if_called`` on every covered-call row since it was written, and
+# the design doc calls them "the two numbers that actually decide a covered
+# call" — the page rendered neither.
+#
+# ⚠ Both are FRACTIONS in the payload (0.0168), not percents. Rendering them raw
+# would put 0.02 beside a 17.5% column and read as a rounding error.
+
+# One covered call with the ratios attached, at the values compute produces for
+# a 100-share lot at a 95.00 basis with a 110 strike and a 1.60 mark:
+#   yield_on_cost         = 160 / (95 * 100)                 = 0.016842…
+#   total_return_if_called = ((110-95)*100 + 160) / 9500      = 0.174736…
+_COVERED = {
+    "id": "AAPL_COVERED_CALL_2026-10-16_110.0",
+    "symbol": "AAPL", "type": "COVERED_CALL", "covered": True,
+    "legs": [{"kind": "call", "side": "short", "strike": 110.0, "qty": 1,
+              "expiration": "2026-10-16"}],
+    "expiration": "2026-10-16", "dte": 35,
+    "net_credit": 160.0, "capital": 9500.0, "max_profit": 1658.7,
+    "breakevens": [93.4], "pop_pct": 61.2, "earnings_status": "not_listed",
+    "cost_basis": 95.0, "shares": 100, "quantity": 1,
+    "yield_on_cost": 160.0 / 9500.0,
+    "total_return_if_called": ((110.0 - 95.0) * 100 + 160.0) / 9500.0,
+}
+
+
+def test_a_covered_call_shows_both_deciding_ratios_as_percents():
+    rows = income.candidate_rows([_COVERED])
+    assert len(rows) == 1
+    assert rows[0]["yield_on_cost"] == "1.68%"
+    assert rows[0]["total_return_if_called"] == "17.47%"
+
+
+def test_the_two_ratios_are_dashes_on_every_structure_without_a_cost_basis():
+    """A put spread, a call spread and a cash-secured put own no shares, so
+    neither ratio exists for them. A 0.00% would rank among real readings."""
+    rows = income.candidate_rows([_PCS, _CCS, _CSP])
+    assert len(rows) == 3
+    for row in rows:
+        assert row["yield_on_cost"] == "—", row["side"]
+        assert row["total_return_if_called"] == "—", row["side"]
+
+
+def test_the_ratios_are_refused_on_a_non_covered_row_even_if_the_field_is_there():
+    """Gated on the STRUCTURE, not merely on the field being readable: a stray
+    ratio stamped on a spread would render as a return on shares nobody owns."""
+    rows = income.candidate_rows([dict(_PCS, yield_on_cost=0.05,
+                                       total_return_if_called=0.09)])
+    assert len(rows) == 1
+    assert rows[0]["yield_on_cost"] == "—"
+    assert rows[0]["total_return_if_called"] == "—"
+
+
+def test_a_covered_call_missing_a_ratio_renders_a_dash_not_a_zero():
+    rows = income.candidate_rows([dict(_COVERED, yield_on_cost=None,
+                                       total_return_if_called=float("nan"))])
+    assert len(rows) == 1
+    assert rows[0]["yield_on_cost"] == "—"
+    assert rows[0]["total_return_if_called"] == "—"
+
+
+def test_both_ratios_have_a_column_of_their_own():
+    fields = [c["field"] for c in income.income_columns()]
+    assert "yield_on_cost" in fields
+    assert "total_return_if_called" in fields
+    labels = {c["field"]: c["label"] for c in income.income_columns()}
+    assert labels["yield_on_cost"] == "Yield on cost"
+    assert labels["total_return_if_called"] == "Total return if called"
+
+
+def test_return_on_capital_and_total_return_if_called_are_not_duplicates():
+    """They read almost the same on a covered call and are NOT the same number:
+    Return on capital is net of the opening commission, Total return if called is
+    gross. Deleting either as a duplicate loses that distinction — and Return on
+    capital is also the only column the other three structures have."""
+    roc = income.return_on_capital(_COVERED)
+    tric = _COVERED["total_return_if_called"] * 100.0
+    # Close enough that a reader would call them the same column...
+    assert abs(roc - tric) < 0.5
+    # ...and not the same number. Return on capital is the smaller: it has paid
+    # the commission that being called away actually costs.
+    assert roc < tric

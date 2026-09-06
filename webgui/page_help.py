@@ -183,6 +183,15 @@ each morning. Three kinds of trade sit on one ranked board:
 - **Call spread** — you think it won't rise much. Also capped.
 - **Cash-secured put** — you'd be happy to *own* the shares at that strike. Risk is
   capped too, but the cap is the whole stock down to zero, so it ties up far more cash.
+- **Covered call** — a call sold against shares you already hold (see **Shares**),
+  never below what those shares cost you.
+- **Yield on cost** and **Total return if called** are the two numbers that decide a
+  covered call, and they show a dash on everything else — a spread owns no shares, so
+  there is nothing to measure a return against. Yield on cost is the premium alone
+  against what the stock cost; total return if called adds the gain up to the strike,
+  which is what you keep if the shares are called away. A fat premium at a strike
+  barely above your basis and a thin one well above it look opposite depending on
+  which you read, so read both.
 - **Capital $** is the cash actually committed, and **Return on capital** is the
   credit measured against it — that is the only way a $60 spread and a $640
   cash-secured put can be compared on one screen. Dollars alone cannot.

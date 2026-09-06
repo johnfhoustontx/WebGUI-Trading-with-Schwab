@@ -57,13 +57,18 @@ _CT_TZ = ZoneInfo("America/Chicago")
 # Engine vocabulary ("PCS") names the builder; a board a human trades off names
 # the position. Each known structure gets a fixed label; anything else falls
 # through as its raw type rather than being mislabelled as one of them — which
-# is why COVERED_CALL is listed here rather than left to that fallback, where it
-# would render as the engine's own shouting identifier.
+# is why the covered call is listed here rather than left to that fallback, where
+# it would render as the engine's own shouting identifier.
+#
+# That identifier is named ONCE, as a constant, because the two covered-call-only
+# ratio columns below gate on it as well.
+COVERED_CALL_TYPE = "COVERED_CALL"
+
 SIDE_LABELS = {
     "PCS": "Put spread",
     "CCS": "Call spread",
     "SHORT_PUT": "Cash-secured put",
-    "COVERED_CALL": "Covered call",
+    COVERED_CALL_TYPE: "Covered call",
 }
 
 
@@ -130,6 +135,35 @@ def _roc_text(row) -> str:
     return _fmt.NO_READING if pct is None else f"{pct:.1f}%"
 
 
+# ── the two covered-call ratios ─────────────────────────────────────────────
+# The design doc calls these "the two numbers that actually decide a covered
+# call", and they are the two a Return-on-capital column cannot stand in for:
+# yield on cost says what the premium alone pays on the money already sunk in
+# the shares, and total return if called adds the capital gain up to the strike,
+# which is the outcome the trade is actually written for. A 0.4% yield at a
+# strike 12% above basis and a 2% yield at a strike 0.5% above it rank opposite
+# ways depending on which of the two you read.
+#
+# ⚠ **Gated on the STRUCTURE, not merely on the field reading.** A put spread, a
+# call spread and a cash-secured put own no shares, so neither ratio has a
+# denominator; ``compute`` emits them only on covered rows today, but a stray
+# value stamped on a spread would render here as a return on stock nobody holds.
+#
+# ⚠ **The payload carries FRACTIONS** (0.0168), not percents — ``yield_on_cost``
+# and ``total_return_if_called`` both divide by ``cost_basis * 100``. Rendering
+# them raw would put 0.02 beside a 17.5% column and read as a rounding error.
+
+def _covered_ratio_text(row, field) -> str:
+    """A covered-call ratio as a percent, or a dash for any other structure."""
+    row = row or {}
+    if (row.get("type") or "") != COVERED_CALL_TYPE:
+        return _fmt.NO_READING
+    # ``num`` (not ``float_or``): a NaN would format as "nan%" and a plausible
+    # 0.00% would sort among real readings on a column a reader ranks on.
+    v = _fmt.num(row.get(field))
+    return _fmt.NO_READING if v is None else f"{v * 100.0:.2f}%"
+
+
 def _dte_text(row) -> str:
     """DTE as a whole number. An absent horizon is a dash — this window IS a
     horizon, so a blank one is a fact worth showing rather than a 0."""
@@ -168,6 +202,10 @@ def candidate_rows(candidates):
             "credit": _fmt.fixed(c.get("net_credit")),
             "capital": _fmt.fixed(c.get("capital")),
             "roc": _roc_text(c),
+            # Covered calls only — a dash on every other structure.
+            "yield_on_cost": _covered_ratio_text(c, "yield_on_cost"),
+            "total_return_if_called": _covered_ratio_text(
+                c, "total_return_if_called"),
             "pop": _fmt.fixed(c.get("pop_pct"), 1),
             "breakeven": _st.breakeven_text(c),
             "earnings": earn_label,
@@ -185,12 +223,23 @@ def income_columns():
     its max loss, for a cash-secured put the full collateral — so the two shapes
     share one honest column instead of a "Max loss" that means different things
     on adjacent rows.
+
+    ⚠ **"Return on capital" and "Total return if called" are NOT duplicates, and
+    the next reader of this file will think they are.** On a covered call they
+    land within a few hundredths of each other, because ``capital`` IS the cost
+    basis there — but Return on capital is net of the opening commission and
+    Total return if called is gross, and Return on capital is the only one of the
+    two that the other three structures have at all. Deleting either loses a
+    column somebody ranks on.
     """
     spec = [
         ("symbol", "Symbol"), ("side", "Side"), ("legs", "Strikes"),
         ("expiration", "Expiry"), ("dte", "DTE"),
         ("credit", "Credit $"), ("capital", "Capital $"),
-        ("roc", "Return on capital"), ("pop", "PoP %"),
+        ("roc", "Return on capital"),
+        ("yield_on_cost", "Yield on cost"),
+        ("total_return_if_called", "Total return if called"),
+        ("pop", "PoP %"),
         ("breakeven", "Breakeven"), ("earnings", "Earnings"),
         ("score", "Score"),
     ]

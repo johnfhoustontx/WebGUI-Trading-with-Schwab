@@ -2743,8 +2743,8 @@ symbol, and any time you have a directional opinion and want the best way to exp
 <p><em>Menu: STRATEGY → Options → Income · Route <code>/options/income</code></em></p>
 <h3 id="what-it-is_15">What it is</h3>
 <p>The premium-selling board at a <strong>30–45 day</strong> horizon: put credit spreads, call credit
-spreads and cash-secured puts, scanned across the whole watchlist and ranked together
-on one list. It is the same <em>find</em> step <a href="#market-scanner">Market Scanner</a> and
+spreads, cash-secured puts and <strong>covered calls against stock the paper account already
+holds</strong>, scanned across the whole watchlist and ranked together on one list. It is the same <em>find</em> step <a href="#market-scanner">Market Scanner</a> and
 <a href="#strategy-finder">Strategy Finder</a> perform, at a longer horizon and with an income
 rather than a directional thesis.</p>
 <h3 id="where-the-data-comes-from_14">Where the data comes from</h3>
@@ -2772,10 +2772,43 @@ rather than a directional thesis.</p>
 </table>
 <h3 id="reading-the-screen_14">Reading the screen</h3>
 <p><strong>The columns:</strong> Symbol · Side · Strikes · Expiry · DTE · Credit $ · Capital $ ·
-Return on capital · PoP % · Breakeven · Earnings · Score. The board arrives already
-ranked by score; the headers re-sort it.</p>
+Return on capital · Yield on cost · Total return if called · PoP % · Breakeven ·
+Earnings · Score. The board arrives already ranked by score; the headers re-sort it.</p>
 <p><strong>Side</strong> names the position rather than the engine's structure code: <em>Put spread</em>,
-<em>Call spread</em>, <em>Cash-secured put</em>.</p>
+<em>Call spread</em>, <em>Cash-secured put</em>, <em>Covered call</em>.</p>
+<p><strong>Yield on cost</strong> and <strong>Total return if called</strong> are covered-call columns and read a
+dash on every other row — a spread owns no shares, so there is no cost basis to divide
+by, and a 0.00% there would sort among real readings.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>On a covered call</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Yield on cost</strong></td>
+<td>Premium ÷ (cost basis × 100). What the call alone pays on money already sunk in the stock.</td>
+</tr>
+<tr>
+<td><strong>Total return if called</strong></td>
+<td>((strike − basis) × 100 + premium) ÷ (basis × 100). The gain to the strike <em>plus</em> the premium — the outcome the trade is written for.</td>
+</tr>
+</tbody>
+</table>
+<p>Read them together. A 0.4% yield at a strike 12% above basis and a 2% yield at a strike
+0.5% above it rank opposite ways depending on which column you look at, and premium
+alone is the misleading one.</p>
+<p>⚠ <strong>Total return if called is not a duplicate of Return on capital</strong>, though on a
+covered call the two land within a few hundredths: Return on capital is net of the
+opening commission, this one is gross, and Return on capital is the only one of the two
+the other three structures carry.</p>
+<p><strong>Covered calls carry no Score.</strong> The composite scale is calibrated on defined-risk
+option structures against an inferred market view, and a covered call's economics are
+dominated by a stock position that scorer never sees — so the row is published without
+one and sorts to the FOOT of the board rather than being given an invented number. The
+two ratios above are what you rank these on instead.</p>
 <p><strong>Credit and Capital are per contract, in dollars.</strong> For a defined-risk credit spread
 Capital is its maximum loss; for a cash-secured put it is the strike down to zero —
 genuinely the cash committed, not a margin figure.</p>
