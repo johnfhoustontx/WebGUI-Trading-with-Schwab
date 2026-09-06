@@ -82,9 +82,22 @@ on loopback.)
   0.63 GiB at argon2-cffi's 64 MiB default. Steady state after this change: ~55% →
   ~56% of four cores, not measurable in practice.
 
-- **Still open.** Redis runs with **no `requirepass`** — `config/env.local.toml`
-  flagged it as "close this before trusting the box further", written when nothing
-  on the machine was public. `GET /login` reads the credentials file per request
+- **⚠ Redis DOES have a password, and two in-repo comments say it does not.**
+  Measured on the box: `redis-cli PING` without auth returns
+  `NOAUTH Authentication required`, and the 48-character `MEMURAI_PASSWORD` in
+  `.env` authenticates against a live db0 of 201 keys. But **`.env`'s own header
+  says "MEMURAI_PASSWORD is unset … SET A PASSWORD BEFORE THIS BOX EVER BECOMES
+  PROD"**, and `config/env.local.toml` lists it as one of two things "NOT yet
+  closed". Both were written on 2026-08-30 while the box was being stood up as
+  dev, and neither was updated when the password went in.
+
+  The first draft of this very entry repeated the claim, because it was taken from
+  the comment rather than from the system — a fresh instance of the exact rot this
+  repo documents, produced while writing the deploy up. **Both files are
+  gitignored and machine-local, so the fix has to happen on the box**, and no test
+  can catch it. Check `redis-cli PING` before believing either.
+
+- **Still open.** `GET /login` reads the credentials file per request
   and sits outside the lockout (which covers POSTs only), so a GET flood is an
   unmetered disk read; caching would defeat instant epoch revocation, so it needs a
   decision rather than a memo. The box also has a pending kernel upgrade.
