@@ -1,9 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NeuralStrike">
-  <!-- The design's own mark: the wordmark's two halves, N in text and S in the
-       accent, on the Nocturne ground. Colours are literals because an SVG
-       served as an icon gets no stylesheet. -->
-  <rect width="64" height="64" rx="12" fill="#161826"/>
-  <circle cx="50" cy="14" r="20" fill="#2b2741"/>
-  <text x="11" y="45" font-family="Inter, system-ui, sans-serif" font-size="30" font-weight="600" fill="#e9e9ed">N</text>
-  <text x="32" y="45" font-family="Inter, system-ui, sans-serif" font-size="30" font-weight="600" fill="#9184d9">S</text>
+  <!--
+    THE FLIP, at small optical size. Browser tab, bookmark, phone home screen.
+
+    ⚠ NOT `mark.svg` SCALED DOWN, and the difference is the whole point. That
+    file's rule is 2.5 units, which at a 16px render is 0.6 of a device pixel:
+    it vanishes, and the mark loses the level that gives it its meaning. Here
+    the rule is 4 units (1px at 16) and both chevrons are heavier, so the three
+    shapes still read. Edit both files when the geometry changes, or the tab
+    icon and the site header stop being the same mark.
+
+    Carries its own ground because a favicon is composited onto browser chrome
+    of unknown colour — a transparent mark disappears into a dark tab strip.
+  -->
+  <rect width="64" height="64" rx="14" fill="#161826"/>
+  <rect x="10" y="30" width="44" height="4" rx="2" fill="#9184d9"/>
+  <path d="M22 12 L32 23.5 L42 12" fill="none" stroke="#e9e9ed"
+        stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 52 L32 41 L42 52" fill="none" stroke="#e9e9ed"
+        stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

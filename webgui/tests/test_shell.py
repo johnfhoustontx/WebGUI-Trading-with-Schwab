@@ -877,12 +877,21 @@ def test_brand_mark_src_requires_the_file_to_exist(tmp_path):
     missing file renders the wordmark alone instead of a broken-image icon."""
     import main
 
-    (tmp_path / "img").mkdir()
+    from pages.options import theme
+
+    # The FILENAME is DERIVED from the configured mark, never written down here.
+    # This test is about the mechanism — present → URL, absent → "" — and pinning
+    # the name made it fail when the mark moved from .png to .svg, which said
+    # nothing at all about whether the mechanism still worked.
+    url = theme.BRAND_MARK
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+
     # Configured + present → the URL is served.
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
-    assert main.brand_mark_src(tmp_path) == "/static/img/neuralstrike-mark.png"
+    asset.write_bytes(b"<svg/>")
+    assert main.brand_mark_src(tmp_path) == url
     # Configured + absent → no image (NOT a dangling src).
-    (tmp_path / "img" / "neuralstrike-mark.png").unlink()
+    asset.unlink()
     assert main.brand_mark_src(tmp_path) == ""
 
 
@@ -920,11 +929,16 @@ def test_brand_lockup_includes_the_mark_when_present(tmp_path):
     """With the asset on disk the lockup leads with the logo image."""
     import main
 
-    (tmp_path / "img").mkdir()
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    from pages.options import theme
+
+    url = theme.BRAND_MARK                       # derived, never pinned
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"<svg/>")
+
     out = main.brand_lockup_html(tmp_path)
     assert 'class="brand-mark"' in out
-    assert 'src="/static/img/neuralstrike-mark.png"' in out
+    assert f'src="{url}"' in out
 
 
 def test_brand_lockup_can_omit_the_mark(tmp_path):
@@ -933,8 +947,13 @@ def test_brand_lockup_can_omit_the_mark(tmp_path):
     inert HTML string."""
     import main
 
-    (tmp_path / "img").mkdir()
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    from pages.options import theme
+
+    url = theme.BRAND_MARK                       # derived, never pinned
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"<svg/>")
+
     out = main.brand_lockup_html(tmp_path, mark=False)
     assert "<img" not in out
     assert "brand-word" in out, "the wordmark must still be there"
@@ -983,10 +1002,20 @@ def test_header_padding_and_logo_size_keep_the_bar_at_its_measured_height():
 
 def test_brand_assets_are_shipped():
     """The header renders a real file, not a hopeful URL — so it must be in the
-    repo. Pins BOTH the mark the header uses and the source lockup it is cropped
-    from (regenerating the mark needs the source)."""
+    repo. Whatever ``[brand].mark`` names has to be ON DISK: ``brand_mark_src``
+    degrades a missing asset to no image at all, so the header would quietly
+    lose its logo and nothing anywhere would fail."""
     import main
+    from pages.options import theme
 
+    url = theme.BRAND_MARK
+    assert url.startswith("/static/"), url
+    assert (main._STATIC_DIR / url[len("/static/"):]).is_file(), (
+        f"[brand].mark points at {url}, which is not in the repo")
+
+    # The retired artwork is deliberately KEPT, unreferenced. It is the revert
+    # path for the 2026-09-07 rebrand — one line in config/theme.toml — and
+    # deleting it would turn that edit into a redraw.
     assert (main._STATIC_DIR / "img" / "neuralstrike-mark.png").is_file()
     assert (main._STATIC_DIR / "img" / "neuralstrike-logo.jpg").is_file()
 

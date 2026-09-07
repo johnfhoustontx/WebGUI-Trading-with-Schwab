@@ -4,6 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-07 (**The gold-and-blue logo is retired; the mark is
+now THE FLIP** — two chevrons converging on a level, dealer hedging pinned to
+the gamma flip. Chosen from three directions put up as a specimen board. It
+replaces artwork that belonged to a different visual system than either surface
+actually runs, could not be reproduced in one colour, and vanished below ~64px.
+Design: [`2026-09-07-brand-direction-design.md`](plans/2026-09-07-brand-direction-design.md).)
+
+- **The mark is carried by its FORM, not by a hex.** The site runs Nocturne
+  (`#9184d9`), the app its own navy theme (`#6b86ff`); the mark takes each
+  surface's own accent instead of importing a foreign colour onto one of them,
+  which is the fault it replaced.
+
+- **Two optical sizes, not one drawing scaled.** At 16px the large variant's
+  2.5-unit rule lands on 0.6 of a device pixel and disappears, taking the level
+  — and the meaning — with it. The favicon is drawn heavier.
+
+- **⚠ The first draw read as an X struck through, and only the render showed
+  it.** The chevron apexes sat ~2 units off the rule; stroke width closed the
+  gap and the mark became a cancel icon. **The gap is the meaning.** Every test
+  passed. `test_the_apex_clears_the_rule` now checks it as arithmetic.
+
+- **⚠ A guard that could not fail, for the second time in two days.**
+  `test_the_landing_page_declares_a_social_preview` asserted `"og:image" in
+  page` — a substring of `og:image:width` and `og:image:alt`, so deleting the
+  actual image tag left it green. Found by mutation testing, not by reading it.
+  **Put the bug back and watch the suite go red**: 19/19 caught.
+
+- **The site has a social preview at last.** There were zero `og:` tags on any
+  page, so every link pasted into Discord or Telegram — this project's actual
+  distribution — previewed as a bare URL. `assets/social.png` is generated, not
+  exported, so the mark on it is provably the geometry the site draws.
+
+- **The tagline changed.** "AI option signals & trading ideas" is the sentence
+  every signal-selling account uses, on a site that promises no signal-selling.
+  It is now "dealer flow, measured."
+
+- **The app moved by CONFIG ONLY** (`config/theme.toml [brand]`), so reverting is
+  one line — and the retired artwork is kept unreferenced and pinned by test so
+  that stays true. The built-in `_DEFAULTS` moved with it: a fallback that
+  restores a retired brand is worse than a crash, because nothing looks wrong.
+
+- **`webgui/tests/test_shell.py` stopped pinning the mark's FILENAME.** Those
+  tests are about the mechanism — present yields the URL, absent yields `""` —
+  so a `.png`→`.svg` move broke them while saying nothing about the mechanism.
+
+- **The local venv was missing `argon2-cffi` and `pyotp`**, both already in
+  `requirements.txt` AND `requirements.lock`. Installing them resolved the
+  `test_the_edge_header_is_the_one_the_app_reads` failure reported twice this
+  week as "pre-existing" — it was only ever the absent dependency. The whole
+  webgui suite now runs locally: **3339 passed, 1 skipped**; `deploy` **49
+  passed**, with nothing failing anywhere.
+
 **Last updated:** 2026-09-06 (**`neuralstrike.co` is a three-page marketing site.**
 The REPLACE-ME one-pager is gone; the public host now serves a landing page, a
 16-screen gallery over 24 screenshots, and a live-screens placeholder, built from

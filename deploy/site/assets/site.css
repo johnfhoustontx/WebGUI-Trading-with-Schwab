@@ -117,6 +117,55 @@ a:hover { color: var(--color-accent-300); text-decoration: underline; }
 .ns-brand .ns-brand-b { color: var(--color-accent); }
 a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 
+/* ─── The mark ───────────────────────────────────────────────────────────
+ *
+ * THE FLIP: two chevrons converging on a level — dealer hedging pinned to the
+ * gamma flip. Inlined into the pages rather than loaded from assets/mark.svg
+ * so it can take its colour from CSS; the standalone file exists for anywhere
+ * that cannot inline it (the favicon, the app header, the social card).
+ *
+ * ⚠ The geometry is duplicated: here as markup in three pages, and in
+ * assets/mark.svg + assets/favicon.svg + webgui/static/img/neuralstrike-mark.svg.
+ * That is deliberate — an <img> gets no stylesheet, so a single shared file
+ * cannot follow the page's accent — but it means a change to the shape is a
+ * change in four places. deploy/tests/test_site.py checks they stay in step.
+ */
+.ns-lockup { display: inline-flex; align-items: center; gap: 9px; }
+
+.ns-mark { width: 26px; height: 26px; display: block; flex: none; overflow: visible; }
+.ns-mark-rule { fill: var(--color-accent); }
+.ns-mark-fig {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Hero scale. The level is allowed to run past the mark's own box (hence
+ * `overflow: visible` above) so it reads as a price level crossing the page
+ * rather than an icon sitting on it. */
+.ns-hero-mark {
+  margin: 0 auto;
+  flex: 0 1 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+.ns-mark-xl { width: min(240px, 62vw); height: min(240px, 62vw); }
+.ns-mark-xl .ns-mark-rule {
+  /* The one place the rule earns a fade: at this size it is page furniture as
+   * much as mark, and it has to die away rather than stop dead against the
+   * hero's radial wash. The reproducible mark keeps its solid rule. */
+  fill: url(#ns-rule-fade);
+}
+.ns-hero-cap {
+  font-size: 12px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
 .ns-navlink {
   font-size: 13.5px;
   white-space: nowrap;

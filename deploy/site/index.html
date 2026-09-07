@@ -7,6 +7,21 @@
 <meta name="description" content="NeuralStrike is a local options workbench that measures dealer hedging pressure. Market conditions, trade candidates, pricing models and a paper account on one screen. Paper positions only; no orders are transmitted to any broker.">
 <meta name="theme-color" content="#161826">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+
+<!-- SOCIAL PREVIEW. Every link pasted into Discord or Telegram renders from
+     these; without them the site's most-shared surface is a bare URL. The
+     image is an absolute URL because a crawler resolves it against nothing.
+     og:image:alt is not decoration - a preview card is often read aloud. -->
+<meta property="og:type"        content="website">
+<meta property="og:site_name"   content="NeuralStrike">
+<meta property="og:url"         content="https://neuralstrike.co/">
+<meta property="og:title"       content="NeuralStrike — local options workbench">
+<meta property="og:description" content="Most tools show you prices. This one shows you who has to trade next. Dealer hedging pressure, measured — on your own machine, paper positions only.">
+<meta property="og:image"       content="https://neuralstrike.co/assets/social.png">
+<meta property="og:image:width"  content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt"   content="The NeuralStrike mark: two chevrons converging on a level line.">
+<meta name="twitter:card"       content="summary_large_image">
 <link rel="stylesheet" href="assets/nocturne.css">
 <link rel="stylesheet" href="assets/site.css">
 
@@ -44,7 +59,17 @@
 <div class="ns-page">
 
   <nav class="ns-nav ns-nav-tall">
-    <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
+    <span class="ns-lockup">
+      <!-- Inlined, not <img>, so the mark inherits the page's accent through
+           currentColor. assets/mark.svg is the same geometry as a standalone
+           file, for anywhere that cannot inline it. -->
+      <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
+        <path d="M20 11 L32 23 L44 11" class="ns-mark-fig" stroke-width="4.6"/>
+        <path d="M20 53 L32 41 L44 53" class="ns-mark-fig" stroke-width="6.2"/>
+      </svg>
+      <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
+    </span>
     <span class="ns-spacer"></span>
     <a class="ns-navlink" href="#idea">The idea</a>
     <a class="ns-navlink" href="#community">Community</a>
@@ -73,12 +98,29 @@
         No real orders. Every position it opens is paper, priced against live market data.
       </p>
     </div>
-    <!-- .lighten is the design system's image wrapper: mix-blend-mode lighten
-         drops the logo's black ground out against the dark page. -->
-    <figure class="lighten" style="margin: 0 auto; flex: 0 1 320px;">
-      <img src="assets/logo.jpg" width="380" height="380"
-           alt="NeuralStrike"
-           style="display: block; width: 100%; max-width: 380px; height: auto;">
+    <!-- The mark at hero scale. The level runs PAST the chevrons and past the
+         mark's own box, so it reads as a price level crossing the page rather
+         than as an icon floating in it — the same thing the app draws on every
+         gamma chart. The old raster logo it replaces needed mix-blend-mode to
+         sit here at all, which is why it could never go on a light ground. -->
+    <figure class="ns-hero-mark" aria-label="NeuralStrike" style="color: var(--color-accent);">
+      <svg class="ns-mark ns-mark-xl" viewBox="0 0 64 64" role="img" aria-label="NeuralStrike">
+        <defs>
+          <!-- Only the hero rule fades. See the note on .ns-mark-xl in site.css:
+               at this scale the level is page furniture as much as mark, and it
+               has to die away rather than stop dead against the radial wash. -->
+          <linearGradient id="ns-rule-fade" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"    stop-color="currentColor" stop-opacity="0"/>
+            <stop offset="0.16" stop-color="currentColor" stop-opacity="1"/>
+            <stop offset="0.84" stop-color="currentColor" stop-opacity="1"/>
+            <stop offset="1"    stop-color="currentColor" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
+        <path d="M20 11 L32 23 L44 11" class="ns-mark-fig" stroke-width="4.6"/>
+        <path d="M20 53 L32 41 L44 53" class="ns-mark-fig" stroke-width="6.2"/>
+      </svg>
+      <figcaption class="ns-hero-cap">Dealers pinned to the flip</figcaption>
     </figure>
   </section>
 
@@ -226,7 +268,7 @@
   </section>
 
   <footer class="ns-wrap ns-foot" style="padding-bottom: 48px;">
-    NeuralStrike — AI option signals &amp; trading ideas. Educational and simulation software. Not investment advice; no orders are transmitted to any broker.
+    NeuralStrike — dealer flow, measured. Educational and simulation software. Not investment advice; no orders are transmitted to any broker.
   </footer>
 
 </div>

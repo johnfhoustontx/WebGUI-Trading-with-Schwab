@@ -115,7 +115,11 @@ _DEFAULTS = {
         # way the logo artwork does. The gradients + font apply to the WORDMARK
         # ONLY — the body/data font stays [typography].family, because a heavy
         # display face hurts readability in the dense signal tables.
-        # Colors are sampled from webgui/static/img/neuralstrike-logo.jpg
+        # Flat since 2026-09-07: the wordmark carries one accent, not the
+        # old artwork's gold/blue split. These MUST track config/theme.toml
+        # [brand] — they are what a missing or malformed file falls back to,
+        # and a fallback that restores a retired brand is worse than a crash
+        # because nothing looks wrong.
         # (p50→p95 of each wordmark band; lower percentiles are anti-aliasing
         # against the black background and read too dark).
         "name_a": "Neural",       # first half of the wordmark (gold)
@@ -125,11 +129,11 @@ _DEFAULTS = {
         "font_url": ("https://fonts.googleapis.com/css2"
                      "?family=Montserrat:wght@800&display=swap"),
         "font_weight": "800",
-        "a_from": "#C9A356",      # "Neural" gradient — deep gold
-        "a_to": "#FBEAA0",        # "Neural" gradient — highlight gold
-        "b_from": "#2C6FB4",      # "Strike" gradient — deep blue
-        "b_to": "#35A3F5",        # "Strike" gradient — bright blue
-        "mark": "/static/img/neuralstrike-mark.png",  # "" = no logo, glyph tile
+        "a_from": "#eef1f6",      # "Neural" — the title tone, flat
+        "a_to": "#eef1f6",
+        "b_from": "#6b86ff",      # "Strike" — the menu accent, flat
+        "b_to": "#6b86ff",
+        "mark": "/static/img/neuralstrike-mark.svg",  # "" = no logo, glyph tile
     },
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults

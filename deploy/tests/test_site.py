@@ -121,9 +121,25 @@ def test_the_stylesheets_own_urls_resolve():
     which looks *almost* right and so goes unnoticed."""
     for sheet in ("assets/site.css", "assets/nocturne.css"):
         for ref in CSS_URL_RE.findall(_css(sheet)):
-            if ref.startswith(("http://", "https://", "data:")):
-                continue
+            if ref.startswith(("http://", "https://", "data:", "#")):
+                continue      # "#..." is an SVG fragment, checked just below
             assert (SITE / "assets" / ref).is_file(), f"{sheet} references missing {ref}"
+
+
+def test_every_svg_fragment_the_css_paints_with_exists():
+    """``fill: url(#id)`` names an element in the SAME DOCUMENT, not a file.
+
+    The hero mark's rule is painted with a gradient defined inside that page's
+    inline SVG, so the rule only works on a page that carries the gradient. A
+    fragment that resolves nowhere does not error -- SVG paints the shape with
+    NOTHING, and the element silently disappears.
+    """
+    frags = {r[1:] for r in CSS_URL_RE.findall(_css("assets/site.css"))
+             if r.startswith("#")}
+    assert frags, "no SVG fragments referenced; drop this test with them"
+    for frag in frags:
+        owners = [n for n in PAGES if f'id="{frag}"' in _markup(n)]
+        assert owners, f"site.css paints with url(#{frag}), which no page defines"
 
 
 def test_every_anchor_target_exists(pages):
@@ -276,6 +292,126 @@ def test_the_stacked_rail_resets_its_flex_basis():
         assert re.search(r"\.ns-rail,\s*\.ns-viewer\s*\{[^}]*flex:\s*0 0 auto", body), (
             "the stacked gallery does not reset the rail/viewer flex basis, so "
             "their 260px/620px bases become heights")
+
+
+# --- C2. the mark, which exists in seven copies -----------------------------
+
+# The two optical sizes. LARGE is the site's nav and hero; SMALL is the favicon
+# and the app's 28px header slot, drawn heavier so a 1-device-pixel rule
+# survives at 16px. They are DIFFERENT DRAWINGS on purpose -- scaling one to
+# both sizes is the mistake optical sizing exists to prevent.
+MARK_LARGE = ("M20 11 L32 23 L44 11", "M20 53 L32 41 L44 53")
+MARK_SMALL = ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52")
+
+MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "assets/mark.svg")
+MARK_SMALL_FILES = ("assets/favicon.svg",)
+
+
+def test_every_copy_of_the_mark_is_the_same_drawing():
+    """THE MARK LIVES IN SEVEN FILES AND NOTHING MAKES THEM AGREE.
+
+    It cannot be one shared file: an <img> gets no stylesheet, so the favicon,
+    the social card and the app header need literal colours, while the site's
+    nav and hero inline the geometry to take the page's accent from CSS. The
+    duplication buys that, and this is the rent.
+
+    A mark that drifts between surfaces does not look broken anywhere -- it
+    looks slightly different in the tab than in the header, which nobody
+    reports and everybody half-notices.
+    """
+    for name in MARK_LARGE_FILES:
+        text = _text(name)
+        for path_d in MARK_LARGE:
+            assert path_d in text, f"{name} does not carry the large mark path {path_d!r}"
+        for path_d in MARK_SMALL:
+            assert path_d not in text, f"{name} carries the SMALL mark; it should be large"
+
+    for name in MARK_SMALL_FILES:
+        text = _text(name)
+        for path_d in MARK_SMALL:
+            assert path_d in text, f"{name} does not carry the small mark path {path_d!r}"
+
+
+def test_the_apex_clears_the_rule():
+    """THE GAP IS THE MEANING, and the first draw did not have one.
+
+    The chevrons converge ON a level; they do not touch it. Drawn first with the
+    apexes ~2 units off the rule, the stroke width closed the gap and the mark
+    rendered as an X struck through -- a cancel icon. Every test passed; only
+    the render showed it.
+
+    Checked as arithmetic rather than by eye: apex + half the stroke width must
+    stay clear of the rule's edge.
+    """
+    import re as _re
+    for name, (rule_y, rule_h) in ((("assets/mark.svg"), (30.75, 2.5)),
+                                   (("assets/favicon.svg"), (30.0, 4.0))):
+        text = _text(name)
+        paths = _re.findall(r'<path d="M\d+ [\d.]+ L32 ([\d.]+) L\d+ [\d.]+"[^>]*?'
+                            r'stroke-width="([\d.]+)"', text, _re.S)
+        assert len(paths) == 2, f"{name}: expected 2 chevrons, found {len(paths)}"
+        for apex_s, w_s in paths:
+            apex, half = float(apex_s), float(w_s) / 2
+            if apex < rule_y:                      # the upper chevron
+                clearance = rule_y - (apex + half)
+            else:                                  # the lower one
+                clearance = apex - half - (rule_y + rule_h)
+            assert clearance >= 2.0, (
+                f"{name}: a chevron clears the rule by only {clearance:.2f} units. "
+                f"Below ~2 the stroke closes the gap and the mark reads as an X.")
+
+
+def test_the_app_and_the_site_draw_the_same_mark():
+    """The web GUI's header mark is a different FILE with a different accent --
+    the two surfaces run different palettes on purpose -- but it must not be a
+    different SHAPE, or they stop being one brand."""
+    app = (pathlib.Path(repo_paths.REPO_ROOT) / "webgui/static/img/neuralstrike-mark.svg")
+    assert app.is_file(), "the app's header mark is missing"
+    text = app.read_text(encoding="utf-8")
+    for path_d in MARK_SMALL:
+        assert path_d in text, f"the app mark does not carry {path_d!r}"
+
+
+def test_the_social_card_exists_and_is_the_right_shape():
+    """og:image is the brand's most-seen surface: every link pasted into Discord
+    or Telegram renders from it. 1200x630 is what the crawlers expect, and the
+    declared dimensions have to match the file or the card is letterboxed."""
+    from struct import unpack
+    png = pathlib.Path(SITE / "assets/social.png")
+    assert png.is_file(), "no social card"
+    head = png.read_bytes()[:24]
+    assert head[:8] == b"\x89PNG\r\n\x1a\n", "social.png is not a PNG"
+    w, h = unpack(">II", head[16:24])
+    assert (w, h) == (1200, 630), f"social card is {w}x{h}, expected 1200x630"
+
+    page = _markup("index.html")
+    assert f'content="{w}"' in page and f'content="{h}"' in page, (
+        "og:image:width/height do not match the file")
+
+
+def test_the_landing_page_declares_a_social_preview():
+    """Without these every link to the site previews as a bare URL.
+
+    ⚠ Matched as a WHOLE property value, closing quote included. A substring
+    test cannot see `og:image` go missing, because `og:image:width` and
+    `og:image:alt` both contain it -- the guard's first draft passed with the
+    image tag deleted, which mutation testing caught and reading it did not.
+    """
+    page = _markup("index.html")
+    for tag in ("og:title", "og:description", "og:image", "og:url",
+                "og:image:alt", "twitter:card"):
+        attr = "name" if tag.startswith("twitter:") else "property"
+        assert f'{attr}="{tag}"' in page, f"index.html has no {tag}"
+    assert "https://neuralstrike.co/assets/social.png" in page, (
+        "og:image must be absolute -- a crawler resolves it against nothing")
+
+
+def test_the_retired_tagline_is_gone():
+    """\"AI option signals\" is the phrase every signal-selling account uses, and
+    the site's own community section promises no signal-selling."""
+    for name in PAGES:
+        assert "AI option signals" not in _text(name), (
+            f"{name} still carries the retired tagline")
 
 
 # --- D. the site never points at the app ------------------------------------
