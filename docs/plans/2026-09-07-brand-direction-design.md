@@ -162,6 +162,37 @@ are inherited from the old raster and now do nothing — a 64-unit square viewBo
 fits a 44px box exactly, and there is no ground to round. Left in place, with a
 note, because a future mark may be a raster again.
 
+### The app's browser tab (2026-09-07, later still)
+
+The header was right and the tab was not: the app's favicon is **generated per
+route** — a plain rounded square in one of thirty colours, so a trader with a
+dozen tabs open can tell them apart. Useful, and completely anonymous.
+
+The fix keeps the feature and adds the brand: **the route colour becomes the
+GROUND and the mark rides on top**. That split is the whole design — the colour
+exists to separate tabs at 16px, and only a full-bleed field does that; a tinted
+rule on a dark square would make every tab identical.
+
+It draws the SMALL optical variant, matching `deploy/site/assets/favicon.svg`, so
+the tab icon does not change meaning when you cross from the marketing site to
+the app.
+
+⚠ **The ink was a luminance threshold, and the threshold was wrong.** At `> 140`
+two routes failed WCAG's 3:1 for graphics — `/driver` `#ff7043` at **2.50:1** and
+`/options/portfolio` `#26a69a` at **2.73:1**, both mid-tones handed the light ink
+when the dark one read better. Retuning to 110 would have fixed those two and
+stayed right only until the next route was added: **a threshold encodes a guess
+about a palette that grows.**
+
+It now picks whichever of the two inks actually contrasts more, measured. That
+cannot be defeated by a new colour, because the best of two is the best of two.
+Worst case across all thirty went **2.50:1 → 4.21:1**, and 24 of 30 flipped to
+dark ink — the threshold had it backwards for most of the palette.
+
+**The test asserts the RATIO, not the branch.** A guard that checked which side
+of the threshold a colour fell on would have been green while `/driver` was
+illegible. It was verified by restoring the threshold and watching it fail.
+
 ## Test-surface note
 
 `webgui/tests/test_shell.py` used to write `neuralstrike-mark.png` and assert

@@ -1045,6 +1045,86 @@ def test_an_uppercase_wordmark_is_actually_tracked():
         f"tracking is {m.group(1)}em -- an uppercase wordmark needs the air")
 
 
+def _contrast(a, b):
+    """WCAG contrast ratio between two #rrggbb colours."""
+    def lum(c):
+        ch = []
+        for i in (1, 3, 5):
+            v = int(c[i:i + 2], 16) / 255
+            ch.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    l1, l2 = sorted((lum(a), lum(b)), reverse=True)
+    return (l1 + 0.05) / (l2 + 0.05)
+
+
+def test_the_favicon_ink_is_legible_on_every_route_colour():
+    """THE PROPERTY, not the formula.
+
+    ``_favicon_ink`` picks light or dark ink by a cheap luminance approximation.
+    What matters is not that the approximation is any particular one, but that
+    the ink it lands on is actually READABLE on that ground -- the palette spans
+    Desk gold #f5c542 to Stop-All dark red #b71c1c, and it gains a colour every
+    time a route does, at which point nobody re-checks the other twenty-nine.
+
+    3:1 is the WCAG threshold for graphics and interface components, which is
+    what a favicon is. Asserting the ratio rather than the branch means a future
+    colour that defeats the approximation fails HERE, not in a tab.
+    """
+    import main
+
+    worst = min(((_contrast(main._favicon_ink(c), c), r, c)
+                 for r, c in main._TAB_COLOR.items()), key=lambda x: x[0])
+    ratio, route, color = worst
+    assert ratio >= 3.0, (
+        f"{route} ({color}) gets ink {main._favicon_ink(color)} at only "
+        f"{ratio:.2f}:1 -- the mark will not read in the tab")
+
+
+def test_the_favicon_draws_the_mark_and_keeps_the_route_colour():
+    """Both halves of the design at once.
+
+    The COLOUR is the ground, because it exists so a dozen open tabs are tellable
+    apart at 16px and only a full-bleed field does that. The MARK rides on top, so
+    every tab is recognisably NeuralStrike. Losing either one silently defeats
+    the other's purpose.
+    """
+    import main
+
+    link = main._favicon_link("#42a5f5")
+    assert "%2342a5f5" in link or "#42a5f5" in link, "the route colour is gone"
+    # The SMALL optical variant -- the same drawing the public site's favicon
+    # uses. URL-encoded in the data URI, so match on the encoded form.
+    from urllib.parse import quote
+    for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
+        assert quote(path_d) in link, f"the favicon does not draw {path_d!r}"
+
+
+def test_the_app_and_site_favicons_are_the_same_drawing():
+    """The app generates its favicon per route; the public site ships a file.
+    Different mechanisms, one mark -- or the tab icon changes meaning when you
+    cross from the marketing site to the app."""
+    import pathlib
+    from urllib.parse import quote
+
+    import main
+
+    site = (pathlib.Path(main._REPO_ROOT) / "deploy/site/assets/favicon.svg"
+            ).read_text(encoding="utf-8")
+    link = main._favicon_link("#42a5f5")
+    for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
+        assert path_d in site, f"the site favicon lost {path_d!r}"
+        assert quote(path_d) in link, f"the app favicon lost {path_d!r}"
+
+
+def test_favicon_ink_degrades_on_a_malformed_colour():
+    """Chrome must never break a page render. An unparseable colour takes the
+    light ink, which suits the mostly mid-to-dark palette."""
+    import main
+
+    for bad in ("", "nope", "#ff", "rgb(1,2,3)", None):
+        assert main._favicon_ink(bad if isinstance(bad, str) else "") == "#f2f4fb"
+
+
 def test_brand_assets_are_shipped():
     """The header renders a real file, not a hopeful URL — so it must be in the
     repo. Whatever ``[brand].mark`` names has to be ON DISK: ``brand_mark_src``

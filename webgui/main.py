@@ -1077,16 +1077,82 @@ _TAB_COLOR = {
 }
 
 
-def _favicon_link(color: str) -> str:
-    """A rounded-square SVG favicon (data-URI) filled ``color``, as BOTH the modern
-    ``rel=icon`` and the legacy ``rel="shortcut icon"``.
+_FAVICON_INK_DARK = "#10131f"
+_FAVICON_INK_LIGHT = "#f2f4fb"
 
-    NiceGUI injects a default ``rel="shortcut icon"`` .ico earlier in <head>; ours are
-    added after it, so the last-declared link of each rel wins — guaranteeing the
-    colored favicon shows in the tab regardless of which rel the browser prefers."""
+
+def _relative_luminance(color: str) -> float:
+    """WCAG relative luminance of ``#rrggbb``. Raises on anything else."""
+    ch = []
+    for i in (1, 3, 5):
+        v = int(color[i:i + 2], 16) / 255
+        ch.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+
+def _contrast_ratio(a: str, b: str) -> float:
+    """WCAG contrast between two ``#rrggbb`` colours, 1.0 … 21.0."""
+    hi, lo = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _favicon_ink(color: str) -> str:
+    """The mark's colour against a ``color`` ground — whichever of the two inks
+    actually contrasts more, measured, not guessed.
+
+    ⚠ THIS WAS A LUMINANCE THRESHOLD AND THE THRESHOLD WAS WRONG. At `> 140` the
+    route palette had two failures — `/driver` `#ff7043` at 2.50:1 and
+    `/options/portfolio` `#26a69a` at 2.73:1, both mid-tones handed the light ink
+    when the dark one read better. Retuning to 110 fixed those two and would have
+    stayed right only until the next route was added: a threshold encodes a guess
+    about a palette that grows.
+
+    Picking the better of two by actual WCAG contrast cannot be defeated by a new
+    colour, because the best of two is the best of two. What a new colour CAN do
+    is be so mid-grey that neither ink clears 3:1 — which is a real warning, and
+    is why ``test_the_favicon_ink_is_legible_on_every_route_colour`` asserts the
+    ratio rather than the branch.
+
+    Falls back to the light ink on anything unparseable: chrome must never break
+    a page render, and the grounds are mostly mid-to-dark.
+    """
+    try:
+        return max((_FAVICON_INK_DARK, _FAVICON_INK_LIGHT),
+                   key=lambda ink: _contrast_ratio(ink, color))
+    except (ValueError, IndexError, TypeError):
+        return _FAVICON_INK_LIGHT
+
+
+def _favicon_link(color: str) -> str:
+    """THE FLIP on a rounded square of ``color``, as a data-URI — emitted as BOTH
+    the modern ``rel=icon`` and the legacy ``rel="shortcut icon"``.
+
+    The per-route colour is the GROUND, not the mark, and that split is the whole
+    design. The colour exists so a trader with a dozen tabs open can tell them
+    apart at 16px, and only a full-bleed field does that — a thin tinted rule on
+    a dark square would make every tab look identical. The mark rides on top in
+    one ink, so every tab is recognisably NeuralStrike *and* still its own route.
+
+    ⚠ The geometry is the SMALL optical variant, matching
+    ``deploy/site/assets/favicon.svg`` — heavier strokes so the rule survives a
+    device pixel at 16px. The large drawing's 2.5-unit rule renders at 0.6px here
+    and disappears, taking the level, and with it the meaning, out of the mark.
+    The two files are kept in step by ``test_the_app_favicon_draws_the_mark``.
+
+    NiceGUI injects a default ``rel="shortcut icon"`` .ico earlier in <head>; ours
+    are added after it, so the last-declared link of each rel wins — guaranteeing
+    this shows in the tab regardless of which rel the browser prefers."""
     from urllib.parse import quote
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-           f'<rect width="32" height="32" rx="7" fill="{color}"/></svg>')
+    ink = _favicon_ink(color)
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        f'<rect width="64" height="64" rx="14" fill="{color}"/>'
+        f'<rect x="10" y="30" width="44" height="4" rx="2" fill="{ink}"/>'
+        f'<path d="M22 12 L32 23.5 L42 12" fill="none" stroke="{ink}"'
+        ' stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'<path d="M22 52 L32 41 L42 52" fill="none" stroke="{ink}"'
+        ' stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        '</svg>')
     uri = f"data:image/svg+xml,{quote(svg)}"
     return f'<link rel="icon" href="{uri}"><link rel="shortcut icon" href="{uri}">'
 
