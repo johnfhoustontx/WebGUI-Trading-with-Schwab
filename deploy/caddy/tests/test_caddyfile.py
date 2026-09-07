@@ -80,6 +80,11 @@ def _block(text, host):
     raise AssertionError(f"no site block for {host!r} in:\n{text}")
 
 
+# The origins that face the world with NO login. The app host is deliberately
+# absent -- it is the thing these must not advertise.
+_PUBLIC_HOSTS = (repo_paths.SITE_HOST, repo_paths.LIVE_HOST)
+
+
 # --- A. the served root ------------------------------------------------------
 def test_the_file_server_root_is_the_site_dir_and_never_the_checkout_root(cfg):
     """One level too high and the secrets are on the internet, silently."""
@@ -207,22 +212,32 @@ def test_the_port_comes_from_repo_paths_not_a_literal(cfg, monkeypatch):
     assert "127.0.0.1:9500" in caddy.render()
 
 
-def test_both_hostnames_are_served(cfg):
+def test_every_hostname_is_served(cfg):
     assert _block(cfg, repo_paths.SITE_HOST).startswith(
         f"{repo_paths.SITE_HOST}, www.{repo_paths.SITE_HOST} {{")
     assert _block(cfg, repo_paths.APP_HOST).startswith(f"{repo_paths.APP_HOST} {{")
+    assert _block(cfg, repo_paths.LIVE_HOST).startswith(f"{repo_paths.LIVE_HOST} {{")
 
 
-def test_the_app_host_is_not_advertised_by_the_public_block(cfg):
+def test_the_app_host_is_not_advertised_by_the_public_blocks(cfg):
     """Recorded as noise reduction, not as a security control -- the subdomain is
     in Certificate Transparency regardless -- but the public page and its block
-    should not point at it."""
-    assert repo_paths.APP_HOST not in _block(cfg, repo_paths.SITE_HOST)
+    should not point at it.
+
+    ⚠ Widened from the site block alone when the LIVE origin arrived. Both of
+    those blocks face the world with no login, and the live one is the easier
+    place to leak the app by accident: it was written by copying the app block,
+    so it starts life holding the app's own hostname."""
+    for host in _PUBLIC_HOSTS:
+        assert repo_paths.APP_HOST not in _block(cfg, host), host
 
 
-def test_both_blocks_send_hsts(cfg):
-    for host in (repo_paths.SITE_HOST, repo_paths.APP_HOST):
-        assert "Strict-Transport-Security" in _block(cfg, host)
+def test_every_block_sends_hsts(cfg):
+    """Every name, not just two. The header carries no ``includeSubDomains``
+    (deliberately -- see the generator), so ``live.`` does NOT inherit the apex
+    policy and a downgrade there would be a foothold on a neighbouring name."""
+    for host in (repo_paths.SITE_HOST, repo_paths.APP_HOST, repo_paths.LIVE_HOST):
+        assert "Strict-Transport-Security" in _block(cfg, host), host
 
 
 def test_the_app_block_refuses_to_be_framed_off_origin(cfg):
@@ -256,3 +271,55 @@ def test_install_writes_the_rendered_config(tmp_path):
     written = caddy.install(dest)
     assert written == dest
     assert dest.read_text(encoding="utf-8") == caddy.render()
+
+
+# --- the live block: public BY DESIGN ----------------------------------------
+def test_the_live_host_is_reverse_proxied_to_the_live_port(cfg):
+    assert f"{repo_paths.LIVE_HOST} {{" in cfg
+    assert f"reverse_proxy 127.0.0.1:{repo_paths.NICEGUI_LIVE_PORT}" in cfg
+
+
+def test_the_live_port_comes_from_repo_paths_not_a_literal(cfg, monkeypatch):
+    """Partner to the app block's version of this. 8500 and 8501 differ by one
+    character, and a literal here would front the PRIVATE app on a hostname
+    with no login -- which is the single worst outcome this file can produce."""
+    monkeypatch.setattr(caddy, "NICEGUI_LIVE_PORT", 9501)
+    assert "127.0.0.1:9501" in caddy.render()
+
+
+def test_the_live_block_carries_no_authentication(cfg):
+    """The live screens are public BY DESIGN. Pinned so that a later copy-paste
+    of the app block does not quietly put a login in front of them -- or, worse,
+    a login that does not work and reads as an outage.
+
+    Brace-counted via ``_block`` rather than split on the first ``
+}``: the app
+    block this was copied from nests ``header { ... }`` and ``handle { ... }``,
+    so a naive split would end the block early and stop seeing exactly the
+    directives it is looking for."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    for directive in ("basicauth", "basic_auth", "forward_auth", "jwt"):
+        assert directive not in block, directive
+
+
+def test_the_live_block_cannot_reach_the_private_app(cfg):
+    """It fronts :8501 and must never name :8500. The two origins exist to keep
+    the public internet out of the process that serves /terminate; a stray
+    upstream here would hand it over on a hostname with no login."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert f"127.0.0.1:{repo_paths.NICEGUI_PORT}" not in block
+    assert repo_paths.APP_HOST not in block
+
+
+def test_the_live_block_is_still_covered_by_the_edge_header_count(cfg):
+    """Non-vacuity partner for ``test_every_reverse_proxy_stamps_the_edge_header``,
+    which is a whole-file COUNT and would stay green if a new block added
+    neither a proxy nor a header.
+
+    ``live_main`` mounts no auth middleware and reads this header nowhere -- it
+    is stamped so the file-wide invariant stays unconditional, because an
+    exception carved out for "the block that does not need it" is a hole a
+    future block proxying the app could sit in."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert block.count("reverse_proxy") == 1
+    assert block.count("header_up X-Edge 1") == 1

@@ -1,4 +1,4 @@
-"""Emit the Caddyfile that fronts this box's two public hostnames.
+"""Emit the Caddyfile that fronts this box's three public hostnames.
 
 Like the systemd units, this is GENERATED and there is no Caddyfile in git.
 Every value comes from ``repo_paths`` -- the hostnames, the checkout root, the
@@ -19,11 +19,14 @@ to bind :443 and must not die with a login session, and it restarts nothing on
 anyone's behalf, so the reason user units exist for the stack (a network-facing
 app restarting its own siblings without a polkit rule) does not apply here.
 
-**Two hostnames, two ORIGINS.** ``SITE_HOST`` serves a static one-pager out of
-``deploy/site``; ``APP_HOST`` proxies the web GUI. Separate origins rather than
-separate paths on one host, because the public page carries third-party links
-and embeds and sharing an origin would put someone else's widget inside the
-app's cookie scope.
+**Three hostnames, three ORIGINS.** ``SITE_HOST`` serves a static one-pager out
+of ``deploy/site``; ``LIVE_HOST`` proxies the PUBLIC read-only screens
+(no login); ``APP_HOST`` proxies the web GUI behind its login. Separate
+origins rather than separate paths on one host, because the public page carries
+third-party links and embeds and sharing an origin would put someone else's
+widget inside the app's cookie scope -- and because a public origin separated
+from the trading UI by a path filter is a filter someone has to keep getting
+right, where an origin is not.
 
 **No ``rate_limit``, decided.** Caddy's rate limiter is in no prebuilt binary; it
 needs an ``xcaddy`` build and a manual rebuild on every future Caddy release,
@@ -37,12 +40,15 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (APP_HOST, ENV_NAME, NICEGUI_PORT,  # noqa: E402
-                        SITE_HOST, SITE_ROOT)
+from repo_paths import (APP_HOST, ENV_NAME, LIVE_HOST,  # noqa: E402
+                        NICEGUI_LIVE_PORT, NICEGUI_PORT, SITE_HOST, SITE_ROOT)
 
-# One year, the shortest value browsers will preload. Both blocks send it: the
+# One year, the shortest value browsers will preload. EVERY block sends it: the
 # app because its session cookie must never travel in clear, the public site
 # because a downgrade there is a foothold on a neighbouring name.
+#
+# ⚠ No `includeSubDomains`, so `live.` does NOT inherit the apex policy -- which
+# is precisely why its block has to send its own rather than lean on this one.
 HSTS = "max-age=31536000"
 
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
@@ -105,6 +111,70 @@ def _public_block():
 }}"""
 
 
+def _live_block():
+    """The PUBLIC read-only screens (``webgui/live_main.py``).
+
+    A separate ORIGIN from ``APP_HOST``, never a path under it. The app is
+    behind a login and these are not, so the two are separated by something a
+    misconfiguration cannot merge rather than by a path filter someone has to
+    keep getting right. The upstream still binds 127.0.0.1 -- Caddy is the only
+    thing that talks to it, the same rule the app follows.
+
+    **No authentication of any kind, deliberately, and pinned by test**, so that
+    a later copy-paste of the app block cannot quietly put a login in front of a
+    public site -- or, worse, a login that does not work and reads as an outage.
+
+    Carried across from the app block, and why:
+
+    * ``encode zstd gzip`` -- same NiceGUI payloads.
+    * ``Strict-Transport-Security`` -- the header carries no
+      ``includeSubDomains``, so this name does not inherit the apex policy.
+    * ``header_up X-Edge 1``. ⚠ **This process never reads it.** ``live_main``
+      mounts no auth middleware, has no ``_client_ip`` and keys no lockout. It
+      is stamped because the invariant ``test_every_reverse_proxy_stamps_the_edge_header``
+      pins is file-wide and unconditional: EVERY ``reverse_proxy`` here stamps
+      it. An exception carved out for "the block that does not need it" is a
+      hole the next block -- one proxying the APP -- could sit in, and the header
+      costs nothing.
+
+    Deliberately NOT carried:
+
+    * **``Content-Security-Policy: frame-ancestors 'self'``.** The app forbids
+      framing so the public one-pager cannot wrap a logged-in session. There is
+      no session here to wrap and nothing behind a credential; every byte this
+      origin serves is world-readable by definition. Setting it would also
+      forbid ``SITE_HOST`` -- a different origin -- from ever embedding a
+      screen, closing a door the design lists under "deliberately not built"
+      rather than "never".
+    * **``handle /wall* { respond 404 }``.** The wall route does not exist in
+      this process at all; ``live_main`` registers the fourteen screens and
+      nothing else. A 404 handler for a path FastAPI already 404s is a rule
+      that reads as a control and is decoration.
+
+    **Nothing about websockets, and that is not an omission.** Caddy v2's
+    ``reverse_proxy`` proxies an ``Upgrade`` natively; the app block sets no
+    websocket directive either and NiceGUI has run behind it since. Recorded
+    because getting it wrong fails in the worst way -- every page would load
+    once and then never repaint, which reads as a frozen tape rather than as an
+    edge misconfiguration.
+    """
+    return f"""{LIVE_HOST} {{
+    encode zstd gzip
+
+    header Strict-Transport-Security "{HSTS}"
+
+    # NO login, by design -- these fourteen screens are public. See the
+    # docstring before adding any auth directive here.
+    reverse_proxy 127.0.0.1:{NICEGUI_LIVE_PORT} {{
+        # Not read by this process; stamped so the file-wide "every proxied
+        # route stamps it" rule keeps no exceptions. (The rule is enforced as
+        # a COUNT over this whole file, so do not name the directive in a
+        # comment -- a mention counts as an occurrence.)
+        header_up X-Edge 1
+    }}
+}}"""
+
+
 def _app_block():
     """The web GUI, behind its own login.
 
@@ -161,7 +231,11 @@ def render():
               "# Every value here is derived from repo_paths; an edit made in place\n"
               "# is lost on the next run and, until then, is a second source of\n"
               "# truth for the port and the checkout root.\n")
-    return f"{banner}\n{_public_block()}\n\n{_app_block()}\n"
+    # Ordered least-privileged first -- static site, public screens, then the
+    # app behind its login. It is the order the design's own diagram uses, and
+    # it puts the one block that may never carry an upstream at the top.
+    return (f"{banner}\n{_public_block()}\n\n{_live_block()}\n\n"
+            f"{_app_block()}\n")
 
 
 def install(dest=None):
