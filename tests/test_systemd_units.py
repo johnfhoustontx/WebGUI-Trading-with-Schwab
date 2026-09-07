@@ -550,3 +550,83 @@ def test_the_live_redis_credential_rides_the_checkout_env_file():
     assert str(POSIX_ROOT / ".env") in _environment_files(text)
     for value in _directives(text, "Environment"):
         assert "REDIS_LIVE_URL" not in value.upper(), value
+
+
+# --- the thumbnail capture, a oneshot the TIMER owns -------------------------
+def test_the_live_capture_units_are_generated():
+    """The public grid is fourteen <img> tags. Without this timer they are
+    fourteen 404s on the first day and fourteen stale pictures after that --
+    and nothing about the site or the live process looks broken while it
+    happens."""
+    all_units = units.render_all()
+    assert f"trading-{ENV_NAME}-live-capture.service" in all_units
+    assert f"trading-{ENV_NAME}-live-capture.timer" in all_units
+
+
+def test_the_capture_runs_every_fifteen_minutes_without_catching_up(rendered):
+    """A missed capture is worthless later -- it would put the market as it was
+    during the downtime onto a page whose whole job is to be current -- so this
+    is the deliberate opposite of the backup timer's Persistent=true."""
+    tmr = rendered[f"trading-{ENV_NAME}-live-capture.timer"]
+    assert tmr["Timer"]["OnCalendar"] == "*:0/15"
+    assert tmr["Timer"].get("Persistent", "false").lower() != "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_capture_timer_does_not_filter_the_days_the_script_gates_on():
+    """The division of labour the stream timer already uses: systemd has no
+    market calendar, so the gate that CAN see a holiday is the one that decides.
+    A Mon..Fri here would be a second, driftable copy of half of it."""
+    text = units.render_all()[f"trading-{ENV_NAME}-live-capture.timer"]
+    schedule = [line.split("=", 1)[1] for line in text.splitlines()
+                if line.startswith("OnCalendar=")]
+    assert schedule, "the capture timer has no OnCalendar at all"
+    for line in schedule:
+        assert "Mon" not in line and "Sat" not in line, line
+
+
+def test_the_capture_is_a_oneshot_that_does_not_retry(rendered):
+    """A oneshot that fails should be VISIBLE and then wait for the next
+    quarter hour. The two failures worth telling apart are a host with no
+    browser, which retrying cannot fix, and a live process that is down, which
+    the next firing picks up on its own. The script already declines to fail for
+    the ordinary reasons -- outside the window it exits 0, and one unreachable
+    screen is logged rather than raised."""
+    svc = rendered[f"trading-{ENV_NAME}-live-capture.service"]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    # The storm cap still belongs in [Unit]; systemd silently ignores it in
+    # [Service], which is how a cap can look configured and not exist.
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_capture_is_not_a_member_of_the_fleet(rendered):
+    """PartOf/WantedBy would make `systemctl start target` fire a capture at
+    whatever hour someone promotes, and a stack stop try to stop a job that
+    runs for a minute every quarter hour."""
+    svc = rendered[f"trading-{ENV_NAME}-live-capture.service"]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert f"trading-{ENV_NAME}-live-capture.service" not in stack_services()
+
+
+def test_the_capture_has_a_timeout_derived_from_its_own_budget(rendered):
+    """A oneshot inherits DefaultTimeoutStartSec (90s on this host) and the run
+    photographs fourteen screens, so without this systemd would kill it partway:
+    some tiles fresh, the rest stale, and nothing on the page to say which.
+
+    Derived from the script's per-screen ceiling times the number of published
+    screens, so adding a screen cannot silently reintroduce the truncation.
+    """
+    from tools import capture_live_shots as capture
+
+    svc = rendered[f"trading-{ENV_NAME}-live-capture.service"]
+    timeout = int(svc["Service"]["TimeoutStartSec"])
+    assert timeout >= capture.SCREEN_TIMEOUT_SEC * len(capture.targets())
+
+
+def test_the_capture_runs_the_script_and_not_a_shell_wrapper(rendered):
+    svc = rendered[f"trading-{ENV_NAME}-live-capture.service"]
+    assert svc["Service"]["ExecStart"].endswith("tools/capture_live_shots.py")
+    assert str(POSIX_ROOT) in svc["Service"]["ExecStart"]

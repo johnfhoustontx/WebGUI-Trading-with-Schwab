@@ -91,3 +91,8 @@ webgui/data/voice/
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
+# Thumbnail captures for the public live grid. Generated on the box that serves
+# them, every 15 min inside [windows.live_capture]. ⚠ NOT committed: tracked,
+# they would dirty prod's tree the moment the timer first fires, and
+# tools/promote.sh refuses a dirty tree.
+deploy/site/live/*.webp

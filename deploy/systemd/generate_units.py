@@ -90,6 +90,14 @@ BACKUP_TIMEOUT_SEC = 7200
 # path the unit loads, and so moving it is one edit.
 STREAM_ENV_FILE = "/etc/neuralstrike-stream/env"
 
+# How often the public grid's thumbnails are refreshed. Every 15 minutes inside
+# [windows.live_capture]; the script's own gate decides the days and hours, so
+# this only has to be the cadence.
+LIVE_CAPTURE_INTERVAL_MIN = 15
+# Slack on top of the derived per-screen budget, for interpreter start and the
+# WebP encodes.
+LIVE_CAPTURE_TIMEOUT_SLACK_SEC = 60
+
 
 def target_name():
     return f"trading-{ENV_NAME}.target"
@@ -400,12 +408,100 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-stream.timer": tmr}
 
 
+def _live_capture_timeout_seconds():
+    """The unit's ``TimeoutStartSec``, DERIVED from the script's own budget.
+
+    ``tools/capture_live_shots.py`` gives each screen a wall-clock ceiling and
+    photographs every screen ``webgui/live_screens.py`` publishes, so the run's
+    worst case is those two multiplied. Typed as a literal it would be wrong the
+    first time a screen is added -- and wrong in the way the backup unit was
+    before it had a timeout at all: systemd SIGTERMs the job partway, so some
+    tiles refresh and the rest silently do not.
+    """
+    from tools import capture_live_shots as capture
+
+    return (capture.SCREEN_TIMEOUT_SEC * len(capture.targets())
+            + LIVE_CAPTURE_TIMEOUT_SLACK_SEC)
+
+
+def _live_capture_units():
+    """The thumbnail capture: a oneshot the timer owns, plus its timer.
+
+    **No ``Restart=``, deliberately.** A oneshot that fails should be visible in
+    ``systemctl --user --failed`` and then wait for the next quarter hour, not
+    retry: the two failures worth distinguishing are "no browser on this host",
+    which no amount of retrying fixes, and "the live process is down", which the
+    next firing picks up on its own. The script itself already declines to fail
+    for the ordinary reasons -- outside the window it stands down with exit 0,
+    and one unreachable screen is logged rather than raised.
+
+    **Not ``PartOf`` the target and not ``WantedBy`` it.** Like the backup and
+    the stream, this is not a member of the fleet; the timer decides when it
+    runs, so the ``[Install]`` section belongs there.
+
+    **No ``After=`` on the live web GUI either**, though it is the thing being
+    photographed. Ordering matters only at boot, and a capture that lands before
+    the live process is up costs one logged failure and fifteen minutes. Against
+    that, ``tests/test_systemd_units.py`` pins that NOTHING in this file names
+    the public unit as a dependency -- the whole point of running the public
+    origin as a separate process -- and an ordering edge here would be the first
+    exception someone has to reason about later.
+    """
+    timeout = _live_capture_timeout_seconds()
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - live screen thumbnails
+# No PartOf and no [Install]: the timer owns this, and a stop of the stack has
+# nothing to stop -- it is a oneshot that runs for a minute every quarter hour.
+# A crash-looping unit is retried this many times in this window, then left
+# down and logged.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+EnvironmentFile={_env_file()}
+# Fourteen screens with a per-screen ceiling. WITHOUT THIS the oneshot inherits
+# DefaultTimeoutStartSec (90s here) and would be killed partway through, leaving
+# some tiles fresh and the rest stale with nothing to say which.
+TimeoutStartSec={timeout}
+ExecStart={_python()} tools/capture_live_shots.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - live screen thumbnail timer
+
+[Timer]
+# Every {LIVE_CAPTURE_INTERVAL_MIN} minutes, all day. The DAYS and HOURS are not
+# filtered here on purpose: the script gates on [windows.live_capture] via the
+# market calendar, which is the only thing that can see a holiday -- the same
+# division of labour the stream timer uses. A stand-down is a sub-second
+# interpreter start.
+OnCalendar=*:0/{LIVE_CAPTURE_INTERVAL_MIN}
+# Deliberately NOT Persistent=true. A missed capture is worthless later: the
+# next one is at most {LIVE_CAPTURE_INTERVAL_MIN} minutes away and shows the
+# market as it is now, not as it was during the downtime.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-live-capture.service": svc,
+            f"trading-{ENV_NAME}-live-capture.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
     out[target_name()] = _target_text()
     out.update(_backup_units())
     out.update(_stream_units())
+    out.update(_live_capture_units())
     return out
 
 
