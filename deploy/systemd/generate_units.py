@@ -32,8 +32,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (ENV_NAME, NICEGUI_PORT, OWNS_PROXY,  # noqa: E402
-                        PROXY_PORT, REPO_ROOT, SERVICE_PORTS)
+from repo_paths import (ENV_NAME, NICEGUI_LIVE_PORT,  # noqa: E402
+                        NICEGUI_PORT, OWNS_PROXY, PROXY_PORT, REPO_ROOT,
+                        SERVICE_PORTS)
 from shared.market_calendar import window_bounds  # noqa: E402
 
 
@@ -50,6 +51,18 @@ def _python():
 
 
 def _env_file():
+    """The checkout's own ``.env`` -- where every STACK secret lives.
+
+    ``REDIS_LIVE_URL`` (the read-only Redis ACL user the public live screens
+    connect as) belongs here and needs no new path: it is a stack credential
+    like the rest, and every unit already loads this file. ``STREAM_ENV_FILE``
+    is the counter-example, and the difference is OWNERSHIP -- the RTMP key
+    belongs to the operator, not to the checkout, so it lives outside it.
+
+    Note the credential is therefore visible to every unit's process, not only
+    the live one. That is not a widening: the ACL user is strictly WEAKER than
+    the one the rest of the stack already holds from this same file.
+    """
     return pathlib.PurePosixPath(REPO_ROOT.as_posix()) / ".env"
 
 
@@ -98,6 +111,18 @@ def components():
     (the Schwab OAuth refresh token is a single rotating credential, so there can
     be only one holder), so ownership is encoded in which units exist rather than
     in a filter someone has to remember to apply.
+
+    ⚠ **The live screens DO get a unit in dev**, and the asymmetry with the proxy
+    is deliberate. Withholding a unit has only ever been about a **single
+    exclusive resource** two environments would fight over -- there is exactly
+    one Schwab refresh token, and a second holder invalidates the first. Nothing
+    like that exists here: the live process binds dev's own offset port, reads
+    Redis and nothing else, spends no Schwab call, no Claude call and sends no
+    notification, so there is nothing for the four dev suppressions to suppress.
+    And the standing development rule is that work is *verified running in dev*
+    before it is promoted; a dev checkout with no live unit would make that
+    verification a hand-started process outside systemd, which is exactly the
+    shape that ships unit config nobody has run.
     """
     out = []
     if OWNS_PROXY:
@@ -105,17 +130,27 @@ def components():
     for key, port in SERVICE_PORTS.items():
         out.append((f"{key}_svc", port, f"services/{key}_svc/app.py"))
     out.append(("webgui", NICEGUI_PORT, "webgui/main.py"))
+    # The PUBLIC read-only screens, a separate process on a separate origin.
+    # Separate so a public traffic spike or a crash cannot reach the trading UI.
+    out.append(("webgui_live", NICEGUI_LIVE_PORT, "webgui/live_main.py"))
     return out
 
 
 def _service_text(component, port, script):
     is_proxy = component == "proxy"
     is_webgui = component == "webgui"
+    # The public read-only screens read Redis -- a SYSTEM unit, outside this
+    # target entirely -- and nothing else: no proxy call, no Schwab call, no
+    # service call. So they order themselves against nothing here. An After= on
+    # a component this process never speaks to would read as a real dependency
+    # and be none, and the next person to touch this file would have to prove
+    # it was fake before deleting it.
+    is_live = component == "webgui_live"
 
     unit = [f"Description=NeuralStrike {ENV_NAME} - {component} (:{port})",
             f"PartOf={target_name()}"]
 
-    if not is_proxy and OWNS_PROXY:
+    if not is_proxy and not is_live and OWNS_PROXY:
         # The web GUI is ordered after the proxy but does NOT require it: it
         # renders a proxy-down banner and is fully usable without one, which
         # restart_spec already encodes as wait_port 0. A dead proxy must not
@@ -145,7 +180,7 @@ def _service_text(component, port, script):
                "# start a stack that is silently mute.",
                f"EnvironmentFile={_env_file()}"]
 
-    if not is_proxy and not is_webgui and OWNS_PROXY:
+    if not is_proxy and not is_webgui and not is_live and OWNS_PROXY:
         # After= orders process START and says nothing about readiness. A dead
         # accept loop stays bound and passes a TCP connect -- which is how a
         # promote once left prod serving no UI at all. wait_http.py does a GET.

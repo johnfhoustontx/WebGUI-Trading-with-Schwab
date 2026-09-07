@@ -477,3 +477,76 @@ def test_the_stream_timer_does_not_catch_up_after_downtime(rendered):
     tmr = rendered[f"trading-{ENV_NAME}-stream.timer"]
     assert "Persistent" not in tmr["Timer"]
     assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+# --- the public live screens: a PEER of the trading UI, not a child ----------
+def test_the_live_screens_have_their_own_unit():
+    """A separate unit is the point: a public traffic spike or a crash on the
+    open origin must not take the trading UI down with it."""
+    names = {c for c, _p, _s in units.components()}
+    assert "webgui_live" in names
+
+
+def test_the_live_unit_binds_the_live_port():
+    import repo_paths
+    port = next(p for c, p, _s in units.components() if c == "webgui_live")
+    assert port == repo_paths.NICEGUI_LIVE_PORT
+
+
+def test_the_live_unit_runs_the_live_entrypoint():
+    script = next(s for c, _p, s in units.components() if c == "webgui_live")
+    assert script == "webgui/live_main.py"
+
+
+def test_the_live_unit_comes_up_and_down_with_the_stack():
+    """WantedBy the target so a promote brings the public screens back, PartOf
+    it so a stop takes them down. It is a member of the fleet -- unlike the
+    stream, which the TIMER owns."""
+    assert units.unit_name("webgui_live") in stack_services()
+
+
+def test_nothing_in_the_stack_depends_on_the_live_screens(rendered):
+    """The whole reason it is a second process. A dependency edge pointing AT
+    the public origin would hand a public traffic spike a way into the trading
+    UI's start-up -- which is exactly what the separate process buys, thrown
+    away in one directive.
+
+    ``Wants=`` is checked as well as ``Requires=``: a Wants on a crash-looping
+    unit does not fail its dependent, but it does drag the restart storm into
+    every ``systemctl start`` of the thing that wants it."""
+    live = units.unit_name("webgui_live")
+    for name, cp in rendered.items():
+        if not name.endswith(".service") or name == live:
+            continue
+        for key in ("Requires", "Requisite", "BindsTo", "After", "Wants"):
+            assert live not in cp["Unit"].get(key, ""), (name, key)
+
+
+def test_the_live_unit_orders_itself_against_nothing_it_talks_to(rendered):
+    """It reads Redis -- a SYSTEM unit, outside this target entirely -- and
+    nothing else. No proxy call, no Schwab call, no service call. So no
+    ``After=``, no ``Requires=`` and no readiness probe: an ordering against a
+    component it never speaks to reads as a real dependency and is none, and
+    the next person to touch this file would have to prove it was fake."""
+    cp = rendered[units.unit_name("webgui_live")]
+    assert "Requires" not in cp["Unit"]
+    assert "After" not in cp["Unit"]
+    assert "ExecStartPre" not in cp["Service"]
+
+
+def test_the_live_redis_credential_rides_the_checkout_env_file():
+    """``REDIS_LIVE_URL`` carries the read-only Redis ACL user. It is a STACK
+    secret like every other one, so it rides the checkout's ``.env`` -- the
+    EnvironmentFile every unit already loads -- and NO new secret path is
+    invented for it. (``STREAM_ENV_FILE`` is the counter-example, and the
+    difference is ownership: the RTMP key belongs to the operator, not to the
+    stack.)
+
+    Asserted as an ABSENCE from ``Environment=``, because that is the failure
+    that matters: ``systemctl show`` prints Environment= to any local user, and
+    ``REDIS_LIVE_URL`` carries a password in a URL, where the generic
+    KEY/TOKEN/PASSWORD/SECRET smell test above cannot see it."""
+    text = units.render_all()[units.unit_name("webgui_live")]
+    assert str(POSIX_ROOT / ".env") in _environment_files(text)
+    for value in _directives(text, "Environment"):
+        assert "REDIS_LIVE_URL" not in value.upper(), value
