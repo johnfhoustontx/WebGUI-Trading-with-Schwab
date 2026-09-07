@@ -1196,9 +1196,14 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     consumes, and ``compute.gamma_snapshot`` is defensive. When the chain fetch
     fails it returns None — we cache a graceful-empty view (``{"symbol", views:{}}``)
     so the page shows a "no data" state instead of staling on a prior symbol's
-    snapshot."""
+    snapshot.
+
+    A symbol the public live screens name lands in its published key too — the
+    snapshot is already computed, so that write costs no chain fetch and no engine
+    pass, and it keeps the public screen fresh on this path (the ``gamma_refresh``
+    command and the startup seed) for free."""
     _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
-                   targets=_gamma_targets(symbol, private=True))
+                   targets=_gamma_targets(symbol))
 
 
 def refresh_gamma_published(bus, symbol) -> None:
@@ -1231,20 +1236,16 @@ def _gamma_pub_target(symbol):
             lambda view: gamma_pub_history_key(symbol, view))
 
 
-def _gamma_targets(symbol, *, private: bool):
-    """Where one snapshot of ``symbol`` should land.
-
-    A published symbol refreshed for the private page lands in BOTH — the
-    snapshot is already computed, so the second write costs no chain fetch and no
-    engine pass, and it keeps the public screen fresh on the command + startup
-    paths for free."""
-    out = [_GAMMA_PRIVATE_TARGET] if private else []
+def _gamma_targets(symbol):
+    """Where a snapshot computed FOR THE PRIVATE PAGE should land: its shared key,
+    plus the symbol's published key when a public screen names that symbol."""
+    out = [_GAMMA_PRIVATE_TARGET]
     if is_published_gamma_symbol(symbol):
         out.append(_gamma_pub_target(symbol))
     return tuple(out)
 
 
-def _publish_gamma(bus, snap, symbol, *, targets=None) -> None:
+def _publish_gamma(bus, snap, symbol, *, targets) -> None:
     """Write the history keys FIRST, then the slim main payload, then publish.
 
     That order matters: the page reacts to the MAIN key's version bump and then
@@ -1259,12 +1260,10 @@ def _publish_gamma(bus, snap, symbol, *, targets=None) -> None:
     with this symbol's bars.
 
     ``targets`` — the ``(main key, event, per-view history key builder)`` triples
-    this snapshot goes to; defaults to the private trio. It is a LIST rather than
-    a second call per destination because the history rows are POPPED out of the
-    snapshot here: a second call would find them already gone and would publish
-    empty rows over good ones.
+    this snapshot goes to. It is a LIST rather than a second call per destination
+    because the history rows are POPPED out of the snapshot here: a second call
+    would find them already gone and would publish empty rows over good ones.
     """
-    targets = targets or (_GAMMA_PRIVATE_TARGET,)
     views = snap.get("views")
     rows_by_view = {}
     if isinstance(views, dict):
