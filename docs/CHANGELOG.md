@@ -4,6 +4,90 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-06 (**`neuralstrike.co` is a three-page marketing site.**
+The REPLACE-ME one-pager is gone; the public host now serves a landing page, a
+16-screen gallery over 24 screenshots, and a live-screens placeholder, built from
+the *Options trading workbench* design over its Nocturne stylesheet. Promoted to
+prod as `6ef19fb` on a Sunday with markets closed; all 24 screenshots, both
+stylesheets, the font, the favicon and both hostnames verified 200 from the box,
+and the app host still 303s to its login.)
+
+- **The design bundle's `dist/` pages were NOT what shipped.** Each is a ~700 KB
+  Design Canvas runtime that paints a loading spinner and renders **nothing** with
+  JavaScript off, with no server-rendered HTML for a crawler. The pages were
+  rebuilt from the `.dc.html` sources as plain static documents — `<x-dc>`/
+  `<helmet>` stripped, `style-hover=` lifted into real CSS, `<sc-if>`/`<sc-for>`
+  unrolled, the `DCLogic` class rewritten as ~130 lines of vanilla JS. Layout,
+  copy, colour and spacing are the design's. Design + the decisions:
+  [`2026-09-06-public-marketing-site-design.md`](plans/2026-09-06-public-marketing-site-design.md).
+
+- **Inter is self-hosted, so the site makes zero off-origin requests.** The design
+  linked Google Fonts and the design system's own `styles.css` carried a *second*
+  `@import` to it; both are gone. ⚠ This widened
+  `test_the_site_directory_holds_nothing_but_site_assets` to admit `.woff2` — the
+  one edit that makes that guard weaker, so the reason sits in its docstring.
+  Everything the list admits is world-readable by definition.
+
+- **Screenshots are lossless WebP: 5.95 MB → 3.34 MB, pixel-identical.** Lossy q92
+  reached 2.14 MB but softened thin UI text, which is the entire content of a
+  screenshot gallery. With `loading="lazy"` and hidden panels never fetching, a
+  visitor pays ~140 KB per screen opened rather than 3.4 MB up front.
+
+- **⚠ THE BUG WORTH REMEMBERING: `hidden` is native HTML, and the browser's own
+  stylesheet hides it.** Inactive panels were marked with the `hidden` ATTRIBUTE
+  under a rule `.js .ns-screen[hidden] { display: none }`, on the belief that
+  hiding was opt-in behind the `.js` hook. It was not — that selector was pure
+  decoration, the UA rule did the work, and a visitor with scripting off saw ONE
+  screen with no way to reach the other fifteen. The no-JS fallback the rebuild
+  existed to provide did not exist. Visibility is now an `is-active` CLASS, which
+  the UA stylesheet knows nothing about.
+
+  **The lesson is about the tests.** The suite asserted all 16 headings, 16
+  captions and 24 images were in the page source — and they were, so it stayed
+  green. **Source presence is not visibility.** It took loading the page with the
+  `<script>` tags stripped. ⚠ And the guard written afterwards *also* could not
+  fail: a shell-escaping slip left a literal backspace byte where each `\b`
+  belonged, so the pattern read `<BS>hidden<BS>` and matched nothing. Both were
+  settled by putting the bug back and watching the suite go red — now automated
+  as a mutation pass, **11/11 caught**.
+
+- **The gallery rail is a horizontal chip row below 1000px**, and that breakpoint
+  also forces the stack. Left alone `.ns-gallery` wraps at ~967px, a number that
+  falls out of two `clamp()`s; keying the chips to a different one would render
+  chips inside a 340px sidebar across a band of widths. Declaring
+  `flex-direction: column` in the same block makes them one number by
+  construction. ⚠ **`flex-basis` sizes the MAIN axis**, so the column turned
+  `flex: 1 1 260px` / `flex: 4 1 620px` from widths into *heights* — ~490px of
+  dead space that reads as a spacing bug and is a flex-axis one.
+
+- **The rail rows are anchors to `#screen-N`, not buttons**, so with scripting off
+  they work as a table of contents — which is why they stay visible there while
+  the pager and sub-tabs hide themselves. A visible dead control beside a hidden
+  dead one is the tell that nobody loaded the page.
+
+- **The nav needed a media query it never had.** Drawn at desktop width, it wants
+  587px; at 375px `.ns-page` clips overflow, so the three links and the primary
+  button were not merely cramped but **invisible**, taking the page's main call to
+  action with them.
+
+- **Three places assumed a backend the site does not have.** It is a showcase, so
+  the hero no longer offers a build to run, and the email capture was **removed**
+  rather than pointed somewhere: `deploy/site` is a file server, so a form there
+  could only lie about what it does with an address. Community links are wired to
+  the real Discord and to Telegram, the latter labelled as the **bot** it is.
+
+- **Tests live in `deploy/tests/`, NOT `deploy/site/tests/`.** They were written
+  beside the thing they test — the ordinary habit everywhere else in this repo and
+  exactly wrong here, because Caddy would have served the `.py` files as
+  downloads. The extension guard caught it. **Nothing that is not served belongs
+  under that directory**, however natural its placement looks.
+
+- **Two things measured and reverted**, both of which looked like improvements:
+  a font `<link rel="preload">` (the face was fetched **twice** per load, with a
+  console warning every time; removing it gave exactly one request), and shrinking
+  the mobile nav's type to save a row (141px → 140px, no row change). Neither was
+  left in looking useful.
+
 **Last updated:** 2026-09-06 (**The web GUI is on the public internet, behind a
 password and TOTP.** `https://app.neuralstrike.co` reaches the trading desk from
 any browser; `https://neuralstrike.co` serves a public one-pager. Verified live
