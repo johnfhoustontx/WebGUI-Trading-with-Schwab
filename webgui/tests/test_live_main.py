@@ -264,6 +264,50 @@ def test_no_published_route_takes_a_request_parameter():
             "screen through _register's argument, not the page signature.")
 
 
+# --- what a published page renders inside ------------------------------------
+
+def test_the_public_render_injects_the_page_level_css(monkeypatch):
+    """A published screen renders the REAL page module, so it needs the CSS that
+    module's own widgets depend on -- sticky Deep Slate table headers
+    (/opportunity, /flow) and the ``.compact-subtabs`` pill row (/net-premium's
+    group picker). Both used to be injected only by ``main._layout``, which this
+    process may never import.
+
+    Driven through ``_render`` rather than asserted as a substring of the file:
+    a constant imported and never injected reads identically in the source."""
+    import types
+
+    import live_main
+    import live_screens
+    import shell
+
+    class _Col:
+        def classes(self, *a, **k):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    seen: list = []
+    fake_ui = types.SimpleNamespace(
+        add_css=seen.append,
+        add_head_html=lambda _h: None,
+        colors=lambda **_k: None,
+        column=_Col)
+    monkeypatch.setattr(live_main, "ui", fake_ui)
+    monkeypatch.setattr(live_main, "importlib", types.SimpleNamespace(
+        import_module=lambda _n: types.SimpleNamespace(render=lambda **_k: None)))
+
+    board = next(s for s in live_screens.SCREENS if s.slug == "opportunity")
+    live_main._render(board)
+
+    assert shell.TABLE_CSS in seen,         "the published tables render without their sticky headers"
+    assert shell.SUBTAB_CSS in seen,         "the published subtab rows render as stock Quasar tabs"
+
+
 # --- the entrypoint's own shape ---------------------------------------------
 
 def test_it_binds_loopback_only():

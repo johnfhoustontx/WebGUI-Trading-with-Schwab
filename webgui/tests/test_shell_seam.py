@@ -66,3 +66,94 @@ def test_the_layout_mutates_the_seam_state_it_no_longer_owns():
     import shell
     assert main._SUBTAB_SLOT is shell._SUBTAB_SLOT
     assert main._breadcrumb_leaf is shell._breadcrumb_leaf
+
+
+# --- the page-level CSS both entrypoints inject -----------------------------
+
+def test_the_shared_page_css_lives_in_the_shell():
+    """``main._TABLE_CSS`` styled a widget the PAGE mounts, from a module the
+    public entrypoint may not import — so /opportunity and /flow published
+    without sticky headers, and /net-premium's group picker without its pill
+    shape. Same seam, same reason as ``play_alert``."""
+    import shell
+    assert ".q-table thead tr th" in shell.TABLE_CSS
+    assert ".q-table__middle { max-height: 65vh; }" in shell.TABLE_CSS
+    assert ".compact-subtabs .q-tab" in shell.SUBTAB_CSS
+
+
+def test_main_re_exports_the_table_css_under_its_old_name():
+    """``main._TABLE_CSS`` has been reachable since 2026-06; the move keeps it,
+    bound to the very same string."""
+    import main
+    import shell
+    assert main._TABLE_CSS is shell.TABLE_CSS
+    assert main.SUBTAB_CSS is shell.SUBTAB_CSS
+
+
+def test_the_private_layout_still_injects_both_shared_blocks():
+    """main.py must behave IDENTICALLY. Read off ``_layout``'s own source, so a
+    constant that is merely imported and never injected fails."""
+    import ast
+    import inspect
+    import main
+    tree = ast.parse(inspect.getsource(main._layout).lstrip())
+    injected = [n.args[0].id
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "add_css" and n.args
+                and isinstance(n.args[0], ast.Name)]
+    assert "TABLE_CSS" in injected, "the private app lost its sticky table headers"
+    assert "SUBTAB_CSS" in injected, "the private app lost its subtab row styling"
+    assert "_NAV_CSS" in injected, "the nav chrome must stay with main"
+
+
+def _rules_only(css: str) -> str:
+    """``css`` with its ``/* ... */`` comments removed.
+
+    ``_NAV_CSS`` keeps a comment SAYING where the subtab rules went, which is
+    the note a reader wants and is not a rule. The tests below are about what
+    the browser is served."""
+    import re
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def test_the_moved_rules_are_gone_from_the_nav_block():
+    """Non-vacuity for the test above: a copy left behind in ``_NAV_CSS`` would
+    make every assertion here pass while the duplication silently drifted."""
+    import main
+    nav = _rules_only(main._NAV_CSS)
+    assert ".q-table" not in nav
+    assert ".compact-subtabs" not in nav
+
+
+def test_the_nav_only_css_did_not_follow_the_pages_out():
+    """What was deliberately LEFT, and why: the rail, the top tab strip, the
+    page-help tooltips, the market-status pill, the brand lockup and the header
+    padding all style chrome the public process never mounts. Shipping rules for
+    elements that do not exist is how a "shared" module becomes main.py again."""
+    import main
+    import shell
+    shared = shell.TABLE_CSS + shell.SUBTAB_CSS
+    nav = _rules_only(main._NAV_CSS)
+    for selector in (".nav-drawer", ".compact-tabs", ".flush-panels",
+                     ".q-tooltip.help-tip", ".mkt-pill", ".brand-mark",
+                     ".q-header"):
+        assert selector in nav, f"{selector} vanished from _NAV_CSS"
+        assert selector not in shared, f"{selector} is nav chrome; it must stay in main"
+
+
+def test_the_shell_stays_a_leaf_module():
+    """``shell.py`` is imported by every page AND by the public entrypoint, so
+    what it imports is what they all pay. The CSS moved as plain strings; if it
+    ever needs ``theme`` or a page module, that is a decision to take
+    deliberately, not to discover."""
+    import ast
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parents[1] / "shell.py"
+    roots = set()
+    for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            roots |= {a.name.split(".")[0] for a in node.names}
+        if isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    assert roots == {"nicegui", "pages"}, f"shell.py grew imports: {sorted(roots)}"

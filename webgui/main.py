@@ -48,6 +48,14 @@ from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
                    _breadcrumb_leaf, _view_name, bind_breadcrumb_leaf,
                    play_alert, set_breadcrumb_leaf, subtab_slot)
 
+# The two PAGE-level CSS blocks a published page's own widgets depend on --
+# sticky table headers and the subtab row -- also live in shell.py, for the same
+# reason: `live_main.py` injects them and cannot import this module. Aliased to
+# the old private name because `_TABLE_CSS` has been reached for since 2026-06.
+from shell import SUBTAB_CSS, TABLE_CSS  # noqa: E402
+
+_TABLE_CSS = TABLE_CSS
+
 import logging_setup  # noqa: E402
 
 # Persist our own log the way the six services already do. Without this the
@@ -1473,19 +1481,9 @@ _NAV_CSS = """
 }
 .compact-tabs .q-tab__indicator { display: none; }
 .compact-tabs .q-tab__label { font-size: 12.5px; font-weight: 500; }
-/* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
-   — the same pill shape one size smaller, on a fainter inset container so the
-   hierarchy under the main strip reads clearly. */
-.compact-subtabs {
-  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
-}
-.compact-subtabs .q-tab {
-  min-height: 26px; padding: 0 11px; margin-right: 2px;
-  border-radius: 7px; background: transparent; color: #8891ab;
-}
-.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
-.compact-subtabs .q-tab__indicator { display: none; }
-.compact-subtabs .q-tab__label { font-size: 12px; }
+/* The subtab-row rules (.compact-subtabs) moved to shell.SUBTAB_CSS on
+   2026-09-07: a page mounts that row itself, so the PUBLIC entrypoint needs the
+   rules too and cannot import this module. Still injected here by _layout. */
 /* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
    panels should hug their card/table edges opt in with .flush-panels. */
 .flush-panels .q-tab-panel { padding: 4px 0 0 0; }
@@ -1539,24 +1537,6 @@ _NAV_CSS += f"""
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {{
     width: {NAV_WIDTH_OPEN}px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }}
-"""
-
-# Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
-# header over a bounded, scrolling body, so the column headers stay visible as a long
-# table scrolls. Injected once per page in ``_layout``. Per-page table CSS
-# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
-# its more-specific selector + later injection win over this baseline.
-_TABLE_CSS = """
-.q-table__middle { max-height: 65vh; }
-/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
-   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
-.q-table thead tr th {
-  position: sticky; top: 0; z-index: 1; background: #141a30;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase; color: #6d76a0;
-}
-/* Faint row dividers (Deep Slate) between body rows. */
-.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
 """
 
 
@@ -2036,7 +2016,8 @@ def _layout(active: str, title: str):
     _scan = bus_client.read("options:scan") or {}
     _recompute_badges(_scan)
     ui.add_css(_NAV_CSS)
-    ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    ui.add_css(TABLE_CSS)    # app-wide fixed (sticky) table headers
+    ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.

@@ -17,6 +17,57 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 
+# ── Page-level CSS both entrypoints inject ───────────────────────────────────
+# These are not nav chrome. They style widgets a PAGE mounts, which is why they
+# live here: `live_main.py` renders the same page modules and cannot import
+# `main`. Both were in main.py until 2026-09-07, and the published /opportunity,
+# /flow and /net-premium screens rendered without them.
+#
+# ⚠ NOT the whole of main's `_NAV_CSS`. The rail, the top tab strip
+# (.compact-tabs), the page-help tooltips, the market pill and the brand lockup
+# are all chrome the public process does not mount, and moving them here would
+# ship rules for elements that do not exist.
+
+# Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
+# header over a bounded, scrolling body, so the column headers stay visible as a long
+# table scrolls. Injected once per page by each entrypoint. Per-page table CSS
+# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
+# its more-specific selector + later injection win over this baseline.
+TABLE_CSS = """
+.q-table__middle { max-height: 65vh; }
+/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
+   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
+.q-table thead tr th {
+  position: sticky; top: 0; z-index: 1; background: #141a30;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: #6d76a0;
+}
+/* Faint row dividers (Deep Slate) between body rows. */
+.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
+"""
+
+# Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
+# — the same pill shape one size smaller, on a fainter inset container so the
+# hierarchy under the main strip reads clearly.
+#
+# A page mounts this row ITSELF (into `subtab_slot()` when the shell offers one,
+# inline when it does not — see gamma.py), so it follows the page, not the shell:
+# the public /net-premium screen builds its group picker with this class and had
+# been drawing it as stock Quasar tabs.
+SUBTAB_CSS = """
+.compact-subtabs {
+  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
+}
+.compact-subtabs .q-tab {
+  min-height: 26px; padding: 0 11px; margin-right: 2px;
+  border-radius: 7px; background: transparent; color: #8891ab;
+}
+.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
+.compact-subtabs .q-tab__indicator { display: none; }
+.compact-subtabs .q-tab__label { font-size: 12px; }
+"""
+
+
 def play_alert(sound: str, volume: float) -> None:
     """Play a bundled alert WAV in the connected browser at the given volume."""
     sound = sound if sound in ("chime", "bell", "ping") else "chime"

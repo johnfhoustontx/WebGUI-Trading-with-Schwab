@@ -65,6 +65,7 @@ bus_client.set_url(os.environ.get("REDIS_LIVE_URL") or None)
 bus_client.set_read_only(True)
 app_settings.freeze(live_screens.SETTINGS_PINS)
 
+import shell                                          # noqa: E402
 from nicegui import ui                                # noqa: E402
 from pages.options import theme                       # noqa: E402
 
@@ -87,6 +88,13 @@ _CONTENT = "w-full p-4 gap-3"
 
 def _render(screen) -> None:
     """Import and render one screen inside the minimal public shell."""
+    # The PAGE-level CSS ``_layout`` injects, in ``_layout``'s own order. Not nav
+    # chrome -- both style widgets the page itself mounts, so without them the
+    # published /opportunity and /flow tables lose their sticky Deep Slate
+    # headers and /net-premium's group picker draws as stock Quasar tabs. They
+    # live in ``shell`` precisely because this process cannot import ``main``.
+    ui.add_css(shell.TABLE_CSS)
+    ui.add_css(shell.SUBTAB_CSS)
     # The app-wide text presentation ``_layout`` injects. Not nav chrome: it is
     # the font and the text-category sizes from ``config/theme.toml``, and
     # without them a published page renders in a different typeface from the
