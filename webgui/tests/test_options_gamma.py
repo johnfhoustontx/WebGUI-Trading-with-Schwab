@@ -6,8 +6,10 @@ service's tests. The page now reads a cached snapshot from the Redis bus and
 drives refresh/explain/analyze via commands, so it must import NO engine / proxy
 code. The pure figure/transform builders below stay unchanged + unit-tested.
 """
+import ast
 import inspect
 import json
+import pathlib
 
 import pytest
 
@@ -2241,13 +2243,13 @@ def test_the_picker_gate_is_the_view_pin_and_nothing_else():
         assert gamma.shows_view_picker(pinned) is False
 
 
-def test_only_a_wholly_unpinned_render_may_enqueue_a_refresh():
+def test_only_a_wholly_unpinned_render_may_enqueue():
     """Either pin means a public screen. A pinned SYMBOL with no pinned view is
     still public -- it would enqueue for a symbol the visitor cannot change."""
-    assert gamma.may_enqueue_refresh(None, None) is True
-    assert gamma.may_enqueue_refresh("SPY", None) is False
-    assert gamma.may_enqueue_refresh(None, "Flow") is False
-    assert gamma.may_enqueue_refresh("SPY", "Flow") is False
+    assert gamma.may_enqueue(None, None) is True
+    assert gamma.may_enqueue("SPY", None) is False
+    assert gamma.may_enqueue(None, "Flow") is False
+    assert gamma.may_enqueue("SPY", "Flow") is False
 
 
 def test_the_breadcrumb_binding_goes_with_the_picker(monkeypatch):
@@ -2280,3 +2282,176 @@ def test_a_pinned_page_counts_down_to_nothing_it_will_do():
 
     assert _strip(_rendered()), "the private page lost its refresh countdown"
     assert _strip(_rendered(view="Flow", symbol="SPY")) == []
+
+
+# ── a PINNED page sends NO command, and draws no control that would ─────────
+# Task 3c closed the 120 s refresh enqueue and left the rest open in its own
+# report. This closes the rest. On live.neuralstrike.co these screens are public
+# and unauthenticated, and two of the four commands this page can send cost real
+# money — ``gamma_analyze`` is a paid Claude call, ``gamma_explain`` a full
+# infographic generation — so a button that cannot work must not be drawn.
+#
+# The gate is the PIN, not a read-only bus flag. The live process installs a
+# read-only bus client, which is the backstop that makes an enqueue impossible;
+# this is the design. Both, not either.
+#
+# The test that matters is SOURCE-LEVEL: it walks gamma.py for every
+# ``bus_client.request(`` and asserts each one's enclosing function is gated,
+# so a fifth command added next year is covered without anyone remembering to
+# add it here. Naming today's four would pass forever while the fifth leaked.
+
+_GAMMA_SRC = pathlib.Path(gamma.__file__).read_text(encoding="utf-8")
+_GAMMA_TREE = ast.parse(_GAMMA_SRC)
+
+# The public live screens, as the shell will pin them. A pinned SYMBOL alone is
+# public too — it would act on a symbol the visitor cannot change.
+PUBLIC_PINS = ({"symbol": "$SPX", "view": "GEX"},
+               {"symbol": "SPY", "view": "Flow"},
+               {"symbol": "QQQ", "view": "Flow"},
+               {"view": "Net Prem"},
+               {"symbol": "$SPX"})
+
+
+def _parents(tree):
+    out = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            out[child] = node
+    return out
+
+
+def _enqueue_calls():
+    """Every ``bus_client.request(...)`` call node in gamma.py."""
+    return [n for n in ast.walk(_GAMMA_TREE)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute) and n.func.attr == "request"
+            and isinstance(n.func.value, ast.Name)
+            and n.func.value.id == "bus_client"]
+
+
+def _enqueue_functions():
+    """``{function name: FunctionDef}`` for every enqueue site's INNERMOST
+    enclosing function — so ``render`` itself is never the answer."""
+    up = _parents(_GAMMA_TREE)
+    out = {}
+    for call in _enqueue_calls():
+        node = up.get(call)
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            node = up.get(node)
+        assert node is not None, f"enqueue at line {call.lineno} sits in no function"
+        out[node.name] = node
+    return out
+
+
+def _first_statement(fn):
+    body = list(fn.body)
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]                       # skip the docstring
+    return body[0] if body else None
+
+
+def _guards_on_the_pin(fn) -> bool:
+    """True when ``fn`` opens with ``if not _may_enqueue: return``.
+
+    A first-statement early return is a TOTAL proof: it covers the button, the
+    timer, the hand-off path and any closure that reaches the function, which no
+    "is this control built?" check can do on its own."""
+    stmt = _first_statement(fn)
+    return (isinstance(stmt, ast.If) and not stmt.orelse
+            and isinstance(stmt.test, ast.UnaryOp)
+            and isinstance(stmt.test.op, ast.Not)
+            and isinstance(stmt.test.operand, ast.Name)
+            and stmt.test.operand.id == "_may_enqueue"
+            and isinstance(stmt.body[-1], ast.Return))
+
+
+def test_the_walker_finds_every_enqueue_in_the_source():
+    """The enumeration's own smoke test: an AST walk that silently matched
+    nothing would make every assertion below vacuously true."""
+    assert len(_enqueue_calls()) == _GAMMA_SRC.count("bus_client.request(") > 0
+    assert _enqueue_functions()
+
+
+def test_every_command_this_page_can_send_is_gated_on_the_pin():
+    """Enumerated from the source, never from a list of today's four names."""
+    for name, fn in sorted(_enqueue_functions().items()):
+        assert _guards_on_the_pin(fn), (
+            f"{name}() (line {fn.lineno}) puts a command on cmd:options without "
+            "first checking _may_enqueue. On the public live origin that is an "
+            "open tap on the owner's Schwab budget and Claude bill.")
+
+
+def _control_labels(kids):
+    """Every button caption and every input label the page actually built."""
+    out = set()
+    for e in kids:
+        if type(e).__name__ in ("Button", "Switch"):
+            out.add(str(getattr(e, "text", "")))
+        label = e.props.get("label")
+        if label:
+            out.add(str(label))
+    return out
+
+
+# Every control whose handler reaches an enqueue, by the caption a visitor sees.
+ENQUEUEING_CONTROLS = {"Refresh now", "Explain", "Analyze", "Open", "Date",
+                       "Symbol"}
+
+
+def test_the_bare_page_builds_every_control_that_sends_a_command():
+    """The private page is untouched — this is the other half of the proof."""
+    assert ENQUEUEING_CONTROLS <= _control_labels(_rendered())
+
+
+def test_a_pinned_page_builds_no_control_that_sends_a_command():
+    for pins in PUBLIC_PINS:
+        got = _control_labels(_rendered(**pins)) & ENQUEUEING_CONTROLS
+        assert got == set(), f"{pins} still offers {sorted(got)}"
+
+
+def test_a_pinned_page_keeps_the_controls_that_only_DRAW():
+    """The gate is on commanding, not on looking: the overlay switches and the
+    Net Prem picker touch nothing but this browser."""
+    labels = _control_labels(_rendered(view="GEX", symbol="$SPX"))
+    assert "Level movement" in labels and "Spot" in labels
+
+
+def _navigations(kids, monkeypatch, bump):
+    """Drive one _poll tick with ``bump`` views version-bumped, and return every
+    URL the page tried to open."""
+    import asyncio
+
+    from nicegui import ui
+
+    went = []
+    monkeypatch.setattr(ui.navigate, "to",
+                        lambda target, *a, **k: went.append(target))
+    for view in bump:
+        bus_client.bus().cache_set(f"cache:{view}", {"generated_at": "2026-09-07"})
+    poll = next(t.callback for t in kids if type(t).__name__ == "Timer"
+                and getattr(t.callback, "__name__", "") == "_poll")
+    asyncio.run(poll())
+    return went
+
+
+_REPORT_VIEWS = ("options:gamma_explain", "options:gamma_analyze",
+                 "options:gamma_history")
+
+
+def test_the_bare_page_opens_the_report_it_asked_for(monkeypatch):
+    """The watchers exist to open the result of a click THIS page made."""
+    went = _navigations(_rendered(), monkeypatch, _REPORT_VIEWS)
+    assert len(went) == 3
+
+
+def test_a_pinned_page_opens_no_report_it_could_never_have_asked_for(monkeypatch):
+    """With the buttons gone the watchers have no click to complete — and the
+    version they watch moves when the OWNER clicks Explain on the PRIVATE app.
+    Left wired, one private click pops a tab in every anonymous visitor's
+    browser, pointed at a route the live process does not even serve."""
+    went = _navigations(_rendered(symbol="SPY", view="Flow"), monkeypatch,
+                        _REPORT_VIEWS)
+    assert went == []

@@ -1804,18 +1804,28 @@ def shows_view_picker(view) -> bool:
     return view is None
 
 
-def may_enqueue_refresh(symbol, view) -> bool:
-    """Whether this render may put a ``gamma_refresh`` on ``cmd:options``.
+def may_enqueue(symbol, view) -> bool:
+    """Whether this render may put ANY command on ``cmd:options``.
 
-    EITHER pin means a public screen, so neither may: on a public origin that
-    enqueue lets any anonymous visitor drive a Schwab chain fetch + a full engine
-    pass, once per visitor per 120 s. A pinned SYMBOL with no pinned view is
-    public too — it would refresh a symbol the visitor cannot even change.
+    This page can send four, and every one of them spends something the owner
+    pays for:
+
+    * ``gamma_refresh`` — a Schwab option-chain fetch + a full engine pass;
+    * ``gamma_explain`` — a standalone infographic build;
+    * ``gamma_analyze`` — a **paid Claude API call**;
+    * ``gamma_history`` — a server-side report build off stored briefings.
+
+    EITHER pin means a public screen, so none of them may be sent: on
+    live.neuralstrike.co the page is unauthenticated, and each of those becomes
+    an open tap that any anonymous visitor can hold down. A pinned SYMBOL with no
+    pinned view is public too — it would act on a symbol the visitor cannot even
+    change.
 
     Gated on the PIN, not on a read-only bus flag. The live process installs a
     read-only bus client, which is the backstop that makes an enqueue impossible;
-    this gate is the design — the public page has no reason to ask, and relying
-    on the backstop would mean a raised exception every 120 s instead.
+    this gate is the design — a button that cannot work must not be drawn, and
+    relying on the backstop alone would mean a raised exception per click. Both,
+    not either.
 
     The screens stay current regardless: options_svc republishes the per-symbol
     keys on its own collection cadence, and the page's version-poll repaints."""
@@ -1832,6 +1842,35 @@ class _PinnedView:
 
     def __init__(self, value):
         self.value = value
+
+    def on_value_change(self, _handler):
+        return None
+
+
+class _PinnedSymbol:
+    """Stand-in for the symbol dropdown on a render that may send no command.
+
+    Picking a symbol enqueues a ``gamma_refresh`` (``_on_symbol_change``), which
+    makes the dropdown one of the controls ``may_enqueue`` governs. It would be a
+    dead knob besides: a pinned render reads a cache key the pin fixes, so the
+    page would keep drawing the pinned symbol whatever the box said — and "hide
+    rather than leave a control that silently does nothing" is the standard the
+    Bar-size picker and the Net Prem cluster already follow.
+
+    Every remaining use is ``_current_symbol()`` asking "which symbol am I
+    drawing?", which is what ``value`` answers. Seeded with the same
+    ``_DEFAULT_SYMBOL`` the real select is, so the first paint is unchanged;
+    ``_initial_load`` then sets it to the pin exactly as before."""
+
+    def __init__(self, value):
+        self.value = value
+        self.options: list = []
+
+    def set_visibility(self, _visible):
+        return None
+
+    def update(self):
+        return None
 
     def on_value_change(self, _handler):
         return None
@@ -2015,9 +2054,10 @@ def render(symbol: str | None = None, view: str | None = None):
     # holds whatever the app last looked at (see snapshot_view). One renderer, two
     # data sources — so the drift risk sits in the data, not in the drawing.
     _snap_view = snapshot_view(symbol)
-    # Whether this render may ask the service to fetch. Resolved once, here, so
-    # every enqueue site reads the same answer — see may_enqueue_refresh.
-    _may_refresh = may_enqueue_refresh(symbol, view)
+    # Whether this render may command the service at all. Resolved once, here, so
+    # every enqueue site and every control that reaches one reads the same
+    # answer — see may_enqueue.
+    _may_enqueue = may_enqueue(symbol, view)
 
     def _build_view_tabs():
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
@@ -2052,11 +2092,19 @@ def render(symbol: str | None = None, view: str | None = None):
         view_toggle = _PinnedView(_pinned_view)
 
     with ui.row().classes("items-center gap-3 flex-wrap w-full"):
-        _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
-        symbol_in = select_all_on_focus(
-            ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
-                      with_input=True, label="Symbol").classes("w-40"))
-        fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_PRIMARY)
+        if _may_enqueue:
+            _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
+            symbol_in = select_all_on_focus(
+                ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                          with_input=True, label="Symbol").classes("w-40"))
+        else:
+            symbol_in = _PinnedSymbol(_DEFAULT_SYMBOL)
+        # Refresh now ENQUEUES a chain fetch, so a pinned (public) render does not
+        # build it — see may_enqueue. Hidden-vs-absent is not the distinction that
+        # matters (both are unreachable); absent is simply the honest one, and it
+        # is what the Explain/Analyze/History controls below do too.
+        fetch_btn = (ui.button("Refresh now", icon="refresh", color=None)
+                     .props("no-caps").classes(BTN_PRIMARY)) if _may_enqueue else None
         # Overlay the intraday movement of the flip + walls on the heatmap. Off by
         # default (it adds three lines to an already-dense chart); the choice is
         # persisted so it survives navigation and restarts.
@@ -2082,8 +2130,14 @@ def render(symbol: str | None = None, view: str | None = None):
                              "intra-minute range.")
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()
-        explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN)
-        analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN)
+        # Both ENQUEUE, and both cost the owner money — gamma_explain builds a
+        # standalone infographic, gamma_analyze is a PAID Claude call, once per
+        # click with no rate limit in front of it. A pinned (public) render does
+        # not build either; see may_enqueue.
+        explain_btn = (ui.button("Explain", icon="help", color=None)
+                       .props("no-caps").classes(BTN)) if _may_enqueue else None
+        analyze_btn = (ui.button("Analyze", icon="psychology", color=None)
+                       .props("no-caps").classes(BTN)) if _may_enqueue else None
         # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
         # premarket / ~18 min after open / midday / close, folded into a single dropdown
         # to save a header row. Each item opens that slot's briefing in a new tab (the
@@ -2198,7 +2252,7 @@ def render(symbol: str | None = None, view: str | None = None):
     # enqueues has none to show — status_strip_text drops the part for a non-int
     # and the collector's own last/next scan times still render.
     strip_state = {"status": None, "summary": "",
-                   "countdown": state.get("countdown", 120) if _may_refresh
+                   "countdown": state.get("countdown", 120) if _may_enqueue
                    else None}
 
     def _repaint_strip():
@@ -2278,15 +2332,23 @@ def render(symbol: str | None = None, view: str | None = None):
     # (+ optional slot) and Open regenerates the report from the stored analysis (via
     # the gamma_history command) and opens it in a new tab. Dates come from
     # cache:options:gamma_briefings.
-    with ui.row().classes("items-center gap-2 flex-wrap"):
-        ui.label("History:").classes("opacity-60 text-sm")
-        hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
-        hist_slot = ui.select(
-            {"": "All slots", "premarket": "Premarket", "open": "Open",
-             "midday": "Midday", "close": "EOD recap"}, value="") \
-            .props("dense options-dense").classes("w-32")
-        hist_open = ui.button("Open", icon="history").props("flat dense")
-        hist_hint = ui.label("").classes("opacity-50 text-xs")
+    #
+    # Open ENQUEUES ``gamma_history`` (a server-side report build), so the whole
+    # row goes on a pinned (public) render — see may_enqueue. The Date and Slot
+    # pickers exist only to feed that one button, so leaving them would be a
+    # picker that picks nothing.
+    if _may_enqueue:
+        with ui.row().classes("items-center gap-2 flex-wrap"):
+            ui.label("History:").classes("opacity-60 text-sm")
+            hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
+            hist_slot = ui.select(
+                {"": "All slots", "premarket": "Premarket", "open": "Open",
+                 "midday": "Midday", "close": "EOD recap"}, value="") \
+                .props("dense options-dense").classes("w-32")
+            hist_open = ui.button("Open", icon="history").props("flat dense")
+            hist_hint = ui.label("").classes("opacity-50 text-xs")
+    else:
+        hist_date = hist_slot = hist_open = hist_hint = None
 
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
@@ -2626,10 +2688,11 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _request_refresh():
-        if not _may_refresh:
-            # A pinned (public) render never enqueues — see may_enqueue_refresh.
-            # The button that reaches here is hidden on such a page too; this is
-            # the belt to that braces, and it also covers the hand-off path.
+        if not _may_enqueue:
+            # A pinned (public) render never enqueues — see may_enqueue. The
+            # control that reaches here is not built on such a page either; this
+            # is the belt to that braces, and it also covers the hand-off path,
+            # which no "is the button there?" check can reach.
             return
         sym = _current_symbol()
         if not sym:
@@ -2643,6 +2706,11 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _auto_refresh():
+        if not _may_enqueue:
+            # Belt to the braces of the timer that is never scheduled — see
+            # may_enqueue. Every enqueue site in this page opens the same way, so
+            # the gate is provable from the source rather than from the wiring.
+            return
         # Fetch-free on the page side: enqueue a refresh for the current symbol;
         # the service recomputes + republishes and the version-poll repaints.
         # SKIPPED on Net Prem, which reads its own cache key and never touches
@@ -2663,7 +2731,7 @@ def render(symbol: str | None = None, view: str | None = None):
         state["countdown"] = state.get("countdown", 120) - 1
         if state["countdown"] < 0:
             state["countdown"] = 120
-        strip_state["countdown"] = state["countdown"] if _may_refresh else None
+        strip_state["countdown"] = state["countdown"] if _may_enqueue else None
         _repaint_strip()
         if view_toggle.value == "Net Prem":
             # Staleness is a clock function — see _paint_np_status.
@@ -2756,6 +2824,8 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _request_explain():
+        if not _may_enqueue:
+            return                        # see may_enqueue — no button either
         sym = _current_symbol()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
@@ -2765,6 +2835,14 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _watch_explain(version):
+        if not _may_enqueue:
+            # These three watchers exist to open the result of a click THIS page
+            # made. With no button there is no click of ours to complete — and
+            # the version still moves, because the OWNER can click Explain on the
+            # private app. Left wired, one private click would pop a tab in every
+            # anonymous visitor browser, pointed at a route the live process does
+            # not even serve.
+            return
         # The initial version was captured at render time, so any change here is a
         # fresh, user-requested infographic → open it in a new browser tab. The
         # /options/explain route serves the cached standalone HTML (raw, so its own
@@ -2776,11 +2854,16 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _request_analyze():
+        if not _may_enqueue:
+            # gamma_analyze is a PAID Claude call — see may_enqueue.
+            return
         bus_client.request("options", {"type": "gamma_analyze"})
         ui.notify("Analyzing $SPX / SPY / QQQ… opens in a new tab (a few seconds).")
 
     @guard
     def _watch_analyze(version):
+        if not _may_enqueue:
+            return                        # see _watch_explain
         # Mirrors _watch_explain: the service ran gamma_analyze (called Claude +
         # rendered the HTML) and bumped the version → open the result in a new browser
         # tab. /options/analyze serves the cached standalone HTML raw (so its own CSS
@@ -2791,6 +2874,8 @@ def render(symbol: str | None = None, view: str | None = None):
         ui.navigate.to(f"/options/analyze?v={version}", new_tab=True)
 
     def _refresh_history_dates(payload):
+        if hist_date is None:
+            return                        # no History row on a pinned render
         dates = history_dates(payload)
         hist_date.options = dates
         if dates and hist_date.value not in dates:
@@ -2800,6 +2885,8 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _open_history():
+        if not _may_enqueue:
+            return                        # see may_enqueue — no picker either
         d = hist_date.value
         if not d:
             ui.notify("No stored briefings to view yet.", type="warning")
@@ -2810,6 +2897,8 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _watch_history(version):
+        if not _may_enqueue:
+            return                        # see _watch_explain
         # options_svc regenerated the history report → open it in a new tab (mirrors
         # _watch_analyze). /options/gamma-history serves the cached HTML raw.
         if version is None or version == seen.get("history"):
@@ -2817,7 +2906,8 @@ def render(symbol: str | None = None, view: str | None = None):
         seen["history"] = version
         ui.navigate.to(f"/options/gamma-history?v={version}", new_tab=True)
 
-    hist_open.on_click(_open_history)
+    if hist_open is not None:
+        hist_open.on_click(_open_history)
 
     _SCHED_VIEWS = {s: f"options:gamma_analyze_{s}" for s in sched_btns}
     _sched_state = {s: {"ver": None, "date": None, "applied": None} for s in sched_btns}
@@ -2896,9 +2986,13 @@ def render(symbol: str | None = None, view: str | None = None):
         # now) and keeps the cache in lockstep with the dropdown.
         _request_refresh()
 
-    fetch_btn.on_click(_request_refresh)
-    explain_btn.on_click(_request_explain)
-    analyze_btn.on_click(_request_analyze)
+    # Each of these three is None on a pinned render (see may_enqueue), so the
+    # wiring is conditional for the same reason the build is.
+    for _btn, _handler in ((fetch_btn, _request_refresh),
+                           (explain_btn, _request_explain),
+                           (analyze_btn, _request_analyze)):
+        if _btn is not None:
+            _btn.on_click(_handler)
 
     @guard_async
     async def _on_view_change(e):
@@ -2946,13 +3040,12 @@ def render(symbol: str | None = None, view: str | None = None):
         # the (now hidden) dropdown, so on Net Prem they would act on a symbol
         # the reader can no longer see or change — worse than a dead knob.
         symbol_scoped = view_toggle.value != "Net Prem"
-        for el in (symbol_in, tracks_sw, spot_style_sel,
+        # Symbol / Refresh now / Explain / Analyze are None on a pinned render —
+        # never built, so there is nothing to show or hide (see may_enqueue).
+        for el in (symbol_in, tracks_sw, spot_style_sel, fetch_btn,
                    explain_btn, analyze_btn, briefings_btn):
-            el.set_visibility(symbol_scoped)
-        # Refresh now ENQUEUES a chain fetch, which a pinned (public) render must
-        # not do (see may_enqueue_refresh). Hide it rather than leave a control
-        # that silently does nothing — the same reasoning as the cluster above.
-        fetch_btn.set_visibility(symbol_scoped and _may_refresh)
+            if el is not None:
+                el.set_visibility(symbol_scoped)
         # Bar size is meaningless for a line — hide it rather than leave a control
         # that silently does nothing.
         spot_int_sel.set_visibility(
@@ -3113,6 +3206,9 @@ def render(symbol: str | None = None, view: str | None = None):
         # A pinned symbol is the strongest claim there is — the whole page exists
         # to show that one symbol — so it outranks both the handoff and the cache.
         _set_symbol(symbol or handoff_sym or (state["snap"] or {}).get("symbol"))
+        # A no-op on the pinned render stand-in — kept as one call rather than a
+        # second gate, since selecting a symbol is exactly what cannot happen
+        # when there is no dropdown.
         symbol_in.on_value_change(lambda e: _on_symbol_change())
         _render_view()
         if handoff_sym:
@@ -3123,7 +3219,7 @@ def render(symbol: str | None = None, view: str | None = None):
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views
-    if _may_refresh:
+    if _may_enqueue:
         ui.timer(120.0, _auto_refresh)   # enqueue a refresh every 120s
 
     @guard

@@ -501,9 +501,9 @@ and it means nothing can render empty, because there is no control to click.
    also the published symbol list**, so a symbol cannot be published without an
    entry saying why. The rows are still POPPED from every payload — not writing a
    key must not mean leaving them inline.
-3. **No enqueue from a pinned render** — `gamma.may_enqueue_refresh(symbol,
-   view)` gates the 120 s timer, the Refresh-now button (hidden, not left dead)
-   and the hand-off path, and the strip stops counting down to a refresh it will
+3. **No enqueue from a pinned render** — `gamma.may_enqueue(symbol, view)`
+   (named `may_enqueue_refresh` until Task 3d generalised it) gates the 120 s
+   timer, the Refresh-now button and the hand-off path, and the strip stops counting down to a refresh it will
    never make. On a public origin that enqueue let every anonymous visitor drive
    a Schwab chain fetch; the read-only bus client of Task 5 is the backstop, this
    is the design.
@@ -526,10 +526,72 @@ with the private page parked on `$SPX`:
 `PUBLISHED_GAMMA_HISTORY_VIEWS`**, or it draws an empty heatmap — silently, since
 a missing history key reads as "no history yet".
 
-⚠ **Still open at Task 3c:** Explain, Analyze and the history-report button also
-enqueue commands, and `gamma_analyze` is a **paid Claude call**. They are not
-gated here — Task 5's read-only bus client is what must stop them, and Task 12
-should confirm it does.
+⚠ **Still open at Task 3c** — closed by Task 3d below: Explain, Analyze and the
+history-report button also enqueue commands, and `gamma_analyze` is a **paid
+Claude call**.
+
+---
+
+## Task 3d: A pinned screen sends no command at all
+
+**⚠ Added mid-execution, 2026-09-07,** closing the hole Task 3c flagged in its own
+report. Task 3c gated the refresh; this gates the other three, which are the
+expensive ones.
+
+`may_enqueue_refresh` is now **`may_enqueue`** — same signature, same semantics
+(`symbol is None and view is None`), renamed because it governs every command
+this page can send, not one of them. No alias: an alias is how two names for one
+concept survive.
+
+**The four commands, and what each costs on an unauthenticated origin.**
+
+| command | cost per anonymous click | reached from |
+|---|---|---|
+| `gamma_refresh` | a Schwab chain fetch + a full engine pass | Refresh now, the Symbol dropdown, the 120 s timer, the Flow-Alerts hand-off |
+| `gamma_explain` | a standalone infographic build | Explain |
+| `gamma_analyze` | a **paid Claude API call** | Analyze |
+| `gamma_history` | a server-side report build | the History row's Open |
+
+**Two gates, not one, and they prove different things.**
+
+1. **Every enqueue site opens with `if not _may_enqueue: return`.** That is a
+   *total* proof — it covers the control, the timer, the hand-off path and any
+   closure that reaches the function, which no "is the control built?" check can
+   do on its own.
+2. **No control that reaches one is BUILT.** Refresh now, Explain, Analyze and
+   the whole History row (Date, Slot, Open) are `None` on a pinned render, and
+   the Symbol dropdown becomes a `_PinnedSymbol` stand-in — the same shape
+   `_PinnedView` already uses for the view picker. A button that cannot work must
+   not be drawn; the design doc says so, and the read-only bus client of Task 5
+   is the backstop that makes it true rather than merely tidy. Both, not either.
+
+**The three report watchers go too**, and this is the part that is easy to miss.
+`_watch_explain` / `_watch_analyze` / `_watch_history` open a new browser tab when
+their cache version moves. With the buttons gone there is no click of *ours* to
+complete — but the version still moves, because the OWNER can click Explain on the
+private app. Left wired, one private click would pop a tab in every anonymous
+visitor's browser, pointed at a route the live process does not even serve.
+
+**The test that matters is source-level** —
+`test_every_command_this_page_can_send_is_gated_on_the_pin` AST-walks `gamma.py`
+for every `bus_client.request(`, finds each call's innermost enclosing function,
+and asserts it opens with the guard. A fifth command added next year is covered
+without anyone remembering to add it. Its companion,
+`test_the_walker_finds_every_enqueue_in_the_source`, asserts the walk found as
+many call sites as the file has occurrences — an AST walk that silently matched
+nothing would make the whole thing vacuously true. Same idiom as
+`test_no_inline_style.py` and `test_auth_covers_every_route.py`.
+
+⚠ **`render()` bare is unchanged**, proved by element-tree fingerprint (element
+count, kinds, tab names, timer callbacks, label texts, event listeners) taken
+before and after: identical. A textual diff of the source is not proof, because
+every change here is conditional.
+
+⚠ **Briefings is deliberately NOT gated.** Its menu items only
+`ui.navigate.to("/options/analyze?slot=...")` — they send no command, so this
+task's rule does not reach them. It *is* a dead control on a public screen (that
+route is private), which belongs to whichever task registers the live process's
+routes.
 
 ---
 
