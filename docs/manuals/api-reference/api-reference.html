@@ -797,8 +797,9 @@ live scorer's primary z-score basis), the <code>calibration</code> bands
 Re-running the fit (e.g. after a regime shift) is the supported maintenance path.</p>
 <h2 id="driver-service-8214">Driver service — :8214</h2>
 <p><strong>Entry:</strong> <code>services/driver_svc/app.py</code>. <strong>Scheduler:</strong> polls the run gate every
-30 s; fires a checkpoint at 09:28 ET and then every 30 minutes inside the entry
-window <strong>09:45–15:30 ET</strong>.</p>
+30 s; fires a checkpoint every 30 minutes inside the entry window
+<strong>09:45–15:30 ET</strong>. The open-bell slot is deliberately skipped, so the first
+fire-able slot is 09:45 and the last entry decision is the 15:00 slot.</p>
 <blockquote>
 <p><strong>The order-approval queue was removed in July 2026.</strong> <code>ApprovalState</code>,
 <code>PerfReport</code>, <code>cache:driver:approvals</code>, <code>cache:driver:performance</code> and the

@@ -2165,8 +2165,36 @@ grids and arbitrary wall levels. Index gamma is only meaningful during the sessi
 <td>integer −100..+100</td>
 <td><code>trade-analyzer/src/analysis/scoring.py</code></td>
 </tr>
+<tr>
+<td>Flow: crossover</td>
+<td>band 2% of the larger side, cooldown 30 min, min premium $10k</td>
+<td><code>config/flow_alerts.toml</code> <code>[crossover]</code></td>
+</tr>
+<tr>
+<td>Flow: unusual activity (UOA)</td>
+<td>volume ≥ 3.0 × OI, vol floor 500, premium floor <strong>$5M</strong>, top 3 per symbol</td>
+<td><code>[uoa]</code></td>
+</tr>
+<tr>
+<td>Flow: gamma flip</td>
+<td>0.15% hysteresis band, cooldown 60 min, watching <code>$SPX SPY QQQ IWM</code></td>
+<td><code>[gamma_flip]</code></td>
+</tr>
+<tr>
+<td>Flow: big delta</td>
+<td>fires at <strong>25%</strong> of the symbol's own gross delta-notional AND ≥ $10M; phone push at the higher <strong>35%</strong>; delta band 0.05–0.85</td>
+<td><code>[big_delta]</code></td>
+</tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>Four detectors, and the file is the source.</strong> <code>services/options_svc/flow_alerts.py</code>
+carries defaults, but <code>config/flow_alerts.toml</code> overrides them and is what runs —
+it raises the UOA premium floor from $250k to $5M and the big-delta fire bar from
+0.20 to 0.25. Read the TOML, not the module, when you want the live number.</p>
+<p><code>big_delta</code> fires and pushes on <strong>separate</strong> bars on purpose: the Flow screen stays
+comprehensive at 25% while the phone only sees the high-conviction 35%.</p>
+</blockquote>
 <h2 id="service-cadences">Service cadences</h2>
 <p>All windows are US Central and gate on a trading day. The constants named below are
 the source; this table is a summary of them.</p>
@@ -2196,7 +2224,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>driver_svc</td>
-<td>Run gate polled every <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>); checkpoint at 09:28 ET then every 30 min inside the <strong>09:45–15:30 ET</strong> entry window (<code>checkpoint_due</code>).</td>
+<td>Run gate polled every <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>); checkpoints every <strong>30 min</strong> (<code>CHECKPOINT_MIN</code>, from <code>config/driver.toml</code>) inside the <strong>09:45–15:30 ET</strong> entry window (<code>checkpoint_due</code>) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot.</td>
 </tr>
 <tr>
 <td>market_svc</td>

@@ -319,8 +319,9 @@ Re-running the fit (e.g. after a regime shift) is the supported maintenance path
 ## Driver service — :8214
 
 **Entry:** `services/driver_svc/app.py`. **Scheduler:** polls the run gate every
-30 s; fires a checkpoint at 09:28 ET and then every 30 minutes inside the entry
-window **09:45–15:30 ET**.
+30 s; fires a checkpoint every 30 minutes inside the entry window
+**09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first
+fire-able slot is 09:45 and the last entry decision is the 15:00 slot.
 
 > **The order-approval queue was removed in July 2026.** `ApprovalState`,
 > `PerfReport`, `cache:driver:approvals`, `cache:driver:performance` and the

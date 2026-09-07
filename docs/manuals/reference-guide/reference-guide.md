@@ -2688,7 +2688,7 @@ monitors it and can stop it.
 |---|---|
 | Service | `driver_svc` (:8214) decides; `options_svc` (:8211) executes into the isolated book |
 | Cache keys | `cache:driver:autonomous`, `:control`, `cache:options:driver_paper_account`, `:driver_paper_perf` |
-| Checkpoints | 09:28 ET morning run, then every 30 minutes within the entry window **09:45–15:30 ET** |
+| Checkpoints | Every 30 minutes within the entry window **09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first is 09:45 |
 | Re-pricing | Open positions re-priced **every minute** during market hours |
 
 **Why the entry window is shaped that way.** The first ~15 minutes after the open are
@@ -2914,7 +2914,7 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*
 
-Links to the four manuals, each opening in a new tab:
+Links to the five manuals, each opening in a new tab:
 
 | Manual | For |
 |---|---|
@@ -2922,6 +2922,7 @@ Links to the four manuals, each opening in a new tab:
 | **Reference Guide** | This document — what each tab does and why it matters. |
 | **Technical Reference** | Every formula, weight, threshold and cadence. |
 | **API / Developer Reference** | Contracts, the Redis bus, service commands, proxy endpoints. |
+| **Options Glossary** | Plain-English definitions of every term the app puts on screen. |
 
 Word (`.docx`) copies sit alongside the HTML under `docs/manuals/`.
 
@@ -3161,7 +3162,7 @@ What updates when. All times US Central.
 | Captured-signal management | **5 min** | Market hours | If enabled in Settings |
 | Term structure (gamma) | **5 min** | | The widest chain in the system |
 | Manual Paper Account cycle | **hourly** | 09:00–14:00 | No 15:00 run |
-| Driver checkpoints | **30 min** | 09:45–15:30 ET | Plus a 09:28 ET morning run |
+| Driver checkpoints | **30 min** | 09:45–15:30 ET | First fire-able slot 09:45; the open-bell slot is skipped |
 | Gamma Analyze briefings | **4× daily** | Premarket · ~18 min after open · midday · close | |
 | Momentum cascade | **nightly** | 16:20 | Daily bars change once a day |
 | Sector Rotation / RRG | **manual** | | Cached; press Refresh |
