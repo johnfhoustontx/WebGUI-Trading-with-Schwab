@@ -364,12 +364,21 @@ def test_the_apex_clears_the_rule():
 def test_the_app_and_the_site_draw_the_same_mark():
     """The web GUI's header mark is a different FILE with a different accent --
     the two surfaces run different palettes on purpose -- but it must not be a
-    different SHAPE, or they stop being one brand."""
+    different SHAPE, or they stop being one brand.
+
+    ⚠ It takes the LARGE drawing. `.brand-mark` renders at 44px, which is well
+    inside large territory; it shipped briefly with the small variant because a
+    comment claimed the header slot was 28px and nobody measured it. At 44 the
+    small variant's heavier strokes read as clumsy.
+    """
     app = (pathlib.Path(repo_paths.REPO_ROOT) / "webgui/static/img/neuralstrike-mark.svg")
     assert app.is_file(), "the app's header mark is missing"
     text = app.read_text(encoding="utf-8")
-    for path_d in MARK_SMALL:
+    for path_d in MARK_LARGE:
         assert path_d in text, f"the app mark does not carry {path_d!r}"
+    for path_d in MARK_SMALL:
+        assert path_d not in text, (
+            "the app mark uses the SMALL drawing, but it renders at 44px")
 
 
 def test_the_social_card_exists_and_is_the_right_shape():

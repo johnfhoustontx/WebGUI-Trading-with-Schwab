@@ -133,6 +133,7 @@ _DEFAULTS = {
         "a_to": "#eef1f6",
         "b_from": "#6b86ff",      # "Strike" — the menu accent, flat
         "b_to": "#6b86ff",
+        "tracking": ".14em",      # uppercase wordmark: capitals need the air
         "mark": "/static/img/neuralstrike-mark.svg",  # "" = no logo, glyph tile
     },
     "menu": {
@@ -662,12 +663,22 @@ def build_brand_css(theme):
     fam = str(b.get("font_family", "")).strip()
     stack = (f"'{fam}', " if fam else "") + "'Segoe UI', system-ui, sans-serif"
     weight = str(b.get("font_weight", "800")).strip() or "800"
+    # Tracking is CONFIG, like every other property of this lockup. It was the
+    # one value hardcoded here (at .01em, i.e. none), which is why the app's
+    # wordmark sat tight while the public site's ran wide — the two surfaces
+    # drifted on the one axis nobody could reach without editing this function.
+    #
+    # ⚠ An uppercase wordmark needs tracking; it is not a refinement. Capitals
+    # are drawn to sit in lowercase words, so set solid they read as cramped.
+    # Anything at or near 0 here undoes the `text-transform: uppercase` above.
+    track = str(b.get("tracking", _DEFAULTS["brand"]["tracking"])).strip() \
+        or _DEFAULTS["brand"]["tracking"]
     return f"""
 .brand-word {{
   font-family: {stack};
   font-weight: {weight};
   font-size: 16px;
-  letter-spacing: .01em;
+  letter-spacing: {track};
   text-transform: uppercase;
   line-height: 1;
   white-space: nowrap;
@@ -686,8 +697,12 @@ def build_brand_css(theme):
 .brand-word .b {{
   background-image: linear-gradient(180deg,{b.get('b_to')} 0%,{b.get('b_from')} 100%);
 }}
-/* The logo mark. Its artwork is on black, which sits naturally on the dark
-   header — so no plate/gradient behind it, unlike the old glyph tile. */
+/* The logo mark. The artwork is a TRANSPARENT SVG since 2026-09-07, so it sits
+   directly on whatever the header paints — no plate, no gradient.
+   `border-radius` and `object-fit: cover` are inherited from the old raster
+   lockup and now do nothing: a 64-unit square viewBox fits a 44px box exactly,
+   so there is nothing to crop, and there is no ground to round off. They are
+   left in place because a future mark may be a raster again. */
 .brand-mark {{
   width: 44px; height: 44px; border-radius: 12px; flex: none;
   object-fit: cover; display: block;

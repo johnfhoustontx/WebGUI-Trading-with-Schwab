@@ -128,10 +128,39 @@ than a crash, because nothing looks wrong.
 `neuralstrike-logo.jpg` stay in `webgui/static/img/`, pinned by test, so the
 revert is a line in a TOML rather than a redraw.
 
-**Not done:** the app's wordmark tracking. The board's lockup is Inter 600 at
-0.15em; `build_brand_css` hardcodes `letter-spacing: .01em` and the font comes
-from config. Matching it means editing a shared theme builder, which is a code
-change to live trading-UI chrome and out of scope for a mark decision.
+### The app's wordmark tracking became config (2026-09-07, later)
+
+`build_brand_css` hardcoded `letter-spacing: .01em` — effectively none — which
+is why the app's lockup sat tight while the public site's ran wide. It was the
+one property of the lockup not reachable from `[brand]`, so the two surfaces
+drifted on the one axis nobody could edit without touching the function.
+
+It is now `[brand].tracking`, defaulting to `.14em`. **Uppercase wordmarks need
+tracking; it is not a refinement** — capitals are drawn to sit inside lowercase
+words, so set solid they read as cramped, and a value near zero undoes the
+`text-transform: uppercase` above it. Chosen by rendering the real `BRAND_CSS`
+and the real lockup at .01 / .08 / .14 / .20em and looking: .01 reads as one
+dense block, .20 starts to fragment.
+
+⚠ **The obvious test proves nothing.** Asserting `BRAND_CSS` contains `.14em`
+passes whether or not the config is read, because `.14em` is also the built-in
+default — the exact trap CLAUDE.md documents for config extractions. The guard
+drives `build_brand_css` with `0.42em`, a value the defaults do not contain, and
+was verified by re-hardcoding the literal and watching it fail.
+
+### ⚠ The app mark was on the wrong optical variant
+
+`.brand-mark` renders at **44px**, not the 28px an earlier comment in the SVG
+claimed — nobody measured it. It shipped briefly with the SMALL drawing, whose
+heavier strokes read as clumsy at that size. It now carries the large one, and
+the test asserts both that it has the large paths and that it does *not* have
+the small ones.
+
+The same audit found `.brand-mark`'s own comment stale: it described artwork
+"on black", and the SVG is transparent. `border-radius` and `object-fit: cover`
+are inherited from the old raster and now do nothing — a 64-unit square viewBox
+fits a 44px box exactly, and there is no ground to round. Left in place, with a
+note, because a future mark may be a raster again.
 
 ## Test-surface note
 

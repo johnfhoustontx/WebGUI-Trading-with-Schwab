@@ -11,18 +11,20 @@
     foreign colour on one of them, which is exactly the fault this mark
     replaced.
 
-    ⚠ It is loaded through <img> by webgui/main.py:brand_mark_src, so it gets
-    no stylesheet and its colours must be literals. If [colors].title or
+    ⚠ This is the LARGE optical variant, because `.brand-mark` renders at 44px
+    — not the 28px an earlier version of this comment claimed. At 44 the small
+    variant's heavier strokes read as clumsy; the small drawing exists for the
+    favicon's 16px, where the large one's rule falls below a device pixel.
+    Check the rendered size before swapping between them.
+
+    ⚠ Loaded through <img> by webgui/main.py:brand_mark_src, so it gets no
+    stylesheet and its colours must be literals. If [colors].title or
     [menu].accent move in config/theme.toml, the two hexes below do not follow
     on their own.
-
-    Sized for the header's ~28px slot, so it uses the SMALL optical variant's
-    weights (see deploy/site/assets/favicon.svg) minus the ground — the header
-    bar supplies that.
   -->
-  <rect x="10" y="30" width="44" height="4" rx="2" fill="#6b86ff"/>
-  <path d="M22 12 L32 23.5 L42 12" fill="none" stroke="#eef1f6"
-        stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M22 52 L32 41 L42 52" fill="none" stroke="#eef1f6"
-        stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#6b86ff"/>
+  <path d="M20 11 L32 23 L44 11" fill="none" stroke="#eef1f6"
+        stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20 53 L32 41 L44 53" fill="none" stroke="#eef1f6"
+        stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -1000,6 +1000,51 @@ def test_header_padding_and_logo_size_keep_the_bar_at_its_measured_height():
     assert 8 + 44 + 8 == 60
 
 
+def test_the_wordmark_tracking_comes_from_config_not_a_literal():
+    """The lockup's letter-spacing is a [brand] key, like every other property
+    of it. It was the ONE value hardcoded in build_brand_css, at .01em -- which
+    is why the app's wordmark sat tight while the public site's ran wide, on the
+    one axis nobody could reach without editing the function.
+
+    ⚠ Asserting `BRAND_CSS contains ".14em"` would prove nothing: that is also
+    the built-in default, so the test passes whether or not the config is read.
+    This drives build_brand_css with a value the defaults do not contain.
+    """
+    from pages.options import theme
+
+    css = theme.build_brand_css({**theme.THEME,
+                                 "brand": {**theme.THEME["brand"], "tracking": "0.42em"}})
+    assert "letter-spacing: 0.42em;" in css, "build_brand_css ignores [brand].tracking"
+
+
+def test_the_wordmark_tracking_degrades_to_the_default():
+    """A missing or blank key must not emit `letter-spacing: ;`, which would
+    make the whole rule invalid and silently drop the uppercase transform's
+    companion."""
+    from pages.options import theme
+
+    default = theme._DEFAULTS["brand"]["tracking"]
+    for bad in ({}, {"tracking": ""}, {"tracking": "   "}):
+        brand = {**theme.THEME["brand"], **bad}
+        if not bad:
+            brand.pop("tracking", None)
+        css = theme.build_brand_css({**theme.THEME, "brand": brand})
+        assert f"letter-spacing: {default};" in css, bad
+
+
+def test_an_uppercase_wordmark_is_actually_tracked():
+    """Capitals are drawn to sit inside lowercase words; set solid they read as
+    cramped. Any value at or near zero undoes the text-transform above it."""
+    from pages.options import theme
+
+    assert "text-transform: uppercase;" in theme.BRAND_CSS
+    import re
+    m = re.search(r"letter-spacing: ([0-9.]+)em;", theme.BRAND_CSS)
+    assert m, "the wordmark's tracking is not an em value"
+    assert float(m.group(1)) >= 0.05, (
+        f"tracking is {m.group(1)}em -- an uppercase wordmark needs the air")
+
+
 def test_brand_assets_are_shipped():
     """The header renders a real file, not a hopeful URL — so it must be in the
     repo. Whatever ``[brand].mark`` names has to be ON DISK: ``brand_mark_src``

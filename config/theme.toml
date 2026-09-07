@@ -120,6 +120,12 @@ name_b      = "Strike"
 font_family = "Montserrat"
 font_url    = "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap"
 font_weight = "800"
+# Letter-spacing for the wordmark. Uppercase capitals are drawn to sit inside
+# lowercase words, so set solid they read as cramped -- this is what makes the
+# lockup a wordmark rather than a word. It was hardcoded at .01em (none) until
+# 2026-09-07, which is why the app's lockup sat tight while the public site's
+# ran wide. Any CSS length; "" falls back to the built-in default.
+tracking    = ".14em"
 a_from      = "#eef1f6"        # "Neural" — the title tone, flat
 a_to        = "#eef1f6"
 b_from      = "#6b86ff"        # "Strike" — [menu].accent, flat
