@@ -658,8 +658,10 @@ def test_big_gamma_snapshot_read_is_off_loop():
     run.io_bound, and an in-flight ("fetching") guard prevents a slow read from
     stacking across the 2 s poll ticks."""
     src = inspect.getsource(gamma.render)
-    # The big-payload read is moved off-loop.
-    assert 'run.io_bound(bus_client.read, "options:gamma")' in src
+    # The big-payload read is moved off-loop. (``_snap_view`` is the view name
+    # resolved once at page build — the shared key, or a pinned symbol's own
+    # published one; see snapshot_view.)
+    assert "run.io_bound(bus_client.read, _snap_view)" in src
     # The cheap version probes are NOT wrapped (still a plain synchronous call).
     assert "read_versions([" in src
     # The repaint/poll became async + are guarded against a dead client.
@@ -2103,3 +2105,56 @@ def test_both_pins_are_actually_consumed_by_render():
     assert "_resolve_view(view)" in src, "the view pin never reaches the subtabs"
     assert "ui.tabs(value=_pinned_view)" in src
     assert "_set_symbol(symbol or " in src, "the symbol pin never reaches the dropdown"
+
+
+# ── a pinned symbol reads that symbol's OWN published key ───────────────────
+# cache:options:gamma is one shared slot holding whatever the private app last
+# looked at, so pinning the RENDER without pinning the DATA gives a screen
+# labelled "$SPX" that shows whatever someone last selected in the app.
+
+def test_the_bare_page_still_reads_the_shared_key():
+    """The private page is untouched: same view, same history keys as before."""
+    assert gamma.snapshot_view() == "options:gamma"
+    assert gamma.snapshot_view(None) == "options:gamma"
+    assert gamma.history_key("GEX") == "options:gamma_hist_gex"
+    assert gamma.history_key("GEX", None) == "options:gamma_hist_gex"
+
+
+def test_a_pinned_symbol_reads_its_own_published_view():
+    assert gamma.snapshot_view("$SPX") == "options:gamma_pub:$SPX"
+    assert gamma.snapshot_view("SPY") == "options:gamma_pub:SPY"
+    assert gamma.snapshot_view("qqq") == "options:gamma_pub:QQQ"
+
+
+def test_a_pinned_symbols_history_is_per_symbol_too():
+    """Per SYMBOL as well as per view: one slot per view cannot hold three."""
+    assert gamma.history_key("GEX", "SPY") == "options:gamma_pub_hist_SPY_gex"
+    assert gamma.history_key("Vanna", "$SPX") == "options:gamma_pub_hist_$SPX_vanna"
+
+
+def test_the_page_view_names_match_the_keys_the_service_writes():
+    """A page view is the service's cache key minus the ``cache:`` prefix. The
+    two are written in different tiers, so nothing but this pairs them -- and a
+    typo would read a key nobody writes and render an empty screen forever."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[2]
+           / "services/options_svc/handlers.py").read_text(encoding="utf-8")
+    # Both tiers build their names with f-strings, so what pairs them is the
+    # literal PREFIX each writes either side of the ``cache:`` boundary.
+    for page_name in (gamma.snapshot_view("SPY"), gamma.history_key("GEX", "SPY")):
+        prefix = page_name.rsplit("SPY", 1)[0]
+        assert f'f"cache:{prefix}' in src or f'(f"cache:{prefix}' in src, (
+            f"nothing in options_svc/handlers.py writes cache:{prefix}… — this "
+            "page would poll a key nobody publishes and stay empty forever")
+
+
+def test_render_reads_the_resolved_view_not_the_shared_key_literal():
+    """The signature + key-builder tests both pass if render still hard-codes
+    "options:gamma" everywhere, which is exactly the bug this task exists to
+    fix. Assert the literal is gone from the read path."""
+    src = inspect.getsource(gamma.render)
+    assert '"options:gamma"' not in src, (
+        "render still reads the shared symbol-agnostic key by name; a pinned "
+        "symbol would render whatever the private app last selected")
+    assert "snapshot_view(symbol)" in src
+    assert "history_key(view, symbol)" in src or "history_key(v, symbol)" in src

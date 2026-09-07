@@ -162,6 +162,68 @@ def test_every_built_manual_is_also_served():
         "That dict is the serving whitelist, so these are unreachable in the app.")
 
 
+# --- the published Gamma symbols --------------------------------------------
+# Four of the public live screens are views of /options/gamma, and three of them
+# name a symbol ($SPX, SPY, QQQ). ``cache:options:gamma`` is ONE symbol-agnostic
+# key holding whatever the private app last looked at, so options_svc publishes
+# a per-symbol snapshot for each named symbol -- and it must know WHICH symbols
+# without importing webgui/live_screens.py, because `services` may not import
+# `webgui` (Tier 1 / Tier 2). Hence the copy, and hence this pin.
+#
+# ⚠ Get this wrong in the DROPPING direction and nothing errors: the screen just
+# polls a key nobody publishes and shows "no snapshot yet" forever.
+
+GAMMA_SYMBOLS_SOURCE = "services/options_svc/handlers.py"
+LIVE_SCREENS = "webgui/live_screens.py"
+
+
+def _gamma_screen_symbols(rel_path):
+    """The ``symbol`` pins of every ``Screen`` whose module is ``options.gamma``.
+
+    Read as TEXT like everything else here -- importing live_screens.py would put
+    webgui on sys.path from a shared test."""
+    tree = ast.parse((ROOT / rel_path).read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == "Screen"):
+            continue
+        kw = {k.arg: k.value for k in node.keywords}
+        module = (node.args[3] if len(node.args) > 3 else kw.get("module"))
+        if module is None or ast.literal_eval(module) != "options.gamma":
+            continue
+        pins = ast.literal_eval(kw["kwargs"]) if "kwargs" in kw else {}
+        if pins.get("symbol"):
+            out.append(pins["symbol"])
+    return out
+
+
+def test_the_published_gamma_symbols_are_the_three_the_screens_name():
+    """The pin itself, so it is never vacuous while live_screens.py is pending.
+
+    Changing this tuple changes which symbols options_svc pays to publish every
+    minute -- each one is a per-symbol snapshot plus four history keys."""
+    assert _const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_SYMBOLS") == \
+        ("$SPX", "SPY", "QQQ")
+
+
+def test_options_svc_publishes_exactly_the_symbols_the_live_screens_pin():
+    """The pairing. Skipped only until webgui/live_screens.py lands (it is a
+    later task in the same plan); the moment it exists this starts pinning both
+    halves and a screen added with an unpublished symbol fails here."""
+    if not (ROOT / LIVE_SCREENS).exists():
+        pytest.skip(f"{LIVE_SCREENS} not written yet - the pairing engages when "
+                    "it lands; the literal pin above holds until then")
+    screens = _gamma_screen_symbols(LIVE_SCREENS)
+    assert len(screens) == len(set(screens)), (
+        f"two live screens pin the same gamma symbol: {screens}")
+    assert set(screens) == set(_const(GAMMA_SYMBOLS_SOURCE,
+                                      "PUBLISHED_GAMMA_SYMBOLS")), (
+        "a live screen names a gamma symbol options_svc does not publish (it "
+        "would poll a key nobody writes and stay empty), or options_svc pays to "
+        "publish a symbol no screen reads.")
+
+
 def test_every_served_manual_is_also_built():
     built = _manual_keys("docs/manuals/build_docs.py")
     served = _manual_keys("webgui/pages/manuals.py")

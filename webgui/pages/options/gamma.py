@@ -1842,14 +1842,43 @@ def symbol_options(cached):
     return out
 
 
-def history_key(view) -> str:
+def snapshot_view(symbol=None) -> str:
+    """The cache view this page reads its snapshot from.
+
+    Bare, it is ``options:gamma`` — ONE symbol-agnostic slot holding whatever the
+    private app last looked at, which is exactly right for the page whose dropdown
+    put it there.
+
+    With a PINNED symbol it is that symbol's own published view. A public screen
+    labelled "$SPX" reading the shared slot would render whatever someone last
+    selected in the app, and the SPY/QQQ screens would render $SPX — honest, since
+    the panels label themselves from the payload, but not the screen that was
+    asked for. The service publishes the pinned symbols additively
+    (``handlers.PUBLISHED_GAMMA_SYMBOLS``); a symbol it does not publish simply
+    reads a key nobody writes, which is the page's existing "no snapshot yet"
+    state rather than another symbol's data.
+    """
+    if not symbol:
+        return "options:gamma"
+    return f"options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+def history_key(view, symbol=None) -> str:
     """Cache view holding one Gamma view's intraday history rows.
 
     Each view's history is its OWN key rather than a field of the gamma snapshot:
     measured in prod the four blobs were ~1.1 MB EACH against ~400 KB for the rest
     of the payload, and this page draws one view at a time (2026-08-20).
+
+    ``symbol`` follows :func:`snapshot_view` — the published keys are per symbol
+    as well as per view, because one slot per view cannot hold three symbols at
+    once. The symbol stays INSIDE the payload either way, so ``history_rows``
+    still refuses a mismatch.
     """
-    return f"options:gamma_hist_{str(view).lower()}"
+    v = str(view).lower()
+    if not symbol:
+        return f"options:gamma_hist_{v}"
+    return f"options:gamma_pub_hist_{str(symbol).strip().upper()}_{v}"
 
 
 def history_rows(payload, symbol):
@@ -1934,6 +1963,11 @@ def render(symbol: str | None = None, view: str | None = None):
     _slot = _shell.subtab_slot()
 
     _pinned_view = _resolve_view(view)
+    # WHERE this page reads from. Bare = the private page's shared slot, exactly
+    # as before; pinned = that symbol's own published key, because the shared slot
+    # holds whatever the app last looked at (see snapshot_view). One renderer, two
+    # data sources — so the drift risk sits in the data, not in the drawing.
+    _snap_view = snapshot_view(symbol)
 
     def _build_view_tabs():
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
@@ -2580,7 +2614,7 @@ def render(symbol: str | None = None, view: str | None = None):
         seen["gamma"] = version
         state["fetching"] = True
         try:
-            snap = await run.io_bound(bus_client.read, "options:gamma") or None
+            snap = await run.io_bound(bus_client.read, _snap_view) or None
         finally:
             state["fetching"] = False
         # Only adopt a snapshot for the symbol currently selected — a foreign
@@ -2607,7 +2641,7 @@ def render(symbol: str | None = None, view: str | None = None):
             return
         state["hist_fetching"] = True
         try:
-            payload = await run.io_bound(bus_client.read, history_key(view))
+            payload = await run.io_bound(bus_client.read, history_key(view, symbol))
         finally:
             state["hist_fetching"] = False
         state.setdefault("hist", {})[view] = history_rows(
@@ -2760,12 +2794,12 @@ def render(symbol: str | None = None, view: str | None = None):
         # gamma snapshot fetch (~14 MB) is moved off-loop, inside _maybe_repaint;
         # the small status/explain/analyze/sched payloads stay inline.
         v = bus_client.read_versions([
-            "options:gamma", "options:gex_status",
+            _snap_view, "options:gex_status",
             "options:gamma_explain", "options:gamma_analyze",
             "options:gamma_briefings", "options:gamma_history",
             "options:net_premium",
             *_SCHED_VIEWS.values()])
-        await _maybe_repaint(v["options:gamma"])
+        await _maybe_repaint(v[_snap_view])
         await _maybe_repaint_netprem(v["options:net_premium"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
@@ -2960,7 +2994,7 @@ def render(symbol: str | None = None, view: str | None = None):
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
     # gamma snapshot (~14 MB) is read OFF the event loop in _initial_load so the
     # first page build doesn't block the loop for every connected client.
-    seen["gamma"] = bus_client.read_version("options:gamma")
+    seen["gamma"] = bus_client.read_version(_snap_view)
     seen["explain"] = bus_client.read_version("options:gamma_explain")
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
     seen["status"] = bus_client.read_version("options:gex_status")
@@ -2981,7 +3015,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if not state.get("fetching"):
             state["fetching"] = True
             try:
-                state["snap"] = await run.io_bound(bus_client.read, "options:gamma") or None
+                state["snap"] = await run.io_bound(bus_client.read, _snap_view) or None
             finally:
                 state["fetching"] = False
         # The Net Prem payload rides the same off-loop initial read (its own key,

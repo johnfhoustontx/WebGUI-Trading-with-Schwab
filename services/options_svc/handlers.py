@@ -253,6 +253,51 @@ def gamma_history_key(view: str) -> str:
     """Cache key holding one view's intraday history rows."""
     return f"cache:options:gamma_hist_{str(view).lower()}"
 
+
+# ── The PUBLISHED per-symbol Gamma snapshots ────────────────────────────────
+# CACHE_GAMMA above is ONE symbol-agnostic key holding whatever the private app
+# last looked at — and ``refresh_gamma_current`` reads the symbol back out of it,
+# so the slot is sticky and driven by the private page. Four of the public live
+# screens are views of /options/gamma, and three of them name a symbol, so a
+# shared slot means the screen labelled "$SPX" renders whatever the app last
+# selected and the SPY/QQQ ones render $SPX.
+#
+# These keys are strictly ADDITIVE: CACHE_GAMMA and its history keys keep their
+# exact shape and meaning, and the private page reads them unchanged. Re-keying
+# the existing cache would change the app's behaviour for a public feature, and
+# the app's screens are the source of truth the public ones mirror, never the
+# reverse.
+#
+# ⚠ CROSS-TIER MIRROR. This list is the symbols in webgui/live_screens.py's
+# gamma SCREENS entries, duplicated because `services` may not import `webgui`.
+# shared/tests/test_cross_tier_mirrors.py pins the pair.
+PUBLISHED_GAMMA_SYMBOLS = ("$SPX", "SPY", "QQQ")
+_PUBLISHED_GAMMA_UPPER = frozenset(s.upper() for s in PUBLISHED_GAMMA_SYMBOLS)
+
+
+def is_published_gamma_symbol(symbol) -> bool:
+    """Whether a public live screen reads ``symbol``'s own gamma snapshot."""
+    return str(symbol or "").strip().upper() in _PUBLISHED_GAMMA_UPPER
+
+
+def gamma_pub_key(symbol) -> str:
+    """Cache key holding ONE symbol's published Gamma snapshot."""
+    return f"cache:options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+def gamma_pub_event(symbol) -> str:
+    return f"events:options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+def gamma_pub_history_key(symbol, view) -> str:
+    """Cache key holding one published symbol's history rows for one view.
+
+    Per SYMBOL as well as per view, unlike ``gamma_history_key``: that one carries
+    the symbol inside the payload for the reader to check, which is enough when a
+    single slot is being overwritten but cannot hold three symbols at once."""
+    return (f"cache:options:gamma_pub_hist_{str(symbol).strip().upper()}"
+            f"_{str(view).lower()}")
+
 CACHE_GAMMA_EXPLAIN = "cache:options:gamma_explain"
 EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
 
@@ -1152,13 +1197,54 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     fails it returns None — we cache a graceful-empty view (``{"symbol", views:{}}``)
     so the page shows a "no data" state instead of staling on a prior symbol's
     snapshot."""
+    _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
+                   targets=_gamma_targets(symbol, private=True))
+
+
+def refresh_gamma_published(bus, symbol) -> None:
+    """Publish ONLY ``symbol``'s per-symbol key, for the public live screens.
+
+    The private page's shared key is deliberately untouched: a public screen must
+    never move the symbol under the app someone is trading from."""
+    _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
+                   targets=(_gamma_pub_target(symbol),))
+
+
+def _gamma_snapshot_or_empty(symbol) -> dict:
+    """The snapshot, or the graceful-empty view when the chain fetch failed.
+
+    ``compute.gamma_snapshot`` returns None then; caching this shape makes the
+    page show its "no data" state instead of staling on another symbol's
+    snapshot — which for a published key is the difference between an honest
+    blank screen and one labelled SPY showing $SPX."""
     snap = compute.gamma_snapshot(symbol)
     if snap is None:
-        snap = {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
-    _publish_gamma(bus, snap, symbol)
+        return {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
+    return snap
 
 
-def _publish_gamma(bus, snap, symbol) -> None:
+_GAMMA_PRIVATE_TARGET = (CACHE_GAMMA, EVENT_GAMMA, gamma_history_key)
+
+
+def _gamma_pub_target(symbol):
+    return (gamma_pub_key(symbol), gamma_pub_event(symbol),
+            lambda view: gamma_pub_history_key(symbol, view))
+
+
+def _gamma_targets(symbol, *, private: bool):
+    """Where one snapshot of ``symbol`` should land.
+
+    A published symbol refreshed for the private page lands in BOTH — the
+    snapshot is already computed, so the second write costs no chain fetch and no
+    engine pass, and it keeps the public screen fresh on the command + startup
+    paths for free."""
+    out = [_GAMMA_PRIVATE_TARGET] if private else []
+    if is_published_gamma_symbol(symbol):
+        out.append(_gamma_pub_target(symbol))
+    return tuple(out)
+
+
+def _publish_gamma(bus, snap, symbol, *, targets=None) -> None:
     """Write the history keys FIRST, then the slim main payload, then publish.
 
     That order matters: the page reacts to the MAIN key's version bump and then
@@ -1171,17 +1257,28 @@ def _publish_gamma(bus, snap, symbol) -> None:
     A view the snapshot does not carry is published EMPTY rather than skipped --
     leaving the previous symbol's rows in the key would let the page pair them
     with this symbol's bars.
+
+    ``targets`` — the ``(main key, event, per-view history key builder)`` triples
+    this snapshot goes to; defaults to the private trio. It is a LIST rather than
+    a second call per destination because the history rows are POPPED out of the
+    snapshot here: a second call would find them already gone and would publish
+    empty rows over good ones.
     """
+    targets = targets or (_GAMMA_PRIVATE_TARGET,)
     views = snap.get("views")
+    rows_by_view = {}
     if isinstance(views, dict):
         for view in set(GAMMA_HISTORY_VIEWS) | set(views):
             entry = views.get(view)
             rows = entry.pop("history", None) if isinstance(entry, dict) else None
-            bus.cache_set(gamma_history_key(view),
-                          {"symbol": symbol, "view": view, "rows": rows or []},
+            rows_by_view[view] = rows or []
+    for main_key, event_key, history_key in targets:
+        for view, rows in rows_by_view.items():
+            bus.cache_set(history_key(view),
+                          {"symbol": symbol, "view": view, "rows": rows},
                           skip_unchanged=True)
-    version = bus.cache_set(CACHE_GAMMA, snap)
-    bus.publish(EVENT_GAMMA, {"version": version})
+        version = bus.cache_set(main_key, snap)
+        bus.publish(event_key, {"version": version})
 
 
 def _current_gamma_symbol(bus) -> str:
@@ -1204,8 +1301,29 @@ def refresh_gamma_current(bus) -> None:
 
     Reads the symbol from the cached snapshot so it NEVER forces a fixed $SPX (which
     would reintroduce the symbol-revert bug); falls back to $SPX only when nothing is
-    cached. Defensive — ``refresh_gamma`` is itself guarded."""
-    refresh_gamma(bus, _current_gamma_symbol(bus))
+    cached. Defensive — ``refresh_gamma`` is itself guarded.
+
+    It also refreshes the PUBLISHED per-symbol keys the public live screens read,
+    on this same tick and in this same function, because that is what makes them
+    free: the collector has just stashed all three chains and the stash is
+    consume-once, so a second pass over the same symbols would find it empty and
+    go back to Schwab. Each symbol is computed exactly ONCE — the common case
+    (the private page parked on $SPX, which is also published) writes one
+    snapshot to both key families rather than computing it twice. Per symbol
+    guarded: one symbol's proxy failure must not cost the other two their
+    screens."""
+    current = _current_gamma_symbol(bus)
+    try:
+        refresh_gamma(bus, current)
+    except Exception:
+        _degrade.degraded("options.refresh_gamma", detail=current)
+    for symbol in PUBLISHED_GAMMA_SYMBOLS:
+        if symbol.upper() == str(current).strip().upper():
+            continue        # already written by refresh_gamma, via _gamma_targets
+        try:
+            refresh_gamma_published(bus, symbol)
+        except Exception:
+            _degrade.degraded("options.refresh_gamma_published", detail=symbol)
 
 
 def collect_gex_history(bus=None) -> None:
@@ -1230,8 +1348,13 @@ def collect_gex_history(bus=None) -> None:
 
     The currently-viewed gamma symbol's chain is CAPTURED during the poll (see
     ``compute.collect_gex_snapshots(capture_symbols=…)``) so the same tick's
-    ``refresh_gamma_current`` reuses it instead of refetching it seconds later."""
-    capture = {_current_gamma_symbol(bus)} if bus is not None else None
+    ``refresh_gamma_current`` reuses it instead of refetching it seconds later.
+    The three PUBLISHED symbols ride the same capture for the same reason: they
+    are all in ``config/symbols.toml`` ``[collection] base``, so the poll fetches
+    their chains anyway and the published snapshots cost no Schwab call. Leaving
+    one out of the capture set would cost it ~440 /chains a day."""
+    capture = ({_current_gamma_symbol(bus)} | set(PUBLISHED_GAMMA_SYMBOLS)
+               if bus is not None else None)
     compute.collect_gex_snapshots(capture_symbols=capture)
     if bus is not None:
         try:

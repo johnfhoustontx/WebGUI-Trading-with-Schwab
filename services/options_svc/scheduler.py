@@ -689,6 +689,9 @@ async def loop(bus):
             # collection so the intraday heatmap + candles stay current server-side —
             # otherwise the gamma cache only refreshes while a page is open (its 120 s
             # timer) and shows a stale, cut-off session on the next load after a gap.
+            # It also writes the per-symbol keys the public live screens read, and it
+            # must run HERE rather than on a branch of its own: the chains it reuses
+            # were stashed by the collection above and the stash is consume-once.
             try:
                 await loop_.run_in_executor(None, handlers.refresh_gamma_current, bus)
             except Exception:
