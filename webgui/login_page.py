@@ -39,6 +39,7 @@ fail.
 """
 from __future__ import annotations
 
+from urllib.parse import quote as _quote
 import dataclasses
 import html
 import logging
@@ -391,6 +392,32 @@ def attempt(*, password: str, code: str | None, client: str,
 # Palette from the design: page #0c1424, card #101a30, border #213152,
 # text #cdd8ee, primary #2563eb.
 
+# THE FLIP, on the app's own accent. The login page is HAND-WRITTEN HTML, not a
+# NiceGUI page (see the note below on why), so it gets none of `main._page`'s
+# favicon wiring -- and with no icon link at all the browser falls back to
+# requesting /favicon.ico, which `auth_middleware.OPEN_PATHS` deliberately
+# leaves open and NiceGUI answers with ITS OWN LOGO. The first page anyone sees
+# was the one page still branded as the framework.
+#
+# Inlined as a data URI rather than served from /static: every static path is
+# closed to unauthenticated requests, and opening one to decorate the login
+# screen would trade a real control for a picture.
+#
+# ⚠ Same geometry as webgui/static/img/neuralstrike-mark.svg and the small
+# variant in deploy/site/assets/favicon.svg. Kept in step by
+# tests/test_shell.py::test_the_login_page_carries_the_mark.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="14" fill="#0a0e1c"/>'
+    '<rect x="10" y="30" width="44" height="4" rx="2" fill="#6b86ff"/>'
+    '<path d="M22 12 L32 23.5 L42 12" fill="none" stroke="#eef1f6"'
+    ' stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
+    '<path d="M22 52 L32 41 L42 52" fill="none" stroke="#eef1f6"'
+    ' stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>')
+_FAVICON_TAG = ('<link rel="icon" href="data:image/svg+xml,'
+                f'{_quote(_FAVICON_SVG)}">')
+
 _CSS = """
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -480,6 +507,7 @@ def render_form(*, next_path: str, error: str | None,
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Sign in</title>
+  {_FAVICON_TAG}
   <style>{_CSS}  </style>
 </head>
 <body>

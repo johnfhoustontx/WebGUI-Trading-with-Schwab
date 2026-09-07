@@ -640,3 +640,41 @@ def test_the_store_is_resolved_at_call_time(creds, tmp_path, monkeypatch):
                               client="8.8.8.8", form_token=_token(creds),
                               now=T0).ok is True
     assert json.loads(other.read_text(encoding="utf-8"))["last_totp_counter"] > 0
+
+def test_the_login_page_carries_the_mark():
+    """THE FIRST PAGE ANYONE SEES WAS THE ONE STILL BRANDED AS THE FRAMEWORK.
+
+    This page is hand-written HTML, not a NiceGUI page, so it gets none of
+    ``main._page``'s favicon wiring. With no icon link at all a browser falls
+    back to requesting ``/favicon.ico`` -- which ``auth_middleware.OPEN_PATHS``
+    deliberately leaves open and NiceGUI answers with its own logo.
+
+    The mark is inlined as a data URI rather than served from ``/static``: every
+    static path is closed to unauthenticated requests, and opening one to
+    decorate the login screen would trade a real control for a picture.
+    """
+    import login_page
+
+    html_out = login_page.render_form(next_path="/desk", form_token="t", error=None)
+    assert 'rel="icon"' in html_out, "the login page declares no favicon"
+    assert "data:image/svg+xml," in html_out, "the icon is not inlined"
+    assert "/static/" not in login_page._FAVICON_TAG, (
+        "the login favicon must not depend on an authenticated static path")
+
+
+def test_the_login_mark_is_the_same_drawing_as_everywhere_else():
+    """A different shape here means the tab icon changes as you sign in."""
+    import pathlib
+    from urllib.parse import quote
+
+    import login_page
+
+    for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
+        assert path_d in login_page._FAVICON_SVG, f"login mark lost {path_d!r}"
+        assert quote(path_d) in login_page._FAVICON_TAG
+
+    app_mark = (pathlib.Path(__file__).resolve().parents[1]
+                / "static" / "img" / "neuralstrike-mark.svg").read_text(encoding="utf-8")
+    # The app header uses the LARGE drawing at 44px; this is the small one, as
+    # the favicon should be -- so they share the accent, not the geometry.
+    assert "#6b86ff" in app_mark and "#6b86ff" in login_page._FAVICON_SVG
