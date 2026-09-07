@@ -1783,13 +1783,29 @@ nothing else.** Never `git pull` in the prod checkout.
    live unit's environment as `REDIS_LIVE_URL`:
 
    ```
-   ACL SETUSER live on >PASSWORD ~cache:* ~events:* &events:* +@read +subscribe +psubscribe +ping
+   ACL SETUSER live on >PASSWORD ~cache:* &events:* +@read +subscribe +psubscribe +@connection
    ```
 
+   ⚠ **`+@read` alone is NOT enough, and getting this wrong fails silently**
+   (found while building Task 5). In Redis, `SUBSCRIBE` belongs to `@pubsub`,
+   not `@read`; `SELECT` — needed to reach a non-zero `redis_db` — and `PING`
+   belong to `@connection`. A user granted only `+@read` connects, reads once,
+   and then **cannot subscribe** — and `EventListener._run` swallows that
+   (`except Exception: return`), so every live screen would render one frame and
+   then never repaint again, with nothing on screen to say why. It would read as
+   a frozen tape, not as a permissions error.
+
+   ⚠ **Do not grant `+publish`.** A public process that can publish can spoof
+   repaint events to every other reader, including the private app. It only
+   needs to *receive* them. Likewise no `@write` and no `@stream` — the streams
+   are `cmd:*`, which is exactly what this user must never reach.
+
    Verify it: connect as `live` and confirm `SET` and `XADD` are refused while
-   `GET` and `SUBSCRIBE` work. **Then confirm the live pages still render** — an
-   over-tight ACL degrades to "Waiting for … service" on every screen, which
-   looks like a service outage rather than a permissions problem.
+   `GET` and `SUBSCRIBE` work. **Then confirm the live pages still render AND
+   still repaint** — watch one through a version bump rather than only loading
+   it, since a first paint proves the reads and nothing else. An over-tight ACL
+   degrades to "Waiting for … service" on every screen, which looks like a
+   service outage rather than a permissions problem.
 
 2. **DNS + TLS.** Point `live.neuralstrike.co` at the box. Regenerate and
    install the Caddyfile, reload Caddy, confirm the certificate issues.
