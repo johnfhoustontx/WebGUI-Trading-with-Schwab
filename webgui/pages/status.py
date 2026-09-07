@@ -10,6 +10,10 @@ you whether everything is up:
 * **Tier 2 — the six domain services** (sentiment/options/portfolio/trade/driver/
   market, :8210–8215) via each service's ``/health`` probe.
 * **Tier 1 — webgui** itself (it's serving this page, so it's up by definition).
+* **Tier 1 — webgui_live**, the PUBLIC read-only screens: a peer process on its
+  own port and origin, probed over HTTP. Down, it is named here and nowhere
+  else — it is absent from the health fan-out behind the rail badge and the
+  chime, because the public site falling over is not a trading-stack alarm.
 
 Below the component checks it shows a **data-freshness** table: for each domain
 it reads the representative cache view's version + timestamp, so you can tell a
@@ -79,7 +83,8 @@ def component_targets():
     Each entry is ``{"key", "label", "tier", "kind", "url"}``. ``kind`` drives
     how the probe is performed: ``memurai`` (Redis ping), ``proxy`` /
     ``service`` (HTTP ``/health``), ``auth`` (Schwab OAuth token validity, read
-    from the proxy ``/health``), ``self`` (the webgui, always up).
+    from the proxy ``/health``), ``self`` (the webgui, always up), ``peer`` (a
+    sibling web process on this box -- an HTTP liveness probe, no ``/health``).
 
     The proxy entry also carries ``owned`` and says so in its label: dev borrows
     PROD's proxy on :8100, so its card has no Restart button (see
@@ -416,8 +421,9 @@ def _sweep():
 # ── render ───────────────────────────────────────────────────────────────────
 def render():
     ui.label("System Status").classes("text-h5")
-    ui.label("Live health of every tier — Memurai backbone, schwab-proxy, the "
-             "five domain services, and this app.").classes("opacity-70 text-sm")
+    ui.label("Live health of every tier — Redis backbone, schwab-proxy, the "
+             "six domain services, this app, and the public live screens "
+             "beside it.").classes("opacity-70 text-sm")
 
     state = {"results": [], "checked_at": None, "busy": False}
 

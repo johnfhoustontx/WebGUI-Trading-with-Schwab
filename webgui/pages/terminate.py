@@ -1,10 +1,15 @@
 """Stop All Services page (``/terminate``) — stop the whole local stack from the web GUI.
 
 A deliberately guarded action: a single red button behind a confirm dialog that
-stops this environment's systemd target (the six domain services + this web app,
-and the schwab-proxy only in the environment that owns it; Redis is left
-running). Because it stops the web app too, the page goes unresponsive right
-after you confirm — by design.
+stops this environment's systemd target (the six domain services, this web app
+and the PUBLIC live screens beside it, and the schwab-proxy only in the
+environment that owns it; Redis is left running). Because it stops the web app
+too, the page goes unresponsive right after you confirm — by design.
+
+⚠ The live screens are a SECOND web app on this target, so confirming here also
+takes the public site dark. Worth saying on the page: someone stopping the
+trading stack for five minutes is not necessarily expecting to unpublish
+anything.
 
 Since 2026-09-06 the confirm dialog also demands a fresh TOTP code. The app is
 served on the public internet, so this control sits behind exactly one session
@@ -173,8 +178,8 @@ def render():
             ui.icon("warning").classes("text-orange text-2xl")
             ui.label("Stop all local services").classes("text-subtitle1 font-bold")
         ui.label(
-            "Stops all six domain services and this web app by killing whatever "
-            "is listening on their ports. Redis (the bus backbone) keeps "
+            "Stops all six domain services, this web app and the public live "
+            "screens beside it. Redis (the bus backbone) keeps "
             "running — it is a system service, not part of this target.").classes(
                 "opacity-80")
         ui.label(
@@ -188,9 +193,10 @@ def render():
 
         with ui.dialog() as dlg, ui.card():
             ui.label("Stop all services now?").classes("text-subtitle1 font-bold")
-            ui.label("All six domain services and this web app will be "
-                     "terminated. The schwab-proxy stops only in the "
-                     "environment that owns it; Redis stays up.").classes(
+            ui.label("All six domain services, this web app and the public "
+                     "live screens will be terminated. The schwab-proxy stops "
+                     "only in the environment that owns it; Redis stays "
+                     "up.").classes(
                          "opacity-80")
             ui.label("Confirm with the 6-digit code from your authenticator "
                      "app.").classes(f"text-sm {MUTED}")

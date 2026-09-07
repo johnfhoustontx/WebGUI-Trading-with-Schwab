@@ -767,7 +767,9 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
 Shows whether each part of the app is alive.
 
 - **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
-  services, and the web app.
+  services, this web app, and the public live screens beside it. The live
+  screens are a separate app on their own address: if that card is red the
+  public site is down, and nothing about your own screens is affected.
 - **Data freshness** — flags data that's gone stale. A view is only judged when
   its publisher is actually due to run: the **scanner** only scans during the
   session, so overnight and at weekends its age is left alone rather than
@@ -811,8 +813,9 @@ Links to the full documentation (each opens in a new tab).
 
 A big red stop button for the whole local stack.
 
-- Confirming stops the gateway, the services, and this web app — the page then goes
-  unresponsive (that's expected).
+- Confirming stops the gateway, the services, this web app and the public live
+  screens — the page then goes unresponsive (that's expected), and the public
+  site goes dark until you start the stack again.
 - Re-launch with `systemctl --user start trading-<env>.target`. Redis keeps running.
 - Confirming also asks for the 6-digit code from your authenticator app. A wrong,
   missing or already-used code refuses the stop; nothing is stopped.
