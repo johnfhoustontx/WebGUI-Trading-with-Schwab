@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGUI Trading with Schwab — API / Developer Reference</title>
+<title>NeuralStrike — API / Developer Reference</title>
 <style>
 :root {
   --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
-  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --accent: #5d5294; --accent-soft: #efedf9; --code-bg: #f4f6fa;
   --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
 }
 * { box-sizing: border-box; }
@@ -18,6 +18,10 @@ body {
 }
 .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
 .titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.lockup { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.lockup .mark { flex: none; display: block; }
+.lockup .word { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.13em;
+                text-transform: uppercase; color: var(--accent); }
 .titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -60,9 +64,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <body>
 <div class="wrap">
 <div class="titleblock">
-  <h1>WebGUI Trading with Schwab</h1>
-  <div class="sub">API / Developer Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
+  <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
+  <h1>API / Developer Reference</h1>
+  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -109,7 +113,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </div>
 <h1 id="about-this-document">About this document</h1>
-<p>This is the <strong>integration reference</strong> for the WebGUI Trading with Schwab 3-tier
+<p>This is the <strong>integration reference</strong> for the NeuralStrike 3-tier
 architecture: the contracts, the Redis bus API, each service's commands and
 published views, and the Schwab proxy's HTTP surface. It is aimed at developers
 extending the stack or wiring a new client to it.</p>
@@ -246,7 +250,7 @@ keys that feed it. Menu order matches the rail.</p>
 <pre><code>TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)
         ▲                                                  │
         │  read cache / subscribe events                   ▼
-TIER 3  Redis (Memurai, :6379)  ◀──cache_set + publish──  TIER 2  services
+TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
         ▲                                                  │
         │                                                  ▼  market data
         └──────────────  schwab-proxy (:8100)  ◀───────────┘
@@ -1238,7 +1242,7 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>PROXY_PORT</code> / <code>PROXY_URL</code></td>
 </tr>
 <tr>
-<td>Memurai (Redis)</td>
+<td>Redis</td>
 <td>6379</td>
 <td><code>MEMURAI_PORT</code> / <code>MEMURAI_URL</code></td>
 </tr>
@@ -1307,8 +1311,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 </tr>
 <tr>
 <td>Redis</td>
-<td>Memurai db <strong>0</strong></td>
-<td>Memurai db <strong>1</strong></td>
+<td>Redis db <strong>0</strong></td>
+<td>Redis db <strong>1</strong></td>
 </tr>
 <tr>
 <td>schwab-proxy</td>

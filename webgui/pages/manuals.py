@@ -43,6 +43,15 @@ MANUALS = {
         "icon": "data_object",
         "file": "api-reference/api-reference.html",
     },
+    "glossary": {
+        "title": "Options Glossary",
+        "desc": "Plain-English definitions of the terms the app uses — contracts, the "
+                "Greeks, volatility, strategies, and dealer positioning and flow.",
+        # NOT menu_book: the User Guide has that one, and the cards are told
+        # apart by their icon.
+        "icon": "school",
+        "file": "glossary/glossary.html",
+    },
 }
 
 

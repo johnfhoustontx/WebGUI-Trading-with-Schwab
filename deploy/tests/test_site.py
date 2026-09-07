@@ -29,15 +29,30 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 import repo_paths  # noqa: E402
 
 SITE = pathlib.Path(repo_paths.SITE_ROOT)
-PAGES = ("index.html", "gallery.html", "live.html")
+
+# ⚠ EVERY page belongs here. A page left out is not partially checked, it is
+# UNCHECKED -- no link resolution, no app-host guard, no origin guard. The
+# glossary shipped with none of them until it was added.
+PAGES = ("index.html", "gallery.html", "live.html", "glossary.html")
 
 # The site calls nobody. Empty on purpose, and widening it is a decision:
 # every entry is a third party learning the IP of everyone who loads the page.
 ALLOWED_ORIGINS: tuple[str, ...] = ()
 
-# Where a visitor may be sent. Both are in the community block on the landing
-# page and are the only outbound links on the site.
-ALLOWED_OUTBOUND = ("https://discord.gg/", "https://t.me/")
+# Where a visitor may be CHOOSING to go. All five live in the community block on
+# the landing page and are the only outbound links on the site.
+#
+# ⚠ This is not the same permission as ALLOWED_ORIGINS above. A link is followed
+# only when someone clicks it; an origin in that list is fetched on their behalf
+# the moment the page loads. Adding to this list costs a visitor nothing until
+# they act, which is why it may hold five entries while the other holds none.
+ALLOWED_OUTBOUND = (
+    "https://discord.gg/",
+    "https://t.me/",
+    "https://x.com/",
+    "https://www.facebook.com/",
+    "https://www.instagram.com/",
+)
 
 # Attributes that make the browser fetch something or follow somewhere.
 REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
@@ -493,6 +508,86 @@ def test_every_page_declares_all_three_icons():
         assert 'href="assets/favicon.svg"' in markup, f"{name} lost the SVG icon"
         assert 'href="/favicon.ico"' in markup, f"{name} lost the .ico fallback"
         assert 'rel="apple-touch-icon"' in markup, f"{name} lost the iOS icon"
+
+
+# --- C3. the glossary, which has one source and two artifacts ---------------
+
+GLOSSARY_MD = (pathlib.Path(repo_paths.REPO_ROOT)
+               / "docs" / "manuals" / "glossary" / "glossary.md")
+
+
+def _glossary_terms_from_source():
+    """Every bolded term at the start of a definition line in the markdown."""
+    md = GLOSSARY_MD.read_text(encoding="utf-8")
+    return {m.group(1).strip() for m in
+            re.finditer(r"^\*\*([^*]+)\*\*\s+[\u2014-]\s+", md, re.M)}
+
+
+def _glossary_terms_on_page():
+    """The rendered terms, UNESCAPED so they compare against the markdown.
+
+    The page is correctly escaped -- "P&L attribution" ships as "P&amp;L
+    attribution" -- so a raw string comparison reports a drift that is only the
+    escaping. Normalising here rather than loosening the assertion keeps the
+    test able to see a real divergence.
+    """
+    import html as _html
+
+    return {_html.unescape(t) for t in
+            re.findall(r"<dt>([^<]+)</dt>", _markup("glossary.html"))}
+
+
+def test_the_site_glossary_carries_every_term_in_the_source():
+    """ONE SOURCE, TWO ARTIFACTS, TWO DIFFERENT BUILDERS.
+
+    ``docs/manuals/glossary/glossary.md`` feeds both the app's fifth manual
+    (via ``build_docs.py``) and this site page (via a one-shot generator). Edit
+    the markdown and rebuild only the manual, and the public page silently keeps
+    saying the old thing -- with nothing failing, because each artifact is
+    internally consistent.
+
+    Compared as a SET of terms rather than byte-for-byte: the two renderings are
+    deliberately different documents -- one is a printable reference, the other a
+    web page with its own navigation -- so only the content they share can be
+    pinned.
+    """
+    source = _glossary_terms_from_source()
+    assert len(source) > 80, f"only {len(source)} terms parsed; the format changed"
+
+    missing = source - _glossary_terms_on_page()
+    assert not missing, (
+        f"{len(missing)} term(s) in glossary.md are not on the site page — "
+        f"re-run the generator. e.g. {sorted(missing)[:5]}")
+
+
+def test_the_site_glossary_invents_nothing():
+    """The other direction. A term on the page that is not in the source means
+    the page was hand-edited, and the next regeneration will silently drop it."""
+    source = _glossary_terms_from_source()
+    extra = _glossary_terms_on_page() - source
+    assert not extra, (
+        f"the site glossary shows {len(extra)} term(s) absent from glossary.md; "
+        f"a regeneration would lose them: {sorted(extra)[:5]}")
+
+
+def test_the_glossary_is_a_definition_list_not_bold_paragraphs():
+    """A glossary's shape IS a definition list, and that is what a screen reader
+    announces and what find-in-page matches. Rendering it as paragraphs of
+    <strong> loses both and looks identical."""
+    page = _markup("glossary.html")
+    assert page.count("<dt>") == page.count("<dd>"), "unbalanced <dt>/<dd>"
+    assert page.count("<dt>") > 80, "the definitions are not marked up as terms"
+
+
+def test_the_glossary_is_listed_as_a_manual_too():
+    """It is a page on the site AND the app's fifth manual. The app registry is
+    also the serving whitelist, so a built-but-unlisted manual is unreachable."""
+    reg = (pathlib.Path(repo_paths.REPO_ROOT)
+           / "webgui" / "pages" / "manuals.py").read_text(encoding="utf-8")
+    assert '"glossary"' in reg, "the glossary is not registered in the app"
+    built = (pathlib.Path(repo_paths.REPO_ROOT)
+             / "docs" / "manuals" / "glossary" / "glossary.html")
+    assert built.is_file(), "the glossary manual has not been built"
 
 
 # --- D. the site never points at the app ------------------------------------

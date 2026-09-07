@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGUI Trading with Schwab — Technical Reference</title>
+<title>NeuralStrike — Technical Reference</title>
 <style>
 :root {
   --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
-  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --accent: #5d5294; --accent-soft: #efedf9; --code-bg: #f4f6fa;
   --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
 }
 * { box-sizing: border-box; }
@@ -18,6 +18,10 @@ body {
 }
 .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
 .titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.lockup { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.lockup .mark { flex: none; display: block; }
+.lockup .word { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.13em;
+                text-transform: uppercase; color: var(--accent); }
 .titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -60,9 +64,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <body>
 <div class="wrap">
 <div class="titleblock">
-  <h1>WebGUI Trading with Schwab</h1>
-  <div class="sub">Technical Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-23</div>
+  <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
+  <h1>Technical Reference</h1>
+  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -72,7 +76,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#prerequisites">Prerequisites</a><ul>
 <li><a href="#platform-and-runtime">Platform and runtime</a></li>
 <li><a href="#python-dependencies">Python dependencies</a></li>
-<li><a href="#memurai-the-redis-backbone">Memurai (the Redis backbone)</a></li>
+<li><a href="#redis-the-bus-backbone">Redis (the bus backbone)</a></li>
 <li><a href="#schwab-api-credentials">Schwab API credentials</a></li>
 <li><a href="#anthropic-api-key-ai-features">Anthropic API key (AI features)</a></li>
 <li><a href="#data-files">Data files</a></li>
@@ -288,7 +292,7 @@ degrades rather than crashes.</p>
 <tbody>
 <tr>
 <td><strong>Operating system</strong></td>
-<td><strong>Windows 10 / 11.</strong> The stack is Windows-first: the launchers are <code>.bat</code>, desktop toasts use <code>winotify</code>, and the Redis backbone is Memurai (a Windows Redis).</td>
+<td><strong>Ubuntu Server 24.04 LTS.</strong> The stack runs as nine <code>systemd --user</code> units; there are no launcher scripts. <code>loginctl enable-linger</code> is what makes them start at boot and survive logout.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -298,7 +302,7 @@ degrades rather than crashes.</p>
 </tr>
 <tr>
 <td><strong>Virtual environment</strong></td>
-<td>A venv at the repo root: <strong><code>.venv</code></strong>. The launchers resolve <code>\.venv\Scripts\python.exe</code> explicitly and abort if it's missing.</td>
+<td>A venv at the repo root: <strong><code>.venv</code></strong>. The launchers resolve <code>\.venv/bin/python.exe</code> explicitly and abort if it's missing.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -307,15 +311,15 @@ degrades rather than crashes.</p>
 <td>Required</td>
 </tr>
 <tr>
-<td><strong>Windows Terminal</strong></td>
-<td>Only for <code>start_all_wt.bat</code> (the one-window, tabbed launcher).</td>
-<td>Optional</td>
+<td><strong><code>uv</code></strong></td>
+<td>Installs Python 3.11 alongside the distro's. The lock is resolved against 3.11, and the system Python is externally-managed (PEP 668).</td>
+<td>Required</td>
 </tr>
 </tbody>
 </table>
 <p>Create the environment:</p>
 <pre><code class="language-powershell">python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv/bin/python -m pip install -r requirements.txt
 </code></pre>
 <h2 id="python-dependencies">Python dependencies</h2>
 <p><code>requirements.txt</code> is the human-readable <strong>direct-dependency</strong> list (the union of
@@ -349,7 +353,7 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 </tr>
 <tr>
 <td><code>redis==8.0.0</code></td>
-<td>Client for the Memurai backbone. <code>fakeredis&gt;=2.20</code> backs the tests (no live server needed).</td>
+<td>Client for the Redis backbone. <code>fakeredis&gt;=2.20</code> backs the tests (no live server needed).</td>
 </tr>
 <tr>
 <td><code>pydantic&gt;=2.0</code></td>
@@ -380,8 +384,8 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 <td>Claude tool-use calls (imported lazily — the suite runs without it configured).</td>
 </tr>
 <tr>
-<td><code>matplotlib</code>, <code>Pillow</code>, <code>winotify</code>, <code>yfinance</code></td>
-<td>Charts/imaging, Windows toasts, optional fallback data.</td>
+<td><code>matplotlib</code>, <code>Pillow</code>, <code>yfinance</code></td>
+<td>Charts/imaging, optional fallback data. Notifications are Telegram / Discord / SMS-over-SMTP / X — all HTTP or SMTP, no OS hooks.</td>
 </tr>
 </tbody>
 </table>
@@ -390,7 +394,7 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 free for <strong>personal / non-commercial use only</strong>. Commercial use requires a paid
 Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 </blockquote>
-<h2 id="memurai-the-redis-backbone">Memurai (the Redis backbone)</h2>
+<h2 id="redis-the-bus-backbone">Redis (the bus backbone)</h2>
 <table>
 <thead>
 <tr>
@@ -401,8 +405,8 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Memurai running on <code>:6379</code></strong></td>
-<td>Installs as a <strong>native Windows service</strong> (start it from <code>services.msc</code>). It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> The launchers check it but do <strong>not</strong> install or start it for you, and <code>stop_all.bat</code> deliberately leaves it running.</td>
+<td><strong>Redis running on <code>:6379</code></strong></td>
+<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -509,7 +513,7 @@ automatically and start empty.</p>
 <tbody>
 <tr>
 <td>6379</td>
-<td>Memurai (Redis)</td>
+<td>Redis</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -584,7 +588,7 @@ aren't running, those paths simply degrade.</p>
 </tbody>
 </table>
 <h2 id="startup-order">Startup order</h2>
-<p>The dependency chain is strict: <strong>Memurai → schwab-proxy → the six services → webgui.</strong>
+<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the six services → webgui.</strong>
 Services wait on the proxy because every one of them resolves market data through it.</p>
 <table>
 <thead>
@@ -595,20 +599,24 @@ Services wait on the proxy because every one of them resolves market data throug
 </thead>
 <tbody>
 <tr>
-<td><code>start_all.bat</code></td>
-<td>Proxy + 6 services + webgui in <strong>8 separate console windows</strong>, then opens the browser.</td>
+<td><code>systemctl --user start trading-prod.target</code></td>
+<td>Proxy + 6 services + webgui. Also starts at boot.</td>
 </tr>
 <tr>
-<td><code>start_all_wt.bat</code></td>
-<td>The same 8 processes as <strong>tabs in one Windows Terminal window</strong>.</td>
+<td><code>systemctl --user stop trading-prod.target</code></td>
+<td>Stops all nine. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
 </tr>
 <tr>
-<td><code>start_all_wt.bat nowindow</code> / <code>start_all_hidden.bat</code></td>
-<td>Windowless (<code>pythonw</code>), logging to <code>logs\</code>.</td>
+<td><code>systemctl --user restart trading-prod-options_svc</code></td>
+<td>One component. This is exactly what the Status page's Restart button runs.</td>
 </tr>
 <tr>
-<td><code>stop_all.bat</code></td>
-<td>Stops the proxy, services, and webgui by port. <strong>Leaves Memurai running.</strong></td>
+<td><code>journalctl --user -u trading-prod-webgui -f</code></td>
+<td>Logs. Replaces the <code>logs/*.out.log</code> redirection.</td>
+</tr>
+<tr>
+<td><code>.venv/bin/python -m deploy.systemd.generate_units --install</code></td>
+<td>Regenerate the units after a port, path or identity change.</td>
 </tr>
 </tbody>
 </table>
@@ -619,7 +627,7 @@ Python process would re-introduce the top-level module-name collisions
 </blockquote>
 <h2 id="verifying-the-install">Verifying the install</h2>
 <ol>
-<li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Memurai,
+<li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Redis,
    the proxy, Schwab authorization, all six services, and the webgui, plus a
    data-freshness table.</li>
 <li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
@@ -627,8 +635,8 @@ Python process would re-introduce the top-level module-name collisions
 <li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
    them — that re-triggers the module-name collisions):</li>
 </ol>
-<pre><code class="language-powershell">.venv\Scripts\python -m pytest services\options_svc
-cd webgui ; ..\.venv\Scripts\python -m pytest -q
+<pre><code class="language-powershell">.venv/bin/python -m pytest services\options_svc
+cd webgui ; ..\.venv/bin/python -m pytest -q
 </code></pre>
 <h2 id="operational-notes">Operational notes</h2>
 <ul>
@@ -644,11 +652,11 @@ cd webgui ; ..\.venv\Scripts\python -m pytest -q
 <h1 id="architecture-overview">Architecture Overview</h1>
 <h2 id="the-three-tiers">The three tiers</h2>
 <p>The stack is split into three physically separate tiers communicating over a local
-Redis (Memurai) backbone. No two Tier-2 services talk to each other directly.</p>
+Redis (Redis) backbone. No two Tier-2 services talk to each other directly.</p>
 <pre><code>TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
                     subscribes to events, enqueues commands. No engine imports.
    ▲ cache read / subscribe                │ commands
-TIER 3  STORE+COMM  Memurai (:6379): cache:{domain}:{view}, events:{domain}:{view}
+TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     pub/sub, cmd:{domain} command streams. shared/contracts (typed
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
@@ -673,7 +681,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>Schwab auth/token manager + market-data gateway. Start first.</td>
 </tr>
 <tr>
-<td>Memurai (Redis)</td>
+<td>Redis</td>
 <td>6379</td>
 <td>Cache, pub/sub, command streams.</td>
 </tr>

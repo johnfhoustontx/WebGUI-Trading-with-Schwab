@@ -2,10 +2,10 @@
 
 # Introduction
 
-**WebGUI Trading with Schwab** is a single, browser-based control center for a
-Charles Schwab options-and-equities trading workflow. It replaces a collection of
-older desktop and dashboard tools with one web app you open in your browser at
-**http://127.0.0.1:8500**.
+**NeuralStrike** is a single, browser-based control center for a Charles Schwab
+options-and-equities trading workflow. It replaces a collection of older desktop
+and dashboard tools with one web app you open in your browser at
+**https://app.neuralstrike.co**, behind a password and an authenticator code.
 
 From this one interface you can:
 
@@ -52,7 +52,8 @@ the plain-English checklist — the *Technical Reference* has the full detail
 - **Redis running.** The local "backbone" the app's parts talk through, on port
   6379. `sudo systemctl enable --now redis-server`. **Nothing works without it** —
   every page shows a "Waiting for … service" placeholder.
-- **A modern web browser** to open the app at `http://127.0.0.1:8500`.
+- **A modern web browser** to open the app at **https://app.neuralstrike.co**
+  (or `http://127.0.0.1:8500` if you are sitting at the machine itself).
 
 ## Schwab account (required for live data)
 
@@ -108,19 +109,31 @@ all together with one of the launcher scripts in the project root:
 They also start **automatically when the machine boots** — you do not normally
 run anything by hand.
 
-**Opening the app.** The web app deliberately listens only on the host itself and
-has no password, so it is never exposed to the network. From your own computer,
-double-click the **Trading Web GUI** shortcut: it opens a secure tunnel and your
-browser at
+**Opening the app.** From any browser, go to:
 
 ```
-http://127.0.0.1:8500
+https://app.neuralstrike.co
 ```
 
-That address is your own machine — the tunnel carries it to the trading host.
+The app itself still listens **only on the host**, on `127.0.0.1:8500`. What
+makes that address reachable is a small web server on the same machine which
+terminates the certificate and passes the request through — the app is never
+exposed to the network directly.
 
-The browser usually opens automatically. If it does not, open that address
-yourself.
+**You will be asked to sign in**: your password, then the current 6-digit code
+from your authenticator app. Tick **Remember this device** and that browser will
+not ask again for a while; a new browser, or a private window, always will.
+
+Two things worth knowing when it refuses you:
+
+- The message is deliberately the same for a wrong password, a wrong code and
+  too many attempts. It will not tell you which one you got wrong.
+- A code can only be used **once**. If you have just signed in and immediately
+  hit something that asks for a code again — stopping the stack does — wait for
+  your authenticator to roll to the next one.
+
+**Sitting at the machine itself?** `http://127.0.0.1:8500` still works there and
+skips the sign-in, which is what the wall display uses.
 
 ## What runs behind the scenes
 

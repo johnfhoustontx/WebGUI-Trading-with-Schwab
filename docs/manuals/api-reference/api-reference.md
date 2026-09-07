@@ -2,7 +2,7 @@
 
 # About this document
 
-This is the **integration reference** for the WebGUI Trading with Schwab 3-tier
+This is the **integration reference** for the NeuralStrike 3-tier
 architecture: the contracts, the Redis bus API, each service's commands and
 published views, and the Schwab proxy's HTTP surface. It is aimed at developers
 extending the stack or wiring a new client to it.

@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGUI Trading with Schwab — User Guide</title>
+<title>NeuralStrike — User Guide</title>
 <style>
 :root {
   --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
-  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --accent: #5d5294; --accent-soft: #efedf9; --code-bg: #f4f6fa;
   --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
 }
 * { box-sizing: border-box; }
@@ -18,6 +18,10 @@ body {
 }
 .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
 .titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.lockup { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.lockup .mark { flex: none; display: block; }
+.lockup .word { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.13em;
+                text-transform: uppercase; color: var(--accent); }
 .titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -60,9 +64,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <body>
 <div class="wrap">
 <div class="titleblock">
-  <h1>WebGUI Trading with Schwab</h1>
-  <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-09-06</div>
+  <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
+  <h1>User Guide</h1>
+  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -145,10 +149,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </div>
 <h1 id="introduction">Introduction</h1>
-<p><strong>WebGUI Trading with Schwab</strong> is a single, browser-based control center for a
-Charles Schwab options-and-equities trading workflow. It replaces a collection of
-older desktop and dashboard tools with one web app you open in your browser at
-<strong>http://127.0.0.1:8500</strong>.</p>
+<p><strong>NeuralStrike</strong> is a single, browser-based control center for a Charles Schwab
+options-and-equities trading workflow. It replaces a collection of older desktop
+and dashboard tools with one web app you open in your browser at
+<strong>https://app.neuralstrike.co</strong>, behind a password and an authenticator code.</p>
 <p>From this one interface you can:</p>
 <ul>
 <li><strong>Scan</strong> for 0-DTE and swing options credit-spread opportunities and see each
@@ -190,7 +194,8 @@ the plain-English checklist — the <em>Technical Reference</em> has the full de
 <li><strong>Redis running.</strong> The local "backbone" the app's parts talk through, on port
   6379. <code>sudo systemctl enable --now redis-server</code>. <strong>Nothing works without it</strong> —
   every page shows a "Waiting for … service" placeholder.</li>
-<li><strong>A modern web browser</strong> to open the app at <code>http://127.0.0.1:8500</code>.</li>
+<li><strong>A modern web browser</strong> to open the app at <strong>https://app.neuralstrike.co</strong>
+  (or <code>http://127.0.0.1:8500</code> if you are sitting at the machine itself).</li>
 </ul>
 <h2 id="schwab-account-required-for-live-data">Schwab account (required for live data)</h2>
 <p>The app reads market data and your positions from Schwab, so you need:</p>
@@ -255,15 +260,26 @@ all together with one of the launcher scripts in the project root:</p>
 </table>
 <p>They also start <strong>automatically when the machine boots</strong> — you do not normally
 run anything by hand.</p>
-<p><strong>Opening the app.</strong> The web app deliberately listens only on the host itself and
-has no password, so it is never exposed to the network. From your own computer,
-double-click the <strong>Trading Web GUI</strong> shortcut: it opens a secure tunnel and your
-browser at</p>
-<pre><code>http://127.0.0.1:8500
+<p><strong>Opening the app.</strong> From any browser, go to:</p>
+<pre><code>https://app.neuralstrike.co
 </code></pre>
-<p>That address is your own machine — the tunnel carries it to the trading host.</p>
-<p>The browser usually opens automatically. If it does not, open that address
-yourself.</p>
+<p>The app itself still listens <strong>only on the host</strong>, on <code>127.0.0.1:8500</code>. What
+makes that address reachable is a small web server on the same machine which
+terminates the certificate and passes the request through — the app is never
+exposed to the network directly.</p>
+<p><strong>You will be asked to sign in</strong>: your password, then the current 6-digit code
+from your authenticator app. Tick <strong>Remember this device</strong> and that browser will
+not ask again for a while; a new browser, or a private window, always will.</p>
+<p>Two things worth knowing when it refuses you:</p>
+<ul>
+<li>The message is deliberately the same for a wrong password, a wrong code and
+  too many attempts. It will not tell you which one you got wrong.</li>
+<li>A code can only be used <strong>once</strong>. If you have just signed in and immediately
+  hit something that asks for a code again — stopping the stack does — wait for
+  your authenticator to roll to the next one.</li>
+</ul>
+<p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
+skips the sign-in, which is what the wall display uses.</p>
 <h2 id="what-runs-behind-the-scenes">What runs behind the scenes</h2>
 <p>You don't interact with these directly, but it helps to know they exist:</p>
 <ul>

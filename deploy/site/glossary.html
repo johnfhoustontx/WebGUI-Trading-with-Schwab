@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options Glossary — NeuralStrike</title>
+<meta name="description" content="Plain-English definitions of the options terms NeuralStrike uses: contracts and mechanics, the Greeks, volatility, strategies, and dealer positioning and flow.">
+<meta name="theme-color" content="#161826">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/site.css">
+
+<meta property="og:type"        content="article">
+<meta property="og:site_name"   content="NeuralStrike">
+<meta property="og:url"         content="https://neuralstrike.co/glossary.html">
+<meta property="og:title"       content="Options Glossary — NeuralStrike">
+<meta property="og:description" content="Plain-English definitions of the options terms this app uses — contracts, the Greeks, volatility, strategies, and dealer positioning and flow.">
+<meta property="og:image"       content="https://neuralstrike.co/assets/social.png">
+<meta property="og:image:width"  content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt"   content="The NeuralStrike mark: two chevrons converging on a level line.">
+<meta name="twitter:card"       content="summary_large_image">
+
+<!--
+  THE GLOSSARY. GENERATED ONCE from docs/manuals/glossary/glossary.md and owned
+  here after that; the app serves the SAME source as its fifth manual, so the
+  two say the same thing without one importing the other.
+
+  ⚠ Definitions are a <dl>, not paragraphs of <strong>. The source is 106 lines
+  of one shape and a definition list is what that shape IS -- which is what a
+  screen reader announces and what find-in-page matches against.
+
+  No JavaScript: the table of contents is anchor links to real element ids, so
+  it works with scripting off like the rest of the site.
+-->
+</head>
+
+<body>
+<div class="ns-page-sub">
+
+  <nav class="ns-nav ns-nav-sticky">
+    <a class="ns-lockup" href="index.html">
+      <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
+        <path d="M20 11 L32 23 L44 11" class="ns-mark-fig" stroke-width="4.6"/>
+        <path d="M20 53 L32 41 L44 53" class="ns-mark-fig" stroke-width="6.2"/>
+      </svg>
+      <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
+    </a>
+    <span class="ns-crumb">/ Glossary</span>
+    <span class="ns-spacer"></span>
+    <span class="ns-count">106 terms</span>
+    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+  </nav>
+
+  <div class="ns-wrap gl-wrap">
+    <header class="gl-head">
+      <span class="ns-eyebrow">Options glossary</span>
+      <h1 class="ns-h2">The words, in plain English.</h1>
+      <p class="ns-body">Every term the app puts on screen, defined without jargon —
+        from what a contract actually is to what dealer gamma means and why it moves
+        price. Read it through, or jump to what you need.</p>
+    </header>
+
+      <nav class="gl-toc" aria-label="Sections">
+        <ol>
+        <li><a href="#the-basics"><span class="gl-num">1</span>The Basics</a></li>
+        <li><a href="#contract-mechanics"><span class="gl-num">2</span>Contract Mechanics</a></li>
+        <li><a href="#the-greeks"><span class="gl-num">3</span>The Greeks</a></li>
+        <li><a href="#volatility"><span class="gl-num">4</span>Volatility</a></li>
+        <li><a href="#strategies"><span class="gl-num">5</span>Strategies</a></li>
+        <li><a href="#dealer-positioning-and-flow"><span class="gl-num">6</span>Dealer Positioning and Flow</a></li>
+        <li><a href="#orders-pricing-and-risk"><span class="gl-num">7</span>Orders, Pricing, and Risk</a></li>
+        <li><a href="#quick-reference"><span class="gl-num">8</span>Quick Reference</a></li>
+        </ol>
+      </nav>
+
+    <main class="gl-body">
+      <section class="gl-sec" id="the-basics">
+        <h2><span class="gl-num">1</span>The Basics</h2>
+        <dl class="gl-list">
+          <dt>Option</dt>
+          <dd>A contract that gives the buyer the <em>right</em> (not the obligation) to buy or sell 100 shares of something at a fixed price before a fixed date. The seller has the <em>obligation</em> to deliver if the buyer exercises.</dd>
+          <dt>Call</dt>
+          <dd>The right to <em>buy</em> at the strike price. You buy calls when you think the price is going up.</dd>
+          <dt>Put</dt>
+          <dd>The right to <em>sell</em> at the strike price. You buy puts when you think the price is going down (or you want insurance on shares you own).</dd>
+          <dt>Strike price</dt>
+          <dd>The fixed price written into the contract. A 500 call lets you buy at $500 no matter what the stock is actually trading at.</dd>
+          <dt>Expiration</dt>
+          <dd>The date the contract dies. After that it&#x27;s either exercised or worthless.</dd>
+          <dt>Premium</dt>
+          <dd>The price of the option. What the buyer pays and the seller collects.</dd>
+          <dt>Contract multiplier</dt>
+          <dd>Standard equity options control 100 shares. A premium of $2.50 means you pay $250 per contract. Index options like SPX use $100 per point too, but settle in cash.</dd>
+          <dt>Underlying</dt>
+          <dd>Whatever the option is written on: a stock, an ETF, an index, a futures contract.</dd>
+          <dt>Long / Short</dt>
+          <dd>Long means you bought it. Short means you sold it (and owe something). &quot;Long puts&quot; and &quot;short calls&quot; are very different positions even though both are bearish.</dd>
+          <dt>Writing</dt>
+          <dd>Selling an option you don&#x27;t already own. Same thing as going short the option.</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="contract-mechanics">
+        <h2><span class="gl-num">2</span>Contract Mechanics</h2>
+        <dl class="gl-list">
+          <dt>In the money (ITM)</dt>
+          <dd>The option has real value if exercised right now. A call is ITM when the stock is above the strike; a put is ITM when the stock is below.</dd>
+          <dt>Out of the money (OTM)</dt>
+          <dd>The opposite. Exercising would make no sense. All the premium is bets on future movement.</dd>
+          <dt>At the money (ATM)</dt>
+          <dd>Strike sits right around the current price.</dd>
+          <dt>Intrinsic value</dt>
+          <dd>The part of the premium that&#x27;s real, exercisable value. Stock at $105, 100 call → $5 of intrinsic value.</dd>
+          <dt>Extrinsic value (time value)</dt>
+          <dd>Everything above intrinsic. This is the part that decays to zero by expiration. OTM options are 100% extrinsic.</dd>
+          <dt>Exercise</dt>
+          <dd>The buyer uses their right and converts the option into shares.</dd>
+          <dt>Assignment</dt>
+          <dd>The flip side. You sold an option and someone exercised against you, so now you must buy or deliver shares.</dd>
+          <dt>Early assignment</dt>
+          <dd>Getting assigned before expiration. Mostly happens on short ITM calls right before an ex-dividend date, or on deep ITM puts.</dd>
+          <dt>American style</dt>
+          <dd>Can be exercised any day up to expiration. Nearly all single-stock options.</dd>
+          <dt>European style</dt>
+          <dd>Can only be exercised at expiration. Most cash-settled index options (SPX, NDX).</dd>
+          <dt>Cash settlement</dt>
+          <dd>No shares change hands. The difference is paid in cash. Index options work this way.</dd>
+          <dt>Physical settlement</dt>
+          <dd>Actual shares get delivered.</dd>
+          <dt>Open interest (OI)</dt>
+          <dd>How many contracts are currently alive at that strike. Builds up over time. Tells you where positions actually exist.</dd>
+          <dt>Volume</dt>
+          <dd>How many contracts traded <em>today</em>. Volume is activity; open interest is accumulated positioning.</dd>
+          <dt>Expiration cycle</dt>
+          <dd>Which expirations are listed. Weeklies expire every Friday, monthlies on the third Friday, quarterlies at quarter end. Big names now list Mon/Wed/Fri or daily.</dd>
+          <dt>0DTE</dt>
+          <dd>Zero days to expiration. An option expiring the same day it&#x27;s traded. Gamma and theta are enormous, and behavior is dominated by dealer hedging.</dd>
+          <dt>DTE</dt>
+          <dd>Days to expiration. Shorthand: &quot;30 DTE&quot; means a month out.</dd>
+          <dt>LEAPS</dt>
+          <dd>Long-dated options, typically a year or more out. Behave more like stock substitutes than bets on short-term movement.</dd>
+          <dt>Option chain</dt>
+          <dd>The full grid of every strike and expiration for an underlying, with bids, asks, volume, OI, and greeks.</dd>
+          <dt>Pin risk</dt>
+          <dd>When the price sits almost exactly on a big strike at expiration and you don&#x27;t know whether you&#x27;ll be assigned. Also describes the tendency of price to gravitate toward heavily-traded strikes.</dd>
+          <dt>Exercise by exception (auto-exercise)</dt>
+          <dd>Brokers automatically exercise anything ITM by a penny or more at expiration unless you tell them not to.</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="the-greeks">
+        <h2><span class="gl-num">3</span>The Greeks</h2>
+        <p class="gl-p">The greeks measure how an option&#x27;s price reacts to different things changing.</p>
+        <dl class="gl-list">
+          <dt>Delta</dt>
+          <dd>How much the option price moves for a $1 move in the underlying. A 0.40 delta call gains about $0.40 per $1 rally. Calls run 0 to +1, puts run 0 to −1. Also a rough shorthand for the probability of finishing ITM.</dd>
+          <dt>Gamma</dt>
+          <dd>How fast delta changes as the underlying moves. High gamma means your delta swings around quickly. Peaks at the money and explodes near expiration.</dd>
+          <dt>Theta</dt>
+          <dd>Time decay. How much value the option bleeds per day, all else equal. Negative for buyers, positive for sellers. Accelerates hard in the final weeks.</dd>
+          <dt>Vega</dt>
+          <dd>Sensitivity to implied volatility. How much the price changes for a 1-point move in IV. Long options are always long vega.</dd>
+          <dt>Rho</dt>
+          <dd>Sensitivity to interest rates. Usually ignorable on short-dated options, matters on LEAPS.</dd>
+          <dt>Charm (delta decay)</dt>
+          <dd>How delta changes as time passes with price standing still. OTM options bleed delta toward zero as expiration approaches; ITM options drift toward ±1. Drives predictable hedging flows, especially into Friday.</dd>
+          <dt>Vanna</dt>
+          <dd>How delta changes when implied volatility changes. When IV drops, OTM put deltas shrink, and dealers who hedged those puts have to buy back stock. This is why vol crush and grind-up rallies go together.</dd>
+          <dt>Vomma (volga)</dt>
+          <dd>How vega changes when volatility changes. Matters for volatility trades and far OTM wings.</dd>
+          <dt>Speed, Zomma, Color</dt>
+          <dd>Third-order greeks: how gamma changes with price (speed), with volatility (zomma), and with time (color). Mostly relevant to market makers and modeling work.</dd>
+          <dt>Net delta / dollar delta</dt>
+          <dd>Total directional exposure of a position or book, expressed in share-equivalents or dollars. A book with +5,000 net delta behaves like 5,000 shares of stock.</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="volatility">
+        <h2><span class="gl-num">4</span>Volatility</h2>
+        <dl class="gl-list">
+          <dt>Historical volatility (HV) / realized volatility (RV)</dt>
+          <dd>How much the underlying <em>actually</em> moved, measured from past prices.</dd>
+          <dt>Implied volatility (IV)</dt>
+          <dd>The volatility the market is currently pricing into options. Back-solved from the option&#x27;s price. It&#x27;s an expectation, not a measurement.</dd>
+          <dt>IV rank</dt>
+          <dd>Where today&#x27;s IV sits between its 52-week low and high, on a 0–100 scale. IV rank of 80 means IV is near the top of its yearly range.</dd>
+          <dt>IV percentile</dt>
+          <dd>What percentage of days over the past year had <em>lower</em> IV than today. Different from IV rank: rank uses only the two extremes, percentile uses the whole distribution. A single spike can distort rank but barely moves percentile.</dd>
+          <dt>Volatility skew</dt>
+          <dd>The fact that different strikes carry different IVs. In equities, downside puts almost always price at higher IV than upside calls, because crash protection is in demand.</dd>
+          <dt>Volatility smile</dt>
+          <dd>The U-shape you get when you plot IV against strike. Common in FX and commodities; equities usually show a lopsided smirk instead.</dd>
+          <dt>Term structure</dt>
+          <dd>IV plotted across expirations. Normally upward sloping (contango). Inverted term structure — near-dated IV above far-dated — signals stress or a known event.</dd>
+          <dt>Vol crush</dt>
+          <dd>The sharp collapse in IV right after a scheduled event like earnings. The uncertainty resolves, the premium evaporates, and long option holders can lose money even when they got the direction right.</dd>
+          <dt>VIX</dt>
+          <dd>The 30-day implied volatility of SPX options, expressed annualized. The market&#x27;s fear gauge.</dd>
+          <dt>Variance risk premium</dt>
+          <dd>The persistent tendency of implied volatility to price above what actually gets realized. The structural reason option selling has an edge over long periods.</dd>
+          <dt>Expected move</dt>
+          <dd>How far the market is pricing the underlying to travel by a given expiration. Roughly the ATM straddle price, or spot × IV × √(days/365).</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="strategies">
+        <h2><span class="gl-num">5</span>Strategies</h2>
+        <dl class="gl-list">
+          <dt>Covered call</dt>
+          <dd>Own 100 shares, sell a call against them. Collects premium, caps your upside.</dd>
+          <dt>Cash-secured put</dt>
+          <dd>Sell a put with cash set aside to buy the shares if assigned. A way to get paid while waiting for a lower entry.</dd>
+          <dt>Protective put</dt>
+          <dd>Own shares, buy a put as insurance.</dd>
+          <dt>Collar</dt>
+          <dd>Own shares, buy a put, sell a call to pay for it. Boxes in your range.</dd>
+          <dt>Vertical spread</dt>
+          <dd>Buy one strike, sell another in the same expiration. Caps both risk and reward. A <em>debit spread</em> costs money and needs movement; a <em>credit spread</em> collects money and profits from time or non-movement.</dd>
+          <dt>Bull call spread / bear put spread</dt>
+          <dd>Debit verticals betting up or down.</dd>
+          <dt>Bull put spread / bear call spread</dt>
+          <dd>Credit verticals betting the price stays above or below a level.</dd>
+          <dt>Calendar spread (time spread)</dt>
+          <dd>Sell a near expiration, buy a further one at the same strike. Profits from the near contract decaying faster.</dd>
+          <dt>Diagonal spread</dt>
+          <dd>A calendar with different strikes too.</dd>
+          <dt>Straddle</dt>
+          <dd>Buy (or sell) a call and put at the same strike. Long straddle bets on a big move either way; short straddle bets on stillness.</dd>
+          <dt>Strangle</dt>
+          <dd>Same idea, but OTM strikes on both sides. Cheaper than a straddle, needs a bigger move.</dd>
+          <dt>Iron condor</dt>
+          <dd>Sell a call spread and a put spread. Profits if price stays in the middle range. Defined risk on both sides.</dd>
+          <dt>Iron butterfly</dt>
+          <dd>Like a condor but the short strikes are the same. Tighter range, bigger credit.</dd>
+          <dt>Ratio spread</dt>
+          <dd>Buy one, sell two (or more) further out. Collects premium but leaves naked exposure past the short strikes.</dd>
+          <dt>Backspread</dt>
+          <dd>The reverse: sell one near, buy two further out. Cheap or free exposure to a large move.</dd>
+          <dt>Broken wing butterfly</dt>
+          <dd>A butterfly with unequal wings, structured so one side has no risk (or a credit) at the cost of more risk on the other.</dd>
+          <dt>Synthetic long / short</dt>
+          <dd>Buy a call and sell a put at the same strike (synthetic long stock), or the reverse. Replicates share exposure using options.</dd>
+          <dt>Box spread</dt>
+          <dd>A bull call spread plus a bear put spread at the same strikes. Locks in a fixed payoff; used as a financing trade, essentially a loan.</dd>
+          <dt>Jelly roll</dt>
+          <dd>The combined value of a calendar spread on both calls and puts. Prices the cost of carry between two expirations.</dd>
+          <dt>Wheel</dt>
+          <dd>A repeating loop: sell cash-secured puts until assigned, then sell covered calls until called away, repeat.</dd>
+          <dt>Roll</dt>
+          <dd>Close an existing position and open a similar one further out in time or at a different strike. &quot;Rolling up,&quot; &quot;rolling out,&quot; &quot;rolling for a credit.&quot;</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="dealer-positioning-and-flow">
+        <h2><span class="gl-num">6</span>Dealer Positioning and Flow</h2>
+        <p class="gl-p">These describe what market makers are forced to do to stay hedged, and why that moves price.</p>
+        <dl class="gl-list">
+          <dt>Market maker / dealer</dt>
+          <dd>The firm on the other side of your trade. They don&#x27;t want directional risk, so they hedge in the underlying. Their hedging is mechanical and therefore predictable.</dd>
+          <dt>Delta hedging</dt>
+          <dd>Buying or selling the underlying to offset the delta of an options book.</dd>
+          <dt>GEX (gamma exposure)</dt>
+          <dd>Estimated total gamma dealers are holding, usually expressed as dollars of stock they must trade per 1% move. The single most watched dealer-positioning metric.</dd>
+          <dt>Long gamma (positive GEX)</dt>
+          <dd>Dealers hold net long gamma, so they sell into rallies and buy into dips to stay hedged. This dampens volatility. Price tends to grind and mean-revert.</dd>
+          <dt>Short gamma (negative GEX)</dt>
+          <dd>Dealers are net short gamma, so they must buy as price rises and sell as it falls. This amplifies moves. Trend days, air pockets, and violent selloffs live here.</dd>
+          <dt>Gamma flip level (zero gamma)</dt>
+          <dd>The price where aggregate dealer gamma crosses from positive to negative. Behavior of the tape often changes character at this level.</dd>
+          <dt>Call wall</dt>
+          <dd>The strike above spot with the largest concentration of call gamma or open interest. Often acts as resistance while dealers are long gamma.</dd>
+          <dt>Put wall</dt>
+          <dd>The equivalent below spot. Often acts as support, and a break below it can accelerate.</dd>
+          <dt>DEX (delta exposure)</dt>
+          <dd>Aggregate dealer delta. Tells you the direction of the standing hedge, and how much stock must be bought or sold if positions unwind.</dd>
+          <dt>Vanna exposure</dt>
+          <dd>Hedging flow driven by IV changes rather than price changes. Falling IV forces dealers to buy stock; this is the mechanism behind slow, low-volume grind-up rallies.</dd>
+          <dt>Charm flow</dt>
+          <dd>Hedging driven purely by time passing. Concentrated into Thursday and Friday of expiration week as OTM options decay toward zero delta.</dd>
+          <dt>OPEX</dt>
+          <dd>Options expiration, especially monthly third-Friday expiration when large amounts of open interest roll off and positioning resets.</dd>
+          <dt>Quad witching</dt>
+          <dd>The quarterly expiration (March, June, September, December) when stock options, index options, stock futures, and index futures all expire together. Very high volume.</dd>
+          <dt>Max pain</dt>
+          <dd>The strike where the largest dollar amount of options would expire worthless. Some traders treat it as a magnet into expiration; the evidence is mixed.</dd>
+          <dt>Put/call ratio</dt>
+          <dd>Put volume or open interest divided by call. A crude sentiment gauge; high readings suggest fear.</dd>
+          <dt>Sweep</dt>
+          <dd>An aggressive order split across multiple exchanges to fill immediately. Often read as urgent, informed buying.</dd>
+          <dt>Block trade</dt>
+          <dd>A single large negotiated trade, usually institutional.</dd>
+          <dt>Unusual options activity</dt>
+          <dd>Volume far above the strike&#x27;s normal levels, particularly volume exceeding open interest, which means new positions are opening.</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="orders-pricing-and-risk">
+        <h2><span class="gl-num">7</span>Orders, Pricing, and Risk</h2>
+        <dl class="gl-list">
+          <dt>Bid / Ask</dt>
+          <dd>What buyers will pay and what sellers will take. Options spreads are usually much wider than stock spreads.</dd>
+          <dt>Mid price</dt>
+          <dd>Halfway between bid and ask. The realistic starting point for a limit order.</dd>
+          <dt>Slippage</dt>
+          <dd>The gap between the price you expected and the price you got. Kills multi-leg strategies traded in illiquid chains.</dd>
+          <dt>Liquidity</dt>
+          <dd>How easily you can get in and out. Judge it by spread width, open interest, and daily volume — not by whether a strike is listed.</dd>
+          <dt>Limit order</dt>
+          <dd>Fill at your price or better. The default for options; market orders in wide chains are how you donate money.</dd>
+          <dt>Multi-leg / combo order</dt>
+          <dd>Sending a spread as a single order so all legs fill together at a net price.</dd>
+          <dt>Legging in</dt>
+          <dd>Entering the legs of a spread separately, hoping for a better combined price. Risks being stuck half-filled.</dd>
+          <dt>Margin</dt>
+          <dd>Collateral required to hold short options. Defined-risk spreads require much less than naked positions.</dd>
+          <dt>Naked / uncovered</dt>
+          <dd>A short option with no offsetting position. Undefined risk, high margin.</dd>
+          <dt>Buying power reduction (BPR)</dt>
+          <dd>How much of your account a position ties up.</dd>
+          <dt>Assignment risk</dt>
+          <dd>The chance you get assigned before you wanted to be, forcing an unplanned share position.</dd>
+          <dt>Break-even</dt>
+          <dd>The underlying price where the trade makes nothing. For a long call it&#x27;s strike + premium; for a long put it&#x27;s strike − premium.</dd>
+          <dt>Max profit / max loss</dt>
+          <dd>The best and worst outcomes at expiration. Every defined-risk structure has both; naked shorts do not.</dd>
+          <dt>P&amp;L attribution</dt>
+          <dd>Breaking down a trade&#x27;s gain or loss into how much came from direction (delta), from movement (gamma), from time (theta), and from vol (vega). Tells you whether you were right for the reason you thought.</dd>
+          <dt>Payoff diagram</dt>
+          <dd>The chart of profit against underlying price at expiration. Worth sketching before every unfamiliar structure.</dd>
+        </dl>
+      </section>
+      <section class="gl-sec" id="quick-reference">
+        <h2><span class="gl-num">8</span>Quick Reference</h2>
+        <div class="gl-tablewrap"><table class="gl-table">
+          <thead><tr><th>If you think...</th><th>Consider</th></tr></thead><tbody>
+          <tr><td>Price goes up</td><td>Long call, bull call spread, short put spread</td></tr>
+          <tr><td>Price goes down</td><td>Long put, bear put spread, short call spread</td></tr>
+          <tr><td>Price goes nowhere</td><td>Iron condor, short strangle, calendar</td></tr>
+          <tr><td>Big move, direction unknown</td><td>Long straddle, long strangle, backspread</td></tr>
+          <tr><td>IV is too high</td><td>Sell premium: credit spreads, condors</td></tr>
+          <tr><td>IV is too low</td><td>Buy premium: debit spreads, calendars, straddles</td></tr>
+          </tbody></table></div>
+        <div class="gl-tablewrap"><table class="gl-table">
+          <thead><tr><th>Greek</th><th>Answers the question</th></tr></thead><tbody>
+          <tr><td>Delta</td><td>How much do I make per $1 move?</td></tr>
+          <tr><td>Gamma</td><td>How fast does that change?</td></tr>
+          <tr><td>Theta</td><td>What does waiting cost me per day?</td></tr>
+          <tr><td>Vega</td><td>What happens if fear rises or falls?</td></tr>
+          <tr><td>Charm</td><td>What happens as Friday approaches?</td></tr>
+          <tr><td>Vanna</td><td>What happens to my delta when IV moves?</td></tr>
+          </tbody></table></div>
+      </section>
+    </main>
+
+    <footer class="ns-foot gl-foot">
+      NeuralStrike — dealer flow, measured. Educational and simulation software.
+      Not investment advice; no orders are transmitted to any broker.
+    </footer>
+  </div>
+
+</div>
+</body>
+</html>
