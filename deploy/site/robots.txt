@@ -1,0 +1,9 @@
+# neuralstrike.co - the public site. Everything served here is meant to be read.
+User-agent: *
+Allow: /
+
+# The live-screens page is an empty placeholder; live.html carries its own
+# noindex meta tag as well. Crawl-blocking it here would ALSO stop a crawler
+# reading that tag, so it stays crawlable and asks not to be indexed.
+
+Sitemap: https://neuralstrike.co/sitemap.txt

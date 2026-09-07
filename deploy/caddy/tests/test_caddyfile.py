@@ -135,8 +135,23 @@ def test_the_public_block_cannot_reach_the_app(cfg):
 
 def test_the_site_directory_holds_nothing_but_site_assets():
     """A stray symlink, a copied config, or a debug dump in deploy/site is
-    published to the internet the moment it lands there."""
-    allowed = {".html", ".css", ".js", ".svg", ".png", ".jpg", ".ico", ".webp", ".txt"}
+    published to the internet the moment it lands there.
+
+    ⚠ ``.woff2`` was added on 2026-09-06 so the site could SELF-HOST Inter
+    instead of linking Google Fonts, which hands Google the IP of every visitor.
+    Recorded because widening this set is the one edit that makes the guard
+    quietly weaker, and each addition should cost the same deliberation:
+    everything the list admits is world-readable by definition.
+
+    ⚠ It also caught its first real thing that day. The site's own tests were
+    first written to ``deploy/site/tests/`` -- beside the thing they test, which
+    is the ordinary habit everywhere else in this repo and exactly wrong here,
+    because Caddy would have served the .py files as downloads. They live in
+    ``deploy/tests/`` instead. **Nothing that is not served belongs under this
+    directory**, however natural its placement looks.
+    """
+    allowed = {".html", ".css", ".js", ".svg", ".png", ".jpg", ".ico", ".webp",
+               ".txt", ".woff2"}
     root = pathlib.Path(repo_paths.SITE_ROOT)
     # Not vacuous: an empty or missing served root would pass every assertion
     # below while Caddy served a 404 for the whole public site.

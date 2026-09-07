@@ -3,108 +3,232 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>REPLACE-ME site title</title>
+<title>NeuralStrike — local options workbench</title>
+<meta name="description" content="NeuralStrike is a local options workbench that measures dealer hedging pressure. Market conditions, trade candidates, pricing models and a paper account on one screen. Paper positions only; no orders are transmitted to any broker.">
+<meta name="theme-color" content="#161826">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/site.css">
 
 <!--
-  The public one-pager. PLACEHOLDER COPY - every REPLACE-ME below is for the
-  owner to write.
-
-  Three constraints, none of them taste:
+  THE PUBLIC ONE-PAGER. Served by Caddy's file_server out of deploy/site/, at
+  neuralstrike.co and www.neuralstrike.co. Three constraints, none of them
+  taste, all inherited from the placeholder this replaced:
 
   1. NOTHING DYNAMIC AND NOTHING SECRET. No form, no call to the app, no
-     analytics needing a key. This file is served by Caddy's file_server out of
-     deploy/site/ and is world-readable by definition. If it ever needs live
-     data, that is a design change, not an edit.
+     analytics. This tree is world-readable by definition. The design's email
+     capture was removed for exactly this reason -- a form on a file server has
+     nowhere to POST and could only lie about what it does with an address.
 
-  2. NO LINK TO THE APP. Recorded as noise reduction rather than as a security
-     control - the subdomain is in Certificate Transparency logs regardless -
-     but the public face should not advertise the door.
+  2. NO LINK TO THE APP. Noise reduction rather than a security control -- the
+     subdomain is in Certificate Transparency logs regardless -- but the public
+     face should not advertise the door. Pinned by
+     deploy/tests/test_site.py.
 
-  3. SINGLE SELF-CONTAINED FILE. No build step, no framework, no directory
-     listing. Inline CSS is deliberate: this is a standalone document, the same
-     exemption the EOD reports and /wall carry from the repo's Tailwind-first
-     rule, which binds NiceGUI components and nothing else.
+  3. NO THIRD-PARTY ORIGIN. Inter is self-hosted in assets/. The site makes
+     zero off-origin requests, and a test keeps it that way.
 
-  The stream slot is a LINK, not an iframe. Swapping in an embed later is one
-  line, and until someone wants it this keeps Google's script off the page.
+  Design and the decisions behind it:
+  docs/plans/2026-09-06-public-marketing-site-design.md
+
+  ── COMMUNITY LINKS ──────────────────────────────────────────────────────
+  Both live in the #community section near the bottom of this file and are the
+  only outbound links on the site:
+      Discord   https://discord.gg/BaSxEWCGGm
+      Telegram  https://t.me/SchwabOptionsBot   (a bot, not a group -- the
+                button says so; do not relabel it "Join Telegram")
 -->
-
-<style>
-  :root {
-    color-scheme: dark;
-    --bg: #0a0f1c;
-    --card: #101a30;
-    --line: #213152;
-    --text: #cdd8ee;
-    --title: #eaf0fb;
-    --muted: #7f8db0;
-    --accent: #3b82f6;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem 1.25rem;
-    background: radial-gradient(circle at 50% 0%, #16243f, #0c1424 55%, var(--bg));
-    color: var(--text);
-    font: 16px/1.6 "IBM Plex Sans", system-ui, -apple-system, Segoe UI, sans-serif;
-  }
-  main { width: 100%; max-width: 32rem; text-align: center; }
-  h1 {
-    margin: 0 0 .5rem;
-    font-size: clamp(2rem, 9vw, 3rem);
-    font-weight: 800;
-    letter-spacing: -.02em;
-    color: var(--title);
-  }
-  .tagline { margin: 0 0 2.5rem; color: var(--muted); font-size: 1.05rem; }
-  .links { display: flex; flex-direction: column; gap: .75rem; }
-  a.link {
-    display: block;
-    padding: .9rem 1.25rem;
-    border: 1px solid var(--line);
-    border-radius: .6rem;
-    background: var(--card);
-    color: var(--title);
-    text-decoration: none;
-    font-weight: 600;
-  }
-  a.link:hover, a.link:focus-visible { border-color: var(--accent); outline: none; }
-  a.link .what { display: block; font-weight: 400; font-size: .875rem; color: var(--muted); }
-  footer { margin-top: 3rem; font-size: .8rem; color: var(--muted); }
-</style>
 </head>
 
 <body>
-<main>
-  <!-- The wordmark. -->
-  <h1>REPLACE-ME</h1>
+<div class="ns-page">
 
-  <!-- One line saying what this is. -->
-  <p class="tagline">REPLACE-ME tagline</p>
-
-  <nav class="links">
-    <!-- The YouTube live stream. A link, deliberately, not an embed. -->
-    <a class="link" href="REPLACE-ME-youtube-url">
-      Watch live
-      <span class="what">REPLACE-ME what the stream shows</span>
-    </a>
-
-    <a class="link" href="REPLACE-ME-discord-invite">
-      Discord
-      <span class="what">REPLACE-ME what the server is for</span>
-    </a>
-
-    <a class="link" href="REPLACE-ME-telegram-url">
-      Telegram
-      <span class="what">REPLACE-ME what the channel posts</span>
-    </a>
+  <nav class="ns-nav ns-nav-tall">
+    <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
+    <span class="ns-spacer"></span>
+    <a class="ns-navlink" href="#idea">The idea</a>
+    <a class="ns-navlink" href="#community">Community</a>
+    <a class="ns-navlink" href="live.html">Live screens</a>
+    <!-- The design made Live Screens the primary button. That page is a
+         deliberate placeholder, so as drawn the most prominent control on the
+         site led to an empty room; the gallery took the slot. -->
+    <a class="btn btn-primary" href="gallery.html" style="white-space: nowrap;">App gallery</a>
   </nav>
 
-  <footer>REPLACE-ME footer</footer>
-</main>
+  <!-- ─── Hero ─────────────────────────────────────────────────────────── -->
+  <section class="ns-wrap" style="padding-top: clamp(48px, 7vw, 104px); padding-bottom: clamp(40px, 6vw, 80px); display: flex; flex-wrap: wrap; gap: clamp(28px, 5vw, 72px); align-items: center;">
+    <div style="flex: 1 1 440px; min-width: 0;">
+      <span class="ns-eyebrow" style="margin-bottom: 22px;">Local options workbench</span>
+      <h1 class="ns-h1">
+        <span>Most tools show you prices.</span>
+        <span style="color: var(--color-accent-300);">This one shows you who has to trade next.</span>
+      </h1>
+      <p class="ns-lede" style="margin: 0 0 28px;">NeuralStrike runs on your own computer and talks to your brokerage account through a small gateway. Market conditions, trade candidates, pricing models, a practice account and your real holdings — on one screen.</p>
+      <div class="ns-actions" style="margin-bottom: 26px;">
+        <a class="btn btn-primary" href="gallery.html">See the screens</a>
+        <a class="btn btn-ghost" href="#idea">Learn dealer gamma</a>
+      </div>
+      <p class="ns-note" style="display: flex; align-items: center; gap: 10px; margin: 0;">
+        <span class="ns-dot"></span>
+        No real orders. Every position it opens is paper, priced against live market data.
+      </p>
+    </div>
+    <!-- .lighten is the design system's image wrapper: mix-blend-mode lighten
+         drops the logo's black ground out against the dark page. -->
+    <figure class="lighten" style="margin: 0 auto; flex: 0 1 320px;">
+      <img src="assets/logo.jpg" width="380" height="380"
+           alt="NeuralStrike"
+           style="display: block; width: 100%; max-width: 380px; height: auto;">
+    </figure>
+  </section>
+
+  <!-- ─── Fact band ────────────────────────────────────────────────────── -->
+  <section class="ns-band" aria-label="What it is and is not">
+    <div class="ns-wrap ns-band-grid">
+      <div>
+        <p class="ns-stat">Local</p>
+        <p class="ns-stat-label">Runs on your machine</p>
+      </div>
+      <div>
+        <p class="ns-stat">One screen</p>
+        <p class="ns-stat-label">Conditions to decision</p>
+      </div>
+      <div>
+        <p class="ns-stat">Paper trade</p>
+        <p class="ns-stat-label">Evaluate your performance</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── The idea ─────────────────────────────────────────────────────── -->
+  <section id="idea" class="ns-wrap" style="padding-top: clamp(56px, 7vw, 104px); padding-bottom: clamp(24px, 4vw, 48px);">
+    <span class="ns-eyebrow" style="margin-bottom: 22px;">The one idea behind it</span>
+    <h2 class="ns-h2" style="max-width: 30ch;">Somebody is always forced to hedge. That flow is measurable.</h2>
+    <p class="ns-body" style="margin: 0 0 clamp(32px, 4vw, 56px);">
+      When you buy an option, a professional market maker — a dealer — usually takes the other side. Dealers do not want a directional bet. They want the fee. So they hedge.
+    </p>
+
+    <ol class="ns-steps">
+      <li class="ns-step">
+        <p class="ns-step-n">01</p>
+        <p class="ns-step-t">You buy the option</p>
+        <p class="ns-step-b">A dealer takes the other side of your trade, whether they like the direction or not.</p>
+      </li>
+      <li class="ns-step">
+        <p class="ns-step-n">02</p>
+        <p class="ns-step-t">They hedge to stay neutral</p>
+        <p class="ns-step-b">They buy or sell the underlying stock so the position carries no view — only the fee.</p>
+      </li>
+      <li class="ns-step">
+        <p class="ns-step-n">03</p>
+        <p class="ns-step-t">Price moves, the hedge breaks</p>
+        <p class="ns-step-b">The required hedge changes with price. Staying neutral means trading again — mechanically.</p>
+      </li>
+      <li class="ns-step">
+        <p class="ns-step-n">04</p>
+        <p class="ns-step-t">That flow is visible</p>
+        <p class="ns-step-b">Large, predictable and sitting in the options chain — if you measure it. That is the whole app.</p>
+      </li>
+    </ol>
+
+    <p class="ns-pull">
+      If you only ever learn one concept here, make it <strong>dealer gamma</strong> — explained in plain language under Dealer Positioning.
+    </p>
+  </section>
+
+  <!-- ─── The four lenses ──────────────────────────────────────────────── -->
+  <section id="lenses" class="ns-wrap" style="padding-top: clamp(48px, 6vw, 88px); padding-bottom: clamp(48px, 6vw, 88px);">
+    <span class="ns-eyebrow" style="margin-bottom: 20px;">Every screen, one idea</span>
+    <h2 class="ns-h2-sm" style="margin: 0 0 clamp(28px, 4vw, 44px); max-width: 34ch;">Four lenses on the same forced flow</h2>
+
+    <p style="margin: -20px 0 clamp(24px, 3vw, 36px);">
+      <a class="btn btn-ghost btn-outline" href="gallery.html">See all 16 screens →</a>
+    </p>
+
+    <div>
+      <div class="ns-lens">
+        <h3>Dealer Positioning</h3>
+        <p>Measures the hedging pressure directly — where dealers are pinned, where they amplify a move, and where they dampen it.</p>
+      </div>
+      <div class="ns-lens">
+        <h3>Flow Alerts &amp; Net Prem</h3>
+        <p>Watch where the option money is actually going, not where commentary says it went.</p>
+      </div>
+      <div class="ns-lens">
+        <h3>Sentiment &amp; Market Regime</h3>
+        <p>Describe the environment that pressure acts in — the same reading means different things in different regimes.</p>
+      </div>
+      <div class="ns-lens">
+        <h3>Scanner, Strategy Finder &amp; Rescue</h3>
+        <p>Turn the reading into specific trades — candidates, structures priced against models, and repairs for positions that moved against you.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Paper / read-only ────────────────────────────────────────────── -->
+  <section id="safety" class="ns-wrap" style="padding-top: clamp(32px, 4vw, 56px); padding-bottom: clamp(48px, 6vw, 88px);">
+    <div class="ns-cards">
+      <div class="card elev-sm">
+        <p class="card-kicker">Paper by design</p>
+        <h3>It does not place real orders</h3>
+        <p>Every trade the app opens is simulated — a paper position priced against real market data, so the practice account behaves like the real one without the consequences.</p>
+      </div>
+      <div class="card elev-sm">
+        <p class="card-kicker">Real money, read-only</p>
+        <h3>Your Schwab portfolio, untouched</h3>
+        <p>The only real money on screen is your own holdings, pulled through a small local gateway and displayed read-only. Nothing on the page can move it.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="ns-rule">
+
+  <!-- ─── Close ────────────────────────────────────────────────────────────
+       The design closed on an email field and a "Get the build" button. There
+       is no build to get and no backend to receive an address, so the section
+       keeps its headline and points at the two things that do exist.
+  -->
+  <section id="start" class="ns-wrap" style="padding-top: clamp(48px, 6vw, 80px); padding-bottom: clamp(48px, 6vw, 80px);">
+    <h2 class="ns-h2-sm" style="margin: 0 0 16px; max-width: 26ch;">Start with the question, not the price.</h2>
+    <p style="font-size: 16px; line-height: 1.65; max-width: 56ch; margin: 0 0 26px; color: color-mix(in srgb, var(--color-text) 80%, transparent);">
+      Every screen in the gallery is a real capture from the running app — the dealer-positioning read first, then what it implies and what to do about it. Start at Dealer Positioning and read down.
+    </p>
+    <div class="ns-actions">
+      <a class="btn btn-primary" href="gallery.html">Open the gallery</a>
+      <a class="btn btn-ghost btn-outline" href="#community">Ask in Discord</a>
+    </div>
+  </section>
+
+  <!-- ─── Community ────────────────────────────────────────────────────── -->
+  <section id="community" class="ns-wrap" style="padding-bottom: clamp(48px, 6vw, 80px);">
+    <div class="ns-community">
+      <div style="flex: 1 1 320px; min-width: 0;">
+        <span class="ns-eyebrow" style="margin-bottom: 14px;">Community</span>
+        <h3>Read the flow with other traders</h3>
+        <p>Gamma reads, flow alerts and paper-trade post-mortems, posted as they happen. Questions welcome — no signal-selling.</p>
+      </div>
+      <div class="ns-actions" style="flex: 0 1 auto;">
+        <!-- Discord is the discussion room, so it leads. -->
+        <a class="btn btn-primary" href="https://discord.gg/BaSxEWCGGm"
+           rel="noopener noreferrer" target="_blank" style="min-height: 38px;">
+          <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M104 140a12 12 0 1 1-12-12 12 12 0 0 1 12 12Zm60-12a12 12 0 1 0 12 12 12 12 0 0 0-12-12Zm81.6 66.3a16 16 0 0 1-9.3 11.1A171.8 171.8 0 0 1 176 220a16 16 0 0 1-13.8-8l-5.9-10.2a172.4 172.4 0 0 1-52.6 0L97.8 212A16 16 0 0 1 84 220a171.5 171.5 0 0 1-60.3-14.6 16 16 0 0 1-9.3-11.1c-8.5-38.4.9-80.1 25.9-114.5a15.9 15.9 0 0 1 8.5-5.8 173.2 173.2 0 0 1 31.1-6.3 16 16 0 0 1 16 7.7l1.3 2.2a180.4 180.4 0 0 1 61.6 0l1.3-2.2a16 16 0 0 1 16-7.7 173.2 173.2 0 0 1 31.1 6.3 15.9 15.9 0 0 1 8.5 5.8c25 34.4 34.4 76.1 25.9 114.5Z"></path></svg>
+          Join the Discord
+        </a>
+        <!-- A BOT, not a group. The design's "Join Telegram" would have read as
+             a second discussion room; this says what it is. -->
+        <a class="btn btn-ghost btn-outline" href="https://t.me/SchwabOptionsBot"
+           rel="noopener noreferrer" target="_blank" style="min-height: 38px;">
+          <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M228.88 26.19a9 9 0 0 0-9.16-1.57L17.06 103.93a14.14 14.14 0 0 0 2.63 26.64L72 141v55a15.87 15.87 0 0 0 9.65 14.63A15.92 15.92 0 0 0 88 212a15.9 15.9 0 0 0 11.3-4.69l25.65-25.65 42.13 37a14 14 0 0 0 9.25 3.51 14.18 14.18 0 0 0 13.7-10.86l40.63-176.2a9 9 0 0 0-1.78-8.92ZM94.85 162.35a6 6 0 0 0-1.71 3.65L88 196v-56a6 6 0 0 0-.11-1.14ZM176 208l-46.79-41.09 84.87-88.62Z"></path></svg>
+          Telegram alerts bot
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="ns-wrap ns-foot" style="padding-bottom: 48px;">
+    NeuralStrike — AI option signals &amp; trading ideas. Educational and simulation software. Not investment advice; no orders are transmitted to any broker.
+  </footer>
+
+</div>
 </body>
 </html>

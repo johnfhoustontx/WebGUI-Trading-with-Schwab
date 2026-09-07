@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuralStrike — Live screens</title>
+<meta name="description" content="Live NeuralStrike screens are not published yet. Browse the app gallery in the meantime.">
+<meta name="theme-color" content="#161826">
+<meta name="robots" content="noindex, follow">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/site.css">
+
+<!--
+  LIVE SCREENS — a placeholder, by decision and not by oversight.
+
+  ⚠ WHATEVER EVENTUALLY MOUNTS HERE MUST NOT BE THE APP. This page is served
+  off a public file server at neuralstrike.co; the app lives behind its own
+  login on a separate origin and the public site must not link to it, embed it,
+  or name its hostname. See the header comment in index.html and
+  deploy/tests/test_site.py, which pins that.
+
+  Anything dropped in the slot below therefore has to be a rendering the app
+  PUSHES OUT -- a stream, an exported snapshot, a static capture -- never a
+  window onto the running instance.
+
+  `noindex` while it is empty: a placeholder in search results is worse than no
+  result. `follow` so the gallery and the overview still gain the links.
+-->
+</head>
+
+<body>
+<div class="ns-page-sub" style="display: flex; flex-direction: column;">
+
+  <nav class="ns-nav">
+    <a class="ns-brand" href="index.html">Neural<span class="ns-brand-b">Strike</span></a>
+    <span class="ns-crumb">/ Live screens</span>
+    <span class="ns-spacer"></span>
+    <a class="ns-navlink" href="gallery.html">Gallery</a>
+    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+  </nav>
+
+  <main class="ns-live-main">
+    <div style="width: 100%; max-width: 720px;">
+      <p class="ns-eyebrow" style="margin: 0 0 20px;">Live screens</p>
+      <h1 style="font-family: var(--font-heading); font-weight: 500; font-size: clamp(30px, 4vw, 52px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 18px; margin-left: -0.06em;">Not published yet.</h1>
+      <p style="font-size: 16.5px; line-height: 1.65; max-width: 56ch; margin: 0 0 32px; color: color-mix(in srgb, var(--color-text) 80%, transparent);">
+        The workbench runs locally against live market data. Nothing from a running session is published here yet — until it is, the gallery has a capture of every screen.
+      </p>
+
+      <div class="ns-slot">
+        <p style="font-family: var(--font-heading); font-weight: 500; font-size: 15px; margin: 0 0 8px; color: color-mix(in srgb, var(--color-text) 72%, transparent);">Live view slot</p>
+        <p style="font-size: 13.5px; line-height: 1.6; margin: 0; color: color-mix(in srgb, var(--color-text) 55%, transparent);">Nothing mounted.</p>
+      </div>
+
+      <div class="ns-actions" style="margin-top: 28px;">
+        <a class="btn btn-primary" href="gallery.html">Browse the gallery meanwhile</a>
+        <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+      </div>
+    </div>
+  </main>
+
+  <footer class="ns-foot" style="padding: 0 clamp(20px, 5vw, 72px) 40px;">
+    Paper positions only. The only real money on screen is your read-only brokerage portfolio.
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,599 @@
+/* NeuralStrike public site — the thin layer over Nocturne.
+ *
+ * Nocturne (nocturne.css) owns colour, type, spacing and the component
+ * classes. This file holds only what a static site needs on top:
+ *
+ *   1. the self-hosted Inter faces, replacing the design's Google Fonts link
+ *   2. the hover states the design canvas carried as `style-hover=` attributes,
+ *      which are not a real HTML feature and had to become CSS rules
+ *   3. the gallery's panel switching
+ *
+ * Nothing here restates a Nocturne token. If a value is needed, it comes
+ * through var(--*).
+ */
+
+/* ─── 1. Inter, self-hosted ──────────────────────────────────────────────
+ *
+ * Inter v20 is a VARIABLE font: one file covers the whole 400-600 range the
+ * design uses, which is why there are two files here (two unicode subsets)
+ * rather than six (three weights x two subsets).
+ *
+ * `font-display: swap` matches what the design asked Google for. Text paints
+ * immediately in system-ui and reflows to Inter — on a page this text-heavy,
+ * a flash of unstyled text beats a flash of no text.
+ *
+ * ⚠ DO NOT ADD `<link rel="preload">` FOR THESE. It was tried, and measured:
+ * the pages fetched the face TWICE per load — once for the preload, once for
+ * the @font-face — and every load logged "preloaded using link preload but not
+ * used within a few seconds". Removing the tag took it to exactly one request.
+ * The theoretical saving is one round trip on a stylesheet that is already
+ * small, inline-free and first in the head; the measured cost was a duplicate
+ * download of 48 KB and a console warning on every visit.
+ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ─── 2. Page base ───────────────────────────────────────────────────────
+ * The three-line base the design repeated in each page's <style> block.
+ */
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  text-wrap: pretty;
+}
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+a:hover { color: var(--color-accent-300); text-decoration: underline; }
+
+/* The page ground. Both radial washes are the design's, verbatim. */
+.ns-page {
+  min-height: 100%;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 720px at 84% -180px,
+      color-mix(in srgb, var(--color-accent-900) 80%, transparent), transparent 60%),
+    radial-gradient(1100px 800px at -10% 100%,
+      color-mix(in srgb, black 32%, transparent), transparent 55%),
+    var(--color-bg);
+}
+.ns-page-sub {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 620px at 88% -200px,
+      color-mix(in srgb, var(--color-accent-900) 70%, transparent), transparent 60%),
+    var(--color-bg);
+}
+
+/* ─── 3. Navigation ──────────────────────────────────────────────────── */
+.ns-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px clamp(16px, 3vw, 40px);
+  border-bottom: 1px solid var(--color-divider);
+}
+.ns-nav-tall { gap: 24px; padding: 18px clamp(20px, 5vw, 72px); }
+.ns-nav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.ns-spacer { flex: 1; }
+
+.ns-brand {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+.ns-nav-tall .ns-brand { font-size: 15px; }
+.ns-brand .ns-brand-b { color: var(--color-accent); }
+a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
+
+.ns-navlink {
+  font-size: 13.5px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-navlink:hover { color: var(--color-accent); text-decoration: none; }
+
+.ns-crumb {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.ns-count {
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  font-feature-settings: "tnum" 1;
+}
+
+/* The design was drawn at desktop width and its nav does not fit a phone.
+ * Measured at 375px: the landing nav needs 587px, so the three links and the
+ * primary button ran off the right edge — and because .ns-page clips overflow
+ * they were not merely awkward but INVISIBLE, taking the page's main call to
+ * action with them.
+ *
+ * The break is put on .ns-spacer, which already sits at exactly the right point
+ * on all three pages — after the brand and any breadcrumb, before the links.
+ * Given a full-width basis it becomes a zero-height row of its own, so
+ * everything after it starts on the next line. One rule, no per-page markup. */
+@media (max-width: 700px) {
+  .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
+  .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+}
+/* The landing's nav settles at three visual rows on a 375px screen — brand,
+ * the three links, then the button. Shrinking the link type and the button
+ * padding to pull it to two was tried and MEASURED AT NOTHING (141px → 140px,
+ * still four rows): the links plus the button need ~349px against 335px of
+ * usable width, and 14px is not recoverable from type alone. Reverted rather
+ * than left in as CSS that looks like it is doing something. */
+
+/* ─── 4. Buttons ─────────────────────────────────────────────────────────
+ *
+ * Nocturne's .btn-primary / .btn-ghost already carry hover and active states,
+ * so most of the design's `style-hover` on buttons only restated the system.
+ * The one variant that genuinely differs is the outlined ghost: the design
+ * mutes its border to neutral-700 at rest and lifts it to the accent on hover.
+ */
+.btn-outline { border-color: var(--color-neutral-700); }
+.btn-outline:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+/* ─── 5. Shared marks ────────────────────────────────────────────────────
+ * The accent eyebrow: a 40px rule, then small uppercase text.
+ */
+.ns-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.ns-eyebrow::before {
+  content: "";
+  width: 40px;
+  height: 1px;
+  background: var(--color-accent);
+  flex: none;
+}
+.ns-eyebrow-sm { font-size: 12px; }
+.ns-eyebrow-sm::before { width: 28px; }
+
+/* The live dot: an accent point with its own glow. */
+.ns-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent);
+  flex: none;
+  animation: ns-pulse 2.8s ease-in-out infinite;
+}
+@keyframes ns-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+/* Respect a reduced-motion preference: the dot is decoration, and the design
+ * gives it no meaning that its animation carries. */
+@media (prefers-reduced-motion: reduce) {
+  .ns-dot { animation: none; opacity: 1; }
+  * { scroll-behavior: auto !important; }
+}
+
+/* A rule that fades at both ends — the system's stated preference over a
+ * plain hairline. */
+.ns-rule {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: linear-gradient(to right, transparent,
+    var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent);
+}
+
+/* ─── 6. Landing page ────────────────────────────────────────────────── */
+.ns-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 5vw, 72px);
+}
+.ns-h1 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(40px, 5.6vw, 76px);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 0 0 24px;
+  margin-left: -0.06em;
+}
+.ns-h1 span { display: block; }
+.ns-h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(28px, 3.6vw, 46px);
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+  margin: 0 0 24px;
+}
+.ns-h2-sm {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(26px, 3vw, 38px);
+  line-height: 1.16;
+  letter-spacing: -0.015em;
+}
+.ns-lede {
+  font-size: 17.5px;
+  line-height: 1.65;
+  max-width: 56ch;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+.ns-body {
+  font-size: 17px;
+  line-height: 1.65;
+  max-width: 62ch;
+  color: color-mix(in srgb, var(--color-text) 82%, transparent);
+}
+.ns-note {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+.ns-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* The one full-bleed saturated band the system permits at page scale. */
+.ns-band {
+  background:
+    radial-gradient(900px 420px at 85% -40%,
+      color-mix(in srgb, var(--color-section-glow) 70%, transparent), transparent 64%),
+    var(--color-section);
+}
+.ns-band-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 32px 28px;
+  padding-block: clamp(36px, 5vw, 64px);
+}
+.ns-stat {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(32px, 3.4vw, 48px);
+  line-height: 1.1;
+  margin: 0 0 12px;
+  font-feature-settings: "tnum" 1;
+}
+.ns-stat-label {
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+/* The four numbered steps. */
+.ns-steps {
+  list-style: none;
+  margin: 0 0 clamp(28px, 4vw, 48px);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.ns-step {
+  background: var(--color-bg);
+  padding: 26px 24px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+}
+.ns-step-n {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--color-accent);
+  margin: 0 0 14px;
+  font-feature-settings: "tnum" 1;
+}
+.ns-step-t {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.3;
+  margin: 0 0 10px;
+}
+.ns-step-b {
+  font-size: 14.5px;
+  line-height: 1.6;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+}
+
+/* The pull-quote with an accent edge. */
+.ns-pull {
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0;
+  padding-left: 18px;
+  border-left: 2px solid var(--color-accent);
+  max-width: 58ch;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+.ns-pull strong { color: var(--color-text); font-weight: 500; }
+
+/* The four lenses: title left, description right, hairline between. */
+.ns-lens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px clamp(24px, 5vw, 72px);
+  align-items: baseline;
+  padding: 26px 0;
+  border-top: 1px solid var(--color-neutral-800);
+}
+.ns-lens:last-child { border-bottom: 1px solid var(--color-neutral-800); }
+.ns-lens h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin: 0;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.ns-lens p {
+  font-size: 15.5px;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 56ch;
+  flex: 2 1 320px;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+/* The two safety cards. */
+.ns-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(20px, 3vw, 32px);
+}
+.ns-cards .card { padding: 28px; }
+.ns-cards h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 21px;
+  line-height: 1.25;
+  margin: 0 0 12px;
+}
+.ns-cards p:last-child {
+  font-size: 15px;
+  line-height: 1.65;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+/* The community block. */
+.ns-community {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px clamp(24px, 5vw, 64px);
+  padding: clamp(24px, 3vw, 32px);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-accent-900) 40%, transparent), transparent);
+}
+.ns-community h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(21px, 2.2vw, 28px);
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  margin: 0 0 10px;
+}
+.ns-community p {
+  font-size: 15px;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 48ch;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.ns-foot {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* ─── 7. Gallery ─────────────────────────────────────────────────────────
+ *
+ * PROGRESSIVE ENHANCEMENT, and it is the reason these pages were rebuilt
+ * rather than copied from the design's bundle. Every one of the 16 screens is
+ * a real element in gallery.html. With no JavaScript the panels simply stack
+ * and the page is still a usable gallery; gallery.js adds `js` to <html>,
+ * which is what turns the stack into a rail-plus-viewer.
+ */
+.ns-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: clamp(20px, 3vw, 40px);
+  padding: clamp(20px, 3vw, 40px) clamp(16px, 3vw, 40px) 64px;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+.ns-rail { flex: 1 1 260px; min-width: 0; max-width: 340px; }
+.js .ns-rail { position: sticky; top: 76px; }
+.ns-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+.js .ns-rail-list { max-height: calc(100vh - 170px); overflow-y: auto; }
+
+.ns-rail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+.ns-rail-row:hover { border-color: var(--color-neutral-700); }
+.ns-rail-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: var(--color-accent-700);
+  color: var(--color-text);
+}
+.ns-rail-row .ns-rail-title { flex: 1; min-width: 0; line-height: 1.35; }
+.ns-rail-row .ns-rail-count {
+  flex: none;
+  font-size: 11.5px;
+  padding-top: 3px;
+  font-feature-settings: "tnum" 1;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.ns-viewer { flex: 4 1 620px; min-width: 0; }
+
+/* Without JS every screen shows, separated by space. With JS, only the
+ * current one.
+ *
+ * ⚠ THE SWITCH IS A CLASS, NEVER THE `hidden` ATTRIBUTE, and the difference is
+ * the whole no-JS fallback. `hidden` is native HTML: the browser's OWN
+ * stylesheet carries `[hidden] { display: none }`, so a panel marked that way
+ * disappears whether or not this file has an opinion — including for the
+ * scripting-off visitor the fallback exists for. An earlier build wrote
+ * `.js .ns-screen[hidden]` and that selector was doing nothing at all; the UA
+ * rule was hiding the panels, and with JS off the gallery showed exactly one
+ * screen and no way to reach the other fifteen.
+ *
+ * `is-active` means nothing to the UA stylesheet, so with no `.js` on <html>
+ * neither rule below matches and every panel renders. */
+.js .ns-screen { display: none; }
+.js .ns-screen.is-active { display: block; }
+.ns-screen + .ns-screen { margin-top: clamp(40px, 6vw, 72px); }
+.js .ns-screen + .ns-screen { margin-top: 0; }
+
+.ns-screen h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(26px, 3vw, 40px);
+  line-height: 1.14;
+  letter-spacing: -0.018em;
+  margin: 0 0 12px;
+}
+.ns-screen-caption {
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0 0 20px;
+  max-width: 62ch;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+.ns-kicker {
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 10px;
+}
+
+.ns-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.ns-tab {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-neutral-800);
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-tab:hover { border-color: var(--color-accent); }
+.ns-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-200);
+}
+
+.ns-shot {
+  margin: 0 0 12px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  background: var(--color-neutral-900);
+}
+.ns-shot:last-child { margin-bottom: 0; }
+.ns-shot img { display: block; width: 100%; height: auto; }
+/* Same rule, same reason, for the sub-tab sections. */
+.js .ns-shot { display: none; }
+.js .ns-shot.is-active { display: block; }
+
+.ns-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+  align-items: center;
+}
+.ns-pager span {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* The tab row and the pager only mean anything once JS can switch panels. */
+.ns-js-only { display: none; }
+.js .ns-js-only { display: flex; }
+
+/* ─── 8. Live page ─────────────────────────────────────────────────────── */
+.ns-live-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(40px, 8vw, 96px) clamp(20px, 5vw, 72px);
+}
+.ns-slot {
+  border: 1px dashed var(--color-neutral-700);
+  border-radius: var(--radius-md);
+  padding: clamp(28px, 5vw, 56px);
+  text-align: center;
+  background: color-mix(in srgb, var(--color-neutral-900) 60%, transparent);
+}

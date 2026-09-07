@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuralStrike — App Gallery</title>
+<meta name="description" content="Every screen in NeuralStrike, captured from the running app: dealer positioning, options flow, market regime, sector rotation, the strategy calculator and the daily briefings.">
+<meta name="theme-color" content="#161826">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/site.css">
+
+<!-- Sets the `.js` hook BEFORE first paint. gallery.js is deferred, so doing it
+     there instead would flash all 16 panels stacked before collapsing them. -->
+<script>document.documentElement.className += " js";</script>
+
+<!--
+  THE APP GALLERY. Static, self-contained, no third-party origin.
+
+  GENERATED ONCE from the design's SCREENS array, then owned here: these
+  <section class="ns-screen"> blocks ARE the content model. Add or reorder a
+  screen by editing this file, and keep three things in step -- the rail button,
+  the panel, and the ids that tie them together (rail-N / screen-N).
+  deploy/tests/test_site.py checks that every shot referenced exists and
+  that every shot on disk is referenced.
+
+  WORKS WITHOUT JAVASCRIPT, deliberately. All 16 screens are real elements,
+  and which one shows is decided by the `is-active` CLASS under a `.js` scope --
+  never by the `hidden` ATTRIBUTE, which the browser's own stylesheet would
+  honour with scripting off and collapse the fallback to a single screen.
+  With no `.js` on <html> the panels simply stack. The design's own bundled
+  build rendered a blank page in that case, which is why these were rebuilt.
+-->
+</head>
+
+<body>
+<div class="ns-page-sub">
+
+  <nav class="ns-nav ns-nav-sticky">
+    <a class="ns-brand" href="index.html">Neural<span class="ns-brand-b">Strike</span></a>
+    <span class="ns-crumb">/ Gallery</span>
+    <span class="ns-spacer"></span>
+    <span class="ns-count">16 screens</span>
+    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+  </nav>
+
+  <div class="ns-gallery">
+
+    <aside class="ns-rail">
+      <p class="ns-eyebrow ns-eyebrow-sm" style="margin: 0 0 14px;">App Gallery</p>
+      <div class="ns-rail-list" role="tablist" aria-label="Screens" aria-orientation="vertical">
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-0" aria-controls="screen-0"
+                aria-current="true">
+          <span class="ns-rail-title">The Desk</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-1" aria-controls="screen-1"
+                aria-current="false">
+          <span class="ns-rail-title">Gamma Heatmap</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-2" aria-controls="screen-2"
+                aria-current="false">
+          <span class="ns-rail-title">Premium Divergence</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-3" aria-controls="screen-3"
+                aria-current="false">
+          <span class="ns-rail-title">Net Options Premium</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-4" aria-controls="screen-4"
+                aria-current="false">
+          <span class="ns-rail-title">Opportunity Board</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-5" aria-controls="screen-5"
+                aria-current="false">
+          <span class="ns-rail-title">Flow Alerts</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-6" aria-controls="screen-6"
+                aria-current="false">
+          <span class="ns-rail-title">Macro Board</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-7" aria-controls="screen-7"
+                aria-current="false">
+          <span class="ns-rail-title">Market Regime Control</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-8" aria-controls="screen-8"
+                aria-current="false">
+          <span class="ns-rail-title">Where the Market Stands</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-9" aria-controls="screen-9"
+                aria-current="false">
+          <span class="ns-rail-title">Sector &amp; Industry Performance</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-10" aria-controls="screen-10"
+                aria-current="false">
+          <span class="ns-rail-title">Sector Rotation</span>
+          <span class="ns-rail-count">2</span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-11" aria-controls="screen-11"
+                aria-current="false">
+          <span class="ns-rail-title">Momentum</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-12" aria-controls="screen-12"
+                aria-current="false">
+          <span class="ns-rail-title">Strategy Calculator</span>
+          <span class="ns-rail-count">5</span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-13" aria-controls="screen-13"
+                aria-current="false">
+          <span class="ns-rail-title">Strategy Finder</span>
+          <span class="ns-rail-count"></span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-14" aria-controls="screen-14"
+                aria-current="false">
+          <span class="ns-rail-title">Stock Evaluation</span>
+          <span class="ns-rail-count">3</span>
+        </button>
+        <button type="button" class="ns-rail-row" role="tab"
+                id="rail-15" aria-controls="screen-15"
+                aria-current="false">
+          <span class="ns-rail-title">Daily Briefings</span>
+          <span class="ns-rail-count">2</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="ns-viewer">
+      <section class="ns-screen is-active" id="screen-0" role="tabpanel" aria-labelledby="rail-0">
+        <h2>The Desk</h2>
+        <p class="ns-screen-caption">The landing surface: everything the app knows about right now, condensed into one working view.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image1.webp" width="1848" height="931" loading="eager" decoding="async" alt="NeuralStrike — The Desk">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-1" role="tabpanel" aria-labelledby="rail-1">
+        <h2>Gamma Heatmap</h2>
+        <p class="ns-screen-caption">Dealer gamma by strike and expiry — where hedging pressure pins price, and where it amplifies a move.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image2.webp" width="1828" height="867" loading="lazy" decoding="async" alt="NeuralStrike — Gamma Heatmap">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-2" role="tabpanel" aria-labelledby="rail-2">
+        <h2>Premium Divergence</h2>
+        <p class="ns-screen-caption">Where option premium disagrees with price: the early tell that positioning is shifting.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image3.webp" width="1843" height="914" loading="lazy" decoding="async" alt="NeuralStrike — Premium Divergence">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-3" role="tabpanel" aria-labelledby="rail-3">
+        <h2>Net Options Premium</h2>
+        <p class="ns-screen-caption">Call premium minus put premium — the dollar-weighted read on where the option money is going.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image4.webp" width="1835" height="941" loading="lazy" decoding="async" alt="NeuralStrike — Net Options Premium">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-4" role="tabpanel" aria-labelledby="rail-4">
+        <h2>Opportunity Board</h2>
+        <p class="ns-screen-caption">Ranked candidates pulled from the current positioning and flow readings.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image5.webp" width="1833" height="862" loading="lazy" decoding="async" alt="NeuralStrike — Opportunity Board">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-5" role="tabpanel" aria-labelledby="rail-5">
+        <h2>Flow Alerts</h2>
+        <p class="ns-screen-caption">Unusual option activity as it prints, filtered to size that can actually move a hedge.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image6.webp" width="1836" height="902" loading="lazy" decoding="async" alt="NeuralStrike — Flow Alerts">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-6" role="tabpanel" aria-labelledby="rail-6">
+        <h2>Macro Board</h2>
+        <p class="ns-screen-caption">The live tape: volatility, breadth, internals, sectors and cross-asset context on one lattice.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image7.webp" width="1837" height="922" loading="lazy" decoding="async" alt="NeuralStrike — Macro Board">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-7" role="tabpanel" aria-labelledby="rail-7">
+        <h2>Market Regime Control</h2>
+        <p class="ns-screen-caption">Sentiment, trend and regime share — the environment that hedging pressure acts inside.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image8.webp" width="1093" height="943" loading="lazy" decoding="async" alt="NeuralStrike — Market Regime Control">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-8" role="tabpanel" aria-labelledby="rail-8">
+        <h2>Where the Market Stands</h2>
+        <p class="ns-screen-caption">A plain-language summary of the current read, with the components behind it.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image9.webp" width="1836" height="870" loading="lazy" decoding="async" alt="NeuralStrike — Where the Market Stands">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-9" role="tabpanel" aria-labelledby="rail-9">
+        <h2>Sector &amp; Industry Performance</h2>
+        <p class="ns-screen-caption">Which parts of the market are carrying the move, and which are quietly leaking.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image10.webp" width="1848" height="936" loading="lazy" decoding="async" alt="NeuralStrike — Sector &amp; Industry Performance">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-10" role="tabpanel" aria-labelledby="rail-10">
+        <p class="ns-kicker">Leaders &amp; laggards</p>
+        <h2>Sector Rotation</h2>
+        <p class="ns-screen-caption">Relative strength rotation — leadership changing hands before the index shows it.</p>
+        <div class="ns-tabs ns-js-only" role="tablist" aria-label="Sector Rotation sections">
+          <button type="button" class="ns-tab" role="tab" aria-selected="true">Leaders &amp; laggards</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">Relative rotation graph</button>
+        </div>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image11.webp" width="1834" height="913" loading="lazy" decoding="async" alt="NeuralStrike — Sector Rotation: Leaders &amp; laggards">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image12.webp" width="1827" height="918" loading="lazy" decoding="async" alt="NeuralStrike — Sector Rotation: Relative rotation graph">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-11" role="tabpanel" aria-labelledby="rail-11">
+        <h2>Momentum</h2>
+        <p class="ns-screen-caption">What is moving, what has stalled, and how persistent the move has been.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image13.webp" width="1834" height="908" loading="lazy" decoding="async" alt="NeuralStrike — Momentum">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-12" role="tabpanel" aria-labelledby="rail-12">
+        <p class="ns-kicker">Build the structure</p>
+        <h2>Strategy Calculator</h2>
+        <p class="ns-screen-caption">Build a structure leg by leg and price it against models — then stress it.</p>
+        <div class="ns-tabs ns-js-only" role="tablist" aria-label="Strategy Calculator sections">
+          <button type="button" class="ns-tab" role="tab" aria-selected="true">Build the structure</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">Expected moves</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">Volatility vs the Greeks</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">What-if: price move</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">What-if: over time</button>
+        </div>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image14.webp" width="1809" height="932" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Calculator: Build the structure">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image15.webp" width="1836" height="767" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Calculator: Expected moves">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image17.webp" width="1840" height="923" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Calculator: Volatility vs the Greeks">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image16.webp" width="1824" height="931" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Calculator: What-if: price move">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image18.webp" width="1754" height="722" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Calculator: What-if: over time">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-13" role="tabpanel" aria-labelledby="rail-13">
+        <h2>Strategy Finder</h2>
+        <p class="ns-screen-caption">Find trade structures that fit the current reading, ranked by what the setup rewards.</p>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image19.webp" width="1823" height="937" loading="lazy" decoding="async" alt="NeuralStrike — Strategy Finder">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-14" role="tabpanel" aria-labelledby="rail-14">
+        <p class="ns-kicker">Evaluate the name</p>
+        <h2>Stock Evaluation</h2>
+        <p class="ns-screen-caption">Take a single name apart: the setup, the case for and against, and the plan to trade it.</p>
+        <div class="ns-tabs ns-js-only" role="tablist" aria-label="Stock Evaluation sections">
+          <button type="button" class="ns-tab" role="tab" aria-selected="true">Evaluate the name</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">Why take this trade — or not</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">The trade plan</button>
+        </div>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image20.webp" width="1824" height="931" loading="lazy" decoding="async" alt="NeuralStrike — Stock Evaluation: Evaluate the name">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image21.webp" width="1814" height="896" loading="lazy" decoding="async" alt="NeuralStrike — Stock Evaluation: Why take this trade — or not">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image22.webp" width="1837" height="815" loading="lazy" decoding="async" alt="NeuralStrike — Stock Evaluation: The trade plan">
+        </figure>
+      </section>
+      <section class="ns-screen" id="screen-15" role="tabpanel" aria-labelledby="rail-15">
+        <p class="ns-kicker">Briefing schedule</p>
+        <h2>Daily Briefings</h2>
+        <p class="ns-screen-caption">Premarket, open, midday, afternoon and close — written from that session&#x27;s own data.</p>
+        <div class="ns-tabs ns-js-only" role="tablist" aria-label="Daily Briefings sections">
+          <button type="button" class="ns-tab" role="tab" aria-selected="true">Briefing schedule</button>
+          <button type="button" class="ns-tab" role="tab" aria-selected="false">Session briefing</button>
+        </div>
+        <figure class="ns-shot is-active">
+          <img src="assets/shots/image23.webp" width="856" height="844" loading="lazy" decoding="async" alt="NeuralStrike — Daily Briefings: Briefing schedule">
+        </figure>
+        <figure class="ns-shot">
+          <img src="assets/shots/image24.webp" width="833" height="640" loading="lazy" decoding="async" alt="NeuralStrike — Daily Briefings: Session briefing">
+        </figure>
+      </section>
+
+      <div class="ns-pager ns-js-only">
+        <button type="button" class="btn btn-ghost btn-outline" data-nav="prev">← Previous</button>
+        <button type="button" class="btn btn-primary" data-nav="next">Next screen →</button>
+      </div>
+      <!-- The design carried this line inside the pager, which JS hides when
+           scripting is off. It is the page's disclaimer, so it lives outside. -->
+      <p class="ns-foot" style="margin: 24px 0 0;">
+        Paper positions only — the numbers are simulated against live market data.
+        Not investment advice; no orders are transmitted to any broker.
+      </p>
+    </main>
+  </div>
+</div>
+<script src="assets/gallery.js" defer></script>
+</body>
+</html>

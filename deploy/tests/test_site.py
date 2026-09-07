@@ -1,0 +1,335 @@
+"""The public site at neuralstrike.co, checked as a tree of files.
+
+``deploy/caddy/tests/test_caddyfile.py`` asserts the EDGE serves this directory
+and nothing above it. These tests assert what is IN it -- which the Caddy suite
+cannot see, and which a browser only reveals to whoever looks at the live page.
+
+Three failure modes motivate the file, all of them silent:
+
+* **a renamed or missing screenshot.** The gallery references 24 images by
+  path. Nothing breaks at deploy time; the page simply shows a broken image to
+  every visitor until somebody scrolls to that screen.
+* **a leaked reference to the app.** The public site must not name the app's
+  hostname, its port, or a loopback address. The Caddy config is already pinned;
+  the HTML was not.
+* **an off-origin request creeping back.** Inter is self-hosted precisely so the
+  site calls nobody. The design's stylesheet shipped its own Google Fonts
+  ``@import``, which is exactly how such a thing returns.
+
+Run with ``.venv/bin/python -m pytest deploy/site``.
+"""
+import pathlib
+import re
+import sys
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
+
+import repo_paths  # noqa: E402
+
+SITE = pathlib.Path(repo_paths.SITE_ROOT)
+PAGES = ("index.html", "gallery.html", "live.html")
+
+# The site calls nobody. Empty on purpose, and widening it is a decision:
+# every entry is a third party learning the IP of everyone who loads the page.
+ALLOWED_ORIGINS: tuple[str, ...] = ()
+
+# Where a visitor may be sent. Both are in the community block on the landing
+# page and are the only outbound links on the site.
+ALLOWED_OUTBOUND = ("https://discord.gg/", "https://t.me/")
+
+# Attributes that make the browser fetch something or follow somewhere.
+REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
+# url(...) inside a stylesheet -- how the @font-face faces are reached.
+CSS_URL_RE = re.compile(r'url\(["\']?([^)"\']+)["\']?\)')
+
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+
+
+def _text(name):
+    return (SITE / name).read_text(encoding="utf-8")
+
+
+def _markup(name):
+    """The document with its comments removed.
+
+    These files carry long explanatory comments that quote the very markup and
+    CSS they are explaining -- ``<section class="ns-screen">``, the removed
+    ``@import`` line. A structural check reading raw text counts those quotes as
+    real, so structure is asserted against this and never against ``_text``.
+
+    ⚠ The reverse holds for the leak checks: a hostname or a port sitting in a
+    comment is still published to the internet, so those read ``_text``.
+    """
+    return HTML_COMMENT_RE.sub("", _text(name))
+
+
+def _css(name):
+    return CSS_COMMENT_RE.sub("", _text(name))
+
+
+def _refs(text):
+    """Every href/src in a document, in source order."""
+    return REF_RE.findall(text)
+
+
+@pytest.fixture(scope="module")
+def pages():
+    """Comment-free, because most assertions here are structural.
+    The leak checks below deliberately re-read the raw file instead."""
+    return {name: _markup(name) for name in PAGES}
+
+
+# --- A. the tree is there at all --------------------------------------------
+
+def test_every_page_exists():
+    """Not vacuous: without this, a missing page makes the rest of this module
+    silently assert nothing at all."""
+    for name in PAGES:
+        assert (SITE / name).is_file(), f"{name} is missing from {SITE}"
+
+
+def test_the_placeholder_is_gone():
+    """The one-pager this replaced was scaffolding with REPLACE-ME copy in it.
+    Shipping that to the internet is the failure this catches."""
+    for name in PAGES:
+        assert "REPLACE-ME" not in _text(name), f"{name} still carries placeholder copy"
+
+
+# --- B. every internal reference resolves -----------------------------------
+
+def test_every_internal_reference_resolves_to_a_file(pages):
+    """THE ONE THAT CATCHES A RENAMED SCREENSHOT.
+
+    A broken href is invisible until a visitor clicks it and a broken <img> is
+    invisible until one scrolls to it, so neither shows up in any other check
+    here -- and by then it is on the public internet.
+    """
+    for name, text in pages.items():
+        for ref in _refs(text):
+            if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
+                continue
+            target = ref.split("#", 1)[0].split("?", 1)[0]
+            assert (SITE / target).is_file(), f"{name} references missing {target}"
+
+
+def test_the_stylesheets_own_urls_resolve():
+    """The @font-face faces are reached from CSS, not from any page, so the
+    check above cannot see them -- and a missing font degrades to system-ui,
+    which looks *almost* right and so goes unnoticed."""
+    for sheet in ("assets/site.css", "assets/nocturne.css"):
+        for ref in CSS_URL_RE.findall(_css(sheet)):
+            if ref.startswith(("http://", "https://", "data:")):
+                continue
+            assert (SITE / "assets" / ref).is_file(), f"{sheet} references missing {ref}"
+
+
+def test_every_anchor_target_exists(pages):
+    """An in-page link to a section that was renamed scrolls nowhere."""
+    for name, text in pages.items():
+        ids = set(re.findall(r'\bid="([^"]+)"', text))
+        for ref in _refs(text):
+            if ref.startswith("#") and len(ref) > 1:
+                assert ref[1:] in ids, f"{name} links to #{ref[1:]}, which has no element"
+
+
+# --- C. the gallery and its images agree, in BOTH directions ----------------
+
+def test_the_gallery_references_every_shot_on_disk():
+    """A shot on disk that no page references is dead weight -- published to
+    the internet, downloaded by nobody, and invisible in review. This is the
+    direction a link-checker never covers."""
+    on_disk = {p.name for p in (SITE / "assets" / "shots").iterdir() if p.is_file()}
+    referenced = {r.rsplit("/", 1)[-1] for r in _refs(_markup("gallery.html"))
+                  if "assets/shots/" in r}
+    assert on_disk == referenced, (
+        f"orphaned on disk: {sorted(on_disk - referenced)}; "
+        f"referenced but absent: {sorted(referenced - on_disk)}")
+
+
+def test_the_rail_and_the_panels_are_the_same_length():
+    """gallery.js pairs them by index and bails out if they disagree, so a
+    mismatch does not throw -- the gallery just silently stops switching."""
+    text = _markup("gallery.html")
+    rails = re.findall(r'id="(rail-\d+)"', text)
+    panels = re.findall(r'id="(screen-\d+)"', text)
+    assert len(rails) == len(panels) == 16, f"{len(rails)} rail rows, {len(panels)} panels"
+    for rail, panel in zip(rails, panels):
+        assert rail.split("-")[1] == panel.split("-")[1]
+
+
+def test_every_rail_row_controls_a_panel_that_exists():
+    text = _markup("gallery.html")
+    ids = set(re.findall(r'\bid="([^"]+)"', text))
+    for controls in re.findall(r'aria-controls="([^"]+)"', text):
+        assert controls in ids, f"a rail row controls {controls}, which does not exist"
+
+
+def test_exactly_one_panel_and_one_shot_start_active():
+    """A second `is-active` panel would show two screens at once."""
+    text = _markup("gallery.html")
+    panels = re.findall(r'<section class="ns-screen[^"]*"[^>]*>', text)
+    assert len(panels) == 16
+    active = [p for p in panels if "is-active" in p]
+    assert len(active) == 1, f"{len(active)} panels start active, expected 1"
+
+    # Each multi-section screen opens on its own first shot.
+    for block in re.split(r'(?=<section class="ns-screen)', text)[1:]:
+        shots = re.findall(r'<figure class="ns-shot[^"]*"', block)
+        act = [s for s in shots if "is-active" in s]
+        assert len(act) == 1, f"a screen has {len(act)} active shots, expected 1"
+
+
+def test_no_panel_or_shot_uses_the_hidden_ATTRIBUTE():
+    """THE NO-JS FALLBACK LIVES OR DIES HERE, and it died once already.
+
+    `hidden` is native HTML: the browser's OWN stylesheet carries
+    ``[hidden] { display: none }``. An earlier build marked the inactive panels
+    with it and wrote ``.js .ns-screen[hidden] { display: none }``, believing the
+    hiding was opt-in behind the `.js` hook. It was not -- that selector was pure
+    decoration and the UA rule did the work, so a visitor with scripting off saw
+    ONE screen and no way to reach the other fifteen. The whole reason these
+    pages were rebuilt instead of copied from the design's bundle was that the
+    bundle needed JavaScript to show anything.
+
+    Nothing in the suite caught it: the content really was all in the source, so
+    every other check here passed. It took loading the page with the scripts
+    stripped. This test is the cheap standing version of that.
+
+    WARNING: this test's FIRST draft could not fail either. A shell-escaping
+    slip put a literal backspace byte where each ``\b`` belonged, so the
+    pattern read ``<BS>hidden<BS>`` and matched nothing -- a guard against a
+    silent bug that was itself silently broken. It was caught only by putting
+    the bug back and watching the suite stay green. Do that after editing this.
+    """
+    markup = _markup("gallery.html")
+    for tag in re.findall(r"<(?:section|figure)\b[^>]*>", markup):
+        if "ns-screen" in tag or "ns-shot" in tag:
+            assert not re.search(r"\bhidden\b", tag), (
+                f"a gallery element uses the hidden ATTRIBUTE, which hides it "
+                f"from scripting-off visitors too -- use `is-active`: {tag}")
+
+
+def test_the_visibility_rules_are_scoped_to_the_js_hook():
+    """The other half of the same invariant. If a rule that hides a panel is not
+    under `.js`, it applies to everyone -- including the fallback."""
+    css = _css("assets/site.css")
+    hiding = re.findall(r"([^{}]*\.ns-(?:screen|shot)[^{}]*)\{([^}]*)\}", css)
+    for selector, body in hiding:
+        if "display: none" in body:
+            assert ".js" in selector, (
+                f"`{selector.strip()}` hides a gallery element for everyone, "
+                f"including visitors with no JavaScript")
+
+
+# --- D. the site never points at the app ------------------------------------
+
+def test_no_page_names_the_app_host():
+    """Noise reduction rather than a security control -- the subdomain is in
+    Certificate Transparency regardless -- but the public face should not point
+    at the door. The Caddy half of this is
+    test_the_app_host_is_not_advertised_by_the_public_block.
+
+    Reads the RAW file, comments included: a hostname sitting in a comment is
+    served to the internet exactly like one in an href."""
+    for name in PAGES:
+        text = _text(name)
+        assert repo_paths.APP_HOST not in text, f"{name} names {repo_paths.APP_HOST}"
+
+
+def test_no_page_names_a_loopback_address_or_the_app_port():
+    """Raw text again, for the reason above."""
+    for name in PAGES:
+        text = _text(name)
+        assert "127.0.0.1" not in text, f"{name} names a loopback address"
+        assert "localhost" not in text, f"{name} names localhost"
+        assert str(repo_paths.NICEGUI_PORT) not in text, f"{name} names the app port"
+
+
+# --- E. nothing off-origin --------------------------------------------------
+
+def test_no_page_reaches_an_external_origin(pages):
+    """Inter is self-hosted so this site fetches nothing from anyone. An
+    outbound LINK a visitor chooses to click is a different thing from a
+    resource the page loads on their behalf, and only the latter is banned."""
+    for name, text in pages.items():
+        for ref in _refs(text):
+            if not ref.startswith(("http://", "https://")):
+                continue
+            if ref.startswith(ALLOWED_OUTBOUND):
+                continue
+            assert ref.startswith(ALLOWED_ORIGINS or ("\0",)), (
+                f"{name} loads or links {ref}, which is not an allowed origin")
+
+
+def test_no_stylesheet_imports_a_remote_font():
+    """The design system's sheet shipped with its own Google Fonts @import.
+    Removing it is what makes the site call nobody; this is what keeps it
+    removed when the sheet is next refreshed from the design bundle."""
+    for sheet in ("assets/site.css", "assets/nocturne.css"):
+        live = _css(sheet)
+        assert "@import" not in live, f"{sheet} has an @import, which may be remote"
+        for host in ("googleapis", "gstatic"):
+            assert host not in live, f"{sheet} reaches {host}"
+            # A commented-out URL is one uncomment away from being live again,
+            # so it may only appear alongside a note saying it was REMOVED.
+            if host in _text(sheet):
+                assert "REMOVED" in _text(sheet), (
+                    f"{sheet} mentions {host} without recording that it was removed")
+
+
+def test_the_fonts_are_actually_present_and_are_woff2():
+    """Self-hosting is only self-hosting if the files shipped. A woff2 whose
+    bytes are an HTML error page renders as a silent fallback to system-ui."""
+    fonts = sorted((SITE / "assets").glob("*.woff2"))
+    assert fonts, "no self-hosted fonts, so the pages fall back to system-ui"
+    for f in fonts:
+        assert f.read_bytes()[:4] == b"wOF2", f"{f.name} is not a woff2 file"
+
+
+def test_outbound_links_are_safe(pages):
+    """A target=_blank without noopener hands the opened tab a handle on this
+    one. Both community links open in a new tab."""
+    for name, text in pages.items():
+        for tag in re.findall(r"<a\b[^>]*>", text):
+            if 'target="_blank"' in tag:
+                assert "noopener" in tag, f"{name} has a target=_blank without noopener"
+
+
+# --- F. the pages are real HTML ---------------------------------------------
+
+def test_each_page_carries_its_own_content_without_scripting(pages):
+    """The design's bundled build rendered a BLANK PAGE with JavaScript off --
+    a ~700 KB runtime and no server-rendered markup. Rebuilding the pages was
+    the whole point; this is the assertion that says so."""
+    for name, text in pages.items():
+        assert "<h1" in text or "<h2" in text, f"{name} has no heading in its source"
+        assert "<nav" in text, f"{name} has no navigation in its source"
+
+
+def test_the_gallery_has_all_sixteen_screen_titles_in_its_source():
+    """With scripting off the panels stack; the text must therefore be readable
+    without running anything."""
+    text = _markup("gallery.html")
+    assert len(re.findall(r"<h2>", text)) == 16
+    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator", "Daily Briefings"):
+        assert f"<h2>{title}</h2>" in text, f"{title} is not in the gallery source"
+
+
+def test_no_page_carries_a_form_or_an_input(pages):
+    """This tree is a file server. There is nowhere to POST, so a form could
+    only lie about what it does with what it collects -- which is why the
+    design's email capture was removed rather than pointed somewhere."""
+    for name, text in pages.items():
+        assert "<form" not in text, f"{name} has a form and no backend to receive it"
+        assert "<input" not in text, f"{name} has an input and no backend to receive it"
+
+
+def test_every_image_declares_its_size(pages):
+    """Without width/height the page reflows as each screenshot arrives."""
+    for name, text in pages.items():
+        for tag in re.findall(r"<img\b[^>]*>", text):
+            assert "width=" in tag and "height=" in tag, f"{name} has an unsized image: {tag[:70]}"
+            assert "alt=" in tag, f"{name} has an image with no alt text: {tag[:70]}"
