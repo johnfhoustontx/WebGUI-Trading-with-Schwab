@@ -66,8 +66,15 @@ TILE_WIDTH, TILE_HEIGHT = 640, 400
 # How long Chrome is told to let the page settle before it shoots. These screens
 # paint from Redis on a watcher tick -- a screenshot taken at load is a grid of
 # skeletons, which reads as a rendering bug and is a timing one.
-# --virtual-time-budget makes the browser's own clock run fast and stops when the
-# budget is spent, so this is a CEILING on wall time rather than a sleep.
+#
+# ⚠ VIRTUAL TIME IS NOT WALL TIME, and that is this flag's known limit. Chrome
+# advances its own clock as fast as the page allows, pausing for pending
+# NETWORK fetches -- so it reliably waits for the document and its assets, and
+# does NOT reliably wait for a value that arrives later over the page's
+# WebSocket. If captures come back showing skeletons, raising this number is
+# the cheap thing to try and is not guaranteed to fix it; the real fix is a
+# CDP-driven capture that waits on a selector, which is a puppeteer/playwright
+# dependency this box does not have and does not need for anything else.
 SETTLE_MS = 8000
 
 # Wall-clock ceiling per screen, in case Chrome hangs instead of exiting. Fourteen
@@ -136,9 +143,11 @@ def _chrome_argv(chrome, url, png, profile):
     """The command line, split out so a test can read it without running it."""
     return [
         chrome,
-        # Plain --headless, not --headless=new: Chrome >= 112 already means the
-        # new one by it, and the packaged chromium builds that do not understand
-        # the suffix would refuse to start with no useful message.
+        # Plain --headless, not --headless=new. Chrome 132 REMOVED the old
+        # headless mode, so on anything current the plain flag already IS the
+        # new one -- while an older packaged chromium understands only the plain
+        # form and refuses to start on the suffix, with a message that names
+        # neither the flag nor the reason.
         "--headless",
         "--disable-gpu",
         # Otherwise the shot carries a scrollbar down its right edge.
