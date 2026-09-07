@@ -1061,6 +1061,29 @@ if __name__ in {"__main__", "__mp_main__"}:
 variable makes all fourteen routes render the *last* screen — a bug that would
 look like "the site works" until you clicked a second tile.
 
+**⚠ NEVER call `main`'s three `sync_*` helpers from here, and do not grow a copy
+of them "for symmetry"** (found while building Task 4). `sync_ticker_setting`,
+`sync_captured_autoclose_setting` and `sync_manual_paper_lifecycle_setting`
+(`main.py:125-176`) look like harmless readers of `app_settings.get()`, and in
+`main` they are. But each one then does `bus_client.request(...)` — they are
+**cross-process writers to Tier-2 services**.
+
+Against a *frozen* store they would read the PINNED value and re-assert it to
+the shared services, overriding what the user configured in their own app.
+Concretely: `ticker_enabled` defaults `True`, so a live process calling
+`sync_ticker_setting()` would enqueue `enable_summary` to `market_svc` and
+**re-enable the ~20-minute paid Claude verdict the user may have deliberately
+switched off**. `captured_autoclose_enabled` defaults `True` too, and would
+re-arm auto-close on the paper book.
+
+This is latent rather than live only because all three are registered via
+`app.on_startup(...)` inside `main.py`'s `__main__` guard, so importing `main`
+does not arm them — and this process does not import `main` at all. The failure
+would be silent and would cost money, which is exactly the class this feature's
+read-only layers exist to prevent. `bus_client.set_read_only(True)` would in
+fact refuse them, but do not rely on that: the refusal is the backstop, not the
+design.
+
 Confirm the shell wrapper actually suits these pages; if `theme.PAGE` fights a
 page that supplies its own wrapper, drop the column and render bare. Verify in
 the browser at Task 12, not by reasoning.
