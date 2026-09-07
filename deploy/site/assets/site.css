@@ -474,7 +474,15 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
   border: 1px solid transparent;
   color: color-mix(in srgb, var(--color-text) 76%, transparent);
 }
-.ns-rail-row:hover { border-color: var(--color-neutral-700); }
+/* The rows are anchors (so they navigate without JavaScript), which means they
+ * inherit `a`'s accent colour and its hover underline. Both are wrong here —
+ * a row's state is carried by its tint and border, not by link styling. */
+.ns-rail-row,
+.ns-rail-row:hover { text-decoration: none; }
+.ns-rail-row:hover {
+  border-color: var(--color-neutral-700);
+  color: var(--color-text);
+}
 .ns-rail-row[aria-current="true"] {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   border-color: var(--color-accent-700);
@@ -565,6 +573,66 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 /* Same rule, same reason, for the sub-tab sections. */
 .js .ns-shot { display: none; }
 .js .ns-shot.is-active { display: block; }
+
+/* ─── 7b. The rail becomes a horizontal chip row on narrow screens ───────
+ *
+ * A 16-item vertical list is fine as a sidebar and wrong as a preamble: below
+ * the stacking width it put 16 screen names between the visitor and the first
+ * screenshot. As chips it reads as what it is — a picker — and costs one row.
+ *
+ * ⚠ THE BREAKPOINT ALSO FORCES THE STACK, and that is the point of stating it
+ * this way. Left to itself `.ns-gallery` wraps when 260px + 620px + the gap no
+ * longer fit, which works out at ~967px — a number that falls out of two
+ * `clamp()`s and moves the moment either is retuned. A chip row keyed to a
+ * DIFFERENT number than the wrap would leave a band of widths showing chips in
+ * a 340px sidebar, or a vertical list across the full width. Declaring
+ * `flex-direction: column` here makes the two the same number by construction.
+ */
+@media (max-width: 1000px) {
+  .ns-gallery { flex-direction: column; }
+
+  /* ⚠ `flex-basis` sizes the MAIN axis, so turning the container to a column
+   * turns `flex: 1 1 260px` and `flex: 4 1 620px` from widths into HEIGHTS.
+   * Measured before this line existed: the rail was 260px tall around 77px of
+   * chips and the viewer 620px around 310px of content — ~490px of dead space
+   * that looked like a spacing bug and was a flex-axis one. Resetting the basis
+   * to auto lets both size to their content, which is what a stacked column
+   * wants anyway. */
+  .ns-rail, .ns-viewer { flex: 0 0 auto; }
+
+  .ns-rail { max-width: none; width: 100%; }
+  /* Sticky belongs to a sidebar. A strip pinned under an already-sticky nav of
+   * its own variable height is a worse problem than scrolling back up. */
+  .js .ns-rail { position: static; }
+
+  .ns-rail-list {
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    /* Room for the scrollbar so it never sits on top of a chip's border. */
+    padding: 0 0 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+  .js .ns-rail-list { max-height: none; overflow-y: hidden; }
+
+  .ns-rail-row {
+    width: auto;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    /* A chip, not a row: pill radius, and a visible edge at rest — the sidebar
+     * version can afford a transparent border because the list has one line of
+     * text per row to align to, and a strip has nothing. */
+    border-radius: 999px;
+    border-color: var(--color-neutral-800);
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+  .ns-rail-row .ns-rail-title { flex: none; }
+  .ns-rail-row .ns-rail-count { padding-top: 0; }
+}
 
 .ns-pager {
   display: flex;

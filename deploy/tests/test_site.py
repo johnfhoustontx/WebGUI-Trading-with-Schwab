@@ -224,6 +224,60 @@ def test_the_visibility_rules_are_scoped_to_the_js_hook():
                 f"including visitors with no JavaScript")
 
 
+def test_the_chip_row_breakpoint_is_the_same_number_in_the_css_and_the_js():
+    """The rail is a sidebar above 1000px and a horizontal chip strip below it.
+    CSS decides the layout; ``gallery.js`` reads the same width through
+    ``matchMedia`` to set ``aria-orientation``, because a strip announced as
+    vertical is a lie told only to the people who cannot see it.
+
+    Two copies of one number. If they drift, nothing breaks visibly and nothing
+    else in this suite notices -- the layout is simply described wrongly to
+    assistive technology across a band of widths.
+    """
+    css_widths = set(re.findall(r"@media\s*\(max-width:\s*(\d+)px\)", _css("assets/site.css")))
+    js_widths = set(re.findall(r"matchMedia\(\s*[\"']\(max-width:\s*(\d+)px\)",
+                               _text("assets/gallery.js")))
+    assert js_widths, "gallery.js no longer reads a breakpoint; drop this test with it"
+    assert js_widths <= css_widths, (
+        f"gallery.js watches {sorted(js_widths)} but site.css defines "
+        f"{sorted(css_widths)} -- the orientation announced to screen readers "
+        f"would disagree with the layout")
+
+
+def test_the_stack_and_the_chip_row_switch_together():
+    """The chip styles and the column stack MUST live in one media query.
+
+    Left to itself the gallery wraps when the rail and viewer stop fitting,
+    which falls out of two clamp() values at about 967px. A chip row keyed to a
+    different number would leave a band of widths rendering chips inside a 340px
+    sidebar, or a vertical list stretched across the full width. Declaring the
+    stack in the same block makes them the same number by construction.
+    """
+    css = _css("assets/site.css")
+    blocks = re.findall(r"@media\s*\(max-width:\s*(\d+)px\)\s*\{(.*?)\n\}", css, re.S)
+    owning = [(w, b) for w, b in blocks if "flex-direction: row" in b and ".ns-rail-list" in b]
+    assert owning, "no media query turns the rail list into a row"
+    for width, body in owning:
+        assert "flex-direction: column" in body and ".ns-gallery" in body, (
+            f"the {width}px block makes the rail horizontal without also forcing "
+            f".ns-gallery to stack, so the two can disagree")
+
+
+def test_the_stacked_rail_resets_its_flex_basis():
+    """`flex-basis` sizes the MAIN axis, so a column container reads
+    ``flex: 1 1 260px`` as a HEIGHT. Measured before the reset existed: a 260px
+    rail around 77px of chips and a 620px viewer around 310px of content, ~490px
+    of dead space that reads as a spacing bug and is a flex-axis one."""
+    css = _css("assets/site.css")
+    blocks = re.findall(r"@media\s*\(max-width:\s*\d+px\)\s*\{(.*?)\n\}", css, re.S)
+    stacking = [b for b in blocks if ".ns-gallery { flex-direction: column; }" in b]
+    assert stacking, "nothing forces the gallery to stack"
+    for body in stacking:
+        assert re.search(r"\.ns-rail,\s*\.ns-viewer\s*\{[^}]*flex:\s*0 0 auto", body), (
+            "the stacked gallery does not reset the rail/viewer flex basis, so "
+            "their 260px/620px bases become heights")
+
+
 # --- D. the site never points at the app ------------------------------------
 
 def test_no_page_names_the_app_host():

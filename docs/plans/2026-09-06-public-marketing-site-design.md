@@ -134,10 +134,49 @@ not merely awkward — they were **invisible**, taking the page's main call to
 action with them. One media query fixes all three pages by giving `.ns-spacer` a
 full-width basis, since it already sits at exactly the right break point on each.
 
-Known and accepted: below ~920px the gallery's rail stacks above the viewer, so a
-phone scrolls past 16 screen names before the first screenshot. That is the
-design's own flex-wrap behaviour and it reads as a table of contents rather than
-as breakage, so it was left alone.
+### 3d. The gallery rail is a horizontal chip row below 1000px
+
+A 16-item vertical list is right as a sidebar and wrong as a preamble: stacked,
+it put every screen name between the visitor and the first screenshot. Below
+1000px the rail becomes a horizontally scrolling row of pill chips.
+
+**The breakpoint also forces the stack, and that is the point of writing it that
+way.** Left alone, `.ns-gallery` wraps when 260px + 620px + the gap stop
+fitting — about 967px, a number that falls out of two `clamp()`s and moves the
+moment either is retuned. A chip row keyed to a *different* number would leave a
+band of widths rendering chips inside a 340px sidebar, or a vertical list
+stretched across the full width. Declaring `flex-direction: column` in the same
+media query makes the two the same number by construction. Verified at the
+boundary: 1001px is a sidebar, 1000px is chips, with no mixed state.
+
+⚠ **`flex-basis` sizes the MAIN axis**, so turning the container to a column
+turned `flex: 1 1 260px` and `flex: 4 1 620px` from widths into *heights* — a
+260px rail around 77px of chips and a 620px viewer around 310px of content,
+~490px of dead space that looks like a spacing bug and is a flex-axis one. Both
+bases are reset to `auto` in the same block.
+
+Two things follow the orientation rather than assuming one:
+
+* **Arrow keys accept both axes.** Which pair a keyboard user reaches for
+  depends on what they can see, so binding only Up/Down would make the tablist
+  inert in the layout that was not chosen.
+* **`aria-orientation` is set from `matchMedia`**, because a strip announced as
+  vertical is a lie told only to the people who cannot see it. That duplicates
+  the breakpoint into `gallery.js`, which
+  `test_the_chip_row_breakpoint_is_the_same_number_in_the_css_and_the_js` pins —
+  drift there breaks nothing visible and nothing else would notice.
+
+`scrollIntoView` gained `inline: "nearest"`, which is what keeps the pager
+honest on the strip: without it "Next screen" could advance to a screen whose
+chip sits off the right edge, with nothing on screen to say the selection moved.
+
+**The rail rows became anchors** (`href="#screen-N"`) rather than buttons in the
+same pass. With scripting off the panels stack and those ids are real, so the
+chips work as a table of contents — which is why they stay visible in that case
+while the pager and the sub-tabs hide themselves. A visible dead control beside
+a hidden dead one is the tell that nobody loaded the page. `gallery.js` calls
+`preventDefault`, so the scripted path is unchanged; the rows also need
+`text-decoration: none` and their own colour, since they now inherit `a`'s.
 
 ### 4. Gallery is the primary nav action, not Live Screens
 

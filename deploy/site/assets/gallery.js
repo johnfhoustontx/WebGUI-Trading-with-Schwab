@@ -68,25 +68,54 @@
       history.replaceState(null, "", "#" + panels[i].id);
     }
     if (opts && opts.scrollRail && rows[i].scrollIntoView) {
-      rows[i].scrollIntoView({ block: "nearest" });
+      /* `inline` is what carries this on the narrow layout, where the rail is a
+       * horizontal chip strip: without it the pager could walk to a screen
+       * whose chip sits off the right edge, with nothing on screen to say the
+       * selection had moved. `block` does the same job for the sidebar. Both
+       * are "nearest", so neither axis scrolls when it does not need to. */
+      rows[i].scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
 
   rows.forEach(function (row, i) {
-    row.addEventListener("click", function () {
+    row.addEventListener("click", function (e) {
+      /* The rows are real anchors to #screen-N, so they work as a table of
+       * contents with scripting off. We handle the click here, so stop the
+       * browser ALSO jumping to the panel. */
+      e.preventDefault();
       selectScreen(i, { push: true });
     });
   });
 
-  /* Arrow keys move through the rail, which is what a role="tablist" promises. */
+  /* Arrow keys move through the rail, which is what a role="tablist" promises.
+   *
+   * Both axes are accepted, always. The rail is a vertical sidebar on a wide
+   * screen and a horizontal chip strip on a narrow one, so which pair a keyboard
+   * user reaches for depends on what they can see; binding only one pair would
+   * make the tablist silently inert in whichever layout was not chosen. */
+  var STEPS = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
   document.querySelectorAll(".ns-rail-list").forEach(function (list) {
     list.addEventListener("keydown", function (e) {
-      var step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      var step = STEPS[e.key];
       if (!step) return;
       e.preventDefault();
       selectScreen(current + step, { push: true, focus: true, scrollRail: true });
     });
   });
+
+  /* Tell assistive technology which way the rail actually runs. The markup
+   * declares one orientation and CSS changes the other at 1000px, so without
+   * this a screen-reader user on a phone is told the strip is vertical. The
+   * media query is duplicated from site.css, which is a real cost -- change
+   * both together, or the announcement and the layout disagree. */
+  var narrow = window.matchMedia("(max-width: 1000px)");
+  function syncOrientation(mq) {
+    document.querySelectorAll(".ns-rail-list").forEach(function (list) {
+      list.setAttribute("aria-orientation", mq.matches ? "horizontal" : "vertical");
+    });
+  }
+  syncOrientation(narrow);
+  if (narrow.addEventListener) narrow.addEventListener("change", syncOrientation);
 
   panels.forEach(function (panel) {
     tabsOf(panel).forEach(function (tab, j) {
