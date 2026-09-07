@@ -1789,6 +1789,54 @@ def _resolve_view(view):
     return view if view in _VIEW_ORDER else "GEX"
 
 
+def shows_view_picker(view) -> bool:
+    """Whether to BUILD the view-picker subtabs.
+
+    A pinned view means a public live screen, and those screens show one view and
+    say so in their own title — "Premium Divergence", not "Dealer Positioning
+    parked on Flow". A picker there would offer views the service deliberately
+    publishes no history for (see options_svc ``PUBLISHED_GAMMA_HISTORY_VIEWS``),
+    so clicking one would draw an empty heatmap.
+
+    Gated on the pin rather than on the slot: the live shell has no
+    ``subtab_slot`` either, but "the slot is absent" means "mount it inline", not
+    "do not build it" — the page already falls back inline for exactly that."""
+    return view is None
+
+
+def may_enqueue_refresh(symbol, view) -> bool:
+    """Whether this render may put a ``gamma_refresh`` on ``cmd:options``.
+
+    EITHER pin means a public screen, so neither may: on a public origin that
+    enqueue lets any anonymous visitor drive a Schwab chain fetch + a full engine
+    pass, once per visitor per 120 s. A pinned SYMBOL with no pinned view is
+    public too — it would refresh a symbol the visitor cannot even change.
+
+    Gated on the PIN, not on a read-only bus flag. The live process installs a
+    read-only bus client, which is the backstop that makes an enqueue impossible;
+    this gate is the design — the public page has no reason to ask, and relying
+    on the backstop would mean a raised exception every 120 s instead.
+
+    The screens stay current regardless: options_svc republishes the per-symbol
+    keys on its own collection cadence, and the page's version-poll repaints."""
+    return symbol is None and view is None
+
+
+class _PinnedView:
+    """Stand-in for the view picker on a screen whose view is PINNED.
+
+    The picker is not built there, but ``view_toggle.value`` is read from a dozen
+    places in ``render`` — every one of them asking "which view am I drawing?",
+    which is exactly what this answers. ``on_value_change`` can never fire,
+    because there is no control to change."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def on_value_change(self, _handler):
+        return None
+
+
 def chart_kind(fig):
     """Identity of a figure for the single full-width chart element.
 
@@ -1960,7 +2008,6 @@ def render(symbol: str | None = None, view: str | None = None):
     # shell mounts beneath the strip); falls back inline if the slot is absent.
     # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
     import shell as _shell
-    _slot = _shell.subtab_slot()
 
     _pinned_view = _resolve_view(view)
     # WHERE this page reads from. Bare = the private page's shared slot, exactly
@@ -1968,6 +2015,9 @@ def render(symbol: str | None = None, view: str | None = None):
     # holds whatever the app last looked at (see snapshot_view). One renderer, two
     # data sources — so the drift risk sits in the data, not in the drawing.
     _snap_view = snapshot_view(symbol)
+    # Whether this render may ask the service to fetch. Resolved once, here, so
+    # every enqueue site reads the same answer — see may_enqueue_refresh.
+    _may_refresh = may_enqueue_refresh(symbol, view)
 
     def _build_view_tabs():
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
@@ -1981,16 +2031,25 @@ def render(symbol: str | None = None, view: str | None = None):
                         ui.tooltip(_h).props("delay=350 max-width=340px")
         return tabs
 
-    if _slot is not None:
-        with _slot:
+    if shows_view_picker(view):
+        _slot = _shell.subtab_slot()
+        if _slot is not None:
+            with _slot:
+                view_toggle = _build_view_tabs()
+        else:
             view_toggle = _build_view_tabs()
+        # "… › Dealer Positioning › Gamma". Needs a labeller: the tab VALUES are
+        # the engine keys (GEX/DEX), while the strip shows GAMMA/DELTA — the
+        # header should read what the tab reads, in sentence case rather than the
+        # strip's caps.
+        _shell.bind_breadcrumb_leaf(
+            view_toggle, lambda v: _view_label(_shell._view_name(v)).title())
     else:
-        view_toggle = _build_view_tabs()
-    # "… › Dealer Positioning › Gamma". Needs a labeller: the tab VALUES are the
-    # engine keys (GEX/DEX), while the strip shows GAMMA/DELTA — the header should
-    # read what the tab reads, in sentence case rather than the strip's caps.
-    _shell.bind_breadcrumb_leaf(
-        view_toggle, lambda v: _view_label(_shell._view_name(v)).title())
+        # A pinned (public) screen shows exactly its one view, so there is no
+        # picker to build — and no tabs element for the breadcrumb to bind to
+        # (the live shell has no breadcrumb either). Everything downstream reads
+        # ``view_toggle.value``, which is the pinned view and never moves.
+        view_toggle = _PinnedView(_pinned_view)
 
     with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
@@ -2135,7 +2194,12 @@ def render(symbol: str | None = None, view: str | None = None):
 
     # Three independent sources feed the detail strip (collector status, the per-view
     # summary, the refresh countdown); unify them behind one state dict + repaint fn.
-    strip_state = {"status": None, "summary": "", "countdown": state.get("countdown", 120)}
+    # ``countdown`` is the page's OWN next enqueue, so a render that never
+    # enqueues has none to show — status_strip_text drops the part for a non-int
+    # and the collector's own last/next scan times still render.
+    strip_state = {"status": None, "summary": "",
+                   "countdown": state.get("countdown", 120) if _may_refresh
+                   else None}
 
     def _repaint_strip():
         detail_lbl.text = status_strip_text(strip_state["status"], strip_state["summary"],
@@ -2562,6 +2626,11 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard
     def _request_refresh():
+        if not _may_refresh:
+            # A pinned (public) render never enqueues — see may_enqueue_refresh.
+            # The button that reaches here is hidden on such a page too; this is
+            # the belt to that braces, and it also covers the hand-off path.
+            return
         sym = _current_symbol()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
@@ -2594,7 +2663,7 @@ def render(symbol: str | None = None, view: str | None = None):
         state["countdown"] = state.get("countdown", 120) - 1
         if state["countdown"] < 0:
             state["countdown"] = 120
-        strip_state["countdown"] = state["countdown"]
+        strip_state["countdown"] = state["countdown"] if _may_refresh else None
         _repaint_strip()
         if view_toggle.value == "Net Prem":
             # Staleness is a clock function — see _paint_np_status.
@@ -2877,9 +2946,13 @@ def render(symbol: str | None = None, view: str | None = None):
         # the (now hidden) dropdown, so on Net Prem they would act on a symbol
         # the reader can no longer see or change — worse than a dead knob.
         symbol_scoped = view_toggle.value != "Net Prem"
-        for el in (symbol_in, fetch_btn, tracks_sw, spot_style_sel,
+        for el in (symbol_in, tracks_sw, spot_style_sel,
                    explain_btn, analyze_btn, briefings_btn):
             el.set_visibility(symbol_scoped)
+        # Refresh now ENQUEUES a chain fetch, which a pinned (public) render must
+        # not do (see may_enqueue_refresh). Hide it rather than leave a control
+        # that silently does nothing — the same reasoning as the cluster above.
+        fetch_btn.set_visibility(symbol_scoped and _may_refresh)
         # Bar size is meaningless for a line — hide it rather than leave a control
         # that silently does nothing.
         spot_int_sel.set_visibility(
@@ -3050,7 +3123,8 @@ def render(symbol: str | None = None, view: str | None = None):
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views
-    ui.timer(120.0, _auto_refresh)       # enqueue a refresh every 120s
+    if _may_refresh:
+        ui.timer(120.0, _auto_refresh)   # enqueue a refresh every 120s
 
     @guard
     def _install_crosshair():

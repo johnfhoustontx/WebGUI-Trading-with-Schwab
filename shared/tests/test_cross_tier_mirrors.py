@@ -177,6 +177,15 @@ GAMMA_SYMBOLS_SOURCE = "services/options_svc/handlers.py"
 LIVE_SCREENS = "webgui/live_screens.py"
 
 
+def _published_gamma_symbols():
+    """The symbols options_svc publishes a per-symbol Gamma snapshot for.
+
+    They are the KEYS of ``PUBLISHED_GAMMA_HISTORY_VIEWS`` -- one table, whose
+    values say which of each symbol's view histories are worth a key, so a symbol
+    cannot be published without an entry saying why."""
+    return tuple(_const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_HISTORY_VIEWS"))
+
+
 def _gamma_screen_symbols(rel_path):
     """The ``symbol`` pins of every ``Screen`` whose module is ``options.gamma``.
 
@@ -201,10 +210,10 @@ def _gamma_screen_symbols(rel_path):
 def test_the_published_gamma_symbols_are_the_three_the_screens_name():
     """The pin itself, so it is never vacuous while live_screens.py is pending.
 
-    Changing this tuple changes which symbols options_svc pays to publish every
-    minute -- each one is a per-symbol snapshot plus four history keys."""
-    assert _const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_SYMBOLS") == \
-        ("$SPX", "SPY", "QQQ")
+    Changing this table changes which symbols options_svc pays to publish every
+    minute -- each one a per-symbol snapshot, plus a history key for each view
+    the table lists against it."""
+    assert _published_gamma_symbols() == ("$SPX", "SPY", "QQQ")
 
 
 def test_options_svc_publishes_exactly_the_symbols_the_live_screens_pin():
@@ -217,8 +226,7 @@ def test_options_svc_publishes_exactly_the_symbols_the_live_screens_pin():
     screens = _gamma_screen_symbols(LIVE_SCREENS)
     assert len(screens) == len(set(screens)), (
         f"two live screens pin the same gamma symbol: {screens}")
-    assert set(screens) == set(_const(GAMMA_SYMBOLS_SOURCE,
-                                      "PUBLISHED_GAMMA_SYMBOLS")), (
+    assert set(screens) == set(_published_gamma_symbols()), (
         "a live screen names a gamma symbol options_svc does not publish (it "
         "would poll a key nobody writes and stay empty), or options_svc pays to "
         "publish a symbol no screen reads.")

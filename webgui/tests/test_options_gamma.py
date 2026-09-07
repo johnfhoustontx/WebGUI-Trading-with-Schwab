@@ -2158,3 +2158,125 @@ def test_render_reads_the_resolved_view_not_the_shared_key_literal():
         "symbol would render whatever the private app last selected")
     assert "snapshot_view(symbol)" in src
     assert "history_key(view, symbol)" in src or "history_key(v, symbol)" in src
+
+
+# ── a PINNED page shows only its pinned view, and drives no fetches ─────────
+# The public live screens render this page with a view pinned. Two consequences,
+# both of which the private page must not feel:
+#   * the view PICKER is not built at all -- the screen is "Premium Divergence",
+#     not "Dealer Positioning parked on Flow", and nothing can be clicked to a
+#     view the service does not publish a history for;
+#   * nothing enqueues ``gamma_refresh``. On a public origin that would let every
+#     anonymous visitor drive Schwab chain fetches, and once the live process
+#     installs a read-only bus client the enqueue would raise every 120 s.
+
+def _rendered(**pins):
+    """Render the page into a throwaway card and return its element tree."""
+    from nicegui import ui
+
+    bus_client.reset()
+    with ui.card() as card:
+        gamma.render(**pins)
+    return list(card.descendants())
+
+
+def _view_tab_names(kids):
+    """The view-picker's tab names among everything rendered.
+
+    The Net Prem GROUP tabs share the .compact-subtabs class, so the picker is
+    identified by the views it offers, not by its styling."""
+    names = {e.props.get("name") for e in kids if type(e).__name__ == "Tab"}
+    return names & set(gamma._VIEW_ORDER)
+
+
+def _timer_callbacks(kids):
+    return {getattr(t.callback, "__name__", "") for t in kids
+            if type(t).__name__ == "Timer"}
+
+
+def test_the_bare_page_still_builds_its_view_picker():
+    """The private page is untouched: all seven views, still clickable."""
+    assert _view_tab_names(_rendered()) == set(gamma._VIEW_ORDER)
+
+
+def test_a_pinned_view_builds_no_view_picker():
+    """Not merely hidden and not merely absent because the shell slot is None --
+    the tabs must not be BUILT, so there is no control at all."""
+    assert _view_tab_names(_rendered(view="Flow", symbol="SPY")) == set()
+    assert _view_tab_names(_rendered(view="Net Prem")) == set()
+
+
+def test_a_pinned_page_still_draws_the_view_it_was_pinned_to():
+    """Hiding the picker must not take the view with it."""
+    kids = _rendered(view="Net Prem")
+    # The Net Prem group tabs live inside the block that view alone shows.
+    assert {e.props.get("name") for e in kids if type(e).__name__ == "Tab"} \
+        >= {"indices"}
+
+
+def test_the_bare_page_still_schedules_its_120s_refresh():
+    assert "_auto_refresh" in _timer_callbacks(_rendered())
+
+
+def test_a_pinned_page_schedules_no_refresh_enqueue():
+    """Every anonymous visitor would otherwise drive a Schwab chain fetch every
+    120 s -- and the read-only bus client the live process installs would raise
+    on each one."""
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(view="Flow",
+                                                             symbol="SPY"))
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(symbol="$SPX"))
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(view="GEX"))
+
+
+def test_the_pinned_page_keeps_the_timers_that_only_READ():
+    """The gate is on ENQUEUEING, not on staying current: the service refreshes
+    the published keys on its own cadence and the page must still repaint."""
+    cbs = _timer_callbacks(_rendered(view="Flow", symbol="SPY"))
+    assert {"_poll", "_tick", "_initial_load"} <= cbs
+
+
+def test_the_picker_gate_is_the_view_pin_and_nothing_else():
+    assert gamma.shows_view_picker(None) is True
+    for pinned in ("GEX", "Flow", "Net Prem", "nonsense"):
+        assert gamma.shows_view_picker(pinned) is False
+
+
+def test_only_a_wholly_unpinned_render_may_enqueue_a_refresh():
+    """Either pin means a public screen. A pinned SYMBOL with no pinned view is
+    still public -- it would enqueue for a symbol the visitor cannot change."""
+    assert gamma.may_enqueue_refresh(None, None) is True
+    assert gamma.may_enqueue_refresh("SPY", None) is False
+    assert gamma.may_enqueue_refresh(None, "Flow") is False
+    assert gamma.may_enqueue_refresh("SPY", "Flow") is False
+
+
+def test_the_breadcrumb_binding_goes_with_the_picker(monkeypatch):
+    """bind_breadcrumb_leaf takes the tabs element as its subject, so it cannot
+    outlive them -- and the live shell has no breadcrumb to bind anyway."""
+    import shell as _shell
+
+    bound = []
+    monkeypatch.setattr(_shell, "bind_breadcrumb_leaf",
+                        lambda el, fn=None: bound.append(el))
+
+    _rendered()
+    assert len(bound) == 1, "the private page lost its breadcrumb leaf"
+    bound.clear()
+
+    _rendered(view="Flow", symbol="SPY")
+    assert bound == [], "a pinned page bound a breadcrumb to tabs it never built"
+
+
+def test_a_pinned_page_counts_down_to_nothing_it_will_do():
+    """The strip's countdown is the page's OWN next enqueue. A render that never
+    enqueues must not advertise one — the collector's last/next scan times, which
+    are still true, stay."""
+    assert "Next refresh" in gamma.status_strip_text({}, "", 90)
+    assert "Next refresh" not in gamma.status_strip_text({}, "", None)
+
+    def _strip(kids):
+        return [t for t in (str(getattr(e, "text", "")) for e in kids)
+                if "Next refresh" in t]
+
+    assert _strip(_rendered()), "the private page lost its refresh countdown"
+    assert _strip(_rendered(view="Flow", symbol="SPY")) == []

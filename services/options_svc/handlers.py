@@ -268,16 +268,54 @@ def gamma_history_key(view: str) -> str:
 # the app's screens are the source of truth the public ones mirror, never the
 # reverse.
 #
-# ⚠ CROSS-TIER MIRROR. This list is the symbols in webgui/live_screens.py's
-# gamma SCREENS entries, duplicated because `services` may not import `webgui`.
+# ⚠ CROSS-TIER MIRROR. These symbols are the ones webgui/live_screens.py's gamma
+# SCREENS entries name, duplicated because `services` may not import `webgui`.
 # shared/tests/test_cross_tier_mirrors.py pins the pair.
-PUBLISHED_GAMMA_SYMBOLS = ("$SPX", "SPY", "QQQ")
-_PUBLISHED_GAMMA_UPPER = frozenset(s.upper() for s in PUBLISHED_GAMMA_SYMBOLS)
+#
+# The VALUE is which of that symbol's four view histories gets a key of its own,
+# and it is a table rather than a flag because the answer differs per screen and
+# the reason has to survive. A published screen renders exactly its PINNED view —
+# the view picker is not built on a pinned page (see
+# webgui/pages/options/gamma.py's ``shows_view_picker``) — so:
+#
+#   $SPX  pins GEX   → draws the intraday heatmap, which IS the history rows
+#   SPY   pins Flow  → the Flow branch of ``_render_view`` draws from the MAIN
+#   QQQ   pins Flow    payload's ``flow`` + ``prem_ladder`` and returns before it
+#                      ever reads the per-view history cache
+#
+# The histories exist for the screens that DRAW them; a screen that draws none
+# must not pay for one. Measured through this publish path on a close-of-session
+# shape, publishing all four views for all three symbols took the tick's gamma
+# writes to ~4x the private page's own — a multiplication of exactly the cost the
+# 2026-08-20 history split was written to remove, on a store that has already
+# needed a manual ~1 GB VACUUM.
+#
+# ⚠ Un-pinning a public screen's view (rendering the picker on it again) means
+# adding that symbol's views back HERE, or the screen shows an empty heatmap on
+# every view but the one it used to pin — silently, since a missing key reads as
+# "no history yet".
+PUBLISHED_GAMMA_HISTORY_VIEWS = {
+    "$SPX": ("GEX",),
+    "SPY": (),
+    "QQQ": (),
+}
+
+# The published symbols ARE that table's keys — one list, so a symbol cannot be
+# published without an entry saying which of its histories are worth writing.
+PUBLISHED_GAMMA_SYMBOLS = tuple(PUBLISHED_GAMMA_HISTORY_VIEWS)
+_PUBLISHED_GAMMA_BY_UPPER = {s.upper(): frozenset(v)
+                          for s, v in PUBLISHED_GAMMA_HISTORY_VIEWS.items()}
 
 
 def is_published_gamma_symbol(symbol) -> bool:
     """Whether a public live screen reads ``symbol``'s own gamma snapshot."""
-    return str(symbol or "").strip().upper() in _PUBLISHED_GAMMA_UPPER
+    return str(symbol or "").strip().upper() in _PUBLISHED_GAMMA_BY_UPPER
+
+
+def published_gamma_history_views(symbol) -> frozenset:
+    """The views whose history is published for ``symbol`` — often none at all."""
+    return _PUBLISHED_GAMMA_BY_UPPER.get(str(symbol or "").strip().upper(),
+                                      frozenset())
 
 
 def gamma_pub_key(symbol) -> str:
@@ -1228,12 +1266,16 @@ def _gamma_snapshot_or_empty(symbol) -> dict:
     return snap
 
 
-_GAMMA_PRIVATE_TARGET = (CACHE_GAMMA, EVENT_GAMMA, gamma_history_key)
+# A publish target: (main key, event, per-view history key builder, the views
+# whose history it wants). ``None`` for the last means EVERY view — the private
+# page has a picker, so every view it can be switched to must have its rows.
+_GAMMA_PRIVATE_TARGET = (CACHE_GAMMA, EVENT_GAMMA, gamma_history_key, None)
 
 
 def _gamma_pub_target(symbol):
     return (gamma_pub_key(symbol), gamma_pub_event(symbol),
-            lambda view: gamma_pub_history_key(symbol, view))
+            lambda view: gamma_pub_history_key(symbol, view),
+            published_gamma_history_views(symbol))
 
 
 def _gamma_targets(symbol):
@@ -1259,10 +1301,13 @@ def _publish_gamma(bus, snap, symbol, *, targets) -> None:
     leaving the previous symbol's rows in the key would let the page pair them
     with this symbol's bars.
 
-    ``targets`` — the ``(main key, event, per-view history key builder)`` triples
-    this snapshot goes to. It is a LIST rather than a second call per destination
-    because the history rows are POPPED out of the snapshot here: a second call
-    would find them already gone and would publish empty rows over good ones.
+    ``targets`` — the ``(main key, event, per-view history key builder, wanted
+    views)`` tuples this snapshot goes to. It is a LIST rather than a second call
+    per destination because the history rows are POPPED out of the snapshot here:
+    a second call would find them already gone and would publish empty rows over
+    good ones. The pop is UNCONDITIONAL for the same reason it always was — a
+    target that wants no history still must not carry the rows inline, which is
+    the 4.99 MB payload the 2026-08-20 split removed.
     """
     views = snap.get("views")
     rows_by_view = {}
@@ -1271,8 +1316,10 @@ def _publish_gamma(bus, snap, symbol, *, targets) -> None:
             entry = views.get(view)
             rows = entry.pop("history", None) if isinstance(entry, dict) else None
             rows_by_view[view] = rows or []
-    for main_key, event_key, history_key in targets:
+    for main_key, event_key, history_key, wanted in targets:
         for view, rows in rows_by_view.items():
+            if wanted is not None and view not in wanted:
+                continue      # no screen draws it — see PUBLISHED_GAMMA_HISTORY_VIEWS
             bus.cache_set(history_key(view),
                           {"symbol": symbol, "view": view, "rows": rows},
                           skip_unchanged=True)

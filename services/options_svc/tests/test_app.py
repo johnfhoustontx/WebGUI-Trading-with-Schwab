@@ -69,7 +69,7 @@ _BRANCH_HANDLERS = (
     "publish_captured_closed", "publish_captured_performance",
     "refresh_gamma", "publish_gamma_symbols",
     "publish_gex_status", "publish_gamma_briefing_index", "refresh_header",
-    "collect_gex_history", "refresh_gamma_current",
+    "collect_gex_history", "refresh_gamma_current", "refresh_gamma_published",
     "run_driver_manage_and_refresh", "run_captured_manage_and_publish",
     "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",
     "run_action_alert", "run_eod_summary", "run_market_snapshot",
@@ -156,3 +156,41 @@ def test_the_loop_test_leaves_no_branch_work_running():
     assert not missing, (
         f"scheduler.loop can submit {sorted(missing)} but the loop test does "
         f"not stub them — add them to _BRANCH_HANDLERS")
+
+
+def test_startup_seeds_every_published_gamma_symbol(monkeypatch):
+    """The startup one-shot must seed all three PUBLISHED symbols, not just $SPX.
+
+    $SPX has a private page to warm it; SPY and QQQ do not, so on a cold Redis
+    their public screens would read a key nobody has written until the first
+    collection tick — and started outside market hours that is the next trading
+    day. Two extra chain fetches per service restart, one-shot and bounded."""
+    bus = Bus(fake=True)
+    seeded = []
+    for name in _BRANCH_HANDLERS:
+        monkeypatch.setattr(handlers, name, lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(handlers, "autoclose_enabled", lambda *a, **k: False,
+                        raising=False)
+    monkeypatch.setattr(handlers, "rescan", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_gamma",
+                        lambda b, symbol="$SPX": seeded.append(symbol))
+    monkeypatch.setattr(handlers, "refresh_gamma_published",
+                        lambda b, symbol: seeded.append(symbol))
+
+    fixed = datetime(2026, 6, 15, 9, 0, tzinfo=scheduler._CT)
+    monkeypatch.setattr(scheduler, "_market_now", lambda: fixed)
+
+    async def _boom(*a, **k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler.asyncio, "sleep", _boom)
+
+    loop = asyncio.new_event_loop()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            loop.run_until_complete(scheduler.loop(bus))
+    finally:
+        loop.run_until_complete(loop.shutdown_default_executor())
+        loop.close()
+
+    assert seeded == list(handlers.PUBLISHED_GAMMA_SYMBOLS)

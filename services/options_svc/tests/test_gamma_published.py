@@ -185,8 +185,8 @@ def test_every_published_history_key_carries_its_own_symbol(monkeypatch):
 
     handlers.refresh_gamma_current(bus)
 
-    for symbol in handlers.PUBLISHED_GAMMA_SYMBOLS:
-        for view in handlers.GAMMA_HISTORY_VIEWS:
+    for symbol, views in handlers.PUBLISHED_GAMMA_HISTORY_VIEWS.items():
+        for view in views:
             env = bus.cache_get(handlers.gamma_pub_history_key(symbol, view))
             assert env is not None, f"{symbol}/{view} history never published"
             assert env.payload["symbol"] == symbol
@@ -206,24 +206,31 @@ def test_published_history_lands_before_the_payload_that_points_at_it(monkeypatc
 
     handlers.refresh_gamma_current(bus)
 
-    for symbol in handlers.PUBLISHED_GAMMA_SYMBOLS:
+    for symbol, views in handlers.PUBLISHED_GAMMA_HISTORY_VIEWS.items():
         main = writes.index(handlers.gamma_pub_key(symbol))
-        for view in handlers.GAMMA_HISTORY_VIEWS:
+        for view in views:
             assert writes.index(handlers.gamma_pub_history_key(symbol, view)) < main
 
 
 def test_a_view_the_snapshot_lacks_is_published_empty_not_skipped(monkeypatch):
     """Leaving the previous run's rows in the key would let the page pair them
-    with a snapshot that no longer carries that view."""
+    with a snapshot that no longer carries that view.
+
+    Read on $SPX/GEX, the one published history there is: a view the table does
+    not list is not written EITHER way, so it could not tell empty from skipped.
+    The private key keeps the same guarantee for all four views."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "gamma_snapshot",
-                        lambda s, chain=None: _snap(s, views=("GEX",)))
+                        lambda s, chain=None: _snap(s, views=("Charm",)))
 
-    handlers.refresh_gamma(bus, "SPY")
+    handlers.refresh_gamma(bus, "$SPX")
 
-    env = bus.cache_get(handlers.gamma_pub_history_key("SPY", "Vanna"))
+    env = bus.cache_get(handlers.gamma_pub_history_key("$SPX", "GEX"))
     assert env is not None and env.payload == {
-        "symbol": "SPY", "view": "Vanna", "rows": []}
+        "symbol": "$SPX", "view": "GEX", "rows": []}
+    priv = bus.cache_get(handlers.gamma_history_key("Vanna"))
+    assert priv is not None and priv.payload == {
+        "symbol": "$SPX", "view": "Vanna", "rows": []}
 
 
 def test_the_published_payload_carries_no_inline_history(monkeypatch):
@@ -300,3 +307,73 @@ def test_the_stash_holds_every_captured_symbol_at_once(symbol):
         compute._stash_tick_chain(s, {"for": s})
     assert compute._take_tick_chain(symbol) == {"for": symbol}
     assert compute._take_tick_chain(symbol) is None      # still consume-once
+
+
+# --- history is published only for the views a screen actually DRAWS --------
+# Each published screen renders exactly its pinned view (the view picker is not
+# built on a pinned page), so:
+#   $SPX pins GEX  -> draws the intraday heatmap, which IS the history
+#   SPY/QQQ pin Flow -> the Flow branch reads snap["flow"] + snap["prem_ladder"]
+#                       from the MAIN payload and returns before it ever touches
+#                       the per-view history cache
+# Twelve history keys is a ~4x multiplication of exactly the cost the 2026-08-20
+# history split was written to remove.
+
+def test_the_published_symbols_are_the_history_maps_keys():
+    """One table, so a symbol cannot be published with no entry saying why."""
+    assert handlers.PUBLISHED_GAMMA_SYMBOLS == \
+        tuple(handlers.PUBLISHED_GAMMA_HISTORY_VIEWS)
+
+
+def test_only_the_views_a_screen_draws_get_a_published_history(monkeypatch):
+    bus = Bus(fake=True)
+    bus.cache_set(handlers.CACHE_GAMMA, {"symbol": "AMD", "views": {}})
+    _by_symbol(monkeypatch)
+
+    handlers.refresh_gamma_current(bus)
+
+    for symbol in handlers.PUBLISHED_GAMMA_SYMBOLS:
+        want = set(handlers.PUBLISHED_GAMMA_HISTORY_VIEWS[symbol])
+        got = {v for v in handlers.GAMMA_HISTORY_VIEWS
+               if bus.cache_get(handlers.gamma_pub_history_key(symbol, v))}
+        assert got == want, f"{symbol} published {got}, screens draw {want}"
+
+
+def test_the_flow_screens_pay_for_no_history_at_all(monkeypatch):
+    """SPY and QQQ pin Flow, which is drawn entirely from the main payload."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s, chain=None: _snap(s))
+
+    handlers.refresh_gamma_published(bus, "SPY")
+
+    assert _pub(bus, "SPY")["symbol"] == "SPY"          # the screen still draws
+    for view in handlers.GAMMA_HISTORY_VIEWS:
+        assert bus.cache_get(handlers.gamma_pub_history_key("SPY", view)) is None
+
+
+def test_the_private_page_still_gets_every_view_history(monkeypatch):
+    """The narrowing is on the PUBLISHED keys only: the private page still has a
+    picker, so every view it can be switched to must have its rows."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s, chain=None: _snap(s))
+
+    handlers.refresh_gamma(bus, "SPY")
+
+    for view in handlers.GAMMA_HISTORY_VIEWS:
+        env = bus.cache_get(handlers.gamma_history_key(view))
+        assert env is not None and env.payload["rows"]
+
+
+def test_the_narrowed_publish_still_strips_history_from_every_payload(monkeypatch):
+    """Not writing a history key must not mean leaving the rows INLINE — that
+    would put the 4.99 MB payload back, which is the opposite of the saving."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s, chain=None: _snap(s))
+
+    handlers.refresh_gamma_published(bus, "QQQ")
+
+    for entry in _pub(bus, "QQQ")["views"].values():
+        assert "history" not in entry
