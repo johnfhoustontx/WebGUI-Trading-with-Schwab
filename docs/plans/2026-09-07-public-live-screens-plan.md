@@ -973,20 +973,92 @@ Confirm the shell wrapper actually suits these pages; if `theme.PAGE` fights a
 page that supplies its own wrapper, drop the column and render bare. Verify in
 the browser at Task 12, not by reasoning.
 
-**Step 4: Run this file, then the whole suite**
+**Step 4: ⚠ Stop `test_auth_covers_every_route.py` vouching for the live routes**
+
+`webgui/tests/test_auth_covers_every_route.py` enumerates `main.app.routes` and
+asserts every path is either documented-open or refuses a stranger with a 303.
+**`main.app` is NiceGUI's GLOBAL `app`**, so the moment any test imports
+`live_main`, the fourteen public routes join that enumeration.
+
+They will *pass* — the test process mounted the gate via `main`, so they refuse
+— and that pass is a lie. In production those routes are served by a process
+that mounts no gate at all. Left alone, the one test in the app whose whole
+purpose is to catch a route nobody thought about would start silently
+guaranteeing the opposite of the truth for fourteen public routes.
+
+That file's own docstring names this failure mode ("a consumer-side guard that
+passed while the producer never emitted the shape being tested — `signal_band`,
+and the ADX characterization test"). This is the same shape, so fix it the way
+that docstring would want.
+
+Exclude them explicitly, keyed off the one source of truth:
+
+```python
+# ⚠ The public live screens are NOT this app's routes.
+#
+# main.app is NiceGUI's GLOBAL app object, so importing live_main -- which any
+# test in this suite may do -- registers its fourteen routes here too. In THIS
+# process they refuse, because main mounted the gate on the shared app; in
+# production they are served by live_main.py, which mounts no gate and is
+# public by design.
+#
+# So a pass on them below would assert the exact opposite of the truth. They
+# are excluded here and covered instead by tests/test_live_main.py, which pins
+# the route set, and by the four read-only layers that entrypoint installs.
+#
+# Keyed off live_screens.SCREENS rather than a literal list: a fifteenth screen
+# must not silently re-enter this enumeration.
+import live_screens
+_LIVE_ROUTES = frozenset(s.route for s in live_screens.SCREENS)
+```
+
+and subtract it in `_all_routes()`:
+
+```python
+    return {p for r in main.app.routes
+            if (p := getattr(r, "path", None)) and "{" not in p} - _LIVE_ROUTES
+```
+
+Then add a test that the exclusion cannot rot into a blanket hole:
+
+```python
+def test_the_live_route_exclusion_covers_exactly_the_published_screens():
+    """The exclusion above is a hole in the app's strongest auth guard, so it
+    must be exactly the size of the thing it exists for -- and it must not
+    overlap a route main.py serves, which WOULD be gated and must stay checked."""
+    import live_screens
+    import main
+    assert _LIVE_ROUTES == {s.route for s in live_screens.SCREENS}
+
+    # /desk and /sentiment are served by BOTH entrypoints. Excluding them from
+    # this sweep is the accepted cost of the shared global app; assert it is a
+    # known, small set rather than something that grew.
+    shared = _LIVE_ROUTES & {"/desk", "/sentiment"}
+    assert shared == {"/desk", "/sentiment"}
+```
+
+**⚠ Read that last assertion before you write it.** `/desk` and `/sentiment`
+are registered by *both* entrypoints, so excluding them costs real coverage of
+the app's own routes. If that trade is unacceptable, the alternative is to give
+the live routes distinct paths (`/live/desk`) and have Caddy strip the prefix
+with `handle_path`. **Raise this rather than deciding it alone** — it is a
+security-coverage trade, and the controller should make the call.
+
+**Step 5: Run this file, then the whole suite**
 
 ```bash
-cd webgui && ../.venv/bin/python -m pytest tests/test_live_main.py -q
+cd webgui && ../.venv/bin/python -m pytest tests/test_live_main.py tests/test_auth_covers_every_route.py -q
 cd webgui && ../.venv/bin/python -m pytest -q
 ```
 
 The full run is not optional here — it is how you find out whether the teardown
-fixture really contained the process-wide state.
+fixture really contained the process-wide state, and whether the auth sweep
+still covers everything it should.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
-git add webgui/live_main.py webgui/tests/test_live_main.py
+git add webgui/live_main.py webgui/tests/test_live_main.py webgui/tests/test_auth_covers_every_route.py
 git commit -m "feat(live): the public read-only entrypoint"
 ```
 
