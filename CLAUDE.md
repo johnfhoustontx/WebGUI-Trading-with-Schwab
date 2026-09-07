@@ -1208,6 +1208,7 @@ options_analytics = 8200
 approval = 8300
 dashboard_frontend = 5173
 nicegui = 8500            # the NiceGUI app
+nicegui_live = 8501       # the PUBLIC read-only screens (a second NiceGUI process)
 memurai = 6379            # Redis backbone (Tier 3)
 
 [ml_servers]              # external processes — not started by this repo
