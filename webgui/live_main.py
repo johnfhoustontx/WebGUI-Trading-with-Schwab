@@ -9,8 +9,11 @@ app renders — so a published screen cannot drift from the private one.
 ``@_page`` route, so importing it here would publish ``/terminate`` (Stop All
 Services) and ``/settings`` to the internet, silently, while looking entirely
 correct. The seam the pages need lives in ``shell.py``; every page reaches the
-shell through it, and ``tests/test_live_main.py`` pins the absence at source
-level rather than trusting inspection.
+shell through it. ``tests/test_live_main.py`` pins the absence twice — at source
+level here, and by running this file ALONE in a fresh interpreter and asserting
+both that ``main`` never entered ``sys.modules`` and that the only routes served
+are the published fourteen. The second is the one that can see a TRANSITIVE
+import, which is how such a thing would actually arrive.
 
 Read-only is enforced at four layers, of which this file installs three:
 
@@ -104,7 +107,7 @@ def _render(screen) -> None:
 
 
 def _register(screen):
-    """Register one screen's route. Returns the page function (for tests).
+    """Register one screen's route, and hand back the page function.
 
     ⚠ ``screen`` is bound by THIS FUNCTION'S PARAMETER, which is what makes each
     route render its own screen. A closure over the ``for`` variable below would
@@ -118,8 +121,14 @@ def _register(screen):
     which reaches ``_render`` and its ``import_module(f"pages.{screen.module}")``.
     The page function below takes no arguments, so there is nothing to inject.
     """
-    @ui.page(screen.route, title=f"{screen.title} · {theme.BRAND_NAME}",
-             favicon=_STATIC_DIR / "img" / "favicon.ico")
+    # No per-page ``favicon=``. The app has one per route because the owner runs
+    # a dozen tabs and the colour is how they tell them apart; a public site
+    # wants one mark. And a per-page favicon is not free: NiceGUI registers a
+    # ``<route>/favicon.ico`` route for each, which on the SHARED global app
+    # object means fourteen more paths that the private app's auth sweep would
+    # then be enumerating on this process's behalf. ``ui.run(favicon=…)`` below
+    # is the fallback ``get_favicon_url`` reads when a page declares none.
+    @ui.page(screen.route, title=f"{screen.title} · {theme.BRAND_NAME}")
     def _page() -> None:
         _render(screen)
     return _page

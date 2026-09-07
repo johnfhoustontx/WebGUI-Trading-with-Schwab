@@ -156,17 +156,19 @@ def test_a_real_public_process_holds_no_route_of_the_apps():
     already imported ``main`` for its own reasons.
 
     So run the entrypoint alone, the way the systemd unit does, and ask the
-    interpreter. A pass means the fourteen routes really are all that exist on
-    the public origin; a failure means ``/terminate`` is on the internet.
+    interpreter. It enumerates the whole ASGI app, not just the page registry,
+    so a raw ``@app.get`` reached transitively is caught as surely as a page. A
+    pass means the fourteen routes really are all that exist on the public
+    origin; a failure means ``/terminate`` is on the internet.
     """
     probe = (
         "import importlib.util, sys;"
         "spec = importlib.util.spec_from_file_location('live_main', sys.argv[1]);"
         "m = importlib.util.module_from_spec(spec); sys.modules['live_main'] = m;"
         "spec.loader.exec_module(m);"
-        "from nicegui import Client;"
+        "from nicegui import app;"
         "print('main' in sys.modules);"
-        "print(sorted(r for f, r in Client.page_routes.items()))"
+        "print(sorted(p for r in app.routes if (p := getattr(r, 'path', None))))"
     )
     out = subprocess.run([sys.executable, "-c", probe, str(_LIVE_MAIN)],
                          capture_output=True, text=True, timeout=180,
@@ -178,7 +180,13 @@ def test_a_real_public_process_holds_no_route_of_the_apps():
         "/terminate included, is now registered in the public process")
 
     import live_screens
-    assert ast.literal_eval(routes) == sorted(s.route for s in live_screens.SCREENS)
+    published = {s.route for s in live_screens.SCREENS}
+    # NiceGUI's own machinery (``/_nicegui/<ver>/...``, the websocket mount) is
+    # the framework, not this app's surface. Everything else must be published.
+    served = {p for p in ast.literal_eval(routes) if not p.startswith("/_nicegui")}
+    assert served == published, (
+        f"the public process serves {sorted(served - published)} beyond the "
+        f"published screens; missing {sorted(published - served)}")
 
 
 # --- the read-only layers, driven from the ENTRYPOINT -----------------------
