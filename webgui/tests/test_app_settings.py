@@ -105,3 +105,38 @@ def test_there_is_no_second_market_hours_switch():
     market-hours key would be two switches for one decision — a drift hazard,
     not a feature."""
     assert "voice_market_hours_only" not in app_settings.DEFAULTS
+
+
+# ── Frozen store (the public live screens) ──────────────────────────────────
+def test_freeze_pins_values_and_makes_set_a_no_op(tmp_path, monkeypatch):
+    """⚠ This is not only about pinning the public screens' defaults.
+
+    settings.json is a SINGLE-USER store whose in-memory cache assumes one
+    writer in one process (see the module docstring). Unfrozen, the live process
+    would read the user's live preferences -- changing your own Macro Board skin
+    would re-skin the public site -- and race the app for the file."""
+    monkeypatch.setattr(app_settings, "_PATH", tmp_path / "settings.json")
+    app_settings.reset_cache()
+    try:
+        app_settings.freeze({"macro_skin": "B"})
+        assert app_settings.get("macro_skin") == "B"
+
+        app_settings.set("macro_skin", "A")
+        assert app_settings.get("macro_skin") == "B", "a frozen store accepted a write"
+        assert not (tmp_path / "settings.json").exists(), "a frozen store touched disk"
+
+        # Keys with no pin still read their defaults.
+        assert app_settings.get("alert_sound") == app_settings.DEFAULTS["alert_sound"]
+    finally:
+        app_settings.unfreeze()
+        app_settings.reset_cache()
+
+
+def test_unfreeze_restores_normal_behaviour(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_settings, "_PATH", tmp_path / "settings.json")
+    app_settings.reset_cache()
+    app_settings.freeze({"macro_skin": "B"})
+    app_settings.unfreeze()
+    app_settings.reset_cache()
+    app_settings.set("macro_skin", "A")
+    assert app_settings.get("macro_skin") == "A"
