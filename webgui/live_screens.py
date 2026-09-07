@@ -64,8 +64,29 @@ SCREENS = (
            kwargs={"symbol": "QQQ", "view": "Flow"}),
 )
 
-# The union of every screen's settings pins, which is what the live entrypoint
-# freezes. ⚠ Pins are process-wide, not per-request: app_settings is a module
-# singleton. That is fine only because no two screens pin the SAME key to
-# DIFFERENT values -- asserted in tests/test_live_screens.py.
-SETTINGS_PINS = {k: v for s in SCREENS for k, v in s.settings.items()}
+# Pins that belong to the ORIGIN rather than to any one screen.
+#
+# ⚠ ``voice_enabled`` DEFAULTS TRUE, and the Desk's spoken alerts are not a
+# bundled sound file: ``webgui/voice.py`` synthesizes each phrase through
+# ``edge_tts``, which is a NETWORK call to a Microsoft endpoint, and writes the
+# mp3 into ``webgui/data/voice/``. Unpinned, this origin would drive outbound
+# calls on anonymous traffic -- one per new flow alert per visitor on the live
+# path (``desk.speak_phrases``), plus up to 32 on the FIRST Desk build
+# (``desk._prewarm_clips``, which unlike the live path has no market-hours
+# gate). ``/voice`` is not mounted in this process, so not one of those clips
+# could ever be played.
+#
+# Here rather than in the Desk screen's own ``settings`` because the reason is
+# the ORIGIN, not the screen: public, so nothing that spends money, calls out,
+# or writes. A Desk-attached pin would read as "the Desk publishes voice off",
+# implying some other screen could publish it on. These are applied LAST so an
+# origin rule wins, and ``tests/test_live_screens.py`` refuses a screen that
+# names one of these keys at all, so the two dicts cannot silently disagree.
+PUBLIC_PINS = {"voice_enabled": False}
+
+# The union of every screen's settings pins plus the origin's, which is what the
+# live entrypoint freezes. ⚠ Pins are process-wide, not per-request:
+# app_settings is a module singleton. That is fine only because no two screens
+# pin the SAME key to DIFFERENT values -- asserted in tests/test_live_screens.py.
+SETTINGS_PINS = {**{k: v for s in SCREENS for k, v in s.settings.items()},
+                 **PUBLIC_PINS}

@@ -47,12 +47,16 @@ def test_every_route_starts_with_a_slash_and_every_slug_is_url_safe():
 
 def test_the_pins_name_real_settings_keys():
     """A typo'd pin key would silently do nothing and the screen would publish
-    the wrong default."""
+    the wrong default -- and a typo in an ORIGIN pin is the same failure with a
+    worse blast radius, since those are the ones that exist to switch something
+    dangerous off."""
     import app_settings
     import live_screens
     for s in live_screens.SCREENS:
         for key in s.settings:
             assert key in app_settings.DEFAULTS, f"{s.slug} pins unknown key {key}"
+    for key in live_screens.PUBLIC_PINS:
+        assert key in app_settings.DEFAULTS, f"PUBLIC_PINS names unknown key {key}"
 
 
 def test_the_net_prem_pin_matches_the_requested_screen():
@@ -79,13 +83,125 @@ def test_no_two_screens_pin_the_same_key_to_different_values():
     assert clashes == {}, f"screens disagree on {clashes}"
 
 
-def test_settings_pins_is_the_union_of_every_screen_s_pins():
+def test_settings_pins_is_the_union_of_every_screen_s_pin_and_the_origin_s():
     """Non-vacuity for the clash test above: the union is what the entrypoint
-    freezes, so a pin that never reaches it is a screen publishing a default."""
+    freezes, so a pin that never reaches it is a screen publishing a default.
+
+    ``PUBLIC_PINS`` is applied LAST, so an origin rule wins over a screen that
+    named the same key -- and the collision test below refuses that case
+    outright, so the ordering is a backstop rather than a policy."""
     import live_screens
     assert live_screens.SETTINGS_PINS == {
-        k: v for s in live_screens.SCREENS for k, v in s.settings.items()}
+        **{k: v for s in live_screens.SCREENS for k, v in s.settings.items()},
+        **live_screens.PUBLIC_PINS}
     assert live_screens.SETTINGS_PINS, "no pins at all - the freeze would be vacuous"
+
+
+def test_no_screen_pin_collides_with_a_public_pin():
+    """The screen-vs-screen clash test one level up.
+
+    ``SETTINGS_PINS`` merges two dicts into one process-wide store, so a screen
+    naming a ``PUBLIC_PINS`` key would either be silently overridden or -- with
+    the merge written the other way round -- silently switch an origin rule back
+    on. Neither is visible in a rendered page. A screen that genuinely needs one
+    of these keys is a decision about the ORIGIN, so it belongs in
+    ``PUBLIC_PINS``."""
+    import live_screens
+    offenders = {s.slug: sorted(set(s.settings) & set(live_screens.PUBLIC_PINS))
+                 for s in live_screens.SCREENS
+                 if set(s.settings) & set(live_screens.PUBLIC_PINS)}
+    assert offenders == {}, (
+        f"these screens pin an origin-level key: {offenders}. Move the decision "
+        "to live_screens.PUBLIC_PINS.")
+
+
+# --- what a public origin may leave on its defaults -------------------------
+
+# Every ``app_settings.DEFAULTS`` key, judged against ONE question: served
+# unauthenticated to anyone, does this default SPEND MONEY, MAKE AN OUTBOUND
+# NETWORK CALL, or WRITE something the owner owns? Answering "no" for a key is
+# the review; the completeness test below is what forces the next key added to
+# ``DEFAULTS`` to be reviewed at the only moment anyone would look at it.
+PUBLIC_UNSAFE_DEFAULTS = {
+    # ``webgui/voice.py`` synthesizes through ``edge_tts`` -- a network call to
+    # a Microsoft endpoint -- and writes mp3s into ``webgui/data/voice/``. The
+    # Desk takes that path on every new flow alert, and prewarms up to 32 clips
+    # on the first build with no market-hours gate.
+    "voice_enabled": False,
+}
+
+# Reviewed and safe as they stand. The reasoning, grouped:
+#   * read only by pages this origin does not publish (``pages/settings.py``,
+#     ``pages/ticker.py``) -- and the marquee in particular is mounted by
+#     ``main._layout``, which this process does not run, so ``ticker_enabled``
+#     never reaches the ~20-minute paid Claude verdict here;
+#   * or read by a published page purely to CHOOSE WHAT TO DRAW
+#     (``macro_skin``, the three ``gamma_*`` display knobs,
+#     ``alert_market_hours_only`` as a gate, the two remaining ``voice_*`` keys
+#     which are inert once ``voice_enabled`` is off);
+#   * or nav chrome this process has none of (``nav_pinned``).
+# Cross-process WRITES are refused a second way regardless: the bus is
+# read-only and ``live_main`` calls none of main's ``sync_*`` helpers.
+PUBLIC_SAFE_DEFAULTS = {
+    "alert_enabled", "alert_sound", "alert_volume", "alert_market_hours_only",
+    "alert_min_score", "desktop_notifications", "flow_alerts_enabled",
+    "voice_name", "voice_volume", "captured_autoclose_enabled",
+    "manual_paper_lifecycle_enabled", "ticker_enabled", "ticker_speed",
+    "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
+    "gamma_spot_interval", "gamma_netprem_group", "gamma_netprem_mode",
+    "gamma_netprem_symbols", "macro_skin",
+}
+
+
+def test_every_app_settings_default_is_reviewed_for_the_public_origin():
+    """THE ONE THAT CATCHES THE NEXT ONE.
+
+    ``voice_enabled`` was missed because nothing asked the question: it defaults
+    True, and the design doc and plan for this origin never mention voice at
+    all. A specific "voice is pinned off" assertion would not have caught it
+    before it was written, and will not catch the next default like it.
+
+    So this asserts COMPLETENESS instead -- every key in ``DEFAULTS`` sits in
+    exactly one of the two lists above. A new setting fails this test the day it
+    is added, and the failure names the question to answer."""
+    import app_settings
+    reviewed = set(PUBLIC_UNSAFE_DEFAULTS) | PUBLIC_SAFE_DEFAULTS
+    unreviewed = set(app_settings.DEFAULTS) - reviewed
+    stale = reviewed - set(app_settings.DEFAULTS)
+    assert not unreviewed, (
+        f"new app_settings default(s) {sorted(unreviewed)}: served "
+        "unauthenticated to anyone, does this default spend money, make an "
+        "outbound network call, or write something the owner owns? Add it to "
+        "PUBLIC_UNSAFE_DEFAULTS (and pin it in live_screens.PUBLIC_PINS) or to "
+        "PUBLIC_SAFE_DEFAULTS with the reason.")
+    assert not stale, f"these keys no longer exist in DEFAULTS: {sorted(stale)}"
+    assert not (set(PUBLIC_UNSAFE_DEFAULTS) & PUBLIC_SAFE_DEFAULTS)
+
+
+def test_every_public_unsafe_default_is_pinned_to_its_safe_value():
+    import live_screens
+    for key, safe in PUBLIC_UNSAFE_DEFAULTS.items():
+        assert live_screens.SETTINGS_PINS.get(key) == safe, (
+            f"{key} is unsafe on a public origin and is not pinned to {safe!r}")
+
+
+def test_each_unsafe_default_really_is_the_dangerous_one():
+    """Non-vacuity: a pin that merely restates the default proves nothing, and
+    would go on passing after someone flipped ``DEFAULTS`` the other way."""
+    import app_settings
+    for key, safe in PUBLIC_UNSAFE_DEFAULTS.items():
+        assert app_settings.DEFAULTS[key] != safe, (
+            f"{key} already defaults to {safe!r} -- either the classification is "
+            "stale or the pin is doing nothing")
+
+
+def test_the_desk_voice_is_off_on_the_public_origin():
+    """The instance, named, because the completeness test above reads as
+    bookkeeping and this is the thing that was actually wrong: a public visitor
+    opening /desk drove ``edge_tts`` synthesis calls whose audio ``/voice`` is
+    not even mounted to serve."""
+    import live_screens
+    assert live_screens.SETTINGS_PINS["voice_enabled"] is False
 
 
 def test_every_module_resolves_and_accepts_its_kwargs():
