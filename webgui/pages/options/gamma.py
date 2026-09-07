@@ -1780,6 +1780,15 @@ _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": 
 _VIEW_ORDER = list(_VIEWS) + ["Flow", "Net Prem", "Term"]
 
 
+def _resolve_view(view):
+    """A pinned view name, or the page's default.
+
+    Total on purpose: an unknown name falls back to GEX rather than raising, so
+    a bad pin degrades to the normal page instead of a 500 on a public origin.
+    Callers that care assert against _VIEW_ORDER themselves."""
+    return view if view in _VIEW_ORDER else "GEX"
+
+
 def chart_kind(fig):
     """Identity of a figure for the single full-width chart element.
 
@@ -1880,7 +1889,16 @@ def history_dates(cached):
     return out
 
 
-def render():
+def render(symbol: str | None = None, view: str | None = None):
+    """The Dealer Positioning page.
+
+    ``symbol`` and ``view`` are PINS used by the public live screens (Gamma is
+    $SPX/GEX, Net Prem is symbol-independent, Premium Divergence is Flow on SPY
+    and on QQQ). Both default to ``None``, which is today's behaviour exactly:
+    the view opens on GEX and the symbol comes from the handoff stash or the
+    cached snapshot. Pinning the REAL render rather than writing a second
+    read-only one means there is one implementation, so the published screen
+    cannot drift from the private page."""
     import bus_client
     from nicegui import ui, run
 
@@ -1915,8 +1933,10 @@ def render():
     import shell as _shell
     _slot = _shell.subtab_slot()
 
+    _pinned_view = _resolve_view(view)
+
     def _build_view_tabs():
-        tabs = ui.tabs(value="GEX").classes("compact-subtabs").props(
+        tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
             "dense no-caps inline-label align=left")
         with tabs:
             for v in _VIEW_ORDER:
@@ -2979,9 +2999,13 @@ def render():
         # A symbol handed over from the Flow Alerts tape WINS over the cached one —
         # it is an explicit request — and the refresh below moves the cache to it.
         await _load_history(view_toggle.value)
+        # take_pending_gamma is CONSUME-ONCE, so it is called either way: a stash
+        # left unread would silently hijack the dropdown on the next page build.
         from .handoff import take_pending_gamma
         handoff_sym = take_pending_gamma()
-        _set_symbol(handoff_sym or (state["snap"] or {}).get("symbol"))
+        # A pinned symbol is the strongest claim there is — the whole page exists
+        # to show that one symbol — so it outranks both the handoff and the cache.
+        _set_symbol(symbol or handoff_sym or (state["snap"] or {}).get("symbol"))
         symbol_in.on_value_change(lambda e: _on_symbol_change())
         _render_view()
         if handoff_sym:

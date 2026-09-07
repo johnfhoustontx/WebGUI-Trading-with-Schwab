@@ -2075,3 +2075,31 @@ def test_page_reads_each_views_history_off_loop_from_its_own_key():
     assert 'entry.get("history")' not in src, "still reading history inline"
     # switching subtabs must be able to fetch, so the handler is async + guarded
     assert "async def _on_view_change" in src
+
+
+def test_render_accepts_a_pinned_symbol_and_view():
+    """The public live screens pin Gamma to $SPX/GEX, Net Prem, and Flow on SPY
+    and QQQ. Pinning is an optional keyword on the REAL render so there is one
+    implementation and the public screen cannot drift from the private one."""
+    sig = inspect.signature(gamma.render)
+    assert sig.parameters["symbol"].default is None
+    assert sig.parameters["view"].default is None
+
+
+def test_a_pinned_view_must_be_one_the_page_actually_has():
+    """A typo'd pin would otherwise render the default view and look correct."""
+    assert gamma._resolve_view("Net Prem") == "Net Prem"
+    assert gamma._resolve_view("Flow") == "Flow"
+    assert gamma._resolve_view("nonsense") == "GEX"
+    assert gamma._resolve_view(None) == "GEX"
+
+
+def test_both_pins_are_actually_consumed_by_render():
+    """The signature test above passes just as well if render accepts the two
+    keywords and ignores them -- which would render the private page on every
+    public screen and look plausible. Assert they reach the two things they
+    steer: the subtab value, and the symbol dropdown's seed."""
+    src = inspect.getsource(gamma.render)
+    assert "_resolve_view(view)" in src, "the view pin never reaches the subtabs"
+    assert "ui.tabs(value=_pinned_view)" in src
+    assert "_set_symbol(symbol or " in src, "the symbol pin never reaches the dropdown"
