@@ -39,20 +39,37 @@ PAGES = ("index.html", "gallery.html", "live.html", "glossary.html")
 # every entry is a third party learning the IP of everyone who loads the page.
 ALLOWED_ORIGINS: tuple[str, ...] = ()
 
-# Where a visitor may be CHOOSING to go. All five live in the community block on
-# the landing page and are the only outbound links on the site.
+# Where a visitor may be CHOOSING to go. Five are the community block on the
+# landing page; the sixth is the public live origin, which every tile on
+# live.html links to.
 #
 # ⚠ This is not the same permission as ALLOWED_ORIGINS above. A link is followed
 # only when someone clicks it; an origin in that list is fetched on their behalf
 # the moment the page loads. Adding to this list costs a visitor nothing until
-# they act, which is why it may hold five entries while the other holds none.
+# they act, which is why it may hold six entries while the other holds none.
+# The live origin is here for exactly that reason: the grid LINKS to it and
+# loads nothing from it -- the tiles are local captures, not embeds.
 ALLOWED_OUTBOUND = (
     "https://discord.gg/",
     "https://t.me/",
     "https://x.com/",
     "https://www.facebook.com/",
     "https://www.instagram.com/",
+    f"https://{repo_paths.LIVE_HOST}",
 )
+
+# References that are RUNTIME STATE rather than files in this repo, and so
+# cannot be resolved on disk here.
+#
+# ⚠ An exemption, never a deletion of the check. `live/<slug>.webp` is written
+# by tools/capture_live_shots.py every 15 minutes on the box that serves the
+# site, and gitignored -- committed, the captures would dirty prod's tree the
+# moment the timer first fires, and tools/promote.sh refuses a dirty tree. The
+# guarantee that these paths are RIGHT comes from
+# test_the_live_grid_offers_every_published_screen instead: the slugs are
+# checked against webgui/live_screens.py, which is also what the capture script
+# names its files from.
+GENERATED_REF_PREFIXES = ("live/",)
 
 # Attributes that make the browser fetch something or follow somewhere.
 REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
@@ -121,10 +138,16 @@ def test_every_internal_reference_resolves_to_a_file(pages):
     A broken href is invisible until a visitor clicks it and a broken <img> is
     invisible until one scrolls to it, so neither shows up in any other check
     here -- and by then it is on the public internet.
+
+    ``GENERATED_REF_PREFIXES`` is skipped: those files are written on the
+    serving box, not committed. See that constant for why, and for what pins
+    them instead.
     """
     for name, text in pages.items():
         for ref in _refs(text):
             if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
+                continue
+            if ref.startswith(GENERATED_REF_PREFIXES):
                 continue
             target = ref.split("#", 1)[0].split("?", 1)[0]
             # A leading "/" is root-absolute, and this site IS served at the
@@ -588,6 +611,123 @@ def test_the_glossary_is_listed_as_a_manual_too():
     built = (pathlib.Path(repo_paths.REPO_ROOT)
              / "docs" / "manuals" / "glossary" / "glossary.html")
     assert built.is_file(), "the glossary manual has not been built"
+
+
+# --- C4. the live grid, whose tiles come from the app's published table ------
+
+def _live_screens():
+    """``webgui/live_screens.py``, loaded BY PATH rather than by import.
+
+    ``webgui/`` holds top-level modules named ``main``, ``proxy``, ``auth`` and
+    ``wall``. Putting that directory on ``sys.path`` -- what the obvious
+    ``sys.path.insert`` would do -- does it for the whole pytest session, since
+    ``tests deploy tools/tests`` run in one command, and any of those names can
+    then shadow a same-named module another suite imports. Loading one file by
+    its path reaches nothing else.
+
+    A REAL import, not an AST parse: ``live_screens`` imports ``dataclasses``
+    and nothing more, so there is no import to be afraid of here.
+    ``shared/tests/test_cross_tier_mirrors.py`` parses instead because ITS
+    subjects sit in packages that trigger the documented cross-app ``scoring``
+    collision -- a reason that does not apply to a table of fourteen strings.
+    """
+    import importlib.util
+
+    path = pathlib.Path(repo_paths.WEBGUI) / "live_screens.py"
+    spec = importlib.util.spec_from_file_location("_live_screens_site_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_live_grid_offers_every_published_screen():
+    """The grid and the live app read ONE source, so a screen cannot be
+    published without a tile or tiled without being published.
+
+    The captures themselves are not on disk here (see
+    ``GENERATED_REF_PREFIXES``), so this is what makes the fourteen ``<img>``
+    paths right: the slug in the ``src`` is the slug the capture script names
+    its output from.
+
+    ⚠ Captions are compared UNESCAPED, the way ``_glossary_terms_on_page`` does
+    and for the same reason: the page correctly ships "Sector &amp; Industry",
+    so a raw comparison would report a drift that is only the escaping.
+    """
+    import html as _html
+
+    text = _text("live.html")
+    captions = {_html.unescape(c) for c in
+                re.findall(r'<span class="ns-live-cap">([^<]+)</span>',
+                           _markup("live.html"))}
+    for s in _live_screens().SCREENS:
+        assert f"{s.slug}.webp" in text, f"no tile for {s.slug}"
+        assert s.title in captions, f"no caption for {s.title}"
+
+
+def test_the_grid_tiles_nothing_the_app_does_not_publish():
+    """The other direction, which a link-checker never covers: a tile left
+    behind after a screen was unpublished points at a route that 404s, and the
+    picture beside it keeps the old capture until someone deletes the file."""
+    slugs = {s.slug for s in _live_screens().SCREENS}
+    tiled = set(re.findall(r'src="live/([^"]+)\.webp"', _markup("live.html")))
+    assert tiled == slugs, (
+        f"tiled but not published: {sorted(tiled - slugs)}; "
+        f"published but not tiled: {sorted(slugs - tiled)}")
+
+
+def test_every_tile_links_to_its_own_route_on_the_live_origin():
+    """A tile that shows one screen and opens another is worse than a missing
+    tile, and looks like nothing at all until someone clicks."""
+    markup = _markup("live.html")
+    tiles = re.findall(r'<a class="ns-live-tile" href="([^"]+)"[^>]*>\s*'
+                       r'<img src="live/([^"]+)\.webp"', markup)
+    by_slug = {s.slug: s.route for s in _live_screens().SCREENS}
+    assert len(tiles) == len(by_slug), f"{len(tiles)} tiles parsed"
+    for href, slug in tiles:
+        assert href == f"https://{repo_paths.LIVE_HOST}{by_slug[slug]}", (href, slug)
+
+
+def test_the_grid_links_to_the_live_origin_and_not_the_app():
+    text = _text("live.html")
+    assert repo_paths.LIVE_HOST in text
+    assert repo_paths.APP_HOST not in text     # re-asserted; also pinned below
+
+
+def test_the_placeholder_copy_is_gone():
+    """live.html shipped saying "Not published yet" and "Nothing mounted"."""
+    text = _text("live.html")
+    for gone in ("Not published yet", "Nothing mounted", "Live view slot"):
+        assert gone not in text
+
+
+def test_the_live_page_is_indexable_now_that_it_has_content():
+    """`noindex` was there because a placeholder in search results is worse
+    than no result. It is not a placeholder any more, and a stale meta tag is
+    invisible: nothing renders differently, the page simply never appears."""
+    assert "noindex" not in _text("live.html")
+
+
+def test_the_grid_carries_no_timestamp():
+    """Baking a capture time into committed HTML would make a source file a
+    build artifact -- and it would go stale in the one way a visitor cannot
+    check, since the file is served long after the capture it claims. The grid
+    is navigation; the live pages carry their own freshness."""
+    markup = _markup("live.html")
+    assert not re.search(r"\b(?:updated|captured|as of)\b\s*[:,]?\s*\d",
+                         markup, re.I)
+    assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
+
+
+def test_the_grid_embeds_nothing_and_runs_nothing():
+    """The tiles are PICTURES. An <iframe> onto the live origin would put a
+    NiceGUI session behind every tile -- fourteen per visitor -- and hand the
+    static site a runtime dependency on the app being up.
+
+    Scripting is checked too: this page has no `.js` hook and needs none, so a
+    <script> here could only be something that crept in."""
+    markup = _markup("live.html")
+    assert "<iframe" not in markup
+    assert "<script" not in markup
 
 
 # --- D. the site never points at the app ------------------------------------
