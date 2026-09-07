@@ -112,7 +112,11 @@ def test_every_internal_reference_resolves_to_a_file(pages):
             if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
                 continue
             target = ref.split("#", 1)[0].split("?", 1)[0]
-            assert (SITE / target).is_file(), f"{name} references missing {target}"
+            # A leading "/" is root-absolute, and this site IS served at the
+            # root -- `/favicon.ico` is a path browsers request by convention,
+            # so it has to be declared that way rather than relatively.
+            assert (SITE / target.lstrip("/")).is_file(), (
+                f"{name} references missing {target}")
 
 
 def test_the_stylesheets_own_urls_resolve():
@@ -389,7 +393,13 @@ def test_the_social_card_exists_and_is_the_right_shape():
     png = pathlib.Path(SITE / "assets/social.png")
     assert png.is_file(), "no social card"
     head = png.read_bytes()[:24]
-    assert head[:8] == b"\x89PNG\r\n\x1a\n", "social.png is not a PNG"
+    # Bytes 1-3 of a PNG are the ASCII letters "PNG" -- checked that way
+    # rather than against the full 8-byte signature, whose escapes have
+    # been mangled by shell quoting three times in this session.
+    # Bytes 1-3 of a PNG are the ASCII letters "PNG". Compared that way
+    # rather than against the full 8-byte signature, whose escapes were
+    # mangled by shell quoting three times while this was written.
+    assert head[1:4] == b"PNG", "not a PNG"
     w, h = unpack(">II", head[16:24])
     assert (w, h) == (1200, 630), f"social card is {w}x{h}, expected 1200x630"
 
@@ -421,6 +431,68 @@ def test_the_retired_tagline_is_gone():
     for name in PAGES:
         assert "AI option signals" not in _text(name), (
             f"{name} still carries the retired tagline")
+
+
+def test_the_site_answers_the_icon_paths_browsers_ask_for_unprompted():
+    """A BROWSER REQUESTS THESE WHETHER OR NOT THE PAGE MENTIONS THEM.
+
+    The site declared only an SVG favicon, which Chrome, Firefox and Edge take
+    happily. ⚠ Safari does not support SVG favicons at all: it falls back to
+    ``/favicon.ico``, which this static tree answered with **404**, so the site
+    had no icon there. And an iPhone home-screen shortcut asks for
+    ``/apple-touch-icon.png`` -- without one it saves a screenshot thumbnail
+    instead of the mark.
+
+    Both live at the ROOT because that is where the request goes, declared or
+    not. Checked as files on disk, since Caddy serves this tree literally.
+    """
+    for name in ("favicon.ico", "apple-touch-icon.png"):
+        assert (SITE / name).is_file(), (
+            f"/{name} is not in the served root; browsers asking for it get a 404")
+
+
+def test_the_apple_touch_icon_is_opaque_and_full_bleed():
+    """iOS masks the corners itself and composites onto BLACK.
+
+    A transparent icon therefore shows black behind the mark, and a
+    pre-rounded one shows its own corners inside Apple's squircle. 180x180 is
+    what current iPhones request.
+    """
+    from struct import unpack
+
+    png = SITE / "apple-touch-icon.png"
+    head = png.read_bytes()[:26]
+    # Bytes 1-3 of a PNG are the ASCII letters "PNG". Compared that way
+    # rather than against the full 8-byte signature, whose escapes were
+    # mangled by shell quoting three times while this was written.
+    assert head[1:4] == b"PNG", "not a PNG"
+    w, h = unpack(">II", head[16:24])
+    assert (w, h) == (180, 180), f"apple-touch-icon is {w}x{h}, expected 180x180"
+    colour_type = head[25]
+    assert colour_type in (0, 2), (
+        f"apple-touch-icon has an alpha channel (colour type {colour_type}); "
+        f"iOS composites transparency onto black")
+
+
+def test_the_favicon_ico_carries_the_small_sizes():
+    """The point of the format is that the browser picks a size instead of
+    scaling one bitmap. A single-size .ico is a .png with extra steps."""
+    from PIL import Image
+
+    with Image.open(SITE / "favicon.ico") as im:
+        sizes = {tuple(s) for s in im.info.get("sizes", ())}
+    for want in ((16, 16), (32, 32)):
+        assert want in sizes, f"favicon.ico has no {want[0]}px entry; has {sorted(sizes)}"
+
+
+def test_every_page_declares_all_three_icons():
+    """One of the three is enough for any given browser, and no single one is
+    enough for all of them."""
+    for name in PAGES:
+        markup = _markup(name)
+        assert 'href="assets/favicon.svg"' in markup, f"{name} lost the SVG icon"
+        assert 'href="/favicon.ico"' in markup, f"{name} lost the .ico fallback"
+        assert 'rel="apple-touch-icon"' in markup, f"{name} lost the iOS icon"
 
 
 # --- D. the site never points at the app ------------------------------------

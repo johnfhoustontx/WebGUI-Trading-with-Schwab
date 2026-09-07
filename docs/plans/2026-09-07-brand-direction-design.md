@@ -216,6 +216,40 @@ favicon, so a page **cannot** be added without one.
 `test_every_page_is_registered_through_the_favicon_wrapper` fails on a bare
 `@ui.page`, which is how this would otherwise return one route at a time.
 
+### The same gap on the public site, and the raster icons that close it
+
+The site declared **only** an SVG favicon. Chrome, Firefox and Edge take it
+happily; two things never ask for it:
+
+* **Safari does not support SVG favicons at all.** It falls back to
+  `/favicon.ico`, which this static tree answered with **404** — so on Safari the
+  site had no icon.
+* **iOS asks for `/apple-touch-icon.png`.** Without one, a home-screen shortcut
+  saves a screenshot thumbnail instead of the mark.
+
+Both now exist at the site ROOT, because that is where the request goes whether
+or not a page mentions them, and both are drawn from the same small-variant
+geometry as `assets/favicon.svg` by `make_icons.py`.
+
+`favicon.ico` is genuinely multi-resolution (16/32/48) — a single-size `.ico` is
+a `.png` with extra steps. The apple-touch icon is **180×180, opaque and
+full-bleed**: iOS masks the corners itself and composites onto black, so a
+transparent icon shows black behind the mark and a pre-rounded one shows its own
+corners inside Apple's squircle.
+
+### And the app had it too
+
+`app.neuralstrike.co/favicon.ico` returned **200 with NiceGUI's own logo**,
+byte-identical to `nicegui/static/favicon.ico` — so Safari on the app got the
+framework's icon no matter what the pages declared.
+`nicegui.favicon.create_favicon_route` registers that route **only when handed a
+real file**, so `ui.run(favicon=<path>)` now points it at the app's own `.ico`.
+
+⚠ That is the app-wide FALLBACK, not the per-page icon. `get_favicon_url` reads
+`page.favicon or app.config.favicon`, so the thirty route colours still win on
+every page that has one. Verified on a live server: `/favicon.ico` serves our
+bytes, a page without its own falls back to it, and a page with one keeps it.
+
 ## Test-surface note
 
 `webgui/tests/test_shell.py` used to write `neuralstrike-mark.png` and assert

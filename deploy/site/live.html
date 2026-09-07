@@ -7,7 +7,16 @@
 <meta name="description" content="Live NeuralStrike screens are not published yet. Browse the app gallery in the meantime.">
 <meta name="theme-color" content="#161826">
 <meta name="robots" content="noindex, follow">
+<!-- Icons. The SVG is the good one and every modern browser takes it; the
+     other two exist because some browsers never ask for it.
+     ⚠ Safari does NOT support SVG favicons and falls back to /favicon.ico —
+     a path this static site answered with 404, so it had no icon there at all.
+     And without an apple-touch-icon an iPhone home-screen shortcut shows a
+     screenshot thumbnail instead of the mark. All three are the same drawing;
+     deploy/tests/test_site.py checks they stay that way. -->
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/nocturne.css">
 <link rel="stylesheet" href="assets/site.css">
 

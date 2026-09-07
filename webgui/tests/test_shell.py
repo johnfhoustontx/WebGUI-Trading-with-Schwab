@@ -1170,6 +1170,69 @@ def test_the_wrapper_gives_every_route_a_favicon_that_draws_the_mark():
         assert quote("M22 12 L32 23.5 L42 12") in uri, f"{route} has no mark"
 
 
+def test_the_app_answers_favicon_ico_with_its_own_mark():
+    """A BROWSER ASKS FOR /favicon.ico WHETHER OR NOT THE PAGE MENTIONS IT.
+
+    Every page declares its own coloured SVG through ``_page``, and that is
+    enough for Chrome, Firefox and Edge. ⚠ Safari does not support SVG favicons
+    at all and falls back to ``/favicon.ico`` -- a path
+    ``auth_middleware.OPEN_PATHS`` deliberately leaves open, and which NiceGUI
+    answers with ITS OWN logo unless ``ui.run`` is handed a real FILE
+    (``nicegui.favicon.create_favicon_route`` registers the route only when
+    ``is_file``). Measured on prod before this landed: the bytes served there
+    were byte-identical to ``nicegui/static/favicon.ico``.
+    """
+    import pathlib as _pl
+    import re
+
+    import main
+
+    ico = _pl.Path(main._STATIC_DIR) / "img" / "favicon.ico"
+    assert ico.is_file(), "the app has no favicon.ico to answer that request with"
+
+    # It must be OURS, not the framework's.
+    import nicegui
+    theirs = _pl.Path(nicegui.__file__).parent / "static" / "favicon.ico"
+    if theirs.is_file():
+        assert ico.read_bytes() != theirs.read_bytes(), (
+            "the app's favicon.ico IS NiceGUI's default")
+
+    # And ui.run has to actually be handed it -- a file nobody passes is inert.
+    # Sliced rather than regexed: the pattern needed an escaped newline, and
+    # shell quoting mangled that into a real one three times while this file was
+    # being written. Indexing needs no escapes.
+    src = _pl.Path(main.__file__).read_text(encoding="utf-8")
+    start = src.rindex("ui.run(")
+    call = src[start:src.index(")", src.index("show=False", start))]
+    assert "favicon=" in call, (
+        "ui.run does not pass favicon=, so NiceGUI still owns /favicon.ico")
+
+
+def test_the_app_ico_is_multi_size_and_draws_the_mark():
+    """The point of the format is that the browser picks a size rather than
+    scaling one bitmap."""
+    import pathlib as _pl
+
+    from PIL import Image
+
+    import main
+
+    ico = _pl.Path(main._STATIC_DIR) / "img" / "favicon.ico"
+    with Image.open(ico) as im:
+        sizes = {tuple(s) for s in im.info.get("sizes", ())}
+    for want in ((16, 16), (32, 32)):
+        assert want in sizes, f"favicon.ico has no {want[0]}px entry; has {sorted(sizes)}"
+
+    # The accent pixel proves it is the app's palette, not the site's blurple.
+    with Image.open(ico) as im:
+        im.size = (48, 48)
+        im.load()
+        rgb = im.convert("RGB")
+    px = {rgb.getpixel((x, 24)) for x in range(14, 34)}
+    assert any(abs(r - 107) < 40 and abs(g - 134) < 40 and abs(b - 255) < 40
+               for r, g, b in px), "the rule is not the app accent #6b86ff"
+
+
 def test_brand_assets_are_shipped():
     """The header renders a real file, not a hopeful URL — so it must be in the
     repo. Whatever ``[brand].mark`` names has to be ON DISK: ``brand_mark_src``

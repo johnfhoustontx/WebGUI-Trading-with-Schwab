@@ -2675,5 +2675,17 @@ if __name__ in {"__main__", "__mp_main__"}:
     # noisy `OSError [WinError 64] "network name is no longer available"` accept
     # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
     # Docker) dropped — and keeps the trading app off the LAN.
+    # ``favicon`` is a real FILE on purpose, and it is the only thing that
+    # answers ``/favicon.ico``. Every page already declares its own coloured SVG
+    # via ``_page``, but a browser that will not take an SVG favicon — Safari
+    # does not — asks for ``/favicon.ico`` regardless, and NiceGUI serves ITS
+    # OWN logo there unless handed a file (``favicon.create_favicon_route``
+    # only registers the route when ``is_file``). Measured on prod before this:
+    # the bytes at that path were byte-identical to nicegui/static/favicon.ico.
+    #
+    # This is the app-wide FALLBACK, not the per-page icon: ``get_favicon_url``
+    # reads ``page.favicon or app.config.favicon``, so the route colours still
+    # win on every page that has one.
     ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=window_title(),
+           favicon=_STATIC_DIR / "img" / "favicon.ico",
            dark=True, reload=False, show=False)
