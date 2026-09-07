@@ -473,6 +473,66 @@ it is the check Task 12 will repeat in a browser.
 
 ---
 
+## Task 3c: A pinned screen shows one view, and pays for one history
+
+**⚠ Added mid-execution, 2026-09-07,** narrowing Task 3b after it measured and
+escalated its own cost: twelve published history keys ran the tick's gamma
+writes to ~4x the private page's own, a multiplication of exactly the cost the
+2026-08-20 history split was written to remove.
+
+**The product decision that unlocks the saving.** The public gamma screens show
+**only their pinned view**; the subtab row is not rendered on them. That is the
+more faithful reading of the request ("Premium Divergence — will display SPY"),
+and it means nothing can render empty, because there is no control to click.
+
+**What follows from it.**
+
+1. **No picker when a view is pinned** — `gamma.shows_view_picker(view)` gates
+   the build, and the `bind_breadcrumb_leaf` call goes with it (it binds *to* the
+   tabs element, and the live shell has no breadcrumb anyway). Gated on the PIN,
+   not on the shell slot being absent: "no slot" already means "mount inline".
+   `_PinnedView` stands in for the tabs so the dozen `view_toggle.value` readers
+   downstream are untouched.
+2. **One history key, not twelve** — `handlers.PUBLISHED_GAMMA_HISTORY_VIEWS`
+   maps symbol → the views whose history is published. `$SPX` pins GEX and draws
+   the intraday heatmap, which IS the history; SPY and QQQ pin Flow, whose
+   `_render_view` branch draws `snap["flow"]` + `snap["prem_ladder"]` from the
+   MAIN payload and returns before it touches the per-view cache. Its **keys are
+   also the published symbol list**, so a symbol cannot be published without an
+   entry saying why. The rows are still POPPED from every payload — not writing a
+   key must not mean leaving them inline.
+3. **No enqueue from a pinned render** — `gamma.may_enqueue_refresh(symbol,
+   view)` gates the 120 s timer, the Refresh-now button (hidden, not left dead)
+   and the hand-off path, and the strip stops counting down to a refresh it will
+   never make. On a public origin that enqueue let every anonymous visitor drive
+   a Schwab chain fetch; the read-only bus client of Task 5 is the backstop, this
+   is the design.
+4. **Startup seeds all three** — `$SPX` has a private page to warm it, SPY and
+   QQQ do not, so a cold Redis left their screens on a key nobody had written
+   until the first collection tick (outside market hours: the next trading day).
+   Two extra chain fetches per service restart.
+
+**Measured** through the real `_publish_gamma` against a fakeredis bus,
+close-of-session shape (376 rows x 80 strikes), one `refresh_gamma_current` tick
+with the private page parked on `$SPX`:
+
+| | writes | bytes | vs private alone |
+|---|---|---|---|
+| private key alone (pre-3b) | 5 | 4.94 MB | — |
+| Task 3b | 21 | 19.75 MB | 4.00x |
+| Task 3c | 10 | 6.28 MB | 1.27x |
+
+⚠ **Un-pinning a public screen's view means adding that symbol's views back to
+`PUBLISHED_GAMMA_HISTORY_VIEWS`**, or it draws an empty heatmap — silently, since
+a missing history key reads as "no history yet".
+
+⚠ **Still open at Task 3c:** Explain, Analyze and the history-report button also
+enqueue commands, and `gamma_analyze` is a **paid Claude call**. They are not
+gated here — Task 5's read-only bus client is what must stop them, and Task 12
+should confirm it does.
+
+---
+
 ## Task 4: `app_settings.freeze()`
 
 **Files:**
