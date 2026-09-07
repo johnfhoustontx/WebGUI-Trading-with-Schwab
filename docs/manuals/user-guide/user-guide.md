@@ -21,9 +21,10 @@ From this one interface you can:
 - **Review** your live brokerage portfolio and an end-of-day report.
 - **Watch** an autonomous paper trader pick and size defined-risk spreads.
 
-> **This is a single-user, local application.** It runs on your own machine and
-> talks to Schwab through a local gateway. There are no accounts to log into in
-> the web app itself.
+> **This is a single-user application.** It runs on your own machine and talks
+> to Schwab through a local gateway. Reaching it from anywhere else goes through
+> a sign-in — your password and an authenticator code — and the app itself still
+> listens only on the host.
 
 ---
 
@@ -277,7 +278,8 @@ Three built-in help features are always within reach:
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.
 - **User Manuals** — a tab in the **More** group. It opens this User Guide, the
-  **Reference Guide**, and the Technical and API references in your browser.
+  **Reference Guide**, the Technical and API references, and the **Options
+  Glossary** in your browser.
 
 > **If you want to understand *why* a page exists rather than how to operate it,
 > read the Reference Guide.** This User Guide is task-oriented — it tells you what
@@ -1319,8 +1321,8 @@ Everything is **paper** — nothing is ever sent to a live brokerage account.
 - A **Performance** view listing closed trades with their exit reason (*Target hit*,
   *Delta stop*, *Time stop*, *Money stop*).
 
-**When it runs:** a 09:28 ET morning checkpoint, then every 30 minutes within an
-entry window of **09:45–15:30 ET**. The first quarter-hour after the open is skipped
+**When it runs:** every 30 minutes within an entry window of
+**09:45–15:30 ET**. The first quarter-hour after the open is skipped
 so the structure is readable, and no *new* entries are taken in the last half hour.
 Open positions are re-priced every minute during market hours regardless.
 
@@ -1406,13 +1408,15 @@ which keeps working in the exported file as well as in the app.
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)
 
-A simple index that links the four manuals — each opens in a new browser tab:
+A simple index that links the five manuals — each opens in a new browser tab:
 
 - **User Guide** — how to use the app (this document).
 - **Reference Guide** — what each tab and sub-tab is for, why it matters and when to
   open it, starting from a one-page summary of the whole app.
 - **Technical Reference** — the math behind every number.
 - **API / Developer Reference** — the integration surface for developers.
+- **Options Glossary** — plain-English definitions of every term the app puts on
+  screen, from what a contract is to what dealer gamma means.
 
 The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
 

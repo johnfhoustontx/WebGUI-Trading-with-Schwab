@@ -168,9 +168,10 @@ and dashboard tools with one web app you open in your browser at
 <li><strong>Watch</strong> an autonomous paper trader pick and size defined-risk spreads.</li>
 </ul>
 <blockquote>
-<p><strong>This is a single-user, local application.</strong> It runs on your own machine and
-talks to Schwab through a local gateway. There are no accounts to log into in
-the web app itself.</p>
+<p><strong>This is a single-user application.</strong> It runs on your own machine and talks
+to Schwab through a local gateway. Reaching it from anywhere else goes through
+a sign-in — your password and an authenticator code — and the app itself still
+listens only on the host.</p>
 </blockquote>
 <hr />
 <h1 id="prerequisites">Prerequisites</h1>
@@ -451,7 +452,8 @@ session.</p>
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.</li>
 <li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group. It opens this User Guide, the
-  <strong>Reference Guide</strong>, and the Technical and API references in your browser.</li>
+  <strong>Reference Guide</strong>, the Technical and API references, and the <strong>Options
+  Glossary</strong> in your browser.</li>
 </ul>
 <blockquote>
 <p><strong>If you want to understand <em>why</em> a page exists rather than how to operate it,
@@ -1464,8 +1466,8 @@ with a stop button.</p>
 <li>A <strong>Performance</strong> view listing closed trades with their exit reason (<em>Target hit</em>,
   <em>Delta stop</em>, <em>Time stop</em>, <em>Money stop</em>).</li>
 </ul>
-<p><strong>When it runs:</strong> a 09:28 ET morning checkpoint, then every 30 minutes within an
-entry window of <strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
+<p><strong>When it runs:</strong> every 30 minutes within an entry window of
+<strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
 so the structure is readable, and no <em>new</em> entries are taken in the last half hour.
 Open positions are re-priced every minute during market hours regardless.</p>
 <blockquote>
@@ -1569,13 +1571,15 @@ not reconcile to each other — that is correct, not a bug.</p>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)</p>
-<p>A simple index that links the four manuals — each opens in a new browser tab:</p>
+<p>A simple index that links the five manuals — each opens in a new browser tab:</p>
 <ul>
 <li><strong>User Guide</strong> — how to use the app (this document).</li>
 <li><strong>Reference Guide</strong> — what each tab and sub-tab is for, why it matters and when to
   open it, starting from a one-page summary of the whole app.</li>
 <li><strong>Technical Reference</strong> — the math behind every number.</li>
 <li><strong>API / Developer Reference</strong> — the integration surface for developers.</li>
+<li><strong>Options Glossary</strong> — plain-English definitions of every term the app puts on
+  screen, from what a contract is to what dealer gamma means.</li>
 </ul>
 <p>The Word (<code>.docx</code>) copies live alongside the HTML under <code>docs/manuals/</code>.</p>
 <hr />
