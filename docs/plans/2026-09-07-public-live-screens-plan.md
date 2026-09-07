@@ -381,6 +381,98 @@ git commit -m "feat(gamma): render() accepts a pinned symbol and view"
 
 ---
 
+## Task 3b: Per-symbol gamma snapshots for the published screens
+
+**⚠ Added mid-execution, 2026-09-07.** Task 3's implementer found, and the
+controller independently confirmed, that Task 3's pin is **necessary but not
+sufficient** for three of the four gamma-derived screens.
+
+**The problem.** `cache:options:gamma` is a **single, symbol-agnostic key**
+holding whichever symbol was last refreshed
+(`services/options_svc/handlers.py:239`). Worse, `refresh_gamma_current` reads
+the symbol back *out* of that key (`handlers.py:1187-1208`), so the slot is
+**sticky and driven by whatever the private app last looked at**. The per-view
+history keys have the same shape: `gamma_history_key(view)` is keyed by view
+only, with the symbol carried *inside* the payload for the page to check.
+
+Three consequences, all of which would have been found in a browser at Task 12
+and none of which Task 3 could fix:
+
+| Screen | Without this task |
+|---|---|
+| Gamma (`$SPX`) | Renders whatever symbol the private app last selected. Open `/options/gamma` and pick AMD, and the public "$SPX" screen shows AMD. |
+| Premium Divergence · SPY | Renders `$SPX` data. The panel labels itself from `snap["symbol"]`, so it is honest rather than wrong — but it is not SPY. |
+| Premium Divergence · QQQ | Same. |
+
+Net Prem is unaffected: it has its own multi-symbol key
+(`cache:options:net_premium`) and is symbol-independent by construction.
+
+**The cost is near zero, which is what makes this the right fix.**
+`config/symbols.toml` `[collection] base` is
+`["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]` — the collector **already fetches SPY
+and QQQ chains every minute**. Publishing per-symbol snapshots for the three
+published symbols reuses chains the service has already paid for, *provided*
+you extend the existing tick-chain stash rather than refetching.
+
+**⚠ Read `handlers._stash_tick_chain` / `_take_tick_chain` before writing
+anything.** They exist precisely to stop the same tick fetching one symbol's
+chain twice, and today they hold exactly ONE symbol. Extending them to hold the
+three published symbols is the difference between this task costing nothing and
+costing ~880 extra Schwab calls/day against a budget already at 68–76k.
+**If you cannot make the stash serve all three, stop and report the measured
+call cost rather than shipping the refetch.**
+
+**Files:**
+- Modify: `services/options_svc/handlers.py` (publish + schedule)
+- Modify: `webgui/pages/options/gamma.py` (read the per-symbol key when pinned)
+- Test: `services/options_svc/tests/` and `webgui/tests/test_options_gamma.py`
+
+**Design constraints:**
+
+1. **The published keys are ADDITIVE.** `cache:options:gamma` and its history
+   keys keep their exact shape and meaning; the private page is untouched. A
+   new `cache:options:gamma_pub:<symbol>` (and its per-symbol history keys)
+   serves the public screens. Do **not** re-key the existing cache — that would
+   change the private app's behaviour for a public feature, and this repo's
+   standing rule is that the app's screens are the source of truth the public
+   ones mirror, never the reverse.
+2. **`gamma.render(symbol=...)` reads the published key; `render()` bare reads
+   today's.** One implementation, one renderer, two data sources — the drift
+   risk is in the data, not the drawing, which is the acceptable half.
+3. **Publish only the three symbols the screens name.** `$SPX`, `SPY`, `QQQ`,
+   sourced from `live_screens.SCREENS` if that is importable from Tier 2
+   without breaking the tier rule — **it is not** (`services` may not import
+   `webgui`), so this is a documented cross-tier mirror. Add it to
+   `shared/tests/test_cross_tier_mirrors.py`, which exists for exactly this and
+   already pins two other such pairs.
+4. **A symbol with no published snapshot must degrade to the page's existing
+   "no data" state**, never to another symbol's data. `refresh_gamma` already
+   caches a graceful-empty `{"symbol", views:{}}` for a failed chain fetch —
+   reuse that shape rather than inventing one.
+5. **Ordering is load-bearing and already documented.** `_publish_gamma` writes
+   history keys FIRST, then the main payload, "because the page reacts to the
+   MAIN key's version bump and then reads the history it needs". Preserve that
+   for the published keys, and keep the symbol inside every history payload so
+   the reader can still refuse a mismatch.
+
+**Verification that actually proves it:** enqueue nothing and read the keys
+directly —
+
+```bash
+.venv/bin/python -c "
+from shared.bus import Bus
+b = Bus()
+for s in ('\$SPX','SPY','QQQ'):
+    env = b.cache_get(f'cache:options:gamma_pub:{s}')
+    p = (env.payload if env else None) or {}
+    print(s, '->', p.get('symbol'), 'views:', sorted((p.get('views') or {})))"
+```
+
+Each must report **its own** symbol. That is the whole point of the task, and
+it is the check Task 12 will repeat in a browser.
+
+---
+
 ## Task 4: `app_settings.freeze()`
 
 **Files:**
