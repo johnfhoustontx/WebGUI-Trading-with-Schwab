@@ -1832,6 +1832,61 @@ def may_enqueue(symbol, view) -> bool:
     return symbol is None and view is None
 
 
+def reads_snapshot(view) -> bool:
+    """Whether this render ever draws from the gamma SNAPSHOT cache.
+
+    Six of the seven views paint from it. Net Prem does not: it is symbol-
+    INDEPENDENT, and ``_render_view`` handles it in a branch that returns BEFORE
+    the snapshot is read, off its own ``options:net_premium`` key. So the one
+    render that needs no snapshot is the one PINNED to Net Prem — with no picker
+    built there is no other view to reach.
+
+    It matters because that screen pins no symbol, so ``snapshot_view(None)``
+    resolves to ``options:gamma`` — the PRIVATE page's shared slot, holding
+    whatever the owner last looked at. The public screen draws nothing from it,
+    and a public process has no business polling it every two seconds and
+    deserializing the owner's snapshot every minute to throw it away.
+
+    An UNPINNED view keeps the picker, so the reader can reach a view that does
+    need it; an unknown pin resolves to GEX, which needs it too."""
+    return shows_view_picker(view) or _resolve_view(view) != "Net Prem"
+
+
+# The four auto-briefing slots, in header order: (cache-view suffix, menu label).
+# Module level because ``polled_views`` and the menu builder must not drift —
+# a slot in one and not the other is either a dead probe or a button whose
+# highlight never updates.
+_SCHED_SLOTS = (("premarket", "Premarket"), ("open", "Open"),
+                ("midday", "Midday"), ("close", "EOD recap"))
+
+# Probed on EVERY render: the collector status strip and the symbol-independent
+# Net Prem series are drawn by every screen, pinned or not.
+_POLL_ALWAYS = ("options:gex_status", "options:net_premium")
+
+# The four REPORT views. Each steers a watcher that opens a browser tab, or the
+# History row — and none of those is built on a pinned render, so probing them
+# there is a read of the owner's private output that can change nothing.
+_POLL_REPORTS = ("options:gamma_explain", "options:gamma_analyze",
+                 "options:gamma_briefings", "options:gamma_history")
+
+
+def polled_views(symbol, view) -> list[str]:
+    """Every cache view this render's 2 s version-poll probes.
+
+    Pure, and the single source for the poll — so what a PUBLIC screen reaches
+    into the owner's cache for is one readable list rather than an argument
+    spread across a function body. A pinned screen probes a strict subset: no
+    report views (it builds none of their controls) and, on Net Prem, not even a
+    gamma snapshot (see :func:`reads_snapshot`)."""
+    out = list(_POLL_ALWAYS)
+    if reads_snapshot(view):
+        out.append(snapshot_view(symbol))
+    if may_enqueue(symbol, view):
+        out += [*_POLL_REPORTS,
+                *(f"options:gamma_analyze_{s}" for s, _t in _SCHED_SLOTS)]
+    return out
+
+
 class _PinnedView:
     """Stand-in for the view picker on a screen whose view is PINNED.
 
@@ -2058,6 +2113,10 @@ def render(symbol: str | None = None, view: str | None = None):
     # every enqueue site and every control that reaches one reads the same
     # answer — see may_enqueue.
     _may_enqueue = may_enqueue(symbol, view)
+    # Whether this render reads a gamma snapshot at all — see reads_snapshot.
+    # Both flags are resolved HERE so every read site and every control asks the
+    # same question once.
+    _reads_snap = reads_snapshot(view)
 
     def _build_view_tabs():
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
@@ -2149,19 +2208,29 @@ def render(symbol: str | None = None, view: str | None = None):
         _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
         sched_btns = {}
         _sched_titles = {}
-        briefings_btn = ui.button("Briefings", icon="schedule", color=None).props("no-caps").classes(BTN)
-        with briefings_btn:
-            _briefings_menu = ui.menu()
-            with _briefings_menu:
-                for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
-                                      ("midday", "Midday"), ("close", "EOD recap")):
-                    _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
-                        f"/options/analyze?slot={s}", new_tab=True))
-                    _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
-                    _mi.set_enabled(False)
-                    _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
-                    sched_btns[_slot] = _mi
-                    _sched_titles[_slot] = _title
+        # Briefings SENDS no command, so may_enqueue's rule did not reach it —
+        # but it is still a live control on a public screen, and a worse one than
+        # a dead button: its items navigate to /options/analyze, a route the live
+        # process does not serve, and what they open is the OWNER'S PAID Claude
+        # briefing. A pinned render does not build it.
+        #
+        # Leaving ``sched_btns`` empty is load-bearing, not incidental:
+        # ``_SCHED_VIEWS`` is derived from it, so the 2 s poll stops probing the
+        # four briefing versions and ``_sync_sched_btns`` loops over nothing.
+        briefings_btn = (ui.button("Briefings", icon="schedule", color=None)
+                         .props("no-caps").classes(BTN)) if _may_enqueue else None
+        if briefings_btn is not None:
+            with briefings_btn:
+                _briefings_menu = ui.menu()
+                with _briefings_menu:
+                    for _slot, _title in _SCHED_SLOTS:
+                        _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
+                            f"/options/analyze?slot={s}", new_tab=True))
+                        _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
+                        _mi.set_enabled(False)
+                        _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
+                        sched_btns[_slot] = _mi
+                        _sched_titles[_slot] = _title
 
     # --- Net Prem controls (this view only) ---------------------------------
     # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
@@ -2739,6 +2808,8 @@ def render(symbol: str | None = None, view: str | None = None):
 
     @guard_async
     async def _maybe_repaint(version):
+        if not _reads_snap:
+            return              # nothing on screen comes from it — see reads_snapshot
         # Repaint only when the bus cache version changes (the service bumps it
         # when a requested gamma_refresh finishes). The version compare is done by
         # the caller off the cheap :ver probe; the actual snapshot payload
@@ -2774,6 +2845,8 @@ def render(symbol: str | None = None, view: str | None = None):
         Mirrors _maybe_repaint_netprem: separate key, own in-flight guard, big read
         via run.io_bound. Cached in state["hist"] so flipping back to a view the
         user has already seen costs nothing."""
+        if not _reads_snap:
+            return              # the history keys are the snapshot's companions
         if not view or view in (state.get("hist") or {}) or state.get("hist_fetching"):
             return
         state["hist_fetching"] = True
@@ -2910,6 +2983,11 @@ def render(symbol: str | None = None, view: str | None = None):
         hist_open.on_click(_open_history)
 
     _SCHED_VIEWS = {s: f"options:gamma_analyze_{s}" for s in sched_btns}
+    # _SCHED_VIEWS above is empty on a pinned render, because sched_btns is (see
+    # the Briefings block) — and polled_views omits the same four for the same
+    # reason, from the pin rather than from the dict. The poll test drives both
+    # and asserts they agree.
+    _poll_views = polled_views(symbol, view)
     _sched_state = {s: {"ver": None, "date": None, "applied": None} for s in sched_btns}
 
     def _sync_sched_btns(versions):
@@ -2952,22 +3030,22 @@ def render(symbol: str | None = None, view: str | None = None):
         # the event loop) and dispatch only the views that changed. Only the big
         # gamma snapshot fetch (~14 MB) is moved off-loop, inside _maybe_repaint;
         # the small status/explain/analyze/sched payloads stay inline.
-        v = bus_client.read_versions([
-            _snap_view, "options:gex_status",
-            "options:gamma_explain", "options:gamma_analyze",
-            "options:gamma_briefings", "options:gamma_history",
-            "options:net_premium",
-            *_SCHED_VIEWS.values()])
-        await _maybe_repaint(v[_snap_view])
+        # The probe LIST is polled_views(...) — pure, and a strict subset on a
+        # pinned render. The dispatch below reads the same two flags, so a key
+        # this indexes and that list omits is a KeyError, not a silent read.
+        v = bus_client.read_versions(_poll_views)
+        if _reads_snap:
+            await _maybe_repaint(v[_snap_view])
         await _maybe_repaint_netprem(v["options:net_premium"])
         _maybe_repaint_status(v["options:gex_status"])
-        _watch_explain(v["options:gamma_explain"])
-        _watch_analyze(v["options:gamma_analyze"])
-        _sync_sched_btns(v)
-        if v["options:gamma_briefings"] != seen.get("briefings"):
-            seen["briefings"] = v["options:gamma_briefings"]
-            _refresh_history_dates(bus_client.read("options:gamma_briefings"))
-        _watch_history(v["options:gamma_history"])
+        if _may_enqueue:
+            _watch_explain(v["options:gamma_explain"])
+            _watch_analyze(v["options:gamma_analyze"])
+            _sync_sched_btns(v)
+            if v["options:gamma_briefings"] != seen.get("briefings"):
+                seen["briefings"] = v["options:gamma_briefings"]
+                _refresh_history_dates(bus_client.read("options:gamma_briefings"))
+            _watch_history(v["options:gamma_history"])
 
     def _set_symbol(sym):
         """Point the dropdown at ``sym`` (adding it to the options if the universe
@@ -3160,16 +3238,24 @@ def render(symbol: str | None = None, view: str | None = None):
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
     # gamma snapshot (~14 MB) is read OFF the event loop in _initial_load so the
     # first page build doesn't block the loop for every connected client.
-    seen["gamma"] = bus_client.read_version(_snap_view)
-    seen["explain"] = bus_client.read_version("options:gamma_explain")
-    seen["analyze"] = bus_client.read_version("options:gamma_analyze")
+    # Seed the same views the 2 s poll will probe, and no others: a version
+    # seeded for a key nobody polls is dead weight, and on a public screen it is
+    # a read of the owner's cache that changes nothing on the page.
+    if _reads_snap:
+        seen["gamma"] = bus_client.read_version(_snap_view)
     seen["status"] = bus_client.read_version("options:gex_status")
-    seen["briefings"] = bus_client.read_version("options:gamma_briefings")
-    seen["history"] = bus_client.read_version("options:gamma_history")
     seen["netprem"] = bus_client.read_version("options:net_premium")
-    _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
+    if _may_enqueue:
+        seen["explain"] = bus_client.read_version("options:gamma_explain")
+        seen["analyze"] = bus_client.read_version("options:gamma_analyze")
+        seen["briefings"] = bus_client.read_version("options:gamma_briefings")
+        seen["history"] = bus_client.read_version("options:gamma_history")
+        _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
     _paint_status(bus_client.read("options:gex_status"))
-    _refresh_history_dates(bus_client.read("options:gamma_briefings"))
+    if _may_enqueue:
+        # Split from the block above rather than folded into it, so the private
+        # page's build order is byte-for-byte what it was.
+        _refresh_history_dates(bus_client.read("options:gamma_briefings"))
 
     @guard_async
     async def _initial_load():
@@ -3178,7 +3264,7 @@ def render(symbol: str | None = None, view: str | None = None):
         # this skips if the poll already fetched. Symbol-sync + first paint happen
         # here, and on_value_change is wired AFTER the sync so the programmatic
         # symbol set doesn't enqueue a spurious refresh.
-        if not state.get("fetching"):
+        if _reads_snap and not state.get("fetching"):
             state["fetching"] = True
             try:
                 state["snap"] = await run.io_bound(bus_client.read, _snap_view) or None

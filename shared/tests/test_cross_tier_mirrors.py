@@ -186,8 +186,12 @@ def _published_gamma_symbols():
     return tuple(_const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_HISTORY_VIEWS"))
 
 
-def _gamma_screen_symbols(rel_path):
-    """The ``symbol`` pins of every ``Screen`` whose module is ``options.gamma``.
+def _gamma_screen_pins(rel_path):
+    """``(symbol, view)`` for every ``Screen`` whose module is ``options.gamma``.
+
+    ``view`` is ``None`` when the screen pins none -- which is not the same as
+    "no view": an unpinned view means the page BUILDS its picker, so the reader
+    can reach all four heatmap views and every one of them needs its history.
 
     Read as TEXT like everything else here -- importing live_screens.py would put
     webgui on sys.path from a shared test."""
@@ -202,9 +206,13 @@ def _gamma_screen_symbols(rel_path):
         if module is None or ast.literal_eval(module) != "options.gamma":
             continue
         pins = ast.literal_eval(kw["kwargs"]) if "kwargs" in kw else {}
-        if pins.get("symbol"):
-            out.append(pins["symbol"])
+        out.append((pins.get("symbol"), pins.get("view")))
     return out
+
+
+def _gamma_screen_symbols(rel_path):
+    """The ``symbol`` pins alone, in order (a screen without one is skipped)."""
+    return [sym for sym, _view in _gamma_screen_pins(rel_path) if sym]
 
 
 def test_the_published_gamma_symbols_are_the_three_the_screens_name():
@@ -238,3 +246,50 @@ def test_every_served_manual_is_also_built():
     orphans = served - built
     assert not orphans, (
         f"served but never BUILT: {sorted(orphans)} - the page would 404.")
+
+
+def test_every_published_gamma_history_is_one_a_screen_actually_draws():
+    """The OTHER half of the pairing above: the views, not just the symbols.
+
+    The symbol test cannot see this. A screen pinned to ``{"symbol": "$SPX",
+    "view": "Charm"}`` names a published symbol, so it passes every test in the
+    repo -- and renders an EMPTY HEATMAP forever, because ``$SPX`` publishes a
+    history for ``GEX`` and nothing else. Silently: a missing key reads as "no
+    history yet", which is also what a Sunday looks like.
+
+    The rule is derived, not listed. ``GAMMA_HISTORY_VIEWS`` is the set of views
+    that HAVE a history key at all, so:
+
+    * a screen pinned to one of them needs exactly that one;
+    * a screen pinned to any other view (Flow, Net Prem, Term) draws from the
+      MAIN payload and needs none -- which is why ``SPY`` and ``QQQ`` publish an
+      empty tuple;
+    * a screen that pins NO view builds the picker, so it can reach all four.
+
+    Asserted as EQUALITY, both directions. Missing is the empty screen above;
+    extra is the cost the split table was written to avoid -- each published
+    history is a per-symbol grid key rewritten every minute, on a store that has
+    already needed a manual ~1 GB VACUUM.
+    """
+    if not (ROOT / LIVE_SCREENS).exists():
+        pytest.skip(f"{LIVE_SCREENS} not written yet")
+    history_views = set(_const(GAMMA_SYMBOLS_SOURCE, "GAMMA_HISTORY_VIEWS"))
+    assert history_views, "no history views - the pin would be vacuous"
+    published = _const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_HISTORY_VIEWS")
+
+    needed = {sym: set() for sym in published}
+    for sym, view in _gamma_screen_pins(LIVE_SCREENS):
+        if not sym:
+            continue                     # symbol-independent (Net Prem)
+        assert sym in needed, f"{sym} is pinned by a screen but never published"
+        if view is None:
+            needed[sym] |= history_views          # picker built - any view reachable
+        elif view in history_views:
+            needed[sym].add(view)
+
+    for sym, want in sorted(needed.items()):
+        assert set(published[sym]) == want, (
+            f"PUBLISHED_GAMMA_HISTORY_VIEWS[{sym!r}] is {tuple(published[sym])!r} "
+            f"but the live screens need {tuple(sorted(want))!r}. Too few and the "
+            "screen draws an empty heatmap forever; too many and options_svc "
+            "rewrites a grid key every minute that nothing reads.")

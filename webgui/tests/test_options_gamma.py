@@ -665,7 +665,11 @@ def test_big_gamma_snapshot_read_is_off_loop():
     # published one; see snapshot_view.)
     assert "run.io_bound(bus_client.read, _snap_view)" in src
     # The cheap version probes are NOT wrapped (still a plain synchronous call).
-    assert "read_versions([" in src
+    # The literal list moved out to the pure ``polled_views`` when the pinned
+    # screens stopped probing keys they draw nothing from; the property this
+    # test is about — plain synchronous call, never run.io_bound — is unchanged.
+    assert "read_versions(_poll_views)" in src
+    assert "run.io_bound(bus_client.read_versions" not in src
     # The repaint/poll became async + are guarded against a dead client.
     assert "async def _maybe_repaint" in src
     assert "async def _poll" in src
@@ -2321,12 +2325,28 @@ def _parents(tree):
 
 
 def _enqueue_calls():
-    """Every ``bus_client.request(...)`` call node in gamma.py."""
+    """Every ``<anything>.request(...)`` call node in gamma.py.
+
+    Deliberately NOT anchored on the receiver being literally ``bus_client``.
+    Mutation-tested: requiring that name caught a plain ungated call and a guard
+    demoted to the second statement, but silently MISSED ``import bus_client as
+    _bc`` / ``_bc.request(...)`` — one keystroke past a security enumeration
+    whose whole promise is that a command added next year is covered. The
+    receiver carries no information the test needs; the method name does.
+
+    The other spelling, ``from bus_client import request`` / ``request(...)``,
+    is an ``ast.Name`` call and cannot be caught by a method-name walk at all.
+    That one is closed by forbidding the import form instead — see
+    ``test_gamma_reaches_the_bus_only_through_the_module``. ⚠ Both halves are
+    load-bearing: neither covers the other's spelling.
+
+    Nothing else in gamma.py calls a ``.request(`` of any kind (asserted below),
+    so widening the receiver costs no false positives today; if one ever appears
+    it is a warning worth reading, not noise.
+    """
     return [n for n in ast.walk(_GAMMA_TREE)
             if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Attribute) and n.func.attr == "request"
-            and isinstance(n.func.value, ast.Name)
-            and n.func.value.id == "bus_client"]
+            and isinstance(n.func, ast.Attribute) and n.func.attr == "request"]
 
 
 def _enqueue_functions():
@@ -2370,9 +2390,34 @@ def _guards_on_the_pin(fn) -> bool:
 
 def test_the_walker_finds_every_enqueue_in_the_source():
     """The enumeration's own smoke test: an AST walk that silently matched
-    nothing would make every assertion below vacuously true."""
-    assert len(_enqueue_calls()) == _GAMMA_SRC.count("bus_client.request(") > 0
+    nothing would make every assertion below vacuously true.
+
+    ``>=`` rather than ``==`` since the walk widened past the ``bus_client.``
+    receiver: it must find AT LEAST every literal occurrence, and finding more
+    (an aliased module) is the point. The count of literal occurrences is what
+    keeps it non-vacuous."""
+    assert len(_enqueue_calls()) >= _GAMMA_SRC.count("bus_client.request(") > 0
     assert _enqueue_functions()
+
+
+def test_gamma_reaches_the_bus_only_through_the_module():
+    """The half a method-name walk cannot do.
+
+    ``from bus_client import request as _req`` makes the enqueue a bare-name
+    call — an ``ast.Name``, indistinguishable from any other one-word call in
+    the file — so no enumeration over ``.request`` attributes can see it. The
+    fix is to make the spelling unavailable rather than to try to recognise it:
+    the page reaches the bus through ``import bus_client`` and reads attributes
+    off it, which is also what every other page here does."""
+    bad = [n for n in ast.walk(_GAMMA_TREE)
+           if isinstance(n, ast.ImportFrom)
+           and (n.module or "").split(".")[-1] == "bus_client"]
+    assert not bad, (
+        "gamma.py does `from bus_client import ...` at line(s) "
+        f"{[n.lineno for n in bad]}. That binds a bus function to a bare name, "
+        "which test_every_command_this_page_can_send_is_gated_on_the_pin walks "
+        "`.request` attributes and so cannot see. Use `import bus_client` and "
+        "call `bus_client.request(...)`.")
 
 
 def test_every_command_this_page_can_send_is_gated_on_the_pin():
@@ -2417,6 +2462,184 @@ def test_a_pinned_page_keeps_the_controls_that_only_DRAW():
     Net Prem picker touch nothing but this browser."""
     labels = _control_labels(_rendered(view="GEX", symbol="$SPX"))
     assert "Level movement" in labels and "Spot" in labels
+
+
+# ── Briefings: a live control that sends no command ────────────────────────
+# may_enqueue's rule is about commands, and Briefings sends none — its items
+# only ``ui.navigate.to``. It is still the wrong thing to draw on a public
+# screen, and worse than a dead button: the route it opens is not served by the
+# live process, and what it would open is the OWNER'S PAID Claude briefing.
+
+
+def _menu_items(kids):
+    return [e for e in kids if type(e).__name__ == "MenuItem"]
+
+
+def _menu_item_captions(kids):
+    """The menu-item captions a visitor reads.
+
+    NiceGUI hangs a ``ui.menu_item``'s text on the ``ItemSection`` it wraps, not
+    on the ``MenuItem`` — reading ``MenuItem.text`` returns "" for every one of
+    them and would make this assertion vacuously true."""
+    return sorted(str(getattr(e, "text", "")) for e in kids
+                  if type(e).__name__ == "ItemSection")
+
+
+def test_the_bare_page_still_offers_its_briefings():
+    """The private page is untouched — the button, the menu and all four slots."""
+    kids = _rendered()
+    assert "Briefings" in _control_labels(kids)
+    assert len(_menu_items(kids)) == 4
+    assert _menu_item_captions(kids) == ["EOD recap", "Midday", "Open",
+                                         "Premarket"]
+    assert [s for s, _t in gamma._SCHED_SLOTS] == ["premarket", "open",
+                                                   "midday", "close"]
+
+
+def test_a_pinned_page_builds_no_briefings_menu():
+    """Not hidden — never built. ``_sync_spot_controls`` would only hide it on
+    the Net Prem view, so on the three symbol screens it was fully clickable."""
+    for pins in PUBLIC_PINS:
+        kids = _rendered(**pins)
+        assert "Briefings" not in _control_labels(kids), pins
+        assert _menu_items(kids) == [], pins
+        assert _menu_item_captions(kids) == [], pins
+        assert not [e for e in kids if type(e).__name__ == "Menu"], pins
+
+
+def _clickable_menu_items(kids):
+    """Menu items actually wired to a click handler.
+
+    Counted as ITEMS, not as listeners: NiceGUI attaches TWO click listeners to
+    a ``ui.menu_item`` — the caller's handler and the menu's own auto-close — so
+    a listener count is 2x the number of things a visitor can press."""
+    return [e for e in kids if type(e).__name__ == "MenuItem"
+            and any(ls.type == "click"
+                    for ls in getattr(e, "_event_listeners", {}).values())]
+
+
+def test_a_pinned_page_offers_no_route_the_live_process_does_not_serve():
+    """The reason the menu goes, stated as the thing a visitor could reach.
+
+    Every briefing item navigates to ``/options/analyze?slot=…``; the live
+    process registers only the fourteen screens in ``live_screens.SCREENS``. The
+    bare-page assertion is what stops this being vacuous — with no menu items to
+    find, "no click handlers" is true of a page that never had any."""
+    assert len(_clickable_menu_items(_rendered())) == 4
+    for pins in PUBLIC_PINS:
+        assert _clickable_menu_items(_rendered(**pins)) == [], pins
+
+
+# ── a PINNED render reads only the keys it can draw from ───────────────────
+# ``render(view="Net Prem")`` pins no symbol, so ``snapshot_view(None)`` is
+# ``options:gamma`` — the PRIVATE page's shared slot, holding whatever the owner
+# last looked at. The Net Prem branch of ``_render_view`` returns before the
+# snapshot is ever read, so the public process was polling that key every two
+# seconds and deserializing the owner's snapshot every minute to discard it.
+
+
+def test_the_private_page_reads_the_snapshot_on_every_view():
+    assert gamma.reads_snapshot(None) is True
+
+
+def test_a_pinned_net_prem_screen_needs_no_gamma_snapshot():
+    assert gamma.reads_snapshot("Net Prem") is False
+
+
+def test_every_other_pinned_view_still_reads_the_snapshot():
+    """Checked rather than assumed — Flow draws ``flow`` + ``prem_ladder`` from
+    the MAIN payload, so it needs the snapshot even though it needs no history."""
+    for v in gamma._VIEW_ORDER:
+        if v != "Net Prem":
+            assert gamma.reads_snapshot(v) is True, v
+
+
+def test_an_unknown_view_pin_still_reads_the_snapshot():
+    """A bad pin resolves to GEX (``_resolve_view`` is total), and GEX needs it —
+    a degraded pin must not also silently stop reading."""
+    assert gamma.reads_snapshot("Nonsense") is True
+
+
+def test_the_net_prem_screen_polls_neither_the_private_key_nor_the_reports():
+    got = gamma.polled_views(None, "Net Prem")
+    assert got == ["options:gex_status", "options:net_premium"]
+    # Named explicitly: that key is the PRIVATE page's shared slot, and it is
+    # what an unpinned symbol resolves to.
+    assert gamma.snapshot_view(None) == "options:gamma"
+    assert "options:gamma" not in got
+
+
+def test_a_pinned_symbol_screen_polls_its_own_published_key_and_no_reports():
+    got = gamma.polled_views("SPY", "Flow")
+    assert got == ["options:gex_status", "options:net_premium",
+                   "options:gamma_pub:SPY"]
+
+
+def test_the_private_page_polls_every_view_it_ever_did():
+    """The other half: nothing was dropped from the page that draws all of it."""
+    got = gamma.polled_views(None, None)
+    assert set(got) == {
+        "options:gamma", "options:gex_status", "options:net_premium",
+        "options:gamma_explain", "options:gamma_analyze",
+        "options:gamma_briefings", "options:gamma_history",
+        "options:gamma_analyze_premarket", "options:gamma_analyze_open",
+        "options:gamma_analyze_midday", "options:gamma_analyze_close"}
+    assert len(got) == len(set(got))
+
+
+def _reads_during_build(**pins):
+    """Every cache view the page BUILD asks the bus for."""
+    import bus_client as _bc
+
+    seen, orig = [], (_bc.read, _bc.read_version, _bc.read_versions)
+    _bc.read = lambda v: (seen.append(v), orig[0](v))[1]
+    _bc.read_version = lambda v: (seen.append(v), orig[1](v))[1]
+    _bc.read_versions = lambda vs: (seen.extend(vs), orig[2](vs))[1]
+    try:
+        _rendered(**pins)
+    finally:
+        _bc.read, _bc.read_version, _bc.read_versions = orig
+    return seen
+
+
+def test_the_net_prem_screen_never_touches_the_private_gamma_key():
+    """Behavioural, not source-level: nothing in the page build asks for it."""
+    assert "options:gamma" not in _reads_during_build(view="Net Prem")
+
+
+def test_the_private_page_still_seeds_the_private_gamma_key():
+    assert "options:gamma" in _reads_during_build()
+
+
+def _run_poll(kids):
+    """Drive the page's own 2 s poll once, and return the views it asked for."""
+    import asyncio
+
+    import bus_client as _bc
+
+    poll = [t.callback for t in kids if type(t).__name__ == "Timer"
+            and getattr(t.callback, "__name__", "") == "_poll"]
+    assert len(poll) == 1, "the version-poll timer moved"
+    seen, orig = [], _bc.read_versions
+    _bc.read_versions = lambda vs: (seen.append(list(vs)), orig(vs))[1]
+    try:
+        asyncio.run(poll[0]())
+    finally:
+        _bc.read_versions = orig
+    assert len(seen) == 1
+    return seen[0]
+
+
+@pytest.mark.parametrize("pins", [{}, *PUBLIC_PINS])
+def test_the_poll_asks_for_exactly_polled_views_and_indexes_nothing_else(pins):
+    """The drift guard, and the reason ``polled_views`` may be pure.
+
+    ``_poll`` indexes the returned dict by name, so a key it reads that the list
+    omits raises KeyError HERE rather than every two seconds in a browser. Driving
+    the real timer callback is what makes that true — a source assertion could
+    not."""
+    assert _run_poll(_rendered(**pins)) == gamma.polled_views(
+        pins.get("symbol"), pins.get("view"))
 
 
 def _navigations(kids, monkeypatch, bump):

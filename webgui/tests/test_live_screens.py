@@ -120,3 +120,26 @@ def test_live_screens_imports_nothing_from_nicegui():
         if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in banned:
             bad.append(node.module)
     assert bad == [], f"live_screens.py must stay pure data; it imports {bad}"
+
+
+def test_no_gamma_screen_reads_the_private_snapshot_slot():
+    """A gamma screen pinning a VIEW but no SYMBOL reads ``options:gamma``.
+
+    That key is the PRIVATE page's shared slot — whatever the owner last had
+    open — so such a screen would publish the owner's current symbol on an
+    unauthenticated origin, under a caption naming a view. The Net Prem screen
+    is the one that may pin no symbol, and only because it draws nothing from a
+    snapshot at all (``gamma.reads_snapshot``); every other view does.
+
+    The cross-tier mirror cannot see this: it pairs SYMBOLS against what
+    options_svc publishes, and a screen with no symbol is skipped there."""
+    import live_screens
+    from pages.options import gamma
+
+    for s in live_screens.SCREENS:
+        if s.module != "options.gamma" or s.kwargs.get("symbol"):
+            continue
+        assert not gamma.reads_snapshot(s.kwargs.get("view")), (
+            f"{s.slug} pins no symbol, so it would read "
+            f"{gamma.snapshot_view(None)!r} — the private page's slot. Pin a "
+            "symbol options_svc publishes (see PUBLISHED_GAMMA_HISTORY_VIEWS).")
