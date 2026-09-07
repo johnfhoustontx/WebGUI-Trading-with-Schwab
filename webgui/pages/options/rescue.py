@@ -741,9 +741,9 @@ def render():
         return lambda: None
 
     # ── tabs: folder-style subtabs mounted under the main strip (app standard,
-    # like Gamma/Scanner/Simulator) via main.subtab_slot(); falls back inline
+    # like Gamma/Scanner/Simulator) via shell.subtab_slot(); falls back inline
     # when the slot is absent (standalone render / tests). ────────────────────
-    import main as _shell
+    import shell as _shell
     _slot = _shell.subtab_slot()
 
     def _build_tabs():

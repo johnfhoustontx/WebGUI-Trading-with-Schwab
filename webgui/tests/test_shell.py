@@ -586,8 +586,8 @@ def test_sync_manual_paper_lifecycle_setting_registered_inside_the_main_guard():
 
 
 def test_reimporting_main_after_startup_does_not_raise():
-    """Pages do `import main as _shell` (e.g. pages/options/scanner.py) at REQUEST
-    time. The entry script runs as __main__, so that re-executes main.py as a
+    """`wall.py` does `import main` lazily inside its route handler. The entry
+    script runs as __main__, so that re-executes main.py as a
     SECOND module object — after NiceGUI has started. Any module-level
     `app.on_startup()` raises RuntimeError there and 500s every page, so lifecycle
     registration must live inside the __main__ guard.

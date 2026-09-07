@@ -597,11 +597,11 @@ def render():
     """
     ui.add_css(SCAN_CSS)  # compact signal-table columns
     # 0-DTE / Swing / Directional as SUBTABS directly under the main tab strip
-    # (like Gamma's view tabs, 2026-07-11): rendered into main.subtab_slot(),
+    # (like Gamma's view tabs, 2026-07-11): rendered into shell.subtab_slot(),
     # folder-styled by .compact-subtabs; the per-tab accent TEXT colors are kept.
     # Falls back inline if the slot is absent. tab_panels below reference the
     # element regardless of where it is mounted.
-    import main as _shell
+    import shell as _shell
     _slot = _shell.subtab_slot()
 
     def _build_scan_tabs():

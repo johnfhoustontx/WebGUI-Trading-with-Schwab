@@ -1686,7 +1686,7 @@ def should_speak(settings, now):
 def speak_volume(settings):
     """``voice_volume`` clamped to 0..1, falling back rather than raising.
 
-    The clamp is ``main.play_alert``'s, character for character. What differs is
+    The clamp is ``shell.play_alert``'s, character for character. What differs is
     the PARSE in front of it, and it has to: this runs on the 2 s poll path
     inside a timer callback, and ``settings.json`` is hand-editable and never
     validated on read — a bare ``float("loud")`` there is a traceback the user

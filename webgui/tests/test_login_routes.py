@@ -394,11 +394,12 @@ def test_the_gate_is_mounted_on_the_app_that_ships(client):
 
 
 def test_installing_the_gate_again_is_a_no_op_rather_than_a_500(client):
-    """⚠ THE TRAP THIS GUARDS. Pages ``import main`` lazily at request time, and
-    because ``main.py`` runs as ``__main__`` in production that re-executes the
-    file as a second module object -- AFTER NiceGUI has started. Starlette's
-    ``add_middleware`` raises once the middleware stack is built, so an
-    unguarded module-scope call would 500 every page that does the lazy import.
+    """⚠ THE TRAP THIS GUARDS. ``wall.py`` does ``import main`` lazily inside its
+    route handler, and because ``main.py`` runs as ``__main__`` in production that
+    re-executes the file as a second module object -- AFTER NiceGUI has started.
+    Starlette's ``add_middleware`` raises once the middleware stack is built, so
+    an unguarded module-scope call would 500 every page that does the lazy
+    import.
     Exactly the hazard the ``app.on_startup`` calls are already inside the
     ``__main__`` guard for.
 

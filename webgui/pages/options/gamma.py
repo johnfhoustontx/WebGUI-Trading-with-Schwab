@@ -1909,10 +1909,10 @@ def render():
 
     # View picker as SUBTABS directly under the main tab strip (2026-07-11 — was a
     # ui.toggle button group in the header row): a second tab level, styled by the
-    # shared .compact-subtabs rule. Renders into main.subtab_slot() (the slot the
+    # shared .compact-subtabs rule. Renders into shell.subtab_slot() (the slot the
     # shell mounts beneath the strip); falls back inline if the slot is absent.
     # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
-    import main as _shell
+    import shell as _shell
     _slot = _shell.subtab_slot()
 
     def _build_view_tabs():

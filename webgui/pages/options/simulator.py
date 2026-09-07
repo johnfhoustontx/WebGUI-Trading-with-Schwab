@@ -301,10 +301,10 @@ def render():
     # in three cards: controls, strategy+legs, and the tabbed chart panel. The
     # Highcharts panels are already dark-transparent, so they sit on the navy. ──────
     # Replay / What-if / IV-shock as SUBTABS directly under the main tab strip
-    # (2026-07-11 — like Gamma/Scanner): rendered into main.subtab_slot(), folder-
+    # (2026-07-11 — like Gamma/Scanner): rendered into shell.subtab_slot(), folder-
     # styled by .compact-subtabs, so the view tabs sit as high as possible. Falls
     # back inline if the slot is absent. Same value/on_value_change API as before.
-    import main as _shell
+    import shell as _shell
     _slot = _shell.subtab_slot()
 
     def _build_sim_tabs():

@@ -135,10 +135,10 @@ def render():
         status_lbl = ui.label("").classes("opacity-70 text-sm")
 
     # Holdings / Sectors / Performance as folder-style TABS at the top of the
-    # page (2026-07-12 — like the Options pages): rendered into main.subtab_slot()
+    # page (2026-07-12 — like the Options pages): rendered into shell.subtab_slot()
     # so they sit under the header in the same position as the group subtabs;
     # falls back inline if the slot is absent.
-    import main as _shell
+    import shell as _shell
 
     def _build_tabs():
         with ui.tabs().classes("compact-tabs").props(
