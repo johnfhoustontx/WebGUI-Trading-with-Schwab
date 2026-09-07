@@ -193,6 +193,29 @@ dark ink — the threshold had it backwards for most of the palette.
 of the threshold a colour fell on would have been green while `/driver` was
 illegible. It was verified by restoring the threshold and watching it fail.
 
+### ⚠ The tab icon was never reaching the browser at all
+
+Swapping the artwork did not fix the tab, because the mechanism was wrong. The
+favicon was injected with `ui.add_head_html`, which appends a **second**
+`<link rel="icon">` — NiceGUI's template already emits its own at line 11
+(`rel="shortcut icon"`, pointing at `/_nicegui/…/favicon.ico`) and renders
+`head_html` at line 46. Two icons were declared and the browser kept NiceGUI's,
+so every tab showed the framework's logo while the header showed the brand.
+
+**The markup was never malformed** — verified by decoding the emitted data URI
+back to valid XML. It simply lost. (An early test harness *did* emit broken
+markup, because I hand-wrote the URI without escaping; that was the test's bug,
+not the code's, and it briefly pointed at the wrong culprit.)
+
+`@ui.page(favicon=…)` **replaces** the line-11 link rather than arguing with it.
+Measured against a live server: one icon link, no `favicon.ico`, drawing the
+mark on the route's colour — against three competing links before.
+
+Every route now registers through `main._page`, a wrapper that supplies the
+favicon, so a page **cannot** be added without one.
+`test_every_page_is_registered_through_the_favicon_wrapper` fails on a bare
+`@ui.page`, which is how this would otherwise return one route at a time.
+
 ## Test-surface note
 
 `webgui/tests/test_shell.py` used to write `neuralstrike-mark.png` and assert

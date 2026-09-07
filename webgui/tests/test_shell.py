@@ -1090,13 +1090,13 @@ def test_the_favicon_draws_the_mark_and_keeps_the_route_colour():
     """
     import main
 
-    link = main._favicon_link("#42a5f5")
-    assert "%2342a5f5" in link or "#42a5f5" in link, "the route colour is gone"
+    uri = main._favicon_uri("#42a5f5")
+    assert "%2342a5f5" in uri or "#42a5f5" in uri, "the route colour is gone"
     # The SMALL optical variant -- the same drawing the public site's favicon
     # uses. URL-encoded in the data URI, so match on the encoded form.
     from urllib.parse import quote
     for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
-        assert quote(path_d) in link, f"the favicon does not draw {path_d!r}"
+        assert quote(path_d) in uri, f"the favicon does not draw {path_d!r}"
 
 
 def test_the_app_and_site_favicons_are_the_same_drawing():
@@ -1110,10 +1110,10 @@ def test_the_app_and_site_favicons_are_the_same_drawing():
 
     site = (pathlib.Path(main._REPO_ROOT) / "deploy/site/assets/favicon.svg"
             ).read_text(encoding="utf-8")
-    link = main._favicon_link("#42a5f5")
+    uri = main._favicon_uri("#42a5f5")
     for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
         assert path_d in site, f"the site favicon lost {path_d!r}"
-        assert quote(path_d) in link, f"the app favicon lost {path_d!r}"
+        assert quote(path_d) in uri, f"the app favicon lost {path_d!r}"
 
 
 def test_favicon_ink_degrades_on_a_malformed_colour():
@@ -1123,6 +1123,51 @@ def test_favicon_ink_degrades_on_a_malformed_colour():
 
     for bad in ("", "nope", "#ff", "rgb(1,2,3)", None):
         assert main._favicon_ink(bad if isinstance(bad, str) else "") == "#f2f4fb"
+
+
+def test_every_page_is_registered_through_the_favicon_wrapper():
+    """EVERY route goes through ``main._page``, never ``ui.page`` directly.
+
+    ⚠ This is the fix for a real bug, not tidiness. The tab icon used to be
+    injected with ``ui.add_head_html``, which emits a SECOND ``<link rel=icon>``
+    AFTER NiceGUI's own -- and the browser kept NiceGUI's, so every tab showed
+    the framework's logo while the header showed the brand. Passing
+    ``favicon=`` to ``@ui.page`` REPLACES that link instead of competing with
+    it; verified against a live server, which emits exactly one icon link and no
+    ``favicon.ico``.
+
+    A route registered with a bare ``@ui.page`` would silently opt out and get
+    NiceGUI's logo back, on that page only -- which is how this would return.
+    """
+    import pathlib
+    import re
+
+    import main
+
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    # Strip comments and docstrings' prose mentions: only real decorators count.
+    bare = re.findall(r"^@ui\.page\(", src, re.M)
+    assert not bare, (
+        f"{len(bare)} page(s) bypass main._page and will show NiceGUI's favicon")
+    assert re.findall(r"^@_page\(", src, re.M), "no pages registered at all"
+
+
+def test_the_wrapper_gives_every_route_a_favicon_that_draws_the_mark():
+    """Including the four routes with no colour of their own, which inherit the
+    Market Scanner's blue rather than falling back to no icon."""
+    import pathlib
+    import re
+    from urllib.parse import quote
+
+    import main
+
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    routes = re.findall(r'^@_page\("([^"]+)"\)', src, re.M)
+    assert len(routes) >= 30, f"only found {len(routes)} routes"
+    for route in routes:
+        uri = main._favicon_uri(main._TAB_COLOR.get(route, "#42a5f5"))
+        assert uri.startswith("data:image/svg+xml,"), route
+        assert quote("M22 12 L32 23.5 L42 12") in uri, f"{route} has no mark"
 
 
 def test_brand_assets_are_shipped():

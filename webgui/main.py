@@ -1123,9 +1123,8 @@ def _favicon_ink(color: str) -> str:
         return _FAVICON_INK_LIGHT
 
 
-def _favicon_link(color: str) -> str:
-    """THE FLIP on a rounded square of ``color``, as a data-URI — emitted as BOTH
-    the modern ``rel=icon`` and the legacy ``rel="shortcut icon"``.
+def _favicon_uri(color: str) -> str:
+    """THE FLIP on a rounded square of ``color``, as an SVG data URI.
 
     The per-route colour is the GROUND, not the mark, and that split is the whole
     design. The colour exists so a trader with a dozen tabs open can tell them
@@ -1137,11 +1136,19 @@ def _favicon_link(color: str) -> str:
     ``deploy/site/assets/favicon.svg`` — heavier strokes so the rule survives a
     device pixel at 16px. The large drawing's 2.5-unit rule renders at 0.6px here
     and disappears, taking the level, and with it the meaning, out of the mark.
-    The two files are kept in step by ``test_the_app_favicon_draws_the_mark``.
+    ⚠ **This must reach the browser through ``@ui.page(favicon=…)``, never
+    through ``ui.add_head_html``**, and that distinction is the whole reason the
+    tab was wrong for a day. NiceGUI's template emits its OWN
+    ``<link rel="shortcut icon" href="/_nicegui/…/favicon.ico">`` at line 11 and
+    renders ``head_html`` at line 46, so an injected link is a SECOND, later
+    icon competing with the framework's — and the browser took NiceGUI's. The
+    markup was never malformed; verified by decoding the emitted data URI back
+    to valid XML. It simply lost.
 
-    NiceGUI injects a default ``rel="shortcut icon"`` .ico earlier in <head>; ours
-    are added after it, so the last-declared link of each rel wins — guaranteeing
-    this shows in the tab regardless of which rel the browser prefers."""
+    ``favicon=`` REPLACES that line-11 link instead of arguing with it, so
+    exactly one icon is declared and there is nothing for a browser to prefer.
+    ``_page`` below is what applies it, so no route can be registered without
+    one."""
     from urllib.parse import quote
     ink = _favicon_ink(color)
     svg = (
@@ -1153,8 +1160,21 @@ def _favicon_link(color: str) -> str:
         f'<path d="M22 52 L32 41 L42 52" fill="none" stroke="{ink}"'
         ' stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>'
         '</svg>')
-    uri = f"data:image/svg+xml,{quote(svg)}"
-    return f'<link rel="icon" href="{uri}"><link rel="shortcut icon" href="{uri}">'
+    return f"data:image/svg+xml,{quote(svg)}"
+
+
+def _page(route: str, **kwargs):
+    """``@ui.page`` for this app: the route's own favicon, applied once.
+
+    Every page goes through here rather than calling ``ui.page`` directly, so a
+    new route CANNOT be registered without a tab icon — which is how the mark
+    would otherwise drift back out of the browser tab one page at a time.
+
+    A route with no ``_TAB_COLOR`` entry inherits the Market Scanner's blue, the
+    same fallback the colour map has always documented.
+    """
+    return ui.page(route, favicon=_favicon_uri(_TAB_COLOR.get(route, "#42a5f5")),
+                   **kwargs)
 
 # Single-user nav-badge state. _NAV_BADGES holds route->count; _ALERT_STATE
 # tracks what's been acknowledged/alerted so we badge/chime only on genuinely
@@ -2145,7 +2165,10 @@ def _layout(active: str, title: str):
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(window_title(_NAV_LABEL.get(active, theme.BRAND_NAME)))
-    ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
+    # The favicon is NOT injected here. It is declared by `_page`, which passes
+    # it to @ui.page(favicon=…) -- see the note in `_favicon_uri`. Adding a
+    # <link> here as well would restore the two-icon fight that put NiceGUI's
+    # default in the tab.
     # Icon rail: laid out at the rail width (or the open width when pinned); the
     # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
     # comment there). behavior=desktop keeps Quasar from flipping it to a mobile
@@ -2396,147 +2419,147 @@ def _root_to_desk():
     return RedirectResponse(url="/desk")
 
 
-@ui.page("/desk")
+@_page("/desk")
 def desk_page() -> None:
     with _layout("/desk", "Desk"):
         from pages import desk
         desk.render()
 
 
-@ui.page("/options/scanner")
+@_page("/options/scanner")
 def options_scanner_page() -> None:
     with _layout("/options/scanner", "Options · Market Scanner"):
         from pages.options import scanner
         scanner.render()
 
 
-@ui.page("/options/paper")
+@_page("/options/paper")
 def options_paper_page() -> None:
     with _layout("/options/paper", "Options · Paper Ledger"):
         from pages.options import paper
         paper.render()
 
 
-@ui.page("/options/captured")
+@_page("/options/captured")
 def options_captured_page() -> None:
     with _layout("/options/captured", "Options · Captured Signals"):
         from pages.options import captured
         captured.render()
 
 
-@ui.page("/options/portfolio")
+@_page("/options/portfolio")
 def options_portfolio_page() -> None:
     with _layout("/options/portfolio", "Options · Paper Account"):
         from pages.options import portfolio
         portfolio.render()
 
 
-@ui.page("/options/shares")
+@_page("/options/shares")
 def options_shares_page() -> None:
     with _layout("/options/shares", "Options · Shares"):
         from pages.options import shares
         shares.render()
 
 
-@ui.page("/options/calculator")
+@_page("/options/calculator")
 def options_calculator_page() -> None:
     with _layout("/options/calculator", "Calculator"):
         from pages.options import calculator
         calculator.render()
 
 
-@ui.page("/options/swing")
+@_page("/options/swing")
 def options_swing_page() -> None:
     with _layout("/options/swing", "Options · Strategy Finder"):
         from pages.options import swing
         swing.render()
 
 
-@ui.page("/options/income")
+@_page("/options/income")
 def options_income_page() -> None:
     with _layout("/options/income", "Options · Income"):
         from pages.options import income
         income.render()
 
 
-@ui.page("/options/gamma")
+@_page("/options/gamma")
 def options_gamma_page() -> None:
     with _layout("/options/gamma", "Dealer Positioning"):
         from pages.options import gamma
         gamma.render()
 
 
-@ui.page("/options/simulator")
+@_page("/options/simulator")
 def options_simulator_page() -> None:
     with _layout("/options/simulator", "Options · Simulator"):
         from pages.options import simulator
         simulator.render()
 
 
-@ui.page("/options/expected-move")
+@_page("/options/expected-move")
 def options_expected_move_page() -> None:
     with _layout("/options/expected-move", "Options · Expected Move"):
         from pages.options import expected_move
         expected_move.render()
 
 
-@ui.page("/options/rescue")
+@_page("/options/rescue")
 def options_rescue_page() -> None:
     with _layout("/options/rescue", "Options · Rescue"):
         from pages.options import rescue
         rescue.render()
 
 
-@ui.page("/options/matrix")
+@_page("/options/matrix")
 def options_matrix_page() -> None:
     with _layout("/options/matrix", "Opportunity Board"):
         from pages.options import matrix
         matrix.render()
 
 
-@ui.page("/options/flow")
+@_page("/options/flow")
 def options_flow_page() -> None:
     with _layout("/options/flow", "Flow Alerts"):
         from pages.options import flow
         flow.render()
 
 
-@ui.page("/sentiment")
+@_page("/sentiment")
 def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
         from pages import sentiment
         sentiment.render()
 
 
-@ui.page("/sentiment/bullbear")
+@_page("/sentiment/bullbear")
 def sentiment_bullbear_page() -> None:
     with _layout("/sentiment/bullbear", "Bull / Bear Map"):
         from pages import sentiment_bullbear
         sentiment_bullbear.render()
 
 
-@ui.page("/sentiment/sectors")
+@_page("/sentiment/sectors")
 def sentiment_sectors_page() -> None:
     with _layout("/sentiment/sectors", "Sector & Industry"):
         from pages import sentiment_sectors
         sentiment_sectors.render()
 
 
-@ui.page("/sentiment/rotation")
+@_page("/sentiment/rotation")
 def sentiment_rotation_page() -> None:
     with _layout("/sentiment/rotation", "Sector Rotation"):
         from pages import sentiment_rotation
         sentiment_rotation.render()
 
 
-@ui.page("/sentiment/rrg")
+@_page("/sentiment/rrg")
 def sentiment_rrg_page() -> None:
     with _layout("/sentiment/rrg", "RRG"):
         from pages import sentiment_rrg
         sentiment_rrg.render()
 
 
-@ui.page("/sentiment/momentum")
+@_page("/sentiment/momentum")
 def sentiment_momentum_page(level: str = "industry") -> None:
     # ?level=stock deep-links the Stocks view (the dropdown still switches it
     # in place); render() coerces anything unknown back to industry.
@@ -2545,91 +2568,91 @@ def sentiment_momentum_page(level: str = "industry") -> None:
         sentiment_momentum.render(level=level)
 
 
-@ui.page("/trade")
+@_page("/trade")
 def trade_page() -> None:
     with _layout("/trade", "Overview"):
         from pages import trade_overview
         trade_overview.render()
 
 
-@ui.page("/trade/evidence")
+@_page("/trade/evidence")
 def trade_evidence_page() -> None:
     with _layout("/trade/evidence", "Evidence"):
         from pages import trade_evidence
         trade_evidence.render()
 
 
-@ui.page("/trade/board")
+@_page("/trade/board")
 def trade_board_page() -> None:
     with _layout("/trade/board", "Rank Board"):
         from pages import trade_board
         trade_board.render()
 
 
-@ui.page("/trade/plan")
+@_page("/trade/plan")
 def trade_plan_page() -> None:
     with _layout("/trade/plan", "Trade Plan"):
         from pages import trade_plan_screen
         trade_plan_screen.render()
 
 
-@ui.page("/portfolio")
+@_page("/portfolio")
 def portfolio_page() -> None:
     with _layout("/portfolio", "Portfolio"):
         from pages import portfolio
         portfolio.render()
 
 
-@ui.page("/driver")
+@_page("/driver")
 def driver_page() -> None:
     with _layout("/driver", "Claude Trades"):
         from pages import driver
         driver.render()
 
 
-@ui.page("/eod")
+@_page("/eod")
 def eod_page() -> None:
     with _layout("/eod", "EOD Report"):
         from pages import eod
         eod.render()
 
 
-@ui.page("/eod/detail")
+@_page("/eod/detail")
 def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
 
 
-@ui.page("/market")
+@_page("/market")
 def market_page() -> None:
     with _layout("/market", "Market Trend & Sentiment · Market Dashboard"):
         from pages import market
         market.render()
 
 
-@ui.page("/status")
+@_page("/status")
 def status_page() -> None:
     with _layout("/status", "System Status"):
         from pages import status
         status.render()
 
 
-@ui.page("/settings")
+@_page("/settings")
 def settings_page() -> None:
     with _layout("/settings", "Settings"):
         from pages import settings
         settings.render()
 
 
-@ui.page("/manuals")
+@_page("/manuals")
 def manuals_page() -> None:
     with _layout("/manuals", "User Manuals"):
         from pages import manuals
         manuals.render()
 
 
-@ui.page("/terminate")
+@_page("/terminate")
 def terminate_page() -> None:
     with _layout("/terminate", "Stop All Services"):
         from pages import terminate
