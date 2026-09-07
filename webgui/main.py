@@ -37,7 +37,6 @@ import page_help  # noqa: E402
 import proxy  # noqa: E402
 import wall  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
-from pages.ui_guard import guard  # noqa: E402
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
