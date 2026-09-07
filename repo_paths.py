@@ -298,8 +298,9 @@ _ports = tomllib.loads(
 def _derive_ports(ports: dict, flags: dict) -> dict:
     """Apply an environment profile to the base port table. PURE.
 
-    ``port_offset`` shifts the ports this repo OWNS (the six services and the
-    webgui). Two things are deliberately left alone:
+    ``port_offset`` shifts the ports this repo OWNS (the six services and both
+    webgui processes — the app and the public live screens). Two things are
+    deliberately left alone:
 
     * the **Memurai port** — both environments share one Redis server and are
       separated by logical DB index instead, so there is no second service to
@@ -327,6 +328,7 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
     return {
         "proxy_port": proxy,
         "nicegui_port": int(ports["nicegui"]) + off,
+        "nicegui_live_port": int(ports["nicegui_live"]) + off,
         "service_ports": {k: int(v) + off for k, v in ports["services"].items()},
         "memurai_port": int(ports["memurai"]),
         "redis_db": int(flags.get("redis_db") or 0),
@@ -342,6 +344,8 @@ ANALYTICS_URL    = f"http://127.0.0.1:{_ports['options_analytics']}"
 APPROVAL_PORT    = _ports["approval"]
 NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
+NICEGUI_LIVE_PORT = _derived["nicegui_live_port"]
+NICEGUI_LIVE_URL  = f"http://127.0.0.1:{NICEGUI_LIVE_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
 MEMURAI_PORT  = _derived["memurai_port"]
 # The logical Redis DB index this environment owns. Exported as an int rather
@@ -375,6 +379,11 @@ SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
 _env_local = _load_env_local(REPO_ROOT, warn=False)
 SITE_HOST = str(_env_local.get("site_host") or "neuralstrike.co").strip().lower()
 APP_HOST  = str(_env_local.get("app_host") or f"app.{SITE_HOST}").strip().lower()
+
+# The public read-only origin. Sibling of APP_HOST, and deliberately NOT a path
+# under it: the app is behind a login and the live screens are not, so they are
+# separated by ORIGIN rather than by a path filter someone has to get right.
+LIVE_HOST = str(_env_local.get("live_host") or f"live.{SITE_HOST}").strip().lower()
 
 # ⚠ WHAT THE PUBLIC FILE SERVER IS ROOTED AT, and the single most damaging value
 # in this file to get wrong. One level up publishes shared/tokens.json,

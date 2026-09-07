@@ -203,24 +203,26 @@ def test_port_derivation_prod():
     tests/test_repo_paths_ports.py, which asserts the literal 8210-8214 and a
     MEMURAI_URL ending "/0".
     """
-    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379,
+    ports = {"proxy": 8100, "nicegui": 8500, "nicegui_live": 8501, "memurai": 6379,
              "services": {"options": 8211, "market": 8215}}
     d = repo_paths._derive_ports(ports, {"port_offset": 0, "proxy_port": None,
                                          "redis_db": 0})
     assert d["proxy_port"] == 8100
     assert d["nicegui_port"] == 8500
+    assert d["nicegui_live_port"] == 8501
     assert d["service_ports"] == {"options": 8211, "market": 8215}
     assert d["memurai_port"] == 6379
     assert d["redis_db"] == 0
 
 
 def test_port_derivation_dev_offsets_and_borrows_proxy():
-    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379,
+    ports = {"proxy": 8100, "nicegui": 8500, "nicegui_live": 8501, "memurai": 6379,
              "services": {"options": 8211, "market": 8215}}
     d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": 8100,
                                          "redis_db": 1})
     assert d["proxy_port"] == 8100          # borrowed, NOT offset
     assert d["nicegui_port"] == 9500
+    assert d["nicegui_live_port"] == 9501
     assert d["service_ports"] == {"options": 9211, "market": 9215}
     # Memurai PORT is shared (one server); only the logical DB differs.
     assert d["memurai_port"] == 6379
@@ -232,14 +234,15 @@ def test_port_derivation_offsets_proxy_when_not_pinned():
     documented meaning of `proxy_port = None`. Pinning it is what makes dev BORROW
     prod's proxy; the two derivation tests above share proxy 8100, so neither one
     would notice the override being ignored."""
-    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379, "services": {}}
+    ports = {"proxy": 8100, "nicegui": 8500, "nicegui_live": 8501, "memurai": 6379,
+             "services": {}}
     d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
                                          "redis_db": 0})
     assert d["proxy_port"] == 9100
 
 
 def test_port_derivation_leaves_external_ports_alone():
-    """Fed the REAL ports.toml, the derivation must emit exactly these five keys.
+    """Fed the REAL ports.toml, the derivation must emit exactly these six keys.
 
     The tests above pass synthetic tables that simply OMIT options_analytics /
     approval / ml_servers, so to them "deliberately not offset" and "not in the
@@ -253,22 +256,44 @@ def test_port_derivation_leaves_external_ports_alone():
     assert {"options_analytics", "approval", "ml_servers"} <= set(ports)  # non-vacuous
     d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
                                          "redis_db": 1})
-    assert set(d) == {"proxy_port", "nicegui_port", "service_ports",
-                      "memurai_port", "redis_db"}
+    assert set(d) == {"proxy_port", "nicegui_port", "nicegui_live_port",
+                      "service_ports", "memurai_port", "redis_db"}
     # The assertion above pins the OUTPUT, which only moves when someone teaches
     # _derive_ports a new port. The silent direction is the other one: a top-level
     # port ADDED to ports.toml and not taught is simply never offset, and no output
     # key changes. So pin the input's scalar keys too — this is a decision tripwire,
     # not a value check. Adding a port here should fail once and make the author
     # answer: does this repo START it (offset it, and extend _derive_ports) or not
-    # (external — leave it, and add it below)?
-    external = {"proxy", "options_analytics", "approval", "dashboard_frontend",
-                "nicegui", "memurai"}
+    # (external — leave it un-offset)? Either way it gets listed below, which is
+    # why this set is "every top-level port someone has ruled on", not "the
+    # external ones" — `proxy`, `nicegui` and `nicegui_live` are all offset.
+    accounted_for = {"proxy", "options_analytics", "approval", "dashboard_frontend",
+                     "nicegui", "nicegui_live", "memurai"}
     scalars = {k for k, v in ports.items() if not isinstance(v, dict)}
-    assert scalars == external, (
-        f"ports.toml top-level keys changed: {scalars ^ external}. If this repo "
-        f"starts the new process, offset it in repo_paths._derive_ports; if it is "
-        f"external, list it here.")
+    assert scalars == accounted_for, (
+        f"ports.toml top-level keys changed: {scalars ^ accounted_for}. If this "
+        f"repo starts the new process, offset it in repo_paths._derive_ports; if "
+        f"it is external, leave it un-offset. Either way, list it here.")
+
+
+def test_the_live_port_is_offset_like_the_app_port():
+    """⚠ ports.toml warns that a TOP-LEVEL port is not offset unless
+    _derive_ports is taught about it, and that this is "a BUG for one it does
+    [start]". nicegui_live is one this repo starts: unoffset, a dev checkout
+    would bind prod's 8501 and the collision would be invisible in the config.
+
+    Pinned against the app port rather than against a literal, so the two can
+    never drift apart.
+    """
+    ports = tomllib.loads(
+        (REPO / "config" / "ports.toml").read_text(encoding="utf-8-sig"))
+    prod = repo_paths._derive_ports(
+        ports, {"port_offset": 0, "proxy_port": None, "redis_db": 0})
+    dev = repo_paths._derive_ports(
+        ports, {"port_offset": 1000, "proxy_port": 8100, "redis_db": 1})
+
+    assert prod["nicegui_live_port"] == prod["nicegui_port"] + 1
+    assert dev["nicegui_live_port"] == prod["nicegui_live_port"] + 1000
 
 
 # --------------------------------------------------------------- shipped config
