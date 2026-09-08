@@ -302,5 +302,21 @@
   </footer>
 
 </div>
+
+<!-- THE MARKET GLOW. Progressive enhancement, and the only scripting on this
+     page: the Live screens button above lights green while the US session is
+     open. A file server cannot know that, so the client works it out.
+
+     ORDER IS THE CONTRACT. market-clock.js is GENERATED DATA (the holiday list
+     and the session bounds, from shared/market_calendar.py) and market-glow.js
+     is the logic that reads it. `defer` runs them in DOCUMENT ORDER, so listing
+     the logic first would leave it reading an undefined global -- and it
+     degrades silently by design, so the button would just never light again
+     with nothing to say why. deploy/tests/test_site.py pins the order.
+
+     Nothing here is content: with scripting off the button is exactly the
+     button, which is why this needs no `.js` hook the way the gallery does. -->
+<script src="assets/market-clock.js" defer></script>
+<script src="assets/market-glow.js" defer></script>
 </body>
 </html>

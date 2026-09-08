@@ -884,3 +884,59 @@ def test_every_image_declares_its_size(pages):
         for tag in re.findall(r"<img\b[^>]*>", text):
             assert "width=" in tag and "height=" in tag, f"{name} has an unsized image: {tag[:70]}"
             assert "alt=" in tag, f"{name} has an image with no alt text: {tag[:70]}"
+
+
+# --- C5. the market glow, which is decoration with a data dependency --------
+
+def test_the_live_link_can_be_glowed():
+    """Structural: the CSS rule and the class the script toggles must agree.
+
+    Two files that never import each other, joined by a string. Rename the
+    class in one and the glow simply never appears -- there is no error, no
+    console warning, and the button looks exactly like the un-glowed state it
+    is supposed to leave when the market shuts.
+    """
+    css = _css("assets/site.css")
+    assert ".ns-market-open" in css
+    js = _text("assets/market-glow.js")
+    assert "ns-market-open" in js, "the script and the stylesheet disagree on the class"
+
+
+def test_the_glow_is_green():
+    """The one thing the request actually specifies."""
+    css = _css("assets/site.css")
+    rule = re.search(r"\.ns-market-open\s*\{[^}]*\}", css)
+    assert rule, "no .ns-market-open rule to check"
+    assert "box-shadow" in rule.group(0) or "filter" in rule.group(0)
+
+
+def test_the_glow_script_does_not_reach_off_origin():
+    """The site makes zero third-party requests and that is pinned.
+
+    ``test_no_page_reaches_an_external_origin`` reads the HTML and cannot see
+    inside a script, which is the one place an off-origin fetch would now be
+    easiest to add and hardest to notice.
+    """
+    js = _text("assets/market-glow.js")
+    assert "http://" not in js and "https://" not in js
+
+
+def test_the_clock_data_loads_before_the_glow_logic():
+    """ORDER IS THE WHOLE CONTRACT BETWEEN THE TWO FILES.
+
+    ``market-clock.js`` is generated data and ``market-glow.js`` is the logic
+    that reads ``window.NS_MARKET_CLOCK`` from it. Both are ``defer``, which
+    runs them in DOCUMENT ORDER -- so listing the logic first leaves it reading
+    an undefined global. It degrades silently by design (a missing clock must
+    never break the page), which is exactly why nothing would report the swap:
+    the button would simply never light up again.
+    """
+    markup = _markup("index.html")
+    srcs = [r for r in _refs(markup) if r.endswith(".js")]
+    assert "assets/market-clock.js" in srcs, "index.html does not load the clock data"
+    assert "assets/market-glow.js" in srcs, "index.html does not load the glow logic"
+    assert srcs.index("assets/market-clock.js") < srcs.index("assets/market-glow.js"), (
+        "market-glow.js is loaded before the data it reads")
+    for tag in re.findall(r"<script\b[^>]*>", markup):
+        if "market-" in tag:
+            assert "defer" in tag, f"{tag} is not deferred, so it runs before the nav exists"
