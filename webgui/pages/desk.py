@@ -1835,6 +1835,10 @@ window.__deskSpeak = function (urls, vol) {
 # worked, which a silent button could not.
 VOICE_UNLOCK_PHRASE = "Spoken alerts on."
 
+# The button's own caption, named so a test can find the control rather than
+# re-typing the string — a copy in a test cannot see a rename.
+VOICE_UNLOCK_LABEL = "ENABLE SPOKEN ALERTS"
+
 # Once per PROCESS, not once per page build: the clip cache is on disk and
 # shared by every tab, so a second prewarm would re-walk a warm cache for
 # nothing. Only a run that actually prewarms sets the latch — with the feature
@@ -2752,11 +2756,25 @@ def render():
         # need it never shows it. ``set_visibility(False)`` is ``display:none``,
         # which a flex ``gap`` skips entirely — the hidden row costs no height.
         # The click that dismisses it IS the gesture that unblocks audio.
-        unlock_btn = ui.button("ENABLE SPOKEN ALERTS", icon="volume_up",
-                               color=None).props("no-caps dense").classes(
-            f"self-start text-[11px] tracking-[.14em] px-3 "
-            f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
-        unlock_btn.set_visibility(False)
+        #
+        # ⚠ NOT BUILT AT ALL when spoken alerts are off — the THIRD caller of
+        # the synthesizer, and the one ``voice_enabled`` did not cover. Its
+        # handler is an ``edge_tts`` call to a Microsoft endpoint plus an mp3
+        # written into ``webgui/data/voice/``, and on the public live origin
+        # (where the pin switches voice off) the button is reachable from a
+        # browser console in two messages: ``emitEvent`` the blocked event —
+        # ``ui.on`` subscribes on the client LAYOUT, which is visible, so
+        # NiceGUI's hidden-element event gate does not apply — then click the
+        # revealed button. Hidden is not absent. The handler refuses underneath
+        # as well; a control that cannot work must not be drawn, and the thing
+        # it cannot do must also refuse.
+        unlock_btn = None
+        if app_settings.load().get("voice_enabled"):
+            unlock_btn = ui.button(VOICE_UNLOCK_LABEL, icon="volume_up",
+                                   color=None).props("no-caps dense").classes(
+                f"self-start text-[11px] tracking-[.14em] px-3 "
+                f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
+            unlock_btn.set_visibility(False)
 
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO QUOTE AT ALL. The Dealer Positioning panel
@@ -3426,7 +3444,13 @@ def render():
 
     @guard
     def _voice_blocked(_e=None):
-        """The browser refused to play. Offer the gesture that fixes it."""
+        """The browser refused to play. Offer the gesture that fixes it.
+
+        ``ui.on`` is registered unconditionally, so this fires on any client
+        that emits the event — including one a stranger types into a console.
+        With voice off there is no button, and nothing to reveal."""
+        if unlock_btn is None:
+            return
         unlock_btn.set_visibility(True)
 
     @guard_async
@@ -3437,9 +3461,19 @@ def render():
         the document, so the ``await`` below does not cost it. Any other click
         on the page unlocks it too; this button exists because nothing TELLS the
         user that.
+
+        ⚠ THE GATE IS THE FIRST STATEMENT, and it re-reads the setting rather
+        than trusting the build. This is the third caller of the synthesizer —
+        ``speak_phrases`` and ``_prewarm_clips`` are the other two — and the one
+        ``voice_enabled`` did not cover: a synthesis is an outbound call to a
+        Microsoft endpoint and an mp3 written to disk, which on the public
+        origin any anonymous visitor could drive.
         """
-        unlock_btn.set_visibility(False)
         settings = app_settings.load()
+        if not settings.get("voice_enabled"):
+            return
+        if unlock_btn is not None:
+            unlock_btn.set_visibility(False)
         url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
                                  settings.get("voice_name"))
         if url:
@@ -3448,7 +3482,8 @@ def render():
                 f"{speak_volume(settings)})")
 
     ui.on(VOICE_BLOCKED_EVENT, _voice_blocked)
-    unlock_btn.on_click(_unlock_voice)
+    if unlock_btn is not None:
+        unlock_btn.on_click(_unlock_voice)
 
     @guard
     def _tick_clock():

@@ -338,3 +338,94 @@ def test_it_serves_the_live_port_not_the_app_port():
     assert "NICEGUI_LIVE_PORT" in src
     assert "NICEGUI_PORT" not in src.replace("NICEGUI_LIVE_PORT", "")
     assert repo_paths.NICEGUI_LIVE_PORT != repo_paths.NICEGUI_PORT
+
+
+# --- what a published PAGE must not do --------------------------------------
+# ⚠ Driven by importing the entrypoint, so the real ``PUBLIC_PINS`` are what
+# switch the feature off. A hand-set ``voice_enabled=False`` would pass just as
+# happily against a table that had never pinned it.
+
+def _desk_elements():
+    """``render()``'s newly built elements, in build order."""
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [e for key, e in ui.context.client.elements.items() if key not in before]
+
+
+def _unlock_buttons(elements):
+    from pages import desk
+    return [e for e in elements
+            if str(getattr(e, "text", "")) == desk.VOICE_UNLOCK_LABEL]
+
+
+def test_the_published_desk_builds_no_voice_unlock_button():
+    """FINDING 1. ``voice_enabled`` is pinned False because ``webgui/voice.py``
+    synthesizes through ``edge_tts`` — a network call to a Microsoft endpoint —
+    and writes an mp3 this process does not even mount ``/voice`` to serve.
+
+    The pin covered ``speak_phrases`` and ``_prewarm_clips`` and MISSED the
+    third caller: ``_unlock_voice``, reachable from a browser console in two
+    messages (``emitEvent('desk_voice_blocked')`` reveals the button, then a
+    click). A control that cannot work must not be drawn."""
+    import live_main       # noqa: F401 -- importing installs the pins
+    assert _unlock_buttons(_desk_elements()) == []
+
+
+def test_the_unlock_handler_refuses_even_if_the_button_is_reached(monkeypatch):
+    """The other half: the handler refuses underneath.
+
+    Not drawing the button is unreachable-by-construction only for as long as
+    nothing else reveals it, and ``ui.on(VOICE_BLOCKED_EVENT, ...)`` is
+    registered on the client LAYOUT — which is visible, so NiceGUI's
+    hidden-element event gate does not apply. So the handler is captured from a
+    render where voice is ON, and then driven with the origin's own pins.
+
+    ``app_settings.load`` is monkeypatched rather than the store unfrozen: the
+    freeze is installed by ``import live_main``, and a module already in
+    ``sys.modules`` does not reinstall it, so an unfreeze here would disarm
+    every other test in this file depending on the order they ran in."""
+    import asyncio
+
+    import app_settings
+    import live_screens
+    from pages import desk
+
+    calls = []
+    monkeypatch.setattr(desk._voice, "ensure",
+                        lambda *a, **k: calls.append(a) or None)
+    monkeypatch.setattr(desk._voice, "prewarm", lambda *a, **k: None)
+
+    monkeypatch.setattr(app_settings, "load", lambda: {"voice_enabled": True})
+    buttons = _unlock_buttons(_desk_elements())
+    assert len(buttons) == 1, "voice on: the unlock button must still be built"
+    # ⚠ NOT ``listener.handler``. ``Button.on_click`` registers a one-argument
+    # lambda that hands the real callback to NiceGUI's ``handle_event``, which
+    # SCHEDULES a coroutine on the running loop and returns None — so calling
+    # the listener in a test runs nothing at all and every assertion after it
+    # is vacuous. Measured: with the guard deleted, the version of this test
+    # that drove ``listener.handler`` still passed. The page's own callback is
+    # the first free variable of that lambda.
+    wrapper = next(listener.handler
+                   for listener in buttons[0]._event_listeners.values()
+                   if listener.type == "click")
+    names = wrapper.__code__.co_freevars
+    handler = wrapper.__closure__[names.index("callback")].cell_contents
+    assert handler.__name__ == "_unlock_voice", handler
+
+    async def _no_thread(fn, *a, **k):
+        return fn(*a, **k)
+
+    monkeypatch.setattr(desk.run, "io_bound", _no_thread)
+    # Now the origin's own pin, exactly as ``live_main`` applies it.
+    monkeypatch.setattr(app_settings, "load",
+                        lambda: dict(live_screens.SETTINGS_PINS))
+    asyncio.run(handler())
+    assert calls == [], "the unlock handler synthesized with voice pinned off"
+
+    # Non-vacuity: the very same call DOES synthesize once voice is on again.
+    monkeypatch.setattr(app_settings, "load", lambda: {"voice_enabled": True})
+    asyncio.run(handler())
+    assert calls, "the test never reached the synthesizer at all"
