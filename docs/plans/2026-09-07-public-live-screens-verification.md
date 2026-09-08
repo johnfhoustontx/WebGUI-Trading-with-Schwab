@@ -69,37 +69,84 @@ git push -u origin claude/add-live-pages-website-e223c5
 
 ---
 
-## Phase 2 — the Redis ACL user
+## Phase 2 — the Redis ACL user ✅ DONE 2026-09-07
 
-Do this **before** the scratch run, so that run also proves the grant is
-sufficient. Two birds.
+Done before the scratch run, deliberately, so that run also proves the grant is
+sufficient.
+
+**What exists now:**
+
+```
+user live on #<hash> ~cache:* resetchannels &events:*
+     -@all +@connection +@read +subscribe -keys +psubscribe
+```
+
+The credential is at **`/home/administrator/.config/neuralstrike/live.env`**
+(mode 600) — deliberately **outside the checkout**, see the ordering trap in
+Phase 5.
 
 ⚠ `+@read` alone is **not** enough. `SUBSCRIBE` is `@pubsub`; `SELECT` and
 `PING` are `@connection`. Under-granted, every screen renders one frame and then
 never repaints — and `EventListener` swallows the failure, so it reads as a
-frozen tape, not an error.
+frozen tape, not an error. Verified working.
 
-```bash
-redis-cli ACL SETUSER live on '>CHOOSE_A_PASSWORD' '~cache:*' '&events:*' +@read +subscribe +psubscribe +@connection
+⚠ **`-keys` is not optional.** `KEYS` is `@read`, so the grant included it by
+default — and it is O(N) on a **single-threaded Redis the whole trading stack
+shares**. `bus_client` never calls it (GET / MGET / PING / SUBSCRIBE only), so
+an unauthenticated path to it is a way to stall the trading stack for nothing.
+
+**Verified in both directions** (all as the `live` user):
+
+| Probe | Result |
+|---|---|
+| `SET` · `DEL` · `XADD cmd:options` · `PUBLISH` · `FLUSHDB` · `CONFIG GET` | NOPERM ✅ |
+| `GET cmd:options` (outside `~cache:*`) | NOPERM ✅ |
+| `KEYS *` | NOPERM ✅ |
+| `PING` · `EXISTS` · `STRLEN` · `GET …:ver` · `MGET` | work ✅ |
+| `SUBSCRIBE events:options:scan` | subscribes ✅ |
+
+### ⚠ `ACL SAVE` does not work on this box — use `CONFIG REWRITE`
+
+This checklist originally said to run `ACL SAVE`. **It fails here:**
+
+```
+ERR This Redis instance is not configured to use an ACL file.
 ```
 
-Then prove it is *weak enough*:
+No `aclfile` is set, so ACL users live in `redis.conf` instead. The persist step
+is therefore:
 
 ```bash
-redis-cli --user live --pass CHOOSE_A_PASSWORD --no-auth-warning SET cache:probe 1
+redis-cli CONFIG REWRITE
 ```
 
-- [ ] That **fails** with NOPERM
-- [ ] `XADD cmd:options '*' t x` also fails with NOPERM
-- [ ] `GET cache:options:scan` succeeds (any value, including nil)
-- [ ] `SUBSCRIBE events:options:scan` connects (Ctrl-C to exit)
+which Redis performs *as itself* — it runs as `redis` and owns `/etc/redis`,
+where `administrator` has neither read access nor password-less `sudo`.
 
-```bash
-redis-cli ACL SAVE
-```
+⚠ **Do not redirect that command's output to `/dev/null`.** The first run of
+this phase did, swallowed the `ACL SAVE` error, and reported success for a user
+that would have vanished on the next Redis restart — the exact swallowed-error
+class this repo documents elsewhere.
 
-⚠ Without `ACL SAVE` the user vanishes on the next Redis restart, and the live
-unit then refuses to start. That refusal is by design — see Phase 4.
+⚠ **`CONFIG REWRITE` returning `OK` is the strongest available proof, and it is
+not complete proof.** Full confirmation needs a Redis restart, which is a
+stack-wide cache blip and was deliberately not done. If Redis is ever restarted
+and the live screens all degrade to "waiting", check `redis-cli ACL LIST` first
+— a missing `live` user looks exactly like a service outage.
+
+A recovery reference (the full running config, mode 600) is at
+`/home/administrator/.config/neuralstrike/redis-running-config-*.txt`, because
+this account cannot read `redis.conf` to back it up.
+
+### Also learned here
+
+**Redis now has `requirepass`.** Earlier notes recorded its absence as an open
+item; it is closed. `MEMURAI_PASSWORD` is in the checkout's `.env`, and
+`redis-cli` needs it for anything.
+
+⚠ Pass it via **`REDISCLI_AUTH`**, never `--pass` — an argv password is
+readable by any local process with `pgrep -af`, which is how this repo's YouTube
+stream key leaks.
 
 ---
 
@@ -124,16 +171,23 @@ name = "prod"
 EOF
 ```
 
+Copy the credential Phase 2 created rather than retyping it — the password is
+never printed anywhere, so a placeholder here would just be wrong:
+
 ```bash
-cd /home/administrator/live-check && cat > .env.live <<'EOF'
-REDIS_LIVE_URL=redis://live:CHOOSE_A_PASSWORD@127.0.0.1:6379/0
-EOF
+cp /home/administrator/.config/neuralstrike/live.env /home/administrator/live-check/.env.live && chmod 600 /home/administrator/live-check/.env.live
 ```
 
 ⚠ The DB index in that URL is `/0` — prod's. `REDIS_LIVE_URL` carries its own
 index and bypasses `repo_paths.REDIS_DB`, so a URL copied between environments
 points the wrong way. Here `/0` is correct because this scratch run is reading
 prod's cache deliberately.
+
+⚠ This scratch checkout resolves to **prod**, which is what gives it prod's
+Redis DB and a free port at 8501. It also means an accidental
+`generate_units.py --install`, `promote.sh`, `webgui/main.py` or any
+`services/*/app.py` from here would fight the live stack. **Run only
+`webgui/live_main.py` from this directory.**
 
 Run it, using prod's venv for its packages (the code comes from this checkout):
 
@@ -226,25 +280,28 @@ stands down and exits 0 with no files. That is correct behaviour, not a failure
 
 - [ ] **DNS**: `live.neuralstrike.co` A record → the box's public IP. Confirm
       with `dig +short live.neuralstrike.co`.
-- [ ] **`.env.live` in the REAL checkout** — the live unit loads
-      `/home/administrator/dev/.env.live` and **not** `.env`, so the public
-      process no longer inherits `ANTHROPIC_API_KEY`, the Telegram token, the
-      proxy secret or the SMTP password.
+### ⚠ `.env.live` goes in AFTER the promote, not before
 
-```bash
-cd /home/administrator/dev && cat > .env.live <<'EOF'
-REDIS_LIVE_URL=redis://live:CHOOSE_A_PASSWORD@127.0.0.1:6379/0
-MEMURAI_PASSWORD=
-EOF
-```
+The original ordering here was **wrong** and would have blocked the promote.
 
-⚠ **Without this file the live unit refuses to start in prod.** That is
-deliberate — the alternative is a public process silently holding a full
-read/write Redis credential. It fails alone and loudly; the trading stack is
-unaffected.
+`tools/promote.sh` refuses on `git status --porcelain`, which includes
+**untracked** files. Prod's current `.gitignore` has `.env` — an exact match,
+not `.env*` — so `.env.live` would sit there untracked, dirty the tree, and
+`promote.sh` would refuse before touching anything. The `.gitignore` entry that
+covers it **arrives with the promote itself**.
 
+That is why Phase 2 stored the credential outside the checkout. The file is
+created in Phase 6, between the `git pull` and starting the unit.
+
+- [ ] **DNS**: `live.neuralstrike.co` A record → the box's public IP. Confirm
+      with `dig +short live.neuralstrike.co`.
 - [ ] **Timing.** `promote.sh` stops the *whole* target — the public stream
       drops and GEX collection slots are lost. Default to **15:25–16:15 CT**.
+
+⚠ **Without `.env.live` the live unit refuses to start in prod.** That is
+deliberate — the alternative is a public process silently holding a full
+read/write Redis credential. It fails alone and loudly; the trading stack is
+unaffected. So the unit will not come up until Phase 6 puts the file in place.
 
 ---
 
@@ -253,6 +310,17 @@ unaffected.
 ```bash
 cd /home/administrator/dev && ./tools/promote.sh
 ```
+
+**Now** put the credential in place — the `git pull` above brought the
+`.gitignore` entry that makes this file invisible to the dirty-tree check:
+
+```bash
+cp /home/administrator/.config/neuralstrike/live.env /home/administrator/dev/.env.live && chmod 600 /home/administrator/dev/.env.live
+```
+
+- [ ] `git -C /home/administrator/dev status --porcelain` is **empty**. If
+      `.env.live` shows as `??`, the promote did not bring the ignore entry and
+      the NEXT promote will refuse — fix that before going further.
 
 ```bash
 cd /home/administrator/dev && .venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
