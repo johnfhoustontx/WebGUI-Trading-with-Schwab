@@ -657,28 +657,28 @@ def _gallery_capture_units():
     so the pages have painted live data. A pre-open capture publishes a gallery
     of blank panels over the product's showcase images.
 
-    ⚠ **:07, AND CPU-CONTAINED, BECAUSE A CHROME STORM READS AS A PROXY OUTAGE.**
-    Measured on prod during the 09:00 live-screen capture on 2026-09-08: load
-    average 2.11 -> **11.84** on 4 vCPU, proxy ``/health`` 0.82s -> **18.2s**.
-    Every probe returned 200 -- the proxy was never down, it was answering later
-    than ``webgui/proxy.py`` ``health(timeout=3.0)`` waits, so every page painted
-    the proxy-down banner and **seven GEX collection slots were lost before
-    09:02**. Two consequences for this unit, and neither is optional:
+    ⚠ **CPU-CONTAINED, BECAUSE A CHROME STORM READS AS A PROXY OUTAGE.** Measured
+    on prod during the 09:00 live-screen capture on 2026-09-08: load average 2.11
+    -> **11.84** on 4 vCPU, proxy ``/health`` 0.82s -> **18.2s**. Every probe
+    returned 200 -- the proxy was never down, it was answering later than
+    ``webgui/proxy.py`` ``health(timeout=3.0)`` waits, so every page painted the
+    proxy-down banner and **seven GEX collection slots were lost before 09:02**.
 
-    * **The time is off the quarter hour.** ``live-capture`` is
-      ``OnCalendar=*:0/15``, and this job is the heavier of the pair (19 shots at
-      12s settle against 14 at 8s), so :00 would stack the two worst spikes of
-      the morning on one minute. A test derives the constraint from
-      ``LIVE_CAPTURE_INTERVAL_MIN`` rather than restating fifteen.
-    * **``CPUQuota`` bounds the peak this job makes on its own.** Separating the
-      two peaks is not enough -- GEX collects every minute the session is open,
-      so any in-session slot contends with it. Moving the capture outside the
-      session was considered and rejected: index option open interest zeroes
-      after hours, so the gamma tiles would photograph all-zero grids and
-      arbitrary walls, which is worse marketing imagery than stale branding.
+    **``live-capture`` answered that by leaving the session** --
+    ``[windows.live_capture]`` moved to 15:25-15:50 the same day -- which this
+    unit cannot copy. Index option open interest zeroes after hours, so a
+    post-close gallery capture photographs all-zero GEX grids and arbitrary
+    walls: worse imagery than the stale branding the recapture exists to fix. So
+    **this is now the only headless Chrome that runs during the session**, and it
+    is the heavier of the two (19 shots at 12s settle against 14 at 8s). It
+    carries ``CPUQuota`` instead, which bounds the peak rather than relocating
+    it. If that proves insufficient the answer is a smaller quota or a quieter
+    in-session minute, not a post-close run.
 
-    ⚠ ``live-capture`` itself is still unthrottled -- that is the same problem,
-    on a unit this branch did not touch, and it remains open.
+    :07 rather than :00 is a small remaining courtesy -- ``live-capture``'s timer
+    still FIRES on the quarter hour (it stands down in under a second outside its
+    window), and the GEX collector's own minute boundary is :00. A test derives
+    that from ``LIVE_CAPTURE_INTERVAL_MIN`` rather than restating fifteen.
 
     **No ``Restart=``, deliberately** -- the same reasoning as the live capture.
     The tool exits non-zero for exactly two things worth telling apart: no

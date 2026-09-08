@@ -905,13 +905,13 @@ def test_the_gallery_timeout_moves_with_the_shot_count(monkeypatch):
 
 
 def test_the_gallery_capture_never_lands_on_a_live_capture_run():
-    """⚠ THE TWO CHROME TIMERS MUST NOT PEAK ON THE SAME MINUTE.
+    """The quarter hour is spoken for, so this job does not sit on it.
 
-    Measured on prod 2026-09-08: one live capture took load average from 2.11 to
-    11.84 on 4 vCPU and proxy /health from 0.82s to 18.2s -- past the 3s timeout
-    in webgui/proxy.py, so every page painted the proxy-down banner and seven GEX
-    slots were lost before 09:02. The gallery capture is the heavier of the two,
-    so sharing a minute would stack the morning's two worst spikes.
+    live-capture's timer is OnCalendar=*:0/15 and fires all day -- since
+    2026-09-08 it stands down in under a second outside its 15:25-15:50 window,
+    so at 09:00 the overlap would cost almost nothing. This is a courtesy rather
+    than the load fix (that is CPUQuota, next test), and it also keeps the run
+    off the GEX collector's own :00 minute boundary.
 
     Derived from LIVE_CAPTURE_INTERVAL_MIN, never from a restated fifteen: if the
     live cadence changes, this constraint has to move with it, and a test that
@@ -927,10 +927,13 @@ def test_the_gallery_capture_never_lands_on_a_live_capture_run():
 
 
 def test_the_gallery_capture_is_cpu_contained(rendered):
-    """The offset separates the peaks; this bounds the one this job makes.
+    """⚠ THE LOAD FIX. The offset above is a courtesy; this is the control.
 
-    GEX collects every minute the session is open, so an in-session capture
-    contends with it wherever it is placed -- the timing fix alone is not enough.
+    Since live-capture moved post-close on 2026-09-08, this is the ONLY headless
+    Chrome that runs during the session -- and the heavier of the two. It cannot
+    follow live-capture out of the session: index option open interest zeroes
+    after hours, so a post-close run photographs all-zero GEX grids. So the peak
+    is bounded where it is, rather than relocated.
     ⚠ CPUQuota belongs in [Service]: cgroup resource control lives there, which
     is the exact inverse of the storm cap's [Unit] home, and carrying both traps
     in one file is why each gets its own test.

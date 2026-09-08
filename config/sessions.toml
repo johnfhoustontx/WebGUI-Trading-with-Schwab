@@ -64,8 +64,27 @@ end   = "15:20"   # 16:20 ET
 # Thumbnail captures for the public grid on neuralstrike.co/live.html.
 # Held SEPARATE from [windows.collection] for the reason [windows.stream] gives:
 # widening collection must not silently extend a public surface.
-start = "08:00"
-end   = "15:20"
+#
+# POST-CLOSE ONLY, and that is the whole point (2026-09-08). Each run drives a
+# headless Chrome over all fourteen screens: ~1.7 CPU-minutes in ~90s of wall
+# clock, i.e. ~1.05 of this box's 4 cores. Run inside the session it took the
+# proxy's /health from 0.8s to 18.2s (load 2.1 -> 11.8) -- which the webgui's
+# 3s timeout renders as a PROXY-DOWN BANNER while the proxy is serving 200s
+# throughout -- and it cost a GEX collection minute on every quarter hour:
+# 08:00, 08:15, 08:30, 08:45 and 09:00 each dropped the minute after.
+#
+# Starting after [windows.stream] end (15:20) is load-bearing, not tidiness:
+# the broadcast's ffmpeg + Xvfb + Chrome hold ~1.57 cores while it runs, so a
+# capture inside the stream window competes with the largest consumer on the
+# box. Ending before the 16:20 momentum cascade keeps it clear of the nightly
+# recompute for the same reason.
+#
+# Two fires (15:30 and 15:45), not one: the second is the retry if the first
+# times out, and after the close the screens no longer change, so the pair
+# costs nothing. Accepted trade: the public grid shows the COMPLETED session
+# all night and all of the next morning.
+start = "15:25"
+end   = "15:50"
 
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
@@ -126,16 +145,24 @@ at = "16:30"
 # screens have painted live data -- a pre-open run publishes a gallery of blank
 # panels and overnight marks.
 #
-# ⚠ :07 AND NOT :00, AND THE SEVEN MINUTES ARE LOAD-BEARING. The live-screen
-# thumbnail timer runs OnCalendar=*:0/15, so :00/:15/:30/:45 already carry a
-# headless-Chrome storm. Measured on prod 2026-09-08 during the 09:00 live
-# capture: load average 2.11 -> 11.84 on 4 vCPU, proxy /health 0.82s -> 18.2s,
-# and since webgui/proxy.py health() times out at 3s every page painted the
-# proxy-down banner. It cost SEVEN GEX collection slots before 09:02. This job
-# is the heavier of the two (19 shots at 12s settle against 14 at 8s), so
-# stacking it on that minute would roughly triple the worst spike of the day.
-# The offset keeps the two peaks apart; CPUQuota on the unit keeps this one
-# from making its own. See _gallery_capture_units in generate_units.py.
+# ⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, and it
+# is the heavier of the two: 19 shots at 12s settle against live_capture's 14 at
+# 8s. Read the [windows.live_capture] comment above before touching this time --
+# that job was moved POST-CLOSE the same day precisely because one in-session run
+# took proxy /health from 0.8s to 18.2s and cost a GEX minute on every quarter
+# hour. The same load lands here, so this slot carries its own containment:
+# CPUQuota + Nice on trading-<env>-gallery-capture.service, which live_capture
+# solved by moving instead. See _gallery_capture_units in generate_units.py.
+#
+# It stays in-session for a DATA reason, not a load one: index option open
+# interest zeroes after hours, so a post-close capture photographs all-zero GEX
+# grids and arbitrary walls -- worse imagery than the stale branding this whole
+# change exists to fix. If the quota turns out not to be enough, the fix is a
+# quieter in-session time or a smaller quota, NOT moving it after the close.
+#
+# :07 rather than :00 is a small remaining courtesy: live_capture's timer still
+# FIRES every quarter hour, it just stands down in under a second outside its
+# window, and the GEX collector's own minute boundary is :00.
 #
 # WHAT A FIRING COSTS: 19 page loads against the local web app (three of the 22
 # tiles are Simulator views that live in page state and are deliberately

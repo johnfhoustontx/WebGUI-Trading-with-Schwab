@@ -210,28 +210,29 @@ until then the shots on disk are the old hand-crops — see the geometry note be
   Claude call, and `[slots.income]`, the largest scheduled Schwab spend on that
   table (`8964fe1`).
 
-- **⚠ :07 AND CPU-CONTAINED, BECAUSE A CHROME STORM READS AS A PROXY OUTAGE.** The
-  slot was 09:00 as first built, and that was wrong for a reason measured on prod
-  the same day. `trading-prod-live-capture.timer` is `OnCalendar=*:0/15`, so
-  :00/:15/:30/:45 already carry a headless-Chrome run. Measured across the
-  09:00:01–09:01:39 live capture (275 samples): **load average 2.11 → 11.84** on 4
-  vCPU, **proxy `/health` 0.82 s → 18.2 s**, in-flight on :8100 ~10 → 24–28. Every
-  probe returned **200** — the proxy was never down, it was answering later than
-  `webgui/proxy.py health(timeout=3.0)` waits, so every page painted the proxy-down
-  banner. Not cosmetic: **seven GEX collection slots were lost before 09:02**, each
-  landing immediately after a capture run. The gallery job is the heavier of the two
-  (19 shots at 12 s settle against 14 at 8 s), so 09:00 would have stacked the two
-  worst spikes of the morning on one minute. Two fixes, and neither alone is enough:
-  the slot moved **off the quarter hour** (pinned against `LIVE_CAPTURE_INTERVAL_MIN`
-  rather than a restated fifteen, so a cadence change drags the constraint with it),
-  and the unit carries **`CPUQuota=100%` + `Nice=10`** — because GEX collects every
-  minute the session is open, so separating the peaks does not stop this job making
-  one of its own. ⚠ `CPUQuota` goes in **`[Service]`**, the exact inverse of the
-  storm cap's `[Unit]` home. Moving the capture outside the session was considered
-  and **rejected**: index option open interest zeroes after hours, so the gamma tiles
-  would photograph all-zero grids and arbitrary walls — worse imagery than stale
-  branding. ⚠ **`live-capture` itself is still unthrottled**; that is the same
-  problem on a unit this branch did not touch, and it remains open.
+- **⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, so it is
+  CPU-contained.** The entry below has the measurement: one in-session live-screen
+  capture took load average **2.11 → 11.84** on 4 vCPU and proxy `/health`
+  **0.82 s → 18.2 s**, which `webgui/proxy.py health(timeout=3.0)` renders as a
+  proxy-down banner while the proxy serves `200`s throughout, and it cost **seven
+  GEX slots before 09:02**. `live-capture` answered that by **leaving the session**
+  (`[windows.live_capture]` → 15:25–15:50). **This job cannot copy that answer**:
+  index option open interest zeroes after hours, so a post-close capture photographs
+  all-zero GEX grids and arbitrary walls — worse imagery than the stale branding the
+  recapture exists to fix. And it is the heavier of the two (19 shots at 12 s settle
+  against 14 at 8 s). So the peak is **bounded where it is** rather than relocated:
+  **`CPUQuota=100%` + `Nice=10`** — one core of four, leaving three for the stack.
+  ⚠ `CPUQuota` goes in **`[Service]`**, the exact inverse of the storm cap's
+  `[Unit]` home. If the quota proves insufficient the answer is a smaller quota or a
+  quieter in-session minute, **not** a post-close run. The `:07` (rather than `:00`)
+  is a minor extra courtesy — live-capture's timer still *fires* every quarter hour,
+  and `:00` is the GEX collector's own minute boundary — pinned against
+  `LIVE_CAPTURE_INTERVAL_MIN` rather than a restated fifteen.
+
+- **The test harness could not parse a `%`.** It ran `configparser` with default
+  interpolation, so `CPUQuota=100%` raised `InterpolationSyntaxError` — `%` is
+  systemd's *specifier* prefix (`%i`, `%h`) and a literal here, so the harness would
+  have refused a perfectly valid unit. Now `interpolation=None`.
 
 - **`TimeoutStartSec` is DERIVED, and so are the counts in the unit's own comment.**
   `SHOT_TIMEOUT_SEC` × (22 shots + the verification render) + 60 s slack = **1440 s**.
@@ -276,6 +277,59 @@ until then the shots on disk are the old hand-crops — see the geometry note be
 
 - **Tests at the time:** webgui **3507 passed, 1 skipped**; `tests` + `deploy` +
   `tools/tests` + `shared/tests` **1480 passed**.
+
+---
+
+**Last updated:** 2026-09-08 (**The live-screen thumbnail capture moved off the
+trading session** — `[windows.live_capture]` in `config/sessions.toml` goes
+`08:00–15:20` → **`15:25–15:50`**, so the timer's `:30` and `:45` fires land
+after the close and every fire inside the session stands down in under a second.
+Config only; no code, no unit regeneration.)
+
+- **The symptom was "the Schwab proxy is down", and the proxy was never down.**
+  It served `/chains` and `/quotes` at `200 OK` throughout, on a process that had
+  not restarted in ten hours. What crossed the line was **`webgui/proxy.py`
+  `health(timeout=3.0)`**, which returns `{"up": False}` on a timeout and paints
+  the proxy-down banner on every page. The Status page's `_HTTP_TIMEOUT = 2.5`
+  is more sensitive still.
+
+- **Measured across the 09:00:01–09:01:39 capture run** (275 samples, 0.4 s
+  apart): load average **2.11 → 11.84** on a 4-vCPU box, `/health` latency
+  **0.82 s → 18.2 s** (also 17.7, 12.3, 5.2, 4.9, 4.1), in-flight connections on
+  `:8100` 10 → 24–28. **Every one of those probes returned `200`** — the proxy
+  answered them all, far too late for a 3-second client.
+
+- **⚠ Not cosmetic — it cost GEX slots.** Every collection minute dropped that
+  morning landed immediately after a capture run: 08:00, 08:15, 08:30, 08:45,
+  09:00 (plus knock-on 08:32 and 08:47). **Seven slots lost before 09:02**, and
+  nothing else dropped that day.
+
+- **Where the box's CPU actually goes**, from systemd's own accounting: the
+  **YouTube wall stream is ~1.57 of 4 cores sustained** (7,992 CPU-seconds in
+  1h25m of wall clock — `x11grab` 1920×1080/15fps → `libx264 -preset veryfast`,
+  plus Xvfb and a Chrome), the **entire trading stack is ~0.8**, and the capture
+  adds **~1.05 for 90 s every quarter hour**. Baseline market-hours utilisation
+  is **2.38 of 4 (60%)** with the run-queue already peaking at 13. The two
+  broadcast features cost more than the trading system does.
+
+- **Schwab was never the constraint, and a second API key would not have helped.**
+  Zero `Schwab 429` responses across the whole retained journal and 1,633,524
+  calls in 30 days; Schwab-bound traffic runs 115–145 calls/min steady state
+  against the **self-imposed** 300/min ceiling from `MIN_REQUEST_INTERVAL = 0.2`,
+  peaking at 272 only while catching up. More permission to call would have added
+  concurrent chain parsing to the side of the machine that was already saturated.
+
+- **Still open, in descending value:** `BRKB` is not a Schwab symbol and returns
+  a guaranteed `400` on every chain fetch (63 wasted calls before 09:00, 2,627 in
+  the retained journal); the `TooBigBody` `502`s on the big chains (SPY, QQQ,
+  `$SPX`, `$NDX`, IWM, DIA, the sector ETFs) are each retried 3× under
+  `MAX_RETRIES`, so each costs three calls and holds a thread through the
+  backoff; `/health` is a sync `def` sharing the 40-thread pool with full-chain
+  handlers, so it queues behind them instead of jumping them; and the proxy's
+  `requests.Session()` still runs at the default `pool_maxsize=10`, which is what
+  the `Connection pool is full` warnings are.
+
+---
 
 **Last updated:** 2026-09-07 (**Fourteen screens are published read-only and
 unauthenticated at `live.neuralstrike.co`**, served by a SECOND NiceGUI process —

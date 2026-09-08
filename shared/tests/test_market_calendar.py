@@ -519,13 +519,15 @@ def test_gallery_capture_is_a_single_daily_slot():
     it needs a built-in default like every other slot: the TOML only overrides,
     and a TOML-only slot raises KeyError out of _slot_group.
 
-    ⚠ :07 IS NOT AN ARBITRARY ROUNDING -- do not tidy it to :00. The live-screen
-    thumbnail timer fires every quarter hour, and one of its runs was measured on
-    prod taking load average to 11.84 and proxy /health to 18.2s, past the 3s
-    timeout the webgui probes with; seven GEX slots were lost that morning. This
-    job is the heavier of the two, so it is deliberately held off the quarter
-    hour. The constraint itself is pinned against the live cadence in
-    tests/test_systemd_units.py rather than restated here."""
+    ⚠ THE TIME STAYS IN-SESSION FOR A DATA REASON, and that is the part to know
+    before moving it. Its sibling live_capture was moved POST-CLOSE on 2026-09-08
+    because one in-session headless-Chrome run took proxy /health from 0.8s to
+    18.2s and cost seven GEX slots. This job is heavier still, but index option
+    open interest zeroes after hours, so a post-close run would photograph
+    all-zero GEX grids -- worse imagery than the stale branding it exists to fix.
+    It carries CPUQuota on its unit instead. :07 rather than :00 is a minor extra
+    courtesy, pinned against the live cadence in tests/test_systemd_units.py
+    rather than restated here."""
     assert mc.slot_times("gallery_capture") == {"at": _t(9, 7)}
 
 
