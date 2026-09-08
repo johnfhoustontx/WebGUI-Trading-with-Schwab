@@ -139,6 +139,25 @@ is **paper only**, and full transparency is the brand argument the site already
 makes. Recorded here so that a later reader finds a decision rather than an
 oversight.
 
+**But PUBLISHED is not ARCHIVED, and that second step was never decided
+(settled 2026-09-07).** The live origin 404'd on `/robots.txt`, which crawlers
+read as *crawl everything* — so permanent indexing was arriving by default. The
+Caddy live block now serves `User-agent: * / Disallow: /`. Three reasons:
+
+* **Publishing is reversible; archiving is not.** Stopping the unit stops the
+  publishing. It does not remove the book from a search cache, the Wayback
+  Machine or Common Crawl, and the decision above was about the first only.
+* **Nothing about discoverability is lost.** `SITE_HOST` stays fully crawlable
+  and its `live.html` grid links every screen, so the project is findable; what
+  is not indexed is the live book itself.
+* **A crawler is the most likely realistic load.** This origin has no rate
+  limit and one anonymous GET retains ~619 KB for ~70 s — see the rate-limiting
+  entry below.
+
+`deploy/site/robots.txt` (the apex) keeps `Allow: /` and was corrected in place:
+it still described the live page as an empty placeholder carrying a `noindex`
+tag, and `deploy/tests/test_site.py` now asserts that tag is gone.
+
 ## Thumbnails
 
 `tools/capture_live_shots.py` drives headless Chrome — the same binary

@@ -323,3 +323,67 @@ def test_the_live_block_is_still_covered_by_the_edge_header_count(cfg):
     block = _block(cfg, repo_paths.LIVE_HOST)
     assert block.count("reverse_proxy") == 1
     assert block.count("header_up X-Edge 1") == 1
+
+
+# --- what a crawler is told, per origin --------------------------------------
+def test_the_live_origin_answers_robots_and_refuses_indexing(cfg):
+    """⚠ A 404 on ``/robots.txt`` is not neutral -- crawlers read it as
+    crawl-everything, so the archived state was arriving by DEFAULT.
+
+    ``Disallow: /`` is the decided answer: publishing a live trading book is
+    reversible, permanently archiving it in a search cache, the Wayback Machine
+    and Common Crawl is not, and that step was never decided. Discoverability is
+    unaffected -- ``SITE_HOST`` stays crawlable and its live.html links every
+    screen. See ``_live_block``'s docstring."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert "handle /robots.txt" in block
+    assert "User-agent: *" in block
+    assert "Disallow: /" in block
+    assert "Allow: /" not in block
+
+
+def test_the_live_robots_body_is_labelled_text(cfg):
+    """``respond`` sets no Content-Type of its own, and an unlabelled body is
+    left to the crawler to sniff."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert 'header Content-Type "text/plain; charset=utf-8"' in block
+
+
+def test_the_robots_rule_precedes_the_upstream(cfg):
+    """``handle`` blocks are mutually exclusive and evaluated in order. Behind
+    the catch-all, ``/robots.txt`` would reach the app and 404 -- the exact state
+    this replaces, with a rule above it that reads as a control."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert block.index("handle /robots.txt") < block.index("handle {")
+
+
+def test_the_upstream_is_inside_a_catch_all_handle(cfg):
+    """Mixing a bare directive with ``handle`` blocks in one site is a routing
+    order someone has to reason about; the app block already solved this by
+    putting its upstream in a catch-all ``handle``, and this mirrors it."""
+    block = _block(cfg, repo_paths.LIVE_HOST)
+    assert re.search(r"handle \{\s*reverse_proxy ", block), block
+
+
+def test_the_public_site_still_invites_crawlers():
+    """Non-vacuity partner: the decision is per-origin, and the apex is the
+    findable way in. A `Disallow: /` that spread to the one-pager would make the
+    project unsearchable while the screens stayed exactly as exposed."""
+    robots = (pathlib.Path(repo_paths.SITE_ROOT) / "robots.txt").read_text(encoding="utf-8")
+    directives = [ln.strip() for ln in robots.splitlines()
+                  if ln.strip() and not ln.lstrip().startswith("#")]
+    assert "Allow: /" in directives
+    assert "Disallow: /" not in directives
+
+
+def test_the_apex_robots_file_no_longer_describes_a_placeholder():
+    """It claimed the live-screens page was an empty placeholder carrying its
+    own ``noindex`` meta tag. Both halves are false -- ``test_site.py`` asserts
+    that tag is GONE -- and the house rule is to correct in place, never to
+    append under stale text."""
+    robots = (pathlib.Path(repo_paths.SITE_ROOT) / "robots.txt").read_text(encoding="utf-8")
+    assert "placeholder" not in robots
+    assert "noindex" not in robots
+    # The correction is not archaeology: the file states the CURRENT division of
+    # labour, and points at the origin that owns the other half.
+    assert "_live_block" in robots

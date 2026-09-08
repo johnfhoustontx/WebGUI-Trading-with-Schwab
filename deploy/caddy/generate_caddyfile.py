@@ -147,6 +147,33 @@ def _live_block():
       hole the next block -- one proxying the APP -- could sit in, and the header
       costs nothing.
 
+    **``robots.txt``: ``Disallow: /``, and this was a decision.** The origin
+    404'd on ``/robots.txt`` before, which crawlers read as crawl-everything --
+    so the archived state was arriving by default rather than by choice. Three
+    things decided it against indexing:
+
+    * **Publishing is reversible; archiving is not.** The owner accepted
+      *publishing* positions and signals. Making them keyword-searchable and
+      permanently held in a search cache, the Wayback Machine and Common Crawl
+      is a further and irreversible step, and it was never decided anywhere.
+    * **Discoverability is not lost.** ``SITE_HOST`` stays fully crawlable and
+      its ``live.html`` grid links every screen, so the project is findable;
+      what is not indexed is the live book itself.
+    * **A crawler is the most likely realistic load.** This origin has no rate
+      limit (Caddy's needs an ``xcaddy`` build), and one anonymous GET retains
+      ~619 KB of NiceGUI ``Client`` for ~70 s. Fourteen screens crawled on a
+      schedule is exactly the shape the unit's ``MemoryMax`` exists to survive.
+
+    Served from here rather than from the app because ``live_main`` registers
+    the fourteen screens and nothing else -- adding a fifteenth route to the
+    public process to say "do not index" would widen the surface the route-set
+    test exists to keep narrow.
+
+    ⚠ Multi-line **quoted** body, not ``\\n`` escapes: quoted tokens have spanned
+    lines since v2.0, while ``\\n`` inside them is a later addition. And
+    ``Content-Type`` is set explicitly -- ``respond`` sets none, and a crawler
+    sniffing an unlabelled body is not something to leave to chance.
+
     Deliberately NOT carried:
 
     * **``Content-Security-Policy: frame-ancestors 'self'``.** The app forbids
@@ -173,14 +200,26 @@ def _live_block():
 
     header Strict-Transport-Security "{HSTS}"
 
+    # Public to READ, not to ARCHIVE. Without this the origin 404s here, which
+    # crawlers read as crawl-everything -- see the docstring for why that is
+    # the one default worth overriding.
+    handle /robots.txt {{
+        header Content-Type "text/plain; charset=utf-8"
+        respond "User-agent: *
+Disallow: /
+" 200
+    }}
+
     # NO login, by design -- these fourteen screens are public. See the
     # docstring before adding any auth directive here.
-    reverse_proxy 127.0.0.1:{NICEGUI_LIVE_PORT} {{
-        # Not read by this process; stamped so the file-wide "every proxied
-        # route stamps it" rule keeps no exceptions. (The rule is enforced as
-        # a COUNT over this whole file, so do not name the directive in a
-        # comment -- a mention counts as an occurrence.)
-        header_up X-Edge 1
+    handle {{
+        reverse_proxy 127.0.0.1:{NICEGUI_LIVE_PORT} {{
+            # Not read by this process; stamped so the file-wide "every proxied
+            # route stamps it" rule keeps no exceptions. (The rule is enforced
+            # as a COUNT over this whole file, so do not name the directive in
+            # a comment -- a mention counts as an occurrence.)
+            header_up X-Edge 1
+        }}
     }}
 }}"""
 
