@@ -76,7 +76,14 @@ from pages.options import theme                       # noqa: E402
 # buttons that raise a full traceback into journald on every anonymous click.
 #
 # ⚠ Called BEFORE any page module is imported, for the same reason as 1-3.
-shell.publish()
+#
+# It also hands over the private→published ROUTE MAP, so a page's click-through
+# lands where that page actually lives here (``/options/matrix`` is published at
+# ``/opportunity``) and draws no link at all for a page this origin does not
+# serve. The map is DERIVED from the screen table — see
+# ``live_screens._public_routes`` — and passed IN rather than imported by
+# ``shell``, which must stay a leaf module.
+shell.publish(live_screens.PUBLIC_ROUTES)
 
 _STATIC_DIR = _HERE / "static"
 

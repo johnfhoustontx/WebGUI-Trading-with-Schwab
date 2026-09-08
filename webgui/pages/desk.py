@@ -37,6 +37,12 @@ from zoneinfo import ZoneInfo
 import alerts as _alerts
 import app_settings
 import bus_client
+# The page-to-shell seam — here for ``route_for``/``navigate_to``, since every
+# click-through on this page names a PRIVATE route and the public origin serves
+# most of them somewhere else and some of them nowhere. At module level rather
+# than inside ``render()`` because ``_mount_score_card`` is module-level too.
+# ``shell`` is itself Tier 1: it imports nothing but nicegui and pages.ui_guard.
+import shell as _shell
 import voice as _voice
 from nicegui import run, ui
 
@@ -439,8 +445,20 @@ BOOKS = (
 # Where a row's own page lives. Click-through is the whole reason the Desk may
 # stay this terse: every row is one click from the page that can act on it, and
 # a book with no route would strand its rows here.
+#
+# ⚠ These are the PRIVATE app's routes, and every route on this page is: a page
+# names the address it has always known and asks ``shell.route_for`` where that
+# lives in this process. The public origin publishes NONE of these three — the
+# paper ledger, the driver's own book and the captured tape are the owner's
+# positions — so there the rows draw without a click and without the pointer.
 POSITION_ROUTES = {PAPER_SOURCE: "/options/paper", CLAUDE_SOURCE: "/driver",
                    CAPTURED_SOURCE: "/options/captured"}
+
+# The other four click-through targets, named for the same reason: the string
+# is a route the shell resolves, not a URL this page emits.
+SENTIMENT_ROUTE = "/sentiment"
+MATRIX_ROUTE = "/options/matrix"
+FLOW_ROUTE = "/options/flow"
 
 # The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
 # treated as open, matching ``paper_adjust``'s own default. The captured-signals
@@ -2192,7 +2210,11 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
 # that the size difference between them is smaller — and it is also why three
 # track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
 _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
-_ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
+# Split because ONE panel's rows are not always clickable: the three position
+# books are deliberately unpublished, so on the public origin those rows have
+# nowhere to go and must not be dressed as links (see ``_position_row``).
+_ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
+_ROW = f"{_ROW_STATIC} cursor-pointer"
 _VALUE = f"text-[13px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
@@ -2488,7 +2510,7 @@ def _compact_card(title, arcs, pill_text, delta):
                     _mount_meter(_K.meter_row(arc.get("caption", ""),
                                               arc.get("value")))
                 _mount_ruler()
-    card.on("click", lambda _e: ui.navigate.to("/sentiment"))
+    card.on("click", lambda _e: _shell.navigate_to(SENTIMENT_ROUTE))
 
 
 # The panel heads, as DATA rather than four ``_panel(...)`` argument lists.
@@ -3218,7 +3240,7 @@ def render():
             # setup", where a "NEUTRAL" chip would read as a finding.
             if row["setup"]:
                 ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
-        el.on("click", lambda _e: ui.navigate.to("/options/matrix"))
+        el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
 
     def _paint_flow():
         flow_body.clear()
@@ -3274,7 +3296,7 @@ def render():
             # and shared by the kind and the side it qualifies.
             ui.label(flow_kind_text(row)).classes(
                 f"text-[10px] min-w-0 truncate {row['_tone_class']}")
-        el.on("click", lambda _e: ui.navigate.to("/options/flow"))
+        el.on("click", lambda _e: _shell.navigate_to(FLOW_ROUTE))
 
     def _paint_positions():
         pos_body.clear()
@@ -3312,8 +3334,17 @@ def render():
 
     def _position_row(row):
         # Rebuild-time only, same as the flow row above — never updated in place.
+        #
+        # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
+        # deliberately unpublished, so on the public origin there is nowhere to
+        # send the reader: the row keeps every number it has and loses the
+        # pointer, the hover wash and the handler. A row dressed as a link that
+        # leads nowhere reads as broken, which is worse than reading as static.
+        route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
+        can_open = _shell.can_navigate(route)
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            f"{POS_GRID} {_ROW if can_open else _ROW_STATIC} "
+            + (f"hover:bg-[{_C['line']}]/[0.06] " if can_open else "")
             + glow_classes(state["glow"].get(row.get("position_id")),
                            state["glow_now"]))
         with el:
@@ -3344,7 +3375,8 @@ def render():
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")
-        el.on("click", lambda _e, r=row: _open_position(r))
+        if can_open:
+            el.on("click", lambda _e, r=row: _open_position(r))
 
     # ── click-through ────────────────────────────────────────────────────────
     @guard
@@ -3361,12 +3393,16 @@ def render():
         """The strip is a pointer, not a second map: every industry and stock
         inside a sector lives one click away, and none of them is on this
         page."""
-        ui.navigate.to(BULLBEAR_ROUTE)
+        _shell.navigate_to(BULLBEAR_ROUTE)
 
     @guard
     def _open_position(row):
-        """Each book has its own page; the source chip is what decides which."""
-        ui.navigate.to(POSITION_ROUTES.get(row.get("source"), "/options/paper"))
+        """Each book has its own page; the source chip is what decides which.
+
+        A no-op where this process publishes no such page — the row wires no
+        handler there either, so this is the backstop rather than the gate."""
+        _shell.navigate_to(
+            POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,

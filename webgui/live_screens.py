@@ -29,6 +29,7 @@ class Screen:
     route: str           # the public route
     title: str           # the tile caption and the browser title
     module: str          # dotted path under `pages`
+    private_route: str   # where the PRIVATE app serves this same page
     kwargs: dict = field(default_factory=dict)   # pins passed to render()
     settings: dict = field(default_factory=dict)  # app_settings pins for this screen
 
@@ -38,31 +39,69 @@ _NETPREM = {"gamma_netprem_group": "indices",
             "gamma_netprem_mode": "dollars"}
 
 SCREENS = (
-    Screen("desk", "/desk", "The Desk", "desk"),
-    Screen("opportunity", "/opportunity", "Opportunity Board", "options.matrix"),
-    Screen("flow", "/flow", "Flow Alerts", "options.flow"),
+    Screen("desk", "/desk", "The Desk", "desk", "/desk"),
+    Screen("opportunity", "/opportunity", "Opportunity Board", "options.matrix",
+           "/options/matrix"),
+    Screen("flow", "/flow", "Flow Alerts", "options.flow", "/options/flow"),
     # Skin B is the Heat Lattice. The page reads it from app_settings, so this
     # is a settings pin rather than a render kwarg.
-    Screen("macro", "/macro", "Macro Board", "market", settings={"macro_skin": "B"}),
-    Screen("sentiment", "/sentiment", "Sentiment", "sentiment"),
-    Screen("bullbear", "/bullbear", "Bull / Bear Map", "sentiment_bullbear"),
+    Screen("macro", "/macro", "Macro Board", "market", "/market",
+           settings={"macro_skin": "B"}),
+    Screen("sentiment", "/sentiment", "Sentiment", "sentiment", "/sentiment"),
+    Screen("bullbear", "/bullbear", "Bull / Bear Map", "sentiment_bullbear",
+           "/sentiment/bullbear"),
     # Collapsed is already the page's build state (state["expanded"] = set()).
-    Screen("sectors", "/sectors", "Sector & Industry", "sentiment_sectors"),
-    Screen("rotation", "/rotation", "Sector Rotation", "sentiment_rotation"),
-    Screen("rrg", "/rrg", "RRG", "sentiment_rrg"),
+    Screen("sectors", "/sectors", "Sector & Industry", "sentiment_sectors",
+           "/sentiment/sectors"),
+    Screen("rotation", "/rotation", "Sector Rotation", "sentiment_rotation",
+           "/sentiment/rotation"),
+    Screen("rrg", "/rrg", "RRG", "sentiment_rrg", "/sentiment/rrg"),
     Screen("momentum", "/momentum", "Momentum", "sentiment_momentum",
-           kwargs={"level": "industry"}),
-    Screen("gamma", "/gamma", "Gamma", "options.gamma",
+           "/sentiment/momentum", kwargs={"level": "industry"}),
+    # ⚠ THE FOUR GAMMA SCREENS ALL NAME /options/gamma, AND THIS ONE IS FIRST.
+    # ``PUBLIC_ROUTES`` keeps the first, so a Dealer Positioning click-through
+    # lands here rather than on Net Prem or a Premium Divergence board — see
+    # the note on ``_public_routes`` below.
+    Screen("gamma", "/gamma", "Gamma", "options.gamma", "/options/gamma",
            kwargs={"symbol": "$SPX", "view": "GEX"}),
     Screen("net-premium", "/net-premium", "Net Prem", "options.gamma",
-           kwargs={"view": "Net Prem"}, settings=_NETPREM),
+           "/options/gamma", kwargs={"view": "Net Prem"}, settings=_NETPREM),
     Screen("premium-divergence-spy", "/premium-divergence/spy",
-           "Premium Divergence · SPY", "options.gamma",
+           "Premium Divergence · SPY", "options.gamma", "/options/gamma",
            kwargs={"symbol": "SPY", "view": "Flow"}),
     Screen("premium-divergence-qqq", "/premium-divergence/qqq",
-           "Premium Divergence · QQQ", "options.gamma",
+           "Premium Divergence · QQQ", "options.gamma", "/options/gamma",
            kwargs={"symbol": "QQQ", "view": "Flow"}),
 )
+
+
+def _public_routes() -> dict:
+    """``{private route: the route THIS origin serves that page at}``.
+
+    DERIVED, so there is no second table to keep in step: every Screen already
+    names both ends, and ``tests/test_live_navigation.py`` reads ``main.py`` to
+    check that ``private_route`` really is where the private app renders that
+    module — the one field with no consequence on the private app, and so the
+    one a typo would hide in until a visitor hit a 404.
+
+    A private route that no screen names is simply ABSENT, which is the answer
+    a caller needs: ``/options/paper``, ``/driver`` and ``/options/captured``
+    are the owner's positions and are deliberately unpublished, so a control
+    pointing at one must not be drawn as a link rather than be given a
+    stand-in. Nothing here ever resolves to the private app's own host.
+
+    ⚠ FIRST WINS, and that is the one place this table's ORDER matters: four
+    screens render ``options.gamma`` under different pins, and a click asking
+    for Dealer Positioning means the plain Gamma board, not Net Prem. Asserted
+    in the tests rather than left to be discovered."""
+    out: dict = {}
+    for s in SCREENS:
+        out.setdefault(s.private_route, s.route)
+    return out
+
+
+PUBLIC_ROUTES = _public_routes()
+
 
 # Pins that belong to the ORIGIN rather than to any one screen.
 #

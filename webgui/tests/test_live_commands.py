@@ -171,9 +171,13 @@ def test_a_published_page_reaches_the_bus_only_through_the_module():
 
 @pytest.fixture
 def published():
-    """Render as the PUBLIC origin, then put the process back."""
+    """Render as the PUBLIC origin, then put the process back.
+
+    Published WITH the real route map, exactly as ``live_main`` does — a
+    routeless publish is a state that process never has, and a page rendered
+    under it could navigate nowhere for a reason this test does not mean."""
     import shell
-    shell.publish()
+    shell.publish(live_screens.PUBLIC_ROUTES)
     yield
     shell.unpublish()
 

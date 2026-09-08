@@ -2224,8 +2224,10 @@ def render(symbol: str | None = None, view: str | None = None):
                 _briefings_menu = ui.menu()
                 with _briefings_menu:
                     for _slot, _title in _SCHED_SLOTS:
-                        _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
-                            f"/options/analyze?slot={s}", new_tab=True))
+                        _mi = ui.menu_item(
+                            _title,
+                            on_click=lambda s=_slot: _shell.navigate_to(
+                                f"/options/analyze?slot={s}", new_tab=True))
                         _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
                         _mi.set_enabled(False)
                         _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
@@ -2923,7 +2925,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen["explain"]:
             return
         seen["explain"] = version
-        ui.navigate.to(f"/options/explain?v={version}", new_tab=True)
+        _shell.navigate_to(f"/options/explain?v={version}", new_tab=True)
 
     @guard
     def _request_analyze():
@@ -2944,7 +2946,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen["analyze"]:
             return
         seen["analyze"] = version
-        ui.navigate.to(f"/options/analyze?v={version}", new_tab=True)
+        _shell.navigate_to(f"/options/analyze?v={version}", new_tab=True)
 
     def _refresh_history_dates(payload):
         if hist_date is None:
@@ -2977,7 +2979,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen.get("history"):
             return
         seen["history"] = version
-        ui.navigate.to(f"/options/gamma-history?v={version}", new_tab=True)
+        _shell.navigate_to(f"/options/gamma-history?v={version}", new_tab=True)
 
     if hist_open is not None:
         hist_open.on_click(_open_history)

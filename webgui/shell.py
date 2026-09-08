@@ -28,17 +28,23 @@ from pages.ui_guard import guard
 # map is PASSED IN by ``live_main`` rather than read from ``live_screens``, so
 # this module keeps importing nothing but ``nicegui`` and ``pages.ui_guard``
 # (``test_shell_seam.test_the_shell_stays_a_leaf_module``).
-_ORIGIN = {"public": False}
+_ORIGIN: dict = {"public": False, "routes": {}}
 
 
-def publish() -> None:
-    """Declare this process the PUBLIC origin. Called once by ``live_main``."""
+def publish(routes: dict | None = None) -> None:
+    """Declare this process the PUBLIC origin. Called once by ``live_main``.
+
+    ``routes`` is ``{private route: the route THIS origin serves it at}`` —
+    ``live_screens.PUBLIC_ROUTES``, passed IN rather than imported, so this
+    module stays a leaf."""
     _ORIGIN["public"] = True
+    _ORIGIN["routes"] = dict(routes or {})
 
 
 def unpublish() -> None:
     """Undo :func:`publish` (test helper; nothing in the app calls it)."""
     _ORIGIN["public"] = False
+    _ORIGIN["routes"] = {}
 
 
 def is_public() -> bool:
@@ -66,6 +72,54 @@ def may_enqueue() -> bool:
     ``_may_enqueue``, and one source-level test walks the published modules for
     command sites and checks that local. See ``tests/test_live_commands.py``."""
     return not _ORIGIN["public"]
+
+
+def route_for(route: str):
+    """Where ``route`` lives in THIS process, or ``None`` if it lives nowhere.
+
+    A page names the route the PRIVATE app serves — the address it has always
+    known, and the one the breadcrumb, the nav and every other reader use. The
+    public origin publishes most of those pages at a DIFFERENT path
+    (``/options/matrix`` at ``/opportunity``) and some of them nowhere at all,
+    so a page asks rather than assumes.
+
+    Unpublished process → the identity, so the private app is unchanged.
+    Published process → the mapped route, or ``None`` for a page this origin
+    does not serve. ``None`` is deliberately not "fall back to the private
+    path": that path 404s here, and linking to the private HOST would be worse
+    still — the public site must never advertise it."""
+    if not _ORIGIN["public"]:
+        return route
+    return _ORIGIN["routes"].get(route)
+
+
+def can_navigate(route: str) -> bool:
+    """Whether a control pointing at ``route`` can work in this process.
+
+    Ask BEFORE drawing the affordance — the ``cursor-pointer``, the hover wash,
+    the click handler. A row dressed as a link that leads nowhere is the same
+    defect as a button that cannot work: it reads as broken rather than as
+    absent."""
+    return route_for(route) is not None
+
+
+def navigate_to(route: str, new_tab: bool = False) -> None:
+    """Navigate to ``route``'s address in this process; a no-op if it has none.
+
+    The no-op is the backstop under :func:`can_navigate`, in the same
+    both-not-either shape as :func:`may_enqueue` and ``bus_client.request``:
+    the control is not drawn, AND the handler declines.
+
+    ⚠ EVERY internal navigation in a page goes through here, not only the ones
+    a published screen draws today — ``tests/test_live_navigation.py``
+    enumerates it. In the private app this is exactly ``ui.navigate.to``, so
+    the uniformity is free; a route carrying a query string (``/options/
+    analyze?v=3``) is not in any map and so resolves to itself privately and to
+    nothing publicly, which is the right answer for both."""
+    target = route_for(route)
+    if target is None:
+        return
+    ui.navigate.to(target, new_tab=new_tab)
 
 
 # ── Page-level CSS both entrypoints inject ───────────────────────────────────

@@ -609,3 +609,40 @@ ranks actionable signals, `/flow` carries live alerts. Anyone may read the book 
 mirror the entries in real time. Chosen over redaction and over a 15-minute delay
 because the book is **paper only** and full transparency is the argument the public
 site already makes.
+
+**Two things a PAGE must ask the shell, and the one it must not assume (2026-09-07,
+from an adversarial review of the three findings below).** `webgui/shell.py` — the
+seam both entrypoints provide — now carries the process's own identity, set once by
+`live_main` before any page is imported and never by `main`:
+
+* **`shell.may_enqueue()`** — may a control on this render put a command on a
+  `cmd:` stream? False on the public origin. Every published page resolves it once
+  into a local `_may_enqueue`, and the button is not built while the handler opens
+  with `if not _may_enqueue: return`. `bus_client.request`'s `PermissionError` stays
+  the backstop; both, not either — relying on the refusal alone leaves live buttons
+  whose every anonymous click writes a traceback into journald, since `ui_guard.guard`
+  re-raises anything that is not the deleted-slot error. It is gated on the ORIGIN
+  rather than on `bus_client.is_read_only()` because the same fact answers the route
+  question below, and a bus MODE says nothing about which routes exist.
+* **`shell.route_for(route)` / `can_navigate` / `navigate_to`** — a page names the
+  route the PRIVATE app serves (the address it has always known) and asks where that
+  lives HERE. The public origin publishes most pages at a different path
+  (`/options/matrix` → `/opportunity`) and some nowhere at all. The map is DERIVED
+  from `live_screens.SCREENS`, which is why every `Screen` now carries a
+  `private_route`; there is no second table. First screen wins, so the four
+  `options.gamma` screens resolve `/options/gamma` to `/gamma` — the one place that
+  table's ORDER is load-bearing. ⚠ An unpublished route resolves to **`None`**, never
+  to the private path (a 404 here) and never to `app.neuralstrike.co`: the public site
+  must not advertise the private app. The Desk's three position books are exactly that
+  case, so those rows draw every number and lose the pointer, the hover wash and the
+  handler.
+* **What a page must not assume is that a settings pin reaches every caller.**
+  `voice_enabled` is pinned False because a spoken alert is an `edge_tts` call to a
+  Microsoft endpoint plus an mp3 on disk; the pin covered `desk.speak_phrases` and
+  `desk._prewarm_clips` and missed `_unlock_voice`, which is reachable from a browser
+  console in two messages (`emitEvent('desk_voice_blocked')` reveals the hidden button
+  — `ui.on` subscribes on the client LAYOUT, which is visible, so NiceGUI's
+  hidden-element event gate does not apply — then click it). Hidden is not absent.
+
+In the private app all three resolve to today's behaviour exactly: `may_enqueue()` is
+True, `route_for` is the identity, and voice defaults on.
