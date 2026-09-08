@@ -445,7 +445,50 @@ draws `Spot 7718.6 · Call wall 7720` with charts at 550×680, 826×680, 826×15
 once and nearly reported a collapse — `innerWidth` was **0** because the browser
 pane had collapsed. Always print the viewport beside the chart size.
 
-### ⚠ STILL OPEN: Caddy needs sudo
+### ✅ Caddy installed and reloaded — the surface is LIVE
+
+Verified end to end from an external machine over the public internet:
+
+| | |
+|---|---|
+| 14 routes on `https://live.neuralstrike.co` | all **200**, 0.23–0.71 s |
+| `/terminate` `/settings` `/status` `/driver` `/options/paper` `/options/captured` `/login` `/logout` `/wall` `/eod` `/options/gamma` `/options/matrix` `/manuals` | all **404** |
+| `/robots.txt` | `User-agent: * / Disallow: /`, `text/plain` ✅ |
+| `?_s=PWNED` | byte-identical to plain — no reflection |
+| App host / paths / creds in `/desk` `/gamma` `/flow` `/opportunity` | **clean** |
+| HSTS | `max-age=31536000` ✅ |
+| `neuralstrike.co` · `app.neuralstrike.co` | 200 · **303 → `/login?next=%2Fdesk`** — unaffected, still gated |
+| `neuralstrike.co/live.html` | 200, 14 tiles, every link to the live origin, no app host |
+| `/desk` in a browser | fully rendered with live data |
+
+⚠ **Captures 404 until the first in-window run**, so the grid shows its empty
+state — verified in production as clean labelled panels, not a broken page.
+
+### ⚠ The install reverted once, and the tell was in the journal
+
+The first run reported success and the surface still did not answer. The
+evidence, worth recognising again:
+
+- `grep -c live.neuralstrike.co /etc/caddy/Caddyfile` → **0**
+- `Caddyfile` and `Caddyfile.pre-live` both **1178 bytes** — identical, i.e. the
+  original 38-line file, not the generated 66-line one
+- but the journal showed `certificate obtained successfully` for
+  `live.neuralstrike.co` at 22:07:06 — **so the config HAD loaded** — and then
+  at 22:07:33 `enabling automatic TLS` listed only
+  `www.neuralstrike.co, app.neuralstrike.co, neuralstrike.co`
+
+Installed, loaded, then reverted 27 seconds later. **Always `grep -c` the
+installed file** rather than trusting the exit code, which is why the command
+below ends with one.
+
+⚠ Windows `curl` reports this failure as
+`schannel: SEC_E_INTERNAL_ERROR - The Local Security Authority cannot be
+contacted`, which reads like a client-side TLS fault and is not one. The
+discriminating check is that the **sibling hosts still answer**: if the apex and
+app host are fine and only the new name fails, look at the Caddyfile, not at
+TLS.
+
+### For reference: the install, which needs sudo
 
 `live.neuralstrike.co` is **not yet served** — the generated Caddyfile is not
 installed, so nothing answers on :443 for that name. The generator's `--install`
