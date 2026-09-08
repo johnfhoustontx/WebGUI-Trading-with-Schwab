@@ -903,11 +903,30 @@ def test_the_live_link_can_be_glowed():
 
 
 def test_the_glow_is_green():
-    """The one thing the request actually specifies."""
+    """The one thing the request actually specifies -- and it must assert the
+    COLOUR, not merely that a glow exists.
+
+    ⚠ This test shipped asserting only ``box-shadow or filter``, under this same
+    name and docstring. A red glow would have passed it. That is worse than a
+    weak test: the name and the docstring both promised the colour, so a reader
+    would reasonably stop looking. Rewritten to read the hue it claims.
+
+    The rule builds every shade from one ``--ns-open`` custom property, so the
+    channel check has exactly one place to look -- and pinning the property
+    rather than the literal means a re-theme that keeps the variable keeps the
+    test honest.
+    """
     css = _css("assets/site.css")
     rule = re.search(r"\.ns-market-open\s*\{[^}]*\}", css)
     assert rule, "no .ns-market-open rule to check"
-    assert "box-shadow" in rule.group(0) or "filter" in rule.group(0)
+    body = rule.group(0)
+    assert "box-shadow" in body or "filter" in body, "the glow has no glow"
+
+    hexes = re.findall(r"#([0-9a-fA-F]{6})", body)
+    assert hexes, "the glow colour is not a hex literal this test can read"
+    r, g, b = (int(hexes[0][i:i + 2], 16) for i in (0, 2, 4))
+    assert g > r and g > b, (
+        f"#{hexes[0]} is not green: red={r} green={g} blue={b}")
 
 
 def test_the_glow_script_does_not_reach_off_origin():
