@@ -229,5 +229,27 @@ the config. `nicegui_live` therefore goes through the same `+ off` as `nicegui`.
   fourteen page instances with fourteen websockets, multiplied by every
   concurrent visitor.
 - **A timestamp on the grid.** See above.
-- **Rate limiting.** Not designed in. If the public origin proves to attract
-  load, it belongs at Caddy, not in the app.
+- **Rate limiting — STILL OPEN, and now measured (2026-09-07).** Not designed
+  in, and the original line here stopped at that, which read as though nobody
+  had looked. What is known: 20 plain unauthenticated `GET /desk` requests
+  create 20 NiceGUI `Client` objects retaining **~619 KB each** against an empty
+  cache — no websocket, no cookie. NiceGUI prunes socketless clients after 60 s
+  on a 10 s timer, so the window is ~70 s, but **nothing bounds the arrival
+  rate**; at 100 req/s that is thousands of live clients holding 4 GB+.
+  Websocket connections have **no cap and no prune at all**.
+
+  **What was done instead:** `MemoryHigh=768M` / `MemoryMax=1G` on the
+  `webgui_live` unit (`deploy/systemd/generate_units.py`, `LIVE_MEMORY_HIGH`).
+  That does not stop a flood — it decides **who dies** in one. The public
+  screens go alone and come back on `Restart=on-failure`, instead of the box's
+  OOM killer choosing among the six services, the private trading UI and Redis.
+  ⚠ Deliberately on that unit ONLY: the others are not internet-facing and a
+  wrong value there kills the trading stack.
+
+  **What remains open:** the request rate itself, and the unbounded websocket
+  count. A real limit belongs at Caddy, and Caddy's `rate_limit` is in no
+  prebuilt binary — it needs an `xcaddy` build and a manual rebuild on every
+  Caddy release, with no apt security updates. That trade was weighed when the
+  only public thing was a static file server; it is a closer call now, and it
+  is the decision to revisit if the origin attracts load. An in-app limiter is
+  the cheaper alternative and was not attempted.

@@ -589,6 +589,79 @@ def test_no_other_unit_loads_the_public_processs_env_file():
         assert str(POSIX_ROOT / ".env.live") not in _environment_files(text), name
 
 
+# --- the public process's memory cap ----------------------------------------
+def _bytes(value):
+    """A systemd memory value ("768M", "1G", "1073741824") as an int.
+
+    systemd's suffixes are BINARY: K/M/G are 1024-based (KiB/MiB/GiB), which is
+    the whole reason this is a helper and not an eyeballed comparison."""
+    units_ = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
+    return (int(value[:-1]) * units_[value[-1].upper()]
+            if value[-1].upper() in units_ else int(value))
+
+
+def test_the_public_unit_caps_its_memory(rendered):
+    """⚠ The one internet-facing, unauthenticated, UNTHROTTLED process.
+
+    There is no rate limit -- Caddy's needs an xcaddy build and none is in
+    place -- and a measured 619 KB of retained NiceGUI `Client` per plain
+    anonymous GET, pruned only after ~70 s. This does not stop a flood; it
+    decides WHO DIES in one: the public screens alone, restarted by
+    Restart=on-failure, rather than the box's OOM killer choosing among the six
+    services, the private trading UI and Redis."""
+    svc = rendered[units.unit_name("webgui_live")]["Service"]
+    assert svc["MemoryMax"] == units.LIVE_MEMORY_MAX
+    assert svc["MemoryHigh"] == units.LIVE_MEMORY_HIGH
+
+
+def test_the_memory_cap_lives_in_the_Service_section():
+    """The sibling trap this file already carries for StartLimit* runs the other
+    way: those belong in [Unit] and are silently ignored in [Service]; these
+    belong in [Service] and are a parse error in [Unit]. Getting either wrong
+    produces a unit that reads as configured."""
+    text = units.render_all()[units.unit_name("webgui_live")]
+    unit_part, service_part = text.split("[Service]", 1)
+    for key in ("MemoryMax", "MemoryHigh"):
+        assert f"{key}=" in service_part, key
+        assert f"{key}=" not in unit_part, f"{key} is in [Unit], where it is invalid"
+
+
+def test_the_throttle_sits_below_the_kill():
+    """MemoryHigh must THROTTLE before MemoryMax KILLS. Set equal or inverted it
+    is decoration: the process would be killed with no reclaim pressure first,
+    which is the signal the pair exists to produce."""
+    high = _bytes(units.LIVE_MEMORY_HIGH)
+    cap = _bytes(units.LIVE_MEMORY_MAX)
+    assert high < cap, (units.LIVE_MEMORY_HIGH, units.LIVE_MEMORY_MAX)
+    assert cap - high >= 128 * 1024 ** 2, (
+        "the gap is too narrow for a burst to drain -- the process would "
+        "oscillate on the edge of the cap instead of throttling")
+
+
+def test_the_cap_is_generous_enough_for_normal_use_and_tight_enough_to_matter():
+    """Both bounds, because either alone is satisfiable by an absurd number.
+
+    The floor: the whole nine-unit stack is budgeted at ~1.2 GB of process
+    memory, so a cap under 512 MiB would be inside a single NiceGUI process's
+    plausible working set. The ceiling: the host's minimum is 8 GB and the
+    trading stack plus the page cache for the 1.52 GB gex_history.db have to
+    survive whatever the public origin does."""
+    cap = _bytes(units.LIVE_MEMORY_MAX)
+    assert 512 * 1024 ** 2 <= cap <= 2 * 1024 ** 3, units.LIVE_MEMORY_MAX
+
+
+def test_no_other_unit_carries_a_memory_cap():
+    """⚠ NOT a drive-by. The other units are not internet-facing, and a wrong
+    value on one of them kills the trading stack -- the failure this cap exists
+    to prevent, moved onto the processes that matter most."""
+    live = units.unit_name("webgui_live")
+    for name, text in units.render_all().items():
+        if name == live:
+            continue
+        for key in ("MemoryMax=", "MemoryHigh=", "MemoryLimit=", "MemorySwapMax="):
+            assert key not in text, (name, key)
+
+
 def test_the_public_env_file_must_exist_for_the_unit_to_start():
     """No leading '-'. Covered by the file-wide rule above, and pinned again
     here because the reasoning is stronger for this file than for the others: a

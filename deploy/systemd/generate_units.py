@@ -117,6 +117,46 @@ BACKUP_TIMEOUT_SEC = 7200
 # path the unit loads, and so moving it is one edit.
 STREAM_ENV_FILE = "/etc/neuralstrike-stream/env"
 
+# ── The public process's memory cap ──────────────────────────────────────────
+# ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
+# are not internet-facing and a wrong value there kills the trading stack.
+#
+# WHY AT ALL. `webgui_live` is unauthenticated and unthrottled: Caddy's
+# rate_limit needs an xcaddy build (see deploy/caddy/generate_caddyfile.py's
+# docstring) and none is in place. Measured: 20 plain unauthenticated
+# `GET /desk` requests created 20 NiceGUI `Client` objects retaining ~619 KB
+# EACH against an empty cache -- no websocket, no cookie. NiceGUI prunes
+# socketless clients after 60 s on a 10 s timer, so the window is ~70 s, but
+# nothing bounds the arrival rate; at 100 req/s that is thousands of live
+# clients holding 4 GB+. Websocket connections have no cap and no prune at all.
+# This does NOT stop that. It decides WHO DIES when it happens: the public
+# screens, alone, restarted by Restart=on-failure -- rather than the box's OOM
+# killer choosing among the six services, the private trading UI and Redis.
+#
+# WHY THESE NUMBERS. The host is 8 GB (16 preferred), and the whole nine-unit
+# stack is budgeted at ~1.2 GB of process memory -- roughly 150 MB per process,
+# the rest being page cache for the 1.52 GB gex_history.db. 1 GiB is ~7x that
+# average for a process that mounts fourteen page modules, so normal use never
+# approaches it; and against the measured 619 KB per client it is several
+# hundred concurrent anonymous clients above baseline, far past any legitimate
+# concurrency for a personal site. Against the box, it is one eighth of the
+# smallest supported host: the trading stack and the page cache are untouched.
+#
+# MemoryHigh THROTTLES before MemoryMax KILLS. Above 768M the kernel applies
+# reclaim pressure and the process slows, which surfaces as slow public screens
+# -- a signal, and a recoverable one -- instead of a kill with nothing before
+# it. The gap is deliberately wide enough (256 MiB) that a genuine burst has
+# room to drain rather than oscillating on the edge of the cap.
+#
+# ⚠ CONFIRM THE IDLE BASELINE ON THE BOX, once, after deploying:
+#   systemctl --user show trading-<env>-webgui_live -p MemoryCurrent
+# If it idles above ~500 MB these two numbers are the ones to raise -- and they
+# are the only two. (MemoryAccounting is implied by both directives, so it is
+# not restated. On a cgroup v1 host they would be silently ignored, the same
+# family of trap as StartLimit* in the wrong section; this host is v2 unified.)
+LIVE_MEMORY_HIGH = "768M"
+LIVE_MEMORY_MAX = "1G"
+
 # How often the public grid's thumbnails are refreshed. Every 15 minutes inside
 # [windows.live_capture]; the script's own gate decides the days and hours, so
 # this only has to be the cadence.
@@ -226,6 +266,18 @@ def _service_text(component, port, script):
         service.append(
             f"ExecStartPre={_python()} tools/wait_http.py "
             f"--port {PROXY_PORT} --timeout {PROXY_WAIT_TIMEOUT_SEC} --label 'the proxy'")
+
+    if is_live:
+        # ⚠ [Service], where cgroup resource control belongs -- unlike
+        # StartLimit* above, which systemd moved to [Unit] in v229 and silently
+        # ignores here. See LIVE_MEMORY_HIGH for the numbers and the reasoning;
+        # this is on the PUBLIC unit alone.
+        service += [
+            "# The one internet-facing, unauthenticated, unthrottled process.",
+            "# Caps WHO DIES under a request flood: these screens, alone.",
+            f"MemoryHigh={LIVE_MEMORY_HIGH}",
+            f"MemoryMax={LIVE_MEMORY_MAX}",
+        ]
 
     service += [f"ExecStart={_python()} {script}",
                 "Restart=on-failure",

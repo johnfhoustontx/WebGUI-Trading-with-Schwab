@@ -30,9 +30,19 @@ right, where an origin is not.
 
 **No ``rate_limit``, decided.** Caddy's rate limiter is in no prebuilt binary; it
 needs an ``xcaddy`` build and a manual rebuild on every future Caddy release,
-with no apt security updates. Throttling lives in the app instead, where
-``LockoutState`` refuses before Argon2 and the login form token rejects a blind
-POST for the cost of an HMAC. This runs stock Caddy from the official repo.
+with no apt security updates. This runs stock Caddy from the official repo.
+
+⚠ **That decision covers the APP block only, and the difference matters.** On
+``APP_HOST`` throttling lives in the app, where ``LockoutState`` refuses before
+Argon2 and the login form token rejects a blind POST for the cost of an HMAC.
+``LIVE_HOST`` has **neither** -- it is unauthenticated, so there is no lockout
+to key and no form to reject, and its origin is therefore **unthrottled**.
+Measured: one plain anonymous GET retains ~619 KB of NiceGUI ``Client`` for
+~70 s, and nothing bounds the arrival rate. What is in place is a **blast-radius
+cap, not a limit**: ``MemoryHigh``/``MemoryMax`` on the ``webgui_live`` unit, so
+a flood takes the public screens down alone. The rate itself is open --
+``docs/plans/2026-09-07-public-live-screens-design.md`` records it under
+"Deliberately not built", and this is the file the fix would land in.
 """
 import argparse
 import pathlib

@@ -1618,7 +1618,20 @@ identity. `tools/promote.sh` already does it on every promote.
 
 ⚠ **`StartLimitIntervalSec` / `StartLimitBurst` belong in `[Unit]`, not
 `[Service]`.** systemd moved them in v229 and **silently ignores them** in the
-wrong section, so the storm cap would look configured and not exist.
+wrong section, so the storm cap would look configured and not exist. The
+**`MemoryHigh`/`MemoryMax`** pair runs the other way — `[Service]`, where cgroup
+resource control lives — and carrying both traps in one file is why each is
+pinned by its own test.
+
+⚠ **Only `webgui_live` carries a memory cap** (`LIVE_MEMORY_HIGH` 768M /
+`LIVE_MEMORY_MAX` 1G). It is the one internet-facing, unauthenticated,
+**unthrottled** process — no Caddy `rate_limit` (it needs an `xcaddy` build), and
+a measured ~619 KB of retained NiceGUI `Client` per anonymous GET pruned only
+after ~70 s. The cap does not stop a flood; it decides **who dies** in one: the
+public screens alone, back on `Restart=on-failure`, instead of the OOM killer
+choosing among the services, the trading UI and Redis. ⚠ **Never add it to the
+other units as a drive-by** — they are not internet-facing and a wrong value
+kills the stack. The request rate itself is still open; see the design doc.
 
 ⚠ **`--user`, never system units.** That is what lets the Status page restart its
 own siblings with no polkit rule and no sudoers entry; a system-unit equivalent
