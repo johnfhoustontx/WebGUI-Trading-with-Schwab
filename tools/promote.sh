@@ -72,6 +72,18 @@ echo "[promote] regenerating units (ports/paths are derived, not committed)"
 "$PY" -m deploy.systemd.generate_units --install
 systemctl --user daemon-reload
 
+# The PUBLIC live unit loads .env.live -- its own minimal file, NOT the stack's
+# .env -- with no leading dash, so a missing one fails that unit. Warned here
+# rather than refused: the whole point of the split is that the public screens
+# fail ALONE, and blocking a trading-stack promote on the public site's config
+# would invert exactly that. See docs/dev-prod-environments.md 2.4b.
+if [ ! -f "$ROOT/.env.live" ]; then
+  echo "[promote] WARNING: $ROOT/.env.live is missing."
+  echo "[promote]   trading-$ENV_NAME-webgui_live will fail to start (the public"
+  echo "[promote]   screens only). It needs REDIS_LIVE_URL + MEMURAI_PASSWORD;"
+  echo "[promote]   see docs/dev-prod-environments.md section 2, step 4b."
+fi
+
 echo "[promote] starting $TARGET"
 systemctl --user start "$TARGET"
 

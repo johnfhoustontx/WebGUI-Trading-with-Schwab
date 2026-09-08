@@ -27,6 +27,32 @@ if str(_REPO_ROOT) not in sys.path:
 from shared.bus import Bus  # noqa: E402
 
 _bus: Bus | None = None
+_url: str | None = None
+_read_only = False
+
+
+def set_url(url: str | None) -> None:
+    """Pin the Redis connection URL for the next ``bus()``.
+
+    The public live process passes an ACL user granted read commands only. That
+    is the STRUCTURAL half of read-only: :func:`set_read_only` is an application
+    control, and this is the one the server enforces. Set once at startup,
+    BEFORE the first ``bus()`` — the singleton is built lazily and never rebuilt
+    on its own, so a later change takes effect only after :func:`reset`.
+    """
+    global _url
+    _url = url
+
+
+def set_read_only(flag: bool) -> None:
+    """Refuse every command enqueue from this process (see :func:`request`)."""
+    global _read_only
+    _read_only = flag
+
+
+def is_read_only() -> bool:
+    """True when this process refuses command enqueues."""
+    return _read_only
 
 
 def bus() -> Bus:
@@ -40,12 +66,18 @@ def bus() -> Bus:
     """
     global _bus
     if _bus is None:
-        _bus = Bus()
+        _bus = Bus(url=_url)   # url=None -> Bus falls back to MEMURAI_URL, as before
     return _bus
 
 
 def reset() -> None:
-    """Drop the cached Bus so the next ``bus()`` builds a fresh one (test helper)."""
+    """Drop the cached Bus so the next ``bus()`` builds a fresh one (test helper).
+
+    Deliberately leaves ``_url`` and ``_read_only`` alone: they are process
+    configuration set once at startup, not cache. ~15 test modules call this to
+    get a clean fakeredis, and clearing the refusal here would mean the live
+    process silently re-armed writes the moment anything reset the bus.
+    """
     global _bus
     _bus = None
 
@@ -184,7 +216,22 @@ def request(domain: str, command: dict) -> str:
     """Enqueue a command dict (e.g. {'type':'refresh'}) onto ``f'cmd:{domain}'``.
 
     Returns the Redis stream message id.
+
+    **Raises ``PermissionError`` when :func:`set_read_only` is on** — it does not
+    quietly return. This is the SINGLE Tier-1 write chokepoint, and on the public
+    live screens the commands behind it are ``gamma_analyze`` / ``gamma_explain``
+    (paid Claude calls) and ``gamma_refresh`` / sentiment ``refresh`` (Schwab
+    fetches against a budget already running 68-76k/day). A silent no-op would be
+    worse than the enqueue: the caller would believe its command was queued and
+    wait for a result that never comes. The published pages draw no control that
+    reaches here — this is the backstop that makes that true rather than tidy.
     """
+    if _read_only:
+        # ``command`` is typed a dict but this guard must never be the thing that
+        # breaks, so it does not assume ``.get`` exists.
+        kind = command.get("type") if isinstance(command, dict) else command
+        raise PermissionError(
+            f"read-only process refused command {kind!r} on cmd:{domain}")
     return bus().enqueue_command(f"cmd:{domain}", command)
 
 

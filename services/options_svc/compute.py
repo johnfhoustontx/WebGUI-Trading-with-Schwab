@@ -3001,34 +3001,47 @@ def reset_gamma_history_memo():
 # gamma_snapshot CONSUMES it once (pop semantics): only the same-tick refresh
 # reuses it, every other caller (page-timer refresh, symbol switch) still
 # fetches fresh. The TTL guards a crash between stash and take.
+#
+# It holds MANY symbols (2026-09-07), not one. The tick now refreshes the private
+# page's symbol AND the three per-symbol snapshots the public live screens read
+# (handlers.PUBLISHED_GAMMA_SYMBOLS), and every one of those is already fetched by
+# the collector — $SPX/SPY/QQQ are all in config/symbols.toml [collection] base.
+# A one-slot stash would serve the first and send the rest back to Schwab for a
+# chain the process had just thrown away: ~440 /chains calls per symbol per day,
+# against a budget already running 68–76k. The map is bounded by the capture set
+# (four symbols at most) and cleared at the start of each collect.
 TICK_CHAIN_TTL_SEC = 45
-_TICK_CHAIN: dict = {"ts": 0.0, "symbol": None, "chain": None}
+_TICK_CHAINS: dict = {}          # symbol -> (monotonic stash time, chain)
 _TICK_CHAIN_LOCK = threading.Lock()
 
 
 def reset_tick_chain():
-    """Drop any stashed tick chain (test helper)."""
+    """Drop every stashed tick chain.
+
+    Called at the start of each collect so a symbol that fell out of the capture
+    set cannot leave a chain behind forever; also the test helper."""
     with _TICK_CHAIN_LOCK:
-        _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
+        _TICK_CHAINS.clear()
 
 
 def _stash_tick_chain(symbol, chain):
     """Stash a just-fetched chain for the same tick's gamma refresh."""
     import time as _time
     with _TICK_CHAIN_LOCK:
-        _TICK_CHAIN.update(ts=_time.monotonic(), symbol=symbol, chain=chain)
+        _TICK_CHAINS[symbol] = (_time.monotonic(), chain)
 
 
 def _take_tick_chain(symbol):
-    """Pop the stashed chain if it matches ``symbol`` and is fresh, else None."""
+    """Pop ``symbol``'s stashed chain if it is fresh, else None.
+
+    Still consume-once per symbol: a stale entry is dropped rather than served,
+    so an expired stash costs one fetch and not a wrong grid."""
     import time as _time
     with _TICK_CHAIN_LOCK:
-        if (_TICK_CHAIN["chain"] is not None
-                and _TICK_CHAIN["symbol"] == symbol
-                and _time.monotonic() - _TICK_CHAIN["ts"] < TICK_CHAIN_TTL_SEC):
-            chain = _TICK_CHAIN["chain"]
-            _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
-            return chain
+        stashed = _TICK_CHAINS.pop(symbol, None)
+        if (stashed is not None and stashed[1] is not None
+                and _time.monotonic() - stashed[0] < TICK_CHAIN_TTL_SEC):
+            return stashed[1]
         return None
 
 
@@ -3586,6 +3599,9 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         clear_big_delta_stash()
+        # Bounded: only the capture set is stashed, and last tick's entries are
+        # dropped here rather than lingering when the capture set changes.
+        reset_tick_chain()
         _uoa_cfg = flow_alerts.load_thresholds()
         # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
         # entirely (nothing computed/published). The chain-capture stash stays on.

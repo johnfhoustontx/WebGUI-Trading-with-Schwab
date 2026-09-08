@@ -28,9 +28,26 @@ from starlette.testclient import TestClient
 import auth
 import auth_middleware
 import auth_store
+import live_screens
 import login_page
 import main
 import wall
+
+# ⚠ The public live screens are NOT this app's routes.
+#
+# main.app is NiceGUI's GLOBAL app object, so importing live_main -- which any
+# test in this suite may do -- registers its fourteen routes here too. In THIS
+# process they refuse, because main mounted the gate on the shared app; in
+# production they are served by live_main.py, which mounts no gate and is
+# public by design.
+#
+# So a pass on them below would assert the exact opposite of the truth. They
+# are excluded here and covered instead by tests/test_live_main.py, which pins
+# the route set, and by the four read-only layers that entrypoint installs.
+#
+# Keyed off live_screens.SCREENS rather than a literal list: a fifteenth screen
+# must not silently re-enter this enumeration.
+_LIVE_ROUTES = frozenset(s.route for s in live_screens.SCREENS)
 
 PASSWORD = "hunter2"
 SECRET = "JBSWY3DPEHPK3PXP" * 2      # 32 base32 chars, well over the 16 floor
@@ -78,6 +95,18 @@ def _all_routes():
     """
     return {p for r in main.app.routes
             if (p := getattr(r, "path", None)) and "{" not in p}
+
+
+def _gated_routes():
+    """``_all_routes()`` minus the public live screens -- see the note above.
+
+    A SEPARATE function rather than a subtraction inside ``_all_routes``,
+    because two of that helper's three callers ask a different question. The
+    wall mirror asks "is this path served at all", and the live routes ARE
+    served in this process -- filtering them there broke that test the first
+    time this exclusion was written.
+    """
+    return _all_routes() - _LIVE_ROUTES
 
 
 @pytest.fixture
@@ -142,7 +171,7 @@ def test_every_route_is_documented_open_or_refuses_an_unauthenticated_caller(
     entire value of the test.
     """
     offenders = []
-    for path in sorted(_all_routes()):
+    for path in sorted(_gated_routes()):
         if path in DOCUMENTED_OPEN:
             continue
         r = client_unauthenticated.get(path, follow_redirects=False)
@@ -153,6 +182,59 @@ def test_every_route_is_documented_open_or_refuses_an_unauthenticated_caller(
         "these routes answered an unauthenticated caller instead of refusing "
         "-- either gate them, or add them to DOCUMENTED_OPEN and to "
         f"auth_middleware.OPEN_PATHS with the reason: {offenders}")
+
+
+def test_the_live_route_exclusion_covers_exactly_the_published_screens():
+    """The exclusion above is a hole in the app's strongest auth guard, so it
+    must be exactly the size of the thing it exists for -- and the coverage it
+    costs must be KNOWN, not merely small.
+
+    ``/desk`` and ``/sentiment`` are registered by BOTH entrypoints, so
+    excluding them stops this sweep checking two of the app's own gated routes.
+    That is the accepted cost of the shared global app; it is asserted as a
+    closed set so a future screen table cannot quietly widen it. If it ever
+    grows, the fix is to give the live routes their own prefix (``/live/desk``)
+    and have Caddy strip it -- not to enlarge this hole.
+    """
+    assert _LIVE_ROUTES == {s.route for s in live_screens.SCREENS}
+
+    app_paths = {p for r in main.app.routes
+                 if (p := getattr(r, "path", None)) and "{" not in p}
+    # ⚠ Measured against the app's OWN registrations, not a literal. Reading it
+    # off main.py's route table is what makes this a live measurement of the
+    # coverage lost rather than a restatement of what someone once believed.
+    shared = _LIVE_ROUTES & set(_main_page_routes().values())
+    assert shared == {"/desk", "/sentiment"}, (
+        f"the live screens now shadow {sorted(shared)} of the app's own routes; "
+        "this sweep no longer checks them")
+    assert shared <= app_paths
+
+
+def test_the_routes_the_exclusion_shadows_are_still_gated(client_unauthenticated):
+    """Buy back the coverage the exclusion costs, for the overlap we KNOW about.
+
+    ``/desk`` and ``/sentiment`` are the app's own gated pages and are skipped by
+    the sweep above only because the live process happens to publish the same
+    two paths. Driven explicitly here, so the exclusion costs the sweep's
+    *generality* over them and not the assertion itself. It cannot buy back an
+    overlap nobody has noticed yet -- that is what the closed-set assertion
+    above is for.
+    """
+    shadowed = sorted(_LIVE_ROUTES & set(_main_page_routes().values()))
+    assert shadowed, "nothing is shadowed -- this test would be vacuous"
+    for path in shadowed:
+        assert _refusal(client_unauthenticated.get(path, follow_redirects=False)), \
+            f"{path} is the app's own route and answered an unauthenticated caller"
+
+
+def _main_page_routes():
+    """``{function: route}`` for the pages ``main`` itself registered.
+
+    Attribution by ``__module__``: both entrypoints write into NiceGUI's global
+    ``Client.page_routes``, and only the defining module distinguishes them."""
+    from nicegui import Client
+    return {fn: route for fn, route in Client.page_routes.items()
+            if getattr(fn, "__module__", "") == "main"}
 
 
 def test_a_refusal_is_a_redirect_to_the_login_form(client_unauthenticated):

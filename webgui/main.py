@@ -37,10 +37,24 @@ import page_help  # noqa: E402
 import proxy  # noqa: E402
 import wall  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
-from pages.ui_guard import guard  # noqa: E402
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
+
+# The page-to-shell seam now lives in shell.py so a page never imports main --
+# see that module's docstring. Re-exported here because pages and tests have
+# reached for main.set_breadcrumb_leaf since 2026-07.
+from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
+                   _breadcrumb_leaf, _view_name, bind_breadcrumb_leaf,
+                   play_alert, set_breadcrumb_leaf, subtab_slot)
+
+# The two PAGE-level CSS blocks a published page's own widgets depend on --
+# sticky table headers and the subtab row -- also live in shell.py, for the same
+# reason: `live_main.py` injects them and cannot import this module. Aliased to
+# the old private name because `_TABLE_CSS` has been reached for since 2026-06.
+from shell import SUBTAB_CSS, TABLE_CSS  # noqa: E402
+
+_TABLE_CSS = TABLE_CSS
 
 import logging_setup  # noqa: E402
 
@@ -82,10 +96,11 @@ except OSError:
 # wiring, which is precisely the bug class this repo keeps paying for (a guard
 # green against a shape the producer never emits).
 #
-# ⚠ AND IT MUST BE IDEMPOTENT. Pages ``import main`` lazily at request time (see
-# the ``__main__`` block's note on ``app.on_startup``), and because this script
-# runs as ``__main__`` in production that import re-executes this file as a
-# SECOND module object -- after NiceGUI has started. Starlette's
+# ⚠ AND IT MUST BE IDEMPOTENT. ``wall.py`` does ``import main`` lazily inside its
+# route handler (main registers that route, so a module-scope import would be a
+# cycle), and because this script runs as ``__main__`` in production that import
+# re-executes this file as a SECOND module object -- after NiceGUI has started.
+# Starlette's
 # ``add_middleware`` raises ``RuntimeError`` once the middleware stack is built,
 # so an unguarded call here would not merely double the gate: it would 500 every
 # page that lazily imports ``main``. The flag lives on ``app``, which is the one
@@ -168,16 +183,6 @@ def sync_manual_paper_lifecycle_setting() -> None:
     except Exception:  # noqa: BLE001
         logging.getLogger("webgui").warning(
             "manual paper lifecycle setting resync failed", exc_info=True)
-
-
-def play_alert(sound: str, volume: float) -> None:
-    """Play a bundled alert WAV in the connected browser at the given volume."""
-    sound = sound if sound in ("chime", "bell", "ping") else "chime"
-    vol = max(0.0, min(1.0, float(volume if volume is not None else 0.6)))
-    ui.run_javascript(
-        f"(() => {{ const a = document.getElementById('alert-audio'); if (!a) return; "
-        f"a.src = '/static/sounds/{sound}.wav'; a.volume = {vol}; "
-        f"a.play().catch(() => {{}}); }})()")
 
 
 def notify_desktop(title: str, body: str) -> None:
@@ -828,96 +833,6 @@ def breadcrumb_trail(active: str):
     return [_NAV_LABEL.get(active, theme.BRAND_NAME)]
 
 
-# Breadcrumb crumb styling — the trailing crumb is the thing you are looking at,
-# everything before it is context. Named because the LEAF swaps them at runtime.
-_CRUMB_LEAF = "text-[13px] text-[#e6ecf9] font-semibold"
-_CRUMB_CONTEXT = "text-[13px] text-[#5d6a88]"
-
-# The optional FOURTH crumb: a page's own active view (Dealer Positioning ›
-# Gamma, Simulator › Replay …). Single-user module state, rebuilt per layout like
-# the badge refs. "parent" is the last trail crumb, which has to be demoted to
-# context when a view is named after it.
-_breadcrumb_leaf: dict = {}
-
-
-def _view_name(value):
-    """A subtab's name from whatever a ``ui.tabs`` element holds.
-
-    Pages build their tabs either by NAME (``ui.tab("Replay")`` → the value is
-    the string) or by ELEMENT (Rescue passes the tab object to ``ui.tab_panels``,
-    so the value can be the element). Reading the element's ``name`` prop covers
-    both without every call site having to know which it is."""
-    if value is None:
-        return ""
-    props = getattr(value, "_props", None)
-    if isinstance(props, dict) and props.get("name"):
-        return str(props["name"])
-    return str(value)
-
-
-def set_breadcrumb_leaf(label, refs=None) -> None:
-    """Show ``label`` as the last breadcrumb crumb, or hide the leaf when falsy.
-
-    ``refs`` targets a SPECIFIC header's elements instead of whichever page built
-    the layout most recently. That matters because ``_breadcrumb_leaf`` is
-    module-level, and unlike the badge refs — which every client rewrites with the
-    same numbers, so the sharing is invisible — each page writes a DIFFERENT view
-    name here. With two tabs open the second page's build reassigns the module
-    state and the first tab's tab-change handler then writes into the second
-    tab's header: caught in prod, where the promote script opens a tab on the
-    Scanner and Dealer Positioning's header went on to read "› 0-DTE".
-
-    Never raises and is a no-op without a mounted header, so a page may call it
-    unconditionally."""
-    refs = _breadcrumb_leaf if refs is None else refs
-    if not refs.get("label"):
-        return
-    text = str(label or "").strip()
-    refs["label"].text = text
-    refs["label"].set_visibility(bool(text))
-    refs["caret"].set_visibility(bool(text))
-    parent = refs.get("parent")
-    if parent is not None:
-        # The page name stops being the leaf the moment a view is named after it.
-        parent.classes(remove=f"{_CRUMB_LEAF} {_CRUMB_CONTEXT}",
-                       add=_CRUMB_CONTEXT if text else _CRUMB_LEAF)
-
-
-def bind_breadcrumb_leaf(tabs, labeller=None, initial=None) -> None:
-    """Track a page's own view tabs in the breadcrumb: ``… › Page › View``.
-
-    A page's subtabs ARE a level of the hierarchy — Dealer Positioning read the
-    same in the header whether you were on Gamma or on Net Prem — but they switch
-    CLIENT-side without rebuilding the layout, so the crumb has to ride the same
-    event that switches the view.
-
-    Registers an ADDITIONAL ``on_value_change`` handler (NiceGUI appends them), so
-    a page's existing handler is untouched, and paints the initial value at build
-    time so the first render is already correct rather than correcting itself on
-    the first click. ``labeller`` maps the raw tab value to what the header should
-    read — Gamma needs it, since its "GEX" tab is displayed as "Gamma".
-
-    ``initial`` is required by every page that builds a bare ``ui.tabs()`` and
-    names its default on the ``ui.tab_panels`` instead — four of the five do. That
-    default reaches the tabs element through NiceGUI's BINDING, which propagates
-    on a later cycle, so ``tabs.value`` is still None while the page is being
-    built and the crumb would sit blank until the first click.
-
-    The header elements are CAPTURED here rather than looked up when the handler
-    fires: ``_breadcrumb_leaf`` is module-level, so a second tab's page build
-    reassigns it and this page's handler would otherwise write its view name into
-    the other tab's header (see ``set_breadcrumb_leaf``)."""
-    fmt = labeller or _view_name
-    refs = dict(_breadcrumb_leaf)
-    set_breadcrumb_leaf(fmt(tabs.value if tabs.value is not None else initial), refs)
-
-    @guard
-    def _sync(e) -> None:
-        set_breadcrumb_leaf(fmt(e.value), refs)
-
-    tabs.on_value_change(_sync)
-
-
 def brand_mark_src(static_dir=None):
     """The header logo's URL, or ``""`` when there is no usable image.
 
@@ -1242,15 +1157,6 @@ _status_refs: dict = {}
 # registered for the 2s tick to update.
 _NAV_PILLS = {"/driver": "AI"}
 
-# Per-page-build slot directly under the top tab strip, where a page can mount
-# its own view SUBTABS (see _layout; e.g. the Gamma GEX/Charm/... row). Rebuilt
-# on every _layout; None on pages without a strip.
-_SUBTAB_SLOT: dict = {"el": None}
-
-
-def subtab_slot():
-    """The container under the main tab strip for a page's view subtabs (or None)."""
-    return _SUBTAB_SLOT["el"]
 
 # ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
 # Representative SCHEDULED cache views (mirrors the scheduled rows of
@@ -1575,19 +1481,9 @@ _NAV_CSS = """
 }
 .compact-tabs .q-tab__indicator { display: none; }
 .compact-tabs .q-tab__label { font-size: 12.5px; font-weight: 500; }
-/* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
-   — the same pill shape one size smaller, on a fainter inset container so the
-   hierarchy under the main strip reads clearly. */
-.compact-subtabs {
-  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
-}
-.compact-subtabs .q-tab {
-  min-height: 26px; padding: 0 11px; margin-right: 2px;
-  border-radius: 7px; background: transparent; color: #8891ab;
-}
-.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
-.compact-subtabs .q-tab__indicator { display: none; }
-.compact-subtabs .q-tab__label { font-size: 12px; }
+/* The subtab-row rules (.compact-subtabs) moved to shell.SUBTAB_CSS on
+   2026-09-07: a page mounts that row itself, so the PUBLIC entrypoint needs the
+   rules too and cannot import this module. Still injected here by _layout. */
 /* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
    panels should hug their card/table edges opt in with .flush-panels. */
 .flush-panels .q-tab-panel { padding: 4px 0 0 0; }
@@ -1641,24 +1537,6 @@ _NAV_CSS += f"""
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {{
     width: {NAV_WIDTH_OPEN}px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }}
-"""
-
-# Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
-# header over a bounded, scrolling body, so the column headers stay visible as a long
-# table scrolls. Injected once per page in ``_layout``. Per-page table CSS
-# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
-# its more-specific selector + later injection win over this baseline.
-_TABLE_CSS = """
-.q-table__middle { max-height: 65vh; }
-/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
-   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
-.q-table thead tr th {
-  position: sticky; top: 0; z-index: 1; background: #141a30;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase; color: #6d76a0;
-}
-/* Faint row dividers (Deep Slate) between body rows. */
-.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
 """
 
 
@@ -2138,7 +2016,8 @@ def _layout(active: str, title: str):
     _scan = bus_client.read("options:scan") or {}
     _recompute_badges(_scan)
     ui.add_css(_NAV_CSS)
-    ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    ui.add_css(TABLE_CSS)    # app-wide fixed (sticky) table headers
+    ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.
@@ -2293,7 +2172,7 @@ def _layout(active: str, title: str):
     # Clicking a tab navigates; the per-page alert badges float on the tabs. A
     # SUBTAB slot sits directly beneath the strip — a page with its own view tabs
     # (e.g. Gamma's GEX/Charm/DEX/Vanna/Flow/Term) renders them there via
-    # ``main.subtab_slot()`` so they read as a second tab level, not page chrome.
+    # ``shell.subtab_slot()`` so they read as a second tab level, not page chrome.
     _SUBTAB_SLOT["el"] = None
     children = _group_children(active)
     if children:
@@ -2660,8 +2539,8 @@ def terminate_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    # Lifecycle handlers register HERE, not at module scope: pages `import main`
-    # lazily at request time (e.g. pages/options/scanner.py for subtab_slot), and
+    # Lifecycle handlers register HERE, not at module scope: `wall.py` does
+    # `import main` lazily inside its route handler, and
     # because this script runs as __main__ that re-executes this file as a second
     # module object AFTER NiceGUI has started — where app.on_startup() raises and
     # 500s the page. Inside this guard it runs once, before ui.run().

@@ -2,8 +2,13 @@
 User-agent: *
 Allow: /
 
-# The live-screens page is an empty placeholder; live.html carries its own
-# noindex meta tag as well. Crawl-blocking it here would ALSO stop a crawler
-# reading that tag, so it stays crawlable and asks not to be indexed.
+# This file covers THIS ORIGIN ONLY - robots.txt is per-origin, so it says
+# nothing about the public read-only screens. Those are a different host and
+# serve their own, emitted by the Caddy live block
+# (deploy/caddy/generate_caddyfile.py:_live_block). That one disallows
+# everything, and the reasoning lives there rather than duplicated here.
+#
+# live.html on this origin stays crawlable and is the findable way in: it
+# describes the screens, where the screens themselves are a live trading book.
 
 Sitemap: https://neuralstrike.co/sitemap.txt

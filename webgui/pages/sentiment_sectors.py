@@ -70,6 +70,13 @@ _TILE = (f"{_T['SC_MONO']} flex items-center justify-center h-full "
 
 
 def render():
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     state = {"sector": None, "industries": {}, "sector_at": None, "summary": {},
              "ver": None, "expanded": set(), "sort": "day", "desc": True}
 
@@ -97,8 +104,13 @@ def render():
                     f"{_T['SC_TXT']} text-[29px] font-bold leading-tight "
                     "tracking-[-0.01em]")
                 ui.space()
-                ui.button("Refresh", color=None, on_click=lambda: _request_refresh()) \
-                    .props("flat no-caps dense").classes(_BTN)
+                # Not drawn on the public live origin — see shell.may_enqueue.
+                # Expand all / Collapse stay: they are pure page state, and the
+                # only way to read the industries under a sector.
+                if _may_enqueue:
+                    ui.button("Refresh", color=None,
+                              on_click=lambda: _request_refresh()) \
+                        .props("flat no-caps dense").classes(_BTN)
                 ui.button("Expand all", color=None, on_click=lambda: _expand_all()) \
                     .props("flat no-caps dense").classes(_BTN)
                 ui.button("Collapse", color=None, on_click=lambda: _collapse_all()) \
@@ -277,6 +289,8 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh"})
         ui.notify("Refreshing — the page updates when the new read lands.")
         sectors_busy.show()

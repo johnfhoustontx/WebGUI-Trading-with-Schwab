@@ -1810,8 +1810,10 @@ def test_tick_chain_stash_consume_once():
     assert compute._take_tick_chain("$SPX") is None      # consume-once
     compute._stash_tick_chain("$SPX", {"c": 2})
     assert compute._take_tick_chain("SPY") is None       # symbol mismatch
+    assert compute._take_tick_chain("$SPX") == {"c": 2}  # ...and did not eat it
     compute._stash_tick_chain("$SPX", {"c": 3})
-    compute._TICK_CHAIN["ts"] -= compute.TICK_CHAIN_TTL_SEC + 1
+    ts, chain = compute._TICK_CHAINS["$SPX"]
+    compute._TICK_CHAINS["$SPX"] = (ts - compute.TICK_CHAIN_TTL_SEC - 1, chain)
     assert compute._take_tick_chain("$SPX") is None      # expired
 
 

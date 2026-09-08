@@ -588,10 +588,27 @@ async def loop(bus):
     # page has data on first load. The page drives subsequent refreshes by
     # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
     # it is NOT polled here. Guarded so a cold proxy never stops the loop starting.
+    _seed_symbol = "$SPX"
     try:
-        await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
+        await loop_.run_in_executor(None, handlers.refresh_gamma, bus,
+                                    _seed_symbol)
     except Exception:
         log.exception("startup refresh_gamma degraded")
+    # ...and the OTHER published symbols, one-shot in the same way. The seed above
+    # already writes $SPX's published key (it is one of them), but SPY and QQQ have
+    # no private page to seed them: on a cold Redis their public screens would read
+    # a key nobody has written until the first collection tick — which, started
+    # outside market hours, means until the next trading day. Two extra chain
+    # fetches per service restart, bounded and one-shot. Same guard per symbol, so
+    # one cold symbol never stops the loop starting.
+    for _sym in handlers.PUBLISHED_GAMMA_SYMBOLS:
+        if _sym == _seed_symbol:
+            continue
+        try:
+            await loop_.run_in_executor(
+                None, handlers.refresh_gamma_published, bus, _sym)
+        except Exception:
+            log.exception("startup refresh_gamma_published degraded (%s)", _sym)
     # One-shot startup publish of the Gamma dropdown symbol universe (collected
     # symbols minus $VIX) so the Gamma page's dropdown is populated on first load.
     # The watchlist rarely changes mid-session; a service restart republishes.
@@ -689,6 +706,9 @@ async def loop(bus):
             # collection so the intraday heatmap + candles stay current server-side —
             # otherwise the gamma cache only refreshes while a page is open (its 120 s
             # timer) and shows a stale, cut-off session on the next load after a gap.
+            # It also writes the per-symbol keys the public live screens read, and it
+            # must run HERE rather than on a branch of its own: the chains it reuses
+            # were stashed by the collection above and the stash is consume-once.
             try:
                 await loop_.run_in_executor(None, handlers.refresh_gamma_current, bus)
             except Exception:

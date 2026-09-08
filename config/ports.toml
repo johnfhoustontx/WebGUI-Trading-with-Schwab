@@ -18,6 +18,10 @@ options_analytics = 8200
 approval = 8300
 dashboard_frontend = 5173
 nicegui = 8500
+# The PUBLIC read-only screens (live.neuralstrike.co), a second NiceGUI process.
+# Offset with `nicegui` -- see the header note: a top-level port this repo
+# STARTS must be offset, or dev binds prod's and the collision is invisible.
+nicegui_live = 8501
 memurai = 6379
 
 [ml_servers]

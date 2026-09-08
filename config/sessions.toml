@@ -60,6 +60,13 @@ end   = "15:00"
 start = "08:00"   # 09:00 ET
 end   = "15:20"   # 16:20 ET
 
+[windows.live_capture]
+# Thumbnail captures for the public grid on neuralstrike.co/live.html.
+# Held SEPARATE from [windows.collection] for the reason [windows.stream] gives:
+# widening collection must not silently extend a public surface.
+start = "08:00"
+end   = "15:20"
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new

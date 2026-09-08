@@ -447,7 +447,7 @@ def render():
 
     # Test sound uses the same shared audio element + helper as the live alert.
     def _test():
-        from main import play_alert
+        from shell import play_alert
         play_alert(app_settings.get("alert_sound"), app_settings.get("alert_volume"))
     test.on_click(_test)
 

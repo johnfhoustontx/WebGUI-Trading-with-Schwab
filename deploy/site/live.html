@@ -4,9 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuralStrike — Live screens</title>
-<meta name="description" content="Live NeuralStrike screens are not published yet. Browse the app gallery in the meantime.">
+<meta name="description" content="Fourteen NeuralStrike screens, running live against the market: dealer positioning, options flow, market regime, sector rotation and the desk itself. Read-only, no sign-in.">
 <meta name="theme-color" content="#161826">
-<meta name="robots" content="noindex, follow">
 <!-- Icons. The SVG is the good one and every modern browser takes it; the
      other two exist because some browsers never ask for it.
      ⚠ Safari does NOT support SVG favicons and falls back to /favicon.ico —
@@ -21,25 +20,45 @@
 <link rel="stylesheet" href="assets/site.css">
 
 <!--
-  LIVE SCREENS — a placeholder, by decision and not by oversight.
+  LIVE SCREENS — a menu of the fourteen read-only screens published at
+  live.neuralstrike.co, which is a SEPARATE ORIGIN running its own process
+  (webgui/live_main.py). The table of what is published lives in
+  webgui/live_screens.py and nothing here restates it: the tiles below are
+  generated from it, and deploy/tests/test_site.py fails if the two drift in
+  either direction.
 
-  ⚠ WHATEVER EVENTUALLY MOUNTS HERE MUST NOT BE THE APP. This page is served
-  off a public file server at neuralstrike.co; the app lives behind its own
-  login on a separate origin and the public site must not link to it, embed it,
-  or name its hostname. See the header comment in index.html and
-  deploy/tests/test_site.py, which pins that.
+  ⚠ THIS PAGE IS STILL NOT THE APP, and must not become it. It is served off a
+  public file server at neuralstrike.co; the trading UI lives behind its own
+  login on app.<domain> and the public site must not link to it, embed it, or
+  name its hostname. See the header comment in index.html and
+  deploy/tests/test_site.py, which pins that. The live origin is a different
+  thing: read-only screens, no controls, no sign-in — which is why linking to
+  it is allowed and linking to the app is not.
 
-  Anything dropped in the slot below therefore has to be a rendering the app
-  PUSHES OUT -- a stream, an exported snapshot, a static capture -- never a
-  window onto the running instance.
+  ── WHY CAPTURES AND NOT IFRAMES ────────────────────────────────────────────
+  Each tile is a PICTURE — live/<slug>.webp, written every 15 minutes by
+  tools/capture_live_shots.py on the box that serves this file. Fourteen
+  iframes would open fourteen NiceGUI sessions per visitor against the public
+  process, for a page whose entire job is to be a menu, and would give this
+  static tree a runtime dependency on the app being up. A dead live process
+  should cost a visitor a 502 on the screen they chose, not a broken index.
 
-  `noindex` while it is empty: a placeholder in search results is worse than no
-  result. `follow` so the gallery and the overview still gain the links.
+  The captures are gitignored: generated state inside the served root, like
+  webgui/data/. Tracked, they would dirty prod's tree the moment the timer
+  first fires, and tools/promote.sh refuses a dirty tree. Before the first
+  capture the images 404 and the grid is text and reserved boxes — which is why
+  every tile declares its width and height.
+
+  ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
+  Baking a capture time into this file would make a committed source file a
+  build artifact, and it would be a claim of freshness the file cannot keep —
+  it is served long after whatever it says. The grid is navigation; the live
+  screens carry their own staleness.
 -->
 </head>
 
 <body>
-<div class="ns-page-sub" style="display: flex; flex-direction: column;">
+<div class="ns-page-sub ns-live-page">
 
   <nav class="ns-nav">
     <a class="ns-lockup" href="index.html">
@@ -58,26 +77,97 @@
   </nav>
 
   <main class="ns-live-main">
-    <div style="width: 100%; max-width: 720px;">
-      <p class="ns-eyebrow" style="margin: 0 0 20px;">Live screens</p>
-      <h1 style="font-family: var(--font-heading); font-weight: 500; font-size: clamp(30px, 4vw, 52px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 18px; margin-left: -0.06em;">Not published yet.</h1>
-      <p style="font-size: 16.5px; line-height: 1.65; max-width: 56ch; margin: 0 0 32px; color: color-mix(in srgb, var(--color-text) 80%, transparent);">
-        The workbench runs locally against live market data. Nothing from a running session is published here yet — until it is, the gallery has a capture of every screen.
+    <div class="ns-live-head">
+      <p class="ns-eyebrow">Live screens</p>
+      <h1 class="ns-live-title">Running against the market, right now.</h1>
+      <p class="ns-live-lede">
+        Fourteen screens from the workbench, published read-only and open to anyone — the same
+        views the desk runs on, with no controls and nothing to sign into. Pick one to open it
+        live; the thumbnails are refreshed through the session.
       </p>
-
-      <div class="ns-slot">
-        <p style="font-family: var(--font-heading); font-weight: 500; font-size: 15px; margin: 0 0 8px; color: color-mix(in srgb, var(--color-text) 72%, transparent);">Live view slot</p>
-        <p style="font-size: 13.5px; line-height: 1.6; margin: 0; color: color-mix(in srgb, var(--color-text) 55%, transparent);">Nothing mounted.</p>
-      </div>
-
-      <div class="ns-actions" style="margin-top: 28px;">
-        <a class="btn btn-primary" href="gallery.html">Browse the gallery meanwhile</a>
-        <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
-      </div>
     </div>
+
+    <div class="ns-live-grid">
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/desk">
+        <img src="live/desk.webp" width="640" height="400" loading="eager" decoding="async"
+             alt="The Desk, captured from the live screen">
+        <span class="ns-live-cap">The Desk</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/opportunity">
+        <img src="live/opportunity.webp" width="640" height="400" loading="eager" decoding="async"
+             alt="Opportunity Board, captured from the live screen">
+        <span class="ns-live-cap">Opportunity Board</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/flow">
+        <img src="live/flow.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Flow Alerts, captured from the live screen">
+        <span class="ns-live-cap">Flow Alerts</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/macro">
+        <img src="live/macro.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Macro Board, captured from the live screen">
+        <span class="ns-live-cap">Macro Board</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/sentiment">
+        <img src="live/sentiment.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Sentiment, captured from the live screen">
+        <span class="ns-live-cap">Sentiment</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/bullbear">
+        <img src="live/bullbear.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Bull / Bear Map, captured from the live screen">
+        <span class="ns-live-cap">Bull / Bear Map</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/sectors">
+        <img src="live/sectors.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Sector &amp; Industry, captured from the live screen">
+        <span class="ns-live-cap">Sector &amp; Industry</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/rotation">
+        <img src="live/rotation.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Sector Rotation, captured from the live screen">
+        <span class="ns-live-cap">Sector Rotation</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/rrg">
+        <img src="live/rrg.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="RRG, captured from the live screen">
+        <span class="ns-live-cap">RRG</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/momentum">
+        <img src="live/momentum.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Momentum, captured from the live screen">
+        <span class="ns-live-cap">Momentum</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/gamma">
+        <img src="live/gamma.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Gamma, captured from the live screen">
+        <span class="ns-live-cap">Gamma</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/net-premium">
+        <img src="live/net-premium.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Net Prem, captured from the live screen">
+        <span class="ns-live-cap">Net Prem</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/premium-divergence/spy">
+        <img src="live/premium-divergence-spy.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Premium Divergence · SPY, captured from the live screen">
+        <span class="ns-live-cap">Premium Divergence · SPY</span>
+      </a>
+      <a class="ns-live-tile" href="https://live.neuralstrike.co/premium-divergence/qqq">
+        <img src="live/premium-divergence-qqq.webp" width="640" height="400" loading="lazy" decoding="async"
+             alt="Premium Divergence · QQQ, captured from the live screen">
+        <span class="ns-live-cap">Premium Divergence · QQQ</span>
+      </a>
+    </div>
+
+    <p class="ns-live-note">
+      Quiet outside market hours: the screens show the last session until the next one opens.
+      Want the whole app, including the parts that are not published? The
+      <a href="gallery.html">gallery</a> has a capture of every screen.
+    </p>
   </main>
 
-  <footer class="ns-foot" style="padding: 0 clamp(20px, 5vw, 72px) 40px;">
+  <footer class="ns-foot ns-live-foot">
     Paper positions only. The only real money on screen is your read-only brokerage portfolio.
   </footer>
 

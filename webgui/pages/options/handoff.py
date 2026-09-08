@@ -12,6 +12,11 @@ the other migrated pages — so this module is fully engine-free.
 from nicegui import ui
 
 import bus_client
+# The page-to-shell seam. Every function here is a "go to page X" action, and X
+# is the PRIVATE app's route: the public origin serves most of those pages
+# somewhere else and most of them nowhere at all, so the route is RESOLVED
+# rather than emitted. In the private app the resolution is the identity.
+import shell as _shell
 
 from .theme import BTN_3D
 
@@ -78,7 +83,7 @@ def send_to_expected_move(payload):
         ui.notify("No symbol for expected move.", type="warning")
         return
     set_pending_expected_move(payload)
-    ui.navigate.to("/options/expected-move", new_tab=True)
+    _shell.navigate_to("/options/expected-move", new_tab=True)
 
 
 def set_pending_calculator(signal):
@@ -97,7 +102,7 @@ def send_to_calculator(signal):
         ui.notify("Select a signal first.", type="warning")
         return
     set_pending_calculator(signal)
-    ui.navigate.to("/options/calculator")
+    _shell.navigate_to("/options/calculator")
 
 
 def set_pending_simulator(payload):
@@ -117,7 +122,7 @@ def send_to_simulator(payload):
         ui.notify("No legs to copy.", type="warning")
         return
     set_pending_simulator(payload)
-    ui.navigate.to("/options/simulator")
+    _shell.navigate_to("/options/simulator")
 
 
 def set_pending_calculator_legs(payload):
@@ -138,7 +143,7 @@ def send_to_calculator_legs(payload):
         ui.notify("No legs to copy.", type="warning")
         return
     set_pending_calculator_legs(payload)
-    ui.navigate.to("/options/calculator")
+    _shell.navigate_to("/options/calculator")
 
 
 def set_pending_gamma(symbol):
@@ -155,17 +160,29 @@ def take_pending_gamma():
     return s
 
 
+GAMMA_ROUTE = "/options/gamma"
+
+
 def send_to_gamma(symbol):
     """Stash a symbol and open Dealer Positioning on it (same browser tab).
 
     Used by the Flow Alerts tape: every alert type — a premium crossover, unusual
     contract activity, a gamma-regime flip — is asking you to look at that
-    symbol's dealer positioning, which is one page away."""
+    symbol's dealer positioning, which is one page away.
+
+    ⚠ Routed through the shell, because ``/options/gamma`` is the PRIVATE app's
+    path: the public origin serves that page at ``/gamma``, and a bare navigate
+    is a 404 there. ``shell.navigate_to`` resolves it. Known and accepted: the
+    published board PINS its symbol, so the stash cannot be honoured there and
+    the visitor lands on the pinned board rather than on this symbol — the page
+    says which symbol it is showing, and a 404 is the worse of the two."""
     if not symbol:
         ui.notify("No symbol for dealer positioning.", type="warning")
         return
+    if not _shell.can_navigate(GAMMA_ROUTE):
+        return                      # nowhere to send it — and nothing stashed
     set_pending_gamma(symbol)
-    ui.navigate.to("/options/gamma")
+    _shell.navigate_to(GAMMA_ROUTE)
 
 
 def set_pending_swing(symbol):
@@ -194,7 +211,7 @@ def send_to_swing(symbol):
         ui.notify("No symbol for the Strategy Finder.", type="warning")
         return
     set_pending_swing(symbol)
-    ui.navigate.to("/options/swing")
+    _shell.navigate_to("/options/swing")
 
 
 def _signal_legs_payload(sig):

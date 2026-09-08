@@ -225,6 +225,13 @@ def render(level="industry"):
     """
     from nicegui import ui
 
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     # ``selected`` is the symbol driving section 4. None = the level's leader.
     state = {"ver": None, "level": normalise_level(level), "payload": None,
              "selected": None}
@@ -252,12 +259,16 @@ def render(level="industry"):
                     on_change=lambda e: _set_level(e.value)) \
                     .props("outlined dense options-dense borderless") \
                     .classes(f"{_MONO} momentum-level min-w-[132px]")
-                ui.button("Refresh", color=None,
-                          on_click=lambda: _request_refresh()) \
-                    .props("flat no-caps dense").classes(
-                        f"{_MONO} {NT['txt']} text-[11px] tracking-[.1em] "
-                        f"uppercase bg-transparent border {NE['btn_edge']} "
-                        f"px-4 h-[38px] leading-none hover:{NB['btn_hover']}")
+                # Not drawn on the public live origin — see shell.may_enqueue.
+                # The level picker stays: it is pure page state.
+                if _may_enqueue:
+                    ui.button("Refresh", color=None,
+                              on_click=lambda: _request_refresh()) \
+                        .props("flat no-caps dense").classes(
+                            f"{_MONO} {NT['txt']} text-[11px] tracking-[.1em] "
+                            f"uppercase bg-transparent border {NE['btn_edge']} "
+                            f"px-4 h-[38px] leading-none "
+                            f"hover:{NB['btn_hover']}")
 
         # ── 1 · is momentum worth trading today? ────────────────────────────
         ui.label("1 · Is momentum worth trading today?").classes(_STEP)
@@ -746,6 +757,8 @@ def render(level="industry"):
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_momentum"})
         ui.notify("Recomputing — this one takes a moment.")
         mom_busy.show()

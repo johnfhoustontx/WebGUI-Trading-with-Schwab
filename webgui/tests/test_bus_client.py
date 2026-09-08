@@ -7,11 +7,27 @@ fakeredis instance — separate FakeStrictRedis objects do NOT share pub/sub sta
 """
 import time
 
+import pytest
+
 import bus_client
 
 
 def setup_function(_fn):
     """Force a fresh fakeredis-backed Bus per test so state does not leak."""
+    bus_client.reset()
+
+
+def teardown_function(_fn):
+    """Restore the process-wide configuration the read-only tests mutate.
+
+    ``_read_only`` and ``_url`` are module globals that ``reset()`` deliberately
+    does NOT clear, so a test that set one and then failed mid-body would leak it
+    into every later test in the session — as a refused ``request`` somewhere
+    that looks nothing like the cause. Teardown runs even when the test body
+    raises, which is what makes this tighter than a per-test try/finally.
+    """
+    bus_client.set_read_only(False)
+    bus_client.set_url(None)
     bus_client.reset()
 
 
@@ -173,3 +189,141 @@ def test_read_gated_recovers_when_an_absent_view_appears():
     bus_client.bus().cache_set("cache:options:scan", {"signals": [9]})
     payload, changed = bus_client.read_gated("options:scan", memo)
     assert payload == {"signals": [9]} and changed is True
+
+
+# ── read-only mode + a pinned connection URL (2026-09-07) ──────────────────
+# The public live process (live.neuralstrike.co) renders the SAME page modules
+# the private app does, unauthenticated. `request` is the SINGLE Tier-1 write
+# chokepoint, so refusing there is the backstop behind "the page draws no button
+# that enqueues" — including for pages nobody has audited yet.
+
+def test_read_only_refuses_every_command():
+    """bus_client.request is the SINGLE Tier-1 write chokepoint, and on the
+    published pages it reaches gamma_analyze and gamma_explain -- PAID Claude
+    calls -- plus gamma_refresh and sentiment refresh, which fan out Schwab
+    fetches against a budget already running 68-76k/day. Unauthenticated and
+    unrefused, that is an open tap on money."""
+    bus_client.set_read_only(True)
+    with pytest.raises(PermissionError):
+        bus_client.request("options", {"type": "gamma_analyze"})
+
+
+def test_read_only_refuses_rather_than_no_ops():
+    """It must RAISE, never return a plausible id. A silent no-op is worse than
+    the enqueue: the caller believes its command is queued and waits for a
+    result that will never arrive."""
+    bus_client.set_read_only(True)
+    with pytest.raises(PermissionError):
+        bus_client.request("sentiment", {"type": "refresh"})
+    # nothing reached the stream
+    assert bus_client.bus().consume_commands(
+        "cmd:sentiment", group="g", consumer="c", block_ms=50) == []
+
+
+def test_the_refusal_never_raises_something_else():
+    """The refusal must never be the thing that breaks. ``command.get('type')``
+    assumes a dict; a caller passing anything else must still get the
+    PermissionError, not an AttributeError from inside the guard."""
+    bus_client.set_read_only(True)
+    for bad in (None, "gamma_analyze", ["gamma_analyze"], 7):
+        with pytest.raises(PermissionError):
+            bus_client.request("options", bad)  # type: ignore[arg-type]
+
+
+def test_reads_still_work_when_read_only():
+    """Refusing writes must not refuse the reads the screens exist to do — so
+    this drives EVERY read helper in this module with the flag on and checks the
+    values, which is what catches a guard placed in ``bus()`` (or anywhere else
+    shared) instead of in ``request``.
+
+    What it does NOT prove: that the Redis ACL user the live process connects as
+    permits these commands. Under pytest ``Bus`` is fakeredis with no ACL at all,
+    so the STRUCTURAL half of read-only is unprovable here by construction — it
+    is verified by connecting as that user, not by this test. Nor does it prove
+    a live page renders; that is Task 7's route-render test."""
+    b = bus_client.bus()
+    b.cache_set("cache:options:scan", {"signals": [1, 2]})
+    b.cache_set("cache:options:gamma", {"x": 1})
+    env = b.cache_get("cache:options:scan")
+
+    bus_client.set_read_only(True)
+
+    assert bus_client.read("options:scan") == {"signals": [1, 2]}
+    assert bus_client.read_full("options:scan") == ({"signals": [1, 2]}, 1)
+    assert bus_client.read_version("options:scan") == 1
+    assert bus_client.read_versions(["options:scan", "options:gamma"]) == {
+        "options:scan": 1, "options:gamma": 1}
+    assert bus_client.read_meta("options:scan") == (1, env.ts)
+    assert bus_client.read_metas(["options:scan"])["options:scan"] == (1, env.ts)
+    assert bus_client.read_gated("options:scan", {}) == ({"signals": [1, 2]}, True)
+    assert bus_client.ping() is True
+
+
+def test_the_event_subscription_still_fires_when_read_only():
+    """A subscription is a READ — the live screens repaint off it. Nothing in the
+    refusal may touch the subscribe path."""
+    bus_client.set_read_only(True)
+    got = []
+    listener = bus_client.on_event("events:options:gamma", lambda v: got.append(v))
+    try:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not listener.subscribed:
+            time.sleep(0.02)
+        bus_client.bus().publish("events:options:gamma", {"version": 4})
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not got:
+            time.sleep(0.02)
+        assert got == [4]
+    finally:
+        listener.stop()
+
+
+def test_a_connection_url_can_be_pinned():
+    """The live process connects as a Redis ACL user with read commands only.
+    Bus.__init__ already accepts a url, so this is a credential passed in, not a
+    redesign. (Under pytest Bus short-circuits to fakeredis and ignores the url,
+    so what is asserted is that the value is held for the next ``bus()`` — not
+    that a connection is made with it.)"""
+    bus_client.set_url("redis://live:secret@127.0.0.1:6379/0")
+    assert bus_client._url == "redis://live:secret@127.0.0.1:6379/0"
+
+
+def test_the_pinned_url_reaches_the_bus():
+    """Holding the value is not the same as USING it — without this, ``bus()``
+    could ignore ``_url`` entirely and the test above would still pass, so the
+    live process would quietly connect as the read-write default user. Recording
+    the constructor is the only way to see it here: under pytest ``Bus``
+    short-circuits to fakeredis and drops the url on the floor."""
+    seen = []
+
+    class _Recorder:
+        def __init__(self, fake: bool = False, url: str | None = None):
+            seen.append(url)
+
+    real_bus_cls = bus_client.Bus
+    bus_client.Bus = _Recorder                      # type: ignore[misc]
+    try:
+        bus_client.set_url("redis://live:secret@127.0.0.1:6379/0")
+        bus_client.reset()
+        bus_client.bus()
+        assert seen == ["redis://live:secret@127.0.0.1:6379/0"]
+
+        bus_client.set_url(None)                    # unpinned -> Bus's own default
+        bus_client.reset()
+        bus_client.bus()
+        assert seen[-1] is None
+    finally:
+        bus_client.Bus = real_bus_cls               # type: ignore[misc]
+        bus_client.reset()                          # drop the recorder instance
+
+
+def test_reset_leaves_the_process_configuration_alone():
+    """``reset()`` drops the cached Bus — it is a CACHE helper, called by ~15
+    other test modules. The read-only flag and the URL are process
+    configuration set once at startup; clearing them here would silently
+    re-arm writes on the live process the moment anything reset the bus."""
+    bus_client.set_read_only(True)
+    bus_client.set_url("redis://live:secret@127.0.0.1:6379/0")
+    bus_client.reset()
+    assert bus_client.is_read_only() is True
+    assert bus_client._url == "redis://live:secret@127.0.0.1:6379/0"

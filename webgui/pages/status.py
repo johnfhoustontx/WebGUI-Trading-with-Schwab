@@ -10,6 +10,10 @@ you whether everything is up:
 * **Tier 2 — the six domain services** (sentiment/options/portfolio/trade/driver/
   market, :8210–8215) via each service's ``/health`` probe.
 * **Tier 1 — webgui** itself (it's serving this page, so it's up by definition).
+* **Tier 1 — webgui_live**, the PUBLIC read-only screens: a peer process on its
+  own port and origin, probed over HTTP. Down, it is named here and nowhere
+  else — it is absent from the health fan-out behind the rail badge and the
+  chime, because the public site falling over is not a trading-stack alarm.
 
 Below the component checks it shows a **data-freshness** table: for each domain
 it reads the representative cache view's version + timestamp, so you can tell a
@@ -35,6 +39,8 @@ from repo_paths import (
     ENV_NAME,
     IS_DEV,
     MEMURAI_PORT,
+    NICEGUI_LIVE_PORT,
+    NICEGUI_LIVE_URL,
     NICEGUI_PORT,
     NICEGUI_URL,
     OWNS_PROXY,
@@ -77,7 +83,8 @@ def component_targets():
     Each entry is ``{"key", "label", "tier", "kind", "url"}``. ``kind`` drives
     how the probe is performed: ``memurai`` (Redis ping), ``proxy`` /
     ``service`` (HTTP ``/health``), ``auth`` (Schwab OAuth token validity, read
-    from the proxy ``/health``), ``self`` (the webgui, always up).
+    from the proxy ``/health``), ``self`` (the webgui, always up), ``peer`` (a
+    sibling web process on this box -- an HTTP liveness probe, no ``/health``).
 
     The proxy entry also carries ``owned`` and says so in its label: dev borrows
     PROD's proxy on :8100, so its card has no Restart button (see
@@ -108,6 +115,15 @@ def component_targets():
                             "kind": "service", "url": url})
     targets.append({"key": "webgui", "label": "webgui (this app)", "tier": "Tier 1",
                     "kind": "self", "url": NICEGUI_URL})
+    # The PUBLIC read-only screens (webgui/live_main.py) -- a PEER of this app,
+    # not a dependency of it. It is a service on this box like any other, so it
+    # gets a card and a Restart button; but it is deliberately absent from
+    # ``alerts.unhealthy_keys`` (main.py's 2s health fan-out, which reads
+    # SERVICE_URLS), so a dead public origin never puts a warning badge on the
+    # rail or chimes. Down, it is named here and nowhere else.
+    targets.append({"key": "webgui_live",
+                    "label": "webgui_live (public live screens)",
+                    "tier": "Tier 1", "kind": "peer", "url": NICEGUI_LIVE_URL})
     return targets
 
 
@@ -253,6 +269,11 @@ def restart_spec(target):
     there is no translation table between card keys and unit names -- the same
     reasoning that put the symbol universe in one config file.
 
+    ``peer`` is the PUBLIC live-screens process (``webgui/live_main.py``). It is
+    restartable in every environment, including dev: unlike the proxy and Redis
+    below, nothing about it is shared -- each environment binds its own offset
+    port and runs its own process, so a restart here reaches only this checkout.
+
     Not restartable:
 
     * **auth** / unknown -- the auth card's action is Authorize, not a restart.
@@ -282,6 +303,9 @@ def restart_spec(target):
     if kind == "self":
         return {"kind": "unit", "title": f"Web GUI :{NICEGUI_PORT}",
                 "name": "webgui"}
+    if kind == "peer":
+        return {"kind": "unit", "title": f"Live Screens :{NICEGUI_LIVE_PORT}",
+                "name": "webgui_live"}
     return None
 
 
@@ -352,6 +376,23 @@ def _probe_one(target, proxy_health=None):
                 sc = h.get("status_code")
                 detail = f"HTTP {sc}" if sc else "unreachable"
             out.update(up=up, detail=detail)
+        elif kind == "peer":
+            # An HTTP probe, never a TCP connect: a dead accept loop stays bound
+            # and passes a connect, which is how a promote once left prod
+            # serving no UI at all.
+            #
+            # ``/favicon.ico`` because NiceGUI registers it unconditionally and
+            # it renders no page -- the live app's own routes each read ten
+            # cache views, which is not what a liveness probe should cost. ANY
+            # HTTP answer counts as up: the question here is whether the process
+            # is alive and speaking HTTP, not whether one route exists, so a
+            # future NiceGUI that moved this path reports the truth rather than
+            # a false Offline.
+            resp = requests.get(f"{target['url']}/favicon.ico",
+                                timeout=_HTTP_TIMEOUT)
+            out.update(up=True,
+                       detail="serving" if resp.status_code == 200
+                       else f"serving (HTTP {resp.status_code})")
         elif kind == "auth":
             h = proxy_health if proxy_health is not None else proxy.health()
             up, detail = auth_status(h)
@@ -380,8 +421,9 @@ def _sweep():
 # ── render ───────────────────────────────────────────────────────────────────
 def render():
     ui.label("System Status").classes("text-h5")
-    ui.label("Live health of every tier — Memurai backbone, schwab-proxy, the "
-             "five domain services, and this app.").classes("opacity-70 text-sm")
+    ui.label("Live health of every tier — Redis backbone, schwab-proxy, the "
+             "six domain services, this app, and the public live screens "
+             "beside it.").classes("opacity-70 text-sm")
 
     state = {"results": [], "checked_at": None, "busy": False}
 

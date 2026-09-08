@@ -29,6 +29,13 @@ config/env.local.toml
 # appsettings.json and env.local.toml above.
 .env
 
+# The PUBLIC live process's own minimal environment: REDIS_LIVE_URL (a Redis
+# ACL password inside a URL) + MEMURAI_PASSWORD. A separate file so the one
+# internet-facing process does not hold the fleet's strongest credentials --
+# see deploy/systemd/generate_units.py:_live_env_file.
+# ⚠ `.env` above does NOT cover this name; gitignore matches it literally.
+.env.live
+
 
 # Databases & runtime state
 *.db
@@ -91,3 +98,8 @@ webgui/data/voice/
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
+# Thumbnail captures for the public live grid. Generated on the box that serves
+# them, every 15 min inside [windows.live_capture]. ⚠ NOT committed: tracked,
+# they would dirty prod's tree the moment the timer first fires, and
+# tools/promote.sh refuses a dirty tree.
+deploy/site/live/*.webp

@@ -244,6 +244,11 @@ _DEFAULTS = {
         # Held separate from ``collection`` even though the bounds match, so
         # widening collection can never silently extend a public broadcast.
         "stream": {"start": "08:00", "end": "15:20"},
+        # The thumbnail captures behind the public live grid. Separate from
+        # ``stream`` for the same reason ``stream`` is separate from
+        # ``collection``: they happen to share bounds today, and one public
+        # surface must not move because another one was retimed.
+        "live_capture": {"start": "08:00", "end": "15:20"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.

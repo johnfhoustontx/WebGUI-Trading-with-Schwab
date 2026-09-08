@@ -2957,6 +2957,7 @@ merely running but actually *publishing*.
 | driver_svc | 2 | 8214 |
 | market_svc | 2 | 8215 |
 | webgui (this app) | 1 | 8500 |
+| webgui_live (public live screens) | 1 | 8501 |
 
 Each card shows online/offline, a health message, and a **Restart** button that
 relaunches the component windowless. The proxy card additionally shows **Schwab auth**
@@ -3079,9 +3080,10 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all six services, and the
-web app itself. **Redis is deliberately left running**, because it is a *system*
-service this app does not own.
+A confirm-gated stop of the entire local stack — the gateway, all six services, the
+web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
+with it. **Redis is deliberately left running**, because it is a *system* service
+this app does not own.
 
 After confirming, this page stops responding. That is expected: it has just stopped the
 program serving it.

@@ -1,4 +1,4 @@
-"""Emit the Caddyfile that fronts this box's two public hostnames.
+"""Emit the Caddyfile that fronts this box's three public hostnames.
 
 Like the systemd units, this is GENERATED and there is no Caddyfile in git.
 Every value comes from ``repo_paths`` -- the hostnames, the checkout root, the
@@ -19,17 +19,30 @@ to bind :443 and must not die with a login session, and it restarts nothing on
 anyone's behalf, so the reason user units exist for the stack (a network-facing
 app restarting its own siblings without a polkit rule) does not apply here.
 
-**Two hostnames, two ORIGINS.** ``SITE_HOST`` serves a static one-pager out of
-``deploy/site``; ``APP_HOST`` proxies the web GUI. Separate origins rather than
-separate paths on one host, because the public page carries third-party links
-and embeds and sharing an origin would put someone else's widget inside the
-app's cookie scope.
+**Three hostnames, three ORIGINS.** ``SITE_HOST`` serves a static one-pager out
+of ``deploy/site``; ``LIVE_HOST`` proxies the PUBLIC read-only screens
+(no login); ``APP_HOST`` proxies the web GUI behind its login. Separate
+origins rather than separate paths on one host, because the public page carries
+third-party links and embeds and sharing an origin would put someone else's
+widget inside the app's cookie scope -- and because a public origin separated
+from the trading UI by a path filter is a filter someone has to keep getting
+right, where an origin is not.
 
 **No ``rate_limit``, decided.** Caddy's rate limiter is in no prebuilt binary; it
 needs an ``xcaddy`` build and a manual rebuild on every future Caddy release,
-with no apt security updates. Throttling lives in the app instead, where
-``LockoutState`` refuses before Argon2 and the login form token rejects a blind
-POST for the cost of an HMAC. This runs stock Caddy from the official repo.
+with no apt security updates. This runs stock Caddy from the official repo.
+
+⚠ **That decision covers the APP block only, and the difference matters.** On
+``APP_HOST`` throttling lives in the app, where ``LockoutState`` refuses before
+Argon2 and the login form token rejects a blind POST for the cost of an HMAC.
+``LIVE_HOST`` has **neither** -- it is unauthenticated, so there is no lockout
+to key and no form to reject, and its origin is therefore **unthrottled**.
+Measured: one plain anonymous GET retains ~619 KB of NiceGUI ``Client`` for
+~70 s, and nothing bounds the arrival rate. What is in place is a **blast-radius
+cap, not a limit**: ``MemoryHigh``/``MemoryMax`` on the ``webgui_live`` unit, so
+a flood takes the public screens down alone. The rate itself is open --
+``docs/plans/2026-09-07-public-live-screens-design.md`` records it under
+"Deliberately not built", and this is the file the fix would land in.
 """
 import argparse
 import pathlib
@@ -37,12 +50,15 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (APP_HOST, ENV_NAME, NICEGUI_PORT,  # noqa: E402
-                        SITE_HOST, SITE_ROOT)
+from repo_paths import (APP_HOST, ENV_NAME, LIVE_HOST,  # noqa: E402
+                        NICEGUI_LIVE_PORT, NICEGUI_PORT, SITE_HOST, SITE_ROOT)
 
-# One year, the shortest value browsers will preload. Both blocks send it: the
+# One year, the shortest value browsers will preload. EVERY block sends it: the
 # app because its session cookie must never travel in clear, the public site
 # because a downgrade there is a foothold on a neighbouring name.
+#
+# ⚠ No `includeSubDomains`, so `live.` does NOT inherit the apex policy -- which
+# is precisely why its block has to send its own rather than lean on this one.
 HSTS = "max-age=31536000"
 
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
@@ -105,6 +121,127 @@ def _public_block():
 }}"""
 
 
+def _live_block():
+    """The PUBLIC read-only screens (``webgui/live_main.py``).
+
+    A separate ORIGIN from ``APP_HOST``, never a path under it. The app is
+    behind a login and these are not, so the two are separated by something a
+    misconfiguration cannot merge rather than by a path filter someone has to
+    keep getting right. The upstream still binds 127.0.0.1 -- Caddy is the only
+    thing that talks to it, the same rule the app follows.
+
+    **No authentication of any kind, deliberately, and pinned by test**, so that
+    a later copy-paste of the app block cannot quietly put a login in front of a
+    public site -- or, worse, a login that does not work and reads as an outage.
+
+    Carried across from the app block, and why:
+
+    * ``encode zstd gzip`` -- same NiceGUI payloads.
+    * ``Strict-Transport-Security`` -- the header carries no
+      ``includeSubDomains``, so this name does not inherit the apex policy.
+    * ``header_up X-Edge 1``. ⚠ **This process never reads it.** ``live_main``
+      mounts no auth middleware, has no ``_client_ip`` and keys no lockout. It
+      is stamped because the invariant ``test_every_reverse_proxy_stamps_the_edge_header``
+      pins is file-wide and unconditional: EVERY ``reverse_proxy`` here stamps
+      it. An exception carved out for "the block that does not need it" is a
+      hole the next block -- one proxying the APP -- could sit in, and the header
+      costs nothing.
+
+    **``robots.txt``: ``Disallow: /``, and this was a decision.** The origin
+    404'd on ``/robots.txt`` before, which crawlers read as crawl-everything --
+    so the archived state was arriving by default rather than by choice. Three
+    things decided it against indexing:
+
+    * **Publishing is reversible; archiving is not.** The owner accepted
+      *publishing* positions and signals. Making them keyword-searchable and
+      permanently held in a search cache, the Wayback Machine and Common Crawl
+      is a further and irreversible step, and it was never decided anywhere.
+    * **Discoverability is not lost.** ``SITE_HOST`` stays fully crawlable and
+      its ``live.html`` grid links every screen, so the project is findable;
+      what is not indexed is the live book itself.
+    * **A crawler is the most likely realistic load.** This origin has no rate
+      limit (Caddy's needs an ``xcaddy`` build), and one anonymous GET retains
+      ~619 KB of NiceGUI ``Client`` for ~70 s. Fourteen screens crawled on a
+      schedule is exactly the shape the unit's ``MemoryMax`` exists to survive.
+
+    Served from here rather than from the app because ``live_main`` registers
+    the fourteen screens and nothing else -- adding a fifteenth route to the
+    public process to say "do not index" would widen the surface the route-set
+    test exists to keep narrow.
+
+    ⚠ **Why not ``X-Robots-Tag: noindex`` instead, and why not BOTH.** They are
+    mutually exclusive in effect: a crawler has to FETCH a page to see a
+    noindex header, so a ``Disallow`` hides the very header that would tell it
+    not to index -- Google says so explicitly. Sending both is a contradiction
+    where the ``Disallow`` wins. ``Disallow`` is the right half here because the
+    thing being protected is the CONTENT (positions, marks, P&L), and it is
+    never fetched at all; noindex would have every crawler pulling all fourteen
+    screens on a schedule, which is the load problem above. The residue is that
+    a disallowed URL can still be listed URL-only when something links to it,
+    and ``live.html`` links all fourteen -- a listing with no content, which is
+    the trade taken knowingly.
+
+    ⚠ **Not a guarantee, and the honest limit is worth stating**: robots.txt is
+    a request. The Internet Archive announced in 2017 that it would largely stop
+    honouring it, so ``Disallow`` moves the Wayback case from *invited* to
+    *unrequested* and no further. Nothing short of not publishing does better,
+    which is the decision recorded under "Exposure" in the design doc.
+
+    ⚠ Multi-line **quoted** body, not ``\\n`` escapes: quoted tokens have spanned
+    lines since v2.0, while ``\\n`` inside them is a later addition. And
+    ``Content-Type`` is set explicitly -- ``respond`` sets none, and a crawler
+    sniffing an unlabelled body is not something to leave to chance.
+
+    Deliberately NOT carried:
+
+    * **``Content-Security-Policy: frame-ancestors 'self'``.** The app forbids
+      framing so the public one-pager cannot wrap a logged-in session. There is
+      no session here to wrap and nothing behind a credential; every byte this
+      origin serves is world-readable by definition. Setting it would also
+      forbid ``SITE_HOST`` -- a different origin -- from ever embedding a
+      screen, closing a door the design lists under "deliberately not built"
+      rather than "never".
+    * **``handle /wall* { respond 404 }``.** The wall route does not exist in
+      this process at all; ``live_main`` registers the fourteen screens and
+      nothing else. A 404 handler for a path FastAPI already 404s is a rule
+      that reads as a control and is decoration.
+
+    **Nothing about websockets, and that is not an omission.** Caddy v2's
+    ``reverse_proxy`` proxies an ``Upgrade`` natively; the app block sets no
+    websocket directive either and NiceGUI has run behind it since. Recorded
+    because getting it wrong fails in the worst way -- every page would load
+    once and then never repaint, which reads as a frozen tape rather than as an
+    edge misconfiguration.
+    """
+    return f"""{LIVE_HOST} {{
+    encode zstd gzip
+
+    header Strict-Transport-Security "{HSTS}"
+
+    # Public to READ, not to ARCHIVE. Without this the origin 404s here, which
+    # crawlers read as crawl-everything -- see the docstring for why that is
+    # the one default worth overriding.
+    handle /robots.txt {{
+        header Content-Type "text/plain; charset=utf-8"
+        respond "User-agent: *
+Disallow: /
+" 200
+    }}
+
+    # NO login, by design -- these fourteen screens are public. See the
+    # docstring before adding any auth directive here.
+    handle {{
+        reverse_proxy 127.0.0.1:{NICEGUI_LIVE_PORT} {{
+            # Not read by this process; stamped so the file-wide "every proxied
+            # route stamps it" rule keeps no exceptions. (The rule is enforced
+            # as a COUNT over this whole file, so do not name the directive in
+            # a comment -- a mention counts as an occurrence.)
+            header_up X-Edge 1
+        }}
+    }}
+}}"""
+
+
 def _app_block():
     """The web GUI, behind its own login.
 
@@ -161,7 +298,11 @@ def render():
               "# Every value here is derived from repo_paths; an edit made in place\n"
               "# is lost on the next run and, until then, is a second source of\n"
               "# truth for the port and the checkout root.\n")
-    return f"{banner}\n{_public_block()}\n\n{_app_block()}\n"
+    # Ordered least-privileged first -- static site, public screens, then the
+    # app behind its login. It is the order the design's own diagram uses, and
+    # it puts the one block that may never carry an upstream at the top.
+    return (f"{banner}\n{_public_block()}\n\n{_live_block()}\n\n"
+            f"{_app_block()}\n")
 
 
 def install(dest=None):

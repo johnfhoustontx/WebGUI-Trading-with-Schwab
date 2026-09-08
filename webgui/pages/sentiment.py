@@ -621,6 +621,13 @@ def _fmt_time(value):
 def render():
     from nicegui import ui
 
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     # Market Regime Console assets — scoped to THIS page, not the app shell.
     # ``add_head_html`` during a page build is client-scoped, so the condensed
     # display face is requested on /sentiment and nowhere else; every other page
@@ -681,8 +688,12 @@ def render():
     # section titles now live per-column (all the same h6 size) below.
     with ui.row().classes("items-center w-full"):
         ui.space()
-        ui.button("Refresh", icon="refresh", color=None,
-                  on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
+        # Not drawn on the public live origin — its only job is to enqueue a
+        # sentiment refresh, which that process refuses. See shell.may_enqueue.
+        if _may_enqueue:
+            ui.button("Refresh", icon="refresh", color=None,
+                      on_click=lambda: _request_refresh()).props(
+                "no-caps").classes(BTN_3D)
 
     # Per-tile reactive element handles (value label, card shell, hairline rule,
     # end dot) — everything the tone recolor has to swap in place.
@@ -890,6 +901,8 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh"})
         console_busy.show()
         ui.notify("Refreshing — the page updates when the new read lands.")

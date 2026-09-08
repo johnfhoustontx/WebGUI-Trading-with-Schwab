@@ -32,8 +32,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (ENV_NAME, NICEGUI_PORT, OWNS_PROXY,  # noqa: E402
-                        PROXY_PORT, REPO_ROOT, SERVICE_PORTS)
+from repo_paths import (ENV_NAME, NICEGUI_LIVE_PORT,  # noqa: E402
+                        NICEGUI_PORT, OWNS_PROXY, PROXY_PORT, REPO_ROOT,
+                        SERVICE_PORTS)
 from shared.market_calendar import window_bounds  # noqa: E402
 
 
@@ -50,7 +51,46 @@ def _python():
 
 
 def _env_file():
+    """The checkout's own ``.env`` -- where every STACK secret lives.
+
+    ``ANTHROPIC_API_KEY``, ``TELEGRAM_BOT_TOKEN``, ``PROXY_SHARED_SECRET``,
+    ``SMS_SMTP_APP_PASSWORD``, ``DISCORD_WEBHOOK_URL``, ``MEMURAI_PASSWORD``,
+    ``GAMMA_BRIEFING_WEBHOOK_URL``. ``STREAM_ENV_FILE`` is the counter-example
+    to keeping a secret here, and the difference is OWNERSHIP -- the RTMP key
+    belongs to the operator, not to the checkout, so it lives outside it.
+
+    ⚠ **The public live unit does NOT load this file** -- see
+    :func:`_live_env_file`. That is the one exception, and it is about BLAST
+    RADIUS rather than ownership.
+    """
     return pathlib.PurePosixPath(REPO_ROOT.as_posix()) / ".env"
+
+
+def _live_env_file():
+    """``.env.live`` -- the PUBLIC process's own, minimal environment.
+
+    ``webgui_live`` is the one internet-facing, unauthenticated process in the
+    fleet, and until 2026-09-07 it loaded the same ``.env`` as everything else:
+    the strongest credential set in the fleet held by the weakest-protected
+    process. It needs exactly two values -- ``REDIS_LIVE_URL`` (the read-only
+    Redis ACL user) and ``MEMURAI_PASSWORD`` (which redis-py uses only when
+    ``REDIS_LIVE_URL`` names a user without a password; a password IN the URL
+    wins over the explicit kwarg ``shared/bus`` passes -- verified, not assumed).
+
+    ⚠ No current code path in this process reads any of the others; the module
+    closure was swept for ``os.environ`` sinks and found none. The split is not
+    a bug fix, it is the difference between "an RCE in NiceGUI costs the public
+    screens" and "an RCE in NiceGUI costs the Anthropic key and the Telegram
+    bot". Blast radius is worth bounding before there is a reason to.
+
+    **No leading '-', deliberately, and the reasoning is now stronger than the
+    house rule.** A ``-`` would start the unit with the file missing -- which
+    means with no ``REDIS_LIVE_URL``, which ``live_main.require_acl_url``
+    refuses to serve prod in anyway. So the dash cannot buy a running process;
+    it can only replace a systemd error naming the exact missing path with a
+    Python one naming the variable. Fail at the more specific message.
+    """
+    return pathlib.PurePosixPath(REPO_ROOT.as_posix()) / ".env.live"
 
 
 def _workdir():
@@ -77,6 +117,54 @@ BACKUP_TIMEOUT_SEC = 7200
 # path the unit loads, and so moving it is one edit.
 STREAM_ENV_FILE = "/etc/neuralstrike-stream/env"
 
+# ── The public process's memory cap ──────────────────────────────────────────
+# ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
+# are not internet-facing and a wrong value there kills the trading stack.
+#
+# WHY AT ALL. `webgui_live` is unauthenticated and unthrottled: Caddy's
+# rate_limit needs an xcaddy build (see deploy/caddy/generate_caddyfile.py's
+# docstring) and none is in place. Measured: 20 plain unauthenticated
+# `GET /desk` requests created 20 NiceGUI `Client` objects retaining ~619 KB
+# EACH against an empty cache -- no websocket, no cookie. NiceGUI prunes
+# socketless clients after 60 s on a 10 s timer, so the window is ~70 s, but
+# nothing bounds the arrival rate; at 100 req/s that is thousands of live
+# clients holding 4 GB+. Websocket connections have no cap and no prune at all.
+# This does NOT stop that. It decides WHO DIES when it happens: the public
+# screens, alone, restarted by Restart=on-failure -- rather than the box's OOM
+# killer choosing among the six services, the private trading UI and Redis.
+#
+# WHY THESE NUMBERS. The host is 8 GB (16 preferred), and the whole nine-unit
+# stack is budgeted at ~1.2 GB of process memory -- roughly 150 MB per process,
+# the rest being page cache for the 1.52 GB gex_history.db. 1 GiB is ~7x that
+# average for a process that mounts fourteen page modules, so normal use never
+# approaches it; and against the measured 619 KB per client it is several
+# hundred concurrent anonymous clients above baseline, far past any legitimate
+# concurrency for a personal site. Against the box, it is one eighth of the
+# smallest supported host: the trading stack and the page cache are untouched.
+#
+# MemoryHigh THROTTLES before MemoryMax KILLS. Above 768M the kernel applies
+# reclaim pressure and the process slows, which surfaces as slow public screens
+# -- a signal, and a recoverable one -- instead of a kill with nothing before
+# it. The gap is deliberately wide enough (256 MiB) that a genuine burst has
+# room to drain rather than oscillating on the edge of the cap.
+#
+# ⚠ CONFIRM THE IDLE BASELINE ON THE BOX, once, after deploying:
+#   systemctl --user show trading-<env>-webgui_live -p MemoryCurrent
+# If it idles above ~500 MB these two numbers are the ones to raise -- and they
+# are the only two. (MemoryAccounting is implied by both directives, so it is
+# not restated. On a cgroup v1 host they would be silently ignored, the same
+# family of trap as StartLimit* in the wrong section; this host is v2 unified.)
+LIVE_MEMORY_HIGH = "768M"
+LIVE_MEMORY_MAX = "1G"
+
+# How often the public grid's thumbnails are refreshed. Every 15 minutes inside
+# [windows.live_capture]; the script's own gate decides the days and hours, so
+# this only has to be the cadence.
+LIVE_CAPTURE_INTERVAL_MIN = 15
+# Slack on top of the derived per-screen budget, for interpreter start and the
+# WebP encodes.
+LIVE_CAPTURE_TIMEOUT_SLACK_SEC = 60
+
 
 def target_name():
     return f"trading-{ENV_NAME}.target"
@@ -98,6 +186,18 @@ def components():
     (the Schwab OAuth refresh token is a single rotating credential, so there can
     be only one holder), so ownership is encoded in which units exist rather than
     in a filter someone has to remember to apply.
+
+    ⚠ **The live screens DO get a unit in dev**, and the asymmetry with the proxy
+    is deliberate. Withholding a unit has only ever been about a **single
+    exclusive resource** two environments would fight over -- there is exactly
+    one Schwab refresh token, and a second holder invalidates the first. Nothing
+    like that exists here: the live process binds dev's own offset port, reads
+    Redis and nothing else, spends no Schwab call, no Claude call and sends no
+    notification, so there is nothing for the four dev suppressions to suppress.
+    And the standing development rule is that work is *verified running in dev*
+    before it is promoted; a dev checkout with no live unit would make that
+    verification a hand-started process outside systemd, which is exactly the
+    shape that ships unit config nobody has run.
     """
     out = []
     if OWNS_PROXY:
@@ -105,17 +205,27 @@ def components():
     for key, port in SERVICE_PORTS.items():
         out.append((f"{key}_svc", port, f"services/{key}_svc/app.py"))
     out.append(("webgui", NICEGUI_PORT, "webgui/main.py"))
+    # The PUBLIC read-only screens, a separate process on a separate origin.
+    # Separate so a public traffic spike or a crash cannot reach the trading UI.
+    out.append(("webgui_live", NICEGUI_LIVE_PORT, "webgui/live_main.py"))
     return out
 
 
 def _service_text(component, port, script):
     is_proxy = component == "proxy"
     is_webgui = component == "webgui"
+    # The public read-only screens read Redis -- a SYSTEM unit, outside this
+    # target entirely -- and nothing else: no proxy call, no Schwab call, no
+    # service call. So they order themselves against nothing here. An After= on
+    # a component this process never speaks to would read as a real dependency
+    # and be none, and the next person to touch this file would have to prove
+    # it was fake before deleting it.
+    is_live = component == "webgui_live"
 
     unit = [f"Description=NeuralStrike {ENV_NAME} - {component} (:{port})",
             f"PartOf={target_name()}"]
 
-    if not is_proxy and OWNS_PROXY:
+    if not is_proxy and not is_live and OWNS_PROXY:
         # The web GUI is ordered after the proxy but does NOT require it: it
         # renders a proxy-down banner and is fully usable without one, which
         # restart_spec already encodes as wait_port 0. A dead proxy must not
@@ -143,15 +253,31 @@ def _service_text(component, port, script):
                "# local user; it shows only the PATH of an EnvironmentFile.",
                "# No leading '-': a missing file must fail the unit loudly, not",
                "# start a stack that is silently mute.",
-               f"EnvironmentFile={_env_file()}"]
+               # The PUBLIC process gets its OWN minimal file. It is the one
+               # internet-facing, unauthenticated process in the fleet and must
+               # not hold the fleet's strongest credentials -- see
+               # _live_env_file for the whole argument.
+               f"EnvironmentFile={_live_env_file() if is_live else _env_file()}"]
 
-    if not is_proxy and not is_webgui and OWNS_PROXY:
+    if not is_proxy and not is_webgui and not is_live and OWNS_PROXY:
         # After= orders process START and says nothing about readiness. A dead
         # accept loop stays bound and passes a TCP connect -- which is how a
         # promote once left prod serving no UI at all. wait_http.py does a GET.
         service.append(
             f"ExecStartPre={_python()} tools/wait_http.py "
             f"--port {PROXY_PORT} --timeout {PROXY_WAIT_TIMEOUT_SEC} --label 'the proxy'")
+
+    if is_live:
+        # ⚠ [Service], where cgroup resource control belongs -- unlike
+        # StartLimit* above, which systemd moved to [Unit] in v229 and silently
+        # ignores here. See LIVE_MEMORY_HIGH for the numbers and the reasoning;
+        # this is on the PUBLIC unit alone.
+        service += [
+            "# The one internet-facing, unauthenticated, unthrottled process.",
+            "# Caps WHO DIES under a request flood: these screens, alone.",
+            f"MemoryHigh={LIVE_MEMORY_HIGH}",
+            f"MemoryMax={LIVE_MEMORY_MAX}",
+        ]
 
     service += [f"ExecStart={_python()} {script}",
                 "Restart=on-failure",
@@ -365,12 +491,100 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-stream.timer": tmr}
 
 
+def _live_capture_timeout_seconds():
+    """The unit's ``TimeoutStartSec``, DERIVED from the script's own budget.
+
+    ``tools/capture_live_shots.py`` gives each screen a wall-clock ceiling and
+    photographs every screen ``webgui/live_screens.py`` publishes, so the run's
+    worst case is those two multiplied. Typed as a literal it would be wrong the
+    first time a screen is added -- and wrong in the way the backup unit was
+    before it had a timeout at all: systemd SIGTERMs the job partway, so some
+    tiles refresh and the rest silently do not.
+    """
+    from tools import capture_live_shots as capture
+
+    return (capture.SCREEN_TIMEOUT_SEC * len(capture.targets())
+            + LIVE_CAPTURE_TIMEOUT_SLACK_SEC)
+
+
+def _live_capture_units():
+    """The thumbnail capture: a oneshot the timer owns, plus its timer.
+
+    **No ``Restart=``, deliberately.** A oneshot that fails should be visible in
+    ``systemctl --user --failed`` and then wait for the next quarter hour, not
+    retry: the two failures worth distinguishing are "no browser on this host",
+    which no amount of retrying fixes, and "the live process is down", which the
+    next firing picks up on its own. The script itself already declines to fail
+    for the ordinary reasons -- outside the window it stands down with exit 0,
+    and one unreachable screen is logged rather than raised.
+
+    **Not ``PartOf`` the target and not ``WantedBy`` it.** Like the backup and
+    the stream, this is not a member of the fleet; the timer decides when it
+    runs, so the ``[Install]`` section belongs there.
+
+    **No ``After=`` on the live web GUI either**, though it is the thing being
+    photographed. Ordering matters only at boot, and a capture that lands before
+    the live process is up costs one logged failure and fifteen minutes. Against
+    that, ``tests/test_systemd_units.py`` pins that NOTHING in this file names
+    the public unit as a dependency -- the whole point of running the public
+    origin as a separate process -- and an ordering edge here would be the first
+    exception someone has to reason about later.
+    """
+    timeout = _live_capture_timeout_seconds()
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - live screen thumbnails
+# No PartOf and no [Install]: the timer owns this, and a stop of the stack has
+# nothing to stop -- it is a oneshot that runs for a minute every quarter hour.
+# A crash-looping unit is retried this many times in this window, then left
+# down and logged.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+EnvironmentFile={_env_file()}
+# Fourteen screens with a per-screen ceiling. WITHOUT THIS the oneshot inherits
+# DefaultTimeoutStartSec (90s here) and would be killed partway through, leaving
+# some tiles fresh and the rest stale with nothing to say which.
+TimeoutStartSec={timeout}
+ExecStart={_python()} tools/capture_live_shots.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - live screen thumbnail timer
+
+[Timer]
+# Every {LIVE_CAPTURE_INTERVAL_MIN} minutes, all day. The DAYS and HOURS are not
+# filtered here on purpose: the script gates on [windows.live_capture] via the
+# market calendar, which is the only thing that can see a holiday -- the same
+# division of labour the stream timer uses. A stand-down is a sub-second
+# interpreter start.
+OnCalendar=*:0/{LIVE_CAPTURE_INTERVAL_MIN}
+# Deliberately NOT Persistent=true. A missed capture is worthless later: the
+# next one is at most {LIVE_CAPTURE_INTERVAL_MIN} minutes away and shows the
+# market as it is now, not as it was during the downtime.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-live-capture.service": svc,
+            f"trading-{ENV_NAME}-live-capture.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
     out[target_name()] = _target_text()
     out.update(_backup_units())
     out.update(_stream_units())
+    out.update(_live_capture_units())
     return out
 
 

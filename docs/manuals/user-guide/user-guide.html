@@ -79,6 +79,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#getting-started">Getting Started</a><ul>
 <li><a href="#starting-the-application">Starting the application</a></li>
+<li><a href="#the-public-live-screens">The public live screens</a></li>
 <li><a href="#what-runs-behind-the-scenes">What runs behind the scenes</a></li>
 <li><a href="#the-proxy-down-banner">The proxy-down banner</a></li>
 <li><a href="#waiting-for-service-placeholders">"Waiting for … service" placeholders</a></li>
@@ -230,8 +231,8 @@ just click <strong>Authorize</strong> again.</p>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
 <strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
-and <strong>8500</strong> (the web app). If another program is already using one of them, the
-matching piece won't start.</p>
+<strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
+is already using one of them, the matching piece won't start.</p>
 <hr />
 <h1 id="getting-started">Getting Started</h1>
 <h2 id="starting-the-application">Starting the application</h2>
@@ -247,7 +248,7 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Starts the gateway, the six domain services and the web app.</td>
+<td>Starts the gateway, the six domain services, the web app and the public live screens.</td>
 </tr>
 <tr>
 <td><code>systemctl --user list-units 'trading-prod*'</code></td>
@@ -281,6 +282,30 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 </ul>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
+<h2 id="the-public-live-screens">The public live screens</h2>
+<p>Fourteen of the app's screens are also published <strong>read-only and without any
+sign-in</strong> on a second address, <code>https://live.neuralstrike.co</code> — the Desk,
+Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
+Industry, Sector Rotation, RRG, Momentum, Gamma, Net Prem and the two Premium
+Divergence screens. <code>https://neuralstrike.co/live.html</code> is a thumbnail menu of
+them.</p>
+<p>Three things to know:</p>
+<ul>
+<li><strong>They are not redacted.</strong> The Desk shows your open paper and driver positions,
+  the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
+  Anyone with the address can read them. That is a deliberate choice — the book
+  is paper only — but it is worth knowing before you show someone the link.</li>
+<li><strong>They are a separate program.</strong> Nothing anyone does there can reach your own
+  app: it holds no login, sends no commands, and cannot write anything. Its
+  health has its own card on <strong>System Status</strong>; a red one means the public site
+  is down and your own screens are unaffected.</li>
+<li><strong>To stop publishing</strong>, use <strong>Stop All Services</strong> — it stops both web apps —
+  or, if you want to keep working, <code>systemctl --user stop trading-prod-webgui_live</code>
+  on the machine, which leaves the rest of the stack alone.</li>
+</ul>
+<p>The thumbnails on the menu page are refreshed on a <strong>15-minute timer</strong>, on trading
+days between 08:00 and 15:20 Central — so a slightly old-looking tile is normal,
+and outside those hours expected. The screen behind it is always live.</p>
 <h2 id="what-runs-behind-the-scenes">What runs behind the scenes</h2>
 <p>You don't interact with these directly, but it helps to know they exist:</p>
 <ul>
@@ -289,6 +314,8 @@ skips the sign-in, which is what the wall display uses.</p>
   handles ordering for you).</li>
 <li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).</li>
+<li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
+  <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
 <li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
 </ul>
 <h2 id="the-proxy-down-banner">The proxy-down banner</h2>
@@ -304,8 +331,9 @@ launcher, or restart the specific service from the <strong>System Status</strong
 <p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
-gateway, the six services, and the web app. (Redis is intentionally left
-running — it is a <em>system</em> service the app's own units cannot reach.)</p>
+gateway, the six services, the web app <strong>and the public live screens</strong> — so the
+public site goes dark until you start the stack again. (Redis is intentionally
+left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
 <h1 id="the-interface">The Interface</h1>
 <h2 id="layout">Layout</h2>
@@ -1592,9 +1620,9 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, and the web
-  app itself, each with Online/Offline and its tier. The gateway's card also shows
-  the <strong>Schwab auth</strong> state.</li>
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, the web app
+  itself, and the public live screens beside it, each with Online/Offline and its
+  tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
   browser tab. Use it when the auth line says the login has expired.</li>
 <li>A <strong>data-freshness</strong> table showing each domain's latest cache write and its age.
@@ -1661,7 +1689,8 @@ group, next to EOD Report.</p>
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><strong>Route:</strong> <code>/terminate</code> — the red button at the foot of the rail.</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
-(behind a confirmation) stops the gateway, the six services, and the web app.</p>
+(behind a confirmation) stops the gateway, the six services, the web app <strong>and the
+public live screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
 code from your authenticator app into the dialog and press <strong>Stop everything</strong>. A
 wrong, missing, or already-used code refuses the stop and says so — nothing is

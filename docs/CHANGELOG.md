@@ -4,6 +4,138 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-07 (**Fourteen screens are published read-only and
+unauthenticated at `live.neuralstrike.co`**, served by a SECOND NiceGUI process —
+`webgui/live_main.py` — that renders the **same page modules the private app
+renders**, so a published screen cannot drift from the one it mirrors. The
+`live.html` placeholder the site has been holding becomes their thumbnail grid.
+Design + plan:
+[`2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-live-screens-design.md)
+/ [`-plan.md`](plans/2026-09-07-public-live-screens-plan.md). ⚠ **Built and green, not
+deployed:** the Redis ACL user, DNS + TLS for the new host, installing the units and
+walking all fourteen routes in a browser are the plan's Task 14 and are not recorded
+here.)
+
+- **⚠ THE TRAP THAT SHAPED THE BUILD: a second process must never `import main`.**
+  `pages/options/gamma.py` did, for three shell functions. `main.py`'s module body
+  registers every `@_page` route, so the public process would have published
+  `/terminate` (Stop All Services), `/settings` and the paper book to the internet —
+  silently, while looking entirely correct. The seam moved to a leaf module
+  **`webgui/shell.py`**, which makes the public process *structurally* incapable of
+  holding the app's route table rather than incapable by inspection. Pinned twice: at
+  source level, and by running `live_main.py` **ALONE in a fresh interpreter** and
+  asserting `main` never entered `sys.modules` — the only check that can see a
+  TRANSITIVE import, which is how such a thing would actually arrive.
+
+- **⚠ `def _page(_s=screen)` published a query parameter.** NiceGUI hands the page
+  function's signature to FastAPI, so the idiomatic late-binding default for a loop
+  variable became something a stranger could set. Measured: `GET /desk?_s=anything`
+  replaced the `Screen` object with the string `'anything'`, which reached
+  `importlib.import_module`. The binding moved into an enclosing `_register(screen)`
+  parameter instead, so the page function has no signature to inject into.
+
+- **Read-only is four layers, not a label.** A Redis **ACL user** with read commands
+  only (structural — the one the *server* enforces); `bus_client.set_read_only(True)`,
+  where `request()` is the single Tier-1 write chokepoint so one refusal covers every
+  command on every page; `app_settings.freeze(pins)`; and structurally, no rail,
+  Settings, Terminate or Sign-out, because those routes do not exist in the process.
+  The three this process installs go in **before any page module is imported**, which
+  is what `live_main.py`'s `# noqa: E402` block is buying. What is at stake is
+  concrete: `gamma_analyze` and `gamma_explain` are **paid Claude calls**, and
+  `gamma_refresh` and sentiment `refresh` fan out Schwab fetches against a budget
+  already running 68–76k/day. Unauthenticated and unrefused, that is an open tap on
+  money.
+
+- **⚠ The Redis ACL needs `@pubsub` and `@connection`, not just `@read` — and getting
+  it wrong fails silently.** `SUBSCRIBE` belongs to `@pubsub`; `SELECT` (any non-zero
+  `redis_db`) and `PING` to `@connection`. `EventListener._run` swallows a failed
+  subscribe, so an under-granted user renders one frame and then never repaints: it
+  reads as a **frozen tape, not as a permissions error**. Found while building the
+  refusal rather than after deploying it. No `+publish` either — a public process that
+  can publish can spoof repaint events to the private app.
+
+- **⚠ `cache:options:gamma` is a single sticky slot, and `refresh_gamma_current` reads
+  the symbol back OUT of it.** Three of the four gamma screens would have rendered
+  whatever the private app last selected: open `/options/gamma`, pick AMD, and the
+  public "$SPX" screen shows AMD. Fixed with **additive** per-symbol keys
+  (`cache:options:gamma_pub:<SYMBOL>`) built off chains the collector already fetches
+  every minute, so the Schwab cost is nil — the existing tick-chain stash was widened
+  from one symbol to three rather than refetching.
+
+- **Publishing four views for three symbols cost ~3.9× on the tick's gamma writes**
+  (5 writes / 4.94 MB → 21 / 19.75 MB), a multiplication of exactly the cost the
+  2026-08-20 history split existed to remove. The **product** decision that fixed it:
+  a public screen shows **only its pinned view and builds no picker**, so nothing can
+  render empty because there is no control to click — and only the one history any
+  screen actually draws is published (`$SPX`/GEX, and nothing else). **10 writes /
+  6.28 MB, 1.27×.** ⚠ Un-pinning a view means adding it back to
+  `PUBLISHED_GAMMA_HISTORY_VIEWS`, or the heatmap draws empty and says nothing: a
+  missing history key reads as "no history yet".
+
+- **⚠ The public Desk would have made an outbound `edge_tts` call per flow alert, per
+  visitor.** `voice_enabled` **defaults True**, and `webgui/voice.py` synthesizes each
+  phrase over the network rather than playing a bundled file — and `desk._prewarm_clips`,
+  unlike the live path, has **no market-hours gate**, so a first open fires ~32
+  synthesis calls. `/voice` is not even mounted in that process, so not one clip could
+  have been played. `live_screens.PUBLIC_PINS` pins it off, and it lives there rather
+  than on the Desk screen because the reason is the **origin** — public, so nothing
+  that spends money, calls out, or writes.
+
+- **⚠ Freezing `app_settings` is not only about pinning defaults.** `settings.json` is
+  a single-user store whose in-memory cache assumes one writer in one process. Left
+  live, the public process would read your own preferences — changing your Macro Board
+  skin would re-skin the public site — and race you for the file.
+
+- **⚠ `test_auth_covers_every_route.py` had to be taught to exclude the live routes,
+  and the exclusion costs real coverage.** Both entrypoints register onto the SAME
+  global NiceGUI app object, so importing `live_main` anywhere in that suite puts the
+  fourteen deliberately-public routes in front of a guard whose entire job is to assert
+  every route is gated — and they would have **passed**, because in that process the
+  private app's middleware does gate them. A guard that vouches for public routes as
+  authenticated is worse than no guard. ⚠ `/desk` and `/sentiment` are registered by
+  *both* entrypoints, so the exclusion also stops the sweep checking two of the app's
+  own gated routes; that is asserted as a closed set, and if it ever grows the fix is
+  to give the live routes their own prefix for Caddy to strip, not to widen the hole.
+
+- **The stack is a unit longer.** `webgui_live` joins the target (prod ten units, dev
+  nine). **Dev DOES get one, unlike the proxy** — withholding a unit has only ever been
+  about a single exclusive credential, and the live process spends no Schwab call, no
+  Claude call and sends no notification, so there is nothing for the four dev
+  suppressions to suppress. Caddy grows a third host block, and a `live-capture`
+  oneshot photographs the fourteen routes every 15 minutes inside a new
+  `[windows.live_capture]` — its `TimeoutStartSec` **derived** from the script's own
+  per-screen budget × the number of screens, so adding a screen cannot leave systemd
+  SIGTERMing the job partway and refreshing some tiles but not others.
+
+- **⚠ The captures are gitignored, and that is load-bearing.** `deploy/site/live/*.webp`
+  is generated state inside the served root. Tracked, it would dirty prod's tree the
+  moment the timer first fired, and **`tools/promote.sh` refuses a dirty tree**.
+
+- **The grid carries no timestamp, deliberately** — baking a freshness line into static
+  HTML at capture time would make a committed source file a build artifact, and a menu
+  that claims to be fresh is worse than one that does not. The live pages carry their
+  own staleness already. Tiles ship with `alt` text and reserved dimensions, so before
+  the first capture the grid is usable text-and-boxes rather than fourteen broken
+  images.
+
+- **The in-app copy the second web app made stale, fixed in the same pass.** Stop All
+  Services now stops **two** web apps — someone halting the trading stack for five
+  minutes is not necessarily expecting to unpublish the public site — so the page, its
+  confirm dialog and its hover guide say so. System Status grows a `webgui_live` peer
+  card, probed over HTTP (never a TCP connect: a dead accept loop stays bound) and
+  deliberately **outside** the 2 s health fan-out, so a dead public origin never badges
+  the rail or chimes. Its subtitle also said "five domain services" where six were
+  listed — a defect the Reference Guide had already recorded.
+
+- **Exposure is a recorded decision, not an oversight.** The screens are unredacted:
+  the Desk shows merged paper and driver positions with rescue flags, the Opportunity
+  Board ranks actionable signals, Flow Alerts carries live alerts. Chosen over
+  redaction and over a 15-minute delayed feed because the book is **paper only** and
+  full transparency is the argument the site already makes.
+
+- **Tests at the time:** webgui **3451 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1386 passed**.
+
 **Last updated:** 2026-09-07 (**The gold-and-blue logo is retired; the mark is
 now THE FLIP** — two chevrons converging on a level, dealer hedging pinned to
 the gamma flip. Chosen from three directions put up as a specimen board. It

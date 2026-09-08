@@ -44,6 +44,13 @@ _CORNER = f"{_MONO} absolute text-[11px] tracking-[.2em] uppercase"
 
 
 def render():
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     state = {"ver": None}
 
     ui.add_head_html(ROTATION_FONT_HEAD_HTML)
@@ -63,11 +70,15 @@ def render():
                     "text-[34px] font-semibold leading-none "
                     "tracking-[-0.025em] whitespace-nowrap")
             ui.space()
-            ui.button("Refresh", color=None, on_click=lambda: _request_refresh()) \
-                .props("flat no-caps dense").classes(
-                    f"{_MONO} {NT['txt']} text-[11px] tracking-[.1em] uppercase "
-                    f"bg-transparent border {NE['btn_edge']} px-[17px] h-[38px] "
-                    f"leading-none hover:{NB['btn_hover']}")
+            # Not drawn on the public live origin — see shell.may_enqueue.
+            if _may_enqueue:
+                ui.button("Refresh", color=None,
+                          on_click=lambda: _request_refresh()) \
+                    .props("flat no-caps dense").classes(
+                        f"{_MONO} {NT['txt']} text-[11px] tracking-[.1em] "
+                        f"uppercase bg-transparent border {NE['btn_edge']} "
+                        f"px-[17px] h-[38px] leading-none "
+                        f"hover:{NB['btn_hover']}")
 
         # ── verdict strip ───────────────────────────────────────────────────
         strip = ui.row().classes(
@@ -223,6 +234,8 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_rotation"})
         ui.notify("Refreshing — the page updates when the new read lands.")
         rrg_busy.show()

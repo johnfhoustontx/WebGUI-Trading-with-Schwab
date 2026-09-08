@@ -37,6 +37,12 @@ from zoneinfo import ZoneInfo
 import alerts as _alerts
 import app_settings
 import bus_client
+# The page-to-shell seam — here for ``route_for``/``navigate_to``, since every
+# click-through on this page names a PRIVATE route and the public origin serves
+# most of them somewhere else and some of them nowhere. At module level rather
+# than inside ``render()`` because ``_mount_score_card`` is module-level too.
+# ``shell`` is itself Tier 1: it imports nothing but nicegui and pages.ui_guard.
+import shell as _shell
 import voice as _voice
 from nicegui import run, ui
 
@@ -439,8 +445,20 @@ BOOKS = (
 # Where a row's own page lives. Click-through is the whole reason the Desk may
 # stay this terse: every row is one click from the page that can act on it, and
 # a book with no route would strand its rows here.
+#
+# ⚠ These are the PRIVATE app's routes, and every route on this page is: a page
+# names the address it has always known and asks ``shell.route_for`` where that
+# lives in this process. The public origin publishes NONE of these three — the
+# paper ledger, the driver's own book and the captured tape are the owner's
+# positions — so there the rows draw without a click and without the pointer.
 POSITION_ROUTES = {PAPER_SOURCE: "/options/paper", CLAUDE_SOURCE: "/driver",
                    CAPTURED_SOURCE: "/options/captured"}
+
+# The other four click-through targets, named for the same reason: the string
+# is a route the shell resolves, not a URL this page emits.
+SENTIMENT_ROUTE = "/sentiment"
+MATRIX_ROUTE = "/options/matrix"
+FLOW_ROUTE = "/options/flow"
 
 # The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
 # treated as open, matching ``paper_adjust``'s own default. The captured-signals
@@ -1686,7 +1704,7 @@ def should_speak(settings, now):
 def speak_volume(settings):
     """``voice_volume`` clamped to 0..1, falling back rather than raising.
 
-    The clamp is ``main.play_alert``'s, character for character. What differs is
+    The clamp is ``shell.play_alert``'s, character for character. What differs is
     the PARSE in front of it, and it has to: this runs on the 2 s poll path
     inside a timer callback, and ``settings.json`` is hand-editable and never
     validated on read — a bare ``float("loud")`` there is a traceback the user
@@ -1834,6 +1852,10 @@ window.__deskSpeak = function (urls, vol) {
 # The phrase the unlock button speaks. It confirms audibly that the unlock
 # worked, which a silent button could not.
 VOICE_UNLOCK_PHRASE = "Spoken alerts on."
+
+# The button's own caption, named so a test can find the control rather than
+# re-typing the string — a copy in a test cannot see a rename.
+VOICE_UNLOCK_LABEL = "ENABLE SPOKEN ALERTS"
 
 # Once per PROCESS, not once per page build: the clip cache is on disk and
 # shared by every tab, so a second prewarm would re-walk a warm cache for
@@ -2188,7 +2210,11 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
 # that the size difference between them is smaller — and it is also why three
 # track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
 _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
-_ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
+# Split because ONE panel's rows are not always clickable: the three position
+# books are deliberately unpublished, so on the public origin those rows have
+# nowhere to go and must not be dressed as links (see ``_position_row``).
+_ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
+_ROW = f"{_ROW_STATIC} cursor-pointer"
 _VALUE = f"text-[13px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
@@ -2484,7 +2510,7 @@ def _compact_card(title, arcs, pill_text, delta):
                     _mount_meter(_K.meter_row(arc.get("caption", ""),
                                               arc.get("value")))
                 _mount_ruler()
-    card.on("click", lambda _e: ui.navigate.to("/sentiment"))
+    card.on("click", lambda _e: _shell.navigate_to(SENTIMENT_ROUTE))
 
 
 # The panel heads, as DATA rather than four ``_panel(...)`` argument lists.
@@ -2752,11 +2778,25 @@ def render():
         # need it never shows it. ``set_visibility(False)`` is ``display:none``,
         # which a flex ``gap`` skips entirely — the hidden row costs no height.
         # The click that dismisses it IS the gesture that unblocks audio.
-        unlock_btn = ui.button("ENABLE SPOKEN ALERTS", icon="volume_up",
-                               color=None).props("no-caps dense").classes(
-            f"self-start text-[11px] tracking-[.14em] px-3 "
-            f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
-        unlock_btn.set_visibility(False)
+        #
+        # ⚠ NOT BUILT AT ALL when spoken alerts are off — the THIRD caller of
+        # the synthesizer, and the one ``voice_enabled`` did not cover. Its
+        # handler is an ``edge_tts`` call to a Microsoft endpoint plus an mp3
+        # written into ``webgui/data/voice/``, and on the public live origin
+        # (where the pin switches voice off) the button is reachable from a
+        # browser console in two messages: ``emitEvent`` the blocked event —
+        # ``ui.on`` subscribes on the client LAYOUT, which is visible, so
+        # NiceGUI's hidden-element event gate does not apply — then click the
+        # revealed button. Hidden is not absent. The handler refuses underneath
+        # as well; a control that cannot work must not be drawn, and the thing
+        # it cannot do must also refuse.
+        unlock_btn = None
+        if app_settings.load().get("voice_enabled"):
+            unlock_btn = ui.button(VOICE_UNLOCK_LABEL, icon="volume_up",
+                                   color=None).props("no-caps dense").classes(
+                f"self-start text-[11px] tracking-[.14em] px-3 "
+                f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
+            unlock_btn.set_visibility(False)
 
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO QUOTE AT ALL. The Dealer Positioning panel
@@ -3200,7 +3240,7 @@ def render():
             # setup", where a "NEUTRAL" chip would read as a finding.
             if row["setup"]:
                 ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
-        el.on("click", lambda _e: ui.navigate.to("/options/matrix"))
+        el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
 
     def _paint_flow():
         flow_body.clear()
@@ -3256,7 +3296,7 @@ def render():
             # and shared by the kind and the side it qualifies.
             ui.label(flow_kind_text(row)).classes(
                 f"text-[10px] min-w-0 truncate {row['_tone_class']}")
-        el.on("click", lambda _e: ui.navigate.to("/options/flow"))
+        el.on("click", lambda _e: _shell.navigate_to(FLOW_ROUTE))
 
     def _paint_positions():
         pos_body.clear()
@@ -3294,8 +3334,17 @@ def render():
 
     def _position_row(row):
         # Rebuild-time only, same as the flow row above — never updated in place.
+        #
+        # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
+        # deliberately unpublished, so on the public origin there is nowhere to
+        # send the reader: the row keeps every number it has and loses the
+        # pointer, the hover wash and the handler. A row dressed as a link that
+        # leads nowhere reads as broken, which is worse than reading as static.
+        route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
+        can_open = _shell.can_navigate(route)
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            f"{POS_GRID} {_ROW if can_open else _ROW_STATIC} "
+            + (f"hover:bg-[{_C['line']}]/[0.06] " if can_open else "")
             + glow_classes(state["glow"].get(row.get("position_id")),
                            state["glow_now"]))
         with el:
@@ -3326,7 +3375,8 @@ def render():
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")
-        el.on("click", lambda _e, r=row: _open_position(r))
+        if can_open:
+            el.on("click", lambda _e, r=row: _open_position(r))
 
     # ── click-through ────────────────────────────────────────────────────────
     @guard
@@ -3343,12 +3393,16 @@ def render():
         """The strip is a pointer, not a second map: every industry and stock
         inside a sector lives one click away, and none of them is on this
         page."""
-        ui.navigate.to(BULLBEAR_ROUTE)
+        _shell.navigate_to(BULLBEAR_ROUTE)
 
     @guard
     def _open_position(row):
-        """Each book has its own page; the source chip is what decides which."""
-        ui.navigate.to(POSITION_ROUTES.get(row.get("source"), "/options/paper"))
+        """Each book has its own page; the source chip is what decides which.
+
+        A no-op where this process publishes no such page — the row wires no
+        handler there either, so this is the backstop rather than the gate."""
+        _shell.navigate_to(
+            POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
@@ -3426,7 +3480,13 @@ def render():
 
     @guard
     def _voice_blocked(_e=None):
-        """The browser refused to play. Offer the gesture that fixes it."""
+        """The browser refused to play. Offer the gesture that fixes it.
+
+        ``ui.on`` is registered unconditionally, so this fires on any client
+        that emits the event — including one a stranger types into a console.
+        With voice off there is no button, and nothing to reveal."""
+        if unlock_btn is None:
+            return
         unlock_btn.set_visibility(True)
 
     @guard_async
@@ -3437,9 +3497,19 @@ def render():
         the document, so the ``await`` below does not cost it. Any other click
         on the page unlocks it too; this button exists because nothing TELLS the
         user that.
+
+        ⚠ THE GATE IS THE FIRST STATEMENT, and it re-reads the setting rather
+        than trusting the build. This is the third caller of the synthesizer —
+        ``speak_phrases`` and ``_prewarm_clips`` are the other two — and the one
+        ``voice_enabled`` did not cover: a synthesis is an outbound call to a
+        Microsoft endpoint and an mp3 written to disk, which on the public
+        origin any anonymous visitor could drive.
         """
-        unlock_btn.set_visibility(False)
         settings = app_settings.load()
+        if not settings.get("voice_enabled"):
+            return
+        if unlock_btn is not None:
+            unlock_btn.set_visibility(False)
         url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
                                  settings.get("voice_name"))
         if url:
@@ -3448,7 +3518,8 @@ def render():
                 f"{speak_volume(settings)})")
 
     ui.on(VOICE_BLOCKED_EVENT, _voice_blocked)
-    unlock_btn.on_click(_unlock_voice)
+    if unlock_btn is not None:
+        unlock_btn.on_click(_unlock_voice)
 
     @guard
     def _tick_clock():
