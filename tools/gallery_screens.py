@@ -25,11 +25,18 @@ routes (from there, because it needs ``import main``).
 TWO WAYS A SHOT NAMES A VIEW WITHIN A PAGE, because the app really does have two:
 
 * a QUERY STRING, for a page whose ``@_page`` function takes the pin as a
-  parameter. ``/sentiment/momentum?level=stock`` is the shipped precedent; the
-  three ``/options/gamma?view=`` routes below are the same shape and are
-  INTENDED rather than built -- ``gamma.render()`` already accepts ``view``, and
-  wiring the route parameter is a later task. The route test strips the query
-  before checking registration, so recording it costs nothing today.
+  parameter. ``/sentiment/momentum?level=stock`` is the shipped precedent, and
+  the three ``/options/gamma?view=`` routes below are the same shape -- wired on
+  2026-09-08, after two reviewers noticed the route was still parameterless and
+  all three shots would have captured the identical default GEX view.
+
+  ⚠ A PINNED VIEW ALSO CHANGES WHAT THE PAGE DRAWS, which matters to whoever
+  recaptures these three. ``gamma.render`` reads a pin as "this is a published
+  single-view screen": it builds NO view-picker subtab row (``shows_view_picker``)
+  and no Refresh / Explain / Analyze / History buttons (``may_enqueue``). The
+  shipped image2 has that picker -- read the SPY in it -- so the recapture will
+  legitimately differ from it there. That is a difference in the PICTURE, like
+  the unpinned symbol below, and NOT a sign the capture went to the wrong page.
 * a ``subtab`` label, for a page where the view lives in page state and the
   capture has to click. ``simulator.render()`` takes no arguments at all, so its
   three shots are one route told apart by nothing else. Deliberately NOT written

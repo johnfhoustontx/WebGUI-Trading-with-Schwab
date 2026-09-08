@@ -46,20 +46,23 @@ def test_every_route_is_one_the_app_actually_registers():
 
 
 def test_a_query_string_is_only_ever_a_pin_the_page_can_take():
-    """``?view=`` on gamma is INTENDED, not yet built -- but it must be buildable.
+    """A query the page cannot honour is the same silent failure as a wrong
+    route, one step later: the capture navigates, the parameter is ignored, and
+    the default view is published under someone else's caption. Checked against
+    the ``@_page`` function's own signature, which is where a pin becomes real.
 
-    A query the page cannot honour is the same silent failure as a wrong route,
-    one step later: the capture navigates, the parameter is ignored, and the
-    default view is published under someone else's caption. Checked against the
-    ``@_page`` function's own signature, which is where a pin becomes real --
-    ``/sentiment/momentum?level=`` already passes on that alone.
+    ⚠ This test carried a carve-out for ``/options/gamma`` from the day the
+    table was written: the route took no parameters, so the check fell back to
+    ``gamma.render``'s signature and recorded the pin as intended-not-built. The
+    route parameter landed on 2026-09-08 and the carve-out RETIRED itself,
+    exactly as its own comment said it would -- the plain signature now answers
+    for gamma as it always did for ``/sentiment/momentum?level=``.
     """
     import inspect
     from urllib.parse import parse_qs, urlsplit
     from nicegui import Client
 
     import main  # noqa: F401 -- registers the @_page routes
-    from pages.options import gamma
 
     builders = {route: fn for fn, route in Client.page_routes.items()
                 if getattr(fn, "__module__", "") == "main"}
@@ -70,14 +73,38 @@ def test_a_query_string_is_only_ever_a_pin_the_page_can_take():
                 continue
             path = shot.route.split("?")[0]
             accepted = set(inspect.signature(builders[path]).parameters)
-            if path == "/options/gamma":
-                # ``gamma.render()`` takes ``view`` already; wiring the route
-                # parameter through ``@_page`` is a later task. Until then the
-                # render target is what can honour the pin. This clause becomes
-                # redundant the moment that lands -- the union above absorbs it.
-                accepted |= set(inspect.signature(gamma.render).parameters)
-            assert set(parse_qs(query)) <= accepted, \
-                f"{s.title}: {shot.route} names a pin {path} cannot take"
+            assert set(parse_qs(query)) <= accepted,                 f"{s.title}: {shot.route} names a pin {path} cannot take"
+
+
+def test_the_gamma_shots_pin_three_different_views():
+    """THE ONE THAT WOULD HAVE CAUGHT IT.
+
+    Three tiles -- Gamma Heatmap, Premium Divergence, Net Options Premium -- are
+    three views of ONE page, told apart by nothing but ``?view=``. While the
+    route ignored that query, all three captured the identical default GEX view:
+    three real, correct-looking screenshots, two under the wrong caption.
+
+    Distinctness is checked on the RESOLVED view rather than on the raw query
+    string, because ``_resolve_view`` is total -- ``?view=nonsense`` and
+    ``?view=Nonsense`` are different strings that render the same page, so
+    comparing the pins as written would call two identical captures distinct.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    from pages.options import gamma
+
+    pins = []
+    for s in g.SCREENS:
+        for shot in s.shots:
+            if shot.route.split("?")[0] != "/options/gamma":
+                continue
+            views = parse_qs(urlsplit(shot.route).query).get("view", [])
+            assert len(views) == 1, f"{s.title}: {shot.route} names no single view"
+            assert views[0] in gamma._VIEW_ORDER,                 f"{s.title}: {views[0]!r} is not a view this page offers"
+            pins.append((s.title, gamma._resolve_view(views[0])))
+
+    assert len(pins) == 3, f"expected three gamma shots, found {pins}"
+    assert len({v for _t, v in pins}) == 3,         f"two gamma tiles would capture the same view: {pins}"
 
 
 def test_a_subtab_shot_names_a_subtab_that_exists():

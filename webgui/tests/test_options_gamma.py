@@ -7,6 +7,7 @@ drives refresh/explain/analyze via commands, so it must import NO engine / proxy
 code. The pure figure/transform builders below stay unchanged + unit-tested.
 """
 import ast
+import contextlib
 import inspect
 import json
 import pathlib
@@ -2678,3 +2679,108 @@ def test_a_pinned_page_opens_no_report_it_could_never_have_asked_for(monkeypatch
     went = _navigations(_rendered(symbol="SPY", view="Flow"), monkeypatch,
                         _REPORT_VIEWS)
     assert went == []
+
+
+# ── the ``?view=`` ROUTE parameter ──────────────────────────────────────────
+# ``gamma.render`` has taken a ``view`` pin since the public live screens; until
+# 2026-09-08 the ``@_page`` function took no parameters, so ``/options/gamma?
+# view=Flow`` was accepted by the router and silently ignored. That is the
+# gallery's wrong-screenshot failure class: three tiles captioned Gamma Heatmap,
+# Premium Divergence and Net Options Premium would all have published the same
+# default GEX view, and nothing would have raised.
+#
+# ⚠ A ``@ui.page`` function's signature IS the query-parameter surface (see
+# ``live_main._register`` for the injection this repo already closed). These
+# tests are the other half of that rule: the parameter is fine BECAUSE its value
+# only ever reaches ``_resolve_view``, which is total.
+
+@contextlib.contextmanager
+def _no_chrome():
+    """``main._layout`` reduced to a bare container.
+
+    The real one reads the bus, builds the rail and the tab strip — none of
+    which this file is about, and all of which would drown the page's own
+    elements in the tree these tests read."""
+    from nicegui import ui
+    with ui.card():
+        yield
+
+
+def _route_rendered(monkeypatch, **query):
+    """Render the page THROUGH ``main.options_gamma_page`` and return its tree.
+
+    The point of going through the route function rather than calling
+    ``gamma.render`` directly: a signature check alone passes against a page
+    that declares ``view`` and drops it on the floor."""
+    import main
+    from nicegui import ui
+
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    bus_client.reset()
+    with ui.card() as card:
+        main.options_gamma_page(**query)
+    return list(card.descendants())
+
+
+def test_the_gamma_route_declares_a_view_query_parameter():
+    """Declared and typed, so FastAPI hands the page a ``str`` or nothing."""
+    import main
+    p = inspect.signature(main.options_gamma_page).parameters.get("view")
+    assert p is not None, "/options/gamma takes no ?view= — the pin is ignored"
+    assert p.default is None, (
+        "the bare route must pin nothing, exactly as before the parameter "
+        "existed — a non-None default would silently pin every navigation")
+
+
+def test_the_view_query_is_handed_to_the_render(monkeypatch):
+    """Driven, not merely declared: patch the render, read what it got."""
+    import main
+    got = {}
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
+    main.options_gamma_page(view="Flow")
+    assert got == {"view": "Flow"}
+
+
+def test_the_bare_route_hands_the_render_no_pin_at_all(monkeypatch):
+    """The PRIVATE page is not to change. ``view=None`` is what it has always
+    been called with, and it is what keeps the picker and the four command
+    buttons (see may_enqueue)."""
+    import main
+    got = {}
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
+    main.options_gamma_page()
+    assert got == {"view": None}
+
+
+def test_the_bare_route_still_builds_the_whole_view_picker(monkeypatch):
+    """End to end, with the real render: no query string ⇒ today's page."""
+    assert _view_tab_names(_route_rendered(monkeypatch)) == set(gamma._VIEW_ORDER)
+
+
+def test_a_pinned_route_renders_that_one_view(monkeypatch):
+    """The pin reaches the page's OWN behaviour, not just its argument list.
+
+    A pinned render builds no picker (``shows_view_picker``) — which is also the
+    visible consequence of wiring this parameter, and the reason the gallery's
+    recaptures will show one view with no subtab row."""
+    assert _view_tab_names(_route_rendered(monkeypatch, view="Flow")) == set()
+
+
+def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
+    """``?view=nonsense`` is a stranger's string on a page behind the login. It
+    must render, and render the DEFAULT — ``_resolve_view`` is total for exactly
+    this reason. Asserted through the route, not on the helper."""
+    junk = _route_rendered(monkeypatch, view="nonsense")
+    gex = _route_rendered(monkeypatch, view="GEX")
+    netprem = _route_rendered(monkeypatch, view="Net Prem")
+
+    def shape(kids):
+        return [(type(e).__name__, str(getattr(e, "text", "") or "")) for e in kids]
+
+    assert shape(junk) == shape(gex), "an unknown pin did not fall back to GEX"
+    # ...and the fallback is a real comparison only because a DIFFERENT pin
+    # really does render a different page. Without this, the assertion above
+    # would also pass against a route that ignored the parameter entirely.
+    assert shape(junk) != shape(netprem)
