@@ -718,6 +718,51 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
+def test_live_screens_is_the_primary_call_to_action():
+    """The nav's own comment records that Live Screens was the design's primary
+    button and lost the slot only because the page was an empty placeholder.
+    It is not a placeholder any more, so this pins the swap back -- structurally,
+    on the class, rather than on copy a later edit would break.
+
+    ⚠ Reads ``_markup``, not ``_text``. The nav comment names BOTH hrefs while
+    explaining the history, so a raw-text search matches inside the comment and
+    passes for the wrong reason -- exactly what ``_markup`` exists to prevent.
+    """
+    text = _markup("index.html")
+    live = re.search(r'<a[^>]*href="live\.html"[^>]*>', text)
+    gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>[^<]*App gallery', text)
+    assert live, "no live.html link in the index nav"
+    assert "btn-primary" in live.group(0), "Live screens is not the primary button"
+    assert gallery and "btn-primary" not in gallery.group(0), (
+        "App gallery still carries the primary treatment")
+
+
+def test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV():
+    """The two picture pages are each other's obvious next stop -- captures of
+    the app, and the app running -- and the gallery reached the live grid from
+    nowhere at all. That is the kind of dead end an author never meets, because
+    they always arrive from the page that does carry the link.
+
+    ⚠ Scoped to the ``<nav>``, and the shouty name says so. Written first
+    against the whole document, this test could not fail: ``live.html`` names
+    the gallery a SECOND time in its body prose, so deleting the nav link left
+    it green. A link buried in a paragraph is not navigation.
+
+    ⚠ ``glossary.html`` is deliberately NOT in this: its nav is a leaf's, a crumb
+    and a term count and a way back, carrying no destination links in either
+    direction. Adding one there is a nav decision, not this invariant.
+    """
+    def nav(name):
+        m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
+        assert m, f"{name} has no <nav>"
+        return m.group(0)
+
+    assert 'href="live.html"' in nav("gallery.html"), (
+        "the gallery's nav offers no way to the live screens")
+    assert 'href="gallery.html"' in nav("live.html"), (
+        "the live grid's nav offers no way to the gallery")
+
+
 def test_the_grid_embeds_nothing_and_runs_nothing():
     """The tiles are PICTURES. An <iframe> onto the live origin would put a
     NiceGUI session behind every tile -- fourteen per visitor -- and hand the
