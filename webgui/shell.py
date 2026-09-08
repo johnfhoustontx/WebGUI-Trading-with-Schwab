@@ -283,3 +283,47 @@ _SUBTAB_SLOT: dict = {"el": None}
 def subtab_slot():
     """The container under the main tab strip for a page's view subtabs (or None)."""
     return _SUBTAB_SLOT["el"]
+
+
+# --- the screenshot session's chrome suppression -----------------------------
+# Set by tools/capture_gallery_shots.py's bootstrap redirect, alongside the
+# session cookie. Cookies ignore PORT, so the bootstrap server on its ephemeral
+# 127.0.0.1 port sets one the app on :8500 receives -- the same mechanism that
+# delivers the session itself.
+CAPTURE_COOKIE = "ns_capture"
+
+# ⚠ SUPPRESSES A REAL SIGNAL, DELIBERATELY AND NARROWLY.
+#
+# `#popup.nicegui-error-popup` is NiceGUI's own "Connection lost. Trying to
+# reconnect..." banner (templates/index.html), and during a capture it is not
+# lying -- the client really does conclude the socket died. The cause is
+# --virtual-time-budget: Chrome races the CLIENT's clock through
+# socket.io's ping_interval (4s) + ping_timeout (2s) in milliseconds of real
+# time, while the SERVER still pings on the wall clock. The busiest pages keep
+# scheduling work, so virtual time runs furthest on exactly the screens whose
+# tiles matter most.
+#
+# It fires AFTER the page has painted its data -- verified by reading the
+# captures, which carry live spot, premium and leaderboard values under the
+# banner -- so what this hides is a cosmetic artifact of how the shutter works,
+# not a page that failed to load. It hides ONE element and nothing else, so a
+# genuinely empty render still photographs as empty.
+#
+# ⚠ NOT injected by live_main, and it must not be: on the public origin any
+# visitor could set the cookie and suppress their own disconnect warning. The
+# capture only ever drives the private app on loopback.
+CAPTURE_CHROME_CSS = """
+#popup.nicegui-error-popup { display: none !important; }
+"""
+
+
+def capture_chrome_css(cookies):
+    """CSS for a screenshot session, or ``None`` for a real visitor. PURE.
+
+    Takes the cookie mapping rather than a request so it is testable without
+    NiceGUI, and matches the value exactly -- a cookie merely being PRESENT is
+    not the contract, so a stray empty `ns_capture=` does not suppress anything.
+    """
+    if not cookies:
+        return None
+    return CAPTURE_CHROME_CSS if cookies.get(CAPTURE_COOKIE) == "1" else None

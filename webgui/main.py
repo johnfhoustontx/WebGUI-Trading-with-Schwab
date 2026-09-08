@@ -20,7 +20,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
 
 from fastapi import Request  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse, Response  # noqa: E402
-from nicegui import app, run, ui  # noqa: E402
+from nicegui import app, context, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
 import logging  # noqa: E402
@@ -52,7 +52,7 @@ from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
 # sticky table headers and the subtab row -- also live in shell.py, for the same
 # reason: `live_main.py` injects them and cannot import this module. Aliased to
 # the old private name because `_TABLE_CSS` has been reached for since 2026-06.
-from shell import SUBTAB_CSS, TABLE_CSS  # noqa: E402
+from shell import SUBTAB_CSS, TABLE_CSS, capture_chrome_css  # noqa: E402
 
 _TABLE_CSS = TABLE_CSS
 
@@ -2018,6 +2018,13 @@ def _layout(active: str, title: str):
     ui.add_css(_NAV_CSS)
     ui.add_css(TABLE_CSS)    # app-wide fixed (sticky) table headers
     ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
+    # A screenshot session asks for the transient chrome to be suppressed; a
+    # real visitor never carries the cookie and this is None. getattr because
+    # Client.request is None for the auto-index client, which has no request.
+    _capture_css = capture_chrome_css(
+        getattr(getattr(context.client, "request", None), "cookies", None))
+    if _capture_css:
+        ui.add_css(_capture_css)
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.

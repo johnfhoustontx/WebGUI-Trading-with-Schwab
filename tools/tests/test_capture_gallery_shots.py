@@ -200,13 +200,21 @@ def test_the_token_never_reaches_the_command_line(store):
 # --- the bootstrap that actually delivers the cookie -------------------------
 
 def _get(url, *, timeout=5):
-    """One request, NOT following redirects -- the redirect is the subject."""
+    """One request, NOT following redirects -- the redirect is the subject.
+
+    ⚠ Returns the raw header MESSAGE, not `dict(resp.getheaders())`. A dict
+    COLLAPSES repeated headers and keeps the last, and Set-Cookie is repeated by
+    design (RFC 6265 s3) -- so a dict here silently hides every cookie but one,
+    which is exactly the bug the caller most needs to see. Message supports
+    `headers["X"]` (first occurrence) and `in`, so callers read unchanged, and
+    `get_all` is available for the ones that must see every line.
+    """
     parts = urllib.parse.urlsplit(url)
     conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
     try:
         conn.request("GET", parts.path + (f"?{parts.query}" if parts.query else ""))
         resp = conn.getresponse()
-        return resp.status, dict(resp.getheaders()), resp.read()
+        return resp.status, resp.headers, resp.read()
     finally:
         conn.close()
 
@@ -233,6 +241,46 @@ def test_the_bootstrap_sets_the_cookie_and_redirects(store):
     cookie = headers["Set-Cookie"]
     assert cookie.startswith(f"{c.SESSION_COOKIE}={token};")
     assert "Path=/" in cookie
+
+
+def test_the_bootstrap_sends_each_cookie_on_its_own_header_line(store):
+    """⚠ TWO Set-Cookie HEADERS, NEVER ONE COMMA-JOINED.
+
+    RFC 6265 s3 sends one cookie per header line. Joined with a comma a browser
+    reads the second as an ATTRIBUTE of the first and drops it -- silently, with
+    a perfectly good 302 and a session that still works, so the only symptom
+    would be the reconnect banner reappearing in the published gallery weeks
+    later. `headers["Set-Cookie"]` returns only the first, which is why this
+    reads get_all.
+    """
+    import shell
+
+    token = c.session_token(store)
+    target = f"{c.APP_URL}/desk"
+    with c.cookie_bootstrap(token) as boot:
+        _status, headers, _body = _get(boot.url_for(target))
+    lines = headers.get_all("Set-Cookie")
+    assert len(lines) == 2, lines
+    names = sorted(ln.split("=", 1)[0] for ln in lines)
+    assert names == sorted([c.SESSION_COOKIE, shell.CAPTURE_COOKIE]), names
+    capture = next(ln for ln in lines if ln.startswith(shell.CAPTURE_COOKIE))
+    # The app matches on the exact value; a bare name would suppress nothing.
+    assert capture.startswith(f"{shell.CAPTURE_COOKIE}=1;")
+
+
+def test_the_capture_cookie_is_the_one_the_app_actually_reads(store):
+    """The suppression spans two files that cannot see each other -- the tool
+    writes the cookie, webgui/shell.py decides on it. A renamed constant on
+    either side leaves a capture that still succeeds and still photographs the
+    banner, so the two halves are asserted against each other here."""
+    import shell
+
+    token = c.session_token(store)
+    with c.cookie_bootstrap(token) as boot:
+        _status, headers, _body = _get(boot.url_for(f"{c.APP_URL}/desk"))
+    sent = {ln.split("=", 1)[0]: ln.split("=", 1)[1].split(";")[0]
+            for ln in headers.get_all("Set-Cookie")}
+    assert shell.capture_chrome_css(sent) is not None
 
 
 def test_the_bootstrap_answers_only_its_own_nonce_path(store):

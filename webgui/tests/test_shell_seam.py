@@ -11,6 +11,8 @@ These tests pin the seam as a leaf module both entrypoints can provide.
 import ast
 import pathlib
 
+import shell
+
 _PAGES = pathlib.Path(__file__).resolve().parents[1] / "pages"
 
 
@@ -158,3 +160,36 @@ def test_the_shell_stays_a_leaf_module():
         if isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
     assert roots == {"nicegui", "pages"}, f"shell.py grew imports: {sorted(roots)}"
+
+
+# --- the screenshot session's chrome suppression -----------------------------
+def test_the_capture_css_needs_the_exact_cookie_value():
+    """Presence is not the contract. A stray or empty ns_capture must not
+    suppress a real visitor's disconnect warning -- that banner is the only
+    thing telling the owner their trading UI stopped updating."""
+    assert shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
+    for cookies in (None, {}, {shell.CAPTURE_COOKIE: ""},
+                    {shell.CAPTURE_COOKIE: "0"},
+                    {shell.CAPTURE_COOKIE: "true"},
+                    {"ns_session": "1"}):
+        assert shell.capture_chrome_css(cookies) is None, cookies
+
+
+def test_the_capture_css_hides_the_reconnect_banner_and_nothing_else():
+    """⚠ The blast radius IS the point. This CSS is injected into the real
+    trading app, so a rule that reached further would hide live content from a
+    screenshot and nobody would know which tile was lying."""
+    css = shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
+    selectors = [ln.split("{")[0].strip()
+                 for ln in css.strip().splitlines() if "{" in ln]
+    assert selectors == ["#popup.nicegui-error-popup"], selectors
+
+
+def test_the_public_origin_never_suppresses_its_own_chrome():
+    """⚠ On live.neuralstrike.co a VISITOR can set any cookie they like, so a
+    cookie-gated suppression there would let anyone hide their own disconnect
+    warning on a screen whose whole value is being live. The capture only ever
+    drives the private app on loopback, so live_main must never import this."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "live_main.py").read_text(encoding="utf-8")
+    assert "capture_chrome_css" not in src
+    assert shell.CAPTURE_COOKIE not in src
