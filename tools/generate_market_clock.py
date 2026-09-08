@@ -60,10 +60,21 @@ def _holidays() -> list:
     """Every NYSE full-day closure in the covered years, as ISO strings.
 
     Straight out of ``market_calendar.nyse_holidays`` -- this function invents
-    nothing and must not start to. Note the module's documented year-boundary
-    spill: when 1 Jan falls on a Saturday the observed closure is 31 Dec of the
-    PREVIOUS year, so a year's set can contain a date outside it. Taking the
-    union and sorting handles that without a special case.
+    nothing and must not start to. Note the module's year-boundary spill: when
+    1 Jan falls on a Saturday the observed closure is 31 Dec of the PREVIOUS
+    year, so a year's set can contain a date outside it.
+
+    ⚠ The union handles that spill at the NEAR end only, and an earlier draft of
+    this docstring claimed it handled both. It does not. A closure belonging to
+    the year AFTER the window is simply absent: ``2027-12-31`` is a real closure
+    (1 Jan 2028 is a Saturday) and lives in ``nyse_holidays(2028)``, which a
+    2026+2027 window never asks for.
+
+    That is accepted rather than fixed, because widening the window here would
+    break the test that pins this file to exactly the two-year union -- and it
+    self-heals: the artifact regenerated during 2027 covers 2027+2028 and picks
+    the date up. ``test_the_committed_file_matches_what_the_generator_emits``
+    starts failing on 1 Jan 2027 and is what forces that regeneration.
     """
     days = set()
     for offset in range(YEARS_EMITTED):
@@ -129,7 +140,14 @@ _HEADER = """\
 
 
 def render() -> str:
-    """The file's exact bytes, as a string. Pure -- no disk, no network."""
+    """The file's exact bytes, as a string.
+
+    Pure in the sense that matters here: it WRITES nothing and reaches no
+    network, so it is testable without touching the artifact. It does read
+    ``config/sessions.toml`` transitively through ``market_calendar``'s
+    mtime-cached loader -- said plainly because an unqualified "no disk" would
+    be wrong, and a docstring that overstates gets believed later.
+    """
     open_et, close_et = _session_bounds_et()
     header = _HEADER.format(years=YEARS_EMITTED, close=close_et)
     # json.dumps rather than string formatting: a malformed literal here would
