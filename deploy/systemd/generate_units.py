@@ -53,17 +53,44 @@ def _python():
 def _env_file():
     """The checkout's own ``.env`` -- where every STACK secret lives.
 
-    ``REDIS_LIVE_URL`` (the read-only Redis ACL user the public live screens
-    connect as) belongs here and needs no new path: it is a stack credential
-    like the rest, and every unit already loads this file. ``STREAM_ENV_FILE``
-    is the counter-example, and the difference is OWNERSHIP -- the RTMP key
+    ``ANTHROPIC_API_KEY``, ``TELEGRAM_BOT_TOKEN``, ``PROXY_SHARED_SECRET``,
+    ``SMS_SMTP_APP_PASSWORD``, ``DISCORD_WEBHOOK_URL``, ``MEMURAI_PASSWORD``,
+    ``GAMMA_BRIEFING_WEBHOOK_URL``. ``STREAM_ENV_FILE`` is the counter-example
+    to keeping a secret here, and the difference is OWNERSHIP -- the RTMP key
     belongs to the operator, not to the checkout, so it lives outside it.
 
-    Note the credential is therefore visible to every unit's process, not only
-    the live one. That is not a widening: the ACL user is strictly WEAKER than
-    the one the rest of the stack already holds from this same file.
+    ⚠ **The public live unit does NOT load this file** -- see
+    :func:`_live_env_file`. That is the one exception, and it is about BLAST
+    RADIUS rather than ownership.
     """
     return pathlib.PurePosixPath(REPO_ROOT.as_posix()) / ".env"
+
+
+def _live_env_file():
+    """``.env.live`` -- the PUBLIC process's own, minimal environment.
+
+    ``webgui_live`` is the one internet-facing, unauthenticated process in the
+    fleet, and until 2026-09-07 it loaded the same ``.env`` as everything else:
+    the strongest credential set in the fleet held by the weakest-protected
+    process. It needs exactly two values -- ``REDIS_LIVE_URL`` (the read-only
+    Redis ACL user) and ``MEMURAI_PASSWORD`` (which redis-py uses only when
+    ``REDIS_LIVE_URL`` names a user without a password; a password IN the URL
+    wins over the explicit kwarg ``shared/bus`` passes -- verified, not assumed).
+
+    ⚠ No current code path in this process reads any of the others; the module
+    closure was swept for ``os.environ`` sinks and found none. The split is not
+    a bug fix, it is the difference between "an RCE in NiceGUI costs the public
+    screens" and "an RCE in NiceGUI costs the Anthropic key and the Telegram
+    bot". Blast radius is worth bounding before there is a reason to.
+
+    **No leading '-', deliberately, and the reasoning is now stronger than the
+    house rule.** A ``-`` would start the unit with the file missing -- which
+    means with no ``REDIS_LIVE_URL``, which ``live_main.require_acl_url``
+    refuses to serve prod in anyway. So the dash cannot buy a running process;
+    it can only replace a systemd error naming the exact missing path with a
+    Python one naming the variable. Fail at the more specific message.
+    """
+    return pathlib.PurePosixPath(REPO_ROOT.as_posix()) / ".env.live"
 
 
 def _workdir():
@@ -186,7 +213,11 @@ def _service_text(component, port, script):
                "# local user; it shows only the PATH of an EnvironmentFile.",
                "# No leading '-': a missing file must fail the unit loudly, not",
                "# start a stack that is silently mute.",
-               f"EnvironmentFile={_env_file()}"]
+               # The PUBLIC process gets its OWN minimal file. It is the one
+               # internet-facing, unauthenticated process in the fleet and must
+               # not hold the fleet's strongest credentials -- see
+               # _live_env_file for the whole argument.
+               f"EnvironmentFile={_live_env_file() if is_live else _env_file()}"]
 
     if not is_proxy and not is_webgui and not is_live and OWNS_PROXY:
         # After= orders process START and says nothing about readiness. A dead

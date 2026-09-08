@@ -93,6 +93,12 @@ EXTRA_FILES = (
     # was carried, which meant a restore produced a stack that would not come up
     # and nothing to fix it with.
     ".env",
+    # The PUBLIC live unit's own EnvironmentFile -- REDIS_LIVE_URL and
+    # MEMURAI_PASSWORD, and deliberately NOT the rest of .env. Same argument as
+    # its sibling above: it is loaded with no leading dash, so a restore missing
+    # it produces a live unit that will not start, from an archive that looks
+    # complete.
+    ".env.live",
 )
 
 # Gitignored data trees, swept WHOLE.

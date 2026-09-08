@@ -625,7 +625,11 @@ which is how one would actually arrive.
 **Read-only is FOUR layers, and the three this process installs go in BEFORE any page
 module is imported** — hence `live_main.py`'s `# noqa: E402` import order, which is
 load-bearing rather than untidy: (1) a Redis **ACL user** from `REDIS_LIVE_URL`, the
-structural one, enforced by the server rather than by this process; (2)
+structural one, enforced by the server rather than by this process — ⚠ and the only
+layer that can be **ABSENT while everything looks correct**, since unset it falls back
+to the stack's ordinary full read/write credential, so `live_main.resolve_acl_url`
+warns and `require_acl_url` **refuses to serve prod** without it (dev warns: dev's
+live origin is not fronted by the edge); (2)
 **`bus_client.set_read_only(True)`** — `bus_client.request` is the **single Tier-1
 write chokepoint**, so one refusal covers every command on every page, and on these
 pages that reaches `gamma_analyze` / `gamma_explain` (**paid Claude calls**) and
@@ -652,6 +656,17 @@ belongs to `@pubsub`; `SELECT` (any non-zero `redis_db`) and `PING` to `@connect
 frame and then never repaints — **it reads as a frozen tape, not as a permissions
 error**. Never grant `+publish` (a public process that can publish can spoof repaint
 events to the private app), `@write`, or `@stream` — the streams are `cmd:*`.
+
+⚠ **The live unit loads `.env.live`, NOT the stack's `.env`** — the one exception in
+`generate_units._env_file`, and it is about BLAST RADIUS, not ownership. `.env` carries
+`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PROXY_SHARED_SECRET`,
+`SMS_SMTP_APP_PASSWORD`, `DISCORD_WEBHOOK_URL` and `GAMMA_BRIEFING_WEBHOOK_URL`; the
+public process needs `REDIS_LIVE_URL` + `MEMURAI_PASSWORD` and reads none of the
+others. Neither `.gitignore`'s `.env` line nor `backup_local.EXTRA_FILES`' entry
+matches the new name, so both carry it explicitly. ⚠ **`REDIS_LIVE_URL` carries the
+Redis DB INDEX in its path**, bypassing `repo_paths.REDIS_DB` — prod's line copied
+into dev aims dev's public process at **prod db 0**. Setup:
+[the runbook](docs/dev-prod-environments.md) §2 step 4b.
 
 ⚠ **`cache:options:gamma` is a single SYMBOL-AGNOSTIC slot**, and
 `refresh_gamma_current` reads the symbol back *out* of it, so it is sticky and driven

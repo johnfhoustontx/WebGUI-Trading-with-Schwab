@@ -46,8 +46,23 @@ The Bus reads `MEMURAI_PASSWORD` (the env var kept its name). Prod sets it. To r
 2. Set the env var `MEMURAI_PASSWORD=<password>` for **every** process that starts a Bus
    (proxy is unaffected; the six services, the webgui and the public `webgui_live`
    process all use the Bus — the last of those connects as its own read-only Redis
-   ACL user via `REDIS_LIVE_URL`, which carries its own credential). The simplest way
-   is to set it machine-wide (`setx MEMURAI_PASSWORD ...`) or export it in the launcher.
+   ACL user via `REDIS_LIVE_URL`, which carries its own credential). On Linux that
+   means the checkout's `.env`, which every unit loads via `EnvironmentFile=`.
+
+   ⚠ **`webgui_live` is the exception and loads `.env.live` instead**, a file of
+   its own holding only `REDIS_LIVE_URL` and `MEMURAI_PASSWORD`. It is the one
+   internet-facing, unauthenticated process in the fleet, and `.env` carries
+   `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PROXY_SHARED_SECRET`,
+   `SMS_SMTP_APP_PASSWORD`, `DISCORD_WEBHOOK_URL` and
+   `GAMMA_BRIEFING_WEBHOOK_URL`. No code path in that process reads any of them
+   today; the split bounds what an RCE in NiceGUI would reach. Setup is
+   `docs/dev-prod-environments.md` §2 step 4b; the generator is
+   `deploy/systemd/generate_units.py:_live_env_file`.
+
+   ⚠ **Unset or empty, `REDIS_LIVE_URL` falls back to the stack's ordinary full
+   read/write credential.** `live_main.require_acl_url` refuses to serve prod in
+   that state rather than starting a public process holding it; dev warns and
+   continues, since dev's live origin is not fronted by the edge.
 3. Restart the stack. Unset → `password=None` → no AUTH, exactly as before.
 
 ## What is intentionally NOT done

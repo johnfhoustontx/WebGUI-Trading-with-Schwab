@@ -181,9 +181,20 @@ def _environment_files(text):
 
 
 def test_secrets_come_from_an_EnvironmentFile():
+    """Every service reads its secrets from a FILE in this checkout.
+
+    ⚠ Which file is not uniform, and the exception is load-bearing: the PUBLIC
+    ``webgui_live`` unit loads ``.env.live`` and NOT ``.env`` -- see
+    ``test_the_public_process_does_not_inherit_the_stacks_secrets``. Asserted as
+    "some checkout env file" here so this test keeps saying the thing it means
+    (secrets are not inline) rather than silently becoming a second, weaker copy
+    of the split test below."""
+    live = units.unit_name("webgui_live")
     for name, text in units.render_all().items():
-        if name.endswith(".service"):
-            assert str(POSIX_ROOT / ".env") in _environment_files(text), name
+        if not name.endswith(".service"):
+            continue
+        want = ".env.live" if name == live else ".env"
+        assert str(POSIX_ROOT / want) in _environment_files(text), name
 
 
 def test_the_environment_file_has_no_leading_dash():
@@ -534,22 +545,59 @@ def test_the_live_unit_orders_itself_against_nothing_it_talks_to(rendered):
     assert "ExecStartPre" not in cp["Service"]
 
 
-def test_the_live_redis_credential_rides_the_checkout_env_file():
-    """``REDIS_LIVE_URL`` carries the read-only Redis ACL user. It is a STACK
-    secret like every other one, so it rides the checkout's ``.env`` -- the
-    EnvironmentFile every unit already loads -- and NO new secret path is
-    invented for it. (``STREAM_ENV_FILE`` is the counter-example, and the
-    difference is ownership: the RTMP key belongs to the operator, not to the
-    stack.)
-
-    Asserted as an ABSENCE from ``Environment=``, because that is the failure
-    that matters: ``systemctl show`` prints Environment= to any local user, and
-    ``REDIS_LIVE_URL`` carries a password in a URL, where the generic
-    KEY/TOKEN/PASSWORD/SECRET smell test above cannot see it."""
+def test_the_live_redis_credential_never_lands_in_an_Environment_line():
+    """``REDIS_LIVE_URL`` carries a password inside a URL, where the generic
+    KEY/TOKEN/PASSWORD/SECRET smell test above cannot see it -- and
+    ``systemctl show`` prints every ``Environment=`` to any local user with no
+    privilege. So it is asserted as an ABSENCE, by name."""
     text = units.render_all()[units.unit_name("webgui_live")]
-    assert str(POSIX_ROOT / ".env") in _environment_files(text)
     for value in _directives(text, "Environment"):
         assert "REDIS_LIVE_URL" not in value.upper(), value
+
+
+def test_the_public_process_does_not_inherit_the_stacks_secrets():
+    """⚠ The one internet-facing, unauthenticated process in the fleet must not
+    hold the fleet's strongest credential set.
+
+    ``.env`` supplies ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN,
+    PROXY_SHARED_SECRET, SMS_SMTP_APP_PASSWORD, DISCORD_WEBHOOK_URL,
+    MEMURAI_PASSWORD and GAMMA_BRIEFING_WEBHOOK_URL. The public screens need two
+    values. No current code path in that process reads the others -- this is not
+    a bug fix, it is the difference between "an RCE in NiceGUI costs the public
+    screens" and "an RCE in NiceGUI costs the Anthropic key and the Telegram
+    bot".
+
+    Asserted in BOTH directions. The presence half alone would stay green if
+    someone added ``.env.live`` beside ``.env`` rather than instead of it, which
+    is the shape a "make it work again" edit takes."""
+    live = units.render_all()[units.unit_name("webgui_live")]
+    files = _environment_files(live)
+    assert str(POSIX_ROOT / ".env.live") in files
+    assert str(POSIX_ROOT / ".env") not in files, (
+        "the public process still loads the stack's own .env")
+
+
+def test_no_other_unit_loads_the_public_processs_env_file():
+    """The converse, and the reason it is worth pinning separately: the split
+    only bounds the blast radius if it stays a split. A second unit picking up
+    ``.env.live`` would not break anything visible -- it would just quietly make
+    the public credential a stack-wide one again, from the other end."""
+    live = units.unit_name("webgui_live")
+    for name, text in units.render_all().items():
+        if not name.endswith(".service") or name == live:
+            continue
+        assert str(POSIX_ROOT / ".env.live") not in _environment_files(text), name
+
+
+def test_the_public_env_file_must_exist_for_the_unit_to_start():
+    """No leading '-'. Covered by the file-wide rule above, and pinned again
+    here because the reasoning is stronger for this file than for the others: a
+    '-' would start the unit with no ``REDIS_LIVE_URL``, which
+    ``live_main.require_acl_url`` refuses to serve prod in anyway. The dash
+    cannot buy a running process -- only a vaguer error."""
+    text = units.render_all()[units.unit_name("webgui_live")]
+    assert f"EnvironmentFile={POSIX_ROOT / '.env.live'}" in text
+    assert f"EnvironmentFile=-{POSIX_ROOT / '.env.live'}" not in text
 
 
 # --- the thumbnail capture, a oneshot the TIMER owns -------------------------
