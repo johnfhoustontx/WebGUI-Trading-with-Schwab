@@ -119,6 +119,27 @@ morning = "08:45"     # 09:45 ET
 # reader. Cheap and local -- it reads signals.db, makes no Schwab or Claude call.
 at = "16:30"
 
+[slots.gallery_capture]
+# The App gallery on neuralstrike.co, re-photographed from the PRIVATE app on
+# loopback (tools/capture_gallery_shots.py) so the tiles carry current branding
+# and current numbers. Half an hour after the 08:30 CT regular open, so the
+# screens have painted live data -- a pre-open run publishes a gallery of blank
+# panels and overnight marks.
+#
+# WHAT A FIRING COSTS: 19 page loads against the local web app (three of the 22
+# tiles are Simulator views that live in page state and are deliberately
+# skipped). NO SCHWAB CALL and NO CLAUDE CALL -- unlike [slots.analyze] above,
+# where EACH FIRING IS A PAID CLAUDE CALL, and unlike [slots.income], the
+# largest scheduled Schwab spend on this table. The whole cost here is ~20
+# minutes of a headless Chrome and some CPU on the box that already serves the
+# app.
+#
+# ⚠ Read by SYSTEMD, not by a service scheduler: generate_units.py turns it
+# into trading-<env>-gallery-capture.timer's OnCalendar. Changing this time
+# needs `python -m deploy.systemd.generate_units --install` and a
+# `systemctl --user daemon-reload`; a service restart will not pick it up.
+at = "09:00"     # 10:00 ET
+
 [slots.momentum]
 # The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the
 # day's daily bars have settled at the proxy. Moving it earlier will silently

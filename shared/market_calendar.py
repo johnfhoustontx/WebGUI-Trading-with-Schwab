@@ -272,6 +272,13 @@ _DEFAULTS = {
         "income": {"grace_min": 20, "morning": "08:45"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
+        # The marketing gallery recapture. ⚠ The ONE slot read by systemd
+        # rather than by a service scheduler: deploy/systemd/generate_units.py
+        # turns it into a timer's OnCalendar at unit-GENERATION time, so moving
+        # it needs `generate_units --install` + `daemon-reload`, not a restart.
+        # It still needs a default here like every other slot -- the TOML only
+        # overrides, and a TOML-only slot raises KeyError out of _slot_group.
+        "gallery_capture": {"at": "09:00"},
     },
     "alerts": {"fire_in_extended_hours": False},
 }

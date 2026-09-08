@@ -35,7 +35,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from repo_paths import (ENV_NAME, NICEGUI_LIVE_PORT,  # noqa: E402
                         NICEGUI_PORT, OWNS_PROXY, PROXY_PORT, REPO_ROOT,
                         SERVICE_PORTS)
-from shared.market_calendar import window_bounds  # noqa: E402
+from shared.market_calendar import slot_times, window_bounds  # noqa: E402
 
 
 
@@ -164,6 +164,12 @@ LIVE_CAPTURE_INTERVAL_MIN = 15
 # Slack on top of the derived per-screen budget, for interpreter start and the
 # WebP encodes.
 LIVE_CAPTURE_TIMEOUT_SLACK_SEC = 60
+
+# Slack on top of the gallery run's derived per-shot budget: interpreter start,
+# the WebP encodes, and the cookie-bootstrap server coming up. The verification
+# render is NOT in here -- it is a full render with the same per-shot ceiling
+# and is counted as a shot in _gallery_capture_timeout_seconds.
+GALLERY_CAPTURE_TIMEOUT_SLACK_SEC = 60
 
 
 def target_name():
@@ -578,6 +584,132 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-live-capture.timer": tmr}
 
 
+def _gallery_capture_timeout_seconds():
+    """The unit's ``TimeoutStartSec``, DERIVED from the script's own budget.
+
+    ``tools/capture_gallery_shots.py`` gives each render a wall-clock ceiling
+    (``SHOT_TIMEOUT_SEC``) and renders every shot in ``tools/gallery_screens.py``
+    -- plus ONE more, the session verification render it does before publishing
+    anything, which is why the shot count is taken ``+ 1``.
+
+    Typed as a literal this would be wrong the first time a shot is added, and
+    wrong in the way that costs most here: systemd SIGTERMs the job partway, so
+    some tiles are refreshed and the rest are not, with nothing on the page to
+    say which. ``targets()`` deliberately counts the shots the tool declines to
+    take as well -- a skip is a sub-millisecond branch, so counting it is free
+    and the alternative is a second definition of what the run covers.
+    """
+    from tools import capture_gallery_shots as capture
+
+    renders = len(capture.targets()) + 1
+    return (capture.SHOT_TIMEOUT_SEC * renders
+            + GALLERY_CAPTURE_TIMEOUT_SLACK_SEC)
+
+
+def _gallery_capture_units():
+    """The marketing-gallery recapture: a oneshot the timer owns, plus its timer.
+
+    **Once a trading day, at ``[slots.gallery_capture]``.** ⚠ That is the one
+    ``[slots]`` entry read by systemd rather than by a service scheduler -- the
+    other four are resolved at module import inside ``options_svc`` and
+    ``sentiment_svc``. ``[slots]`` is still the right home for the time: it is a
+    named clock mark that fires once per trading day, exactly what that table
+    models, where ``[windows]`` models a span (which is why ``live_capture``
+    needed one -- it fires every fifteen minutes inside it). The consequence to
+    know is that moving this time needs ``generate_units --install`` and a
+    ``daemon-reload``, not a service restart.
+
+    **Nine o'clock, not eight.** Half an hour after the 08:30 CT regular open,
+    so the pages have painted live data. A pre-open capture publishes a gallery
+    of blank panels over the product's showcase images.
+
+    **No ``Restart=``, deliberately** -- the same reasoning as the live capture.
+    The tool exits non-zero for exactly two things worth telling apart: no
+    browser on the box, which retrying cannot fix, and the app unreachable or
+    the session refused, which the next day picks up. Crucially it publishes
+    NOTHING in the failure case (it verifies the session against a real render
+    first), so a failed run leaves the existing gallery intact and shows up in
+    ``systemctl --user --failed``.
+
+    **No ``After=`` and no ``Requires=`` on the web GUI**, though loopback
+    ``:8500`` is the thing being photographed. Ordering decides BOOT sequence
+    only, and this unit is never started at boot -- the timer starts it
+    mid-session, hours after the stack is up. A ``Requires=`` would be actively
+    worse: it would let a screenshot job pull the trading UI around. The failure
+    it might seem to prevent -- the timer firing during a webgui restart -- is
+    not an ordering problem and is already handled the right way, by publishing
+    nothing and exiting non-zero.
+
+    **The checkout's ``.env``, like every other unit here**, even though this
+    tool needs no environment secret of its own -- it reads the 0600
+    credentials file directly and talks to loopback. Omitting it was considered
+    and rejected: ``test_secrets_come_from_an_EnvironmentFile`` is a file-wide
+    invariant, and buying a marginal blast-radius reduction for a local,
+    owner-run, once-a-day job by carving an exemption into it would let a future
+    unit skip its env file unnoticed. ``webgui_live``'s ``.env.live`` split is
+    the shape to copy if that reduction is ever actually wanted.
+
+    ⚠ **``Mon..Fri`` filters weekends and NOT holidays.** The stream and live
+    capture timers deliberately push that decision down to their scripts,
+    because only the market calendar can see Thanksgiving -- but
+    ``capture_gallery_shots.py`` has no window or trading-day gate at all today.
+    So on a holiday this fires and republishes the gallery from a flat tape.
+    That is a stale-looking gallery, not a broken one, and the honest fix is a
+    gate in the tool (``in_window``/``is_trading_day``), not a holiday table
+    here that would be a second, driftable copy of the calendar.
+    """
+    at = slot_times("gallery_capture")["at"]
+    timeout = _gallery_capture_timeout_seconds()
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - marketing gallery recapture
+# No PartOf and no [Install]: the timer owns this. It is not a member of the
+# fleet -- it is a oneshot that runs for a few minutes once a trading day.
+# A crash-looping unit is retried this many times in this window, then left
+# down and logged.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# No leading '-': the file-wide rule, even though this tool reads no secret
+# from it -- see _gallery_capture_units for why it is not exempted.
+EnvironmentFile={_env_file()}
+# Twenty-two shots plus the verification render, each with its own ceiling.
+# WITHOUT THIS the oneshot inherits DefaultTimeoutStartSec (90s here) and is
+# killed partway through, leaving some tiles refreshed and the rest not.
+TimeoutStartSec={timeout}
+ExecStart={_python()} tools/capture_gallery_shots.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - marketing gallery recapture timer
+
+[Timer]
+# Derived from [slots.gallery_capture] in config/sessions.toml -- the unit and
+# the config cannot disagree about when the gallery is refreshed.
+# NOTE: Mon..Fri excludes weekends only. systemd has no market calendar, and unlike
+# the stream and live-capture scripts this tool carries no trading-day gate, so
+# a holiday firing republishes a flat tape. See _gallery_capture_units.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Deliberately NOT Persistent=true. A missed day is a day of slightly older
+# pictures; a catch-up run would recapture at whatever hour the box came back
+# and publish an overnight or pre-open render -- which is the exact thing the
+# 09:00 slot exists to avoid.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-gallery-capture.service": svc,
+            f"trading-{ENV_NAME}-gallery-capture.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
@@ -585,6 +717,7 @@ def render_all():
     out.update(_backup_units())
     out.update(_stream_units())
     out.update(_live_capture_units())
+    out.update(_gallery_capture_units())
     return out
 
 

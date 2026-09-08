@@ -508,6 +508,19 @@ def test_momentum_is_a_single_nightly_slot():
     assert mc.slot_times("momentum") == {"at": _t(16, 20)}
 
 
+def test_gallery_capture_is_a_single_daily_slot():
+    """The marketing gallery recapture, half an hour after the 08:30 CT regular
+    open so the screens carry live data rather than a pre-open blank.
+
+    ⚠ This is the one slot systemd reads rather than a service scheduler --
+    deploy/systemd/generate_units.py turns it into the timer's OnCalendar at
+    unit-GENERATION time. It still belongs here: it is a named clock mark that
+    fires once per trading day, which is what [slots] models. But it is also why
+    it needs a built-in default like every other slot: the TOML only overrides,
+    and a TOML-only slot raises KeyError out of _slot_group."""
+    assert mc.slot_times("gallery_capture") == {"at": _t(9, 0)}
+
+
 def test_unknown_slot_group_raises():
     """A typo'd group is a programming error, not something to degrade past -
     mirrors _window()."""
