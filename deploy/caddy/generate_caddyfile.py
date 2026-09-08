@@ -61,6 +61,17 @@ from repo_paths import (APP_HOST, ENV_NAME, LIVE_HOST,  # noqa: E402
 # is precisely why its block has to send its own rather than lean on this one.
 HSTS = "max-age=31536000"
 
+# Thumbnail freshness, in seconds. Must stay WELL BELOW the 15-minute
+# [windows.live_capture] interval in config/sessions.toml: at or above it, a
+# visitor can be served a tile older than the one on disk. Derived from nothing
+# on purpose -- the capture interval lives in a config this module may not read,
+# so the relationship is stated here and pinned by a test instead.
+CAPTURE_MAX_AGE = 300
+
+# The two self-hosted woff2 faces. Long, because they are byte-stable for the
+# life of the brand and are the largest repeated download on the site.
+FONT_MAX_AGE = 2592000          # 30 days
+
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
@@ -118,6 +129,42 @@ def _public_block():
     file_server
 
     header Strict-Transport-Security "{HSTS}"
+
+    # -- Caching ------------------------------------------------------------
+    # This site shipped with NO Cache-Control. file_server sends ETag and
+    # Last-Modified but no freshness directive, so browsers fall back to
+    # HEURISTIC caching -- they invent a lifetime and will not even revalidate
+    # until it expires.
+    #
+    # Measured in production the day the live grid shipped: the grid rendered
+    # completely unstyled for a returning visitor, because their browser held a
+    # `site.css` from before the deploy while serving fresh HTML from the same
+    # origin. Nothing was wrong with the deploy.
+    #
+    # NOTE: every filename here is UNVERSIONED (`site.css`, not
+    # `site.abc123.css`), so a freshness lifetime is a promise the next deploy
+    # cannot keep. The fonts are the one exception, below.
+
+    # `no-cache` does NOT mean "do not cache" -- it means "cache, but always
+    # revalidate", which with the ETag already being sent makes the common case
+    # a 304 carrying no body rather than a re-download.
+    @revalidate path / *.html *.css *.js
+    header @revalidate Cache-Control "no-cache"
+
+    # The thumbnails are rewritten under the SAME filenames every 15 minutes.
+    # They cannot be cached long -- but a page view pulls fourteen, and
+    # revalidating each one every view is fourteen round trips for images that
+    # change four times an hour. Well under the capture interval is the trade;
+    # a lifetime at or above it could show a thumbnail older than the one on
+    # disk.
+    @captures path /live/*
+    header @captures Cache-Control "max-age={CAPTURE_MAX_AGE}, must-revalidate"
+
+    # Two self-hosted faces, byte-stable for the life of the brand, and the
+    # largest repeated download on the site. The only thing here allowed to
+    # skip revalidation.
+    @fonts path *.woff2
+    header @fonts Cache-Control "max-age={FONT_MAX_AGE}"
 }}"""
 
 

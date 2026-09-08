@@ -387,3 +387,92 @@ def test_the_apex_robots_file_no_longer_describes_a_placeholder():
     # The correction is not archaeology: the file states the CURRENT division of
     # labour, and points at the origin that owns the other half.
     assert "_live_block" in robots
+
+
+# --- caching -----------------------------------------------------------------
+#
+# The static site shipped with NO Cache-Control at all. Caddy's file_server
+# sends ETag and Last-Modified but no freshness directive, so browsers fall back
+# to HEURISTIC caching -- they invent a lifetime and will not even revalidate
+# until it expires. Measured in production the day the live grid shipped: the
+# grid rendered completely unstyled for a returning visitor, because their
+# browser held a `site.css` from before the deploy while serving fresh HTML.
+#
+# Every filename here is UNVERSIONED (`site.css`, not `site.abc123.css`), so
+# nothing may be cached without revalidation except the fonts.
+
+
+def test_html_css_and_js_revalidate(cfg):
+    """`no-cache` does NOT mean "do not cache" -- it means "cache, but always
+    revalidate", which with the ETag Caddy already sends makes the common case a
+    cheap 304 rather than a re-download.
+
+    These filenames are unversioned, so this is the only correct policy: a
+    freshness lifetime on `site.css` is a promise the deploy cannot keep."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    assert "@revalidate" in block
+    assert re.search(r'header\s+@revalidate\s+Cache-Control\s+"no-cache"', block)
+    for ext in ("*.html", "*.css", "*.js"):
+        assert ext in block, f"{ext} is not matched by the revalidate rule"
+
+
+def test_the_live_captures_go_stale_on_their_own(cfg):
+    """The thumbnails are REWRITTEN under the same filenames every 15 minutes,
+    so they cannot be cached long -- but a page view pulls fourteen of them, and
+    revalidating every one on every view is fourteen round trips for images that
+    change four times an hour. A short lifetime under the capture interval is
+    the trade."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    assert "@captures" in block
+    m = re.search(r'header\s+@captures\s+Cache-Control\s+"max-age=(\d+)', block)
+    assert m, "no Cache-Control on the captures"
+    assert int(m.group(1)) < 900, (
+        "a capture may not outlive the 15-minute capture interval, or the grid "
+        "shows a thumbnail older than the one on disk")
+
+
+def test_the_fonts_are_the_only_thing_cached_without_revalidation(cfg):
+    """Two self-hosted woff2 faces, byte-stable for the life of the brand, and
+    the largest repeated download on the site. Everything else revalidates."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    assert "*.woff2" in block
+    m = re.search(r'header\s+@fonts\s+Cache-Control\s+"max-age=(\d+)', block)
+    assert m and int(m.group(1)) >= 86400
+
+
+def test_caching_is_declared_only_where_the_files_are(cfg):
+    """The app and live blocks are reverse proxies -- their upstream owns its own
+    caching, and a header here would silently override what the app decides."""
+    for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST):
+        assert "Cache-Control" not in _block(cfg, host), (
+            f"{host} is a proxy; it must not dictate caching for its upstream")
+
+
+def test_every_matcher_the_cache_rules_name_is_defined(cfg):
+    """A `header @foo` naming a matcher that was never declared is a Caddy
+    parse error, which takes BOTH sites down at reload -- and these tests assert
+    on a string, so nothing else here would catch it."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    used = set(re.findall(r'header\s+(@\w+)\s+Cache-Control', block))
+    declared = set(re.findall(r'^\s*(@\w+)\s*\{', block, re.M))
+    declared |= set(re.findall(r'^\s*(@\w+)\s+path\s', block, re.M))
+    assert used, "no cache rules found at all"
+    assert used <= declared, f"undeclared matchers: {sorted(used - declared)}"
+
+
+def test_the_generated_config_is_pure_ascii(cfg):
+    """A decorative box-drawing character in a comment is a real, if small,
+    hazard in a file whose failure mode is BOTH sites going down at reload: it
+    survives only as long as every tool in the path -- the generator's write,
+    an editor, a `cat` over ssh, whatever inspects it next -- agrees on UTF-8.
+
+    Caught by writing one: a `⚠` added to a comment here raised
+    UnicodeEncodeError on a Windows console the moment the config was printed.
+    Nothing in the output needs a character outside ASCII, and the file was
+    already clean before that, so this pins what was already true."""
+    offenders = [(i, line) for i, line in enumerate(cfg.splitlines(), 1)
+                 if any(ord(ch) > 127 for ch in line)]
+    assert offenders == [], (
+        "non-ASCII in a generated system config: "
+        + "; ".join(f"line {i}: {line.encode('ascii', 'replace').decode()}"
+                    for i, line in offenders))
