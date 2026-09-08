@@ -17,6 +17,57 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 
+# ── which ORIGIN this process is ─────────────────────────────────────────────
+# A process is either the private app (``main.py``) or the public live site
+# (``live_main.py``) — never both — so this is process state, not per-request
+# state, and it is set once at startup by the entrypoint that knows.
+#
+# It lives HERE, in the seam, because it is the same fact both entrypoints
+# already differ on, and because ``shell.py`` is the one module every page may
+# import and the public entrypoint may too. ⚠ It must stay a LEAF: the route
+# map is PASSED IN by ``live_main`` rather than read from ``live_screens``, so
+# this module keeps importing nothing but ``nicegui`` and ``pages.ui_guard``
+# (``test_shell_seam.test_the_shell_stays_a_leaf_module``).
+_ORIGIN = {"public": False}
+
+
+def publish() -> None:
+    """Declare this process the PUBLIC origin. Called once by ``live_main``."""
+    _ORIGIN["public"] = True
+
+
+def unpublish() -> None:
+    """Undo :func:`publish` (test helper; nothing in the app calls it)."""
+    _ORIGIN["public"] = False
+
+
+def is_public() -> bool:
+    """True when this process serves the unauthenticated live screens."""
+    return _ORIGIN["public"]
+
+
+def may_enqueue() -> bool:
+    """Whether a page built in THIS process may put a command on a ``cmd:`` stream.
+
+    Every such command spends something the owner pays for — a Schwab
+    option-chain fetch against a budget already running 68-76k/day, a paid
+    Claude call, a sentiment refresh that pulls eleven sector chains plus their
+    histories. On the public origin the page is served to anyone with the URL,
+    so a control that reaches one is an open tap.
+
+    ``bus_client.request`` REFUSES an enqueue in that process regardless; that
+    is the backstop, and this is the design — a button that cannot work must not
+    be drawn. Both, not either. (Relying on the backstop alone also costs a full
+    traceback in the journal per click, since ``ui_guard.guard`` re-raises
+    anything that is not the deleted-slot error.)
+
+    Named after ``pages/options/gamma.py``'s ``may_enqueue``, which asks the
+    same question from its own pins: every page resolves it once into a local
+    ``_may_enqueue``, and one source-level test walks the published modules for
+    command sites and checks that local. See ``tests/test_live_commands.py``."""
+    return not _ORIGIN["public"]
+
+
 # ── Page-level CSS both entrypoints inject ───────────────────────────────────
 # These are not nav chrome. They style widgets a PAGE mounts, which is why they
 # live here: `live_main.py` renders the same page modules and cannot import

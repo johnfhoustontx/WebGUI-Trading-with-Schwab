@@ -49,11 +49,13 @@ FORBIDDEN_ROUTES = ("/terminate", "/settings", "/status", "/driver", "/manuals",
 def _restore_process_state():
     """Undo everything importing the entrypoint installs, for the rest of the run."""
     yield
+    import shell
     bus_client.set_read_only(False)
     bus_client.set_url(None)
     bus_client.reset()
     app_settings.unfreeze()
     app_settings.reset_cache()
+    shell.unpublish()
 
 
 def _live_builders():
@@ -201,6 +203,25 @@ def test_it_puts_the_bus_in_read_only_mode_and_freezes_settings():
     assert app_settings.is_frozen()
     with pytest.raises(PermissionError):
         bus_client.request("options", {"type": "gamma_analyze"})
+
+
+def test_it_declares_itself_the_public_origin_to_the_shell():
+    """The layer a PAGE can act on.
+
+    ``bus_client``'s refusal makes an enqueue impossible; it cannot make a
+    button not be drawn, and a drawn one costs a full traceback in journald per
+    anonymous click (``ui_guard.guard`` re-raises anything that is not the
+    deleted-slot error). ``shell.publish()`` is what lets a page decline.
+
+    ⚠ Driven from the ENTRYPOINT. A test calling ``shell.publish()`` itself
+    would prove the pages read the flag and nothing about whether the live
+    process ever sets it — the same consumer-side hole the ``signal_band``
+    incident is the standing example of."""
+    import live_main       # noqa: F401 -- importing installs the refusals
+    import shell
+
+    assert shell.is_public() is True
+    assert shell.may_enqueue() is False
 
 
 def test_the_frozen_settings_carry_every_screen_pin():

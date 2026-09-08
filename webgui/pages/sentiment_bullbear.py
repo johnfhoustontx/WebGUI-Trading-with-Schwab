@@ -215,6 +215,13 @@ _BULLBEAR_CSS = """
 
 
 def render():
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     state = {"payload": None, "ver": None, "days": {}, "cells": [], "sig": None,
              "refresh_until": None}
 
@@ -232,9 +239,11 @@ def render():
                     f"{NT['body']} text-[29px] font-bold leading-tight "
                     "tracking-[-0.01em]")
                 ui.space()
-                ui.button("Refresh", color=None,
-                          on_click=lambda: _request_refresh()) \
-                    .props("flat no-caps dense").classes(_BTN)
+                # Not drawn on the public live origin — see shell.may_enqueue.
+                if _may_enqueue:
+                    ui.button("Refresh", color=None,
+                              on_click=lambda: _request_refresh()) \
+                        .props("flat no-caps dense").classes(_BTN)
             with ui.row().classes("items-center w-full no-wrap gap-4 mt-4"):
                 scores_lbl = ui.label("").classes(
                     f"{_MONO} {NT['caption']} text-[11px] leading-none")
@@ -451,6 +460,8 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_bullbear"})
         ui.notify("Refreshing — the page updates when the new read lands.")
         state["refresh_until"] = monotonic() + REFRESH_WAIT_SEC

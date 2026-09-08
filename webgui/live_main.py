@@ -69,6 +69,15 @@ import shell                                          # noqa: E402
 from nicegui import ui                                # noqa: E402
 from pages.options import theme                       # noqa: E402
 
+# Layer 5, and the only one a PAGE can act on: this process says which origin it
+# is, so a page can decline to draw a control that cannot work here. The pages
+# read it through ``shell.may_enqueue()``; ``bus_client``'s refusal above stays
+# the backstop. Both, not either — relying on the refusal alone leaves live
+# buttons that raise a full traceback into journald on every anonymous click.
+#
+# ⚠ Called BEFORE any page module is imported, for the same reason as 1-3.
+shell.publish()
+
 _STATIC_DIR = _HERE / "static"
 
 # The private app's content container, minus its ``pb-10``. That padding exists

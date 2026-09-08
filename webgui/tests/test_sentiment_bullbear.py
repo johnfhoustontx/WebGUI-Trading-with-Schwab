@@ -117,7 +117,10 @@ def test_the_page_imports_nothing_below_tier_one():
     got = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     got |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
             for a in n.names}
-    assert got <= {"datetime", "time", "bus_client", "nicegui", "pages",
+    # ``shell`` is the page-to-shell seam and is itself Tier 1 — it imports
+    # nothing but ``nicegui`` and ``pages.ui_guard``, pinned by
+    # ``test_shell_seam.test_the_shell_stays_a_leaf_module``.
+    assert got <= {"datetime", "time", "bus_client", "nicegui", "pages", "shell",
                    "pages.options.theme", "pages.rotation_view", "pages.ui_guard"}
 
 

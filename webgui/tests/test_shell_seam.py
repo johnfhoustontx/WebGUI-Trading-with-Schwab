@@ -41,7 +41,8 @@ def test_no_page_imports_main():
 def test_the_seam_exposes_what_the_pages_actually_call():
     import shell
     for name in ("subtab_slot", "bind_breadcrumb_leaf",
-                 "set_breadcrumb_leaf", "_view_name", "play_alert"):
+                 "set_breadcrumb_leaf", "_view_name", "play_alert",
+                 "publish", "unpublish", "is_public", "may_enqueue"):
         assert hasattr(shell, name), f"shell.py is missing {name}"
 
 
