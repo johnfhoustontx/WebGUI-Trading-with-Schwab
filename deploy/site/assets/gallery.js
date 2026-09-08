@@ -1,6 +1,6 @@
 /* NeuralStrike gallery — panel switching, and nothing else.
  *
- * The CONTENT lives in gallery.html: all 16 screens are real elements, already
+ * The CONTENT lives in gallery.html: all 15 screens are real elements, already
  * in the document. This file only decides which one is visible. With scripting
  * off, `.js` is never added to <html>, so the rules that hide a panel never
  * match and they stack into a long scrolling gallery that works fine.

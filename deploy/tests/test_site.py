@@ -265,15 +265,90 @@ def test_the_gallery_shows_every_shot_the_capture_map_names_and_orphans_none():
         f"{sorted(on_disk - referenced)}")
 
 
+def test_the_recaptured_shots_declare_the_capture_tool_s_viewport():
+    """A DECLARED SIZE THAT IS NOT THE FILE'S SIZE LETTERBOXES THE TILE.
+
+    Every shot the tool takes comes out at one fixed geometry, where the
+    original hand-cropped set had twenty-three different ones. The width/height
+    attributes are what stop the page reflowing as each screenshot arrives, so
+    they have to follow the capture viewport rather than the crop that used to
+    be there -- and a wrong pair reads as a CSS bug, not as a stale number.
+
+    Read from ``capture_gallery_shots`` rather than written down, so changing
+    the viewport fails here instead of quietly mis-sizing nineteen tiles.
+
+    The three shots the tool declines keep their own hand-cropped sizes: nothing
+    recaptures them, so their real dimensions do not change.
+    """
+    from tools import capture_gallery_shots as cap
+
+    want = f'width="{cap.VIEWPORT_WIDTH}" height="{cap.VIEWPORT_HEIGHT}"'
+    generated = _regenerated_shot_refs()
+    seen = 0
+    for tag in re.findall(r"<img \S[^>]*>", _markup("gallery.html")):
+        src = re.search(r'src="([^"]+)"', tag)
+        if not src or src.group(1) not in generated:
+            continue
+        seen += 1
+        assert want in tag, f"{src.group(1)} does not declare the capture viewport: {tag}"
+    assert seen == len(generated), (
+        f"{seen} of {len(generated)} recaptured shots have a tile")
+
+
+def test_the_replay_figure_is_not_captioned_as_a_whatif():
+    """THE GALLERY SHIPPED ONE CAPTION OVER ANOTHER TAB'S SCREENSHOT.
+
+    ``image18`` is the Simulator's Replay tab -- the six-panel
+    Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" inside the picture
+    itself -- and it shipped captioned "What-if: over time". Nothing detects
+    that: the tile renders perfectly, and only somebody who knows the app can
+    see that the words and the image disagree.
+
+    Corrected 2026-09-08. Pinned because it is the one defect here that a
+    recapture cannot fix -- the shot is never retaken (see
+    ``unreachable_reason``), so the caption is the only thing that can be wrong.
+    """
+    markup = _markup("gallery.html")
+    tag = re.search(r'<img src="assets/shots/image18\.webp"[^>]*>', markup)
+    assert tag, "image18 has no tile"
+    assert "Replay" in tag.group(0), (
+        f"image18 is the Replay tab and its alt text says otherwise: {tag.group(0)}")
+    assert "What-if: over time" not in markup, (
+        "the retired caption is back over the Replay screenshot")
+
+
 def test_the_rail_and_the_panels_are_the_same_length():
     """gallery.js pairs them by index and bails out if they disagree, so a
     mismatch does not throw -- the gallery just silently stops switching."""
     text = _markup("gallery.html")
     rails = re.findall(r'id="(rail-\d+)"', text)
     panels = re.findall(r'id="(screen-\d+)"', text)
-    assert len(rails) == len(panels) == 16, f"{len(rails)} rail rows, {len(panels)} panels"
+    assert len(rails) == len(panels) == 15, f"{len(rails)} rail rows, {len(panels)} panels"
     for rail, panel in zip(rails, panels):
         assert rail.split("-")[1] == panel.split("-")[1]
+
+
+def test_the_pages_that_COUNT_the_screens_say_how_many_there_are():
+    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE.
+
+    The gallery's header badge and the landing page's call to action both state
+    the number out loud -- "16 screens", "See all 16 screens" -- and both kept
+    saying sixteen after Daily Briefings was dropped, because nothing renders
+    differently when a number in prose is wrong. A visitor counts fifteen.
+
+    Derived from the panels, so the copy cannot be right by luck: the two pages
+    are checked against the same document that decides the answer.
+    """
+    gallery = _markup("gallery.html")
+    panels = len(re.findall(r'id="(screen-\d+)"', gallery))
+    assert panels, "no panels parsed; this test would then assert nothing"
+    for name, pattern in (("gallery.html", r'class="ns-count">(\d+) screens'),
+                          ("index.html", r"See all (\d+) screens")):
+        said = re.findall(pattern, _markup(name))
+        assert said, f"{name} no longer states a screen count; drop it from this test"
+        for n in said:
+            assert int(n) == panels, (
+                f"{name} says {n} screens; the gallery has {panels}")
 
 
 def test_every_rail_row_controls_a_panel_that_exists():
@@ -287,7 +362,7 @@ def test_exactly_one_panel_and_one_shot_start_active():
     """A second `is-active` panel would show two screens at once."""
     text = _markup("gallery.html")
     panels = re.findall(r'<section class="ns-screen[^"]*"[^>]*>', text)
-    assert len(panels) == 16
+    assert len(panels) == 15
     active = [p for p in panels if "is-active" in p]
     assert len(active) == 1, f"{len(active)} panels start active, expected 1"
 
@@ -918,13 +993,20 @@ def test_each_page_carries_its_own_content_without_scripting(pages):
         assert "<nav" in text, f"{name} has no navigation in its source"
 
 
-def test_the_gallery_has_all_sixteen_screen_titles_in_its_source():
+def test_the_gallery_has_all_fifteen_screen_titles_in_its_source():
     """With scripting off the panels stack; the text must therefore be readable
-    without running anything."""
+    without running anything.
+
+    ⚠ RENAMED from ``..._all_sixteen_...`` when Daily Briefings was dropped on
+    2026-09-08. A test called sixteen asserting fifteen is how the next reader
+    is misled about what the site actually shows.
+    """
     text = _markup("gallery.html")
-    assert len(re.findall(r"<h2>", text)) == 16
-    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator", "Daily Briefings"):
+    assert len(re.findall(r"<h2>", text)) == 15
+    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator"):
         assert f"<h2>{title}</h2>" in text, f"{title} is not in the gallery source"
+    assert "Daily Briefings" not in text, (
+        "Daily Briefings was dropped from the gallery; its panel is back")
 
 
 def test_no_page_carries_a_form_or_an_input(pages):

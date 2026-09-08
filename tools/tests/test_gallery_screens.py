@@ -99,13 +99,19 @@ def test_the_table_matches_the_gallery_it_feeds():
             f"{s.title}: shot order disagrees with gallery.html"
 
 
-def test_the_only_section_the_table_drops_is_daily_briefings():
+def test_the_gallery_shows_no_section_the_table_has_dropped():
     """Guards the CONVERSE of the test above, which containment cannot see.
 
     A screen deleted from the table by accident leaves a tile on the site whose
     capture is never refreshed again -- so it keeps the old branding forever,
     which is the exact defect this whole exercise exists to fix.
+
+    ⚠ This allowed exactly one exception, ``Daily Briefings``, for as long as
+    the table had dropped that screen and the HTML still carried its panel. The
+    panel is gone (2026-09-08) and so is the exception: the two sides now agree
+    exactly, which is a stronger statement than the one it replaces and the
+    reason the name changed with it.
     """
     in_html = [t for t, _ in _gallery_sections()]
     dropped = [t for t in in_html if t not in {s.title for s in g.SCREENS}]
-    assert dropped == ["Daily Briefings"]
+    assert dropped == [], f"gallery.html still shows sections the table dropped: {dropped}"

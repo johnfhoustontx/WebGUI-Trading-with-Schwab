@@ -519,7 +519,7 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 /* ─── 7. Gallery ─────────────────────────────────────────────────────────
  *
  * PROGRESSIVE ENHANCEMENT, and it is the reason these pages were rebuilt
- * rather than copied from the design's bundle. Every one of the 16 screens is
+ * rather than copied from the design's bundle. Every one of the 15 screens is
  * a real element in gallery.html. With no JavaScript the panels simply stack
  * and the page is still a usable gallery; gallery.js adds `js` to <html>,
  * which is what turns the stack into a rail-plus-viewer.
@@ -660,8 +660,8 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 
 /* ─── 7b. The rail becomes a horizontal chip row on narrow screens ───────
  *
- * A 16-item vertical list is fine as a sidebar and wrong as a preamble: below
- * the stacking width it put 16 screen names between the visitor and the first
+ * A 15-item vertical list is fine as a sidebar and wrong as a preamble: below
+ * the stacking width it put 15 screen names between the visitor and the first
  * screenshot. As chips it reads as what it is — a picker — and costs one row.
  *
  * ⚠ THE BREAKPOINT ALSO FORCES THE STACK, and that is the point of stating it

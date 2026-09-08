@@ -135,10 +135,13 @@ SCREENS = (
     )),
     # ⚠ ONE CAPTION, THREE PAGES, and the order is the HTML's (17 before 16).
     # Mapped from the breadcrumbs in the shipped captures rather than from the
-    # tab labels above them, and one of the five does not survive that: the
-    # figure captioned "What-if: over time" is the Simulator's REPLAY tab -- the
-    # six-panel Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" in the
-    # shot itself. Its caption would have sent a capture to the What-if tab.
+    # tab labels above them, and one of the five did not survive that: image18
+    # was captioned "What-if: over time" and is the Simulator's REPLAY tab --
+    # the six-panel Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" in
+    # the shot itself. Reading the tab label would have sent its capture to the
+    # What-if tab. The SITE's caption was corrected to match the picture on
+    # 2026-09-08 ("Replay bar by bar"); the label is not what this table joins
+    # on, so nothing here changed with it.
     Screen("Strategy Calculator", (
         Shot("image14", "/options/calculator"),
         Shot("image15", "/options/expected-move"),
