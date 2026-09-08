@@ -18,7 +18,13 @@ import, which is how such a thing would actually arrive.
 Read-only is enforced at four layers, of which this file installs three:
 
 1. a Redis ACL user with read commands only (from ``REDIS_LIVE_URL``) — the
-   STRUCTURAL one, enforced by the server rather than by this process;
+   STRUCTURAL one, enforced by the server rather than by this process. ⚠ It is
+   the one layer that can be ABSENT while everything looks correct: unset, the
+   Bus falls back to the stack's ordinary full read/write credential. Nothing
+   in the generated unit sets the variable — the unit loads a FILE, and a
+   forgotten line, an empty value or a typo all land in the same place. So
+   ``resolve_acl_url`` warns and ``require_acl_url`` refuses to serve prod
+   without it;
 2. ``bus_client.set_read_only(True)`` — refuses every command enqueue, which on
    these pages covers ``gamma_analyze`` and ``gamma_explain`` (PAID Claude
    calls) and ``gamma_refresh`` / sentiment ``refresh`` (Schwab fetches against
@@ -43,9 +49,11 @@ it — ``ticker_enabled`` defaults True, so this process would re-enable the
 ~20-minute paid Claude verdict the owner may have deliberately switched off.
 """
 import importlib
+import logging
 import os
 import pathlib
 import sys
+import urllib.parse
 
 _HERE = pathlib.Path(__file__).resolve().parent
 for _p in (str(_HERE.parent), str(_HERE)):
@@ -56,12 +64,116 @@ import app_settings                                   # noqa: E402
 import bus_client                                     # noqa: E402
 import live_screens                                   # noqa: E402
 
-from repo_paths import LIVE_HOST, NICEGUI_LIVE_PORT   # noqa: E402
+from repo_paths import (ENV_NAME, LIVE_HOST,          # noqa: E402
+                        NICEGUI_LIVE_PORT, REDIS_DB)
+
+log = logging.getLogger("webgui.live")
+
+# The environment variable carrying the read-only Redis ACL user. Named once so
+# every message below spells it the same way the operator has to type it.
+ACL_URL_VAR = "REDIS_LIVE_URL"
+
+
+def _db_index(url):
+    """The Redis DB index a connection URL selects, or ``None`` if it names none.
+
+    ``redis://user:pw@host:6379/1`` selects db 1. The index is the URL's PATH,
+    which is precisely why it is worth reading back out: ``REDIS_LIVE_URL``
+    carries it, so it BYPASSES ``repo_paths.REDIS_DB`` -- the one value that
+    keeps dev off prod's data. A URL copied from prod's env file into dev's
+    points dev's public process at **prod db 0**, and every published screen
+    then renders prod's real book while looking like dev.
+
+    Returns ``None`` rather than 0 for a URL with no path, because "unstated"
+    and "explicitly db 0" are different claims and only one of them is worth
+    warning about.
+    """
+    try:
+        path = urllib.parse.urlparse(url).path.strip("/")
+    except ValueError:                      # a malformed URL is the Bus's problem
+        return None
+    return int(path) if path.isdigit() else None
+
+
+def resolve_acl_url(environ=None):
+    """``REDIS_LIVE_URL`` from the environment, with the fallback made LOUD.
+
+    Unset, this returns ``None`` and ``Bus`` falls back to ``MEMURAI_URL`` --
+    **the same full read/write credential every service in the stack holds**.
+    That is layer 1 of the four this file's docstring lists, and it is the only
+    one the server rather than this process enforces, so losing it silently is
+    the whole four-layer design quietly becoming three.
+
+    ⚠ This function only WARNS. Refusing is :func:`require_acl_url`'s job, and
+    it is deliberately a separate step: importing this module must stay possible
+    on a box with no ACL user (the test suite does it, and so does anyone
+    reading the route table), while SERVING without one must not.
+
+    It also warns when the URL selects a Redis DB other than this checkout's --
+    see :func:`_db_index`.
+    """
+    environ = os.environ if environ is None else environ
+    url = (environ.get(ACL_URL_VAR) or "").strip() or None
+    if url is None:
+        log.warning(
+            "%s is not set: the PUBLIC read-only screens will connect to Redis "
+            "as the stack's ordinary full read/write user. The Redis ACL is the "
+            "only read-only layer the SERVER enforces; without it the four-layer "
+            "design is three, all of them in-process.", ACL_URL_VAR)
+        return None
+    db = _db_index(url)
+    if db is not None and db != REDIS_DB:
+        log.warning(
+            "%s selects Redis db %s but this is the %r checkout, which uses db "
+            "%s. The public screens will publish ANOTHER environment's data.",
+            ACL_URL_VAR, db, ENV_NAME, REDIS_DB)
+    return url
+
+
+def require_acl_url(url, env_name=ENV_NAME):
+    """Refuse to SERVE prod's public origin without the read-only credential.
+
+    **Prod refuses; anything else warns and continues.** The asymmetry is the
+    whole decision, and both halves cost something:
+
+    * In **prod** this process is on the public internet with no login. Starting
+      it holding a credential that can ``SET`` every cache key and ``XADD`` every
+      command stream is exactly the failure this repo keeps paying for -- a
+      control that reads as configured and does not exist. A refusal is loud,
+      lands in ``systemctl --user --failed`` next to a journal line naming the
+      variable, and is recoverable in the seconds it takes to add one line to
+      ``.env.live``. The cost is that the public screens are down until then;
+      the alternative cost is that they are up and unprotected, which nothing
+      reports.
+    * In **dev** the origin is not fronted by Caddy at all -- the Caddyfile
+      generator refuses to run outside prod -- so there is no public exposure to
+      protect, and a dev box may legitimately have no ACL user provisioned.
+      Refusing there would block the standing rule that work is *verified
+      running in dev* before it is promoted, which buys nothing.
+
+    ⚠ Called from the ``__main__`` block, NOT from the module body. Import must
+    stay possible without the credential (see :func:`resolve_acl_url`).
+    """
+    if url:
+        return
+    if env_name == "prod":
+        raise SystemExit(
+            f"refusing to serve the PUBLIC live screens without {ACL_URL_VAR}.\n"
+            f"Unset, this process connects to Redis as the stack's ordinary "
+            f"full read/write user -- on an origin with no login.\n"
+            f"Put the read-only ACL user's URL in {ACL_URL_VAR} in this "
+            f"checkout's .env.live and restart.")
+    log.warning(
+        "serving the public live screens WITHOUT %s. Allowed because this is "
+        "the %r checkout, whose live origin is not fronted by the edge; prod "
+        "refuses.", ACL_URL_VAR, env_name)
+
 
 # ── The refusals, installed before any page module is imported ───────────────
-# REDIS_LIVE_URL carries the read-only ACL user. Unset -> the ordinary URL, so a
-# dev box without the ACL still runs; prod's unit always sets it.
-bus_client.set_url(os.environ.get("REDIS_LIVE_URL") or None)
+# Layer 1: the read-only Redis ACL user. Unset -> the ordinary URL, WARNED about
+# here and REFUSED outright before serving in prod (require_acl_url, below).
+_ACL_URL = resolve_acl_url()
+bus_client.set_url(_ACL_URL)
 bus_client.set_read_only(True)
 app_settings.freeze(live_screens.SETTINGS_PINS)
 
@@ -163,6 +275,10 @@ for _screen in live_screens.SCREENS:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    # ⚠ BEFORE ui.run, and this ordering is the point: a check that runs after
+    # the server is listening has already served the first anonymous request
+    # with the stack's write credential in hand.
+    require_acl_url(_ACL_URL)
     # 127.0.0.1 only. Caddy terminates TLS for LIVE_HOST and is the only thing
     # that should ever talk to this port — the same rule the app follows, and
     # for the same reason. ⚠ Never widen this to 0.0.0.0.

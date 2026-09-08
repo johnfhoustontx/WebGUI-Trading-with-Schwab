@@ -450,3 +450,160 @@ def test_the_unlock_handler_refuses_even_if_the_button_is_reached(monkeypatch):
     monkeypatch.setattr(app_settings, "load", lambda: {"voice_enabled": True})
     asyncio.run(handler())
     assert calls, "the test never reached the synthesizer at all"
+
+
+# --- layer 1: the read-only Redis ACL credential ----------------------------
+# ⚠ The layer that can be ABSENT while everything looks correct. Unset, the Bus
+# falls back to MEMURAI_URL -- the same full read/write credential every service
+# holds -- and no page, badge or health probe says so. These tests exist because
+# a control that reads as configured and does not exist is this repo's most
+# expensive recurring shape.
+
+def _live_main():
+    import live_main
+    return live_main
+
+
+def test_a_missing_acl_credential_warns_and_names_the_consequence(caplog):
+    """WARNING, not silence. The old code's only trace of this was a comment
+    claiming "prod's unit always sets it" -- which was false: the unit loads a
+    FILE, and a forgotten line lands here with nothing said."""
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.resolve_acl_url({}) is None
+    text = caplog.text
+    assert live_main.ACL_URL_VAR in text
+    assert "read/write" in text, "the warning must name what is lost, not just the variable"
+
+
+def test_an_empty_or_blank_credential_counts_as_missing(caplog):
+    """`REDIS_LIVE_URL=` in an env file is a PRESENT variable with an empty
+    value, and systemd passes it through. So is a line with a stray space."""
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.resolve_acl_url({live_main.ACL_URL_VAR: ""}) is None
+        assert live_main.resolve_acl_url({live_main.ACL_URL_VAR: "   "}) is None
+    assert caplog.text.count(live_main.ACL_URL_VAR) >= 2
+
+
+def test_a_present_credential_is_used_verbatim_and_says_nothing(caplog):
+    live_main = _live_main()
+    import repo_paths
+    url = f"redis://live:pw@127.0.0.1:6379/{repo_paths.REDIS_DB}"
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.resolve_acl_url({live_main.ACL_URL_VAR: url}) == url
+    assert caplog.text == "", f"a correct credential must be quiet: {caplog.text!r}"
+
+
+def test_a_credential_pointing_at_another_environments_db_warns(caplog):
+    """``REDIS_LIVE_URL`` carries the DB INDEX in its path, so it BYPASSES
+    ``repo_paths.REDIS_DB`` -- the one value that keeps dev off prod's data. A
+    URL copied from prod's env file into dev's aims dev's public process at prod
+    db 0, and every screen then renders prod's real book while looking like dev."""
+    live_main = _live_main()
+    import repo_paths
+    other = 1 if repo_paths.REDIS_DB == 0 else 0
+    url = f"redis://live:pw@127.0.0.1:6379/{other}"
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.resolve_acl_url({live_main.ACL_URL_VAR: url}) == url
+    assert str(other) in caplog.text and str(repo_paths.REDIS_DB) in caplog.text
+
+
+def test_a_url_naming_no_db_is_not_reported_as_a_mismatch(caplog):
+    """"Unstated" and "explicitly the wrong db" are different claims. Warning on
+    the first would train the operator to ignore the second."""
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        live_main.resolve_acl_url({live_main.ACL_URL_VAR: "redis://live:pw@127.0.0.1:6379"})
+    assert caplog.text == ""
+
+
+def test_prod_refuses_to_serve_without_the_credential():
+    live_main = _live_main()
+    with pytest.raises(SystemExit) as exc:
+        live_main.require_acl_url(None, env_name="prod")
+    assert live_main.ACL_URL_VAR in str(exc.value)
+    assert ".env.live" in str(exc.value), "the message must say where to put it"
+
+
+def test_dev_is_allowed_to_serve_without_the_credential(caplog):
+    """Dev's live origin is not fronted by the edge at all -- the Caddyfile
+    generator refuses to run outside prod -- so there is no public exposure to
+    protect, and refusing would block the standing "verify running in dev" rule."""
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.require_acl_url(None, env_name="dev") is None
+    assert live_main.ACL_URL_VAR in caplog.text
+
+
+def test_a_credential_is_accepted_without_comment(caplog):
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.require_acl_url("redis://live:pw@h:6379/0", env_name="prod") is None
+    assert caplog.text == ""
+
+
+def test_the_refusal_runs_before_the_server_starts():
+    """⚠ The ORDERING is the point. A check that runs after ``ui.run`` has
+    already served the first anonymous request holding the write credential.
+
+    Read off the ``__main__`` block's statement list rather than as a substring,
+    so a mention in a comment cannot satisfy it -- the same instrument
+    ``test_it_binds_loopback_only`` uses, for the same reason."""
+    tree = ast.parse(_LIVE_MAIN.read_text(encoding="utf-8"))
+    guards = [n for n in tree.body if isinstance(n, ast.If)]
+    assert guards, "no __main__ guard in the entrypoint"
+    calls = [n.func.attr if isinstance(n.func, ast.Attribute) else n.func.id
+             for g in guards for n in ast.walk(g) if isinstance(n, ast.Call)
+             and isinstance(n.func, (ast.Name, ast.Attribute))]
+    assert "require_acl_url" in calls, \
+        "the __main__ block does not call the refusal at all"
+    assert calls.index("require_acl_url") < calls.index("run"), \
+        "the credential is checked AFTER ui.run -- the server is already public"
+
+
+# --- the same property, driven from a real process --------------------------
+# ⚠ The three tests above call the primitives. This one runs the entrypoint the
+# way the unit does. A consumer-side assertion never driven from the producer
+# proves nothing -- CLAUDE.md's ``signal_band`` incident is the standing example.
+
+_SERVE_PROBE = (
+    "import runpy, sys, nicegui.ui;"
+    "nicegui.ui.run = lambda *a, **k: print('SERVED');"
+    "runpy.run_path(sys.argv[1], run_name='__main__')"
+)
+
+
+def _serve(acl_url):
+    """Run ``live_main.py`` as ``__main__`` with ``ui.run`` stubbed out."""
+    import os as _os
+    env = dict(_os.environ)
+    env.pop("REDIS_LIVE_URL", None)
+    # The child must NOT present as pytest: repo_paths keys that off
+    # ``"pytest" in sys.modules``, and under it ENV_NAME is pinned to prod
+    # regardless of the marker -- which is what makes the dev branch reachable.
+    env.pop("PYTEST_CURRENT_TEST", None)
+    if acl_url is not None:
+        env["REDIS_LIVE_URL"] = acl_url
+    return subprocess.run([sys.executable, "-c", _SERVE_PROBE, str(_LIVE_MAIN)],
+                          capture_output=True, text=True, timeout=180,
+                          cwd=str(_LIVE_MAIN.parent.parent), env=env)
+
+
+def test_a_real_prod_process_will_not_serve_without_the_acl_user():
+    """THE PRODUCTION PROPERTY. ``REDIS_LIVE_URL`` unset, in a process that
+    looks like the systemd unit's: it must never reach ``ui.run``."""
+    out = _serve(None)
+    assert out.returncode != 0, (
+        f"the public entrypoint SERVED with no ACL credential: {out.stdout!r}")
+    assert "SERVED" not in out.stdout
+    assert "REDIS_LIVE_URL" in out.stderr, out.stderr
+
+
+def test_a_real_prod_process_serves_once_the_acl_user_is_given():
+    """Non-vacuity partner: the refusal must be about the credential and not
+    about anything else the entrypoint does on its way to ``ui.run``."""
+    import repo_paths
+    out = _serve(f"redis://live:pw@127.0.0.1:6379/{repo_paths.REDIS_DB}")
+    assert out.returncode == 0, out.stderr
+    assert "SERVED" in out.stdout, out.stdout
