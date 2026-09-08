@@ -410,7 +410,78 @@ unaffected. So the unit will not come up until Phase 6 puts the file in place.
 
 ---
 
-## Phase 6 — promote, then check
+## Phase 6 — promote, then check ✅ DONE 2026-09-07 (except Caddy)
+
+**Promoted `7069d35` → `e9b3a81`, 44 commits.** `requirements.lock` unchanged,
+so no dependency reinstall.
+
+| | |
+|---|---|
+| Trading stack after | 8 units **active running**; proxy `:8100/health` 200, webgui `:8500/desk` 200 |
+| `webgui_live` on first start | **failed, alone** — `Failed to load environment files` (no `.env.live` yet). Exactly the designed refusal; nothing else affected |
+| After `cp` of the credential | `git check-ignore` confirms `.gitignore:37:.env.live`, **tree stays clean**, unit active on 127.0.0.1:8501 |
+| 14 published routes | all 200 |
+| `/terminate` `/settings` `/driver` `/options/paper` `/login` | all 404 |
+| Capture timer | enabled, first fire 22:00 (stood down — outside the window) |
+| Staleness | units started 21:58 against a 21:30 commit — not stale |
+
+**The per-symbol publish works in production**, which was the last real unknown:
+
+```
+$SPX -> symbol='$SPX'  spot=7718.6   views=[Charm, DEX, GEX, Vanna]
+SPY  -> symbol='SPY'   spot=770.19   views=[Charm, DEX, GEX, Vanna]
+QQQ  -> symbol='QQQ'   spot=718.96   views=[Charm, DEX, GEX, Vanna]
+```
+
+and **only `gamma_pub_hist_$SPX_gex` exists** — the Task-3c history narrowing
+holds on the real box, so SPY and QQQ pay for no history at all.
+
+Rendered and confirmed in a browser: `/premium-divergence/spy` shows SPY
+(`SPOT 769.96 · NET +7.48`), `/premium-divergence/qqq` shows QQQ
+(`SPOT 718.72 · NET +98.25`), neither mentions the other or `$SPX`; `/gamma`
+draws `Spot 7718.6 · Call wall 7720` with charts at 550×680, 826×680, 826×150.
+
+⚠ **A 0×0 chart reading is usually the PANE, not the app.** Measured 20×680
+once and nearly reported a collapse — `innerWidth` was **0** because the browser
+pane had collapsed. Always print the viewport beside the chart size.
+
+### ⚠ STILL OPEN: Caddy needs sudo
+
+`live.neuralstrike.co` is **not yet served** — the generated Caddyfile is not
+installed, so nothing answers on :443 for that name. The generator's `--install`
+writes a root-owned path and `sudo` prompts for a password on this box, so these
+three are yours to run:
+
+```bash
+cd /home/administrator/dev && sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
+```
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+The diff is **purely additive** — one `live.neuralstrike.co` block between the
+apex and app blocks, 38 → 66 lines, nothing removed or changed. ⚠ Validate
+before reloading: a bad Caddyfile takes **both** existing sites down.
+
+Then finish:
+
+- [ ] `https://live.neuralstrike.co/desk` loads over TLS (Caddy will request the
+      certificate on reload; DNS already resolves to 63.141.255.25)
+- [ ] `https://live.neuralstrike.co/robots.txt` returns `Disallow: /`
+- [ ] `https://neuralstrike.co/live.html` shows the grid — **it will show empty
+      tiles until the first in-window capture**, since prod's
+      `deploy/site/live/` is still empty
+- [ ] **Re-run Phase 4 in-window** and confirm the three gamma-family captures
+      grow past ~9 KB now that `gamma_pub` exists
+- [ ] The **collection-cadence** check below, after an hour of market hours
+- [ ] Delete the scratch checkout: `rm -rf /home/administrator/live-check`
+
+### The steps, for reference
 
 ```bash
 cd /home/administrator/dev && ./tools/promote.sh
