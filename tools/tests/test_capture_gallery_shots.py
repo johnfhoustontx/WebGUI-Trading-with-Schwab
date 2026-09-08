@@ -536,3 +536,34 @@ def test_the_shots_git_still_carries_are_exactly_the_ones_nothing_regenerates():
     assert tracked == kept, (
         f"tracked but rewritten by every capture run: {sorted(tracked & regenerated)}; "
         f"nothing regenerates them and git does not carry them: {sorted(kept - tracked)}")
+
+
+def test_the_settle_wait_stays_under_the_gamma_pages_auto_refresh_cadence():
+    """⚠ SETTLE_MS IS ONE COMMENT AWAY FROM BUYING A DAILY SCHWAB FETCH.
+
+    ``/options/gamma`` mounts ``ui.timer(120.0, _auto_refresh)`` when the page
+    may enqueue, and that callback enqueues a ``gamma_refresh`` -- a real chain
+    fetch against a budget already running at 68-76k calls a day. The unpinned
+    gamma tile is captured with ``_may_enqueue`` true, so that timer exists on
+    it; the capture costs nothing today only because Chrome is torn down after
+    ``SETTLE_MS`` (12s) and the first fire never arrives.
+
+    Nothing else states that relationship, and the capture tool's own comment
+    invites raising the settle time ("the cheap thing to try if captures come
+    back showing skeletons"). Raised past the cadence it stops being a rendering
+    tweak and becomes a scheduled paid fetch, with nothing on the page or in the
+    log to say so. Half the cadence is the bar, not the whole of it: at 119s the
+    margin would be one slow page load.
+
+    Read out of the source rather than imported -- ``gamma`` pulls in nicegui
+    and the whole page module, and this is a one-number fact.
+    """
+    src = (pathlib.Path(__file__).resolve().parents[2]
+           / "webgui" / "pages" / "options" / "gamma.py").read_text(encoding="utf-8")
+    found = re.findall(r"ui\.timer\(([\d.]+),\s*_auto_refresh\)", src)
+    assert len(found) == 1, f"expected one gamma auto-refresh timer, found {found}"
+    cadence_ms = float(found[0]) * 1000
+    assert c.SETTLE_MS < cadence_ms / 2, (
+        f"SETTLE_MS={c.SETTLE_MS}ms is no longer comfortably under the "
+        f"{cadence_ms:.0f}ms gamma auto-refresh -- the capture would enqueue a "
+        f"chain fetch on every run")

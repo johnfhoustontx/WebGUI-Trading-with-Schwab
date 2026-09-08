@@ -584,6 +584,20 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-live-capture.timer": tmr}
 
 
+def _gallery_capture_shot_counts():
+    """``(budgeted, skipped)`` -- what the unit's comment states about the run.
+
+    Both numbers are read from the capture tool rather than typed, because the
+    first draft of this file typed one of them and it was already wrong: the
+    comment said twenty-two renders happen when nineteen do. A count in a
+    generated artifact is prose an operator reads at 09:00 on a bad morning, and
+    a second definition of a fact is the thing this generator exists to avoid.
+    """
+    from tools import capture_gallery_shots as capture
+
+    return len(capture.targets()), len(capture.unreachable_shots())
+
+
 def _gallery_capture_timeout_seconds():
     """The unit's ``TimeoutStartSec``, DERIVED from the script's own budget.
 
@@ -611,7 +625,8 @@ def _gallery_capture_units():
 
     **Once a trading day, at ``[slots.gallery_capture]``.** ⚠ That is the one
     ``[slots]`` entry read by systemd rather than by a service scheduler -- the
-    other four are resolved at module import inside ``options_svc`` and
+    other five (``analyze``, ``action_alert``, ``income``, ``calibration``,
+    ``momentum``) are resolved at module import inside ``options_svc`` and
     ``sentiment_svc``. ``[slots]`` is still the right home for the time: it is a
     named clock mark that fires once per trading day, exactly what that table
     models, where ``[windows]`` models a span (which is why ``live_capture``
@@ -660,6 +675,7 @@ def _gallery_capture_units():
     """
     at = slot_times("gallery_capture")["at"]
     timeout = _gallery_capture_timeout_seconds()
+    budgeted, skipped = _gallery_capture_shot_counts()
 
     svc = f"""[Unit]
 Description=NeuralStrike {ENV_NAME} - marketing gallery recapture
@@ -680,7 +696,9 @@ Environment=TZ=America/Chicago
 # No leading '-': the file-wide rule, even though this tool reads no secret
 # from it -- see _gallery_capture_units for why it is not exempted.
 EnvironmentFile={_env_file()}
-# Twenty-two shots plus the verification render, each with its own ceiling.
+# Budgeted for all {budgeted} shots plus the verification render, each with its
+# own ceiling. {skipped} of those are skipped today (page state, no URL to reach
+# them by), so the real run is shorter -- this is a ceiling, not an estimate.
 # WITHOUT THIS the oneshot inherits DefaultTimeoutStartSec (90s here) and is
 # killed partway through, leaving some tiles refreshed and the rest not.
 TimeoutStartSec={timeout}

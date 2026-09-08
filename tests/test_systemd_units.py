@@ -863,6 +863,29 @@ def test_the_gallery_capture_has_a_timeout_derived_from_the_shot_count(rendered)
     svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
     timeout = int(svc["Service"]["TimeoutStartSec"])
     assert timeout > capture.SHOT_TIMEOUT_SEC * len(capture.targets())
+    # ⚠ The bound above pins the HELPER only. Without this line the rendered
+    # unit could carry a typed literal that happens to satisfy it -- measured:
+    # hardcoding TimeoutStartSec=1440 into the template passed the whole file.
+    assert timeout == units._gallery_capture_timeout_seconds()
+
+
+def test_the_gallery_units_state_shot_counts_they_read_rather_than_type():
+    """The unit ships an operator-facing comment naming how many renders it
+    budgets for and how many are skipped. The first draft TYPED those and was
+    already wrong -- it said twenty-two renders happen where nineteen do, while
+    the sessions.toml comment beside it said nineteen. Mutating either count
+    must move the shipped text, which a typed one would not.
+    """
+    from tools import capture_gallery_shots as capture
+
+    budgeted, skipped = units._gallery_capture_shot_counts()
+    assert (budgeted, skipped) == (len(capture.targets()),
+                                   len(capture.unreachable_shots()))
+    # render_all(), not the `rendered` fixture: configparser drops comments,
+    # and the comment IS the subject here.
+    text = units.render_all()[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert f"all {budgeted} shots" in text
+    assert f"{skipped} of those are skipped" in text
 
 
 def test_the_gallery_timeout_moves_with_the_shot_count(monkeypatch):
