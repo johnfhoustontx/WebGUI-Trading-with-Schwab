@@ -6,7 +6,7 @@ cannot see, and which a browser only reveals to whoever looks at the live page.
 
 Three failure modes motivate the file, all of them silent:
 
-* **a renamed or missing screenshot.** The gallery references 24 images by
+* **a renamed or missing screenshot.** The gallery references 22 images by
   path. Nothing breaks at deploy time; the page simply shows a broken image to
   every visitor until somebody scrolls to that screen.
 * **a leaked reference to the app.** The public site must not name the app's
@@ -70,6 +70,35 @@ ALLOWED_OUTBOUND = (
 # checked against webgui/live_screens.py, which is also what the capture script
 # names its files from.
 GENERATED_REF_PREFIXES = ("live/",)
+
+
+def _regenerated_shot_refs():
+    """The gallery ``src`` values ``tools/capture_gallery_shots.py`` rewrites.
+
+    The SAME exemption as ``GENERATED_REF_PREFIXES``, deliberately NOT folded
+    into it: a prefix covering ``assets/shots/`` would exempt the whole
+    directory, and three of those files -- the Simulator shots the tool declines
+    (``unreachable_reason``) -- are ordinary committed images that nothing
+    regenerates. A rename of one of those is exactly what the reference check
+    exists to catch, so they stay checked and only the generated ones are
+    skipped.
+
+    ⚠ Imported inside the function. ``capture_gallery_shots`` APPENDS
+    ``webgui/`` to ``sys.path`` to reach the credential modules it mints a
+    cookie with, and ``webgui/`` holds top-level ``main``, ``proxy``, ``auth``
+    and ``wall``. Appending is the safe end (see that module's own note, and
+    ``_live_screens`` below for why an insert would not be), and
+    ``tools/tests`` already pays exactly this cost in the same pytest session --
+    so this changes nothing about the session, while a hand-written list of
+    three filenames here would drift the first time a shot changes hands.
+    """
+    from tools import capture_gallery_shots as cap
+    from tools import gallery_screens
+
+    return {f"assets/shots/{sh.image}.webp"
+            for scr in gallery_screens.SCREENS for sh in scr.shots
+            if not cap.unreachable_reason(sh)}
+
 
 # Attributes that make the browser fetch something or follow somewhere.
 REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
@@ -139,15 +168,16 @@ def test_every_internal_reference_resolves_to_a_file(pages):
     invisible until one scrolls to it, so neither shows up in any other check
     here -- and by then it is on the public internet.
 
-    ``GENERATED_REF_PREFIXES`` is skipped: those files are written on the
-    serving box, not committed. See that constant for why, and for what pins
-    them instead.
+    ``GENERATED_REF_PREFIXES`` and ``_regenerated_shot_refs`` are skipped: those
+    files are written on the serving box, not committed. See both for why, and
+    for what pins them instead.
     """
+    generated_shots = _regenerated_shot_refs()
     for name, text in pages.items():
         for ref in _refs(text):
             if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
                 continue
-            if ref.startswith(GENERATED_REF_PREFIXES):
+            if ref.startswith(GENERATED_REF_PREFIXES) or ref in generated_shots:
                 continue
             target = ref.split("#", 1)[0].split("?", 1)[0]
             # A leading "/" is root-absolute, and this site IS served at the
@@ -195,16 +225,44 @@ def test_every_anchor_target_exists(pages):
 
 # --- C. the gallery and its images agree, in BOTH directions ----------------
 
-def test_the_gallery_references_every_shot_on_disk():
-    """A shot on disk that no page references is dead weight -- published to
-    the internet, downloaded by nobody, and invisible in review. This is the
-    direction a link-checker never covers."""
+def test_the_gallery_shows_every_shot_the_capture_map_names_and_orphans_none():
+    """WAS an equality against the DIRECTORY, and that stopped being true.
+
+    Nineteen of the twenty-two shots are now written on the serving box and
+    gitignored, so ``assets/shots/`` legitimately holds only three files in a
+    fresh clone -- an equality against ``iterdir()`` would fail there while
+    everything is correct. The subject moved to the CAPTURE MAP instead
+    (``tools/gallery_screens``), which is what actually decides both what gets
+    written and what the tiles show, and is present in every checkout.
+
+    Two directions, and neither is the one a link-checker covers:
+
+    * every shot the tool captures has a tile. A capture with no tile writes a
+      file to the public tree that nobody will ever see, every single run.
+    * nothing on disk is unreferenced. That is the ORIGINAL assertion, kept and
+      made empty-safe -- it is what catches a shot left behind after its screen
+      was dropped, which is a picture published to the internet with no page
+      pointing at it.
+
+    The remaining direction -- referenced but never produced -- is
+    ``test_every_internal_reference_resolves_to_a_file`` for the three
+    committed shots, and ``tools/tests/test_gallery_screens.py`` (HTML against
+    the map, titles and order included) for the rest.
+    """
+    from tools import gallery_screens
+
+    in_map = {f"{sh.image}.webp"
+              for scr in gallery_screens.SCREENS for sh in scr.shots}
     on_disk = {p.name for p in (SITE / "assets" / "shots").iterdir() if p.is_file()}
     referenced = {r.rsplit("/", 1)[-1] for r in _refs(_markup("gallery.html"))
                   if "assets/shots/" in r}
-    assert on_disk == referenced, (
-        f"orphaned on disk: {sorted(on_disk - referenced)}; "
-        f"referenced but absent: {sorted(referenced - on_disk)}")
+
+    assert in_map <= referenced, (
+        f"the capture map writes shots the gallery shows nowhere: "
+        f"{sorted(in_map - referenced)}")
+    assert on_disk <= referenced, (
+        f"orphaned on disk, published to the internet and shown by nothing: "
+        f"{sorted(on_disk - referenced)}")
 
 
 def test_the_rail_and_the_panels_are_the_same_length():
