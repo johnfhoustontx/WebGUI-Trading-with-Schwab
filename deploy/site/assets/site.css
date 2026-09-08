@@ -915,6 +915,21 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
   object-fit: cover;
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-neutral-800);
+  /* ⚠ THE EMPTY STATE IS A REAL STATE, not a transient one. The captures are
+     gitignored and written on the serving box, so this grid ships referencing
+     fourteen files that do not exist yet -- and if the capture timer ever
+     stops, or its settle delay turns out to be too short, it goes back to
+     that state on a PUBLIC page.
+
+     Without this, a missing capture renders its alt text spilling across the
+     top-left of the tile beside a broken-image icon, which reads as a broken
+     site rather than as a screen not captured yet. Transparent text drops the
+     spill; `aspect-ratio` above holds the box open at full size either way, so
+     what remains is an empty panel under its caption.
+
+     The alt attribute STAYS -- it is still read aloud, and .ns-live-cap
+     repeats the same name visually, so nothing is lost to a sighted reader. */
+  color: transparent;
 }
 .ns-live-cap {
   display: block;
