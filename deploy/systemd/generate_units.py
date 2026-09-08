@@ -171,6 +171,25 @@ LIVE_CAPTURE_TIMEOUT_SLACK_SEC = 60
 # and is counted as a shot in _gallery_capture_timeout_seconds.
 GALLERY_CAPTURE_TIMEOUT_SLACK_SEC = 60
 
+# One core's worth of the box, expressed the way systemd expresses it: 100% is
+# ONE CPU, not the whole machine. The prod box has 4, already carrying ffmpeg and
+# two Chromes for the wall stream, so this leaves three for the stack while the
+# capture runs. It makes the job SLOWER, which is free -- TimeoutStartSec is
+# derived and sits far above the throttled run -- and the point is bounding the
+# peak, not finishing early. See _gallery_capture_units for the measurement.
+#
+# The one coupling to keep in view: throttling also eats into each shot's OWN
+# ceiling (capture_gallery_shots.SHOT_TIMEOUT_SEC, 60s per render, enforced by
+# the tool rather than by systemd). A shot costs on the order of 15s of CPU, so
+# at one core there is ample margin -- but lowering this quota much further
+# starts killing individual renders, and a killed render is a missing tile, not
+# a slow one.
+GALLERY_CAPTURE_CPU_QUOTA_PCT = 100
+# Chrome renders and the proxy answering /health are not equally urgent. Nice
+# only orders work the quota already bounds, but the entire failure mode here is
+# LATENCY on a probe with a 3s timeout, so the ordering is the part that matters.
+GALLERY_CAPTURE_NICE = 10
+
 
 def target_name():
     return f"trading-{ENV_NAME}.target"
@@ -638,6 +657,29 @@ def _gallery_capture_units():
     so the pages have painted live data. A pre-open capture publishes a gallery
     of blank panels over the product's showcase images.
 
+    ⚠ **:07, AND CPU-CONTAINED, BECAUSE A CHROME STORM READS AS A PROXY OUTAGE.**
+    Measured on prod during the 09:00 live-screen capture on 2026-09-08: load
+    average 2.11 -> **11.84** on 4 vCPU, proxy ``/health`` 0.82s -> **18.2s**.
+    Every probe returned 200 -- the proxy was never down, it was answering later
+    than ``webgui/proxy.py`` ``health(timeout=3.0)`` waits, so every page painted
+    the proxy-down banner and **seven GEX collection slots were lost before
+    09:02**. Two consequences for this unit, and neither is optional:
+
+    * **The time is off the quarter hour.** ``live-capture`` is
+      ``OnCalendar=*:0/15``, and this job is the heavier of the pair (19 shots at
+      12s settle against 14 at 8s), so :00 would stack the two worst spikes of
+      the morning on one minute. A test derives the constraint from
+      ``LIVE_CAPTURE_INTERVAL_MIN`` rather than restating fifteen.
+    * **``CPUQuota`` bounds the peak this job makes on its own.** Separating the
+      two peaks is not enough -- GEX collects every minute the session is open,
+      so any in-session slot contends with it. Moving the capture outside the
+      session was considered and rejected: index option open interest zeroes
+      after hours, so the gamma tiles would photograph all-zero grids and
+      arbitrary walls, which is worse marketing imagery than stale branding.
+
+    ⚠ ``live-capture`` itself is still unthrottled -- that is the same problem,
+    on a unit this branch did not touch, and it remains open.
+
     **No ``Restart=``, deliberately** -- the same reasoning as the live capture.
     The tool exits non-zero for exactly two things worth telling apart: no
     browser on the box, which retrying cannot fix, and the app unreachable or
@@ -696,6 +738,11 @@ Environment=TZ=America/Chicago
 # No leading '-': the file-wide rule, even though this tool reads no secret
 # from it -- see _gallery_capture_units for why it is not exempted.
 EnvironmentFile={_env_file()}
+# CPU CONTAINMENT, NOT TIDINESS -- this unit runs a browser during the session
+# [Service] is correct for these: cgroup resource control lives here, unlike the
+# storm cap above, which systemd moved to [Unit] in v229.
+CPUQuota={GALLERY_CAPTURE_CPU_QUOTA_PCT}%
+Nice={GALLERY_CAPTURE_NICE}
 # Budgeted for all {budgeted} shots plus the verification render, each with its
 # own ceiling. {skipped} of those are skipped today (page state, no URL to reach
 # them by), so the real run is shorter -- this is a ceiling, not an estimate.

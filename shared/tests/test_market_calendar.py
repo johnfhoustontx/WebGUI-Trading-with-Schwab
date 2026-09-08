@@ -517,8 +517,16 @@ def test_gallery_capture_is_a_single_daily_slot():
     unit-GENERATION time. It still belongs here: it is a named clock mark that
     fires once per trading day, which is what [slots] models. But it is also why
     it needs a built-in default like every other slot: the TOML only overrides,
-    and a TOML-only slot raises KeyError out of _slot_group."""
-    assert mc.slot_times("gallery_capture") == {"at": _t(9, 0)}
+    and a TOML-only slot raises KeyError out of _slot_group.
+
+    ⚠ :07 IS NOT AN ARBITRARY ROUNDING -- do not tidy it to :00. The live-screen
+    thumbnail timer fires every quarter hour, and one of its runs was measured on
+    prod taking load average to 11.84 and proxy /health to 18.2s, past the 3s
+    timeout the webgui probes with; seven GEX slots were lost that morning. This
+    job is the heavier of the two, so it is deliberately held off the quarter
+    hour. The constraint itself is pinned against the live cadence in
+    tests/test_systemd_units.py rather than restated here."""
+    assert mc.slot_times("gallery_capture") == {"at": _t(9, 7)}
 
 
 def test_unknown_slot_group_raises():

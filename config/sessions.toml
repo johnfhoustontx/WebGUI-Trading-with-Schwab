@@ -126,6 +126,17 @@ at = "16:30"
 # screens have painted live data -- a pre-open run publishes a gallery of blank
 # panels and overnight marks.
 #
+# ⚠ :07 AND NOT :00, AND THE SEVEN MINUTES ARE LOAD-BEARING. The live-screen
+# thumbnail timer runs OnCalendar=*:0/15, so :00/:15/:30/:45 already carry a
+# headless-Chrome storm. Measured on prod 2026-09-08 during the 09:00 live
+# capture: load average 2.11 -> 11.84 on 4 vCPU, proxy /health 0.82s -> 18.2s,
+# and since webgui/proxy.py health() times out at 3s every page painted the
+# proxy-down banner. It cost SEVEN GEX collection slots before 09:02. This job
+# is the heavier of the two (19 shots at 12s settle against 14 at 8s), so
+# stacking it on that minute would roughly triple the worst spike of the day.
+# The offset keeps the two peaks apart; CPUQuota on the unit keeps this one
+# from making its own. See _gallery_capture_units in generate_units.py.
+#
 # WHAT A FIRING COSTS: 19 page loads against the local web app (three of the 22
 # tiles are Simulator views that live in page state and are deliberately
 # skipped). NO SCHWAB CALL and NO CLAUDE CALL -- unlike [slots.analyze] above,
@@ -138,7 +149,7 @@ at = "16:30"
 # into trading-<env>-gallery-capture.timer's OnCalendar. Changing this time
 # needs `python -m deploy.systemd.generate_units --install` and a
 # `systemctl --user daemon-reload`; a service restart will not pick it up.
-at = "09:00"     # 10:00 ET
+at = "09:07"     # 10:07 ET -- off the quarter hour, deliberately
 
 [slots.momentum]
 # The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the

@@ -197,7 +197,7 @@ until then the shots on disk are the old hand-crops — see the geometry note be
   height:auto`, so the mismatch costs a layout shift as each tile loads and never a
   distorted picture.
 
-- **Scheduled by `[slots.gallery_capture]` at 09:00 CT** — half an hour after the
+- **Scheduled by `[slots.gallery_capture]` at 09:07 CT** — half an hour after the
   08:30 open, so the screens have painted live data; a pre-open run publishes a
   gallery of blank panels and overnight marks. ⚠ **That is the one `[slots]` entry
   read by systemd rather than by a service scheduler**: `generate_units.py` turns it
@@ -209,6 +209,29 @@ until then the shots on disk are the old hand-crops — see the geometry note be
   call and no Claude call** — unlike `[slots.analyze]`, where each firing is a paid
   Claude call, and `[slots.income]`, the largest scheduled Schwab spend on that
   table (`8964fe1`).
+
+- **⚠ :07 AND CPU-CONTAINED, BECAUSE A CHROME STORM READS AS A PROXY OUTAGE.** The
+  slot was 09:00 as first built, and that was wrong for a reason measured on prod
+  the same day. `trading-prod-live-capture.timer` is `OnCalendar=*:0/15`, so
+  :00/:15/:30/:45 already carry a headless-Chrome run. Measured across the
+  09:00:01–09:01:39 live capture (275 samples): **load average 2.11 → 11.84** on 4
+  vCPU, **proxy `/health` 0.82 s → 18.2 s**, in-flight on :8100 ~10 → 24–28. Every
+  probe returned **200** — the proxy was never down, it was answering later than
+  `webgui/proxy.py health(timeout=3.0)` waits, so every page painted the proxy-down
+  banner. Not cosmetic: **seven GEX collection slots were lost before 09:02**, each
+  landing immediately after a capture run. The gallery job is the heavier of the two
+  (19 shots at 12 s settle against 14 at 8 s), so 09:00 would have stacked the two
+  worst spikes of the morning on one minute. Two fixes, and neither alone is enough:
+  the slot moved **off the quarter hour** (pinned against `LIVE_CAPTURE_INTERVAL_MIN`
+  rather than a restated fifteen, so a cadence change drags the constraint with it),
+  and the unit carries **`CPUQuota=100%` + `Nice=10`** — because GEX collects every
+  minute the session is open, so separating the peaks does not stop this job making
+  one of its own. ⚠ `CPUQuota` goes in **`[Service]`**, the exact inverse of the
+  storm cap's `[Unit]` home. Moving the capture outside the session was considered
+  and **rejected**: index option open interest zeroes after hours, so the gamma tiles
+  would photograph all-zero grids and arbitrary walls — worse imagery than stale
+  branding. ⚠ **`live-capture` itself is still unthrottled**; that is the same
+  problem on a unit this branch did not touch, and it remains open.
 
 - **`TimeoutStartSec` is DERIVED, and so are the counts in the unit's own comment.**
   `SHOT_TIMEOUT_SEC` × (22 shots + the verification render) + 60 s slack = **1440 s**.
@@ -226,7 +249,7 @@ until then the shots on disk are the old hand-crops — see the geometry note be
   refused, which the next day picks up — and it publishes **nothing** in the failure
   case, so a failed run leaves the gallery intact and shows in `systemctl --user
   --failed`. A catch-up run would recapture at whatever hour the box came back and
-  publish an overnight render, which is the exact thing the 09:00 slot exists to
+  publish an overnight render, which is the exact thing the 09:07 slot exists to
   avoid. And ordering decides BOOT sequence only, while this unit is only ever
   started mid-session by its timer; a `Requires=` on the web GUI would be actively
   worse — it would let a screenshot job pull the trading UI around.

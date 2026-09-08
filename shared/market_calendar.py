@@ -278,7 +278,7 @@ _DEFAULTS = {
         # it needs `generate_units --install` + `daemon-reload`, not a restart.
         # It still needs a default here like every other slot -- the TOML only
         # overrides, and a TOML-only slot raises KeyError out of _slot_group.
-        "gallery_capture": {"at": "09:00"},
+        "gallery_capture": {"at": "09:07"},
     },
     "alerts": {"fire_in_extended_hours": False},
 }

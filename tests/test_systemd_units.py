@@ -42,7 +42,12 @@ def _posix_root(monkeypatch):
 def _parse(text):
     # strict=False: systemd permits repeated keys (two Environment= lines here);
     # configparser rejects them by default.
-    cp = configparser.ConfigParser(strict=False)
+    # interpolation=None: '%' is systemd's SPECIFIER prefix (%i, %h) and is a
+    # literal in values like CPUQuota=100%. configparser's default interpolation
+    # reads it as its own syntax and raises, which would make this harness refuse
+    # to parse a perfectly valid unit -- a test failure that says nothing about
+    # the unit.
+    cp = configparser.ConfigParser(strict=False, interpolation=None)
     cp.read_string(text)
     return cp
 
@@ -897,6 +902,43 @@ def test_the_gallery_timeout_moves_with_the_shot_count(monkeypatch):
     grown = [("u", "p")] * (len(capture.targets()) + 7)
     monkeypatch.setattr(capture, "targets", lambda: grown)
     assert units._gallery_capture_timeout_seconds() > real
+
+
+def test_the_gallery_capture_never_lands_on_a_live_capture_run():
+    """⚠ THE TWO CHROME TIMERS MUST NOT PEAK ON THE SAME MINUTE.
+
+    Measured on prod 2026-09-08: one live capture took load average from 2.11 to
+    11.84 on 4 vCPU and proxy /health from 0.82s to 18.2s -- past the 3s timeout
+    in webgui/proxy.py, so every page painted the proxy-down banner and seven GEX
+    slots were lost before 09:02. The gallery capture is the heavier of the two,
+    so sharing a minute would stack the morning's two worst spikes.
+
+    Derived from LIVE_CAPTURE_INTERVAL_MIN, never from a restated fifteen: if the
+    live cadence changes, this constraint has to move with it, and a test that
+    typed the interval would keep passing while the collision came back.
+    """
+    from shared import market_calendar as mc
+
+    at = mc.slot_times("gallery_capture")["at"]
+    minutes = at.hour * 60 + at.minute
+    assert minutes % units.LIVE_CAPTURE_INTERVAL_MIN != 0, (
+        f"{at} coincides with a live-capture run "
+        f"(OnCalendar=*:0/{units.LIVE_CAPTURE_INTERVAL_MIN})")
+
+
+def test_the_gallery_capture_is_cpu_contained(rendered):
+    """The offset separates the peaks; this bounds the one this job makes.
+
+    GEX collects every minute the session is open, so an in-session capture
+    contends with it wherever it is placed -- the timing fix alone is not enough.
+    ⚠ CPUQuota belongs in [Service]: cgroup resource control lives there, which
+    is the exact inverse of the storm cap's [Unit] home, and carrying both traps
+    in one file is why each gets its own test.
+    """
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert svc["Service"]["CPUQuota"] == f"{units.GALLERY_CAPTURE_CPU_QUOTA_PCT}%"
+    assert svc["Service"]["Nice"] == str(units.GALLERY_CAPTURE_NICE)
+    assert "CPUQuota" not in svc["Unit"]
 
 
 def test_the_gallery_capture_carries_no_memory_cap(rendered):
