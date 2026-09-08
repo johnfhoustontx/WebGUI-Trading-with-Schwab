@@ -64,8 +64,27 @@ end   = "15:20"   # 16:20 ET
 # Thumbnail captures for the public grid on neuralstrike.co/live.html.
 # Held SEPARATE from [windows.collection] for the reason [windows.stream] gives:
 # widening collection must not silently extend a public surface.
-start = "08:00"
-end   = "15:20"
+#
+# POST-CLOSE ONLY, and that is the whole point (2026-09-08). Each run drives a
+# headless Chrome over all fourteen screens: ~1.7 CPU-minutes in ~90s of wall
+# clock, i.e. ~1.05 of this box's 4 cores. Run inside the session it took the
+# proxy's /health from 0.8s to 18.2s (load 2.1 -> 11.8) -- which the webgui's
+# 3s timeout renders as a PROXY-DOWN BANNER while the proxy is serving 200s
+# throughout -- and it cost a GEX collection minute on every quarter hour:
+# 08:00, 08:15, 08:30, 08:45 and 09:00 each dropped the minute after.
+#
+# Starting after [windows.stream] end (15:20) is load-bearing, not tidiness:
+# the broadcast's ffmpeg + Xvfb + Chrome hold ~1.57 cores while it runs, so a
+# capture inside the stream window competes with the largest consumer on the
+# box. Ending before the 16:20 momentum cascade keeps it clear of the nightly
+# recompute for the same reason.
+#
+# Two fires (15:30 and 15:45), not one: the second is the retry if the first
+# times out, and after the close the screens no longer change, so the pair
+# costs nothing. Accepted trade: the public grid shows the COMPLETED session
+# all night and all of the next morning.
+start = "15:25"
+end   = "15:50"
 
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
