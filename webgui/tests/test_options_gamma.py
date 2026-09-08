@@ -2723,13 +2723,32 @@ def _route_rendered(monkeypatch, **query):
 
 
 def test_the_gamma_route_declares_a_view_query_parameter():
-    """Declared and typed, so FastAPI hands the page a ``str`` or nothing."""
+    """Declared, and optional so the bare route pins nothing."""
     import main
     p = inspect.signature(main.options_gamma_page).parameters.get("view")
     assert p is not None, "/options/gamma takes no ?view= — the pin is ignored"
     assert p.default is None, (
         "the bare route must pin nothing, exactly as before the parameter "
         "existed — a non-None default would silently pin every navigation")
+
+
+def test_fastapi_binds_the_view_pin_from_the_QUERY_STRING():
+    """The half a signature check cannot reach.
+
+    Every test below calls the page function in Python, which proves the value
+    travels once it arrives — not that ``?view=Flow`` in a URL is where it comes
+    from. A parameter FastAPI classified as a path or body field would satisfy
+    all of them and still leave the gallery capturing one view three times. Read
+    off the route's own dependant, which is what the router consults per
+    request, and checked beside ``/sentiment/momentum`` so the shipped precedent
+    says what a correctly-wired pin looks like."""
+    import main
+    bound = {r.path: {q.name for q in r.dependant.query_params}
+             for r in main.app.routes
+             if getattr(r, "path", "") in ("/options/gamma", "/sentiment/momentum")
+             and hasattr(r, "dependant")}
+    assert bound.get("/sentiment/momentum") == {"level"}, "the precedent moved"
+    assert bound.get("/options/gamma") == {"view"}
 
 
 def test_the_view_query_is_handed_to_the_render(monkeypatch):
@@ -2774,11 +2793,17 @@ def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
     this reason. Asserted through the route, not on the helper."""
     junk = _route_rendered(monkeypatch, view="nonsense")
     gex = _route_rendered(monkeypatch, view="GEX")
+    gex_again = _route_rendered(monkeypatch, view="GEX")
     netprem = _route_rendered(monkeypatch, view="Net Prem")
 
     def shape(kids):
         return [(type(e).__name__, str(getattr(e, "text", "") or "")) for e in kids]
 
+    # Stated first so a future one-shot per-render stash (the handoff symbol is
+    # already one) fails HERE, saying repeated renders differ, rather than in the
+    # comparison below saying the coercion broke.
+    assert shape(gex) == shape(gex_again), (
+        "two identical renders differ, so comparing renders proves nothing")
     assert shape(junk) == shape(gex), "an unknown pin did not fall back to GEX"
     # ...and the fallback is a real comparison only because a DIFFERENT pin
     # really does render a different page. Without this, the assertion above
