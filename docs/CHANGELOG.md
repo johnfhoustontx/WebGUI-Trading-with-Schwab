@@ -43,9 +43,19 @@ Config only; no code, no unit regeneration.)
   peaking at 272 only while catching up. More permission to call would have added
   concurrent chain parsing to the side of the machine that was already saturated.
 
-- **Still open, in descending value:** `BRKB` is not a Schwab symbol and returns
-  a guaranteed `400` on every chain fetch (63 wasted calls before 09:00, 2,627 in
-  the retained journal); the `TooBigBody` `502`s on the big chains (SPY, QQQ,
+- **`BRKB` removed from the scan watchlist** (same day). It is not a Schwab
+  symbol and returned a guaranteed `400` on every chain fetch — 106 wasted calls
+  before 09:55, 2,627 in the retained journal, and a known gap since at least
+  2026-08-10, when the big-delta plan doc already recorded "BRKB failing to
+  fetch". ⚠ Measured against the live API: **`BRK/B` returns 200**, `BRK.B` and
+  `BRKB` both 400 — so it was fixable rather than dead, and removal was the
+  user's call, taken with that in hand. The watchlist is
+  `options-scanner/data/Top 20.xlsx` (Column A of Sheet1), **gitignored and
+  prod-local**, so this change is not in this commit and does not travel with a
+  promote; it is `mtime`-cached, so it took effect with no restart. Verified: 81
+  → 80 symbols, order preserved, zero `BRKB` requests afterwards.
+
+- **Still open, in descending value:** the `TooBigBody` `502`s on the big chains (SPY, QQQ,
   `$SPX`, `$NDX`, IWM, DIA, the sector ETFs) are each retried 3× under
   `MAX_RETRIES`, so each costs three calls and holds a thread through the
   backoff; `/health` is a sync `def` sharing the 40-thread pool with full-chain
