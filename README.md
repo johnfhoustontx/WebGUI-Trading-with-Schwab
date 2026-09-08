@@ -16,6 +16,7 @@ market-sentiment scoring, a trade analyzer, portfolio analytics, and an autonomo
 
 ```
 TIER 1  webgui/ (NiceGUI, :8500)            render-only; reads Redis, enqueues commands
+        webgui/live_main.py (:8501)         the same page modules, published read-only
    ▲ cache read / subscribe   │ commands
 TIER 3  Redis (:6379)                       cache:{domain}:{view} + events pub/sub + cmd:{domain} streams
    ▲ publish                  │ consume     shared/contracts (typed payloads) + shared/bus (redis wrapper)
@@ -55,7 +56,7 @@ Copy the secret templates and fill in real values (all gitignored):
 
 ## Running
 
-The stack is nine `systemd --user` units. There are no launcher scripts.
+The stack is ten `systemd --user` units. There are no launcher scripts.
 
 ```bash
 systemctl --user start trading-prod.target
@@ -82,7 +83,8 @@ SSH tunnel (`tools/open_webgui.ps1` from a Windows workstation forwards `:8500`
 and `:8100`), never by exposing the port.
 
 Manual order, for debugging one component: Redis → `schwab-proxy/schwab_proxy.py`
-→ `services/*_svc/app.py` (×6) → `webgui/main.py`.
+→ `services/*_svc/app.py` (×6) → `webgui/main.py`. `webgui/live_main.py` reads Redis
+and nothing else, so it orders after nothing.
 
 ## Testing
 
@@ -102,7 +104,7 @@ Lint locally: `uvx ruff check .` (config in `ruff.toml`); install hooks with `pr
 
 | Path | Role |
 |---|---|
-| `webgui/` | Tier-1 NiceGUI app (:8500) |
+| `webgui/` | Tier-1 NiceGUI app (:8500), plus `live_main.py` — the fourteen public read-only screens on their own origin (:8501) |
 | `services/` | Tier-2 domain services + shared `_scaffold.py` |
 | `shared/` | `bus/` (Redis wrapper), `contracts/` (Pydantic payloads), `analysis_lib/` |
 | `schwab-proxy/` | Schwab API gateway / token manager (:8100) |
