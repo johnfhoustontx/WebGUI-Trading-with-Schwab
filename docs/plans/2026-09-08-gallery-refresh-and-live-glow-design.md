@@ -66,11 +66,31 @@ anywhere"* — and that module derives NYSE holidays algorithmically, so a hand
 list in JavaScript would be an eleventh copy that silently rots. A small
 generator emits the current and next year into the JS file.
 
-⚠ **Half-days matter and are easy to miss.** The NYSE closes at 13:00 ET on the
-day after Thanksgiving, Christmas Eve and July 3rd (when they fall on a weekday).
-A glow still lit at 15:00 on Black Friday is exactly the kind of small,
-confident, wrong claim this project keeps writing down. `market_calendar` knows
-them; the generator must emit them too.
+⚠ **Half-days matter, and NOTHING IN THIS REPO KNOWS ABOUT THEM.** The NYSE
+closes at 13:00 ET on the day after Thanksgiving, on Christmas Eve and on July
+3rd when those fall on a weekday. A glow still lit at 15:00 on Black Friday is
+exactly the kind of small, confident, wrong claim this project keeps writing
+down.
+
+An earlier draft of this document asserted that `shared/market_calendar` knows
+them and the generator need only emit them. **That was false** — measured
+2026-09-08, there is no `is_half_day`, no early-close field and no 13:00
+reference in `market_calendar.py`, `config/sessions.toml`, or anywhere else in
+the tree. The module derives *holidays* algorithmically and stops there.
+
+So this is a fork, and it is recorded as an open decision rather than assumed:
+
+* **Add early-close support to `shared/market_calendar`.** The right home — it
+  is the calendar module, and the standing rule is that no calendar fact lives
+  anywhere else. The three dates are derivable from rules the module already
+  has (`_nth_weekday` for Thanksgiving, `_observed` for the shifting ones), and
+  everything downstream gains a fact it currently lacks. Costs real logic and
+  real tests, on rules with genuine corner cases (when July 4th falls on a
+  Saturday, July 3rd is the *observed holiday*, not a half day).
+* **Ship without it, and say so.** The glow is decoration on a marketing page;
+  being lit on roughly three afternoons a year is a cosmetic error with no
+  downstream consumer. Cheaper, and honest **only if the gap is written into
+  the code rather than left for someone to discover.**
 
 **Three alternatives were rejected:**
 
@@ -230,8 +250,9 @@ outcome, and a non-zero exit restart-storms into `StartLimitBurst`.
 - The screen map is pinned: every route in the map resolves to a registered app
   route, and every shot referenced by `gallery.html` is produced by the capture
   list. That is the guard against the silent mis-map above.
-- Half-day handling gets its own case; it is the one the naive implementation
-  gets wrong.
+- Half-day handling gets its own case **if it is built** — it is the one a naive
+  implementation gets wrong. If it is not built, the test asserts the documented
+  gap instead, so the limitation is pinned rather than forgotten.
 - The existing site guards keep holding: no app host, no off-origin resource,
   every image declares its size.
 
