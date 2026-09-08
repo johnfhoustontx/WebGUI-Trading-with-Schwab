@@ -308,7 +308,45 @@ Leave it running for Phase 4, then Ctrl-C.
 
 ---
 
-## Phase 4 — the capture script
+## Phase 4 — the capture script ✅ DONE 2026-09-07
+
+**The settle delay is fine. The worry recorded below was unfounded** — the
+captures are full renders, not skeletons.
+
+| | |
+|---|---|
+| Browser | `google-chrome` at `/usr/bin/google-chrome` |
+| Window gate, unmodified | `INFO outside the live-capture window … standing down`, **exit 0**, zero files ✅ |
+| Gate bypassed | **14/14 captured in 42.3 s** (~3 s each), exit 0, no per-screen failures |
+| File sizes | 36–144 KB for the eleven data screens; **7.6–9.0 KB** for the three gamma-family ones |
+| Zero-byte or <5 KB | none |
+| Chrome processes left behind | none |
+
+**Inspected the actual images**, which is the only check that counts here:
+
+- `desk.webp` — a **complete** Desk. Sentiment/trend rings, all eleven sectors,
+  dealer positioning with a `SHORT GAMMA · RUNS` badge, the Opportunity Board,
+  live flow alerts, and the Positions book with real ORCL spreads and P&L.
+  Nothing is a placeholder.
+- `rrg.webp` — full plot: quadrant washes, eleven labelled markers, trails,
+  verdict strip. **Strokes are even**, confirming the percentage-endpoint fix
+  survives DOMPurify stripping `vector-effect`.
+
+⚠ **The three small files are expected, not a failure.** `gamma`,
+`premium-divergence-spy` and `premium-divergence-qqq` captured the honest
+"Fetch a symbol… (no snapshot yet)" state, because `cache:options:gamma_pub:*`
+does not exist until the new `options_svc` runs. `gamma.webp` and
+`premium-divergence-qqq.webp` are byte-identical in size for exactly that
+reason. **Re-run this phase after the promote** and confirm all three grow.
+
+**Timing headroom:** the generated unit derives `TimeoutStartSec` as
+`SCREEN_TIMEOUT_SEC × 14 + 60` = 690 s. The real run took 42 s.
+
+⚠ The captures landed in the **scratch** tree
+(`/home/administrator/live-check/deploy/site/live/`), not prod's served
+`deploy/site/`. Prod's is still empty, which is correct until Phase 6.
+
+### The steps, for a re-run
 
 With the live process still up:
 
