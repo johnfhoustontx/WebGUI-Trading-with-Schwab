@@ -619,6 +619,7 @@ hard-code ports or `D:\` paths.
 | driver_svc | 8214 | `SERVICE_PORTS["driver"]` |
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
+| webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
 > The `dashboard_frontend = 5173` entry in `config/ports.toml` belongs to the retired
 > React frontend and is **not** used by this app. The web GUI is on **8500**.
@@ -632,6 +633,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 |---|---|---|
 | `[services]` ports | 8210–8215 | **9210–9215** (`port_offset`) |
 | webgui | 8500 | **9500** |
+| webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |
 | schwab-proxy | **owns** it on 8100 | **borrows** prod's — starts none |
 

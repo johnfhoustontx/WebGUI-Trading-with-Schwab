@@ -4020,6 +4020,11 @@ merely running but actually <em>publishing</em>.</p>
 <td>1</td>
 <td>8500</td>
 </tr>
+<tr>
+<td>webgui_live (public live screens)</td>
+<td>1</td>
+<td>8501</td>
+</tr>
 </tbody>
 </table>
 <p>Each card shows online/offline, a health message, and a <strong>Restart</strong> button that
@@ -4114,9 +4119,10 @@ number before that happens. The Claude counter does the same for money.</p>
 <hr />
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><em>Menu: bottom of the rail, the red button · Route <code>/terminate</code></em></p>
-<p>A confirm-gated stop of the entire local stack — the gateway, all six services, and the
-web app itself. <strong>Redis is deliberately left running</strong>, because it is a <em>system</em>
-service this app does not own.</p>
+<p>A confirm-gated stop of the entire local stack — the gateway, all six services, the
+web app itself, and the public live screens on <code>live.neuralstrike.co</code>, which go dark
+with it. <strong>Redis is deliberately left running</strong>, because it is a <em>system</em> service
+this app does not own.</p>
 <p>After confirming, this page stops responding. That is expected: it has just stopped the
 program serving it.</p>
 <p>Restart with <code>systemctl --user start trading-prod.target</code>.</p>

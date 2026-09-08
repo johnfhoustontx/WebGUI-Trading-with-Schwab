@@ -1,6 +1,6 @@
 # Manuals
 
-Generated documentation for the WebGUI Trading with Schwab stack. Four manuals,
+Generated documentation for the WebGUI Trading with Schwab stack. Five manuals,
 each authored once in Markdown and built into a styled **HTML** (online viewing,
 and opens cleanly in Word) plus a native **.docx** (with a Word table-of-contents
 field and page numbers).
@@ -11,6 +11,7 @@ field and page numbers).
 | **Reference Guide** | End users — what each tab/sub-tab is for, why it matters, when to use it | `reference-guide/` |
 | **Technical Reference** | Maintainers — all calculations, formulas, weights, cadences | `technical-reference/` |
 | **API / Developer Reference** | Developers — contracts, bus API, service commands, proxy endpoints | `api-reference/` |
+| **Options Glossary** | End users — the vocabulary the other four assume | `glossary/` |
 
 The User Guide and the Reference Guide are deliberately different documents: the
 User Guide answers *how do I do this*, the Reference Guide answers *what is this
@@ -26,7 +27,7 @@ The source of truth is the `.md` file in each folder. After editing it, rebuild:
 
 ```powershell
 cd docs\manuals
-python build_docs.py                 # build all three
+python build_docs.py                 # build all five
 python build_docs.py user-guide      # build just one
 ```
 

@@ -556,6 +556,11 @@ automatically and start empty.</p>
 <td>webgui (NiceGUI)</td>
 <td>Required</td>
 </tr>
+<tr>
+<td>8501</td>
+<td>webgui_live — the PUBLIC read-only screens, a second NiceGUI process</td>
+<td>Required</td>
+</tr>
 </tbody>
 </table>
 <p><code>config/ports.toml</code> also lists <code>options_analytics = 8200</code>, <code>approval = 8300</code>,
@@ -589,7 +594,9 @@ aren't running, those paths simply degrade.</p>
 </table>
 <h2 id="startup-order">Startup order</h2>
 <p>The dependency chain is strict: <strong>Redis → schwab-proxy → the six services → webgui.</strong>
-Services wait on the proxy because every one of them resolves market data through it.</p>
+Services wait on the proxy because every one of them resolves market data through it.
+<code>webgui_live</code> sits outside that chain: it reads Redis and nothing else — no proxy
+call, no Schwab call, no service call — so it is ordered after nothing in the target.</p>
 <table>
 <thead>
 <tr>
@@ -600,11 +607,11 @@ Services wait on the proxy because every one of them resolves market data throug
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Proxy + 6 services + webgui. Also starts at boot.</td>
+<td>Proxy + 6 services + webgui + webgui_live. Also starts at boot.</td>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
-<td>Stops all nine. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
+<td>Stops all ten, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
 </tr>
 <tr>
 <td><code>systemctl --user restart trading-prod-options_svc</code></td>
@@ -621,15 +628,15 @@ Services wait on the proxy because every one of them resolves market data throug
 </tbody>
 </table>
 <blockquote>
-<p>The eight processes must stay <strong>separate OS processes</strong>. Merging services into one
+<p>The nine processes must stay <strong>separate OS processes</strong>. Merging services into one
 Python process would re-introduce the top-level module-name collisions
 (<code>config</code> / <code>scoring</code> / <code>notifier</code> / <code>src</code>) that the 3-tier split exists to prevent.</p>
 </blockquote>
 <h2 id="verifying-the-install">Verifying the install</h2>
 <ol>
 <li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, and the webgui, plus a
-   data-freshness table.</li>
+   the proxy, Schwab authorization, all six services, the webgui and the public
+   live screens, plus a data-freshness table.</li>
 <li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
    <code>GET http://127.0.0.1:82{10..15}/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
 <li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
@@ -655,6 +662,9 @@ cd webgui ; ..\.venv/bin/python -m pytest -q
 Redis (Redis) backbone. No two Tier-2 services talk to each other directly.</p>
 <pre><code>TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
                     subscribes to events, enqueues commands. No engine imports.
+                    webgui/live_main.py (:8501) is a SECOND Tier-1 process: the
+                    same page modules, published read-only and unauthenticated.
+                    It reads and subscribes; it enqueues nothing.
    ▲ cache read / subscribe                │ commands
 TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     pub/sub, cmd:{domain} command streams. shared/contracts (typed
@@ -719,6 +729,11 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>webgui</td>
 <td>8500</td>
 <td>The web UI.</td>
+</tr>
+<tr>
+<td>webgui_live</td>
+<td>8501</td>
+<td>The fourteen public read-only screens, on their own origin.</td>
 </tr>
 </tbody>
 </table>

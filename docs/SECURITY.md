@@ -44,7 +44,9 @@ The Bus reads `MEMURAI_PASSWORD` (the env var kept its name). Prod sets it. To r
 
 1. Set `requirepass <password>` in the Redis/Redis config and restart the service.
 2. Set the env var `MEMURAI_PASSWORD=<password>` for **every** process that starts a Bus
-   (proxy is unaffected; the six services + the webgui all use the Bus). The simplest way
+   (proxy is unaffected; the six services, the webgui and the public `webgui_live`
+   process all use the Bus — the last of those connects as its own read-only Redis
+   ACL user via `REDIS_LIVE_URL`, which carries its own credential). The simplest way
    is to set it machine-wide (`setx MEMURAI_PASSWORD ...`) or export it in the launcher.
 3. Restart the stack. Unset → `password=None` → no AUTH, exactly as before.
 

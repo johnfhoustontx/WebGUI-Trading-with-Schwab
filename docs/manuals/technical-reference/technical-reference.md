@@ -168,6 +168,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8214 | driver_svc | Required |
 | 8215 | market_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
+| 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
 `config/ports.toml` also lists `options_analytics = 8200`, `approval = 8300`,
 `dashboard_frontend = 5173`, and an `[ml_servers]` block (MES 8000 / MNQ 8001 /
@@ -188,24 +189,26 @@ aren't running, those paths simply degrade.
 
 The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
 Services wait on the proxy because every one of them resolves market data through it.
+`webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
+call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui. Also starts at boot. |
-| `systemctl --user stop trading-prod.target` | Stops all nine. **Redis survives** — it is a system unit this cannot reach. |
+| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
 | `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. |
 
-> The eight processes must stay **separate OS processes**. Merging services into one
+> The nine processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions
 > (`config` / `scoring` / `notifier` / `src`) that the 3-tier split exists to prevent.
 
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, and the webgui, plus a
-   data-freshness table.
+   the proxy, Schwab authorization, all six services, the webgui and the public
+   live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
    `GET http://127.0.0.1:82{10..15}/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
@@ -238,6 +241,9 @@ Redis (Redis) backbone. No two Tier-2 services talk to each other directly.
 ```
 TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
                     subscribes to events, enqueues commands. No engine imports.
+                    webgui/live_main.py (:8501) is a SECOND Tier-1 process: the
+                    same page modules, published read-only and unauthenticated.
+                    It reads and subscribes; it enqueues nothing.
    ▲ cache read / subscribe                │ commands
 TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     pub/sub, cmd:{domain} command streams. shared/contracts (typed
@@ -262,6 +268,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | driver_svc | 8214 | Autonomous decision layer (Claude + pure-code guardrails). |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
 | webgui | 8500 | The web UI. |
+| webgui_live | 8501 | The fourteen public read-only screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 

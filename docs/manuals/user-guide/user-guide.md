@@ -89,8 +89,8 @@ The app reads market data and your positions from Schwab, so you need:
 
 The app runs entirely on your own machine and needs these local ports free:
 **6379** (Redis), **8100** (Schwab gateway), **8210–8215** (the six services),
-and **8500** (the web app). If another program is already using one of them, the
-matching piece won't start.
+**8500** (the web app) and **8501** (the public live screens). If another program
+is already using one of them, the matching piece won't start.
 
 ---
 
@@ -103,7 +103,7 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services and the web app. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
@@ -136,6 +136,33 @@ Two things worth knowing when it refuses you:
 **Sitting at the machine itself?** `http://127.0.0.1:8500` still works there and
 skips the sign-in, which is what the wall display uses.
 
+## The public live screens
+
+Fourteen of the app's screens are also published **read-only and without any
+sign-in** on a second address, `https://live.neuralstrike.co` — the Desk,
+Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
+Industry, Sector Rotation, RRG, Momentum, Gamma, Net Prem and the two Premium
+Divergence screens. `https://neuralstrike.co/live.html` is a thumbnail menu of
+them.
+
+Three things to know:
+
+- **They are not redacted.** The Desk shows your open paper and driver positions,
+  the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
+  Anyone with the address can read them. That is a deliberate choice — the book
+  is paper only — but it is worth knowing before you show someone the link.
+- **They are a separate program.** Nothing anyone does there can reach your own
+  app: it holds no login, sends no commands, and cannot write anything. Its
+  health has its own card on **System Status**; a red one means the public site
+  is down and your own screens are unaffected.
+- **To stop publishing**, use **Stop All Services** — it stops both web apps —
+  or, if you want to keep working, `systemctl --user stop trading-prod-webgui_live`
+  on the machine, which leaves the rest of the stack alone.
+
+The thumbnails on the menu page are refreshed on a **15-minute timer**, on trading
+days between 08:00 and 15:20 Central — so a slightly old-looking tile is normal,
+and outside those hours expected. The screen behind it is always live.
+
 ## What runs behind the scenes
 
 You don't interact with these directly, but it helps to know they exist:
@@ -145,6 +172,8 @@ You don't interact with these directly, but it helps to know they exist:
   handles ordering for you).
 - **Six domain services** — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).
+- **The public live screens** — a second, read-only copy of the web app serving
+  `live.neuralstrike.co`. See *The public live screens* above.
 - **Redis** — a local data backbone the services and the web app share.
 
 ## The proxy-down banner
@@ -165,8 +194,9 @@ launcher, or restart the specific service from the **System Status** page.
 Use **Stop All Services** at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the six services, and the web app. (Redis is intentionally left
-running — it is a *system* service the app's own units cannot reach.)
+gateway, the six services, the web app **and the public live screens** — so the
+public site goes dark until you start the stack again. (Redis is intentionally
+left running — it is a *system* service the app's own units cannot reach.)
 
 ---
 
@@ -1435,9 +1465,9 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the six services, and the web
-  app itself, each with Online/Offline and its tier. The gateway's card also shows
-  the **Schwab auth** state.
+- A **component grid** — Redis, the Schwab gateway, the six services, the web app
+  itself, and the public live screens beside it, each with Online/Offline and its
+  tier. The gateway's card also shows the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
   browser tab. Use it when the auth line says the login has expired.
 - A **data-freshness** table showing each domain's latest cache write and its age.
@@ -1511,7 +1541,8 @@ group, next to EOD Report.
 **Route:** `/terminate` — the red button at the foot of the rail.
 
 A guarded "stop the whole local stack" page. The red **Stop all services** button
-(behind a confirmation) stops the gateway, the six services, and the web app.
+(behind a confirmation) stops the gateway, the six services, the web app **and the
+public live screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit
 code from your authenticator app into the dialog and press **Stop everything**. A

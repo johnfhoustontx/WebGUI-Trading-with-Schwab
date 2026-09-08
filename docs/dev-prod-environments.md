@@ -20,6 +20,7 @@ box, along with the twelve `.bat` launchers.
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
+| webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
@@ -190,7 +191,7 @@ committed, so this is also how you repair them after any port or path change.
 .venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
 ```
 
-Confirm the shape before starting anything: **eight** `trading-dev-*` units and
+Confirm the shape before starting anything: **nine** `trading-dev-*` units and
 **no proxy unit** — ownership is encoded in which units exist, not in a kill-list
 filter. `systemd-analyze --user verify ~/.config/systemd/user/trading-dev.target`
 should print nothing at all; any output is an error.
@@ -258,8 +259,10 @@ not. Without it the SQLite half completes and the Redis half dies on
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`systemctl --user start trading-dev.target` brings up **eight** units (six
-services + webgui, and no proxy — dev borrows prod's). Output goes to the
+`systemctl --user start trading-dev.target` brings up **nine** units (six
+services + webgui + webgui_live, and no proxy — dev borrows prod's; the live
+screens are NOT withheld the way the proxy is, because nothing about them is a
+shared exclusive credential). Output goes to the
 journal: `journalctl --user -u trading-dev-options_svc -f`.
 
 It cannot start the wrong stack. A unit's `ExecStart` and `WorkingDirectory` are

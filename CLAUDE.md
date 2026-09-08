@@ -20,7 +20,7 @@ Five homes, and the test for each is what a future session needs to *act*:
 | **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | Dated shipping narrative: what shipped, the pieces, commit SHAs, test counts at the time, live-verification logs |
 | **[docs/webgui-routes.md](docs/webgui-routes.md)** | Per-page behaviour detail — what a specific route renders, its cache keys, its own quirks |
 | **`docs/plans/<date>-<feature>-{design,plan}.md`** | The reasoning and step plan for a feature, written as you build it |
-| **[docs/manuals/](docs/manuals/README.md)** | Anything a **user** reads: the four built manuals. A user-visible behaviour change lands here too, not only in the CHANGELOG |
+| **[docs/manuals/](docs/manuals/README.md)** | Anything a **user** reads: the five built manuals. A user-visible behaviour change lands here too, not only in the CHANGELOG |
 
 ⚠ **The manuals rot silently, because nothing fails when they go stale.** A
 2026-08-16 audit against the running stack found the User Guide still documenting
@@ -120,6 +120,11 @@ client singletons; `test_proxy.py` now guards it at source level). ⚠ The
 shorthand "only nicegui + shared.bus + shared.contracts" was repeated in several
 places and was wrong on the last term: **the webgui imports `shared.contracts`
 nowhere at all** — see the contracts note below.
+
+⚠ **Tier 1 has TWO entrypoints since 2026-09-07** — `webgui/main.py` (the app,
+behind the login) and `webgui/live_main.py` (the public read-only screens). The
+allow-list binds both; the public one adds a stricter rule of its own — **no page
+may `import main`** — for the reason in “The public live screens” below.
 
 **Contracts are a WRITE-side gate on SOME views, not the typed API both tiers
 share.** The design says "both tiers import them; validated on write and read".
@@ -308,7 +313,7 @@ the shared build/update pair. The old expandable sub-menus / `_NAV_OPEN` /
 `_settings_group` are GONE. Tabs are **pill-style** (raised rounded container,
 active pill a soft navy tint). A page with its
 own view tabs mounts them as a **subtab row flush under the strip** via
-`main.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
+`shell.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
 GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 — same
 value/on_value_change API as the old `ui.toggle`). Pages live in
 `webgui/pages/`; each leaf exposes `render()` called inside the shell
@@ -363,8 +368,8 @@ Routes:
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui, plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
-| `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. Redis survives structurally: it is a system unit the user target cannot reach. | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. ⚠ Since 2026-09-07 that stops **both** web apps, so the public live screens go dark too. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), **`flow_panels.py`** (PURE builders for the two Options Flow console
@@ -593,6 +598,74 @@ escaping the decorator and surfacing as a noisy traceback via NiceGUI's default
 **only** that benign record (client gone → nothing to update); every other error
 still logs in full.
 
+## The public live screens — a SECOND Tier-1 process
+
+`webgui/live_main.py` serves **fourteen READ-ONLY screens, unauthenticated, to
+anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
+(`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
+published screen cannot drift from the private one. The published set and every pin
+are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
+`PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
+static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
+route**. Per-screen detail: [docs/webgui-routes.md](docs/webgui-routes.md); design +
+plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](docs/plans/2026-09-07-public-live-screens-design.md).
+
+⚠ **NO page may `import main`, and neither may `live_main`.** `main.py`'s module body
+registers every `@_page` route, so importing it from a second process publishes
+`/terminate` and `/settings` to the internet — silently, while looking entirely
+correct. The seam a page needs is **`webgui/shell.py`** (`subtab_slot` ·
+`set_breadcrumb_leaf` · `bind_breadcrumb_leaf` · `play_alert`, plus the page-level
+`TABLE_CSS` / `SUBTAB_CSS` that **both** entrypoints inject — those style widgets a
+PAGE mounts, not nav chrome). `main` re-exports every one of them, so nothing else
+moved. `test_shell_seam.py` pins the absence at source level; `test_live_main.py`
+pins it again by running `live_main.py` ALONE in a fresh interpreter and asserting
+`main` never entered `sys.modules` — the only check that can see a TRANSITIVE import,
+which is how one would actually arrive.
+
+**Read-only is FOUR layers, and the three this process installs go in BEFORE any page
+module is imported** — hence `live_main.py`'s `# noqa: E402` import order, which is
+load-bearing rather than untidy: (1) a Redis **ACL user** from `REDIS_LIVE_URL`, the
+structural one, enforced by the server rather than by this process; (2)
+**`bus_client.set_read_only(True)`** — `bus_client.request` is the **single Tier-1
+write chokepoint**, so one refusal covers every command on every page, and on these
+pages that reaches `gamma_analyze` / `gamma_explain` (**paid Claude calls**) and
+`gamma_refresh` / sentiment `refresh` (Schwab fetches against a budget already at
+68–76k/day); (3) **`app_settings.freeze(pins)`** — `set()` becomes a no-op and
+`load()` never touches disk; (4) structurally, no rail, Settings, Terminate or
+Sign-out, because those routes **do not exist in the process**. The pinned gamma
+screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates every
+enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
+control that reaches one is built. Both, not either.
+
+⚠ **`app_settings.freeze()` is not only about pinning defaults.** `settings.json` is a
+**single-user store whose in-memory cache assumes one writer in one process**;
+unfrozen, the public process would read your live preferences — changing your own
+Macro Board skin would re-skin the public site — and race you for the file.
+`PUBLIC_PINS` holds the pins that belong to the ORIGIN rather than to any one screen:
+today `voice_enabled: False`, because it **defaults True** and the Desk's spoken
+alerts are `edge_tts` **network calls**, one per flow alert per visitor plus ~32 on a
+first build (`desk._prewarm_clips` has no market-hours gate).
+
+⚠ **The Redis ACL needs `@pubsub` and `@connection`, not just `@read`.** `SUBSCRIBE`
+belongs to `@pubsub`; `SELECT` (any non-zero `redis_db`) and `PING` to `@connection`.
+`EventListener._run` swallows a failed subscribe, so an under-granted ACL renders one
+frame and then never repaints — **it reads as a frozen tape, not as a permissions
+error**. Never grant `+publish` (a public process that can publish can spoof repaint
+events to the private app), `@write`, or `@stream` — the streams are `cmd:*`.
+
+⚠ **`cache:options:gamma` is a single SYMBOL-AGNOSTIC slot**, and
+`refresh_gamma_current` reads the symbol back *out* of it, so it is sticky and driven
+by whatever the private app last looked at. The published screens therefore read
+**`cache:options:gamma_pub:<SYMBOL>`** (+ `gamma_pub_hist_<SYMBOL>_<view>`), written
+additively for `handlers.PUBLISHED_GAMMA_SYMBOLS` off chains the collector already
+pays for. ⚠ Only the views listed in `PUBLISHED_GAMMA_HISTORY_VIEWS` get a history
+key — un-pinning a public screen's view without adding it there draws an **empty
+heatmap, silently**, because a missing history key reads as "no history yet".
+
+⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the
+same shape as `webgui/data/`. Committed, the captures would dirty prod's tree the
+moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty tree.**
+
 ## webgui development notes (read before adding a page)
 
 **Page pattern.** Add a leaf module `webgui/pages/<name>.py` exposing `render()`.
@@ -750,6 +823,15 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `hover:bg-…` for as long as the class sits there — on a `cursor-pointer` row,
   for the rest of the session. Drop `forwards` when the end keyframe already IS
   the element's default. See `pages/desk.py` `DESK_NEON_CSS`.
+- **A `@ui.page` function's SIGNATURE is handed to FastAPI, so any parameter — a
+  bound default included — becomes a QUERY PARAMETER a stranger can set.** The
+  idiomatic late-binding fix for a loop variable, `def _page(_s=screen)`, therefore
+  publishes `_s`: measured while building the public live screens,
+  `GET /desk?_s=anything` replaced the `Screen` object with the string `'anything'`,
+  which reached an `importlib.import_module`. **Bind in an enclosing function's
+  parameter instead** (`def _register(screen):` wrapping a zero-argument
+  `@ui.page(...) def _page():`), so the page function has no signature to inject
+  into. See `webgui/live_main.py._register`.
 - **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
   bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
   has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
@@ -1480,7 +1562,9 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-**The stack is nine `systemd --user` units on a Linux host.** There are no
+**The stack is ten `systemd --user` units on a Linux host** — the target, the
+proxy, the six services, the web app, and `webgui_live`, the public read-only
+screens (2026-09-07). There are no
 launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
 both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
 every one of them existed to work around something Windows lacks.
@@ -1557,16 +1641,21 @@ every `http` and `websocket` scope except `/login` and `/favicon.ico`, plus a
 three-condition loopback exemption for the wall kiosk. Design + plan:
 [`docs/plans/2026-09-06-webgui-credentialing-{design,plan}.md`](docs/plans/2026-09-06-webgui-credentialing-design.md).
 
+**`https://live.neuralstrike.co`** is the same shape with the login taken out: a
+third Caddy host block reverse-proxying to `webgui/live_main.py` on `:8501`, which
+**also binds `127.0.0.1`**. It runs no auth middleware at all — that is the point
+— so the origin separation IS the control. See “The public live screens” above.
+
 `tools/open_webgui.ps1` survives as the **fallback**: if the cert or Caddy breaks,
 the way in must not depend on the thing that broke. The proxy on `:8100` is
 **never** on the public domain — it is published on the tailnet by
 `tailscale serve`, which is also how the Schwab refresh token gets re-minted at
 `/auth` every 7 days.
 
-⚠ **Never change either bind to `0.0.0.0`.** The login is a second control, not a
-replacement for the first — Caddy is the only thing that should ever talk to
-`:8500`, and the wall exemption's loopback condition is what stops a widened bind
-turning into an open door.
+⚠ **Never change any of these binds to `0.0.0.0`.** The login is a second control,
+not a replacement for the first — Caddy is the only thing that should ever talk to
+`:8500` or `:8501`, and the wall exemption's loopback condition is what stops a
+widened bind turning into an open door.
 
 **Manual start**, if you are debugging a single component rather than running the
 stack:
@@ -1577,7 +1666,8 @@ stack:
 
 Same order as the units: Redis, then the proxy on :8100, then the six services
 (8210–8215), then `webgui/main.py` on :8500. Everything reads market data through
-the proxy, so it starts first.
+the proxy, so it starts first. `webgui/live_main.py` on :8501 orders after nothing
+in the target — it reads Redis (a *system* unit) and nothing else.
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes
 > anything for it — its **service must be running** (and Redis up) or the page
@@ -1600,10 +1690,11 @@ Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
+| webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (`:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Units | `trading-prod.target` (9 units) | `trading-dev.target` (8 — no proxy) |
+| Units | `trading-prod.target` (10 units) | `trading-dev.target` (9 — no proxy, but it DOES get `webgui_live`) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
@@ -2506,7 +2597,7 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 
 ## User-facing manuals
 
-**Four** manuals under [`docs/manuals/`](docs/manuals/README.md), each authored once
+**Five** manuals under [`docs/manuals/`](docs/manuals/README.md), each authored once
 in Markdown and built by `build_docs.py` into HTML + `.docx`. They are surfaced
 in-app at **More → User Manuals** via `webgui/pages/manuals.py:MANUALS` — **a new
 manual must be added in BOTH places** (`build_docs.py:MANUALS` to build it,
@@ -2519,8 +2610,9 @@ unlisted file is refused rather than served).
 | **Reference Guide** | *What is this tab for, and when do I open it?* — per-tab depth over a one-page orientation |
 | **Technical Reference** | *Where does this number come from?* — formulas, weights, cadences |
 | **API / Developer Reference** | *How do I integrate with this?* — contracts, bus, commands, proxy |
+| **Options Glossary** | *What does this word mean?* — the vocabulary the other four assume |
 
-⚠ **`webgui/page_help.py` is the fifth manual and the most-read prose in the app** —
+⚠ **`webgui/page_help.py` is a manual too — and the most-read prose in the app** —
 the per-page hover guides. It is the least likely thing to be touched when a feature
 moves, so it rots first: the 2026-08-16 audit found it claiming a 5-minute paper
 cycle that is hourly, a fixed $500 driver target that ratchets $250–$1,000, and

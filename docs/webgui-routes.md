@@ -280,7 +280,7 @@ withheld when its bucket's day-clustered t is inside ±2. Builders:
 
 ## `/options/scanner`
 
-Options · Market Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **Since 2026-08-06 the ENGINE only emits non-Weak candidates scoring ≥ 50** (`scanner_engine.SINGLE_LEG_MIN_SCORE` / `SINGLE_LEG_EXCLUDED_GRADES`, cut before the per-symbol cap) — an empty Directional tab now means "nothing cleared the bar", not a failure, and long CALLS largely vanish because the documented unbounded-profit R:R artifact scores them ~14 points below long puts. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]]))
+Options · Market Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **Since 2026-08-06 the ENGINE only emits non-Weak candidates scoring ≥ 50** (`scanner_engine.SINGLE_LEG_MIN_SCORE` / `SINGLE_LEG_EXCLUDED_GRADES`, cut before the per-symbol cap) — an empty Directional tab now means "nothing cleared the bar", not a failure, and long CALLS largely vanish because the documented unbounded-profit R:R artifact scores them ~14 points below long puts. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `shell.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]]))
 
 ## `/options/matrix`
 
@@ -536,3 +536,76 @@ EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summa
 ## `/market`
 
 Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-only; see CHANGELOG)**: page-scoped `[macro]` theme section (like `[console]`), notched clip-path panels + tiles, per-category accent bars, magnitude-scaled heat wash, a top rail (Chakra Petch wordmark / live dot / clock / **breadth meter** / A-B **skin toggle** persisted in `app_settings.macro_skin`), and **flash-on-change** (ignition bar + price flare fired only on tiles whose value moved — server-side `tile_signature` diff + a batched JS reflow-retrigger). Two skins: A Instrument (default) / B Heat Lattice. Direction/flash/wash colour keys on the polarity-aware `color_state` (NOT raw pct), wash magnitude on `|%change|`. The ONE `ui.add_css` block (`theme.MACRO_CSS`) carries only clip-path/keyframes/radial-bg/custom-props; everything else Tailwind. Data/grouping/cadence unchanged. (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/**Top 10** · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). The **Top 10** frame (renamed from "Magnificent 7" on 2026-07-21) leads with a **composite `BIG10` tile** = the equal-weighted avg day %-move of its **10 members** (NVDA/MSFT/GOOGL/AMZN/META/AAPL/TSLA + AVGO/PLTR/AMD) + a breadth subline (e.g. "8/10 up"), colored by the avg (a `kind="basket"` tile whose members are also its 10 constituent tiles). **Per-symbol premium sublines (2026-07-21):** the SPX/NDX, SPY/DIA/QQQ/IWM and Top-10 tiles carry a small **call/put PREMIUM skew** line ("Call 37%"/"Put 11%", from `cache:options:matrix` rows' `call_prem`/`put_prem`), the BIG10 tile shows the **dollar-weighted net of its 10**, and **every tile is a fixed `min-h-[92px]` so a frame's tiles are all the same height** whether or not they have the subline. `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread + the `MAG7` basket, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` **+ the dollar-weighted call/put PREMIUM skew ("Net Prem" tile) from `cache:options:matrix`→`premium`** (added 2026-07-21; "Call 46%"/"Put 22%" + a net-$ subline, a money-weighted P/C over the ~45 collected symbols, NOT net buying) → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **Five frames are LEADERBOARDS** (four from 2026-08-05; **Broad-Market ETF** joined **2026-08-19**) — **Broad-Market ETF**, **Top 10**, **Sector SPDR**, **Thematic / Industry ETF** and **Countries** are emitted **ranked descending by day %-move** (`symbols.SORTED_CATEGORIES` + the pure `compute.rank_tiles`), with the **BIG10 composite PINNED leftmost** (it carries its members' average as its own `change_pct`, so it would otherwise sort into the middle of them) and no-data tiles last; **every other frame keeps its curated symbol-map order by design** (Volatility's VIX-then-tenors, Cash Index pairing with Futures — that layout IS the information). The rail's **advance/decline meter counts only those four equity frames** (`market.BREADTH_CATEGORIES` — Broad-Market ETF · Top 10 · Sector SPDR · Thematic / Industry ETF), skipping the BIG10 basket so its ten constituents aren't double-counted; over the whole board a bid VIX, a stronger dollar and a rallying Treasury all counted as *declines*, cancelling the equity selling out on exactly the sessions the meter should read hardest. The page mirrors the rank as a Tailwind flex **`order-N`** class (`market.order_class`), swapping the **tracked-previous** class in place, so a re-rank is one class swap and never rebuilds the board. **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below)
+
+## Public live screens (`live.neuralstrike.co`) — 2026-09-07
+
+Fourteen READ-ONLY routes served by a **second NiceGUI process**,
+`webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
+anyone. **They render the same page modules the private routes render** — each pin is
+an optional keyword on the real `render()` — the precedent is
+`sentiment_momentum.render(level=...)`, which `/sentiment/momentum` already took —
+and every pin defaults to today's behaviour, so the app's own routes are unchanged
+and a published screen cannot drift from the private one it mirrors. The table
+below is not a second source: it is `webgui/live_screens.py:SCREENS`, which the route
+registration, `tools/capture_live_shots.py` and the static grid on
+`neuralstrike.co/live.html` all read. The invariants — the `import main` trap, the
+four read-only layers, the Redis ACL — are in [CLAUDE.md](../CLAUDE.md); design + plan
+in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-live-screens-design.md).
+
+| Public route | Renders (private route) | Pinned |
+|---|---|---|
+| `/desk` | `desk.render()` (`/desk`) | — |
+| `/opportunity` | `options.matrix.render()` (`/options/matrix`) | — |
+| `/flow` | `options.flow.render()` (`/options/flow`) | — |
+| `/macro` | `market.render()` (`/market`) | `macro_skin="B"` (Heat Lattice) — an `app_settings` pin, not a render kwarg, because the page reads it from settings |
+| `/sentiment` | `sentiment.render()` (`/sentiment`) | — |
+| `/bullbear` | `sentiment_bullbear.render()` (`/sentiment/bullbear`) | — |
+| `/sectors` | `sentiment_sectors.render()` (`/sentiment/sectors`) | collapsed — already the page's own build state |
+| `/rotation` | `sentiment_rotation.render()` (`/sentiment/rotation`) | — |
+| `/rrg` | `sentiment_rrg.render()` (`/sentiment/rrg`) | — |
+| `/momentum` | `sentiment_momentum.render(level="industry")` (`/sentiment/momentum`) | Industries |
+| `/gamma` | `options.gamma.render(symbol="$SPX", view="GEX")` (`/options/gamma`) | `$SPX` · GEX |
+| `/net-premium` | `options.gamma.render(view="Net Prem")` (`/options/gamma`) | group `indices`, symbols `SPY QQQ BIG10`, mode `dollars` (settings pins) |
+| `/premium-divergence/spy` | `options.gamma.render(symbol="SPY", view="Flow")` (`/options/gamma`) | SPY · Flow |
+| `/premium-divergence/qqq` | `options.gamma.render(symbol="QQQ", view="Flow")` (`/options/gamma`) | QQQ · Flow |
+
+`BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
+of its own.
+
+**A pinned gamma screen differs from the private page in three visible ways, all
+deliberate.** It **draws no view picker** — `gamma.shows_view_picker(view)` gates the
+build, so nothing can render empty because there is no control to click, and
+`_PinnedView` stands in so the dozen downstream `view_toggle.value` readers are
+untouched. It draws **no Refresh now / Explain / Analyze / History row, and the Symbol
+dropdown becomes `_PinnedSymbol`** — a button that cannot work must not be drawn, and
+`gamma.may_enqueue(symbol, view)` gates every enqueue site behind it as the total
+proof. And its **three report watchers are unwired**: `_watch_explain` /
+`_watch_analyze` / `_watch_history` open a new browser tab when their cache version
+moves, and the version still moves because the OWNER can click Explain on the private
+app — left wired, one private click would pop a tab in every anonymous visitor's
+browser, pointed at a route this process does not serve.
+
+The four gamma screens read **`cache:options:gamma_pub:<SYMBOL>`**, never
+`cache:options:gamma` — that key is a sticky, symbol-agnostic single slot whose symbol
+follows whatever the private app last looked at (see CLAUDE.md). `/net-premium` is the
+exception and needs no per-symbol key: `cache:options:net_premium` is multi-symbol and
+symbol-independent by construction.
+
+**The shell is not `_layout`.** The live process mounts no rail, no tab strip, no
+breadcrumb, no market marquee and no page-help tooltips, and its content wrapper is a
+neutral `w-full p-4 gap-3` column — deliberately NOT `theme.PAGE`, since every one of
+the fourteen pages already supplies its own top-level wrap and background
+(`CONSOLE_PAGE`, `RT_VOID_BG`, `macro-board`, `calc-v2 PAGE`), so wrapping again would
+draw a second frame around each and a navy gradient behind the void-black ones. What
+it DOES inject — because these follow the PAGE rather than the shell — is
+`shell.TABLE_CSS`, `shell.SUBTAB_CSS` and the `[typography]` / `[brand]` font head.
+Without them `/opportunity` and `/flow` lose their sticky Deep Slate table headers,
+`/net-premium`'s group picker draws as stock Quasar tabs, and every screen renders in
+a different typeface from the private page it is supposed to mirror.
+
+**Exposure is a recorded decision, not an oversight.** The screens are unredacted:
+`/desk` renders merged paper and driver positions with rescue flags, `/opportunity`
+ranks actionable signals, `/flow` carries live alerts. Anyone may read the book and
+mirror the entries in real time. Chosen over redaction and over a 15-minute delay
+because the book is **paper only** and full transparency is the argument the public
+site already makes.
