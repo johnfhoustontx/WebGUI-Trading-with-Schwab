@@ -78,8 +78,29 @@ sufficient.
 
 ```
 user live on #<hash> ~cache:* resetchannels &events:*
-     -@all +@connection +@read +subscribe -keys +psubscribe
+     -@all +@connection +@read +@transaction -watch -unwatch
+     +subscribe +psubscribe -keys
 ```
+
+### ⚠ `+@transaction` is required, and omitting it reads as stale data
+
+The first grant here left it out, and **every screen rendered "data age
+unknown"** with 365 `NoPermissionError`s in the log:
+
+```
+redis.exceptions.NoPermissionError: this user has no permissions to run the 'multi' command
+```
+
+`bus_client.read_versions` / `read_metas` batch their probes through a redis-py
+pipeline, and **`pipeline()` defaults to `transaction=True`**, which issues
+`MULTI`/`EXEC`. Those are `@transaction`, not `@read`. Denied, the batched
+freshness reads fail — and the page has no way to say so, it just reports an
+age it could not read.
+
+**This grants no write ability.** Every command queued inside a transaction is
+ACL-checked *at queue time*, verified here: a `MULTI` + `SET` returns `NOPERM`
+on the SET and the whole thing `EXECABORT`s. `WATCH`/`UNWATCH` are excluded —
+a reader needs no optimistic locking.
 
 The credential is at **`/home/administrator/.config/neuralstrike/live.env`**
 (mode 600) — deliberately **outside the checkout**, see the ordering trap in
@@ -150,7 +171,53 @@ stream key leaks.
 
 ---
 
-## Phase 3 — scratch checkout, and walk all fourteen screens
+## Phase 3 — scratch checkout, and walk all fourteen screens ✅ DONE 2026-09-07
+
+**Result: all fourteen serve, in under 260 ms each, with a completely clean
+log** (0 NOPERM, 0 tracebacks, 0 ERROR) once `+@transaction` was granted.
+
+Confirmed in a real browser against live prod data:
+
+| | |
+|---|---|
+| 14 published routes | all 200 |
+| `/terminate` `/settings` `/status` `/driver` `/options/paper` `/options/captured` `/login` `/logout` `/wall` `/eod` `/options/gamma` `/options/matrix` | all **404** |
+| `?_s=PWNED` and `?symbol=…` | byte-identical responses — no reflection, no injection |
+| App host / paths / credentials in page source | none |
+| Macro Board | wrapper carries `macro-b`; HEAT LATTICE toggle active ✅ |
+| Momentum | "Momentum Industries" ✅ |
+| Sector & Industry | collapsed, Expand all / Collapse present, **no Refresh** ✅ |
+| Sentiment · Bull/Bear · Rotation · RRG · Momentum | **no Refresh button on any** ✅ |
+| Gamma | no Refresh / Explain / Analyze / Briefings, no view subtabs ✅ |
+| RRG | no `viewBox`, no `vector-effect` — the percentage-endpoint fix is in place ✅ |
+| Charts | `/sentiment` 821×200; `/gamma` 434×680, 434×680, 521×150 with 3/9/2 series — **none collapsed** ✅ |
+| Flow Alerts row click | lands on **`/gamma`**, not `/options/gamma` ✅ |
+
+**The chart-mount risk is resolved.** The Highcharts panels do mount hidden
+(`display:none`) when there is no snapshot, which is the documented 0×0 trap in
+its latent form — but seeded with real data they render at full size, so the
+reflow path works. Net Prem's three hidden Highcharts are correct: that view
+draws through a raw `ui.html` SVG fragment, not Highcharts.
+
+⚠ To test that, `cache:options:gamma` was copied to
+`cache:options:gamma_pub:$SPX` as a **temporary fixture** and deleted
+immediately after. Additive and inert — nothing deployed reads `gamma_pub`.
+Verified after: 0 `gamma_pub` keys, DBSIZE back to 213, private slot unchanged,
+prod checkout clean and unmoved.
+
+⚠ **"Data age unknown" and "Walls hidden" on the Desk are HONEST**, not a
+defect: `cache:options:gex_status` carries `"age_seconds": null` and
+`"session": "Closed"` (2026-09-07 is Labor Day). The Desk refuses to state an
+age it did not read, and hides levels it cannot date.
+
+⚠ **Two traps hit while running this, both documented and both real.** A
+`pkill` pattern that did not match left the old process holding 8501, so the new
+one failed to bind **silently** and the old one kept serving — kill by port, and
+grep the log for `address already in use`. And a loose `grep 8500` "found" the
+app port in `/sentiment`, which turned out to be the float
+`5.6850000000000005`. Check the context before reporting a leak.
+
+### The steps, for a re-run
 
 This is the real verification. It reads live prod data through the read-only
 ACL user and runs nothing else.
