@@ -169,6 +169,24 @@ def _live_block():
     public process to say "do not index" would widen the surface the route-set
     test exists to keep narrow.
 
+    ⚠ **Why not ``X-Robots-Tag: noindex`` instead, and why not BOTH.** They are
+    mutually exclusive in effect: a crawler has to FETCH a page to see a
+    noindex header, so a ``Disallow`` hides the very header that would tell it
+    not to index -- Google says so explicitly. Sending both is a contradiction
+    where the ``Disallow`` wins. ``Disallow`` is the right half here because the
+    thing being protected is the CONTENT (positions, marks, P&L), and it is
+    never fetched at all; noindex would have every crawler pulling all fourteen
+    screens on a schedule, which is the load problem above. The residue is that
+    a disallowed URL can still be listed URL-only when something links to it,
+    and ``live.html`` links all fourteen -- a listing with no content, which is
+    the trade taken knowingly.
+
+    ⚠ **Not a guarantee, and the honest limit is worth stating**: robots.txt is
+    a request. The Internet Archive announced in 2017 that it would largely stop
+    honouring it, so ``Disallow`` moves the Wayback case from *invited* to
+    *unrequested* and no further. Nothing short of not publishing does better,
+    which is the decision recorded under "Exposure" in the design doc.
+
     ⚠ Multi-line **quoted** body, not ``\\n`` escapes: quoted tokens have spanned
     lines since v2.0, while ``\\n`` inside them is a later addition. And
     ``Content-Type`` is set explicitly -- ``respond`` sets none, and a crawler

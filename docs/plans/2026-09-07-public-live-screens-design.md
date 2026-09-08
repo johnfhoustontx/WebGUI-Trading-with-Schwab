@@ -158,6 +158,16 @@ Caddy live block now serves `User-agent: * / Disallow: /`. Three reasons:
 it still described the live page as an empty placeholder carrying a `noindex`
 tag, and `deploy/tests/test_site.py` now asserts that tag is gone.
 
+⚠ **Two limits, stated rather than glossed.** (1) `Disallow` and
+`X-Robots-Tag: noindex` are mutually exclusive in effect — a crawler must fetch
+a page to see the header, so a disallow hides it. `Disallow` is the right half
+because the content is what matters and it is then never fetched; the residue is
+that a disallowed URL can still be listed URL-only when something links to it,
+and `live.html` links all fourteen. A listing with no content is the accepted
+trade. (2) robots.txt is a request, and the Internet Archive announced in 2017
+that it would largely stop honouring it — so this moves the Wayback case from
+*invited* to *unrequested*, no further.
+
 ## Thumbnails
 
 `tools/capture_live_shots.py` drives headless Chrome — the same binary
