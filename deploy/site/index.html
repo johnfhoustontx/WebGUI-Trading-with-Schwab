@@ -83,11 +83,11 @@
     <a class="ns-navlink" href="#idea">The idea</a>
     <a class="ns-navlink" href="#community">Community</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
-    <a class="ns-navlink" href="live.html">Live screens</a>
-    <!-- The design made Live Screens the primary button. That page is a
-         deliberate placeholder, so as drawn the most prominent control on the
-         site led to an empty room; the gallery took the slot. -->
-    <a class="btn btn-primary" href="gallery.html" style="white-space: nowrap;">App gallery</a>
+    <a class="ns-navlink" href="gallery.html">App gallery</a>
+    <!-- Live Screens is the design's primary button, and now earns it: the page
+         served an empty placeholder until 2026-09-07, so the gallery held the slot
+         rather than pointing the site's most prominent control at an empty room. -->
+    <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live screens</a>
   </nav>
 
   <!-- ─── Hero ─────────────────────────────────────────────────────────── -->
@@ -194,7 +194,7 @@
     <h2 class="ns-h2-sm" style="margin: 0 0 clamp(28px, 4vw, 44px); max-width: 34ch;">Four lenses on the same forced flow</h2>
 
     <p style="margin: -20px 0 clamp(24px, 3vw, 36px);">
-      <a class="btn btn-ghost btn-outline" href="gallery.html">See all 16 screens →</a>
+      <a class="btn btn-ghost btn-outline" href="gallery.html">See all 15 screens →</a>
     </p>
 
     <div>
@@ -302,5 +302,21 @@
   </footer>
 
 </div>
+
+<!-- THE MARKET GLOW. Progressive enhancement, and the only scripting on this
+     page: the Live screens button above lights green while the US session is
+     open. A file server cannot know that, so the client works it out.
+
+     ORDER IS THE CONTRACT. market-clock.js is GENERATED DATA (the holiday list
+     and the session bounds, from shared/market_calendar.py) and market-glow.js
+     is the logic that reads it. `defer` runs them in DOCUMENT ORDER, so listing
+     the logic first would leave it reading an undefined global -- and it
+     degrades silently by design, so the button would just never light again
+     with nothing to say why. deploy/tests/test_site.py pins the order.
+
+     Nothing here is content: with scripting off the button is exactly the
+     button, which is why this needs no `.js` hook the way the gallery does. -->
+<script src="assets/market-clock.js" defer></script>
+<script src="assets/market-glow.js" defer></script>
 </body>
 </html>

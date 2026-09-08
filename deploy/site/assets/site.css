@@ -216,6 +216,41 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 .btn-outline { border-color: var(--color-neutral-700); }
 .btn-outline:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
+/* THE MARKET GLOW. assets/market-glow.js puts this class on the nav's Live
+ * screens button while the US session is open, and takes it off at the close.
+ *
+ * It is the ONE place on the site whose colour is not the violet accent, and
+ * that is the point: the button means something different for six and a half
+ * hours a day, and a brighter violet would read as a hover state. The green is
+ * the app's own profit green, so the two surfaces speak one vocabulary.
+ *
+ * Built out of .ns-dot's language -- a colour plus a soft outer box-shadow --
+ * rather than a new one. Three shadows: a hairline that firms the edge, a tight
+ * halo, and a wide low-opacity bloom that is what actually reads as neon on the
+ * dark ground.
+ *
+ * DELIBERATELY STEADY. .ns-dot pulses and carries a prefers-reduced-motion
+ * guard for it; this does not animate, so it needs none. A pulsing button in
+ * the nav of every page view would be an advertisement, not a status light.
+ *
+ * ⚠ These rules must stay AFTER nocturne's .btn-primary. Both are single-class
+ * selectors, so the cascade is decided by source order alone, and site.css is
+ * the sheet that loads second. */
+.ns-market-open {
+  --ns-open: #34d399;
+  color: var(--ns-open);
+  border-color: color-mix(in srgb, var(--ns-open) 72%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ns-open) 20%, transparent),
+    0 0 16px -3px color-mix(in srgb, var(--ns-open) 55%, transparent),
+    0 0 40px -10px color-mix(in srgb, var(--ns-open) 45%, transparent);
+}
+.ns-market-open:hover {
+  background: color-mix(in srgb, var(--ns-open) 12%, transparent);
+  border-color: var(--ns-open);
+}
+.ns-market-open:active { background: color-mix(in srgb, var(--ns-open) 22%, transparent); }
+
 /* ─── 5. Shared marks ────────────────────────────────────────────────────
  * The accent eyebrow: a 40px rule, then small uppercase text.
  */
@@ -484,7 +519,7 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 /* ─── 7. Gallery ─────────────────────────────────────────────────────────
  *
  * PROGRESSIVE ENHANCEMENT, and it is the reason these pages were rebuilt
- * rather than copied from the design's bundle. Every one of the 16 screens is
+ * rather than copied from the design's bundle. Every one of the 15 screens is
  * a real element in gallery.html. With no JavaScript the panels simply stack
  * and the page is still a usable gallery; gallery.js adds `js` to <html>,
  * which is what turns the stack into a rail-plus-viewer.
@@ -625,8 +660,8 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 
 /* ─── 7b. The rail becomes a horizontal chip row on narrow screens ───────
  *
- * A 16-item vertical list is fine as a sidebar and wrong as a preamble: below
- * the stacking width it put 16 screen names between the visitor and the first
+ * A 15-item vertical list is fine as a sidebar and wrong as a preamble: below
+ * the stacking width it put 15 screen names between the visitor and the first
  * screenshot. As chips it reads as what it is — a picker — and costs one row.
  *
  * ⚠ THE BREAKPOINT ALSO FORCES THE STACK, and that is the point of stating it

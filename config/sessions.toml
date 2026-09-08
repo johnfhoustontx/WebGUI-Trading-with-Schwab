@@ -138,6 +138,46 @@ morning = "08:45"     # 09:45 ET
 # reader. Cheap and local -- it reads signals.db, makes no Schwab or Claude call.
 at = "16:30"
 
+[slots.gallery_capture]
+# The App gallery on neuralstrike.co, re-photographed from the PRIVATE app on
+# loopback (tools/capture_gallery_shots.py) so the tiles carry current branding
+# and current numbers. Half an hour after the 08:30 CT regular open, so the
+# screens have painted live data -- a pre-open run publishes a gallery of blank
+# panels and overnight marks.
+#
+# ⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, and it
+# is the heavier of the two: 19 shots at 12s settle against live_capture's 14 at
+# 8s. Read the [windows.live_capture] comment above before touching this time --
+# that job was moved POST-CLOSE the same day precisely because one in-session run
+# took proxy /health from 0.8s to 18.2s and cost a GEX minute on every quarter
+# hour. The same load lands here, so this slot carries its own containment:
+# CPUQuota + Nice on trading-<env>-gallery-capture.service, which live_capture
+# solved by moving instead. See _gallery_capture_units in generate_units.py.
+#
+# It stays in-session for a DATA reason, not a load one: index option open
+# interest zeroes after hours, so a post-close capture photographs all-zero GEX
+# grids and arbitrary walls -- worse imagery than the stale branding this whole
+# change exists to fix. If the quota turns out not to be enough, the fix is a
+# quieter in-session time or a smaller quota, NOT moving it after the close.
+#
+# :07 rather than :00 is a small remaining courtesy: live_capture's timer still
+# FIRES every quarter hour, it just stands down in under a second outside its
+# window, and the GEX collector's own minute boundary is :00.
+#
+# WHAT A FIRING COSTS: 19 page loads against the local web app (three of the 22
+# tiles are Simulator views that live in page state and are deliberately
+# skipped). NO SCHWAB CALL and NO CLAUDE CALL -- unlike [slots.analyze] above,
+# where EACH FIRING IS A PAID CLAUDE CALL, and unlike [slots.income], the
+# largest scheduled Schwab spend on this table. The whole cost here is ~20
+# minutes of a headless Chrome and some CPU on the box that already serves the
+# app.
+#
+# ⚠ Read by SYSTEMD, not by a service scheduler: generate_units.py turns it
+# into trading-<env>-gallery-capture.timer's OnCalendar. Changing this time
+# needs `python -m deploy.systemd.generate_units --install` and a
+# `systemctl --user daemon-reload`; a service restart will not pick it up.
+at = "09:07"     # 10:07 ET -- off the quarter hour, deliberately
+
 [slots.momentum]
 # The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the
 # day's daily bars have settled at the proxy. Moving it earlier will silently

@@ -4,6 +4,282 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-08 (**The marketing site's three loose ends, closed
+together: Live screens takes the primary button now that the page behind it is
+real, that button GLOWS GREEN while the US session is open, and the App gallery
+is re-photographed from the PRIVATE app every trading morning so the tiles carry
+the current branding.** Design + plan:
+[`2026-09-08-gallery-refresh-and-live-glow-design.md`](plans/2026-09-08-gallery-refresh-and-live-glow-design.md)
+/ [`-plan.md`](plans/2026-09-08-gallery-refresh-and-live-glow-plan.md). ⚠ **Built and
+green, not yet run in anger:** the first capture happens on the serving box, so
+until then the shots on disk are the old hand-crops — see the geometry note below.)
+
+- **The nav inversion is over.** `index.html` made the gallery the `btn btn-primary`
+  because the design's choice — Live screens — pointed at a deliberate placeholder,
+  and the site's most prominent control led to an empty room. That page has served
+  fourteen real screens since 2026-09-07, so the slot goes back (`89ffa7a`). The
+  comment explaining the inversion was **corrected in place** rather than deleted:
+  the next reader deserves to know the original design was right, and why it was not
+  followed for the two days the site existed without live screens behind it.
+  `gallery.html`'s nav also gained a Live screens link —
+  the two pages are captures and the running app, and the gallery had **no way to
+  reach the live grid at all**, a dead end only a visitor ever hits because the
+  author always arrives from a page that carries the link.
+
+- **The glow is two files on purpose, and only one of them is generated.**
+  `tools/generate_market_clock.py` writes `deploy/site/assets/market-clock.js` —
+  the holiday list from `shared/market_calendar.nyse_holidays` (derived
+  algorithmically; there is no list to maintain) and the regular session bounds
+  from `config/sessions.toml`, stated there in Central and converted to Eastern on
+  the way out (`b36c941`). `assets/market-glow.js` is hand-written logic that reads
+  it and toggles `.ns-market-open` on the Live screens link (`81fca59`). Splitting
+  them is the point: **a generator that owns hand-written code is a generator
+  people stop running.**
+
+- **⚠ The generated clock is COMMITTED, which is the opposite of what this repo
+  does with generated state** — `deploy/site/live/*.webp` and now the gallery shots
+  are both gitignored for the promote-refuses-a-dirty-tree reason. This one is
+  committed because it is **source the site needs to work from a fresh clone**, it
+  is tiny and deterministic, and nothing on the serving box ever rewrites it. The
+  cost of that choice is drift, so `test_the_committed_file_matches_what_the_generator_emits`
+  regenerates and compares the bytes. It covers **two years** — the year it was
+  generated in and the next — so a visitor in early January is not looking at a blind
+  clock, and that test **legitimately goes red on 1 January**: the reminder to
+  regenerate is a failing assertion rather than a timer.
+
+- **⚠ KNOWN GAP — early closes are not handled, deliberately.** The NYSE shuts at
+  13:00 ET on roughly three afternoons a year (the eves of Independence Day and
+  Christmas, the Friday after Thanksgiving), and **nothing in this repo models a
+  half day** — there is no `is_half_day` anywhere. So on those afternoons the button
+  stays lit until 16:00. Accepted rather than papered over with a second
+  hand-maintained date list, which is exactly what the standing "no new holiday
+  literal anywhere" rule exists to prevent. Written into the generated file's own
+  header, into `market-glow.js`, and into the design doc — three places a reader
+  might arrive from. `ea2afd4` had to correct a claim in the design that the
+  calendar knew about half days; it does not.
+
+- **Two browser facts the glow turns on.** The question is *what time is it in New
+  York*, not *what time is it here*, so it asks `Intl.DateTimeFormat` with an
+  explicit `timeZone` rather than subtracting an offset — the naive fix is wrong
+  twice a year in the gap between the US and everyone else's DST switch, and wrong
+  all year for anyone whose own clock is off. And the weekday is **not** an `Intl`
+  `weekday` part: that is a locale string ("sam." in French, another script
+  elsewhere), so the numeric Y/M/D is fed through `Date.UTC` and read back with
+  `getUTCDay()` — an integer, identical for every visitor.
+
+- **Every failure path is an unlit button** (no clock data, no such link, an engine
+  with no `timeZone` support). Decoration must never break a page. Two consequences
+  worth knowing: the glow is **steady, not pulsing** — `.ns-dot` pulses and carries
+  a `prefers-reduced-motion` guard for it, but a pulsing button in the nav of every
+  page view is an advertisement, not a status light — and **script order is a
+  contract**. `defer` runs scripts in document order, so listing the logic before
+  its data would leave it reading an undefined global and, because it degrades
+  silently, the button would simply never light again with nothing to say why.
+  `test_the_clock_data_loads_before_the_glow_logic` pins it. The `.ns-market-open`
+  rules must also stay **after** nocturne's `.btn-primary`: both are single-class
+  selectors, so source order alone decides.
+
+- **⚠ `test_the_glow_is_green` asserted the class existed, not that it was green.**
+  Fixed in `9637761` before the feature shipped — it now reads the hue out of the
+  declared colour. The same shape as the `"og:image" in page` substring guard caught
+  the day before: a test named for a property that never checks it.
+
+- **The gallery is 15 screens, not 16.** Daily Briefings was dropped by decision;
+  `image23`/`image24` went with it (`8751bbc`). ⚠ **The rail row and the panel had
+  to go together**: `gallery.js` pairs them BY INDEX and bails out if the lengths
+  disagree, so a stray one does not throw — the gallery just silently stops
+  switching. Three counts in **copy** were about to go stale in the same silent way
+  (the "16 screens" badge, the landing page's "See all 16 screens", four comments);
+  `test_the_pages_that_COUNT_the_screens_say_how_many_there_are` now derives the
+  answer from the panels, because a wrong number in prose renders exactly like a
+  right one and the visitor just counts fifteen.
+
+- **One caption was simply wrong, and it is the one defect a recapture can never
+  fix.** `image18` is the Simulator's **Replay** tab — the six-panel
+  Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" inside the picture — and
+  shipped captioned "What-if: over time". It is now "Replay bar by bar" in the tab
+  label and the alt text, and pinned by test, because that shot is never retaken
+  (see the skip below).
+
+- **`tools/gallery_screens.py` is the pure map** (`7334a6d`): 15 screens, 22 shots,
+  each naming the private route behind it. Nothing else restates a filename or a
+  route. Order is load-bearing twice — `SCREENS` order is the rail order, and a
+  screen's `shots` order pairs each figure with its tab caption **by position**, so
+  re-sorting silently re-captions. Screen 12's files run 14, 15, 17, 16, 18; that is
+  what the HTML has, and it is preserved rather than tidied. Pinned from both sides:
+  `tools/tests/test_gallery_screens.py` holds the table against the HTML,
+  `webgui/tests/test_gallery_routes.py` holds it against the app's registered routes.
+
+- **⚠ The capture tool authenticates as the owner, which is a capability its sibling
+  does not have.** `tools/capture_live_shots.py` photographs a public origin and can
+  reach nothing; `tools/capture_gallery_shots.py` reads `shared/webgui_auth.json`
+  (mode 0600) and **mints a session cookie** (`c8653fb`). That is possible because
+  `webgui/auth.mint_token` is stateless — there is no server-side registry of issued
+  tokens, by design — so given the store's `session_secret` and `epoch` a valid
+  cookie is a pure computation. It mints nothing it could not equally well have
+  obtained by typing the password into the form, but the blast radius of the file
+  and of this script is now the whole private app. Shots come from the private app
+  because **the branding lives in the app header**, which the public read-only
+  screens deliberately do not render.
+
+- **⚠ Without a session, every route 303s to `/login` — and a login form is a
+  perfectly good HTTP 200 that Chrome screenshots happily.** A run that ignored that
+  would publish a login box over every tile it captures. So a missing or
+  corrupt credentials file raises `SystemExit` **before a browser is even looked
+  for**, and the session is verified against the rendered DOM — positively, against
+  a `/_nicegui/` asset URL the login page structurally cannot carry — **before the
+  first file is written**. Not after the first capture: by then a good tile is
+  already overwritten, and that file is the one thing there is no way back.
+
+- **The cookie reaches Chrome through a loopback redirect, not through argv or a
+  profile.** `--headless --screenshot` takes no cookie or header; writing one into a
+  throwaway `--user-data-dir` means forging Chrome's OS-encrypted cookie store
+  (DPAPI/app-bound on Windows, OSCrypt on Linux), version-dependent and silently
+  wrong when it breaks; `Network.setCookie` over CDP needs a websocket client this
+  tool would be the only user of. Instead a tiny loopback server answers `302` +
+  `Set-Cookie` and forwards to the app: Chrome stores it through its own code path,
+  and because **cookies are not isolated by port** (RFC 6265 §8.5) the one set from
+  `127.0.0.1:<ephemeral>` is sent to `127.0.0.1:8500` — including on the
+  `/_nicegui_ws/` handshake, which is an ordinary HTTP request. **The token never
+  appears in a command line**; this repo has a documented incident where a live
+  stream key was readable in `pgrep -af`. The one thing that would break it is
+  Chrome enabling origin-bound cookies by default; if that lands, the verification
+  render fails and the run exits non-zero saying the session was refused.
+
+- **Three shots are SKIPPED, not guessed.** `image16`/`17`/`18` are one Simulator
+  route told apart by an in-page tab, and `simulator.render()` takes no arguments —
+  clicking needs CDP. Capturing the page default three times would publish one
+  identical picture under three different captions, **which is precisely the failure
+  this gallery already shipped** (see the Replay caption above). A tile that is
+  older is a smaller lie than a tile that is wrong.
+
+- **The other three gamma tiles WOULD have had that failure, and two reviewers
+  caught it.** `/options/gamma` was parameterless, so its three shots would all have
+  captured the identical default GEX view. It now takes **`?view=`** (`f74fe61`),
+  the same shape as the shipped `/sentiment/momentum?level=`. ⚠ A pinned view also
+  changes what the page draws — `gamma.shows_view_picker` builds no subtab row and
+  `may_enqueue` no Refresh/Explain/Analyze/History buttons — so the recapture will
+  legitimately differ from the shipped `image2`, which has a picker in it. A pin is
+  deliberately **not** offered for `symbol`: that one is interpolated into a Redis
+  key name with no allow-list behind it, and nothing asks for it.
+  **⚠ Self-review found the tests one layer short of the claim** (`91f223d`): every
+  one called `options_gamma_page` in Python, which proves the value travels once it
+  ARRIVES, not that `?view=` in a URL is where it comes from — a parameter FastAPI
+  had classified as a path or body field would have satisfied all of them and still
+  left the gallery capturing one view three times. They now read the classification
+  off the **route's own FastAPI dependant**, beside `/sentiment/momentum` so the
+  shipped precedent states the shape, and both directions were verified by mutation:
+  the query-string test fails against the parameterless route, and an
+  accepts-but-ignores route fails four tests. The `def _page(_s=screen)` incident the
+  day before was precisely a signature that looked innocent until FastAPI read it.
+
+- **⚠ The shots became gitignored state, with three tracked exceptions**
+  (`8558f5c`). Nineteen of the twenty-two are rewritten on the serving box, and
+  tracked they would dirty prod's tree — **`tools/promote.sh` refuses a dirty tree
+  before it stops anything**, so a daily capture would block every promote. Same
+  trap and same fix as `deploy/site/live/*.webp`. **Not a wholesale ignore:**
+  nothing regenerates the three Simulator shots, so ignored, a fresh clone would
+  have no picture for those tiles **ever**, not merely until the next capture run.
+  The pattern excludes the FILES rather than the directory, which is what lets them
+  be negated back in at all — git cannot un-exclude a file inside an excluded
+  directory. Two more things that look identical from the `.gitignore` alone:
+  **the pattern buys nothing until `git rm --cached` runs**, because `.gitignore`
+  does not apply to a path already in the index; and a hand-written trio is exactly
+  what drifts, so the tests ask **git itself** (`check-ignore` / `ls-files`) against
+  the tool's own `unreachable_shots()` rather than re-implementing git's rules.
+
+- **The geometry is now declared, not inherited.** The shipped images are
+  hand-cropped and no two match — 23 distinct `width`/`height` pairs across the 24
+  `<img>` tags the page carried; the nineteen the tool rewrites now
+  declare its single viewport, **1840×920**, and the three Simulator shots keep
+  their own because nothing recaptures them. ⚠ **The files on disk are still the old
+  crops until the tool runs on the serving box** — `.ns-shot img` is `width:100%;
+  height:auto`, so the mismatch costs a layout shift as each tile loads and never a
+  distorted picture.
+
+- **Scheduled by `[slots.gallery_capture]` at 09:07 CT** — half an hour after the
+  08:30 open, so the screens have painted live data; a pre-open run publishes a
+  gallery of blank panels and overnight marks. ⚠ **That is the one `[slots]` entry
+  read by systemd rather than by a service scheduler**: `generate_units.py` turns it
+  into `trading-<env>-gallery-capture.timer`'s `OnCalendar` at unit-GENERATION time,
+  so moving it needs `generate_units --install` + `daemon-reload`, not a service
+  restart. It still needs a default in `market_calendar._DEFAULTS` like every other
+  slot — the TOML only overrides, and a TOML-only slot raises `KeyError` out of
+  `_slot_group`. A firing costs **19 page loads against the local app, no Schwab
+  call and no Claude call** — unlike `[slots.analyze]`, where each firing is a paid
+  Claude call, and `[slots.income]`, the largest scheduled Schwab spend on that
+  table (`8964fe1`).
+
+- **⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, so it is
+  CPU-contained.** The entry below has the measurement: one in-session live-screen
+  capture took load average **2.11 → 11.84** on 4 vCPU and proxy `/health`
+  **0.82 s → 18.2 s**, which `webgui/proxy.py health(timeout=3.0)` renders as a
+  proxy-down banner while the proxy serves `200`s throughout, and it cost **seven
+  GEX slots before 09:02**. `live-capture` answered that by **leaving the session**
+  (`[windows.live_capture]` → 15:25–15:50). **This job cannot copy that answer**:
+  index option open interest zeroes after hours, so a post-close capture photographs
+  all-zero GEX grids and arbitrary walls — worse imagery than the stale branding the
+  recapture exists to fix. And it is the heavier of the two (19 shots at 12 s settle
+  against 14 at 8 s). So the peak is **bounded where it is** rather than relocated:
+  **`CPUQuota=100%` + `Nice=10`** — one core of four, leaving three for the stack.
+  ⚠ `CPUQuota` goes in **`[Service]`**, the exact inverse of the storm cap's
+  `[Unit]` home. If the quota proves insufficient the answer is a smaller quota or a
+  quieter in-session minute, **not** a post-close run. The `:07` (rather than `:00`)
+  is a minor extra courtesy — live-capture's timer still *fires* every quarter hour,
+  and `:00` is the GEX collector's own minute boundary — pinned against
+  `LIVE_CAPTURE_INTERVAL_MIN` rather than a restated fifteen.
+
+- **The test harness could not parse a `%`.** It ran `configparser` with default
+  interpolation, so `CPUQuota=100%` raised `InterpolationSyntaxError` — `%` is
+  systemd's *specifier* prefix (`%i`, `%h`) and a literal here, so the harness would
+  have refused a perfectly valid unit. Now `interpolation=None`.
+
+- **`TimeoutStartSec` is DERIVED, and so are the counts in the unit's own comment.**
+  `SHOT_TIMEOUT_SEC` × (22 shots + the verification render) + 60 s slack = **1440 s**.
+  Typed as a literal it would be wrong the first time a shot is added, and wrong in
+  the way that costs most: systemd SIGTERMs the job partway, so some tiles refresh
+  and the rest do not, with nothing on the page to say which. The comment's "22
+  budgeted, 3 skipped" is read from the tool too (`a73994f`) — the first draft typed
+  one of them and it was **already wrong**, saying twenty-two renders happen where
+  nineteen do. A count in a generated artifact is prose an operator reads at 09:00
+  on a bad morning.
+
+- **No `Restart=`, no `Persistent=true`, and no `After=`/`Requires=` on the web
+  GUI.** The tool exits non-zero for two things worth telling apart — no browser on
+  the box, which retrying cannot fix, and the app unreachable or the session
+  refused, which the next day picks up — and it publishes **nothing** in the failure
+  case, so a failed run leaves the gallery intact and shows in `systemctl --user
+  --failed`. A catch-up run would recapture at whatever hour the box came back and
+  publish an overnight render, which is the exact thing the 09:07 slot exists to
+  avoid. And ordering decides BOOT sequence only, while this unit is only ever
+  started mid-session by its timer; a `Requires=` on the web GUI would be actively
+  worse — it would let a screenshot job pull the trading UI around.
+
+- **⚠ KNOWN GAP — the capture has no trading-day gate.** `OnCalendar=Mon..Fri`
+  filters weekends and **not holidays**, and unlike the stream and live-capture
+  scripts this tool carries no `in_window` / `is_trading_day` check of its own. So
+  on Thanksgiving it fires and republishes the gallery from a flat tape — a
+  stale-looking gallery, not a broken one. The honest fix is a gate **in the tool**,
+  not a holiday table in the unit generator, which would be a second driftable copy
+  of the calendar.
+
+- **`358e5e4` fixed two docstrings that overstated what they promised**, and the
+  class is worth naming because this branch produced three of them: `render()` was
+  documented as touching no disk when it reads `sessions.toml` transitively (it
+  writes nothing, which is what the spec asked, but "no disk" was wrong); the
+  holiday union was documented as handling the year-boundary spill at **both** ends
+  when it handles the near one only — a closure in the year *after* the window is
+  simply absent, `2027-12-31` living in `nyse_holidays(2028)`, accepted because
+  widening the window breaks the test pinning the two-year union and the 1 January
+  regeneration picks it up; and the Replay caption above. **Prose is checked by
+  nothing**; the only defence is verifying each sentence against the tree as it is
+  written.
+
+- **Tests at the time:** webgui **3507 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1480 passed**.
+
+---
+
 **Last updated:** 2026-09-08 (**The live-screen thumbnail capture moved off the
 trading session** — `[windows.live_capture]` in `config/sessions.toml` goes
 `08:00–15:20` → **`15:25–15:50`**, so the timer's `:30` and `:45` fires land

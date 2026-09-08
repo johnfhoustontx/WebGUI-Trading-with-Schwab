@@ -42,7 +42,12 @@ def _posix_root(monkeypatch):
 def _parse(text):
     # strict=False: systemd permits repeated keys (two Environment= lines here);
     # configparser rejects them by default.
-    cp = configparser.ConfigParser(strict=False)
+    # interpolation=None: '%' is systemd's SPECIFIER prefix (%i, %h) and is a
+    # literal in values like CPUQuota=100%. configparser's default interpolation
+    # reads it as its own syntax and raises, which would make this harness refuse
+    # to parse a perfectly valid unit -- a test failure that says nothing about
+    # the unit.
+    cp = configparser.ConfigParser(strict=False, interpolation=None)
     cp.read_string(text)
     return cp
 
@@ -751,3 +756,218 @@ def test_the_capture_runs_the_script_and_not_a_shell_wrapper(rendered):
     svc = rendered[f"trading-{ENV_NAME}-live-capture.service"]
     assert svc["Service"]["ExecStart"].endswith("tools/capture_live_shots.py")
     assert str(POSIX_ROOT) in svc["Service"]["ExecStart"]
+
+
+# --- the gallery recapture, a once-a-day oneshot the TIMER owns --------------
+#
+# ⚠ Unlike every other [slots] entry in config/sessions.toml, this one is read
+# by SYSTEMD, not by a service scheduler: the four existing groups are resolved
+# at module import by options_svc/scheduler.py and sentiment_svc/scheduler.py,
+# and this one is resolved here, at unit-GENERATION time. The slot is still the
+# right home for the time -- it is a named clock mark that fires once per
+# trading day, which is exactly what [slots] models -- but the consequence is
+# that moving it needs `generate_units --install` + `daemon-reload`, where
+# moving an analyze slot only needs a service restart.
+
+def test_the_gallery_capture_units_are_generated():
+    """The App gallery on neuralstrike.co is twenty-two <img> tags whose files
+    are written by tools/capture_gallery_shots.py. Without a timer they are
+    whatever the last hand-run left behind, and nothing about the site looks
+    wrong while they age."""
+    all_units = units.render_all()
+    assert f"trading-{ENV_NAME}-gallery-capture.service" in all_units
+    assert f"trading-{ENV_NAME}-gallery-capture.timer" in all_units
+
+
+def test_the_gallery_capture_fires_once_a_day_at_the_configured_slot():
+    """Derived from [slots.gallery_capture], never typed: the unit and the
+    config cannot disagree about when the gallery is refreshed.
+
+    Exactly ONE OnCalendar. A second line is a second full recapture -- twenty
+    minutes of Chrome against the live trading UI -- for no second picture."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("gallery_capture")["at"]
+    text = units.render_all()[f"trading-{ENV_NAME}-gallery-capture.timer"]
+    schedule = _directives(text, "OnCalendar")
+    assert schedule == [f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"], schedule
+
+
+def test_the_gallery_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    """Mutate the slot and the unit must move. A hardcoded 09:00 passes the
+    test above and fails this one, which is the whole difference between a
+    derived value and a copy of one."""
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times",
+                        lambda name: {"at": _dt.time(13, 37)})
+    text = units.render_all()[f"trading-{ENV_NAME}-gallery-capture.timer"]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 13:37:00"]
+
+
+def test_the_gallery_capture_does_not_catch_up_after_downtime(rendered):
+    """Persistent=true would recapture at whatever hour the box came back --
+    publishing an overnight or pre-open render over the gallery, which is the
+    exact thing the 09:00 CT slot exists to avoid. A missed day is a day of
+    slightly older pictures; a caught-up one is twenty-two wrong ones."""
+    tmr = rendered[f"trading-{ENV_NAME}-gallery-capture.timer"]
+    assert tmr["Timer"].get("Persistent", "false").lower() != "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_gallery_capture_is_a_oneshot_that_does_not_retry(rendered):
+    """The tool exits non-zero when the app is unreachable or the session is
+    refused, and publishes NOTHING in that case -- so a failure leaves the old
+    gallery intact and shows up in `systemctl --user --failed`. A Restart= would
+    turn a down app into a retry loop against it, which fixes nothing and hides
+    the failure by eventually succeeding at an unknown hour."""
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+
+
+def test_the_gallery_storm_cap_is_in_the_unit_section(rendered):
+    """⚠ systemd moved StartLimitIntervalSec/StartLimitBurst to [Unit] in v229
+    and SILENTLY IGNORES them in [Service] -- so a cap there looks configured
+    and does not exist."""
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert int(svc["Unit"]["StartLimitIntervalSec"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+    assert "StartLimitIntervalSec" not in svc["Service"]
+
+
+def test_the_gallery_capture_is_not_a_member_of_the_fleet(rendered):
+    """PartOf/WantedBy would fire a twenty-minute Chrome run at whatever hour
+    someone promotes, and make a stack stop try to stop a job that is not
+    running."""
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert f"trading-{ENV_NAME}-gallery-capture.service" not in stack_services()
+
+
+def test_the_gallery_capture_orders_itself_against_nothing(rendered):
+    """It photographs the private webgui on loopback, so an After= reads like a
+    real dependency -- and would be fake. Ordering only decides BOOT sequence,
+    and this unit is never started at boot: the timer starts it mid-session,
+    hours after everything is up. A Requires= would be worse than useless: it
+    would let a capture drag the trading UI around."""
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert "After" not in svc["Unit"]
+    assert "Requires" not in svc["Unit"]
+    assert "Wants" not in svc["Unit"]
+
+
+def test_the_gallery_capture_has_a_timeout_derived_from_the_shot_count(rendered):
+    """A oneshot inherits DefaultTimeoutStartSec (90s) and this run renders
+    twenty-two pages plus a verification render, so without a timeout systemd
+    kills it partway: some tiles refreshed, the rest not, and nothing on the
+    page to say which."""
+    from tools import capture_gallery_shots as capture
+
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    timeout = int(svc["Service"]["TimeoutStartSec"])
+    assert timeout > capture.SHOT_TIMEOUT_SEC * len(capture.targets())
+    # ⚠ The bound above pins the HELPER only. Without this line the rendered
+    # unit could carry a typed literal that happens to satisfy it -- measured:
+    # hardcoding TimeoutStartSec=1440 into the template passed the whole file.
+    assert timeout == units._gallery_capture_timeout_seconds()
+
+
+def test_the_gallery_units_state_shot_counts_they_read_rather_than_type():
+    """The unit ships an operator-facing comment naming how many renders it
+    budgets for and how many are skipped. The first draft TYPED those and was
+    already wrong -- it said twenty-two renders happen where nineteen do, while
+    the sessions.toml comment beside it said nineteen. Mutating either count
+    must move the shipped text, which a typed one would not.
+    """
+    from tools import capture_gallery_shots as capture
+
+    budgeted, skipped = units._gallery_capture_shot_counts()
+    assert (budgeted, skipped) == (len(capture.targets()),
+                                   len(capture.unreachable_shots()))
+    # render_all(), not the `rendered` fixture: configparser drops comments,
+    # and the comment IS the subject here.
+    text = units.render_all()[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert f"all {budgeted} shots" in text
+    assert f"{skipped} of those are skipped" in text
+
+
+def test_the_gallery_timeout_moves_with_the_shot_count(monkeypatch):
+    """The discriminating half: a literal satisfies the bound above on the day
+    it is written and stops satisfying it the first time a shot is added."""
+    from tools import capture_gallery_shots as capture
+
+    real = units._gallery_capture_timeout_seconds()
+    grown = [("u", "p")] * (len(capture.targets()) + 7)
+    monkeypatch.setattr(capture, "targets", lambda: grown)
+    assert units._gallery_capture_timeout_seconds() > real
+
+
+def test_the_gallery_capture_never_lands_on_a_live_capture_run():
+    """The quarter hour is spoken for, so this job does not sit on it.
+
+    live-capture's timer is OnCalendar=*:0/15 and fires all day -- since
+    2026-09-08 it stands down in under a second outside its 15:25-15:50 window,
+    so at 09:00 the overlap would cost almost nothing. This is a courtesy rather
+    than the load fix (that is CPUQuota, next test), and it also keeps the run
+    off the GEX collector's own :00 minute boundary.
+
+    Derived from LIVE_CAPTURE_INTERVAL_MIN, never from a restated fifteen: if the
+    live cadence changes, this constraint has to move with it, and a test that
+    typed the interval would keep passing while the collision came back.
+    """
+    from shared import market_calendar as mc
+
+    at = mc.slot_times("gallery_capture")["at"]
+    minutes = at.hour * 60 + at.minute
+    assert minutes % units.LIVE_CAPTURE_INTERVAL_MIN != 0, (
+        f"{at} coincides with a live-capture run "
+        f"(OnCalendar=*:0/{units.LIVE_CAPTURE_INTERVAL_MIN})")
+
+
+def test_the_gallery_capture_is_cpu_contained(rendered):
+    """⚠ THE LOAD FIX. The offset above is a courtesy; this is the control.
+
+    Since live-capture moved post-close on 2026-09-08, this is the ONLY headless
+    Chrome that runs during the session -- and the heavier of the two. It cannot
+    follow live-capture out of the session: index option open interest zeroes
+    after hours, so a post-close run photographs all-zero GEX grids. So the peak
+    is bounded where it is, rather than relocated.
+    ⚠ CPUQuota belongs in [Service]: cgroup resource control lives there, which
+    is the exact inverse of the storm cap's [Unit] home, and carrying both traps
+    in one file is why each gets its own test.
+    """
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert svc["Service"]["CPUQuota"] == f"{units.GALLERY_CAPTURE_CPU_QUOTA_PCT}%"
+    assert svc["Service"]["Nice"] == str(units.GALLERY_CAPTURE_NICE)
+    assert "CPUQuota" not in svc["Unit"]
+
+
+def test_the_gallery_capture_carries_no_memory_cap(rendered):
+    """⚠ Only webgui_live carries one, for a documented reason. The file-wide
+    test_no_other_unit_carries_a_memory_cap covers this too; pinned locally so
+    the intent is visible at the unit that could most plausibly attract one (it
+    runs Chrome)."""
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    for key in ("MemoryMax", "MemoryHigh", "MemoryLimit", "MemorySwapMax"):
+        assert key not in svc["Service"], key
+
+
+def test_the_gallery_capture_runs_the_script_and_not_a_shell_wrapper(rendered):
+    svc = rendered[f"trading-{ENV_NAME}-gallery-capture.service"]
+    assert svc["Service"]["ExecStart"].endswith("tools/capture_gallery_shots.py")
+    assert str(POSIX_ROOT) in svc["Service"]["ExecStart"]
+
+
+def test_the_gallery_slot_is_after_the_open_so_the_screens_carry_live_data():
+    """The whole reason it is not at 08:00: a pre-open render publishes a
+    gallery of blank panels and overnight numbers. Half an hour after the
+    regular open is enough for the watcher tick and the first scans to have
+    painted, and the bound is derived from [sessions.regular] rather than
+    restating 08:30."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("gallery_capture")["at"]
+    open_, close = mc._session_bounds("regular")
+    assert open_ < at < close, (open_, at, close)
+    assert (at.hour * 60 + at.minute) - (open_.hour * 60 + open_.minute) >= 20

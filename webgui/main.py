@@ -2362,10 +2362,22 @@ def options_income_page() -> None:
 
 
 @_page("/options/gamma")
-def options_gamma_page() -> None:
+def options_gamma_page(view: str | None = None) -> None:
+    # ?view=Flow deep-links one view of this page; bare (view=None) is the
+    # private page exactly as it has always been -- the picker, and the four
+    # commands may_enqueue gates. render() coerces anything unknown back to GEX
+    # (_resolve_view is total), so a stranger's string cannot 500 the page.
+    #
+    # ⚠ A @ui.page function's signature IS its query-parameter surface, which is
+    # how live_main's late-binding ``_s`` became settable (see _register there).
+    # The rule that separates the two is "never let a parameter reach code", not
+    # "never take a parameter": this one is a declared str whose only destination
+    # is _resolve_view. A pin is deliberately NOT offered for ``symbol`` -- that
+    # one is interpolated into a Redis key name (gamma.snapshot_view) with no
+    # allow-list behind it, and nothing asks for it.
     with _layout("/options/gamma", "Dealer Positioning"):
         from pages.options import gamma
-        gamma.render()
+        gamma.render(view=view)
 
 
 @_page("/options/simulator")

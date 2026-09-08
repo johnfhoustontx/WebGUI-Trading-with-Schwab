@@ -680,6 +680,21 @@ heatmap, silently**, because a missing history key reads as "no history yet".
 ⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the
 same shape as `webgui/data/`. Committed, the captures would dirty prod's tree the
 moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty tree.**
+**`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
+TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page
+state rather than in the URL, so **nothing regenerates them**: ignored, a fresh clone
+would have no picture for those tiles *ever*, not merely until the next capture run.
+The pattern therefore excludes the **files**, not the directory — git cannot un-exclude
+a file inside an excluded directory — and `.gitignore` does not apply to a path already
+in the index, so such a pattern buys nothing until `git rm --cached` runs.
+
+⚠ **The gallery capture AUTHENTICATES AS THE OWNER; its sibling cannot.**
+`tools/capture_live_shots.py` reads the public origin and has no app access at all.
+`tools/capture_gallery_shots.py` reads the 0600 `auth_store` file and **mints a session
+cookie** — possible because `auth.mint_token` is stateless (no server-side registry of
+issued tokens, by design), so a valid cookie is a pure computation over the store's
+`session_secret` and `epoch`. What it mints is an ordinary full session, not a read-only
+one, so this tool carries the private app's blast radius rather than a public origin's.
 
 ## webgui development notes (read before adding a page)
 
@@ -1559,6 +1574,19 @@ left outside it is `claude-driver/config.py` (legacy; its morning-agent consumer
 `from shared.market_calendar import ...` resolves once the repo root is on
 `sys.path`; legacy app-dir callers (`options-scanner/scanner.py`,
 `scanner_engine.py`, `gex_status.py`) carry the three-line bootstrap.
+
+⚠ **The marketing site consumes that calendar too, and its artifact is generated AND
+COMMITTED.** `tools/generate_market_clock.py` emits
+`deploy/site/assets/market-clock.js` — the holiday list plus the regular session
+bounds, converted CT→ET — so a static page can decide open/closed in the visitor's
+browser. It is **committed**, against this repo's own "generated state is gitignored"
+pattern, because it is source a fresh clone needs to serve a working site, and nothing
+on the serving box ever rewrites it; a test compares the committed bytes to the
+generator's output, and that test **legitimately goes red on 1 January**, since the file
+covers only the year it was generated in and the next. ⚠ **Early closes (13:00 ET, ~3
+afternoons a year) are NOT handled, and the gap is deliberate** — nothing in this repo
+models a half day, and the fix must not be a second hand-maintained date list, which is
+what the rule above forbids.
 
 ## Secrets
 

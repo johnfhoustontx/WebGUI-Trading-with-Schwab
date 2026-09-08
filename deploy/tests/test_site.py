@@ -6,7 +6,7 @@ cannot see, and which a browser only reveals to whoever looks at the live page.
 
 Three failure modes motivate the file, all of them silent:
 
-* **a renamed or missing screenshot.** The gallery references 24 images by
+* **a renamed or missing screenshot.** The gallery references 22 images by
   path. Nothing breaks at deploy time; the page simply shows a broken image to
   every visitor until somebody scrolls to that screen.
 * **a leaked reference to the app.** The public site must not name the app's
@@ -70,6 +70,35 @@ ALLOWED_OUTBOUND = (
 # checked against webgui/live_screens.py, which is also what the capture script
 # names its files from.
 GENERATED_REF_PREFIXES = ("live/",)
+
+
+def _regenerated_shot_refs():
+    """The gallery ``src`` values ``tools/capture_gallery_shots.py`` rewrites.
+
+    The SAME exemption as ``GENERATED_REF_PREFIXES``, deliberately NOT folded
+    into it: a prefix covering ``assets/shots/`` would exempt the whole
+    directory, and three of those files -- the Simulator shots the tool declines
+    (``unreachable_reason``) -- are ordinary committed images that nothing
+    regenerates. A rename of one of those is exactly what the reference check
+    exists to catch, so they stay checked and only the generated ones are
+    skipped.
+
+    ⚠ Imported inside the function. ``capture_gallery_shots`` APPENDS
+    ``webgui/`` to ``sys.path`` to reach the credential modules it mints a
+    cookie with, and ``webgui/`` holds top-level ``main``, ``proxy``, ``auth``
+    and ``wall``. Appending is the safe end (see that module's own note, and
+    ``_live_screens`` below for why an insert would not be), and
+    ``tools/tests`` already pays exactly this cost in the same pytest session --
+    so this changes nothing about the session, while a hand-written list of
+    three filenames here would drift the first time a shot changes hands.
+    """
+    from tools import capture_gallery_shots as cap
+    from tools import gallery_screens
+
+    return {f"assets/shots/{sh.image}.webp"
+            for scr in gallery_screens.SCREENS for sh in scr.shots
+            if not cap.unreachable_reason(sh)}
+
 
 # Attributes that make the browser fetch something or follow somewhere.
 REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
@@ -139,15 +168,16 @@ def test_every_internal_reference_resolves_to_a_file(pages):
     invisible until one scrolls to it, so neither shows up in any other check
     here -- and by then it is on the public internet.
 
-    ``GENERATED_REF_PREFIXES`` is skipped: those files are written on the
-    serving box, not committed. See that constant for why, and for what pins
-    them instead.
+    ``GENERATED_REF_PREFIXES`` and ``_regenerated_shot_refs`` are skipped: those
+    files are written on the serving box, not committed. See both for why, and
+    for what pins them instead.
     """
+    generated_shots = _regenerated_shot_refs()
     for name, text in pages.items():
         for ref in _refs(text):
             if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
                 continue
-            if ref.startswith(GENERATED_REF_PREFIXES):
+            if ref.startswith(GENERATED_REF_PREFIXES) or ref in generated_shots:
                 continue
             target = ref.split("#", 1)[0].split("?", 1)[0]
             # A leading "/" is root-absolute, and this site IS served at the
@@ -195,16 +225,96 @@ def test_every_anchor_target_exists(pages):
 
 # --- C. the gallery and its images agree, in BOTH directions ----------------
 
-def test_the_gallery_references_every_shot_on_disk():
-    """A shot on disk that no page references is dead weight -- published to
-    the internet, downloaded by nobody, and invisible in review. This is the
-    direction a link-checker never covers."""
+def test_the_gallery_shows_every_shot_the_capture_map_names_and_orphans_none():
+    """WAS an equality against the DIRECTORY, and that stopped being true.
+
+    Nineteen of the twenty-two shots are now written on the serving box and
+    gitignored, so ``assets/shots/`` legitimately holds only three files in a
+    fresh clone -- an equality against ``iterdir()`` would fail there while
+    everything is correct. The subject moved to the CAPTURE MAP instead
+    (``tools/gallery_screens``), which is what actually decides both what gets
+    written and what the tiles show, and is present in every checkout.
+
+    Two directions, and neither is the one a link-checker covers:
+
+    * every shot the tool captures has a tile. A capture with no tile writes a
+      file to the public tree that nobody will ever see, every single run.
+    * nothing on disk is unreferenced. That is the ORIGINAL assertion, kept and
+      made empty-safe -- it is what catches a shot left behind after its screen
+      was dropped, which is a picture published to the internet with no page
+      pointing at it.
+
+    The remaining direction -- referenced but never produced -- is
+    ``test_every_internal_reference_resolves_to_a_file`` for the three
+    committed shots, and ``tools/tests/test_gallery_screens.py`` (HTML against
+    the map, titles and order included) for the rest.
+    """
+    from tools import gallery_screens
+
+    in_map = {f"{sh.image}.webp"
+              for scr in gallery_screens.SCREENS for sh in scr.shots}
     on_disk = {p.name for p in (SITE / "assets" / "shots").iterdir() if p.is_file()}
     referenced = {r.rsplit("/", 1)[-1] for r in _refs(_markup("gallery.html"))
                   if "assets/shots/" in r}
-    assert on_disk == referenced, (
-        f"orphaned on disk: {sorted(on_disk - referenced)}; "
-        f"referenced but absent: {sorted(referenced - on_disk)}")
+
+    assert in_map <= referenced, (
+        f"the capture map writes shots the gallery shows nowhere: "
+        f"{sorted(in_map - referenced)}")
+    assert on_disk <= referenced, (
+        f"orphaned on disk, published to the internet and shown by nothing: "
+        f"{sorted(on_disk - referenced)}")
+
+
+def test_the_recaptured_shots_declare_the_capture_tool_s_viewport():
+    """A DECLARED SIZE THAT IS NOT THE FILE'S SIZE LETTERBOXES THE TILE.
+
+    Every shot the tool takes comes out at one fixed geometry, where the
+    original hand-cropped set had twenty-three different ones. The width/height
+    attributes are what stop the page reflowing as each screenshot arrives, so
+    they have to follow the capture viewport rather than the crop that used to
+    be there -- and a wrong pair reads as a CSS bug, not as a stale number.
+
+    Read from ``capture_gallery_shots`` rather than written down, so changing
+    the viewport fails here instead of quietly mis-sizing nineteen tiles.
+
+    The three shots the tool declines keep their own hand-cropped sizes: nothing
+    recaptures them, so their real dimensions do not change.
+    """
+    from tools import capture_gallery_shots as cap
+
+    want = f'width="{cap.VIEWPORT_WIDTH}" height="{cap.VIEWPORT_HEIGHT}"'
+    generated = _regenerated_shot_refs()
+    seen = 0
+    for tag in re.findall(r"<img \S[^>]*>", _markup("gallery.html")):
+        src = re.search(r'src="([^"]+)"', tag)
+        if not src or src.group(1) not in generated:
+            continue
+        seen += 1
+        assert want in tag, f"{src.group(1)} does not declare the capture viewport: {tag}"
+    assert seen == len(generated), (
+        f"{seen} of {len(generated)} recaptured shots have a tile")
+
+
+def test_the_replay_figure_is_not_captioned_as_a_whatif():
+    """THE GALLERY SHIPPED ONE CAPTION OVER ANOTHER TAB'S SCREENSHOT.
+
+    ``image18`` is the Simulator's Replay tab -- the six-panel
+    Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" inside the picture
+    itself -- and it shipped captioned "What-if: over time". Nothing detects
+    that: the tile renders perfectly, and only somebody who knows the app can
+    see that the words and the image disagree.
+
+    Corrected 2026-09-08. Pinned because it is the one defect here that a
+    recapture cannot fix -- the shot is never retaken (see
+    ``unreachable_reason``), so the caption is the only thing that can be wrong.
+    """
+    markup = _markup("gallery.html")
+    tag = re.search(r'<img src="assets/shots/image18\.webp"[^>]*>', markup)
+    assert tag, "image18 has no tile"
+    assert "Replay" in tag.group(0), (
+        f"image18 is the Replay tab and its alt text says otherwise: {tag.group(0)}")
+    assert "What-if: over time" not in markup, (
+        "the retired caption is back over the Replay screenshot")
 
 
 def test_the_rail_and_the_panels_are_the_same_length():
@@ -213,9 +323,32 @@ def test_the_rail_and_the_panels_are_the_same_length():
     text = _markup("gallery.html")
     rails = re.findall(r'id="(rail-\d+)"', text)
     panels = re.findall(r'id="(screen-\d+)"', text)
-    assert len(rails) == len(panels) == 16, f"{len(rails)} rail rows, {len(panels)} panels"
+    assert len(rails) == len(panels) == 15, f"{len(rails)} rail rows, {len(panels)} panels"
     for rail, panel in zip(rails, panels):
         assert rail.split("-")[1] == panel.split("-")[1]
+
+
+def test_the_pages_that_COUNT_the_screens_say_how_many_there_are():
+    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE.
+
+    The gallery's header badge and the landing page's call to action both state
+    the number out loud -- "16 screens", "See all 16 screens" -- and both kept
+    saying sixteen after Daily Briefings was dropped, because nothing renders
+    differently when a number in prose is wrong. A visitor counts fifteen.
+
+    Derived from the panels, so the copy cannot be right by luck: the two pages
+    are checked against the same document that decides the answer.
+    """
+    gallery = _markup("gallery.html")
+    panels = len(re.findall(r'id="(screen-\d+)"', gallery))
+    assert panels, "no panels parsed; this test would then assert nothing"
+    for name, pattern in (("gallery.html", r'class="ns-count">(\d+) screens'),
+                          ("index.html", r"See all (\d+) screens")):
+        said = re.findall(pattern, _markup(name))
+        assert said, f"{name} no longer states a screen count; drop it from this test"
+        for n in said:
+            assert int(n) == panels, (
+                f"{name} says {n} screens; the gallery has {panels}")
 
 
 def test_every_rail_row_controls_a_panel_that_exists():
@@ -229,7 +362,7 @@ def test_exactly_one_panel_and_one_shot_start_active():
     """A second `is-active` panel would show two screens at once."""
     text = _markup("gallery.html")
     panels = re.findall(r'<section class="ns-screen[^"]*"[^>]*>', text)
-    assert len(panels) == 16
+    assert len(panels) == 15
     active = [p for p in panels if "is-active" in p]
     assert len(active) == 1, f"{len(active)} panels start active, expected 1"
 
@@ -718,6 +851,51 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
+def test_live_screens_is_the_primary_call_to_action():
+    """The nav's own comment records that Live Screens was the design's primary
+    button and lost the slot only because the page was an empty placeholder.
+    It is not a placeholder any more, so this pins the swap back -- structurally,
+    on the class, rather than on copy a later edit would break.
+
+    ⚠ Reads ``_markup``, not ``_text``. The nav comment names BOTH hrefs while
+    explaining the history, so a raw-text search matches inside the comment and
+    passes for the wrong reason -- exactly what ``_markup`` exists to prevent.
+    """
+    text = _markup("index.html")
+    live = re.search(r'<a[^>]*href="live\.html"[^>]*>', text)
+    gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>[^<]*App gallery', text)
+    assert live, "no live.html link in the index nav"
+    assert "btn-primary" in live.group(0), "Live screens is not the primary button"
+    assert gallery and "btn-primary" not in gallery.group(0), (
+        "App gallery still carries the primary treatment")
+
+
+def test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV():
+    """The two picture pages are each other's obvious next stop -- captures of
+    the app, and the app running -- and the gallery reached the live grid from
+    nowhere at all. That is the kind of dead end an author never meets, because
+    they always arrive from the page that does carry the link.
+
+    ⚠ Scoped to the ``<nav>``, and the shouty name says so. Written first
+    against the whole document, this test could not fail: ``live.html`` names
+    the gallery a SECOND time in its body prose, so deleting the nav link left
+    it green. A link buried in a paragraph is not navigation.
+
+    ⚠ ``glossary.html`` is deliberately NOT in this: its nav is a leaf's, a crumb
+    and a term count and a way back, carrying no destination links in either
+    direction. Adding one there is a nav decision, not this invariant.
+    """
+    def nav(name):
+        m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
+        assert m, f"{name} has no <nav>"
+        return m.group(0)
+
+    assert 'href="live.html"' in nav("gallery.html"), (
+        "the gallery's nav offers no way to the live screens")
+    assert 'href="gallery.html"' in nav("live.html"), (
+        "the live grid's nav offers no way to the gallery")
+
+
 def test_the_grid_embeds_nothing_and_runs_nothing():
     """The tiles are PICTURES. An <iframe> onto the live origin would put a
     NiceGUI session behind every tile -- fourteen per visitor -- and hand the
@@ -815,13 +993,20 @@ def test_each_page_carries_its_own_content_without_scripting(pages):
         assert "<nav" in text, f"{name} has no navigation in its source"
 
 
-def test_the_gallery_has_all_sixteen_screen_titles_in_its_source():
+def test_the_gallery_has_all_fifteen_screen_titles_in_its_source():
     """With scripting off the panels stack; the text must therefore be readable
-    without running anything."""
+    without running anything.
+
+    ⚠ RENAMED from ``..._all_sixteen_...`` when Daily Briefings was dropped on
+    2026-09-08. A test called sixteen asserting fifteen is how the next reader
+    is misled about what the site actually shows.
+    """
     text = _markup("gallery.html")
-    assert len(re.findall(r"<h2>", text)) == 16
-    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator", "Daily Briefings"):
+    assert len(re.findall(r"<h2>", text)) == 15
+    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator"):
         assert f"<h2>{title}</h2>" in text, f"{title} is not in the gallery source"
+    assert "Daily Briefings" not in text, (
+        "Daily Briefings was dropped from the gallery; its panel is back")
 
 
 def test_no_page_carries_a_form_or_an_input(pages):
@@ -839,3 +1024,78 @@ def test_every_image_declares_its_size(pages):
         for tag in re.findall(r"<img\b[^>]*>", text):
             assert "width=" in tag and "height=" in tag, f"{name} has an unsized image: {tag[:70]}"
             assert "alt=" in tag, f"{name} has an image with no alt text: {tag[:70]}"
+
+
+# --- C5. the market glow, which is decoration with a data dependency --------
+
+def test_the_live_link_can_be_glowed():
+    """Structural: the CSS rule and the class the script toggles must agree.
+
+    Two files that never import each other, joined by a string. Rename the
+    class in one and the glow simply never appears -- there is no error, no
+    console warning, and the button looks exactly like the un-glowed state it
+    is supposed to leave when the market shuts.
+    """
+    css = _css("assets/site.css")
+    assert ".ns-market-open" in css
+    js = _text("assets/market-glow.js")
+    assert "ns-market-open" in js, "the script and the stylesheet disagree on the class"
+
+
+def test_the_glow_is_green():
+    """The one thing the request actually specifies -- and it must assert the
+    COLOUR, not merely that a glow exists.
+
+    ⚠ This test shipped asserting only ``box-shadow or filter``, under this same
+    name and docstring. A red glow would have passed it. That is worse than a
+    weak test: the name and the docstring both promised the colour, so a reader
+    would reasonably stop looking. Rewritten to read the hue it claims.
+
+    The rule builds every shade from one ``--ns-open`` custom property, so the
+    channel check has exactly one place to look -- and pinning the property
+    rather than the literal means a re-theme that keeps the variable keeps the
+    test honest.
+    """
+    css = _css("assets/site.css")
+    rule = re.search(r"\.ns-market-open\s*\{[^}]*\}", css)
+    assert rule, "no .ns-market-open rule to check"
+    body = rule.group(0)
+    assert "box-shadow" in body or "filter" in body, "the glow has no glow"
+
+    hexes = re.findall(r"#([0-9a-fA-F]{6})", body)
+    assert hexes, "the glow colour is not a hex literal this test can read"
+    r, g, b = (int(hexes[0][i:i + 2], 16) for i in (0, 2, 4))
+    assert g > r and g > b, (
+        f"#{hexes[0]} is not green: red={r} green={g} blue={b}")
+
+
+def test_the_glow_script_does_not_reach_off_origin():
+    """The site makes zero third-party requests and that is pinned.
+
+    ``test_no_page_reaches_an_external_origin`` reads the HTML and cannot see
+    inside a script, which is the one place an off-origin fetch would now be
+    easiest to add and hardest to notice.
+    """
+    js = _text("assets/market-glow.js")
+    assert "http://" not in js and "https://" not in js
+
+
+def test_the_clock_data_loads_before_the_glow_logic():
+    """ORDER IS THE WHOLE CONTRACT BETWEEN THE TWO FILES.
+
+    ``market-clock.js`` is generated data and ``market-glow.js`` is the logic
+    that reads ``window.NS_MARKET_CLOCK`` from it. Both are ``defer``, which
+    runs them in DOCUMENT ORDER -- so listing the logic first leaves it reading
+    an undefined global. It degrades silently by design (a missing clock must
+    never break the page), which is exactly why nothing would report the swap:
+    the button would simply never light up again.
+    """
+    markup = _markup("index.html")
+    srcs = [r for r in _refs(markup) if r.endswith(".js")]
+    assert "assets/market-clock.js" in srcs, "index.html does not load the clock data"
+    assert "assets/market-glow.js" in srcs, "index.html does not load the glow logic"
+    assert srcs.index("assets/market-clock.js") < srcs.index("assets/market-glow.js"), (
+        "market-glow.js is loaded before the data it reads")
+    for tag in re.findall(r"<script\b[^>]*>", markup):
+        if "market-" in tag:
+            assert "defer" in tag, f"{tag} is not deferred, so it runs before the nav exists"
