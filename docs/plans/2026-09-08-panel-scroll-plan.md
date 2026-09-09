@@ -22,6 +22,36 @@
   `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
 - ⚠ Compare the failing **set** by node ID and the **skipped** set, never the counts.
 
+## ⚠ MEASURED 2026-09-08 — read this before Task 2 or Task 4
+
+Task 1 ran. Three things it found contradict what this plan assumed:
+
+**1. ONE screen clips, not fourteen.** Only `desk`. The other thirteen are clean
+at every width from 1280 to 2560. `flow` is already solved by Quasar's own
+`.q-table__middle { overflow-x: auto }` and must NOT be touched. **Task 5 is
+therefore empty** — do not go looking for work there.
+
+**2. The boundary is ~1650-1700px on the PUBLIC origin, not 1877.** Measured:
+clips at and below 1650, clean from 1700 up. `desk.py`'s comment claiming 1877
+is not reproducible as written and must be corrected in place along with the
+`_GAP` note.
+
+**3. ⚠ THE PUBLIC AND PRIVATE BOUNDARIES DIFFER BY THE NAV RAIL, and every
+measurement here is of the PUBLIC one.** `live_main` renders no rail, so the
+public screens have ~68px more room than the app. Measured chrome on the public
+origin is ~111px (1650 viewport, 1539 client) against `DESK_CHROME_PX = 164`,
+and 164 - 68 = 96, +15 scrollbar = 111 -- which is exactly the gap. So
+**`DESK_CHROME_PX` describes the private app and cannot be used to reason about
+the public screens**, and the private app starts clipping ~68px WIDER than the
+numbers above. Task 4 must not treat the two as one number.
+
+**4. The row's hard minimum measures 801px** (`POS_GRID`, stable across widths),
+against 725 + 72 = **797** derived. The 4px is almost certainly `scrollWidth`
+reporting left padding but not right -- a known engine quirk -- so the formula
+below is believed correct and 801 is not a second number to chase. ⚠ **Task 2
+must reconcile this explicitly rather than assuming it away**: if the anchor
+cannot be made to land on a defensible number, the formula is wrong.
+
 ## The arithmetic this plan turns on
 
 `desk.py` states two numbers independently, and they are the proof the formula below is right — reproduce them before trusting anything else:
@@ -248,11 +278,15 @@ with the current reasoning: the objection was right and its conclusion did not h
 
 ---
 
-## Task 5: Apply to whatever else Task 1 measured
+## Task 5: (EMPTY — Task 1 measured, nothing else clips)
 
-**Files:** whichever page modules Task 1 named
+Task 1 found `desk` is the only screen that overflows at any tested width, and
+that `flow` already contains its own overflow via Quasar's `.q-table__middle`.
+**There is no work here.** Skip to Task 6.
 
-Only those. ⚠ Screens built on `ui.table` already contain overflow in `.q-table__middle` and need nothing — confirm per screen rather than assuming either way.
+Recorded rather than deleted because the reasoning matters: this task existed to
+stop thirteen files being changed on an assumption, and it did its job by
+measuring them out of scope.
 
 ---
 
