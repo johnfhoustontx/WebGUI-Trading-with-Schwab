@@ -238,7 +238,8 @@ SUBTAB_CSS = """
 #
 # ⚠ TWO THINGS THE ARRIVAL GLOW (`desk.DESK_NEON_CSS`) LOSES, both accepted.
 # (a) It animates the ROW's background, and the pin's opaque backdrop sits over
-# its first column; matching it would mean duplicating those keyframes, which
+# the pinned columns — one, or two where `desk._PIN_DEPTHS` says the symbol is
+# not the first cell; matching it would mean duplicating those keyframes, which
 # belong to that page and not to this seam. (b) `overflow-x: auto` computes
 # `overflow-y` to `auto` as well, so the container CLIPS painted overflow —
 # measured, the glow's outer `0 0 18px -2px` shadow bleeds ~18px above an
@@ -260,6 +261,13 @@ PANEL_SCROLL_CSS = """
   margin-right: -8px; background: #0c131a;
 }
 .ns-panel-row.cursor-pointer:hover::after { background: #121920; }
+/* Three of the four Desk panels do not lead with the column that names the row
+   (see `desk._PIN_DEPTHS`), so they pin their first TWO cells. The cell itself
+   is transparent by design, so the backdrop has to widen with it or the moving
+   digits show straight through the pinned symbol. `grid-column` alone: the rule
+   above already placed the row, and the SECOND pinned cell places itself from
+   the page, which is the only place its per-panel offset is known. */
+.ns-panel-row.ns-pin-2::after { grid-column: 1 / 3; }
 """
 
 

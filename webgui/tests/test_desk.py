@@ -2376,6 +2376,189 @@ def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
             and v.value.id.endswith("_GRID")}
     assert heads == rows and len(heads) == 4
 
+# ── panel scrolling: the identity column stays put ───────────────────────────
+# ``shell.PANEL_SCROLL_CSS`` contains a too-narrow panel's sideways scroll AT
+# the panel and pins its `:first-child`. That last part is only half an answer
+# here: on three of the four panels the first cell is NOT what names the row.
+# Pinning it alone would hold a SCORE, a clock time or a book badge in place
+# while the symbol slid away under it — worse than pinning nothing, because it
+# looks deliberate. These pin the two halves the page has to supply: how deep
+# each panel pins, and the ``min-width`` without which there is nothing for the
+# container to scroll.
+def _row_min_width(grid):
+    """What one grid ELEMENT must be at least, off this file's own parser.
+
+    The row's floors and gaps plus its own ``px-1`` — everything on the page is
+    ``box-sizing: border-box``, so a ``min-width`` on the row carries its own
+    padding but NOT the card's (that is ``_panel_width_needed`` above)."""
+    t = _floors(grid)
+    return sum(t) + (len(t) - 1) * d.COL_GAP_PX + 8
+
+
+def _grid_names():
+    return [n for n in dir(d) if n.endswith("_GRID") and n.isupper()]
+
+
+def test_every_panel_body_is_the_scroll_container_never_its_card():
+    """The card holds the panel TITLE. Scrolling the card scrolls the title
+    away, which is one of the two things this whole mechanism exists to stop —
+    the other being the identity column. ``_panel`` returns the BODY, and the
+    body is what every painter clears, so that is the element that may move."""
+    src = inspect.getsource(d._panel)
+    body_line = next(ln for ln in src.splitlines()
+                     if ln.strip().startswith("body = "))
+    assert "ns-panel-scroll" in body_line, "no panel body scrolls its own rows"
+    for line in src.splitlines():
+        if "CONSOLE_CARD" in line:
+            assert "ns-panel-scroll" not in line, \
+                "the card scrolls, so the panel title scrolls away with it"
+
+
+def test_every_panel_grid_carries_the_row_shell_and_a_derived_min_width():
+    """Without the ``min-width`` the tracks keep being squeezed to their floors
+    and the row simply overflows: a scroll container with nothing wider than
+    itself inside it never scrolls. The number is DERIVED from the panel's own
+    grid string — re-derived here by this file's independent parser, so a floor
+    that moves has to move it too."""
+    for name in _grid_names():
+        grid = getattr(d, name)
+        classes = d._row_shell(grid)
+        assert "ns-panel-row" in classes, f"{name} rows are not pinnable"
+        assert f"min-w-[{_row_min_width(grid)}px]" in classes, (
+            f"{name} is squeezed below its floors instead of scrolling: "
+            f"{classes}")
+
+
+def test_every_panel_grid_has_a_pin_decision():
+    """A fifth panel added with no entry here has to fail LOUDLY. Defaulting it
+    to the shipped one-cell pin is the failure this section is about: three of
+    the four panels already do not lead with the column that names the row."""
+    assert {getattr(d, n) for n in _grid_names()} == set(d._PIN_DEPTHS)
+
+
+def test_every_panel_pins_through_the_column_that_names_the_row():
+    """THE constraint. Whatever the column ORDER, the pinned prefix has to
+    reach the symbol — and stop there, because every pinned pixel is width the
+    reader can no longer scroll out of the way."""
+    for grid, labels in _head_calls():
+        assert "SYMBOL" in labels, labels
+        assert d._pin_depth(grid) == labels.index("SYMBOL") + 1, (
+            f"{labels[:d._pin_depth(grid)]} is pinned, the symbol is at "
+            f"{labels.index('SYMBOL')}")
+
+
+def test_a_pin_past_the_first_cell_offsets_itself_by_the_tracks_before_it():
+    """The first cell is pinned by ``shell.PANEL_SCROLL_CSS`` and needs no
+    offset. A second one does, and it is a PER-PANEL number — the first track's
+    floor plus one column gap — so it is derived at import from that panel's own
+    grid string rather than written into the stylesheet, which cannot see it."""
+    for grid, _labels in _head_calls():
+        assert d._pin_cell_class(grid, 0) == "", \
+            "the first cell is the stylesheet's, not the page's"
+        for i in range(1, d._pin_depth(grid)):
+            classes = d._pin_cell_class(grid, i)
+            assert "sticky" in classes, classes
+            assert f"col-start-{i + 1}" in classes, classes
+            left = sum(_floors(grid)[:i]) + i * d.COL_GAP_PX
+            assert f"left-[{left}px]" in classes, (
+                f"a pinned cell offset {classes} does not abut the {left}px "
+                f"of track before it")
+            # ⚠ the bundled Tailwind JIT emits NO rule at all for an arbitrary
+            # value holding ``var(...)`` — silently, so the cell would simply
+            # stop pinning with nothing to see anywhere.
+            assert "var(" not in classes, classes
+        assert d._pin_cell_class(grid, d._pin_depth(grid)) == "", \
+            "a cell past the identity columns is pinned and should not be"
+
+
+def test_the_page_only_asks_for_pin_depths_the_stylesheet_can_draw():
+    """The backdrop is a ``::after``, so the page cannot reach it — the depth
+    class is the whole conversation between the two. A two-cell pin over a
+    one-cell backdrop leaves the scrolling numbers showing through the second
+    pinned cell, which reads as corruption rather than as a pinned column."""
+    import shell
+    for grid, depth in d._PIN_DEPTHS.items():
+        assert f"ns-pin-{depth}" in d._row_shell(grid)
+        if depth > 1:
+            assert f".ns-panel-row.ns-pin-{depth}::after" in \
+                shell.PANEL_SCROLL_CSS, \
+                f"a {depth}-cell pin has only a one-cell backdrop"
+
+
+def _render_tree():
+    src = inspect.getsource(d.render).lstrip()
+    return src, ast.parse(src)
+
+
+def test_every_row_painter_wears_its_panels_scroll_shell():
+    """The grid string is shared by all four panels' rows, so the per-panel
+    part cannot live in the row helper — it is derived from the grid, at the
+    one place the grid is named."""
+    src, tree = _render_tree()
+    seen = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        parts = [v.value for v in node.values
+                 if isinstance(v, ast.FormattedValue)]
+        if not any(isinstance(p, ast.Name) and p.id.endswith("_GRID")
+                   for p in parts):
+            continue
+        seen += 1
+        assert any(isinstance(p, ast.Call)
+                   and getattr(p.func, "id", "") == "_row_shell"
+                   for p in parts), ast.get_source_segment(src, node)
+    assert seen == 4, f"{seen} row painters, not 4"
+
+
+def test_the_deep_pin_lands_on_the_symbol_cell_and_nothing_else():
+    """Non-vacuity for the depth map: a panel can declare a two-cell pin and
+    then hang the offset on the wrong child, which pins a book badge and lets
+    the symbol scroll — the exact failure the depth is there to prevent."""
+    src, tree = _render_tree()
+    for func, grid in (("_board_row", "BOARD_GRID"),
+                       ("_flow_row", "FLOW_GRID"),
+                       ("_position_row", "POS_GRID")):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == func)
+        segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
+                if isinstance(s, ast.stmt)]
+        hits = [s for s in segs if s and "_pin_cell_class(" in s]
+        assert hits, f"{func} declares a deep pin it never applies"
+        innermost = min(hits, key=len)
+        assert 'row["symbol"]' in innermost, (func, innermost)
+        assert f"_pin_cell_class({grid}, 1)" in " ".join(innermost.split()), \
+            (func, innermost)
+
+
+def test_the_column_labels_pin_with_the_cells_beneath_them():
+    """The head row is on the same tracks as the rows, so it needs the same
+    shell and the same pins — a label that scrolls away from its column is the
+    reading this mechanism was built to keep."""
+    src = " ".join(inspect.getsource(d._grid_head).split())
+    assert "_row_shell(grid)" in src, "the head row does not scroll with its rows"
+    assert "_pin_cell_class(grid," in src, "the column labels do not pin"
+def test_a_panel_level_sentence_stays_put_while_its_columns_move():
+    """Exactly two lines share a panel body with its grids, and both describe
+    the whole PANEL. The body scrolls now, so a full-width label inside it
+    carries its own first words off the left edge as soon as the rows move —
+    and the first words are the reading ("3 open · $1,204" / "walls stale
+    since ..."). Read off the statement that BUILDS each one, so a class parked
+    on the wrong label passes nothing."""
+    src, tree = _render_tree()
+    assert "sticky" in d._PANEL_NOTE and "left-0" in d._PANEL_NOTE
+    for func, builder in (("_paint_dealer", "stale_walls_note("),
+                          ("_paint_positions", "summary_line(")):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == func)
+        segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
+                if isinstance(s, ast.stmt)]
+        hits = [s for s in segs if s and builder in s]
+        assert hits, f"{func} no longer builds {builder}"
+        assert "_PANEL_NOTE" in min(hits, key=len), (func, min(hits, key=len))
+    # ⚠ never on the placeholder: it REPLACES the rows, so that panel has no
+    # grid, no min-width and nothing to scroll.
+    assert "sticky" not in d._PLACEHOLDER
 
 # ── arrival detection ────────────────────────────────────────────────────────
 def test_new_ids_reports_only_rows_not_seen_before():

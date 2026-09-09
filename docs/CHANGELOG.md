@@ -4,6 +4,69 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-09 (**A Desk panel now scrolls sideways INSIDE
+itself, with the column that names each row pinned**, instead of the whole
+document sliding and taking the panel heading and the symbol with it. Design +
+plan: [`2026-09-08-panel-scroll-design.md`](plans/2026-09-08-panel-scroll-design.md)
+/ [`-plan.md`](plans/2026-09-08-panel-scroll-plan.md).)
+
+- **⚠ THIS REVERSES A DOCUMENTED DECISION, and the reversal is the interesting
+  part.** `desk.py` had held since 2026-08-20 that "`overflow-x-auto` was
+  deliberately not used as the fallback: a dashboard you scroll sideways to read
+  defeats the page's purpose." That objection was right and its conclusion did
+  not hold: refusing a panel scroll never prevented the sideways scroll, it
+  **relocated it to the document**, where the reader loses the heading and the
+  identity column as well. The choice was never scroll-vs-no-scroll but WHERE.
+  The note is corrected in place, per the maintenance rule.
+
+- **Measured before anything was changed, and the scope collapsed.** A new
+  `tools/measure_screen_widths.py` drove a real browser over all fourteen
+  published screens at six widths. **Only `desk` overflows** — the other thirteen
+  are clean from 1280 to 2560, and `flow` was already solved by Quasar's own
+  `.q-table__middle { overflow-x: auto }`. The plan had provisioned for changing
+  thirteen page modules; it changed one.
+
+- **⚠ THE IDENTITY COLUMN IS NOT FIRST ON THREE OF FOUR PANELS**, which is the
+  trap this work nearly shipped into. Dealer leads with SYMBOL, but Board leads
+  with SCORE, Flow with TIME and Positions with **BOOK** — so pinning
+  `:first-child` everywhere would have frozen a `PAPER` chip beside ten scrolling
+  numbers and called it done. Those three pin **two** cells (through the symbol),
+  dealer pins one; the cost is 125–137px and is only ever spent while the panel
+  is too narrow to show everything.
+
+- **The min-width is DERIVED from the panel's own track floors**, never typed —
+  `webgui/pages/panel_scroll.py`, pure over `re`. The anchor is a number
+  `desk.py` already stated twice: `POS_GRID`'s ten floors sum to 725, + 9 gaps +
+  the card box = **839**, and the card's `offsetWidth` measures exactly 839 at
+  the width its overflow first reaches 0. The discriminating test mutates a floor
+  and asserts the value moves — a typed 839 passes the anchor on the day it is
+  written and rots at the first track change.
+
+- **Two numbers in `desk.py` were right and read as wrong**, and both now say
+  which question they answer. **1877 is the PRIVATE app's boundary**; the public
+  origin has no icon rail, so its equivalent is 1809. And "clips below 1650"
+  measured DOCUMENT overflow, which the padding chain defers ~140px past the
+  point a panel stops containing its rows — in between, rows paint out through
+  the card with no scrollbar to show for it, which is the worse symptom.
+
+- **`shell.PANEL_SCROLL_CSS`, injected by BOTH entrypoints** so the published
+  screens and the app cannot diverge. The sticky cell is transparent and a sticky
+  `::after` supplies the opaque backdrop, so the row's hover wash still reads
+  over the card's gradient. ⚠ Accepted cost: `overflow-x: auto` computes
+  `overflow-y` to `auto` too, so the arrival glow's outer halo clips at the
+  container edge — a halo, not a row.
+
+- **Selenium is a DEV dependency only** (`requirements-dev.txt`, never
+  `requirements.lock` — prod installs the lock and does not test layout). It
+  earns its place on one fact: `--headless --screenshot` cannot report element
+  widths and the Claude Browser pane returns `viewport: 0` on this app, so a
+  change entirely about widths had no way to be measured.
+
+- **Tests at the time:** webgui **3553 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1529 passed**.
+
+---
+
 **Last updated:** 2026-09-08 (**The marketing site's three loose ends, closed
 together: Live screens takes the primary button now that the page behind it is
 real, that button GLOWS GREEN while the US session is open, and the App gallery

@@ -56,10 +56,13 @@ from pages import console_regime as _CR
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
-# The two padding constants the panel-width arithmetic is built from, imported
-# rather than restated so a width quoted in a comment here and a width computed
-# from the same CSS cannot drift apart. Re-exported: read by ``test_desk``.
-from pages.panel_scroll import COL_GAP_PX, PANEL_PAD_PX  # noqa: F401
+# The panel-width arithmetic, imported rather than restated so a width quoted
+# in a comment here and a width computed from the same CSS cannot drift apart.
+# ``grid_min_width_px``/``track_floors`` feed ``_ROW_SHELLS``/``_PIN_OFFSETS``
+# below; ``COL_GAP_PX`` and ``PANEL_PAD_PX`` are also re-exported for
+# ``test_desk``, which spends them against its own independent parser.
+from pages.panel_scroll import (COL_GAP_PX, PANEL_PAD_PX,  # noqa: F401
+                                grid_min_width_px, track_floors)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import paper as _paper
@@ -2208,6 +2211,103 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
             "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
             f"minmax(60px,0.8fr)] {_GAP} w-full")
 
+# ── which leading cells of a row are its IDENTITY ────────────────────────────
+# A panel handed less width than its floors add up to scrolls ITSELF rather
+# than handing the scroll to the document (``shell.PANEL_SCROLL_CSS``). That
+# stylesheet pins the row's ``:first-child`` — and on THREE of the four grids
+# above, the first cell is not what names the row: the Board leads with SCORE,
+# the flow feed with TIME, Positions with the BOOK badge. Pinning those alone
+# would hold a rank, a clock time or a badge still while the symbol slid away
+# underneath, which is WORSE than pinning nothing, because it looks deliberate.
+#
+# So each panel says how deep its identity runs, and the answer everywhere is
+# "through the symbol, and not one track further": every pinned pixel is width
+# the reader can no longer scroll out of the way. The cost is modest — 137px on
+# the Board (SCORE + gap + SYMBOL), 132px on Flow, 125px on Positions, against
+# against the 508-839px those four panels need — and it is only ever spent
+# while a panel is too narrow
+# to show everything at once, which is the only case this exists for.
+#
+# ⚠ REORDERING a panel's columns is a change HERE too. The depth is a count of
+# leading cells, not a search for the symbol, so moving SYMBOL right without
+# moving this number pins the wrong cells silently. ``test_every_panel_pins_
+# through_the_column_that_names_the_row`` reads the depth against that panel's
+# own head tuple, which is the only place the order is written down.
+#
+# ⚠ Keyed by the GRID STRING, because that is all the shared row helpers are
+# handed: ``_grid_head`` and all four row painters take the grid and nothing
+# else, so keying on anything they do not already hold would mean four copies
+# of the row builder. A grid with no entry RAISES rather than falling back to
+# the stylesheet's one-cell pin — see ``_pin_depth``.
+_PIN_DEPTHS = {DEALER_GRID: 1, BOARD_GRID: 2, FLOW_GRID: 2, POS_GRID: 2}
+
+
+def _pin_depth(grid):
+    """How many leading cells of ``grid`` stay put while the panel scrolls."""
+    try:
+        return _PIN_DEPTHS[grid]
+    except KeyError:
+        raise ValueError(
+            "this panel grid has no pin depth, and there is no safe default: "
+            "a panel whose identity column is not its first would pin the "
+            "wrong cell and look like it meant to") from None
+
+
+# The classes every one of a panel's grids wears — its head row and each of its
+# data rows alike, which is what keeps a label over its column while both move.
+# ``min-w-`` is what gives the scroll container something wider than itself to
+# scroll: without it the tracks are simply squeezed onto their floors and the
+# row overflows a container that then never scrolls. DERIVED from the panel's
+# own grid string, so a widened track brings its own minimum with it.
+_ROW_SHELLS = {
+    grid: f"ns-panel-row ns-pin-{depth} min-w-[{grid_min_width_px(grid)}px]"
+    for grid, depth in _PIN_DEPTHS.items()}
+
+# The sticky offset for a pinned cell PAST the first: the tracks before it plus
+# the gaps between them. Every panel's first track is a bare pixel width, so it
+# is exactly as wide as its floor and the pinned pair stays flush at any width.
+#
+# Resolved ONCE at import, which is what makes these Tailwind arbitrary values
+# rather than the data-driven-colour case the house rule bans: there are four
+# panels, the numbers are fixed by the grid strings above, and nothing here is
+# computed per render. The alternative — four static rules in
+# ``shell.PANEL_SCROLL_CSS`` — was rejected because that file cannot see a
+# ``minmax()`` floor, so the first widened track would leave the pinned symbol
+# overlapping the cell beside it with nothing failing anywhere.
+# ⚠ And it can never become ``left-[var(--x)]``: the bundled Tailwind JIT emits
+# NO rule for an arbitrary value containing ``var(...)``, and emits none
+# silently.
+_PIN_OFFSETS = {
+    grid: [sum(track_floors(grid)[:i]) + i * COL_GAP_PX for i in range(depth)]
+    for grid, depth in _PIN_DEPTHS.items()}
+
+
+def _row_shell(grid):
+    """``ns-panel-row`` + the panel's pin depth + its derived ``min-width``."""
+    _pin_depth(grid)                     # a grid with no decision fails here
+    return _ROW_SHELLS[grid]
+
+
+def _pin_cell_class(grid, index):
+    """The sticky classes for the ``index``-th cell of a row on ``grid``.
+
+    Empty for cell 0: ``shell.PANEL_SCROLL_CSS`` already pins ``:first-child``
+    on every panel, and a second source for one rule is a second thing to keep
+    in step. Empty past the identity columns too. What is left — the cells
+    between — is the page's to supply, because the offset is a per-panel number
+    read off a ``minmax()`` floor that a stylesheet cannot see.
+    """
+    depth = _pin_depth(grid)
+    if not 0 < index < depth:
+        return ""
+    # ``row-start-1``/``col-start-N`` place the cell explicitly, for the same
+    # reason the stylesheet places the first one: a definitely-placed ``::after``
+    # occupies its cell, so anything left to auto-placement lands one column
+    # right of where its label is.
+    return (f"sticky row-start-1 col-start-{index + 1} z-[2] "
+            f"left-[{_PIN_OFFSETS[grid][index]}px]")
+
+
 # The type ladder. Every size is 0.8x what this page briefly carried, which was
 # the reference design's own multiplied by ~1.35 for a 2381px screen. The page
 # is read at 1920px — the width the reference was authored for — so that scaling
@@ -2241,6 +2341,18 @@ _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
 _V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
 _SUB = "text-[10px] tabular-nums"          # a cell's second line
 _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
+# A panel-level SENTENCE that shares the body with the grids — there are
+# exactly two (the dealer's stale-walls warning and the Positions summary), and
+# both state a fact about the whole panel rather than about a column. The body
+# is a scroll container (see ``_panel``), and a full-width label inside one
+# carries its own first words off the left edge the moment the rows are
+# scrolled, so they pin instead. It costs nothing at rest: a sticky element in
+# an unscrolled container sits exactly where it laid out.
+#
+# ⚠ Deliberately NOT on ``_PLACEHOLDER``. A placeholder REPLACES the rows, so
+# that panel has no grid, no ``min-width`` and nothing to scroll — pinning it
+# would be a class that can never do anything, which reads as though it must.
+_PANEL_NOTE = "sticky left-0"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
 # the same words for both would make a dead service indistinguishable from a
@@ -2638,7 +2750,14 @@ def _panel(title, use_line=""):
             if use_line:
                 ui.label(use_line).classes(
                     f"text-[11px] leading-snug {CON_TXT_DIM}")
-        body = ui.column().classes("w-full gap-0")
+        # ⚠ The scroll container is the BODY, never the card above it. A panel
+        # too narrow for its floors has to scroll SOMETHING, and everything
+        # outside this element is what the reader would otherwise lose: put it
+        # on the card and the panel's own title slides away with the numbers,
+        # which is half of what the document-level scroll was doing wrong.
+        # ``min-width`` lives on the rows (``_row_shell``); this is only the
+        # window they move behind.
+        body = ui.column().classes("w-full gap-0 ns-panel-scroll")
     return body, head_slot
 
 
@@ -2648,10 +2767,17 @@ def _grid_head(grid, labels):
     ``px-1`` matches the data row's own horizontal padding (``_ROW``), which is
     what actually keeps a label over its column: the padding shrinks the grid's
     content box, and if the two rows disagreed about it every fixed track would
-    start 4px out of step with its label."""
-    with ui.element("div").classes(f"{grid} px-1 pb-2 border-b {_HEAD_RULE}"):
-        for text in labels:
-            ui.label(text).classes(_HEAD)
+    start 4px out of step with its label.
+
+    It wears the panel's scroll shell and its pins for the same reason: a head
+    row that did not scroll with the rows, or pinned to a different depth than
+    they do, would put every label over the wrong number the moment the panel
+    is narrow enough to move — which is exactly when the labels matter most."""
+    with ui.element("div").classes(
+            f"{grid} {_row_shell(grid)} px-1 pb-2 border-b {_HEAD_RULE}"):
+        for index, text in enumerate(labels):
+            ui.label(text).classes(
+                f"{_HEAD} {_pin_cell_class(grid, index)}".rstrip())
 
 
 def _cell(text, extra=""):
@@ -3153,7 +3279,7 @@ def render():
                 # Say WHY the walls vanished. A silently wall-less row reads as
                 # a broken page; this reads as a stopped feed, which is true.
                 ui.label(stale_walls_note(fresh["label"])).classes(
-                    f"text-[10px] {CON_WARN} pb-1")
+                    f"text-[10px] {CON_WARN} pb-1 {_PANEL_NOTE}")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
@@ -3170,7 +3296,8 @@ def render():
         # The cell stays a single line rather than borrowing something unrelated
         # to fill the space.
         el = ui.element("div").classes(
-            f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
                 f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
@@ -3265,11 +3392,16 @@ def render():
         # line by construction, and the scores are ranked and adjacent, so the
         # ordering already carries the comparison the bar was drawing.
         el = ui.element("div").classes(
-            f"{BOARD_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06]")
         with el:
             _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
+            # SCORE is pinned by the stylesheet as this row's first cell; the
+            # symbol is what the reader is actually holding onto, so it pins
+            # too (see ``_PIN_DEPTHS``) and carries its own offset.
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(BOARD_GRID, 1)}")
             # A rationale is up to three clauses of ordinary words. Its track
             # carries by far the largest weight (see ``BOARD_GRID``) precisely
             # so this never ellipses at the width the page is read at; the
@@ -3336,14 +3468,18 @@ def render():
         # designed for (see the ``GLOW_SEC`` notes). ``state["glow_now"]`` is the
         # paint's single clock — not a fresh ``monotonic()`` per row.
         el = ui.element("div").classes(
-            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            f"{FLOW_GRID} {_row_shell(FLOW_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06] "
             + glow_classes(state["glow"].get(row.get("id")),
                            state["glow_now"]))
         with el:
             ui.label(row["time"] or _DASH).classes(
                 f"text-[11px] tabular-nums {CON_TXT_MUTED}")
+            # TIME alone does not name an alert — two can share a minute — so
+            # the pin runs through the symbol (see ``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(FLOW_GRID, 1)}")
             # `min-w-0` is what lets `truncate` bite: a grid item's automatic
             # minimum is its content, so without it a long detail line widens
             # the track past the panel instead of ellipsing inside it.
@@ -3373,7 +3509,7 @@ def render():
             summary = positions_summary(rows)
             shown = rows[:POSITION_ROWS_N]
             ui.label(summary_line(summary, len(shown))).classes(
-                f"text-[11px] tracking-[.16em] pb-2 "
+                f"text-[11px] tracking-[.16em] pb-2 {_PANEL_NOTE} "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
                 ui.label(EMPTY_POSITIONS).classes(_PLACEHOLDER)
@@ -3401,15 +3537,20 @@ def render():
         route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
         can_open = _shell.can_navigate(route)
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW if can_open else _ROW_STATIC} "
+            f"{POS_GRID} {_row_shell(POS_GRID)} "
+            f"{_ROW if can_open else _ROW_STATIC} "
             + (f"hover:bg-[{_C['line']}]/[0.06] " if can_open else "")
             + glow_classes(state["glow"].get(row.get("position_id")),
                            state["glow_now"]))
         with el:
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
+            # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
+            # THAT — and a pinned PAPER/DRIVER chip beside ten scrolling
+            # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(POS_GRID, 1)}")
             ui.label(strategy_label(row["strategy"])).classes(
                 f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             _cell(expiry_text(row))
