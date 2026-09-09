@@ -110,6 +110,13 @@ PROXY_WAIT_TIMEOUT_SEC = 120
 # would otherwise inherit the 90s default and be killed mid-upload.
 BACKUP_TIMEOUT_SEC = 7200
 
+# The flow-delta instrumentation fans 91 symbols out through the proxy and took
+# ~5 minutes measured on 09-01 and 09-09. The ceiling is deliberately generous
+# rather than tight: the run is once a day, off the hot path, and the failure it
+# must not have is being SIGTERMed partway -- which would leave a truncated
+# report that still looks like a report.
+FLOW_DELTA_TIMEOUT_SEC = 1800
+
 # The operator's 0600 file holding RTMP_URL -- the YouTube stream key. It lives
 # OUTSIDE the checkout on purpose: a key in the repo is a key in every clone, in
 # every backup archive, and one `git add -A` from being public. Named here as a
@@ -775,6 +782,103 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-gallery-capture.timer": tmr}
 
 
+def _flow_delta_units():
+    """The delta-notional flow-alert instrumentation: a oneshot plus its timer.
+
+    **This unit exists because its absence was invisible for eleven days.** The
+    job ran daily on the Windows box under Task Scheduler; the 2026-08-29 systemd
+    migration converted its wrapper from .bat to .sh and replaced the schtasks
+    registration with a COMMENT saying how to schedule it. Nothing installed a
+    timer, and the tool exits 0 whether it measured anything or not, so the only
+    symptom was a directory that stopped gaining dates: 08-31, 09-02, 09-03,
+    09-04 and 09-08 have no report and never will. The closing chain is gone and
+    `cache:options:flow_alerts` resets overnight, so a missed day is not a
+    late day.
+
+    **It is the only measurement of the [big_delta] and UOA thresholds**, which
+    is what makes a silent gap expensive rather than untidy: the 08-17 raise of
+    rel_threshold was set from a projection, ran 3x over it for ten days, and
+    nothing said so.
+
+    **16:00 CT, from [slots.flow_delta]** -- a named clock mark firing once per
+    trading day, which is what that table models. The time is chosen against the
+    other post-close work: after live_capture's 15:25-15:50 window, because that
+    unit drives a headless Chrome over fourteen screens and this one fans 91
+    chain fetches through the proxy -- the 09-08 incident is precisely what those
+    two together look like. Before the 16:20 momentum cascade and the 16:30
+    calibration rebuild. Moving it needs `generate_units --install` plus a
+    `daemon-reload`, not a service restart.
+
+    **EnvironmentFile is load-bearing here, not boilerplate.** The tool reads the
+    live channel out of Redis to reconcile its model against real fires, and this
+    host runs `requirepass`. Without MEMURAI_PASSWORD in the environment it still
+    runs, still writes a report and still exits 0 -- with both reconciliation
+    sections degraded to a note. That is the failure this whole unit exists to
+    stop being invisible, so it must not be reintroduced by the unit that
+    schedules it.
+
+    **Calls the Python directly, not tools/run_flow_delta_instrumentation.sh.**
+    The wrapper exists for a MANUAL run, where sourcing .env and appending to
+    logs/ are its whole job; under systemd the EnvironmentFile and the journal do
+    both. Running the shell script would be the stream unit's exception without
+    the stream unit's reason (Xvfb, Chrome and ffmpeg around the Python).
+
+    **No Restart=.** The tool gates on `is_trading_day` and exits 0 on a holiday,
+    so a firing is not a run. A genuine failure is a proxy or Redis that a retry
+    minutes later will not fix, and it surfaces in `systemctl --user --failed`
+    with tomorrow's run as the recovery.
+    """
+    at = slot_times("flow_delta")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - flow-delta instrumentation
+# No PartOf and no [Install]: the timer owns this. It is a oneshot that runs for
+# about five minutes once a trading day, not a member of the fleet.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# LOAD-BEARING: MEMURAI_PASSWORD lives here, and without it the reconciliation
+# silently degrades to a note while the run still exits 0. See _flow_delta_units.
+EnvironmentFile={_env_file()}
+# WITHOUT THIS the oneshot inherits DefaultTimeoutStartSec (90s here) and is
+# killed partway through a ~5 minute fan-out, leaving a truncated report that
+# still looks like a report.
+TimeoutStartSec={FLOW_DELTA_TIMEOUT_SEC}
+ExecStart={_python()} -X utf8 tools/flow_delta_instrumentation.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - flow-delta instrumentation timer
+
+[Timer]
+# Derived from [slots.flow_delta] in config/sessions.toml -- the unit and the
+# config cannot disagree about when the thresholds are measured.
+# Mon..Fri excludes weekends only. Holidays are NOT filtered here and do not need
+# to be: flow_delta_instrumentation.main() gates on
+# shared.market_calendar.is_trading_day and exits 0, so a firing is not a run.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: a missed day CANNOT be recovered later -- the closing chain is
+# gone and the alert channel resets overnight -- so a catch-up run at boot is the
+# difference between a partial reading and none. Unlike the gallery capture there
+# is no public surface to publish a bad render to; the worst a late run does is
+# read a thinner chain, which the report timestamps.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-flow-delta.service": svc,
+            f"trading-{ENV_NAME}-flow-delta.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
@@ -783,6 +887,7 @@ def render_all():
     out.update(_stream_units())
     out.update(_live_capture_units())
     out.update(_gallery_capture_units())
+    out.update(_flow_delta_units())
     return out
 
 

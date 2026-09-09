@@ -130,6 +130,24 @@ close   = "15:00"     # pre-close sweep
 grace_min = 20
 morning = "08:45"     # 09:45 ET
 
+[slots.flow_delta]
+# The delta-notional flow-alert instrumentation (tools/flow_delta_instrumentation.py):
+# one report per trading day under options-scanner/data/flow_delta_instrumentation/,
+# reconciling the [big_delta] and UOA rules against what the live channel really fired.
+# It is the ONLY measurement of those thresholds, so a day it does not run is a day
+# that cannot be recovered -- the closing chain is gone and cache:options:flow_alerts
+# resets overnight.
+#
+# 16:00 CT is chosen against the other post-close work, not for tidiness:
+#   15:20  collection stops        -- chains settle
+#   15:25-15:50  live_capture      -- headless Chrome; a 15:30 run would put 91
+#                                     chain fetches under it, and that combination
+#                                     is exactly what read as a proxy outage on 09-08
+#   16:00  THIS                    -- ~5 min measured, 91 symbols through the proxy
+#   16:20  momentum cascade
+#   16:30  calibration rebuild
+at = "16:00"
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]

@@ -270,6 +270,12 @@ _DEFAULTS = {
         # ``analyze``/``action_alert`` -- and because a second daily pass, if it
         # is ever wanted, is then one line rather than a reshaped table.
         "income": {"grace_min": 20, "morning": "08:45"},
+        # The delta-notional flow-alert instrumentation -- the ONLY measurement
+        # of the [big_delta]/UOA thresholds, and a day it misses cannot be
+        # recovered (the closing chain is gone, the alert channel resets
+        # overnight). 16:00 sits after live_capture's 15:25-15:50 window and
+        # before the 16:20/16:30 cascades -- see [slots.flow_delta].
+        "flow_delta": {"at": "16:00"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
         # The marketing gallery recapture. ⚠ The ONE slot read by systemd

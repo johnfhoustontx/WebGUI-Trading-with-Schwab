@@ -24,8 +24,23 @@ push    = true            # PHONE-PUSH master gate. false = Flow screen only (no
                           #             true = push the fires that ALSO clear push_threshold below.
 push_threshold = 0.35     # PHONE-PUSH share bar, SEPARATE from rel_threshold's fire bar: the screen
                           #             still shows every rel_threshold fire, but only fires whose share
-                          #             of gross >= this get a Telegram push (~15-20/day at 0.35 vs
-                          #             ~100/day at 0.20). Raise to quiet the phone; lower to hear more.
+                          #             of gross >= this get a Telegram push. Left at 0.35 for now, but
+                          #             read this before tuning it:
+                          #
+                          #             ! A SHARE BAR SELECTS INVERSELY TO SIZE. pct_of_gross is a
+                          #             contract's share of its OWN symbol's gross, and a deep book
+                          #             spreads volume over hundreds of strikes while a thin one does
+                          #             not -- so a huge index flow rarely clears 30% of its own gross
+                          #             while a quiet name's single trade clears 60% easily. Measured
+                          #             on 2026-09-09's real fires: the 12 that pushed had a MEDIAN of
+                          #             $23.3M against $55.3M for all fires, and 9 of the 12 were under
+                          #             $25M. The phone got IONQ (3,346 contracts, $10.1M, 67% share)
+                          #             and did NOT get $SPX 7640P (179,112 contracts, $89.5B, 32%).
+                          #             That is backwards, and no value of THIS knob fixes it -- raising
+                          #             it selects harder for thin books, lowering it adds more of them.
+                          #             The floor below is what actually corrects the mix (12 -> 3 that
+                          #             day, leaving AVGO/JNJ/QQQ). If the phone later wants a real
+                          #             significance gate, it needs a term that is not a share.
 rel_threshold = 0.25      # FIRE bar (screen). contract's delta-notional >= this share of the symbol's OWN gross
                           #             Raised 0.20 -> 0.25 on 2026-08-17, expecting ~23/day. IT DID NOT
                           #             HAPPEN: 10 trading days at 0.25 measured 48-122 fires, mean ~70.
