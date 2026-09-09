@@ -27,16 +27,52 @@ which excludes them for exactly that reason.
 """
 import ast
 import inspect
+import os
 import pathlib
 import subprocess
 import sys
 
 import pytest
 
+import repo_paths
+
 import app_settings
 import bus_client
 
 _LIVE_MAIN = pathlib.Path(__file__).resolve().parents[1] / "live_main.py"
+
+
+def _child_env(**overrides):
+    """Environment for a spawned probe, on a CENTRAL clock.
+
+    ⚠ These probes run ``live_main`` OUTSIDE pytest, which is the entire point --
+    only a fresh interpreter can see a TRANSITIVE ``import main``. But
+    ``repo_paths.assert_central_time()`` is inert only under pytest (it keys on
+    ``"pytest" in sys.modules``), so in the child it is LIVE, and on a host whose
+    clock is not Central it raises before the probe prints anything. Every GitHub
+    runner is UTC, so all three subprocess tests failed there while passing on a
+    Central laptop -- which reads as a broken public entrypoint and is a wrong
+    clock.
+
+    Handing the child ``TZ`` gives it a genuinely Central clock rather than
+    suppressing the guard. ⚠ An env escape ON the guard was considered and
+    rejected: that is exactly the flag that ends up in a systemd unit and is
+    never removed, and the guard exists because a wrong clock shifts every
+    session window, roll date and expiry silently.
+
+    ⚠ POSIX ONLY, AND SETTING IT ON WINDOWS IS ACTIVELY WRONG -- measured, not
+    assumed. Windows has no tz database; its C runtime reads ``TZ`` as a POSIX
+    ``STDoffset[DST]`` string, so ``America/Chicago`` does not fail loudly, it
+    parses to a DIFFERENT ZONE: the child reported ``UTC+01:00`` and the guard
+    refused on a machine whose clock was already Central. Hence the branch --
+    on Windows the inherited OS zone is what the guard should see, and on a
+    Central box that is exactly right.
+    """
+    env = dict(os.environ)
+    if os.name == "posix":
+        env["TZ"] = repo_paths.NAIVE_WALLCLOCK_TZ
+    env.update(overrides)
+    return env
 
 # Control surfaces that must not exist in the public process. Mirrors (a subset
 # of) tests/test_live_screens.FORBIDDEN — asserted again HERE because that file
@@ -148,6 +184,27 @@ def test_live_main_calls_none_of_the_sync_helpers():
         f"called={offenders} defined={defined}")
 
 
+def test_the_spawned_probes_carry_a_central_clock():
+    """⚠ The three subprocess tests below are the ONLY ones that can see a
+    transitive `import main`, and for two weeks they failed on every CI run for
+    a reason that had nothing to do with imports: the child inherits the host's
+    clock, every runner is UTC, and repo_paths refuses to start off Central.
+
+    Pinned here rather than left implicit because the symptom lies -- the
+    assertion that fires says "the public entrypoint did not import", which
+    sends the next reader into live_main.py instead of at the clock.
+    """
+    if os.name == "posix":
+        assert _child_env()["TZ"] == repo_paths.NAIVE_WALLCLOCK_TZ
+    else:
+        # ⚠ Windows reads TZ as a POSIX STDoffset string, so this exact value
+        # parses to UTC+01:00 rather than Central -- setting it there BREAKS the
+        # very guard it is meant to satisfy. Measured on this box.
+        assert "TZ" not in _child_env() or _child_env()["TZ"] == os.environ.get("TZ")
+    # An override must still win; _serve pops REDIS_LIVE_URL through this.
+    assert _child_env(TZ="UTC")["TZ"] == "UTC"
+
+
 def test_a_real_public_process_holds_no_route_of_the_apps():
     """THE PRODUCTION PROPERTY, in a process that looks like production.
 
@@ -174,7 +231,7 @@ def test_a_real_public_process_holds_no_route_of_the_apps():
     )
     out = subprocess.run([sys.executable, "-c", probe, str(_LIVE_MAIN)],
                          capture_output=True, text=True, timeout=180,
-                         cwd=str(_LIVE_MAIN.parent.parent))
+                         cwd=str(_LIVE_MAIN.parent.parent), env=_child_env())
     assert out.returncode == 0, f"the public entrypoint did not import: {out.stderr}"
     imported_main, routes = out.stdout.strip().splitlines()[-2:]
     assert imported_main == "False", (
@@ -577,8 +634,7 @@ _SERVE_PROBE = (
 
 def _serve(acl_url):
     """Run ``live_main.py`` as ``__main__`` with ``ui.run`` stubbed out."""
-    import os as _os
-    env = dict(_os.environ)
+    env = _child_env()
     env.pop("REDIS_LIVE_URL", None)
     # The child must NOT present as pytest: repo_paths keys that off
     # ``"pytest" in sys.modules``, and under it ENV_NAME is pinned to prod
