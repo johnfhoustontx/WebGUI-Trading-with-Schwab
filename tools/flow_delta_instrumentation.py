@@ -544,9 +544,9 @@ def big_delta_threshold_section(fired, cfg):
         L.append("\nNo big_delta fires in the channel today — nothing to bucket "
                  "(detector off, restarting, or a genuinely quiet session).\n")
         return "".join(L)
-    L.append("\nOf today's live fires, how many carry a share of gross >= each bar "
-             "(real fires, not a re-model — raising the bar just drops the ones "
-             "that barely cleared it):\n")
+    L.append("\nOf today's live fires, how many were STAMPED at a share "
+             ">= each bar. These are real fires, not a re-model — but read the "
+             "warning below before using a row to choose a bar:\n")
     L.append("\n| rel_threshold | fires | |\n|---:|---:|:--|\n")
     for thr, n in big_delta_threshold_table(fired):
         tags = []
@@ -555,6 +555,20 @@ def big_delta_threshold_section(fired, cfg):
         if push_on and abs(thr - push_thr) < 1e-9:
             tags.append("← PUSH bar")
         L.append(f"| {thr:.0%} | {n} | {' '.join(tags)} |\n")
+    L.append(
+        "\n> ⚠ **A row below the fire bar is empty by construction, and a "
+        "row ABOVE it UNDERSTATES what that bar would fire.** A contract alerts "
+        "ONCE PER DAY, at its FIRST crossing of the CURRENT bar, stamped with its "
+        "share at that instant — and `pct_of_gross` is a ratio whose numerator "
+        "and denominator both move, so unlike UOA's vol/OI it is not monotonic. "
+        "Raising the bar therefore DELAYS a contract's recording rather than "
+        "removing it: the same contract is caught later, at a higher stamped share. "
+        "The day's count at a bar is the number of contracts whose share ever "
+        "PEAKS over it — which the reconciliation above measures at roughly 3.5x "
+        "the point-in-time count. This table drove the 2026-08-17 raise to 0.25 on a "
+        "predicted 23/day; ten days then measured a mean of ~70. **To choose a bar, "
+        "move it and read the next few days — not this table.**\n")
+
     if push_on:
         def _sh(a):
             p = (a or {}).get("pct_of_gross")

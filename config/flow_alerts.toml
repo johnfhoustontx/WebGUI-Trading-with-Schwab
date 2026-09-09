@@ -27,13 +27,35 @@ push_threshold = 0.35     # PHONE-PUSH share bar, SEPARATE from rel_threshold's 
                           #             of gross >= this get a Telegram push (~15-20/day at 0.35 vs
                           #             ~100/day at 0.20). Raise to quiet the phone; lower to hear more.
 rel_threshold = 0.25      # FIRE bar (screen). contract's delta-notional >= this share of the symbol's OWN gross
-                          #             Raised 0.20 -> 0.25 on 2026-08-17: at 0.20 the detector fired
-                          #             98-136/day and was ~33% of the whole flow channel (296 alerts on
-                          #             08-17), against a design estimate of ~18/day. The response is a
-                          #             CLIFF, not a slope — measured on real fires, not a re-model:
-                          #             20% -> 98, 25% -> 23, 30% -> 11, 35% -> 8. min_contract_notional
-                          #             deliberately left at $10M so the next reading isolates this knob.
-min_contract_notional = 10000000   # AND >= this absolute $ ($10M) — a big share of a tiny name isn't real
+                          #             Raised 0.20 -> 0.25 on 2026-08-17, expecting ~23/day. IT DID NOT
+                          #             HAPPEN: 10 trading days at 0.25 measured 48-122 fires, mean ~70.
+                          #             The "CLIFF" that raise relied on (20% -> 98, 25% -> 23) was an
+                          #             artifact. A contract fires ONCE PER DAY, at its FIRST crossing
+                          #             (handlers.py's shared cooldown seen-set), stamped with its share
+                          #             at that moment -- and pct_of_gross is a RATIO whose numerator and
+                          #             denominator both move, so it is NOT monotonic like UOA's vol/OI.
+                          #             Raising the bar therefore DELAYS a contract's recording rather
+                          #             than removing it: it is caught later, at a higher stamped share.
+                          #             So a table of stamped shares under bar X cannot predict bar X+n,
+                          #             and always reads low. Proof, three reconciliations, same shape --
+                          #             contracts above 0.25 AT THE CLOSE vs contracts that fired all day:
+                          #             08-28 21 vs 94, 09-01 14 vs 50, 09-09 17 vs 54, and in all three
+                          #             "modelled but never fired" is ZERO. The day's count is the number
+                          #             whose share ever PEAKS over the bar, ~3.5x the point-in-time count.
+                          #             Left at 0.25 so the min_contract_notional move below is isolated.
+min_contract_notional = 25000000   # AND >= this absolute $ ($25M) — a big share of a tiny name isn't real.
+                          #             Raised $10M -> $25M on 2026-09-09, because at $10M the floor was
+                          #             admitting precisely what it exists to exclude: across 16 archived
+                          #             closing snapshots, 161 of 363 modelled fires (44%) sat under $25M,
+                          #             median size 2,448 contracts against 62,077 in the $100M+ bucket --
+                          #             a different phenomenon, not merely smaller flow. The repeat names
+                          #             are thin-book mega-caps (BAC 17, CVX 13, PFE 11, KO 10, SOFI 9,
+                          #             V 9, XOM 8, UBER 8); the clearest live case was V 365C firing on
+                          #             426 CONTRACTS for 26% of Visa's gross. Unlike the share bar this
+                          #             knob removes a CATEGORY rather than trimming signal -- every index
+                          #             and mega-cap flow clears $25M untouched. Expect ~70 -> ~43/day;
+                          #             that is a projection off the same model, so MEASURE it, don't
+                          #             trust it (tools/run_flow_delta_instrumentation.sh).
 delta_lo = 0.05           # delta band low  — drop near-zero delta (noise)
 delta_hi = 0.85           # delta band high — drop deep-ITM (stock-replacement / assignment)
 delta_max = 1.0           # sentinel guard  — drop |delta| > 1 (Schwab's -999 no-value)
