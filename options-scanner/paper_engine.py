@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import config_paper
 import paper_sizing
+import paper_concentration
 import paper_account_db
 import signal_repricer
 import signal_recommender
@@ -149,6 +150,17 @@ def _record_reject(db_path, sig, side, reason):
 # ENTRY CYCLE
 #############################################
 
+
+def _log_capped(seen, symbol, reason):
+    """Log a concentration block once per (symbol, reason) per cycle."""
+    key = (symbol, reason)
+    if key in seen:
+        return
+    seen.add(key)
+    log.info("%s SKIPPED %s %s (concentration cap)",
+             _default_broker.PREFIX, symbol, reason)
+
+
 def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
     """Open new paper positions from eligible captured signals. RTH gating is the
     caller's responsibility; this opens nothing when the account is halted."""
@@ -158,6 +170,9 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
     paper_account_db.roll_session_if_needed(db_path, now_date)
     if paper_account_db.get_account(db_path)["halted"]:
         return
+    # A cap can block the same name on every signal in a cycle; log each
+    # (symbol, reason) once so a concentrated scan does not bury the log.
+    capped_seen = set()
     for sig in signals:
         if not is_eligible(sig):
             continue
@@ -166,6 +181,18 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
         # order (filled OR rejected). Prevents both re-opening a closed signal
         # and re-rejecting an un-sizeable one every cycle (the reject-churn flood).
         if paper_account_db.has_order_for_signal(db_path, sid):
+            continue
+        # Concentration caps. Checked BEFORE the broker call with added_risk 0
+        # so a name already at its position/expiry limit costs no round-trip,
+        # then again on the real fill below where the dollar risk is known.
+        # A breach SKIPS without recording an order: the condition is transient
+        # (see paper_concentration's header) and an order row would make
+        # has_order_for_signal blacklist the signal for good.
+        book = paper_account_db.fetch_open_positions(db_path)
+        capped = paper_concentration.concentration_reject(
+            book, sig["symbol"], sig["expiration"], 0.0)
+        if capped:
+            _log_capped(capped_seen, sig["symbol"], capped)
             continue
         try:
             qty, max_loss_per = paper_sizing.size_contracts(sig["entry_credit"], sig["width"])
@@ -209,6 +236,11 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
                          _default_broker.PREFIX, sig["symbol"], fill)
                 continue
             max_loss_total = round(max_loss_per * qty, 2)
+            capped = paper_concentration.concentration_reject(
+                book, sig["symbol"], sig["expiration"], max_loss_total)
+            if capped:
+                _log_capped(capped_seen, sig["symbol"], capped)
+                continue
             if max_loss_total > paper_account_db.get_account(db_path)["cash"]:
                 _record_reject(db_path, sig, "SELL_TO_OPEN", "INSUFFICIENT_BUYING_POWER")
                 log.info("%s REJECTED %s INSUFFICIENT_BUYING_POWER (need %.2f)",

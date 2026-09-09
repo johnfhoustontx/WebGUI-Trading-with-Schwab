@@ -4,6 +4,83 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-09 (**The paper engine can no longer put the whole
+book in one name, and the earnings gate fires for the first time.** Design:
+[`2026-09-09-concentration-and-earnings-gate-design.md`](plans/2026-09-09-concentration-and-earnings-gate-design.md).)
+
+- **The trigger, measured in prod before anything was written.** The paper
+  account held **14 open positions and every one was ORCL** — $2,829 of max
+  loss, **11.6% of a $24,490 account**, all put credit spreads, all expiring
+  **2026-09-11**, over an ORCL report scheduled for **2026-09-10**. Fourteen
+  tickets read as a diversified book and were one bet sliced fourteen ways.
+  The captured-signals ledger agrees: ORCL is **31 closed, 1 winner, −$683**,
+  every exit a stop, not one reaching `EXPIRED` or `MANUAL_CLOSE` — the two
+  outcomes carrying all of that ledger's profit. September's captures were
+  **19 ORCL of 25**.
+
+- **The correlated-loss mode had already fired, and the stops were not the
+  problem.** On **2026-09-01 ORCL fell 149.12 → 141.32** (low 139.95) in one
+  session and **eight** ORCL spreads hit DELTA_STOP / MONEY_STOP the same day.
+  Every one of those exits was correct. That is the argument for the caps: one
+  name's one bad day emptied a third of the book, and nothing was broken.
+
+- **Caps — `options-scanner/paper_concentration.py` + three `config_paper.py`
+  constants.** `MAX_POSITIONS_PER_SYMBOL=3`, `MAX_RISK_PER_SYMBOL=750.0`,
+  `MAX_POSITIONS_PER_EXPIRY=5`. The engine had **nothing between**
+  `MAX_RISK_PER_TRADE` (one trade) and `MAX_SESSION_DRAWDOWN` (the account), so
+  a one-name book cleared both ends. ⚠ The expiry cap counts **across symbols**
+  — five positions on one Friday is a bet on a date. ⚠ A breach **skips without
+  recording a rejected order**, unlike `RISK_TOO_HIGH`: the condition is
+  transient, and an order row would make `has_order_for_signal` blacklist the
+  signal permanently. The cost is that a capped signal leaves **no trace in the
+  UI**, only the service journal — documented in the Reference Guide's Paper
+  Account caveats, because the visible symptom is a good signal that never
+  opens.
+
+- **The earnings gate had never fired on the live scan.** `screen_spreads` has
+  carried `if earnings_date and ...` for months and **`run_full_scan` never
+  passed a date**, so the first conjunct was always False and every swing signal
+  the scanner ever emitted was ungated. The `earnings_cache.json` it was
+  nominally fed from holds `"date": null` for all seventeen symbols and was last
+  written 2026-08-29. New `scanner_engine.scan_earnings_dates` reads
+  `EARNINGS_CALENDAR_DB` once per scan — the store the income window already
+  used, which held `('ORCL','2026-09-10')` from 2026-09-07.
+
+- **⚠ The "0-DTE" bucket spans DTE 0..4, and its exemption rested on a false
+  premise.** The gate exempted the whole bucket because such a position "is flat
+  by the close"; `zerodte_max_dte = 4`, and all sixteen ORCL captures on
+  2026-09-08 were `scanner_type=0DTE` with `dte_at_entry=3`. New
+  `earnings_gate_applies(trade_type, dte)` exempts **only DTE 0**, and replaces
+  the bare tuple test at **both** mirror sites — an AST guard in
+  `test_earnings_gate_mirror.py` fails if `swing_scan` restates it again. That
+  filter is now **per signal**, since one scan spans a DTE range.
+
+- **⚠ The original scoping of that third fix was WRONG and is recorded as such
+  in the design doc.** It read "the 0-DTE scanner emits 3-DTE trades, probably
+  because ORCL lacks daily expirations — add a DTE ceiling." There is no
+  anomaly: 0..4 is a deliberate 2026-05-21 design and 4 already *is* the
+  ceiling. The defect was the exemption, not the range.
+
+- **The manuals said the same wrong thing, in the app's most-read prose.**
+  `page_help.py` described the 0-DTE tab as "Credit spreads that expire TODAY"
+  and the Reference Guide as "Same-day expirations" — which is how a reader
+  concludes a position will be flat by the close when it will not. Corrected at
+  four sites plus the glossary.
+
+- **`not_listed` deliberately does NOT block.** `shared.earnings.coverage` is
+  three-valued and "the vendor does not carry this symbol" is genuinely unknown,
+  but the scan's gate can only act on a date and failing closed would empty the
+  watchlist whenever coverage thins (1,814 symbols in the near month, 11 by
+  March). The income window, which *stamps* rows, is where that distinction
+  lives.
+
+- **Tests: options-scanner 1290 → 1317 passed / 2 skipped; options_svc + 13.**
+  ⚠ One testing note worth carrying: the `swing_scan` mirror harness returned an
+  empty list on its first run because a double had the wrong signature — making
+  every "was dropped" assertion pass for the wrong reason.
+  `test_the_harness_itself_produces_a_row` now guards the rest of that file.
+
+
 **Last updated:** 2026-09-09 (**A Desk panel now scrolls sideways INSIDE
 itself, with the column that names each row pinned**, instead of the whole
 document sliding and taking the panel heading and the symbol with it. Design +

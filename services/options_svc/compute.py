@@ -399,22 +399,26 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if structures is not None:
         wanted = set(structures)
         signals = [s for s in signals if s.get("type") in wanted]
-    if earnings_date and trade_type in se.EARNINGS_GATED_TRADE_TYPES:
+    if earnings_date:
         # Uniform over every family rather than only the builders' output: the
         # adapted credit spreads were already gated inside ``screen_spreads``,
         # so re-checking them is idempotent.
         #
-        # ⚠ The trade_type condition MIRRORS screen_spreads' own gate and is not
-        # decoration. Without it the two halves disagree for any window the
-        # engine deliberately exempts: a 0-DTE caller passing an earnings_date
-        # would have its BUILDER candidates dropped here while its SPREAD
-        # candidates were kept, since a 0-DTE position is flat by the close and
-        # cannot be held through a report. Unreachable today — income_scan is
-        # the only caller that passes a date — which is exactly why it would
-        # have been found the hard way.
+        # ⚠ Decided by ``se.earnings_gate_applies`` — the SAME predicate
+        # screen_spreads uses — and not by restating its membership test here.
+        # Without that, the two halves disagree for any window the engine
+        # exempts: a caller's BUILDER candidates are dropped while its SPREAD
+        # candidates are kept, for the same symbol, expiry and report. They DID
+        # disagree once the engine learned that the "0-DTE" bucket spans DTE
+        # 0..4 and this filter still keyed off the bare tuple.
+        #
+        # Per-signal rather than per-scan because the predicate reads DTE, and
+        # one scan spans a DTE range: within a 0..4 request the same-day
+        # candidates keep the exemption while the overnight ones do not.
         signals = [s for s in signals
-                   if not se.check_earnings_conflict(earnings_date,
-                                                     s.get("expiration"))]
+                   if not (se.earnings_gate_applies(trade_type, s.get("dte"))
+                           and se.check_earnings_conflict(earnings_date,
+                                                          s.get("expiration")))]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
 

@@ -2109,6 +2109,54 @@ invisible when wrong:
   `reset_account` therefore clears `equity_lots` too, or the next session opens
   claiming committed capital the account no longer has.
 
+## The paper engine's risk envelope has FOUR rungs, not two
+
+`config_paper.py` held only `MAX_RISK_PER_TRADE` (one trade) and
+`MAX_SESSION_DRAWDOWN` (the account), so a book could be **entirely one name**
+and clear both ends. On 2026-09-08 it was: 14 open positions, all ORCL, $2,829 —
+11.6% of a $24,490 account — one direction, one expiry, over a report the next
+day. **`paper_concentration.concentration_reject`** is the missing middle,
+enforced at `run_entry_cycle`: `MAX_POSITIONS_PER_SYMBOL` ·
+`MAX_RISK_PER_SYMBOL` · `MAX_POSITIONS_PER_EXPIRY` (**counted across symbols** —
+five positions on one Friday is a bet on a date).
+
+⚠ **A concentration breach SKIPS without recording a rejected order**, unlike
+`RISK_TOO_HIGH`. The condition is transient — it describes the book at this
+instant, not the signal — and an order row would make `has_order_for_signal`
+blacklist the signal permanently, so a name that freed up an hour later could
+never be entered. **Accepted consequence: it leaves no trace in the UI**, only
+the journal (`SKIPPED <sym> <reason> (concentration cap)`); the visible symptom
+is a good signal that never opens. Do not "fix" that by recording the row.
+
+The risk sum goes through **`shared.driver_policy.open_risk_dollars`** rather
+than a local `sum(...)` — a NaN total makes every `>` False and silently
+switches the ceiling off, the documented pins-the-bound trap.
+
+## ⚠ The "0-DTE" bucket spans DTE 0..4 — the name is a WINDOW LABEL, not a DTE
+
+`zerodte_max_dte = 4` (a deliberate 2026-05-21 design; the semantics are on
+`is_short_strike_in_em_window`). So a `scanner_type=0DTE` row is routinely a
+multi-session hold — all sixteen ORCL captures on 2026-09-08 carried
+`dte_at_entry=3`. **This misled the code, the manuals and the operator at once:**
+the earnings gate exempted the whole bucket because such a position "is flat by
+the close", and `page_help.py` plus the Reference Guide both told the reader it
+"expires TODAY".
+
+**The gate's decision is `scanner_engine.earnings_gate_applies(trade_type, dte)`,
+never a membership test on `EARNINGS_GATED_TRADE_TYPES`.** That tuple is still
+the underlying data, but the exemption now needs DTE, so both mirror sites —
+`screen_spreads` and `options_svc.compute.swing_scan` — must call the predicate
+or they drift; `swing_scan` filters **per signal**, since one scan spans a DTE
+range. An AST guard in `test_earnings_gate_mirror.py` pins it.
+
+⚠ **`run_full_scan` passed NO `earnings_date` until 2026-09-09**, so
+`if earnings_date and ...` was always False and the gate was a no-op on every
+live scan — while reading exactly like protection. `scan_earnings_dates` now
+reads `EARNINGS_CALENDAR_DB` once per scan. Its `None` means **"no date to gate
+on", not "no earnings"**: `not_listed` deliberately does not block, because
+failing closed would empty the watchlist whenever vendor coverage thins. The
+older `data/earnings_cache.json` is dead — all-`null` since 2026-08-29.
+
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 
 `strategy_scoring._reward_metric`'s NAKED branch returns

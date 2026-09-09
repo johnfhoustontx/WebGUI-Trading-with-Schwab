@@ -497,17 +497,51 @@ LIQUIDITY_THRESHOLDS = {
 # (tests/test_scanner_engine.py::TestScannedTradeTypesAreAllGated).
 SCANNED_TRADE_TYPES = ("0-DTE", "SWING", "INCOME")
 
-# The windows whose positions are HELD across sessions, and so can be held
-# through an earnings report. 0-DTE is absent because it is flat by the close --
-# a hold-duration argument, NOT a claim that check_earnings_conflict would
-# return False for a same-day expiry (its window is [today - 5d, expiration], so
-# a report earlier this week falls inside it).
+# The windows whose positions are ALWAYS held across sessions, and so can be
+# held through an earnings report. "0-DTE" is absent from the tuple because most
+# -- not all -- of that bucket is flat by the close; see earnings_gate_applies,
+# which is the predicate every caller must use.
 #
 # Exported because the gate is applied in TWO places: screen_spreads' own loop,
 # and services/options_svc.compute.swing_scan's post-build filter over the
 # builder families, which screen_spreads never sees. They must agree, and a
-# shared tuple is the only way they cannot drift.
+# shared predicate over shared data is the only way they cannot drift.
 EARNINGS_GATED_TRADE_TYPES = ("SWING", "INCOME")
+
+
+def _dte_int(dte):
+    """``dte`` as an int, or None when it cannot be read."""
+    try:
+        return int(float(dte))
+    except (TypeError, ValueError):
+        return None
+
+
+def earnings_gate_applies(trade_type, dte):
+    """Whether a candidate at this DTE can be HELD through a report.
+
+    ⚠ The "0-DTE" bucket spans **DTE 0..4** (``zerodte_max_dte = 4``; see the
+    bucket semantics on ``is_short_strike_in_em_window``), so its name is a
+    window label, not a statement about time to expiry. The exemption rests on
+    the position being flat by the close, which is true at DTE 0 and false at
+    every other DTE in the bucket.
+
+    This was not a theoretical gap. On 2026-09-08 sixteen ORCL candidates were
+    captured as ``0DTE`` with ``dte_at_entry=3``, expiring 2026-09-11 -- either
+    side of the report scheduled for 2026-09-10 -- and fourteen positions were
+    opened against them.
+
+    An unreadable ``dte`` does NOT earn the exemption: the carve-out rests on
+    knowing the expiry is same-day. That fails closed on the EXEMPTION, not on
+    the gate -- nothing is dropped unless a report actually straddles the
+    expiry. Unknown trade types stay ungated, matching the deliberate fail-open
+    default the liquidity gate documents.
+    """
+    if trade_type in EARNINGS_GATED_TRADE_TYPES:
+        return True
+    if trade_type == "0-DTE":
+        return _dte_int(dte) != 0
+    return False
 
 # Absolute spread cents below which the percentage gate is bypassed.
 # Penny-wide markets on cheap options (e.g. $0.05 mid, $0.01 ask-bid) are
@@ -802,6 +836,60 @@ def apply_gex_gate(sigs, gex_context):
     return out
 
 
+def scan_earnings_dates(symbols, db_path=None):
+    """``{symbol: next report date or None}`` for one scan, one store open.
+
+    ``run_full_scan`` passed no ``earnings_date`` at all, so its gate --
+    ``if earnings_date and earnings_gate_applies(...)`` -- could never fire. The
+    older ``data/earnings_cache.json`` it was nominally fed from holds
+    ``"date": null`` for every symbol in it. This reads the calendar that is
+    actually maintained: ``EARNINGS_CALENDAR_DB``, filled nightly by
+    ``trade_svc`` and already consumed by the income window through
+    ``shared/earnings.py`` -- which exists precisely so a second reader need not
+    import that service.
+
+    ⚠ **A None here means "no date to gate on", NOT "no earnings".**
+    ``shared.earnings.coverage`` draws a three-valued distinction and
+    ``"not_listed"`` (the vendor does not carry the symbol) is genuinely
+    unknown. This resolver deliberately does not surface it: the scan's gate can
+    only act on a date, and failing closed on unknown would empty the watchlist
+    whenever vendor coverage thins -- measured at 1,814 symbols in the near
+    month and 11 by March. The income window, which stamps rows rather than
+    dropping them, is where that distinction is carried.
+
+    Never raises: a gate that raises costs the user the whole scan.
+    """
+    out = {sym: None for sym in symbols or ()}
+    if not out:
+        return out
+
+    import os
+
+    from shared import earnings as _earn
+
+    path = db_path or _earn.DEFAULT_DB_PATH
+    # The repo-root conftest refuses a sqlite3.connect into a live data dir, and
+    # init_db would CREATE the store besides. Mirrors compute._income_earnings.
+    if db_path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return out
+    conn = None
+    try:
+        conn = _earn.init_db(path)
+        for sym in out:
+            row = _earn.lookup(conn, sym)
+            if row is not None:
+                out[sym] = row["report_date"]
+    except Exception:  # noqa: BLE001
+        log.warning("scan earnings lookup failed", exc_info=True)
+    finally:
+        if conn is not None:
+            try:
+                _earn.close_db(conn)
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
 def check_earnings_conflict(earnings_date, expiration):
     """Check if an option expiration straddles an earnings date.
     Returns True if earnings fall between today and expiration (conflict)."""
@@ -876,15 +964,15 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             if not (dte_min <= dte <= dte_max):
                 continue
 
-            # Earnings avoidance — for the windows whose positions are HELD
-            # across sessions. A 0-DTE position opens and closes inside one, so
-            # it cannot be held through a report; SWING and INCOME both can, and
-            # at 30-45 DTE straddling one is the common case rather than the
-            # exception. (Note this is a hold-duration argument, not a claim that
-            # check_earnings_conflict would return False for a 0-DTE: its window
-            # is [today - 5d, expiration], so a report earlier this week falls
-            # inside it. 0-DTE is exempt because it is flat by the close.)
-            if earnings_date and trade_type in EARNINGS_GATED_TRADE_TYPES:
+            # Earnings avoidance — for candidates whose positions are HELD
+            # across sessions. SWING and INCOME always are, and at 30-45 DTE
+            # straddling a report is the common case rather than the exception;
+            # a 0-DTE candidate is exempt only at a genuinely same-day expiry,
+            # since that bucket spans DTE 0..4. This is a hold-duration
+            # argument, not a claim that check_earnings_conflict would return
+            # False for a same-day expiry: its window is [today - 5d,
+            # expiration], so a report earlier this week falls inside it.
+            if earnings_date and earnings_gate_applies(trade_type, dte):
                 if check_earnings_conflict(earnings_date, exp_str):
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
@@ -1443,6 +1531,13 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 if data is not None:
                     per_sym[symbol] = data
 
+    # One calendar read for the whole scan, ahead of the loop. Before this the
+    # live scan passed no earnings_date at all, so screen_spreads' gate --
+    # `if earnings_date and earnings_gate_applies(...)` -- could never fire.
+    # A symbol with no scheduled report (or an unreadable store) maps to None,
+    # which is exactly the pre-existing behaviour for that symbol.
+    earnings_by_symbol = scan_earnings_dates(symbols)
+
     # Serial processing over pre-fetched data — all CPU-bound, no I/O.
     gex_context = {}  # symbol -> {"band", "walls"} for index dealer-gamma gate
     for symbol in symbols:
@@ -1488,7 +1583,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                                   pd_min_0, pd_max_0, cd_min_0, cd_max_0, min_cr_0, "0-DTE",
                                   spot=price, daily_expected_move=daily_em,
                                   account_size=account_size, max_risk_pct=max_risk_pct,
-                                  now_ct=datetime.now(TZ))
+                                  now_ct=datetime.now(TZ),
+                                  earnings_date=earnings_by_symbol.get(symbol))
 
             # Attach walls to every signal for scoring
             for s in sigs:
@@ -1514,7 +1610,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
             sigs = screen_spreads(chain_s, symbol, swing_min_dte, swing_max_dte, pd_min_s, pd_max_s, cd_min_s, cd_max_s, min_cr_s, "SWING",
                                   spot=price, daily_expected_move=daily_em,
                                   account_size=account_size, max_risk_pct=max_risk_pct,
-                                  now_ct=datetime.now(TZ))
+                                  now_ct=datetime.now(TZ),
+                                  earnings_date=earnings_by_symbol.get(symbol))
             sigs = _apply_momentum_veto(sigs, move_ratio)
             ics = build_iron_condors(sigs, 2)
             pcs = [s for s in sigs if s["type"] == "PCS"][:3]
@@ -1654,6 +1751,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                     spot=spot, daily_expected_move=daily_em,
                     account_size=account_size,
                     max_risk_pct=DIRECTIONAL_MAX_RISK_PCT,
+                    earnings_date=earnings_by_symbol.get(symbol),
                     now_ct=now_ct, mode="DIRECTIONAL",
                 )
                 dir_sigs_0 = [s for s in dir_sigs_0 if s["type"] == directional_side]
@@ -1673,6 +1771,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                     spot=spot, daily_expected_move=daily_em,
                     account_size=account_size,
                     max_risk_pct=DIRECTIONAL_MAX_RISK_PCT,
+                    earnings_date=earnings_by_symbol.get(symbol),
                     now_ct=now_ct, mode="DIRECTIONAL",
                 )
                 dir_sigs_s = [s for s in dir_sigs_s if s["type"] == directional_side]

@@ -136,9 +136,9 @@ quality — mostly **credit spreads** (you sell risk and collect cash up front),
 plus single-leg directional trades on their own tab.
 
 - **0-DTE / Swing / Directional** — the small tabs at the very top (under the page
-  tabs): expiring today, over several days, and single-leg long/short calls and
-  puts. Directional only lists trades that clear a quality bar, so an empty tab
-  means "nothing qualified today", not a failure.
+  tabs): short-dated (0-4 days, NOT only today), days-to-weeks out, and single-leg
+  long/short calls and puts. Directional only lists trades that clear a quality bar,
+  so an empty tab means "nothing qualified today", not a failure.
 - **Score chip & Grade** — greener/higher means better reward-vs-risk, higher
   probability of profit, and better trend fit. Work from the top down.
 - **Click a row** for full details; the row buttons send it to the Calculator,
@@ -865,8 +865,9 @@ def help_md(active: str) -> str:
 
 SUBTAB_HELP: dict[str, dict[str, str]] = {
     "/options/scanner": {  # Market Scanner
-        "0-DTE": "Credit spreads that expire TODAY — fastest decay, highest risk "
-                 "(zero days to expiration).",
+        "0-DTE": "Short-dated credit spreads — 0 to 4 days to expiration, not "
+                 "only today. Fastest decay, highest risk. Check the Exp column: "
+                 "anything past today is held overnight.",
         "Swing": "Credit spreads days-to-weeks out — slower decay, more room to be "
                  "right.",
         "Directional": "Single-leg long or short calls/puts — a plain bullish or "
