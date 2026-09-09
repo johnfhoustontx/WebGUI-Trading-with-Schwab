@@ -31,10 +31,22 @@ at every width from 1280 to 2560. `flow` is already solved by Quasar's own
 `.q-table__middle { overflow-x: auto }` and must NOT be touched. **Task 5 is
 therefore empty** — do not go looking for work there.
 
-**2. The boundary is ~1650-1700px on the PUBLIC origin, not 1877.** Measured:
-clips at and below 1650, clean from 1700 up. `desk.py`'s comment claiming 1877
-is not reproducible as written and must be corrected in place along with the
-`_GAP` note.
+**2. ⚠ CORRECTED IN TASK 2 — 1877 WAS RIGHT, AND THIS NOTE WAS WRONG.** An
+earlier revision of this section claimed `desk.py`'s 1877 was "not reproducible".
+It is reproducible; the claim conflated two things, and both are now written down
+in `desk.py` itself:
+
+* **Origin.** 1877 is the PRIVATE app's boundary. The public origin has no icon
+  rail, so its equivalent is **1809** (measured clean at 1808). `DESK_CHROME_PX`
+  164 decomposes as 96 padding chain + 68 rail, and the 96 was measured publicly.
+* **Criterion.** "clips below 1650" measured DOCUMENT overflow. The padding chain
+  absorbs 16px per level, so a panel stops containing its rows ~140px before the
+  document starts scrolling: panel overflow below 1809, document overflow only
+  below ~1671. In between, rows paint out through the card border with no
+  scrollbar to show for it — which is a worse symptom, not a milder one.
+
+The anchor stands: the card's `offsetWidth` measures **839** at exactly the width
+its overflow first reaches 0.
 
 **3. ⚠ THE PUBLIC AND PRIVATE BOUNDARIES DIFFER BY THE NAV RAIL, and every
 measurement here is of the PUBLIC one.** `live_main` renders no rail, so the
