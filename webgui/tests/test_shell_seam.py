@@ -330,3 +330,23 @@ def test_the_pinned_cell_and_its_backdrop_share_one_grid_cell():
     selectors = [r.split("{")[0].strip() for r in placed]
     assert ".ns-panel-row > :first-child" in selectors, selectors
     assert any(s.endswith("::after") for s in selectors), selectors
+
+
+def test_a_two_cell_pin_gets_a_two_cell_backdrop():
+    """Three of the four Desk panels do not lead with the column that names the
+    row, so they pin their first TWO cells (see ``desk._PIN_DEPTHS``). The cell
+    itself is transparent by design — the ``::after`` is what paints under it —
+    so a two-cell pin over the one-cell backdrop would leave the scrolling
+    numbers visible straight through the pinned symbol.
+
+    The page cannot reach a pseudo-element, so the depth CLASS is the whole
+    conversation between the two halves; this pins the stylesheet's side of it.
+    ⚠ ``grid-column`` and not ``grid-area``: the base rule's ``grid-area: 1 / 1``
+    already sets the row, and restating it here would break the neighbouring
+    "exactly two rules place a grid cell" count."""
+    decls = _declarations(shell.PANEL_SCROLL_CSS)
+    wide = decls[".ns-panel-row.ns-pin-2::after"]
+    assert "grid-column: 1 / 3" in wide, wide
+    # ⚠ it must NOT restate the gap reach: one ``margin-right`` in the whole
+    # sheet is what ``test_the_pin_backdrop_covers_the_column_gap`` reads.
+    assert "margin-right" not in wide, wide
