@@ -12,6 +12,19 @@ in [CHANGELOG.md](CHANGELOG.md).**
 the top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the mirror
 of the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`.
 
+⚠ **Each panel scrolls sideways INSIDE itself below ~1877px (private) / ~1809px
+(public), rather than the document scrolling** (2026-09-09). The panel BODY is
+the scroll container, never the card, so the heading stays put; each grid carries
+a `min-width` DERIVED from its own `minmax()` track floors
+(`pages/panel_scroll.py`), because a grid that keeps shrinking has nothing to
+scroll. ⚠ **The pinned column is the one that NAMES the row, which is not always
+the first**: dealer leads with SYMBOL and pins one cell, but Board leads with
+SCORE, Flow with TIME and Positions with BOOK, so those three pin **two** —
+pinning `:first-child` there would freeze a `PAPER` chip while the symbol scrolled
+away. `_PIN_DEPTHS` is keyed by the grid string, the one thing every painter and
+`_grid_head` already holds. The CSS is `shell.PANEL_SCROLL_CSS`, injected by BOTH
+entrypoints so the published screen cannot diverge from the private one.
+
 A single-screen aggregate of the highest glance-value element of each page, laid out
 as the four questions a session opens with, in order: **top strip** (clock ·
 Day/Week/Month **Sentiment** and **Trend** rings · **Bias** + **Signal** ·
