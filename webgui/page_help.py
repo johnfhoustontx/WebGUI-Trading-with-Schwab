@@ -59,20 +59,47 @@ on · what am I holding.*
   (Rallying / Balanced / Whipsaw / Stressed…). Bias and Signal are the same two
   the Sentiment page's Signals column shows, read off the same composite score;
   the Desk never computes its own.
+- **Bull / Bear sectors** — a chip for each of the eleven sectors, and every chip
+  shows **two different time frames at once**. The **colour, and the order left to
+  right, are today**: whichever sector is doing best on the session sits first.
+  The **thin line down the left edge is the last three months** — hover a chip and
+  it spells that out in words. **The two often disagree, and that is the most
+  useful thing on the strip**: a sector that has led all quarter but is red today
+  is being sold into, and one that has lagged all quarter but is green today is
+  where money went this morning. **Rising · Leading** means going up *and* beating
+  the S&P; **Falling · Leading** means going down, just less than the index — the
+  reading a relative-strength screen mistakes for a buy. The small line under the
+  count says what the strip is sorted by, and the count itself names its time
+  frame ("4 of 11 sectors rising and leading **today**"). Chips only change places
+  when a move is big enough to matter, so the strip does not shuffle under your
+  eye. Click one to open the full **Bull / Bear Map**, which always shows the
+  three-month view.
+  ⚠ **Before the opening bell — and at weekends — there is no session move to
+  read yet**, so every chip falls back to the three-month view and the strip says
+  so under the count. A colour you see pre-open is **not** a statement about
+  today.
 - **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
-  **gamma flip** and how far price sits from it, the **call and put walls**, and
-  net gamma exposure. The little bar shows where price sits **between the two
-  walls**. *Long gamma · pins* means dealer hedging tends to **hold** price near
-  those walls; *short gamma · runs* means it **amplifies** moves instead.
-- **Opportunity Board** — the five hottest names right now, with what makes each
-  one interesting, its at-the-money implied volatility and whether that is rising
-  or falling, and a setup tag when one is active.
-- **Live Flow Alerts** — the five newest unusual-options events. Note these show
+  **flip level** and how far price sits from it, the **ceiling** and **floor**
+  (the call and put walls — the ceiling is coloured like its marker on the map,
+  and it only caps price while price is below it), and net gamma exposure. The
+  little bar shows where price sits **between the two**. Under *dealer mode*,
+  *Long gamma · pins* means dealer hedging tends to **hold** price near those
+  levels; *short gamma · runs* means it **amplifies** moves instead.
+- **Opportunity Board** — the hottest names right now, with what makes each one
+  interesting, its at-the-money implied volatility and whether that is rising or
+  falling, and a setup tag when one is active. The panel says how many it is
+  showing.
+  The **Buy / Neutral / Sell** counts in its header are the same ones the
+  Opportunity Board page shows, and they cover **every symbol on the watchlist**
+  — not just the few rows listed beneath them. So "Buy 12" over six rows is not
+  a contradiction: twelve names are rated Buy, and you are looking at the
+  hottest handful of all of them.
+- **Live Flow Alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
   tape, so nobody can honestly say which side traded.
 - **Positions** — your open paper trades and Claude's, together, with the live
-  mark and profit or loss, and a flag: **OK**, **Watch**, **At risk**, **Rescue**.
-  The header totals open trades, unrealised profit and loss, and how many need
+  mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
+  **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
 
 **Click any row** to open the page it came from, already set to that symbol.
@@ -81,11 +108,11 @@ Nothing on this page places or changes a trade.
 **It talks to you.** When a new flow alert or a newly-opened position appears, the
 Desk says it out loud — and that row **glows for ten seconds**, so your eye lands
 where the voice pointed. When the alert names a **contract** it is spoken in full:
-*"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover or a gamma flip is about
-the whole book rather than one contract, so it stays short — *"S P Y. Crossover
-alert, calls over."* A new position adds its strikes, expiry and entry price, and
+*"N D X. Unusual volume, 0-D T E 7 15 Put."* A premium shift or a hedging flip is
+about the whole book rather than one contract, so it stays short — *"S P Y.
+Premium shift alert, calls over."* A new position adds its strikes, expiry and entry price, and
 says **credit or debit** rather than leaving you to work out the sign. If several
-arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **flag** — OK to At risk to Rescue — glows
+arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **status** — OK to At risk to Rescue — glows
 amber and stays **silent**: it was already there, and the flag column has already
 told you.
 
@@ -100,33 +127,6 @@ follows the same *only during market hours* setting as the scanner chime.
 reads 0 overnight, which would otherwise produce confident-looking walls that are
 pure noise. A greyed panel with a timestamp means "this is the last good reading",
 not "the market is flat".
-""",
-    "/desk/live": """
-**Live Mirror — the simple version**
-
-**The Desk, on a screen you are not sitting at.** Same numbers, same layout, built
-as a plain web page instead of an app page — so it keeps updating on a wall
-display, a spare monitor or a phone, and picks itself back up after the machine
-sleeps or the network blinks. It opens in a **new tab**, so the tab you were
-working in stays where it was.
-
-- **Same numbers, always.** Every figure is produced by the Desk's own code, so
-  the mirror cannot quietly disagree with the Desk. If the two ever differ, one of
-  them has stopped updating — check the dot.
-- **The dot, top right.** **Live** means the stream is connected and the screen is
-  current. **Reconnecting** means it dropped and is retrying by itself; the numbers
-  on screen are the last good ones until it says Live again.
-- **The clock keeps ticking even when nothing else changes** — that is deliberate.
-  A frozen page and a quiet market look identical, and the second hand is how you
-  tell them apart at a glance from across the room.
-- **The four panels stay 2x2 at every width**, unlike the Desk, which stacks them
-  into one column on a narrow screen. A display you have pinned something to should
-  not rearrange itself.
-
-**Click any row** to open the page it came from. **Open the full Desk** (top left)
-goes back to the real app.
-
-This screen is **read-only**. It places no trades and changes nothing.
 """,
     "/options/scanner": """
 **Market Scanner — the simple version**
@@ -150,6 +150,11 @@ plus single-leg directional trades on their own tab.
   RETURNED, per trade, as a multiple of what was risked. It comes from your own
   closed trades, not from the option's price, and it is **left out entirely**
   when there aren't enough of them to mean anything.
+- **Dropped at** — the table keeps every signal the day produced, not just the
+  ones still live. A signal the latest scan no longer finds is dimmed and stamped
+  with the time it went, so the day's record stays complete. Its price is frozen
+  at that moment, which is why a dropped row **cannot be paper-traded** — the
+  button is disabled rather than filling you at an hours-old credit.
 - It re-scans on its own — **Run scan** (at the right edge of the table) just
   forces a refresh.
 """,
@@ -167,6 +172,44 @@ family for it — directional, spreads, and neutral.
 - Only candidates that clear a **quality bar** are listed. The status line says how
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
+""",
+    "/options/income": """
+**Income Window — the simple version**
+
+Premium to **sell** 30 to 45 days out, across the whole watchlist, scanned once
+each morning. Three kinds of trade sit on one ranked board:
+
+- **Put spread** — you think it won't fall much. Risk is capped at the spread width.
+- **Call spread** — you think it won't rise much. Also capped.
+- **Cash-secured put** — you'd be happy to *own* the shares at that strike. Risk is
+  capped too, but the cap is the whole stock down to zero, so it ties up far more cash.
+- **Covered call** — a call sold against shares you already hold (see **Shares**),
+  never below what those shares cost you.
+- **Yield on cost** and **Total return if called** are the two numbers that decide a
+  covered call, and they show a dash on everything else — a spread owns no shares, so
+  there is nothing to measure a return against. Yield on cost is the premium alone
+  against what the stock cost; total return if called adds the gain up to the strike,
+  which is what you keep if the shares are called away. A fat premium at a strike
+  barely above your basis and a thin one well above it look opposite depending on
+  which you read, so read both.
+- **Capital $** is the cash actually committed, and **Return on capital** is the
+  credit measured against it — that is the only way a $60 spread and a $640
+  cash-secured put can be compared on one screen. Dollars alone cannot.
+- **Earnings** says what the calendar knows: *None scheduled* means it was checked
+  and found nothing, *After expiry* means a report is coming but lands past this
+  expiration, and **Not checked** means the calendar has no entry for that symbol —
+  unknown, not clear. Without an Alpha Vantage key that is every row.
+- **The wallet button** on a cash-secured put or a covered call opens that trade in
+  the **paper account** — the book with cash and share lots, so a put assigned there
+  really does become stock on the **Shares** tab. The two spreads have no button:
+  their route is *Send to Paper trade* on the Market Scanner, which writes the paper
+  *ledger* instead. You are filled at the **live** price, not the morning board's,
+  and the account answers in a moment with either a confirmation or a refusal that
+  says what stopped it — not enough cash, no lot behind the call, a lot already
+  covered, a call that would not cover the lot whole, or a price that has moved more
+  than 15% since the scan.
+- Nothing here is traded automatically. The board is a shortlist; the button is
+  yours to press.
 """,
     "/options/calculator": """
 **Calculator — the simple version**
@@ -287,8 +330,14 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
-- **Apply** dispatches a (simulated) paper adjustment. The board refreshes itself
-  as positions are re-priced.
+- **Apply** adjusts your paper position. No real money, and no live order is
+  placed. The board refreshes itself as positions are re-priced.
+- **Not every option has an Apply button.** One marked *Manual* is a trade you
+  place yourself — the app will not do it for you.
+- **If prices move while you're deciding, Apply is refused** and nothing is
+  changed: you'll see *"Prices moved — nothing was applied."* The numbers on the
+  card were priced a moment ago, and it will not fill you at them once they're
+  stale. Re-read the card and press it again.
 """,
     "/options/matrix": """
 **Opportunity Board — the simple version**
@@ -296,11 +345,16 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
 One **at-a-glance grid** of every tracked symbol, so you can scan the whole board
 without opening each page.
 
-- **Each row** is a ticker: spot, **Day %**, a **trend** arrow, call/put
-  **acceleration**, put/call ratio, net premium ($M), the **GEX** regime
-  (above/below the flip), how many live **signals** and **flow** alerts it has, an
-  overall **Signal** (buy / neutral / sell), and a **hotness** score.
-- **Click any column header** to sort — e.g. hottest names or biggest movers first.
+- **Each row** is one symbol: price, **Day %**, a price **trend** arrow, then
+  **Call flow** and **Put flow** — arrows for whether call and put activity is
+  heating up or cooling off, *not* prices — the put/call ratio, **Net premium
+  $M**, and **Vs flip**, which side of the dealer gamma flip price sits on.
+- **Open signals** and **Flow alerts** are counts: how many live scanner signals
+  and how many of today's flow alerts belong to that symbol. **Signal** is the
+  one overall verdict (buy / neutral / sell), and **Score** is how much is going
+  on altogether — the board's default sort.
+- **Click any column header** to sort — e.g. highest Score or biggest movers
+  first. Sorting is the only control here; rows do not open anything.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
     "/options/flow": """
@@ -309,12 +363,14 @@ without opening each page.
 Everything the options service flagged **today**, newest first — the same alerts
 that chime and hit your phone, kept somewhere you can actually read them.
 
-- **Crossover** — call premium overtook put premium on a symbol, or the reverse.
-- **Unusual activity** — one contract traded far more than its open interest.
-- **Gamma flip** — spot crossed the dealer gamma flip, so dealer hedging starts
-  damping the move instead of amplifying it (or the reverse).
-- **Big delta** — one contract carries an outsized share of that symbol's whole
-  directional exposure; the **Share** column is how big a share.
+- **Premium shift** — call premium overtook put premium on a symbol, or the
+  reverse.
+- **Unusual volume** — one contract traded far more than its open interest.
+- **Hedging flip** — spot crossed the dealer gamma flip, so dealer hedging starts
+  damping the move instead of amplifying it (or the reverse). The side says which
+  way: **now damping** or **now amplifying**.
+- **Outsized bet** — one contract carries an outsized share of that symbol's
+  whole directional exposure; **Share of flow** is how big a share.
 
 None of these can tell a **buy** from a **sell** — Schwab publishes no options
 tape — so read every row as "something large happened here", not as a direction.
@@ -332,8 +388,15 @@ A practice ledger of option trades — **no real money**.
 This is the **hand-kept ledger** — trades you sent here yourself. The automated
 engine's positions live on **Paper Account**.
 
-- **Each row** is a trade with its strikes, credit, max loss, and live P&L.
-- **Analyze** re-prices it now and shows current Greeks; **Close** records an exit.
+- **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
+  you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
+  and when you **Opened** it.
+- **Entry is positive for a credit and negative for a debit** — one column, and
+  the sign tells you which. **P&L** is unrealised while a trade is open and
+  realised once it is closed.
+- **Analyze** re-prices it now and shows current Greeks. **Close trade** records
+  an exit; **Delete** removes the row entirely. Both are sent to the engine, so
+  the ledger updates a moment later rather than instantly.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
@@ -343,11 +406,16 @@ Market Scanner signals you're **tracking over time** to see whether they're work
 
 - **Newest first** — the table opens with your most recently captured signal at
   the top. Click any column heading to re-sort it.
-- **Rec** — green = take profit, red = cut, amber = hold.
-- **Credit vs Cur Price** — what you took in against what it would cost to close
-  now; **P&L** is the difference, green in profit and red in loss.
-- **Refresh marks (live)** re-prices everything against fresh chains; you're
-  alerted when a stop or target is hit.
+- **Action** — what to do now: green = take profit, red = cut, amber = hold.
+- **Entry vs Mark** — what you took in against what it would cost to close now;
+  **Open P&L** is the difference, green in profit and red in loss. Entry is
+  positive for a credit and negative for a debit, so a **Directional** signal
+  (see **Style**) shows a negative Entry — that is a debit paid, not a loss.
+- **DTE at entry** and **Entry grade** are frozen at the moment you captured the
+  signal and do not move. Every other column is live. Use **Expiry** for how much
+  time is actually left.
+- **Reprice now** re-prices everything against fresh chains; you're alerted when
+  a stop or target is hit.
 - Click a row to load it into the **detail panel** on the right, and to pick it
   for **Close selected**.
 - **The footer** under the table sums the day: how many signals were captured and
@@ -373,6 +441,39 @@ Trades you sent by hand live on **Paper Ledger**.
   each hour, 09:00–14:00 CT** (there is no 15:00 run) — so a target hit at 09:15 is
   acted on at 10:00 unless you press **Run manage cycle** yourself.
 - **Reset** sets a new starting balance.
+""",
+    "/options/shares": """
+**Shares — the simple version**
+
+The **stock** the paper account owns. Options usually expire; a **cash-secured put**
+that finishes below its strike does not — it turns into 100 shares per contract, at
+the strike. Those shares land here.
+
+- **How acquired** — *Assigned* means a short put was exercised against you, which
+  is how nearly every lot appears. *Bought* means it was entered by hand. It matters:
+  an assigned lot's cost basis is the strike you sold, not what the stock was worth.
+- **Cost basis $/share** and **Cost $** — what you paid per share, and the cash that
+  bought the whole lot.
+- **Mark** and **Unrealized** are **blank on purpose.** Nothing here re-prices a bare
+  share, so there is no current value to show — and a number nothing measured is
+  worse than an empty cell. To see what a holding is worth right now, look it up on
+  **Market Dashboard** or in your broker.
+- **Covering call** — the call already written against that symbol, if there is one.
+  Blank means the shares are uncovered: you keep all the upside, and you are
+  collecting no premium. A call **spread** on the same symbol is *not* a covering
+  call and is deliberately not shown here. ⚠ The call is matched by **symbol, not
+  by lot** — the book records no link from a call back to the shares it was
+  written against — so with two lots of one name and one call written, the same
+  call shows on both rows and the screen cannot tell you which hundred shares are
+  covered.
+- Shares owned are what make a **covered call** possible. The **Income** tab screens
+  calls against these lots, never below their cost basis.
+- Nothing on this page is an action. A lot appears when the engine settles an
+  in-the-money short put, and leaves when a covered call written against it finishes
+  **above** its strike — the shares are called away at that strike and the cash comes
+  back with the gain booked as realised profit. A call finishing at or below its
+  strike expires worthless: you keep the premium and the shares stay. Being called
+  away is the only exit; there is no sell-by-hand.
 """,
     "/sentiment": """
 **Sentiment — the simple version**
@@ -666,7 +767,9 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
 Shows whether each part of the app is alive.
 
 - **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
-  services, and the web app.
+  services, this web app, and the public live screens beside it. The live
+  screens are a separate app on their own address: if that card is red the
+  public site is down, and nothing about your own screens is affected.
 - **Data freshness** — flags data that's gone stale. A view is only judged when
   its publisher is actually due to run: the **scanner** only scans during the
   session, so overnight and at weekends its age is left alone rather than
@@ -710,9 +813,23 @@ Links to the full documentation (each opens in a new tab).
 
 A big red stop button for the whole local stack.
 
-- Confirming stops the gateway, the services, and this web app — the page then goes
-  unresponsive (that's expected).
+- Confirming stops the gateway, the services, this web app and the public live
+  screens — the page then goes unresponsive (that's expected), and the public
+  site goes dark until you start the stack again.
 - Re-launch with `systemctl --user start trading-<env>.target`. Redis keeps running.
+- Confirming also asks for the 6-digit code from your authenticator app. A wrong,
+  missing or already-used code refuses the stop; nothing is stopped.
+""",
+    "/logout": """
+**Sign out — the simple version**
+
+Ends this browser's session and returns you to the sign-in page.
+
+- It also forgets a **trusted device**, so the next sign-in asks for your
+  authenticator code again — which is the point on a borrowed or shared machine.
+- It signs out THIS browser only. Other devices stay signed in.
+- Nothing running is affected: the services, the collectors and the driver all
+  carry on. Signing out is not stopping anything.
 """,
 }
 

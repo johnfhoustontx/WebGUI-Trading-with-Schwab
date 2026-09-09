@@ -1,0 +1,984 @@
+/* NeuralStrike public site — the thin layer over Nocturne.
+ *
+ * Nocturne (nocturne.css) owns colour, type, spacing and the component
+ * classes. This file holds only what a static site needs on top:
+ *
+ *   1. the self-hosted Inter faces, replacing the design's Google Fonts link
+ *   2. the hover states the design canvas carried as `style-hover=` attributes,
+ *      which are not a real HTML feature and had to become CSS rules
+ *   3. the gallery's panel switching
+ *
+ * Nothing here restates a Nocturne token. If a value is needed, it comes
+ * through var(--*).
+ */
+
+/* ─── 1. Inter, self-hosted ──────────────────────────────────────────────
+ *
+ * Inter v20 is a VARIABLE font: one file covers the whole 400-600 range the
+ * design uses, which is why there are two files here (two unicode subsets)
+ * rather than six (three weights x two subsets).
+ *
+ * `font-display: swap` matches what the design asked Google for. Text paints
+ * immediately in system-ui and reflows to Inter — on a page this text-heavy,
+ * a flash of unstyled text beats a flash of no text.
+ *
+ * ⚠ DO NOT ADD `<link rel="preload">` FOR THESE. It was tried, and measured:
+ * the pages fetched the face TWICE per load — once for the preload, once for
+ * the @font-face — and every load logged "preloaded using link preload but not
+ * used within a few seconds". Removing the tag took it to exactly one request.
+ * The theoretical saving is one round trip on a stylesheet that is already
+ * small, inline-free and first in the head; the measured cost was a duplicate
+ * download of 48 KB and a console warning on every visit.
+ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ─── 2. Page base ───────────────────────────────────────────────────────
+ * The three-line base the design repeated in each page's <style> block.
+ */
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  text-wrap: pretty;
+}
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+a:hover { color: var(--color-accent-300); text-decoration: underline; }
+
+/* The page ground. Both radial washes are the design's, verbatim. */
+.ns-page {
+  min-height: 100%;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 720px at 84% -180px,
+      color-mix(in srgb, var(--color-accent-900) 80%, transparent), transparent 60%),
+    radial-gradient(1100px 800px at -10% 100%,
+      color-mix(in srgb, black 32%, transparent), transparent 55%),
+    var(--color-bg);
+}
+.ns-page-sub {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 620px at 88% -200px,
+      color-mix(in srgb, var(--color-accent-900) 70%, transparent), transparent 60%),
+    var(--color-bg);
+}
+
+/* ─── 3. Navigation ──────────────────────────────────────────────────── */
+.ns-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px clamp(16px, 3vw, 40px);
+  border-bottom: 1px solid var(--color-divider);
+}
+.ns-nav-tall { gap: 24px; padding: 18px clamp(20px, 5vw, 72px); }
+.ns-nav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.ns-spacer { flex: 1; }
+
+.ns-brand {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+.ns-nav-tall .ns-brand { font-size: 15px; }
+.ns-brand .ns-brand-b { color: var(--color-accent); }
+a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
+
+/* ─── The mark ───────────────────────────────────────────────────────────
+ *
+ * THE FLIP: two chevrons converging on a level — dealer hedging pinned to the
+ * gamma flip. Inlined into the pages rather than loaded from assets/mark.svg
+ * so it can take its colour from CSS; the standalone file exists for anywhere
+ * that cannot inline it (the favicon, the app header, the social card).
+ *
+ * ⚠ The geometry is duplicated: here as markup in three pages, and in
+ * assets/mark.svg + assets/favicon.svg + webgui/static/img/neuralstrike-mark.svg.
+ * That is deliberate — an <img> gets no stylesheet, so a single shared file
+ * cannot follow the page's accent — but it means a change to the shape is a
+ * change in four places. deploy/tests/test_site.py checks they stay in step.
+ */
+.ns-lockup { display: inline-flex; align-items: center; gap: 9px; }
+
+.ns-mark { width: 26px; height: 26px; display: block; flex: none; overflow: visible; }
+.ns-mark-rule { fill: var(--color-accent); }
+.ns-mark-fig {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Hero scale. The level is allowed to run past the mark's own box (hence
+ * `overflow: visible` above) so it reads as a price level crossing the page
+ * rather than an icon sitting on it. */
+.ns-hero-mark {
+  margin: 0 auto;
+  flex: 0 1 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+.ns-mark-xl { width: min(240px, 62vw); height: min(240px, 62vw); }
+.ns-mark-xl .ns-mark-rule {
+  /* The one place the rule earns a fade: at this size it is page furniture as
+   * much as mark, and it has to die away rather than stop dead against the
+   * hero's radial wash. The reproducible mark keeps its solid rule. */
+  fill: url(#ns-rule-fade);
+}
+.ns-hero-cap {
+  font-size: 12px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.ns-navlink {
+  font-size: 13.5px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-navlink:hover { color: var(--color-accent); text-decoration: none; }
+
+.ns-crumb {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.ns-count {
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  font-feature-settings: "tnum" 1;
+}
+
+/* The design was drawn at desktop width and its nav does not fit a phone.
+ * Measured at 375px: the landing nav needs 587px, so the three links and the
+ * primary button ran off the right edge — and because .ns-page clips overflow
+ * they were not merely awkward but INVISIBLE, taking the page's main call to
+ * action with them.
+ *
+ * The break is put on .ns-spacer, which already sits at exactly the right point
+ * on all three pages — after the brand and any breadcrumb, before the links.
+ * Given a full-width basis it becomes a zero-height row of its own, so
+ * everything after it starts on the next line. One rule, no per-page markup. */
+@media (max-width: 700px) {
+  .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
+  .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+}
+/* The landing's nav settles at three visual rows on a 375px screen — brand,
+ * the three links, then the button. Shrinking the link type and the button
+ * padding to pull it to two was tried and MEASURED AT NOTHING (141px → 140px,
+ * still four rows): the links plus the button need ~349px against 335px of
+ * usable width, and 14px is not recoverable from type alone. Reverted rather
+ * than left in as CSS that looks like it is doing something. */
+
+/* ─── 4. Buttons ─────────────────────────────────────────────────────────
+ *
+ * Nocturne's .btn-primary / .btn-ghost already carry hover and active states,
+ * so most of the design's `style-hover` on buttons only restated the system.
+ * The one variant that genuinely differs is the outlined ghost: the design
+ * mutes its border to neutral-700 at rest and lifts it to the accent on hover.
+ */
+.btn-outline { border-color: var(--color-neutral-700); }
+.btn-outline:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+/* THE MARKET GLOW. assets/market-glow.js puts this class on the nav's Live
+ * screens button while the US session is open, and takes it off at the close.
+ *
+ * It is the ONE place on the site whose colour is not the violet accent, and
+ * that is the point: the button means something different for six and a half
+ * hours a day, and a brighter violet would read as a hover state. The green is
+ * the app's own profit green, so the two surfaces speak one vocabulary.
+ *
+ * Built out of .ns-dot's language -- a colour plus a soft outer box-shadow --
+ * rather than a new one. Three shadows: a hairline that firms the edge, a tight
+ * halo, and a wide low-opacity bloom that is what actually reads as neon on the
+ * dark ground.
+ *
+ * DELIBERATELY STEADY. .ns-dot pulses and carries a prefers-reduced-motion
+ * guard for it; this does not animate, so it needs none. A pulsing button in
+ * the nav of every page view would be an advertisement, not a status light.
+ *
+ * ⚠ These rules must stay AFTER nocturne's .btn-primary. Both are single-class
+ * selectors, so the cascade is decided by source order alone, and site.css is
+ * the sheet that loads second. */
+.ns-market-open {
+  --ns-open: #34d399;
+  color: var(--ns-open);
+  border-color: color-mix(in srgb, var(--ns-open) 72%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ns-open) 20%, transparent),
+    0 0 16px -3px color-mix(in srgb, var(--ns-open) 55%, transparent),
+    0 0 40px -10px color-mix(in srgb, var(--ns-open) 45%, transparent);
+}
+.ns-market-open:hover {
+  background: color-mix(in srgb, var(--ns-open) 12%, transparent);
+  border-color: var(--ns-open);
+}
+.ns-market-open:active { background: color-mix(in srgb, var(--ns-open) 22%, transparent); }
+
+/* ─── 5. Shared marks ────────────────────────────────────────────────────
+ * The accent eyebrow: a 40px rule, then small uppercase text.
+ */
+.ns-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.ns-eyebrow::before {
+  content: "";
+  width: 40px;
+  height: 1px;
+  background: var(--color-accent);
+  flex: none;
+}
+.ns-eyebrow-sm { font-size: 12px; }
+.ns-eyebrow-sm::before { width: 28px; }
+
+/* The live dot: an accent point with its own glow. */
+.ns-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent);
+  flex: none;
+  animation: ns-pulse 2.8s ease-in-out infinite;
+}
+@keyframes ns-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+/* Respect a reduced-motion preference: the dot is decoration, and the design
+ * gives it no meaning that its animation carries. */
+@media (prefers-reduced-motion: reduce) {
+  .ns-dot { animation: none; opacity: 1; }
+  * { scroll-behavior: auto !important; }
+}
+
+/* A rule that fades at both ends — the system's stated preference over a
+ * plain hairline. */
+.ns-rule {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: linear-gradient(to right, transparent,
+    var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent);
+}
+
+/* ─── 6. Landing page ────────────────────────────────────────────────── */
+.ns-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 5vw, 72px);
+}
+.ns-h1 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(40px, 5.6vw, 76px);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 0 0 24px;
+  margin-left: -0.06em;
+}
+.ns-h1 span { display: block; }
+.ns-h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(28px, 3.6vw, 46px);
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+  margin: 0 0 24px;
+}
+.ns-h2-sm {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(26px, 3vw, 38px);
+  line-height: 1.16;
+  letter-spacing: -0.015em;
+}
+.ns-lede {
+  font-size: 17.5px;
+  line-height: 1.65;
+  max-width: 56ch;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+.ns-body {
+  font-size: 17px;
+  line-height: 1.65;
+  max-width: 62ch;
+  color: color-mix(in srgb, var(--color-text) 82%, transparent);
+}
+.ns-note {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+.ns-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* The one full-bleed saturated band the system permits at page scale. */
+.ns-band {
+  background:
+    radial-gradient(900px 420px at 85% -40%,
+      color-mix(in srgb, var(--color-section-glow) 70%, transparent), transparent 64%),
+    var(--color-section);
+}
+.ns-band-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 32px 28px;
+  padding-block: clamp(36px, 5vw, 64px);
+}
+.ns-stat {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(32px, 3.4vw, 48px);
+  line-height: 1.1;
+  margin: 0 0 12px;
+  font-feature-settings: "tnum" 1;
+}
+.ns-stat-label {
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+/* The four numbered steps. */
+.ns-steps {
+  list-style: none;
+  margin: 0 0 clamp(28px, 4vw, 48px);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.ns-step {
+  background: var(--color-bg);
+  padding: 26px 24px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+}
+.ns-step-n {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--color-accent);
+  margin: 0 0 14px;
+  font-feature-settings: "tnum" 1;
+}
+.ns-step-t {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.3;
+  margin: 0 0 10px;
+}
+.ns-step-b {
+  font-size: 14.5px;
+  line-height: 1.6;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+}
+
+/* The pull-quote with an accent edge. */
+.ns-pull {
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0;
+  padding-left: 18px;
+  border-left: 2px solid var(--color-accent);
+  max-width: 58ch;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+.ns-pull strong { color: var(--color-text); font-weight: 500; }
+
+/* The four lenses: title left, description right, hairline between. */
+.ns-lens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px clamp(24px, 5vw, 72px);
+  align-items: baseline;
+  padding: 26px 0;
+  border-top: 1px solid var(--color-neutral-800);
+}
+.ns-lens:last-child { border-bottom: 1px solid var(--color-neutral-800); }
+.ns-lens h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin: 0;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.ns-lens p {
+  font-size: 15.5px;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 56ch;
+  flex: 2 1 320px;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+/* The two safety cards. */
+.ns-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(20px, 3vw, 32px);
+}
+.ns-cards .card { padding: 28px; }
+.ns-cards h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 21px;
+  line-height: 1.25;
+  margin: 0 0 12px;
+}
+.ns-cards p:last-child {
+  font-size: 15px;
+  line-height: 1.65;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+/* The community block. */
+.ns-community {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px clamp(24px, 5vw, 64px);
+  padding: clamp(24px, 3vw, 32px);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-accent-900) 40%, transparent), transparent);
+}
+.ns-community h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(21px, 2.2vw, 28px);
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  margin: 0 0 10px;
+}
+.ns-community p {
+  font-size: 15px;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 48ch;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.ns-foot {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* ─── 7. Gallery ─────────────────────────────────────────────────────────
+ *
+ * PROGRESSIVE ENHANCEMENT, and it is the reason these pages were rebuilt
+ * rather than copied from the design's bundle. Every one of the 15 screens is
+ * a real element in gallery.html. With no JavaScript the panels simply stack
+ * and the page is still a usable gallery; gallery.js adds `js` to <html>,
+ * which is what turns the stack into a rail-plus-viewer.
+ */
+.ns-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: clamp(20px, 3vw, 40px);
+  padding: clamp(20px, 3vw, 40px) clamp(16px, 3vw, 40px) 64px;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+.ns-rail { flex: 1 1 260px; min-width: 0; max-width: 340px; }
+.js .ns-rail { position: sticky; top: 76px; }
+.ns-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+.js .ns-rail-list { max-height: calc(100vh - 170px); overflow-y: auto; }
+
+.ns-rail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+/* The rows are anchors (so they navigate without JavaScript), which means they
+ * inherit `a`'s accent colour and its hover underline. Both are wrong here —
+ * a row's state is carried by its tint and border, not by link styling. */
+.ns-rail-row,
+.ns-rail-row:hover { text-decoration: none; }
+.ns-rail-row:hover {
+  border-color: var(--color-neutral-700);
+  color: var(--color-text);
+}
+.ns-rail-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: var(--color-accent-700);
+  color: var(--color-text);
+}
+.ns-rail-row .ns-rail-title { flex: 1; min-width: 0; line-height: 1.35; }
+.ns-rail-row .ns-rail-count {
+  flex: none;
+  font-size: 11.5px;
+  padding-top: 3px;
+  font-feature-settings: "tnum" 1;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.ns-viewer { flex: 4 1 620px; min-width: 0; }
+
+/* Without JS every screen shows, separated by space. With JS, only the
+ * current one.
+ *
+ * ⚠ THE SWITCH IS A CLASS, NEVER THE `hidden` ATTRIBUTE, and the difference is
+ * the whole no-JS fallback. `hidden` is native HTML: the browser's OWN
+ * stylesheet carries `[hidden] { display: none }`, so a panel marked that way
+ * disappears whether or not this file has an opinion — including for the
+ * scripting-off visitor the fallback exists for. An earlier build wrote
+ * `.js .ns-screen[hidden]` and that selector was doing nothing at all; the UA
+ * rule was hiding the panels, and with JS off the gallery showed exactly one
+ * screen and no way to reach the other fifteen.
+ *
+ * `is-active` means nothing to the UA stylesheet, so with no `.js` on <html>
+ * neither rule below matches and every panel renders. */
+.js .ns-screen { display: none; }
+.js .ns-screen.is-active { display: block; }
+.ns-screen + .ns-screen { margin-top: clamp(40px, 6vw, 72px); }
+.js .ns-screen + .ns-screen { margin-top: 0; }
+
+.ns-screen h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(26px, 3vw, 40px);
+  line-height: 1.14;
+  letter-spacing: -0.018em;
+  margin: 0 0 12px;
+}
+.ns-screen-caption {
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0 0 20px;
+  max-width: 62ch;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+.ns-kicker {
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 10px;
+}
+
+.ns-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.ns-tab {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-neutral-800);
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-tab:hover { border-color: var(--color-accent); }
+.ns-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-200);
+}
+
+.ns-shot {
+  margin: 0 0 12px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  background: var(--color-neutral-900);
+}
+.ns-shot:last-child { margin-bottom: 0; }
+.ns-shot img { display: block; width: 100%; height: auto; }
+/* Same rule, same reason, for the sub-tab sections. */
+.js .ns-shot { display: none; }
+.js .ns-shot.is-active { display: block; }
+
+/* ─── 7b. The rail becomes a horizontal chip row on narrow screens ───────
+ *
+ * A 15-item vertical list is fine as a sidebar and wrong as a preamble: below
+ * the stacking width it put 15 screen names between the visitor and the first
+ * screenshot. As chips it reads as what it is — a picker — and costs one row.
+ *
+ * ⚠ THE BREAKPOINT ALSO FORCES THE STACK, and that is the point of stating it
+ * this way. Left to itself `.ns-gallery` wraps when 260px + 620px + the gap no
+ * longer fit, which works out at ~967px — a number that falls out of two
+ * `clamp()`s and moves the moment either is retuned. A chip row keyed to a
+ * DIFFERENT number than the wrap would leave a band of widths showing chips in
+ * a 340px sidebar, or a vertical list across the full width. Declaring
+ * `flex-direction: column` here makes the two the same number by construction.
+ */
+@media (max-width: 1000px) {
+  .ns-gallery { flex-direction: column; }
+
+  /* ⚠ `flex-basis` sizes the MAIN axis, so turning the container to a column
+   * turns `flex: 1 1 260px` and `flex: 4 1 620px` from widths into HEIGHTS.
+   * Measured before this line existed: the rail was 260px tall around 77px of
+   * chips and the viewer 620px around 310px of content — ~490px of dead space
+   * that looked like a spacing bug and was a flex-axis one. Resetting the basis
+   * to auto lets both size to their content, which is what a stacked column
+   * wants anyway. */
+  .ns-rail, .ns-viewer { flex: 0 0 auto; }
+
+  .ns-rail { max-width: none; width: 100%; }
+  /* Sticky belongs to a sidebar. A strip pinned under an already-sticky nav of
+   * its own variable height is a worse problem than scrolling back up. */
+  .js .ns-rail { position: static; }
+
+  .ns-rail-list {
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    /* Room for the scrollbar so it never sits on top of a chip's border. */
+    padding: 0 0 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+  .js .ns-rail-list { max-height: none; overflow-y: hidden; }
+
+  .ns-rail-row {
+    width: auto;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    /* A chip, not a row: pill radius, and a visible edge at rest — the sidebar
+     * version can afford a transparent border because the list has one line of
+     * text per row to align to, and a strip has nothing. */
+    border-radius: 999px;
+    border-color: var(--color-neutral-800);
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+  .ns-rail-row .ns-rail-title { flex: none; }
+  .ns-rail-row .ns-rail-count { padding-top: 0; }
+}
+
+.ns-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+  align-items: center;
+}
+.ns-pager span {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* The tab row and the pager only mean anything once JS can switch panels. */
+.ns-js-only { display: none; }
+.js .ns-js-only { display: flex; }
+
+/* ─── 8. Glossary ────────────────────────────────────────────────────────
+ *
+ * Definitions are a real <dl>. On a wide screen the term sits in its own left
+ * column so the page can be scanned down the terms alone; below 720px that
+ * column would squeeze the definition to a ribbon, so the pair stacks.
+ */
+.gl-wrap { padding-bottom: clamp(48px, 6vw, 88px); }
+.gl-head { padding: clamp(32px, 5vw, 56px) 0 clamp(20px, 3vw, 32px); }
+.gl-head .ns-eyebrow { margin-bottom: 18px; }
+.gl-head h1 { margin-bottom: 16px; }
+
+.gl-toc {
+  border-top: 1px solid var(--color-neutral-800);
+  border-bottom: 1px solid var(--color-neutral-800);
+  padding: 18px 0;
+  margin-bottom: clamp(28px, 4vw, 44px);
+}
+.gl-toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px 24px;
+}
+.gl-toc a {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14.5px;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+.gl-toc a:hover { color: var(--color-accent); text-decoration: none; }
+
+/* The section number. Tabular so the column of them lines up. */
+.gl-num {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  color: var(--color-accent);
+  font-feature-settings: "tnum" 1;
+  flex: none;
+  min-width: 1.1em;
+}
+
+.gl-sec { padding-top: clamp(28px, 4vw, 44px); }
+.gl-sec h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(21px, 2.3vw, 28px);
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-neutral-800);
+}
+.gl-sec h2 .gl-num { font-size: 14px; }
+
+.gl-p {
+  font-size: 15.5px;
+  line-height: 1.65;
+  max-width: 62ch;
+  margin: 0 0 18px;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.gl-list { margin: 0; display: grid; gap: 14px 28px; }
+.gl-list dt {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+.gl-list dd {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.62;
+  max-width: 68ch;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+.gl-list strong { color: var(--color-text); font-weight: 500; }
+.gl-list code {
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+@media (min-width: 721px) {
+  /* Term left, definition right — the layout that makes a glossary skimmable. */
+  .gl-list { grid-template-columns: minmax(150px, 210px) 1fr; }
+  .gl-list dt { grid-column: 1; text-align: right; }
+  .gl-list dd { grid-column: 2; }
+}
+
+.gl-tablewrap { overflow-x: auto; margin: 4px 0 20px; }
+.gl-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 460px;
+  font-size: 14.5px;
+}
+.gl-table th,
+.gl-table td {
+  text-align: left;
+  padding: 9px 14px 9px 0;
+  border-bottom: 1px solid var(--color-neutral-800);
+  vertical-align: top;
+}
+.gl-table th {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  color: var(--color-accent);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gl-table td { color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+.gl-table tr:last-child td { border-bottom: 0; }
+
+.gl-foot {
+  margin-top: clamp(40px, 6vw, 64px);
+  padding-top: 22px;
+  border-top: 1px solid var(--color-neutral-800);
+}
+
+/* ─── 9. Social links ────────────────────────────────────────────────────
+ * Icon-only buttons in the community block. Square, so a row of five reads as
+ * a set rather than as five differently-sized words.
+ */
+.ns-social { display: flex; flex-wrap: wrap; gap: 8px; }
+.ns-social .btn {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-color: var(--color-neutral-700);
+}
+.ns-social .btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+/* ─── 10. Live page ──────────────────────────────────────────────────────
+ *
+ * A grid of fourteen tiles, each a still capture of one published live screen
+ * (see the header comment in live.html for why a picture and not an iframe).
+ *
+ * ⚠ THE TILE'S BOX MUST EXIST BEFORE ITS PICTURE DOES. The captures are
+ * generated on the serving box and gitignored, so on a fresh deploy — and any
+ * time the capture timer is down — the images 404. Every <img> therefore
+ * declares width/height AND gets `aspect-ratio` here, so the grid is a page of
+ * labelled boxes rather than a collapsed pile of captions. `object-fit: cover`
+ * is the other half: a capture whose aspect ever drifts crops instead of
+ * letterboxing into a box the rest of the row does not share.
+ */
+/* The column that lets .ns-live-main take the slack, so the footer sits at the
+ * bottom of a short viewport instead of under the last row of tiles. It was an
+ * inline style on this page's wrapper while the page was a placeholder. */
+.ns-live-page { display: flex; flex-direction: column; }
+.ns-live-main {
+  flex: 1;
+  padding: clamp(28px, 5vw, 64px) clamp(20px, 5vw, 72px) clamp(40px, 6vw, 80px);
+}
+.ns-live-head { max-width: 64ch; margin: 0 0 clamp(26px, 4vw, 40px); }
+.ns-live-head .ns-eyebrow { margin: 0 0 18px; }
+.ns-live-title {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  margin: 0 0 18px;
+  margin-left: -0.06em;
+}
+.ns-live-lede {
+  font-size: 16.5px;
+  line-height: 1.65;
+  max-width: 62ch;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+.ns-live-grid {
+  display: grid;
+  /* auto-fill, so the row count follows the viewport instead of a breakpoint
+   * list: four tiles wide on a desktop, one on a phone, and nothing to keep in
+   * step with a media query. */
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: clamp(14px, 1.6vw, 22px);
+}
+
+.ns-live-tile {
+  display: block;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-neutral-900);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ns-live-tile:hover,
+.ns-live-tile:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md);
+  text-decoration: none;
+  color: var(--color-text);
+}
+.ns-live-tile img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;          /* the capture viewport, 1600x1000 */
+  object-fit: cover;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-neutral-800);
+  /* ⚠ THE EMPTY STATE IS A REAL STATE, not a transient one. The captures are
+     gitignored and written on the serving box, so this grid ships referencing
+     fourteen files that do not exist yet -- and if the capture timer ever
+     stops, or its settle delay turns out to be too short, it goes back to
+     that state on a PUBLIC page.
+
+     Without this, a missing capture renders its alt text spilling across the
+     top-left of the tile beside a broken-image icon, which reads as a broken
+     site rather than as a screen not captured yet. Transparent text drops the
+     spill; `aspect-ratio` above holds the box open at full size either way, so
+     what remains is an empty panel under its caption.
+
+     The alt attribute STAYS -- it is still read aloud, and .ns-live-cap
+     repeats the same name visually, so nothing is lost to a sighted reader. */
+  color: transparent;
+}
+.ns-live-cap {
+  display: block;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  line-height: 1.3;
+  color: color-mix(in srgb, var(--color-text) 82%, transparent);
+}
+
+.ns-live-note {
+  margin: clamp(28px, 4vw, 44px) 0 0;
+  max-width: 68ch;
+  font-size: 14px;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.ns-live-foot { padding: 0 clamp(20px, 5vw, 72px) 40px; }

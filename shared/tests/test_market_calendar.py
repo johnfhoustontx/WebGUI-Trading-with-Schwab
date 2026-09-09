@@ -508,6 +508,29 @@ def test_momentum_is_a_single_nightly_slot():
     assert mc.slot_times("momentum") == {"at": _t(16, 20)}
 
 
+def test_gallery_capture_is_a_single_daily_slot():
+    """The marketing gallery recapture, half an hour after the 08:30 CT regular
+    open so the screens carry live data rather than a pre-open blank.
+
+    ⚠ This is the one slot systemd reads rather than a service scheduler --
+    deploy/systemd/generate_units.py turns it into the timer's OnCalendar at
+    unit-GENERATION time. It still belongs here: it is a named clock mark that
+    fires once per trading day, which is what [slots] models. But it is also why
+    it needs a built-in default like every other slot: the TOML only overrides,
+    and a TOML-only slot raises KeyError out of _slot_group.
+
+    ⚠ THE TIME STAYS IN-SESSION FOR A DATA REASON, and that is the part to know
+    before moving it. Its sibling live_capture was moved POST-CLOSE on 2026-09-08
+    because one in-session headless-Chrome run took proxy /health from 0.8s to
+    18.2s and cost seven GEX slots. This job is heavier still, but index option
+    open interest zeroes after hours, so a post-close run would photograph
+    all-zero GEX grids -- worse imagery than the stale branding it exists to fix.
+    It carries CPUQuota on its unit instead. :07 rather than :00 is a minor extra
+    courtesy, pinned against the live cadence in tests/test_systemd_units.py
+    rather than restated here."""
+    assert mc.slot_times("gallery_capture") == {"at": _t(9, 7)}
+
+
 def test_unknown_slot_group_raises():
     """A typo'd group is a programming error, not something to degrade past -
     mirrors _window()."""
@@ -556,3 +579,105 @@ def test_stream_window_survives_a_missing_toml():
     """Every config in this repo degrades to built-in defaults rather than
     raising. A window present only in the TOML would break on a malformed file."""
     assert mc._DEFAULTS["windows"]["stream"] == {"start": "08:00", "end": "15:20"}
+
+
+def test_regular_session_has_opened_is_false_before_the_open():
+    """08:00 CT on a Tuesday, before the 08:30 open."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 8, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_during_the_session():
+    """09:30 CT on a Tuesday, an hour into the regular session."""
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 8, 9, 30)) is True
+
+
+def test_regular_session_has_opened_stays_true_after_the_cash_close():
+    """15:45 CT is the ONE moment the two predicates disagree, and the whole
+    reason this function exists: past the 15:00 close ``is_regular_hours`` goes
+    False, while the day's move does not stop being a fact. Both are asserted
+    together so a degrade into an ``is_regular_hours`` alias fails loudly here
+    rather than passing every other test in this group."""
+    after_close = dt.datetime(2026, 9, 8, 15, 45)
+    assert mc.regular_session_has_opened(after_close) is True
+    assert mc.is_regular_hours(after_close) is False
+
+
+def test_regular_session_has_opened_is_false_at_the_weekend():
+    """2026-09-05 is a Saturday -- asserted, not merely commented, so the
+    fixture cannot quietly become a weekday and take the test's meaning with
+    it (the holiday case below does the same)."""
+    assert dt.date(2026, 9, 5).weekday() == 5
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 5, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_false_on_a_holiday():
+    """2026-09-07 is Labor Day -- and a MONDAY, so this fixture also proves the
+    guard is ``is_trading_day`` and not a bare weekday check. Noon is well past
+    the 08:30 open, so nothing but the trading-day guard can answer False. The
+    weekend case alone would leave a broken holiday branch undetected."""
+    labor_day = date(2026, 9, 7)
+    assert labor_day.weekday() == 0            # Monday -- the point of the fixture
+    assert mc.is_holiday(labor_day) is True
+    assert mc.regular_session_has_opened(dt.datetime(2026, 9, 7, 12, 0)) is False
+
+
+def test_regular_session_has_opened_is_true_at_the_opening_bell():
+    """08:30 itself is INSIDE: the bell opens the session, it does not precede
+    it. The pair straddles the boundary, so a ``>`` in place of the ``>=``
+    fails here, at the REAL configured boundary -- the config-reuse test below
+    also catches it, but only at its stubbed 09:05 one."""
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 29)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 8, 30)) is True
+
+
+def test_regular_session_has_opened_converts_a_non_ct_datetime():
+    """13:00 UTC == 08:00 CDT -> before the open; 14:00 UTC == 09:00 -> after.
+    A caller handing this an aware non-CT clock must not read the raw hour."""
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 13, 0, tzinfo=dt.timezone.utc)) is False
+    assert mc.regular_session_has_opened(
+        dt.datetime(2026, 9, 8, 14, 0, tzinfo=dt.timezone.utc)) is True
+
+
+def test_regular_session_has_opened_reads_the_configured_regular_start(monkeypatch):
+    """It carries no time literal of its own -- move sessions.regular.start and
+    the boundary moves with it, exactly as ``next_regular_open`` does."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(9, 5), dt.time(15, 0)))
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 0)) is False
+    assert mc.regular_session_has_opened(_ct(2026, 9, 8, 9, 5)) is True
+
+
+# --- every slot name a service reads must exist in the built-in defaults -----
+def test_every_slot_name_read_in_the_tree_has_a_builtin_default():
+    """``_slot_group`` does a bare ``_DEFAULTS["slots"][name]``, so a name that
+    lives only in sessions.toml raises KeyError.
+
+    That is not a degraded tick: the services resolve their slot tables at
+    MODULE level (``_ANALYZE_SLOTS = ... mc.slot_times("analyze")``), so the
+    KeyError lands at import and the service will not start at all. It is also
+    the repo's config contract stated plainly -- the built-in defaults are the
+    real values and the TOML only overrides -- which means a TOML-only slot is
+    broken even when the file is perfectly well-formed.
+
+    This scans SOURCE rather than importing anything: pulling a service module in
+    here would put a hyphenated app dir on ``sys.path`` and re-trigger the
+    documented ``scoring``/``notifier`` module-name collisions (same reason
+    ``test_cross_tier_mirrors.py`` parses instead of imports).
+    """
+    import re
+
+    call = re.compile(r"""\bslot_(?:times|grace_min)\(\s*["']([A-Za-z_]\w*)["']""")
+    known = set(mc._DEFAULTS["slots"])
+    seen = {}
+    for path in (repo_paths.REPO_ROOT / "services").rglob("*.py"):
+        if "test" in path.name:          # tests legitimately probe unknown names
+            continue
+        for name in call.findall(path.read_text(encoding="utf-8", errors="replace")):
+            seen.setdefault(name, path)
+
+    assert seen, "found no slot lookups at all - has the call site been renamed?"
+    missing = {n: str(p) for n, p in seen.items() if n not in known}
+    assert not missing, (
+        f"slot names read with no _DEFAULTS['slots'] entry: {missing}. "
+        "Add the default in shared/market_calendar.py; the TOML only overrides.")

@@ -168,6 +168,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8214 | driver_svc | Required |
 | 8215 | market_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
+| 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
 `config/ports.toml` also lists `options_analytics = 8200`, `approval = 8300`,
 `dashboard_frontend = 5173`, and an `[ml_servers]` block (MES 8000 / MNQ 8001 /
@@ -188,24 +189,26 @@ aren't running, those paths simply degrade.
 
 The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
 Services wait on the proxy because every one of them resolves market data through it.
+`webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
+call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui. Also starts at boot. |
-| `systemctl --user stop trading-prod.target` | Stops all nine. **Redis survives** — it is a system unit this cannot reach. |
+| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
 | `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. |
 
-> The eight processes must stay **separate OS processes**. Merging services into one
+> The nine processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions
 > (`config` / `scoring` / `notifier` / `src`) that the 3-tier split exists to prevent.
 
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, and the webgui, plus a
-   data-freshness table.
+   the proxy, Schwab authorization, all six services, the webgui and the public
+   live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
    `GET http://127.0.0.1:82{10..15}/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
@@ -238,6 +241,9 @@ Redis (Redis) backbone. No two Tier-2 services talk to each other directly.
 ```
 TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
                     subscribes to events, enqueues commands. No engine imports.
+                    webgui/live_main.py (:8501) is a SECOND Tier-1 process: the
+                    same page modules, published read-only and unauthenticated.
+                    It reads and subscribes; it enqueues nothing.
    ▲ cache read / subscribe                │ commands
 TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     pub/sub, cmd:{domain} command streams. shared/contracts (typed
@@ -262,6 +268,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | driver_svc | 8214 | Autonomous decision layer (Claude + pure-code guardrails). |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
 | webgui | 8500 | The web UI. |
+| webgui_live | 8501 | The fourteen public read-only screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
@@ -1504,6 +1511,18 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Relative volume / vol profile | period 20 / 20 bins, 70% value area | `technical.py` |
 | GEX per strike | `gamma·OI·100·spot²` (calls +, puts −) | `gamma_tool.py` |
 | Trade primitives range | integer −100..+100 | `trade-analyzer/src/analysis/scoring.py` |
+| Flow: crossover | band 2% of the larger side, cooldown 30 min, min premium $10k | `config/flow_alerts.toml` `[crossover]` |
+| Flow: unusual activity (UOA) | volume ≥ 3.0 × OI, vol floor 500, premium floor **$5M**, top 3 per symbol | `[uoa]` |
+| Flow: gamma flip | 0.15% hysteresis band, cooldown 60 min, watching `$SPX SPY QQQ IWM` | `[gamma_flip]` |
+| Flow: big delta | fires at **25%** of the symbol's own gross delta-notional AND ≥ $10M; phone push at the higher **35%**; delta band 0.05–0.85 | `[big_delta]` |
+
+> **Four detectors, and the file is the source.** `services/options_svc/flow_alerts.py`
+> carries defaults, but `config/flow_alerts.toml` overrides them and is what runs —
+> it raises the UOA premium floor from $250k to $5M and the big-delta fire bar from
+> 0.20 to 0.25. Read the TOML, not the module, when you want the live number.
+>
+> `big_delta` fires and pushes on **separate** bars on purpose: the Flow screen stays
+> comprehensive at 25% while the phone only sees the high-conviction 35%.
 
 ## Service cadences
 
@@ -1516,7 +1535,7 @@ the source; this table is a summary of them.
 | options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **driver** paper auto-manage every **1 min** (`_MANAGE_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | On-demand only (no scheduler). |
-| driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoint at 09:28 ET then every 30 min inside the **09:45–15:30 ET** entry window (`checkpoint_due`). |
+| driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoints every **30 min** (`CHECKPOINT_MIN`, from `config/driver.toml`) inside the **09:45–15:30 ET** entry window (`checkpoint_due`) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); Claude summary every **40 min** RTH / **60 min** off-hours (`SUMMARY_RTH_SEC`, `SUMMARY_OFFHOURS_SEC`). |
 
 > **Two cadences are easy to state wrongly, because they used to be the same

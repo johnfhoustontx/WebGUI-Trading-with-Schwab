@@ -227,7 +227,7 @@ _CLOSED_COLS = [
     {"name": "closed", "label": "Closed", "field": "closed", "align": "left"},
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
     {"name": "strategy", "label": "Strategy", "field": "strategy"},
-    {"name": "qty", "label": "Qty", "field": "qty"},
+    {"name": "qty", "label": "Contracts", "field": "qty"},
     {"name": "reason", "label": "Exit reason", "field": "reason", "align": "left"},
     {"name": "pnl", "label": "Realized P&L", "field": "pnl"},
 ]
@@ -586,12 +586,15 @@ def resolve_switch_state(pending, actual_enabled):
 _POSITION_COLS = [
     {"name": "position_id", "label": "ID", "field": "position_id", "align": "left"},
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
-    {"name": "strategy", "label": "Strat", "field": "strategy"},
-    {"name": "quantity", "label": "Qty", "field": "quantity"},
+    # "Strategy", matching this page's OWN closed-trades table above - one
+    # screen was printing the concept two ways.
+    {"name": "strategy", "label": "Strategy", "field": "strategy"},
+    {"name": "quantity", "label": "Contracts", "field": "quantity"},
     {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
-    {"name": "expiration", "label": "Expiration", "field": "expiration", "align": "left"},
+    {"name": "expiration", "label": "Expiry", "field": "expiration", "align": "left"},
     {"name": "opened", "label": "Opened", "field": "opened", "align": "left"},
-    {"name": "pnl", "label": "P&L", "field": "pnl"},
+    # ``position_rows`` is documented as the OPEN positions panel.
+    {"name": "pnl", "label": "Open P&L", "field": "pnl"},
     {"name": "status", "label": "Status", "field": "status"},
 ]
 

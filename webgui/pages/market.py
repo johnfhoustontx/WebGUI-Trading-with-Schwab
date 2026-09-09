@@ -31,6 +31,7 @@ from pages.options.theme import (
     MACRO_TOKENS as _T,
 )
 from pages.ui_guard import guard, guard_async
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "market:dashboard"
 
@@ -540,6 +541,6 @@ def render():
         _paint(payload)
     else:
         with board:
-            ui.label("Waiting for the market service…").classes(_T["MB_DIM"])
+            ui.label(_copy.WAITING_MARKET).classes(_T["MB_DIM"])
     ui.timer(1.0, _tick_clock)
     ui.timer(2.0, _poll)

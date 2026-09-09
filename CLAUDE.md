@@ -20,7 +20,7 @@ Five homes, and the test for each is what a future session needs to *act*:
 | **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | Dated shipping narrative: what shipped, the pieces, commit SHAs, test counts at the time, live-verification logs |
 | **[docs/webgui-routes.md](docs/webgui-routes.md)** | Per-page behaviour detail — what a specific route renders, its cache keys, its own quirks |
 | **`docs/plans/<date>-<feature>-{design,plan}.md`** | The reasoning and step plan for a feature, written as you build it |
-| **[docs/manuals/](docs/manuals/README.md)** | Anything a **user** reads: the four built manuals. A user-visible behaviour change lands here too, not only in the CHANGELOG |
+| **[docs/manuals/](docs/manuals/README.md)** | Anything a **user** reads: the five built manuals. A user-visible behaviour change lands here too, not only in the CHANGELOG |
 
 ⚠ **The manuals rot silently, because nothing fails when they go stale.** A
 2026-08-16 audit against the running stack found the User Guide still documenting
@@ -107,13 +107,24 @@ page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
-report routes · the lazy `edge_tts` in `voice.py`. **Zero** engine imports, zero
+report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
+three **credential primitives** the login uses — `argon2` (password hashing),
+`pyotp` (the TOTP second factor) and `itsdangerous` (the signed session and
+remember-device cookies). They join the list on the same footing `edge_tts` did:
+none is an engine, none touches a DB or Schwab, and each is a leaf library over
+bytes. They live in `auth.py`, `auth_store.py`, `auth_middleware.py` and
+`login_page.py` and nowhere else. **Zero** engine imports, zero
 `sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
 a hyphenated app folder (`webgui/proxy.py` held the last of it for two dead
 client singletons; `test_proxy.py` now guards it at source level). ⚠ The
 shorthand "only nicegui + shared.bus + shared.contracts" was repeated in several
 places and was wrong on the last term: **the webgui imports `shared.contracts`
 nowhere at all** — see the contracts note below.
+
+⚠ **Tier 1 has TWO entrypoints since 2026-09-07** — `webgui/main.py` (the app,
+behind the login) and `webgui/live_main.py` (the public read-only screens). The
+allow-list binds both; the public one adds a stricter rule of its own — **no page
+may `import main`** — for the reason in “The public live screens” below.
 
 **Contracts are a WRITE-side gate on SOME views, not the typed API both tiers
 share.** The design says "both tiers import them; validated on write and read".
@@ -177,11 +188,10 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **15 items** — a top-pinned **Desk** + its **Live Mirror**
-(`/desk/live`, the streaming standalone view, added 2026-08-20) in a
+the left drawer holds **15 items** — a top-pinned **Desk** alone in a
 **caption-less leading `NAV_SECTIONS` block** (2026-08-18), 10 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
-**Settings**, **Stop All Services**) — and the active group's
+**Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with
 `.compact-tabs` small padding — q-tab min-height 30px — clicking a tab
@@ -202,14 +212,14 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
-(Desk + Live Mirror) · **MARKETS** (Dealer
+(Desk alone) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
 at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
-it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its pages get
-a bare one-crumb breadcrumb since no section sits above them. ⚠ `first=(_i == 0)`
+it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its page gets
+a bare one-crumb breadcrumb since no section sits above it. ⚠ `first=(_i == 0)`
 in that loop is consequently **never True**, which is deliberate: the first
 *visible* caption keeps its `mt-4`, and that gap is what separates MARKETS from the
 Desk row above it. Entries reference their group/page **by name**
@@ -219,22 +229,34 @@ than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
 (it is now just the flat-route registry `_NAV_LABEL` iterates). Caption counts are
 **derived** from `len(entries)` — never written down. The sentiment group renamed
 **"Market Trend & Sentiment" → "Trend & Sentiment"** now the MARKETS caption
-carries the word. ⚠ **`/desk/live` is the ONE rail route that is not a shell page**, and it is
-therefore the one that opens in a **new tab** (`EXTERNAL_RAIL_ROUTES`, consumed by
-`_nav_link(..., new_tab=)`). It renders no `_layout` — no drawer, no breadcrumb —
-so a same-tab navigation would strand the reader on a page whose only way back is
-the link the document draws itself; and the row never claims the active wash,
-which would otherwise assert a navigation that did not happen. It is also why
-`_LANDING_ROUTES` in `test_shell.py` holds two routes rather than one. ⚠ The
+carries the word. **Every rail route is a shell page**, so `_nav_link` always
+navigates in place and `_LANDING_ROUTES` in `test_shell.py` holds the one route,
+`/desk`. (`EXTERNAL_RAIL_ROUTES` and `_nav_link`'s `new_tab=` existed solely for
+the Live Mirror and went with it on 2026-09-02 — a rail row that opens elsewhere
+must not claim the active wash, so anything reviving that shape needs both.) ⚠ The
 Options group sits under STRATEGY while Dealer Positioning
 / Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are
 market-WIDE reads, the Options group is the per-signal find → analyze → track →
 repair workflow. `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
 is the guard that matters: a regrouping that drops or doubles an item is invisible
-to every other test. **Stop All Services** is now a **danger-outlined button**
-(`_nav_danger_link`) sitting LAST in `SYSTEM_RAIL` (`SYSTEM_DANGER_ROUTE`) — the
-one irreversible item in the rail, moved out from between System Status and
-Settings so an overshoot can't land on it. A **live service-status card**
+to every other test. **Stop All Services** is a **danger-outlined button**
+(`_nav_danger_link`, `SYSTEM_DANGER_ROUTE`) — the one irreversible item in the
+rail. ⚠ **Its position argument INVERTED on 2026-09-06 and the comment in
+`main.py` records the current one** — it sat last so nothing could be overshot
+INTO it, but the app is now used from a phone, where the bottom edge is the
+easiest target, so the last slot is the worst place for it. **`Sign out` took
+that slot** (`login_page.LOGOUT_ROUTE`, the one existing raw `@app.get` that
+clears both cookies and 303s to `/login`): an overshoot now costs a re-login,
+not the rest of the trading day. It is the one `SYSTEM_RAIL` route that is
+**not a shell page**, which is exactly why `_nav_link` needs nothing special for
+it — `active` is always a rendered page's route, so the wash is unreachable by
+construction. The stop itself also demands a **fresh TOTP code** in its confirm
+dialog (`pages/terminate.verify_stop_code`, persisting the accepted counter to
+the SAME `auth_store` file the login form reads, so a code spent on one cannot
+serve the other). ⚠ `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
+does NOT cover `SYSTEM_RAIL` — it asserts those routes stay OUT of the sections
+— so a footer row dropped or doubled is caught only by the drawer-icon
+count/distinctness test and the two `test_shell.py` sign-out tests. A **live service-status card**
 (`_status_card` / PURE `status_card_facts`) sits above that block: it reads the
 throttled `/health` fan-out the watcher ALREADY runs (no new probe; latency is the
 mean of services that ANSWERED — a timed-out probe would report the failure, not
@@ -291,7 +313,7 @@ the shared build/update pair. The old expandable sub-menus / `_NAV_OPEN` /
 `_settings_group` are GONE. Tabs are **pill-style** (raised rounded container,
 active pill a soft navy tint). A page with its
 own view tabs mounts them as a **subtab row flush under the strip** via
-`main.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
+`shell.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
 GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 — same
 value/on_value_change API as the old `ui.toggle`). Pages live in
 `webgui/pages/`; each leaf exposes `render()` called inside the shell
@@ -320,7 +342,6 @@ Routes:
 |-------|------|--------|
 | `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
 | `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper+driver Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
-| `/desk/live` | **Desk (streaming mirror)** — the same screen as a STANDALONE HTML document + an SSE stream (`/desk/stream`): no NiceGUI, no websocket, so a wall display or a phone reconnects with an HTTP request. `webgui/desk_stream.py` — `snapshot()` is PURE and returns display-ready **strings** built by `pages/desk.py`'s OWN builders, so the mirror cannot drift from `/desk`; the browser only places colour. Two event types, deliberately on separate cadences: `desk` on a cache-version change (2 s probe), `clock` every second (which doubles as the SSE keep-alive). Panels are **always 2x2**, as `/desk` has been since 2026-08-20 — this screen gets pinned to a display, so it must not reflow. ⚠ Outside the Tailwind-first standard — a raw `HTMLResponse` document, the same out-of-scope case as the EOD report. | built |
 | `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. [Detail](docs/webgui-routes.md) | built |
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
@@ -329,6 +350,8 @@ Routes:
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
 | `/options/calculator` | Calculator — a three-step screen (① STRATEGY / ② SYMBOL / ③ LEGS) over six metric cards + the P&L matrix on real chain strikes, in its own `[calc]` palette. Multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — multi-strategy single-symbol scan (directional / spreads / neutral) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. [Detail](docs/webgui-routes.md) | built |
+| `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
+| `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
 | `/options/simulator` | Simulator — Replay / What-if / IV-shock over the shared multi-leg builder; persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
@@ -345,8 +368,8 @@ Routes:
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui, plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
-| `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. Redis survives structurally: it is a system unit the user target cannot reach. | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. ⚠ Since 2026-09-07 that stops **both** web apps, so the public live screens go dark too. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), **`flow_panels.py`** (PURE builders for the two Options Flow console
@@ -575,6 +598,104 @@ escaping the decorator and surfacing as a noisy traceback via NiceGUI's default
 **only** that benign record (client gone → nothing to update); every other error
 still logs in full.
 
+## The public live screens — a SECOND Tier-1 process
+
+`webgui/live_main.py` serves **fourteen READ-ONLY screens, unauthenticated, to
+anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
+(`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
+published screen cannot drift from the private one. The published set and every pin
+are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
+`PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
+static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
+route**. Per-screen detail: [docs/webgui-routes.md](docs/webgui-routes.md); design +
+plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](docs/plans/2026-09-07-public-live-screens-design.md).
+
+⚠ **NO page may `import main`, and neither may `live_main`.** `main.py`'s module body
+registers every `@_page` route, so importing it from a second process publishes
+`/terminate` and `/settings` to the internet — silently, while looking entirely
+correct. The seam a page needs is **`webgui/shell.py`** (`subtab_slot` ·
+`set_breadcrumb_leaf` · `bind_breadcrumb_leaf` · `play_alert`, plus the page-level
+`TABLE_CSS` / `SUBTAB_CSS` / `PANEL_SCROLL_CSS` that **both** entrypoints inject — those style widgets a
+PAGE mounts, not nav chrome). `main` re-exports every one of them, so nothing else
+moved. `test_shell_seam.py` pins the absence at source level; `test_live_main.py`
+pins it again by running `live_main.py` ALONE in a fresh interpreter and asserting
+`main` never entered `sys.modules` — the only check that can see a TRANSITIVE import,
+which is how one would actually arrive.
+
+**Read-only is FOUR layers, and the three this process installs go in BEFORE any page
+module is imported** — hence `live_main.py`'s `# noqa: E402` import order, which is
+load-bearing rather than untidy: (1) a Redis **ACL user** from `REDIS_LIVE_URL`, the
+structural one, enforced by the server rather than by this process — ⚠ and the only
+layer that can be **ABSENT while everything looks correct**, since unset it falls back
+to the stack's ordinary full read/write credential, so `live_main.resolve_acl_url`
+warns and `require_acl_url` **refuses to serve prod** without it (dev warns: dev's
+live origin is not fronted by the edge); (2)
+**`bus_client.set_read_only(True)`** — `bus_client.request` is the **single Tier-1
+write chokepoint**, so one refusal covers every command on every page, and on these
+pages that reaches `gamma_analyze` / `gamma_explain` (**paid Claude calls**) and
+`gamma_refresh` / sentiment `refresh` (Schwab fetches against a budget already at
+68–76k/day); (3) **`app_settings.freeze(pins)`** — `set()` becomes a no-op and
+`load()` never touches disk; (4) structurally, no rail, Settings, Terminate or
+Sign-out, because those routes **do not exist in the process**. The pinned gamma
+screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates every
+enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
+control that reaches one is built. Both, not either.
+
+⚠ **`app_settings.freeze()` is not only about pinning defaults.** `settings.json` is a
+**single-user store whose in-memory cache assumes one writer in one process**;
+unfrozen, the public process would read your live preferences — changing your own
+Macro Board skin would re-skin the public site — and race you for the file.
+`PUBLIC_PINS` holds the pins that belong to the ORIGIN rather than to any one screen:
+today `voice_enabled: False`, because it **defaults True** and the Desk's spoken
+alerts are `edge_tts` **network calls**, one per flow alert per visitor plus ~32 on a
+first build (`desk._prewarm_clips` has no market-hours gate).
+
+⚠ **The Redis ACL needs `@pubsub` and `@connection`, not just `@read`.** `SUBSCRIBE`
+belongs to `@pubsub`; `SELECT` (any non-zero `redis_db`) and `PING` to `@connection`.
+`EventListener._run` swallows a failed subscribe, so an under-granted ACL renders one
+frame and then never repaints — **it reads as a frozen tape, not as a permissions
+error**. Never grant `+publish` (a public process that can publish can spoof repaint
+events to the private app), `@write`, or `@stream` — the streams are `cmd:*`.
+
+⚠ **The live unit loads `.env.live`, NOT the stack's `.env`** — the one exception in
+`generate_units._env_file`, and it is about BLAST RADIUS, not ownership. `.env` carries
+`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PROXY_SHARED_SECRET`,
+`SMS_SMTP_APP_PASSWORD`, `DISCORD_WEBHOOK_URL` and `GAMMA_BRIEFING_WEBHOOK_URL`; the
+public process needs `REDIS_LIVE_URL` + `MEMURAI_PASSWORD` and reads none of the
+others. Neither `.gitignore`'s `.env` line nor `backup_local.EXTRA_FILES`' entry
+matches the new name, so both carry it explicitly. ⚠ **`REDIS_LIVE_URL` carries the
+Redis DB INDEX in its path**, bypassing `repo_paths.REDIS_DB` — prod's line copied
+into dev aims dev's public process at **prod db 0**. Setup:
+[the runbook](docs/dev-prod-environments.md) §2 step 4b.
+
+⚠ **`cache:options:gamma` is a single SYMBOL-AGNOSTIC slot**, and
+`refresh_gamma_current` reads the symbol back *out* of it, so it is sticky and driven
+by whatever the private app last looked at. The published screens therefore read
+**`cache:options:gamma_pub:<SYMBOL>`** (+ `gamma_pub_hist_<SYMBOL>_<view>`), written
+additively for `handlers.PUBLISHED_GAMMA_SYMBOLS` off chains the collector already
+pays for. ⚠ Only the views listed in `PUBLISHED_GAMMA_HISTORY_VIEWS` get a history
+key — un-pinning a public screen's view without adding it there draws an **empty
+heatmap, silently**, because a missing history key reads as "no history yet".
+
+⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the
+same shape as `webgui/data/`. Committed, the captures would dirty prod's tree the
+moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty tree.**
+**`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
+TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page
+state rather than in the URL, so **nothing regenerates them**: ignored, a fresh clone
+would have no picture for those tiles *ever*, not merely until the next capture run.
+The pattern therefore excludes the **files**, not the directory — git cannot un-exclude
+a file inside an excluded directory — and `.gitignore` does not apply to a path already
+in the index, so such a pattern buys nothing until `git rm --cached` runs.
+
+⚠ **The gallery capture AUTHENTICATES AS THE OWNER; its sibling cannot.**
+`tools/capture_live_shots.py` reads the public origin and has no app access at all.
+`tools/capture_gallery_shots.py` reads the 0600 `auth_store` file and **mints a session
+cookie** — possible because `auth.mint_token` is stateless (no server-side registry of
+issued tokens, by design), so a valid cookie is a pure computation over the store's
+`session_secret` and `epoch`. What it mints is an ordinary full session, not a read-only
+one, so this tool carries the private app's blast radius rather than a public origin's.
+
 ## webgui development notes (read before adding a page)
 
 **Page pattern.** Add a leaf module `webgui/pages/<name>.py` exposing `render()`.
@@ -732,6 +853,15 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `hover:bg-…` for as long as the class sits there — on a `cursor-pointer` row,
   for the rest of the session. Drop `forwards` when the end keyframe already IS
   the element's default. See `pages/desk.py` `DESK_NEON_CSS`.
+- **A `@ui.page` function's SIGNATURE is handed to FastAPI, so any parameter — a
+  bound default included — becomes a QUERY PARAMETER a stranger can set.** The
+  idiomatic late-binding fix for a loop variable, `def _page(_s=screen)`, therefore
+  publishes `_s`: measured while building the public live screens,
+  `GET /desk?_s=anything` replaced the `Screen` object with the string `'anything'`,
+  which reached an `importlib.import_module`. **Bind in an enclosing function's
+  parameter instead** (`def _register(screen):` wrapping a zero-argument
+  `@ui.page(...) def _page():`), so the page function has no signature to inject
+  into. See `webgui/live_main.py._register`.
 - **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
   bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
   has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
@@ -1190,6 +1320,7 @@ options_analytics = 8200
 approval = 8300
 dashboard_frontend = 5173
 nicegui = 8500            # the NiceGUI app
+nicegui_live = 8501       # the PUBLIC read-only screens (a second NiceGUI process)
 memurai = 6379            # Redis backbone (Tier 3)
 
 [ml_servers]              # external processes — not started by this repo
@@ -1281,10 +1412,12 @@ Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyz
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
 nightly **`calibration`** rebuild (16:30 CT, after `[windows.collection] stop`
 so the day's outcomes have settled — it reads `signals.db` only and costs no
-Schwab or Claude call). They
+Schwab or Claude call), and the once-daily **`income`** scan (08:45 CT — the
+30–45 DTE window, ~23 `/chains` calls against the ~690 the autoscan cadence would
+cost). They
 are named clock marks, the same thing `[windows]` already models, and **each
-`analyze` slot is a paid Claude call**, so the table is the direct control on
-that spend.
+`analyze` slot is a paid Claude call** while `income` is the largest scheduled
+Schwab spend on that table, so it is the direct control on both.
 
 **`shared/config_toml.py:toml_loader(path, defaults)` is the one loader.** It
 returns `(load, reset)` and encodes the contract every config file here follows:
@@ -1394,6 +1527,34 @@ value is about to be formatted. `num` alone had SIX byte-identical copies before
 2026-08-20. Options table helpers (`rescue_highlight`, `AT_RISK_STATES`) live in
 `pages/options/rescue.py` beside `heat_border_class`.
 
+**`webgui/pages/copy.py` is its sibling for shared SENTENCES** (2026-09-04) —
+text more than one screen shows for one condition, where two screens wording it
+differently is a defect rather than a style difference. It holds
+`WAITING_OPTIONS` / `WAITING_SENTIMENT` / `WAITING_MARKET` and imports nothing
+from `pages`, which is what makes it safe to import at any depth: `desk.py`
+imports `pages.options.flow` and `pages.options.matrix`, so neither of those can
+import `desk` back. ⚠ **These are the lines for a feed that has published
+NOTHING** — never for one that is fine and has nothing to report. Every screen
+drawing one keeps its own quiet-market line (`desk.EMPTY_*`,
+`flow.status_text`'s empty branch), because a dead service and a still tape
+rendering the same words is what the "never print a zero you did not read" rule
+exists to prevent. `webgui/tests/test_shared_copy.py` reads the source of every
+page module and fails on a reintroduced literal — the guard a per-page test
+cannot be, and it caught a site the hand-written grep behind it had missed.
+
+**The screen vocabulary is written from the READER's side (the 2026-09-04
+pass).** A label names what the number is FOR, not which mechanism produced it;
+an empty state says what is true rather than which service is cold; and an
+action toast says what to expect rather than that a command was enqueued. Two
+traps that pass turned up repeatedly and are worth assuming on any page not yet
+audited: **a `Credit` column is wrong wherever the book holds debits** (a debit
+is stored as a NEGATIVE credit — hit on the Paper Ledger, Captured Signals, Paper
+Account and the EOD report), and **an `entry_*` field rendered under a bare
+label reads as live** (`dte_at_entry` under "DTE" on a tracking page). Per-page
+decisions and the deliberate divergences — `/desk` keeping `STRAT`/`QTY` for
+width, `/options/paper` keeping plain `P&L` because its rows can be closed — are
+in the eight `docs/plans/2026-09-04-*-copy-design.md` docs, each pinned by test.
+
 **The version-gate poll idiom is `webgui/pages/view_watch.watch_view(view, on_change)`**
 — seed the version, probe the cheap `{key}:ver` on a timer, repaint only when it
 moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing
@@ -1414,6 +1575,19 @@ left outside it is `claude-driver/config.py` (legacy; its morning-agent consumer
 `sys.path`; legacy app-dir callers (`options-scanner/scanner.py`,
 `scanner_engine.py`, `gex_status.py`) carry the three-line bootstrap.
 
+⚠ **The marketing site consumes that calendar too, and its artifact is generated AND
+COMMITTED.** `tools/generate_market_clock.py` emits
+`deploy/site/assets/market-clock.js` — the holiday list plus the regular session
+bounds, converted CT→ET — so a static page can decide open/closed in the visitor's
+browser. It is **committed**, against this repo's own "generated state is gitignored"
+pattern, because it is source a fresh clone needs to serve a working site, and nothing
+on the serving box ever rewrites it; a test compares the committed bytes to the
+generator's output, and that test **legitimately goes red on 1 January**, since the file
+covers only the year it was generated in and the next. ⚠ **Early closes (13:00 ET, ~3
+afternoons a year) are NOT handled, and the gap is deliberate** — nothing in this repo
+models a half day, and the fix must not be a second hand-maintained date list, which is
+what the rule above forbids.
+
 ## Secrets
 
 Live in `shared/` and are **all gitignored**. Real values were copied locally so
@@ -1431,7 +1605,9 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-**The stack is nine `systemd --user` units on a Linux host.** There are no
+**The stack is ten `systemd --user` units on a Linux host** — the target, the
+proxy, the six services, the web app, and `webgui_live`, the public read-only
+screens (2026-09-07). There are no
 launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
 both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
 every one of them existed to work around something Windows lacks.
@@ -1470,7 +1646,20 @@ identity. `tools/promote.sh` already does it on every promote.
 
 ⚠ **`StartLimitIntervalSec` / `StartLimitBurst` belong in `[Unit]`, not
 `[Service]`.** systemd moved them in v229 and **silently ignores them** in the
-wrong section, so the storm cap would look configured and not exist.
+wrong section, so the storm cap would look configured and not exist. The
+**`MemoryHigh`/`MemoryMax`** pair runs the other way — `[Service]`, where cgroup
+resource control lives — and carrying both traps in one file is why each is
+pinned by its own test.
+
+⚠ **Only `webgui_live` carries a memory cap** (`LIVE_MEMORY_HIGH` 768M /
+`LIVE_MEMORY_MAX` 1G). It is the one internet-facing, unauthenticated,
+**unthrottled** process — no Caddy `rate_limit` (it needs an `xcaddy` build), and
+a measured ~619 KB of retained NiceGUI `Client` per anonymous GET pruned only
+after ~70 s. The cap does not stop a flood; it decides **who dies** in one: the
+public screens alone, back on `Restart=on-failure`, instead of the OOM killer
+choosing among the services, the trading UI and Redis. ⚠ **Never add it to the
+other units as a drive-by** — they are not internet-facing and a wrong value
+kills the stack. The request rate itself is still open; see the design doc.
 
 ⚠ **`--user`, never system units.** That is what lets the Status page restart its
 own siblings with no polkit rule and no sudoers entry; a system-unit equivalent
@@ -1500,15 +1689,29 @@ sockets, not the unit state. `tools/promote.sh` does both.
 **Logs** are the journal. `journalctl --user -u trading-prod-options_svc -f`.
 `webgui/logging_setup.py` still writes `logs/webgui.log` as well.
 
-**Reaching the app from a workstation.** The web GUI binds `127.0.0.1` on the
-host and has **no authentication of any kind** — correct for a desk-side app,
-and the whole problem on a server, since that UI can open paper positions, arm
-the autonomous driver and stop the stack. Use `tools/open_webgui.ps1` (a desktop
-shortcut on the Windows box), which forwards **both** `:8500` and `:8100` over
-SSH. The proxy port matters: the Schwab refresh token expires every 7 days and
-is re-minted at `http://127.0.0.1:8100/auth`.
+**Reaching the app from a workstation.** The normal route is
+**`https://app.neuralstrike.co`** — Caddy (a *system* unit, since it needs :443)
+terminates TLS and reverse-proxies to the app, which **still binds `127.0.0.1`**.
+Behind it sits a password + TOTP login: `webgui/auth_middleware.py` default-denies
+every `http` and `websocket` scope except `/login` and `/favicon.ico`, plus a
+three-condition loopback exemption for the wall kiosk. Design + plan:
+[`docs/plans/2026-09-06-webgui-credentialing-{design,plan}.md`](docs/plans/2026-09-06-webgui-credentialing-design.md).
 
-⚠ **Never change either bind to `0.0.0.0`.**
+**`https://live.neuralstrike.co`** is the same shape with the login taken out: a
+third Caddy host block reverse-proxying to `webgui/live_main.py` on `:8501`, which
+**also binds `127.0.0.1`**. It runs no auth middleware at all — that is the point
+— so the origin separation IS the control. See “The public live screens” above.
+
+`tools/open_webgui.ps1` survives as the **fallback**: if the cert or Caddy breaks,
+the way in must not depend on the thing that broke. The proxy on `:8100` is
+**never** on the public domain — it is published on the tailnet by
+`tailscale serve`, which is also how the Schwab refresh token gets re-minted at
+`/auth` every 7 days.
+
+⚠ **Never change any of these binds to `0.0.0.0`.** The login is a second control,
+not a replacement for the first — Caddy is the only thing that should ever talk to
+`:8500` or `:8501`, and the wall exemption's loopback condition is what stops a
+widened bind turning into an open door.
 
 **Manual start**, if you are debugging a single component rather than running the
 stack:
@@ -1519,7 +1722,8 @@ stack:
 
 Same order as the units: Redis, then the proxy on :8100, then the six services
 (8210–8215), then `webgui/main.py` on :8500. Everything reads market data through
-the proxy, so it starts first.
+the proxy, so it starts first. `webgui/live_main.py` on :8501 orders after nothing
+in the target — it reads Redis (a *system* unit) and nothing else.
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes
 > anything for it — its **service must be running** (and Redis up) or the page
@@ -1542,10 +1746,11 @@ Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
+| webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (`:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Units | `trading-prod.target` (9 units) | `trading-dev.target` (8 — no proxy) |
+| Units | `trading-prod.target` (10 units) | `trading-dev.target` (9 — no proxy, but it DOES get `webgui_live`) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
@@ -1870,6 +2075,69 @@ against the OPEN POSITIONS, so the ceiling is real. ⚠ `driver_policy.open_risk
 drops a non-finite row rather than summing it: a NaN total makes every `>`
 comparison False and silently switches the cap OFF — the pins-the-bound class one
 layer up.
+
+## An equity lot is cash CONVERTED, never a buying-power reservation
+
+The manual paper book holds shares as well as options (`equity_lots` in
+`paper_account_db`, created by put assignment at expiry). **The rule that makes
+that safe is that a lot never touches `buying_power_reserved`, and nothing may
+make it.** `reconcile_buying_power` recomputes `buying_power_reserved` as
+`Σ OPEN paper_positions.max_loss_total` and hands the difference back to cash, so
+**anything that reserves outside that sum is silently zeroed at the next service
+start**. A lot is cash already spent on stock; the reservation the short put held
+is released by `_close` on the ordinary settlement path, and `debit_cash` then
+pays for the shares.
+
+That is the whole reason `equity_lots` is a separate table rather than a `kind`
+column on `paper_positions` — every one of that table's many readers stays
+correct without learning to filter, and any one of them forgetting would be a
+silent miscount. Three corollaries, each of which has a test because each is
+invisible when wrong:
+
+* **Do not add a second `release_buying_power` to `_assign_shares`.** `_close`
+  already returned it, and for a cash-secured put that reservation IS the strike
+  notional — a second release credits it twice and the resulting lot looks
+  identical. The one assertion that catches it is
+  `reconcile_buying_power(db) == 0.0`.
+* **Do not book the purchase through `realize_pnl`.** It would report the
+  purchase price as a realized loss and, at a whole strike notional, trip the
+  session drawdown halt on a trade that lost nothing. Hence `debit_cash`, which
+  touches neither reserved BP nor realized P&L.
+* **`session_start_equity` includes `Σ(open lots: shares × cost_basis)`** — at
+  cost only, since a lot's basis is committed capital by the same definition that
+  puts `buying_power_reserved` there, while its mark is unrealized and stays out.
+  `reset_account` therefore clears `equity_lots` too, or the next session opens
+  claiming committed capital the account no longer has.
+
+## The NAKED reward gate is a RATE (per year), not a per-trade return
+
+`strategy_scoring._reward_metric`'s NAKED branch returns
+`(max_profit / capital) × (365 / max(dte, MIN_ANNUALISE_DTE))` — **annualised
+capital efficiency**, so `GATE_BARS["NAKED"]`'s `capeff` 0.10 / 0.20 mean 10% and
+20% **per year**. It was a per-trade return until 2026-09-05, which demanded the
+same 10% of a 1-day trade as of a 45-day one and so cut **every** `SHORT_PUT` /
+`SHORT_CALL` the scanner has ever emitted (a 35-DTE cash-secured put returns
+~1.70%/trade ≈ 17.8%/yr). Two invariants:
+
+* **`MIN_ANNUALISE_DTE = 5` floors the DIVISOR**, capping the short-end
+  amplification annualising introduces (unfloored, a 1-DTE short is rescaled
+  365×). It is the horizon lever; the bars are the capital lever, and the ~4.4×
+  SHORT_CALL/SHORT_PUT gap is a **capital basis** difference (margin proxy vs
+  stock-to-zero), not a horizon one — so raising a bar to discourage short-dated
+  shorts cuts on the wrong axis.
+* **`dte <= 0` returns `None`, and `MIN_ANNUALISE_DTE` must never reach that
+  guard.** The floor is for a horizon that exists; the guard asks whether one
+  exists at all. `strategy_scanner._dte_for` returns `max(0, …)` **and** folds an
+  unparseable expiration into the same bucket, so a data fault and a same-day
+  contract are indistinguishable there. **Accepted consequence: the NAKED reward
+  gate is unreachable for 0-DTE** — every same-day naked short fails it, however
+  rich the credit. Admitting them needs its own per-horizon bar, not a yearly
+  rate over a horizon of zero.
+
+Every figure in that block is re-runnable: `python tools/sweep_naked_capeff.py`
+(`--rows` / `--floors`) is pure Black-Scholes through the same scorers, no Schwab
+call and no DB. **Quote its numbers with their parameters** — they move with the
+strike ladder, and this block has shipped stale ones twice.
 
 ## The halt latch, and what a replayed command may re-do
 
@@ -2256,6 +2524,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv/bin/python -m pytest shared/tests            # 89
 .venv/bin/python -m pytest tests                   # 69  (env profiles + launcher guards)
 .venv/bin/python -m pytest tools/tests             # 816
+.venv/bin/python -m pytest deploy/caddy            # 18  (the generated Caddyfile)
 ```
 
 **Every count above is a 2026-08-20 measurement** -- the accuracy-audit batch (ADX,
@@ -2384,7 +2653,7 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 
 ## User-facing manuals
 
-**Four** manuals under [`docs/manuals/`](docs/manuals/README.md), each authored once
+**Five** manuals under [`docs/manuals/`](docs/manuals/README.md), each authored once
 in Markdown and built by `build_docs.py` into HTML + `.docx`. They are surfaced
 in-app at **More → User Manuals** via `webgui/pages/manuals.py:MANUALS` — **a new
 manual must be added in BOTH places** (`build_docs.py:MANUALS` to build it,
@@ -2397,8 +2666,9 @@ unlisted file is refused rather than served).
 | **Reference Guide** | *What is this tab for, and when do I open it?* — per-tab depth over a one-page orientation |
 | **Technical Reference** | *Where does this number come from?* — formulas, weights, cadences |
 | **API / Developer Reference** | *How do I integrate with this?* — contracts, bus, commands, proxy |
+| **Options Glossary** | *What does this word mean?* — the vocabulary the other four assume |
 
-⚠ **`webgui/page_help.py` is the fifth manual and the most-read prose in the app** —
+⚠ **`webgui/page_help.py` is a manual too — and the most-read prose in the app** —
 the per-page hover guides. It is the least likely thing to be touched when a feature
 moves, so it rots first: the 2026-08-16 audit found it claiming a 5-minute paper
 cycle that is hourly, a fixed $500 driver target that ratchets $250–$1,000, and

@@ -2187,16 +2187,21 @@ def compute_momentum(session_date=None, conn=None, client=None):
 # The nightly cascade above already scores all three levels with their parent
 # links. This adds only the live layer: ONE batched /quotes call for every
 # distinct symbol, merged onto a COPY of the cached rows.
+#
+# The relative axis is measured against MOMENTUM_BENCHMARK — the same SPY the
+# nightly cascade scores excess against, deliberately not a second spelling of
+# it.
 # See docs/plans/2026-08-19-bull-bear-map-design.md.
 
 BULLBEAR_LEVELS = ("sector", "industry", "stock")
 
 
 def bullbear_symbols(levels):
-    """Every distinct symbol across the three levels, order preserved.
+    """Every distinct symbol across the three levels, plus the benchmark.
 
-    Deduped because an industry ETF is usually a scored stock as well, and the
-    batched quote call should ask for it once.
+    Deduped because an industry ETF is usually a scored stock as well, and
+    MOMENTUM_BENCHMARK can itself be a scored row. Order preserved; the
+    benchmark goes last, and only when no row already carries it.
     """
     out, seen = [], set()
     for name in BULLBEAR_LEVELS:
@@ -2205,11 +2210,51 @@ def bullbear_symbols(levels):
             if symbol and symbol not in seen:
                 seen.add(symbol)
                 out.append(symbol)
+    # One more symbol, not one more request: 374 came back in a single call
+    # (measured 2026-08-19), so a live relative axis can be computed against the
+    # benchmark's own day move for no new proxy round-trip and no new schedule.
+    if MOMENTUM_BENCHMARK not in seen:
+        out.append(MOMENTUM_BENCHMARK)
     return out
 
 
+def _quoted_day_pct(quotes, symbol):
+    """``change_pct`` for one symbol, or None when there is no usable number.
+
+    ONE spelling of this extraction, called by both the per-row merge and the
+    benchmark lookup: the mapping, the missing-symbol fallthrough and the
+    coercion have to agree, and this repo has a history of the same read
+    existing in several spellings that then drift.
+
+    None means OMITTED, never "unchanged" — ``_extract_change_pct``
+    (schwab-proxy/proxy_client.py) falls through to a literal 0.0 for a symbol
+    it does return, so 0.0 is a reading and absence is not one.
+
+    Deliberately STRICTER than ``_as_finite`` alone on both ends, matching the
+    Tier-1 ``webgui/pages/fmt.num`` contract:
+
+    * ``bool`` is rejected. ``float(True)`` is a finite 1.0, so ``_as_finite``
+      would pass it through — and a True in this field is a shape error, not a
+      1% move.
+    * a numeric STRING is rejected. ``_as_finite("1.5")`` returns 1.5, but this
+      reads one specific producer — the flattened ``get_quotes`` mapping, whose
+      ``change_pct`` is already a float or a literal 0.0 — so a string means
+      that shape changed, and coercing it would hide the change behind a
+      plausible number.
+
+    ``_as_finite`` owns the finiteness half, so NaN/±inf cannot reach the
+    payload: a NaN PASSES the downstream ``is None`` usability gate, then loses
+    every ``> 0`` quadrant test and renders as a confident falling/lagging row,
+    and — being unequal to itself — permanently defeats ``skip_unchanged``.
+    """
+    pct = ((quotes or {}).get(symbol) or {}).get("change_pct")
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+        return None
+    return _as_finite(pct)
+
+
 def merge_live(levels, quotes):
-    """Attach ``day_pct`` to a COPY of every row.
+    """Attach ``day_pct`` and ``day_excess`` to a COPY of every row.
 
     Copies rather than mutates: ``levels`` comes from the cached momentum
     payload, which /sentiment/momentum renders too — a live field written into
@@ -2221,14 +2266,21 @@ def merge_live(levels, quotes):
     no nested ``quote`` envelope. A symbol the proxy left out leaves ``day_pct``
     None, which renders as a dash; defaulting to 0.0 would render as
     "unchanged", a different and false claim.
+
+    ``day_excess`` is the relative axis: today's move less MOMENTUM_BENCHMARK's
+    today, resolved once per merge, from the same batched quotes the rows use.
     """
+    bench = _quoted_day_pct(quotes, MOMENTUM_BENCHMARK)
     merged = {}
     for name in BULLBEAR_LEVELS:
         rows = []
         for row in (levels or {}).get(name) or []:
             out_row = dict(row or {})
-            pct = ((quotes or {}).get(out_row.get("symbol")) or {}).get("change_pct")
-            out_row["day_pct"] = float(pct) if isinstance(pct, (int, float)) else None
+            day = _quoted_day_pct(quotes, out_row.get("symbol"))
+            out_row["day_pct"] = day
+            # None when EITHER side is absent.
+            out_row["day_excess"] = (
+                (day - bench) if (day is not None and bench is not None) else None)
             rows.append(out_row)
         merged[name] = rows
     return merged
@@ -2237,8 +2289,8 @@ def merge_live(levels, quotes):
 def _bullbear_quotes(symbols):
     """One batched ``/quotes`` call for every symbol.
 
-    Measured 2026-08-19: all 374 come back in a SINGLE call, so this is one
-    request per poll and not one per name.
+    Measured 2026-08-19: the tree's 374 came back in a SINGLE call, so asking
+    for those plus the benchmark is one request per poll and not one per name.
     """
     from services import _proxy
 
@@ -2287,5 +2339,10 @@ def bullbear_view(momentum) -> dict:
         "computed_at": momentum.get("computed_at"),
         "quoted_at": quoted_at,
         "regime": momentum.get("regime"),
+        # The axis every row's day_excess is measured against. Tier 1 reads it
+        # as a LIVENESS sentinel, not to label: None here is the only in-band
+        # tell that the quote call came back without the benchmark, which the
+        # calendar cannot see.
+        "benchmark_day_pct": _quoted_day_pct(quotes, MOMENTUM_BENCHMARK),
         "levels": merge_live(levels, quotes),
     }

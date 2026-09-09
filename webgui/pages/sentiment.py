@@ -33,6 +33,7 @@ from pages import console_page
 from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 def _safe_float(v, default=0.0):
     return float_or(v, default)
@@ -620,6 +621,13 @@ def _fmt_time(value):
 def render():
     from nicegui import ui
 
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     # Market Regime Console assets — scoped to THIS page, not the app shell.
     # ``add_head_html`` during a page build is client-scoped, so the condensed
     # display face is requested on /sentiment and nowhere else; every other page
@@ -680,8 +688,12 @@ def render():
     # section titles now live per-column (all the same h6 size) below.
     with ui.row().classes("items-center w-full"):
         ui.space()
-        ui.button("Refresh", icon="refresh", color=None,
-                  on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
+        # Not drawn on the public live origin — its only job is to enqueue a
+        # sentiment refresh, which that process refuses. See shell.may_enqueue.
+        if _may_enqueue:
+            ui.button("Refresh", icon="refresh", color=None,
+                      on_click=lambda: _request_refresh()).props(
+                "no-caps").classes(BTN_3D)
 
     # Per-tile reactive element handles (value label, card shell, hairline rule,
     # end dot) — everything the tone recolor has to swap in place.
@@ -889,9 +901,11 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh"})
         console_busy.show()
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
 
     from datetime import timedelta
     @guard
@@ -907,7 +921,8 @@ def render():
             parts.append(f"Sectors {sa_str}")
         up = state.get("proxy_up")
         parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
-        status_lbl.text = "   ·   ".join(parts) if parts else "Waiting for sentiment service…"
+        status_lbl.text = ("   ·   ".join(parts) if parts
+                           else _copy.WAITING_SENTIMENT)
 
     @guard
     def _maybe_repaint():
@@ -931,7 +946,8 @@ def render():
         _render_status()
 
     ui.separator().classes("q-my-sm")
-    status_lbl = ui.label("Waiting for sentiment service…").classes("opacity-60 text-xs w-full")
+    status_lbl = ui.label(_copy.WAITING_SENTIMENT).classes(
+        "opacity-60 text-xs w-full")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     _apply()

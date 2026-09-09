@@ -35,8 +35,8 @@ VIEW = "sentiment:bullbear"
 # The three level names, in the order ``compute.BULLBEAR_LEVELS`` writes them.
 LEVELS = ("sector", "industry", "stock")
 
-WAITING = ("Waiting for the sentiment service — no map has been published yet. "
-           "The tree is built by the nightly cascade at 16:20 CT.")
+WAITING = ("No Bull / Bear map yet — nothing has been published. The tree is "
+           "rebuilt by the nightly cascade at 16:20 CT.")
 NO_SCORES = "Scores not yet computed"
 NO_QUOTES = ("Live quotes unavailable — the day-move column is empty. The "
              "scores, quadrants and breadth below are unaffected.")
@@ -76,14 +76,18 @@ def day_tone(day_pct):
     return {"+": "up", "-": "down"}.get(B.signed_pct(day_pct)[:1], "flat")
 
 
-def headline_line(sector_rows):
+def headline_line(sector_rows, live=False):
     """The count headline, pluralised here because ``B.headline`` will not.
 
     It renders ``noun`` verbatim and would emit "1 of 1 sectors". Its empty
     string on an empty payload is deliberate too — ``_rebuild`` substitutes
     :data:`WAITING` rather than leave a blank strip.
+
+    ``live`` forwards to :func:`bullbear.quadrant_counts` — this page always
+    counts the quarter, but the Desk strip counts today once the bell has rung
+    and must not grow a second copy of the pluralisation to do it.
     """
-    counts = B.quadrant_counts(sector_rows)
+    counts = B.quadrant_counts(sector_rows, live=live)
     total = sum(counts.values())
     return B.headline(counts, "sector" if total == 1 else "sectors")
 
@@ -211,6 +215,13 @@ _BULLBEAR_CSS = """
 
 
 def render():
+    # Whether this render may command the sentiment service at all — resolved
+    # ONCE, so the button and its handler cannot disagree. False on the public
+    # live origin, where a Refresh is eleven sector chains plus their histories
+    # per click against the owner's Schwab budget. See ``shell.may_enqueue``.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
+
     state = {"payload": None, "ver": None, "days": {}, "cells": [], "sig": None,
              "refresh_until": None}
 
@@ -228,9 +239,11 @@ def render():
                     f"{NT['body']} text-[29px] font-bold leading-tight "
                     "tracking-[-0.01em]")
                 ui.space()
-                ui.button("Refresh", color=None,
-                          on_click=lambda: _request_refresh()) \
-                    .props("flat no-caps dense").classes(_BTN)
+                # Not drawn on the public live origin — see shell.may_enqueue.
+                if _may_enqueue:
+                    ui.button("Refresh", color=None,
+                              on_click=lambda: _request_refresh()) \
+                        .props("flat no-caps dense").classes(_BTN)
             with ui.row().classes("items-center w-full no-wrap gap-4 mt-4"):
                 scores_lbl = ui.label("").classes(
                     f"{_MONO} {NT['caption']} text-[11px] leading-none")
@@ -447,8 +460,10 @@ def render():
 
     @guard
     def _request_refresh():
+        if not _may_enqueue:
+            return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_bullbear"})
-        ui.notify("Refresh requested")
+        ui.notify("Refreshing — the page updates when the new read lands.")
         state["refresh_until"] = monotonic() + REFRESH_WAIT_SEC
         map_busy.show()
 

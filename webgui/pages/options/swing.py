@@ -170,7 +170,7 @@ def render():
             # Falsy families ⇒ the service scans ALL families (the contract);
             # surface it so an all-unchecked group isn't a silent "scan everything".
             ui.notify("No strategies selected — scanning all.", type="info")
-        ui.notify("Swing scan requested")
+        ui.notify("Scanning — results appear when the scan finishes.")
         status.text = "Scanning…"
         scan_busy.show(f"Scanning {params['symbol']}…")
 

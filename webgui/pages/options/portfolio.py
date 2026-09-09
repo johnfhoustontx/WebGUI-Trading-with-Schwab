@@ -50,11 +50,22 @@ def account_cards(snapshot):
 
 
 def position_columns():
+    # "Entry", not "Credit": the engine's paper book holds directional DEBITS,
+    # and a debit is stored as a negative credit - the same defect the Paper
+    # Ledger and Captured Signals carried in their same-named column.
+    #
+    # "Mark", not "CurVal": a casual shortening AND the wrong idea. It is the
+    # live price, which is what /desk and Captured Signals call Mark.
+    #
+    # "Open P&L": the field IS ``unrealized_pnl``, so these rows are open by
+    # construction - the Captured Signals case, not the Paper Ledger one. The
+    # "$" said nothing the number does not.
     spec = [
-        ("position_id", "ID"), ("symbol", "Symbol"), ("strategy", "Strat"),
-        ("strikes", "Strikes"), ("expiration", "Exp"), ("quantity", "Qty"),
-        ("entry_credit", "Credit"), ("current_value", "CurVal"),
-        ("unrealized_pnl", "P&L$"), ("status", "Status"),
+        ("position_id", "ID"), ("symbol", "Symbol"), ("strategy", "Strategy"),
+        ("strikes", "Strikes"), ("expiration", "Expiry"),
+        ("quantity", "Contracts"), ("entry_credit", "Entry"),
+        ("current_value", "Mark"), ("unrealized_pnl", "Open P&L"),
+        ("status", "Status"),
     ]
     return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
@@ -86,9 +97,10 @@ def position_rows(positions):
 
 def order_columns():
     spec = [
-        ("order_id", "OrderID"), ("ts", "Time"), ("side", "Side"),
-        ("symbol", "Symbol"), ("quantity", "Qty"), ("order_type", "Type"),
-        ("fill_price", "Fill$"), ("status", "Status"), ("reject_reason", "Reason"),
+        ("order_id", "Order ID"), ("ts", "Time"), ("side", "Side"),
+        ("symbol", "Symbol"), ("quantity", "Contracts"), ("order_type", "Type"),
+        ("fill_price", "Fill price"), ("status", "Status"),
+        ("reject_reason", "Reason"),
     ]
     return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
@@ -250,7 +262,8 @@ def render():
                     "options",
                     {"type": "paper_reset", "args": {"starting_balance": float(bal.value)}})
                 dlg.close()
-                ui.notify("Paper account reset requested.", type="positive")
+                ui.notify("Resetting the paper account — the book clears "
+                          "when the engine confirms.", type="positive")
                 status.text = "Resetting…"
 
             with ui.row():

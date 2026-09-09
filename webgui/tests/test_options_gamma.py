@@ -6,8 +6,11 @@ service's tests. The page now reads a cached snapshot from the Redis bus and
 drives refresh/explain/analyze via commands, so it must import NO engine / proxy
 code. The pure figure/transform builders below stay unchanged + unit-tested.
 """
+import ast
+import contextlib
 import inspect
 import json
+import pathlib
 
 import pytest
 
@@ -658,10 +661,16 @@ def test_big_gamma_snapshot_read_is_off_loop():
     run.io_bound, and an in-flight ("fetching") guard prevents a slow read from
     stacking across the 2 s poll ticks."""
     src = inspect.getsource(gamma.render)
-    # The big-payload read is moved off-loop.
-    assert 'run.io_bound(bus_client.read, "options:gamma")' in src
+    # The big-payload read is moved off-loop. (``_snap_view`` is the view name
+    # resolved once at page build — the shared key, or a pinned symbol's own
+    # published one; see snapshot_view.)
+    assert "run.io_bound(bus_client.read, _snap_view)" in src
     # The cheap version probes are NOT wrapped (still a plain synchronous call).
-    assert "read_versions([" in src
+    # The literal list moved out to the pure ``polled_views`` when the pinned
+    # screens stopped probing keys they draw nothing from; the property this
+    # test is about — plain synchronous call, never run.io_bound — is unchanged.
+    assert "read_versions(_poll_views)" in src
+    assert "run.io_bound(bus_client.read_versions" not in src
     # The repaint/poll became async + are guarded against a dead client.
     assert "async def _maybe_repaint" in src
     assert "async def _poll" in src
@@ -2075,3 +2084,728 @@ def test_page_reads_each_views_history_off_loop_from_its_own_key():
     assert 'entry.get("history")' not in src, "still reading history inline"
     # switching subtabs must be able to fetch, so the handler is async + guarded
     assert "async def _on_view_change" in src
+
+
+def test_render_accepts_a_pinned_symbol_and_view():
+    """The public live screens pin Gamma to $SPX/GEX, Net Prem, and Flow on SPY
+    and QQQ. Pinning is an optional keyword on the REAL render so there is one
+    implementation and the public screen cannot drift from the private one."""
+    sig = inspect.signature(gamma.render)
+    assert sig.parameters["symbol"].default is None
+    assert sig.parameters["view"].default is None
+
+
+def test_a_pinned_view_must_be_one_the_page_actually_has():
+    """A typo'd pin would otherwise render the default view and look correct."""
+    assert gamma._resolve_view("Net Prem") == "Net Prem"
+    assert gamma._resolve_view("Flow") == "Flow"
+    assert gamma._resolve_view("nonsense") == "GEX"
+    assert gamma._resolve_view(None) == "GEX"
+
+
+def test_both_pins_are_actually_consumed_by_render():
+    """The signature test above passes just as well if render accepts the two
+    keywords and ignores them -- which would render the private page on every
+    public screen and look plausible. Assert they reach the two things they
+    steer: the subtab value, and the symbol dropdown's seed."""
+    src = inspect.getsource(gamma.render)
+    assert "_resolve_view(view)" in src, "the view pin never reaches the subtabs"
+    assert "ui.tabs(value=_pinned_view)" in src
+    assert "_set_symbol(symbol or " in src, "the symbol pin never reaches the dropdown"
+
+
+# ── a pinned symbol reads that symbol's OWN published key ───────────────────
+# cache:options:gamma is one shared slot holding whatever the private app last
+# looked at, so pinning the RENDER without pinning the DATA gives a screen
+# labelled "$SPX" that shows whatever someone last selected in the app.
+
+def test_the_bare_page_still_reads_the_shared_key():
+    """The private page is untouched: same view, same history keys as before."""
+    assert gamma.snapshot_view() == "options:gamma"
+    assert gamma.snapshot_view(None) == "options:gamma"
+    assert gamma.history_key("GEX") == "options:gamma_hist_gex"
+    assert gamma.history_key("GEX", None) == "options:gamma_hist_gex"
+
+
+def test_a_pinned_symbol_reads_its_own_published_view():
+    assert gamma.snapshot_view("$SPX") == "options:gamma_pub:$SPX"
+    assert gamma.snapshot_view("SPY") == "options:gamma_pub:SPY"
+    assert gamma.snapshot_view("qqq") == "options:gamma_pub:QQQ"
+
+
+def test_a_pinned_symbols_history_is_per_symbol_too():
+    """Per SYMBOL as well as per view: one slot per view cannot hold three."""
+    assert gamma.history_key("GEX", "SPY") == "options:gamma_pub_hist_SPY_gex"
+    assert gamma.history_key("Vanna", "$SPX") == "options:gamma_pub_hist_$SPX_vanna"
+
+
+def test_the_page_view_names_match_the_keys_the_service_writes():
+    """A page view is the service's cache key minus the ``cache:`` prefix. The
+    two are written in different tiers, so nothing but this pairs them -- and a
+    typo would read a key nobody writes and render an empty screen forever."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[2]
+           / "services/options_svc/handlers.py").read_text(encoding="utf-8")
+    # Both tiers build their names with f-strings, so what pairs them is the
+    # literal PREFIX each writes either side of the ``cache:`` boundary.
+    for page_name in (gamma.snapshot_view("SPY"), gamma.history_key("GEX", "SPY")):
+        prefix = page_name.rsplit("SPY", 1)[0]
+        assert f'f"cache:{prefix}' in src or f'(f"cache:{prefix}' in src, (
+            f"nothing in options_svc/handlers.py writes cache:{prefix}… — this "
+            "page would poll a key nobody publishes and stay empty forever")
+
+
+def test_render_reads_the_resolved_view_not_the_shared_key_literal():
+    """The signature + key-builder tests both pass if render still hard-codes
+    "options:gamma" everywhere, which is exactly the bug this task exists to
+    fix. Assert the literal is gone from the read path."""
+    src = inspect.getsource(gamma.render)
+    assert '"options:gamma"' not in src, (
+        "render still reads the shared symbol-agnostic key by name; a pinned "
+        "symbol would render whatever the private app last selected")
+    assert "snapshot_view(symbol)" in src
+    assert "history_key(view, symbol)" in src or "history_key(v, symbol)" in src
+
+
+# ── a PINNED page shows only its pinned view, and drives no fetches ─────────
+# The public live screens render this page with a view pinned. Two consequences,
+# both of which the private page must not feel:
+#   * the view PICKER is not built at all -- the screen is "Premium Divergence",
+#     not "Dealer Positioning parked on Flow", and nothing can be clicked to a
+#     view the service does not publish a history for;
+#   * nothing enqueues ``gamma_refresh``. On a public origin that would let every
+#     anonymous visitor drive Schwab chain fetches, and once the live process
+#     installs a read-only bus client the enqueue would raise every 120 s.
+
+def _rendered(**pins):
+    """Render the page into a throwaway card and return its element tree."""
+    from nicegui import ui
+
+    bus_client.reset()
+    with ui.card() as card:
+        gamma.render(**pins)
+    return list(card.descendants())
+
+
+def _view_tab_names(kids):
+    """The view-picker's tab names among everything rendered.
+
+    The Net Prem GROUP tabs share the .compact-subtabs class, so the picker is
+    identified by the views it offers, not by its styling."""
+    names = {e.props.get("name") for e in kids if type(e).__name__ == "Tab"}
+    return names & set(gamma._VIEW_ORDER)
+
+
+def _timer_callbacks(kids):
+    return {getattr(t.callback, "__name__", "") for t in kids
+            if type(t).__name__ == "Timer"}
+
+
+def test_the_bare_page_still_builds_its_view_picker():
+    """The private page is untouched: all seven views, still clickable."""
+    assert _view_tab_names(_rendered()) == set(gamma._VIEW_ORDER)
+
+
+def test_a_pinned_view_builds_no_view_picker():
+    """Not merely hidden and not merely absent because the shell slot is None --
+    the tabs must not be BUILT, so there is no control at all."""
+    assert _view_tab_names(_rendered(view="Flow", symbol="SPY")) == set()
+    assert _view_tab_names(_rendered(view="Net Prem")) == set()
+
+
+def test_a_pinned_page_still_draws_the_view_it_was_pinned_to():
+    """Hiding the picker must not take the view with it."""
+    kids = _rendered(view="Net Prem")
+    # The Net Prem group tabs live inside the block that view alone shows.
+    assert {e.props.get("name") for e in kids if type(e).__name__ == "Tab"} \
+        >= {"indices"}
+
+
+def test_the_bare_page_still_schedules_its_120s_refresh():
+    assert "_auto_refresh" in _timer_callbacks(_rendered())
+
+
+def test_a_pinned_page_schedules_no_refresh_enqueue():
+    """Every anonymous visitor would otherwise drive a Schwab chain fetch every
+    120 s -- and the read-only bus client the live process installs would raise
+    on each one."""
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(view="Flow",
+                                                             symbol="SPY"))
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(symbol="$SPX"))
+    assert "_auto_refresh" not in _timer_callbacks(_rendered(view="GEX"))
+
+
+def test_the_pinned_page_keeps_the_timers_that_only_READ():
+    """The gate is on ENQUEUEING, not on staying current: the service refreshes
+    the published keys on its own cadence and the page must still repaint."""
+    cbs = _timer_callbacks(_rendered(view="Flow", symbol="SPY"))
+    assert {"_poll", "_tick", "_initial_load"} <= cbs
+
+
+def test_the_picker_gate_is_the_view_pin_and_nothing_else():
+    assert gamma.shows_view_picker(None) is True
+    for pinned in ("GEX", "Flow", "Net Prem", "nonsense"):
+        assert gamma.shows_view_picker(pinned) is False
+
+
+def test_only_a_wholly_unpinned_render_may_enqueue():
+    """Either pin means a public screen. A pinned SYMBOL with no pinned view is
+    still public -- it would enqueue for a symbol the visitor cannot change."""
+    assert gamma.may_enqueue(None, None) is True
+    assert gamma.may_enqueue("SPY", None) is False
+    assert gamma.may_enqueue(None, "Flow") is False
+    assert gamma.may_enqueue("SPY", "Flow") is False
+
+
+def test_the_breadcrumb_binding_goes_with_the_picker(monkeypatch):
+    """bind_breadcrumb_leaf takes the tabs element as its subject, so it cannot
+    outlive them -- and the live shell has no breadcrumb to bind anyway."""
+    import shell as _shell
+
+    bound = []
+    monkeypatch.setattr(_shell, "bind_breadcrumb_leaf",
+                        lambda el, fn=None: bound.append(el))
+
+    _rendered()
+    assert len(bound) == 1, "the private page lost its breadcrumb leaf"
+    bound.clear()
+
+    _rendered(view="Flow", symbol="SPY")
+    assert bound == [], "a pinned page bound a breadcrumb to tabs it never built"
+
+
+def test_a_pinned_page_counts_down_to_nothing_it_will_do():
+    """The strip's countdown is the page's OWN next enqueue. A render that never
+    enqueues must not advertise one — the collector's last/next scan times, which
+    are still true, stay."""
+    assert "Next refresh" in gamma.status_strip_text({}, "", 90)
+    assert "Next refresh" not in gamma.status_strip_text({}, "", None)
+
+    def _strip(kids):
+        return [t for t in (str(getattr(e, "text", "")) for e in kids)
+                if "Next refresh" in t]
+
+    assert _strip(_rendered()), "the private page lost its refresh countdown"
+    assert _strip(_rendered(view="Flow", symbol="SPY")) == []
+
+
+# ── a PINNED page sends NO command, and draws no control that would ─────────
+# Task 3c closed the 120 s refresh enqueue and left the rest open in its own
+# report. This closes the rest. On live.neuralstrike.co these screens are public
+# and unauthenticated, and two of the four commands this page can send cost real
+# money — ``gamma_analyze`` is a paid Claude call, ``gamma_explain`` a full
+# infographic generation — so a button that cannot work must not be drawn.
+#
+# The gate is the PIN, not a read-only bus flag. The live process installs a
+# read-only bus client, which is the backstop that makes an enqueue impossible;
+# this is the design. Both, not either.
+#
+# The test that matters is SOURCE-LEVEL: it walks gamma.py for every
+# ``bus_client.request(`` and asserts each one's enclosing function is gated,
+# so a fifth command added next year is covered without anyone remembering to
+# add it here. Naming today's four would pass forever while the fifth leaked.
+
+_GAMMA_SRC = pathlib.Path(gamma.__file__).read_text(encoding="utf-8")
+_GAMMA_TREE = ast.parse(_GAMMA_SRC)
+
+# The public live screens, as the shell will pin them. A pinned SYMBOL alone is
+# public too — it would act on a symbol the visitor cannot change.
+PUBLIC_PINS = ({"symbol": "$SPX", "view": "GEX"},
+               {"symbol": "SPY", "view": "Flow"},
+               {"symbol": "QQQ", "view": "Flow"},
+               {"view": "Net Prem"},
+               {"symbol": "$SPX"})
+
+
+def _parents(tree):
+    out = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            out[child] = node
+    return out
+
+
+def _enqueue_calls():
+    """Every ``<anything>.request(...)`` call node in gamma.py.
+
+    Deliberately NOT anchored on the receiver being literally ``bus_client``.
+    Mutation-tested: requiring that name caught a plain ungated call and a guard
+    demoted to the second statement, but silently MISSED ``import bus_client as
+    _bc`` / ``_bc.request(...)`` — one keystroke past a security enumeration
+    whose whole promise is that a command added next year is covered. The
+    receiver carries no information the test needs; the method name does.
+
+    The other spelling, ``from bus_client import request`` / ``request(...)``,
+    is an ``ast.Name`` call and cannot be caught by a method-name walk at all.
+    That one is closed by forbidding the import form instead — see
+    ``test_gamma_reaches_the_bus_only_through_the_module``. ⚠ Both halves are
+    load-bearing: neither covers the other's spelling.
+
+    Nothing else in gamma.py calls a ``.request(`` of any kind (asserted below),
+    so widening the receiver costs no false positives today; if one ever appears
+    it is a warning worth reading, not noise.
+    """
+    return [n for n in ast.walk(_GAMMA_TREE)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute) and n.func.attr == "request"]
+
+
+def _enqueue_functions():
+    """``{function name: FunctionDef}`` for every enqueue site's INNERMOST
+    enclosing function — so ``render`` itself is never the answer."""
+    up = _parents(_GAMMA_TREE)
+    out = {}
+    for call in _enqueue_calls():
+        node = up.get(call)
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            node = up.get(node)
+        assert node is not None, f"enqueue at line {call.lineno} sits in no function"
+        out[node.name] = node
+    return out
+
+
+def _first_statement(fn):
+    body = list(fn.body)
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]                       # skip the docstring
+    return body[0] if body else None
+
+
+def _guards_on_the_pin(fn) -> bool:
+    """True when ``fn`` opens with ``if not _may_enqueue: return``.
+
+    A first-statement early return is a TOTAL proof: it covers the button, the
+    timer, the hand-off path and any closure that reaches the function, which no
+    "is this control built?" check can do on its own."""
+    stmt = _first_statement(fn)
+    return (isinstance(stmt, ast.If) and not stmt.orelse
+            and isinstance(stmt.test, ast.UnaryOp)
+            and isinstance(stmt.test.op, ast.Not)
+            and isinstance(stmt.test.operand, ast.Name)
+            and stmt.test.operand.id == "_may_enqueue"
+            and isinstance(stmt.body[-1], ast.Return))
+
+
+def test_the_walker_finds_every_enqueue_in_the_source():
+    """The enumeration's own smoke test: an AST walk that silently matched
+    nothing would make every assertion below vacuously true.
+
+    ``>=`` rather than ``==`` since the walk widened past the ``bus_client.``
+    receiver: it must find AT LEAST every literal occurrence, and finding more
+    (an aliased module) is the point. The count of literal occurrences is what
+    keeps it non-vacuous."""
+    assert len(_enqueue_calls()) >= _GAMMA_SRC.count("bus_client.request(") > 0
+    assert _enqueue_functions()
+
+
+def test_gamma_reaches_the_bus_only_through_the_module():
+    """The half a method-name walk cannot do.
+
+    ``from bus_client import request as _req`` makes the enqueue a bare-name
+    call — an ``ast.Name``, indistinguishable from any other one-word call in
+    the file — so no enumeration over ``.request`` attributes can see it. The
+    fix is to make the spelling unavailable rather than to try to recognise it:
+    the page reaches the bus through ``import bus_client`` and reads attributes
+    off it, which is also what every other page here does."""
+    bad = [n for n in ast.walk(_GAMMA_TREE)
+           if isinstance(n, ast.ImportFrom)
+           and (n.module or "").split(".")[-1] == "bus_client"]
+    assert not bad, (
+        "gamma.py does `from bus_client import ...` at line(s) "
+        f"{[n.lineno for n in bad]}. That binds a bus function to a bare name, "
+        "which test_every_command_this_page_can_send_is_gated_on_the_pin walks "
+        "`.request` attributes and so cannot see. Use `import bus_client` and "
+        "call `bus_client.request(...)`.")
+
+
+def test_every_command_this_page_can_send_is_gated_on_the_pin():
+    """Enumerated from the source, never from a list of today's four names."""
+    for name, fn in sorted(_enqueue_functions().items()):
+        assert _guards_on_the_pin(fn), (
+            f"{name}() (line {fn.lineno}) puts a command on cmd:options without "
+            "first checking _may_enqueue. On the public live origin that is an "
+            "open tap on the owner's Schwab budget and Claude bill.")
+
+
+def _control_labels(kids):
+    """Every button caption and every input label the page actually built."""
+    out = set()
+    for e in kids:
+        if type(e).__name__ in ("Button", "Switch"):
+            out.add(str(getattr(e, "text", "")))
+        label = e.props.get("label")
+        if label:
+            out.add(str(label))
+    return out
+
+
+# Every control whose handler reaches an enqueue, by the caption a visitor sees.
+ENQUEUEING_CONTROLS = {"Refresh now", "Explain", "Analyze", "Open", "Date",
+                       "Symbol"}
+
+
+def test_the_bare_page_builds_every_control_that_sends_a_command():
+    """The private page is untouched — this is the other half of the proof."""
+    assert ENQUEUEING_CONTROLS <= _control_labels(_rendered())
+
+
+def test_a_pinned_page_builds_no_control_that_sends_a_command():
+    for pins in PUBLIC_PINS:
+        got = _control_labels(_rendered(**pins)) & ENQUEUEING_CONTROLS
+        assert got == set(), f"{pins} still offers {sorted(got)}"
+
+
+def test_a_pinned_page_keeps_the_controls_that_only_DRAW():
+    """The gate is on commanding, not on looking: the overlay switches and the
+    Net Prem picker touch nothing but this browser."""
+    labels = _control_labels(_rendered(view="GEX", symbol="$SPX"))
+    assert "Level movement" in labels and "Spot" in labels
+
+
+# ── Briefings: a live control that sends no command ────────────────────────
+# may_enqueue's rule is about commands, and Briefings sends none — its items
+# only ``ui.navigate.to``. It is still the wrong thing to draw on a public
+# screen, and worse than a dead button: the route it opens is not served by the
+# live process, and what it would open is the OWNER'S PAID Claude briefing.
+
+
+def _menu_items(kids):
+    return [e for e in kids if type(e).__name__ == "MenuItem"]
+
+
+def _menu_item_captions(kids):
+    """The menu-item captions a visitor reads.
+
+    NiceGUI hangs a ``ui.menu_item``'s text on the ``ItemSection`` it wraps, not
+    on the ``MenuItem`` — reading ``MenuItem.text`` returns "" for every one of
+    them and would make this assertion vacuously true."""
+    return sorted(str(getattr(e, "text", "")) for e in kids
+                  if type(e).__name__ == "ItemSection")
+
+
+def test_the_bare_page_still_offers_its_briefings():
+    """The private page is untouched — the button, the menu and all four slots."""
+    kids = _rendered()
+    assert "Briefings" in _control_labels(kids)
+    assert len(_menu_items(kids)) == 4
+    assert _menu_item_captions(kids) == ["EOD recap", "Midday", "Open",
+                                         "Premarket"]
+    assert [s for s, _t in gamma._SCHED_SLOTS] == ["premarket", "open",
+                                                   "midday", "close"]
+
+
+def test_a_pinned_page_builds_no_briefings_menu():
+    """Not hidden — never built. ``_sync_spot_controls`` would only hide it on
+    the Net Prem view, so on the three symbol screens it was fully clickable."""
+    for pins in PUBLIC_PINS:
+        kids = _rendered(**pins)
+        assert "Briefings" not in _control_labels(kids), pins
+        assert _menu_items(kids) == [], pins
+        assert _menu_item_captions(kids) == [], pins
+        assert not [e for e in kids if type(e).__name__ == "Menu"], pins
+
+
+def _clickable_menu_items(kids):
+    """Menu items actually wired to a click handler.
+
+    Counted as ITEMS, not as listeners: NiceGUI attaches TWO click listeners to
+    a ``ui.menu_item`` — the caller's handler and the menu's own auto-close — so
+    a listener count is 2x the number of things a visitor can press."""
+    return [e for e in kids if type(e).__name__ == "MenuItem"
+            and any(ls.type == "click"
+                    for ls in getattr(e, "_event_listeners", {}).values())]
+
+
+def test_a_pinned_page_offers_no_route_the_live_process_does_not_serve():
+    """The reason the menu goes, stated as the thing a visitor could reach.
+
+    Every briefing item navigates to ``/options/analyze?slot=…``; the live
+    process registers only the fourteen screens in ``live_screens.SCREENS``. The
+    bare-page assertion is what stops this being vacuous — with no menu items to
+    find, "no click handlers" is true of a page that never had any."""
+    assert len(_clickable_menu_items(_rendered())) == 4
+    for pins in PUBLIC_PINS:
+        assert _clickable_menu_items(_rendered(**pins)) == [], pins
+
+
+# ── a PINNED render reads only the keys it can draw from ───────────────────
+# ``render(view="Net Prem")`` pins no symbol, so ``snapshot_view(None)`` is
+# ``options:gamma`` — the PRIVATE page's shared slot, holding whatever the owner
+# last looked at. The Net Prem branch of ``_render_view`` returns before the
+# snapshot is ever read, so the public process was polling that key every two
+# seconds and deserializing the owner's snapshot every minute to discard it.
+
+
+def test_the_private_page_reads_the_snapshot_on_every_view():
+    assert gamma.reads_snapshot(None) is True
+
+
+def test_a_pinned_net_prem_screen_needs_no_gamma_snapshot():
+    assert gamma.reads_snapshot("Net Prem") is False
+
+
+def test_every_other_pinned_view_still_reads_the_snapshot():
+    """Checked rather than assumed — Flow draws ``flow`` + ``prem_ladder`` from
+    the MAIN payload, so it needs the snapshot even though it needs no history."""
+    for v in gamma._VIEW_ORDER:
+        if v != "Net Prem":
+            assert gamma.reads_snapshot(v) is True, v
+
+
+def test_an_unknown_view_pin_still_reads_the_snapshot():
+    """A bad pin resolves to GEX (``_resolve_view`` is total), and GEX needs it —
+    a degraded pin must not also silently stop reading."""
+    assert gamma.reads_snapshot("Nonsense") is True
+
+
+def test_the_net_prem_screen_polls_neither_the_private_key_nor_the_reports():
+    got = gamma.polled_views(None, "Net Prem")
+    assert got == ["options:gex_status", "options:net_premium"]
+    # Named explicitly: that key is the PRIVATE page's shared slot, and it is
+    # what an unpinned symbol resolves to.
+    assert gamma.snapshot_view(None) == "options:gamma"
+    assert "options:gamma" not in got
+
+
+def test_a_pinned_symbol_screen_polls_its_own_published_key_and_no_reports():
+    got = gamma.polled_views("SPY", "Flow")
+    assert got == ["options:gex_status", "options:net_premium",
+                   "options:gamma_pub:SPY"]
+
+
+def test_the_private_page_polls_every_view_it_ever_did():
+    """The other half: nothing was dropped from the page that draws all of it."""
+    got = gamma.polled_views(None, None)
+    assert set(got) == {
+        "options:gamma", "options:gex_status", "options:net_premium",
+        "options:gamma_explain", "options:gamma_analyze",
+        "options:gamma_briefings", "options:gamma_history",
+        "options:gamma_analyze_premarket", "options:gamma_analyze_open",
+        "options:gamma_analyze_midday", "options:gamma_analyze_close"}
+    assert len(got) == len(set(got))
+
+
+def _reads_during_build(**pins):
+    """Every cache view the page BUILD asks the bus for."""
+    import bus_client as _bc
+
+    seen, orig = [], (_bc.read, _bc.read_version, _bc.read_versions)
+    _bc.read = lambda v: (seen.append(v), orig[0](v))[1]
+    _bc.read_version = lambda v: (seen.append(v), orig[1](v))[1]
+    _bc.read_versions = lambda vs: (seen.extend(vs), orig[2](vs))[1]
+    try:
+        _rendered(**pins)
+    finally:
+        _bc.read, _bc.read_version, _bc.read_versions = orig
+    return seen
+
+
+def test_the_net_prem_screen_never_touches_the_private_gamma_key():
+    """Behavioural, not source-level: nothing in the page build asks for it."""
+    assert "options:gamma" not in _reads_during_build(view="Net Prem")
+
+
+def test_the_private_page_still_seeds_the_private_gamma_key():
+    assert "options:gamma" in _reads_during_build()
+
+
+def _run_poll(kids):
+    """Drive the page's own 2 s poll once, and return the views it asked for."""
+    import asyncio
+
+    import bus_client as _bc
+
+    poll = [t.callback for t in kids if type(t).__name__ == "Timer"
+            and getattr(t.callback, "__name__", "") == "_poll"]
+    assert len(poll) == 1, "the version-poll timer moved"
+    seen, orig = [], _bc.read_versions
+    _bc.read_versions = lambda vs: (seen.append(list(vs)), orig(vs))[1]
+    try:
+        asyncio.run(poll[0]())
+    finally:
+        _bc.read_versions = orig
+    assert len(seen) == 1
+    return seen[0]
+
+
+@pytest.mark.parametrize("pins", [{}, *PUBLIC_PINS])
+def test_the_poll_asks_for_exactly_polled_views_and_indexes_nothing_else(pins):
+    """The drift guard, and the reason ``polled_views`` may be pure.
+
+    ``_poll`` indexes the returned dict by name, so a key it reads that the list
+    omits raises KeyError HERE rather than every two seconds in a browser. Driving
+    the real timer callback is what makes that true — a source assertion could
+    not."""
+    assert _run_poll(_rendered(**pins)) == gamma.polled_views(
+        pins.get("symbol"), pins.get("view"))
+
+
+def _navigations(kids, monkeypatch, bump):
+    """Drive one _poll tick with ``bump`` views version-bumped, and return every
+    URL the page tried to open."""
+    import asyncio
+
+    from nicegui import ui
+
+    went = []
+    monkeypatch.setattr(ui.navigate, "to",
+                        lambda target, *a, **k: went.append(target))
+    for view in bump:
+        bus_client.bus().cache_set(f"cache:{view}", {"generated_at": "2026-09-07"})
+    poll = next(t.callback for t in kids if type(t).__name__ == "Timer"
+                and getattr(t.callback, "__name__", "") == "_poll")
+    asyncio.run(poll())
+    return went
+
+
+_REPORT_VIEWS = ("options:gamma_explain", "options:gamma_analyze",
+                 "options:gamma_history")
+
+
+def test_the_bare_page_opens_the_report_it_asked_for(monkeypatch):
+    """The watchers exist to open the result of a click THIS page made."""
+    went = _navigations(_rendered(), monkeypatch, _REPORT_VIEWS)
+    assert len(went) == 3
+
+
+def test_a_pinned_page_opens_no_report_it_could_never_have_asked_for(monkeypatch):
+    """With the buttons gone the watchers have no click to complete — and the
+    version they watch moves when the OWNER clicks Explain on the PRIVATE app.
+    Left wired, one private click pops a tab in every anonymous visitor's
+    browser, pointed at a route the live process does not even serve."""
+    went = _navigations(_rendered(symbol="SPY", view="Flow"), monkeypatch,
+                        _REPORT_VIEWS)
+    assert went == []
+
+
+# ── the ``?view=`` ROUTE parameter ──────────────────────────────────────────
+# ``gamma.render`` has taken a ``view`` pin since the public live screens; until
+# 2026-09-08 the ``@_page`` function took no parameters, so ``/options/gamma?
+# view=Flow`` was accepted by the router and silently ignored. That is the
+# gallery's wrong-screenshot failure class: three tiles captioned Gamma Heatmap,
+# Premium Divergence and Net Options Premium would all have published the same
+# default GEX view, and nothing would have raised.
+#
+# ⚠ A ``@ui.page`` function's signature IS the query-parameter surface (see
+# ``live_main._register`` for the injection this repo already closed). These
+# tests are the other half of that rule: the parameter is fine BECAUSE its value
+# only ever reaches ``_resolve_view``, which is total.
+
+@contextlib.contextmanager
+def _no_chrome():
+    """``main._layout`` reduced to a bare container.
+
+    The real one reads the bus, builds the rail and the tab strip — none of
+    which this file is about, and all of which would drown the page's own
+    elements in the tree these tests read."""
+    from nicegui import ui
+    with ui.card():
+        yield
+
+
+def _route_rendered(monkeypatch, **query):
+    """Render the page THROUGH ``main.options_gamma_page`` and return its tree.
+
+    The point of going through the route function rather than calling
+    ``gamma.render`` directly: a signature check alone passes against a page
+    that declares ``view`` and drops it on the floor."""
+    import main
+    from nicegui import ui
+
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    bus_client.reset()
+    with ui.card() as card:
+        main.options_gamma_page(**query)
+    return list(card.descendants())
+
+
+def test_the_gamma_route_declares_a_view_query_parameter():
+    """Declared, and optional so the bare route pins nothing."""
+    import main
+    p = inspect.signature(main.options_gamma_page).parameters.get("view")
+    assert p is not None, "/options/gamma takes no ?view= — the pin is ignored"
+    assert p.default is None, (
+        "the bare route must pin nothing, exactly as before the parameter "
+        "existed — a non-None default would silently pin every navigation")
+
+
+def test_fastapi_binds_the_view_pin_from_the_QUERY_STRING():
+    """The half a signature check cannot reach.
+
+    Every test below calls the page function in Python, which proves the value
+    travels once it arrives — not that ``?view=Flow`` in a URL is where it comes
+    from. A parameter FastAPI classified as a path or body field would satisfy
+    all of them and still leave the gallery capturing one view three times. Read
+    off the route's own dependant, which is what the router consults per
+    request, and checked beside ``/sentiment/momentum`` so the shipped precedent
+    says what a correctly-wired pin looks like."""
+    import main
+    bound = {r.path: {q.name for q in r.dependant.query_params}
+             for r in main.app.routes
+             if getattr(r, "path", "") in ("/options/gamma", "/sentiment/momentum")
+             and hasattr(r, "dependant")}
+    assert bound.get("/sentiment/momentum") == {"level"}, "the precedent moved"
+    assert bound.get("/options/gamma") == {"view"}
+
+
+def test_the_view_query_is_handed_to_the_render(monkeypatch):
+    """Driven, not merely declared: patch the render, read what it got."""
+    import main
+    got = {}
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
+    main.options_gamma_page(view="Flow")
+    assert got == {"view": "Flow"}
+
+
+def test_the_bare_route_hands_the_render_no_pin_at_all(monkeypatch):
+    """The PRIVATE page is not to change. ``view=None`` is what it has always
+    been called with, and it is what keeps the picker and the four command
+    buttons (see may_enqueue)."""
+    import main
+    got = {}
+    monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
+    monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
+    main.options_gamma_page()
+    assert got == {"view": None}
+
+
+def test_the_bare_route_still_builds_the_whole_view_picker(monkeypatch):
+    """End to end, with the real render: no query string ⇒ today's page."""
+    assert _view_tab_names(_route_rendered(monkeypatch)) == set(gamma._VIEW_ORDER)
+
+
+def test_a_pinned_route_renders_that_one_view(monkeypatch):
+    """The pin reaches the page's OWN behaviour, not just its argument list.
+
+    A pinned render builds no picker (``shows_view_picker``) — which is also the
+    visible consequence of wiring this parameter, and the reason the gallery's
+    recaptures will show one view with no subtab row."""
+    assert _view_tab_names(_route_rendered(monkeypatch, view="Flow")) == set()
+
+
+def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
+    """``?view=nonsense`` is a stranger's string on a page behind the login. It
+    must render, and render the DEFAULT — ``_resolve_view`` is total for exactly
+    this reason. Asserted through the route, not on the helper."""
+    junk = _route_rendered(monkeypatch, view="nonsense")
+    gex = _route_rendered(monkeypatch, view="GEX")
+    gex_again = _route_rendered(monkeypatch, view="GEX")
+    netprem = _route_rendered(monkeypatch, view="Net Prem")
+
+    def shape(kids):
+        return [(type(e).__name__, str(getattr(e, "text", "") or "")) for e in kids]
+
+    # Stated first so a future one-shot per-render stash (the handoff symbol is
+    # already one) fails HERE, saying repeated renders differ, rather than in the
+    # comparison below saying the coercion broke.
+    assert shape(gex) == shape(gex_again), (
+        "two identical renders differ, so comparing renders proves nothing")
+    assert shape(junk) == shape(gex), "an unknown pin did not fall back to GEX"
+    # ...and the fallback is a real comparison only because a DIFFERENT pin
+    # really does render a different page. Without this, the assertion above
+    # would also pass against a route that ignored the parameter entirely.
+    assert shape(junk) != shape(netprem)

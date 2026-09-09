@@ -2,7 +2,7 @@
 
 # About this document
 
-This is the **integration reference** for the WebGUI Trading with Schwab 3-tier
+This is the **integration reference** for the NeuralStrike 3-tier
 architecture: the contracts, the Redis bus API, each service's commands and
 published views, and the Schwab proxy's HTTP surface. It is aimed at developers
 extending the stack or wiring a new client to it.
@@ -319,8 +319,9 @@ Re-running the fit (e.g. after a regime shift) is the supported maintenance path
 ## Driver service — :8214
 
 **Entry:** `services/driver_svc/app.py`. **Scheduler:** polls the run gate every
-30 s; fires a checkpoint at 09:28 ET and then every 30 minutes inside the entry
-window **09:45–15:30 ET**.
+30 s; fires a checkpoint every 30 minutes inside the entry window
+**09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first
+fire-able slot is 09:45 and the last entry decision is the 15:00 slot.
 
 > **The order-approval queue was removed in July 2026.** `ApprovalState`,
 > `PerfReport`, `cache:driver:approvals`, `cache:driver:performance` and the
@@ -618,6 +619,7 @@ hard-code ports or `D:\` paths.
 | driver_svc | 8214 | `SERVICE_PORTS["driver"]` |
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
+| webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
 > The `dashboard_frontend = 5173` entry in `config/ports.toml` belongs to the retired
 > React frontend and is **not** used by this app. The web GUI is on **8500**.
@@ -631,6 +633,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 |---|---|---|
 | `[services]` ports | 8210–8215 | **9210–9215** (`port_offset`) |
 | webgui | 8500 | **9500** |
+| webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |
 | schwab-proxy | **owns** it on 8100 | **borrows** prod's — starts none |
 

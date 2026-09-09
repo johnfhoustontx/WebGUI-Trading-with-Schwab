@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Open the trading web GUI, which now runs on the Linux host.
+  The FALLBACK route to the trading web GUI. The normal route is
+  https://app.neuralstrike.co -- use that unless it is broken.
 
 .DESCRIPTION
   Holds an SSH tunnel to the VPS and opens a browser at the local end:
@@ -18,15 +19,26 @@
   proxy rather than a missing forward. :8100 also serves /health, which is the
   honest answer to "is Schwab auth actually working".
 
-  WHY A TUNNEL AND NOT A URL. Both services bind 127.0.0.1 on the VPS and have
-  NO AUTHENTICATION OF ANY KIND. That is correct for a desk-side app and it is
-  the whole problem on a server: the web GUI can open paper positions, apply
-  rescue adjustments, arm the autonomous driver and stop the entire stack, and
-  the proxy holds the Schwab credentials. Exposing either publicly would hand
-  that to whoever found the port. The tunnel gives you both while they stay
-  bound to loopback on each end, authenticated by your SSH key.
+  WHY THIS STILL EXISTS, NOW THAT THERE IS A URL. Since 2026-09-06 the web GUI
+  is reachable at https://app.neuralstrike.co behind a password + TOTP login,
+  with Caddy terminating TLS. This script is the way in WHEN THAT BREAKS -- an
+  expired or failed certificate, a Caddy misconfiguration, a DNS problem. The
+  fallback must not depend on the thing that failed, which is the whole reason
+  it is kept rather than deleted.
 
-  ⚠ Do NOT "simplify" this by changing either bind address to 0.0.0.0.
+  It is also still the only route for two things:
+    - the PROXY on :8100, which is deliberately NOT on the public domain. It
+      holds the Schwab credentials and its market-data reads are unauthenticated,
+      so it is published to the tailnet by `tailscale serve` and nowhere else.
+    - anything you want to reach without going through the login at all.
+
+  Both services still bind 127.0.0.1 on the VPS. Caddy is the only thing that
+  talks to :8500; the login is a second control layered on the first, not a
+  replacement for it.
+
+  ⚠ Do NOT "simplify" this by changing either bind address to 0.0.0.0. The
+  gate's wall exemption is scoped by a loopback check, so a widened bind would
+  turn it from a local carve-out into an open door.
 
   The window stays open while you use the app -- closing it closes the tunnel.
   That is deliberate: a forgotten background tunnel is an access path nobody

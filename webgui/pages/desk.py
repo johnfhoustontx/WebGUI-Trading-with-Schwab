@@ -37,6 +37,12 @@ from zoneinfo import ZoneInfo
 import alerts as _alerts
 import app_settings
 import bus_client
+# The page-to-shell seam — here for ``route_for``/``navigate_to``, since every
+# click-through on this page names a PRIVATE route and the public origin serves
+# most of them somewhere else and some of them nowhere. At module level rather
+# than inside ``render()`` because ``_mount_score_card`` is module-level too.
+# ``shell`` is itself Tier 1: it imports nothing but nicegui and pages.ui_guard.
+import shell as _shell
 import voice as _voice
 from nicegui import run, ui
 
@@ -48,11 +54,20 @@ from pages import console_regime as _CR
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
+# The panel-width arithmetic, imported rather than restated so a width quoted
+# in a comment here and a width computed from the same CSS cannot drift apart.
+# ``grid_min_width_px``/``track_floors`` feed ``_ROW_SHELLS``/``_PIN_OFFSETS``
+# below; ``COL_GAP_PX`` and ``PANEL_PAD_PX`` are also re-exported for
+# ``test_desk``, which spends them against its own independent parser.
+from pages.panel_scroll import (COL_GAP_PX, PANEL_PAD_PX,  # noqa: F401
+                                grid_min_width_px, track_floors)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
+from pages.options.matrix import signal_summary as _signal_summary
 from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
                                  CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
@@ -437,8 +452,20 @@ BOOKS = (
 # Where a row's own page lives. Click-through is the whole reason the Desk may
 # stay this terse: every row is one click from the page that can act on it, and
 # a book with no route would strand its rows here.
+#
+# ⚠ These are the PRIVATE app's routes, and every route on this page is: a page
+# names the address it has always known and asks ``shell.route_for`` where that
+# lives in this process. The public origin publishes NONE of these three — the
+# paper ledger, the driver's own book and the captured tape are the owner's
+# positions — so there the rows draw without a click and without the pointer.
 POSITION_ROUTES = {PAPER_SOURCE: "/options/paper", CLAUDE_SOURCE: "/driver",
                    CAPTURED_SOURCE: "/options/captured"}
+
+# The other four click-through targets, named for the same reason: the string
+# is a route the shell resolves, not a URL this page emits.
+SENTIMENT_ROUTE = "/sentiment"
+MATRIX_ROUTE = "/options/matrix"
+FLOW_ROUTE = "/options/flow"
 
 # The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
 # treated as open, matching ``paper_adjust``'s own default. The captured-signals
@@ -682,34 +709,92 @@ BULLBEAR_ROUTE = "/sentiment/bullbear"
 # cascade rather than a 30 s poll, so "not published yet" means something a
 # reader can act on (wait for tonight) that the generic line does not. Wording
 # follows ``sentiment_bullbear.WAITING``.
-WAITING_BULLBEAR = ("Waiting for the sentiment service — the Bull / Bear map is "
-                    "built by the nightly cascade at 16:20 CT.")
+WAITING_BULLBEAR = ("No Bull / Bear map yet — it is rebuilt by the nightly "
+                    "cascade at 16:20 CT.")
 
 
-def _bullbear_rows(bullbear_view):
-    """The payload's sector rows, ordered strongest-first and null-free.
+def strip_is_live(bullbear_view, now=None):
+    """Should the chips paint TODAY's quadrant rather than the structural one?
+
+    **This asks the CALENDAR, never the numbers, and that is the whole point.**
+    ``SchwabProxyClient._extract_change_pct`` (schwab-proxy/proxy_client.py)
+    falls through to a literal ``0.0`` when every percent field is missing or
+    zero — so a switch written as "is any row's day move non-zero?" would see
+    eleven honest-looking zeros every pre-open, every weekend and through any
+    proxy hiccup, and ``0.0`` is not ``> 0``: all eleven sectors would render
+    ``falling_lagging``. A confident, maximally bearish reading of no data at
+    all, which is the failure class CLAUDE.md documents five times over. The
+    bell either rang today or it did not, and only the calendar knows which.
+
+    ``regular_session_has_opened`` rather than ``is_regular_hours``: the day's
+    move does not stop being today's move at the cash close, and this strip is
+    read after the close as often as during the session.
+
+    The benchmark clause catches what a calendar cannot see — a dead proxy
+    mid-session, where ``compute.bullbear_view`` leaves ``benchmark_day_pct``
+    None (``merge_live`` attaches the per-row fields; the top-level one is
+    ``bullbear_view``'s). It goes through ``pages.fmt.num``, the STRICT reader, so a NaN counts
+    as absent while a **measured** ``0.0`` — a genuinely flat tape — stays
+    live. A truthiness test here would be the same bug one field over.
+
+    False is not a neutral or empty state: pre-open is exactly when this strip
+    is read to plan the session, so ``bullbear_chips`` and ``bullbear_headline``
+    both still draw every chip, on its structural horizon, and label it.
+
+    ``now`` defaults to an AWARE local clock. ``market_calendar`` reads a naive
+    datetime as Central, which is right on prod (its unit sets TZ) and silently
+    wrong on any other host; ``.astimezone()`` is identical on a CT box and
+    correct everywhere else. A caller may still pass either form.
+    """
+    view = bullbear_view if isinstance(bullbear_view, dict) else {}
+    if _finite(view.get("benchmark_day_pct")) is None:
+        return False
+    return _cal.regular_session_has_opened(now or datetime.now().astimezone())
+
+
+def _bullbear_rows(bullbear_view, live=False, previous=None):
+    """The payload's sector rows, ordered for the horizon asked for, null-free.
 
     Shape-guarded at BOTH levels because ``render()`` seeds every view at build
     time: a half-written key, an older writer or a service caught mid-restart
     can put a non-dict in either position, and ``or {}`` would pass a truthy
     malformed payload straight through to the first ``.get``.
 
-    Ordering is ``bullbear.by_strength`` — the map's own — so the strip and the
-    page it links to can never list the same sectors in different orders.
+    Ordering is ``bullbear.by_day_move`` when ``live`` and ``by_strength``
+    otherwise, so the order matches the horizon the chips are coloured by.
+    On a live strip that DELIBERATELY diverges from ``/sentiment/bullbear``,
+    which always sorts by strength: the two screens answer different questions
+    — the strip asks what is working today, the map asks what has worked this
+    quarter — and a strip that coloured by today while ranking by the quarter
+    would be the one genuinely incoherent combination. ⚠ That divergence is
+    only defensible because the strip SAYS what it sorted by
+    (:func:`bullbear_caption`) and its headline names the horizon it counted
+    (:func:`bullbear_headline`) — remove either and the divergence goes silent.
+    ``previous`` is the day sorter's hysteresis seat order and does
+    nothing on the structural horizon, which does not move between paints.
     """
     view = bullbear_view if isinstance(bullbear_view, dict) else {}
     levels = view.get("levels")
     levels = levels if isinstance(levels, dict) else {}
-    return _bb.by_strength(levels.get("sector"))
+    rows = levels.get("sector")
+    return _bb.by_day_move(rows, previous) if live else _bb.by_strength(rows)
 
 
-def bullbear_chips(bullbear_view):
+def bullbear_chips(bullbear_view, now=None, previous=None):
     """One chip per scored sector — everything the strip draws, as plain dicts.
 
     Every DECISION here belongs to ``pages/bullbear.py``: the ordering, the
     quadrant, the breadth width and its thin threshold, and the day-move
     formatting. This function picks the sector level out of the payload and
     names the fields; it computes nothing.
+
+    Each chip carries BOTH horizons. ``quadrant`` is the one the chip is
+    coloured by — today's once the bell has rung, the cascade's quarter
+    otherwise — and ``structural_quadrant`` is always the quarter's, so a live
+    chip can show what today's colour is departing from. ``live`` says which,
+    once, for the whole strip: :func:`strip_is_live` is asked ONE time per paint
+    rather than per row, since two chips in a single paint disagreeing about the
+    horizon would make the strip's caption true of only some of it.
 
     ``payload["regime"]`` is deliberately never read. ``/sentiment/sectors`` and
     ``/sentiment/rotation`` already print OPPOSITE risk-on/risk-off headlines
@@ -724,13 +809,19 @@ def bullbear_chips(bullbear_view):
     (schwab-proxy/proxy_client.py) falls through to a literal ``0.0`` when every
     percent field is missing or zero. So "0.00%" is not proof of a flat tape.
     """
+    live = strip_is_live(bullbear_view, now)
     out = []
-    for row in _bullbear_rows(bullbear_view):
+    for row in _bullbear_rows(bullbear_view, live=live, previous=previous):
         share = _bb.row_participation(row)
         out.append({
             "label": str(row.get("label") or row.get("symbol") or ""),
             "symbol": str(row.get("symbol") or ""),
-            "quadrant": _bb.quadrant(*_bb.row_axes(row)),
+            "quadrant": (_bb.quadrant(*_bb.row_day_axes(row)) if live
+                         else _bb.quadrant(*_bb.row_axes(row))),
+            # Rendered only when live: off-session the two are the same value,
+            # and a stripe repeating the fill says nothing.
+            "structural_quadrant": _bb.quadrant(*_bb.row_axes(row)),
+            "live": live,
             "day_text": _bb.signed_pct(row.get("day_pct")),
             # None ("no reading at all") and 0 ("nothing confirms") are two
             # different drawings, so this stays the raw None rather than being
@@ -741,14 +832,72 @@ def bullbear_chips(bullbear_view):
     return out
 
 
-def bullbear_headline(bullbear_view):
-    """The map's own count sentence, over the same rows the chips draw.
+# What the strip sorted itself by, said out loud. The live line also names the
+# stripe, because a colour on an edge is not self-explanatory and colour is
+# never the sole carrier of a reading. No clock time in either: the horizon is
+# the calendar's answer, and a printed bell time here would be a second copy of
+# a value ``config/sessions.toml`` already owns.
+BB_CAPTION_LIVE = "sorted by today's move — the left edge marks the quarter"
+# ⚠ The reason clause deliberately does NOT say "no session move to read".
+# Every chip still prints a day-% cell, and off-session that cell is a stale
+# prior-session percent or the proxy's literal 0.00% — so a caption denying a
+# move sits directly over eleven of them, on the one screen whose thesis is not
+# printing a reading nobody took. It says which horizon it sorted by, and stops.
+BB_CAPTION_STRUCTURAL = "sorted by the quarter's strength — the session has not opened"
+
+# The horizon the headline's count was taken on. Two words, appended to the
+# map's own sentence rather than replacing it, so the count and its horizon
+# cannot be read apart.
+BB_HORIZON = {True: "today", False: "on the quarter"}
+
+
+def bullbear_caption(live):
+    """Which horizon the strip sorted and coloured by, in words.
+
+    The strip DELIBERATELY diverges from ``/sentiment/bullbear``'s order — the
+    strip asks what is working today, the map asks what has worked this quarter
+    — and that is only defensible once the strip SAYS what it sorted by.
+    Otherwise two screens rank one payload differently and neither admits it,
+    which is the ``/sentiment/sectors``-vs-``/sentiment/rotation`` failure
+    (CLAUDE.md, 2026-08-17) reopened one screen earlier.
+
+    Takes the flag rather than the view: ``_paint_bullbear`` already knows the
+    horizon from the chips it just built, and asking :func:`strip_is_live` a
+    second time on a second clock is how a caption ends up true of a strip that
+    was drawn on the other side of the bell.
+    """
+    return BB_CAPTION_LIVE if live else BB_CAPTION_STRUCTURAL
+
+
+def bullbear_headline(bullbear_view, now=None):
+    """The map's own count sentence, over the same rows the chips draw, NAMING
+    the horizon it counted.
 
     ``sentiment_bullbear.headline_line`` handles the pluralisation and returns
     "" on an empty payload — where "0 of 0 sectors rising and leading" would
-    state a maximally bearish tape that nobody measured.
+    state a maximally bearish tape that nobody measured. An empty line takes no
+    horizon word either: naming the horizon of a count nobody made would make
+    that claim worse rather than better.
+
+    The count follows the chips onto today's axes once :func:`strip_is_live`
+    says the bell has rung, because a sentence reading "4 of 11 sectors rising
+    and leading" that silently changes meaning at the open is worse than either
+    count alone. ``now`` is threaded so one paint can decide the horizon ONCE
+    and hand the same instant to both the chips and this line.
+
+    ⚠ That threading is the whole reason this function may make its OWN
+    :func:`strip_is_live` call and re-run :func:`_bullbear_rows` rather than
+    taking the flag the way :func:`bullbear_caption` does: on the same instant
+    both mechanisms are the same answer, so the second one costs a little work
+    and buys the caller a one-argument signature. Hand it a second clock and
+    they diverge — at the opening bell, a headline saying "on the quarter" over
+    chips already drawn on today's axes. Nothing in the SIGNATURE prevents that,
+    so ``test_one_paint_decides_the_horizon_once`` pins the call site instead.
     """
-    return _bbmap.headline_line(_bullbear_rows(bullbear_view))
+    live = strip_is_live(bullbear_view, now)
+    line = _bbmap.headline_line(_bullbear_rows(bullbear_view, live=live),
+                                live=live)
+    return f"{line} {BB_HORIZON[live]}" if line else ""
 
 
 # ── freshness ────────────────────────────────────────────────────────────────
@@ -917,6 +1066,39 @@ def _arc_value(arcs, i):
         return None
 
 
+# ── the Opportunity Board panel head ─────────────────────────────────────────
+# The three buckets, in the board page's own order.
+_BOARD_SIGNALS = ("buy", "neutral", "sell")
+
+
+def board_signal_facts(matrix):
+    """Buy / Neutral / Sell counts for the Opportunity Board panel head.
+
+    ``[{"key", "label", "count", "cls"}]``, or ``None`` when there is nothing
+    to count.
+
+    **Delegated, not recomputed.** ``matrix.signal_summary`` is the same
+    function that page's own summary band calls, and ``signal_class`` the same
+    palette its chips wear — so the head cannot report a different count, or a
+    different colour, from the screen it is quoting.
+
+    ⚠ These count the WHOLE published board while the panel draws only
+    ``BOARD_ROWS_N`` rows. That is deliberate and matches the board page, whose
+    band counts every row too: the head is a market-wide read and the rows
+    below it are the top of that read.
+
+    ⚠ A cold cache and an EMPTY board both return ``None``, never three
+    zeros. A zero here is a reading this page did not take — the rule behind
+    every em dash on this screen — and the body already says "Nothing ranked
+    yet" for the empty case, so a row of zeros beside it would be noise.
+    """
+    if not isinstance(matrix, dict) or not (matrix.get("rows") or []):
+        return None
+    counts = _signal_summary(matrix)
+    return [{"key": k, "label": k.upper(), "count": int(counts.get(k, 0)),
+             "cls": _signal_class(k)} for k in _BOARD_SIGNALS]
+
+
 # ── the session countdown ────────────────────────────────────────────────────
 # What the clock counts to, and what it calls itself. Two states only: the
 # session is open, or it is not — there is no third reading a trader acts on.
@@ -1053,7 +1235,7 @@ def flip_text(row):
 
 
 def flow_kind_text(row):
-    """'Unusual activity · Call' — the alert kind and the side it fired on.
+    """'Unusual volume · Call' — the alert kind and the side it fired on.
 
     One cell, because the flow rows are one line each now and the side is a
     qualifier on the kind rather than a reading of its own. "Call"/"Put" names
@@ -1529,7 +1711,7 @@ def should_speak(settings, now):
 def speak_volume(settings):
     """``voice_volume`` clamped to 0..1, falling back rather than raising.
 
-    The clamp is ``main.play_alert``'s, character for character. What differs is
+    The clamp is ``shell.play_alert``'s, character for character. What differs is
     the PARSE in front of it, and it has to: this runs on the 2 s poll path
     inside a timer callback, and ``settings.json`` is hand-editable and never
     validated on read — a bare ``float("loud")`` there is a traceback the user
@@ -1677,6 +1859,10 @@ window.__deskSpeak = function (urls, vol) {
 # The phrase the unlock button speaks. It confirms audibly that the unlock
 # worked, which a silent button could not.
 VOICE_UNLOCK_PHRASE = "Spoken alerts on."
+
+# The button's own caption, named so a test can find the control rather than
+# re-typing the string — a copy in a test cannot see a rename.
+VOICE_UNLOCK_LABEL = "ENABLE SPOKEN ALERTS"
 
 # Once per PROCESS, not once per page build: the clip cache is on disk and
 # shared by every tab, so a second prewarm would re-walk a warm cache for
@@ -1849,8 +2035,14 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
 # a line of height instead of a whole column of width, and it keeps each row to
 # ONE grid line — which is what puts the structure map beside its symbol instead
-# of on a tier of its own. `overflow-x-auto` was deliberately not used as the
-# fallback: a dashboard you scroll sideways to read defeats the page's purpose.
+# of on a tier of its own. That is what keeps the floors low enough to fit; the
+# fallback for when they still do not is `shell.PANEL_SCROLL_CSS`, which
+# contains the sideways scroll AT THE PANEL with the identity column pinned.
+# (This line refused a panel scroll outright until 2026-09-08, on the grounds
+# that a dashboard you scroll sideways to read defeats the page's purpose. It
+# does — but refusing it did not prevent the scroll, it relocated it to the
+# DOCUMENT, which carries the panel heading and the identity column off screen
+# as well. See the note above `PANEL_SCROLL_CSS`.)
 _GAP = "gap-x-[8px] gap-y-0"
 
 # ── the width budget every track floor below is spent against ────────────────
@@ -1861,10 +2053,17 @@ _GAP = "gap-x-[8px] gap-y-0"
 # track below its ``minmax()`` floor, so a panel whose floors oversubscribe this
 # does not reflow, it CLIPS.
 #
-# ``DESK_CHROME_PX`` is the MEASURED non-panel width — the icon rail's laid-out
-# 68px plus the page's own ``p-4`` and the drawer/page padding around it —
-# confirmed live at 1920 (a 1905px document less a 1741px panel grid). It is
+# ``DESK_CHROME_PX`` is the MEASURED non-panel width, and it decomposes exactly:
+# 96px of padding chain (``q-page``'s content, the page's ``p-4`` and the panel
+# wrap's ``px-4``, 16px a side each) plus the icon rail's laid-out 68px. It is
 # written down rather than computed because there is nothing to compute it from.
+#
+# ⚠ **It describes the PRIVATE app only.** The public live screens have no nav
+# rail (``live_main`` registers no drawer), so their chrome is the 96px of
+# padding chain alone — confirmed by measurement on ``live.neuralstrike.co``,
+# where a 1650px window left the 2x2 grid 1539px: 1650 - 15 of scrollbar - 96.
+# Any minimum-width figure below is therefore 68px wider than the same figure
+# for the public origin, and must say which one it means.
 #
 # ⚠ The SCROLLBAR is subtracted, and that is not fussiness: this page is taller
 # than any window it is read in, so the classic scrollbar is ALWAYS there, and a
@@ -1877,11 +2076,14 @@ PANEL_GUTTER_PX = 20              # the 2x2's ``gap-5``, between the two columns
 PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
                    - PANEL_GUTTER_PX) // 2
 
-# What a panel spends before its first track: the card's 1px border both sides,
-# the panel's ``px-4`` both sides (``_panel``) and the row's own ``px-1`` both
-# sides (``_ROW``/``_grid_head``). The gaps are ``len(tracks) - 1`` x 8px on top.
-PANEL_PAD_PX = 2 + 32 + 8
-COL_GAP_PX = 8
+# ``PANEL_PAD_PX`` (42) is what a panel spends before its first track: the
+# card's 1px border both sides, the panel's ``px-4`` both sides (``_panel``)
+# and the row's own ``px-1`` both sides (``_ROW``/``_grid_head``). ``COL_GAP_PX``
+# (8) is ``_GAP``, and there are ``len(tracks) - 1`` of them on top. Both live
+# in ``pages/panel_scroll.py`` beside the arithmetic that spends them — which
+# is also where each panel's minimum width is derived from its own grid string,
+# and where the reconciliation between that sum and what ``scrollWidth``
+# reports is written down.
 
 # Column widths are the reference design's, but every flexible track is
 # ``minmax(<reference px>, <weight>fr)`` rather than a bare pixel width with ONE
@@ -1944,8 +2146,16 @@ DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
 #
 # SCORE's 52px is the exception noted above: it holds a two-digit number, but
 # its LABEL is five caps on .2em tracking (~40px), and that is what binds it.
+#
+# NET PREMIUM's track is 88px, not the 66px its VALUE wants, for the same
+# reason: the label binds. It was "NET PREM" at 64px until the casual
+# shortening was spelled out, and the +22px is the whole price of that word.
+# Board's floor sum goes 783 -> 805, still inside the 860px a panel gets and
+# still under Positions' 839, which is the panel that sets the page's minimum
+# window — so this widening is affordable where the same move on STRAT or QTY
+# would not be.
 BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
-              "minmax(116px,1.2fr)_minmax(66px,1fr)_minmax(37px,0.8fr)_"
+              "minmax(116px,1.2fr)_minmax(88px,1fr)_minmax(37px,0.8fr)_"
               f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
 # Four tracks now, not three: the flow rows went flat (one line per alert), so
 # DETAIL takes a column of its own instead of riding under the symbol. The 3fr
@@ -2001,6 +2211,103 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
             "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
             f"minmax(60px,0.8fr)] {_GAP} w-full")
 
+# ── which leading cells of a row are its IDENTITY ────────────────────────────
+# A panel handed less width than its floors add up to scrolls ITSELF rather
+# than handing the scroll to the document (``shell.PANEL_SCROLL_CSS``). That
+# stylesheet pins the row's ``:first-child`` — and on THREE of the four grids
+# above, the first cell is not what names the row: the Board leads with SCORE,
+# the flow feed with TIME, Positions with the BOOK badge. Pinning those alone
+# would hold a rank, a clock time or a badge still while the symbol slid away
+# underneath, which is WORSE than pinning nothing, because it looks deliberate.
+#
+# So each panel says how deep its identity runs, and the answer everywhere is
+# "through the symbol, and not one track further": every pinned pixel is width
+# the reader can no longer scroll out of the way. The cost is modest — 137px on
+# the Board (SCORE + gap + SYMBOL), 132px on Flow, 125px on Positions, against
+# against the 508-839px those four panels need — and it is only ever spent
+# while a panel is too narrow
+# to show everything at once, which is the only case this exists for.
+#
+# ⚠ REORDERING a panel's columns is a change HERE too. The depth is a count of
+# leading cells, not a search for the symbol, so moving SYMBOL right without
+# moving this number pins the wrong cells silently. ``test_every_panel_pins_
+# through_the_column_that_names_the_row`` reads the depth against that panel's
+# own head tuple, which is the only place the order is written down.
+#
+# ⚠ Keyed by the GRID STRING, because that is all the shared row helpers are
+# handed: ``_grid_head`` and all four row painters take the grid and nothing
+# else, so keying on anything they do not already hold would mean four copies
+# of the row builder. A grid with no entry RAISES rather than falling back to
+# the stylesheet's one-cell pin — see ``_pin_depth``.
+_PIN_DEPTHS = {DEALER_GRID: 1, BOARD_GRID: 2, FLOW_GRID: 2, POS_GRID: 2}
+
+
+def _pin_depth(grid):
+    """How many leading cells of ``grid`` stay put while the panel scrolls."""
+    try:
+        return _PIN_DEPTHS[grid]
+    except KeyError:
+        raise ValueError(
+            "this panel grid has no pin depth, and there is no safe default: "
+            "a panel whose identity column is not its first would pin the "
+            "wrong cell and look like it meant to") from None
+
+
+# The classes every one of a panel's grids wears — its head row and each of its
+# data rows alike, which is what keeps a label over its column while both move.
+# ``min-w-`` is what gives the scroll container something wider than itself to
+# scroll: without it the tracks are simply squeezed onto their floors and the
+# row overflows a container that then never scrolls. DERIVED from the panel's
+# own grid string, so a widened track brings its own minimum with it.
+_ROW_SHELLS = {
+    grid: f"ns-panel-row ns-pin-{depth} min-w-[{grid_min_width_px(grid)}px]"
+    for grid, depth in _PIN_DEPTHS.items()}
+
+# The sticky offset for a pinned cell PAST the first: the tracks before it plus
+# the gaps between them. Every panel's first track is a bare pixel width, so it
+# is exactly as wide as its floor and the pinned pair stays flush at any width.
+#
+# Resolved ONCE at import, which is what makes these Tailwind arbitrary values
+# rather than the data-driven-colour case the house rule bans: there are four
+# panels, the numbers are fixed by the grid strings above, and nothing here is
+# computed per render. The alternative — four static rules in
+# ``shell.PANEL_SCROLL_CSS`` — was rejected because that file cannot see a
+# ``minmax()`` floor, so the first widened track would leave the pinned symbol
+# overlapping the cell beside it with nothing failing anywhere.
+# ⚠ And it can never become ``left-[var(--x)]``: the bundled Tailwind JIT emits
+# NO rule for an arbitrary value containing ``var(...)``, and emits none
+# silently.
+_PIN_OFFSETS = {
+    grid: [sum(track_floors(grid)[:i]) + i * COL_GAP_PX for i in range(depth)]
+    for grid, depth in _PIN_DEPTHS.items()}
+
+
+def _row_shell(grid):
+    """``ns-panel-row`` + the panel's pin depth + its derived ``min-width``."""
+    _pin_depth(grid)                     # a grid with no decision fails here
+    return _ROW_SHELLS[grid]
+
+
+def _pin_cell_class(grid, index):
+    """The sticky classes for the ``index``-th cell of a row on ``grid``.
+
+    Empty for cell 0: ``shell.PANEL_SCROLL_CSS`` already pins ``:first-child``
+    on every panel, and a second source for one rule is a second thing to keep
+    in step. Empty past the identity columns too. What is left — the cells
+    between — is the page's to supply, because the offset is a per-panel number
+    read off a ``minmax()`` floor that a stylesheet cannot see.
+    """
+    depth = _pin_depth(grid)
+    if not 0 < index < depth:
+        return ""
+    # ``row-start-1``/``col-start-N`` place the cell explicitly, for the same
+    # reason the stylesheet places the first one: a definitely-placed ``::after``
+    # occupies its cell, so anything left to auto-placement lands one column
+    # right of where its label is.
+    return (f"sticky row-start-1 col-start-{index + 1} z-[2] "
+            f"left-[{_PIN_OFFSETS[grid][index]}px]")
+
+
 # The type ladder. Every size is 0.8x what this page briefly carried, which was
 # the reference design's own multiplied by ~1.35 for a 2381px screen. The page
 # is read at 1920px — the width the reference was authored for — so that scaling
@@ -2023,27 +2330,128 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
 # that the size difference between them is smaller — and it is also why three
 # track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
 _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
-_ROW = f"items-center px-1 py-[11px] border-b {_ROW_RULE} cursor-pointer"
+# Split because ONE panel's rows are not always clickable: the three position
+# books are deliberately unpublished, so on the public origin those rows have
+# nowhere to go and must not be dressed as links (see ``_position_row``).
+_ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
+_ROW = f"{_ROW_STATIC} cursor-pointer"
 _VALUE = f"text-[13px] tabular-nums {CON_TXT}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
 _V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
 _SUB = "text-[10px] tabular-nums"          # a cell's second line
 _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
+# A panel-level SENTENCE that shares the body with the grids — there are
+# exactly two (the dealer's stale-walls warning and the Positions summary), and
+# both state a fact about the whole panel rather than about a column. The body
+# is a scroll container (see ``_panel``), and a full-width label inside one
+# carries its own first words off the left edge the moment the rows are
+# scrolled, so they pin instead. It costs nothing at rest: a sticky element in
+# an unscrolled container sits exactly where it laid out.
+#
+# ⚠ Deliberately NOT on ``_PLACEHOLDER``. A placeholder REPLACES the rows, so
+# that panel has no grid, no ``min-width`` and nothing to scroll — pinning it
+# would be a class that can never do anything, which reads as though it must.
+_PANEL_NOTE = "sticky left-0"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
 # the same words for both would make a dead service indistinguishable from a
 # quiet market — which is the whole reason this page must never print a zero it
 # did not read.
-WAITING_OPTIONS = "Waiting for the options service…"
+# The ONE copy lives in ``pages/copy.py`` (three screens show it, and the two
+# that are not this one cannot import ``desk`` without a cycle). Re-exported
+# under this name because several tests address it here, and that name is not
+# wrong.
+WAITING_OPTIONS = _copy.WAITING_OPTIONS
+
+# The four "the feed is fine and has nothing to say" lines, and the one warning
+# that qualifies a reading rather than replacing it.
+#
+# Constants for the same reason as ``PANEL_HEADS``: these were written out at
+# their four call sites, and a fifth reader (the standalone mirror, removed
+# 2026-09-02) had carried a byte-copy of every one of them — so one empty
+# cache could be described two different ways. Each says what is TRUE and, where
+# there is one, what makes it change: "the board fills once the scanner runs" is
+# a wait a reader can price; "No ranked symbols yet" is a full stop.
+EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
+                "gamma feed publishes.")
+EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
+EMPTY_FLOW = "Nothing unusual has traded yet today."
+EMPTY_POSITIONS = "Nothing open — no paper or Claude trades running."
+
+
+def stale_walls_note(label):
+    """Why the walls vanished from a dealer row, given a freshness label.
+
+    A silently wall-less row reads as a broken page. This reads as a stopped
+    feed, which is what it is — and it names the consequence rather than only
+    the state, because "stale · 12m" tells a reader the feed is old without
+    telling them what that costs (levels computed against a price that has
+    since moved)."""
+    return (f"Walls hidden — the gamma feed stopped updating "
+            f"({str(label).lower()}), so these levels would be out of date.")
 
 # ── the Bull / Bear chip ─────────────────────────────────────────────────────
 # The chip's frame. Its COLOUR is not here: ``bullbear.quadrant_class`` supplies
 # text, background and border from its own five-literal palette, and the chip's
 # inner labels inherit that text colour rather than setting one — so the strip
 # and the map cannot colour the same quadrant differently.
-_BB_CHIP = ("flex-1 min-w-[124px] border rounded-[2px] px-[8px] py-[6px] "
-            "gap-[5px] cursor-pointer")
+# ``border-l-[3px]`` lives HERE, on the frame, not on the stripe class: every
+# chip reserves the stripe's width at both horizons, so the strip does not
+# reflow 3px sideways when the opening bell flips it. Off-session the left
+# border simply takes the quadrant's own colour, like the other three edges.
+_BB_CHIP = ("flex-1 min-w-[124px] border border-l-[3px] rounded-[2px] "
+            "px-[8px] py-[6px] gap-[5px] cursor-pointer")
+
+# The structural stripe: the quarter's quadrant on the chip's left edge, drawn
+# only when the fill is TODAY's, so the chip carries both horizons at once
+# without either pretending to be the other. A fixed finite palette of static
+# classes, mapped from ``bullbear.QUADRANTS`` — never an f-string built from a
+# payload — and it tracks ``bullbear._CLASSES``' ramp so one quadrant is not
+# emerald in the fill and amber on the edge. HIGHER opacity than the fill
+# (/70 /40 /70 /70 /50; the edges it actually out-paints are
+# ``quadrant_class``' border-* /30 /15 /25 /30 /20, and its bg-* washes are
+# fainter still at /15 /5 /10 /15 /10), because 3px of edge has to carry at a
+# glance what a whole chip's wash carries.
+# Degrades to ``unknown`` exactly as ``quadrant_class`` does.
+#
+# ⚠ These win over ``quadrant_class``' ``border-*`` shorthand for a reason that
+# is NOT DOM class order: NiceGUI ships Tailwind v4, whose compiler emits rules
+# sorted by a canonical CSS-property list in which every per-side property
+# (``border-left-color``) follows its shorthand (``border-color``). At equal
+# specificity the later rule wins, so the stripe holds the left edge however the
+# two class strings are concatenated. ``pages/options/leg_editor.py``'s leg-card
+# accents (``accent_long``/``accent_short``) already depend on this.
+_BB_STRIPE = {
+    "rising_leading": "border-l-emerald-400/70",
+    "rising_lagging": "border-l-emerald-400/40",
+    "falling_leading": "border-l-amber-400/70",
+    "falling_lagging": "border-l-rose-400/70",
+    "unknown": "border-l-slate-400/50",
+}
+
+# Colour is never the sole carrier of a reading, so the stripe says its quadrant
+# in words too — in ``bullbear``'s words, so the strip and the map cannot name
+# one quadrant two ways.
+STRIPE_TOOLTIP_PREFIX = "On the quarter: "
+
+
+def stripe_class(q):
+    """A structural quadrant -> its left-edge classes; an unknown key degrades."""
+    return _BB_STRIPE.get(q, _BB_STRIPE["unknown"])
+
+
+def stripe_tooltip(q):
+    """The chip's hover text, naming what the left edge marks.
+
+    It hangs on the whole chip rather than the 3px edge — a stripe is too small
+    a hover target to be the only way to read it — so the
+    :data:`STRIPE_TOOLTIP_PREFIX` carries the disambiguation: without "On the
+    quarter" the reader would take it for a second name for the fill.
+    """
+    return f"{STRIPE_TOOLTIP_PREFIX}{_bb.quadrant_label(q)}"
+
+
 _BB_NAME = "text-[13px] font-semibold leading-none min-w-0 truncate"
 _BB_QUAD = "text-[10px] leading-none tracking-[.1em] opacity-80 truncate"
 # The day move is deliberately NOT coloured by its sign: ``signed_pct`` prints
@@ -2234,27 +2642,123 @@ def _compact_card(title, arcs, pill_text, delta):
                     _mount_meter(_K.meter_row(arc.get("caption", ""),
                                               arc.get("value")))
                 _mount_ruler()
-    card.on("click", lambda _e: ui.navigate.to("/sentiment"))
+    card.on("click", lambda _e: _shell.navigate_to(SENTIMENT_ROUTE))
 
 
-def _panel(title, subtitle=""):
+# The panel heads, as DATA rather than four ``_panel(...)`` argument lists.
+#
+# One source for the four heads, rather than four ``_panel(...)`` argument
+# lists and a painter that has to agree with them. It began as the fix for a
+# real drift — the standalone mirror (removed 2026-09-02) restated these titles
+# as literals and rebuilt two of the subtitles with a ``.format`` of its own,
+# so one panel could be named two ways on two screens. The mirror is gone; the
+# reason to keep the heads as data is the line below.
+#
+# The row caps are INTERPOLATED, never written down. That is the property the old
+# "HOTTEST {N}" subtitle had and the reason it was built that way: a cap that
+# moved would otherwise leave a stale number standing on the panel.
+# The second element is a USE-LINE: what the reader does with the panel, not
+# what produced it. All of this was already written — in ``page_help.py``'s
+# ``/desk`` entry, one hover away — which is the wrong side of a tooltip for the
+# landing page.
+#
+# Two facts that used to stand here are gone, and one survived. ``$SPX · SPY ·
+# $NDX · QQQ`` and ``PAPER · CLAUDE · CAPTURED`` are literally the SYMBOL and
+# BOOK columns underneath them, printed row by row. The SORT ORDER is not
+# anywhere else on the panel, so it stays — still interpolated, never written
+# down.
+PANEL_HEADS = {
+    "dealer": ("DEALER POSITIONING",
+               "Above the flip, dealers damp moves; below it they feed them."),
+    "board": ("OPPORTUNITY BOARD",
+              f"The {BOARD_ROWS_N} hottest names right now — where to start "
+              f"looking."),
+    # Which side traded, never who initiated: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here can honestly say. The row
+    # vocabulary has always been careful about this; now the panel says so.
+    "flow": ("LIVE FLOW ALERTS",
+             f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
+             f"who initiated."),
+    "positions": ("POSITIONS",
+                  "What you and Claude are holding, and what needs a decision."),
+}
+
+# One label per grid track, hoisted for the same reason as the heads above: the
+# mirror carries its own copy of all four lists, and a rename that reached one
+# screen and not the other would put two different words on one number.
+#
+# Each label names what the number is FOR. ``test_every_column_label_fits_the_
+# track_it_stands_over`` is the constraint every one of them was checked
+# against — a label on .2em tracking does not shrink with the data under it, so
+# a rename is a width change whether or not it was meant as one.
+#
+# ⚠ CEILING and FLOOR drop the call/put naming, and that is deliberate rather
+# than careless: the SIDE is still carried, in the cell's colour (each wall is
+# painted in its own marker's hue on the structure map beside it). The reader's
+# question at a glance is what stops price here, not which contract class the
+# level was derived from. The one thing lost is that a call wall is only a
+# ceiling while price sits BELOW it — which is exactly what the structure map
+# in the next column shows.
+DEALER_HEADS = ("SYMBOL", "PRICE", "FLIP LEVEL", "PRICE VS WALLS",
+                "CEILING", "FLOOR", "DEALER MODE")
+# NET PREMIUM is the one expansion that cost width: 88px against a 66px floor,
+# so BOARD_GRID's fifth track was widened to 88 (panel floor 783 -> 805, still
+# inside the 860px a panel gets). ATM IV and P/C stay — the standing rule is to
+# spell out casual shortenings and keep trader acronyms, and those two are the
+# vocabulary rather than shorthand for it.
+BOARD_HEADS = ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV", "NET PREMIUM",
+               "P/C", "SIGNAL", "SETUP")
+FLOW_HEADS = ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+# ⚠ STRAT and QTY are NOT abbreviations left by accident. They are the two
+# tracks whose floor the HEAD LABEL binds (see POS_GRID's notes), and at 8.0px
+# per character "STRATEGY" needs 64px of 42 and "CONTRACTS" 72px of 36.
+# Widening both costs ~58px against the 43px of slack between this page's
+# minimum supported window and the 1920px it is read at — i.e. it would clip
+# the panel on the screen it is read on. Pinned by test.
+POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
+             "STRIKES", "QTY", "OPEN P&L", "STATUS")
+
+
+def _panel(title, use_line=""):
     """A console card with a titled head; returns the BODY container.
 
     The head is built ONCE and the body is what each painter clears, so a
-    repaint can neither duplicate the title nor strand a handle to it."""
+    repaint can neither duplicate the title nor strand a handle to it.
+
+    Returns ``(body, head_slot)``. ``body`` is what each painter clears;
+    ``head_slot`` is an empty right-aligned row on the TITLE line, for a fact
+    that moves with the data (the Opportunity Board's signal counts). A painter
+    that uses it must clear it too — the head is built once, the slot's
+    contents are not.
+
+    ``use_line`` gets its OWN line UNDER the title row, and that is not a
+    layout preference. The slot beside the title is ``whitespace-nowrap``,
+    which is right for a short fact and would push a sentence straight out of
+    the narrowest panel (Flow's floor is 508px); it also wears the small-caps
+    ``.2em`` tracking, which is unreadable on prose.
+    """
     with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
-        with ui.row().classes(
-                f"items-baseline justify-between w-full gap-4 border-b "
-                f"{CONSOLE_RULE} pb-2"):
-            ui.label(title).classes(
-                f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] "
-                f"{CON_TXT}")
-            if subtitle:
-                ui.label(subtitle).classes(
-                    f"text-[10px] tracking-[.2em] whitespace-nowrap "
-                    f"{CON_TXT_DIM}")
-        body = ui.column().classes("w-full gap-0")
-    return body
+        with ui.column().classes(
+                f"w-full gap-1 border-b {CONSOLE_RULE} pb-2"):
+            with ui.row().classes(
+                    "items-baseline justify-between w-full gap-4"):
+                ui.label(title).classes(
+                    f"{CONSOLE_DISPLAY} text-[19px] font-bold "
+                    f"tracking-[.16em] {CON_TXT}")
+                head_slot = ui.row().classes(
+                    "items-center gap-2 whitespace-nowrap shrink-0")
+            if use_line:
+                ui.label(use_line).classes(
+                    f"text-[11px] leading-snug {CON_TXT_DIM}")
+        # ⚠ The scroll container is the BODY, never the card above it. A panel
+        # too narrow for its floors has to scroll SOMETHING, and everything
+        # outside this element is what the reader would otherwise lose: put it
+        # on the card and the panel's own title slides away with the numbers,
+        # which is half of what the document-level scroll was doing wrong.
+        # ``min-width`` lives on the rows (``_row_shell``); this is only the
+        # window they move behind.
+        body = ui.column().classes("w-full gap-0 ns-panel-scroll")
+    return body, head_slot
 
 
 def _grid_head(grid, labels):
@@ -2263,10 +2767,17 @@ def _grid_head(grid, labels):
     ``px-1`` matches the data row's own horizontal padding (``_ROW``), which is
     what actually keeps a label over its column: the padding shrinks the grid's
     content box, and if the two rows disagreed about it every fixed track would
-    start 4px out of step with its label."""
-    with ui.element("div").classes(f"{grid} px-1 pb-2 border-b {_HEAD_RULE}"):
-        for text in labels:
-            ui.label(text).classes(_HEAD)
+    start 4px out of step with its label.
+
+    It wears the panel's scroll shell and its pins for the same reason: a head
+    row that did not scroll with the rows, or pinned to a different depth than
+    they do, would put every label over the wrong number the moment the panel
+    is narrow enough to move — which is exactly when the labels matter most."""
+    with ui.element("div").classes(
+            f"{grid} {_row_shell(grid)} px-1 pb-2 border-b {_HEAD_RULE}"):
+        for index, text in enumerate(labels):
+            ui.label(text).classes(
+                f"{_HEAD} {_pin_cell_class(grid, index)}".rstrip())
 
 
 def _cell(text, extra=""):
@@ -2413,11 +2924,25 @@ def render():
         # need it never shows it. ``set_visibility(False)`` is ``display:none``,
         # which a flex ``gap`` skips entirely — the hidden row costs no height.
         # The click that dismisses it IS the gesture that unblocks audio.
-        unlock_btn = ui.button("ENABLE SPOKEN ALERTS", icon="volume_up",
-                               color=None).props("no-caps dense").classes(
-            f"self-start text-[11px] tracking-[.14em] px-3 "
-            f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
-        unlock_btn.set_visibility(False)
+        #
+        # ⚠ NOT BUILT AT ALL when spoken alerts are off — the THIRD caller of
+        # the synthesizer, and the one ``voice_enabled`` did not cover. Its
+        # handler is an ``edge_tts`` call to a Microsoft endpoint plus an mp3
+        # written into ``webgui/data/voice/``, and on the public live origin
+        # (where the pin switches voice off) the button is reachable from a
+        # browser console in two messages: ``emitEvent`` the blocked event —
+        # ``ui.on`` subscribes on the client LAYOUT, which is visible, so
+        # NiceGUI's hidden-element event gate does not apply — then click the
+        # revealed button. Hidden is not absent. The handler refuses underneath
+        # as well; a control that cannot work must not be drawn, and the thing
+        # it cannot do must also refuse.
+        unlock_btn = None
+        if app_settings.load().get("voice_enabled"):
+            unlock_btn = ui.button(VOICE_UNLOCK_LABEL, icon="volume_up",
+                                   color=None).props("no-caps dense").classes(
+                f"self-start text-[11px] tracking-[.14em] px-3 "
+                f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
+            unlock_btn.set_visibility(False)
 
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO QUOTE AT ALL. The Dealer Positioning panel
@@ -2502,6 +3027,11 @@ def render():
                 # so the two screens cannot report different counts.
                 bb_headline = ui.label("").classes(
                     f"text-[13px] leading-none {CON_TXT_MUTED}")
+                # What it was sorted by. Dimmer than the count, because it
+                # qualifies that sentence rather than adding a second reading —
+                # and empty until there is something sorted to describe.
+                bb_caption = ui.label("").classes(
+                    f"text-[11px] leading-none {CON_TXT_DIM}")
             bb_box = ui.row().classes("w-full items-stretch gap-2 flex-wrap")
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
@@ -2524,33 +3054,71 @@ def render():
         #   + 164 of measured chrome           = 1862px of LAYOUT width
         #   + 15 for the classic scrollbar     = 1877px of innerWidth
         #
+        # ⚠ The sum above is prose; the LIVE version of it is
+        # ``panel_scroll.panel_min_width_px``, which re-derives each panel's
+        # minimum from that panel's own grid string and owns ``PANEL_PAD_PX``.
+        # It is pinned by a test that has to MOVE when a floor moves, so a
+        # widened track cannot leave a stale number behind here — which is what
+        # happened to the Board's figure below before it was caught.
+        #
+        # **The 839 is measured, not merely summed.** Stepping the window width
+        # on the public origin, the Positions card's ``offsetWidth`` reached
+        # exactly 839 at the same width its ``scrollWidth - clientWidth`` first
+        # reached 0 — the card stops overflowing at 839px. ⚠ Its ``scrollWidth``
+        # reads 817 while it is clipping, and that is NOT evidence against the
+        # sum: ``scrollWidth`` is a padding-box measure (never the 2px border)
+        # and, on a box that does not scroll, it drops the END padding too. The
+        # missing 22 is 16 of the card's padding-right, 4 of the row's, and 2 of
+        # border. See ``panel_scroll`` for the control experiment that settled
+        # it, and for why the row reads 801 today and would read 805 if it
+        # were given an ``overflow-x`` that made it a scroll container.
+        #
         # At the 1920px window this page is read at, ``PANEL_BUDGET_PX`` hands
         # each panel 860px (measured: 861), so Positions clears its floor by
-        # 21px and the other three by more (Board 783px, Dealer 757px, Flow
+        # 21px and the other three by more (Board 805px, Dealer 757px, Flow
         # 508px). Measured live at 1920 and at 2560: no panel, and no cell in
-        # one, reports a horizontal overflow — and at exactly 1877 the panels
-        # measure 839px, so the sum above is the boundary rather than an
-        # estimate of it. **Below it the page clips**: a CSS grid will not shrink
-        # a track under its minmax() floor, so the rows overflow their card
-        # rather than reflowing. Measured at 1600 (701px panels): Positions over
-        # by 134px, the Board by 78, Dealer Positioning by 52; only Flow, with
-        # four tracks, still fits. Keep this sum current when a floor moves; it
-        # is the number the next track is sized against.
+        # one, reports a horizontal overflow.
         #
-        # `overflow-x-auto` is deliberately NOT the fallback — see the note above
-        # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
-        # purpose. If the narrow case ever has to work, narrow the tracks — and
-        # the type standing in them, together (see the ladder above).
+        # ⚠ **1877 is where the PANEL stops fitting, and it is the PRIVATE
+        # app's number** — see ``DESK_CHROME_PX``, whose 164 includes 68px of
+        # icon rail the public screens do not have. The public equivalent is
+        # 1809, and the card was measured at 839 with zero overflow at 1808.
+        # (1808 already measures clean; the half-pixel is the odd width being
+        # halved between two columns.) Below it the rows overflow their card
+        # rather than reflowing: a CSS grid will not shrink a track under its
+        # minmax() floor. At 1600 the private app's panels are 700px each —
+        # 139px SHORT of what Positions needs, 105 short for the Board and 57
+        # for Dealer Positioning; only Flow, with four tracks, still fits.
+        #
+        # ⚠ **A panel overflowing is not yet the page scrolling sideways**, and
+        # conflating the two reads as though the boundary above were wrong. The
+        # padding chain absorbs 16px of overflow per level, so the document
+        # keeps its width well past the point the cards stop containing their
+        # rows: measured on the public origin, the panel overflows below 1809
+        # but ``documentElement`` reports 0px of overflow at 1672 and only 1px
+        # at 1670 — a boundary ~140px narrower. The defect between the two is
+        # not a sideways scrollbar at all; it is rows painting out through the
+        # card's own border, between those two widths.
+        #
+        # The FIRST answer is still to narrow the tracks — and the type standing
+        # in them, together (see the ladder above): a panel that fits is read
+        # without being operated. Where they cannot be narrowed further, the
+        # fallback below 1877 is ``shell.PANEL_SCROLL_CSS``, which contains the
+        # sideways scroll at the PANEL with the identity column pinned, so the
+        # heading and the symbol stay put. That reverses the refusal this note
+        # used to carry, and the reason is the paragraph directly above: refusing
+        # a panel scroll never stopped the sideways scroll, it just handed it to
+        # the document, which loses strictly more of the reader's place.
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
-            dealer_body = _panel("DEALER POSITIONING", " · ".join(DESK_SYMBOLS))
-            # Both subtitles are DERIVED from their panel's row cap, because
-            # each used to be a word and a number written down separately — and
-            # both numbers have now moved.
-            board_body = _panel("OPPORTUNITY BOARD", f"HOTTEST {BOARD_ROWS_N}")
-            flow_body = _panel("LIVE FLOW ALERTS", f"NEWEST {FLOW_ROWS_N}")
-            pos_body = _panel("POSITIONS", " · ".join(
-                b["source"] for b in BOOKS))
+            # All four heads come from ``PANEL_HEADS`` — one copy, with the
+            # row caps still interpolated rather than written down.
+            dealer_body, _ = _panel(*PANEL_HEADS["dealer"])
+            # Only the board uses its head slot today - the Opportunity Board's
+            # Buy / Neutral / Sell counts, quoted from that page's own summary.
+            board_body, board_signals = _panel(*PANEL_HEADS["board"])
+            flow_body, _ = _panel(*PANEL_HEADS["flow"])
+            pos_body, _ = _panel(*PANEL_HEADS["positions"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -2622,10 +3190,25 @@ def render():
                           _CC.delta_parts(_arc_value(t_arcs, 0),
                                           _arc_value(t_arcs, 2), "MONTH"))
 
+    # The seat order the strip last drew, fed back into ``by_day_move`` so its
+    # hysteresis has something to hold: the sorter is a pure function of
+    # (rows, previous), so without this the margin buys nothing and the strip
+    # re-sorts from scratch on every 30 s repaint. Page state in a local dict,
+    # never a module global — one client, one strip, one memory.
+    bb_seats = {"order": None}
+
     def _paint_bullbear():
         view = _view("sentiment:bullbear")
-        bb_headline.text = bullbear_headline(view)
-        chips = bullbear_chips(view)
+        # ONE clock for the whole paint, as ``_paint`` takes one for the page:
+        # two would let the headline name a horizon the chips were not drawn on.
+        now = datetime.now().astimezone()
+        chips = bullbear_chips(view, now=now, previous=bb_seats["order"])
+        bb_seats["order"] = [c["symbol"] for c in chips]
+        bb_headline.text = bullbear_headline(view, now=now)
+        # The horizon comes off the chips rather than from a third
+        # ``strip_is_live`` call — every chip in one paint carries the same
+        # flag, and nothing was sorted at all when there are none.
+        bb_caption.text = bullbear_caption(chips[0]["live"]) if chips else ""
         bb_box.clear()
         with bb_box:
             if not chips:
@@ -2637,6 +3220,16 @@ def render():
     def _bullbear_chip(chip):
         el = ui.column().classes(
             f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
+        # The stripe ONLY on a live strip: off-session both quadrants are the
+        # same value and an edge repeating the fill says nothing. Colour and
+        # words come off ONE decision on ONE field — a chip carrying the stripe
+        # without its tooltip would make colour the sole carrier of a reading.
+        # Adding the class after the frame's is safe: see ``_BB_STRIPE`` — the
+        # left edge wins on Tailwind's property order, not on class order.
+        if chip["live"]:
+            quad = chip["structural_quadrant"]
+            el.classes(stripe_class(quad))
+            el.tooltip(stripe_tooltip(quad))
         with el:
             with ui.row().classes(
                     "items-baseline justify-between w-full gap-2 flex-nowrap"):
@@ -2680,21 +3273,17 @@ def render():
                 return
             rows = dealer_rows(matrix, fresh["stale"])
             if not rows:
-                ui.label("No dealer positioning published for these symbols "
-                         "yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_DEALER).classes(_PLACEHOLDER)
                 return
             if fresh["stale"]:
                 # Say WHY the walls vanished. A silently wall-less row reads as
                 # a broken page; this reads as a stopped feed, which is true.
-                ui.label(
-                    f"Walls withheld — GEX feed {fresh['label'].lower()}"
-                ).classes(f"text-[10px] {CON_WARN} pb-1")
+                ui.label(stale_walls_note(fresh["label"])).classes(
+                    f"text-[10px] {CON_WARN} pb-1 {_PANEL_NOTE}")
             # Seven labels for seven tracks. NET GEX and the regime chip share
             # the last one — the chip is the WORD for the number above it, so
             # the label names both.
-            _grid_head(DEALER_GRID,
-                       ("SYMBOL", "SPOT", "GAMMA FLIP", "STRUCTURE MAP",
-                        "CALL WALL", "PUT WALL", "NET GEX / REGIME"))
+            _grid_head(DEALER_GRID, DEALER_HEADS)
             for row in rows:
                 _dealer_row(row)
 
@@ -2707,7 +3296,8 @@ def render():
         # The cell stays a single line rather than borrowing something unrelated
         # to fill the space.
         el = ui.element("div").classes(
-            f"{DEALER_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
                 f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
@@ -2750,16 +3340,35 @@ def render():
                         f"self-start {regime_chip_class(row['regime_word'])}")
         el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
+    def _paint_signal_counts(matrix):
+        """The head's Buy / Neutral / Sell chips, rebuilt with the body.
+
+        Withheld entirely when ``board_signal_facts`` returns None, rather than
+        drawn as zeros - see that builder. The chips wear the board page's own
+        class, so a BUY here and a BUY in the SIGNAL column below are visibly
+        one thing."""
+        board_signals.clear()
+        facts = board_signal_facts(matrix)
+        if not facts:
+            return
+        with board_signals:
+            ui.label("SIGNALS").classes(_STRIP_EYEBROW)
+            for fact in facts:
+                ui.label(f"{fact['label']} {fact['count']}").classes(
+                    f"px-[5px] py-[2px] rounded-[2px] text-[9px] "
+                    f"tracking-[.1em] whitespace-nowrap {fact['cls']}")
+
     def _paint_board():
         board_body.clear()
         matrix = _view("options:matrix")
+        _paint_signal_counts(matrix)
         with board_body:
             if matrix is None:
                 ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
                 return
             rows = opportunity_rows(matrix)
             if not rows:
-                ui.label("No ranked symbols yet.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_BOARD).classes(_PLACEHOLDER)
                 return
             # Eight labels for eight tracks, ONE line per symbol. WHY and SETUP
             # were the two qualifiers riding under the symbol and the signal;
@@ -2770,11 +3379,9 @@ def render():
             # ATM IV cell on the same line.
             #
             # SCORE rather than HOTNESS because the first track cannot hold
-            # seven letters of 10px caps on .2em tracking — and the panel's own
-            # subtitle already says HOTTEST N, so nothing is lost.
-            _grid_head(BOARD_GRID,
-                       ("SCORE", "SYMBOL", "WHY", "ATM IV", "NET PREM", "P/C",
-                        "SIGNAL", "SETUP"))
+            # seven letters of 10px caps on .2em tracking - and the panel's own
+            # use-line already says "the N hottest names", so nothing is lost.
+            _grid_head(BOARD_GRID, BOARD_HEADS)
             for row in rows:
                 _board_row(row)
 
@@ -2785,11 +3392,16 @@ def render():
         # line by construction, and the scores are ranked and adjacent, so the
         # ordering already carries the comparison the bar was drawing.
         el = ui.element("div").classes(
-            f"{BOARD_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06]")
+            f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06]")
         with el:
             _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
+            # SCORE is pinned by the stylesheet as this row's first cell; the
+            # symbol is what the reader is actually holding onto, so it pins
+            # too (see ``_PIN_DEPTHS``) and carries its own offset.
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(BOARD_GRID, 1)}")
             # A rationale is up to three clauses of ordinary words. Its track
             # carries by far the largest weight (see ``BOARD_GRID``) precisely
             # so this never ellipses at the width the page is read at; the
@@ -2818,7 +3430,7 @@ def render():
             # setup", where a "NEUTRAL" chip would read as a finding.
             if row["setup"]:
                 ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
-        el.on("click", lambda _e: ui.navigate.to("/options/matrix"))
+        el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
 
     def _paint_flow():
         flow_body.clear()
@@ -2829,7 +3441,7 @@ def render():
                 return
             rows = flow_rows(view)
             if not rows:
-                ui.label("No alerts today.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_FLOW).classes(_PLACEHOLDER)
                 return
             # Four labels for four tracks, ONE line per alert. Every other panel
             # here stacks a qualifier under its value because it is short of
@@ -2838,13 +3450,13 @@ def render():
             # and cost a line of height per alert. Flat, the same panel carries
             # nearly twice as many alerts (see ``FLOW_ROWS_N``).
             #
-            # SIDE rides with KIND in the last track ("Unusual activity ·
+            # SIDE rides with KIND in the last track ("Unusual volume ·
             # Call"), which is where it was already being read from. It is
             # still "Call"/"Put", never bought/sold: Schwab publishes no
             # time-and-sales tape to this app, so nobody here knows who
             # initiated. DETAIL carries the premium the alert fired on, in the
             # Flow Alerts page's own wording.
-            _grid_head(FLOW_GRID, ("TIME", "SYMBOL", "DETAIL", "KIND"))
+            _grid_head(FLOW_GRID, FLOW_HEADS)
             for row in rows:
                 _flow_row(row)
 
@@ -2856,14 +3468,18 @@ def render():
         # designed for (see the ``GLOW_SEC`` notes). ``state["glow_now"]`` is the
         # paint's single clock — not a fresh ``monotonic()`` per row.
         el = ui.element("div").classes(
-            f"{FLOW_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            f"{FLOW_GRID} {_row_shell(FLOW_GRID)} {_ROW} "
+            f"hover:bg-[{_C['line']}]/[0.06] "
             + glow_classes(state["glow"].get(row.get("id")),
                            state["glow_now"]))
         with el:
             ui.label(row["time"] or _DASH).classes(
                 f"text-[11px] tabular-nums {CON_TXT_MUTED}")
+            # TIME alone does not name an alert — two can share a minute — so
+            # the pin runs through the symbol (see ``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(FLOW_GRID, 1)}")
             # `min-w-0` is what lets `truncate` bite: a grid item's automatic
             # minimum is its content, so without it a long detail line widens
             # the track past the panel instead of ellipsing inside it.
@@ -2874,7 +3490,7 @@ def render():
             # and shared by the kind and the side it qualifies.
             ui.label(flow_kind_text(row)).classes(
                 f"text-[10px] min-w-0 truncate {row['_tone_class']}")
-        el.on("click", lambda _e: ui.navigate.to("/options/flow"))
+        el.on("click", lambda _e: _shell.navigate_to(FLOW_ROUTE))
 
     def _paint_positions():
         pos_body.clear()
@@ -2893,10 +3509,10 @@ def render():
             summary = positions_summary(rows)
             shown = rows[:POSITION_ROWS_N]
             ui.label(summary_line(summary, len(shown))).classes(
-                f"text-[11px] tracking-[.16em] pb-2 "
+                f"text-[11px] tracking-[.16em] pb-2 {_PANEL_NOTE} "
                 + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
             if not rows:
-                ui.label("No open positions.").classes(_PLACEHOLDER)
+                ui.label(EMPTY_POSITIONS).classes(_PLACEHOLDER)
                 return
             # Ten labels for ten tracks, ONE line per row — the same move the
             # board and the flow feed just made, and here it is what pays for
@@ -2906,23 +3522,35 @@ def render():
             # of riding under the strikes. ENTRY and MARK are the pair the
             # unrealized figure is the difference of, so the row shows its own
             # arithmetic rather than only its result.
-            _grid_head(POS_GRID,
-                       ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
-                        "STRIKES", "QTY", "UNREALIZED", "FLAG"))
+            _grid_head(POS_GRID, POS_HEADS)
             for row in shown:
                 _position_row(row)
 
     def _position_row(row):
         # Rebuild-time only, same as the flow row above — never updated in place.
+        #
+        # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
+        # deliberately unpublished, so on the public origin there is nowhere to
+        # send the reader: the row keeps every number it has and loses the
+        # pointer, the hover wash and the handler. A row dressed as a link that
+        # leads nowhere reads as broken, which is worse than reading as static.
+        route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
+        can_open = _shell.can_navigate(route)
         el = ui.element("div").classes(
-            f"{POS_GRID} {_ROW} hover:bg-[{_C['line']}]/[0.06] "
+            f"{POS_GRID} {_row_shell(POS_GRID)} "
+            f"{_ROW if can_open else _ROW_STATIC} "
+            + (f"hover:bg-[{_C['line']}]/[0.06] " if can_open else "")
             + glow_classes(state["glow"].get(row.get("position_id")),
                            state["glow_now"]))
         with el:
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
+            # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
+            # THAT — and a pinned PAPER/DRIVER chip beside ten scrolling
+            # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+                f"{_pin_cell_class(POS_GRID, 1)}")
             ui.label(strategy_label(row["strategy"])).classes(
                 f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
             _cell(expiry_text(row))
@@ -2946,7 +3574,8 @@ def render():
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")
-        el.on("click", lambda _e, r=row: _open_position(r))
+        if can_open:
+            el.on("click", lambda _e, r=row: _open_position(r))
 
     # ── click-through ────────────────────────────────────────────────────────
     @guard
@@ -2963,12 +3592,16 @@ def render():
         """The strip is a pointer, not a second map: every industry and stock
         inside a sector lives one click away, and none of them is on this
         page."""
-        ui.navigate.to(BULLBEAR_ROUTE)
+        _shell.navigate_to(BULLBEAR_ROUTE)
 
     @guard
     def _open_position(row):
-        """Each book has its own page; the source chip is what decides which."""
-        ui.navigate.to(POSITION_ROUTES.get(row.get("source"), "/options/paper"))
+        """Each book has its own page; the source chip is what decides which.
+
+        A no-op where this process publishes no such page — the row wires no
+        handler there either, so this is the backstop rather than the gate."""
+        _shell.navigate_to(
+            POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
@@ -3046,7 +3679,13 @@ def render():
 
     @guard
     def _voice_blocked(_e=None):
-        """The browser refused to play. Offer the gesture that fixes it."""
+        """The browser refused to play. Offer the gesture that fixes it.
+
+        ``ui.on`` is registered unconditionally, so this fires on any client
+        that emits the event — including one a stranger types into a console.
+        With voice off there is no button, and nothing to reveal."""
+        if unlock_btn is None:
+            return
         unlock_btn.set_visibility(True)
 
     @guard_async
@@ -3057,9 +3696,19 @@ def render():
         the document, so the ``await`` below does not cost it. Any other click
         on the page unlocks it too; this button exists because nothing TELLS the
         user that.
+
+        ⚠ THE GATE IS THE FIRST STATEMENT, and it re-reads the setting rather
+        than trusting the build. This is the third caller of the synthesizer —
+        ``speak_phrases`` and ``_prewarm_clips`` are the other two — and the one
+        ``voice_enabled`` did not cover: a synthesis is an outbound call to a
+        Microsoft endpoint and an mp3 written to disk, which on the public
+        origin any anonymous visitor could drive.
         """
-        unlock_btn.set_visibility(False)
         settings = app_settings.load()
+        if not settings.get("voice_enabled"):
+            return
+        if unlock_btn is not None:
+            unlock_btn.set_visibility(False)
         url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
                                  settings.get("voice_name"))
         if url:
@@ -3068,7 +3717,8 @@ def render():
                 f"{speak_volume(settings)})")
 
     ui.on(VOICE_BLOCKED_EVENT, _voice_blocked)
-    unlock_btn.on_click(_unlock_voice)
+    if unlock_btn is not None:
+        unlock_btn.on_click(_unlock_voice)
 
     @guard
     def _tick_clock():

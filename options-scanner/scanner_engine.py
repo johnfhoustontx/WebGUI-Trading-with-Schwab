@@ -458,7 +458,56 @@ LIQUIDITY_THRESHOLDS = {
         "min_volume": 10,
         "max_spread_pct": 0.25,
     },
+    # 30-45 DTE income window. Deliberately NOT a copy of SWING: the two horizons
+    # differ on each axis, and in opposite directions.
+    #
+    #   min_oi 100 (long 20) -- ABOVE swing's. Open interest is a STOCK, not a
+    #   flow: a monthly strike has had weeks to accumulate resting size, so 50
+    #   contracts here is a far weaker signal of tradeability than 50 on a strike
+    #   listed days ago. Matching 0-DTE's floor is the honest equivalent.
+    #
+    #   min_volume 5 -- BELOW swing's 10. Volume is a flow, and the same strike
+    #   trades less PER DAY the further out it is: interest spreads across many
+    #   more listed expirations and holders sit rather than scalp. A swing-sized
+    #   volume floor would reject genuinely liquid monthlies. 5 also matches
+    #   strategy_scoring.VOL_FLOOR, the per-leg floor the cash-secured-put side
+    #   of this same window is already measured against.
+    #
+    #   max_spread_pct 0.20 -- between 0-DTE's 0.15 and swing's 0.25. The gate is
+    #   a RATIO, and the mark is much larger at 35 DTE, so the same cents-wide
+    #   market reads as a smaller percentage; a window whose whole thesis is the
+    #   premium collected can afford to demand a tighter market than the 1-15 DTE
+    #   swing does without becoming unreachable. MIN_ABS_SPREAD still bypasses it
+    #   for penny-wide markets.
+    "INCOME": {
+        "min_oi": 100,
+        "min_oi_long": 20,
+        "min_volume": 5,
+        "max_spread_pct": 0.20,
+    },
 }
+
+# Every trade_type the scanner actually emits. This exists for ONE reason:
+# `passes_liquidity_gate` fails OPEN on a trade type LIQUIDITY_THRESHOLDS does
+# not carry ("unknown trade type -- don't filter"), and that silence is how the
+# INCOME window came to run with no OI floor, no volume floor and no spread cap
+# at all. The default is correct and stays -- other callers legitimately pass
+# trade types this dict has never covered, and a blanket fail-closed would
+# silently empty them -- so the guard is a test over this tuple instead
+# (tests/test_scanner_engine.py::TestScannedTradeTypesAreAllGated).
+SCANNED_TRADE_TYPES = ("0-DTE", "SWING", "INCOME")
+
+# The windows whose positions are HELD across sessions, and so can be held
+# through an earnings report. 0-DTE is absent because it is flat by the close --
+# a hold-duration argument, NOT a claim that check_earnings_conflict would
+# return False for a same-day expiry (its window is [today - 5d, expiration], so
+# a report earlier this week falls inside it).
+#
+# Exported because the gate is applied in TWO places: screen_spreads' own loop,
+# and services/options_svc.compute.swing_scan's post-build filter over the
+# builder families, which screen_spreads never sees. They must agree, and a
+# shared tuple is the only way they cannot drift.
+EARNINGS_GATED_TRADE_TYPES = ("SWING", "INCOME")
 
 # Absolute spread cents below which the percentage gate is bypassed.
 # Penny-wide markets on cheap options (e.g. $0.05 mid, $0.01 ask-bid) are
@@ -552,7 +601,8 @@ def passes_liquidity_gate(contract, trade_type, is_short_leg=True):
 
     Args:
         contract: dict with keys oi, volume, bid, ask, mark
-        trade_type: "0-DTE" or "SWING"
+        trade_type: one of SCANNED_TRADE_TYPES ("0-DTE" / "SWING" / "INCOME").
+            Anything else fails OPEN — see the note on SCANNED_TRADE_TYPES.
         is_short_leg: if True, volume check is applied; if False, only OI and spread
     """
     thresholds = LIQUIDITY_THRESHOLDS.get(trade_type)
@@ -826,8 +876,15 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             if not (dte_min <= dte <= dte_max):
                 continue
 
-            # Earnings avoidance (swing trades only)
-            if earnings_date and trade_type == "SWING":
+            # Earnings avoidance — for the windows whose positions are HELD
+            # across sessions. A 0-DTE position opens and closes inside one, so
+            # it cannot be held through a report; SWING and INCOME both can, and
+            # at 30-45 DTE straddling one is the common case rather than the
+            # exception. (Note this is a hold-duration argument, not a claim that
+            # check_earnings_conflict would return False for a 0-DTE: its window
+            # is [today - 5d, expiration], so a report earlier this week falls
+            # inside it. 0-DTE is exempt because it is flat by the close.)
+            if earnings_date and trade_type in EARNINGS_GATED_TRADE_TYPES:
                 if check_earnings_conflict(earnings_date, exp_str):
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue

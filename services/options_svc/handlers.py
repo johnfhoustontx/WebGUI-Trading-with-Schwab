@@ -22,8 +22,10 @@ from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
-from shared.contracts.options import MatrixSnapshot, NetPremiumSnapshot, ScanResult
+from shared.contracts.options import (IncomeScan, MatrixSnapshot,
+                                      NetPremiumSnapshot, ScanResult)
 from services import _degrade
+from services._parallel import parallel_map
 
 log = logging.getLogger(__name__)
 
@@ -124,11 +126,19 @@ def _is_stale_open(command) -> bool:
 #                   passes BOTH, re-applying a partial close or paying a second
 #                   roll's commission.
 #   gamma_analyze - a PAID Claude call.
+#   income_scan   - ~23 /chains fetches. It mutates nothing and bills no vendor,
+#                   so it is here for the THIRD reason: external budget. The
+#                   income window's whole design premise is call-count
+#                   minimisation - one pass a day instead of the autoscan's
+#                   cadence, ~23 calls against ~690 - and a backlog replay runs
+#                   it once per queued Refresh click with nobody watching. The
+#                   scheduled slot republishes the same board anyway, so a
+#                   dropped replay costs a reader nothing.
 #
 # ⚠ This is an age gate, not true idempotency: two genuinely FRESH duplicates
 # still both run. It closes the REPLAY case with machinery the service already
 # trusts; a dedup store keyed on the stream message id would be the stronger fix.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze")
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan")
 
 
 def _is_stale_side_effect(command) -> bool:
@@ -158,6 +168,29 @@ EVENT_HEADER = "events:options:header"
 CACHE_SWING = "cache:options:swing"
 EVENT_SWING = "events:options:swing"
 
+# The 30-45 DTE income window's published board. One view for the WHOLE
+# watchlist (see publish_income) — unlike cache:options:swing, which is one
+# on-demand symbol at a time.
+CACHE_INCOME = "cache:options:income"
+EVENT_INCOME = "events:options:income"
+
+# The OUTCOME of one ``income_open`` — what the Income page turns into a toast.
+# A separate view from the board, because it is a different kind of thing: the
+# board is a once-daily reading of the market and this is the answer to one
+# click. Folding a per-click result into the board would repaint every reader's
+# table for one reader's button, and would make the board's own version — which
+# the page uses to decide whether to repaint — move for a reason that has
+# nothing to do with the candidates.
+#
+# ⚠ Written on EVERY outcome including a refusal, and short-TTL'd. A refusal
+# that is not published is a button that does nothing, which is the single worst
+# reading here: the user cannot tell "the account refused" from "the service is
+# down". The TTL keeps a stale answer from being read as a fresh one after a
+# restart.
+CACHE_INCOME_OPEN = "cache:options:income_open"
+EVENT_INCOME_OPEN = "events:options:income_open"
+INCOME_OPEN_TTL_SEC = 600
+
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
 # Manual (scanner-baseline) book performance analytics — the benchmark to compare the
@@ -181,6 +214,8 @@ EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 # Settings auto-close master toggle (default ON; only an explicit False disables).
 CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
 EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
+CACHE_CAPTURED_PERF = "cache:options:captured_perf"
+EVENT_CAPTURED_PERF = "events:options:captured_perf"
 CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
 
 # MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
@@ -217,6 +252,89 @@ GAMMA_HISTORY_VIEWS = ("GEX", "Charm", "DEX", "Vanna")
 def gamma_history_key(view: str) -> str:
     """Cache key holding one view's intraday history rows."""
     return f"cache:options:gamma_hist_{str(view).lower()}"
+
+
+# ── The PUBLISHED per-symbol Gamma snapshots ────────────────────────────────
+# CACHE_GAMMA above is ONE symbol-agnostic key holding whatever the private app
+# last looked at — and ``refresh_gamma_current`` reads the symbol back out of it,
+# so the slot is sticky and driven by the private page. Four of the public live
+# screens are views of /options/gamma, and three of them name a symbol, so a
+# shared slot means the screen labelled "$SPX" renders whatever the app last
+# selected and the SPY/QQQ ones render $SPX.
+#
+# These keys are strictly ADDITIVE: CACHE_GAMMA and its history keys keep their
+# exact shape and meaning, and the private page reads them unchanged. Re-keying
+# the existing cache would change the app's behaviour for a public feature, and
+# the app's screens are the source of truth the public ones mirror, never the
+# reverse.
+#
+# ⚠ CROSS-TIER MIRROR. These symbols are the ones webgui/live_screens.py's gamma
+# SCREENS entries name, duplicated because `services` may not import `webgui`.
+# shared/tests/test_cross_tier_mirrors.py pins the pair.
+#
+# The VALUE is which of that symbol's four view histories gets a key of its own,
+# and it is a table rather than a flag because the answer differs per screen and
+# the reason has to survive. A published screen renders exactly its PINNED view —
+# the view picker is not built on a pinned page (see
+# webgui/pages/options/gamma.py's ``shows_view_picker``) — so:
+#
+#   $SPX  pins GEX   → draws the intraday heatmap, which IS the history rows
+#   SPY   pins Flow  → the Flow branch of ``_render_view`` draws from the MAIN
+#   QQQ   pins Flow    payload's ``flow`` + ``prem_ladder`` and returns before it
+#                      ever reads the per-view history cache
+#
+# The histories exist for the screens that DRAW them; a screen that draws none
+# must not pay for one. Measured through this publish path on a close-of-session
+# shape, publishing all four views for all three symbols took the tick's gamma
+# writes to ~4x the private page's own — a multiplication of exactly the cost the
+# 2026-08-20 history split was written to remove, on a store that has already
+# needed a manual ~1 GB VACUUM.
+#
+# ⚠ Un-pinning a public screen's view (rendering the picker on it again) means
+# adding that symbol's views back HERE, or the screen shows an empty heatmap on
+# every view but the one it used to pin — silently, since a missing key reads as
+# "no history yet".
+PUBLISHED_GAMMA_HISTORY_VIEWS = {
+    "$SPX": ("GEX",),
+    "SPY": (),
+    "QQQ": (),
+}
+
+# The published symbols ARE that table's keys — one list, so a symbol cannot be
+# published without an entry saying which of its histories are worth writing.
+PUBLISHED_GAMMA_SYMBOLS = tuple(PUBLISHED_GAMMA_HISTORY_VIEWS)
+_PUBLISHED_GAMMA_BY_UPPER = {s.upper(): frozenset(v)
+                          for s, v in PUBLISHED_GAMMA_HISTORY_VIEWS.items()}
+
+
+def is_published_gamma_symbol(symbol) -> bool:
+    """Whether a public live screen reads ``symbol``'s own gamma snapshot."""
+    return str(symbol or "").strip().upper() in _PUBLISHED_GAMMA_BY_UPPER
+
+
+def published_gamma_history_views(symbol) -> frozenset:
+    """The views whose history is published for ``symbol`` — often none at all."""
+    return _PUBLISHED_GAMMA_BY_UPPER.get(str(symbol or "").strip().upper(),
+                                      frozenset())
+
+
+def gamma_pub_key(symbol) -> str:
+    """Cache key holding ONE symbol's published Gamma snapshot."""
+    return f"cache:options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+def gamma_pub_event(symbol) -> str:
+    return f"events:options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+def gamma_pub_history_key(symbol, view) -> str:
+    """Cache key holding one published symbol's history rows for one view.
+
+    Per SYMBOL as well as per view, unlike ``gamma_history_key``: that one carries
+    the symbol inside the payload for the reader to check, which is enough when a
+    single slot is being overwritten but cannot hold three symbols at once."""
+    return (f"cache:options:gamma_pub_hist_{str(symbol).strip().upper()}"
+            f"_{str(view).lower()}")
 
 CACHE_GAMMA_EXPLAIN = "cache:options:gamma_explain"
 EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
@@ -535,6 +653,236 @@ def swing_scan(bus, args: dict) -> None:
     bus.publish(EVENT_SWING, {"version": version})
 
 
+# ── the 30-45 DTE income window ─────────────────────────────────────────────
+# One pass a day over the watchlist (scheduler.income_slot_due), plus the page's
+# Refresh command. Design:
+# docs/plans/2026-09-05-income-window-and-share-inventory-design.md.
+
+# Fan-out width for the per-symbol chain fetches. Kept at the shared default
+# (<= 8 by house rule): the proxy only SPACES upstream calls ~0.2 s apart, so a
+# wider pool queues rather than going faster, and this pass has no deadline.
+_INCOME_WORKERS = 6
+
+
+def _income_symbols():
+    """The income window's universe: the autoscan's watchlist, verbatim.
+
+    ``scanner_engine.run_full_scan`` scans ``watchlist.get_scan_symbols()``, so
+    that is what this reads — an income board over a DIFFERENT universe than the
+    scanner's would be a silently different product (a name you can find a 0-DTE
+    signal on but never a 35-DTE one, with nothing on either screen to say why).
+    The accessor is mtime-cached in options-scanner, so calling it per pass costs
+    a ``stat``.
+
+    Imported LAZILY, per this tier's cross-app collision discipline. Degrades to
+    ``[]`` — publish an honest empty pass — rather than guessing a universe.
+    """
+    try:
+        import watchlist
+        return list(watchlist.get_scan_symbols())
+    except Exception:  # noqa: BLE001 — a missing workbook must not kill the pass.
+        _degrade.degraded("options.income_symbols")
+        return []
+
+
+def _income_lots(db_path=None):
+    """Open equity lots from the paper account — the covered-call screen's input.
+
+    ``options_svc`` is Tier 2 and already imports these engines, so this is a
+    normal import rather than a tier violation; it stays LAZY for the same
+    reason ``_income_symbols`` does (this module must not bind a hyphenated
+    app dir's module names merely by being imported).
+
+    Degrades to ``[]``. A checkout with no paper database has no shares, which
+    must cost the covered calls and NOTHING ELSE — losing the whole 23-symbol
+    spread scan because a fresh clone has no ``paper_account.db`` would be the
+    tail wagging the dog. ``_degrade`` keeps it from being silent.
+
+    ``db_path=None`` resolves at CALL time (``paper_account_db``'s own shape,
+    the one ``signal_db`` gets wrong). Under pytest with no explicit path it
+    returns ``[]`` without connecting: the repo-root conftest refuses a connect
+    into a live data directory, and this is the same guard ``_income_earnings``
+    carries two functions up. Tests pass a tmp path to exercise the real read.
+    """
+    import os
+
+    if db_path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return []
+    try:
+        import paper_account_db
+        return list(paper_account_db.fetch_open_lots(db_path))
+    except Exception:  # noqa: BLE001 — a missing paper DB must not kill the pass.
+        _degrade.degraded("options.income_lots")
+        return []
+
+
+def _income_rank(row) -> float:
+    """Sort key for the merged board: ``composite_score``, absent/NaN LAST.
+
+    ``score_all`` neutralizes an unscorable signal to 0.0, but the key can be
+    missing outright on a shape drift — and ``sorted`` over a mixed None/float
+    raises, which would lose the whole pass for one bad row. ``-inf`` (with
+    ``reverse=True``) also refuses the documented NaN trap in the other
+    direction: a non-reading must never sort to the TOP of a board a human picks
+    a trade from.
+    """
+    try:
+        v = float(row.get("composite_score"))
+    except (TypeError, ValueError, AttributeError):
+        return float("-inf")
+    return v if v == v else float("-inf")       # NaN != NaN
+
+
+def publish_income(bus, symbols=None) -> None:
+    """Scan the 30-45 DTE income window across the watchlist; publish one view.
+
+    ``compute.income_scan`` answers for ONE symbol (``swing_scan``'s per-symbol
+    ``signals``/``view``/``filtered_out`` shape). This merges every symbol's rows
+    into ONE jointly-ranked ``candidates`` list, because a reader picking today's
+    income trade compares across the whole watchlist rather than within a symbol
+    — hence the deliberate naming split the ``IncomeScan`` contract documents.
+
+    **Fanned out concurrently** (``parallel_map``): ~23 symbols x one chain
+    round-trip is the house shape for an I/O-bound proxy loop, and serially that
+    is minutes of an executor thread for work the proxy overlaps happily.
+
+    **One symbol's failure must not cost the other 22** — a halted name, a thin
+    off-hours book, a proxy blip. Each one lands in ``errors`` (so the page can
+    say which) AND in ``_degrade`` (so /health counts the case where the outage
+    took all 23). An error list alone would leave a whole-watchlist failure
+    looking like a quiet tape to everyone not reading that page.
+
+    ``scanned_symbols`` is what was ATTEMPTED, not what succeeded: reporting 1
+    after 22 failures would read as a thin market rather than a broken pass.
+
+    ``market_state`` is read ONCE per pass (not per symbol) from
+    ``cache:sentiment:composite`` and threaded to every scan, mirroring
+    ``swing_scan`` above — the handler is the natural cross-service reader, which
+    keeps ``compute`` proxy-only. Every level is guarded; a missing composite
+    means no family-ranking tilt, exactly as it does on the Swing page.
+
+    Only each scan's ``signals`` are forwarded. That is not incidental tidiness:
+    ``cache:options:calc_chain`` reached 8.77 MB — 53% of all prod Redis string
+    bytes — by caching a raw chain beside what the page reads, and a 30-45 DTE
+    chain is wider than the 0-DTE one that caused it.
+
+    **Covered calls join the SAME ranked list**, and the interesting part is
+    what they cost. A covered call needs a chain for each HELD symbol, and a
+    naive version would fetch one per lot and double the pass. Instead:
+
+    * a held symbol the watchlist already scans has its chain handed back in
+      memory by ``income_scan(return_chain=True)`` — **zero** extra calls, and
+      the chain is requested per symbol so the pass retains a handful rather
+      than all 23;
+    * only a held symbol OUTSIDE the watchlist is fetched, and then through
+      ``compute.income_chain`` (chain + quote, two calls) rather than a full
+      scan — which would cost more AND publish spreads on a name outside the
+      universe this board documents itself as mirroring.
+
+    That is the design's *0-10 extra calls/day*. The earnings gate over the held
+    names costs nothing at all: ``income_earnings_map`` is a local SQLite read.
+
+    Three separate guards, because these are three independent failures and
+    collapsing them would let one cost the others: the lots read (a fresh clone
+    has no paper database), the per-symbol chain fetch, and the builder itself.
+    The spreads are the bulk of the board and must survive all three.
+    """
+    syms = list(symbols) if symbols is not None else _income_symbols()
+    env = bus.cache_get("cache:sentiment:composite")
+    payload = env.payload if env is not None else None
+    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+
+    # The covered-call half. ``held`` decides which chains are worth carrying
+    # back out of the scan, so the pass retains a handful of chains rather than
+    # all 23 — the fan-out already holds up to _INCOME_WORKERS of them anyway,
+    # and a chain per watchlist symbol for no reader is exactly the payload
+    # mistake this window's contract warns about.
+    lots = _income_lots()
+    held = {(lot or {}).get("symbol") for lot in lots}
+    held.discard(None)
+    held.discard("")
+
+    chains: dict = {}
+    spots: dict = {}
+
+    def _scan_one(symbol):
+        """``(symbol, rows, error or None, chain, spot)``. Self-contained +
+        defensive, as ``parallel_map`` requires — a raising ``fn`` propagates on
+        result iteration exactly as it would in the serial loop it replaces.
+
+        ⚠ The SYMBOL rides back explicitly. Keying the reuse map off the rows
+        would drop the chain for exactly the held name that produced no spreads
+        — which is a normal outcome, and the one case where the covered call is
+        the only thing this pass has to say about a stock the account owns."""
+        try:
+            out = compute.income_scan(symbol, market_state=market_state,
+                                      return_chain=symbol in held) or {}
+            return (symbol, list(out.get("signals") or []), None,
+                    out.get("chain"), out.get("spot"))
+        except Exception as exc:  # noqa: BLE001 — see the docstring.
+            _degrade.degraded("options.publish_income", detail=symbol)
+            return (symbol, [], f"{symbol}: {type(exc).__name__}: {exc}", None, None)
+
+    candidates: list = []
+    errors: list = []
+    for symbol, rows, err, chain, spot in parallel_map(_scan_one, syms,
+                                                       workers=_INCOME_WORKERS):
+        candidates.extend(rows)
+        if err:
+            errors.append(err)
+        if chain is not None:
+            chains[symbol] = chain
+            spots[symbol] = spot
+
+    def _fetch_one(symbol):
+        """One chain + quote for a held symbol the scan did not cover."""
+        try:
+            return (symbol, *compute.income_chain(symbol))
+        except Exception:  # noqa: BLE001 — one held name must not cost the pass.
+            _degrade.degraded("options.income_chain", detail=symbol)
+            return (symbol, None, None)
+
+    # ONLY a held symbol the watchlist does not cover — the design's 0-10 extra
+    # calls. Membership of ``syms``, not of ``chains``: a scanned symbol whose
+    # chain came back None already tried and failed (off-hours, halted, no
+    # book), and refetching it would spend a call to be told the same thing.
+    scanned = set(syms)
+    missing = [s for s in sorted(held) if s not in scanned]
+    if missing:
+        for symbol, chain, spot in parallel_map(_fetch_one, missing,
+                                                workers=_INCOME_WORKERS):
+            if chain is not None:
+                chains[symbol] = chain
+                spots[symbol] = spot
+
+    if lots and chains:
+        try:
+            candidates.extend(compute.covered_call_candidates(
+                lots, chains, spots,
+                earnings=compute.income_earnings_map(sorted(held))))
+        except Exception:  # noqa: BLE001 — the spreads are the bulk of the board.
+            _degrade.degraded("options.covered_calls")
+
+    candidates.sort(key=_income_rank, reverse=True)
+
+    # Validation gate BEFORE the write, like rescan/publish_matrix: a gross shape
+    # drift raises here rather than reaching the page as a half-valid board.
+    snap = IncomeScan(
+        candidates=candidates,
+        scanned_symbols=len(syms),
+        errors=errors,
+        # CT, tz-aware: the page renders this as "scanned at 08:35", and the two
+        # other user-facing stamps in this module are CT for the same reason.
+        ts=_dt.datetime.now(mc.CT).isoformat(),
+    )
+    # ⚠ ``skip_unchanged`` cannot fire while ``ts`` moves on every pass (the same
+    # thing publish_net_premium documents about its own fresh ``ts``). It is kept
+    # because it is the safe default on a republisher and costs one small read on
+    # a twice-a-day path — not because it suppresses anything today.
+    bus.cache_set(CACHE_INCOME, snap.model_dump(), event=EVENT_INCOME,
+                  skip_unchanged=True)
+
+
 def _coerce_pid(pid):
     """Coerce a position id to int for overlay lookup (rows/keys may be int or
     str). Returns None when it can't be coerced (so the lookup falls back to
@@ -781,6 +1129,23 @@ def publish_captured_closed(bus) -> None:
     bus.publish(EVENT_CAPTURED_CLOSED, {"version": version})
 
 
+def publish_captured_performance(bus) -> None:
+    """Publish the captured score's rows (``cache:options:captured_perf``).
+
+    Read-only, and published regardless of the auto-close toggle for the same
+    reason ``publish_captured_closed`` is: MANUAL closes land in
+    ``signal_outcomes`` too, so a score gated on auto-close would quietly stop
+    counting the ones you closed yourself.
+
+    ``compute.captured_performance`` is fully defensive - it returns an empty
+    row list rather than raising, so a bad read costs the EOD section its
+    numbers and never the publish.
+    """
+    data = compute.captured_performance()
+    version = bus.cache_set(CACHE_CAPTURED_PERF, data)
+    bus.publish(EVENT_CAPTURED_PERF, {"version": version})
+
+
 def autoclose_enabled(bus) -> bool:
     """Whether captured auto-close is enabled. Defaults **True** on a missing /
     unreadable key — so only an EXPLICIT ``{"enabled": False}`` (from the Settings
@@ -835,6 +1200,7 @@ def run_captured_manage_and_publish(bus) -> None:
     res = compute.run_captured_manage_cycle()
     refresh_captured(bus)
     publish_captured_closed(bus)
+    publish_captured_performance(bus)
     try:
         _notify_captured_closes(bus, (res or {}).get("closed"))
     except Exception:  # noqa: BLE001
@@ -868,14 +1234,60 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     consumes, and ``compute.gamma_snapshot`` is defensive. When the chain fetch
     fails it returns None — we cache a graceful-empty view (``{"symbol", views:{}}``)
     so the page shows a "no data" state instead of staling on a prior symbol's
-    snapshot."""
+    snapshot.
+
+    A symbol the public live screens name lands in its published key too — the
+    snapshot is already computed, so that write costs no chain fetch and no engine
+    pass, and it keeps the public screen fresh on this path (the ``gamma_refresh``
+    command and the startup seed) for free."""
+    _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
+                   targets=_gamma_targets(symbol))
+
+
+def refresh_gamma_published(bus, symbol) -> None:
+    """Publish ONLY ``symbol``'s per-symbol key, for the public live screens.
+
+    The private page's shared key is deliberately untouched: a public screen must
+    never move the symbol under the app someone is trading from."""
+    _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
+                   targets=(_gamma_pub_target(symbol),))
+
+
+def _gamma_snapshot_or_empty(symbol) -> dict:
+    """The snapshot, or the graceful-empty view when the chain fetch failed.
+
+    ``compute.gamma_snapshot`` returns None then; caching this shape makes the
+    page show its "no data" state instead of staling on another symbol's
+    snapshot — which for a published key is the difference between an honest
+    blank screen and one labelled SPY showing $SPX."""
     snap = compute.gamma_snapshot(symbol)
     if snap is None:
-        snap = {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
-    _publish_gamma(bus, snap, symbol)
+        return {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
+    return snap
 
 
-def _publish_gamma(bus, snap, symbol) -> None:
+# A publish target: (main key, event, per-view history key builder, the views
+# whose history it wants). ``None`` for the last means EVERY view — the private
+# page has a picker, so every view it can be switched to must have its rows.
+_GAMMA_PRIVATE_TARGET = (CACHE_GAMMA, EVENT_GAMMA, gamma_history_key, None)
+
+
+def _gamma_pub_target(symbol):
+    return (gamma_pub_key(symbol), gamma_pub_event(symbol),
+            lambda view: gamma_pub_history_key(symbol, view),
+            published_gamma_history_views(symbol))
+
+
+def _gamma_targets(symbol):
+    """Where a snapshot computed FOR THE PRIVATE PAGE should land: its shared key,
+    plus the symbol's published key when a public screen names that symbol."""
+    out = [_GAMMA_PRIVATE_TARGET]
+    if is_published_gamma_symbol(symbol):
+        out.append(_gamma_pub_target(symbol))
+    return tuple(out)
+
+
+def _publish_gamma(bus, snap, symbol, *, targets) -> None:
     """Write the history keys FIRST, then the slim main payload, then publish.
 
     That order matters: the page reacts to the MAIN key's version bump and then
@@ -888,17 +1300,31 @@ def _publish_gamma(bus, snap, symbol) -> None:
     A view the snapshot does not carry is published EMPTY rather than skipped --
     leaving the previous symbol's rows in the key would let the page pair them
     with this symbol's bars.
+
+    ``targets`` — the ``(main key, event, per-view history key builder, wanted
+    views)`` tuples this snapshot goes to. It is a LIST rather than a second call
+    per destination because the history rows are POPPED out of the snapshot here:
+    a second call would find them already gone and would publish empty rows over
+    good ones. The pop is UNCONDITIONAL for the same reason it always was — a
+    target that wants no history still must not carry the rows inline, which is
+    the 4.99 MB payload the 2026-08-20 split removed.
     """
     views = snap.get("views")
+    rows_by_view = {}
     if isinstance(views, dict):
         for view in set(GAMMA_HISTORY_VIEWS) | set(views):
             entry = views.get(view)
             rows = entry.pop("history", None) if isinstance(entry, dict) else None
-            bus.cache_set(gamma_history_key(view),
-                          {"symbol": symbol, "view": view, "rows": rows or []},
+            rows_by_view[view] = rows or []
+    for main_key, event_key, history_key, wanted in targets:
+        for view, rows in rows_by_view.items():
+            if wanted is not None and view not in wanted:
+                continue      # no screen draws it — see PUBLISHED_GAMMA_HISTORY_VIEWS
+            bus.cache_set(history_key(view),
+                          {"symbol": symbol, "view": view, "rows": rows},
                           skip_unchanged=True)
-    version = bus.cache_set(CACHE_GAMMA, snap)
-    bus.publish(EVENT_GAMMA, {"version": version})
+        version = bus.cache_set(main_key, snap)
+        bus.publish(event_key, {"version": version})
 
 
 def _current_gamma_symbol(bus) -> str:
@@ -921,8 +1347,29 @@ def refresh_gamma_current(bus) -> None:
 
     Reads the symbol from the cached snapshot so it NEVER forces a fixed $SPX (which
     would reintroduce the symbol-revert bug); falls back to $SPX only when nothing is
-    cached. Defensive — ``refresh_gamma`` is itself guarded."""
-    refresh_gamma(bus, _current_gamma_symbol(bus))
+    cached. Defensive — ``refresh_gamma`` is itself guarded.
+
+    It also refreshes the PUBLISHED per-symbol keys the public live screens read,
+    on this same tick and in this same function, because that is what makes them
+    free: the collector has just stashed all three chains and the stash is
+    consume-once, so a second pass over the same symbols would find it empty and
+    go back to Schwab. Each symbol is computed exactly ONCE — the common case
+    (the private page parked on $SPX, which is also published) writes one
+    snapshot to both key families rather than computing it twice. Per symbol
+    guarded: one symbol's proxy failure must not cost the other two their
+    screens."""
+    current = _current_gamma_symbol(bus)
+    try:
+        refresh_gamma(bus, current)
+    except Exception:
+        _degrade.degraded("options.refresh_gamma", detail=current)
+    for symbol in PUBLISHED_GAMMA_SYMBOLS:
+        if symbol.upper() == str(current).strip().upper():
+            continue        # already written by refresh_gamma, via _gamma_targets
+        try:
+            refresh_gamma_published(bus, symbol)
+        except Exception:
+            _degrade.degraded("options.refresh_gamma_published", detail=symbol)
 
 
 def collect_gex_history(bus=None) -> None:
@@ -947,8 +1394,13 @@ def collect_gex_history(bus=None) -> None:
 
     The currently-viewed gamma symbol's chain is CAPTURED during the poll (see
     ``compute.collect_gex_snapshots(capture_symbols=…)``) so the same tick's
-    ``refresh_gamma_current`` reuses it instead of refetching it seconds later."""
-    capture = {_current_gamma_symbol(bus)} if bus is not None else None
+    ``refresh_gamma_current`` reuses it instead of refetching it seconds later.
+    The three PUBLISHED symbols ride the same capture for the same reason: they
+    are all in ``config/symbols.toml`` ``[collection] base``, so the poll fetches
+    their chains anyway and the published snapshots cost no Schwab call. Leaving
+    one out of the capture set would cost it ~440 /chains a day."""
+    capture = ({_current_gamma_symbol(bus)} | set(PUBLISHED_GAMMA_SYMBOLS)
+               if bus is not None else None)
     compute.collect_gex_snapshots(capture_symbols=capture)
     if bus is not None:
         try:
@@ -1739,9 +2191,77 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
 
 
+def _publish_income_open(bus, result: dict) -> None:
+    """Cache one ``income_open`` outcome and publish its event.
+
+    Stamps ``ts`` so the page can age it, and — load-bearing — a ``seq`` that
+    increments per publish. Two identical refusals in a row (click Open twice on
+    the same under-funded row) would otherwise be a byte-identical payload, and
+    ``cache_set`` would be right to skip the write; the reader would see one
+    toast for two clicks and reasonably conclude the second did nothing. The
+    default ``skip_unchanged=False`` already writes, but the version alone is
+    what the page gates on, so the counter makes the difference visible in the
+    payload as well.
+    """
+    global _INCOME_OPEN_SEQ
+    _INCOME_OPEN_SEQ += 1
+    payload = dict(result or {})
+    payload["seq"] = _INCOME_OPEN_SEQ
+    payload.setdefault("ts", _dt.datetime.now(mc.CT).isoformat())
+    version = bus.cache_set(CACHE_INCOME_OPEN, payload, ttl=INCOME_OPEN_TTL_SEC)
+    bus.publish(EVENT_INCOME_OPEN, {"version": version})
+
+
+_INCOME_OPEN_SEQ = 0
+
+
+def run_income_open(bus, command) -> None:
+    """Open one Income-board candidate into the manual paper ACCOUNT.
+
+    ``income_open`` is a trade-OPENING command, so it takes ``_is_stale_open`` —
+    the same gate ``paper_create`` and ``driver_paper_create`` take, for the same
+    reason and on the same budget. A consumer group created at id ``0`` replays
+    the whole backlog, and this one MUTATES the book: it reserves collateral and
+    writes a position. ``_is_stale_side_effect`` would work identically, but it
+    is the gate for commands that are *not* opens, and this is an open.
+
+    Every outcome — opened, refused, or failed — is published to
+    ``cache:options:income_open``. A refusal that stayed in the log would leave
+    the reader unable to tell a rule they broke from a service that is down.
+    The paper view is refreshed on a successful open only: a refusal changed
+    nothing, and republishing the account for it would repaint three screens to
+    say so.
+    """
+    args = getattr(command, "args", None) or {}
+    row = args.get("row") or {}
+    if _is_stale_open(command):
+        age = _command_age_seconds(command)
+        log.warning("REJECTED stale income_open for %s: age %.0fs > %ds "
+                    "(enqueue ts=%s)", row.get("symbol"), age or -1,
+                    STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+        _publish_income_open(bus, {
+            "status": "rejected", "reason": "stale_command",
+            "symbol": row.get("symbol"), "age_sec": round(age or 0, 1),
+            "message": ("That request sat too long to act on — nothing was "
+                        "opened. Try again from the current board.")})
+        return
+    result = compute.open_income_position(row, args.get("qty", 1))
+    _publish_income_open(bus, result)
+    if (result or {}).get("status") == "opened":
+        # The book changed: the account view feeds the Paper Account page, the
+        # Shares page and the nav badge, and all three are now out of date.
+        refresh_paper_account(bus)
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
-    ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
+    ``swing_scan`` → on-demand parameterized swing scan; ``income_scan`` → force
+    a 30-45 DTE income pass over the watchlist (replay-guarded — see
+    ``_REPLAY_GUARDED``; normally runs on its own once-daily slot);
+    ``income_open`` (args row, qty) → open one income candidate (a cash-secured
+    put or a covered call) into the manual paper ACCOUNT — note the ACCOUNT, not
+    the ledger ``paper_create`` writes;
+    ``refresh_paper`` →
     re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
     (guarded on an existing account) then refresh; ``paper_reset`` → reset the
     account then refresh; ``paper_create`` (args signal, qty) → create + persist a
@@ -1802,6 +2322,19 @@ def handle_command(bus, command) -> None:
         refresh_calibration(bus)
     elif command.type == "swing_scan":
         swing_scan(bus, command.args)
+    elif command.type == "income_scan":
+        # The page's Refresh. Replay-guarded (see _REPLAY_GUARDED): ~23 chain
+        # fetches is the largest per-command Schwab spend on this stream, and a
+        # backlog replay would run one pass per queued click.
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale income_scan: age %.0fs > %ds (ts=%s) — "
+                        "a replayed command must not re-spend ~23 chain fetches",
+                        _command_age_seconds(command) or -1,
+                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            return
+        publish_income(bus)
+    elif command.type == "income_open":
+        run_income_open(bus, command)
     elif command.type == "refresh_paper":
         refresh_paper_account(bus)
     elif command.type == "paper_entry":

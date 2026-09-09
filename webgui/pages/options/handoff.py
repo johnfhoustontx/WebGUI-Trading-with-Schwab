@@ -12,6 +12,11 @@ the other migrated pages — so this module is fully engine-free.
 from nicegui import ui
 
 import bus_client
+# The page-to-shell seam. Every function here is a "go to page X" action, and X
+# is the PRIVATE app's route: the public origin serves most of those pages
+# somewhere else and most of them nowhere at all, so the route is RESOLVED
+# rather than emitted. In the private app the resolution is the identity.
+import shell as _shell
 
 from .theme import BTN_3D
 
@@ -78,7 +83,7 @@ def send_to_expected_move(payload):
         ui.notify("No symbol for expected move.", type="warning")
         return
     set_pending_expected_move(payload)
-    ui.navigate.to("/options/expected-move", new_tab=True)
+    _shell.navigate_to("/options/expected-move", new_tab=True)
 
 
 def set_pending_calculator(signal):
@@ -97,7 +102,7 @@ def send_to_calculator(signal):
         ui.notify("Select a signal first.", type="warning")
         return
     set_pending_calculator(signal)
-    ui.navigate.to("/options/calculator")
+    _shell.navigate_to("/options/calculator")
 
 
 def set_pending_simulator(payload):
@@ -117,7 +122,7 @@ def send_to_simulator(payload):
         ui.notify("No legs to copy.", type="warning")
         return
     set_pending_simulator(payload)
-    ui.navigate.to("/options/simulator")
+    _shell.navigate_to("/options/simulator")
 
 
 def set_pending_calculator_legs(payload):
@@ -138,7 +143,7 @@ def send_to_calculator_legs(payload):
         ui.notify("No legs to copy.", type="warning")
         return
     set_pending_calculator_legs(payload)
-    ui.navigate.to("/options/calculator")
+    _shell.navigate_to("/options/calculator")
 
 
 def set_pending_gamma(symbol):
@@ -155,17 +160,29 @@ def take_pending_gamma():
     return s
 
 
+GAMMA_ROUTE = "/options/gamma"
+
+
 def send_to_gamma(symbol):
     """Stash a symbol and open Dealer Positioning on it (same browser tab).
 
     Used by the Flow Alerts tape: every alert type — a premium crossover, unusual
     contract activity, a gamma-regime flip — is asking you to look at that
-    symbol's dealer positioning, which is one page away."""
+    symbol's dealer positioning, which is one page away.
+
+    ⚠ Routed through the shell, because ``/options/gamma`` is the PRIVATE app's
+    path: the public origin serves that page at ``/gamma``, and a bare navigate
+    is a 404 there. ``shell.navigate_to`` resolves it. Known and accepted: the
+    published board PINS its symbol, so the stash cannot be honoured there and
+    the visitor lands on the pinned board rather than on this symbol — the page
+    says which symbol it is showing, and a 404 is the worse of the two."""
     if not symbol:
         ui.notify("No symbol for dealer positioning.", type="warning")
         return
+    if not _shell.can_navigate(GAMMA_ROUTE):
+        return                      # nowhere to send it — and nothing stashed
     set_pending_gamma(symbol)
-    ui.navigate.to("/options/gamma")
+    _shell.navigate_to(GAMMA_ROUTE)
 
 
 def set_pending_swing(symbol):
@@ -194,7 +211,7 @@ def send_to_swing(symbol):
         ui.notify("No symbol for the Strategy Finder.", type="warning")
         return
     set_pending_swing(symbol)
-    ui.navigate.to("/options/swing")
+    _shell.navigate_to("/options/swing")
 
 
 def _signal_legs_payload(sig):
@@ -236,13 +253,112 @@ def send_to_paper(signal):
                 "type": "paper_create",
                 "args": {"signal": signal, "qty": int(qty.value or 1)},
             })
-            ui.notify("Paper trade requested.", type="positive")
+            ui.notify("Sent to the paper ledger — it appears when the engine "
+                      "confirms.", type="positive")
             dlg.close()
 
         with ui.row():
             ui.button("Create", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
             ui.button("Cancel", on_click=dlg.close).props("flat")
     dlg.open()
+
+
+# ── the Income board's open action ──────────────────────────────────────────
+# ⚠ This targets the paper ACCOUNT, not the paper LEDGER ``send_to_paper``
+# writes, and they are two different books: the ledger tracks a trade's marks,
+# the account holds cash, reserved collateral and — the point of this action —
+# share lots. A cash-secured put opened here is what eventually becomes stock;
+# the same trade sent to the ledger never can.
+#
+# The two structures below are the only ones the ACCOUNT can hold from this
+# board. The two credit spreads already have a route (the ledger), and the
+# service refuses anything else anyway; the gate here just keeps a button off a
+# row it would only be refused on. Spelled as row ``type`` values, matching
+# ``income.SIDE_LABELS``.
+INCOME_OPENABLE_TYPES = ("SHORT_PUT", "COVERED_CALL")
+
+
+def income_openable(row) -> bool:
+    """True when an income row can be opened into the paper ACCOUNT (PURE).
+
+    An unreadable row is not openable — absent reads as falsy, which fails safe
+    in the direction that matters for a button that books a trade.
+    """
+    return str((row or {}).get("type") or "").strip().upper() in INCOME_OPENABLE_TYPES
+
+
+def open_in_paper_account(row):
+    """Confirm-then-enqueue an ``income_open`` for one Income-board row.
+
+    The quantity defaults to what the row itself says it supports — for a
+    covered call that is the whole lot, which is the only quantity the book can
+    deliver — so the common case is one click and a confirm.
+
+    The toast here promises only that the request went out; the ACCOUNT's answer
+    (opened, or refused and why) comes back asynchronously on
+    ``cache:options:income_open`` and the page shows it. Claiming a fill here
+    would be the ``driver-executed-but-nothing-opened`` shape: reporting the
+    enqueue as the outcome.
+    """
+    if not row:
+        ui.notify("Select a row first.", type="warning")
+        return
+    if not income_openable(row):
+        ui.notify("Only a cash-secured put or a covered call can be opened into "
+                  "the paper account.", type="warning")
+        return
+    default_qty = 1
+    try:
+        default_qty = max(1, int(float(row.get("quantity") or 1)))
+    except (TypeError, ValueError):
+        default_qty = 1
+
+    with ui.dialog() as dlg, ui.card():
+        ui.label(f"Open {row.get('symbol')} "
+                 f"{'cash-secured put' if row.get('type') == 'SHORT_PUT' else 'covered call'} "
+                 f"{row.get('expiration', '')}").classes("text-subtitle1")
+        ui.label("This opens into the paper ACCOUNT — collateral is reserved and "
+                 "an assignment becomes shares.").classes("text-xs")
+        qty = ui.number("Contracts", value=default_qty, min=1, max=100)
+
+        def confirm():
+            bus_client.request("options", {
+                "type": "income_open",
+                "args": {"row": row, "qty": int(qty.value or 1)},
+            })
+            ui.notify("Sent to the paper account — the result appears here in a "
+                      "moment.", type="positive")
+            dlg.close()
+
+        with ui.row():
+            ui.button("Open", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
+            ui.button("Cancel", on_click=dlg.close).props("flat")
+    dlg.open()
+
+
+# One per-row action for the Income board: open into the paper account. Gated on
+# ``props.row._allow_open`` — every caller MUST stamp it (an absent field reads
+# as falsy → no button, which fails safe, exactly as ``_allow_paper`` does).
+_INCOME_ACTION_SLOT = """
+<q-td :props="props" auto-width>
+  <q-btn v-if="props.row._allow_open" dense flat round size="sm" icon="account_balance_wallet"
+         color="secondary"
+         @click.stop="() => $parent.$emit('to_account', props.row)">
+    <q-tooltip>Open in the paper account</q-tooltip>
+  </q-btn>
+</q-td>
+"""
+
+
+def add_income_row_actions(table, get_row):
+    """Add the per-row 'open in the paper account' button to the Income board.
+
+    ``get_row(display_row)`` maps a clicked display row back to its raw
+    candidate — the display row carries formatted strings, and the service needs
+    the numbers.
+    """
+    table.add_slot("body-cell-actions", _INCOME_ACTION_SLOT)
+    table.on("to_account", lambda e: open_in_paper_account(get_row(e.args)))
 
 
 # Three tiny per-row action buttons (Send to Calculator / Paper trade / Expected

@@ -20,6 +20,7 @@ box, along with the twelve `.bat` launchers.
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
+| webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications · autonomous driver | live | **off** |
@@ -170,6 +171,42 @@ User-Agent is a silent wrong value rather than an error.
 2026-08-31, which meant a restore produced a stack that could not start, from an
 archive that looked complete.
 
+**4b. `.env.live`, mode 600 — the PUBLIC process's own file.** The
+`webgui_live` unit loads **this** and **not** `.env`. It is the one
+internet-facing, unauthenticated process in the fleet, and `.env` supplies
+`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PROXY_SHARED_SECRET`,
+`SMS_SMTP_APP_PASSWORD`, `DISCORD_WEBHOOK_URL` and
+`GAMMA_BRIEFING_WEBHOOK_URL` — the strongest credential set on the box, held by
+the weakest-protected process. No code path in it reads any of them today; the
+split is about what an RCE in NiceGUI would cost, not about a live bug.
+
+```bash
+umask 077 && cat > /home/administrator/prod/.env.live <<'EOF'
+REDIS_LIVE_URL=redis://live:<the ACL user's password>@127.0.0.1:6379/0
+MEMURAI_PASSWORD=<the same value as in .env>
+EOF
+```
+
+| Key | Read by | Notes |
+|---|---|---|
+| `REDIS_LIVE_URL` | `webgui/live_main.py` and nothing else | the read-only Redis ACL user. **Unset or empty, `live_main` refuses to serve in prod** — the Bus would otherwise fall back to the stack's ordinary full read/write credential, on an origin with no login |
+| `MEMURAI_PASSWORD` | `shared/bus` | only used when `REDIS_LIVE_URL` names a user **without** a password. A password inside the URL wins over the kwarg the Bus passes (verified against redis-py 8) |
+
+⚠ **The DB index is in the URL**, so it bypasses the `redis_db` the profile
+selects. Prod is `/0`, **dev is `/1`**. Copying prod's line into dev's file aims
+dev's public process at prod's data, and every published screen then renders
+prod's real book while the checkout looks like dev. `live_main` warns on a
+mismatch — into the journal, which is not where anyone is looking.
+
+⚠ **No leading dash on this `EnvironmentFile=` either**, so a missing file
+fails the unit. That is not merely the house rule here: a dash would start the
+process with no `REDIS_LIVE_URL`, which the prod refusal above kills anyway, so
+it could only ever trade a systemd error naming the exact path for a Python one
+naming the variable.
+
+⚠ **`.env.live` is in the backup and in `.gitignore`** — both as their own
+line, because neither `.env` entry matches this name.
+
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
 one store no tool knows about:
@@ -190,7 +227,7 @@ committed, so this is also how you repair them after any port or path change.
 .venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
 ```
 
-Confirm the shape before starting anything: **eight** `trading-dev-*` units and
+Confirm the shape before starting anything: **nine** `trading-dev-*` units and
 **no proxy unit** — ownership is encoded in which units exist, not in a kill-list
 filter. `systemd-analyze --user verify ~/.config/systemd/user/trading-dev.target`
 should print nothing at all; any output is an error.
@@ -258,8 +295,10 @@ not. Without it the SQLite half completes and the Redis half dies on
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`systemctl --user start trading-dev.target` brings up **eight** units (six
-services + webgui, and no proxy — dev borrows prod's). Output goes to the
+`systemctl --user start trading-dev.target` brings up **nine** units (six
+services + webgui + webgui_live, and no proxy — dev borrows prod's; the live
+screens are NOT withheld the way the proxy is, because nothing about them is a
+shared exclusive credential). Output goes to the
 journal: `journalctl --user -u trading-dev-options_svc -f`.
 
 It cannot start the wrong stack. A unit's `ExecStart` and `WorkingDirectory` are
@@ -484,13 +523,25 @@ its environment, because only the *units* have an `EnvironmentFile`.
   Both come from the same generator run, so they cannot disagree unless the units
   are stale — regenerate after any port or path change, which `promote.sh` does
   for you.
-- **Reach either web GUI over an SSH tunnel.** Both bind `127.0.0.1` and have
-  **no authentication of any kind** — correct for a desk-side app, and the whole
-  problem on a server, since that UI opens paper positions, arms the autonomous
-  driver and stops the stack. `tools/open_webgui.ps1` forwards prod's `:8500`
-  **and** `:8100` (the proxy's `/auth`, needed every 7 days when the Schwab
-  refresh token expires). For dev, forward `:9500` the same way. ⚠ Never change
-  either bind to `0.0.0.0`.
+- **Reach prod's web GUI at `https://app.neuralstrike.co`** (Caddy + a password
+  and TOTP login, since 2026-09-06). `tools/open_webgui.ps1` is the **fallback**
+  for when the cert or Caddy breaks, and remains the only route to the proxy's
+  `:8100` `/auth` — needed every 7 days when the Schwab refresh token expires —
+  which is deliberately not on the public domain. **Dev is not on the domain at
+  all**; forward `:9500`, or reach it over the tailnet. ⚠ Never change either
+  bind to `0.0.0.0`: the gate's wall exemption is scoped by a loopback check, so
+  a widened bind turns a local carve-out into an open door.
+- ⚠ **DEV NEEDS ITS OWN CREDENTIALS, or you cannot log into it.** The gate is
+  registered at module scope in `main.py`, so **dev runs it too** — deliberately,
+  since a dev that skipped authentication would be taking a code path prod never
+  takes, which is exactly what the four suppression flags are careful not to do.
+  But `auth_store.DEFAULT_PATH` is `<checkout>/shared/webgui_auth.json` and
+  `shared/` is gitignored, so **prod's credentials do not travel to dev and
+  `promote.sh` does not carry them**. Run `python tools/webgui_credentials.py
+  set-password` and `enroll-totp` **inside the dev checkout** once. Two entries in
+  your authenticator is the intended outcome; they can share a password if you
+  like, but not a file. Symptom if you skip it: a normal-looking login page on
+  `:9500` where every attempt fails — that is default-deny working, not a bug.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
 - **systemd owns the PIDs, so the process archaeology is over.** Two long gotchas

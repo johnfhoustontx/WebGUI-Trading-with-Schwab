@@ -130,8 +130,11 @@ def test_at_risk_columns_strike_date_no_underlying():
     fields = [c["field"] for c in rescue.at_risk_columns()]
     labels = [c["label"] for c in rescue.at_risk_columns()]
     assert "underlying_vs_short" not in fields   # nonsensical column removed
-    assert "expiration" in fields                # Strike Date uses expiration
-    assert "Strike Date" in labels
+    # The expiry column reads the ``expiration`` field. Its LABEL is pinned by
+    # ``test_the_expiry_column_is_not_called_a_strike_date`` below - it used to
+    # say "Strike Date", which named a quantity a two-strike spread does not
+    # have.
+    assert "expiration" in fields
     assert "DTE" not in labels
 
 
@@ -276,7 +279,11 @@ def test_summary_line_with_apply_result_stale():
     adv = _advisory(candidates=[_candidate()],
                     apply_result={"ok": False, "stale": True, "action": "roll_out"})
     line = rescue.summary_line(adv)
-    assert "re-review" in line.lower()
+    # The stale branch must report that NOTHING HAPPENED, not merely that
+    # prices moved - the engine aborts without mutating. See
+    # ``test_a_stale_apply_says_nothing_was_applied``.
+    assert "nothing applied" in line.lower()
+    assert "prices moved" in line.lower()
 
 
 # ── ad-hoc trade rescue (pure spec mapping from leg-editor legs) ──────────────
@@ -529,3 +536,79 @@ def test_the_three_tables_share_one_rescue_highlight():
     from pages.options.rescue import rescue_highlight
     for mod in (captured, paper, portfolio):
         assert mod.rescue_highlight is rescue_highlight, mod.__name__
+
+
+# ── the stale-price guard must say that nothing happened ─────────────────────
+def test_a_stale_apply_says_nothing_was_applied():
+    """The page's most consequential sentence, and it was missing a fact.
+
+    The guard ABORTS WITHOUT MUTATING — ``paper_adjust`` says "stale
+    (re-review) and nothing is mutated", ``handlers`` says it "aborts (stale)
+    without mutating when prices have drifted". The reader was told only that
+    prices moved, which on a page whose Apply button was just pressed reads as
+    easily as "it went through" as "nothing happened"."""
+    line = rescue.summary_line({
+        "symbol": "SPY", "strategy": "PCS", "state": "tested", "heat": 72,
+        "candidates": [],
+        "apply_result": {"ok": False, "stale": True, "action": "roll"}})
+    assert line.lower().startswith("nothing applied")
+    assert "re-review" not in line.lower()
+
+
+def test_an_applied_rescue_still_reads_as_done():
+    line = rescue.summary_line({
+        "symbol": "SPY", "strategy": "PCS", "state": "tested", "heat": 72,
+        "candidates": [], "apply_result": {"ok": True, "action": "roll"}})
+    assert line.startswith("Applied roll")
+
+
+# ── column labels name the reading ───────────────────────────────────────────
+def test_at_risk_column_labels_say_what_the_cell_holds():
+    labels = [c["label"] for c in rescue.at_risk_columns()]
+    assert labels == ["Symbol", "Strategy", "Strikes", "Expiry", "Short delta",
+                      "Open P&L", "Heat", "Risk state"]
+
+
+def test_the_expiry_column_is_not_called_a_strike_date():
+    """It holds ``expiration``. There is no such thing as a strike DATE on a
+    spread carrying two strikes."""
+    labels = {c["name"]: c["label"] for c in rescue.at_risk_columns()}
+    assert labels["strike_date"] == "Expiry"
+
+
+def test_the_table_and_the_cards_name_the_short_delta_the_same_way():
+    """One number, one screen, two names: the table said "delta short" while the
+    candidate cards' own metric list said "Short delta"."""
+    labels = {c["label"] for c in rescue.at_risk_columns()}
+    card_metric_labels = {label for _key, label, _fmt in rescue._CANDIDATE_METRICS}
+    assert "Short delta" in labels
+    assert "Short delta" in card_metric_labels
+
+
+def test_risk_state_does_not_reuse_the_paper_ledgers_Status():
+    """The Paper Ledger's Status column means OPEN/CLOSED. This one means
+    TESTED/CRITICAL. One word on two different things is the drift these passes
+    exist to close."""
+    from pages.options import paper
+    labels = {c["label"] for c in rescue.at_risk_columns()}
+    assert "Risk state" in labels and "Status" not in labels
+    assert "Status" in {c["label"] for c in paper.paper_columns()}
+
+
+def test_the_rescue_help_explains_the_stale_price_guard():
+    """The guard is the page's main safety property and the help never
+    mentioned it — a reader who saw "Prices moved" had nothing to check it
+    against."""
+    import page_help
+    text = page_help.HELP_MD["/options/rescue"]
+    low = text.lower()
+    assert "prices moved" in low or "moved" in low
+    assert "nothing" in low
+    assert "manual" in low          # not every option is one the app can place
+
+
+def test_the_rescue_help_calls_the_columns_what_the_screen_calls_them():
+    import page_help
+    text = page_help.HELP_MD["/options/rescue"]
+    for gone in ("dispatches a (simulated) paper adjustment",):
+        assert gone not in text, gone

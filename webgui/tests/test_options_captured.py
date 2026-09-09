@@ -431,3 +431,69 @@ def test_synth_pop_none_when_delta_is_the_recorder_zero_default():
     # signal_recorder.py stores short_delta with a DEFAULT OF 0, so a signal that
     # never carried a delta must not be reported as a 100% probability of profit.
     assert captured.synth_from_captured({"entry_short_delta": 0})["pop_pct"] is None
+
+
+# ── column labels name the reading, not the field ────────────────────────────
+def test_column_labels_say_what_the_cell_holds():
+    labels = [c["label"] for c in captured.captured_columns()]
+    assert labels == ["Action", "Symbol", "Strategy", "Style", "Opened",
+                      "Expiry", "DTE at entry", "Entry", "Mark", "Max loss",
+                      "Open P&L", "Entry grade", ""]
+
+
+def test_the_two_frozen_columns_say_they_are_frozen():
+    """``dte_at_entry`` and ``entry_grade`` are captured once and never move.
+    On a page whose whole purpose is tracking a signal OVER TIME, a bare "DTE"
+    is read as days left — and drifts further from the truth every session."""
+    labels = {c["name"]: c["label"] for c in captured.captured_columns()}
+    assert labels["dte"] == "DTE at entry"
+    assert labels["grade"] == "Entry grade"
+
+
+def test_the_entry_column_is_not_called_Credit():
+    """``mode`` is the PREMIUM-vs-DIRECTIONAL tag and a directional signal is a
+    DEBIT, so this book is not all credits. The same defect the Paper Ledger
+    pass found in the same-named column, fixed the same way: the sign carries
+    credit-vs-debit."""
+    labels = {c["name"]: c["label"] for c in captured.captured_columns()}
+    assert labels["credit"] == "Entry"
+    assert "Credit" not in set(labels.values())
+
+
+def test_open_pnl_is_right_HERE_and_wrong_on_the_paper_ledger():
+    """These two pages label one concept differently, and that tracks a real
+    difference rather than a drift. A closed signal LEAVES this table (which is
+    why the Status column was dropped), so every visible row is open. The Paper
+    Ledger keeps closed rows and its ``trade_pnl`` returns REALIZED for them."""
+    from pages.options import paper
+    here = {c["name"]: c["label"] for c in captured.captured_columns()}
+    there = {c["name"]: c["label"] for c in paper.paper_columns()}
+    assert here["unrealized_pnl"] == "Open P&L"
+    assert there["pnl"] == "P&L"
+
+
+def test_mode_is_not_relabelled_trade_type():
+    """"Style" deliberately avoids "Trade type": this app already uses
+    ``trade_type`` for 0-DTE / Swing / Directional, and reusing the phrase for
+    the PREMIUM/DIRECTIONAL tag would put one name on two different splits."""
+    labels = set(c["label"] for c in captured.captured_columns())
+    assert "Style" in labels
+    assert "Trade type" not in labels and "Mode" not in labels
+
+
+def test_the_captured_help_calls_the_columns_what_the_screen_calls_them():
+    import page_help
+    text = page_help.HELP_MD["/options/captured"]
+    for want in ("Action", "Entry", "Mark", "Reprice now", "DTE at entry"):
+        assert want in text, want
+    for gone in ("**Rec**", "**Credit vs Cur Price**", "Refresh marks (live)"):
+        assert gone not in text, gone
+
+
+def test_the_captured_help_warns_that_two_columns_are_frozen():
+    """The finding this pass turned up, and the one a header alone cannot carry:
+    on a tracking page, two columns do not track."""
+    import page_help
+    text = page_help.HELP_MD["/options/captured"].lower()
+    assert "at entry" in text
+    assert "capture" in text or "captured" in text

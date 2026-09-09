@@ -117,7 +117,10 @@ def test_the_page_imports_nothing_below_tier_one():
     got = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     got |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
             for a in n.names}
-    assert got <= {"datetime", "time", "bus_client", "nicegui", "pages",
+    # ``shell`` is the page-to-shell seam and is itself Tier 1 — it imports
+    # nothing but ``nicegui`` and ``pages.ui_guard``, pinned by
+    # ``test_shell_seam.test_the_shell_stays_a_leaf_module``.
+    assert got <= {"datetime", "time", "bus_client", "nicegui", "pages", "shell",
                    "pages.options.theme", "pages.rotation_view", "pages.ui_guard"}
 
 
@@ -164,7 +167,11 @@ def test_the_headline_is_empty_on_a_cold_payload_and_the_page_explains_instead()
     leading" reads as a maximally bearish tape when nothing was published — so
     the page owes the reader the reason in that slot."""
     assert P.headline_line([]) == ""
-    assert P.WAITING and "Waiting" in P.WAITING
+    # Not the word "Waiting" — the page was reworded to say what is TRUE
+    # rather than which service is cold. What must survive is the ACTIONABLE
+    # half: this map comes from a nightly cascade, so the answer is "tonight"
+    # rather than "refresh".
+    assert P.WAITING and "16:20 CT" in P.WAITING
 
 
 def test_the_count_strip_keeps_all_four_quadrants_even_at_zero():

@@ -167,6 +167,28 @@ _ENV_DEFAULTS = {
 }
 
 
+def _load_env_local(root, *, warn=True):
+    """The gitignored ``config/env.local.toml`` as a mapping. NEVER raises.
+
+    Missing, unreadable or malformed all give ``{}`` — see ``_read_env_marker``
+    for why failing safe beats reporting.
+
+    ``warn=False`` exists because this file is read TWICE at import: once for the
+    environment identity and once for the public hostnames. A malformed marker
+    must announce itself, but only once; a doubled warning reads as two problems.
+    """
+    path = root / "config" / "env.local.toml"
+    if not path.exists():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001 — bad TOML, encoding, permissions.
+        if warn:
+            print(f"repo_paths: {path} exists but could not be read ({exc}); "
+                  f"resolving to prod", file=sys.stderr)
+        return {}
+
+
 def _read_env_marker(root):
     """``(name, peer_root, proxy_host)`` from gitignored ``config/env.local.toml``.
 
@@ -186,14 +208,8 @@ def _read_env_marker(root):
     handles the first; the warning surfaces the second. See
     config/env.local.example.toml, which sidesteps the escape by construction.
     """
-    path = root / "config" / "env.local.toml"
-    if not path.exists():
-        return "prod", None, None
-    try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception as exc:  # noqa: BLE001 — bad TOML, encoding, permissions.
-        print(f"repo_paths: {path} exists but could not be read ({exc}); "
-              f"resolving to prod", file=sys.stderr)
+    raw = _load_env_local(root)
+    if not raw:
         return "prod", None, None
     name = str(raw.get("name") or "prod").strip().lower() or "prod"
     peer = raw.get("peer_root") or None
@@ -282,8 +298,9 @@ _ports = tomllib.loads(
 def _derive_ports(ports: dict, flags: dict) -> dict:
     """Apply an environment profile to the base port table. PURE.
 
-    ``port_offset`` shifts the ports this repo OWNS (the six services and the
-    webgui). Two things are deliberately left alone:
+    ``port_offset`` shifts the ports this repo OWNS (the six services and both
+    webgui processes — the app and the public live screens). Two things are
+    deliberately left alone:
 
     * the **Memurai port** — both environments share one Redis server and are
       separated by logical DB index instead, so there is no second service to
@@ -311,6 +328,7 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
     return {
         "proxy_port": proxy,
         "nicegui_port": int(ports["nicegui"]) + off,
+        "nicegui_live_port": int(ports["nicegui_live"]) + off,
         "service_ports": {k: int(v) + off for k, v in ports["services"].items()},
         "memurai_port": int(ports["memurai"]),
         "redis_db": int(flags.get("redis_db") or 0),
@@ -326,6 +344,8 @@ ANALYTICS_URL    = f"http://127.0.0.1:{_ports['options_analytics']}"
 APPROVAL_PORT    = _ports["approval"]
 NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
+NICEGUI_LIVE_PORT = _derived["nicegui_live_port"]
+NICEGUI_LIVE_URL  = f"http://127.0.0.1:{NICEGUI_LIVE_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
 MEMURAI_PORT  = _derived["memurai_port"]
 # The logical Redis DB index this environment owns. Exported as an int rather
@@ -337,6 +357,41 @@ REDIS_DB      = _derived["redis_db"]
 MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/{REDIS_DB}"
 SERVICE_PORTS = dict(_derived["service_ports"])
 SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
+
+# ── the public edge: two hostnames, two ORIGINS ──────────────────────────────
+# `deploy/caddy/generate_caddyfile.py` derives the whole edge config from these,
+# for the same reason the systemd units derive theirs from the ports above.
+#
+# SITE_HOST carries a static one-pager with third-party links; APP_HOST carries
+# the web GUI behind the login. They are separate ORIGINS and not separate paths
+# on one host deliberately: the public page hosts other people's embeds, and
+# sharing an origin would put a compromised widget inside the app's cookie scope.
+#
+# Machine-local like `peer_root` and `proxy_host`, and for the same reason — the
+# domain is a property of the box that answers on :443, not of which environment
+# a checkout is. The default is this project's own domain so a checkout with no
+# marker still renders something inspectable; the generator refuses to run
+# outside prod, so a wrong default cannot reach a live edge.
+#
+# A SECOND read of the same marker. warn=False because _resolve_env's read above
+# has already reported a malformed file, once — a doubled warning reads as two
+# problems.
+_env_local = _load_env_local(REPO_ROOT, warn=False)
+SITE_HOST = str(_env_local.get("site_host") or "neuralstrike.co").strip().lower()
+APP_HOST  = str(_env_local.get("app_host") or f"app.{SITE_HOST}").strip().lower()
+
+# The public read-only origin. Sibling of APP_HOST, and deliberately NOT a path
+# under it: the app is behind a login and the live screens are not, so they are
+# separated by ORIGIN rather than by a path filter someone has to get right.
+LIVE_HOST = str(_env_local.get("live_host") or f"live.{SITE_HOST}").strip().lower()
+
+# ⚠ WHAT THE PUBLIC FILE SERVER IS ROOTED AT, and the single most damaging value
+# in this file to get wrong. One level up publishes shared/tokens.json,
+# shared/appsettings.json, shared/webgui_auth.json and config/env.local.toml to
+# the internet — and the site would look perfect while it happened, with nothing
+# to alert anyone. Nothing but site assets belongs under it; a test in
+# deploy/caddy/tests/ fails on anything else that lands there.
+SITE_ROOT = REPO_ROOT / "deploy" / "site"
 
 
 # ── the clock this whole codebase assumes ────────────────────────────────────

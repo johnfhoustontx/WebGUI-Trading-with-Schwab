@@ -227,6 +227,50 @@ class TestLiquidityThresholds:
     def test_swing_long_leg_thresholds(self):
         assert LIQUIDITY_THRESHOLDS["SWING"]["min_oi_long"] == 10
 
+    # ── INCOME (30-45 DTE) ──────────────────────────────────────────────────
+    def test_thresholds_has_income_key(self):
+        """Without this entry `passes_liquidity_gate` fails OPEN for INCOME —
+        no OI floor, no volume floor, no spread cap — which is exactly how a
+        30-45 DTE premium screen would surface untradeable strikes."""
+        assert "INCOME" in LIQUIDITY_THRESHOLDS
+
+    def test_income_min_oi_is_at_least_swings(self):
+        """A monthly strike ACCUMULATES open interest over weeks, so the
+        resting-size floor can be stricter here than at 1-15 DTE, never looser."""
+        assert (LIQUIDITY_THRESHOLDS["INCOME"]["min_oi"]
+                >= LIQUIDITY_THRESHOLDS["SWING"]["min_oi"])
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_oi"] == 100
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_oi_long"] == 20
+
+    def test_income_min_volume_is_below_swings(self):
+        """The same strike TRADES less per day than a near-dated weekly, so a
+        SWING-sized volume floor would reject liquid monthlies. This is the one
+        axis where the income window must be more permissive."""
+        assert (LIQUIDITY_THRESHOLDS["INCOME"]["min_volume"]
+                < LIQUIDITY_THRESHOLDS["SWING"]["min_volume"])
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["min_volume"] == 5
+
+    def test_income_max_spread_pct(self):
+        assert LIQUIDITY_THRESHOLDS["INCOME"]["max_spread_pct"] == 0.20
+
+
+class TestScannedTradeTypesAreAllGated:
+    """`passes_liquidity_gate` fails OPEN on an unknown trade_type, and that
+    silence is the bug: INCOME shipped with no gate at all and nothing said so.
+
+    The default stays `return True` deliberately — other callers pass trade
+    types this dict has never covered, and a blanket fail-closed would silently
+    empty them. This test is the guard instead."""
+
+    def test_every_scanned_trade_type_has_a_liquidity_floor(self):
+        assert set(scanner_engine.SCANNED_TRADE_TYPES) <= set(LIQUIDITY_THRESHOLDS)
+
+    def test_the_fail_open_default_is_still_there(self):
+        """Pins the deliberate default, so a future "fix" that flips it to
+        fail-closed has to argue with a test rather than slip through."""
+        assert passes_liquidity_gate({"oi": 0, "volume": 0, "bid": 0, "ask": 0},
+                                     "NOT-A-WINDOW") is True
+
 
 class TestPassesLiquidityGate:
     """Unit tests for passes_liquidity_gate() helper.
@@ -819,6 +863,72 @@ class TestEarningsAvoidance:
 
     def test_no_conflict_when_earnings_far_before_entry(self):
         assert check_earnings_conflict(self._d(-70), self._d(10)) is False
+
+
+class TestIncomeEarningsGate:
+    """The earnings gate must cover the INCOME window, not only SWING.
+
+    At 30-45 DTE a straddled report is the common case rather than the
+    exception, so a SWING-only gate would emit income candidates over earnings
+    from the very first scan.
+    """
+
+    def _chain(self, dte):
+        """Put-only ladder 85-99 whose marks decay steeply enough that every
+        auto-selected width clears both min_cr_pct and the |delta|+EDGE_MARGIN
+        edge floor. Delta -0.25 sits inside the requested band AND below
+        MAX_ENTRY_SHORT_DELTA, so the short legs are not filtered on delta.
+
+        ⚠ The 0.50 per-strike mark slope IS the spread's credit/width, so it
+        must exceed |delta| + EDGE_MARGIN — 0.27 here. Measured: 0.20 yields
+        ZERO signals, 0.28 and 0.50 both yield 14. The neighbouring
+        TestPerExpiryExpectedMove._chain uses 0.20, which is enough at ITS delta
+        of -0.10 and is NOT enough at -0.25 — so do not "harmonise" this fixture
+        toward that one. (Doing so is caught loudly rather than silently, by
+        test_fixture_produces_signals_without_an_earnings_date below.)
+
+        Underlying is fixed at 100.0 rather than parameterised: both call sites
+        pass a matching spot=100.0 independently, and a varying parameter could
+        desynchronise the two with no signal.
+
+        The expiration STRING is a real date `dte` days out, because
+        check_earnings_conflict compares dates, not the `:dte` suffix.
+        """
+        underlying = 100.0
+        exp = (date.today() + timedelta(days=dte)).isoformat()
+
+        def leg(k):
+            mark = 0.20 + (k - 85) * 0.50
+            return [{"strikePrice": float(k), "delta": -0.25, "mark": mark,
+                     "bid": round(mark - 0.02, 2), "ask": round(mark + 0.02, 2),
+                     "theta": -0.02, "vega": 0.05, "gamma": 0.01,
+                     "volatility": 25.0,
+                     "totalVolume": 500, "openInterest": 500}]
+
+        return {
+            "underlyingPrice": underlying,
+            "callExpDateMap": {},
+            "putExpDateMap": {
+                f"{exp}:{dte}": {f"{k}.0": leg(k) for k in range(85, 100)},
+            },
+        }
+
+    def test_fixture_produces_signals_without_an_earnings_date(self):
+        """Non-vacuity guard for the test below: `sigs == []` only means the
+        gate fired if the same chain yields spreads when nothing is gating."""
+        sigs = screen_spreads(
+            self._chain(dte=35), "AAPL", 30, 45, -0.30, -0.20, 0.20, 0.30, 0.12,
+            "INCOME", spot=100.0, earnings_date=None)
+        assert sigs, "fixture produced no spreads - the gate test would pass vacuously"
+
+    def test_income_window_skips_expirations_straddling_earnings(self):
+        earnings = (date.today() + timedelta(days=20)).isoformat()
+
+        sigs = screen_spreads(
+            self._chain(dte=35), "AAPL", 30, 45, -0.30, -0.20, 0.20, 0.30, 0.12,
+            "INCOME", spot=100.0, earnings_date=earnings)
+
+        assert sigs == []
 
 
 class TestDynamicMinCredit:
@@ -1863,15 +1973,28 @@ class TestPerExpiryExpectedMove:
         assert all(96.5 <= k <= 98.5 for k in legacy), legacy
 
 
+def _directional_uncut(fake_client, symbols):
+    """Re-run the scan with the min-score cut lifted, for non-vacuity checks."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
+        mp.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+        return scanner_engine.run_full_scan(
+            fake_client, symbols=symbols)["signals_directional"]
+
+
 @pytest.fixture
 def unfiltered_directional(monkeypatch):
     """Drop the min-score cut for tests that are about the build/score pipeline.
 
-    Every directional candidate this fixture chain produces grades Weak (the
-    fake chain's liquidity/PoP fail the hard gates), so with the production
-    ``SINGLE_LEG_MIN_SCORE`` in force the emitted list is empty and every
-    assertion about shape, window coverage or ordering goes vacuous. These
-    tests predate the cut and are not about it — the cut has its own tests.
+    MOST directional candidates this fixture chain produces grade Weak (the fake
+    chain's liquidity/PoP fail the hard gates), so with the production
+    ``SINGLE_LEG_MIN_SCORE`` in force nearly everything is cut and assertions
+    about shape, window coverage or ordering go vacuous or lose their probe.
+    These tests predate the cut and are not about it — the cut has its own tests.
+
+    ⚠ "Every candidate grades Weak" until Task 2.6, which is when the naked
+    shorts stopped being uniformly Weak (their reward bar is now annualised).
+    Three of them now clear the cut, so the word is "most", not "every".
     """
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
@@ -1939,12 +2062,13 @@ class TestDirectionalSignals:
         and drives q_be toward 0 -- under-scoring the swing side of this single
         jointly-sorted list.
 
-        QQQ's 7-DTE LONG_CALL is the probe because it is the ONLY swing
-        candidate this fixture produces that is NOT pinned to GATE_FAIL_CAP
-        (39.0) by a failed hard gate -- i.e. the only one where q_be is
-        observable at all. Measured: 36.2 scored per-window vs 31.6 under the
-        spec's single 1-day em_1sd; the 34.0 bar sits between them, so a revert
-        to the spec fails here.
+        QQQ's 7-DTE LONG_CALL is the probe because q_be is observable on it --
+        it is not pinned to GATE_FAIL_CAP (39.0) by a failed hard gate.
+        Measured: 36.2 scored per-window vs 31.6 under the spec's single 1-day
+        em_1sd; the 34.0 bar sits between them, so a revert to the spec fails
+        here. (It was the ONLY such swing candidate until Task 2.6 annualised
+        the naked reward bar; QQQ's 7-DTE SHORT_CALL now scores 50.7 and is
+        un-capped too. The probe is unchanged -- it is still a valid one.)
         """
         sigs = scanner_engine.run_full_scan(
             fake_client, symbols=self.SYMBOLS)["signals_directional"]
@@ -1970,13 +2094,74 @@ class TestDirectionalSignals:
     # --- Minimum-score cut ---------------------------------------------------
 
     def test_weak_directional_candidates_are_not_emitted(self, fake_client):
-        """Every candidate this fixture builds grades Weak (~23-39), so the
-        production cut must emit NOTHING — no Weak signal reaches the tab."""
+        """No Weak / sub-floor candidate reaches the tab, end to end.
+
+        UPDATED (Task 2.6). This asserted `signals_directional == []` on the
+        premise, stated in its own docstring and in `unfiltered_directional`,
+        that "every candidate this fixture builds grades Weak (~23-39)". That
+        premise was a CHARACTERIZATION OF THE BUG, not a property of the
+        fixture: naked shorts were uniformly Weak because the NAKED reward bar
+        demanded 10% return on capital per TRADE at any horizon, so no short
+        put or short call could ever clear it. With the bar annualised, three of
+        this fixture's naked shorts grade Marginal at 50.7-53.2 and are
+        correctly emitted.
+
+        Asserting an empty list therefore no longer tests the cut — it tests the
+        bug. The invariant the cut actually promises is asserted instead.
+
+        ⚠ The per-row loop below is NOT on its own stronger than the old
+        `== []`: it has the same hole, and an earlier revision of this docstring
+        claimed otherwise. Mutation-verified — with `SINGLE_LEG_MIN_SCORE` forced
+        to 999 the cut emits nothing, the loop iterates zero times, `uncut >
+        with_cut` still holds at `16 > 0`, and the whole test passed. That is
+        exactly the regression Task 2.6 exists to prevent, sailing through green.
+        The two assertions that close it are the non-empty check and the
+        surviving-naked-short check; the latter is the only assertion anywhere in
+        this suite that would notice the annualisation being undone end to end.
+
+        ⚠ Do NOT read those three rows as evidence a 1-DTE naked short is a good
+        trade. This fixture's chain is synthetic and degenerate — a flat 440.57
+        credit at PoP 99.8 — which no real chain offers.
+
+        ⚠ A CORRECTED CLAIM (Task 2.7). This paragraph used to continue
+        "measured on a Black-Scholes chain (spot 100, IV 0.28), a 1-DTE naked
+        short composites ~49.6, just under this same 50.0 floor", and both
+        halves were wrong. The number was 48.8-48.9, not 49.6 (re-measured by
+        `tools/sweep_naked_capeff.py`, which had not existed when the prose was
+        written); and one grid point of one synthetic chain is not a general
+        brake on the short end — THESE THREE ROWS are the counter-example, sitting
+        in the same file. The 1-DTE class was reaching users unbraked, which is
+        why `strategy_scoring.MIN_ANNUALISE_DTE` now floors the annualisation
+        horizon. The rows still emit at the same composites: the fixture's naked
+        shorts return 0.90-5.12% per trade, so the floor would have to exceed 32
+        before any of their reward gates failed (sweep section (e)).
+
+        Scope: this half of the pair proves the cut lets nothing bad THROUGH.
+        The other direction — that it does not over-cut and suppress qualifying
+        rows — is `test_directional_emits_candidates_at_or_above_the_min_score`,
+        which stubs the scores and so cannot be moved by a scoring change.
+        Deliberately not asserted here as a non-empty list: that would re-pin
+        this synthetic fixture's exact output and break on any future bar tune.
+        """
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
-        assert results["signals_directional"] == []
-        # Non-vacuity: the builder must actually have produced candidates for
-        # the cut to have anything to drop, else this passes for free.
+        for s in results["signals_directional"]:
+            assert s["grade"] not in scanner_engine.SINGLE_LEG_EXCLUDED_GRADES
+            assert (s.get("composite_score") or 0) >= scanner_engine.SINGLE_LEG_MIN_SCORE
+        # Non-vacuity, both halves: the builder must have produced candidates,
+        # and the cut must actually have DROPPED some — otherwise the loop above
+        # passes for free on a list nothing was ever removed from.
         assert results["signals_0dte"], "fixture produced no scan at all"
+        assert results["signals_directional"], (
+            "the cut emitted nothing — every candidate is Weak again")
+        assert any(s["type"] in ("SHORT_PUT", "SHORT_CALL")
+                   for s in results["signals_directional"]), (
+            "no naked short survived the cut — the Task 2.6 annualisation has "
+            "regressed")
+        with_cut = len(results["signals_directional"])
+        uncut = len(_directional_uncut(fake_client, self.SYMBOLS))
+        assert uncut > with_cut, (
+            f"cut dropped nothing ({uncut} built, {with_cut} emitted) — "
+            "the assertions above are vacuous")
 
     def test_directional_emits_candidates_at_or_above_the_min_score(
             self, fake_client, monkeypatch):

@@ -47,8 +47,8 @@ three-tab implementation would have been.
 
 ⚠ This file is deliberately OUTSIDE the Tailwind-first standard, which binds
 NiceGUI components styled with ``.classes()``. It emits a raw ``HTMLResponse``
-document — the documented out-of-scope case, the same one ``/desk/live`` and the
-EOD report sit in — so it carries its own ``<style>`` block. Its palette is still
+document — the documented out-of-scope case, the same one the EOD report and
+the Gamma Explain infographic sit in — so it carries its own ``<style>`` block. Its palette is still
 read out of ``pages/options/theme`` rather than hand-picked.
 """
 import html

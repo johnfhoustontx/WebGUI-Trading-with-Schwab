@@ -13,7 +13,8 @@ def test_shell_registers_all_pages():
     routes = set(Client.page_routes.values())
     expected = (
         "/options/scanner", "/options/paper", "/options/captured", "/options/portfolio",
-        "/options/calculator", "/options/swing", "/options/gamma",
+        "/options/shares",
+        "/options/calculator", "/options/swing", "/options/income", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
         "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
@@ -470,7 +471,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     # `_LANDING_ROUTES` is the explicit, enumerated exemption — a set rather than a
     # blanket "or len(trail) == 1", so a page that loses its section by accident
     # still fails here instead of being waved through as a second landing page.
-    _LANDING_ROUTES = {"/desk", "/desk/live"}
+    _LANDING_ROUTES = {"/desk"}
     sections = {c.title() for c, _e in main.NAV_SECTIONS if c} | {main.SYSTEM_SECTION}
     for route in main._NAV_LABEL:
         trail = main.breadcrumb_trail(route)
@@ -585,8 +586,8 @@ def test_sync_manual_paper_lifecycle_setting_registered_inside_the_main_guard():
 
 
 def test_reimporting_main_after_startup_does_not_raise():
-    """Pages do `import main as _shell` (e.g. pages/options/scanner.py) at REQUEST
-    time. The entry script runs as __main__, so that re-executes main.py as a
+    """`wall.py` does `import main` lazily inside its route handler. The entry
+    script runs as __main__, so that re-executes main.py as a
     SECOND module object — after NiceGUI has started. Any module-level
     `app.on_startup()` raises RuntimeError there and 500s every page, so lifecycle
     registration must live inside the __main__ guard.
@@ -625,10 +626,10 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 15 drawer items (the 12
-    NAV_SECTIONS entries — the pinned landing block's Desk + Live Mirror, plus the
-    10 workflow ones — + the 3 SYSTEM_RAIL pages at the foot); child-page icons
-    are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 15 drawer items (the 11
+    NAV_SECTIONS entries — the pinned landing block's Desk, plus the 10 workflow
+    ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
@@ -876,12 +877,21 @@ def test_brand_mark_src_requires_the_file_to_exist(tmp_path):
     missing file renders the wordmark alone instead of a broken-image icon."""
     import main
 
-    (tmp_path / "img").mkdir()
+    from pages.options import theme
+
+    # The FILENAME is DERIVED from the configured mark, never written down here.
+    # This test is about the mechanism — present → URL, absent → "" — and pinning
+    # the name made it fail when the mark moved from .png to .svg, which said
+    # nothing at all about whether the mechanism still worked.
+    url = theme.BRAND_MARK
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+
     # Configured + present → the URL is served.
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
-    assert main.brand_mark_src(tmp_path) == "/static/img/neuralstrike-mark.png"
+    asset.write_bytes(b"<svg/>")
+    assert main.brand_mark_src(tmp_path) == url
     # Configured + absent → no image (NOT a dangling src).
-    (tmp_path / "img" / "neuralstrike-mark.png").unlink()
+    asset.unlink()
     assert main.brand_mark_src(tmp_path) == ""
 
 
@@ -919,11 +929,16 @@ def test_brand_lockup_includes_the_mark_when_present(tmp_path):
     """With the asset on disk the lockup leads with the logo image."""
     import main
 
-    (tmp_path / "img").mkdir()
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    from pages.options import theme
+
+    url = theme.BRAND_MARK                       # derived, never pinned
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"<svg/>")
+
     out = main.brand_lockup_html(tmp_path)
     assert 'class="brand-mark"' in out
-    assert 'src="/static/img/neuralstrike-mark.png"' in out
+    assert f'src="{url}"' in out
 
 
 def test_brand_lockup_can_omit_the_mark(tmp_path):
@@ -932,8 +947,13 @@ def test_brand_lockup_can_omit_the_mark(tmp_path):
     inert HTML string."""
     import main
 
-    (tmp_path / "img").mkdir()
-    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    from pages.options import theme
+
+    url = theme.BRAND_MARK                       # derived, never pinned
+    asset = tmp_path / url[len("/static/"):]
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"<svg/>")
+
     out = main.brand_lockup_html(tmp_path, mark=False)
     assert "<img" not in out
     assert "brand-word" in out, "the wordmark must still be there"
@@ -980,12 +1000,255 @@ def test_header_padding_and_logo_size_keep_the_bar_at_its_measured_height():
     assert 8 + 44 + 8 == 60
 
 
-def test_brand_assets_are_shipped():
-    """The header renders a real file, not a hopeful URL — so it must be in the
-    repo. Pins BOTH the mark the header uses and the source lockup it is cropped
-    from (regenerating the mark needs the source)."""
+def test_the_wordmark_tracking_comes_from_config_not_a_literal():
+    """The lockup's letter-spacing is a [brand] key, like every other property
+    of it. It was the ONE value hardcoded in build_brand_css, at .01em -- which
+    is why the app's wordmark sat tight while the public site's ran wide, on the
+    one axis nobody could reach without editing the function.
+
+    ⚠ Asserting `BRAND_CSS contains ".14em"` would prove nothing: that is also
+    the built-in default, so the test passes whether or not the config is read.
+    This drives build_brand_css with a value the defaults do not contain.
+    """
+    from pages.options import theme
+
+    css = theme.build_brand_css({**theme.THEME,
+                                 "brand": {**theme.THEME["brand"], "tracking": "0.42em"}})
+    assert "letter-spacing: 0.42em;" in css, "build_brand_css ignores [brand].tracking"
+
+
+def test_the_wordmark_tracking_degrades_to_the_default():
+    """A missing or blank key must not emit `letter-spacing: ;`, which would
+    make the whole rule invalid and silently drop the uppercase transform's
+    companion."""
+    from pages.options import theme
+
+    default = theme._DEFAULTS["brand"]["tracking"]
+    for bad in ({}, {"tracking": ""}, {"tracking": "   "}):
+        brand = {**theme.THEME["brand"], **bad}
+        if not bad:
+            brand.pop("tracking", None)
+        css = theme.build_brand_css({**theme.THEME, "brand": brand})
+        assert f"letter-spacing: {default};" in css, bad
+
+
+def test_an_uppercase_wordmark_is_actually_tracked():
+    """Capitals are drawn to sit inside lowercase words; set solid they read as
+    cramped. Any value at or near zero undoes the text-transform above it."""
+    from pages.options import theme
+
+    assert "text-transform: uppercase;" in theme.BRAND_CSS
+    import re
+    m = re.search(r"letter-spacing: ([0-9.]+)em;", theme.BRAND_CSS)
+    assert m, "the wordmark's tracking is not an em value"
+    assert float(m.group(1)) >= 0.05, (
+        f"tracking is {m.group(1)}em -- an uppercase wordmark needs the air")
+
+
+def _contrast(a, b):
+    """WCAG contrast ratio between two #rrggbb colours."""
+    def lum(c):
+        ch = []
+        for i in (1, 3, 5):
+            v = int(c[i:i + 2], 16) / 255
+            ch.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    l1, l2 = sorted((lum(a), lum(b)), reverse=True)
+    return (l1 + 0.05) / (l2 + 0.05)
+
+
+def test_the_favicon_ink_is_legible_on_every_route_colour():
+    """THE PROPERTY, not the formula.
+
+    ``_favicon_ink`` picks light or dark ink by a cheap luminance approximation.
+    What matters is not that the approximation is any particular one, but that
+    the ink it lands on is actually READABLE on that ground -- the palette spans
+    Desk gold #f5c542 to Stop-All dark red #b71c1c, and it gains a colour every
+    time a route does, at which point nobody re-checks the other twenty-nine.
+
+    3:1 is the WCAG threshold for graphics and interface components, which is
+    what a favicon is. Asserting the ratio rather than the branch means a future
+    colour that defeats the approximation fails HERE, not in a tab.
+    """
     import main
 
+    worst = min(((_contrast(main._favicon_ink(c), c), r, c)
+                 for r, c in main._TAB_COLOR.items()), key=lambda x: x[0])
+    ratio, route, color = worst
+    assert ratio >= 3.0, (
+        f"{route} ({color}) gets ink {main._favicon_ink(color)} at only "
+        f"{ratio:.2f}:1 -- the mark will not read in the tab")
+
+
+def test_the_favicon_draws_the_mark_and_keeps_the_route_colour():
+    """Both halves of the design at once.
+
+    The COLOUR is the ground, because it exists so a dozen open tabs are tellable
+    apart at 16px and only a full-bleed field does that. The MARK rides on top, so
+    every tab is recognisably NeuralStrike. Losing either one silently defeats
+    the other's purpose.
+    """
+    import main
+
+    uri = main._favicon_uri("#42a5f5")
+    assert "%2342a5f5" in uri or "#42a5f5" in uri, "the route colour is gone"
+    # The SMALL optical variant -- the same drawing the public site's favicon
+    # uses. URL-encoded in the data URI, so match on the encoded form.
+    from urllib.parse import quote
+    for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
+        assert quote(path_d) in uri, f"the favicon does not draw {path_d!r}"
+
+
+def test_the_app_and_site_favicons_are_the_same_drawing():
+    """The app generates its favicon per route; the public site ships a file.
+    Different mechanisms, one mark -- or the tab icon changes meaning when you
+    cross from the marketing site to the app."""
+    import pathlib
+    from urllib.parse import quote
+
+    import main
+
+    site = (pathlib.Path(main._REPO_ROOT) / "deploy/site/assets/favicon.svg"
+            ).read_text(encoding="utf-8")
+    uri = main._favicon_uri("#42a5f5")
+    for path_d in ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52"):
+        assert path_d in site, f"the site favicon lost {path_d!r}"
+        assert quote(path_d) in uri, f"the app favicon lost {path_d!r}"
+
+
+def test_favicon_ink_degrades_on_a_malformed_colour():
+    """Chrome must never break a page render. An unparseable colour takes the
+    light ink, which suits the mostly mid-to-dark palette."""
+    import main
+
+    for bad in ("", "nope", "#ff", "rgb(1,2,3)", None):
+        assert main._favicon_ink(bad if isinstance(bad, str) else "") == "#f2f4fb"
+
+
+def test_every_page_is_registered_through_the_favicon_wrapper():
+    """EVERY route goes through ``main._page``, never ``ui.page`` directly.
+
+    ⚠ This is the fix for a real bug, not tidiness. The tab icon used to be
+    injected with ``ui.add_head_html``, which emits a SECOND ``<link rel=icon>``
+    AFTER NiceGUI's own -- and the browser kept NiceGUI's, so every tab showed
+    the framework's logo while the header showed the brand. Passing
+    ``favicon=`` to ``@ui.page`` REPLACES that link instead of competing with
+    it; verified against a live server, which emits exactly one icon link and no
+    ``favicon.ico``.
+
+    A route registered with a bare ``@ui.page`` would silently opt out and get
+    NiceGUI's logo back, on that page only -- which is how this would return.
+    """
+    import pathlib
+    import re
+
+    import main
+
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    # Strip comments and docstrings' prose mentions: only real decorators count.
+    bare = re.findall(r"^@ui\.page\(", src, re.M)
+    assert not bare, (
+        f"{len(bare)} page(s) bypass main._page and will show NiceGUI's favicon")
+    assert re.findall(r"^@_page\(", src, re.M), "no pages registered at all"
+
+
+def test_the_wrapper_gives_every_route_a_favicon_that_draws_the_mark():
+    """Including the four routes with no colour of their own, which inherit the
+    Market Scanner's blue rather than falling back to no icon."""
+    import pathlib
+    import re
+    from urllib.parse import quote
+
+    import main
+
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    routes = re.findall(r'^@_page\("([^"]+)"\)', src, re.M)
+    assert len(routes) >= 30, f"only found {len(routes)} routes"
+    for route in routes:
+        uri = main._favicon_uri(main._TAB_COLOR.get(route, "#42a5f5"))
+        assert uri.startswith("data:image/svg+xml,"), route
+        assert quote("M22 12 L32 23.5 L42 12") in uri, f"{route} has no mark"
+
+
+def test_the_app_answers_favicon_ico_with_its_own_mark():
+    """A BROWSER ASKS FOR /favicon.ico WHETHER OR NOT THE PAGE MENTIONS IT.
+
+    Every page declares its own coloured SVG through ``_page``, and that is
+    enough for Chrome, Firefox and Edge. ⚠ Safari does not support SVG favicons
+    at all and falls back to ``/favicon.ico`` -- a path
+    ``auth_middleware.OPEN_PATHS`` deliberately leaves open, and which NiceGUI
+    answers with ITS OWN logo unless ``ui.run`` is handed a real FILE
+    (``nicegui.favicon.create_favicon_route`` registers the route only when
+    ``is_file``). Measured on prod before this landed: the bytes served there
+    were byte-identical to ``nicegui/static/favicon.ico``.
+    """
+    import pathlib as _pl
+    import re
+
+    import main
+
+    ico = _pl.Path(main._STATIC_DIR) / "img" / "favicon.ico"
+    assert ico.is_file(), "the app has no favicon.ico to answer that request with"
+
+    # It must be OURS, not the framework's.
+    import nicegui
+    theirs = _pl.Path(nicegui.__file__).parent / "static" / "favicon.ico"
+    if theirs.is_file():
+        assert ico.read_bytes() != theirs.read_bytes(), (
+            "the app's favicon.ico IS NiceGUI's default")
+
+    # And ui.run has to actually be handed it -- a file nobody passes is inert.
+    # Sliced rather than regexed: the pattern needed an escaped newline, and
+    # shell quoting mangled that into a real one three times while this file was
+    # being written. Indexing needs no escapes.
+    src = _pl.Path(main.__file__).read_text(encoding="utf-8")
+    start = src.rindex("ui.run(")
+    call = src[start:src.index(")", src.index("show=False", start))]
+    assert "favicon=" in call, (
+        "ui.run does not pass favicon=, so NiceGUI still owns /favicon.ico")
+
+
+def test_the_app_ico_is_multi_size_and_draws_the_mark():
+    """The point of the format is that the browser picks a size rather than
+    scaling one bitmap."""
+    import pathlib as _pl
+
+    from PIL import Image
+
+    import main
+
+    ico = _pl.Path(main._STATIC_DIR) / "img" / "favicon.ico"
+    with Image.open(ico) as im:
+        sizes = {tuple(s) for s in im.info.get("sizes", ())}
+    for want in ((16, 16), (32, 32)):
+        assert want in sizes, f"favicon.ico has no {want[0]}px entry; has {sorted(sizes)}"
+
+    # The accent pixel proves it is the app's palette, not the site's blurple.
+    with Image.open(ico) as im:
+        im.size = (48, 48)
+        im.load()
+        rgb = im.convert("RGB")
+    px = {rgb.getpixel((x, 24)) for x in range(14, 34)}
+    assert any(abs(r - 107) < 40 and abs(g - 134) < 40 and abs(b - 255) < 40
+               for r, g, b in px), "the rule is not the app accent #6b86ff"
+
+
+def test_brand_assets_are_shipped():
+    """The header renders a real file, not a hopeful URL — so it must be in the
+    repo. Whatever ``[brand].mark`` names has to be ON DISK: ``brand_mark_src``
+    degrades a missing asset to no image at all, so the header would quietly
+    lose its logo and nothing anywhere would fail."""
+    import main
+    from pages.options import theme
+
+    url = theme.BRAND_MARK
+    assert url.startswith("/static/"), url
+    assert (main._STATIC_DIR / url[len("/static/"):]).is_file(), (
+        f"[brand].mark points at {url}, which is not in the repo")
+
+    # The retired artwork is deliberately KEPT, unreferenced. It is the revert
+    # path for the 2026-09-07 rebrand — one line in config/theme.toml — and
+    # deleting it would turn that edit into a redraw.
     assert (main._STATIC_DIR / "img" / "neuralstrike-mark.png").is_file()
     assert (main._STATIC_DIR / "img" / "neuralstrike-logo.jpg").is_file()
 
@@ -1119,8 +1382,9 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
     # The Options strip keeps its find -> analyze -> track -> repair workflow.
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
-        "/options/scanner", "/options/swing", "/options/expected-move", "/options/captured",
-        "/options/paper", "/options/portfolio", "/options/rescue"]
+        "/options/scanner", "/options/swing", "/options/income",
+        "/options/expected-move", "/options/captured",
+        "/options/paper", "/options/portfolio", "/options/shares", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
     assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
         "/options/gamma", "/options/matrix", "/options/flow"]
@@ -1183,19 +1447,15 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 4, 4, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 4, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
 
 
 def test_the_landing_block_is_pinned_above_every_caption():
-    """The home page and its Live Mirror sit above the captions — the rail's mirror
-    of the bottom-pinned SYSTEM_RAIL block — and render no section header.
-
-    The mirror belongs HERE rather than in a workflow section because it is the
-    same screen as Desk for a different display, not a destination of its own;
-    filing it under MARKETS would have made it look like a distinct read.
+    """The home page sits above the captions — the rail's mirror of the
+    bottom-pinned SYSTEM_RAIL block — and renders no section header.
 
     Pinned because three separate things have to agree for this to look right and
     none of the others would fail on its own: the block must be first, its caption
@@ -1207,7 +1467,7 @@ def test_the_landing_block_is_pinned_above_every_caption():
     import main
     caption, entries = main.NAV_SECTIONS[0]
     assert caption is None, "the landing block must carry NO caption"
-    assert entries == [main._sec_page("/desk"), main._sec_page("/desk/live")]
+    assert entries == [main._sec_page("/desk")]
     src = inspect.getsource(main._layout)
     assert "if caption is not None:" in src, (
         "the drawer must SKIP the header for a caption-less block")
@@ -1257,22 +1517,110 @@ def test_sec_helpers_refuse_an_unknown_group_or_route():
         main._sec_page("/no/such/route")
 
 
-def test_stop_all_services_is_a_danger_button_and_sits_last():
+def test_stop_all_services_is_a_danger_button_and_never_sits_last():
     """The one irreversible item in the rail must not look like — or sit among —
-    the navigation rows it neighbours."""
+    the navigation rows it neighbours.
+
+    Its POSITION reasoning inverted on 2026-09-06. It used to sit last so nothing
+    could be overshot INTO it; the app is now used from a phone, where the bottom
+    edge is the easiest thing to hit, so the last slot is the worst place for it.
+    Sign out took that slot: overshooting the stop now costs a re-login, not a
+    trading day.
+    """
     import inspect
     import main
-    assert main.SYSTEM_RAIL[-1][0] == main.SYSTEM_DANGER_ROUTE == "/terminate"
+    assert main.SYSTEM_DANGER_ROUTE == "/terminate"
+    assert main.SYSTEM_RAIL[-1][0] != main.SYSTEM_DANGER_ROUTE, (
+        "the destructive item must not own the phone's easiest tap target")
     # Settings must come BEFORE it: aiming for Settings and overshooting should
     # not land on "stop the whole stack".
     assert [p for p, _l, _i in main.SYSTEM_RAIL] == [
-        "/status", "/settings", "/terminate"]
+        "/status", "/settings", "/terminate", "/logout"]
     src = inspect.getsource(main._layout)
     assert "_nav_danger_link(" in src, "the danger route gets its own renderer"
     # It claims no active state (a navy active wash under a rose outline reads as
     # a rendering bug) and carries no dot.
     danger = inspect.getsource(main._nav_danger_link)
     assert "nav-active" not in danger and "_alert_dot" not in danger
+
+
+def test_the_rail_order_comment_states_the_reasoning_that_now_applies():
+    """The comment above ``SYSTEM_DANGER_ROUTE`` argues for a POSITION, and the
+    argument inverted when Sign out took the last slot. A comment left asserting
+    the superseded rationale is worse than none: it is the only place the reader
+    is told why the order is what it is, and it would now be telling them the
+    opposite of the truth.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "main.py").read_text(encoding="utf-8")
+    assert "never sits mid-list where Settings is aimed for" not in src, (
+        "the old last-slot rationale survived the reorder")
+    # Scoped to the block that actually argues the position: a match anywhere in
+    # a 2,300-line file would prove nothing about THIS comment.
+    head, _sep, _rest = src.partition("SYSTEM_DANGER_ROUTE = ")
+    block = head[head.rindex("\n\n"):]
+    assert "overshoot" in block.lower(), (
+        "the comment above SYSTEM_DANGER_ROUTE no longer says why the "
+        f"destructive item sits where it does:\n{block}")
+
+
+def test_sign_out_is_the_rails_last_item_and_reuses_the_one_logout_route():
+    """Sign out is a rail row, and it points at the route that already exists.
+
+    ``/logout`` was URL-only until 2026-09-06 — it worked and nothing on screen
+    offered it. The row is deliberately the LAST item: on a phone the bottom edge
+    is the easiest target, so the harmless control belongs there and the
+    destructive one above it.
+
+    The target is read from ``login_page.LOGOUT_ROUTE`` rather than restated, so
+    a second logout path cannot appear by a literal drifting out of step with the
+    ``@app.get`` that clears the cookies.
+    """
+    import main
+    import login_page
+    route, label, icon = main.SYSTEM_RAIL[-1]
+    assert route == login_page.LOGOUT_ROUTE == "/logout"
+    assert label == "Sign out"
+    assert icon, "the collapsed 68px rail shows the icon and nothing else"
+
+
+def test_sign_out_cannot_claim_the_active_wash():
+    """A rail row that leaves the app must never highlight as "you are here".
+
+    ``_nav_link`` washes on ``path == active`` and ``active`` is always the route
+    of the shell page being rendered — so the guarantee is that ``/logout``
+    renders no shell page at all. It is a raw ``@app.get`` returning a 303, which
+    is what makes it un-highlightable by construction rather than by accident.
+    """
+    import main  # noqa: F401  -- importing registers the @ui.page routes
+
+    assert "/logout" not in set(Client.page_routes.values()), (
+        "/logout became a shell page — it would now claim the active wash, and "
+        "the cookie-clearing redirect would stop being what the row does")
+
+
+def test_sign_out_row_renders_no_alert_dot_and_navigates_in_place():
+    """Nothing counts toward signing out, and the row is an ordinary in-place
+    link — not a new tab. ``EXTERNAL_RAIL_ROUTES`` and ``_nav_link(new_tab=)``
+    were deleted with the Live Mirror on 2026-09-02; this must not revive them."""
+    import inspect
+
+    from nicegui import ui
+
+    import main
+    assert not hasattr(main, "EXTERNAL_RAIL_ROUTES")
+    assert "new_tab" not in inspect.signature(main._nav_link).parameters
+
+    main._NAV_BADGES.clear()
+    main._alert_refs.clear()
+    with ui.card():
+        holder = ui.element("div")
+        with holder:
+            main._nav_link("/logout", "Sign out", "logout", "/status")
+    link = holder.default_slot.children[0]
+    assert "nav-active" not in link.classes
+    assert main._NAV_BADGES.get("/logout", 0) == 0
 
 
 def test_stop_all_services_lines_up_with_every_other_drawer_row():

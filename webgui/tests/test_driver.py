@@ -68,8 +68,8 @@ def test_closed_trade_rows_tolerates_junk():
 
 def test_closed_cols_are_clean_reader_friendly_set():
     labels = [c["label"] for c in driver._CLOSED_COLS]
-    assert labels == ["Opened", "Closed", "Symbol", "Strategy", "Qty", "Exit reason",
-                      "Realized P&L"]
+    assert labels == ["Opened", "Closed", "Symbol", "Strategy", "Contracts",
+                      "Exit reason", "Realized P&L"]
     # the useless legacy columns are gone
     assert "Bucket" not in labels and "Source" not in labels and "Status" not in labels
 
@@ -121,7 +121,7 @@ def test_position_rows_carry_opened_strikes_expiration():
 
 def test_position_cols_include_opened_strikes_expiration():
     labels = [c["label"] for c in driver._POSITION_COLS]
-    for expected in ("Opened", "Strikes", "Expiration"):
+    for expected in ("Opened", "Strikes", "Expiry"):
         assert expected in labels
 
 
@@ -341,3 +341,19 @@ def test_is_risk_halt_tolerates_junk():
         assert driver.is_risk_halt(junk) in (True, False)
     # a halt with NO reason is not a manual stop, so it counts as a risk halt
     assert driver.is_risk_halt({"halted": True, "reason": None}) is True
+
+
+def test_the_two_driver_tables_name_one_concept_one_way():
+    """This page printed the concept two ways on one screen: its closed-trades
+    table said "Strategy" while its positions table said "Strat"."""
+    closed = {c["label"] for c in driver._CLOSED_COLS}
+    positions = {c["label"] for c in driver._POSITION_COLS}
+    assert "Strategy" in closed and "Strategy" in positions
+    assert "Strat" not in closed and "Strat" not in positions
+    assert "Contracts" in closed and "Contracts" in positions
+
+
+def test_the_positions_table_says_its_pnl_is_OPEN():
+    """``position_rows``'s own docstring calls it the OPEN positions panel."""
+    labels = {c["label"] for c in driver._POSITION_COLS}
+    assert "Open P&L" in labels

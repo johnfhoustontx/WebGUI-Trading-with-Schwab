@@ -60,6 +60,32 @@ end   = "15:00"
 start = "08:00"   # 09:00 ET
 end   = "15:20"   # 16:20 ET
 
+[windows.live_capture]
+# Thumbnail captures for the public grid on neuralstrike.co/live.html.
+# Held SEPARATE from [windows.collection] for the reason [windows.stream] gives:
+# widening collection must not silently extend a public surface.
+#
+# POST-CLOSE ONLY, and that is the whole point (2026-09-08). Each run drives a
+# headless Chrome over all fourteen screens: ~1.7 CPU-minutes in ~90s of wall
+# clock, i.e. ~1.05 of this box's 4 cores. Run inside the session it took the
+# proxy's /health from 0.8s to 18.2s (load 2.1 -> 11.8) -- which the webgui's
+# 3s timeout renders as a PROXY-DOWN BANNER while the proxy is serving 200s
+# throughout -- and it cost a GEX collection minute on every quarter hour:
+# 08:00, 08:15, 08:30, 08:45 and 09:00 each dropped the minute after.
+#
+# Starting after [windows.stream] end (15:20) is load-bearing, not tidiness:
+# the broadcast's ffmpeg + Xvfb + Chrome hold ~1.57 cores while it runs, so a
+# capture inside the stream window competes with the largest consumer on the
+# box. Ending before the 16:20 momentum cascade keeps it clear of the nightly
+# recompute for the same reason.
+#
+# Two fires (15:30 and 15:45), not one: the second is the retry if the first
+# times out, and after the close the screens no longer change, so the pair
+# costs nothing. Accepted trade: the public grid shows the COMPLETED session
+# all night and all of the next morning.
+start = "15:25"
+end   = "15:50"
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new
@@ -95,6 +121,15 @@ morning = "10:00"
 midday  = "13:00"
 close   = "15:00"     # pre-close sweep
 
+[slots.income]
+# The 30-45 DTE income scan (two-sided credit spreads + cash-secured puts).
+# ONE pass a day by design: a 35-DTE candidate does not meaningfully re-rank
+# inside fifteen minutes, and running it on the autoscan's cadence would cost
+# ~690 extra /chains calls a day instead of ~23. After the open so the chain
+# carries real marks rather than overnight stubs.
+grace_min = 20
+morning = "08:45"     # 09:45 ET
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]
@@ -102,6 +137,46 @@ close   = "15:00"     # pre-close sweep
 # recomputing mid-session would publish a bucket table that changes under the
 # reader. Cheap and local -- it reads signals.db, makes no Schwab or Claude call.
 at = "16:30"
+
+[slots.gallery_capture]
+# The App gallery on neuralstrike.co, re-photographed from the PRIVATE app on
+# loopback (tools/capture_gallery_shots.py) so the tiles carry current branding
+# and current numbers. Half an hour after the 08:30 CT regular open, so the
+# screens have painted live data -- a pre-open run publishes a gallery of blank
+# panels and overnight marks.
+#
+# ⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, and it
+# is the heavier of the two: 19 shots at 12s settle against live_capture's 14 at
+# 8s. Read the [windows.live_capture] comment above before touching this time --
+# that job was moved POST-CLOSE the same day precisely because one in-session run
+# took proxy /health from 0.8s to 18.2s and cost a GEX minute on every quarter
+# hour. The same load lands here, so this slot carries its own containment:
+# CPUQuota + Nice on trading-<env>-gallery-capture.service, which live_capture
+# solved by moving instead. See _gallery_capture_units in generate_units.py.
+#
+# It stays in-session for a DATA reason, not a load one: index option open
+# interest zeroes after hours, so a post-close capture photographs all-zero GEX
+# grids and arbitrary walls -- worse imagery than the stale branding this whole
+# change exists to fix. If the quota turns out not to be enough, the fix is a
+# quieter in-session time or a smaller quota, NOT moving it after the close.
+#
+# :07 rather than :00 is a small remaining courtesy: live_capture's timer still
+# FIRES every quarter hour, it just stands down in under a second outside its
+# window, and the GEX collector's own minute boundary is :00.
+#
+# WHAT A FIRING COSTS: 19 page loads against the local web app (three of the 22
+# tiles are Simulator views that live in page state and are deliberately
+# skipped). NO SCHWAB CALL and NO CLAUDE CALL -- unlike [slots.analyze] above,
+# where EACH FIRING IS A PAID CLAUDE CALL, and unlike [slots.income], the
+# largest scheduled Schwab spend on this table. The whole cost here is ~20
+# minutes of a headless Chrome and some CPU on the box that already serves the
+# app.
+#
+# ⚠ Read by SYSTEMD, not by a service scheduler: generate_units.py turns it
+# into trading-<env>-gallery-capture.timer's OnCalendar. Changing this time
+# needs `python -m deploy.systemd.generate_units --install` and a
+# `systemctl --user daemon-reload`; a service restart will not pick it up.
+at = "09:07"     # 10:07 ET -- off the quarter hour, deliberately
 
 [slots.momentum]
 # The nightly momentum cascade: ~80 min after the 15:00 CT cash close, so the

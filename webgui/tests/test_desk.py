@@ -13,6 +13,7 @@ import re
 import pytest
 import voice
 from pages import desk as d
+from pages.options import flow as _flow_page
 
 
 @pytest.fixture(autouse=True)
@@ -325,8 +326,8 @@ def test_flow_rows_delegates_to_the_flow_pages_own_builder():
 
 
 def test_flow_kind_text_joins_the_kind_and_the_side_it_fired_on():
-    assert d.flow_kind_text({"kind": "Unusual activity", "side": "Call"}) == \
-        "Unusual activity · Call"
+    assert d.flow_kind_text({"kind": "Unusual volume", "side": "Call"}) == \
+        "Unusual volume · Call"
 
 
 def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
@@ -340,7 +341,7 @@ def test_flow_kind_text_drops_the_separator_when_a_half_is_missing():
 def test_flow_kind_text_never_claims_who_initiated():
     """Call/Put names the side of the book that moved. Schwab publishes no
     time-and-sales tape to this app, so nobody here knows who bought it."""
-    blob = d.flow_kind_text({"kind": "Big delta", "side": "Call"}).lower()
+    blob = d.flow_kind_text({"kind": "Outsized bet", "side": "Call"}).lower()
     assert "buy" not in blob and "sell" not in blob
 
 
@@ -1068,6 +1069,268 @@ def test_desk_bullbear_strip_degrades_a_row_it_cannot_score():
     assert [c["quadrant"] for c in chips] == ["unknown", "unknown"]
 
 
+# ── which horizon the strip paints ───────────────────────────────────────────
+# 2026-09-05 is a Saturday; 2026-09-07 is Labor Day, so that week's first
+# session is Tuesday 2026-09-08. Both are asserted against the shared calendar
+# rather than trusted, because a fixture that has quietly become a non-trading
+# day would make every one of these pass for the wrong reason.
+def test_the_horizon_fixtures_are_the_days_this_module_thinks_they_are():
+    from shared import market_calendar as mc
+    assert mc.is_trading_day(datetime.date(2026, 9, 5)) is False   # Saturday
+    assert mc.is_trading_day(datetime.date(2026, 9, 7)) is False   # Labor Day
+    assert mc.is_trading_day(datetime.date(2026, 9, 8)) is True
+
+
+def test_strip_is_not_live_outside_a_session():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 5, 12, 0)) is False
+
+
+def test_strip_is_not_live_before_the_bell_on_a_trading_day():
+    """The case the calendar is here for. Pre-open the proxy's percent fields
+    are a stale prior close or its literal 0.0 fallback — numbers that look
+    exactly like a measured flat tape, which is why the switch cannot ask
+    them."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.0}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 7, 0)) is False
+
+
+def test_strip_is_not_live_before_the_bell_on_a_stale_non_zero_benchmark():
+    """The case that DISCRIMINATES, which the zero above does not.
+
+    A benchmark of 0.0 pre-open is rejected by a numbers-based switch too, so
+    that test alone cannot tell a calendar switch from a numbers one. Here the
+    proxy hands back a stale prior-close percent that is a perfectly ordinary
+    number — nothing in the payload says the bell has not rung. Only the
+    calendar knows.
+    """
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 7, 0)) is False
+
+
+def test_strip_is_not_live_when_the_benchmark_is_missing():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": None}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_when_the_benchmark_key_is_absent():
+    """A payload written before the field existed, or a service caught
+    mid-restart — indistinguishable from an explicit None, and treated so."""
+    assert d.strip_is_live({"levels": {"sector": []}},
+                           now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_on_a_nan_benchmark():
+    """NaN is the app's documented trap: every comparison against it is False,
+    so an unguarded check reads it as a real number. ``pages.fmt.num`` is the
+    strict copy that rejects it."""
+    assert d.strip_is_live({"benchmark_day_pct": float("nan")},
+                           now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_not_live_on_a_malformed_view():
+    for bad in (None, "nonsense", [], 3.0):
+        assert d.strip_is_live(bad,
+                               now=datetime.datetime(2026, 9, 8, 10, 0)) is False
+
+
+def test_strip_is_live_during_a_session_with_a_benchmark():
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is True
+
+
+def test_strip_is_live_on_a_benchmark_of_exactly_zero():
+    """A MEASURED flat tape is a reading, not an absence. A truthiness check
+    would drop the strip to its structural horizon on the one day it is most
+    worth reading live, and nothing else in this suite would see it."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": 0.0}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 10, 0)) is True
+
+
+def test_strip_is_live_after_the_close_on_a_trading_day():
+    """``regular_session_has_opened``, not ``is_regular_hours``: the day's move
+    does not stop being today's move at the cash close, and the strip is read
+    after it as often as during the session."""
+    view = {"levels": {"sector": []}, "benchmark_day_pct": -0.8}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 18, 0)) is True
+
+
+def test_strip_is_live_reads_a_naive_now_as_central():
+    """Callers may pass either. A naive datetime is CT — ``market_calendar``'s
+    own rule — so 08:00 CT is pre-open and 09:00 CT is not, on the same day a
+    UTC reading of both would put after the bell."""
+    view = {"benchmark_day_pct": 0.4}
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 8, 0)) is False
+    assert d.strip_is_live(view, now=datetime.datetime(2026, 9, 8, 9, 0)) is True
+
+
+def test_strip_is_live_accepts_an_aware_now():
+    """And an aware one converts rather than being read as CT: 15:00 UTC is
+    10:00 CT, inside the session; 12:00 UTC is 07:00 CT, before the bell."""
+    view = {"benchmark_day_pct": 0.4}
+    utc = datetime.timezone.utc
+    assert d.strip_is_live(
+        view, now=datetime.datetime(2026, 9, 8, 15, 0, tzinfo=utc)) is True
+    assert d.strip_is_live(
+        view, now=datetime.datetime(2026, 9, 8, 12, 0, tzinfo=utc)) is False
+
+
+def test_strip_is_live_defaults_now_to_an_aware_local_clock():
+    """The default must not hand ``market_calendar`` a naive host clock: it
+    would be read as CT, so on any host that is not CT the strip would switch
+    horizons at the wrong hour. ``.astimezone()`` makes the local time aware,
+    which is identical on a CT box and correct everywhere else."""
+    src = inspect.getsource(d.strip_is_live)
+    assert "datetime.now().astimezone()" in src
+
+
+def test_strip_is_live_asks_the_calendar_not_the_numbers():
+    """The whole point of the function. A future 'simplification' to a
+    ``day_pct > 0`` test would class all eleven sectors as falling+lagging
+    every pre-open and every weekend — a confident, maximally bearish reading
+    of no data."""
+    body = inspect.getsource(d.strip_is_live).split('"""')[-1]
+    assert "_cal.regular_session_has_opened" in body
+    # And it must not read the sector rows AT ALL: inferring "there is day data
+    # today" from the numbers is precisely the inference that cannot be made,
+    # and the rows are where those numbers live.
+    # ``_bullbear_rows`` is the ergonomic accessor twelve lines below, so it is
+    # the spelling a regression would actually use. Without it this loop only
+    # caught a direct ``view["levels"]`` walk — the LEAST likely one — and a
+    # rewrite that kept the calendar call and merely ANDed a rows clause sailed
+    # past a guard that read like coverage.
+    for row_reader in ("levels", "_bullbear_rows", "row_day_axes",
+                       "by_day_move", "day_excess"):
+        assert row_reader not in body
+
+
+# ── the chip's two horizons ──────────────────────────────────────────────────
+# Deliberately CONTRADICTORY: rising and leading today, falling and lagging on
+# the quarter. Neither axis can be read out of the wrong block and still pass.
+LIVE_ROW = {"symbol": "XLK", "label": "Information Technology",
+            "day_pct": 1.2, "day_excess": 0.4,
+            "raw": {"trend": -0.5, "excess": -0.2}, "participation": 0.8}
+
+
+def test_chip_colour_follows_today_and_keeps_structure_as_a_stripe():
+    view = {"levels": {"sector": [LIVE_ROW]}, "benchmark_day_pct": 0.8}
+    chip = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))[0]
+    assert chip["quadrant"] == "rising_leading"             # today
+    assert chip["structural_quadrant"] == "falling_lagging"  # the quarter
+    assert chip["live"] is True
+
+
+def test_a_cold_tape_never_paints_the_whole_strip_bearish():
+    """The producer-shaped no-data case: a payload with no day moves at all.
+
+    Driven from the shape the SERVICE writes, because a consumer-side guard
+    proves nothing until a test drives it from the producer.
+    """
+    rows = [{"symbol": s, "label": s, "day_pct": None, "day_excess": None,
+             "raw": {"trend": 0.4, "excess": 0.1}} for s in ("XLK", "XLF", "XLV")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": None}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert [c["quadrant"] for c in chips] == ["rising_leading"] * 3
+    assert all(c["live"] is False for c in chips)
+
+
+def test_off_session_the_stripe_repeats_the_fill():
+    """Both quadrants are the structural one when the strip is not live — which
+    is why Task 8 draws the stripe only when ``live``: a stripe repeating the
+    fill says nothing."""
+    view = {"levels": {"sector": [LIVE_ROW]}, "benchmark_day_pct": 0.8}
+    chip = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))[0]
+    assert chip["quadrant"] == chip["structural_quadrant"] == "falling_lagging"
+    assert chip["live"] is False
+
+
+def test_a_live_strip_orders_by_todays_move_and_a_cold_one_by_strength():
+    """The ordering really switches horizons with the colour, and the two
+    orders genuinely disagree on this fixture — asserted against
+    ``bullbear``'s own sorters rather than a hand-written order that happens to
+    agree today."""
+    from pages import bullbear as B
+    rows = [_brow("A", "Alpha", 0.9, 0.2, day_pct=-1.0, day_excess=-1.5),
+            _brow("B", "Beta", 0.1, 0.2, day_pct=2.0, day_excess=1.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+
+    live = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    assert [c["label"] for c in live] == \
+        [r["label"] for r in B.by_day_move(rows)] == ["Beta", "Alpha"]
+
+    cold = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert [c["label"] for c in cold] == \
+        [r["label"] for r in B.by_strength(rows)] == ["Alpha", "Beta"]
+
+
+def test_previous_reaches_the_day_sorter_so_the_strip_holds_its_seats():
+    """Two sectors inside one margin-wide bucket: only ``previous`` can decide
+    which sits first, so an order following it proves the argument is threaded
+    through rather than dropped on the floor."""
+    rows = [_brow("A", "Alpha", 0.5, 0.1, day_pct=1.21, day_excess=0.7),
+            _brow("B", "Beta", 0.5, 0.1, day_pct=1.23, day_excess=0.7)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    now = datetime.datetime(2026, 9, 8, 10, 0)
+    assert [c["symbol"] for c in
+            d.bullbear_chips(view, now=now, previous=["B", "A"])] == ["B", "A"]
+    assert [c["symbol"] for c in
+            d.bullbear_chips(view, now=now, previous=["A", "B"])] == ["A", "B"]
+
+
+def test_a_row_with_no_live_fields_on_a_live_strip_is_unknown_not_a_direction():
+    """The per-row half of the cold-tape rule. ``row_day_axes`` has no fallback
+    to ``raw`` on purpose, so a sector the proxy omitted must come out
+    ``unknown`` — painting the quarter's reading in today's colours is the one
+    outcome the pair exists to avoid — while its structural stripe still
+    reports what the cascade did measure."""
+    rows = [_brow("A", "Alpha", 0.9, 0.4),            # no day fields at all
+            _brow("B", "Beta", -0.9, -0.4, day_pct=1.0, day_excess=0.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    by_symbol = {c["symbol"]: c for c in chips}
+    assert by_symbol["A"]["quadrant"] == "unknown"
+    assert by_symbol["A"]["structural_quadrant"] == "rising_leading"
+    assert by_symbol["B"]["quadrant"] == "rising_leading"
+
+
+def test_the_horizon_is_decided_once_per_paint_not_once_per_row(monkeypatch):
+    """Per-row would be both wasteful and a chance for two chips in ONE paint to
+    disagree about the horizon — the strip's caption would then be true of some
+    of it."""
+    calls = []
+    real = d.strip_is_live
+
+    def counted(view, now=None):
+        calls.append(now)
+        return real(view, now)
+
+    monkeypatch.setattr(d, "strip_is_live", counted)
+    rows = [_brow(s, s, 0.4, 0.1, day_pct=1.0, day_excess=0.2)
+            for s in ("XLK", "XLF", "XLV", "XLE")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    chips = d.bullbear_chips(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    assert len(chips) == 4
+    assert len(calls) == 1
+
+
+def test_the_existing_chip_keys_all_survive_the_second_horizon():
+    """The renderer and its tests read these by name; Task 8 adds to the dict,
+    it does not rewrite it."""
+    view = {"levels": {"sector": [
+        _brow("XLV", "Health Care", 1.0, 0.1, participation=0.75, day_pct=0.4)]}}
+    chip = d.bullbear_chips(view)[0]
+    assert chip["label"] == "Health Care" and chip["symbol"] == "XLV"
+    assert chip["day_text"] == "+0.40%"
+    assert chip["breadth"] == 75 and chip["thin"] is False
+
+
+def test_bullbear_chips_and_headline_still_work_on_their_old_call():
+    """``_paint_bullbear`` passes the view alone today, and Task 8 wires the
+    rest — nothing may break in between."""
+    view = {"levels": {"sector": [_brow("XLV", "Health Care", 1.0, 0.1)]}}
+    assert d.bullbear_chips(view)[0]["label"] == "Health Care"
+    assert "1 of 1" in d.bullbear_headline(view)
+
 # ── the poll contract ────────────────────────────────────────────────────────
 def test_every_region_only_depends_on_views_the_page_actually_polls():
     """A region wired to a view outside ``VIEWS`` would never repaint: the poll
@@ -1424,7 +1687,7 @@ def test_countdown_takes_every_session_bound_from_the_shared_calendar():
 
 
 # ── render() smoke ───────────────────────────────────────────────────────────
-# ``render()`` is otherwise unexercised: /desk has no route yet, so no shell
+# ``render()`` is otherwise thinly exercised here, so no shell
 # smoke test reaches it. These build the page against the auto-index client and
 # read the text back out — enough to catch a bad name, a stale handle, or (the
 # one that matters) a cold service rendering as a confident zero.
@@ -1525,7 +1788,11 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
     # The flow kind, now carrying the side it fired on in the same cell — the
     # rows are one line each, so the side is a qualifier rather than a column.
-    assert "Unusual activity · Call" in texts
+    # Built from the flow page's OWN labels, never restated: the Desk
+    # prints whatever that module stamps, so a rename there shows up here
+    # as agreement rather than as a stale literal for someone to chase.
+    assert (_flow_page.alert_kind_label({"type": "uoa"}) + " · "
+            + _flow_page.side_label({"side": "call"})) in texts
     assert "AT RISK" in texts                    # the position flag
     assert any(t.startswith("OPEN 1 ·") for t in texts)
     assert "Rallying" in texts                   # the regime word in the strip
@@ -1585,7 +1852,7 @@ def test_render_survives_junk_in_every_view(monkeypatch):
     # It degrades to the empty state rather than raising — but note it does NOT
     # degrade to the *waiting* state, because a malformed payload is not an
     # absent one and the page cannot tell the difference from here.
-    assert "No open positions." in texts
+    assert desk.EMPTY_POSITIONS in texts
 
 
 # ── the Bull / Bear sector strip, mounted ────────────────────────────────────
@@ -1610,12 +1877,15 @@ def test_render_mounts_a_chip_per_sector_over_the_maps_own_count_sentence(
         monkeypatch):
     """The sentence is ``sentiment_bullbear.headline_line`` — the map's own,
     pluralisation included — so the two screens cannot report different counts
-    off one payload."""
+    off one payload. The HORIZON word after it is the Desk's own: this payload
+    carries no benchmark, so the strip is not live and the sentence must say it
+    counted the quarter rather than leaving the reader to assume today."""
     _seed_bus(monkeypatch, {"sentiment:bullbear": _bullbear_payload()})
     texts = [t for t in _rendered_texts() if t]
     assert "Technology" in texts and "Utilities" in texts
     assert "Rising · Leading" in texts and "Falling · Leading" in texts
-    assert "1 of 2 sectors rising and leading" in texts
+    assert ("1 of 2 sectors rising and leading "
+            + d.BB_HORIZON[False]) in texts
     assert "+1.20%" in texts and "-0.30%" in texts
 
 
@@ -1640,6 +1910,268 @@ def test_render_gives_the_bullbear_strip_its_own_cold_message():
     assert d.WAITING_BULLBEAR in texts
     assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
     assert not any("rising and leading" in t for t in texts)
+
+
+# ── Task 8: the structural stripe, the caption and the horizon headline ──────
+def _live_bullbear_payload():
+    """The strip's payload with today's numbers CONTRADICTING the quarter's, so
+    no assertion below can pass by reading the wrong horizon."""
+    return {"benchmark_day_pct": 0.5, "levels": {"sector": [
+        _brow("XLK", "Technology", -0.42, -0.11, participation=0.8,
+              day_pct=1.2, day_excess=0.7),
+        _brow("XLU", "Utilities", 0.30, 0.20, participation=0.6,
+              day_pct=-0.3, day_excess=-0.8)]}}
+
+
+def _live_now(monkeypatch, live=True):
+    """Pin the horizon switch, since ``_paint_bullbear`` reads the real clock."""
+    monkeypatch.setattr(d, "strip_is_live", lambda view, now=None: live)
+
+
+def test_stripe_class_answers_for_every_quadrant_and_degrades_like_the_fill():
+    """A static class per member of the finite set, and an unrecognised key
+    takes ``unknown`` exactly as ``bullbear.quadrant_class`` does — never a
+    runtime-built colour, which is the Tailwind-first standard's one hard rule
+    for a data-driven colour."""
+    from pages import bullbear as B
+    for quad in B.QUADRANTS:
+        assert d.stripe_class(quad).strip()
+        assert "border-l-" in d.stripe_class(quad)
+    assert d.stripe_class("no_such_quadrant") == d.stripe_class("unknown")
+    assert d.stripe_class(None) == d.stripe_class("unknown")
+    # Five distinct marks, or two quadrants would be indistinguishable on the
+    # edge that is supposed to tell them apart.
+    assert len({d.stripe_class(q) for q in B.QUADRANTS}) == len(B.QUADRANTS)
+
+
+def test_the_chip_reserves_the_stripes_width_at_both_horizons():
+    """The border-left width lives on the FRAME, not on the stripe class, so a
+    chip is the same size live and cold. Otherwise the whole strip reflows at
+    the opening bell — eleven chips jumping 3px sideways for no reading a user
+    asked for."""
+    assert "border-l-[3px]" in d._BB_CHIP
+
+
+def test_the_stripe_is_drawn_only_on_a_live_strip(monkeypatch):
+    """Off-session the two quadrants are the same value, and a stripe repeating
+    the fill says nothing. Read off the mounted classes: the stripe is drawn,
+    never written."""
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    live_classes = " ".join(_rendered_classes())
+    # Technology is falling and lagging on the quarter while rising today.
+    assert d.stripe_class("falling_lagging") in live_classes
+    assert d.stripe_class("rising_leading") in live_classes
+
+    _live_now(monkeypatch, live=False)
+    cold_classes = " ".join(_rendered_classes())
+    for quad in ("falling_lagging", "rising_leading", "rising_lagging",
+                 "falling_leading", "unknown"):
+        assert d.stripe_class(quad) not in cold_classes
+
+
+def test_the_stripe_names_its_quadrant_in_words_too(monkeypatch):
+    """Colour is never the sole carrier of a reading. The tooltip spells the
+    structural quadrant out with ``bullbear.quadrant_label``, so the strip and
+    the map cannot name one quadrant two ways."""
+    from pages import bullbear as B
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    texts = [t for t in _rendered_texts() if t]
+    assert d.stripe_tooltip("falling_lagging") in texts
+    assert B.quadrant_label("falling_lagging") in d.stripe_tooltip(
+        "falling_lagging")
+
+    _live_now(monkeypatch, live=False)
+    cold = [t for t in _rendered_texts() if t]
+    assert not any(t.startswith(d.STRIPE_TOOLTIP_PREFIX) for t in cold)
+
+
+def test_the_caption_says_which_horizon_the_strip_was_sorted_by():
+    """The strip DELIBERATELY diverges from /sentiment/bullbear's order, and
+    that is only defensible once it says what it sorted by — otherwise two
+    screens rank one payload differently and neither admits it."""
+    assert d.bullbear_caption(True) != d.bullbear_caption(False)
+    assert d.bullbear_caption(True).strip()
+    assert d.bullbear_caption(False).strip()
+
+
+def test_the_caption_is_painted_and_switches_with_the_horizon(monkeypatch):
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+    _live_now(monkeypatch, live=True)
+    assert d.bullbear_caption(True) in [t for t in _rendered_texts() if t]
+
+    _live_now(monkeypatch, live=False)
+    cold = [t for t in _rendered_texts() if t]
+    assert d.bullbear_caption(False) in cold
+    assert d.bullbear_caption(True) not in cold
+
+
+def test_a_cold_strip_captions_nothing_it_did_not_sort(monkeypatch):
+    """No chips means nothing was sorted, so neither caption is true. The
+    placeholder is the whole message."""
+    texts = [t for t in _rendered_texts() if t]
+    assert d.bullbear_caption(True) not in texts
+    assert d.bullbear_caption(False) not in texts
+
+
+def test_the_headline_counts_todays_quadrants_and_says_so():
+    """An unlabelled count that silently changes meaning at the opening bell is
+    worse than either count alone. Technology is rising and leading today while
+    falling and lagging on the quarter, so the two horizons must disagree here
+    or the fixture is not testing anything."""
+    view = _live_bullbear_payload()
+    live = d.bullbear_headline(view, now=datetime.datetime(2026, 9, 8, 10, 0))
+    cold = d.bullbear_headline(view, now=datetime.datetime(2026, 9, 5, 12, 0))
+    assert live.startswith("1 of 2 sectors rising and leading")
+    assert cold.startswith("1 of 2 sectors rising and leading")
+    assert live != cold
+    assert live.endswith(d.BB_HORIZON[True])
+    assert cold.endswith(d.BB_HORIZON[False])
+
+
+def test_the_headline_really_changes_axis_not_only_wording():
+    """A fixture where the COUNTS differ, so a headline that named the horizon
+    while still counting ``raw`` would fail here."""
+    rows = [_brow("A", "Alpha", 0.9, 0.4, day_pct=-1.0, day_excess=-1.5),
+            _brow("B", "Beta", 0.9, 0.4, day_pct=-1.0, day_excess=-1.5)]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.5}
+    assert d.bullbear_headline(
+        view, now=datetime.datetime(2026, 9, 8, 10, 0)).startswith("0 of 2")
+    assert d.bullbear_headline(
+        view, now=datetime.datetime(2026, 9, 5, 12, 0)).startswith("2 of 2")
+
+
+def test_the_headline_still_says_nothing_about_a_payload_it_never_read():
+    """A count of "0 of 0 sectors rising and leading" states a maximally bearish
+    tape that nobody measured — and naming a horizon after it would make it
+    worse, not better."""
+    for view in (None, {}, {"levels": {"sector": []}}):
+        assert d.bullbear_headline(view) == ""
+        assert d.bullbear_headline(
+            view, now=datetime.datetime(2026, 9, 8, 10, 0)) == ""
+
+
+def test_the_headline_keeps_the_maps_pluralisation():
+    view = {"levels": {"sector": [_brow("XLV", "Health Care", 1.0, 0.1)]}}
+    assert d.bullbear_headline(view).startswith("1 of 1 sector rising")
+
+
+def _desk_paint():
+    """``render()``'s own ``_paint``, so a test can drive a SECOND paint.
+
+    The seat memory is closure state on purpose — page state belongs in a local
+    dict, never a module global — so nothing about feeding it back is visible
+    from one ``render()`` call. It is reached through the poll timer's callback,
+    which is the only handle ``render()`` leaves on the page's elements.
+    """
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    for key, el in ui.context.client.elements.items():
+        if key in before:
+            continue
+        fn = getattr(getattr(el, "callback", None), "__wrapped__", None)
+        names = getattr(fn, "__code__", None) and fn.__code__.co_freevars
+        if not names or "_paint" not in names:
+            continue
+        return fn.__closure__[names.index("_paint")].cell_contents
+    raise AssertionError("render() left no handle on _paint")
+
+
+def test_the_strip_feeds_its_own_seat_order_into_the_next_paint(monkeypatch):
+    """``by_day_move``'s hysteresis is a pure function of (rows, previous), so
+    without the feedback the margin buys nothing and the strip reshuffles on
+    noise. Proven across TWO paints: one call cannot show a value being carried.
+    """
+    seen = []
+    real = d.bullbear_chips
+
+    def recorder(view, now=None, previous=None):
+        seen.append(previous)
+        return real(view, now=now, previous=previous)
+
+    payload = _live_bullbear_payload()
+    _seed_bus(monkeypatch, {"sentiment:bullbear": payload})
+    _live_now(monkeypatch, live=True)
+    monkeypatch.setattr(d, "bullbear_chips", recorder)
+
+    paint = _desk_paint()
+    paint({"sentiment:bullbear": payload})
+
+    assert len(seen) == 2
+    assert seen[0] is None                       # nothing was drawn before
+    # The first paint's order, symbol for symbol — not a truthy stand-in.
+    assert seen[1] == [c["symbol"] for c in
+                       real(payload, now=None, previous=None)]
+    assert seen[1] == ["XLK", "XLU"]
+
+
+def test_one_paint_decides_the_horizon_once(monkeypatch):
+    """One paint, ONE clock — threaded into both the chips and the headline.
+
+    Each of the two decides its own horizon from a ``strip_is_live`` call of its
+    own (``bullbear_headline``'s docstring says why that is safe), so they agree
+    only because they are handed the same instant. Give them a clock each and a
+    paint straddling the opening bell renders a headline saying "on the quarter"
+    over chips already drawn on today's axes — precisely the one-word ambiguity
+    ``/sentiment/bullbear`` exists to remove, and precisely what a reader of the
+    strip cannot detect.
+
+    Nothing in either SIGNATURE prevents it: taking a second ``datetime.now()``
+    for the headline leaves the whole suite green. Hence this test, and hence
+    identity rather than equality — two ``now()`` calls microseconds apart
+    compare unequal only sometimes, and a guard that fails only sometimes is
+    not a guard.
+    """
+    seen = []
+    monkeypatch.setattr(
+        d, "bullbear_chips",
+        lambda view, now=None, previous=None: seen.append(("chips", now)) or [])
+    monkeypatch.setattr(
+        d, "bullbear_headline",
+        lambda view, now=None: seen.append(("headline", now)) or "")
+    _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
+
+    from pages import desk
+    desk.render()
+
+    assert [where for where, _ in seen] == ["chips", "headline"]
+    # A real instant, not each side quietly falling back to its own default.
+    assert seen[0][1] is not None
+    assert seen[0][1] is seen[1][1]
+
+
+def test_a_measured_zero_mid_session_is_a_known_false_bearish_reading():
+    """KNOWN, DELIBERATE trade-off — recorded so it cannot change silently.
+
+    ``SchwabProxyClient._extract_change_pct`` falls through to a literal
+    ``0.0`` when every percent field is missing or zero, so a proxy returning
+    junk quotes mid-session yields eleven honest-looking zeros. ``strip_is_live``
+    asks the calendar rather than the numbers, so it is True; ``quadrant`` ties
+    to the cautious side, so ``0.0`` is not ``> 0`` and every such chip renders
+    ``falling_lagging`` — a maximally bearish strip drawn from no data.
+
+    The alternative is worse: a deadband or a truthiness test would fold a
+    GENUINELY flat sector, which moved exactly with the benchmark, into "no
+    reading", and would make the whole strip disappear on the quiet tapes it is
+    most useful on. The dash reserved for an OMITTED symbol is the only absence
+    this payload can express, and a returned 0.0 is not that. Fix it upstream in
+    the proxy or not at all.
+    """
+    rows = [_brow(s, s, 0.9, 0.4, day_pct=0.0, day_excess=0.0)
+            for s in ("XLK", "XLF", "XLV")]
+    view = {"levels": {"sector": rows}, "benchmark_day_pct": 0.0}
+    now = datetime.datetime(2026, 9, 8, 10, 0)
+    assert d.strip_is_live(view, now=now) is True
+    chips = d.bullbear_chips(view, now=now)
+    assert [c["quadrant"] for c in chips] == ["falling_lagging"] * 3
+    # …while the stripe still reports what the cascade really did measure, which
+    # is the one thing that keeps the strip readable through this.
+    assert [c["structural_quadrant"] for c in chips] == ["rising_leading"] * 3
+    assert d.bullbear_headline(view, now=now).startswith("0 of 3")
 
 
 def test_render_wires_every_bullbear_chip_through_to_the_map(monkeypatch):
@@ -1700,24 +2232,40 @@ def test_desk_panel_grid_is_two_columns_at_every_width():
         assert "min-[" not in value, f"a width breakpoint came back: {value}"
 
 
-def test_desk_panels_do_not_scroll_sideways():
-    """`overflow-x-auto` is the tempting fix for the fixed 2x2 at narrow widths
-    and is deliberately refused — see the note above `_GAP`: a dashboard you
-    scroll sideways to read defeats the page's purpose. Pinned because the next
-    person to hit a clipped row will reach for it."""
+def test_desk_panels_contain_their_sideways_scroll_at_the_panel():
+    """A panel out of width scrolls ITSELF, and never the page (2026-09-08).
+
+    ⚠ This reverses what this test asserted from 2026-08-20 — that
+    `overflow-x-auto` was "deliberately refused", because a dashboard you scroll
+    sideways to read defeats the page's purpose. It does. But refusing it did
+    not prevent sideways scrolling: it relocated it to the DOCUMENT, where the
+    reader loses the panel heading and the row's identity column as well as
+    their place in the numbers. A panel scroll with the identity column pinned
+    is what that objection was actually asking for.
+
+    The `_panel` half of the assertion SURVIVES the reversal and still has
+    teeth: the mechanism is `shell.PANEL_SCROLL_CSS`, injected by both
+    entrypoints, so an `overflow-x-auto` utility appearing in `_panel` would be
+    a second, ad-hoc scroll container — and on the card, which is where it would
+    scroll the panel TITLE away."""
     import inspect
 
+    import shell
     from pages import desk
     assert "overflow-x-auto" not in inspect.getsource(desk._panel)
+    assert "overflow-x: auto" in shell.PANEL_SCROLL_CSS
+    assert "position: sticky" in shell.PANEL_SCROLL_CSS
 
 
 # ── the 1920px width budget ──────────────────────────────────────────────────
 # A CSS grid never shrinks a track below its ``minmax()`` floor, so a panel
 # whose floors oversubscribe its share of the window CLIPS its rows instead of
-# reflowing — and `overflow-x-auto` is refused (see the test above). Three of
+# reflowing. A panel that clips now scrolls itself rather than the page (see the
+# test above), but that is the fallback, not the goal: these guards are what keep
+# the panels inside the budget so nobody has to operate one to read it. Three of
 # the four grids shipped over budget until the type ladder and the floors were
-# unwound together to the reference design's own scale; these are the guards
-# that make the next widened track fail HERE rather than on screen.
+# unwound together to the reference design's own scale; they make the next
+# widened track fail HERE rather than on screen.
 def _floors(grid):
     """The pixel floor of every track in a grid class string, in order."""
     inner = grid.split("grid-cols-[", 1)[1].split("]", 1)[0]
@@ -1742,12 +2290,21 @@ def _px(classes):
 
 
 def _head_calls():
-    """Every ``_grid_head(GRID, (labels...))`` in ``render``, resolved."""
+    """Every ``_grid_head(GRID, LABELS)`` in ``render``, both args resolved.
+
+    Both arguments are module constants now — the labels moved out of the
+    call so one tuple could serve the head and the rows (and, until it was
+    removed, the standalone mirror that had carried its own copy). A literal
+    tuple is still accepted, so this keeps working if a call is ever written
+    inline again."""
     tree = ast.parse(inspect.getsource(d.render).lstrip())
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_grid_head":
-            yield (getattr(d, node.args[0].id),
-                   [e.value for e in node.args[1].elts])
+            arg = node.args[1]
+            labels = ([e.value for e in arg.elts]
+                      if isinstance(arg, (ast.Tuple, ast.List))
+                      else list(getattr(d, arg.id)))
+            yield getattr(d, node.args[0].id), labels
 
 
 def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
@@ -1819,6 +2376,189 @@ def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
             and v.value.id.endswith("_GRID")}
     assert heads == rows and len(heads) == 4
 
+# ── panel scrolling: the identity column stays put ───────────────────────────
+# ``shell.PANEL_SCROLL_CSS`` contains a too-narrow panel's sideways scroll AT
+# the panel and pins its `:first-child`. That last part is only half an answer
+# here: on three of the four panels the first cell is NOT what names the row.
+# Pinning it alone would hold a SCORE, a clock time or a book badge in place
+# while the symbol slid away under it — worse than pinning nothing, because it
+# looks deliberate. These pin the two halves the page has to supply: how deep
+# each panel pins, and the ``min-width`` without which there is nothing for the
+# container to scroll.
+def _row_min_width(grid):
+    """What one grid ELEMENT must be at least, off this file's own parser.
+
+    The row's floors and gaps plus its own ``px-1`` — everything on the page is
+    ``box-sizing: border-box``, so a ``min-width`` on the row carries its own
+    padding but NOT the card's (that is ``_panel_width_needed`` above)."""
+    t = _floors(grid)
+    return sum(t) + (len(t) - 1) * d.COL_GAP_PX + 8
+
+
+def _grid_names():
+    return [n for n in dir(d) if n.endswith("_GRID") and n.isupper()]
+
+
+def test_every_panel_body_is_the_scroll_container_never_its_card():
+    """The card holds the panel TITLE. Scrolling the card scrolls the title
+    away, which is one of the two things this whole mechanism exists to stop —
+    the other being the identity column. ``_panel`` returns the BODY, and the
+    body is what every painter clears, so that is the element that may move."""
+    src = inspect.getsource(d._panel)
+    body_line = next(ln for ln in src.splitlines()
+                     if ln.strip().startswith("body = "))
+    assert "ns-panel-scroll" in body_line, "no panel body scrolls its own rows"
+    for line in src.splitlines():
+        if "CONSOLE_CARD" in line:
+            assert "ns-panel-scroll" not in line, \
+                "the card scrolls, so the panel title scrolls away with it"
+
+
+def test_every_panel_grid_carries_the_row_shell_and_a_derived_min_width():
+    """Without the ``min-width`` the tracks keep being squeezed to their floors
+    and the row simply overflows: a scroll container with nothing wider than
+    itself inside it never scrolls. The number is DERIVED from the panel's own
+    grid string — re-derived here by this file's independent parser, so a floor
+    that moves has to move it too."""
+    for name in _grid_names():
+        grid = getattr(d, name)
+        classes = d._row_shell(grid)
+        assert "ns-panel-row" in classes, f"{name} rows are not pinnable"
+        assert f"min-w-[{_row_min_width(grid)}px]" in classes, (
+            f"{name} is squeezed below its floors instead of scrolling: "
+            f"{classes}")
+
+
+def test_every_panel_grid_has_a_pin_decision():
+    """A fifth panel added with no entry here has to fail LOUDLY. Defaulting it
+    to the shipped one-cell pin is the failure this section is about: three of
+    the four panels already do not lead with the column that names the row."""
+    assert {getattr(d, n) for n in _grid_names()} == set(d._PIN_DEPTHS)
+
+
+def test_every_panel_pins_through_the_column_that_names_the_row():
+    """THE constraint. Whatever the column ORDER, the pinned prefix has to
+    reach the symbol — and stop there, because every pinned pixel is width the
+    reader can no longer scroll out of the way."""
+    for grid, labels in _head_calls():
+        assert "SYMBOL" in labels, labels
+        assert d._pin_depth(grid) == labels.index("SYMBOL") + 1, (
+            f"{labels[:d._pin_depth(grid)]} is pinned, the symbol is at "
+            f"{labels.index('SYMBOL')}")
+
+
+def test_a_pin_past_the_first_cell_offsets_itself_by_the_tracks_before_it():
+    """The first cell is pinned by ``shell.PANEL_SCROLL_CSS`` and needs no
+    offset. A second one does, and it is a PER-PANEL number — the first track's
+    floor plus one column gap — so it is derived at import from that panel's own
+    grid string rather than written into the stylesheet, which cannot see it."""
+    for grid, _labels in _head_calls():
+        assert d._pin_cell_class(grid, 0) == "", \
+            "the first cell is the stylesheet's, not the page's"
+        for i in range(1, d._pin_depth(grid)):
+            classes = d._pin_cell_class(grid, i)
+            assert "sticky" in classes, classes
+            assert f"col-start-{i + 1}" in classes, classes
+            left = sum(_floors(grid)[:i]) + i * d.COL_GAP_PX
+            assert f"left-[{left}px]" in classes, (
+                f"a pinned cell offset {classes} does not abut the {left}px "
+                f"of track before it")
+            # ⚠ the bundled Tailwind JIT emits NO rule at all for an arbitrary
+            # value holding ``var(...)`` — silently, so the cell would simply
+            # stop pinning with nothing to see anywhere.
+            assert "var(" not in classes, classes
+        assert d._pin_cell_class(grid, d._pin_depth(grid)) == "", \
+            "a cell past the identity columns is pinned and should not be"
+
+
+def test_the_page_only_asks_for_pin_depths_the_stylesheet_can_draw():
+    """The backdrop is a ``::after``, so the page cannot reach it — the depth
+    class is the whole conversation between the two. A two-cell pin over a
+    one-cell backdrop leaves the scrolling numbers showing through the second
+    pinned cell, which reads as corruption rather than as a pinned column."""
+    import shell
+    for grid, depth in d._PIN_DEPTHS.items():
+        assert f"ns-pin-{depth}" in d._row_shell(grid)
+        if depth > 1:
+            assert f".ns-panel-row.ns-pin-{depth}::after" in \
+                shell.PANEL_SCROLL_CSS, \
+                f"a {depth}-cell pin has only a one-cell backdrop"
+
+
+def _render_tree():
+    src = inspect.getsource(d.render).lstrip()
+    return src, ast.parse(src)
+
+
+def test_every_row_painter_wears_its_panels_scroll_shell():
+    """The grid string is shared by all four panels' rows, so the per-panel
+    part cannot live in the row helper — it is derived from the grid, at the
+    one place the grid is named."""
+    src, tree = _render_tree()
+    seen = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        parts = [v.value for v in node.values
+                 if isinstance(v, ast.FormattedValue)]
+        if not any(isinstance(p, ast.Name) and p.id.endswith("_GRID")
+                   for p in parts):
+            continue
+        seen += 1
+        assert any(isinstance(p, ast.Call)
+                   and getattr(p.func, "id", "") == "_row_shell"
+                   for p in parts), ast.get_source_segment(src, node)
+    assert seen == 4, f"{seen} row painters, not 4"
+
+
+def test_the_deep_pin_lands_on_the_symbol_cell_and_nothing_else():
+    """Non-vacuity for the depth map: a panel can declare a two-cell pin and
+    then hang the offset on the wrong child, which pins a book badge and lets
+    the symbol scroll — the exact failure the depth is there to prevent."""
+    src, tree = _render_tree()
+    for func, grid in (("_board_row", "BOARD_GRID"),
+                       ("_flow_row", "FLOW_GRID"),
+                       ("_position_row", "POS_GRID")):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == func)
+        segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
+                if isinstance(s, ast.stmt)]
+        hits = [s for s in segs if s and "_pin_cell_class(" in s]
+        assert hits, f"{func} declares a deep pin it never applies"
+        innermost = min(hits, key=len)
+        assert 'row["symbol"]' in innermost, (func, innermost)
+        assert f"_pin_cell_class({grid}, 1)" in " ".join(innermost.split()), \
+            (func, innermost)
+
+
+def test_the_column_labels_pin_with_the_cells_beneath_them():
+    """The head row is on the same tracks as the rows, so it needs the same
+    shell and the same pins — a label that scrolls away from its column is the
+    reading this mechanism was built to keep."""
+    src = " ".join(inspect.getsource(d._grid_head).split())
+    assert "_row_shell(grid)" in src, "the head row does not scroll with its rows"
+    assert "_pin_cell_class(grid," in src, "the column labels do not pin"
+def test_a_panel_level_sentence_stays_put_while_its_columns_move():
+    """Exactly two lines share a panel body with its grids, and both describe
+    the whole PANEL. The body scrolls now, so a full-width label inside it
+    carries its own first words off the left edge as soon as the rows move —
+    and the first words are the reading ("3 open · $1,204" / "walls stale
+    since ..."). Read off the statement that BUILDS each one, so a class parked
+    on the wrong label passes nothing."""
+    src, tree = _render_tree()
+    assert "sticky" in d._PANEL_NOTE and "left-0" in d._PANEL_NOTE
+    for func, builder in (("_paint_dealer", "stale_walls_note("),
+                          ("_paint_positions", "summary_line(")):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == func)
+        segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
+                if isinstance(s, ast.stmt)]
+        hits = [s for s in segs if s and builder in s]
+        assert hits, f"{func} no longer builds {builder}"
+        assert "_PANEL_NOTE" in min(hits, key=len), (func, min(hits, key=len))
+    # ⚠ never on the placeholder: it REPLACES the rows, so that panel has no
+    # grid, no min-width and nothing to scroll.
+    assert "sticky" not in d._PLACEHOLDER
 
 # ── arrival detection ────────────────────────────────────────────────────────
 def test_new_ids_reports_only_rows_not_seen_before():
@@ -2164,7 +2904,7 @@ def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
     s = d.arrival_state()
     s["first"] = False
     said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
-    assert said == "Q Q Q. Unusual activity, 0-D T E 7 37 Call."
+    assert said == "Q Q Q. Unusual volume, 0-D T E 7 37 Call."
 
 
 def test_a_new_position_speaks_its_contract_from_the_raw_payload():
@@ -2584,3 +3324,257 @@ def test_synthesis_never_runs_on_the_event_loop():
         if "_voice.ensure" in line:
             assert "run.io_bound" in line
     assert src.count("_voice.ensure") == 2      # the poll, and the unlock button
+
+
+# ── the panel heads and column labels, as one shared source ──────────────────
+def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
+    """The heads are DATA: one copy, rather than four argument lists.
+
+    The row caps must stay interpolated rather than written down: the old
+    "HOTTEST {N}" subtitle existed in that shape precisely so a cap change could
+    not leave a stale number standing on the panel.
+    """
+    heads = d.PANEL_HEADS
+    assert set(heads) == {"dealer", "board", "flow", "positions"}
+    for key, (title, use_line) in heads.items():
+        assert title == title.upper(), key
+        assert use_line, key
+    assert str(d.BOARD_ROWS_N) in heads["board"][1]
+    assert str(d.FLOW_ROWS_N) in heads["flow"][1]
+
+
+def test_column_headers_are_constants_one_per_grid_track():
+    """A header tuple must carry exactly as many labels as its grid has tracks.
+
+    The grids and their labels are declared in different places, and a track
+    added without its label silently shifts every label after it one column to
+    the left — which reads as a page that is merely wrong, not as one that
+    broke.
+    """
+    for name, heads, grid in (("dealer", d.DEALER_HEADS, d.DEALER_GRID),
+                              ("board", d.BOARD_HEADS, d.BOARD_GRID),
+                              ("flow", d.FLOW_HEADS, d.FLOW_GRID),
+                              ("positions", d.POS_HEADS, d.POS_GRID)):
+        tracks = grid.split("grid-cols-[")[1].split("]")[0].count("_") + 1
+        assert len(heads) == tracks, (name, len(heads), tracks)
+
+
+def test_use_lines_say_what_the_panel_is_for():
+    """Each head's second line is the reader's question, not the mechanism's
+    name. page_help.py already carried this voice; it was one hover away."""
+    heads = d.PANEL_HEADS
+    assert "dealers" in heads["dealer"][1]
+    assert "where to start looking" in heads["board"][1]
+    # The honest caveat the Flow panel owes its reader, and the reason the
+    # rows say Call/Put rather than bought/sold: Schwab publishes no
+    # time-and-sales tape to this app, so nobody here knows who initiated.
+    assert "not who initiated" in heads["flow"][1]
+    assert "needs a decision" in heads["positions"][1]
+
+
+def test_a_use_line_fits_the_panel_it_stands_in():
+    """~125 characters at 11px in an 860px panel; 90 is the guard rail.
+
+    WIDTH, not height: this page is already taller than any window it is read
+    in (see ``DESK_SCROLLBAR_PX``), so a line too TALL costs nothing, while a
+    line too WIDE overflows a panel that cannot reflow."""
+    for key, (_title, use_line) in d.PANEL_HEADS.items():
+        assert len(use_line) <= 90, (key, len(use_line))
+
+
+def test_the_dropped_facts_are_the_columns_underneath_them():
+    """The symbol and book lists left the head because the SYMBOL and BOOK
+    columns already print them, row by row. The SORT ORDER did not — it is the
+    one fact in that slot the rows cannot show, so it survives into the
+    use-line, still interpolated from the cap."""
+    heads = d.PANEL_HEADS
+    assert "$SPX" not in heads["dealer"][1]
+    assert d.PAPER_SOURCE not in heads["positions"][1]
+    assert "hottest" in heads["board"][1].lower()
+    assert "newest" in heads["flow"][1].lower()
+
+
+def test_headers_name_the_use_not_the_mechanism():
+    assert d.DEALER_HEADS == ("SYMBOL", "PRICE", "FLIP LEVEL",
+                              "PRICE VS WALLS", "CEILING", "FLOOR",
+                              "DEALER MODE")
+    assert d.BOARD_HEADS == ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV",
+                             "NET PREMIUM", "P/C", "SIGNAL", "SETUP")
+    assert d.FLOW_HEADS == ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
+    assert d.POS_HEADS == ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY",
+                           "MARK", "STRIKES", "QTY", "OPEN P&L", "STATUS")
+
+
+def test_the_two_width_blocked_labels_stay_short():
+    """STRAT and QTY are the two tracks the HEAD LABEL binds rather than the
+    value (see POS_GRID's floor notes). At the 8.0px per character
+    ``test_every_column_label_fits_the_track_it_stands_over`` measures,
+    "STRATEGY" needs 64px of a 42px floor and "CONTRACTS" 72px of a 36px one;
+    widening both costs ~58px against the 43px of slack between this page's
+    minimum window and the 1920px it is read at.
+
+    So this is a deferral with arithmetic behind it, not an oversight — and it
+    gets a test because a comment saying so is the kind nobody reads before
+    "fixing" the inconsistency.
+
+    /options/paper is a ui.table with no such limit and DOES spell both out
+    (``test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here``). The
+    app therefore shows one concept under two spellings, deliberately: the
+    standing rule is to spell out casual shortenings, so the abbreviation
+    stays a width concession HERE rather than becoming the app's word for
+    the concept."""
+    assert "STRAT" in d.POS_HEADS and "STRATEGY" not in d.POS_HEADS
+    assert "QTY" in d.POS_HEADS and "CONTRACTS" not in d.POS_HEADS
+
+
+def test_trader_acronyms_survive_the_reword():
+    """The standing rule is: spell out casual shortenings, keep trader
+    acronyms. NET PREM was the casual one and got its word; ATM IV and P/C are
+    the vocabulary, not shorthand for it."""
+    assert "ATM IV" in d.BOARD_HEADS
+    assert "P/C" in d.BOARD_HEADS
+
+
+# ── empty and waiting states ─────────────────────────────────────────────────
+def test_waiting_copy_states_what_is_true_not_which_service_is_cold():
+    """Off-hours this is the most-read text on the page, and naming an internal
+    service makes a quiet market read as a fault the reader should chase."""
+    assert "service" not in d.WAITING_OPTIONS.lower()
+    assert "hasn't published" in d.WAITING_OPTIONS
+
+
+def test_a_cold_feed_is_still_distinguishable_from_a_quiet_market():
+    """The pre-existing invariant, restated here because this pass rewrote both
+    sides of it: rendering the same words for a dead service and for a market
+    with nothing to say would make the two indistinguishable — the whole reason
+    this page must never print a zero it did not read.
+
+    The Bull / Bear line also keeps the one fact a reader can ACT on: the map
+    comes from a nightly cascade, so the answer is "tonight", not "refresh"."""
+    assert d.WAITING_BULLBEAR != d.WAITING_OPTIONS
+    assert "16:20" in d.WAITING_BULLBEAR
+
+
+def test_the_desk_and_the_map_still_say_the_same_thing_about_a_cold_map():
+    """``WAITING_BULLBEAR`` mirrors ``sentiment_bullbear.WAITING`` by explicit
+    intent — two screens describing one cold cache. They were reworded
+    together; this is what stops the next rewording moving only one."""
+    from pages import sentiment_bullbear as bb
+    assert "16:20 CT" in bb.WAITING and "16:20 CT" in d.WAITING_BULLBEAR
+    for page_text in (bb.WAITING, d.WAITING_BULLBEAR):
+        assert "Waiting for the sentiment service" not in page_text
+
+
+def test_the_desk_help_calls_things_what_the_screen_calls_them():
+    """``term in text`` is not coverage. This checks the RENAMED words are
+    present AND the superseded ones are gone — the pair is what catches a
+    rename that reached the screen and stopped at the hover guide."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    # The BOLD form is how this file names a thing on the screen, so that is
+    # what must move. The plain-text gloss "(the call and put walls ...)" is
+    # kept deliberately: a trader knows those words, and the help is where the
+    # new label gets tied back to them.
+    for gone in ("a flag:", "**flag**", "**call and put walls**",
+                 "unrealised profit and loss"):
+        assert gone not in text, gone
+    for want in ("ceiling", "floor", "status", "open P&L"):
+        assert want in text, want
+
+
+def test_the_desk_help_writes_no_row_count_down():
+    """It said "the five hottest names" and "the five newest" while the caps
+    were 6 and 9 — stale, and now visibly so, because the panel prints its own
+    count. The fix is to state no number here rather than a second copy of one:
+    nothing fails when a manual goes stale, which is why it does."""
+    import page_help
+    text = page_help.HELP_MD["/desk"].lower()
+    for phrase in ("five hottest", "five newest", "six hottest", "nine newest"):
+        assert phrase not in text, phrase
+
+
+# ── the Opportunity Board panel head: Buy / Neutral / Sell ───────────────────
+def test_board_signal_facts_delegate_to_the_boards_own_summary():
+    """Taken from the Opportunity Board, not recomputed here.
+
+    ``matrix.signal_summary`` is the function that page's own band calls, so
+    the two screens cannot report different counts for one payload — the whole
+    reason this page composes rather than restates."""
+    from pages.options import matrix as m
+    payload = {"rows": [{"signal": "buy"}, {"signal": "buy"},
+                        {"signal": "sell"}, {"signal": "neutral"},
+                        {"signal": None}]}
+    facts = d.board_signal_facts(payload)
+    counts = {f["key"]: f["count"] for f in facts}
+    assert counts == m.signal_summary(payload)
+    assert counts == {"buy": 2, "neutral": 2, "sell": 1}
+
+
+def test_board_signal_facts_keep_the_boards_order_and_chip_colours():
+    """Same order and the same chip class the board row below it wears, so the
+    head and the rows read as one vocabulary."""
+    from pages.options.matrix import signal_class
+    facts = d.board_signal_facts({"rows": [{"signal": "buy"}]})
+    assert [f["key"] for f in facts] == ["buy", "neutral", "sell"]
+    assert [f["label"] for f in facts] == ["BUY", "NEUTRAL", "SELL"]
+    for f in facts:
+        assert f["cls"] == signal_class(f["key"])
+
+
+def test_board_signal_facts_withhold_rather_than_print_three_zeros():
+    """A cold cache and an empty board both return None.
+
+    Three zeros would be a reading this page never took — the same rule that
+    makes every other cell here print an em dash rather than 0.00 — and the
+    panel body already says "Nothing ranked yet" for the empty case, so a
+    "BUY 0 · NEUTRAL 0 · SELL 0" beside it would be noise saying nothing."""
+    assert d.board_signal_facts(None) is None
+    assert d.board_signal_facts({}) is None
+    assert d.board_signal_facts({"rows": []}) is None
+    assert d.board_signal_facts("nonsense") is None
+
+
+def test_board_signal_facts_count_the_WHOLE_board_not_the_drawn_rows():
+    """Deliberate, and the one thing about this head worth knowing: the panel
+    draws BOARD_ROWS_N rows while these count every published symbol. That
+    matches the Opportunity Board's own band, which also counts every row — the
+    head is a market-wide read and the rows are the top of it."""
+    payload = {"rows": [{"signal": "buy"} for _ in range(d.BOARD_ROWS_N + 9)]}
+    facts = d.board_signal_facts(payload)
+    total = sum(f["count"] for f in facts)
+    assert total == d.BOARD_ROWS_N + 9
+    assert total > len(d.opportunity_rows(payload))
+
+
+def test_render_puts_the_signal_counts_in_the_board_panel_head(monkeypatch):
+    """The counts must reach the SCREEN, not just the builder — the head slot
+    is separate from the body the painter clears, so a painter that forgot it
+    would leave every builder test green and the head empty."""
+    _seed_bus(monkeypatch, _full_payloads())
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" in texts
+    facts = d.board_signal_facts(_full_payloads()["options:matrix"])
+    for fact in facts:
+        assert f"{fact['label']} {fact['count']}" in texts
+
+
+def test_render_shows_no_signal_counts_when_nothing_is_published(monkeypatch):
+    """The withholding rule, driven from the PRODUCER rather than asserted on a
+    hand-made payload: with every view cold the head must carry no chip at all,
+    not three zeros."""
+    _seed_bus(monkeypatch, {})
+    texts = [t for t in _rendered_texts() if t]
+    assert "SIGNALS" not in texts
+    for word in ("BUY 0", "NEUTRAL 0", "SELL 0"):
+        assert word not in texts
+
+
+def test_the_desk_help_explains_what_the_signal_counts_COUNT():
+    """The one genuinely confusable thing about this head: it reports every
+    published symbol while the rows under it are the top few. A reader seeing
+    "BUY 12" over six rows has no way to resolve that from the screen."""
+    import page_help
+    text = page_help.HELP_MD["/desk"]
+    low = text.lower()
+    assert "buy" in low and "neutral" in low and "sell" in low
+    assert "watchlist" in low or "whole board" in low or "every symbol" in low

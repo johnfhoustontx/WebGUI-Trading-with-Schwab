@@ -2,11 +2,13 @@ name: CI
 
 # Runs lint + the per-folder test matrix + a dependency audit on every push/PR.
 #
-# WHY windows-latest: the stack is Windows-first — it imports winotify (a
-# Windows-only toast library) and touches tkinter/Memurai; a Linux runner fails at
-# import time. Tests need NO live services (the bus falls back to fakeredis under
-# pytest — see shared/bus/client.py; the proxy is mocked), so no Redis service
-# container is required.
+# WHY ubuntu-latest: the stack RUNS on Linux (Ubuntu 24.04, systemd user units)
+# since the 2026-08-29 migration, so CI matches production. This block used to
+# read "WHY windows-latest: the stack is Windows-first — winotify, tkinter,
+# Memurai"; all three went with that migration, and the note outlived them.
+# Tests need NO live services (the bus falls back to fakeredis under pytest — see
+# shared/bus/client.py; the proxy is mocked), so no Redis service container is
+# required.
 #
 # WHY a matrix of per-folder jobs: running the whole tree in one pytest invocation
 # re-triggers the documented cross-app top-level module-name collisions
@@ -22,9 +24,12 @@ name: CI
 # for review without wedging the clean-stack gate.
 
 # TRIGGERS — deliberately narrow, because this matrix is EXPENSIVE.
-# Measured on the last full green run (2026-08-07): 18 jobs, 3,085 job-seconds
-# = 51.4 wall-minutes, and every job is `windows-latest`, which GitHub bills at
-# a 2x multiplier => ~103 BILLABLE MINUTES PER RUN. Against the 2,000 min/month
+# Measured on the last full green run (2026-08-07), when every job was
+# `windows-latest`: 18 jobs, 3,085 job-seconds = 51.4 wall-minutes, billed at
+# Windows' 2x multiplier => ~103 BILLABLE MINUTES PER RUN. ⚠ The jobs are
+# `ubuntu-latest` now (1x), so the bill is far lower than this paragraph implies
+# -- the TRIGGER narrowing below is still worth keeping, but re-measure before
+# quoting a number. Against the 2,000 min/month
 # free private-repo allowance that is ~19 runs; the previous config
 # (`push: branches: ["**"]` PLUS `pull_request`) fired the whole matrix on every
 # WIP commit on every branch AND again on the PR, roughly halving that to ~9-10.
@@ -92,6 +97,13 @@ jobs:
           cache: pip
       - name: Install pinned runtime + audit tool
         run: |
+          # pip-audit scans the whole environment, which INCLUDES pip itself, so
+          # the runner's own preinstalled pip can fail this job while every
+          # project dependency is clean -- it did, on PYSEC-2026-3721 against
+          # pip 26.1.2, for days. Upgrading is the honest fix: an --ignore-vuln
+          # would suppress the finding for the project's packages too, which is
+          # the opposite of what this job is for.
+          python -m pip install --upgrade pip
           pip install -r requirements.lock
           pip install pip-audit
       - name: pip-audit (dependency CVE scan)
@@ -104,6 +116,18 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
+    # ⚠ CI MUST RUN ON PRODUCTION'S CLOCK. A tz-naive datetime in this codebase
+    # MEANS Central, and repo_paths.assert_central_time() refuses to start off
+    # it -- so a UTC runner does not test a variant configuration, it tests one
+    # that cannot exist. The guard is inert under pytest, which hides this until
+    # a test SPAWNS a subprocess (the only way to observe a transitive import):
+    # the child has no pytest in sys.modules, the guard fires, and the failure
+    # reads as "the public entrypoint did not import" or "importing gamma_tool
+    # failed". Measured 2026-09-09: that is all three webgui test_live_main
+    # failures and both test_gamma_tool_headless ones, red for days, on two
+    # suites whose actual subjects were fine.
+    env:
+      TZ: America/Chicago
     strategy:
       fail-fast: false
       matrix:
@@ -163,8 +187,14 @@ jobs:
             # Deselect the documented pre-existing baseline failures (tkinter
             # dashboard tests need a display + crash headless; the earnings tests
             # are date-relative; test_key_levels_doc references an uncopied doc).
+            # ⚠ -p no:randomly is REQUIRED, not tidiness: CLAUDE.md's Tests
+            # section documents this suite's command with it, because the suite
+            # is order-sensitive. Omitting it here made two directional-screening
+            # tests fail on some seeds and pass on others -- reproduced neither
+            # locally nor on the prod box, which is exactly how a seed-dependent
+            # failure presents.
             cmd: >-
-              python -m pytest tests -q
+              python -m pytest tests -q -p no:randomly
               --ignore=tests/test_dashboard_captured_signals_drift.py
               --ignore=tests/test_dashboard_tree_signal_map.py
               --ignore=tests/test_key_levels_doc.py

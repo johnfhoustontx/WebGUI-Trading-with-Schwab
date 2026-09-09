@@ -33,12 +33,50 @@ from docx.shared import Pt, RGBColor, Inches
 
 HERE = Path(__file__).resolve().parent
 
+# ---------------------------------------------------------------------------
+# Brand
+#
+# These documents stay LIGHT even though the product is dark: a reference you
+# read at length -- and may print -- is not the place for a dark ground. What
+# carries the brand here is the accent and the mark, not the background.
+#
+# ⚠ The accent is NOT the site's #9184d9. That blurple is tuned for a near-black
+# page and falls to ~2.3:1 on white, which fails for link text. This is
+# accent-700 from the same ramp: the same hue family, dark enough to read.
+BRAND_NAME = "NeuralStrike"
+BRAND_ACCENT = "#5d5294"          # Nocturne --color-accent-700
+BRAND_ACCENT_SOFT = "#efedf9"     # a wash of it, for table headers and callouts
+BRAND_ACCENT_RGB = (0x5D, 0x52, 0x94)
+
+# THE FLIP, in the accent -- the same geometry as deploy/site/assets/mark.svg.
+# Inlined because these HTML files are self-contained by design: they are opened
+# from disk, mailed, and served from the app, and a linked image would break in
+# at least one of those.
+BRAND_MARK_SVG = (
+    '<svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true">'
+    '<rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="' + BRAND_ACCENT + '"/>'
+    '<path d="M20 11 L32 23 L44 11" fill="none" stroke="' + BRAND_ACCENT + '"'
+    ' stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>'
+    '<path d="M20 53 L32 41 L44 53" fill="none" stroke="' + BRAND_ACCENT + '"'
+    ' stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>')
+
 # Manual folder -> (markdown filename, doc title, doc subtitle)
+# ⚠ The title is the PRODUCT, not the repository. These read
+# "WebGUI Trading with Schwab" until 2026-09-07 -- the folder name on a
+# developer's disk, printed at the top of every page of a document written for
+# a user, in a document set that never named the product once.
+#
+# A manual added here must ALSO be added to webgui/pages/manuals.py:MANUALS,
+# which is both the in-app list and the serving whitelist: built-but-unlisted is
+# silently unreachable. shared/tests/test_cross_tier_mirrors.py pins both
+# directions.
 MANUALS = {
-    "user-guide": ("user-guide.md", "WebGUI Trading with Schwab", "User Guide"),
-    "reference-guide": ("reference-guide.md", "WebGUI Trading with Schwab", "Reference Guide"),
-    "technical-reference": ("technical-reference.md", "WebGUI Trading with Schwab", "Technical Reference"),
-    "api-reference": ("api-reference.md", "WebGUI Trading with Schwab", "API / Developer Reference"),
+    "user-guide": ("user-guide.md", BRAND_NAME, "User Guide"),
+    "reference-guide": ("reference-guide.md", BRAND_NAME, "Reference Guide"),
+    "technical-reference": ("technical-reference.md", BRAND_NAME, "Technical Reference"),
+    "api-reference": ("api-reference.md", BRAND_NAME, "API / Developer Reference"),
+    "glossary": ("glossary.md", BRAND_NAME, "Options Glossary"),
 }
 
 MD_EXTENSIONS = ["extra", "tables", "fenced_code", "sane_lists", "toc", "attr_list"]
@@ -50,7 +88,7 @@ MD_EXTENSIONS = ["extra", "tables", "fenced_code", "sane_lists", "toc", "attr_li
 HTML_CSS = """
 :root {
   --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
-  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --accent: ACCENT_HEX; --accent-soft: ACCENT_SOFT_HEX; --code-bg: #f4f6fa;
   --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
 }
 * { box-sizing: border-box; }
@@ -61,6 +99,10 @@ body {
 }
 .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
 .titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.lockup { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.lockup .mark { flex: none; display: block; }
+.lockup .word { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.13em;
+                text-transform: uppercase; color: var(--accent); }
 .titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -111,8 +153,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="wrap">
 <div class="titleblock">
-  <h1>{title}</h1>
-  <div class="sub">{subtitle}</div>
+  <div class="lockup">{mark}<span class="word">{title}</span></div>
+  <h1>{subtitle}</h1>
   <div class="meta">{meta}</div>
 </div>
 {body}
@@ -129,7 +171,10 @@ def build_html(md_text: str, title: str, subtitle: str, meta: str, out_path: Pat
     body = md.convert(md_text)
     # markdown's [TOC] marker -> a .toc div is produced by the toc extension's
     # placeholder; we rely on a literal "[TOC]" in source being replaced.
-    html = HTML_TEMPLATE.format(title=title, subtitle=subtitle, meta=meta, css=HTML_CSS, body=body)
+    css = (HTML_CSS.replace("ACCENT_HEX", BRAND_ACCENT)
+                .replace("ACCENT_SOFT_HEX", BRAND_ACCENT_SOFT))
+    html = HTML_TEMPLATE.format(title=title, subtitle=subtitle, meta=meta,
+                                css=css, mark=BRAND_MARK_SVG, body=body)
     out_path.write_text(html, encoding="utf-8")
     return body
 
@@ -217,7 +262,7 @@ def _inline_runs(paragraph, node, bold=False, italic=False, mono=False) -> None:
                 run = paragraph.add_run(child.get_text())
                 run.bold = bold or None
                 run.italic = italic or None
-                run.font.color.rgb = RGBColor(0x2E, 0x6D, 0xB4)
+                run.font.color.rgb = RGBColor(*BRAND_ACCENT_RGB)
             elif child.name == "br":
                 paragraph.add_run().add_break()
             else:
@@ -367,7 +412,7 @@ def build_docx(body_html: str, title: str, subtitle: str, meta: str, out_path: P
     t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r = t.add_run(title); r.bold = True; r.font.size = Pt(26); r.font.color.rgb = RGBColor(0x16, 0x24, 0x3A)
     s = doc.add_paragraph(); rs = s.add_run(subtitle); rs.font.size = Pt(15); rs.bold = True
-    rs.font.color.rgb = RGBColor(0x2E, 0x6D, 0xB4)
+    rs.font.color.rgb = RGBColor(*BRAND_ACCENT_RGB)
     m = doc.add_paragraph(); rm = m.add_run(meta); rm.font.size = Pt(9); rm.italic = True
     rm.font.color.rgb = RGBColor(0x5B, 0x66, 0x78)
 
@@ -429,7 +474,7 @@ def build_one(folder: str) -> None:
     # every manual claimed that date no matter when it was rebuilt -- by 2026-08-16
     # it was telling readers the docs were six weeks staler than they were, and it
     # would never have corrected itself.
-    meta = f"WebGUI Trading with Schwab · Generated {_dt.date.today().isoformat()}"
+    meta = f"{BRAND_NAME} · Generated {_dt.date.today().isoformat()}"
     html_body = build_html(md_text, title, subtitle, meta, md_path.with_suffix(".html"))
     shots = USER_GUIDE_SHOTS if folder == "user-guide" else None
     build_docx(html_body, title, subtitle, meta, md_path.with_suffix(".docx"),

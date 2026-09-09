@@ -381,6 +381,45 @@ def count_opened_on(date_iso, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
+def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH):
+    """Closed-signal outcomes with ``lo_iso <= close_date <= hi_iso``, OLDEST first.
+
+    The range sibling of ``get_outcomes_for_date``, feeding the captured score's
+    Daily / Weekly / MTD rows. It returns two columns that one does not, because
+    a score needs both ends of a trade:
+
+    * ``first_seen_ts`` — the "opened" date. It routinely falls OUTSIDE the
+      window: a signal opened in August can close in September, and the opened
+      count buckets on this while realized P&L buckets on ``close_date``.
+    * ``scanner_type`` — 0DTE vs SWING, the split the report breaks out.
+
+    Both ends are INCLUSIVE. A half-open range would drop the newest day, which
+    is precisely the day the Daily row is made of.
+    """
+    conn = connect(db_path)
+    try:
+        cur = conn.execute("""
+            SELECT o.signal_id        AS signal_id,
+                   s.symbol           AS symbol,
+                   s.strategy         AS strategy,
+                   s.scanner_type     AS scanner_type,
+                   s.first_seen_ts    AS first_seen_ts,
+                   s.entry_credit     AS entry_credit,
+                   o.exit_value       AS exit_value,
+                   o.realized_pnl     AS realized_pnl,
+                   o.exit_reason      AS exit_reason,
+                   o.close_date       AS close_date,
+                   o.close_ts         AS close_ts
+            FROM signal_outcomes o
+            JOIN signals s ON s.signal_id = o.signal_id
+            WHERE o.close_date >= ? AND o.close_date <= ?
+            ORDER BY o.close_ts ASC
+        """, (str(lo_iso), str(hi_iso)))
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH):
     """Closed-signal outcomes for a given ``close_date`` (YYYY-MM-DD), newest first.
 

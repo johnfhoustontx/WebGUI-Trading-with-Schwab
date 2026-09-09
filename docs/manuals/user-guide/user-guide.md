@@ -2,10 +2,10 @@
 
 # Introduction
 
-**WebGUI Trading with Schwab** is a single, browser-based control center for a
-Charles Schwab options-and-equities trading workflow. It replaces a collection of
-older desktop and dashboard tools with one web app you open in your browser at
-**http://127.0.0.1:8500**.
+**NeuralStrike** is a single, browser-based control center for a Charles Schwab
+options-and-equities trading workflow. It replaces a collection of older desktop
+and dashboard tools with one web app you open in your browser at
+**https://app.neuralstrike.co**, behind a password and an authenticator code.
 
 From this one interface you can:
 
@@ -21,9 +21,10 @@ From this one interface you can:
 - **Review** your live brokerage portfolio and an end-of-day report.
 - **Watch** an autonomous paper trader pick and size defined-risk spreads.
 
-> **This is a single-user, local application.** It runs on your own machine and
-> talks to Schwab through a local gateway. There are no accounts to log into in
-> the web app itself.
+> **This is a single-user application.** It runs on your own machine and talks
+> to Schwab through a local gateway. Reaching it from anywhere else goes through
+> a sign-in — your password and an authenticator code — and the app itself still
+> listens only on the host.
 
 ---
 
@@ -52,7 +53,8 @@ the plain-English checklist — the *Technical Reference* has the full detail
 - **Redis running.** The local "backbone" the app's parts talk through, on port
   6379. `sudo systemctl enable --now redis-server`. **Nothing works without it** —
   every page shows a "Waiting for … service" placeholder.
-- **A modern web browser** to open the app at `http://127.0.0.1:8500`.
+- **A modern web browser** to open the app at **https://app.neuralstrike.co**
+  (or `http://127.0.0.1:8500` if you are sitting at the machine itself).
 
 ## Schwab account (required for live data)
 
@@ -87,8 +89,8 @@ The app reads market data and your positions from Schwab, so you need:
 
 The app runs entirely on your own machine and needs these local ports free:
 **6379** (Redis), **8100** (Schwab gateway), **8210–8215** (the six services),
-and **8500** (the web app). If another program is already using one of them, the
-matching piece won't start.
+**8500** (the web app) and **8501** (the public live screens). If another program
+is already using one of them, the matching piece won't start.
 
 ---
 
@@ -101,26 +103,65 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services and the web app. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
 They also start **automatically when the machine boots** — you do not normally
 run anything by hand.
 
-**Opening the app.** The web app deliberately listens only on the host itself and
-has no password, so it is never exposed to the network. From your own computer,
-double-click the **Trading Web GUI** shortcut: it opens a secure tunnel and your
-browser at
+**Opening the app.** From any browser, go to:
 
 ```
-http://127.0.0.1:8500
+https://app.neuralstrike.co
 ```
 
-That address is your own machine — the tunnel carries it to the trading host.
+The app itself still listens **only on the host**, on `127.0.0.1:8500`. What
+makes that address reachable is a small web server on the same machine which
+terminates the certificate and passes the request through — the app is never
+exposed to the network directly.
 
-The browser usually opens automatically. If it does not, open that address
-yourself.
+**You will be asked to sign in**: your password, then the current 6-digit code
+from your authenticator app. Tick **Remember this device** and that browser will
+not ask again for a while; a new browser, or a private window, always will.
+
+Two things worth knowing when it refuses you:
+
+- The message is deliberately the same for a wrong password, a wrong code and
+  too many attempts. It will not tell you which one you got wrong.
+- A code can only be used **once**. If you have just signed in and immediately
+  hit something that asks for a code again — stopping the stack does — wait for
+  your authenticator to roll to the next one.
+
+**Sitting at the machine itself?** `http://127.0.0.1:8500` still works there and
+skips the sign-in, which is what the wall display uses.
+
+## The public live screens
+
+Fourteen of the app's screens are also published **read-only and without any
+sign-in** on a second address, `https://live.neuralstrike.co` — the Desk,
+Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
+Industry, Sector Rotation, RRG, Momentum, Gamma, Net Prem and the two Premium
+Divergence screens. `https://neuralstrike.co/live.html` is a thumbnail menu of
+them.
+
+Three things to know:
+
+- **They are not redacted.** The Desk shows your open paper and driver positions,
+  the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
+  Anyone with the address can read them. That is a deliberate choice — the book
+  is paper only — but it is worth knowing before you show someone the link.
+- **They are a separate program.** Nothing anyone does there can reach your own
+  app: it holds no login, sends no commands, and cannot write anything. Its
+  health has its own card on **System Status**; a red one means the public site
+  is down and your own screens are unaffected.
+- **To stop publishing**, use **Stop All Services** — it stops both web apps —
+  or, if you want to keep working, `systemctl --user stop trading-prod-webgui_live`
+  on the machine, which leaves the rest of the stack alone.
+
+The thumbnails on the menu page are refreshed on a **15-minute timer**, on trading
+days between 08:00 and 15:20 Central — so a slightly old-looking tile is normal,
+and outside those hours expected. The screen behind it is always live.
 
 ## What runs behind the scenes
 
@@ -131,6 +172,8 @@ You don't interact with these directly, but it helps to know they exist:
   handles ordering for you).
 - **Six domain services** — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).
+- **The public live screens** — a second, read-only copy of the web app serving
+  `live.neuralstrike.co`. See *The public live screens* above.
 - **Redis** — a local data backbone the services and the web app share.
 
 ## The proxy-down banner
@@ -148,10 +191,12 @@ launcher, or restart the specific service from the **System Status** page.
 
 ## Stopping everything
 
-Use **Stop All Services** at the foot of the rail, or run
+Use **Stop All Services** at the foot of the rail — it asks for your
+authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the six services, and the web app. (Redis is intentionally left
-running — it is a *system* service the app's own units cannot reach.)
+gateway, the six services, the web app **and the public live screens** — so the
+public site goes dark until you start the stack again. (Redis is intentionally
+left running — it is a *system* service the app's own units cannot reach.)
 
 ---
 
@@ -203,9 +248,11 @@ question, plus a block of machine controls pinned to the bottom.
 | **More** (group) | EOD Report · User Manuals |
 
 **System controls** sit at the foot of the rail, below a separator: **System
-Status**, **Settings**, and a red-outlined **Stop All Services** button. They are
-kept apart because none of them is a step in a trading workflow, and the
-destructive one is placed last so overshooting Settings cannot land on it.
+Status**, **Settings**, a red-outlined **Stop All Services** button, and **Sign
+out**. They are kept apart because none of them is a step in a trading workflow.
+Sign out is last on purpose: on a phone the bottom edge is the easiest thing to
+hit, so the slot goes to the control that costs nothing if you hit it by mistake,
+and the destructive one sits above it.
 
 Two groupings are worth explaining because they are deliberate:
 
@@ -261,7 +308,8 @@ Three built-in help features are always within reach:
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.
 - **User Manuals** — a tab in the **More** group. It opens this User Guide, the
-  **Reference Guide**, and the Technical and API references in your browser.
+  **Reference Guide**, the Technical and API references, and the **Options
+  Glossary** in your browser.
 
 > **If you want to understand *why* a page exists rather than how to operate it,
 > read the Reference Guide.** This User Guide is task-oriented — it tells you what
@@ -342,51 +390,6 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   and they refuse silently — nothing is logged and no error is shown. That button is
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.
-
----
-
-## Live Mirror
-
-**Route:** `/desk/live` — pinned in the rail directly under **Desk**, and it
-**opens in a new browser tab**, so the tab you were working in stays where it was.
-
-**The Desk, on a screen you are not sitting at.** Same panels, same numbers, same
-layout, built as a plain web page instead of an app page. It keeps updating on a
-wall display, a spare monitor, a tablet or a phone, and it picks itself back up on
-its own after the machine sleeps, the Wi-Fi drops, or the browser suspends the tab.
-
-**How to use it:** open it once, drag the window to the display you want it on, and
-leave it. Clicking a row still opens the page it came from, and **Open the full
-Desk** at the top left brings you back to the app.
-
-**What is different from the Desk:**
-
-| | Desk | Live Mirror |
-|---|---|---|
-| Panels | 2x2, stacking to one column on a narrow screen | **always 2x2** |
-| After sleep or a dropped connection | reload it | **reconnects itself** |
-
-The layout difference is deliberate: a screen you have pinned somewhere should not
-rearrange itself. On a narrow display the columns tighten and long values shorten
-with an ellipsis instead of the panels moving.
-
-**The indicator at the top right tells you whether to trust the screen:**
-
-- **Live** — connected, and what you are looking at is current.
-- **Reconnecting** — the connection dropped and the page is retrying by itself. The
-  numbers are the last good ones until it says Live again.
-
-**The countdown keeps ticking every second even when nothing else changes**, and
-that is the point: a frozen page and a quiet market look identical from across the
-room, and the moving clock is how you tell them apart.
-
-**Every number comes from the Desk's own code**, so the mirror cannot drift from
-it. If the two ever disagree, one of them has stopped updating — check the
-indicator. The same honesty rules apply, because they are the same rules: walls are
-hidden rather than zeroed when the gamma feed is stale, and a missing reading shows
-a dash rather than a zero.
-
-**Nothing on this page can place or change a trade.** It reads and links only.
 
 ---
 
@@ -906,6 +909,89 @@ parameters and press **Scan**:
 Results appear in the same signal table (with the same Score chip, Grade, and the
 three per-row action buttons) and detail panel as the Market Scanner.
 
+## Income
+
+**Route:** `/options/income`.
+
+A board of premium worth **selling** 30 to 45 days out, ranked across the whole
+watchlist. The scan runs once each morning on its own schedule — there is no
+Refresh — and the status line tells you how many symbols it covered, when it ran,
+and whether any of them failed.
+
+Three structures share the board:
+
+- **Put spread** — a put credit spread, for a symbol you do not expect to fall much.
+- **Call spread** — a call credit spread, for one you do not expect to rise much.
+- **Cash-secured put** — a single short put, for a symbol you would be content to own
+  at that strike.
+- **Covered call** — a call written against stock the paper account already holds
+  (see **Shares**), never struck below what the shares cost.
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · **Credit $** · **Capital $**
+· **Return on capital** · **Yield on cost** · **Total return if called** · PoP % ·
+Breakeven · **Earnings** · Score. Click any column to re-sort.
+
+**Yield on cost** and **Total return if called** apply to covered calls only, and the
+other three structures show a dash — they own no shares, so there is no cost to
+measure against. Yield on cost is the premium alone as a percentage of what the shares
+cost you. Total return if called adds the gain up to the strike, which is what you
+actually collect if the stock is called away — and it is the number that decides
+between a fat premium at a strike barely above your basis and a thin one well above
+it. (It reads almost the same as Return on capital on these rows, but not quite:
+Return on capital is after the commission, and it is the only one of the two the
+spreads and the cash-secured put have at all.)
+
+**Credit and Capital are both per contract, in dollars.** Capital is the cash the
+trade actually commits — for a spread that is its width less the credit; for a
+cash-secured put it is the strike all the way down to zero, which is far larger.
+**Return on capital** is the credit measured against that, and it is the only column
+that makes the two comparable: a $60 credit and a $640 credit say nothing until you
+know that one risks $441 and the other $39,361.
+
+**The Earnings column** reports what the earnings calendar knows about the symbol:
+
+- **None scheduled** — checked, and nothing is coming.
+- **After expiry** — a report is scheduled, but it lands after this expiration.
+  Anything reporting *before* expiration was already removed from the scan.
+- **Not checked** — the calendar has no entry for that symbol, so the check could not
+  run. This means *unknown*, not *clear*. Without an Alpha Vantage API key configured
+  it is what every row will say.
+
+An empty board is a normal outcome, not a fault — the status line says how many
+symbols were scanned so you can tell "nothing qualified today" from "the scan never
+ran".
+
+### Opening one in the paper account
+
+A **cash-secured put** and a **covered call** carry a wallet button at the end of
+their row. It opens that trade in the **paper account** — the book with cash and
+share lots behind it, which is the one an assignment can turn into stock. The two
+credit spreads do not have the button: their route is **Send to Paper trade** on
+the Market Scanner, which writes the paper *ledger*, a separate book that tracks
+marks rather than cash.
+
+Press it, confirm the number of contracts, and the account answers in a moment —
+either a confirmation, or a refusal saying exactly what stopped it. It will refuse
+when:
+
+- the account cannot secure the put (the message names the collateral needed and
+  the cash you have);
+- there is no share lot behind a covered call, or the lot was already called away
+  since this morning's scan;
+- a covered call would not cover the lot **whole** — 300 shares is three contracts,
+  not one, because the book delivers a lot in one piece (the message names the
+  number that works);
+- a covered call is already open on that symbol — the book records coverage per
+  symbol, so it cannot tell a second one apart from the first;
+- the price has moved more than 15% from what the board shows, which after a
+  morning scan is common enough to be worth checking rather than filling;
+- there is no live quote for the contract at all, or the account is halted for the
+  session.
+
+**You are filled at the live price, not the board's.** The board was scanned this
+morning; the number you see is what ranked the row, and the number you get is what
+the contract is worth when you press the button.
+
 ## Expected Move
 
 **Route:** `/options/expected-move`.
@@ -979,6 +1065,48 @@ The account view for the automated paper-trading engine.
 > 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
 > is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
 > autonomous driver's separate account re-prices every minute; this one does not.)
+
+## Shares
+
+**Route:** `/options/shares`.
+
+The **stock** the paper account holds. Options normally expire worthless or are closed;
+a **cash-secured put** that finishes below its strike does neither — it is exercised
+against you and becomes 100 shares per contract, bought at the strike. Every such lot
+appears here.
+
+**The columns:** Symbol · Shares · **Cost basis $/share** · **Cost $** ·
+**Mark (not tracked)** · Unrealized $ · **How acquired** · Held since ·
+**Covering call**. Click any column to re-sort.
+
+**How acquired** says where the lot came from. *Assigned* means a short put was
+exercised against you — which is how nearly every lot arrives — and *Bought* means it
+was entered by hand. The two are not interchangeable: an assigned lot's cost basis is
+the strike you sold, which may be well above what the shares were worth when they
+landed.
+
+**Mark and Unrealized are deliberately blank.** Nothing in this app re-prices a bare
+share, so there is no current value to report, and printing the cost basis in the Mark
+column would look like a live quote. To see what a holding is worth right now, look the
+symbol up on **Market Dashboard** or in your broker.
+
+**Covering call** shows the call already written against that symbol, as strike and
+expiry — for example `210c 10/16`, with `×2` if more than one contract. A blank cell
+means the shares are uncovered: all the upside is yours and no premium is being
+collected. A call *spread* on the same symbol is not a covering call and is not shown
+here. The match is by **symbol, not by lot** — the book keeps no record of which
+shares a call was written against — so if you hold two lots of one name and have
+written one call, that call appears on both rows.
+
+There is nothing to press. Lots appear when the engine settles an in-the-money short
+put, and disappear when a covered call written against them finishes **above** its
+strike — the shares are called away at that strike, and the cash comes back with the
+gain booked as realised P&L. (A call that finishes at or below its strike expires
+worthless: you keep the premium and the shares stay.) There is no way to sell a lot
+by hand; being called away is the only exit the book has.
+
+What lots are *for* is the **Income** tab, which screens covered calls against them
+and never offers a strike below their cost basis.
 
 ## Rescue
 
@@ -1223,8 +1351,8 @@ Everything is **paper** — nothing is ever sent to a live brokerage account.
 - A **Performance** view listing closed trades with their exit reason (*Target hit*,
   *Delta stop*, *Time stop*, *Money stop*).
 
-**When it runs:** a 09:28 ET morning checkpoint, then every 30 minutes within an
-entry window of **09:45–15:30 ET**. The first quarter-hour after the open is skipped
+**When it runs:** every 30 minutes within an entry window of
+**09:45–15:30 ET**. The first quarter-hour after the open is skipped
 so the structure is readable, and no *new* entries are taken in the last half hour.
 Open positions are re-priced every minute during market hours regardless.
 
@@ -1310,13 +1438,15 @@ which keeps working in the exported file as well as in the app.
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)
 
-A simple index that links the four manuals — each opens in a new browser tab:
+A simple index that links the five manuals — each opens in a new browser tab:
 
 - **User Guide** — how to use the app (this document).
 - **Reference Guide** — what each tab and sub-tab is for, why it matters and when to
   open it, starting from a one-page summary of the whole app.
 - **Technical Reference** — the math behind every number.
 - **API / Developer Reference** — the integration surface for developers.
+- **Options Glossary** — plain-English definitions of every term the app puts on
+  screen, from what a contract is to what dealer gamma means.
 
 The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
 
@@ -1335,9 +1465,9 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the six services, and the web
-  app itself, each with Online/Offline and its tier. The gateway's card also shows
-  the **Schwab auth** state.
+- A **component grid** — Redis, the Schwab gateway, the six services, the web app
+  itself, and the public live screens beside it, each with Online/Offline and its
+  tier. The gateway's card also shows the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
   browser tab. Use it when the auth line says the login has expired.
 - A **data-freshness** table showing each domain's latest cache write and its age.
@@ -1358,7 +1488,7 @@ A health board for the whole stack.
 **Route:** `/settings` — a standalone item at the **foot of the rail**, with System
 Status and Stop All Services.
 
-Preferences, all saved on your machine (there is no login):
+Preferences, all saved on your machine:
 
 - **Scanner alerts** — enable the audio alert, pick the sound (chime / bell /
   ping), a **Test sound** button, a **Volume** slider, an **only during market
@@ -1411,11 +1541,39 @@ group, next to EOD Report.
 **Route:** `/terminate` — the red button at the foot of the rail.
 
 A guarded "stop the whole local stack" page. The red **Stop all services** button
-(behind a confirmation) stops the gateway, the six services, and the web app.
+(behind a confirmation) stops the gateway, the six services, the web app **and the
+public live screens** — the public site goes dark with it.
+
+**The confirmation asks for your authenticator code.** Type the current 6-digit
+code from your authenticator app into the dialog and press **Stop everything**. A
+wrong, missing, or already-used code refuses the stop and says so — nothing is
+stopped, and you can wait for the next code and try again. A code you spend here
+cannot then be used to sign in (and vice versa), so if you have just signed in,
+wait for the next one.
 
 > **This also stops the page you're on** — it will become unresponsive right after
 > you confirm, by design. Redis is left running. Re-launch with
 > `systemctl --user start trading-prod.target`.
+
+---
+
+## Sign out
+
+**Route:** `/logout` — the last item in the rail, below Stop All Services.
+
+Ends this browser's session and returns you to the sign-in page. It also forgets a
+**trusted device**, so the next sign-in asks for your authenticator code again —
+which is the point on a borrowed or shared machine.
+
+- It signs out **this browser only**. Other devices you are signed in on stay
+  signed in.
+- Nothing running is affected. The services, the collectors, the scheduled scans
+  and the autonomous driver all carry on. Signing out is not stopping anything —
+  that is the page above it.
+
+It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
+the easiest thing to hit, so the harmless control gets that slot and the
+stop-everything button sits above it.
 
 ---
 

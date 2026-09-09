@@ -74,6 +74,57 @@ def test_sentiment_svc_delegates_rather_than_copying():
     assert "\"mean_reversion\": \"Balanced\"" not in src
 
 
+# --- the covered-call identifier --------------------------------------------
+# ONE string, "COVERED_CALL", in three tiers that cannot import each other:
+#
+#   services/options_svc/compute.py  COVERED_CALL_TYPE       - the scan-row TYPE
+#   options-scanner/paper_engine.py  COVERED_CALL_STRATEGIES - the position
+#                                                              STRATEGY it settles
+#   webgui/pages/options/shares.py   COVERED_CALL_STRATEGIES - the position
+#                                                              STRATEGY it displays
+#
+# ⚠ Those are two DIFFERENT FIELDS, and until ``compute.open_income_position``
+# existed the mirror was not real: a scan row's ``type`` and a paper position's
+# ``strategy`` merely happened to spell the same word, with nothing carrying one
+# into the other. That function is the link — it stores ``strategy = row["type"]``
+# — so the three now genuinely have to agree, and this is the test that says so.
+# ``shares.py`` claimed to be "pinned by a test on both sides" for a while when
+# no such test existed; writing it was cheaper than deleting the claim.
+
+COVERED_CALL_WORD = "COVERED_CALL"
+
+
+def test_the_covered_call_identifier_is_one_word_in_three_tiers():
+    scan_type = _const("services/options_svc/compute.py", "COVERED_CALL_TYPE")
+    engine = _const("options-scanner/paper_engine.py", "COVERED_CALL_STRATEGIES")
+    page = _const("webgui/pages/options/shares.py", "COVERED_CALL_STRATEGIES")
+    assert scan_type == COVERED_CALL_WORD, (
+        "the scan-row type changed; the position strategy written by "
+        "open_income_position changes with it, so both engine and page must move")
+    assert tuple(engine) == (COVERED_CALL_WORD,)
+    assert tuple(page) == (COVERED_CALL_WORD,)
+    assert scan_type in engine and scan_type in page, (
+        "open_income_position stores the scan row's TYPE as the position's "
+        "STRATEGY, so a type the engine cannot recognise is a covered call that "
+        "is never called away and a lot that can never leave the book.")
+
+
+def test_the_openable_income_structures_are_the_two_single_leg_products():
+    """Non-vacuity for the pin above, and a guard on the page's own gate.
+
+    ``handoff.INCOME_OPENABLE_TYPES`` decides which rows GET an Open button and
+    ``compute.INCOME_OPEN_STRUCTURES`` decides which the service will accept. A
+    button on a row the service refuses is a dead control; a row the service
+    accepts with no button is a feature nobody can reach.
+    """
+    page = tuple(_const("webgui/pages/options/handoff.py", "INCOME_OPENABLE_TYPES"))
+    assert page == ("SHORT_PUT", COVERED_CALL_WORD)
+    # The service side names the covered call through COVERED_CALL_TYPE rather
+    # than a literal, so its tuple is not a literal AST node - read the source.
+    src = (ROOT / "services/options_svc/compute.py").read_text(encoding="utf-8")
+    assert 'INCOME_OPEN_STRUCTURES = ("SHORT_PUT", COVERED_CALL_TYPE)' in src
+
+
 # --- the manuals dual registration ------------------------------------------
 # A manual has to be registered in TWO places: docs/manuals/build_docs.py to be
 # BUILT, and webgui/pages/manuals.py to be SERVED (that dict is also the path
@@ -111,9 +162,134 @@ def test_every_built_manual_is_also_served():
         "That dict is the serving whitelist, so these are unreachable in the app.")
 
 
+# --- the published Gamma symbols --------------------------------------------
+# Four of the public live screens are views of /options/gamma, and three of them
+# name a symbol ($SPX, SPY, QQQ). ``cache:options:gamma`` is ONE symbol-agnostic
+# key holding whatever the private app last looked at, so options_svc publishes
+# a per-symbol snapshot for each named symbol -- and it must know WHICH symbols
+# without importing webgui/live_screens.py, because `services` may not import
+# `webgui` (Tier 1 / Tier 2). Hence the copy, and hence this pin.
+#
+# ⚠ Get this wrong in the DROPPING direction and nothing errors: the screen just
+# polls a key nobody publishes and shows "no snapshot yet" forever.
+
+GAMMA_SYMBOLS_SOURCE = "services/options_svc/handlers.py"
+LIVE_SCREENS = "webgui/live_screens.py"
+
+
+def _published_gamma_symbols():
+    """The symbols options_svc publishes a per-symbol Gamma snapshot for.
+
+    They are the KEYS of ``PUBLISHED_GAMMA_HISTORY_VIEWS`` -- one table, whose
+    values say which of each symbol's view histories are worth a key, so a symbol
+    cannot be published without an entry saying why."""
+    return tuple(_const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_HISTORY_VIEWS"))
+
+
+def _gamma_screen_pins(rel_path):
+    """``(symbol, view)`` for every ``Screen`` whose module is ``options.gamma``.
+
+    ``view`` is ``None`` when the screen pins none -- which is not the same as
+    "no view": an unpinned view means the page BUILDS its picker, so the reader
+    can reach all four heatmap views and every one of them needs its history.
+
+    Read as TEXT like everything else here -- importing live_screens.py would put
+    webgui on sys.path from a shared test."""
+    tree = ast.parse((ROOT / rel_path).read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == "Screen"):
+            continue
+        kw = {k.arg: k.value for k in node.keywords}
+        module = (node.args[3] if len(node.args) > 3 else kw.get("module"))
+        if module is None or ast.literal_eval(module) != "options.gamma":
+            continue
+        pins = ast.literal_eval(kw["kwargs"]) if "kwargs" in kw else {}
+        out.append((pins.get("symbol"), pins.get("view")))
+    return out
+
+
+def _gamma_screen_symbols(rel_path):
+    """The ``symbol`` pins alone, in order (a screen without one is skipped)."""
+    return [sym for sym, _view in _gamma_screen_pins(rel_path) if sym]
+
+
+def test_the_published_gamma_symbols_are_the_three_the_screens_name():
+    """The pin itself, so it is never vacuous while live_screens.py is pending.
+
+    Changing this table changes which symbols options_svc pays to publish every
+    minute -- each one a per-symbol snapshot, plus a history key for each view
+    the table lists against it."""
+    assert _published_gamma_symbols() == ("$SPX", "SPY", "QQQ")
+
+
+def test_options_svc_publishes_exactly_the_symbols_the_live_screens_pin():
+    """The pairing. Skipped only until webgui/live_screens.py lands (it is a
+    later task in the same plan); the moment it exists this starts pinning both
+    halves and a screen added with an unpublished symbol fails here."""
+    if not (ROOT / LIVE_SCREENS).exists():
+        pytest.skip(f"{LIVE_SCREENS} not written yet - the pairing engages when "
+                    "it lands; the literal pin above holds until then")
+    screens = _gamma_screen_symbols(LIVE_SCREENS)
+    assert len(screens) == len(set(screens)), (
+        f"two live screens pin the same gamma symbol: {screens}")
+    assert set(screens) == set(_published_gamma_symbols()), (
+        "a live screen names a gamma symbol options_svc does not publish (it "
+        "would poll a key nobody writes and stay empty), or options_svc pays to "
+        "publish a symbol no screen reads.")
+
+
 def test_every_served_manual_is_also_built():
     built = _manual_keys("docs/manuals/build_docs.py")
     served = _manual_keys("webgui/pages/manuals.py")
     orphans = served - built
     assert not orphans, (
         f"served but never BUILT: {sorted(orphans)} - the page would 404.")
+
+
+def test_every_published_gamma_history_is_one_a_screen_actually_draws():
+    """The OTHER half of the pairing above: the views, not just the symbols.
+
+    The symbol test cannot see this. A screen pinned to ``{"symbol": "$SPX",
+    "view": "Charm"}`` names a published symbol, so it passes every test in the
+    repo -- and renders an EMPTY HEATMAP forever, because ``$SPX`` publishes a
+    history for ``GEX`` and nothing else. Silently: a missing key reads as "no
+    history yet", which is also what a Sunday looks like.
+
+    The rule is derived, not listed. ``GAMMA_HISTORY_VIEWS`` is the set of views
+    that HAVE a history key at all, so:
+
+    * a screen pinned to one of them needs exactly that one;
+    * a screen pinned to any other view (Flow, Net Prem, Term) draws from the
+      MAIN payload and needs none -- which is why ``SPY`` and ``QQQ`` publish an
+      empty tuple;
+    * a screen that pins NO view builds the picker, so it can reach all four.
+
+    Asserted as EQUALITY, both directions. Missing is the empty screen above;
+    extra is the cost the split table was written to avoid -- each published
+    history is a per-symbol grid key rewritten every minute, on a store that has
+    already needed a manual ~1 GB VACUUM.
+    """
+    if not (ROOT / LIVE_SCREENS).exists():
+        pytest.skip(f"{LIVE_SCREENS} not written yet")
+    history_views = set(_const(GAMMA_SYMBOLS_SOURCE, "GAMMA_HISTORY_VIEWS"))
+    assert history_views, "no history views - the pin would be vacuous"
+    published = _const(GAMMA_SYMBOLS_SOURCE, "PUBLISHED_GAMMA_HISTORY_VIEWS")
+
+    needed = {sym: set() for sym in published}
+    for sym, view in _gamma_screen_pins(LIVE_SCREENS):
+        if not sym:
+            continue                     # symbol-independent (Net Prem)
+        assert sym in needed, f"{sym} is pinned by a screen but never published"
+        if view is None:
+            needed[sym] |= history_views          # picker built - any view reachable
+        elif view in history_views:
+            needed[sym].add(view)
+
+    for sym, want in sorted(needed.items()):
+        assert set(published[sym]) == want, (
+            f"PUBLISHED_GAMMA_HISTORY_VIEWS[{sym!r}] is {tuple(published[sym])!r} "
+            f"but the live screens need {tuple(sorted(want))!r}. Too few and the "
+            "screen draws an empty heatmap forever; too many and options_svc "
+            "rewrites a grid key every minute that nothing reads.")

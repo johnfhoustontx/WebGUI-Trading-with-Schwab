@@ -122,3 +122,70 @@ def test_symbol_slot_renders_the_badge_conditionally():
     assert "props.row._eth" in slot            # v-if gate
     assert "props.row._eth_class" in slot      # stamped :class, no inline style
     assert ":style=" not in slot
+
+
+# ── column labels name the reading, not the field ────────────────────────────
+def test_column_labels_say_what_the_cell_holds():
+    labels = [c["label"] for c in matrix.matrix_columns()]
+    assert labels == ["Symbol", "Price", "Day %", "Trend", "Call flow",
+                      "Put flow", "P/C", "Net premium $M", "Vs flip",
+                      "Open signals", "Flow alerts", "Signal", "Score"]
+
+
+def test_the_call_and_put_columns_say_they_are_FLOW_not_a_price():
+    """They hold call/put ACCELERATION arrows (hot / cool / steady / flat). A
+    header reading just "Call" gives a reader every reason to expect a price or
+    a volume in the cell under it."""
+    labels = {c["name"]: c["label"] for c in matrix.matrix_columns()}
+    assert labels["call_accel_disp"] == "Call flow"
+    assert labels["put_accel_disp"] == "Put flow"
+
+
+def test_the_signal_COUNT_and_the_signal_VERDICT_no_longer_collide():
+    """``Sig`` (a count of live scanner signals) sat two columns from ``Signal``
+    (the buy/neutral/sell verdict). The count is what got renamed: /desk's board
+    panel already prints SIGNAL for this verdict, and a second name for it would
+    be the drift the earlier passes closed."""
+    labels = {c["name"]: c["label"] for c in matrix.matrix_columns()}
+    assert labels["n_signals"] == "Open signals"
+    assert labels["n_alerts"] == "Flow alerts"
+    assert labels["signal_label"] == "Signal"
+
+
+def test_the_labels_the_desk_also_prints_use_the_desks_words():
+    """One quantity, two screens, one word — the invariant the Desk pass was
+    built around. These four are the overlap between this table and /desk's
+    Opportunity Board panel."""
+    from pages import desk
+    labels = {c["label"] for c in matrix.matrix_columns()}
+    for shared in ("SYMBOL", "SIGNAL", "SCORE"):
+        assert shared in desk.BOARD_HEADS
+        assert shared.title() in labels or shared.capitalize() in labels
+    assert "NET PREMIUM" in desk.BOARD_HEADS
+    assert "Net premium $M" in labels      # the unit rides along: a bare number
+
+
+def test_the_waiting_line_is_the_ONE_copy_every_screen_shows():
+    """Three screens print this sentence. ``desk`` imports both this module and
+    ``flow``, so neither can import back — which is why it lives in a leaf both
+    can reach rather than being restated a third time."""
+    from pages import copy as shared_copy
+    from pages import desk
+    from pages.options import flow
+    assert matrix.status_text(None) == shared_copy.WAITING_OPTIONS
+    assert matrix.status_text({}) == shared_copy.WAITING_OPTIONS
+    assert desk.WAITING_OPTIONS == shared_copy.WAITING_OPTIONS
+    assert flow.status_text(None) == shared_copy.WAITING_OPTIONS
+    assert "service" not in shared_copy.WAITING_OPTIONS.lower()
+
+
+def test_the_board_help_calls_the_columns_what_the_screen_calls_them():
+    """Present-and-absent, the pair that catches a rename which reached the
+    screen and stopped at the hover guide."""
+    import page_help
+    text = page_help.HELP_MD["/options/matrix"]
+    for want in ("Call flow", "Put flow", "Vs flip", "Open signals",
+                 "Flow alerts", "Score"):
+        assert want in text, want
+    for gone in ("**GEX** regime", "a **hotness** score", "spot,"):
+        assert gone not in text, gone

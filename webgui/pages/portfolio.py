@@ -41,7 +41,7 @@ STATUS_TEXT_CLASSES = f"{TXT_UP} {TXT_DOWN} {TXT_MUTED}"
 HOLDINGS_COLS = [
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
     {"name": "sector", "label": "Sector", "field": "sector", "align": "left"},
-    {"name": "quantity", "label": "Qty", "field": "quantity"},
+    {"name": "quantity", "label": "Shares", "field": "quantity"},
     {"name": "market_value", "label": "Market Value", "field": "market_value"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
     {"name": "total_pl", "label": "Total P/L", "field": "total_pl"},
@@ -135,10 +135,10 @@ def render():
         status_lbl = ui.label("").classes("opacity-70 text-sm")
 
     # Holdings / Sectors / Performance as folder-style TABS at the top of the
-    # page (2026-07-12 — like the Options pages): rendered into main.subtab_slot()
+    # page (2026-07-12 — like the Options pages): rendered into shell.subtab_slot()
     # so they sit under the header in the same position as the group subtabs;
     # falls back inline if the slot is absent.
-    import main as _shell
+    import shell as _shell
 
     def _build_tabs():
         with ui.tabs().classes("compact-tabs").props(

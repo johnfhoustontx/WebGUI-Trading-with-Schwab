@@ -98,7 +98,7 @@ def strategy_columns():
         ("strategy_label", "Strategy"),
         ("bias", "Bias"),
         ("legs", "Legs"),
-        ("expiration", "Exp"),
+        ("expiration", "Expiry"),
         ("dte", "DTE"),
         ("debit_credit", "Debit/Credit"),
         ("max_profit", "Max P"),

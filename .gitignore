@@ -6,6 +6,7 @@
 **/ai_config.json
 shared/sentiment_bridge.json
 shared/notifications.json
+shared/webgui_auth.json
 shared/anthropic_key.txt
 shared/alphavantage_key.txt
 shared/massive_key.txt
@@ -27,6 +28,13 @@ config/env.local.toml
 # ANTHROPIC_API_KEY + MEMURAI_PASSWORD. Never committed -- same rule as
 # appsettings.json and env.local.toml above.
 .env
+
+# The PUBLIC live process's own minimal environment: REDIS_LIVE_URL (a Redis
+# ACL password inside a URL) + MEMURAI_PASSWORD. A separate file so the one
+# internet-facing process does not hold the fleet's strongest credentials --
+# see deploy/systemd/generate_units.py:_live_env_file.
+# ⚠ `.env` above does NOT cover this name; gitignore matches it literally.
+.env.live
 
 
 # Databases & runtime state
@@ -90,3 +98,27 @@ webgui/data/voice/
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
+# Thumbnail captures for the public live grid. Generated on the box that serves
+# them, every 15 min inside [windows.live_capture]. ⚠ NOT committed: tracked,
+# they would dirty prod's tree the moment the timer first fires, and
+# tools/promote.sh refuses a dirty tree.
+deploy/site/live/*.webp
+
+# The marketing gallery's screenshots, re-photographed from the PRIVATE app by
+# tools/capture_gallery_shots.py on the box that serves the site. Same reason as
+# deploy/site/live/*.webp above: committed, a capture run would dirty prod's
+# tree and tools/promote.sh refuses a dirty tree before it stops anything.
+#
+# ⚠ NOT a wholesale ignore, and the exceptions are not decoration. The three
+# Simulator shots name a view that lives in page state rather than in the URL
+# (capture_gallery_shots.unreachable_reason), so the tool declines them and
+# NOTHING regenerates them -- ignored, a fresh clone would have no picture for
+# those tiles ever, not merely until the next capture run. The pattern excludes
+# the FILES rather than the directory, which is what lets these three be
+# re-included at all: git cannot un-exclude a file inside an excluded directory.
+# tools/tests/test_capture_gallery_shots.py pins this list against the tool's
+# own answer, so it cannot drift into a stale hand-written trio.
+deploy/site/assets/shots/*.webp
+!deploy/site/assets/shots/image16.webp
+!deploy/site/assets/shots/image17.webp
+!deploy/site/assets/shots/image18.webp

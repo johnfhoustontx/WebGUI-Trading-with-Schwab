@@ -27,12 +27,15 @@ def test_paper_columns_have_keys():
     assert {"symbol", "strategy", "quantity", "status", "pnl"} <= fields
 
 
-def test_paper_columns_renamed_headers():
-    """Credit$/Risk$/P&L$ drop the '$' (dollars are implied by the values)."""
-    labels = {c["field"]: c["label"] for c in paper.paper_columns()}
-    assert labels["entry_credit_total"] == "Credit"
-    assert labels["max_loss_total"] == "Risk"
-    assert labels["pnl"] == "P&L"
+def test_paper_columns_carry_no_currency_sign():
+    """The older rename this test was written for: Credit$/Risk$/P&L$ dropped
+    the '$' because dollars are implied by the values. The three labels have
+    moved on since (see the column tests at the foot of this file), but that
+    point has not — a unit belongs in a header only when the cell would be
+    ambiguous without it, which is why the Opportunity Board's "Net premium $M"
+    keeps one and these do not."""
+    labels = [c["label"] for c in paper.paper_columns()]
+    assert not [lbl for lbl in labels if "$" in lbl]
 
 
 def test_paper_rows_latest_first():
@@ -393,3 +396,76 @@ def test_vega_sign_round_trips_through_storage():
     s = paper.synth_from_trade({"symbol": "SPY", "entry_vega": stored_entry_vega,
                                 "expiration": "2099-01-15"})
     assert s["net_vega"] == pytest.approx(original_net_vega)
+
+
+# ── column labels name the reading, not the field ────────────────────────────
+def test_column_labels_say_what_the_cell_holds():
+    labels = [c["label"] for c in paper.paper_columns()]
+    assert labels == ["Symbol", "Strategy", "Strikes", "Expiry", "Contracts",
+                      "Entry", "Max loss", "P&L", "Status", "Opened", ""]
+
+
+def test_the_entry_column_is_not_called_Credit():
+    """``entry_credit_total`` stores a DEBIT trade's debit as a NEGATIVE credit,
+    so "Credit" contradicted the sign in the cell for half the book. "Entry"
+    lets the sign carry credit-vs-debit, which is what it already does — and it
+    is /desk's word for the same quantity."""
+    labels = {c["name"]: c["label"] for c in paper.paper_columns()}
+    assert labels["entry_credit_total"] == "Entry"
+    assert "Credit" not in set(labels.values())
+
+
+def test_the_freed_name_did_not_leave_two_columns_called_Entry():
+    """The rename is a SWAP: ``entry_time`` held "Entry" and moves to "Opened",
+    which is the better word for a timestamp regardless."""
+    labels = {c["name"]: c["label"] for c in paper.paper_columns()}
+    assert labels["entry_time"] == "Opened"
+    assert [lbl for lbl in labels.values()].count("Entry") == 1
+
+
+def test_max_loss_names_the_quantity_it_holds():
+    labels = {c["name"]: c["label"] for c in paper.paper_columns()}
+    assert labels["max_loss_total"] == "Max loss"
+    assert "Risk" not in set(labels.values())
+
+
+def test_the_pnl_column_is_NOT_renamed_to_open_pnl():
+    """/desk renamed its UNREALIZED column to OPEN P&L, and copying that here
+    would be wrong: ``trade_pnl`` returns REALIZED for a closed trade, so half
+    these rows are not open at all."""
+    labels = {c["name"]: c["label"] for c in paper.paper_columns()}
+    assert labels["pnl"] == "P&L"
+
+
+def test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here():
+    """A DELIBERATE divergence, recorded so it reads as a decision.
+
+    /desk's Positions grid has measured per-string minmax() floors and those two
+    tracks are label-bound, so STRATEGY and CONTRACTS cost ~58px against 43px of
+    slack and would clip the panel at the 1920px it is read at. This is a
+    ui.table with no such limit, and the standing rule is to spell out casual
+    shortenings — so the abbreviation stays a width concession rather than
+    becoming the app's word for the concept."""
+    from pages import desk
+    labels = set(c["label"] for c in paper.paper_columns())
+    assert {"Strategy", "Contracts"} <= labels
+    assert "STRAT" in desk.POS_HEADS and "QTY" in desk.POS_HEADS
+
+
+def test_the_ledger_help_calls_the_columns_what_the_screen_calls_them():
+    import page_help
+    text = page_help.HELP_MD["/options/paper"]
+    for want in ("Entry", "Max loss", "Opened", "Close trade"):
+        assert want in text, want
+    # The old words, and the one that was WRONG for half the book.
+    for gone in ("strikes, credit, max loss", "**Close** records"):
+        assert gone not in text, gone
+
+
+def test_the_ledger_help_explains_the_entry_sign():
+    """The single most confusing thing on this page: a debit trade stores its
+    debit as a NEGATIVE credit, so the Entry column goes negative on exactly the
+    trades a reader is least sure about."""
+    import page_help
+    text = page_help.HELP_MD["/options/paper"]
+    assert "debit" in text.lower()

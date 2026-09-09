@@ -269,7 +269,8 @@ def _passes_swing_cut(sig):
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
-               market_state=None) -> dict:
+               market_state=None, trade_type="SWING", structures=None,
+               earnings_date=None, return_chain=False) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -300,6 +301,25 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     the schwab-py-compatible client passed into the engine calls, while
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
+
+    Four parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
+    and all four default to today's behaviour, because nine existing call sites
+    pass none of them:
+
+    * ``trade_type`` is threaded to the ONE ``se.screen_spreads`` call below. It
+      is the single thread that makes the earnings gate, the liquidity floor and
+      the calibration bucket all key off the window actually being scanned.
+    * ``structures``, when given, keeps only candidates whose ``type`` is in it.
+      Applied AFTER building and BEFORE ``score_all``, so ``filtered_out`` keeps
+      meaning "the quality cut removed N" rather than silently absorbing rows
+      the window never wanted.
+    * ``earnings_date``, when given, reaches ``screen_spreads`` (which drops a
+      conflicting expiration on the spread side) AND gates the candidates the
+      BUILDERS produced. ``strategy_scanner`` does not consult the calendar at
+      all, so without the second half a 35-DTE cash-secured put would sail
+      straight over the report the spreads were just protected from.
+    * ``return_chain`` adds the fetched ``chain`` + ``spot`` to the returned
+      dict so the covered-call screen can reuse them (see the return statement).
 
     ``strategy_scanner`` / ``strategy_scoring`` are imported lazily here (not at
     module top) to avoid binding the process-wide ``sys.modules`` entries merely by
@@ -364,13 +384,37 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if {"VERTICAL", "NEUTRAL"} & fams:
         spreads = list(se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min,
                                          put_d_max, call_d_min, call_d_max,
-                                         min_cr_fraction, "SWING", spot=spot,
-                                         daily_expected_move=dem))
+                                         min_cr_fraction, trade_type, spot=spot,
+                                         daily_expected_move=dem,
+                                         earnings_date=earnings_date))
     if "VERTICAL" in fams:
         signals += ssn.build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max)
         signals += [ssn.adapt_credit_spread(s) for s in spreads]
     if "NEUTRAL" in fams:
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
+
+    # Window filters, BEFORE scoring — a candidate this window does not trade is
+    # not a candidate the quality bar rejected, and ``filtered_out`` below is
+    # rendered as the latter. Both are no-ops on the default arguments.
+    if structures is not None:
+        wanted = set(structures)
+        signals = [s for s in signals if s.get("type") in wanted]
+    if earnings_date and trade_type in se.EARNINGS_GATED_TRADE_TYPES:
+        # Uniform over every family rather than only the builders' output: the
+        # adapted credit spreads were already gated inside ``screen_spreads``,
+        # so re-checking them is idempotent.
+        #
+        # ⚠ The trade_type condition MIRRORS screen_spreads' own gate and is not
+        # decoration. Without it the two halves disagree for any window the
+        # engine deliberately exempts: a 0-DTE caller passing an earnings_date
+        # would have its BUILDER candidates dropped here while its SPREAD
+        # candidates were kept, since a 0-DTE position is flat by the close and
+        # cannot be held through a report. Unreachable today — income_scan is
+        # the only caller that passes a date — which is exactly why it would
+        # have been found the hard way.
+        signals = [s for s in signals
+                   if not se.check_earnings_conflict(earnings_date,
+                                                     s.get("expiration"))]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
 
@@ -387,7 +431,712 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
-    return {"signals": signals, "view": view, "filtered_out": filtered_out}
+    result = {"signals": signals, "view": view, "filtered_out": filtered_out}
+    if return_chain:
+        # Handed back IN MEMORY so a second screen over the SAME symbol (the
+        # covered-call one, see publish_income) can reuse this chain instead of
+        # paying for a second round-trip. Off by default because nine call sites
+        # want the signals and nothing else, and an unwanted chain is retained
+        # for the life of the caller's dict.
+        #
+        # ⚠ It must never be PUBLISHED — cache:options:calc_chain reached 8.77 MB
+        # exactly this way, and a 30-45 DTE chain is wider still. The IncomeScan
+        # contract says so in its own docstring. The two early-return guards
+        # above deliberately do not carry the key: there is no chain in either
+        # case, so ``.get("chain")`` is None, which is the honest answer.
+        result["chain"], result["spot"] = chain, spot
+    return result
+
+
+# ── INCOME window (30-45 DTE) ────────────────────────────────────────────────
+# A THIRD scan window beside 0-DTE and swing, on its own morning slot. Two-sided
+# by construction: screen_spreads loops BOTH expiry maps out of the same chain
+# object, so the CCS side costs no extra Schwab call. See
+# docs/plans/2026-09-05-income-window-and-share-inventory-design.md.
+INCOME_DTE_MIN = 30
+INCOME_DTE_MAX = 45
+
+# Short-delta band for the income window. Deliberately NOT
+# _scanner_config.directional_delta_range(): those bands (PCS -0.55..-0.30, CCS
+# 0.30..0.55) are for mode="DIRECTIONAL", which is explicitly exempt from the
+# PREMIUM-mode ceiling MAX_ENTRY_SHORT_DELTA (0.27). They sit entirely ABOVE it,
+# so every candidate would pass the band and then be dropped by the ceiling --
+# and that `continue` increments no reject counter, so the window would have
+# returned zero spreads forever while every stubbed test passed.
+#
+# 0.15-0.25 brackets the ~0.20-delta income convention with clearance on BOTH
+# sides, so a small drift in either the band or the ceiling cannot silently
+# empty the scan. Hugging 0.27 would put every candidate one tick from filtered.
+INCOME_PUT_DELTA = (-0.25, -0.15)
+INCOME_CALL_DELTA = (0.15, 0.25)
+
+# PCS/CCS are the two-sided premium core; SHORT_PUT is the cash-secured put.
+# Everything else build_directional / the VERTICAL family emits is a different
+# trade with a different thesis (a long call at 35 DTE is a direction bet;
+# SHORT_CALL is undefined risk; the debit verticals pay rather than collect), so
+# it is filtered rather than scored and ranked against these.
+#
+# ⚠ SHORT_PUT is the SCAN-side spelling. NAKED_PUT is the Calculator/rescue one
+# (compute._SINGLE_STRATEGIES). Do not introduce a third.
+_INCOME_STRUCTURES = ("PCS", "CCS", "SHORT_PUT")
+
+
+def _income_earnings(symbol, db_path=None):
+    """``(coverage, next report date or None)`` for the income window's gate.
+
+    Consumes :func:`shared.earnings.coverage`'s THREE-valued vocabulary
+    unchanged — ``"upcoming"`` / ``"none_scheduled"`` / ``"not_listed"`` — because
+    the last two both leave the date None and conflating them makes the gate
+    fail open silently on exactly the names most likely to be traded.
+
+    ⚠ ``"not_listed"`` must NOT drop the symbol. With no Alpha Vantage key and no
+    populated calendar it is the answer for EVERY symbol, so failing closed
+    would empty the whole scan and the feature would look broken rather than
+    uninformed. The row is stamped instead (``earnings_status``), which is this
+    repo's *never print a number you did not read* rule applied to a gate: a row
+    that skipped the check must not look like a row that passed it.
+
+    Never raises — a gate that raises costs the user the scan. ``db_path=None``
+    is resolved at CALL time (the ``paper_account_db`` shape), not bound as a
+    ``def``-time default, which is the trap that left ``signal_db``'s test
+    isolation inert for weeks.
+
+    ⚠ Reading a shared store is not a cross-service import — ``shared/earnings.py``
+    exists precisely so ``options_svc`` need not import ``trade_svc``.
+    """
+    import os
+
+    from shared import earnings as _earn
+
+    path = db_path or _earn.DEFAULT_DB_PATH
+    # The repo-root conftest refuses a sqlite3.connect into a live data dir, and
+    # init_db would CREATE the store besides. Mirrors trade_svc.earnings_coverage.
+    if db_path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return ("not_listed", None)
+    conn = None
+    try:
+        conn = _earn.init_db(path)
+        # ONE read decides both halves. ``coverage`` calls ``lookup`` itself
+        # (shared/earnings.py:127) and ``lookup`` swallows its own failure to
+        # None, so asking each in turn is two independent reads: the first can
+        # answer "upcoming" while the second fails alone, returning
+        # ("upcoming", None) -- a row stamped as CHECKED whose gate never fired.
+        # That is the precise inverse of what this helper exists to protect, and
+        # it is invisible because both halves degrade quietly.
+        row = _earn.lookup(conn, symbol)
+        if row is not None:
+            return ("upcoming", row["report_date"])
+        # No row: only now does the none_scheduled / not_listed distinction
+        # matter, and ``coverage`` is the thing that draws it.
+        return (_earn.coverage(conn, symbol), None)
+    except Exception:  # noqa: BLE001
+        log.warning("income earnings lookup failed for %s", symbol, exc_info=True)
+        return ("not_listed", None)
+    finally:
+        if conn is not None:
+            _earn.close_db(conn)
+
+
+def income_earnings_map(symbols) -> dict:
+    """``{symbol: (status, report date or None)}`` for the window's earnings gate.
+
+    Local SQLite reads only — **zero API cost**, which is what lets the gate
+    cover every held symbol as well as every scanned one. Deduped on the way in
+    so a symbol held in two lots is looked up once.
+
+    Exists so ``handlers`` need not reach for the private ``_income_earnings``:
+    the DB read belongs on this side of the tier boundary, beside the one
+    ``income_scan`` already does.
+    """
+    return {s: _income_earnings(s) for s in dict.fromkeys(symbols or []) if s}
+
+
+def income_chain(symbol):
+    """``(chain, spot)`` for one symbol — the MINIMUM fetch a covered call needs.
+
+    Two proxy calls, against ``income_scan``'s six-ish. It exists for the held
+    symbol the watchlist does not cover: running a full ``income_scan`` there
+    would cost the extra calls AND silently widen the board's universe past the
+    watchlist ``_income_symbols`` documents it as mirroring, publishing spreads
+    on a name the reader never asked to scan.
+
+    Degrades to ``(None, None)`` on a null chain or a null spot, matching
+    ``swing_scan``'s own two guards — off-hours the chain fetch can return None
+    and the quote can miss while the chain dict lacks ``underlyingPrice``. The
+    caller treats that as "no covered calls for this symbol today".
+    """
+    import datetime as dt
+
+    today = dt.date.today()
+    chain = se.fetch_option_chain(_proxy.schwab_py_client, symbol, from_date=today,
+                                  to_date=today + dt.timedelta(days=INCOME_DTE_MAX + 2))
+    if not chain:
+        return (None, None)
+    quote = _proxy.schwab_client.get_quote(symbol) or {}
+    spot = quote.get("last") or chain.get("underlyingPrice")
+    return (chain, spot) if spot else (None, None)
+
+
+def income_scan(symbol, market_state=None, return_chain=False) -> dict:
+    """The 30-45 DTE income window for one symbol: PCS + CCS + cash-secured put.
+
+    A thin wrapper over :func:`swing_scan`, not a second pipeline: that function
+    already fetches the chain/quote/history, derives ``atm_iv`` past a documented
+    percent/decimal trap, guards a null chain and a null spot, scores, cuts,
+    assigns ids and stamps IV rank. Duplicating it is how ``clamp`` came to have
+    nine copies.
+
+    ⚠ Two row SHAPES land in one ranked list, exactly as ``swing_scan`` already
+    produces: the adapted spreads carry BOTH the flat ``short_strike`` contract
+    and ``legs``; ``SHORT_PUT`` carries only the normalized ``legs`` one, with
+    ``capital`` / ``max_loss`` / ``breakevens`` (a list) / ``rr`` (a ratio).
+    Readers must not assume either — see the ScanResult docstring.
+
+    The credit floor reuses ``min_credit_pct()["SWING"]`` (0.12) rather than
+    growing an ``income`` knob, and that is deliberate even though 0.12 is
+    commented in the TOML as the 1-15 DTE floor: it is DOMINATED here and
+    therefore inert. The binding constraint is the delta-aware edge floor
+    ``credit/width >= abs(delta) + EDGE_MARGIN(0.02)``, which at a 0.15-0.25
+    delta short demands 17-27%, and the credit floor is
+    ``max(0.12, MIN_ABS_CREDIT/width)`` = 0.12 at any width >= 2. A separate knob
+    would be a second constant that changes nothing until EDGE_MARGIN moves.
+
+    The quality cut is likewise ``swing_scan``'s own ``SWING_MIN_SCORE`` /
+    ``SWING_EXCLUDED_GRADES``, unchanged and deliberately NOT duplicated as an
+    ``income_min``. The bar is a statement about the Fit+Quality composite, which
+    is horizon-agnostic; a second constant carrying the same value would be a
+    liability until the two genuinely diverge, and if they ever do it belongs in
+    ``config/scanner.toml`` under ``[scores]``, never as a literal here.
+
+    ``return_chain`` threads straight through to ``swing_scan``: it hands the
+    fetched chain + spot back in memory so ``publish_income`` can run the
+    covered-call screen over a symbol it was scanning anyway, at no extra API
+    cost. Requested per SYMBOL (only for names the paper account actually
+    holds), never for the whole watchlist.
+    """
+    status, earnings_date = _income_earnings(symbol)
+    out = swing_scan(symbol, INCOME_DTE_MIN, INCOME_DTE_MAX,
+                     INCOME_PUT_DELTA[0], INCOME_PUT_DELTA[1],
+                     INCOME_CALL_DELTA[0], INCOME_CALL_DELTA[1],
+                     _scanner_config.min_credit_pct()["SWING"],
+                     families=("VERTICAL", "DIRECTIONAL"),
+                     market_state=market_state,
+                     trade_type="INCOME",
+                     structures=_INCOME_STRUCTURES,
+                     earnings_date=earnings_date,
+                     return_chain=return_chain)
+    for s in out["signals"]:
+        s["earnings_status"] = status
+    return out
+
+
+# ── covered calls against held shares ───────────────────────────────────────
+# The income window's THIRD product, and the only one that is not a screen over
+# a universe: it screens the paper account's open equity lots. The builder is
+# pure over injected data (lots + chains + spots) so every rule below is
+# testable without a proxy call or a database, and so the caller decides where
+# the chains come from — which is what lets ``publish_income`` reuse the ones
+# the watchlist pass already fetched instead of doubling the API cost.
+#
+# Design: docs/plans/2026-09-05-income-window-and-share-inventory-design.md,
+# Decision 3.
+COVERED_CALL_TYPE = "COVERED_CALL"
+
+# A standard US equity option controls 100 shares. The name is spelled out
+# because this constant appears in BOTH a sizing floor and a dollar scale, and
+# a bare 100 in either place reads as the other.
+SHARES_PER_CONTRACT = 100
+
+# The strike convention is the window's own short-delta band, not a second
+# number: a covered call written at 0.20 delta is the same trade the CCS side
+# already expresses, minus the long wing. Taking the midpoint keeps the two in
+# step automatically if the band ever moves.
+_COVERED_TARGET_DELTA = (INCOME_CALL_DELTA[0] + INCOME_CALL_DELTA[1]) / 2.0
+
+
+def yield_on_cost(net_credit, cost_basis):
+    """Premium collected as a fraction of what the shares cost. None if unread.
+
+    ``net_credit`` is PER CONTRACT (160.00) and the denominator is therefore
+    ``cost_basis * 100`` — the trap the income page was rebuilt around, since an
+    adapted spread carries a per-SHARE ``credit`` beside its per-contract
+    ``net_credit`` and the two differ by exactly this factor.
+
+    Both operands go through ``_num`` (the module's strict finite coercion,
+    defined below) rather than ``float()``: a NaN here would reach a ranking
+    comparison, which is this repo's most-documented bug class, and a plausible
+    0.0 is worse than a None because it sorts among real readings. A
+    non-positive basis is likewise a non-reading, not a divide.
+    """
+    credit = _num(net_credit)
+    basis = _num(cost_basis)
+    if credit is None or basis is None or basis <= 0:
+        return None
+    return credit / (basis * SHARES_PER_CONTRACT)
+
+
+def total_return_if_called(net_credit, strike, cost_basis):
+    """Total return if the shares are called away, as a fraction of cost.
+
+    ``((strike - basis) * 100 + net_credit) / (basis * 100)`` — the capital gain
+    to the strike PLUS the premium. This is the number that actually ranks a
+    covered call: a 0.4% yield at a strike 12% above basis and a 2% yield at a
+    strike 0.5% above it are not comparable on premium alone.
+
+    Same strictness as :func:`yield_on_cost`, for the same reason.
+    """
+    credit = _num(net_credit)
+    k = _num(strike)
+    basis = _num(cost_basis)
+    if credit is None or k is None or basis is None or basis <= 0:
+        return None
+    return ((k - basis) * SHARES_PER_CONTRACT + credit) / (basis * SHARES_PER_CONTRACT)
+
+
+def _covered_pop(spot, breakeven, leg_iv, dte):
+    """P(profit at expiry) as a percent, or None when it cannot be read.
+
+    A covered call is profitable above its breakeven, so this is
+    ``P(S_T > basis - premium)`` under the SAME normal-on-price model
+    ``strategy_scanner.pop_from_payoff`` uses, so the column compares against
+    the rest of the board rather than mixing two probability models.
+
+    ⚠ ``extract_options`` copies the chain's ``volatility`` through unchanged,
+    and Schwab reports it as a PERCENT (28.0, not 0.28). The >1.5 test is the
+    repo's documented percent/decimal idiom (``swing_scan`` uses the same one on
+    ``current_iv``); a decimal IV above 1.5 is not a real equity reading.
+    """
+    s = _num(spot)
+    be = _num(breakeven)
+    iv = _num(leg_iv)
+    d = _num(dte)
+    if s is None or be is None or iv is None or d is None or s <= 0 or iv <= 0:
+        return None
+    iv_dec = iv / 100.0 if iv > 1.5 else iv
+    sigma = s * iv_dec * math.sqrt(max(d, 0.5) / 365.0)
+    if sigma <= 0:
+        return None
+    z = (be - s) / sigma
+    return round((1.0 - 0.5 * (1 + math.erf(z / math.sqrt(2)))) * 100.0, 1)
+
+
+def _covered_row(symbol, lot, quantity, basis, exp, dte, leg_data, spot, status):
+    """One covered-call candidate, or None when the contract has no usable mark.
+
+    ⚠ **The dollars are PER CONTRACT and ``quantity`` is separate.** Every other
+    row on this board is one contract, so scaling a covered call by the lot size
+    would put a 3x row beside 1x rows on the Credit and Capital columns and make
+    the board incomparable — the exact thing ``return_on_capital`` exists to fix.
+    ``quantity`` says how many contracts the lot supports; the reader multiplies.
+
+    ⚠ **``composite_score`` is deliberately ABSENT.** ``strategy_scoring``'s
+    Fit+Quality scale is calibrated on defined-risk option structures against an
+    inferred market view; a covered call's economics are dominated by a stock
+    position the scorer never sees. Inventing a number so the row sorts higher
+    would be fabricating a reading. ``handlers._income_rank`` sends an absent
+    score to ``-inf``, so these rows land at the FOOT of the merged board — which
+    is the honest place for a row scored on a different question, and the two
+    ratios above are the columns a reader sorts these on instead.
+    """
+    leg_mark = _num(leg_data.get("mark"))
+    if leg_mark is None or leg_mark <= 0:
+        # No premium is no trade. A zero-mark contract would produce a zero
+        # yield that still sorts and still renders as a candidate.
+        return None
+    # ``_leg_from`` is strategy_scanner's own normalized-leg constructor. Reached
+    # through its underscore deliberately: re-spelling the leg contract here is
+    # how ``clamp`` came to have nine copies, and the leg shape is exactly what
+    # the page and the detail panel read.
+    import strategy_scanner as ssn
+
+    leg = ssn._leg_from(leg_data, "call", "short", exp)
+    strike = float(leg["strike"])
+
+    # Opening commission only. Assignment legs cost nothing (``commission_for``
+    # says so in its own docstring), and being called away IS the max-profit
+    # path — charging a round trip against it would overstate the cost of the
+    # outcome the row is ranked on.
+    comm = commission.commission_for(1, symbol, 1)
+
+    net_credit = round(leg_mark * SHARES_PER_CONTRACT, 2)
+    capital = round(basis * SHARES_PER_CONTRACT, 2)
+    max_profit = round((strike - basis) * SHARES_PER_CONTRACT + net_credit - comm, 2)
+    # Bounded below: the payoff floors at S=0, where the shares are worthless and
+    # the credit is kept. Unlike a NAKED call this position has no unbounded
+    # side, which is the whole reason ``payoff_metrics`` is not used here — it
+    # would read a lone short call as undefined risk and price capital off a
+    # spot*0.20 margin proxy.
+    max_loss = round(capital - net_credit + comm, 2)
+    breakeven = round(basis - leg_mark, 4)
+
+    row = {
+        "id": f"{symbol}_{COVERED_CALL_TYPE}_{exp}_{strike}",
+        "symbol": symbol, "type": COVERED_CALL_TYPE, "family": "COVERED",
+        "strategy_label": "Covered Call", "bias": "neutral",
+        "covered": True,
+        "legs": [leg],
+        # The flat contract too: unlike the adapted spreads there is exactly one
+        # short strike here and it is the decision the reader is making.
+        "short_strike": strike,
+        "expiration": exp, "dte": dte,
+        "quantity": quantity,
+        "shares": int(lot.get("shares") or 0),
+        "cost_basis": basis,
+        "lot_id": lot.get("lot_id"),
+        "net_credit": net_credit,
+        "commission": comm,
+        "capital": capital,
+        "max_profit": max_profit,
+        "max_loss": max_loss,
+        "breakevens": [breakeven],
+        "rr": round(max_profit / max_loss, 3) if max_loss else None,
+        "pop_pct": _covered_pop(spot, breakeven, leg_data.get("iv"), dte),
+        "underlying_price": _num(spot),
+        "yield_on_cost": yield_on_cost(net_credit, basis),
+        "total_return_if_called": total_return_if_called(net_credit, strike, basis),
+        "timestamp": _dt.datetime.now().isoformat(),
+    }
+    if status is not None:
+        # Absence of the stamp is absence of the check — never the cleared
+        # label. Only stamp what was actually looked up.
+        row["earnings_status"] = status
+    return row
+
+
+def covered_call_candidates(lots, chains, spots, earnings=None):
+    """Covered-call candidates over open equity lots. Pure over injected data.
+
+    ``lots`` are ``paper_account_db.fetch_open_lots`` rows; ``chains`` and
+    ``spots`` are ``{symbol: ...}`` maps the caller supplies (see
+    ``handlers.publish_income``, which reuses the chains the watchlist pass
+    already fetched). ``earnings`` is ``{symbol: (status, report date or None)}``
+    from :func:`income_earnings_map` — a local read, zero API.
+
+    **The hard floor: a call struck BELOW cost basis is never emitted.** Not a
+    warning, not a score penalty — the builder refuses. Called away, such a call
+    books a guaranteed loss on the shares, and the premium rarely covers it. The
+    floor is applied to the eligible ladder BEFORE the delta pick, so an
+    underwater lot gets the nearest usable strike above its basis rather than
+    the conventional 0.20-delta strike below it.
+
+    One candidate per expiry in the window, not one per eligible strike: the
+    horizon is genuinely the reader's choice while the strike is pinned by the
+    delta convention, and a strike ladder would swamp a board picked by hand.
+
+    A lot is skipped whole — never emitted with None ratios — when it holds
+    fewer than ``SHARES_PER_CONTRACT`` shares (nothing to cover), or when its
+    basis is not a positive finite reading (there is no floor to apply against a
+    basis you cannot read; note a NaN basis fails EVERY ``>=`` comparison, so an
+    unguarded version would silently emit nothing anyway, for the wrong reason).
+    """
+    import strategy_scanner as ssn
+
+    out = []
+    for lot in lots or []:
+        lot = lot or {}
+        symbol = lot.get("symbol")
+        chain = (chains or {}).get(symbol)
+        if not symbol or not chain:
+            continue
+        shares = _num(lot.get("shares"))
+        basis = _num(lot.get("cost_basis"))
+        if shares is None or basis is None or basis <= 0:
+            continue
+        quantity = int(shares) // SHARES_PER_CONTRACT
+        if quantity < 1:
+            continue
+
+        status, earn_date = (earnings or {}).get(symbol) or (None, None)
+        spot = (spots or {}).get(symbol)
+        by_exp = ssn.extract_options(chain, "call", INCOME_DTE_MIN, INCOME_DTE_MAX)
+        for exp in sorted(by_exp):
+            data = by_exp[exp]
+            # The same gate the spreads went through. At 30-45 DTE a straddled
+            # report is close to certain, which is why the window extends it.
+            if earn_date and se.check_earnings_conflict(earn_date, exp):
+                continue
+            eligible = {k: v for k, v in (data.get("strikes") or {}).items()
+                        if k >= basis}
+            leg_data = ssn.nearest_by_delta(eligible, _COVERED_TARGET_DELTA)
+            if not leg_data:
+                continue
+            row = _covered_row(symbol, lot, quantity, basis, exp,
+                               data.get("dte"), leg_data, spot, status)
+            if row is not None:
+                out.append(row)
+    return out
+
+
+# ── opening an income candidate into the paper ACCOUNT ──────────────────────
+# The Income board's two single-leg products are the only structures on it that
+# the paper ACCOUNT can hold: a cash-secured put and a covered call. (The two
+# credit spreads already have a route — ``paper_create``, which writes the
+# LEDGER — and the ledger and the account are different books.)
+#
+# ⚠ This exists because nothing else opens one. ``paper_engine.run_entry_cycle``
+# sizes every candidate off ``sig["width"]``, which a single-leg short has none
+# of, so it dies in that function's broad ``except`` — which is exactly why
+# ``tests/test_assignment.py`` had to hand-build its short put. Everything
+# downstream of a lot (assignment, the share inventory, the covered-call half of
+# this board, the called-away disposal) was reachable only from a test fixture
+# until this function existed.
+INCOME_OPEN_STRUCTURES = ("SHORT_PUT", COVERED_CALL_TYPE)
+
+# The board is scanned ONCE each morning, so its prices are hours old by the
+# time anyone clicks. We open at the LIVE mark, never the board's — but a live
+# mark that has drifted this far from the printed one is a materially different
+# trade from the one the reader picked, so it is refused and both numbers are
+# shown rather than silently filled. The fraction is
+# ``paper_adjust.apply_adjustment``'s, deliberately: the rescue board's Execute
+# button already refuses on exactly this rule, and a second tolerance would mean
+# two answers to "has this moved too much".
+INCOME_PRICE_DRIFT_TOLERANCE = 0.15
+
+# A cash-secured put's collateral is the FULL strike notional — that is what
+# makes it cash-SECURED, and it is the reservation
+# ``paper_engine._assign_shares`` relies on already being back in cash when the
+# put is assigned. A covered call reserves NOTHING: the shares are the
+# collateral, and they are already counted in ``equity_at_cost``, so reserving
+# against them would count the same capital twice.
+COVERED_CALL_RESERVATION = 0.0
+
+
+def income_open_strike(row) -> float | None:
+    """The short strike of an income row, or None (PURE).
+
+    ``short_strike`` first — both single-leg builders stamp it, and
+    ``_covered_row``'s comment says why (there is exactly one strike here and it
+    is the decision the reader is making). The ``legs`` fallback covers a row
+    shape that carries only the normalized contract.
+    """
+    row = row or {}
+    k = _num(row.get("short_strike"))
+    if k is not None:
+        return k
+    for leg in row.get("legs") or []:
+        if (leg or {}).get("side") == "short":
+            return _num(leg.get("strike"))
+    return None
+
+
+def income_price_drift(board_per_share, live_per_share) -> float | None:
+    """``|live - board| / board`` as a fraction, or None when either is unread.
+
+    The denominator is the BOARD price and is not floored, unlike
+    ``paper_adjust``'s: that one compares whole-position net cash in dollars,
+    where a near-zero candidate would blow the ratio up, while this compares a
+    per-share option mark that ``_covered_row`` and the spread builders already
+    refuse to emit at or below zero. A board price that is not a positive
+    reading is a non-reading, and returns None so the caller can say so rather
+    than dividing.
+
+    ⚠ **Rounded, and not for tidiness.** ``abs(1.70 - 2.00) / 2.00`` is
+    0.15000000000000002 in binary floating point while ``abs(2.30 - 2.00) /
+    2.00`` is 0.1499999999999999 — so an unrounded comparison against a 0.15
+    tolerance refuses a 15% drop and allows a 15% rise, from nothing but
+    representation error. A user-facing refusal decided at the seventeenth
+    significant digit is arbitrary, and asymmetrically arbitrary is worse. Six
+    places is far finer than any tolerance this is compared against and removes
+    the noise entirely.
+    """
+    board = _num(board_per_share)
+    live = _num(live_per_share)
+    if board is None or live is None or board <= 0:
+        return None
+    return round(abs(live - board) / board, 6)
+
+
+def open_covered_call_conflict(positions, symbol):
+    """The open covered call already written on ``symbol``, or None (PURE).
+
+    ⚠ Per SYMBOL, not per lot, and that is not a shortcut — it is what the book
+    can express. ``paper_positions`` records no link from a call back to the
+    shares it was written against, which is why
+    ``webgui/pages/options/shares.covering_call`` shows one call against every
+    lot of a name. Allowing a second call while the first is open would make
+    that display a lie in the one direction that matters: it would report shares
+    as covered once when they are written twice over.
+    """
+    want = str(symbol or "").strip().upper()
+    for pos in positions or []:
+        pos = pos or {}
+        if str(pos.get("symbol") or "").strip().upper() != want:
+            continue
+        if str(pos.get("strategy") or "").strip().upper() == COVERED_CALL_TYPE:
+            return pos
+    return None
+
+
+def _reject(reason: str, message: str, **extra) -> dict:
+    """A refusal the Income page can render as one sentence.
+
+    ``reason`` is the machine code (logged, and asserted on in tests);
+    ``message`` is the whole sentence a reader sees. Both, always: a code alone
+    reaches the user as ``insufficient_cash`` and a sentence alone cannot be
+    tested for without matching prose.
+    """
+    return {"status": "rejected", "reason": reason, "message": message, **extra}
+
+
+def open_income_position(row, qty: int = 1) -> dict:
+    """Open one Income-board candidate into the MANUAL paper account.
+
+    Returns ``{"status": "opened"|"rejected"|"error", ...}`` and NEVER raises —
+    the command consumer must survive a malformed row, and every refusal carries
+    a ``message`` the page shows verbatim.
+
+    The sequence is ``paper_engine.run_entry_cycle``'s, minus the broker: reserve
+    the collateral, then insert the position. ``paper_broker.simulate_fill_price``
+    handles PCS/CCS/IC only and raises ``FillError`` on anything else, so a
+    single leg is priced directly off the chain through ``_make_leg_pricer`` —
+    the same live pricer ``run_rescue_apply`` uses for its own stale guard.
+
+    ⚠ **The opening credit is NOT credited to cash here**, and that is not an
+    omission. This book realizes an option's credit at CLOSE, through
+    ``paper_engine._close`` → ``realize_pnl``; ``run_entry_cycle`` and
+    ``open_driver_position`` both open the same way. Crediting it at open would
+    double it at settlement.
+    """
+    import datetime as dt
+
+    import paper_account_db
+
+    try:
+        row = dict(row or {})
+        kind = str(row.get("type") or "").strip().upper()
+        if kind not in INCOME_OPEN_STRUCTURES:
+            return _reject(
+                "unsupported_structure",
+                "Only a cash-secured put or a covered call can be opened into "
+                "the paper account from this board.", symbol=row.get("symbol"))
+
+        symbol = str(row.get("symbol") or "").strip().upper()
+        expiration = row.get("expiration")
+        strike = income_open_strike(row)
+        if not symbol or not expiration or strike is None or strike <= 0:
+            return _reject("bad_row",
+                           "That row is missing a symbol, an expiry or a strike, "
+                           "so nothing can be opened from it.", symbol=symbol or None)
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty < 1:
+            return _reject("bad_quantity", "Quantity must be at least 1 contract.",
+                           symbol=symbol)
+
+        if not has_paper_account():
+            return _reject("no_account",
+                           "There is no paper account yet — open one on the Paper "
+                           "Account page before trading into it.", symbol=symbol)
+        # A STALE (prior-day) drawdown halt clears on the session roll; a
+        # SAME-day halt is preserved. Same call, same reason, as the driver's
+        # open path two functions down.
+        paper_account_db.roll_session_if_needed(None, dt.date.today().isoformat())
+        if paper_account_db.get_account(None)["halted"]:
+            return _reject("halted",
+                           "The paper account is halted for this session, so "
+                           "nothing new can be opened.", symbol=symbol)
+
+        # ── the live mark ────────────────────────────────────────────────────
+        right = "PUT" if kind == "SHORT_PUT" else "CALL"
+        live = _num(_make_leg_pricer(symbol)(symbol, expiration, right, strike))
+        if live is None or live <= 0:
+            return _reject(
+                "no_quote",
+                f"No live quote for the {symbol} {strike:g} {right.lower()} right "
+                "now, so there is no price to open at. This board was scanned "
+                "this morning.", symbol=symbol)
+        board = _num(row.get("net_credit"))
+        board = None if board is None else board / SHARES_PER_CONTRACT
+        drift = income_price_drift(board, live)
+        if drift is not None and drift > INCOME_PRICE_DRIFT_TOLERANCE:
+            return _reject(
+                "stale_price",
+                f"The price has moved: the board shows ${board:.2f} and it is "
+                f"${live:.2f} now. Nothing was opened — re-read the row after the "
+                "next scan.", symbol=symbol, board_price=round(board, 2),
+                live_price=round(live, 2))
+
+        # ── the collateral ───────────────────────────────────────────────────
+        lot = None
+        if kind == "SHORT_PUT":
+            reservation = round(strike * SHARES_PER_CONTRACT * qty, 2)
+            cash = _num(paper_account_db.get_account(None)["cash"]) or 0.0
+            if reservation > cash:
+                return _reject(
+                    "insufficient_cash",
+                    f"A cash-secured put on {symbol} at {strike:g} ties up "
+                    f"${reservation:,.2f} of collateral and the account has "
+                    f"${cash:,.2f}.", symbol=symbol)
+        else:
+            reservation = COVERED_CALL_RESERVATION
+            shares_needed = SHARES_PER_CONTRACT * qty
+            lots = paper_account_db.fetch_open_lots()
+            lot_id = row.get("lot_id")
+            lot = next((l for l in lots if l.get("lot_id") == lot_id), None)
+            if lot is None:
+                return _reject(
+                    "no_lot",
+                    f"The paper account no longer holds that {symbol} lot, and a "
+                    "covered call needs the shares behind it.", symbol=symbol)
+            held = int(_num(lot.get("shares")) or 0)
+            # Whole-lot only: ``close_equity_lot`` disposes of a lot WHOLE, so a
+            # call covering part of one could never be delivered against it. The
+            # message names the number that WOULD work rather than just refusing.
+            if held != shares_needed:
+                return _reject(
+                    "partial_lot",
+                    f"That lot holds {held:,} {symbol} shares, so a covered call "
+                    f"on it is {held // SHARES_PER_CONTRACT} contract"
+                    f"{'' if held // SHARES_PER_CONTRACT == 1 else 's'}, not "
+                    f"{qty} — this book delivers a lot whole.", symbol=symbol)
+            open_positions = paper_account_db.fetch_open_positions(None)
+            if open_covered_call_conflict(open_positions, symbol) is not None:
+                return _reject(
+                    "already_covered",
+                    f"A covered call on {symbol} is already open. Coverage is "
+                    "recorded per symbol here, so a second one cannot be told "
+                    "apart from the first.", symbol=symbol)
+
+        # ── the two-step open ────────────────────────────────────────────────
+        if reservation:
+            paper_account_db.reserve_buying_power(None, reservation)
+        position_id = paper_account_db.insert_position(None, {
+            "signal_id": row.get("id"), "symbol": symbol, "strategy": kind,
+            # The put's strike goes in ``short_strike`` and the call's in BOTH
+            # ``call_short`` and ``short_strike``: ``is_cash_secured_put``
+            # requires ``call_short is None``, so a populated call side is what
+            # keeps a covered call from ever being read as an assignable put,
+            # and ``shares.covering_text`` reads ``call_short`` first.
+            "short_strike": strike,
+            "long_strike": None,
+            "call_short": strike if kind == COVERED_CALL_TYPE else None,
+            "call_long": None,
+            "width": None,
+            "expiration": expiration,
+            "dte_at_entry": int(_num(row.get("dte")) or 0),
+            "quantity": qty,
+            "entry_credit": round(live, 2),
+            "entry_order_id": None,
+            "max_loss_per": strike if kind == "SHORT_PUT" else COVERED_CALL_RESERVATION,
+            "max_loss_total": reservation,
+            "entry_ts": _dt.datetime.now().isoformat(),
+        })
+        log.info("income open %s %s x%s @ %.2f (collateral %.2f)",
+                 symbol, kind, qty, live, reservation)
+        return {"status": "opened", "reason": None, "symbol": symbol,
+                "structure": kind, "position_id": position_id, "qty": qty,
+                "strike": strike, "entry_credit": round(live, 2),
+                "collateral": reservation,
+                "lot_id": (lot or {}).get("lot_id"),
+                "message": (f"Opened {qty} {symbol} {strike:g} "
+                            f"{'put' if kind == 'SHORT_PUT' else 'call'} "
+                            f"at ${live:.2f} in the paper account.")}
+    except Exception as exc:  # noqa: BLE001 — the consumer must survive a bad row.
+        _degrade.degraded("options.open_income_position")
+        return {"status": "error", "reason": "error", "error": str(exc),
+                "message": f"The open failed: {type(exc).__name__}: {exc}"}
 
 
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
@@ -407,11 +1156,19 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
 
 
 def paper_account_view() -> dict:
-    """Read the paper account view: snapshot + open positions + fills + flag.
+    """Read the paper account view: snapshot + positions + fills + lots + flag.
 
     Each sub-read is defensively guarded (snapshot→None, lists→[] on failure),
     mirroring the page's per-read try/except. ``has_account`` lets the GUI show
-    the no-account state without a separate read."""
+    the no-account state without a separate read.
+
+    ``lots`` is the open SHARE inventory, and it rides this view rather than a
+    new one on purpose: ``/options/shares`` is a second reader of the paper book,
+    not a second book. A separate cache view would give one database two publish
+    cadences, so a lot could be visible on one screen and absent from the other.
+    Tier 1 cannot open the store itself, so this is the only way the lots reach a
+    page at all.
+    """
     import paper_account_db
     import paper_engine
 
@@ -428,6 +1185,13 @@ def paper_account_view() -> dict:
     except Exception:
         orders = []
     try:
+        lots = paper_account_db.fetch_open_lots()
+    except Exception:
+        # Same degrade as the lists above. An empty list is honest here — the
+        # page tells "no shares held" apart from "the feed is cold" by whether
+        # the payload exists at all, not by this value.
+        lots = []
+    try:
         has_account = paper_account_db.get_account() is not None
     except Exception:
         has_account = False
@@ -436,6 +1200,7 @@ def paper_account_view() -> dict:
         "snapshot": snapshot,
         "positions": positions,
         "orders": orders,
+        "lots": lots,
         "has_account": has_account,
     }
 
@@ -1594,6 +2359,107 @@ def run_captured_manage_cycle() -> dict:
     return {"closed": closed, "armed": armed}
 
 
+# ── the captured score (Daily / Weekly / MTD) ────────────────────────────────
+# The score's inception. Nothing before this date is part of it: signal_outcomes
+# reaches back to 2026-06-15, from a period whose captures predate the
+# regular-hours recorder gate. The period windows never reach that far on their
+# own - this constant is what guarantees they cannot.
+CAPTURED_SCORE_EPOCH = _dt.date(2026, 9, 1)
+
+
+def captured_score_window(today):
+    """``(lo, hi)`` INCLUSIVE dates the score must read to fill Daily/Weekly/MTD.
+
+    The earlier of the WEEK start and the MONTH start - **not** month-to-date.
+
+    Month-to-date looks like the right bound, because MTD is the widest row in
+    the table. It is wrong: on Thursday 1 October the WTD row starts Monday
+    28 September, before the month began. Bounding the read at the month start
+    would return no rows for 28-30 September and the weekly row would silently
+    under-count on the first days of every month, with nothing on screen to say
+    it had.
+
+    Floored at ``CAPTURED_SCORE_EPOCH``. The width is also what bounds the
+    payload - at most about five weeks of closes.
+    """
+    month_start = today.replace(day=1)
+    week_start = today - _dt.timedelta(days=today.weekday())      # Monday
+    return max(min(month_start, week_start), CAPTURED_SCORE_EPOCH), today
+
+
+def captured_perf_rows(raw):
+    """Outcome rows -> the shape ``eod.normalize_trades(kind="captured")`` reads.
+
+    ``entry_credit_total`` is ``entry_credit * 100``: ONE contract, matching
+    ``close_signal_manually``'s ``(entry_credit - exit_value) * 100``. A captured
+    signal is never sized, so one contract is the only basis either number has -
+    and they must share it, or the two figures on one row describe different
+    position sizes.
+
+    Total over a malformed row. This feeds a nightly report, and one bad row must
+    not cost the whole section.
+    """
+    out = []
+    for r in raw or []:
+        if not isinstance(r, dict):
+            continue
+        credit = _num(r.get("entry_credit"))
+        close_ts = r.get("close_ts") or r.get("close_date")
+        out.append({
+            "symbol": r.get("symbol"),
+            "strategy": r.get("strategy"),
+            "trade_type": r.get("scanner_type"),
+            # DERIVED, never hardcoded: an OPEN signal is a legitimate row
+            # here (see ``captured_performance``), and it is the one that makes
+            # the report's "Opened" column right.
+            "status": "CLOSED" if close_ts else "OPEN",
+            "first_seen_ts": r.get("first_seen_ts"),
+            "close_ts": close_ts,
+            "realized_pnl": _num(r.get("realized_pnl")),
+            "entry_credit_total": (round(credit * 100.0, 2)
+                                   if credit is not None else None),
+            "exit_reason": r.get("exit_reason"),
+        })
+    return out
+
+
+def captured_performance() -> dict:
+    """The captured score's rows plus the window they were read over.
+
+    ``{"rows": [...], "window": {"start": iso, "end": iso}}``. The window ships
+    with the rows so a reader can say WHICH days a total covers rather than
+    inferring it. Defensive -> empty on any failure, like its sibling
+    ``captured_closed_today``.
+    """
+    import signal_db
+
+    today = _dt.datetime.now(_PROJ_CT_TZ).date()
+    lo, hi = captured_score_window(today)
+    try:
+        raw = signal_db.get_outcomes_in_range(lo.isoformat(), hi.isoformat())
+    except Exception:
+        log.exception("captured_performance read degraded -> empty")
+        raw = []
+    # ⚠ The OPEN signals belong here too. "Opened" and "credit" bucket on the
+    # ENTRY date independent of the exit, so a signal opened this week and still
+    # running belongs in both columns - and publishing only closed outcomes
+    # would drop every one of them, under-counting the column silently. This is
+    # what the ledger book has always done; its Opened column was right for
+    # exactly this reason.
+    #
+    # Filtered to the window: an older open signal cannot reach any period in
+    # the table, and carrying it would put rows in the payload no row of the
+    # report can read.
+    try:
+        open_rows = [r for r in signal_db.get_open_signals() or []
+                     if str((r or {}).get("first_seen_date") or "") >= lo.isoformat()]
+    except Exception:
+        log.exception("captured_performance open-signal read degraded -> empty")
+        open_rows = []
+    return {"rows": captured_perf_rows(list(raw) + open_rows),
+            "window": {"start": lo.isoformat(), "end": hi.isoformat()}}
+
+
 def captured_closed_today() -> dict:
     """Today's (CT) closed captured outcomes + a day realized total.
 
@@ -2135,34 +3001,47 @@ def reset_gamma_history_memo():
 # gamma_snapshot CONSUMES it once (pop semantics): only the same-tick refresh
 # reuses it, every other caller (page-timer refresh, symbol switch) still
 # fetches fresh. The TTL guards a crash between stash and take.
+#
+# It holds MANY symbols (2026-09-07), not one. The tick now refreshes the private
+# page's symbol AND the three per-symbol snapshots the public live screens read
+# (handlers.PUBLISHED_GAMMA_SYMBOLS), and every one of those is already fetched by
+# the collector — $SPX/SPY/QQQ are all in config/symbols.toml [collection] base.
+# A one-slot stash would serve the first and send the rest back to Schwab for a
+# chain the process had just thrown away: ~440 /chains calls per symbol per day,
+# against a budget already running 68–76k. The map is bounded by the capture set
+# (four symbols at most) and cleared at the start of each collect.
 TICK_CHAIN_TTL_SEC = 45
-_TICK_CHAIN: dict = {"ts": 0.0, "symbol": None, "chain": None}
+_TICK_CHAINS: dict = {}          # symbol -> (monotonic stash time, chain)
 _TICK_CHAIN_LOCK = threading.Lock()
 
 
 def reset_tick_chain():
-    """Drop any stashed tick chain (test helper)."""
+    """Drop every stashed tick chain.
+
+    Called at the start of each collect so a symbol that fell out of the capture
+    set cannot leave a chain behind forever; also the test helper."""
     with _TICK_CHAIN_LOCK:
-        _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
+        _TICK_CHAINS.clear()
 
 
 def _stash_tick_chain(symbol, chain):
     """Stash a just-fetched chain for the same tick's gamma refresh."""
     import time as _time
     with _TICK_CHAIN_LOCK:
-        _TICK_CHAIN.update(ts=_time.monotonic(), symbol=symbol, chain=chain)
+        _TICK_CHAINS[symbol] = (_time.monotonic(), chain)
 
 
 def _take_tick_chain(symbol):
-    """Pop the stashed chain if it matches ``symbol`` and is fresh, else None."""
+    """Pop ``symbol``'s stashed chain if it is fresh, else None.
+
+    Still consume-once per symbol: a stale entry is dropped rather than served,
+    so an expired stash costs one fetch and not a wrong grid."""
     import time as _time
     with _TICK_CHAIN_LOCK:
-        if (_TICK_CHAIN["chain"] is not None
-                and _TICK_CHAIN["symbol"] == symbol
-                and _time.monotonic() - _TICK_CHAIN["ts"] < TICK_CHAIN_TTL_SEC):
-            chain = _TICK_CHAIN["chain"]
-            _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
-            return chain
+        stashed = _TICK_CHAINS.pop(symbol, None)
+        if (stashed is not None and stashed[1] is not None
+                and _time.monotonic() - stashed[0] < TICK_CHAIN_TTL_SEC):
+            return stashed[1]
         return None
 
 
@@ -2720,6 +3599,9 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         clear_big_delta_stash()
+        # Bounded: only the capture set is stashed, and last tick's entries are
+        # dropped here rather than lingering when the capture set changes.
+        reset_tick_chain()
         _uoa_cfg = flow_alerts.load_thresholds()
         # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
         # entirely (nothing computed/published). The chain-capture stash stays on.

@@ -94,10 +94,15 @@ small     = "11px"             # eyebrows / captions / status lines
 # font stays [typography].family below, because a heavy display face hurts
 # readability in the dense signal tables.
 #
-# The colors are SAMPLED from webgui/static/img/neuralstrike-logo.jpg (the
-# p50→p95 range of each wordmark band; lower percentiles are anti-aliasing
-# against the black background and read too dark), so the header matches the
-# artwork rather than approximating it by eye.
+# THE GRADIENTS ARE FLAT NOW, and that is the change, not an oversight. Each
+# half still runs through the gradient machinery (from == to), because that was
+# cheaper and less risky than teaching build_brand_css a second code path.
+#
+# They used to be four colors sampled from the old logo artwork — gold for
+# "Neural", blue for "Strike". That artwork was replaced on 2026-09-07: it
+# belonged to a different visual system than the one the app and the public site
+# actually run, and it was the only saturated object on a deliberately
+# desaturated page. One accent now, taken from [menu].accent.
 #
 # font_family is a CLOSE FREE MATCH for the logo's typeface, not a positive
 # identification — the exact face can't be read off a raster image. Montserrat
@@ -115,11 +120,23 @@ name_b      = "Strike"
 font_family = "Montserrat"
 font_url    = "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap"
 font_weight = "800"
-a_from      = "#C9A356"        # "Neural" — deep gold
-a_to        = "#FBEAA0"        # "Neural" — highlight gold
-b_from      = "#2C6FB4"        # "Strike" — deep blue
-b_to        = "#35A3F5"        # "Strike" — bright blue
-mark        = "/static/img/neuralstrike-mark.png"
+# Letter-spacing for the wordmark. Uppercase capitals are drawn to sit inside
+# lowercase words, so set solid they read as cramped -- this is what makes the
+# lockup a wordmark rather than a word. It was hardcoded at .01em (none) until
+# 2026-09-07, which is why the app's lockup sat tight while the public site's
+# ran wide. Any CSS length; "" falls back to the built-in default.
+tracking    = ".14em"
+a_from      = "#eef1f6"        # "Neural" — the title tone, flat
+a_to        = "#eef1f6"
+b_from      = "#6b86ff"        # "Strike" — [menu].accent, flat
+b_to        = "#6b86ff"
+# THE FLIP: two chevrons converging on a level — dealer hedging pinned to the
+# gamma flip. Same geometry the public site draws; a different accent on
+# purpose, since the two surfaces run different palettes and the mark is
+# carried by its form rather than by one fixed hex. SVG, so it stays sharp in
+# the 28px header slot and on a retina display; the old .png is left in place
+# unreferenced rather than deleted, so reverting is one line here.
+mark        = "/static/img/neuralstrike-mark.svg"
 
 [menu]                         # ── application menu (header bar + left nav) ─
 # Deep Slate shell (Phase 2): dark header + rail with a blue accent on the active

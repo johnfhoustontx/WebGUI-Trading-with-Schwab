@@ -318,7 +318,7 @@ def test_day_note_flags_a_stale_dated_envelope():
 
 
 def test_day_note_empty_when_the_service_is_cold():
-    # status_line already says "Waiting for options service…" — don't say it twice.
+    # status_line already reports a cold service - don't say it twice.
     assert scanner.day_note({}, today=DAY) == ""
 
 
@@ -369,8 +369,12 @@ def test_stamp_stale_joins_by_id_not_by_position():
 
 
 def test_signal_columns_carry_a_dropped_column():
+    """That the column EXISTS at all — its label is pinned by
+    ``test_the_dropped_column_says_it_holds_a_TIME`` below. Without this column
+    a dropped signal is indistinguishable from a live one, which is the whole
+    point of reading the day union rather than the live scan."""
     cols = {c["field"]: c["label"] for c in scanner.signal_columns()}
-    assert cols.get("stale_since") == "Dropped"
+    assert "stale_since" in cols and cols["stale_since"]
 
 
 def test_row_class_prop_binds_the_stamped_field():
@@ -569,7 +573,11 @@ def test_tab_label_no_count_when_none():
 
 # ── bottom status line ───────────────────────────────────────────────────────
 def test_status_line_waiting_when_empty():
-    assert scanner.status_line({}) == "Waiting for options service…"
+    """A cold service must not read as a quiet market. The words are the shared
+    ``pages.copy`` constant now — this page had a FOURTH spelling of them, with
+    the "the" missing."""
+    from pages import copy as shared_copy
+    assert scanner.status_line({}) == shared_copy.WAITING_OPTIONS
 
 
 def test_status_line_has_time_count_and_cadence():
@@ -600,3 +608,66 @@ def test_status_line_includes_errors():
     out = scanner.status_line({"signals_0dte": [], "signals_swing": [],
                                "errors": ["x"], "timestamp": None})
     assert "1 errors" in out
+
+
+# ── column labels name the reading, not the field ────────────────────────────
+def test_credit_spread_column_labels_say_what_the_cell_holds():
+    labels = [c["label"] for c in scanner.signal_columns()]
+    assert labels == ["Symbol", "Strategy", "Expiry", "DTE", "Strikes",
+                      "Credit", "Max loss", "R/R %", "PoP %", "IV Rank",
+                      "Score", "Grade", "Dropped at", ""]
+
+
+def test_credit_STAYS_because_this_table_holds_no_debits():
+    """The opposite call from the Paper Ledger and Captured Signals, where the
+    same-named column WAS wrong because those books mix credits and debits.
+
+    ``signal_columns`` is a credit-spread table by construction. The Directional
+    tab — the one holding debits — does not use these columns at all:
+    ``directional_columns`` is a separate list that deliberately carries no
+    credit or R:R economics, because a directional trade is scored by a model
+    not commensurable with the premium one.
+
+    Three pages into a pattern, this is the one somebody will 'fix'."""
+    labels = {c["name"]: c["label"] for c in scanner.signal_columns()}
+    assert labels["credit"] == "Credit"
+    directional = {c["label"] for c in scanner.directional_columns()}
+    assert "Credit" not in directional
+
+
+def test_the_dropped_column_says_it_holds_a_TIME():
+    """It carries ``stale_since`` — WHEN the signal stopped appearing in a scan,
+    not whether it did."""
+    labels = {c["name"]: c["label"] for c in scanner.signal_columns()}
+    assert labels["stale_since"] == "Dropped at"
+
+
+def test_dte_stays_bare_here_unlike_captured_signals():
+    """Captured Signals had to say "DTE at entry" because its value is frozen at
+    capture. This scan reruns every 15 minutes, so a bare DTE is live and
+    correct — the two pages differ because the quantities do."""
+    labels = {c["name"]: c["label"] for c in scanner.signal_columns()}
+    assert labels["dte"] == "DTE"
+    from pages.options import captured
+    cap = {c["name"]: c["label"] for c in captured.captured_columns()}
+    assert cap["dte"] == "DTE at entry"
+
+
+def test_the_waiting_line_is_the_shared_one():
+    """It read "Waiting for options service..." — no "the" — which made it a
+    FOURTH spelling of a sentence that already had three."""
+    from pages import copy as shared_copy
+    assert scanner.status_line(None) == shared_copy.WAITING_OPTIONS
+    assert scanner.status_line({}) == shared_copy.WAITING_OPTIONS
+
+
+def test_the_scanner_help_explains_the_dropped_column():
+    """A gap this pass found rather than created: the day union DIMS a dropped
+    row and blocks paper-trading it (``stamp_stale``), and nothing told the
+    reader why a row had gone grey or why its button had stopped working."""
+    import page_help
+    text = page_help.HELP_MD["/options/scanner"]
+    assert "Dropped at" in text
+    low = text.lower()
+    assert "paper" in low and ("dimmed" in low or "greyed" in low
+                              or "grey" in low)

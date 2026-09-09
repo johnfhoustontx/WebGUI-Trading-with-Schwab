@@ -994,24 +994,33 @@ def test_refresh_gamma_caches_empty_when_none(monkeypatch):
 
 def test_refresh_gamma_current_uses_cached_symbol(monkeypatch):
     """The server-side keep-fresh refresh reads the symbol from the cache so it
-    never forces $SPX over the user's last-viewed symbol."""
+    never forces $SPX over the user's last-viewed symbol.
+
+    The tick also refreshes the PUBLISHED per-symbol keys, so the assertion is on
+    the symbol that reached the SHARED key -- ``gamma_snapshot`` is called for the
+    published symbols too (see test_gamma_published.py)."""
     bus = Bus(fake=True)
     bus.cache_set("cache:options:gamma", {"symbol": "QQQ", "views": {}})
-    seen = {"symbol": None}
+    seen = []
     monkeypatch.setattr(handlers.compute, "gamma_snapshot",
-                        lambda s: (seen.__setitem__("symbol", s), _fake_gamma_snapshot())[1])
+                        lambda s, chain=None: (seen.append(s), _fake_gamma_snapshot())[1])
 
     handlers.refresh_gamma_current(bus)
-    assert seen["symbol"] == "QQQ"
+    assert seen[0] == "QQQ"      # the private page's symbol goes first
+    # ...and QQQ is what the SHARED key's history was stamped with. (The payload's
+    # own "symbol" comes from the snapshot, and this fixture always says $SPX.)
+    assert bus.cache_get(
+        handlers.gamma_history_key("GEX")).payload["symbol"] == "QQQ"
 
 
 def test_refresh_gamma_current_defaults_spx_when_empty(monkeypatch):
     bus = Bus(fake=True)  # nothing cached
-    seen = {"symbol": None}
+    seen = []
     monkeypatch.setattr(handlers.compute, "gamma_snapshot",
-                        lambda s: (seen.__setitem__("symbol", s), None)[1])
+                        lambda s, chain=None: (seen.append(s), None)[1])
     handlers.refresh_gamma_current(bus)
-    assert seen["symbol"] == "$SPX"
+    assert seen[0] == "$SPX"
+    assert bus.cache_get("cache:options:gamma").payload["symbol"] == "$SPX"
 
 
 def test_gamma_refresh_command(monkeypatch):
@@ -1511,7 +1520,9 @@ def test_collect_gex_history_captures_viewed_symbol_chain(monkeypatch):
     monkeypatch.setattr(handlers, "publish_flow_skew", lambda b: None)
     monkeypatch.setattr(handlers, "run_flow_alerts", lambda b: None)
     handlers.collect_gex_history(bus=bus)
-    assert seen["cap"] == {"SPY"}
+    # The three PUBLISHED symbols ride the same capture -- the poll fetches their
+    # chains anyway, so leaving one out would cost it ~440 /chains a day.
+    assert seen["cap"] == {"SPY"} | set(handlers.PUBLISHED_GAMMA_SYMBOLS)
 
     # ...and with NO viewed symbol cached, it falls back to $SPX. The explicit
     # reset is load-bearing: this used to rely on a fresh ``Bus(fake=True)``
@@ -1521,7 +1532,7 @@ def test_collect_gex_history_captures_viewed_symbol_chain(monkeypatch):
     # condition under test has to be created deliberately.
     reset_fake_bus()
     handlers.collect_gex_history(bus=Bus(fake=True))
-    assert seen["cap"] == {"$SPX"}
+    assert seen["cap"] == {"$SPX"} | set(handlers.PUBLISHED_GAMMA_SYMBOLS)
 
 
 def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):

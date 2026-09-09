@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NeuralStrike">
+  <!--
+    THE FLIP — the web GUI's header mark. Same geometry as the public site's
+    deploy/site/assets/mark.svg; different accent, deliberately.
+
+    The site runs Nocturne (accent #9184d9) and the app runs its own dark-navy
+    theme (accent #6b86ff, [menu].accent in config/theme.toml). Both are the
+    same blue-violet family at different tunings, and the mark is carried by
+    its FORM, not by one fixed hex — so each surface keeps its own palette and
+    they still read as one brand. Forcing a single hex across both would put a
+    foreign colour on one of them, which is exactly the fault this mark
+    replaced.
+
+    ⚠ This is the LARGE optical variant, because `.brand-mark` renders at 44px
+    — not the 28px an earlier version of this comment claimed. At 44 the small
+    variant's heavier strokes read as clumsy; the small drawing exists for the
+    favicon's 16px, where the large one's rule falls below a device pixel.
+    Check the rendered size before swapping between them.
+
+    ⚠ Loaded through <img> by webgui/main.py:brand_mark_src, so it gets no
+    stylesheet and its colours must be literals. If [colors].title or
+    [menu].accent move in config/theme.toml, the two hexes below do not follow
+    on their own.
+  -->
+  <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#6b86ff"/>
+  <path d="M20 11 L32 23 L44 11" fill="none" stroke="#eef1f6"
+        stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20 53 L32 41 L44 53" fill="none" stroke="#eef1f6"
+        stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

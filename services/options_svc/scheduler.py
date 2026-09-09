@@ -345,6 +345,37 @@ def action_alert_due(now, ran_slots):
     return None
 
 
+# ── Income-window scan cadence (see config/sessions.toml [slots.income]) ────
+# ONE pass a day, by design. A 30-45 DTE candidate does not meaningfully
+# re-rank inside fifteen minutes, so putting this on the autoscan's cadence
+# would change nothing in the ranking and cost ~690 extra /chains calls a day
+# against ~23 — the single largest lever on this service's Schwab budget.
+# Mirrors analyze_slot_due / action_alert_due: each slot fires once per trading
+# day inside the grace window, never backfilling a long-stale one.
+_INCOME_SLOTS = {k: (t.hour, t.minute)
+                 for k, t in mc.slot_times("income").items()}
+_INCOME_GRACE_MIN = mc.slot_grace_min("income")
+
+
+def income_slot_due(now, ran_slots):
+    """Name of the income-scan slot due now, or None.
+
+    Fires each slot ONCE per trading day when ``target <= now < target + grace``
+    and that ``(date, slot)`` isn't already in ``ran_slots``. The caller records
+    the returned ``(date, slot)`` so it won't refire. Mirrors ``action_alert_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _INCOME_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_INCOME_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduled end-of-day summary cadence (~15:10 CT) ─────────────────────────
 # A once-daily push AFTER the regular-session close (15:00 CT / 4pm ET) + 0-DTE
 # settlement, summarizing the day's result per paper book. 15:10 gives the driver's
@@ -508,6 +539,7 @@ async def loop(bus):
     calibration_session = None  # nightly calibration session sentinel (see calibration_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
+    income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
@@ -548,16 +580,35 @@ async def loop(bus):
     # Guarded so a cold DB never stops the loop from starting.
     try:
         await loop_.run_in_executor(None, handlers.publish_captured_closed, bus)
+        await loop_.run_in_executor(
+            None, handlers.publish_captured_performance, bus)
     except Exception:
         log.exception("startup publish_captured_closed degraded")
     # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma
     # page has data on first load. The page drives subsequent refreshes by
     # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
     # it is NOT polled here. Guarded so a cold proxy never stops the loop starting.
+    _seed_symbol = "$SPX"
     try:
-        await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
+        await loop_.run_in_executor(None, handlers.refresh_gamma, bus,
+                                    _seed_symbol)
     except Exception:
         log.exception("startup refresh_gamma degraded")
+    # ...and the OTHER published symbols, one-shot in the same way. The seed above
+    # already writes $SPX's published key (it is one of them), but SPY and QQQ have
+    # no private page to seed them: on a cold Redis their public screens would read
+    # a key nobody has written until the first collection tick — which, started
+    # outside market hours, means until the next trading day. Two extra chain
+    # fetches per service restart, bounded and one-shot. Same guard per symbol, so
+    # one cold symbol never stops the loop starting.
+    for _sym in handlers.PUBLISHED_GAMMA_SYMBOLS:
+        if _sym == _seed_symbol:
+            continue
+        try:
+            await loop_.run_in_executor(
+                None, handlers.refresh_gamma_published, bus, _sym)
+        except Exception:
+            log.exception("startup refresh_gamma_published degraded (%s)", _sym)
     # One-shot startup publish of the Gamma dropdown symbol universe (collected
     # symbols minus $VIX) so the Gamma page's dropdown is populated on first load.
     # The watchlist rarely changes mid-session; a service restart republishes.
@@ -655,6 +706,9 @@ async def loop(bus):
             # collection so the intraday heatmap + candles stay current server-side —
             # otherwise the gamma cache only refreshes while a page is open (its 120 s
             # timer) and shows a stale, cut-off session on the next load after a gap.
+            # It also writes the per-symbol keys the public live screens read, and it
+            # must run HERE rather than on a branch of its own: the chains it reuses
+            # were stashed by the collection above and the stash is consume-once.
             try:
                 await loop_.run_in_executor(None, handlers.refresh_gamma_current, bus)
             except Exception:
@@ -788,6 +842,29 @@ async def loop(bus):
 
         if aa_slot:
             branches.append(("action_alert", _action_alert_branch(aa_slot)))
+
+        # INCOME window — one 30-45 DTE pass a day over the watchlist. The slot is
+        # latched in income_ran BEFORE the blocking scan so a slow pass can't
+        # double-fire on the next tick (launch_branches' still-running skip means a
+        # slow scan only ever delays ITSELF — but only once the slot is marked).
+        # The ~23 chain fetches run in the executor; independently guarded so a
+        # failure never skips the work above or kills the loop.
+        try:
+            inc_slot = income_slot_due(now, income_ran)
+            if inc_slot:
+                income_ran.add((now.date().isoformat(), inc_slot))
+        except Exception:
+            log.exception("income_slot_due gate degraded")
+            inc_slot = None
+
+        async def _income_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.publish_income, bus)
+            except Exception:
+                log.exception("publish_income branch degraded")
+
+        if inc_slot:
+            branches.append(("income", _income_branch()))
 
         # Nightly realized-outcome calibration -> cache:options:calibration, the
         # EV the Trade detail panel shows. The session is latched BEFORE the

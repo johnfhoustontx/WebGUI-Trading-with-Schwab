@@ -47,11 +47,31 @@ PAPER_CSS = """
 def paper_columns():
     # trade_id is kept on each row (row_key + internal lookups) but is NOT a
     # visible column — it's an internal id, not trader-facing.
+    # Each label names the READING.
+    #
+    # WARNING: "Entry", not "Credit". ``entry_credit_total`` stores a DEBIT
+    # trade's debit as a NEGATIVE credit, so "Credit" contradicted the sign in
+    # the cell for half the book. Under "Entry" the sign carries credit-vs-debit,
+    # which is what it was already doing - and it is /desk's word for this same
+    # quantity.
+    #
+    # That name was taken by ``entry_time``, which is now "Opened" - the better
+    # word for a timestamp regardless. The rename is therefore a SWAP: a reader
+    # who knows the old layout sees "Entry" move from a time to a price.
+    #
+    # WARNING: "P&L" is NOT renamed to /desk's "OPEN P&L". ``trade_pnl`` returns
+    # REALIZED for a closed trade, so half these rows are not open at all.
+    #
+    # "Strategy" and "Contracts" are spelled out where /desk keeps STRAT and QTY:
+    # that grid's floors are label-bound and the words would clip it at the
+    # 1920px it is read at. A width concession there, not the app's word for the
+    # concept - see test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here.
     spec = [
-        ("symbol", "Symbol"), ("strategy", "Strat"),
-        ("strikes", "Strikes"), ("expiration", "Exp"), ("quantity", "Qty"),
-        ("entry_credit_total", "Credit"), ("max_loss_total", "Risk"),
-        ("pnl", "P&L"), ("status", "Status"), ("entry_time", "Entry"),
+        ("symbol", "Symbol"), ("strategy", "Strategy"),
+        ("strikes", "Strikes"), ("expiration", "Expiry"),
+        ("quantity", "Contracts"), ("entry_credit_total", "Entry"),
+        ("max_loss_total", "Max loss"), ("pnl", "P&L"),
+        ("status", "Status"), ("entry_time", "Opened"),
     ]
     cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
@@ -357,7 +377,9 @@ def render():
             with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
                 ui.button("Reload", icon="refresh", color=None,
                           on_click=lambda: _reload()).props("no-caps").classes(BTN)
-                ui.button("Close", icon="check_circle", color=None,
+                # "Close trade", not "Close": the Analyze dialog carries its
+                # own Close button, which dismisses it.
+                ui.button("Close trade", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN)
                 ui.button("Analyze", icon="biotech", color=None,
                           on_click=lambda: _analyze()).props("no-caps").classes(BTN_PRIMARY)
@@ -459,7 +481,9 @@ def render():
                     "args": {"trade_id": t.get("trade_id"), "debit": float(debit.value)},
                 })
                 dlg.close()
-                ui.notify("Close requested.", type="positive")
+                ui.notify(
+                    f"Closing {t.get('symbol', '')} — the ledger updates "
+                    f"when the engine confirms.", type="positive")
                 status.text = "Closing…"
 
             with ui.row():
@@ -474,13 +498,15 @@ def render():
             return
         bus_client.request("options",
                            {"type": "paper_delete", "args": {"trade_id": t.get("trade_id")}})
-        ui.notify("Delete requested.", type="positive")
+        ui.notify(f"Deleting {t.get('symbol', '')} — the row clears "
+                  f"when the engine confirms.", type="positive")
         status.text = "Deleting…"
 
     @guard
     def _delete_closed():
         bus_client.request("options", {"type": "paper_delete_closed"})
-        ui.notify("Delete-all-closed requested.", type="positive")
+        ui.notify("Deleting every closed trade — the ledger updates "
+                  "when the engine confirms.", type="positive")
         status.text = "Deleting closed…"
 
     def _show_analyze_popup(res):

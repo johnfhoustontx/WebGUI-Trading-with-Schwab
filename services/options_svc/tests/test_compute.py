@@ -162,10 +162,15 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
                             {"iv_rank": 50.0,
                              "expected_moves": {"daily": {"move_dollars": 5.0}}})[1])
 
+    # ``earnings_date`` mirrors the real ``screen_spreads`` signature — the
+    # income window threads a date through it, and a double narrower than the
+    # function it doubles breaks on every future thread-through.
     def _screen(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
-                call_d_min, call_d_max, min_cr, kind, spot=None, daily_expected_move=None):
+                call_d_min, call_d_max, min_cr, kind, spot=None,
+                daily_expected_move=None, earnings_date=None):
         calls["screen"] = dict(min_cr=min_cr, kind=kind, spot=spot,
-                               dem=daily_expected_move)
+                               dem=daily_expected_move,
+                               earnings_date=earnings_date)
         return [{"symbol": symbol, "type": "PCS", "short_strike": 530.0,
                  "long_strike": 525.0, "short_mark": 1.2, "long_mark": 0.6,
                  "credit": 0.6, "max_loss": 4.4, "expiration": "2026-07-15",
@@ -186,8 +191,10 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
     assert calls["quote_symbol"] == "SPY"
     assert calls["iv_price"] == 540.0
 
-    # screen_spreads still called with SWING + spot + the daily EM.
+    # screen_spreads still called with SWING + spot + the daily EM, and no
+    # earnings date — the swing window has never consulted the calendar.
     assert calls["screen"]["kind"] == "SWING"
+    assert calls["screen"]["earnings_date"] is None
     assert calls["screen"]["spot"] == 540.0
     assert calls["screen"]["dem"] == 5.0
 
@@ -460,7 +467,35 @@ def test_paper_account_view_defensive_on_failure(monkeypatch):
 
     out = compute.paper_account_view()
     assert out == {"snapshot": None, "positions": [], "orders": [],
-                   "has_account": False}
+                   "lots": [], "has_account": False}
+
+
+def test_paper_account_view_carries_the_open_equity_lots(monkeypatch):
+    """The share inventory rides the EXISTING paper-account view.
+
+    ``/options/shares`` is a second READER of the paper book, not a second book:
+    a separate cache view would give the two pages two publish cadences over one
+    database, so a lot could exist on one screen and not the other. Tier 1
+    cannot open the SQLite store itself, so the lots have to arrive here.
+    """
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    lots = [{"lot_id": 1, "symbol": "AAPL", "shares": 100, "cost_basis": 195.0,
+             "source": "assignment", "source_position_id": 7}]
+    fake_engine = _types.SimpleNamespace(account_snapshot=lambda: {"equity": 1.0})
+    fake_db = _types.SimpleNamespace(
+        fetch_open_positions=lambda db: [],
+        fetch_orders=lambda db, limit=None, status=None: [],
+        fetch_open_lots=lambda: (seen.__setitem__("lots_called", True), lots)[1],
+        get_account=lambda: {"id": 1})
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+    monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
+
+    out = compute.paper_account_view()
+    assert seen.get("lots_called") is True
+    assert out["lots"] == lots
 
 
 def test_run_entry_cycle_calls_engine_with_signals(monkeypatch):
@@ -1775,8 +1810,10 @@ def test_tick_chain_stash_consume_once():
     assert compute._take_tick_chain("$SPX") is None      # consume-once
     compute._stash_tick_chain("$SPX", {"c": 2})
     assert compute._take_tick_chain("SPY") is None       # symbol mismatch
+    assert compute._take_tick_chain("$SPX") == {"c": 2}  # ...and did not eat it
     compute._stash_tick_chain("$SPX", {"c": 3})
-    compute._TICK_CHAIN["ts"] -= compute.TICK_CHAIN_TTL_SEC + 1
+    ts, chain = compute._TICK_CHAINS["$SPX"]
+    compute._TICK_CHAINS["$SPX"] = (ts - compute.TICK_CHAIN_TTL_SEC - 1, chain)
     assert compute._take_tick_chain("$SPX") is None      # expired
 
 

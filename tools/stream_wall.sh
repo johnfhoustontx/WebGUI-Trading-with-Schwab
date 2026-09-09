@@ -225,8 +225,16 @@ FFMPEG_PID=$!
 # SIGTERM and SIGPIPE as a CLEAN exit: Restart=on-failure explicitly excludes
 # those four, so the unit would go quietly down and stay down. It would also
 # orphan ffmpeg, since a bare `kill PID` never reaches a sibling. Killing the
-# encoder instead makes `wait` below return 143 as an exit CODE, which is the
-# unclean exit systemd will actually restart.
+# encoder instead makes `wait` below return an exit CODE rather than a signal
+# death, and a non-zero code is the unclean exit systemd will actually restart.
+#
+# NOT 143, which this comment claimed until 2026-09-05. ffmpeg TRAPS SIGTERM: it
+# finalises the output and exits with its own status, so `wait` never sees
+# 128+15. Measured at the daily 15:20 stop: 1 on 09-01, 255 on 09-03 and 09-04
+# (255 is ffmpeg's fatal-error code -- it cannot rewrite the FLV trailer into an
+# RTMP socket that is already closing, which is the "Failed to update header"
+# pair in the journal). The mechanism is sound and the reason above still holds;
+# only the specific number was wrong. Do not "fix" the code to produce 143.
 #
 # Every check runs BEFORE the first sleep, so a child that is already gone is
 # caught at once rather than up to 30s later.
@@ -250,6 +258,23 @@ FFMPEG_PID=$!
 # exactly that instant -- a difference of zero width, and swamped four orders of
 # magnitude by the 30s poll. Erring toward stopping is the right side for a
 # public broadcast anyway.
+#
+# The 30s poll also means the watchdog RACES the encoder at the window end, and
+# whether it wins depends on the phase its start time gave it. YouTube ends the
+# broadcast at 15:20 too, which kills ffmpeg on its own; whoever gets there first
+# ends the stream, and the outcome is identical either way.
+#
+# What is NOT identical is the log. Started 08:00:18, the polls land on :18/:48
+# and the watchdog fires at 15:20:18, announcing itself. Restarted mid-session at
+# 13:24:09 -- a promote, say -- the polls land on :09/:39, and on 2026-09-04
+# ffmpeg died at 15:20:28, eleven seconds before the watchdog's next look. So
+# "reached the end of the stream window" was simply absent that day.
+#
+# It reads exactly like a crash, and it was diagnosed as one before this note
+# existed. If the message is missing, check the START time before assuming a
+# fault: the tell is ffmpeg's "Failed to update header" pair arriving BEFORE
+# Chrome's "X connection error", which is the encoder dying first and the EXIT
+# trap tearing down Xvfb after it.
 ( while :; do
     if [ "$(date +%s)" -ge "$END_EPOCH" ]; then
       echo "reached the end of the stream window - stopping" >&2

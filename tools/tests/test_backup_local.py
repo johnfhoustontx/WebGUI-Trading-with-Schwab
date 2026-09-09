@@ -199,6 +199,19 @@ def test_the_env_file_is_carried():
     assert ".env" in bl.EXTRA_FILES
 
 
+def test_the_public_live_env_file_is_carried_too():
+    """`.env.live` is the PUBLIC process's own EnvironmentFile, split off from
+    `.env` so the one internet-facing unit does not hold the fleet's strongest
+    credentials. It is loaded with no leading dash for the same reason its
+    sibling is, so it has the same restore failure: an archive that looks
+    complete and a live unit that will not start.
+
+    ⚠ A separate assertion rather than a widened one, because `.env.live` is a
+    NEW name -- `.gitignore`'s `.env` line does not match it either, and the two
+    omissions have the same root."""
+    assert ".env.live" in bl.EXTRA_FILES
+
+
 def test_every_carried_secret_is_repo_relative():
     """EXTRA_FILES entries are joined onto REPO_ROOT; an absolute path or a `..`
     would silently write outside the generation."""

@@ -115,7 +115,11 @@ _DEFAULTS = {
         # way the logo artwork does. The gradients + font apply to the WORDMARK
         # ONLY — the body/data font stays [typography].family, because a heavy
         # display face hurts readability in the dense signal tables.
-        # Colors are sampled from webgui/static/img/neuralstrike-logo.jpg
+        # Flat since 2026-09-07: the wordmark carries one accent, not the
+        # old artwork's gold/blue split. These MUST track config/theme.toml
+        # [brand] — they are what a missing or malformed file falls back to,
+        # and a fallback that restores a retired brand is worse than a crash
+        # because nothing looks wrong.
         # (p50→p95 of each wordmark band; lower percentiles are anti-aliasing
         # against the black background and read too dark).
         "name_a": "Neural",       # first half of the wordmark (gold)
@@ -125,11 +129,12 @@ _DEFAULTS = {
         "font_url": ("https://fonts.googleapis.com/css2"
                      "?family=Montserrat:wght@800&display=swap"),
         "font_weight": "800",
-        "a_from": "#C9A356",      # "Neural" gradient — deep gold
-        "a_to": "#FBEAA0",        # "Neural" gradient — highlight gold
-        "b_from": "#2C6FB4",      # "Strike" gradient — deep blue
-        "b_to": "#35A3F5",        # "Strike" gradient — bright blue
-        "mark": "/static/img/neuralstrike-mark.png",  # "" = no logo, glyph tile
+        "a_from": "#eef1f6",      # "Neural" — the title tone, flat
+        "a_to": "#eef1f6",
+        "b_from": "#6b86ff",      # "Strike" — the menu accent, flat
+        "b_to": "#6b86ff",
+        "tracking": ".14em",      # uppercase wordmark: capitals need the air
+        "mark": "/static/img/neuralstrike-mark.svg",  # "" = no logo, glyph tile
     },
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
@@ -658,12 +663,22 @@ def build_brand_css(theme):
     fam = str(b.get("font_family", "")).strip()
     stack = (f"'{fam}', " if fam else "") + "'Segoe UI', system-ui, sans-serif"
     weight = str(b.get("font_weight", "800")).strip() or "800"
+    # Tracking is CONFIG, like every other property of this lockup. It was the
+    # one value hardcoded here (at .01em, i.e. none), which is why the app's
+    # wordmark sat tight while the public site's ran wide — the two surfaces
+    # drifted on the one axis nobody could reach without editing this function.
+    #
+    # ⚠ An uppercase wordmark needs tracking; it is not a refinement. Capitals
+    # are drawn to sit in lowercase words, so set solid they read as cramped.
+    # Anything at or near 0 here undoes the `text-transform: uppercase` above.
+    track = str(b.get("tracking", _DEFAULTS["brand"]["tracking"])).strip() \
+        or _DEFAULTS["brand"]["tracking"]
     return f"""
 .brand-word {{
   font-family: {stack};
   font-weight: {weight};
   font-size: 16px;
-  letter-spacing: .01em;
+  letter-spacing: {track};
   text-transform: uppercase;
   line-height: 1;
   white-space: nowrap;
@@ -682,8 +697,12 @@ def build_brand_css(theme):
 .brand-word .b {{
   background-image: linear-gradient(180deg,{b.get('b_to')} 0%,{b.get('b_from')} 100%);
 }}
-/* The logo mark. Its artwork is on black, which sits naturally on the dark
-   header — so no plate/gradient behind it, unlike the old glyph tile. */
+/* The logo mark. The artwork is a TRANSPARENT SVG since 2026-09-07, so it sits
+   directly on whatever the header paints — no plate, no gradient.
+   `border-radius` and `object-fit: cover` are inherited from the old raster
+   lockup and now do nothing: a 64-unit square viewBox fits a 44px box exactly,
+   so there is nothing to crop, and there is no ground to round off. They are
+   left in place because a future mark may be a raster again. */
 .brand-mark {{
   width: 44px; height: 44px; border-radius: 12px; flex: none;
   object-fit: cover; display: block;

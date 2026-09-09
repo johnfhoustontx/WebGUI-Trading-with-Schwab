@@ -43,6 +43,30 @@ _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"
 # disk read every tick. Invalidated by set() (updates it) and reset_cache() (tests).
 _cache = {"data": None}
 
+# A frozen store is the public live screens' settings layer: DEFAULTS with a
+# fixed overlay, and set() disabled. Two jobs in one primitive — it pins the
+# published screens' state, and it stops the public process reading or racing
+# the single-user settings.json the app writes.
+_frozen: dict | None = None
+
+
+def freeze(overrides: dict) -> None:
+    """Pin settings to DEFAULTS + ``overrides`` and disable ``set``."""
+    global _frozen
+    _frozen = {**DEFAULTS, **overrides}
+    _cache["data"] = None
+
+
+def unfreeze() -> None:
+    """Undo :func:`freeze` (test helper; the live process never calls it)."""
+    global _frozen
+    _frozen = None
+    _cache["data"] = None
+
+
+def is_frozen() -> bool:
+    return _frozen is not None
+
 
 def _load_from_disk():
     try:
@@ -59,7 +83,11 @@ def load():
 
     Cached in memory after the first read (see ``_cache``); a fresh copy is
     returned each call so callers can't mutate the cache.
+
+    A frozen store (see ``freeze``) never touches disk or the cache.
     """
+    if _frozen is not None:
+        return dict(_frozen)
     if _cache["data"] is None:
         _cache["data"] = _load_from_disk()
     return dict(_cache["data"])
@@ -82,6 +110,8 @@ def all():
 
 def set(key, value):
     """Persist one setting (writes the full merged dict back to disk + cache)."""
+    if _frozen is not None:
+        return  # read-only store: the public live screens cannot write
     data = load()
     data[key] = value
     _PATH.parent.mkdir(parents=True, exist_ok=True)

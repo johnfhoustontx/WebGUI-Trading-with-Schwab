@@ -19,9 +19,8 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
         sys.path.insert(0, _p)
 
 from fastapi import Request  # noqa: E402
-from fastapi.responses import (HTMLResponse, RedirectResponse,  # noqa: E402
-                               StreamingResponse)
-from nicegui import app, run, ui  # noqa: E402
+from fastapi.responses import HTMLResponse, RedirectResponse, Response  # noqa: E402
+from nicegui import app, context, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
 import logging  # noqa: E402
@@ -30,16 +29,35 @@ from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 
 import alerts  # noqa: E402
 import app_settings  # noqa: E402
+import auth  # noqa: E402
+import auth_middleware  # noqa: E402
 import bus_client  # noqa: E402
-import desk_stream  # noqa: E402
+import login_page  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 import wall  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
-from pages.ui_guard import guard  # noqa: E402
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
+
+# The page-to-shell seam now lives in shell.py so a page never imports main --
+# see that module's docstring. Re-exported here because pages and tests have
+# reached for main.set_breadcrumb_leaf since 2026-07.
+from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
+                   _breadcrumb_leaf, _view_name, bind_breadcrumb_leaf,
+                   play_alert, set_breadcrumb_leaf, subtab_slot)
+
+# The three PAGE-level CSS blocks a published page's own widgets depend on --
+# sticky table headers, the subtab row, and the dashboard panels' contained
+# horizontal scroll -- also live in shell.py, for the same reason:
+# `live_main.py` injects them and cannot import this module. TABLE_CSS is
+# aliased to the old private name because `_TABLE_CSS` has been reached for
+# since 2026-06.
+from shell import (PANEL_SCROLL_CSS, SUBTAB_CSS, TABLE_CSS,  # noqa: E402
+                   capture_chrome_css)
+
+_TABLE_CSS = TABLE_CSS
 
 import logging_setup  # noqa: E402
 
@@ -72,6 +90,45 @@ except OSError:
     logging.getLogger("webgui").warning(
         "voice clip directory unavailable — Desk spoken alerts are off",
         exc_info=True)
+
+
+# ── Authentication ────────────────────────────────────────────────────────────
+# The gate is mounted at MODULE scope, not inside the ``__main__`` guard at the
+# foot of this file. ``ui.run()`` lives in that guard, so a middleware added
+# there would not exist under pytest -- tests and production would run different
+# wiring, which is precisely the bug class this repo keeps paying for (a guard
+# green against a shape the producer never emits).
+#
+# ⚠ AND IT MUST BE IDEMPOTENT. ``wall.py`` does ``import main`` lazily inside its
+# route handler (main registers that route, so a module-scope import would be a
+# cycle), and because this script runs as ``__main__`` in production that import
+# re-executes this file as a SECOND module object -- after NiceGUI has started.
+# Starlette's
+# ``add_middleware`` raises ``RuntimeError`` once the middleware stack is built,
+# so an unguarded call here would not merely double the gate: it would 500 every
+# page that lazily imports ``main``. The flag lives on ``app``, which is the one
+# NiceGUI singleton both module objects share.
+_AUTH_GATE_FLAG = "_neuralstrike_auth_gate_installed"
+
+
+def install_auth_gate() -> bool:
+    """Mount ``AuthGate`` once. True if this call is the one that mounted it.
+
+    The gate gets its OWN default credential providers, deliberately.
+    ``auth_middleware.default_session_key`` / ``default_epoch`` already catch
+    ``CredentialsError`` and return None, which the gate reads as default-deny;
+    a provider hand-rolled here that let that error escape would turn a corrupt
+    credentials file from "a login page" into an unhandled exception on every
+    route, publicly.
+    """
+    if getattr(app, _AUTH_GATE_FLAG, False):
+        return False
+    app.add_middleware(auth_middleware.AuthGate)
+    setattr(app, _AUTH_GATE_FLAG, True)
+    return True
+
+
+install_auth_gate()
 
 _CT = _ZoneInfo("America/Chicago")
 
@@ -131,16 +188,6 @@ def sync_manual_paper_lifecycle_setting() -> None:
             "manual paper lifecycle setting resync failed", exc_info=True)
 
 
-def play_alert(sound: str, volume: float) -> None:
-    """Play a bundled alert WAV in the connected browser at the given volume."""
-    sound = sound if sound in ("chime", "bell", "ping") else "chime"
-    vol = max(0.0, min(1.0, float(volume if volume is not None else 0.6)))
-    ui.run_javascript(
-        f"(() => {{ const a = document.getElementById('alert-audio'); if (!a) return; "
-        f"a.src = '/static/sounds/{sound}.wav'; a.volume = {vol}; "
-        f"a.play().catch(() => {{}}); }})()")
-
-
 def notify_desktop(title: str, body: str) -> None:
     """Fire a desktop Notification if permission was granted (best-effort)."""
     safe = body.replace("'", "\\'")
@@ -161,6 +208,187 @@ def explain_html(payload):
     friendly placeholder)."""
     html = (payload or {}).get("html")
     return html if isinstance(html, str) and html.strip() else _EXPLAIN_EMPTY
+
+
+# ── Sign in / sign out ───────────────────────────────────────────────────────
+# Raw routes, not ``@ui.page``s, and that is the load-bearing choice: a NiceGUI
+# login would need ``/_nicegui_ws/`` and ``/_nicegui/*`` open before
+# authentication, which is what stops the websocket being a real boundary. It
+# would also submit over that websocket, where a cookie cannot be set. So the
+# whole open list is ``/login`` plus the favicon -- see
+# ``auth_middleware.OPEN_PATHS``, and do not widen it.
+#
+# ``/logout`` is deliberately NOT open. Clearing a cookie nobody presented is a
+# no-op, and the gate already sends a signed-out visitor to the same place this
+# route would.
+
+# The cookie attributes, in ONE place, applied to both cookies.
+#
+# ⚠ ``Secure`` is unconditional and must never be derived from the request
+# scheme. Behind Caddy this app sees plain HTTP on loopback, so a
+# scheme-conditional flag would ship Secure-less cookies in production while
+# looking perfectly correct in every local test -- the single most likely way to
+# get this wrong.
+#
+# ⚠ No ``domain=``. A ``Domain=neuralstrike.co`` cookie is sent to that host and
+# EVERY subdomain, so the session that arms the trading driver would travel to
+# the public marketing page and its third-party YouTube and Discord embeds on
+# every page view. Host-only is what makes the separate hostname a boundary at
+# all; ``set_cookie`` omits the attribute when ``domain`` is None, and a test
+# pins that it stays absent.
+_COOKIE_KW = dict(path="/", httponly=True, secure=True, samesite="lax")
+
+
+def _set_auth_cookie(response: Response, name: str, value: str,
+                     max_age: int) -> None:
+    response.set_cookie(name, value, max_age=max_age, **_COOKIE_KW)
+
+
+def _clear_auth_cookie(response: Response, name: str) -> None:
+    response.delete_cookie(name, **_COOKIE_KW)
+
+
+def login_target(candidate) -> str:
+    """Where a successful sign-in lands: ``next`` if it is safe, else the Desk.
+
+    ``login_page.safe_next`` is the ONE validator for the site-relative part --
+    not re-implemented here. What this adds is the one path that is safe and
+    still wrong: ``/logout``. The gate refuses a signed-out visitor's
+    ``GET /logout`` with ``?next=/logout``, so honouring it would sign the user
+    in and immediately back out, leaving them at the login form they just
+    completed with no error and nothing to do differently.
+    """
+    target = login_page.safe_next(candidate)
+    return login_page.DEFAULT_NEXT if target == login_page.LOGOUT_ROUTE else target
+
+
+def _client_ip(request: Request) -> str:
+    """The address the failed-attempt backoff counts against.
+
+    ⚠ BEHIND A REVERSE PROXY THE PEER IS THE PROXY. Every request through Caddy
+    arrives from 127.0.0.1, so keying the per-client lockout on the peer would
+    file the whole internet under one address -- and the per-client penalty
+    ramps to 900 s where the global one is deliberately 60 s. Any bot spraying
+    the advertised hostname would lock the owner out of the UI that arms the
+    driver and stops the stack, which is exactly the denial of service the
+    design's short global penalty exists to avoid.
+
+    So when -- and only when -- the request carries ``X-Edge``, the LAST entry
+    of ``X-Forwarded-For`` is used. Caddy sets ``X-Edge`` with ``header_up``,
+    which REPLACES any client-supplied value, so its presence is evidence the
+    request came through our proxy; and Caddy APPENDS the peer it observed to
+    ``X-Forwarded-For``, so the last entry is the one hop we wrote ourselves. A
+    client-supplied prefix can lengthen that list but cannot change its tail.
+
+    With no edge header the peer is used unchanged, which is the direct
+    (loopback or Tailscale) case. If the edge is ever fronted without
+    ``X-Forwarded-For`` this degrades to the peer -- one bucket, the safe-but-
+    blunt behaviour -- rather than trusting a header nobody wrote.
+    """
+    peer = request.client.host if request.client else ""
+    if request.headers.get(auth_middleware.EDGE_HEADER) is not None:
+        hops = [h.strip() for h in
+                request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return peer or "unknown"
+
+
+def _login_response(*, next_path: str, error: str | None) -> HTMLResponse:
+    """The login document, always with a FRESH form token.
+
+    Re-rendering after a failure with the token that was just submitted would
+    make the second attempt fail for the wrong reason -- the token is single-use
+    only in the sense that it expires, but a re-render that happens near the
+    five-minute edge would hand back one about to die. Minting per render costs
+    an HMAC.
+
+    ``no-store`` because the document carries a per-visitor token, and because a
+    cached login page served to the next visitor is a stale token plus a
+    confusing screen.
+    """
+    return HTMLResponse(
+        login_page.render_form(next_path=next_path, error=error,
+                               form_token=login_page.issue_form_token()),
+        headers={"cache-control": "no-store"})
+
+
+@app.get(login_page.ROUTE)
+def _login_form(next: str | None = None):   # noqa: A002 - the query param's name
+    return _login_response(next_path=login_target(next), error=None)
+
+
+@app.post(login_page.ROUTE)
+async def _login_submit(request: Request):
+    """One sign-in attempt, then a cookie or the same form again.
+
+    Everything that decides the outcome lives in ``login_page.attempt`` -- the
+    lockout, the form token, Argon2, TOTP, the counter persist, and their order.
+    This route reads the form, names the client, and turns the boolean into HTTP.
+
+    The form parse is guarded: content type and body are attacker-controlled on
+    a public endpoint, where an exception is a 500 rather than a refusal. An
+    unparseable body is treated as an empty form, which fails the form-token
+    check and is recorded as a failure like any other -- a blind POST must not
+    be a cheaper way to reach us than a well-formed one.
+    """
+    try:
+        form = await request.form()
+    except Exception:   # noqa: BLE001 - any malformed body is just "no fields"
+        form = {}
+
+    target = login_target(form.get(login_page.FIELD_NEXT))
+    result = login_page.attempt(
+        password=str(form.get(login_page.FIELD_PASSWORD) or ""),
+        code=form.get(login_page.FIELD_CODE),
+        client=_client_ip(request),
+        form_token=form.get(login_page.FIELD_FORM_TOKEN),
+        # Read even when the box is not ticked: an already-trusted device must
+        # keep skipping the code without re-ticking it every time.
+        remember_token=request.cookies.get(auth_middleware.REMEMBER_COOKIE),
+    )
+    if not result.ok:
+        # 200, not 401. RFC 9110 requires a 401 to carry WWW-Authenticate, and
+        # sending one would put a browser's own credential dialog in front of
+        # this form. The page IS the answer.
+        return _login_response(next_path=target, error=result.message)
+
+    session = login_page.issue_session_token()
+    if not session:
+        # The store went unreadable between the attempt and here. Refuse rather
+        # than redirect to a page the gate will bounce straight back.
+        return _login_response(next_path=target, error=login_page.GENERIC_FAILURE)
+
+    response = RedirectResponse(url=target, status_code=303)
+    _set_auth_cookie(response, auth_middleware.SESSION_COOKIE, session,
+                     auth.SESSION_MAX_AGE_SEC)
+
+    # Only when asked. An unchecked box submits no field at all, so presence is
+    # the test -- and a device already trusted does NOT silently renew: the user
+    # ticks the box again, which is the one moment they are choosing to leave a
+    # 30-day credential on this machine.
+    if form.get(login_page.FIELD_REMEMBER) is not None:
+        remember = login_page.issue_remember_token()
+        if remember:
+            _set_auth_cookie(response, auth_middleware.REMEMBER_COOKIE, remember,
+                             auth.REMEMBER_MAX_AGE_SEC)
+    return response
+
+
+@app.get(login_page.LOGOUT_ROUTE)
+def _logout():
+    """Drop both cookies and go back to the form.
+
+    BOTH, and the remember cookie is the one that matters: clearing only the
+    session would leave a device that still skips the second factor, so "sign
+    out" on a borrowed machine would mean less than it says. What it cannot do
+    is reach the other devices -- the tokens are stateless by design, and
+    "sign out everywhere" is an epoch bump in the credentials file.
+    """
+    response = RedirectResponse(url=login_page.ROUTE, status_code=303)
+    _clear_auth_cookie(response, auth_middleware.SESSION_COOKIE)
+    _clear_auth_cookie(response, auth_middleware.REMEMBER_COOKIE)
+    return response
 
 
 @app.get("/options/explain")
@@ -308,45 +536,19 @@ def _serve_eod_file(date: str, which: str = "summary"):
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
-# ── Desk — the standalone streaming mirror (/desk/live + /desk/stream) ────────
-# Raw routes rather than a second ``@ui.page``: the whole point of this screen is
-# that it carries NO NiceGUI runtime, so a wall display, a phone or a sleeping
-# laptop reconnects with an HTTP request instead of a websocket. The document is
-# static and every number arrives over the event stream — see webgui/desk_stream.py.
-@app.get(desk_stream.PAGE_ROUTE)
-def _serve_desk_live():
-    """The Desk mirror document — self-contained, so its own <style> applies."""
-    return HTMLResponse(desk_stream.document())
-
-
-@app.get(desk_stream.STREAM_ROUTE)
-def _serve_desk_stream(request: Request):
-    """The Desk as server-sent events: ``desk`` on change, ``clock`` every second.
-
-    ``X-Accel-Buffering: no`` and the disabled cache are what stop a proxy (or a
-    browser's own buffering heuristics) holding frames back until some buffer
-    fills — an event stream that arrives in bursts is indistinguishable from a
-    frozen page, which is the one failure this screen exists to avoid.
-    """
-    return StreamingResponse(
-        desk_stream.event_stream(request),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
 # ── The wall display (/wall) ──────────────────────────────────────────────────
-# A raw route for the same reason ``/desk/live`` is one: this document carries no
-# NiceGUI runtime of its own. It is a static shell around three iframes onto the
+# A raw route rather than a ``@ui.page``: this document carries no NiceGUI
+# runtime of its own. It is a static shell around three iframes onto the
 # real pages, opened once in the morning by a kiosk Chrome on the capture host
 # and left for nine hours — a fourth live client with a websocket and a reconnect
 # story would be machinery serving an interaction that never happens.
 #
-# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL`` /
-# ``EXTERNAL_RAIL_ROUTES``: those describe places a person navigates to, and this
-# is a display target for a camera. Listing it would put a rail row in front of
-# every user for a screen that only makes sense full-bleed on a 1920x1080
-# framebuffer, and would need a third ``_LANDING_ROUTES`` exemption in
-# ``test_shell.py`` for a page that renders no ``_layout`` at all.
+# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL``: those
+# describe places a person navigates to, and this is a display target for a
+# camera. Listing it would put a rail row in front of every user for a screen
+# that only makes sense full-bleed on a 1920x1080 framebuffer, and would need a
+# second ``_LANDING_ROUTES`` exemption in ``test_shell.py`` for a page that
+# renders no ``_layout`` at all.
 @app.get(wall.PAGE_ROUTE)
 def _serve_wall():
     """The rotating wall document — self-contained, so its own <style> applies."""
@@ -380,10 +582,25 @@ def _serve_manual(name: str):
 OPTIONS_CHILDREN = [
     ("/options/scanner", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
+    # The 30-45 DTE income window sits in the FIND phase beside the other two
+    # scanners — it is the same find -> analyze -> track -> repair workflow at a
+    # longer horizon, which is why it is a tab here and not a new rail group
+    # (design doc 2026-09-05, "Menu placement").
+    ("/options/income", "Income", "savings"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
     ("/options/portfolio", "Paper Account", "account_balance_wallet"),
+    # Shares sits in the TRACK phase beside the two paper screens: put
+    # assignment turns an option position into stock, so the inventory is part
+    # of what the book holds, not a separate workflow (design doc 2026-09-05).
+    #
+    # ⚠ This makes NINE tabs in the Options strip — seven was the most it had
+    # carried before Income and Shares landed together — and wrapping at a
+    # narrow width is UNVERIFIED (nobody has opened a browser on it). The
+    # design's stated fallback if it wraps is to move THIS page under ACCOUNT
+    # beside /portfolio.
+    ("/options/shares", "Shares", "inventory_2"),
     ("/options/rescue", "Rescue", "healing"),
 ]
 
@@ -435,10 +652,6 @@ TRADE_CHILDREN = [
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
-    # The Desk's streaming mirror (webgui/desk_stream.py). It sits DIRECTLY under
-    # Desk, in the same pinned landing block, because it is the same screen for a
-    # different display rather than a destination of its own.
-    ("/desk/live", "Live Mirror", "cast"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -462,15 +675,30 @@ SETTINGS_CHILDREN = [
 # their own block at the foot of the rail (the conventional place for them). Like
 # OPTIONS_RAIL they are standalone: no tab strip, breadcrumb is just the page name.
 # (route, label, icon)
+#
+# ``Sign out`` is the exception to "rail routes are shell pages": ``/logout`` is
+# a raw ``@app.get`` that clears both cookies and 303s to the form. ``_nav_link``
+# needs nothing special for it — the row is an ordinary in-place link, and the
+# active wash is unreachable by construction, since ``active`` is always the
+# route of a shell page being rendered and this route renders none.
 SYSTEM_RAIL = [
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
     ("/terminate", "Stop All Services", "power_settings_new"),
+    (login_page.LOGOUT_ROUTE, "Sign out", "logout"),
 ]
 
 # The one DESTRUCTIVE item in the rail. It is rendered as a danger-outlined
-# button rather than a fourth navigation row (see ``_nav_danger_link``) and sits
-# last, so "stop everything" never sits mid-list where Settings is aimed for.
+# button rather than a plain navigation row (see ``_nav_danger_link``).
+#
+# It used to sit LAST, on the reasoning that nothing could then be overshot into
+# it. That inverted on 2026-09-06, when the app went public and became something
+# used from a phone: on a touch screen the bottom edge is the EASIEST thing to
+# hit, so the last slot is the worst place for the irreversible control. Sign
+# out took it instead — overshooting the stop now costs a re-login rather than
+# the rest of the trading day. Settings still sits above the stop for the same
+# reason it always did, and the stop itself now also demands a TOTP code
+# (``pages/terminate.py``), so a mis-tap is two barriers from doing anything.
 SYSTEM_DANGER_ROUTE = "/terminate"
 
 # ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────
@@ -531,7 +759,7 @@ def _sec_page(route: str):
 # filing it under one of the three workflow sections. Its breadcrumb is likewise
 # just ["Desk"], since there is no section to name above it.
 NAV_SECTIONS = [
-    (None, [_sec_page("/desk"), _sec_page("/desk/live")]),
+    (None, [_sec_page("/desk")]),
     ("MARKETS", [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
@@ -549,20 +777,6 @@ NAV_SECTIONS = [
         _sec_group("More"),
     ]),
 ]
-
-
-# Rail routes that are NOT shell pages, and so open in a NEW TAB.
-#
-# ``/desk/live`` is a raw HTMLResponse document with no ``_layout`` — no drawer,
-# no header, no breadcrumb. Navigating to it in the same tab would therefore
-# strand the reader: the only way back is the one link the document draws itself.
-# Opening it in a new tab is also what the page is FOR — you put the mirror on a
-# second display and keep working in the tab you were already in.
-#
-# A set rather than a flag on the nav tuple: every other rail entry is a shell
-# page, and widening the tuple would make ten call sites carry a field that only
-# one of them ever uses.
-EXTERNAL_RAIL_ROUTES = {"/desk/live"}
 
 
 def _group_children(active: str):
@@ -620,96 +834,6 @@ def breadcrumb_trail(active: str):
         if path == active:
             return [SYSTEM_SECTION, label]
     return [_NAV_LABEL.get(active, theme.BRAND_NAME)]
-
-
-# Breadcrumb crumb styling — the trailing crumb is the thing you are looking at,
-# everything before it is context. Named because the LEAF swaps them at runtime.
-_CRUMB_LEAF = "text-[13px] text-[#e6ecf9] font-semibold"
-_CRUMB_CONTEXT = "text-[13px] text-[#5d6a88]"
-
-# The optional FOURTH crumb: a page's own active view (Dealer Positioning ›
-# Gamma, Simulator › Replay …). Single-user module state, rebuilt per layout like
-# the badge refs. "parent" is the last trail crumb, which has to be demoted to
-# context when a view is named after it.
-_breadcrumb_leaf: dict = {}
-
-
-def _view_name(value):
-    """A subtab's name from whatever a ``ui.tabs`` element holds.
-
-    Pages build their tabs either by NAME (``ui.tab("Replay")`` → the value is
-    the string) or by ELEMENT (Rescue passes the tab object to ``ui.tab_panels``,
-    so the value can be the element). Reading the element's ``name`` prop covers
-    both without every call site having to know which it is."""
-    if value is None:
-        return ""
-    props = getattr(value, "_props", None)
-    if isinstance(props, dict) and props.get("name"):
-        return str(props["name"])
-    return str(value)
-
-
-def set_breadcrumb_leaf(label, refs=None) -> None:
-    """Show ``label`` as the last breadcrumb crumb, or hide the leaf when falsy.
-
-    ``refs`` targets a SPECIFIC header's elements instead of whichever page built
-    the layout most recently. That matters because ``_breadcrumb_leaf`` is
-    module-level, and unlike the badge refs — which every client rewrites with the
-    same numbers, so the sharing is invisible — each page writes a DIFFERENT view
-    name here. With two tabs open the second page's build reassigns the module
-    state and the first tab's tab-change handler then writes into the second
-    tab's header: caught in prod, where the promote script opens a tab on the
-    Scanner and Dealer Positioning's header went on to read "› 0-DTE".
-
-    Never raises and is a no-op without a mounted header, so a page may call it
-    unconditionally."""
-    refs = _breadcrumb_leaf if refs is None else refs
-    if not refs.get("label"):
-        return
-    text = str(label or "").strip()
-    refs["label"].text = text
-    refs["label"].set_visibility(bool(text))
-    refs["caret"].set_visibility(bool(text))
-    parent = refs.get("parent")
-    if parent is not None:
-        # The page name stops being the leaf the moment a view is named after it.
-        parent.classes(remove=f"{_CRUMB_LEAF} {_CRUMB_CONTEXT}",
-                       add=_CRUMB_CONTEXT if text else _CRUMB_LEAF)
-
-
-def bind_breadcrumb_leaf(tabs, labeller=None, initial=None) -> None:
-    """Track a page's own view tabs in the breadcrumb: ``… › Page › View``.
-
-    A page's subtabs ARE a level of the hierarchy — Dealer Positioning read the
-    same in the header whether you were on Gamma or on Net Prem — but they switch
-    CLIENT-side without rebuilding the layout, so the crumb has to ride the same
-    event that switches the view.
-
-    Registers an ADDITIONAL ``on_value_change`` handler (NiceGUI appends them), so
-    a page's existing handler is untouched, and paints the initial value at build
-    time so the first render is already correct rather than correcting itself on
-    the first click. ``labeller`` maps the raw tab value to what the header should
-    read — Gamma needs it, since its "GEX" tab is displayed as "Gamma".
-
-    ``initial`` is required by every page that builds a bare ``ui.tabs()`` and
-    names its default on the ``ui.tab_panels`` instead — four of the five do. That
-    default reaches the tabs element through NiceGUI's BINDING, which propagates
-    on a later cycle, so ``tabs.value`` is still None while the page is being
-    built and the crumb would sit blank until the first click.
-
-    The header elements are CAPTURED here rather than looked up when the handler
-    fires: ``_breadcrumb_leaf`` is module-level, so a second tab's page build
-    reassigns it and this page's handler would otherwise write its view name into
-    the other tab's header (see ``set_breadcrumb_leaf``)."""
-    fmt = labeller or _view_name
-    refs = dict(_breadcrumb_leaf)
-    set_breadcrumb_leaf(fmt(tabs.value if tabs.value is not None else initial), refs)
-
-    @guard
-    def _sync(e) -> None:
-        set_breadcrumb_leaf(fmt(e.value), refs)
-
-    tabs.on_value_change(_sync)
 
 
 def brand_mark_src(static_dir=None):
@@ -842,6 +966,13 @@ _TAB_COLOR = {
     "/options/portfolio": "#26a69a",      # Paper Account — teal
     "/options/calculator": "#ffa726",     # Calculator — amber
     "/options/swing": "#ec407a",          # Strategy Finder — pink
+    # Emerald: hue 147, the widest gap left in this map's hue circle (the next
+    # neighbours are Paper Ledger's 123 and Paper Account's 172). A route with no
+    # entry here silently inherits the Market Scanner's blue.
+    "/options/income": "#3dd983",         # Income Window — emerald
+    # Periwinkle: hue 249, the midpoint of the widest gap left in the Options
+    # strip's hue circle (Market Scanner's 207 and Captured Signals' 291).
+    "/options/shares": "#7c6ff0",         # Shares — periwinkle
     "/options/gamma": "#7e57c2",          # Dealer Positioning — deep purple
     "/options/simulator": "#29b6f6",      # Simulator — light blue
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
@@ -864,18 +995,104 @@ _TAB_COLOR = {
 }
 
 
-def _favicon_link(color: str) -> str:
-    """A rounded-square SVG favicon (data-URI) filled ``color``, as BOTH the modern
-    ``rel=icon`` and the legacy ``rel="shortcut icon"``.
+_FAVICON_INK_DARK = "#10131f"
+_FAVICON_INK_LIGHT = "#f2f4fb"
 
-    NiceGUI injects a default ``rel="shortcut icon"`` .ico earlier in <head>; ours are
-    added after it, so the last-declared link of each rel wins — guaranteeing the
-    colored favicon shows in the tab regardless of which rel the browser prefers."""
+
+def _relative_luminance(color: str) -> float:
+    """WCAG relative luminance of ``#rrggbb``. Raises on anything else."""
+    ch = []
+    for i in (1, 3, 5):
+        v = int(color[i:i + 2], 16) / 255
+        ch.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+
+def _contrast_ratio(a: str, b: str) -> float:
+    """WCAG contrast between two ``#rrggbb`` colours, 1.0 … 21.0."""
+    hi, lo = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _favicon_ink(color: str) -> str:
+    """The mark's colour against a ``color`` ground — whichever of the two inks
+    actually contrasts more, measured, not guessed.
+
+    ⚠ THIS WAS A LUMINANCE THRESHOLD AND THE THRESHOLD WAS WRONG. At `> 140` the
+    route palette had two failures — `/driver` `#ff7043` at 2.50:1 and
+    `/options/portfolio` `#26a69a` at 2.73:1, both mid-tones handed the light ink
+    when the dark one read better. Retuning to 110 fixed those two and would have
+    stayed right only until the next route was added: a threshold encodes a guess
+    about a palette that grows.
+
+    Picking the better of two by actual WCAG contrast cannot be defeated by a new
+    colour, because the best of two is the best of two. What a new colour CAN do
+    is be so mid-grey that neither ink clears 3:1 — which is a real warning, and
+    is why ``test_the_favicon_ink_is_legible_on_every_route_colour`` asserts the
+    ratio rather than the branch.
+
+    Falls back to the light ink on anything unparseable: chrome must never break
+    a page render, and the grounds are mostly mid-to-dark.
+    """
+    try:
+        return max((_FAVICON_INK_DARK, _FAVICON_INK_LIGHT),
+                   key=lambda ink: _contrast_ratio(ink, color))
+    except (ValueError, IndexError, TypeError):
+        return _FAVICON_INK_LIGHT
+
+
+def _favicon_uri(color: str) -> str:
+    """THE FLIP on a rounded square of ``color``, as an SVG data URI.
+
+    The per-route colour is the GROUND, not the mark, and that split is the whole
+    design. The colour exists so a trader with a dozen tabs open can tell them
+    apart at 16px, and only a full-bleed field does that — a thin tinted rule on
+    a dark square would make every tab look identical. The mark rides on top in
+    one ink, so every tab is recognisably NeuralStrike *and* still its own route.
+
+    ⚠ The geometry is the SMALL optical variant, matching
+    ``deploy/site/assets/favicon.svg`` — heavier strokes so the rule survives a
+    device pixel at 16px. The large drawing's 2.5-unit rule renders at 0.6px here
+    and disappears, taking the level, and with it the meaning, out of the mark.
+    ⚠ **This must reach the browser through ``@ui.page(favicon=…)``, never
+    through ``ui.add_head_html``**, and that distinction is the whole reason the
+    tab was wrong for a day. NiceGUI's template emits its OWN
+    ``<link rel="shortcut icon" href="/_nicegui/…/favicon.ico">`` at line 11 and
+    renders ``head_html`` at line 46, so an injected link is a SECOND, later
+    icon competing with the framework's — and the browser took NiceGUI's. The
+    markup was never malformed; verified by decoding the emitted data URI back
+    to valid XML. It simply lost.
+
+    ``favicon=`` REPLACES that line-11 link instead of arguing with it, so
+    exactly one icon is declared and there is nothing for a browser to prefer.
+    ``_page`` below is what applies it, so no route can be registered without
+    one."""
     from urllib.parse import quote
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-           f'<rect width="32" height="32" rx="7" fill="{color}"/></svg>')
-    uri = f"data:image/svg+xml,{quote(svg)}"
-    return f'<link rel="icon" href="{uri}"><link rel="shortcut icon" href="{uri}">'
+    ink = _favicon_ink(color)
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        f'<rect width="64" height="64" rx="14" fill="{color}"/>'
+        f'<rect x="10" y="30" width="44" height="4" rx="2" fill="{ink}"/>'
+        f'<path d="M22 12 L32 23.5 L42 12" fill="none" stroke="{ink}"'
+        ' stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'<path d="M22 52 L32 41 L42 52" fill="none" stroke="{ink}"'
+        ' stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        '</svg>')
+    return f"data:image/svg+xml,{quote(svg)}"
+
+
+def _page(route: str, **kwargs):
+    """``@ui.page`` for this app: the route's own favicon, applied once.
+
+    Every page goes through here rather than calling ``ui.page`` directly, so a
+    new route CANNOT be registered without a tab icon — which is how the mark
+    would otherwise drift back out of the browser tab one page at a time.
+
+    A route with no ``_TAB_COLOR`` entry inherits the Market Scanner's blue, the
+    same fallback the colour map has always documented.
+    """
+    return ui.page(route, favicon=_favicon_uri(_TAB_COLOR.get(route, "#42a5f5")),
+                   **kwargs)
 
 # Single-user nav-badge state. _NAV_BADGES holds route->count; _ALERT_STATE
 # tracks what's been acknowledged/alerted so we badge/chime only on genuinely
@@ -943,15 +1160,6 @@ _status_refs: dict = {}
 # registered for the 2s tick to update.
 _NAV_PILLS = {"/driver": "AI"}
 
-# Per-page-build slot directly under the top tab strip, where a page can mount
-# its own view SUBTABS (see _layout; e.g. the Gamma GEX/Charm/... row). Rebuilt
-# on every _layout; None on pages without a strip.
-_SUBTAB_SLOT: dict = {"el": None}
-
-
-def subtab_slot():
-    """The container under the main tab strip for a page's view subtabs (or None)."""
-    return _SUBTAB_SLOT["el"]
 
 # ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
 # Representative SCHEDULED cache views (mirrors the scheduled rows of
@@ -1276,19 +1484,9 @@ _NAV_CSS = """
 }
 .compact-tabs .q-tab__indicator { display: none; }
 .compact-tabs .q-tab__label { font-size: 12.5px; font-weight: 500; }
-/* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
-   — the same pill shape one size smaller, on a fainter inset container so the
-   hierarchy under the main strip reads clearly. */
-.compact-subtabs {
-  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
-}
-.compact-subtabs .q-tab {
-  min-height: 26px; padding: 0 11px; margin-right: 2px;
-  border-radius: 7px; background: transparent; color: #8891ab;
-}
-.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
-.compact-subtabs .q-tab__indicator { display: none; }
-.compact-subtabs .q-tab__label { font-size: 12px; }
+/* The subtab-row rules (.compact-subtabs) moved to shell.SUBTAB_CSS on
+   2026-09-07: a page mounts that row itself, so the PUBLIC entrypoint needs the
+   rules too and cannot import this module. Still injected here by _layout. */
 /* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
    panels should hug their card/table edges opt in with .flush-panels. */
 .flush-panels .q-tab-panel { padding: 4px 0 0 0; }
@@ -1342,24 +1540,6 @@ _NAV_CSS += f"""
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {{
     width: {NAV_WIDTH_OPEN}px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }}
-"""
-
-# Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
-# header over a bounded, scrolling body, so the column headers stay visible as a long
-# table scrolls. Injected once per page in ``_layout``. Per-page table CSS
-# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
-# its more-specific selector + later injection win over this baseline.
-_TABLE_CSS = """
-.q-table__middle { max-height: 65vh; }
-/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
-   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
-.q-table thead tr th {
-  position: sticky; top: 0; z-index: 1; background: #141a30;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase; color: #6d76a0;
-}
-/* Faint row dividers (Deep Slate) between body rows. */
-.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
 """
 
 
@@ -1619,11 +1799,9 @@ def _nav_icon(icon: str, count: int):
     return dot
 
 
-def _nav_link(path: str, label: str, icon: str, active: str,
-              new_tab: bool = False) -> None:
-    """One drawer row. ``new_tab`` is for the rail's non-shell routes — see
-    ``EXTERNAL_RAIL_ROUTES``; such a row never claims the active state, because
-    it does not replace the page you are looking at."""
+def _nav_link(path: str, label: str, icon: str, active: str) -> None:
+    """One drawer row. Every rail route is a shell page, so the row always
+    navigates in place and claims the active wash when it is the current page."""
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
     # nav-active is a plain CSS rule in _NAV_CSS (a soft rgba navy wash) — NOT a
@@ -1631,13 +1809,9 @@ def _nav_link(path: str, label: str, icon: str, active: str,
     # nor rgba(...) arbitraries reliably (plain-hex ones are fine), so the old
     # bg-[var(--q-primary)] silently produced no rule at all. The pill is now
     # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
-    # A new-tab row leaves the current page where it is, so it must not paint
-    # itself as "where you are" — the active wash would claim a navigation that
-    # never happened.
-    is_active = path == active and not new_tab
-    state = " nav-active" if is_active else ""
+    state = " nav-active" if path == active else ""
     n = _NAV_BADGES.get(path, 0)
-    with ui.link(target=path, new_tab=new_tab).classes(base + state):
+    with ui.link(target=path).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             rail_dot = _nav_icon(icon, n)
@@ -1845,7 +2019,16 @@ def _layout(active: str, title: str):
     _scan = bus_client.read("options:scan") or {}
     _recompute_badges(_scan)
     ui.add_css(_NAV_CSS)
-    ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    ui.add_css(TABLE_CSS)    # app-wide fixed (sticky) table headers
+    ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
+    ui.add_css(PANEL_SCROLL_CSS)  # a dashboard panel keeps its own overflow
+    # A screenshot session asks for the transient chrome to be suppressed; a
+    # real visitor never carries the cookie and this is None. getattr because
+    # Client.request is None for the auto-index client, which has no request.
+    _capture_css = capture_chrome_css(
+        getattr(getattr(context.client, "request", None), "cookies", None))
+    if _capture_css:
+        ui.add_css(_capture_css)
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.
@@ -1872,7 +2055,10 @@ def _layout(active: str, title: str):
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(window_title(_NAV_LABEL.get(active, theme.BRAND_NAME)))
-    ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
+    # The favicon is NOT injected here. It is declared by `_page`, which passes
+    # it to @ui.page(favicon=…) -- see the note in `_favicon_uri`. Adding a
+    # <link> here as well would restore the two-icon fight that put NiceGUI's
+    # default in the tab.
     # Icon rail: laid out at the rail width (or the open width when pinned); the
     # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
     # comment there). behavior=desktop keeps Quasar from flipping it to a mobile
@@ -1912,8 +2098,7 @@ def _layout(active: str, title: str):
                         _nav_group_link(_label, _icon, _children, active)
                     else:
                         _kind, _path, _label, _icon = entry
-                        _nav_link(_path, _label, _icon, active,
-                                  new_tab=_path in EXTERNAL_RAIL_ROUTES)
+                        _nav_link(_path, _label, _icon, active)
             # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
             # the leftover column height so they sit at the bottom edge (the column
             # is h-full flex-col), while still reading as the last items when the
@@ -1998,7 +2183,7 @@ def _layout(active: str, title: str):
     # Clicking a tab navigates; the per-page alert badges float on the tabs. A
     # SUBTAB slot sits directly beneath the strip — a page with its own view tabs
     # (e.g. Gamma's GEX/Charm/DEX/Vanna/Flow/Term) renders them there via
-    # ``main.subtab_slot()`` so they read as a second tab level, not page chrome.
+    # ``shell.subtab_slot()`` so they read as a second tab level, not page chrome.
     _SUBTAB_SLOT["el"] = None
     children = _group_children(active)
     if children:
@@ -2124,133 +2309,159 @@ def _root_to_desk():
     return RedirectResponse(url="/desk")
 
 
-@ui.page("/desk")
+@_page("/desk")
 def desk_page() -> None:
     with _layout("/desk", "Desk"):
         from pages import desk
         desk.render()
 
 
-@ui.page("/options/scanner")
+@_page("/options/scanner")
 def options_scanner_page() -> None:
     with _layout("/options/scanner", "Options · Market Scanner"):
         from pages.options import scanner
         scanner.render()
 
 
-@ui.page("/options/paper")
+@_page("/options/paper")
 def options_paper_page() -> None:
     with _layout("/options/paper", "Options · Paper Ledger"):
         from pages.options import paper
         paper.render()
 
 
-@ui.page("/options/captured")
+@_page("/options/captured")
 def options_captured_page() -> None:
     with _layout("/options/captured", "Options · Captured Signals"):
         from pages.options import captured
         captured.render()
 
 
-@ui.page("/options/portfolio")
+@_page("/options/portfolio")
 def options_portfolio_page() -> None:
     with _layout("/options/portfolio", "Options · Paper Account"):
         from pages.options import portfolio
         portfolio.render()
 
 
-@ui.page("/options/calculator")
+@_page("/options/shares")
+def options_shares_page() -> None:
+    with _layout("/options/shares", "Options · Shares"):
+        from pages.options import shares
+        shares.render()
+
+
+@_page("/options/calculator")
 def options_calculator_page() -> None:
     with _layout("/options/calculator", "Calculator"):
         from pages.options import calculator
         calculator.render()
 
 
-@ui.page("/options/swing")
+@_page("/options/swing")
 def options_swing_page() -> None:
     with _layout("/options/swing", "Options · Strategy Finder"):
         from pages.options import swing
         swing.render()
 
 
-@ui.page("/options/gamma")
-def options_gamma_page() -> None:
+@_page("/options/income")
+def options_income_page() -> None:
+    with _layout("/options/income", "Options · Income"):
+        from pages.options import income
+        income.render()
+
+
+@_page("/options/gamma")
+def options_gamma_page(view: str | None = None) -> None:
+    # ?view=Flow deep-links one view of this page; bare (view=None) is the
+    # private page exactly as it has always been -- the picker, and the four
+    # commands may_enqueue gates. render() coerces anything unknown back to GEX
+    # (_resolve_view is total), so a stranger's string cannot 500 the page.
+    #
+    # ⚠ A @ui.page function's signature IS its query-parameter surface, which is
+    # how live_main's late-binding ``_s`` became settable (see _register there).
+    # The rule that separates the two is "never let a parameter reach code", not
+    # "never take a parameter": this one is a declared str whose only destination
+    # is _resolve_view. A pin is deliberately NOT offered for ``symbol`` -- that
+    # one is interpolated into a Redis key name (gamma.snapshot_view) with no
+    # allow-list behind it, and nothing asks for it.
     with _layout("/options/gamma", "Dealer Positioning"):
         from pages.options import gamma
-        gamma.render()
+        gamma.render(view=view)
 
 
-@ui.page("/options/simulator")
+@_page("/options/simulator")
 def options_simulator_page() -> None:
     with _layout("/options/simulator", "Options · Simulator"):
         from pages.options import simulator
         simulator.render()
 
 
-@ui.page("/options/expected-move")
+@_page("/options/expected-move")
 def options_expected_move_page() -> None:
     with _layout("/options/expected-move", "Options · Expected Move"):
         from pages.options import expected_move
         expected_move.render()
 
 
-@ui.page("/options/rescue")
+@_page("/options/rescue")
 def options_rescue_page() -> None:
     with _layout("/options/rescue", "Options · Rescue"):
         from pages.options import rescue
         rescue.render()
 
 
-@ui.page("/options/matrix")
+@_page("/options/matrix")
 def options_matrix_page() -> None:
     with _layout("/options/matrix", "Opportunity Board"):
         from pages.options import matrix
         matrix.render()
 
 
-@ui.page("/options/flow")
+@_page("/options/flow")
 def options_flow_page() -> None:
     with _layout("/options/flow", "Flow Alerts"):
         from pages.options import flow
         flow.render()
 
 
-@ui.page("/sentiment")
+@_page("/sentiment")
 def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
         from pages import sentiment
         sentiment.render()
 
 
-@ui.page("/sentiment/bullbear")
+@_page("/sentiment/bullbear")
 def sentiment_bullbear_page() -> None:
     with _layout("/sentiment/bullbear", "Bull / Bear Map"):
         from pages import sentiment_bullbear
         sentiment_bullbear.render()
 
 
-@ui.page("/sentiment/sectors")
+@_page("/sentiment/sectors")
 def sentiment_sectors_page() -> None:
     with _layout("/sentiment/sectors", "Sector & Industry"):
         from pages import sentiment_sectors
         sentiment_sectors.render()
 
 
-@ui.page("/sentiment/rotation")
+@_page("/sentiment/rotation")
 def sentiment_rotation_page() -> None:
     with _layout("/sentiment/rotation", "Sector Rotation"):
         from pages import sentiment_rotation
         sentiment_rotation.render()
 
 
-@ui.page("/sentiment/rrg")
+@_page("/sentiment/rrg")
 def sentiment_rrg_page() -> None:
     with _layout("/sentiment/rrg", "RRG"):
         from pages import sentiment_rrg
         sentiment_rrg.render()
 
 
-@ui.page("/sentiment/momentum")
+@_page("/sentiment/momentum")
 def sentiment_momentum_page(level: str = "industry") -> None:
     # ?level=stock deep-links the Stocks view (the dropdown still switches it
     # in place); render() coerces anything unknown back to industry.
@@ -2259,91 +2470,91 @@ def sentiment_momentum_page(level: str = "industry") -> None:
         sentiment_momentum.render(level=level)
 
 
-@ui.page("/trade")
+@_page("/trade")
 def trade_page() -> None:
     with _layout("/trade", "Overview"):
         from pages import trade_overview
         trade_overview.render()
 
 
-@ui.page("/trade/evidence")
+@_page("/trade/evidence")
 def trade_evidence_page() -> None:
     with _layout("/trade/evidence", "Evidence"):
         from pages import trade_evidence
         trade_evidence.render()
 
 
-@ui.page("/trade/board")
+@_page("/trade/board")
 def trade_board_page() -> None:
     with _layout("/trade/board", "Rank Board"):
         from pages import trade_board
         trade_board.render()
 
 
-@ui.page("/trade/plan")
+@_page("/trade/plan")
 def trade_plan_page() -> None:
     with _layout("/trade/plan", "Trade Plan"):
         from pages import trade_plan_screen
         trade_plan_screen.render()
 
 
-@ui.page("/portfolio")
+@_page("/portfolio")
 def portfolio_page() -> None:
     with _layout("/portfolio", "Portfolio"):
         from pages import portfolio
         portfolio.render()
 
 
-@ui.page("/driver")
+@_page("/driver")
 def driver_page() -> None:
     with _layout("/driver", "Claude Trades"):
         from pages import driver
         driver.render()
 
 
-@ui.page("/eod")
+@_page("/eod")
 def eod_page() -> None:
     with _layout("/eod", "EOD Report"):
         from pages import eod
         eod.render()
 
 
-@ui.page("/eod/detail")
+@_page("/eod/detail")
 def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
 
 
-@ui.page("/market")
+@_page("/market")
 def market_page() -> None:
     with _layout("/market", "Market Trend & Sentiment · Market Dashboard"):
         from pages import market
         market.render()
 
 
-@ui.page("/status")
+@_page("/status")
 def status_page() -> None:
     with _layout("/status", "System Status"):
         from pages import status
         status.render()
 
 
-@ui.page("/settings")
+@_page("/settings")
 def settings_page() -> None:
     with _layout("/settings", "Settings"):
         from pages import settings
         settings.render()
 
 
-@ui.page("/manuals")
+@_page("/manuals")
 def manuals_page() -> None:
     with _layout("/manuals", "User Manuals"):
         from pages import manuals
         manuals.render()
 
 
-@ui.page("/terminate")
+@_page("/terminate")
 def terminate_page() -> None:
     with _layout("/terminate", "Stop All Services"):
         from pages import terminate
@@ -2351,8 +2562,8 @@ def terminate_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    # Lifecycle handlers register HERE, not at module scope: pages `import main`
-    # lazily at request time (e.g. pages/options/scanner.py for subtab_slot), and
+    # Lifecycle handlers register HERE, not at module scope: `wall.py` does
+    # `import main` lazily inside its route handler, and
     # because this script runs as __main__ that re-executes this file as a second
     # module object AFTER NiceGUI has started — where app.on_startup() raises and
     # 500s the page. Inside this guard it runs once, before ui.run().
@@ -2366,5 +2577,17 @@ if __name__ in {"__main__", "__mp_main__"}:
     # noisy `OSError [WinError 64] "network name is no longer available"` accept
     # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
     # Docker) dropped — and keeps the trading app off the LAN.
+    # ``favicon`` is a real FILE on purpose, and it is the only thing that
+    # answers ``/favicon.ico``. Every page already declares its own coloured SVG
+    # via ``_page``, but a browser that will not take an SVG favicon — Safari
+    # does not — asks for ``/favicon.ico`` regardless, and NiceGUI serves ITS
+    # OWN logo there unless handed a file (``favicon.create_favicon_route``
+    # only registers the route when ``is_file``). Measured on prod before this:
+    # the bytes at that path were byte-identical to nicegui/static/favicon.ico.
+    #
+    # This is the app-wide FALLBACK, not the per-page icon: ``get_favicon_url``
+    # reads ``page.favicon or app.config.favicon``, so the route colours still
+    # win on every page that has one.
     ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=window_title(),
+           favicon=_STATIC_DIR / "img" / "favicon.ico",
            dark=True, reload=False, show=False)

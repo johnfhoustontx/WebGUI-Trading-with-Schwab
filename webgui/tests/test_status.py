@@ -21,7 +21,8 @@ def test_component_targets_covers_every_tier():
 def test_component_targets_have_required_fields():
     for t in status.component_targets():
         assert set(t) >= {"key", "label", "tier", "kind", "url"}
-        assert t["kind"] in {"memurai", "proxy", "service", "self", "auth"}
+        assert t["kind"] in {"memurai", "proxy", "service", "self", "auth",
+                             "peer"}
 
 
 def test_memurai_is_tier3_and_proxy_tier1():
@@ -283,7 +284,7 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
     assert restartable == {"proxy", "sentiment", "options", "portfolio",
-                           "trade", "driver", "market", "webgui"}
+                           "trade", "driver", "market", "webgui", "webgui_live"}
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
@@ -294,8 +295,13 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
     monkeypatch.setattr(status, "OWNS_PROXY", False)
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
+    # webgui_live is here on purpose. The two withheld cards above are
+    # withheld because the RESOURCE is shared -- one proxy holding one rotating
+    # OAuth token, one Redis server behind two logical DBs. The public live
+    # screens share nothing: dev binds its own offset port and runs its own
+    # process, so this button reaches only this checkout.
     assert restartable == {"sentiment", "options", "portfolio", "trade",
-                           "driver", "market", "webgui"}
+                           "driver", "market", "webgui", "webgui_live"}
 
 
 # --- restart_command ----------------------------------------------------------
@@ -470,3 +476,75 @@ def test_schwab_auth_state_tolerates_an_older_proxy_without_the_field():
         "token_expired": False,
     })
     assert ok is True
+
+
+# --- the public live screens: a peer, probed but never nagged about ----------
+def test_the_live_screens_get_a_card_of_their_own():
+    """It is a process on this box like any other, so it is probed and named.
+    Its unit suffix is pinned against the generator by
+    ``tests/test_systemd_units.py`` -- the seam that would otherwise surface
+    only as a Restart button that errors."""
+    by_key = {t["key"]: t for t in status.component_targets()}
+    live = by_key["webgui_live"]
+    assert live["kind"] == "peer"
+    assert live["tier"] == "Tier 1"
+    assert str(status.NICEGUI_LIVE_PORT) in live["url"]
+    assert status.restart_spec(live)["name"] == "webgui_live"
+
+
+def test_a_dead_live_process_never_reaches_the_apps_own_health_signal():
+    """The rail badge, the drawer status card and the chime all come from
+    ``alerts.unhealthy_keys`` over main.py's health fan-out, which iterates
+    ``SERVICE_URLS`` -- the Tier-2 services. The live screens are a PEER of
+    this app, not a dependency of it: the public origin going down must not put
+    a warning on the trading UI's rail.
+
+    Pinned as the structural fact that makes it true (the peer is not a Tier-2
+    service key), because the alternative is discovering it the first time the
+    public site falls over mid-session and the rail claims a service alert."""
+    from repo_paths import SERVICE_PORTS, SERVICE_URLS
+    peers = [t for t in status.component_targets() if t["kind"] == "peer"]
+    assert peers, "no peer target at all -- this test would be vacuous"
+    for t in peers:
+        assert t["key"] not in SERVICE_PORTS
+        assert t["key"] not in SERVICE_URLS
+
+
+def test_the_live_probe_reads_alive_on_any_http_answer(monkeypatch):
+    """The question a liveness probe asks is whether the process is speaking
+    HTTP, not whether one route exists. ``/favicon.ico`` is registered by
+    NiceGUI unconditionally today; a future version that moved it must report
+    the truth rather than a false Offline.
+
+    And it must be HTTP, never a TCP connect -- a dead accept loop stays bound
+    and passes a connect, which is how a promote once left prod serving no UI.
+    """
+    seen = {}
+
+    class _Resp:
+        status_code = 404
+
+    def _get(url, timeout=None):
+        seen["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(status.requests, "get", _get)
+    target = {"key": "webgui_live", "label": "L", "tier": "Tier 1",
+              "kind": "peer", "url": "http://127.0.0.1:8501"}
+    out = status._probe_one(target)
+    assert out["up"] is True
+    assert seen["url"].startswith("http://127.0.0.1:8501/")
+    assert not seen["url"].endswith("/health")   # it serves no /health at all
+
+
+def test_the_live_probe_reports_down_when_nothing_answers(monkeypatch):
+    """Non-vacuity partner: 'any answer is up' must not degrade to 'always up'."""
+    def _boom(url, timeout=None):
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(status.requests, "get", _boom)
+    out = status._probe_one({"key": "webgui_live", "label": "L",
+                             "tier": "Tier 1", "kind": "peer",
+                             "url": "http://127.0.0.1:8501"})
+    assert out["up"] is False
+    assert "unreachable" in out["detail"]

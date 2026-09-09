@@ -21,3 +21,12 @@
 # systemd units, if ever committed, are read by a C daemon on Linux only.
 *.service text eol=lf
 *.target  text eol=lf
+
+# The public site's binary assets (deploy/site/assets/). Git's own heuristic
+# already treats these as binary, but it is a heuristic and core.autocrlf is
+# true on the Windows dev box: pinning them costs two lines and removes the
+# possibility that a checkout mangles a font or a screenshot. The failure would
+# be silent -- a corrupted woff2 does not error, it falls back to system-ui and
+# the page merely looks slightly wrong to everyone on the internet.
+*.woff2 binary
+*.webp  binary

@@ -40,7 +40,20 @@ python gex_collector.py
 ```
 
 
-**Test baseline: 1180 passed, 0 failed, 2 skipped** (re-measured 2026-08-21).
+**Test baseline: GREEN — 0 failed, 2 skipped.** No pass count is written down
+here on purpose. This suite's total moves with almost every change (it has
+*fallen* twice, when tests were deleted alongside the subjects they pinned), so a
+number in this file is stale within a week and reads as authority while it is
+wrong — which is exactly how the two contradictory baselines that used to sit in
+this file came about. **Measure your own before you start**, and compare the
+failing SET against it afterwards:
+
+```powershell
+..\.venv\Scripts\python -m pytest tests -q -rf
+```
+
+The only durable facts are the ones below: nothing is expected to fail, and the
+2 skips are the deterministic `test_dashboard_*` `importorskip`s.
 
 **There are no longer any expected failures.** The 8-11 that sat here for months
 were labelled "stale fixtures / timing-dependent / a missing doc file". On
@@ -73,9 +86,10 @@ the same way again - the reasoning `gex_collector.py` already applies to
 > "8 failures" is normal, a 9th (`test_per_leg_expiry_...`, which appeared the
 > morning of the audit) is invisible.
 
-**`pytest-randomly` is NOT installed in this venv** (verified 2026-08-07), so the
-`-p no:randomly` in older commands here has always been a no-op; run order is
-pytest's deterministic default.
+**`pytest-randomly` is NOT installed in this venv** (verified 2026-08-07), so
+`-p no:randomly` has always been a no-op; run order is pytest's deterministic
+default. It is no longer prescribed anywhere in this file — a flag that does
+nothing still teaches the next reader that run order here is a hazard it is not.
 
 
 There is no lint/format step configured. Black-Scholes math, DB schemas, and scoring are TDD; UI changes are verified manually.
@@ -173,7 +187,17 @@ docs/plans/YYYY-MM-DD-<topic>-plan.md      # how (TDD task list, exact files, te
 
 ## Commit conventions
 
-Small commits with conventional prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `test:`, `docs:`. Run `pytest tests/ -q -p no:randomly` before pushing and compare against the **1311 passed / 17 failed** baseline at the top of this file — **comparing the failing SET, not the count**, since the `test_dashboard_*` tests wander between fail and skip. (This line previously cited a "246/7 baseline" that had not been true for a very long time.)
+Small commits with conventional prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `test:`, `docs:`. Run `pytest tests -q -rf` before pushing and compare against the **green** baseline described in [Commands](#commands) — **comparing the failing SET, not the count**.
+
+⚠ This line has now been wrong twice, and both wrongnesses were the same mistake:
+writing a count down. It cited a "246/7 baseline" that had not been true for a
+very long time, and then a "**1311 passed / 17 failed**" one that contradicted
+the 1180/0/2 stated forty lines above it in the same file. The second was the
+harmful one — it told the reader to expect a standing red baseline of 17, which
+is the precise condition the test section here argues against (*once "8 failures"
+is normal, a 9th is invisible*). The suite is green; a count is not a baseline.
+`-p no:randomly` is gone with them: `pytest-randomly` is not installed in this
+venv, so that flag has always been a no-op.
 
 ## Further reading
 

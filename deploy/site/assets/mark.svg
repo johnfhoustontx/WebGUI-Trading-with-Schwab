@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NeuralStrike">
+  <!--
+    THE FLIP — the NeuralStrike mark.
+
+    Two chevrons converging on a level: dealer hedging pinned to the gamma
+    flip. Three shapes, which is what lets it survive 16px.
+
+    ⚠ TWO OPTICAL SIZES EXIST AND THEY ARE NOT THE SAME DRAWING. This is the
+    LARGE one, for anything at roughly 24px and up. `favicon.svg` carries a
+    heavier variant, because at 16px this file's 2.5-unit rule lands on 0.6 of
+    a device pixel and disappears. Scaling one drawing to both sizes is the
+    mistake; that is what optical sizing is for.
+
+    The rule is SOLID, not faded. Nocturne fades its page dividers, but a mark
+    has to survive one-colour reproduction — a stamp, vinyl, embroidery — and
+    a gradient cannot be cut.
+
+    Colours are literals here because a standalone SVG loaded through <img>
+    gets no stylesheet. The site's nav and hero inline this geometry instead
+    and drive it from CSS, so the mark takes each surface's own accent: the
+    Nocturne blurple here, the app's #6b86ff in the web GUI header. The brand
+    is carried by the FORM, not by a fixed hex.
+  -->
+  <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#9184d9"/>
+  <path d="M20 11 L32 23 L44 11" fill="none" stroke="#e9e9ed"
+        stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20 53 L32 41 L44 53" fill="none" stroke="#e9e9ed"
+        stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

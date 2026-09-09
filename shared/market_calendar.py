@@ -244,6 +244,11 @@ _DEFAULTS = {
         # Held separate from ``collection`` even though the bounds match, so
         # widening collection can never silently extend a public broadcast.
         "stream": {"start": "08:00", "end": "15:20"},
+        # The thumbnail captures behind the public live grid. Separate from
+        # ``stream`` for the same reason ``stream`` is separate from
+        # ``collection``: they happen to share bounds today, and one public
+        # surface must not move because another one was retimed.
+        "live_capture": {"start": "08:00", "end": "15:20"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.
@@ -260,8 +265,20 @@ _DEFAULTS = {
                     "midday": "11:30", "close": "15:15"},
         "action_alert": {"grace_min": 20, "morning": "10:00", "midday": "13:00",
                          "close": "15:00"},
+        # The 30-45 DTE income scan. One firing, but the NAMED shape (not
+        # ``{"at": …}``) because its gate returns a slot name, matching
+        # ``analyze``/``action_alert`` -- and because a second daily pass, if it
+        # is ever wanted, is then one line rather than a reshaped table.
+        "income": {"grace_min": 20, "morning": "08:45"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
+        # The marketing gallery recapture. ⚠ The ONE slot read by systemd
+        # rather than by a service scheduler: deploy/systemd/generate_units.py
+        # turns it into a timer's OnCalendar at unit-GENERATION time, so moving
+        # it needs `generate_units --install` + `daemon-reload`, not a restart.
+        # It still needs a default here like every other slot -- the TOML only
+        # overrides, and a TOML-only slot raises KeyError out of _slot_group.
+        "gallery_capture": {"at": "09:07"},
     },
     "alerts": {"fire_in_extended_hours": False},
 }
@@ -418,6 +435,28 @@ def session_at(now) -> Session:
 def is_regular_hours(now) -> bool:
     """True during the regular 08:30-15:00 CT session only."""
     return session_at(now) is Session.REGULAR
+
+
+def regular_session_has_opened(now) -> bool:
+    """True on a trading day from the 08:30 CT open through end of day.
+
+    Distinct from :func:`is_regular_hours`, which goes False at 15:00 CT. A
+    consumer asking "is today's move real yet?" wants True from the opening
+    bell until midnight CT -- the day's change does not stop being a fact at
+    the close.
+
+    False whenever the bell has NOT rung: weekends, holidays, and the pre-open
+    hours alike. All three share one trap -- a quote's percent field is then a
+    stale prior close or the proxy's literal 0.0 fallback, neither of which is
+    today's move. The pre-open branch is the one a caller is most likely to
+    loosen later to catch a GTH print; it is a real move, but it is not the one
+    this predicate is asked about.
+    """
+    ct = _ct_of(now)
+    if not is_trading_day(ct.date()):
+        return False
+    reg_start, _reg_end = _session_bounds("regular")
+    return ct.time() >= reg_start
 
 
 def mins_to_close(now):

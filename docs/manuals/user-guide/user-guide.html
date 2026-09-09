@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGUI Trading with Schwab — User Guide</title>
+<title>NeuralStrike — User Guide</title>
 <style>
 :root {
   --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
-  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --accent: #5d5294; --accent-soft: #efedf9; --code-bg: #f4f6fa;
   --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
 }
 * { box-sizing: border-box; }
@@ -18,6 +18,10 @@ body {
 }
 .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
 .titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.lockup { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.lockup .mark { flex: none; display: block; }
+.lockup .word { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.13em;
+                text-transform: uppercase; color: var(--accent); }
 .titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
 .titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -60,9 +64,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <body>
 <div class="wrap">
 <div class="titleblock">
-  <h1>WebGUI Trading with Schwab</h1>
-  <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-24</div>
+  <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
+  <h1>User Guide</h1>
+  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -75,6 +79,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#getting-started">Getting Started</a><ul>
 <li><a href="#starting-the-application">Starting the application</a></li>
+<li><a href="#the-public-live-screens">The public live screens</a></li>
 <li><a href="#what-runs-behind-the-scenes">What runs behind the scenes</a></li>
 <li><a href="#the-proxy-down-banner">The proxy-down banner</a></li>
 <li><a href="#waiting-for-service-placeholders">"Waiting for … service" placeholders</a></li>
@@ -87,7 +92,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
 <li><a href="#desk">Desk</a></li>
-<li><a href="#live-mirror">Live Mirror</a></li>
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
@@ -108,10 +112,15 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#market-scanner">Market Scanner</a></li>
 <li><a href="#strategy-finder">Strategy Finder</a></li>
+<li><a href="#income">Income</a><ul>
+<li><a href="#opening-one-in-the-paper-account">Opening one in the paper account</a></li>
+</ul>
+</li>
 <li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#captured-signals">Captured Signals</a></li>
 <li><a href="#paper-ledger">Paper Ledger</a></li>
 <li><a href="#paper-account">Paper Account</a></li>
+<li><a href="#shares">Shares</a></li>
 <li><a href="#rescue">Rescue</a></li>
 <li><a href="#overview">Overview</a></li>
 <li><a href="#evidence">Evidence</a></li>
@@ -134,16 +143,17 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#system-status">System Status</a></li>
 <li><a href="#settings">Settings</a></li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
+<li><a href="#sign-out">Sign out</a></li>
 </ul>
 </li>
 <li><a href="#faq-troubleshooting">FAQ &amp; Troubleshooting</a></li>
 </ul>
 </div>
 <h1 id="introduction">Introduction</h1>
-<p><strong>WebGUI Trading with Schwab</strong> is a single, browser-based control center for a
-Charles Schwab options-and-equities trading workflow. It replaces a collection of
-older desktop and dashboard tools with one web app you open in your browser at
-<strong>http://127.0.0.1:8500</strong>.</p>
+<p><strong>NeuralStrike</strong> is a single, browser-based control center for a Charles Schwab
+options-and-equities trading workflow. It replaces a collection of older desktop
+and dashboard tools with one web app you open in your browser at
+<strong>https://app.neuralstrike.co</strong>, behind a password and an authenticator code.</p>
 <p>From this one interface you can:</p>
 <ul>
 <li><strong>Scan</strong> for 0-DTE and swing options credit-spread opportunities and see each
@@ -159,9 +169,10 @@ older desktop and dashboard tools with one web app you open in your browser at
 <li><strong>Watch</strong> an autonomous paper trader pick and size defined-risk spreads.</li>
 </ul>
 <blockquote>
-<p><strong>This is a single-user, local application.</strong> It runs on your own machine and
-talks to Schwab through a local gateway. There are no accounts to log into in
-the web app itself.</p>
+<p><strong>This is a single-user application.</strong> It runs on your own machine and talks
+to Schwab through a local gateway. Reaching it from anywhere else goes through
+a sign-in — your password and an authenticator code — and the app itself still
+listens only on the host.</p>
 </blockquote>
 <hr />
 <h1 id="prerequisites">Prerequisites</h1>
@@ -170,22 +181,23 @@ the plain-English checklist — the <em>Technical Reference</em> has the full de
 (exact package versions, environment variables, etc.).</p>
 <h2 id="the-essentials-required">The essentials (required)</h2>
 <ul>
-<li><strong>Windows 10 or 11.</strong> The app is Windows-first — the launchers are <code>.bat</code> files,
-  the alert pop-ups use Windows notifications, and the data backbone (Memurai) is a
-  Windows service.</li>
+<li><strong>A Linux host.</strong> The stack runs on Ubuntu Server 24.04 LTS as <code>systemd</code> user
+  services. You do not need a desktop on it — you reach the app from your own
+  computer over an SSH tunnel (see <em>Opening the app</em>, below).</li>
 <li><strong>Python 3.11 or newer.</strong> Install it from python.org if you don't have it.</li>
-<li><strong>A one-time setup</strong> in the project folder, which creates the virtual environment
-  the launchers expect and installs everything:</li>
+<li><strong>A one-time setup</strong> in the project folder, which creates the virtual
+  environment the units expect and installs everything:</li>
 </ul>
-<p><code>powershell
-  python -m venv .venv
-  .\.venv\Scripts\python -m pip install -r requirements.txt</code></p>
+<p><code>bash
+  uv venv --python 3.11 .venv &amp;&amp; uv pip install -r requirements.lock</code></p>
+<p>Use the <strong>lock</strong>, not <code>requirements.txt</code> — the lock is what the host installs,
+  and a package present in one but not the other ships missing.</p>
 <ul>
-<li><strong>Memurai running.</strong> Memurai is a Windows version of Redis — the local "backbone"
-  the app's parts talk through. It installs as a <strong>Windows service on port 6379</strong>;
-  start it from <strong>services.msc</strong> if it isn't already running. <strong>Nothing works
-  without it</strong> — every page will just say "Waiting for … service."</li>
-<li><strong>A modern web browser</strong> to open the app at <code>http://127.0.0.1:8500</code>.</li>
+<li><strong>Redis running.</strong> The local "backbone" the app's parts talk through, on port
+  6379. <code>sudo systemctl enable --now redis-server</code>. <strong>Nothing works without it</strong> —
+  every page shows a "Waiting for … service" placeholder.</li>
+<li><strong>A modern web browser</strong> to open the app at <strong>https://app.neuralstrike.co</strong>
+  (or <code>http://127.0.0.1:8500</code> if you are sitting at the machine itself).</li>
 </ul>
 <h2 id="schwab-account-required-for-live-data">Schwab account (required for live data)</h2>
 <p>The app reads market data and your positions from Schwab, so you need:</p>
@@ -218,9 +230,9 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Memurai), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
-and <strong>8500</strong> (the web app). If another program is already using one of them, the
-matching piece won't start.</p>
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
+<strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
+is already using one of them, the matching piece won't start.</p>
 <hr />
 <h1 id="getting-started">Getting Started</h1>
 <h2 id="starting-the-application">Starting the application</h2>
@@ -229,26 +241,71 @@ all together with one of the launcher scripts in the project root:</p>
 <table>
 <thead>
 <tr>
-<th>Launcher</th>
+<th>Command</th>
 <th>What it does</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>start_all.bat</code></td>
-<td>Opens the gateway, the six domain services, and the web app in <strong>eight separate console windows</strong>, then opens your browser.</td>
+<td><code>systemctl --user start trading-prod.target</code></td>
+<td>Starts the gateway, the six domain services, the web app and the public live screens.</td>
 </tr>
 <tr>
-<td><code>start_all_wt.bat</code></td>
-<td>Same eight processes, but as <strong>eight tabs in one Windows Terminal window</strong> (less desktop clutter; requires Windows Terminal).</td>
+<td><code>systemctl --user list-units 'trading-prod*'</code></td>
+<td>Shows what is running.</td>
+</tr>
+<tr>
+<td><code>journalctl --user -u trading-prod-options_svc -f</code></td>
+<td>Follows one service's log.</td>
 </tr>
 </tbody>
 </table>
-<p>After the windows finish loading, the app is available at:</p>
-<pre><code>http://127.0.0.1:8500
+<p>They also start <strong>automatically when the machine boots</strong> — you do not normally
+run anything by hand.</p>
+<p><strong>Opening the app.</strong> From any browser, go to:</p>
+<pre><code>https://app.neuralstrike.co
 </code></pre>
-<p>The browser usually opens automatically. If it does not, open that address
-yourself.</p>
+<p>The app itself still listens <strong>only on the host</strong>, on <code>127.0.0.1:8500</code>. What
+makes that address reachable is a small web server on the same machine which
+terminates the certificate and passes the request through — the app is never
+exposed to the network directly.</p>
+<p><strong>You will be asked to sign in</strong>: your password, then the current 6-digit code
+from your authenticator app. Tick <strong>Remember this device</strong> and that browser will
+not ask again for a while; a new browser, or a private window, always will.</p>
+<p>Two things worth knowing when it refuses you:</p>
+<ul>
+<li>The message is deliberately the same for a wrong password, a wrong code and
+  too many attempts. It will not tell you which one you got wrong.</li>
+<li>A code can only be used <strong>once</strong>. If you have just signed in and immediately
+  hit something that asks for a code again — stopping the stack does — wait for
+  your authenticator to roll to the next one.</li>
+</ul>
+<p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
+skips the sign-in, which is what the wall display uses.</p>
+<h2 id="the-public-live-screens">The public live screens</h2>
+<p>Fourteen of the app's screens are also published <strong>read-only and without any
+sign-in</strong> on a second address, <code>https://live.neuralstrike.co</code> — the Desk,
+Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
+Industry, Sector Rotation, RRG, Momentum, Gamma, Net Prem and the two Premium
+Divergence screens. <code>https://neuralstrike.co/live.html</code> is a thumbnail menu of
+them.</p>
+<p>Three things to know:</p>
+<ul>
+<li><strong>They are not redacted.</strong> The Desk shows your open paper and driver positions,
+  the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
+  Anyone with the address can read them. That is a deliberate choice — the book
+  is paper only — but it is worth knowing before you show someone the link.</li>
+<li><strong>They are a separate program.</strong> Nothing anyone does there can reach your own
+  app: it holds no login, sends no commands, and cannot write anything. Its
+  health has its own card on <strong>System Status</strong>; a red one means the public site
+  is down and your own screens are unaffected.</li>
+<li><strong>To stop publishing</strong>, use <strong>Stop All Services</strong> — it stops both web apps —
+  or, if you want to keep working, <code>systemctl --user stop trading-prod-webgui_live</code>
+  on the machine, which leaves the rest of the stack alone.</li>
+</ul>
+<p>The thumbnails on the menu page are refreshed on a <strong>15-minute timer</strong>, on trading
+days between 08:00 and 15:20 Central — so a slightly old-looking tile is normal,
+and outside those hours expected. The screen behind it is always live.</p>
 <h2 id="what-runs-behind-the-scenes">What runs behind the scenes</h2>
 <p>You don't interact with these directly, but it helps to know they exist:</p>
 <ul>
@@ -257,7 +314,9 @@ yourself.</p>
   handles ordering for you).</li>
 <li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Driver, and
   Market. Each one powers its matching page(s).</li>
-<li><strong>Memurai (Redis)</strong> — a local data backbone the services and the web app share.</li>
+<li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
+  <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
+<li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
 </ul>
 <h2 id="the-proxy-down-banner">The proxy-down banner</h2>
 <p>If you ever see a <strong>red banner</strong> across the top of every page saying the proxy is
@@ -269,9 +328,12 @@ restart components.</p>
 message, that service hasn't started or has stopped. Start the full stack with a
 launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
 <h2 id="stopping-everything">Stopping everything</h2>
-<p>Use <strong>Stop All Services</strong> at the foot of the rail, or run <code>stop_all.bat</code>. This stops the
-gateway, the six services, and the web app. (Memurai is intentionally left
-running — it's a shared Windows service.)</p>
+<p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
+authenticator code before it will do anything — or run
+<code>systemctl --user stop trading-prod.target</code>. This stops the
+gateway, the six services, the web app <strong>and the public live screens</strong> — so the
+public site goes dark until you start the stack again. (Redis is intentionally
+left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
 <h1 id="the-interface">The Interface</h1>
 <h2 id="layout">Layout</h2>
@@ -364,9 +426,11 @@ question, plus a block of machine controls pinned to the bottom.</p>
 </tbody>
 </table>
 <p><strong>System controls</strong> sit at the foot of the rail, below a separator: <strong>System
-Status</strong>, <strong>Settings</strong>, and a red-outlined <strong>Stop All Services</strong> button. They are
-kept apart because none of them is a step in a trading workflow, and the
-destructive one is placed last so overshooting Settings cannot land on it.</p>
+Status</strong>, <strong>Settings</strong>, a red-outlined <strong>Stop All Services</strong> button, and <strong>Sign
+out</strong>. They are kept apart because none of them is a step in a trading workflow.
+Sign out is last on purpose: on a phone the bottom edge is the easiest thing to
+hit, so the slot goes to the control that costs nothing if you hit it by mistake,
+and the destructive one sits above it.</p>
 <p>Two groupings are worth explaining because they are deliberate:</p>
 <ul>
 <li><strong>Dealer Positioning, Opportunity Board and Flow Alerts sit under MARKETS, not
@@ -416,7 +480,8 @@ session.</p>
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.</li>
 <li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group. It opens this User Guide, the
-  <strong>Reference Guide</strong>, and the Technical and API references in your browser.</li>
+  <strong>Reference Guide</strong>, the Technical and API references, and the <strong>Options
+  Glossary</strong> in your browser.</li>
 </ul>
 <blockquote>
 <p><strong>If you want to understand <em>why</em> a page exists rather than how to operate it,
@@ -510,57 +575,6 @@ you.</p>
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.</li>
 </ul>
-<hr />
-<h2 id="live-mirror">Live Mirror</h2>
-<p><strong>Route:</strong> <code>/desk/live</code> — pinned in the rail directly under <strong>Desk</strong>, and it
-<strong>opens in a new browser tab</strong>, so the tab you were working in stays where it was.</p>
-<p><strong>The Desk, on a screen you are not sitting at.</strong> Same panels, same numbers, same
-layout, built as a plain web page instead of an app page. It keeps updating on a
-wall display, a spare monitor, a tablet or a phone, and it picks itself back up on
-its own after the machine sleeps, the Wi-Fi drops, or the browser suspends the tab.</p>
-<p><strong>How to use it:</strong> open it once, drag the window to the display you want it on, and
-leave it. Clicking a row still opens the page it came from, and <strong>Open the full
-Desk</strong> at the top left brings you back to the app.</p>
-<p><strong>What is different from the Desk:</strong></p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Desk</th>
-<th>Live Mirror</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Panels</td>
-<td>2x2, stacking to one column on a narrow screen</td>
-<td><strong>always 2x2</strong></td>
-</tr>
-<tr>
-<td>After sleep or a dropped connection</td>
-<td>reload it</td>
-<td><strong>reconnects itself</strong></td>
-</tr>
-</tbody>
-</table>
-<p>The layout difference is deliberate: a screen you have pinned somewhere should not
-rearrange itself. On a narrow display the columns tighten and long values shorten
-with an ellipsis instead of the panels moving.</p>
-<p><strong>The indicator at the top right tells you whether to trust the screen:</strong></p>
-<ul>
-<li><strong>Live</strong> — connected, and what you are looking at is current.</li>
-<li><strong>Reconnecting</strong> — the connection dropped and the page is retrying by itself. The
-  numbers are the last good ones until it says Live again.</li>
-</ul>
-<p><strong>The countdown keeps ticking every second even when nothing else changes</strong>, and
-that is the point: a frozen page and a quiet market look identical from across the
-room, and the moving clock is how you tell them apart.</p>
-<p><strong>Every number comes from the Desk's own code</strong>, so the mirror cannot drift from
-it. If the two ever disagree, one of them has stopped updating — check the
-indicator. The same honesty rules apply, because they are the same rules: walls are
-hidden rather than zeroed when the gamma feed is stale, and a missing reading shows
-a dash rather than a zero.</p>
-<p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
 <p>The four rail entries in this section establish the conditions a trade would be
@@ -1075,6 +1089,79 @@ parameters and press <strong>Scan</strong>:</p>
 </ul>
 <p>Results appear in the same signal table (with the same Score chip, Grade, and the
 three per-row action buttons) and detail panel as the Market Scanner.</p>
+<h2 id="income">Income</h2>
+<p><strong>Route:</strong> <code>/options/income</code>.</p>
+<p>A board of premium worth <strong>selling</strong> 30 to 45 days out, ranked across the whole
+watchlist. The scan runs once each morning on its own schedule — there is no
+Refresh — and the status line tells you how many symbols it covered, when it ran,
+and whether any of them failed.</p>
+<p>Three structures share the board:</p>
+<ul>
+<li><strong>Put spread</strong> — a put credit spread, for a symbol you do not expect to fall much.</li>
+<li><strong>Call spread</strong> — a call credit spread, for one you do not expect to rise much.</li>
+<li><strong>Cash-secured put</strong> — a single short put, for a symbol you would be content to own
+  at that strike.</li>
+<li><strong>Covered call</strong> — a call written against stock the paper account already holds
+  (see <strong>Shares</strong>), never struck below what the shares cost.</li>
+</ul>
+<p><strong>The columns:</strong> Symbol · Side · Strikes · Expiry · DTE · <strong>Credit $</strong> · <strong>Capital $</strong>
+· <strong>Return on capital</strong> · <strong>Yield on cost</strong> · <strong>Total return if called</strong> · PoP % ·
+Breakeven · <strong>Earnings</strong> · Score. Click any column to re-sort.</p>
+<p><strong>Yield on cost</strong> and <strong>Total return if called</strong> apply to covered calls only, and the
+other three structures show a dash — they own no shares, so there is no cost to
+measure against. Yield on cost is the premium alone as a percentage of what the shares
+cost you. Total return if called adds the gain up to the strike, which is what you
+actually collect if the stock is called away — and it is the number that decides
+between a fat premium at a strike barely above your basis and a thin one well above
+it. (It reads almost the same as Return on capital on these rows, but not quite:
+Return on capital is after the commission, and it is the only one of the two the
+spreads and the cash-secured put have at all.)</p>
+<p><strong>Credit and Capital are both per contract, in dollars.</strong> Capital is the cash the
+trade actually commits — for a spread that is its width less the credit; for a
+cash-secured put it is the strike all the way down to zero, which is far larger.
+<strong>Return on capital</strong> is the credit measured against that, and it is the only column
+that makes the two comparable: a $60 credit and a $640 credit say nothing until you
+know that one risks $441 and the other $39,361.</p>
+<p><strong>The Earnings column</strong> reports what the earnings calendar knows about the symbol:</p>
+<ul>
+<li><strong>None scheduled</strong> — checked, and nothing is coming.</li>
+<li><strong>After expiry</strong> — a report is scheduled, but it lands after this expiration.
+  Anything reporting <em>before</em> expiration was already removed from the scan.</li>
+<li><strong>Not checked</strong> — the calendar has no entry for that symbol, so the check could not
+  run. This means <em>unknown</em>, not <em>clear</em>. Without an Alpha Vantage API key configured
+  it is what every row will say.</li>
+</ul>
+<p>An empty board is a normal outcome, not a fault — the status line says how many
+symbols were scanned so you can tell "nothing qualified today" from "the scan never
+ran".</p>
+<h3 id="opening-one-in-the-paper-account">Opening one in the paper account</h3>
+<p>A <strong>cash-secured put</strong> and a <strong>covered call</strong> carry a wallet button at the end of
+their row. It opens that trade in the <strong>paper account</strong> — the book with cash and
+share lots behind it, which is the one an assignment can turn into stock. The two
+credit spreads do not have the button: their route is <strong>Send to Paper trade</strong> on
+the Market Scanner, which writes the paper <em>ledger</em>, a separate book that tracks
+marks rather than cash.</p>
+<p>Press it, confirm the number of contracts, and the account answers in a moment —
+either a confirmation, or a refusal saying exactly what stopped it. It will refuse
+when:</p>
+<ul>
+<li>the account cannot secure the put (the message names the collateral needed and
+  the cash you have);</li>
+<li>there is no share lot behind a covered call, or the lot was already called away
+  since this morning's scan;</li>
+<li>a covered call would not cover the lot <strong>whole</strong> — 300 shares is three contracts,
+  not one, because the book delivers a lot in one piece (the message names the
+  number that works);</li>
+<li>a covered call is already open on that symbol — the book records coverage per
+  symbol, so it cannot tell a second one apart from the first;</li>
+<li>the price has moved more than 15% from what the board shows, which after a
+  morning scan is common enough to be worth checking rather than filling;</li>
+<li>there is no live quote for the contract at all, or the account is halted for the
+  session.</li>
+</ul>
+<p><strong>You are filled at the live price, not the board's.</strong> The board was scanned this
+morning; the number you see is what ranked the row, and the number you get is what
+the contract is worth when you press the button.</p>
 <h2 id="expected-move">Expected Move</h2>
 <p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
 <p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to
@@ -1139,6 +1226,39 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself. (The
 autonomous driver's separate account re-prices every minute; this one does not.)</p>
 </blockquote>
+<h2 id="shares">Shares</h2>
+<p><strong>Route:</strong> <code>/options/shares</code>.</p>
+<p>The <strong>stock</strong> the paper account holds. Options normally expire worthless or are closed;
+a <strong>cash-secured put</strong> that finishes below its strike does neither — it is exercised
+against you and becomes 100 shares per contract, bought at the strike. Every such lot
+appears here.</p>
+<p><strong>The columns:</strong> Symbol · Shares · <strong>Cost basis $/share</strong> · <strong>Cost $</strong> ·
+<strong>Mark (not tracked)</strong> · Unrealized $ · <strong>How acquired</strong> · Held since ·
+<strong>Covering call</strong>. Click any column to re-sort.</p>
+<p><strong>How acquired</strong> says where the lot came from. <em>Assigned</em> means a short put was
+exercised against you — which is how nearly every lot arrives — and <em>Bought</em> means it
+was entered by hand. The two are not interchangeable: an assigned lot's cost basis is
+the strike you sold, which may be well above what the shares were worth when they
+landed.</p>
+<p><strong>Mark and Unrealized are deliberately blank.</strong> Nothing in this app re-prices a bare
+share, so there is no current value to report, and printing the cost basis in the Mark
+column would look like a live quote. To see what a holding is worth right now, look the
+symbol up on <strong>Market Dashboard</strong> or in your broker.</p>
+<p><strong>Covering call</strong> shows the call already written against that symbol, as strike and
+expiry — for example <code>210c 10/16</code>, with <code>×2</code> if more than one contract. A blank cell
+means the shares are uncovered: all the upside is yours and no premium is being
+collected. A call <em>spread</em> on the same symbol is not a covering call and is not shown
+here. The match is by <strong>symbol, not by lot</strong> — the book keeps no record of which
+shares a call was written against — so if you hold two lots of one name and have
+written one call, that call appears on both rows.</p>
+<p>There is nothing to press. Lots appear when the engine settles an in-the-money short
+put, and disappear when a covered call written against them finishes <strong>above</strong> its
+strike — the shares are called away at that strike, and the cash comes back with the
+gain booked as realised P&amp;L. (A call that finishes at or below its strike expires
+worthless: you keep the premium and the shares stay.) There is no way to sell a lot
+by hand; being called away is the only exit the book has.</p>
+<p>What lots are <em>for</em> is the <strong>Income</strong> tab, which screens covered calls against them
+and never offers a strike below their cost basis.</p>
 <h2 id="rescue">Rescue</h2>
 <p><strong>Route:</strong> <code>/options/rescue</code>.</p>
 <p>An advisory <strong>and</strong> one-click-apply tool for <strong>tested credit spreads</strong> — put credit
@@ -1374,8 +1494,8 @@ with a stop button.</p>
 <li>A <strong>Performance</strong> view listing closed trades with their exit reason (<em>Target hit</em>,
   <em>Delta stop</em>, <em>Time stop</em>, <em>Money stop</em>).</li>
 </ul>
-<p><strong>When it runs:</strong> a 09:28 ET morning checkpoint, then every 30 minutes within an
-entry window of <strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
+<p><strong>When it runs:</strong> every 30 minutes within an entry window of
+<strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
 so the structure is readable, and no <em>new</em> entries are taken in the last half hour.
 Open positions are re-priced every minute during market hours regardless.</p>
 <blockquote>
@@ -1479,13 +1599,15 @@ not reconcile to each other — that is correct, not a bug.</p>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)</p>
-<p>A simple index that links the four manuals — each opens in a new browser tab:</p>
+<p>A simple index that links the five manuals — each opens in a new browser tab:</p>
 <ul>
 <li><strong>User Guide</strong> — how to use the app (this document).</li>
 <li><strong>Reference Guide</strong> — what each tab and sub-tab is for, why it matters and when to
   open it, starting from a one-page summary of the whole app.</li>
 <li><strong>Technical Reference</strong> — the math behind every number.</li>
 <li><strong>API / Developer Reference</strong> — the integration surface for developers.</li>
+<li><strong>Options Glossary</strong> — plain-English definitions of every term the app puts on
+  screen, from what a contract is to what dealer gamma means.</li>
 </ul>
 <p>The Word (<code>.docx</code>) copies live alongside the HTML under <code>docs/manuals/</code>.</p>
 <hr />
@@ -1498,9 +1620,9 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Memurai, the Schwab gateway, the six services, and the web
-  app itself, each with Online/Offline and its tier. The gateway's card also shows
-  the <strong>Schwab auth</strong> state.</li>
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, the web app
+  itself, and the public live screens beside it, each with Online/Offline and its
+  tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
   browser tab. Use it when the auth line says the login has expired.</li>
 <li>A <strong>data-freshness</strong> table showing each domain's latest cache write and its age.
@@ -1512,14 +1634,14 @@ in a trading workflow, which is why they sit apart.</p>
 <blockquote>
 <p><strong><code>token_expired: true</code> on the gateway is routine</strong> — it refreshes itself. Only a
 missing or expired <em>refresh</em> token needs <strong>Re-authorize</strong>.</p>
-<p><strong>Restart order matters:</strong> Memurai first, then the gateway, then services, then the
+<p><strong>Restart order matters:</strong> Redis first, then the gateway, then services, then the
 web app. A service restarted while the gateway is down will start and then fail to
 fetch anything.</p>
 </blockquote>
 <h2 id="settings">Settings</h2>
 <p><strong>Route:</strong> <code>/settings</code> — a standalone item at the <strong>foot of the rail</strong>, with System
 Status and Stop All Services.</p>
-<p>Preferences, all saved on your machine (there is no login):</p>
+<p>Preferences, all saved on your machine:</p>
 <ul>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
@@ -1567,12 +1689,35 @@ group, next to EOD Report.</p>
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><strong>Route:</strong> <code>/terminate</code> — the red button at the foot of the rail.</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
-(behind a confirmation) stops the gateway, the six services, and the web app.</p>
+(behind a confirmation) stops the gateway, the six services, the web app <strong>and the
+public live screens</strong> — the public site goes dark with it.</p>
+<p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
+code from your authenticator app into the dialog and press <strong>Stop everything</strong>. A
+wrong, missing, or already-used code refuses the stop and says so — nothing is
+stopped, and you can wait for the next code and try again. A code you spend here
+cannot then be used to sign in (and vice versa), so if you have just signed in,
+wait for the next one.</p>
 <blockquote>
 <p><strong>This also stops the page you're on</strong> — it will become unresponsive right after
-you confirm, by design. Memurai is left running. Re-launch with <code>start_all.bat</code>
-or <code>start_all_wt.bat</code>.</p>
+you confirm, by design. Redis is left running. Re-launch with
+<code>systemctl --user start trading-prod.target</code>.</p>
 </blockquote>
+<hr />
+<h2 id="sign-out">Sign out</h2>
+<p><strong>Route:</strong> <code>/logout</code> — the last item in the rail, below Stop All Services.</p>
+<p>Ends this browser's session and returns you to the sign-in page. It also forgets a
+<strong>trusted device</strong>, so the next sign-in asks for your authenticator code again —
+which is the point on a borrowed or shared machine.</p>
+<ul>
+<li>It signs out <strong>this browser only</strong>. Other devices you are signed in on stay
+  signed in.</li>
+<li>Nothing running is affected. The services, the collectors, the scheduled scans
+  and the autonomous driver all carry on. Signing out is not stopping anything —
+  that is the page above it.</li>
+</ul>
+<p>It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
+the easiest thing to hit, so the harmless control gets that slot and the
+stop-everything button sits above it.</p>
 <hr />
 <h1 id="faq-troubleshooting">FAQ &amp; Troubleshooting</h1>
 <p><strong>A red "proxy unreachable" banner is on every page.</strong>

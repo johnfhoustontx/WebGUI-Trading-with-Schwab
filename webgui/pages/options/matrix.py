@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages import busy as _busy
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from nicegui import run, ui
 
 from pages.ui_guard import guard_async
@@ -87,12 +88,28 @@ def signal_summary(payload):
 
 
 def matrix_columns():
+    # Each label names the READING, not the field behind it.
+    #
+    # WARNING: "Call flow" / "Put flow" are not prices. Those cells hold call and
+    # put ACCELERATION arrows (hot / cool / steady / flat), and a header reading
+    # just "Call" gives a reader every reason to expect a price under it.
+    #
+    # WARNING: "Open signals" is a COUNT and "Signal" is the buy/neutral/sell
+    # verdict. They sat two columns apart as "Sig" and "Signal". The COUNT is
+    # what got renamed: /desk's board panel already prints SIGNAL for the
+    # verdict, and a second name for one quantity is the drift these passes
+    # exist to close.
+    #
+    # Symbol / Price / Net premium / Signal / Score are /desk's own words for
+    # the same quantities its Opportunity Board panel shows. "$M" rides on the
+    # premium label because this cell is a bare number in millions.
     spec = [
-        ("symbol", "Ticker"), ("spot", "Spot"), ("day_pct", "Day %"),
-        ("trend", "Trend"), ("call_accel_disp", "Call"), ("put_accel_disp", "Put"),
-        ("pc_ratio", "P/C"), ("net_prem_m", "Net $M"), ("gex_regime", "GEX"),
-        ("n_signals", "Sig"), ("n_alerts", "Flow"), ("signal_label", "Signal"),
-        ("hotness", "Hot"),
+        ("symbol", "Symbol"), ("spot", "Price"), ("day_pct", "Day %"),
+        ("trend", "Trend"), ("call_accel_disp", "Call flow"),
+        ("put_accel_disp", "Put flow"), ("pc_ratio", "P/C"),
+        ("net_prem_m", "Net premium $M"), ("gex_regime", "Vs flip"),
+        ("n_signals", "Open signals"), ("n_alerts", "Flow alerts"),
+        ("signal_label", "Signal"), ("hotness", "Score"),
     ]
     return [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
             for f, l in spec]
@@ -154,7 +171,7 @@ def status_text(payload):
     waiting note."""
     p = payload or {}
     if not p:
-        return "Waiting for the options service…"
+        return _copy.WAITING_OPTIONS
     n = len(p.get("rows") or [])
     parts = [f"{n} symbol" + ("" if n == 1 else "s")]
     if p.get("session_date"):
@@ -224,7 +241,10 @@ def render():
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
         with ui.column().classes(f"{CARD} w-full gap-2"):
             ui.label("Opportunity Board").classes(f"text-h6 {LABEL}")
-            ui.label("Every watchlist stock at a glance — sorted by hotness") \
+            # This page has NO row click-through, so sorting is the only thing
+            # a reader does here - and nothing on screen said so.
+            ui.label("Every watchlist symbol on one row, ranked by how much is "
+                     "going on. Click any column to re-sort.") \
                 .classes(EYEBROW)
             # Summary band: signal counts across the whole grid.
             with ui.row().classes("items-center gap-2 flex-wrap pt-1"):
@@ -232,7 +252,7 @@ def render():
                 buy_chip = ui.label("Buy 0").classes(_SUM_BUY_CLASS)
                 neutral_chip = ui.label("Neutral 0").classes(_SUM_NEUTRAL_CLASS)
                 sell_chip = ui.label("Sell 0").classes(_SUM_SELL_CLASS)
-            status = ui.label("Waiting for the options service…").classes(EYEBROW)
+            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
             table_box = ui.element("div").classes("w-full")
             with table_box:
                 table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",

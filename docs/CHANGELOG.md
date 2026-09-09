@@ -4,6 +4,1781 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-09 (**A Desk panel now scrolls sideways INSIDE
+itself, with the column that names each row pinned**, instead of the whole
+document sliding and taking the panel heading and the symbol with it. Design +
+plan: [`2026-09-08-panel-scroll-design.md`](plans/2026-09-08-panel-scroll-design.md)
+/ [`-plan.md`](plans/2026-09-08-panel-scroll-plan.md).)
+
+- **⚠ THIS REVERSES A DOCUMENTED DECISION, and the reversal is the interesting
+  part.** `desk.py` had held since 2026-08-20 that "`overflow-x-auto` was
+  deliberately not used as the fallback: a dashboard you scroll sideways to read
+  defeats the page's purpose." That objection was right and its conclusion did
+  not hold: refusing a panel scroll never prevented the sideways scroll, it
+  **relocated it to the document**, where the reader loses the heading and the
+  identity column as well. The choice was never scroll-vs-no-scroll but WHERE.
+  The note is corrected in place, per the maintenance rule.
+
+- **Measured before anything was changed, and the scope collapsed.** A new
+  `tools/measure_screen_widths.py` drove a real browser over all fourteen
+  published screens at six widths. **Only `desk` overflows** — the other thirteen
+  are clean from 1280 to 2560, and `flow` was already solved by Quasar's own
+  `.q-table__middle { overflow-x: auto }`. The plan had provisioned for changing
+  thirteen page modules; it changed one.
+
+- **⚠ THE IDENTITY COLUMN IS NOT FIRST ON THREE OF FOUR PANELS**, which is the
+  trap this work nearly shipped into. Dealer leads with SYMBOL, but Board leads
+  with SCORE, Flow with TIME and Positions with **BOOK** — so pinning
+  `:first-child` everywhere would have frozen a `PAPER` chip beside ten scrolling
+  numbers and called it done. Those three pin **two** cells (through the symbol),
+  dealer pins one; the cost is 125–137px and is only ever spent while the panel
+  is too narrow to show everything.
+
+- **The min-width is DERIVED from the panel's own track floors**, never typed —
+  `webgui/pages/panel_scroll.py`, pure over `re`. The anchor is a number
+  `desk.py` already stated twice: `POS_GRID`'s ten floors sum to 725, + 9 gaps +
+  the card box = **839**, and the card's `offsetWidth` measures exactly 839 at
+  the width its overflow first reaches 0. The discriminating test mutates a floor
+  and asserts the value moves — a typed 839 passes the anchor on the day it is
+  written and rots at the first track change.
+
+- **Two numbers in `desk.py` were right and read as wrong**, and both now say
+  which question they answer. **1877 is the PRIVATE app's boundary**; the public
+  origin has no icon rail, so its equivalent is 1809. And "clips below 1650"
+  measured DOCUMENT overflow, which the padding chain defers ~140px past the
+  point a panel stops containing its rows — in between, rows paint out through
+  the card with no scrollbar to show for it, which is the worse symptom.
+
+- **`shell.PANEL_SCROLL_CSS`, injected by BOTH entrypoints** so the published
+  screens and the app cannot diverge. The sticky cell is transparent and a sticky
+  `::after` supplies the opaque backdrop, so the row's hover wash still reads
+  over the card's gradient. ⚠ Accepted cost: `overflow-x: auto` computes
+  `overflow-y` to `auto` too, so the arrival glow's outer halo clips at the
+  container edge — a halo, not a row.
+
+- **Selenium is a DEV dependency only** (`requirements-dev.txt`, never
+  `requirements.lock` — prod installs the lock and does not test layout). It
+  earns its place on one fact: `--headless --screenshot` cannot report element
+  widths and the Claude Browser pane returns `viewport: 0` on this app, so a
+  change entirely about widths had no way to be measured.
+
+- **Tests at the time:** webgui **3553 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1529 passed**.
+
+---
+
+**Last updated:** 2026-09-08 (**The marketing site's three loose ends, closed
+together: Live screens takes the primary button now that the page behind it is
+real, that button GLOWS GREEN while the US session is open, and the App gallery
+is re-photographed from the PRIVATE app every trading morning so the tiles carry
+the current branding.** Design + plan:
+[`2026-09-08-gallery-refresh-and-live-glow-design.md`](plans/2026-09-08-gallery-refresh-and-live-glow-design.md)
+/ [`-plan.md`](plans/2026-09-08-gallery-refresh-and-live-glow-plan.md). ⚠ **Built and
+green, not yet run in anger:** the first capture happens on the serving box, so
+until then the shots on disk are the old hand-crops — see the geometry note below.)
+
+- **The nav inversion is over.** `index.html` made the gallery the `btn btn-primary`
+  because the design's choice — Live screens — pointed at a deliberate placeholder,
+  and the site's most prominent control led to an empty room. That page has served
+  fourteen real screens since 2026-09-07, so the slot goes back (`89ffa7a`). The
+  comment explaining the inversion was **corrected in place** rather than deleted:
+  the next reader deserves to know the original design was right, and why it was not
+  followed for the two days the site existed without live screens behind it.
+  `gallery.html`'s nav also gained a Live screens link —
+  the two pages are captures and the running app, and the gallery had **no way to
+  reach the live grid at all**, a dead end only a visitor ever hits because the
+  author always arrives from a page that carries the link.
+
+- **The glow is two files on purpose, and only one of them is generated.**
+  `tools/generate_market_clock.py` writes `deploy/site/assets/market-clock.js` —
+  the holiday list from `shared/market_calendar.nyse_holidays` (derived
+  algorithmically; there is no list to maintain) and the regular session bounds
+  from `config/sessions.toml`, stated there in Central and converted to Eastern on
+  the way out (`b36c941`). `assets/market-glow.js` is hand-written logic that reads
+  it and toggles `.ns-market-open` on the Live screens link (`81fca59`). Splitting
+  them is the point: **a generator that owns hand-written code is a generator
+  people stop running.**
+
+- **⚠ The generated clock is COMMITTED, which is the opposite of what this repo
+  does with generated state** — `deploy/site/live/*.webp` and now the gallery shots
+  are both gitignored for the promote-refuses-a-dirty-tree reason. This one is
+  committed because it is **source the site needs to work from a fresh clone**, it
+  is tiny and deterministic, and nothing on the serving box ever rewrites it. The
+  cost of that choice is drift, so `test_the_committed_file_matches_what_the_generator_emits`
+  regenerates and compares the bytes. It covers **two years** — the year it was
+  generated in and the next — so a visitor in early January is not looking at a blind
+  clock, and that test **legitimately goes red on 1 January**: the reminder to
+  regenerate is a failing assertion rather than a timer.
+
+- **⚠ KNOWN GAP — early closes are not handled, deliberately.** The NYSE shuts at
+  13:00 ET on roughly three afternoons a year (the eves of Independence Day and
+  Christmas, the Friday after Thanksgiving), and **nothing in this repo models a
+  half day** — there is no `is_half_day` anywhere. So on those afternoons the button
+  stays lit until 16:00. Accepted rather than papered over with a second
+  hand-maintained date list, which is exactly what the standing "no new holiday
+  literal anywhere" rule exists to prevent. Written into the generated file's own
+  header, into `market-glow.js`, and into the design doc — three places a reader
+  might arrive from. `ea2afd4` had to correct a claim in the design that the
+  calendar knew about half days; it does not.
+
+- **Two browser facts the glow turns on.** The question is *what time is it in New
+  York*, not *what time is it here*, so it asks `Intl.DateTimeFormat` with an
+  explicit `timeZone` rather than subtracting an offset — the naive fix is wrong
+  twice a year in the gap between the US and everyone else's DST switch, and wrong
+  all year for anyone whose own clock is off. And the weekday is **not** an `Intl`
+  `weekday` part: that is a locale string ("sam." in French, another script
+  elsewhere), so the numeric Y/M/D is fed through `Date.UTC` and read back with
+  `getUTCDay()` — an integer, identical for every visitor.
+
+- **Every failure path is an unlit button** (no clock data, no such link, an engine
+  with no `timeZone` support). Decoration must never break a page. Two consequences
+  worth knowing: the glow is **steady, not pulsing** — `.ns-dot` pulses and carries
+  a `prefers-reduced-motion` guard for it, but a pulsing button in the nav of every
+  page view is an advertisement, not a status light — and **script order is a
+  contract**. `defer` runs scripts in document order, so listing the logic before
+  its data would leave it reading an undefined global and, because it degrades
+  silently, the button would simply never light again with nothing to say why.
+  `test_the_clock_data_loads_before_the_glow_logic` pins it. The `.ns-market-open`
+  rules must also stay **after** nocturne's `.btn-primary`: both are single-class
+  selectors, so source order alone decides.
+
+- **⚠ `test_the_glow_is_green` asserted the class existed, not that it was green.**
+  Fixed in `9637761` before the feature shipped — it now reads the hue out of the
+  declared colour. The same shape as the `"og:image" in page` substring guard caught
+  the day before: a test named for a property that never checks it.
+
+- **The gallery is 15 screens, not 16.** Daily Briefings was dropped by decision;
+  `image23`/`image24` went with it (`8751bbc`). ⚠ **The rail row and the panel had
+  to go together**: `gallery.js` pairs them BY INDEX and bails out if the lengths
+  disagree, so a stray one does not throw — the gallery just silently stops
+  switching. Three counts in **copy** were about to go stale in the same silent way
+  (the "16 screens" badge, the landing page's "See all 16 screens", four comments);
+  `test_the_pages_that_COUNT_the_screens_say_how_many_there_are` now derives the
+  answer from the panels, because a wrong number in prose renders exactly like a
+  right one and the visitor just counts fifteen.
+
+- **One caption was simply wrong, and it is the one defect a recapture can never
+  fix.** `image18` is the Simulator's **Replay** tab — the six-panel
+  Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" inside the picture — and
+  shipped captioned "What-if: over time". It is now "Replay bar by bar" in the tab
+  label and the alt text, and pinned by test, because that shot is never retaken
+  (see the skip below).
+
+- **`tools/gallery_screens.py` is the pure map** (`7334a6d`): 15 screens, 22 shots,
+  each naming the private route behind it. Nothing else restates a filename or a
+  route. Order is load-bearing twice — `SCREENS` order is the rail order, and a
+  screen's `shots` order pairs each figure with its tab caption **by position**, so
+  re-sorting silently re-captions. Screen 12's files run 14, 15, 17, 16, 18; that is
+  what the HTML has, and it is preserved rather than tidied. Pinned from both sides:
+  `tools/tests/test_gallery_screens.py` holds the table against the HTML,
+  `webgui/tests/test_gallery_routes.py` holds it against the app's registered routes.
+
+- **⚠ The capture tool authenticates as the owner, which is a capability its sibling
+  does not have.** `tools/capture_live_shots.py` photographs a public origin and can
+  reach nothing; `tools/capture_gallery_shots.py` reads `shared/webgui_auth.json`
+  (mode 0600) and **mints a session cookie** (`c8653fb`). That is possible because
+  `webgui/auth.mint_token` is stateless — there is no server-side registry of issued
+  tokens, by design — so given the store's `session_secret` and `epoch` a valid
+  cookie is a pure computation. It mints nothing it could not equally well have
+  obtained by typing the password into the form, but the blast radius of the file
+  and of this script is now the whole private app. Shots come from the private app
+  because **the branding lives in the app header**, which the public read-only
+  screens deliberately do not render.
+
+- **⚠ Without a session, every route 303s to `/login` — and a login form is a
+  perfectly good HTTP 200 that Chrome screenshots happily.** A run that ignored that
+  would publish a login box over every tile it captures. So a missing or
+  corrupt credentials file raises `SystemExit` **before a browser is even looked
+  for**, and the session is verified against the rendered DOM — positively, against
+  a `/_nicegui/` asset URL the login page structurally cannot carry — **before the
+  first file is written**. Not after the first capture: by then a good tile is
+  already overwritten, and that file is the one thing there is no way back.
+
+- **The cookie reaches Chrome through a loopback redirect, not through argv or a
+  profile.** `--headless --screenshot` takes no cookie or header; writing one into a
+  throwaway `--user-data-dir` means forging Chrome's OS-encrypted cookie store
+  (DPAPI/app-bound on Windows, OSCrypt on Linux), version-dependent and silently
+  wrong when it breaks; `Network.setCookie` over CDP needs a websocket client this
+  tool would be the only user of. Instead a tiny loopback server answers `302` +
+  `Set-Cookie` and forwards to the app: Chrome stores it through its own code path,
+  and because **cookies are not isolated by port** (RFC 6265 §8.5) the one set from
+  `127.0.0.1:<ephemeral>` is sent to `127.0.0.1:8500` — including on the
+  `/_nicegui_ws/` handshake, which is an ordinary HTTP request. **The token never
+  appears in a command line**; this repo has a documented incident where a live
+  stream key was readable in `pgrep -af`. The one thing that would break it is
+  Chrome enabling origin-bound cookies by default; if that lands, the verification
+  render fails and the run exits non-zero saying the session was refused.
+
+- **Three shots are SKIPPED, not guessed.** `image16`/`17`/`18` are one Simulator
+  route told apart by an in-page tab, and `simulator.render()` takes no arguments —
+  clicking needs CDP. Capturing the page default three times would publish one
+  identical picture under three different captions, **which is precisely the failure
+  this gallery already shipped** (see the Replay caption above). A tile that is
+  older is a smaller lie than a tile that is wrong.
+
+- **The other three gamma tiles WOULD have had that failure, and two reviewers
+  caught it.** `/options/gamma` was parameterless, so its three shots would all have
+  captured the identical default GEX view. It now takes **`?view=`** (`f74fe61`),
+  the same shape as the shipped `/sentiment/momentum?level=`. ⚠ A pinned view also
+  changes what the page draws — `gamma.shows_view_picker` builds no subtab row and
+  `may_enqueue` no Refresh/Explain/Analyze/History buttons — so the recapture will
+  legitimately differ from the shipped `image2`, which has a picker in it. A pin is
+  deliberately **not** offered for `symbol`: that one is interpolated into a Redis
+  key name with no allow-list behind it, and nothing asks for it.
+  **⚠ Self-review found the tests one layer short of the claim** (`91f223d`): every
+  one called `options_gamma_page` in Python, which proves the value travels once it
+  ARRIVES, not that `?view=` in a URL is where it comes from — a parameter FastAPI
+  had classified as a path or body field would have satisfied all of them and still
+  left the gallery capturing one view three times. They now read the classification
+  off the **route's own FastAPI dependant**, beside `/sentiment/momentum` so the
+  shipped precedent states the shape, and both directions were verified by mutation:
+  the query-string test fails against the parameterless route, and an
+  accepts-but-ignores route fails four tests. The `def _page(_s=screen)` incident the
+  day before was precisely a signature that looked innocent until FastAPI read it.
+
+- **⚠ The shots became gitignored state, with three tracked exceptions**
+  (`8558f5c`). Nineteen of the twenty-two are rewritten on the serving box, and
+  tracked they would dirty prod's tree — **`tools/promote.sh` refuses a dirty tree
+  before it stops anything**, so a daily capture would block every promote. Same
+  trap and same fix as `deploy/site/live/*.webp`. **Not a wholesale ignore:**
+  nothing regenerates the three Simulator shots, so ignored, a fresh clone would
+  have no picture for those tiles **ever**, not merely until the next capture run.
+  The pattern excludes the FILES rather than the directory, which is what lets them
+  be negated back in at all — git cannot un-exclude a file inside an excluded
+  directory. Two more things that look identical from the `.gitignore` alone:
+  **the pattern buys nothing until `git rm --cached` runs**, because `.gitignore`
+  does not apply to a path already in the index; and a hand-written trio is exactly
+  what drifts, so the tests ask **git itself** (`check-ignore` / `ls-files`) against
+  the tool's own `unreachable_shots()` rather than re-implementing git's rules.
+
+- **The geometry is now declared, not inherited.** The shipped images are
+  hand-cropped and no two match — 23 distinct `width`/`height` pairs across the 24
+  `<img>` tags the page carried; the nineteen the tool rewrites now
+  declare its single viewport, **1840×920**, and the three Simulator shots keep
+  their own because nothing recaptures them. ⚠ **The files on disk are still the old
+  crops until the tool runs on the serving box** — `.ns-shot img` is `width:100%;
+  height:auto`, so the mismatch costs a layout shift as each tile loads and never a
+  distorted picture.
+
+- **Scheduled by `[slots.gallery_capture]` at 09:07 CT** — half an hour after the
+  08:30 open, so the screens have painted live data; a pre-open run publishes a
+  gallery of blank panels and overnight marks. ⚠ **That is the one `[slots]` entry
+  read by systemd rather than by a service scheduler**: `generate_units.py` turns it
+  into `trading-<env>-gallery-capture.timer`'s `OnCalendar` at unit-GENERATION time,
+  so moving it needs `generate_units --install` + `daemon-reload`, not a service
+  restart. It still needs a default in `market_calendar._DEFAULTS` like every other
+  slot — the TOML only overrides, and a TOML-only slot raises `KeyError` out of
+  `_slot_group`. A firing costs **19 page loads against the local app, no Schwab
+  call and no Claude call** — unlike `[slots.analyze]`, where each firing is a paid
+  Claude call, and `[slots.income]`, the largest scheduled Schwab spend on that
+  table (`8964fe1`).
+
+- **⚠ THIS IS NOW THE ONLY HEADLESS CHROME THAT RUNS DURING THE SESSION, so it is
+  CPU-contained.** The entry below has the measurement: one in-session live-screen
+  capture took load average **2.11 → 11.84** on 4 vCPU and proxy `/health`
+  **0.82 s → 18.2 s**, which `webgui/proxy.py health(timeout=3.0)` renders as a
+  proxy-down banner while the proxy serves `200`s throughout, and it cost **seven
+  GEX slots before 09:02**. `live-capture` answered that by **leaving the session**
+  (`[windows.live_capture]` → 15:25–15:50). **This job cannot copy that answer**:
+  index option open interest zeroes after hours, so a post-close capture photographs
+  all-zero GEX grids and arbitrary walls — worse imagery than the stale branding the
+  recapture exists to fix. And it is the heavier of the two (19 shots at 12 s settle
+  against 14 at 8 s). So the peak is **bounded where it is** rather than relocated:
+  **`CPUQuota=100%` + `Nice=10`** — one core of four, leaving three for the stack.
+  ⚠ `CPUQuota` goes in **`[Service]`**, the exact inverse of the storm cap's
+  `[Unit]` home. If the quota proves insufficient the answer is a smaller quota or a
+  quieter in-session minute, **not** a post-close run. The `:07` (rather than `:00`)
+  is a minor extra courtesy — live-capture's timer still *fires* every quarter hour,
+  and `:00` is the GEX collector's own minute boundary — pinned against
+  `LIVE_CAPTURE_INTERVAL_MIN` rather than a restated fifteen.
+
+- **The test harness could not parse a `%`.** It ran `configparser` with default
+  interpolation, so `CPUQuota=100%` raised `InterpolationSyntaxError` — `%` is
+  systemd's *specifier* prefix (`%i`, `%h`) and a literal here, so the harness would
+  have refused a perfectly valid unit. Now `interpolation=None`.
+
+- **`TimeoutStartSec` is DERIVED, and so are the counts in the unit's own comment.**
+  `SHOT_TIMEOUT_SEC` × (22 shots + the verification render) + 60 s slack = **1440 s**.
+  Typed as a literal it would be wrong the first time a shot is added, and wrong in
+  the way that costs most: systemd SIGTERMs the job partway, so some tiles refresh
+  and the rest do not, with nothing on the page to say which. The comment's "22
+  budgeted, 3 skipped" is read from the tool too (`a73994f`) — the first draft typed
+  one of them and it was **already wrong**, saying twenty-two renders happen where
+  nineteen do. A count in a generated artifact is prose an operator reads at 09:00
+  on a bad morning.
+
+- **No `Restart=`, no `Persistent=true`, and no `After=`/`Requires=` on the web
+  GUI.** The tool exits non-zero for two things worth telling apart — no browser on
+  the box, which retrying cannot fix, and the app unreachable or the session
+  refused, which the next day picks up — and it publishes **nothing** in the failure
+  case, so a failed run leaves the gallery intact and shows in `systemctl --user
+  --failed`. A catch-up run would recapture at whatever hour the box came back and
+  publish an overnight render, which is the exact thing the 09:07 slot exists to
+  avoid. And ordering decides BOOT sequence only, while this unit is only ever
+  started mid-session by its timer; a `Requires=` on the web GUI would be actively
+  worse — it would let a screenshot job pull the trading UI around.
+
+- **⚠ KNOWN GAP — the capture has no trading-day gate.** `OnCalendar=Mon..Fri`
+  filters weekends and **not holidays**, and unlike the stream and live-capture
+  scripts this tool carries no `in_window` / `is_trading_day` check of its own. So
+  on Thanksgiving it fires and republishes the gallery from a flat tape — a
+  stale-looking gallery, not a broken one. The honest fix is a gate **in the tool**,
+  not a holiday table in the unit generator, which would be a second driftable copy
+  of the calendar.
+
+- **`358e5e4` fixed two docstrings that overstated what they promised**, and the
+  class is worth naming because this branch produced three of them: `render()` was
+  documented as touching no disk when it reads `sessions.toml` transitively (it
+  writes nothing, which is what the spec asked, but "no disk" was wrong); the
+  holiday union was documented as handling the year-boundary spill at **both** ends
+  when it handles the near one only — a closure in the year *after* the window is
+  simply absent, `2027-12-31` living in `nyse_holidays(2028)`, accepted because
+  widening the window breaks the test pinning the two-year union and the 1 January
+  regeneration picks it up; and the Replay caption above. **Prose is checked by
+  nothing**; the only defence is verifying each sentence against the tree as it is
+  written.
+
+- **Tests at the time:** webgui **3507 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1480 passed**.
+
+---
+
+**Last updated:** 2026-09-08 (**The live-screen thumbnail capture moved off the
+trading session** — `[windows.live_capture]` in `config/sessions.toml` goes
+`08:00–15:20` → **`15:25–15:50`**, so the timer's `:30` and `:45` fires land
+after the close and every fire inside the session stands down in under a second.
+Config only; no code, no unit regeneration.)
+
+- **The symptom was "the Schwab proxy is down", and the proxy was never down.**
+  It served `/chains` and `/quotes` at `200 OK` throughout, on a process that had
+  not restarted in ten hours. What crossed the line was **`webgui/proxy.py`
+  `health(timeout=3.0)`**, which returns `{"up": False}` on a timeout and paints
+  the proxy-down banner on every page. The Status page's `_HTTP_TIMEOUT = 2.5`
+  is more sensitive still.
+
+- **Measured across the 09:00:01–09:01:39 capture run** (275 samples, 0.4 s
+  apart): load average **2.11 → 11.84** on a 4-vCPU box, `/health` latency
+  **0.82 s → 18.2 s** (also 17.7, 12.3, 5.2, 4.9, 4.1), in-flight connections on
+  `:8100` 10 → 24–28. **Every one of those probes returned `200`** — the proxy
+  answered them all, far too late for a 3-second client.
+
+- **⚠ Not cosmetic — it cost GEX slots.** Every collection minute dropped that
+  morning landed immediately after a capture run: 08:00, 08:15, 08:30, 08:45,
+  09:00 (plus knock-on 08:32 and 08:47). **Seven slots lost before 09:02**, and
+  nothing else dropped that day.
+
+- **Where the box's CPU actually goes**, from systemd's own accounting: the
+  **YouTube wall stream is ~1.57 of 4 cores sustained** (7,992 CPU-seconds in
+  1h25m of wall clock — `x11grab` 1920×1080/15fps → `libx264 -preset veryfast`,
+  plus Xvfb and a Chrome), the **entire trading stack is ~0.8**, and the capture
+  adds **~1.05 for 90 s every quarter hour**. Baseline market-hours utilisation
+  is **2.38 of 4 (60%)** with the run-queue already peaking at 13. The two
+  broadcast features cost more than the trading system does.
+
+- **Schwab was never the constraint, and a second API key would not have helped.**
+  Zero `Schwab 429` responses across the whole retained journal and 1,633,524
+  calls in 30 days; Schwab-bound traffic runs 115–145 calls/min steady state
+  against the **self-imposed** 300/min ceiling from `MIN_REQUEST_INTERVAL = 0.2`,
+  peaking at 272 only while catching up. More permission to call would have added
+  concurrent chain parsing to the side of the machine that was already saturated.
+
+- **`BRKB` removed from the scan watchlist** (same day). It is not a Schwab
+  symbol and returned a guaranteed `400` on every chain fetch — 106 wasted calls
+  before 09:55, 2,627 in the retained journal, and a known gap since at least
+  2026-08-10, when the big-delta plan doc already recorded "BRKB failing to
+  fetch". ⚠ Measured against the live API: **`BRK/B` returns 200**, `BRK.B` and
+  `BRKB` both 400 — so it was fixable rather than dead, and removal was the
+  user's call, taken with that in hand. The watchlist is
+  `options-scanner/data/Top 20.xlsx` (Column A of Sheet1), **gitignored and
+  prod-local**, so this change is not in this commit and does not travel with a
+  promote; it is `mtime`-cached, so it took effect with no restart. Verified: 81
+  → 80 symbols, order preserved, zero `BRKB` requests afterwards.
+
+- **Still open, in descending value:** the `TooBigBody` `502`s on the big chains (SPY, QQQ,
+  `$SPX`, `$NDX`, IWM, DIA, the sector ETFs) are each retried 3× under
+  `MAX_RETRIES`, so each costs three calls and holds a thread through the
+  backoff; `/health` is a sync `def` sharing the 40-thread pool with full-chain
+  handlers, so it queues behind them instead of jumping them; and the proxy's
+  `requests.Session()` still runs at the default `pool_maxsize=10`, which is what
+  the `Connection pool is full` warnings are.
+
+---
+
+**Last updated:** 2026-09-07 (**Fourteen screens are published read-only and
+unauthenticated at `live.neuralstrike.co`**, served by a SECOND NiceGUI process —
+`webgui/live_main.py` — that renders the **same page modules the private app
+renders**, so a published screen cannot drift from the one it mirrors. The
+`live.html` placeholder the site has been holding becomes their thumbnail grid.
+Design + plan:
+[`2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-live-screens-design.md)
+/ [`-plan.md`](plans/2026-09-07-public-live-screens-plan.md). ⚠ **Built and green, not
+deployed:** the Redis ACL user, DNS + TLS for the new host, installing the units and
+walking all fourteen routes in a browser are the plan's Task 14 and are not recorded
+here.)
+
+- **⚠ THE TRAP THAT SHAPED THE BUILD: a second process must never `import main`.**
+  `pages/options/gamma.py` did, for three shell functions. `main.py`'s module body
+  registers every `@_page` route, so the public process would have published
+  `/terminate` (Stop All Services), `/settings` and the paper book to the internet —
+  silently, while looking entirely correct. The seam moved to a leaf module
+  **`webgui/shell.py`**, which makes the public process *structurally* incapable of
+  holding the app's route table rather than incapable by inspection. Pinned twice: at
+  source level, and by running `live_main.py` **ALONE in a fresh interpreter** and
+  asserting `main` never entered `sys.modules` — the only check that can see a
+  TRANSITIVE import, which is how such a thing would actually arrive.
+
+- **⚠ `def _page(_s=screen)` published a query parameter.** NiceGUI hands the page
+  function's signature to FastAPI, so the idiomatic late-binding default for a loop
+  variable became something a stranger could set. Measured: `GET /desk?_s=anything`
+  replaced the `Screen` object with the string `'anything'`, which reached
+  `importlib.import_module`. The binding moved into an enclosing `_register(screen)`
+  parameter instead, so the page function has no signature to inject into.
+
+- **Read-only is four layers, not a label.** A Redis **ACL user** with read commands
+  only (structural — the one the *server* enforces); `bus_client.set_read_only(True)`,
+  where `request()` is the single Tier-1 write chokepoint so one refusal covers every
+  command on every page; `app_settings.freeze(pins)`; and structurally, no rail,
+  Settings, Terminate or Sign-out, because those routes do not exist in the process.
+  The three this process installs go in **before any page module is imported**, which
+  is what `live_main.py`'s `# noqa: E402` block is buying. What is at stake is
+  concrete: `gamma_analyze` and `gamma_explain` are **paid Claude calls**, and
+  `gamma_refresh` and sentiment `refresh` fan out Schwab fetches against a budget
+  already running 68–76k/day. Unauthenticated and unrefused, that is an open tap on
+  money.
+
+- **⚠ The Redis ACL needs `@pubsub` and `@connection`, not just `@read` — and getting
+  it wrong fails silently.** `SUBSCRIBE` belongs to `@pubsub`; `SELECT` (any non-zero
+  `redis_db`) and `PING` to `@connection`. `EventListener._run` swallows a failed
+  subscribe, so an under-granted user renders one frame and then never repaints: it
+  reads as a **frozen tape, not as a permissions error**. Found while building the
+  refusal rather than after deploying it. No `+publish` either — a public process that
+  can publish can spoof repaint events to the private app.
+
+- **⚠ `cache:options:gamma` is a single sticky slot, and `refresh_gamma_current` reads
+  the symbol back OUT of it.** Three of the four gamma screens would have rendered
+  whatever the private app last selected: open `/options/gamma`, pick AMD, and the
+  public "$SPX" screen shows AMD. Fixed with **additive** per-symbol keys
+  (`cache:options:gamma_pub:<SYMBOL>`) built off chains the collector already fetches
+  every minute, so the Schwab cost is nil — the existing tick-chain stash was widened
+  from one symbol to three rather than refetching.
+
+- **Publishing four views for three symbols cost ~3.9× on the tick's gamma writes**
+  (5 writes / 4.94 MB → 21 / 19.75 MB), a multiplication of exactly the cost the
+  2026-08-20 history split existed to remove. The **product** decision that fixed it:
+  a public screen shows **only its pinned view and builds no picker**, so nothing can
+  render empty because there is no control to click — and only the one history any
+  screen actually draws is published (`$SPX`/GEX, and nothing else). **10 writes /
+  6.28 MB, 1.27×.** ⚠ Un-pinning a view means adding it back to
+  `PUBLISHED_GAMMA_HISTORY_VIEWS`, or the heatmap draws empty and says nothing: a
+  missing history key reads as "no history yet".
+
+- **⚠ The public Desk would have made an outbound `edge_tts` call per flow alert, per
+  visitor.** `voice_enabled` **defaults True**, and `webgui/voice.py` synthesizes each
+  phrase over the network rather than playing a bundled file — and `desk._prewarm_clips`,
+  unlike the live path, has **no market-hours gate**, so a first open fires ~32
+  synthesis calls. `/voice` is not even mounted in that process, so not one clip could
+  have been played. `live_screens.PUBLIC_PINS` pins it off, and it lives there rather
+  than on the Desk screen because the reason is the **origin** — public, so nothing
+  that spends money, calls out, or writes.
+
+- **⚠ Freezing `app_settings` is not only about pinning defaults.** `settings.json` is
+  a single-user store whose in-memory cache assumes one writer in one process. Left
+  live, the public process would read your own preferences — changing your Macro Board
+  skin would re-skin the public site — and race you for the file.
+
+- **⚠ `test_auth_covers_every_route.py` had to be taught to exclude the live routes,
+  and the exclusion costs real coverage.** Both entrypoints register onto the SAME
+  global NiceGUI app object, so importing `live_main` anywhere in that suite puts the
+  fourteen deliberately-public routes in front of a guard whose entire job is to assert
+  every route is gated — and they would have **passed**, because in that process the
+  private app's middleware does gate them. A guard that vouches for public routes as
+  authenticated is worse than no guard. ⚠ `/desk` and `/sentiment` are registered by
+  *both* entrypoints, so the exclusion also stops the sweep checking two of the app's
+  own gated routes; that is asserted as a closed set, and if it ever grows the fix is
+  to give the live routes their own prefix for Caddy to strip, not to widen the hole.
+
+- **The stack is a unit longer.** `webgui_live` joins the target (prod ten units, dev
+  nine). **Dev DOES get one, unlike the proxy** — withholding a unit has only ever been
+  about a single exclusive credential, and the live process spends no Schwab call, no
+  Claude call and sends no notification, so there is nothing for the four dev
+  suppressions to suppress. Caddy grows a third host block, and a `live-capture`
+  oneshot photographs the fourteen routes every 15 minutes inside a new
+  `[windows.live_capture]` — its `TimeoutStartSec` **derived** from the script's own
+  per-screen budget × the number of screens, so adding a screen cannot leave systemd
+  SIGTERMing the job partway and refreshing some tiles but not others.
+
+- **⚠ The captures are gitignored, and that is load-bearing.** `deploy/site/live/*.webp`
+  is generated state inside the served root. Tracked, it would dirty prod's tree the
+  moment the timer first fired, and **`tools/promote.sh` refuses a dirty tree**.
+
+- **The grid carries no timestamp, deliberately** — baking a freshness line into static
+  HTML at capture time would make a committed source file a build artifact, and a menu
+  that claims to be fresh is worse than one that does not. The live pages carry their
+  own staleness already. Tiles ship with `alt` text and reserved dimensions, so before
+  the first capture the grid is usable text-and-boxes rather than fourteen broken
+  images.
+
+- **The in-app copy the second web app made stale, fixed in the same pass.** Stop All
+  Services now stops **two** web apps — someone halting the trading stack for five
+  minutes is not necessarily expecting to unpublish the public site — so the page, its
+  confirm dialog and its hover guide say so. System Status grows a `webgui_live` peer
+  card, probed over HTTP (never a TCP connect: a dead accept loop stays bound) and
+  deliberately **outside** the 2 s health fan-out, so a dead public origin never badges
+  the rail or chimes. Its subtitle also said "five domain services" where six were
+  listed — a defect the Reference Guide had already recorded.
+
+- **Exposure is a recorded decision, not an oversight.** The screens are unredacted:
+  the Desk shows merged paper and driver positions with rescue flags, the Opportunity
+  Board ranks actionable signals, Flow Alerts carries live alerts. Chosen over
+  redaction and over a 15-minute delayed feed because the book is **paper only** and
+  full transparency is the argument the site already makes.
+
+- **Tests at the time:** webgui **3451 passed, 1 skipped**; `tests` + `deploy` +
+  `tools/tests` + `shared/tests` **1386 passed**.
+
+**Last updated:** 2026-09-07 (**The gold-and-blue logo is retired; the mark is
+now THE FLIP** — two chevrons converging on a level, dealer hedging pinned to
+the gamma flip. Chosen from three directions put up as a specimen board. It
+replaces artwork that belonged to a different visual system than either surface
+actually runs, could not be reproduced in one colour, and vanished below ~64px.
+Design: [`2026-09-07-brand-direction-design.md`](plans/2026-09-07-brand-direction-design.md).)
+
+- **The mark is carried by its FORM, not by a hex.** The site runs Nocturne
+  (`#9184d9`), the app its own navy theme (`#6b86ff`); the mark takes each
+  surface's own accent instead of importing a foreign colour onto one of them,
+  which is the fault it replaced.
+
+- **Two optical sizes, not one drawing scaled.** At 16px the large variant's
+  2.5-unit rule lands on 0.6 of a device pixel and disappears, taking the level
+  — and the meaning — with it. The favicon is drawn heavier.
+
+- **⚠ The first draw read as an X struck through, and only the render showed
+  it.** The chevron apexes sat ~2 units off the rule; stroke width closed the
+  gap and the mark became a cancel icon. **The gap is the meaning.** Every test
+  passed. `test_the_apex_clears_the_rule` now checks it as arithmetic.
+
+- **⚠ A guard that could not fail, for the second time in two days.**
+  `test_the_landing_page_declares_a_social_preview` asserted `"og:image" in
+  page` — a substring of `og:image:width` and `og:image:alt`, so deleting the
+  actual image tag left it green. Found by mutation testing, not by reading it.
+  **Put the bug back and watch the suite go red**: 19/19 caught.
+
+- **The site has a social preview at last.** There were zero `og:` tags on any
+  page, so every link pasted into Discord or Telegram — this project's actual
+  distribution — previewed as a bare URL. `assets/social.png` is generated, not
+  exported, so the mark on it is provably the geometry the site draws.
+
+- **The tagline changed.** "AI option signals & trading ideas" is the sentence
+  every signal-selling account uses, on a site that promises no signal-selling.
+  It is now "dealer flow, measured."
+
+- **The app moved by CONFIG ONLY** (`config/theme.toml [brand]`), so reverting is
+  one line — and the retired artwork is kept unreferenced and pinned by test so
+  that stays true. The built-in `_DEFAULTS` moved with it: a fallback that
+  restores a retired brand is worse than a crash, because nothing looks wrong.
+
+- **`webgui/tests/test_shell.py` stopped pinning the mark's FILENAME.** Those
+  tests are about the mechanism — present yields the URL, absent yields `""` —
+  so a `.png`→`.svg` move broke them while saying nothing about the mechanism.
+
+- **The local venv was missing `argon2-cffi` and `pyotp`**, both already in
+  `requirements.txt` AND `requirements.lock`. Installing them resolved the
+  `test_the_edge_header_is_the_one_the_app_reads` failure reported twice this
+  week as "pre-existing" — it was only ever the absent dependency. The whole
+  webgui suite now runs locally: **3339 passed, 1 skipped**; `deploy` **49
+  passed**, with nothing failing anywhere.
+
+**Last updated:** 2026-09-06 (**`neuralstrike.co` is a three-page marketing site.**
+The REPLACE-ME one-pager is gone; the public host now serves a landing page, a
+16-screen gallery over 24 screenshots, and a live-screens placeholder, built from
+the *Options trading workbench* design over its Nocturne stylesheet. Promoted to
+prod as `6ef19fb` on a Sunday with markets closed; all 24 screenshots, both
+stylesheets, the font, the favicon and both hostnames verified 200 from the box,
+and the app host still 303s to its login.)
+
+- **The design bundle's `dist/` pages were NOT what shipped.** Each is a ~700 KB
+  Design Canvas runtime that paints a loading spinner and renders **nothing** with
+  JavaScript off, with no server-rendered HTML for a crawler. The pages were
+  rebuilt from the `.dc.html` sources as plain static documents — `<x-dc>`/
+  `<helmet>` stripped, `style-hover=` lifted into real CSS, `<sc-if>`/`<sc-for>`
+  unrolled, the `DCLogic` class rewritten as ~130 lines of vanilla JS. Layout,
+  copy, colour and spacing are the design's. Design + the decisions:
+  [`2026-09-06-public-marketing-site-design.md`](plans/2026-09-06-public-marketing-site-design.md).
+
+- **Inter is self-hosted, so the site makes zero off-origin requests.** The design
+  linked Google Fonts and the design system's own `styles.css` carried a *second*
+  `@import` to it; both are gone. ⚠ This widened
+  `test_the_site_directory_holds_nothing_but_site_assets` to admit `.woff2` — the
+  one edit that makes that guard weaker, so the reason sits in its docstring.
+  Everything the list admits is world-readable by definition.
+
+- **Screenshots are lossless WebP: 5.95 MB → 3.34 MB, pixel-identical.** Lossy q92
+  reached 2.14 MB but softened thin UI text, which is the entire content of a
+  screenshot gallery. With `loading="lazy"` and hidden panels never fetching, a
+  visitor pays ~140 KB per screen opened rather than 3.4 MB up front.
+
+- **⚠ THE BUG WORTH REMEMBERING: `hidden` is native HTML, and the browser's own
+  stylesheet hides it.** Inactive panels were marked with the `hidden` ATTRIBUTE
+  under a rule `.js .ns-screen[hidden] { display: none }`, on the belief that
+  hiding was opt-in behind the `.js` hook. It was not — that selector was pure
+  decoration, the UA rule did the work, and a visitor with scripting off saw ONE
+  screen with no way to reach the other fifteen. The no-JS fallback the rebuild
+  existed to provide did not exist. Visibility is now an `is-active` CLASS, which
+  the UA stylesheet knows nothing about.
+
+  **The lesson is about the tests.** The suite asserted all 16 headings, 16
+  captions and 24 images were in the page source — and they were, so it stayed
+  green. **Source presence is not visibility.** It took loading the page with the
+  `<script>` tags stripped. ⚠ And the guard written afterwards *also* could not
+  fail: a shell-escaping slip left a literal backspace byte where each `\b`
+  belonged, so the pattern read `<BS>hidden<BS>` and matched nothing. Both were
+  settled by putting the bug back and watching the suite go red — now automated
+  as a mutation pass, **11/11 caught**.
+
+- **The gallery rail is a horizontal chip row below 1000px**, and that breakpoint
+  also forces the stack. Left alone `.ns-gallery` wraps at ~967px, a number that
+  falls out of two `clamp()`s; keying the chips to a different one would render
+  chips inside a 340px sidebar across a band of widths. Declaring
+  `flex-direction: column` in the same block makes them one number by
+  construction. ⚠ **`flex-basis` sizes the MAIN axis**, so the column turned
+  `flex: 1 1 260px` / `flex: 4 1 620px` from widths into *heights* — ~490px of
+  dead space that reads as a spacing bug and is a flex-axis one.
+
+- **The rail rows are anchors to `#screen-N`, not buttons**, so with scripting off
+  they work as a table of contents — which is why they stay visible there while
+  the pager and sub-tabs hide themselves. A visible dead control beside a hidden
+  dead one is the tell that nobody loaded the page.
+
+- **The nav needed a media query it never had.** Drawn at desktop width, it wants
+  587px; at 375px `.ns-page` clips overflow, so the three links and the primary
+  button were not merely cramped but **invisible**, taking the page's main call to
+  action with them.
+
+- **Three places assumed a backend the site does not have.** It is a showcase, so
+  the hero no longer offers a build to run, and the email capture was **removed**
+  rather than pointed somewhere: `deploy/site` is a file server, so a form there
+  could only lie about what it does with an address. Community links are wired to
+  the real Discord and to Telegram, the latter labelled as the **bot** it is.
+
+- **Tests live in `deploy/tests/`, NOT `deploy/site/tests/`.** They were written
+  beside the thing they test — the ordinary habit everywhere else in this repo and
+  exactly wrong here, because Caddy would have served the `.py` files as
+  downloads. The extension guard caught it. **Nothing that is not served belongs
+  under that directory**, however natural its placement looks.
+
+- **Two things measured and reverted**, both of which looked like improvements:
+  a font `<link rel="preload">` (the face was fetched **twice** per load, with a
+  console warning every time; removing it gave exactly one request), and shrinking
+  the mobile nav's type to save a row (141px → 140px, no row change). Neither was
+  left in looking useful.
+
+**Last updated:** 2026-09-06 (**The web GUI is on the public internet, behind a
+password and TOTP.** `https://app.neuralstrike.co` reaches the trading desk from
+any browser; `https://neuralstrike.co` serves a public one-pager. Verified live
+from an external network: 9 secret paths and 4 traversal attempts all 404,
+`/desk` 303s to the login, `/wall` 404s at the edge while still serving the kiosk
+on loopback.)
+
+- **The shape.** Caddy 2.11.4 as a **system** unit (it needs :443 and must not die
+  with a login session) terminates TLS for both hostnames and reverse-proxies to
+  `127.0.0.1:8500`, which **still binds loopback**. One pure-ASGI middleware
+  (`webgui/auth_middleware.py`) default-denies every `http` and `websocket` scope
+  except `/login` and `/favicon.ico`, plus a three-condition loopback exemption
+  for the wall kiosk. Design + plan:
+  [`2026-09-06-webgui-credentialing-design.md`](plans/2026-09-06-webgui-credentialing-design.md).
+
+- **⚠ THE DEPLOY GOTCHA NOBODY WILL GUESS: Caddy could not read the served
+  directory, and the symptom looked like success.** `deploy/site` lives under
+  `/home/administrator`, which is `drwxr-x---`. Caddy runs as user `caddy`, not in
+  that group, so it could not *traverse* into the home directory — every path on
+  the apex returned **403**, including the homepage.
+
+  The trap is what that did to the security check. The runbook's first
+  verification is "fetch `/shared/tokens.json` and confirm 404", and it returned
+  403 — which reads as *protected* and is actually *Caddy cannot reach anything*.
+  **The secret-exposure sweep proved nothing until traversal worked**, and only
+  after the fix does a 404 mean the `root *` line is correctly scoped. Re-run that
+  sweep after any permissions change.
+
+  Fixed with `setfacl -m u:caddy:x /home/administrator` — traverse for the `caddy`
+  user alone. ⚠ **Not** `usermod -aG administrator caddy`: that group has `rw` on
+  files like `config/env.local.toml`, which would hand a network-facing service
+  account write access to the checkout. Every real secret is `-rw-------`
+  (`.env`, `proxy_tokens.json`, `appsettings.json`, `anthropic_key.txt`,
+  `notifications.json`, `webgui_auth.json`), so the ACL exposes only source code
+  that is already public on GitHub.
+
+- **Three fail-open holes were found in review and fixed before deploy**, each
+  reproduced before being believed. (1) The session and remember-device tokens
+  carried only `{epoch, issued_at}`, making them **byte-identical** — a stolen
+  30-day cookie replayed in the session slot was a full session with neither
+  factor. (2) `base32` decodes `""` to a valid empty HMAC key, so an empty
+  `totp_secret` did not disable the second factor, it made the code **publicly
+  computable from the clock**; `verify_totp("", "489721", …)` returned *accepted*.
+  (3) The drift window was unpinned — widening `TOTP_DRIFT_STEPS` 1 → 2, a 90 s →
+  150 s attack surface, left **all 16 tests green**, because `T0` sat 20 s into its
+  window so the `+90` case was three steps away, not two.
+
+- **The lockout would have been global, not per-client.** Behind a reverse proxy
+  every request arrives from `127.0.0.1`, so keying on the peer files the whole
+  internet under one address — and that counter ramps to 900 s where the global one
+  is deliberately 60 s. `main._client_ip` reads the **last** `X-Forwarded-For` hop,
+  and only when `X-Edge` is present; safe because Caddy *appends* the peer it
+  observed, so a client-supplied prefix can lengthen the list but not change its
+  tail. Measured: a spoofed `9.9.9.9, 203.0.113.9` still counts against
+  `203.0.113.9`. **The Caddyfile must never suppress `X-Forwarded-For`.**
+
+- **An unquoted `root *` truncates at the first space.** Rendered on a Windows
+  checkout it emitted `root * D:/WebGUI` against a real root of
+  `D:/WebGUI Trading with Schwab/…`. Prod's path has no spaces so it was latent,
+  not absent — and the failure is either a parse error taking down **both**
+  hostnames, or a root *above* the checkout. Quoted, with a test that renders a
+  spaced path; the POSIX-root fixture could never have caught it.
+
+- **Rejected: the Caddy `rate_limit` plugin.** It is in no prebuilt binary and
+  needs an `xcaddy` rebuild on every future Caddy update with no apt security
+  updates. The throttling it would add is already bought twice — the login form
+  token rejects a blind POST for the cost of an HMAC, and `LockoutState` refuses
+  **before Argon2 runs** — so a flood costs an HTTP request and a dict lookup, not
+  19 MiB. Revisit only if `sar` shows the Python round-trip costing something
+  during stream hours.
+
+- **Load, measured rather than estimated.** The eight-unit stack costs **~0.07 of
+  one core**; the wall stream (Xvfb + kiosk Chrome + ffmpeg) costs **~2.2 cores** and
+  is 97% of the load on the box. Argon2 at the tuned 19 MiB / t=2 measures **23.5 ms
+  and 19 MiB** per verification, so ten concurrent attempts need 0.19 GiB against
+  0.63 GiB at argon2-cffi's 64 MiB default. Steady state after this change: ~55% →
+  ~56% of four cores, not measurable in practice.
+
+- **⚠ Redis DOES have a password, and two in-repo comments say it does not.**
+  Measured on the box: `redis-cli PING` without auth returns
+  `NOAUTH Authentication required`, and the 48-character `MEMURAI_PASSWORD` in
+  `.env` authenticates against a live db0 of 201 keys. But **`.env`'s own header
+  says "MEMURAI_PASSWORD is unset … SET A PASSWORD BEFORE THIS BOX EVER BECOMES
+  PROD"**, and `config/env.local.toml` lists it as one of two things "NOT yet
+  closed". Both were written on 2026-08-30 while the box was being stood up as
+  dev, and neither was updated when the password went in.
+
+  The first draft of this very entry repeated the claim, because it was taken from
+  the comment rather than from the system — a fresh instance of the exact rot this
+  repo documents, produced while writing the deploy up. **Both files are
+  gitignored and machine-local, so the fix has to happen on the box**, and no test
+  can catch it. Check `redis-cli PING` before believing either.
+
+- **Still open.** `GET /login` reads the credentials file per request
+  and sits outside the lockout (which covers POSTs only), so a GET flood is an
+  unmetered disk read; caching would defeat instant epoch revocation, so it needs a
+  decision rather than a memo. The box also has a pending kernel upgrade.
+
+---
+
+**Last updated:** 2026-09-05 (**Phase B stops being dead machinery: the wheel now
+turns end to end.** A whole-branch review found the two gaps that made the share
+inventory unreachable outside a test fixture — nothing opened a cash-secured put
+into the paper ACCOUNT, and `close_equity_lot` had no production caller. Both are
+wired. ⚠ **Still not verified running in dev.**)
+
+- **C1 — nothing opened a cash-secured put into the account, so the entire
+  downstream chain was reachable only from hand-built fixtures.**
+  `run_entry_cycle` sizes every candidate off `sig["width"]`, which a single-leg
+  short has none of, so it died in that function's broad `except`;
+  `publish_income` calls no recorder, so income candidates never became captured
+  signals; and `paper_create` writes the *ledger*, not the account. The result
+  was that `is_cash_secured_put`, `_assign_shares`, `equity_lots`,
+  `/options/shares` and the covered-call half of the Income board all existed and
+  none of them could be reached. `compute.open_income_position` +
+  `handlers.run_income_open` (`income_open` on `cmd:options`) are the missing
+  path, driven by a per-row wallet button on the Income board.
+- **C2 — once a lot existed it could never leave, and the moment C1 landed that
+  became a money bug:** cash permanently debited, `equity_at_cost` permanently
+  inflating `session_start_equity`, and three documents already promising a
+  disposal that did not exist. `paper_engine.is_called_away` /
+  `_call_away_shares` are the mirror of assignment, in the same settlement
+  branch. **The disposal shipped WITH the open path, not after it.**
+- **⚠ The cash moves in TWO pieces on disposal and only their sum is
+  `strike × shares`.** `credit_cash(cost_basis × shares)` — a new mirror of
+  `debit_cash`, and the same argument for existing — returns the conversion, and
+  `realize_pnl` carries the gain, because `realize_pnl` moves cash as well as
+  booking P&L. Crediting the full `strike × shares` and *then* booking the lot's
+  P&L credits the gain twice, and the lot, the exit price and the share count all
+  still read correctly: only the balance is wrong. That is the disposal-side
+  mirror of the double *release* the assignment path is guarded against, and the
+  assertion that catches either is
+  `cash + reserved + equity_at_cost == start + realized_pnl`. Traced by hand on
+  the full loop and pinned by `test_the_full_wheel_turns`.
+- **A covered call reserves NOTHING and stores `max_loss_total = 0.0`.** The
+  shares are the collateral and `equity_at_cost` already counts them; reserving
+  would double-count, and `reconcile_buying_power` would hand it straight back at
+  the next service start, so the double-count would also be unstable. Storing 0
+  is what keeps `_close`'s unconditional `release_buying_power` a **no-op** on it
+  — pinned from a book holding real collateral on another position, so a release
+  of the wrong amount cannot hide behind a zero total.
+- **Called away is STRICTLY above the strike**, the mirror of assignment's strict
+  `<`. A call settling exactly at its strike is worth nothing and is abandoned;
+  `>=` would deliver stock for a contract that expired worthless.
+  Mutation-verified along with the cash arithmetic — eight mutations
+  (double-credit, dropped credit, dropped P&L booking, `>`→`>=`, `>`→`<`, the
+  commission branch, the strategy gate, the lot lookup) each killed by the test
+  written for it.
+- **`_position_legs` needed an `is_covered_call` branch and it is not cosmetic.**
+  The fallback below it reads a call-side strike as an iron condor, and a covered
+  call stores its strike in exactly that field — so without the branch a one-leg
+  position is charged **four** legs, on both the open and the settlement.
+- **⚠ A covered call must cover a lot WHOLE.** `close_equity_lot` disposes of a
+  lot whole (multi-lot cost-basis accounting is deliberately not built), so a
+  partial call could never be delivered against it. The open path refuses and
+  **names the contract count that would work**; the settlement path resolves the
+  lot by symbol + exact share match, and with no match settles the option, leaves
+  the lot alone and logs a WARNING rather than guessing.
+- **Five refusals, each carrying a machine `reason` AND a whole sentence.** A
+  code alone reaches the user as `insufficient_cash`; a sentence alone cannot be
+  asserted on without matching prose. Every outcome — refusals included — is
+  published to `cache:options:income_open` and toasted by the page, because a
+  refusal that stayed in the log is a button that appears to do nothing. A
+  refusal renders as a **warning, not an error**: "the account has $8,000 and
+  this needs $10,000" is the system working, and painting a rule red trains the
+  reader to read a rule as a fault.
+- **The open is priced LIVE, and the board's price is only a sanity check.** The
+  board is scanned once each morning, so a drift past 15% (deliberately
+  `paper_adjust.apply_adjustment`'s fraction — the Rescue board's Execute already
+  refuses on exactly this rule) refuses and names both numbers. ⚠
+  `income_price_drift` **rounds to 6 places**: unrounded, `abs(1.70-2.00)/2.00`
+  is 0.15000000000000002 while `abs(2.30-2.00)/2.00` is 0.1499999999999999, so a
+  15% *fall* was refused and a 15% *rise* allowed, from nothing but binary
+  representation. Caught by parametrising both signs.
+- **`income_open` takes `_is_stale_open`**, the trade-opening replay gate, for
+  the reason it exists: consumer groups are created at id `0`, and this command
+  reserves collateral and writes a position. Only a *successful* open republishes
+  the account view — a refusal changed nothing.
+- **The covered-call identifier is now a REAL mirror rather than a claimed one.**
+  `shares.py` said it was "pinned by a test on both sides" and no such test
+  existed — and the two constants were different FIELDS (a scan-row `type`
+  against a paper-position `strategy`). They only genuinely have to agree because
+  `open_income_position` stores the row's type as the position's strategy;
+  `shared/tests/test_cross_tier_mirrors.py` now pins all three tiers, plus the
+  page gate against `INCOME_OPEN_STRUCTURES` (a button on a row the service
+  refuses is a dead control; a structure it accepts with no button is a feature
+  nobody can reach). Writing the test was cheaper than deleting the claim.
+- **Three more stale comments the same review found**, corrected in place:
+  `main.py` said "TEN tabs — nine was already the most" where `OPTIONS_CHILDREN`
+  has **nine** and had **seven**; `IncomeScan.scanned_symbols` said "actually
+  covered" against its producer's own "ATTEMPTED, not succeeded"; and
+  `income.return_on_capital` reversed its own correct premise, claiming
+  `capital > 0` rejects a NaN when `nan <= 0` is False.
+- **Manuals in the same commit** (they rot silently): the User Guide's Income
+  section gains the open action and its refusals, its Shares section stops
+  promising a hand-sale that does not exist, `page_help.py` gains both, and
+  `docs/webgui-routes.md` documents the command, the collateral rule, the
+  two-piece cash move and the whole-lot constraint.
+- **Suites:** webgui **3081 green** (was 3072, +9); options_svc **1487 green**
+  (was 1450, +37); shared **313 green** across its three sub-suites (bus 34 ·
+  contracts 53 · tests 226, +2); options-scanner `test_assignment.py` + the new
+  `test_called_away.py` **19 green** (+12). No failures and no skips in any of
+  them. ⚠ The shared total is **313, not the 277** carried into this session as
+  a baseline — the delta from HEAD is provably +2 (both in
+  `test_cross_tier_mirrors.py`), so 277 was already stale before this work.
+  Compare the failing SET, as ever; the count was the thing that misled.
+
+**Prior —** 2026-09-05 (**A two-sided 30–45 DTE `INCOME` window, and the
+paper account learns to hold shares.** Two new Options tabs — `/options/income`
+and `/options/shares` — a third scan horizon on its own once-daily slot, put
+assignment into an `equity_lots` table, and covered calls struck at or above
+cost basis. ⚠ **Nothing below has been verified running in dev.**)
+
+- **⚠ Read this first: every suite is green and NOTHING here has run against
+  Redis, the proxy, or a browser.** No page has been opened, no scan has fired,
+  no put has been assigned outside a test. The DEVELOPMENT RULE is explicit that
+  "tests pass" is not "verified in dev" for anything with a runtime surface, and
+  this branch is almost entirely runtime surface: a scheduler slot, ~23 live
+  chain fetches, a new SQLite table, two NiceGUI pages and a ten-tab nav strip.
+  Treat the whole entry as *built and unit-tested*, not as *working*.
+- **⚠ The operator prerequisite, so it is not later chased as a bug.** The
+  earnings gate does nothing real until an Alpha Vantage key exists at
+  `shared/alphavantage_key.txt` (or `ALPHAVANTAGE_API_KEY`) **and** the nightly
+  refresh has populated `EARNINGS_CALENDAR_DB`. Until both are true,
+  `shared.earnings.coverage()` returns `not_listed` for **every** symbol, every
+  row on the board reads **"Not checked"**, and no expiration is dropped for a
+  report. That is the three-state vocabulary working exactly as designed —
+  *unknown*, never *clear* — and it is deliberately not a fail-closed, because
+  failing closed would empty the whole scan on a checkout with no key and make
+  the feature look broken rather than uninformed.
+
+**Phase A — the `INCOME` window.**
+
+- **What it is:** a third scan horizon beside 0-DTE and swing, at **30–45 DTE**,
+  screening put credit spreads, call credit spreads and cash-secured puts across
+  the autoscan's own watchlist, published as one jointly-ranked board on
+  `cache:options:income`. `compute.income_scan` is a thin wrapper over
+  `swing_scan` — new `trade_type` / `structures` / `earnings_date` /
+  `return_chain` parameters — not a second pipeline, because duplicating it is
+  how `clamp` came to have nine copies.
+- **Two-sided by construction, and the second side is free.** `screen_spreads`
+  already loops BOTH expiry maps out of the same chain object, so the CCS side
+  costs no extra Schwab call. A long-only "wheel" would have been the one
+  asymmetric screen in a stack where every other gate — the momentum veto, the
+  regime filter, the wall check, directional mode — is two-sided.
+- **One pass a day, and that is the whole cost argument.** `[slots.income]` in
+  `config/sessions.toml` (08:45 CT, 20-minute grace) with
+  `scheduler.income_slot_due` mirroring `analyze_slot_due`. A 35-DTE candidate
+  does not meaningfully re-rank inside fifteen minutes, so running it at autoscan
+  cadence would change nothing in the ranking and cost **~690 extra `/chains`
+  calls a day against ~23** — against the audited ~68–76k/day, ~0.03%.
+  `income_scan` is also added to `_REPLAY_GUARDED`, for the third reason that
+  list exists: it mutates nothing and bills no vendor, but a backlog replay would
+  re-spend those ~23 fetches once per queued command.
+- **The delta band is 0.15–0.25 and NOT `directional_delta_range()`.** Those
+  bands (PCS −0.55…−0.30) sit entirely above the PREMIUM-mode ceiling
+  `MAX_ENTRY_SHORT_DELTA` (0.27), and the `continue` that drops them increments
+  no reject counter — so the window would have returned zero spreads forever
+  while every stubbed test passed. 0.15–0.25 brackets the ~0.20 income
+  convention with clearance on both sides.
+- **The credit floor and the quality cut are reused, deliberately.**
+  `min_credit_pct()["SWING"]` (0.12) is **dominated** here — the binding
+  constraint is the delta-aware edge floor `credit/width >= |delta| + 0.02`,
+  which demands 17–27% at these strikes — so an `income` knob would be a second
+  constant that changes nothing until `EDGE_MARGIN` moves. Same for
+  `SWING_MIN_SCORE`: the bar is a statement about a horizon-agnostic composite.
+- **The earnings gate was SWING-only, and 30–45 DTE is where it matters most.**
+  At 5–15 DTE a straddled report is occasional; at 30–45 days it is close to
+  certain, since most names report inside any 35-day window. `screen_spreads`
+  now gates on the exported `EARNINGS_GATED_TRADE_TYPES = ("SWING", "INCOME")`,
+  shared with `options_svc.compute`'s post-build filter over the builder families
+  that `screen_spreads` never sees — a tuple rather than two conditions, because
+  the two must agree and could otherwise drift. 0-DTE stays exempt on a
+  **hold-duration** argument (it is flat by the close), not because
+  `check_earnings_conflict` would clear it — its window is `[today − 5d,
+  expiration]`, so a report earlier in the week falls inside it.
+- **`shared/earnings.py` is the calendar's READ path, hoisted.** `lookup`,
+  `coverage`, `days_to_earnings` and the store helpers moved out of
+  `services/trade_svc/earnings_calendar.py` and are **re-exported** there, so
+  every existing caller is unaffected and there is still exactly one
+  implementation. The vendor key, the HTTP call and the CSV parser stayed
+  behind: they belong to that service alone. `options_svc` may not import
+  `trade_svc`, but reading a shared store is not a cross-service import —
+  `shared/market_calendar.py` and `shared/symbols.py` are the precedent. The
+  gate costs **zero API**: one bulk Alpha Vantage call a night, and a local
+  SQLite read per symbol.
+- **`LIQUIDITY_THRESHOLDS["INCOME"]`, and the fail-open that made it necessary.**
+  `passes_liquidity_gate` falls open on a trade type the dict does not carry
+  ("unknown trade type — don't filter"), silently — so the income window would
+  have run with **no OI floor, no volume floor and no spread cap at all**. The
+  default is correct and stays (other callers legitimately pass uncovered
+  types); the guard is the new `SCANNED_TRADE_TYPES` tuple and a test over it.
+  The thresholds are deliberately **not** a copy of SWING's, and move in opposite
+  directions on two axes: `min_oi` **100** (above swing's 50 — open interest is a
+  stock, not a flow, and a monthly strike has had weeks to accumulate resting
+  size, so 50 there is a far weaker signal of tradeability), `min_volume` **5**
+  (below swing's 10 — the same strike trades less per day the further out it is,
+  as interest spreads across more listed expirations), `max_spread_pct` **0.20**
+  (between 0-DTE's 0.15 and swing's 0.25 — the gate is a ratio and the mark is
+  much larger at 35 DTE, so the same cents-wide market reads as a smaller
+  percentage).
+- **⚠ A live defect fixed on the way past: the NAKED gate had ALWAYS discarded
+  every `SHORT_PUT`/`SHORT_CALL` the scanner emitted.** `build_directional`
+  produces them on every scan, and `_reward_metric`'s NAKED branch compared a
+  **per-trade** capital efficiency against a 10% bar — demanding the same 10% of
+  a 1-day trade as of a 45-day one. An ordinary 35-DTE cash-secured put returns
+  ~1.70% per trade (≈17.8%/yr), so it graded Weak and was cut, every time,
+  invisibly. The metric is now **annualised**:
+  `(max_profit / capital) × (365 / max(dte, MIN_ANNUALISE_DTE))`, so the bar
+  means a rate. The 0.10/0.20 bars are unchanged, and that is measured rather
+  than lazy — `tools/sweep_naked_capeff.py` (pure Black-Scholes through the same
+  scorers, no Schwab call and no DB) prints every figure: annualised capeff runs
+  0.55–2.03 for SHORT_CALL and 0.14–0.40 for SHORT_PUT, a ~4.4× gap that is the
+  **capital basis** (a short call is capitalised at the 20%-of-spot margin proxy,
+  a short put at its true stock-to-zero max loss) and not the horizon. So raising
+  the bar to discourage short-dated shorts would cut on the wrong axis.
+- **`MIN_ANNUALISE_DTE = 5` is the horizon lever, and it too was swept
+  (`--floors`).** Unfloored, annualising rescales a 1-DTE short **365×**, so
+  ~0.2% per trade reads as ~73%/yr and clears a 10%/yr bar on nothing. 5 is the
+  **largest** value that rescales only horizons the 0-DTE window owns (0-DTE
+  scans 0–4 DTE, SWING opens at 5), and it makes that window horizon-neutral —
+  dte 1, 2, 3 and 4 all divide by 5, so within it capeff ranks on per-trade
+  return alone, which is the honest reading at horizons too short to annualise.
+  It cuts nothing the old bar admitted.
+- **⚠ Two prose corrections inside that block, recorded because it shipped stale
+  numbers twice.** The first sweep existed only in a session transcript
+  (0.59–3.78 / ~4.7×) and was committed as a re-runnable script; the ceilings
+  then fell again (3.78 → 2.03) once `MIN_ANNUALISE_DTE` divided the 1-DTE rows
+  by 5. Everything at 5 DTE and beyond is untouched, and the argument never
+  changed — the numbers were correctable only because the sweep is a script. A
+  third claim was **deleted** rather than corrected: "the short end is already
+  braked by `q_breakeven_vs_em`" was derived from a single synthetic grid point,
+  and the repo's own `fake_client` fixture emits 1-DTE naked shorts at 52.1 and
+  53.2 through the production cut. The short end was not braked.
+- **`dte <= 0` returns `None`, which excludes the whole 0-DTE naked-short class**
+  — an accepted consequence, stated rather than discovered later. `_dte_for`
+  returns `max(0, …)` and folds an unparseable expiration into the same bucket,
+  so a data fault and a same-day contract are indistinguishable there; a yearly
+  rate over a horizon of zero is not a judgement. `MIN_ANNUALISE_DTE` floors the
+  **divisor** for a horizon that exists and must never be made to reach this
+  guard. Admitting 0-DTE naked shorts needs its own per-horizon bar.
+- **`evaluate_gates` now says "capital efficiency" for the NAKED profile**, where
+  it used to report "R:R" about a ratio that profile does not have (its loss is
+  unbounded, so it is undefined). Display only — `reward_key` still decides the
+  compare — and `detail.py`'s `_GATE_FLAGS` carries the matching chip.
+- **`IncomeScan` (`shared/contracts/options.py`) validates the ENVELOPE, not the
+  rows**, the same judgement `ScanResult` makes: the board is genuinely
+  heterogeneous, since an adapted spread carries **both** the flat
+  `short_strike`/`credit`/`rr_pct` contract and the normalized `legs` one while a
+  natively-built `SHORT_PUT` carries only the latter. **The chain is deliberately
+  absent** — publishing it beside the candidates would repeat the
+  `cache:options:calc_chain` incident (8.77 MB, 53% of all prod Redis string
+  bytes), and worse, since a 30–45 DTE chain is wider than the 0-DTE one that
+  caused it.
+- **`handlers.publish_income` merges every symbol into ONE ranked list**, fanned
+  out through `parallel_map` at 6 workers. One symbol's failure lands in
+  `errors` (so the page can say which) **and** in `_degrade` (so `/health`
+  counts the case where an outage took all 23) — an error list alone would leave
+  a whole-watchlist failure looking like a quiet tape. `scanned_symbols` is what
+  was **attempted**, so 1 after 22 failures cannot read as a thin market.
+  `_income_rank` sends an absent or NaN score to `-inf`: a non-reading must never
+  sort to the top of a board a human picks a trade from.
+
+**Phase B — share inventory.**
+
+- **`equity_lots` is a new table, and it never holds reserved buying power.**
+  That is the load-bearing decision and the reason it is not a `kind` column on
+  `paper_positions`: `reconcile_buying_power` recomputes
+  `buying_power_reserved` as `Σ OPEN paper_positions.max_loss_total` and corrects
+  the drift against cash, so anything reserving outside that sum is **silently
+  zeroed** at the next service start. A lot is cash already **converted into
+  shares**. `reconcile_buying_power` needed no change at all, and every one of
+  `paper_positions`' many readers stays correct without learning to filter.
+- **`debit_cash` exists because the two functions either side of it are both
+  wrong for a purchase.** Reserving would be undone by the reconcile above;
+  booking it through `realize_pnl` would report the purchase price as a realized
+  loss and, at a whole strike notional, trip the session drawdown halt on a trade
+  that lost nothing.
+- **Assignment is three moves the account already knew how to make.** The short
+  put closes `EXPIRED` with `exit_reason='ASSIGNED'` and keeps its full credit
+  (`intrinsic_value` returns 0 outside PCS/CCS/IC, and the loss is not lost — it
+  lives in the share basis); `_close` already returns the reservation, which for
+  a cash-secured put **is** the strike notional; then cash is debited
+  `strike × 100 × qty` and a lot is inserted at `cost_basis = strike`. ⚠ Adding a
+  second `release_buying_power` to "complete" the sequence credits the notional
+  twice and silently inflates the account, and the resulting lot looks identical
+  — the one assertion that catches it is `reconcile_buying_power(db) == 0.0`.
+- **`is_cash_secured_put` tests BOTH structure and strategy**, because each is
+  ambiguous alone: `short_strike`/`long_strike` hold the CALL strikes for a CCS,
+  so "one strike, no long leg, no call side" equally describes a naked short
+  *call*, which assigns stock short. Two spellings for the one structure already
+  existed (`SHORT_PUT` on the scan side, `NAKED_PUT` on the Calculator/rescue
+  side) and both assign. A spread that finishes in the money settles its legs
+  against each other and produces no shares.
+- **Settlement is strictly below the strike** — matching `max(strike − spot, 0)`.
+  A put settling exactly at its strike is worth nothing and is abandoned.
+- **There is deliberately no second detection path.** The settlement branch
+  already defers a cycle when no quote is available, so an assignment can appear
+  a cycle late — better than two mechanisms that can disagree.
+- **Shares count toward session-start equity, at cost.** `roll_session_if_needed`
+  computes `cash + buying_power_reserved`, excluding open unrealized; a lot's
+  cost basis is committed capital by exactly that definition, while its mark is
+  unrealized and stays out. ⚠ **Measured, and the design doc's first draft was
+  corrected in place for it:** `session_start_equity` is written in three places
+  and **read nowhere** in `services/`, `webgui/` or `options-scanner/`. The live
+  guard is `should_halt` against the absolute-dollar
+  `config_paper.MAX_SESSION_DRAWDOWN`, which never consults it. So this is about
+  storing the right number for its first reader — not a loose safety guard, and
+  it must not be cited as one.
+- **`reset_account` clears the lots too.** A lot surviving a reset reports shares
+  against a wiped balance, and `equity_at_cost` would keep counting it into the
+  next session's opening equity.
+- **A cash-secured put is ONE leg for commission, not two.** `_position_legs`
+  defers to `is_cash_secured_put` rather than restating the test, so the one
+  single-leg structure in this book is recognised by one definition — the same
+  one the assignment path uses.
+- **Covered calls are struck at or above basis, and the builder refuses
+  otherwise** — not a warning, not a score penalty. Called away, such a call
+  books a guaranteed loss on the shares that the premium rarely covers. The floor
+  is applied to the ladder **before** the delta pick, so an underwater lot gets
+  the nearest usable strike above basis rather than the conventional 0.20-delta
+  strike below it. One candidate per expiry, not per strike: the horizon is the
+  reader's choice, the strike is pinned by the convention, and a ladder would
+  swamp a board picked by hand.
+- **They cost 0–10 extra chain calls, and that is the design's whole trick.**
+  `income_scan(return_chain=True)` hands back the chain for a **held** symbol the
+  watchlist was scanning anyway — zero extra calls, requested per symbol so the
+  pass retains a handful rather than all 23. Only a held symbol *outside* the
+  watchlist is fetched, and then through `income_chain` (chain + quote, two
+  calls) rather than a full scan, which would cost more **and** silently widen
+  the board past the watchlist it documents itself as mirroring. The earnings map
+  over the held names costs nothing: local SQLite.
+- **A covered call carries NO `composite_score`, deliberately.** The Fit+Quality
+  scale is calibrated on defined-risk option structures against an inferred
+  market view, and a covered call's economics are dominated by a stock position
+  that scorer never sees. Inventing a number so the row sorts higher would be
+  fabricating a reading, so it sorts to the **foot** of the board and is ranked
+  on `yield_on_cost` / `total_return_if_called` instead — the two numbers that
+  actually decide a covered call, and which this repo computed nowhere before.
+  Its dollars are **per contract** like every other row, with `quantity`
+  separate: scaling by lot size would put a 3× row beside 1× rows and make the
+  board incomparable.
+
+**The two pages, and where they are weak.**
+
+- **`/options/income`** — read-only, Tier-1 reader of `cache:options:income`.
+  Every cell reads a field **both** row shapes carry (`legs` / `net_credit` /
+  `capital` / `max_profit` / `breakevens`); reaching for `short_strike` would
+  render the spreads and silently blank the single. Dollars are per **contract**
+  everywhere (`net_credit`, 60.00) and never the per-share `credit` (0.60) — a
+  $0.60 row beside a $640 row is exactly what that field invites. **Return on
+  capital** is the column that makes the board comparable at all. The status line
+  has three states, not two: a pass that ran and found nothing says so by naming
+  what it scanned, because wording it like a cold feed would report a quiet
+  market as an outage.
+- **`/options/shares`** — a second READER of `cache:options:paper_account`, not a
+  second book. The lots ride the account view rather than a new key, so one
+  database has one publish cadence and a lot cannot exist on one screen and not
+  the other.
+- **⚠ There is no live equity mark, and the page says so in the column header.**
+  Nothing in this app re-prices a bare share, so **Mark (not tracked)** and
+  **Unrealized** render an em-dash on every row. Printing the cost basis under a
+  Mark header, or a 0.00 unrealized, would fabricate exactly the reading the page
+  is opened for. The builders do read a `mark` off a lot if one is ever attached
+  upstream, so filling those columns later is a service change with no page edit.
+- **⚠ Coverage is per SYMBOL, not per lot.** The paper book stores no link from a
+  covered call back to the lot it was written against, so one open call shows
+  against **every** lot of that symbol. Showing it on all of them is the honest
+  rendering of what is stored — hiding it on all but one would imply those shares
+  are uncovered. A call **credit spread** on the same symbol is deliberately not
+  matched: reporting it as covering would say the shares are protected when they
+  are not.
+- **⚠ The Options tab strip is now TEN tabs**, and nine was already the most it
+  has carried. Whether it wraps at a narrow width is **unverified** — nobody has
+  opened a browser on it, and no test can tell you. The design's stated fallback
+  is to move **Shares** under ACCOUNT beside `/portfolio`, it being the more
+  separable of the two.
+
+**Deliberately not built:** LEAPS (shares no machinery with either half — own
+design, later) · naked calls as a "short wheel" (`driver_policy`'s structure
+allowlist refuses undefined risk on principle; the bearish expression at this
+horizon is the CCS the window already screens) · autonomous trading of these
+signals (`config/driver.toml` is unchanged and `INCOME` is not in the driver's
+allowlist — this is a screen a human acts on) · multi-lot cost-basis accounting
+(FIFO / LIFO / specific-ID; one lot per assignment, closed whole).
+
+**Calibration needs no change** — `shared.calibration.family_key` passes an
+unrecognised family through **upper-cased rather than guessed**, so `INCOME`
+buckets appear on their own as outcomes accrue. `_FAMILY_ALIASES` exists only to
+reconcile `scanner_type` `'0DTE'` with `trade_type` `'0-DTE'`, and `INCOME` has
+no hyphenated variant. ⚠ The one thing to hold to: the recorder must write
+`INCOME` as the `scanner_type` too — two spellings would silently produce two
+buckets, the exact failure the alias table was added to fix.
+
+- **Suites:** `webgui` **3072 passed**, `options_svc` **1450 passed**,
+  `shared/contracts` **53 passed**, `shared/tests` **224 passed**, all clean.
+  `options-scanner` is green (0 failed, 2 skipped) but its count is deliberately
+  not quoted: another session held uncommitted work in that folder while this was
+  measured, so the number is not attributable. Commits `7fe0d70`…`9e2b7a5` on
+  `claude/grok-bot-options-desk-9786fc`.
+  [design](plans/2026-09-05-income-window-and-share-inventory-design.md) ·
+  [plan](plans/2026-09-05-income-window-and-share-inventory-plan.md)
+
+---
+
+**Last updated:** 2026-09-05 (**The Desk's Bull / Bear sector strip is re-keyed
+to TODAY.** The chip's fill colour and the strip's left-to-right order now follow
+the session's move; the nightly quarter-horizon quadrant survives as a thin left
+border stripe. `/sentiment/bullbear` itself is untouched.)
+
+- **The problem was that three of the four signals on a chip could not move.**
+  The quadrant (`raw.trend` × `raw.excess`, 90/63-bar windows), the order
+  (`by_strength`) and the breadth bar were all the nightly cascade's, frozen
+  until 16:20 CT. Only the smallest text on the chip — the day % — was live. That
+  is the right answer for the map, whose whole purpose is an honest structural
+  read; it is the wrong answer for a short-term trading screen.
+- **It cost no new request.** `merge_live` already attached `day_pct` from ONE
+  batched `/quotes` call (374 symbols in a single call, measured 2026-08-19).
+  The missing half of an intraday *relative* axis was the benchmark, and
+  `bullbear_symbols` derives purely from tree rows — so **SPY was not in that
+  fan-out**. Adding it is one more symbol on a call that already happens: no new
+  request, no new schedule, no new cost. Rows gain top-level `day_excess`
+  (`day_pct` less the benchmark's) and the payload gains `benchmark_day_pct`.
+- **`day_excess` is `None`, never `0.0`, when either side is missing** —
+  inheriting `merge_live`'s existing contract, where `None` means *the proxy
+  omitted this symbol* and never *unchanged*. `_quoted_day_pct` is the ONE
+  spelling of that read, called by both the per-row merge and the benchmark
+  lookup, and it is deliberately **stricter than `_as_finite`** at two ends:
+  `bool` is rejected (`float(True)` is a finite 1.0, and a True here is a shape
+  error, not a 1% move) and a numeric **string** is rejected (this reads one
+  specific producer, the flattened `get_quotes` mapping, so a string means that
+  shape changed, and coercing it would hide the change behind a plausible
+  number).
+- **⚠ The live/structural switch asks the CALENDAR, never the numbers, and that
+  is the whole design.** `SchwabProxyClient._extract_change_pct` falls through to
+  a literal `0.0` when every percent field is missing or zero, and `0.0` is not
+  `> 0` — so a switch written as "is any row's day move non-zero?" would render
+  **all eleven sectors `falling_lagging` every pre-open, every weekend and
+  through any proxy hiccup**: a confident, maximally bearish reading of no data
+  at all, the failure class CLAUDE.md documents five times over. `strip_is_live`
+  instead asks the new `shared.market_calendar.regular_session_has_opened`, plus
+  a `benchmark_day_pct` clause for what a calendar cannot see — a dead proxy
+  mid-session. That clause reads through the STRICT `pages.fmt.num`, so a NaN
+  counts as absent while a **measured** `0.0` — a genuinely flat tape — stays
+  live; a truthiness test there would be the same bug one field over.
+- **`regular_session_has_opened`, not `is_regular_hours`.** The latter goes False
+  at the cash close, and the day's move does not stop being today's move at the
+  close — this strip is read after the bell as often as during the session. It is
+  False for weekends, holidays and the pre-open alike, all three sharing one
+  trap: a quote's percent field is then a stale prior close or the proxy's
+  literal fallback, neither of which is today.
+- **The fallback is NOT a neutral or empty state.** Pre-open is exactly when the
+  strip is read to plan the session, so every chip is still drawn — on the
+  structural horizon — and the strip labels itself.
+- **One classifier over both horizons.** `row_day_axes(row)` reads the top-level
+  live fields and feeds the EXISTING `quadrant()` unchanged, so the two horizons
+  cannot diverge by rule and a strip/map disagreement is always a difference of
+  *horizon*. It has no fallback to `raw`: painting the quarter's reading in
+  today's colours is the one outcome the feature exists to prevent. ⚠ A
+  `day_quadrant` wrapper was specified in the design and **dropped during
+  implementation** — its only future justification would be a deadband on the
+  noisier intraday axis, which the design rejects, and a parity test over a body
+  of `return quadrant(...)` *cannot fail*: it would read as if it pinned the
+  invariant while pinning nothing.
+- **Ordering has hysteresis, and the precise claim matters.** `by_day_move`
+  quantises the move into margin-wide buckets (`DAY_SORT_MARGIN_PCT = 0.05`) and
+  breaks ties on the row's seat in the previous paint, so order survives *inside*
+  a bucket and a chip changes seats only when it crosses a boundary — a pure
+  function of `(rows, previous)`, no pairwise state machine and no clock. This is
+  **not** "a chip moves only when it beats its neighbour by a margin": a pair
+  sitting a whisker apart either side of a boundary still swaps on every repaint.
+  That residual is accepted, bounded to adjacent seats (such a pair is by
+  construction within one margin of each other), and pinned by
+  `test_by_day_move_still_swaps_a_pair_straddling_a_bucket_boundary`.
+  `math.floor`, never `int` — truncation rounds toward zero, which would make the
+  single bucket spanning flat twice as wide as every other one and let a sector
+  down 0.04% hold a seat above one up 0.04%, blurring the one boundary the strip
+  is sorted this way to show. `margin` is a parameter because the constant binds
+  as a default at `def` time, so patching the module attribute would never reach
+  the call.
+- **⚠ This deliberately breaks `by_strength`'s stated invariant** — *"two screens
+  ordering the same rows differently is a defect neither shows"* — because the
+  two screens answer different questions: the strip asks what is working today,
+  the map asks what has worked this quarter. That is honest **only** because the
+  strip says what it sorted by (`bullbear_caption`) and the headline names the
+  horizon it counted (`bullbear_headline` appends "today" / "on the quarter" to
+  the map's own sentence). Remove either and the divergence goes silent. An
+  unlabelled count that changes meaning at the opening bell is worse than either
+  count alone; an empty headline takes no horizon word either, since naming the
+  horizon of a count nobody made makes the claim worse rather than better.
+- **The stripe costs no chip height and no reflow.** `border-l-[3px]` sits on the
+  frame at BOTH horizons — off-session the left border simply takes the
+  quadrant's own colour — so the strip does not shift 3px sideways when the bell
+  flips it. The stripe is drawn only when the fill is today's, since off-session
+  an edge repeating the fill says nothing, and it never carries meaning alone:
+  the whole chip hovers to "On the quarter: Falling · Leading", in `bullbear`'s
+  own words. ⚠ The stripe classes win the left edge on **Tailwind v4's canonical
+  property ordering** (`border-left-color` follows `border-color`), not on DOM
+  class order — the same thing `leg_editor`'s long/short accents already rely on.
+- **One clock per paint.** `_paint_bullbear` takes a single `now` and hands it to
+  both the chips and the headline; two clocks would let a headline say "on the
+  quarter" over chips already drawn on today's axes at the opening bell. Nothing
+  in the signatures prevents that, so `test_one_paint_decides_the_horizon_once`
+  pins the call site. The seat order the strip last drew lives in page state (one
+  client, one strip, one memory) and is fed back into the sorter — without it the
+  margin buys nothing and the strip re-sorts from scratch on every ~30 s repaint.
+- **Out of scope, deliberately:** `/sentiment/bullbear` is unchanged and remains
+  the structural read; the industry and stock levels are unchanged; the nightly
+  cascade, its windows and its scoring are untouched.
+- **Suites:** `webgui` **3006 passed**, `sentiment_svc` **354 passed / 1 xfailed**
+  (the documented `test_daily_history_wins_over_session_latch`), `shared/tests`
+  **203 passed**, all clean. Commits `70387fb`…`e4e3f78` on
+  `claude/new-session-8a07f5`.
+  [design](plans/2026-09-05-desk-bullbear-intraday-design.md) ·
+  [plan](plans/2026-09-05-desk-bullbear-intraday-plan.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Captured signals get a Daily / Weekly / MTD
+score, backdated to 1 September.** The EOD report's performance section gains a
+third book beside the Paper Ledger and Claude's.)
+
+- **Nothing new is recorded.** `signal_outcomes` already carried `close_date`
+  (indexed), `realized_pnl` and `exit_reason` back to 2026-06-15 — 868 rows on
+  prod. So "starting 1 September" is a **floor on what the report counts**, not
+  the point where recording begins, which is why the MTD row was backdated the
+  moment it shipped rather than starting to accumulate from the build date.
+- **The service publishes ROWS; Tier-1 buckets them.** `captured_closed_today`
+  is today-only and cannot feed a weekly row, so `options_svc.captured_performance`
+  publishes `cache:options:captured_perf`. Aggregating service-side would have
+  duplicated `period_buckets`, which already exists in Tier-1, is already tested,
+  and already renders the exact table the other two books use — so all three now
+  cannot disagree about what "this week" means. `/eod` is Tier-1 and may not open
+  SQLite; the rows reach it through Redis or not at all.
+- **⚠ The read window is `min(month_start, week_start)`, not month-to-date.**
+  Month-to-date looks right because MTD is the widest ROW. It is wrong: on
+  1 October the WTD row starts Monday 28 September, before the month began, so a
+  month-to-date read returns nothing for 28–30 September and the weekly row
+  under-counts on the first days of every month, silently. Floored at a
+  2026-09-01 epoch, which also bounds the payload to about five weeks of closes.
+- **⚠ Open signals are rows too**, and the first draft got this wrong. `opened`
+  and `credit` bucket on the **entry** date independent of the exit, so
+  publishing only CLOSED outcomes under-counted the Opened column by every signal
+  still running — 4 of them, on a Daily row that read **0**. Found by rendering
+  the section against prod rather than by reasoning about it.
+- **The dollars are per ONE contract, and the section says so.**
+  `close_signal_manually` computes `(entry_credit − exit_value) × 100`, and a
+  captured signal is never sized — `/desk` already refuses to print a quantity
+  for one. Credit is put on the same basis, because two figures on one row that
+  do not share a basis describe different positions. Without the note, a −$1,251
+  month reads as an account loss instead of the scanner's picks scored under the
+  auto-manage rules.
+- **The first reading, verified against a direct SQL read of prod:** Daily
+  **+$329** (4 closed, 4-0) · WTD **−$1,251** (45 closed, 5-39, 11%) · MTD the
+  same. By exit: `DELTA_STOP` 17 (−$975) · `BREAKEVEN_STOP` 13 (−$154) ·
+  `TIME_STOP` 8 (−$115) · `EXPIRED` 4 (**+$329**) · `MONEY_STOP` 3 (−$336). By
+  type: 0DTE −$636 / Swing −$615. **The only four winners expired; every managed
+  stop lost money.** The report exists to keep showing that rather than to
+  flatter it.
+  ⚠ **5-39, not 5-40** — one outcome closed at exactly $0.00 and `period_buckets`
+  counts a scratch as neither. The design doc had said 5-40, derived by
+  subtracting wins from closes; corrected in place.
+- **⚠ A lesson about baselining.** The first full `options_svc` run failed on an
+  unrelated test — `test_rescue_singles`'s `inspect.getsource` guard — because
+  `compute.py` was being edited WHILE that run was in flight, and `inspect`
+  resolves source by line numbers cached at import. It passes in isolation. The
+  second run surfaced the REAL failure: `test_app`'s loop guard, which scans
+  `scheduler.py` for every `handlers.<name>` it can submit and demands each be
+  stubbed — so the new publisher had been left running for real inside the loop
+  test, exactly the failure that test's docstring predicts. **Never baseline a
+  suite against a tree you are still editing.**
+- **Suites:** `webgui` **2995 passed**, `options_svc` **1358 passed**,
+  `test_signal_db` **33 passed**, all clean.
+  [design](plans/2026-09-04-captured-trade-score-design.md) ·
+  [plan](plans/2026-09-04-captured-trade-score-plan.md)
+
+---
+
+**Last updated:** 2026-09-02 (**The Live Mirror is removed** — the rail's
+`Live Mirror` row, `/desk/live`, `/desk/stream` and `webgui/desk_stream.py`, at
+the user's request. `/desk` and `/wall` are untouched.)
+
+- **What went:** `webgui/desk_stream.py` (1,031 lines) and its
+  `webgui/tests/test_desk_stream.py`; the two raw routes in `main.py`; the
+  `FLAT_NAV` row and the `NAV_SECTIONS` landing-block entry; the `/desk/live`
+  guide in `page_help.py`.
+- **`EXTERNAL_RAIL_ROUTES` and `_nav_link(..., new_tab=)` went with it**, because
+  the mirror was their only member and only caller — the set's own comment said as
+  much. That plumbing carried a real invariant (a row that opens elsewhere must
+  not paint the active wash, since no navigation happened), so CLAUDE.md keeps a
+  one-line note saying it existed and why, for anything that revives the shape.
+  `fastapi.Request` and `StreamingResponse` left `main.py`'s imports with the SSE
+  route — it was their only consumer.
+- **`/wall` is unaffected.** It iframes `/desk`, never `/desk/live`, and imports
+  nothing from the deleted module. Its two prose references to it were corrected,
+  and `test_wall_is_not_a_nav_page` — which asserted the wall was absent from
+  `EXTERNAL_RAIL_ROUTES` — now asserts absence from `FLAT_NAV` and `NAV_SECTIONS`
+  instead, keeping the test's intent rather than dropping a line from it.
+- **Rail counts moved, and they are asserted in three places**: the drawer is
+  **14 items**, `NAV_SECTIONS` lengths are `[1, 4, 4, 2]`, and `_LANDING_ROUTES`
+  in `test_shell.py` holds one route. All three are pinned by tests that fail
+  loudly rather than counts that quietly drift.
+- **Both manuals rebuilt.** The Live Mirror section is out of the User Guide and
+  the Reference Guide, and `build_docs.py` regenerated the `.html` + `.docx` — the
+  documented failure mode is prose that rots because nothing fails when it does.
+- **webgui suite: 2,869 passed, 0 failed.** The count FELL from the pre-change
+  baseline because the deleted tests went with their subject — the one case where
+  a dropping count is the healthy signal.
+**Last updated:** 2026-09-04 (**The reader's-voice pass is complete across the
+app.** The eighth and last entry in the series: the sweep of everything the seven
+per-page passes did not cover.)
+
+- **The audit's headline is how little was left.** Grepping the remaining ~20
+  pages for the four defect classes turned up a short specific list, not twenty
+  pages of work. The six Trend & Sentiment screens were rebuilt with reader-side
+  copy on 2026-08-17; `pages/portfolio.py` was already plain English; and
+  `/status`, `/terminate` and `/settings` are machine-facing screens where
+  "cache" and "service" ARE the subject matter — deliberately untouched.
+- **Two more shared sentences.** `WAITING_SENTIMENT` had **two spellings across
+  four screens** (with and without "the"); `WAITING_MARKET` has one site and lives
+  in `pages/copy.py` anyway, so the next screen to need it finds it rather than
+  inventing a fifth wording.
+- **Ten "requested" toasts.** "Refresh requested", "Paper trade requested.",
+  "Swing scan requested" — honest about the enqueue and useless to a reader. The
+  three `cmd:*` ones keep the "when the engine confirms" formula the earlier
+  passes established.
+- **⚠ `webgui/tests/test_shared_copy.py` is the guard a per-page test cannot
+  be**, and it earned its keep on the first run: it reads the source of every page
+  module, and found a **tenth** "requested" toast on the Gamma page that the
+  hand-written grep behind the design had missed. It also pins the two deliberate
+  exemptions by NAME rather than by pattern, so a new page cannot inherit them.
+- **Paper Account carried the most labels**: `Strat`/`Exp`/`Qty`/`Credit`/
+  `CurVal`/`P&L$` → `Strategy`/`Expiry`/`Contracts`/`Entry`/`Mark`/`Open P&L`.
+  `Credit` was wrong for the fourth time in this campaign — the engine's paper
+  book holds directional debits — and `CurVal` was a shortening *and* the wrong
+  idea, since it is the live price the rest of the app calls Mark.
+- **Claude Trades was printing one concept two ways on ONE screen**: its
+  closed-trades table said `Strategy` while its positions table said `Strat`.
+- **`/portfolio` counts SHARES, not contracts.** Every options page in this
+  campaign renamed `Qty` to "Contracts"; doing it here would have been consistency
+  at the cost of being wrong, since that is the equity book.
+- **Two deliberate deferrals, both tested.** `/desk` keeps `STRAT`/`QTY` (measured
+  label-bound grid floors; the words clip the panel at the 1920px it is read at),
+  and `leg_editor` keeps `Qty` (a 64px track in a dense widget mounted by three
+  pages). Same class, same treatment: a test recording the arithmetic, because a
+  comment saying "this is deliberate" is the kind nobody reads before "fixing" it.
+- **The two traps worth carrying forward**, now in CLAUDE.md: a `Credit` column is
+  wrong wherever the book holds debits (four pages), and an `entry_*` field under a
+  bare label reads as live (`dte_at_entry` under "DTE" on a page whose whole
+  purpose is tracking over time).
+- **Not browser-verified — and this is the one thing outstanding.** A worktree
+  resolves to prod and would bind `:8500`, so none of the eight passes has been
+  seen in a browser. Suite: **2980 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-remaining-pages-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Rescue — the stale-price guard now says nothing
+happened.** Seventh page of the reader's-voice pass, and the first that EXECUTES
+rather than reports, which is why one of its sentences mattered more than every
+column label on it.)
+
+- **⚠ The finding.** When prices drift, Apply **aborts without mutating** — the
+  engine states it twice (`paper_adjust.py`: *"stale (re-review) and nothing is
+  mutated"*; `handlers.py`: *"aborts (`stale`) without mutating when prices have
+  drifted"*). The reader was told only **"Prices moved — re-review"**. That says
+  prices moved; it does not say the adjustment was refused — and on a page whose
+  Apply button had just been pressed, "re-review" reads as easily as *"it went
+  through, go look"* as *"nothing happened"*. The toast now reads **"Prices
+  moved — nothing was applied. Check the new numbers and try again."** and the
+  `summary_line` prefix leads with **"Nothing applied — prices moved"**, since a
+  headline continues after it.
+- **`Strike Date` labelled `expiration`.** A spread carrying two strikes has no
+  such thing as a strike date. → **Expiry**, the word six pages have now settled
+  on. Third page running with a header naming the wrong quantity.
+- **One number, one screen, two names.** The at-risk table said `Δ short` while
+  the candidate cards' own metric list (`_CANDIDATE_METRICS`) said `Short delta`.
+  The table takes the cards' word.
+- **`Strat`→`Strategy`**, **`Comm`→`Commission`**, and **`P&L`→`Open P&L`** —
+  every row here is an at-risk *open* position, so this is the Captured Signals
+  case rather than the Paper Ledger one. `Gross` and `Net` stay: either side of
+  `Commission` in one money row, the pairing is self-evident.
+- **`State`→`Risk state`, deliberately not `Status`.** The Paper Ledger's
+  `Status` column means OPEN/CLOSED; this one means TESTED/CRITICAL. One word on
+  two different things is exactly the drift these passes close.
+- **The Apply dialog said it "dispatches a (simulated) paper adjustment"** —
+  implementation-speak for the most reassuring fact on the page. It now says
+  *"This adjusts your paper position. No real money, and no live order is
+  placed."* And an advisory-only card's lower-case *"manual — place yourself"*
+  now reads as the instruction it is.
+- **The help never mentioned the guard at all**, so a reader who saw "Prices
+  moved" had nothing to check it against. It now covers both the refusal and the
+  fact that a *Manual* option is one the app will not place for you.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2971 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-rescue-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Market Scanner — and the last spelling of the
+waiting line.** Sixth page of the reader's-voice pass. This one started in better
+shape than the five before it, so the change is narrow and two of its labels
+deliberately did NOT move.)
+
+- **Already good, and left alone:** `day_note` and `truncated_note` are written
+  from the reader's side; the three subtab tooltips explain 0-DTE / Swing /
+  Directional in a sentence each; and `status_line`'s word **live** is doing real
+  work — the tab headers carry the DAY's counts (hundreds by 3pm) while that line
+  sums the last SCAN (dozens), and the word is what stops the gap reading as a bug.
+- **`Type`→`Strategy`** (the cell holds `PCS` / `CCS` / `IC` — the structure, and
+  the word the Paper Ledger and Captured Signals already use), **`Exp`→`Expiry`**,
+  **`Max Loss`→`Max loss`**.
+- **`Dropped`→`Dropped at`** — the cell holds `stale_since`, a *timestamp*: when
+  the signal stopped appearing in a scan, not whether it did.
+- **⚠ `Credit` STAYS here, which is the opposite of the last two pages** — and it
+  now carries a test saying so, because three pages into a pattern this is the one
+  somebody "fixes". `signal_columns` is a credit-spread table **by construction**;
+  the Directional tab, which holds the debits, does not use these columns at all
+  (`directional_columns` deliberately carries no credit or R:R economics, since a
+  directional trade is scored by a model not commensurable with the premium one).
+- **⚠ `DTE` also stays bare**, where Captured Signals had to become "DTE at
+  entry". That page's value is frozen at capture; this scan reruns every 15
+  minutes. The two pages differ because the quantities do, and a test on each side
+  records it.
+- **The waiting line is now singular across the app.** `status_line` read
+  *"Waiting for options service…"* — no "the" — a **fourth** spelling of a
+  sentence that already had three. It takes `pages.copy.WAITING_OPTIONS`, and so
+  does the one remaining variant in `rescue.py`: that is a shared sentence, so it
+  belongs to that module's job rather than waiting for a Rescue-page pass. Grep
+  confirms no other spelling survives in the tree.
+- **`Scan requested`→`Scanning — results appear when the scan finishes.`** A full
+  scan takes tens of seconds, and "requested" left no clue whether to wait or
+  re-press.
+- **A help gap this pass FOUND rather than created.** Nothing told the reader why
+  a row goes grey, or why its paper-trade button stops working. A dropped signal's
+  price is frozen at the moment it went — which is precisely why `stamp_stale`
+  blocks paper-trading it — and the help now says so.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2963 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-market-scanner-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Captured Signals — three columns were wrong, not
+merely terse.** Fifth page of the reader's-voice pass, and the one that turned up
+the most genuine mislabelling.)
+
+- **⚠ Two columns on a tracking page did not track.** `DTE` holds `dte_at_entry`
+  and `Grade` holds `entry_grade` — both captured once, never updated. On a screen
+  whose entire purpose is watching a signal **over time**, a bare "DTE" is read as
+  days left and drifts further from the truth every session that passes. They
+  become **DTE at entry** and **Entry grade**, and the help now says outright that
+  these two are frozen while every other column is live.
+- **⚠ `Credit` again, same defect as the Paper Ledger.** `mode` is the
+  PREMIUM-vs-DIRECTIONAL tag, and a directional signal is a **debit** — so this
+  book was never all credits. It becomes **Entry**, with the sign carrying
+  credit-vs-debit. Two pages in a row have now had a column whose header
+  contradicted the sign in its own cell; worth assuming the next one does too.
+- **`Rec`→`Action`** — the cell literally holds `TAKE_PROFIT` / `HOLD` / `CUT`,
+  which is what to do, not a description of anything.
+- **`Mode`→`Style`**, deliberately **not** "Trade type": this app already uses
+  `trade_type` for 0-DTE / Swing / Directional, and reusing that phrase for the
+  PREMIUM/DIRECTIONAL split would put one name on two different things.
+- **`Strat`/`Exp`/`Cur Price`/`Risk` → `Strategy`/`Expiry`/`Mark`/`Max loss`**,
+  matching `/desk` and the Paper Ledger.
+- **`P&L`→`Open P&L` here, while the Paper Ledger keeps plain `P&L`** — and that
+  is a real difference, not a drift. A closed signal **leaves this table** (the
+  reason its Status column was dropped long ago), so every visible row is open.
+  The Paper Ledger keeps closed rows and its `trade_pnl` returns *realized* for
+  them, where "Open P&L" would be wrong for half the book. A test on each side
+  records the distinction, so neither gets "fixed" into agreement.
+- **`Refresh marks (live)`→`Reprice now`** — "marks" is jargon, and the page's own
+  status line already said "Repricing…". The close toast takes the Paper Ledger's
+  wording for the same reason: it is a `cmd:options` command, so it names the
+  symbol and says the list updates when the engine confirms.
+- **Untouched:** the four footer figures, which are already the clearest copy on
+  the page — including the em-dash-not-$0.00 rule for an unpriced book — plus
+  every colour map and the raw payload keys.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2957 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-captured-signals-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Paper Ledger's columns name the reading, and
+one of them was wrong.** Fourth page of the reader's-voice pass, and the first
+that ACTS rather than only reports.)
+
+- **⚠ `Credit` was not merely terse, it was false for half the book.** That column
+  holds `entry_credit_total`, and a **debit trade stores its debit as a negative
+  credit** — so every debit row rendered under a header contradicting the sign in
+  its own cell. It becomes **Entry**: the sign then carries credit-vs-debit, which
+  is what it was already doing, and it is `/desk`'s word for the same quantity.
+- **That made the rename a SWAP,** which is worth knowing before you next open the
+  page: `Entry` was taken by `entry_time`, which becomes **Opened**. A reader who
+  knows the old layout sees `Entry` move from a time to a price. `Opened` is the
+  better word for a timestamp regardless, and leaving `Credit` wrong was the worse
+  option.
+- **`Risk`→`Max loss`** (it *is* `max_loss_total`; "Risk" names no quantity) and
+  **`Exp`→`Expiry`**.
+- **`P&L` is deliberately NOT renamed to `/desk`'s `OPEN P&L`.** `trade_pnl`
+  returns REALIZED for a closed trade, so half these rows are not open at all —
+  copying the Desk's word here would have been consistency at the cost of being
+  right.
+- **⚠ A deliberate divergence from `/desk`, and the first one this pass has
+  produced.** `Strat` and `Qty` are spelled out here as **Strategy** and
+  **Contracts**. Those are exactly the two labels the Desk had to keep short: its
+  Positions grid has measured per-string `minmax()` floors, both tracks are
+  label-bound, and the words cost ~58px against 43px of slack — they would clip
+  the panel at the 1920px it is read at. This page is a `ui.table` with no such
+  limit. So the app now shows one concept under two spellings, on purpose: the
+  standing rule is to spell out casual shortenings, so the abbreviation stays a
+  width **concession** rather than becoming the app's word for the concept. Both
+  tests now point at each other, so the next reader finds the reason rather than
+  the inconsistency.
+- **The action copy, which is what makes this page different from the first
+  three.** The toolbar's `Close` becomes **Close trade** — the Analyze dialog
+  carries its own `Close`, which dismisses it. And the toasts said "Close
+  requested." / "Delete requested.": accurate, since these are commands on
+  `cmd:options` and the ledger changes when `options_svc` processes them, but
+  silent about what the reader should now watch for. They now name the symbol and
+  say the ledger updates **when the engine confirms** — the honesty kept, the
+  missing half added. Nothing claims a trade is already closed.
+- **`page_help.py` gained the sentence the column could not carry:** that Entry is
+  positive for a credit and negative for a debit, and that P&L is unrealised while
+  open and realised once closed.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2950 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-paper-ledger-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Opportunity Board's columns name the reading,
+not the field.** Third page of the reader's-voice pass, and the one that finally
+earned a shared home for the copy three screens show.)
+
+- **Two headers were actively misleading, not merely terse.** `Call` and `Put`
+  hold call/put **acceleration** arrows (hot / cool / steady / flat) — a reader
+  scanning that header row has every reason to expect a price or a volume in the
+  cell beneath. They become **Call flow** / **Put flow**. `GEX` labelled a column
+  whose values are literally `above` / `below`, so it becomes **Vs flip**.
+- **`Sig` and `Signal` were different quantities two columns apart** — a count of
+  live scanner signals, and the buy/neutral/sell verdict. The COUNT is what got
+  renamed, to **Open signals**. `Verdict` is arguably the clearer word for the
+  other one, but `/desk`'s board panel already prints SIGNAL for it, and a second
+  name for one quantity is the drift the first two passes closed. `Flow` (a count
+  of alerts, not an amount of flow) becomes **Flow alerts**.
+- **Four more took `/desk`'s words** for the same quantities its Opportunity
+  Board panel shows: `Ticker`→**Symbol**, `Spot`→**Price**, `Net $M`→**Net
+  premium $M**, `Hot`→**Score**. The unit rides on the premium label because that
+  cell is a bare number in millions. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The eyebrow now names the only control on the page.** This screen has no row
+  click-through: sorting is the whole interaction, and nothing on it said so.
+- **⚠ `webgui/pages/copy.py` is new, and the reason is worth recording.** This
+  page was the THIRD byte-copy of "Waiting for the options service…". `desk.py`
+  imports both `pages.options.flow` and `pages.options.matrix`, so neither can
+  import back — which is why the Flow pass settled for a restated literal plus a
+  test pinning it equal to the Desk's. That is the right answer for two copies
+  and the wrong one for three. The new module is a leaf importing nothing from
+  `pages`, on the model `pages/fmt.py` already set for shared *numeric*
+  vocabulary ("the ONE copy"); `flow._WAITING` is gone along with the guard that
+  justified it, and `desk.WAITING_OPTIONS` stays as an alias because
+  `desk_stream` and several tests address it there and that name is not wrong.
+- **The distinction that module must NOT collapse**, stated in its own docstring:
+  this is the line for a feed that has published nothing, never for a feed that
+  is fine and has nothing to report. Every screen drawing it keeps its own
+  quiet-market line, because a dead service and a still tape rendering the same
+  words is the failure this app's "never print a zero you did not read" rule
+  exists to prevent.
+- **`page_help.py` followed**, and gained the two things the columns could not
+  say: that Call flow / Put flow are *not* prices, and that rows do not open
+  anything.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2942 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-opportunity-board-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**Flow Alerts names the event, not the detector.**
+Second page of the reader's-voice pass. `/options/flow` went next because the Desk
+pass left it holding the app's other copy of "Waiting for the options service…".)
+
+- **The four alert kinds were detector names.** `Crossover`, `Unusual activity`,
+  `Gamma flip`, `Big delta` are the four things `options_svc` runs. "Big delta ·
+  Call" told a reader which detector produced the row and nothing about what the
+  market did — the only reason the row is on screen. They become **Premium
+  shift**, **Unusual volume**, **Hedging flip**, **Outsized bet**.
+- **The two gamma SIDES had to move with them.** "Hedging flip · To positive"
+  reads *worse* than the name it replaced: "to positive" only parses once you
+  already know the subject is gamma sign, and that is precisely the word the new
+  kind name takes away. `To positive`/`To negative` become **Now damping** /
+  **Now amplifying**. `Calls over` / `Puts over` / `Call` / `Put` are untouched
+  and deliberately literal — this page can say which side traded and never who
+  initiated, because Schwab publishes no time-and-sales tape to this app.
+- **⚠ "Hedging flip", not "Hedging flipped", and that is load-bearing.**
+  `voice.flow_phrase` builds its contract-less form as `f"{kind} alert"` — the
+  form a gamma flip ALWAYS takes, since it names no contract — so a clause there
+  speaks as "Hedging flipped alert, now damping." Every kind label is a noun
+  phrase for that reason, and a test says so.
+- **The Desk, `/desk/live` and the SPOKEN alerts all followed**, because each
+  reads these labels rather than restating them. The squawk now says *"S P Y.
+  Premium shift alert, calls over."* and *"N D X. Unusual volume, 0-D T E 7 15
+  Put."* `voice.py`'s two deliberate copies (`_ALL_CAUSES`, `CONTRACT_KINDS` —
+  restated because the prewarm runs before any page is built) were updated; both
+  guards recompute through `flow.alert_kind_label`/`side_label`, so the rename
+  **failed the suite loudly** rather than desynchronising the audio. The
+  prewarmed clips under `webgui/data/voice/` are keyed by phrase text, so they
+  re-synthesize on first use and the old files are orphaned — gitignored,
+  self-healing, no action needed.
+- **Column labels match the Desk's words** for the same quantities: `Type`→**Alert
+  type**, `Detail`→**What traded**. `Alert` sat directly beside `Alert type`
+  naming a different thing and became **Summary**; `Share` never said share *of
+  what* and became **Share of flow**. No width constraint applies — this is a
+  `ui.table`, not the Desk's fixed `minmax()` grid.
+- **The status line, both branches.** The cold branch is a **guarded copy** of
+  `desk.WAITING_OPTIONS`, not an import: `desk.py` imports this module for
+  `alert_rows` and `_TONE`, so importing back is a cycle. Same pattern and same
+  justification as `voice._ALL_CAUSES`, with a test pinning the two equal. The
+  quiet branch now describes the MARKET rather than the page — "Nothing unusual
+  has traded yet today" against "No flow alerts yet today", which reads as a
+  screen with nothing on it.
+- **The raw payload keys did NOT change.** `crossover` / `uoa` / `gamma_flip` /
+  `big_delta` / `to_positive` are the `options_svc` contract, the
+  `config/flow_alerts.toml` section names and `_TONE`'s keys. Renaming a word is
+  this page's business; renaming a key would be a cross-tier migration for no
+  reader's benefit, and the page's design already separates the two.
+- **`page_help.py` followed on BOTH entries** — and the Desk's entry was stale in
+  a way the first pass missed: it quotes the spoken examples verbatim, and it
+  still said "changes **flag**" after that column became STATUS. The earlier
+  guard forbade `"a flag:"` but not the bolded form, which is how that file names
+  a screen element. Guard widened.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  Suite: **2936 passed** in `webgui`, no failures (the four affected suites were
+  411 before, 419 after).
+  [design](plans/2026-09-04-flow-alerts-user-perspective-copy-design.md)
+
+---
+
+**Last updated:** 2026-09-04 (**The Desk speaks in the reader's voice.** Every
+label on `/desk` said which mechanism produced the number; the use-language was
+already written, one hover away in `page_help.py`. First of a planned pass; the
+landing page went first.)
+
+- **Four use-lines.** Each panel head gained a sentence saying what you do with
+  it — "Above the flip, dealers damp moves; below it they feed them." It gets its
+  OWN line, not the existing subtitle slot: that slot is `whitespace-nowrap` on
+  the title row (right for the four short facts it held, fatal to a sentence in
+  the 508px-floor Flow panel) and wears `.2em` tracking, which is correct for
+  small caps and unreadable on prose.
+- **Two facts dropped, one absorbed.** `$SPX · SPY · $NDX · QQQ` and
+  `PAPER · CLAUDE · CAPTURED` are literally the SYMBOL and BOOK columns beneath
+  them. The SORT ORDER is not anywhere else on the panel, so `HOTTEST`/`NEWEST`
+  survive into the use-line — still interpolated from the row cap, which is the
+  property the old subtitle was built for.
+- **Column labels name the use.** `SPOT`→`PRICE`, `GAMMA FLIP`→`FLIP LEVEL`,
+  `STRUCTURE MAP`→`PRICE VS WALLS`, `CALL WALL`/`PUT WALL`→`CEILING`/`FLOOR`,
+  `NET GEX / REGIME`→`DEALER MODE`, `WHY`→`WHY IT'S HOT`, `DETAIL`/`KIND`→
+  `WHAT TRADED`/`ALERT TYPE`, `UNREALIZED`/`FLAG`→`OPEN P&L`/`STATUS`.
+  `CEILING`/`FLOOR` drop the call/put naming deliberately — the side is carried
+  by the cell's COLOUR (each wall painted in its structure-map marker's hue), and
+  the caveat that a call wall only caps price from above is what the map beside
+  it shows.
+- **⚠ Two labels are width-blocked, and that is arithmetic rather than an
+  oversight.** On Positions the head label binds the track, not the value. At the
+  8.0px/char the existing width test measures, `STRATEGY` needs 64px of a 42px
+  floor and `CONTRACTS` 72px of a 36px one; widening both costs ~58px against the
+  43px of slack between this page's minimum window and the 1920px it is read at —
+  i.e. it would clip the panel on the screen it is read on. Pinned by test so the
+  next reader sees a deferral, not an inconsistency to tidy. `NET PREM`→`NET
+  PREMIUM` was affordable at +22px (track 66→88, Board's floor 783→805, inside
+  the 860px a panel gets).
+- **Empty states say what is true.** "Waiting for the options service…" is the
+  most-read text on the page off-hours and made a quiet market read as a fault.
+  Each now states the fact and, where there is one, what changes it — "the board
+  fills once the scanner runs" is a wait a reader can price.
+- **`/desk/live` was drifting-capable and is no longer.** CLAUDE.md said the
+  mirror "cannot drift from `/desk`" because `snapshot()` uses that page's own
+  builders. True of every NUMBER, false of every WORD around them: titles were
+  HTML literals, two subtitles were rebuilt with a local `.format`, and all four
+  column-label lists plus all five empty-state strings were byte-copies. Both
+  screens now read `desk.PANEL_HEADS`, the `*_HEADS` tuples and the `EMPTY_*` /
+  `stale_walls_note` constants. Because `_JS` is inserted verbatim and can never
+  be `.format`ed, the labels reach it through the `consts` injection — the route
+  `CALL_HEX` already took — paired with that screen's own width percentages by
+  `zipw`, so a renamed label reaches both screens and a re-tuned width reaches
+  one. The dealer panel also gained the `psub` element it never had.
+- **The hover guide was already stale and this exposed it.** `page_help.py` said
+  "the five hottest names" and "the five newest" against caps of 6 and 9 — now
+  visibly wrong, since the panel prints its own count. Fixed by stating no number
+  there at all rather than a second copy of one.
+- **Not in this pass, by choice:** the `BIAS`/`SIGNAL` tile captions, the trend
+  and regime words and the Bull/Bear headline are imported from `/sentiment`, so
+  rewording them changes that screen too; the Positions summary line and the
+  top-strip captions were deferred to keep the diff reviewable. `/options/flow`
+  still carries its own "Waiting for the options service…" — the natural next
+  page.
+- **Not browser-verified.** A worktree resolves to prod and would bind `:8500`.
+  The width claims are arithmetic against the floors `desk.py` documents and are
+  enforced by `test_every_column_label_fits_the_track_it_stands_over`; the
+  `NET PREMIUM` track widening wants eyeballing in dev before promote. Suite:
+  **2927 passed** in `webgui`, no failures.
+  [design](plans/2026-09-04-desk-user-perspective-copy-design.md) ·
+  [plan](plans/2026-09-04-desk-user-perspective-copy-plan.md)
+
+---
+
 **Last updated:** 2026-08-30 (**The realized-outcome calibration stopped
 counting out-of-session captures.** The companion to the recorder gate above:
 that one stops new ones, this one stops the history feeding the EV number.)

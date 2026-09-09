@@ -95,9 +95,12 @@ The left menu is grouped into three captioned sections. Each answers one questio
 | **More** ▸ EOD Report | You want the day's results across every book. |
 | ▸ User Manuals | You want this guide and the other three. |
 
-At the very bottom of the menu sit three machine-level controls — **System Status**,
-**Settings**, and a red **Stop All Services** button. They are separated deliberately:
-none of them is a step in a trading workflow.
+At the very bottom of the menu sit the machine-level controls — **System Status**,
+**Settings**, a red **Stop All Services** button, and **Sign out** last of all. They
+are separated deliberately: none of them is a step in a trading workflow. Sign out
+takes the bottom slot on purpose, because on a phone the bottom edge is the easiest
+thing to hit and it is the one control down there that costs nothing to press by
+mistake.
 
 ## A trading day, page by page
 
@@ -316,71 +319,6 @@ deliberately no second switch to fall out of step with the first.
   error anywhere. When it happens an **Enable spoken alerts** button appears at the
   top of the Desk; one click unlocks sound for the session, and it speaks a line back
   to confirm.
-- **Nothing on this page can place, change, or close a trade.** It reads and links.
-
----
-
-## Live Mirror
-
-*Menu: pinned directly under Desk · Route `/desk/live` · opens in a new browser tab*
-
-### What it is
-
-**The Desk, built as a plain web page.** Same panels, same numbers, same layout —
-but with none of the app framework behind it. The Desk keeps a live two-way
-connection open to the server for every tab you have on it; the Live Mirror instead
-receives a one-way stream of updates over an ordinary web request.
-
-That difference is the whole point. A plain page reconnects by itself after the
-machine sleeps, the Wi-Fi drops or the browser suspends a background tab, so it can
-be left running on a display nobody is touching.
-
-### When to open it
-
-When the Desk needs to be *somewhere else*: a wall display, a second monitor, a
-tablet propped beside the keyboard, a phone. Open it once, put the window where you
-want it, and leave it. It opens in a new tab so the tab you were working in stays
-where it was.
-
-Use the Desk itself, not the mirror, when you intend to click through to other
-pages — that is the screen built for working.
-
-### How it differs from the Desk
-
-| | Desk | Live Mirror |
-|---|---|---|
-| Panel layout | 2x2, stacking to one column on a narrow screen | **always 2x2** |
-| Recovers from sleep / network drop | needs a reload | **reconnects itself** |
-| Click-through to other pages | yes | yes |
-| Charts | none | none |
-
-The layout difference is deliberate. A screen you have pinned to a display should
-not rearrange itself when the window is resized, so the mirror keeps its four panels
-in the same four places at every width. On a narrow display the columns get tighter
-and long values shorten with an ellipsis rather than the panels moving.
-
-### The connection indicator
-
-Top right, beside the title:
-
-- **Live** — the stream is connected and the screen is current.
-- **Reconnecting** — the stream dropped and the page is retrying on its own. The
-  numbers on screen are the last good ones until it says Live again.
-
-**The countdown keeps ticking every second even when nothing else on the screen
-changes.** That is deliberate, and it is the fastest check available from across a
-room: a stopped page and a quiet market look identical, and the moving clock is what
-tells them apart.
-
-### What the numbers are, and are not
-
-- **Every figure is produced by the Desk's own code.** The mirror formats nothing
-  itself, so it cannot quietly disagree with the Desk. If the two ever show
-  different numbers, one of them has stopped updating — check the indicator.
-- **The same honesty rules apply**, because they are the same rules: walls are
-  hidden rather than zeroed when the gamma feed is stale, a missing reading shows a
-  dash rather than a zero, and the Positions header reports the whole book even
-  though only the first rows are drawn.
 - **Nothing on this page can place, change, or close a trade.** It reads and links.
 
 ---
@@ -1927,6 +1865,107 @@ symbol, and any time you have a directional opinion and want the best way to exp
 
 ---
 
+## Income
+
+*Menu: STRATEGY → Options → Income · Route `/options/income`*
+
+### What it is
+
+The premium-selling board at a **30–45 day** horizon: put credit spreads, call credit
+spreads, cash-secured puts and **covered calls against stock the paper account already
+holds**, scanned across the whole watchlist and ranked together on one list. It is the same *find* step [Market Scanner](#market-scanner) and
+[Strategy Finder](#strategy-finder) perform, at a longer horizon and with an income
+rather than a directional thesis.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:income` |
+| Trigger | A scheduled once-daily pass (`[slots.income]` in `config/sessions.toml`) |
+| Cost | One option chain per watchlist symbol, once per trading day |
+
+### Reading the screen
+
+**The columns:** Symbol · Side · Strikes · Expiry · DTE · Credit $ · Capital $ ·
+Return on capital · Yield on cost · Total return if called · PoP % · Breakeven ·
+Earnings · Score. The board arrives already ranked by score; the headers re-sort it.
+
+**Side** names the position rather than the engine's structure code: *Put spread*,
+*Call spread*, *Cash-secured put*, *Covered call*.
+
+**Yield on cost** and **Total return if called** are covered-call columns and read a
+dash on every other row — a spread owns no shares, so there is no cost basis to divide
+by, and a 0.00% there would sort among real readings.
+
+| Column | On a covered call |
+|---|---|
+| **Yield on cost** | Premium ÷ (cost basis × 100). What the call alone pays on money already sunk in the stock. |
+| **Total return if called** | ((strike − basis) × 100 + premium) ÷ (basis × 100). The gain to the strike *plus* the premium — the outcome the trade is written for. |
+
+Read them together. A 0.4% yield at a strike 12% above basis and a 2% yield at a strike
+0.5% above it rank opposite ways depending on which column you look at, and premium
+alone is the misleading one.
+
+⚠ **Total return if called is not a duplicate of Return on capital**, though on a
+covered call the two land within a few hundredths: Return on capital is net of the
+opening commission, this one is gross, and Return on capital is the only one of the two
+the other three structures carry.
+
+**Covered calls carry no Score.** The composite scale is calibrated on defined-risk
+option structures against an inferred market view, and a covered call's economics are
+dominated by a stock position that scorer never sees — so the row is published without
+one and sorts to the FOOT of the board rather than being given an invented number. The
+two ratios above are what you rank these on instead.
+
+**Credit and Capital are per contract, in dollars.** For a defined-risk credit spread
+Capital is its maximum loss; for a cash-secured put it is the strike down to zero —
+genuinely the cash committed, not a margin figure.
+
+**Return on capital** is Credit divided by Capital. It exists because dollars alone
+cannot rank these three structures against each other: a $60 credit on a $441 spread
+and a $640 credit on a $39,361 cash-secured put are 13.3% and 1.6% respectively, and
+the second number is the one that decides.
+
+**Earnings** carries the three-state result of the earnings-calendar check, which is
+deliberately not a yes/no:
+
+| Value | Means |
+|---|---|
+| **None scheduled** | The calendar covers this symbol and has no report before expiration |
+| **After expiry** | A report is scheduled, and it falls after this expiration |
+| **Not checked** | The calendar has no entry for this symbol at all |
+
+Any expiration that *straddles* a known report was dropped from the scan before it
+reached this board, so nothing listed here is knowingly exposed to one.
+
+### Why it matters
+
+At 30–45 days a straddled earnings report is close to certain for most names, which is
+why the gate matters more here than at any shorter horizon — and why the third state
+matters. A symbol the calendar has never heard of and a symbol it knows is clear both
+leave the date blank; collapsing them would let the gate fail open silently on exactly
+the names most likely to be traded.
+
+**Where it is weak.** Without an Alpha Vantage API key configured, the earnings
+calendar is empty and **every** row reads *Not checked*. That is honest but it is not
+protection — check reports yourself before selling premium into one.
+
+The board is also a once-daily snapshot. Prices move after it is taken, so treat the
+credits as a shortlist to re-price, not as fills.
+
+### When to use it
+
+In the morning, when you are looking for premium to sell rather than a direction to
+express. Take a candidate to [Calculator](#calculator) to price it as it stands now.
+
+### Related pages
+
+[Strategy Finder](#strategy-finder) · [Calculator](#calculator) ·
+[Paper Ledger](#paper-ledger).
+
+---
+
 ## Expected Move
 
 *Menu: STRATEGY → Options → Expected Move · Route `/options/expected-move`*
@@ -2205,6 +2244,87 @@ The fills log is also the best available audit trail when a position behaves une
 
 [Paper Ledger](#paper-ledger) · [Captured Signals](#captured-signals) (the entry source)
 · [Claude Trades](#claude-trades) · [EOD Report](#eod-report).
+
+---
+
+## Shares
+
+*Menu: STRATEGY → Options → Shares · Route `/options/shares`*
+
+### What it is
+
+The **equity inventory** of the paper account — the stock it owns, lot by lot. It is a
+second reader of the same account [Paper Account](#paper-account) shows, not a separate
+book: options live on that page, shares live here.
+
+Shares get into the book one way in normal operation. A **cash-secured put** that
+finishes in the money is exercised against you at expiration, and the engine converts
+it into 100 shares per contract at the strike, debiting the cash it had already
+reserved. That is the whole point of selling one, and it is what makes a covered call
+possible afterwards.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211) → `cache:options:paper_account` |
+| Trigger | Republished on every paper-account refresh — the hourly entry/manage cycle and every manual paper action |
+| Store | `equity_lots` in the manual paper account database |
+
+### Reading the screen
+
+**The columns:** Symbol · Shares · Cost basis $/share · Cost $ · Mark (not tracked) ·
+Unrealized $ · How acquired · Held since · Covering call.
+
+**How acquired** carries the lot's provenance, and it is not decoration:
+
+| Value | Means |
+|---|---|
+| **Assigned** | A short put was exercised against you. Cost basis is the strike you sold, not the market price when the shares arrived. |
+| **Bought** | The lot was entered by hand. |
+| **—** | The lot records no source. Unknown, not "bought". |
+
+**Covering call** is the call currently written against that symbol, shown as strike and
+expiry with a contract count when it exceeds one. Blank means the shares are uncovered.
+
+### Why it matters
+
+An assigned lot is the point where an options position quietly becomes a stock position,
+and the two are managed completely differently — the option had defined risk and an
+expiry, the stock has neither. A screen that shows only the option book makes that
+transition invisible, which is exactly when it goes unmanaged.
+
+The provenance column is what makes the cost basis readable. A basis of 195 on a lot
+*bought* at 195 says the market was there; the same basis on an *assigned* lot says only
+that 195 is the strike you chose to sell, and the shares may have been worth
+considerably less on arrival.
+
+### Caveats and gotchas
+
+- **There is no live mark, and the page says so.** Nothing in this application re-prices
+  a bare equity symbol, so **Mark** and **Unrealized** render an em-dash on every row.
+  That is honest rather than useful: the alternative was to print the cost basis in a
+  column labelled Mark, or a 0.00 unrealized, both of which would read as measurements.
+  Price the shares in your broker or on [Market Dashboard](#market-dashboard).
+- **Coverage is recorded per symbol, not per lot.** The paper book stores no link from a
+  covered call back to the specific lot it was written against, so one open call shows on
+  every lot of that symbol. With two lots of one name and one call written, the screen
+  cannot tell you which hundred shares are covered — because the book does not know.
+- A call **credit spread** on a symbol you hold is not a covering call and is
+  deliberately not matched. Reporting it as one would say the shares are protected when
+  they are not.
+- Nothing here is an action. Lots are created and closed by the engine's settlement pass.
+
+### When to use it
+
+Before writing a covered call, to see what you actually hold and at what basis; and
+after any expiry day on which you had short puts near the money, to see whether one was
+assigned. [Income](#income) screens calls against these lots automatically, never below
+their cost basis.
+
+### Related pages
+
+[Paper Account](#paper-account) · [Income](#income) · [Paper Ledger](#paper-ledger).
 
 ---
 
@@ -2568,7 +2688,7 @@ monitors it and can stop it.
 |---|---|
 | Service | `driver_svc` (:8214) decides; `options_svc` (:8211) executes into the isolated book |
 | Cache keys | `cache:driver:autonomous`, `:control`, `cache:options:driver_paper_account`, `:driver_paper_perf` |
-| Checkpoints | 09:28 ET morning run, then every 30 minutes within the entry window **09:45–15:30 ET** |
+| Checkpoints | Every 30 minutes within the entry window **09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first is 09:45 |
 | Re-pricing | Open positions re-priced **every minute** during market hours |
 
 **Why the entry window is shaped that way.** The first ~15 minutes after the open are
@@ -2794,7 +2914,7 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*
 
-Links to the four manuals, each opening in a new tab:
+Links to the five manuals, each opening in a new tab:
 
 | Manual | For |
 |---|---|
@@ -2802,6 +2922,7 @@ Links to the four manuals, each opening in a new tab:
 | **Reference Guide** | This document — what each tab does and why it matters. |
 | **Technical Reference** | Every formula, weight, threshold and cadence. |
 | **API / Developer Reference** | Contracts, the Redis bus, service commands, proxy endpoints. |
+| **Options Glossary** | Plain-English definitions of every term the app puts on screen. |
 
 Word (`.docx`) copies sit alongside the HTML under `docs/manuals/`.
 
@@ -2836,6 +2957,7 @@ merely running but actually *publishing*.
 | driver_svc | 2 | 8214 |
 | market_svc | 2 | 8215 |
 | webgui (this app) | 1 | 8500 |
+| webgui_live (public live screens) | 1 | 8501 |
 
 Each card shows online/offline, a health message, and a **Restart** button that
 relaunches the component windowless. The proxy card additionally shows **Schwab auth**
@@ -2958,17 +3080,52 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all six services, and the
-web app itself. **Redis is deliberately left running**, because it is a *system*
-service this app does not own.
+A confirm-gated stop of the entire local stack — the gateway, all six services, the
+web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
+with it. **Redis is deliberately left running**, because it is a *system* service
+this app does not own.
 
 After confirming, this page stops responding. That is expected: it has just stopped the
 program serving it.
 
 Restart with `systemctl --user start trading-prod.target`.
 
-It is rendered as a danger-outlined button and sits **last** in the menu so that
-overshooting Settings cannot land on it.
+**The confirmation is a step-up, not just a click.** The dialog asks for the current
+6-digit code from your authenticator app, and the stop runs only when that code
+verifies. A wrong, missing or already-spent code refuses the stop and says which it
+was — you are already signed in, so there is nothing to be coy about. The code is
+recorded as used against the same counter the sign-in form checks, so one code
+cannot do both jobs.
+
+Why this control and no other: the app is reachable from the internet behind a single
+session cookie, and a stolen cookie or an unlocked phone would cost the rest of the
+trading day — the session's options collection, a live stream dropped mid-broadcast,
+the driver stood down. The arm switch on Claude Trades and Rescue's **Apply** are
+deliberately *not* gated this way; a code demanded everywhere is a code nobody reads.
+
+It is rendered as a danger-outlined button, and **Sign out** sits below it — on a
+phone the bottom edge is the easiest target, so the harmless control takes that slot
+and an overshoot costs a re-login rather than a trading day.
+
+---
+
+## Sign out
+
+*Menu: the last row of the rail · Route `/logout`*
+
+Ends this browser's session and returns you to the sign-in form. It clears **both**
+credentials the app issues: the session, and the *trusted device* token — so the next
+sign-in on this machine asks for the authenticator code again. That second half is
+the reason to use it on a borrowed or shared browser; clearing only the session would
+leave a device that still skips the second factor.
+
+It signs out this browser only. The tokens are stateless by design, so there is no
+"sign out everywhere" button here — other devices stay signed in until their own
+tokens expire.
+
+**It stops nothing.** Services, collectors, scheduled scans and the autonomous driver
+all keep running; signing out only ends your view of them. The page directly above it
+in the rail is the one that stops things.
 
 ---
 
@@ -3007,7 +3164,7 @@ What updates when. All times US Central.
 | Captured-signal management | **5 min** | Market hours | If enabled in Settings |
 | Term structure (gamma) | **5 min** | | The widest chain in the system |
 | Manual Paper Account cycle | **hourly** | 09:00–14:00 | No 15:00 run |
-| Driver checkpoints | **30 min** | 09:45–15:30 ET | Plus a 09:28 ET morning run |
+| Driver checkpoints | **30 min** | 09:45–15:30 ET | First fire-able slot 09:45; the open-bell slot is skipped |
 | Gamma Analyze briefings | **4× daily** | Premarket · ~18 min after open · midday · close | |
 | Momentum cascade | **nightly** | 16:20 | Daily bars change once a day |
 | Sector Rotation / RRG | **manual** | | Cached; press Refresh |
