@@ -327,6 +327,7 @@ def test_the_public_render_injects_the_page_level_css(monkeypatch):
 
     assert shell.TABLE_CSS in seen,         "the published tables render without their sticky headers"
     assert shell.SUBTAB_CSS in seen,         "the published subtab rows render as stock Quasar tabs"
+    assert shell.PANEL_SCROLL_CSS in seen,   "the published /desk panels clip instead of scrolling"
 
 
 # --- the entrypoint's own shape ---------------------------------------------

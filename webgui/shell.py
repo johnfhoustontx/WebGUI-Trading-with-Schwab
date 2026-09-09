@@ -172,6 +172,96 @@ SUBTAB_CSS = """
 .compact-subtabs .q-tab__label { font-size: 12px; }
 """
 
+# ── a dashboard panel that has run out of width ──────────────────────────────
+# ⚠ THIS REVERSES A POSITION `desk.py` HELD FROM 2026-08-20, AND THE POSITION IT
+# REVERSES WAS RIGHT. That note read: "`overflow-x-auto` is deliberately NOT the
+# fallback: a dashboard you scroll sideways to read defeats the page's purpose."
+# It does. But refusing the scroll did not PREVENT sideways scrolling — it only
+# decided WHERE it happened. A Desk panel is a stack of CSS grids sharing one
+# `grid-template-columns` of `minmax()` tracks, and a grid never shrinks a track
+# below its floor, so a panel given less width than its floors add up to does
+# not reflow: the rows paint out through the card, the page's padding chain
+# absorbs a little, and then the DOCUMENT scrolls sideways — carrying the panel
+# heading AND the row's identity column off screen with everything else. The
+# objection was against losing your place, and the document scroll loses more of
+# it than a panel scroll ever could. What it actually asked for is this: the
+# scroll CONTAINED at the panel, with the identity column pinned, so the heading
+# and the symbol stay while the numbers move under them.
+#
+# Four decisions, each measured in a real browser rather than reasoned about:
+#
+# 1. NO `min-width` HERE. The sketch this came from said `min-width: max-content`
+#    on every child. `max-content` on a grid resolves its `fr` tracks to their
+#    widest CELL, so one long rationale string would widen a panel far past the
+#    floors and make it scroll when it did not need to — and it would hit the
+#    "waiting for the options service" placeholder, which is a child of the same
+#    container. The width is per-panel data: `pages/panel_scroll.grid_min_width_px`
+#    derives it from the panel's own grid string, and it belongs on the grid
+#    elements as a Tailwind `min-w-[...]`.
+#
+# 2. THE SCROLL CONTAINER IS THE ROWS' CONTAINER, NOT THE CARD. The card also
+#    holds the panel heading, and a heading that scrolls away is half of what
+#    this exists to prevent. The head ROW must be inside it, though — head and
+#    data rows share one track list, so anything that scrolled one without the
+#    other would slide every label off its column.
+#
+# 3. THE PIN IS A `::after`, NOT A BACKGROUND ON THE CELL. A background on the
+#    cell covers only the CELL, and these rows are `items-center` with cells of
+#    unequal height — a one-line symbol beside a two-line stack or a 34px
+#    structure map. Measured: the scrolling numbers ran through the gap above and
+#    below the pinned symbol, which reads as corruption, exactly as feared. The
+#    pseudo takes `align-self: stretch` instead, so the backdrop is the full row
+#    height while the real cell keeps its own alignment — including the Positions
+#    chip's `self-start`, which a `stretch` on the cell would have overridden and
+#    stretched the chip itself. ⚠ `grid-area: 1 / 1` on BOTH: a definitely-placed
+#    pseudo occupies that cell, and without the same placement on the first child
+#    every real cell auto-places one column to the right and the last one wraps
+#    to a second row (measured — the row grew from 57px to 73px).
+#
+# 4. THE COLOURS ARE FLAT, AND THAT IS A COMPROMISE. The panel is a 160deg
+#    gradient (`theme.CONSOLE_CARD`, both stops at 95% over the page wash), so no
+#    flat colour matches at every row. Sampled off a rendered panel, the ground
+#    behind the first column runs #0e161d at the top to #0a1117 at the foot;
+#    #0c131a is its middle, and the residual mismatch measured 0-4 levels per
+#    channel, invisible against the ~#0d151e row rule the panel already draws
+#    flat across the same gradient. #121920 is that ground under the row's own
+#    hover wash (`_C['line']` at 6%), measured 1-2 levels off the real hovered
+#    row: without it the pinned column stays dark while the rest of the row
+#    lights, which reads as the pin not belonging to the row.
+#
+# ⚠ `.cursor-pointer` gates the hover, and it is the right predicate rather than
+# a convenient one: in `desk.py` `_ROW` is `_ROW_STATIC` plus that class, and the
+# hover wash rides the identical condition (`can_open`), so a row that is a link
+# and a row that lights up are the same set by construction. On the public origin
+# every Positions row is static, and an ungated rule would light the pin alone on
+# rows whose remaining nine cells do nothing.
+#
+# ⚠ TWO THINGS THE ARRIVAL GLOW (`desk.DESK_NEON_CSS`) LOSES, both accepted.
+# (a) It animates the ROW's background, and the pin's opaque backdrop sits over
+# its first column; matching it would mean duplicating those keyframes, which
+# belong to that page and not to this seam. (b) `overflow-x: auto` computes
+# `overflow-y` to `auto` as well, so the container CLIPS painted overflow —
+# measured, the glow's outer `0 0 18px -2px` shadow bleeds ~18px above an
+# unclipped first row and is cut flat at the container's edge inside one. Only
+# the first and last rows can touch that edge, and it costs a halo, not a row.
+#
+# -8px is `desk._GAP` / `panel_scroll.COL_GAP_PX` — the backdrop reaches into the
+# column gap, or an 8px strip of moving digits shows beside the pinned column.
+# Pinned by `test_the_pin_backdrop_covers_the_column_gap`, since a literal here
+# cannot follow that constant on its own.
+PANEL_SCROLL_CSS = """
+.ns-panel-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+/* The identity cell rides above its own backdrop, which rides above the cells
+   scrolling under both. */
+.ns-panel-row > :first-child { grid-area: 1 / 1; position: sticky; left: 0; z-index: 2; }
+.ns-panel-row::after {
+  content: ""; grid-area: 1 / 1; align-self: stretch;
+  position: sticky; left: 0; z-index: 1;
+  margin-right: -8px; background: #0c131a;
+}
+.ns-panel-row.cursor-pointer:hover::after { background: #121920; }
+"""
+
 
 def play_alert(sound: str, volume: float) -> None:
     """Play a bundled alert WAV in the connected browser at the given volume."""

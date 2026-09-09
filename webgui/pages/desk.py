@@ -2032,8 +2032,14 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
 # a line of height instead of a whole column of width, and it keeps each row to
 # ONE grid line — which is what puts the structure map beside its symbol instead
-# of on a tier of its own. `overflow-x-auto` was deliberately not used as the
-# fallback: a dashboard you scroll sideways to read defeats the page's purpose.
+# of on a tier of its own. That is what keeps the floors low enough to fit; the
+# fallback for when they still do not is `shell.PANEL_SCROLL_CSS`, which
+# contains the sideways scroll AT THE PANEL with the identity column pinned.
+# (This line refused a panel scroll outright until 2026-09-08, on the grounds
+# that a dashboard you scroll sideways to read defeats the page's purpose. It
+# does — but refusing it did not prevent the scroll, it relocated it to the
+# DOCUMENT, which carries the panel heading and the identity column off screen
+# as well. See the note above `PANEL_SCROLL_CSS`.)
 _GAP = "gap-x-[8px] gap-y-0"
 
 # ── the width budget every track floor below is spent against ────────────────
@@ -2968,10 +2974,15 @@ def render():
         # not a sideways scrollbar at all; it is rows painting out through the
         # card's own border, between those two widths.
         #
-        # `overflow-x-auto` is deliberately NOT the fallback — see the note above
-        # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
-        # purpose. If the narrow case ever has to work, narrow the tracks — and
-        # the type standing in them, together (see the ladder above).
+        # The FIRST answer is still to narrow the tracks — and the type standing
+        # in them, together (see the ladder above): a panel that fits is read
+        # without being operated. Where they cannot be narrowed further, the
+        # fallback below 1877 is ``shell.PANEL_SCROLL_CSS``, which contains the
+        # sideways scroll at the PANEL with the identity column pinned, so the
+        # heading and the symbol stay put. That reverses the refusal this note
+        # used to carry, and the reason is the paragraph directly above: refusing
+        # a panel scroll never stopped the sideways scroll, it just handed it to
+        # the document, which loses strictly more of the reader's place.
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
             # All four heads come from ``PANEL_HEADS`` — one copy, with the
