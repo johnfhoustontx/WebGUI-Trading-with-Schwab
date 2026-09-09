@@ -2232,24 +2232,40 @@ def test_desk_panel_grid_is_two_columns_at_every_width():
         assert "min-[" not in value, f"a width breakpoint came back: {value}"
 
 
-def test_desk_panels_do_not_scroll_sideways():
-    """`overflow-x-auto` is the tempting fix for the fixed 2x2 at narrow widths
-    and is deliberately refused — see the note above `_GAP`: a dashboard you
-    scroll sideways to read defeats the page's purpose. Pinned because the next
-    person to hit a clipped row will reach for it."""
+def test_desk_panels_contain_their_sideways_scroll_at_the_panel():
+    """A panel out of width scrolls ITSELF, and never the page (2026-09-08).
+
+    ⚠ This reverses what this test asserted from 2026-08-20 — that
+    `overflow-x-auto` was "deliberately refused", because a dashboard you scroll
+    sideways to read defeats the page's purpose. It does. But refusing it did
+    not prevent sideways scrolling: it relocated it to the DOCUMENT, where the
+    reader loses the panel heading and the row's identity column as well as
+    their place in the numbers. A panel scroll with the identity column pinned
+    is what that objection was actually asking for.
+
+    The `_panel` half of the assertion SURVIVES the reversal and still has
+    teeth: the mechanism is `shell.PANEL_SCROLL_CSS`, injected by both
+    entrypoints, so an `overflow-x-auto` utility appearing in `_panel` would be
+    a second, ad-hoc scroll container — and on the card, which is where it would
+    scroll the panel TITLE away."""
     import inspect
 
+    import shell
     from pages import desk
     assert "overflow-x-auto" not in inspect.getsource(desk._panel)
+    assert "overflow-x: auto" in shell.PANEL_SCROLL_CSS
+    assert "position: sticky" in shell.PANEL_SCROLL_CSS
 
 
 # ── the 1920px width budget ──────────────────────────────────────────────────
 # A CSS grid never shrinks a track below its ``minmax()`` floor, so a panel
 # whose floors oversubscribe its share of the window CLIPS its rows instead of
-# reflowing — and `overflow-x-auto` is refused (see the test above). Three of
+# reflowing. A panel that clips now scrolls itself rather than the page (see the
+# test above), but that is the fallback, not the goal: these guards are what keep
+# the panels inside the budget so nobody has to operate one to read it. Three of
 # the four grids shipped over budget until the type ladder and the floors were
-# unwound together to the reference design's own scale; these are the guards
-# that make the next widened track fail HERE rather than on screen.
+# unwound together to the reference design's own scale; they make the next
+# widened track fail HERE rather than on screen.
 def _floors(grid):
     """The pixel floor of every track in a grid class string, in order."""
     inner = grid.split("grid-cols-[", 1)[1].split("]", 1)[0]

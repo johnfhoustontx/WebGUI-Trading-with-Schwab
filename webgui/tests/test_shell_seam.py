@@ -11,6 +11,8 @@ These tests pin the seam as a leaf module both entrypoints can provide.
 import ast
 import pathlib
 
+import shell
+
 _PAGES = pathlib.Path(__file__).resolve().parents[1] / "pages"
 
 
@@ -134,7 +136,7 @@ def test_the_nav_only_css_did_not_follow_the_pages_out():
     elements that do not exist is how a "shared" module becomes main.py again."""
     import main
     import shell
-    shared = shell.TABLE_CSS + shell.SUBTAB_CSS
+    shared = shell.TABLE_CSS + shell.SUBTAB_CSS + shell.PANEL_SCROLL_CSS
     nav = _rules_only(main._NAV_CSS)
     for selector in (".nav-drawer", ".compact-tabs", ".flush-panels",
                      ".q-tooltip.help-tip", ".mkt-pill", ".brand-mark",
@@ -158,3 +160,173 @@ def test_the_shell_stays_a_leaf_module():
         if isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
     assert roots == {"nicegui", "pages"}, f"shell.py grew imports: {sorted(roots)}"
+
+
+# --- the screenshot session's chrome suppression -----------------------------
+def test_the_capture_css_needs_the_exact_cookie_value():
+    """Presence is not the contract. A stray or empty ns_capture must not
+    suppress a real visitor's disconnect warning -- that banner is the only
+    thing telling the owner their trading UI stopped updating."""
+    assert shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
+    for cookies in (None, {}, {shell.CAPTURE_COOKIE: ""},
+                    {shell.CAPTURE_COOKIE: "0"},
+                    {shell.CAPTURE_COOKIE: "true"},
+                    {"ns_session": "1"}):
+        assert shell.capture_chrome_css(cookies) is None, cookies
+
+
+def test_the_capture_css_hides_the_reconnect_banner_and_nothing_else():
+    """⚠ The blast radius IS the point. This CSS is injected into the real
+    trading app, so a rule that reached further would hide live content from a
+    screenshot and nobody would know which tile was lying."""
+    css = shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
+    selectors = [ln.split("{")[0].strip()
+                 for ln in css.strip().splitlines() if "{" in ln]
+    assert selectors == ["#popup.nicegui-error-popup"], selectors
+
+
+def test_the_public_origin_never_suppresses_its_own_chrome():
+    """⚠ On live.neuralstrike.co a VISITOR can set any cookie they like, so a
+    cookie-gated suppression there would let anyone hide their own disconnect
+    warning on a screen whose whole value is being live. The capture only ever
+    drives the private app on loopback, so live_main must never import this."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / "live_main.py").read_text(encoding="utf-8")
+    assert "capture_chrome_css" not in src
+    assert shell.CAPTURE_COOKIE not in src
+
+
+# --- the panel scroll CSS ----------------------------------------------------
+# A Desk panel is a set of CSS grids sharing one `grid-template-columns` of
+# `minmax()` tracks, and a grid never shrinks a track below its floor. Handed
+# less width than the floors add up to, the panel does not reflow: its rows
+# paint out through the card, and once the page's padding chain is used up the
+# DOCUMENT scrolls sideways — which loses the panel heading AND the row's
+# identity column. These pin the CSS that contains the scroll at the panel and
+# keeps the identity cell in place while the numbers move under it.
+
+def test_the_panel_scroll_css_contains_overflow_at_the_panel_not_the_page():
+    css = shell.PANEL_SCROLL_CSS
+    assert "overflow-x: auto" in css
+    # ⚠ never on body/html: containing it at the panel is the entire point.
+    assert "body" not in css and "html" not in css
+
+
+def test_the_identity_cell_is_sticky_and_opaque():
+    """A sticky cell with no background paints the scrolling numbers straight
+    through it, which reads as corruption rather than as a pinned column."""
+    css = shell.PANEL_SCROLL_CSS
+    assert "position: sticky" in css and "left: 0" in css
+    assert "background" in css and "z-index" in css
+
+
+def _declarations(css: str) -> dict:
+    """``{selector: "decls"}`` for one flat stylesheet, comments stripped."""
+    out = {}
+    for rule in _rules_only(css).split("}"):
+        if "{" not in rule:
+            continue
+        selector, decls = rule.split("{", 1)
+        out[selector.strip()] = decls.strip()
+    return out
+
+
+def test_the_pin_and_its_backdrop_each_carry_their_own_sticky():
+    """⚠ Non-vacuity for the test above, and it caught a real hole.
+
+    The pin is TWO rules — the identity cell, and the ``::after`` that paints
+    the row-height backdrop under it — and every property the substring test
+    looks for appears in both. Deleting ``position: sticky; left: 0`` from the
+    CELL therefore left the assertions above passing while the symbol scrolled
+    away from the backdrop that was supposed to sit behind it. Each rule has to
+    be read on its own."""
+    decls = _declarations(shell.PANEL_SCROLL_CSS)
+    cell = decls[".ns-panel-row > :first-child"]
+    backdrop = next(d for s, d in decls.items() if s.endswith(".ns-panel-row::after"))
+    for name, rule in (("cell", cell), ("backdrop", backdrop)):
+        assert "position: sticky" in rule, f"the {name} stopped pinning"
+        assert "left: 0" in rule, f"the {name} has nothing to pin against"
+        assert "z-index:" in rule, f"the {name} lost its paint order"
+    assert "background:" in backdrop, "the backdrop went see-through"
+    # ⚠ And the CELL must stay transparent: a background there is the row's
+    # OWN height at most, so it cannot cover a two-line stack beside it, and it
+    # would paint over the backdrop that can.
+    assert "background" not in cell, "the cell must not paint its own ground"
+
+
+def _add_css_args(path, func_name: str) -> list[str]:
+    """Every ``ui.add_css(X)`` argument inside ``func_name`` of ``path``.
+
+    ⚠ Parses the FILE; deliberately does not import it. ``live_main``'s module
+    body installs the public origin's read-only layers — it freezes
+    ``app_settings`` and puts ``bus_client`` in read-only mode — before it
+    imports a single page, by design. Importing it here to reach ``_render``
+    leaves those on for every test that runs afterwards in the same process;
+    measured, it turned two unrelated ``test_desk`` render tests red. The
+    neighbouring ``test_the_public_origin_never_suppresses_its_own_chrome``
+    reads that file as text for its own reasons, and ``test_live_main.py``
+    runs it in a fresh interpreter — nothing in this suite imports it.
+
+    ``main._layout`` writes ``ui.add_css(TABLE_CSS)`` (a Name) and
+    ``live_main._render`` writes ``ui.add_css(shell.TABLE_CSS)`` (an Attribute),
+    so both shapes have to be read or the test passes vacuously on one file."""
+    import ast
+    tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"))
+    func = next(n for n in ast.walk(tree)
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and n.name == func_name)
+    out = []
+    for node in ast.walk(func):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_css" and node.args):
+            arg = node.args[0]
+            if isinstance(arg, ast.Name):
+                out.append(arg.id)
+            elif isinstance(arg, ast.Attribute):
+                out.append(arg.attr)
+    return out
+
+
+def test_both_entrypoints_inject_the_panel_scroll_css():
+    """⚠ BOTH, or the public and private Desks drift.
+
+    The published /desk renders the very same page module, so a panel that
+    scrolls in the app and clips on live.neuralstrike.co is the one failure this
+    design promised not to introduce. Read off each entrypoint's OWN source, so
+    a constant that is merely imported and never injected fails."""
+    webgui = pathlib.Path(__file__).resolve().parents[1]
+    assert "PANEL_SCROLL_CSS" in _add_css_args(webgui / "main.py", "_layout"), \
+        "the private app's panels lost their scroll containers"
+    assert "PANEL_SCROLL_CSS" in _add_css_args(webgui / "live_main.py", "_render"), \
+        "the public live screens' panels lost their scroll containers"
+
+
+def test_the_pin_backdrop_covers_the_column_gap():
+    """⚠ The ``-8px`` in the CSS is ``panel_scroll.COL_GAP_PX``, written out.
+
+    ``shell.py`` is a leaf module (see ``test_the_shell_stays_a_leaf_module``),
+    so the literal cannot follow that constant by importing it — and a backdrop
+    one gap too narrow leaves an 8px strip of moving digits beside the pinned
+    column, which is exactly the see-through this design is here to remove.
+    This is the check that keeps the two in step instead."""
+    import re
+
+    from pages.panel_scroll import COL_GAP_PX
+    margins = re.findall(r"margin-right:\s*(-?\d+)px", shell.PANEL_SCROLL_CSS)
+    assert margins == [str(-COL_GAP_PX)], (
+        f"the pin backdrop reaches {margins} into the gap, not "
+        f"{-COL_GAP_PX}px")
+
+
+def test_the_pinned_cell_and_its_backdrop_share_one_grid_cell():
+    """⚠ BOTH need ``grid-area: 1 / 1``, and the second one is the non-obvious
+    half. A definitely-placed ``::after`` OCCUPIES that cell, so auto-placement
+    moves every real cell one column right and wraps the last to a second row —
+    measured, a dealer row grew 57px to 73px with the labels one column out of
+    step with their numbers. Placing the first child explicitly puts it back."""
+    rules = [r for r in _rules_only(shell.PANEL_SCROLL_CSS).split("}")
+             if "{" in r]
+    placed = [r for r in rules if "grid-area: 1 / 1" in r]
+    assert len(placed) == 2, f"only {len(placed)} rule(s) place a grid cell"
+    selectors = [r.split("{")[0].strip() for r in placed]
+    assert ".ns-panel-row > :first-child" in selectors, selectors
+    assert any(s.endswith("::after") for s in selectors), selectors

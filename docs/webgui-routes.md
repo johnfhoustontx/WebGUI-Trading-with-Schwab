@@ -600,10 +600,11 @@ the fourteen pages already supplies its own top-level wrap and background
 (`CONSOLE_PAGE`, `RT_VOID_BG`, `macro-board`, `calc-v2 PAGE`), so wrapping again would
 draw a second frame around each and a navy gradient behind the void-black ones. What
 it DOES inject — because these follow the PAGE rather than the shell — is
-`shell.TABLE_CSS`, `shell.SUBTAB_CSS` and the `[typography]` / `[brand]` font head.
-Without them `/opportunity` and `/flow` lose their sticky Deep Slate table headers,
-`/net-premium`'s group picker draws as stock Quasar tabs, and every screen renders in
-a different typeface from the private page it is supposed to mirror.
+`shell.TABLE_CSS`, `shell.SUBTAB_CSS`, `shell.PANEL_SCROLL_CSS` and the `[typography]` /
+`[brand]` font head. Without them `/opportunity` and `/flow` lose their sticky Deep
+Slate table headers, `/net-premium`'s group picker draws as stock Quasar tabs, `/desk`'s
+panels clip their rows and then scroll the whole document sideways, and every screen
+renders in a different typeface from the private page it is supposed to mirror.
 
 **Exposure is a recorded decision, not an oversight.** The screens are unredacted:
 `/desk` renders merged paper and driver positions with rescue flags, `/opportunity`

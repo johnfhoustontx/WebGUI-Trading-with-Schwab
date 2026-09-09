@@ -56,6 +56,10 @@ from pages import console_regime as _CR
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
+# The two padding constants the panel-width arithmetic is built from, imported
+# rather than restated so a width quoted in a comment here and a width computed
+# from the same CSS cannot drift apart. Re-exported: read by ``test_desk``.
+from pages.panel_scroll import COL_GAP_PX, PANEL_PAD_PX  # noqa: F401
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
 from pages.options import paper as _paper
@@ -2028,8 +2032,14 @@ _MAP_EDGE = "border-[#14202c]"         # the structure map's two end walls
 # flip, the rationale under the symbol, the expiry under the strikes. That costs
 # a line of height instead of a whole column of width, and it keeps each row to
 # ONE grid line — which is what puts the structure map beside its symbol instead
-# of on a tier of its own. `overflow-x-auto` was deliberately not used as the
-# fallback: a dashboard you scroll sideways to read defeats the page's purpose.
+# of on a tier of its own. That is what keeps the floors low enough to fit; the
+# fallback for when they still do not is `shell.PANEL_SCROLL_CSS`, which
+# contains the sideways scroll AT THE PANEL with the identity column pinned.
+# (This line refused a panel scroll outright until 2026-09-08, on the grounds
+# that a dashboard you scroll sideways to read defeats the page's purpose. It
+# does — but refusing it did not prevent the scroll, it relocated it to the
+# DOCUMENT, which carries the panel heading and the identity column off screen
+# as well. See the note above `PANEL_SCROLL_CSS`.)
 _GAP = "gap-x-[8px] gap-y-0"
 
 # ── the width budget every track floor below is spent against ────────────────
@@ -2040,10 +2050,17 @@ _GAP = "gap-x-[8px] gap-y-0"
 # track below its ``minmax()`` floor, so a panel whose floors oversubscribe this
 # does not reflow, it CLIPS.
 #
-# ``DESK_CHROME_PX`` is the MEASURED non-panel width — the icon rail's laid-out
-# 68px plus the page's own ``p-4`` and the drawer/page padding around it —
-# confirmed live at 1920 (a 1905px document less a 1741px panel grid). It is
+# ``DESK_CHROME_PX`` is the MEASURED non-panel width, and it decomposes exactly:
+# 96px of padding chain (``q-page``'s content, the page's ``p-4`` and the panel
+# wrap's ``px-4``, 16px a side each) plus the icon rail's laid-out 68px. It is
 # written down rather than computed because there is nothing to compute it from.
+#
+# ⚠ **It describes the PRIVATE app only.** The public live screens have no nav
+# rail (``live_main`` registers no drawer), so their chrome is the 96px of
+# padding chain alone — confirmed by measurement on ``live.neuralstrike.co``,
+# where a 1650px window left the 2x2 grid 1539px: 1650 - 15 of scrollbar - 96.
+# Any minimum-width figure below is therefore 68px wider than the same figure
+# for the public origin, and must say which one it means.
 #
 # ⚠ The SCROLLBAR is subtracted, and that is not fussiness: this page is taller
 # than any window it is read in, so the classic scrollbar is ALWAYS there, and a
@@ -2056,11 +2073,14 @@ PANEL_GUTTER_PX = 20              # the 2x2's ``gap-5``, between the two columns
 PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
                    - PANEL_GUTTER_PX) // 2
 
-# What a panel spends before its first track: the card's 1px border both sides,
-# the panel's ``px-4`` both sides (``_panel``) and the row's own ``px-1`` both
-# sides (``_ROW``/``_grid_head``). The gaps are ``len(tracks) - 1`` x 8px on top.
-PANEL_PAD_PX = 2 + 32 + 8
-COL_GAP_PX = 8
+# ``PANEL_PAD_PX`` (42) is what a panel spends before its first track: the
+# card's 1px border both sides, the panel's ``px-4`` both sides (``_panel``)
+# and the row's own ``px-1`` both sides (``_ROW``/``_grid_head``). ``COL_GAP_PX``
+# (8) is ``_GAP``, and there are ``len(tracks) - 1`` of them on top. Both live
+# in ``pages/panel_scroll.py`` beside the arithmetic that spends them — which
+# is also where each panel's minimum width is derived from its own grid string,
+# and where the reconciliation between that sum and what ``scrollWidth``
+# reports is written down.
 
 # Column widths are the reference design's, but every flexible track is
 # ``minmax(<reference px>, <weight>fr)`` rather than a bare pixel width with ONE
@@ -2908,23 +2928,61 @@ def render():
         #   + 164 of measured chrome           = 1862px of LAYOUT width
         #   + 15 for the classic scrollbar     = 1877px of innerWidth
         #
+        # ⚠ The sum above is prose; the LIVE version of it is
+        # ``panel_scroll.panel_min_width_px``, which re-derives each panel's
+        # minimum from that panel's own grid string and owns ``PANEL_PAD_PX``.
+        # It is pinned by a test that has to MOVE when a floor moves, so a
+        # widened track cannot leave a stale number behind here — which is what
+        # happened to the Board's figure below before it was caught.
+        #
+        # **The 839 is measured, not merely summed.** Stepping the window width
+        # on the public origin, the Positions card's ``offsetWidth`` reached
+        # exactly 839 at the same width its ``scrollWidth - clientWidth`` first
+        # reached 0 — the card stops overflowing at 839px. ⚠ Its ``scrollWidth``
+        # reads 817 while it is clipping, and that is NOT evidence against the
+        # sum: ``scrollWidth`` is a padding-box measure (never the 2px border)
+        # and, on a box that does not scroll, it drops the END padding too. The
+        # missing 22 is 16 of the card's padding-right, 4 of the row's, and 2 of
+        # border. See ``panel_scroll`` for the control experiment that settled
+        # it, and for why the row reads 801 today and would read 805 if it
+        # were given an ``overflow-x`` that made it a scroll container.
+        #
         # At the 1920px window this page is read at, ``PANEL_BUDGET_PX`` hands
         # each panel 860px (measured: 861), so Positions clears its floor by
-        # 21px and the other three by more (Board 783px, Dealer 757px, Flow
+        # 21px and the other three by more (Board 805px, Dealer 757px, Flow
         # 508px). Measured live at 1920 and at 2560: no panel, and no cell in
-        # one, reports a horizontal overflow — and at exactly 1877 the panels
-        # measure 839px, so the sum above is the boundary rather than an
-        # estimate of it. **Below it the page clips**: a CSS grid will not shrink
-        # a track under its minmax() floor, so the rows overflow their card
-        # rather than reflowing. Measured at 1600 (701px panels): Positions over
-        # by 134px, the Board by 78, Dealer Positioning by 52; only Flow, with
-        # four tracks, still fits. Keep this sum current when a floor moves; it
-        # is the number the next track is sized against.
+        # one, reports a horizontal overflow.
         #
-        # `overflow-x-auto` is deliberately NOT the fallback — see the note above
-        # ``_GAP``: a dashboard you scroll sideways to read defeats the page's
-        # purpose. If the narrow case ever has to work, narrow the tracks — and
-        # the type standing in them, together (see the ladder above).
+        # ⚠ **1877 is where the PANEL stops fitting, and it is the PRIVATE
+        # app's number** — see ``DESK_CHROME_PX``, whose 164 includes 68px of
+        # icon rail the public screens do not have. The public equivalent is
+        # 1809, and the card was measured at 839 with zero overflow at 1808.
+        # (1808 already measures clean; the half-pixel is the odd width being
+        # halved between two columns.) Below it the rows overflow their card
+        # rather than reflowing: a CSS grid will not shrink a track under its
+        # minmax() floor. At 1600 the private app's panels are 700px each —
+        # 139px SHORT of what Positions needs, 105 short for the Board and 57
+        # for Dealer Positioning; only Flow, with four tracks, still fits.
+        #
+        # ⚠ **A panel overflowing is not yet the page scrolling sideways**, and
+        # conflating the two reads as though the boundary above were wrong. The
+        # padding chain absorbs 16px of overflow per level, so the document
+        # keeps its width well past the point the cards stop containing their
+        # rows: measured on the public origin, the panel overflows below 1809
+        # but ``documentElement`` reports 0px of overflow at 1672 and only 1px
+        # at 1670 — a boundary ~140px narrower. The defect between the two is
+        # not a sideways scrollbar at all; it is rows painting out through the
+        # card's own border, between those two widths.
+        #
+        # The FIRST answer is still to narrow the tracks — and the type standing
+        # in them, together (see the ladder above): a panel that fits is read
+        # without being operated. Where they cannot be narrowed further, the
+        # fallback below 1877 is ``shell.PANEL_SCROLL_CSS``, which contains the
+        # sideways scroll at the PANEL with the identity column pinned, so the
+        # heading and the symbol stay put. That reverses the refusal this note
+        # used to carry, and the reason is the paragraph directly above: refusing
+        # a panel scroll never stopped the sideways scroll, it just handed it to
+        # the document, which loses strictly more of the reader's place.
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
             # All four heads come from ``PANEL_HEADS`` — one copy, with the

@@ -94,6 +94,7 @@ import auth              # noqa: E402  (webgui/auth.py)
 import auth_middleware   # noqa: E402  (webgui/auth_middleware.py)
 import auth_store        # noqa: E402  (webgui/auth_store.py)
 import login_page        # noqa: E402  (webgui/login_page.py)
+import shell             # noqa: E402  (webgui/shell.py -- the capture cookie)
 
 log = logging.getLogger("capture_gallery_shots")
 
@@ -294,6 +295,14 @@ def _handler_class(nonce, token):
     # profile. HttpOnly because nothing needs to read it from page script and a
     # captured page is running the whole application's JavaScript.
     cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax"
+    # Tells the app this is a screenshot session, so it suppresses NiceGUI's
+    # "Connection lost" banner -- which --virtual-time-budget provokes by racing
+    # the client's socket.io heartbeat while the server pings on the wall clock.
+    # NOT HttpOnly-sensitive and carries no authority: shell.capture_chrome_css
+    # hides one cosmetic element and nothing else, and the public origin does
+    # not read it at all. See shell.CAPTURE_CHROME_CSS for why it is narrow.
+    capture_cookie = (f"{shell.CAPTURE_COOKIE}=1; Path=/; HttpOnly; "
+                      f"SameSite=Lax")
 
     class _Handler(http.server.BaseHTTPRequestHandler):
         # HTTP/1.1 so Chrome does not have to see a connection close to know the
@@ -313,7 +322,12 @@ def _handler_class(nonce, token):
                 self.end_headers()
                 return
             self.send_response(302)
+            # Two Set-Cookie headers, not one joined by a comma: RFC 6265 §3
+            # says a response sends one cookie per header line, and joining
+            # them makes the browser read the second as an attribute of the
+            # first and drop it silently.
             self.send_header("Set-Cookie", cookie)
+            self.send_header("Set-Cookie", capture_cookie)
             self.send_header("Location", target)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")

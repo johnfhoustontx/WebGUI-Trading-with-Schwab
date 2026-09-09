@@ -615,7 +615,7 @@ registers every `@_page` route, so importing it from a second process publishes
 `/terminate` and `/settings` to the internet — silently, while looking entirely
 correct. The seam a page needs is **`webgui/shell.py`** (`subtab_slot` ·
 `set_breadcrumb_leaf` · `bind_breadcrumb_leaf` · `play_alert`, plus the page-level
-`TABLE_CSS` / `SUBTAB_CSS` that **both** entrypoints inject — those style widgets a
+`TABLE_CSS` / `SUBTAB_CSS` / `PANEL_SCROLL_CSS` that **both** entrypoints inject — those style widgets a
 PAGE mounts, not nav chrome). `main` re-exports every one of them, so nothing else
 moved. `test_shell_seam.py` pins the absence at source level; `test_live_main.py`
 pins it again by running `live_main.py` ALONE in a fresh interpreter and asserting

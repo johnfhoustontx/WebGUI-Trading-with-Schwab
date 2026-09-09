@@ -10,3 +10,7 @@ pytest-cov>=5.0          # coverage measurement
 pyright>=1.1.400           # SCOPED type check of the tier seam only - see
                            # pyrightconfig.json for why it is not repo-wide.
                            # Run: .venv\Scripts\python -m pyright
+selenium>=4.20            # width measurement for the panel-scroll work (dev only) -
+                           # tools/measure_screen_widths.py. DEV ONLY: it must
+                           # never reach requirements.lock, which is what prod
+                           # installs, and prod does not measure layout.

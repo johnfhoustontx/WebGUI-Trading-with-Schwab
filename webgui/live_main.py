@@ -217,12 +217,15 @@ _CONTENT = "w-full p-4 gap-3"
 def _render(screen) -> None:
     """Import and render one screen inside the minimal public shell."""
     # The PAGE-level CSS ``_layout`` injects, in ``_layout``'s own order. Not nav
-    # chrome -- both style widgets the page itself mounts, so without them the
-    # published /opportunity and /flow tables lose their sticky Deep Slate
-    # headers and /net-premium's group picker draws as stock Quasar tabs. They
-    # live in ``shell`` precisely because this process cannot import ``main``.
+    # chrome -- all three style widgets the page itself mounts, so without them
+    # the published /opportunity and /flow tables lose their sticky Deep Slate
+    # headers, /net-premium's group picker draws as stock Quasar tabs, and the
+    # published /desk's panels clip their rows and then scroll the whole document
+    # sideways. They live in ``shell`` precisely because this process cannot
+    # import ``main``.
     ui.add_css(shell.TABLE_CSS)
     ui.add_css(shell.SUBTAB_CSS)
+    ui.add_css(shell.PANEL_SCROLL_CSS)
     # The app-wide text presentation ``_layout`` injects. Not nav chrome: it is
     # the font and the text-category sizes from ``config/theme.toml``, and
     # without them a published page renders in a different typeface from the
