@@ -971,3 +971,134 @@ def test_the_gallery_slot_is_after_the_open_so_the_screens_carry_live_data():
     open_, close = mc._session_bounds("regular")
     assert open_ < at < close, (open_, at, close)
     assert (at.hour * 60 + at.minute) - (open_.hour * 60 + open_.minute) >= 20
+
+
+# --- arming, which is not the same thing as writing --------------------------
+#
+# A generated `.timer` that nothing enables is a FILE, not a schedule. That is
+# not hypothetical: `--install` wrote trading-prod-flow-delta.timer correct and
+# `disabled`, so it never fired, and the only symptom was a report directory
+# that stopped gaining dates for eleven days. Every other timer on that host was
+# armed by a human running `enable` once, unrecorded -- so a rebuilt box would
+# have got the whole set, all disabled. These pin the arming to the generator.
+
+def _fake_systemctl(fail_on=()):
+    """Record `systemctl --user ...` calls; optionally fail matching ones."""
+    calls = []
+
+    def run(cmd):
+        assert cmd[:2] == ["systemctl", "--user"], cmd
+        rest = cmd[2:]
+        calls.append(rest)
+        for pat in fail_on:
+            if pat in rest:
+                return False, f"boom: {pat}"
+        # `is-enabled --quiet` answering False is "not yet enabled"
+        if rest and rest[0] == "is-enabled":
+            return False, ""
+        return True, ""
+
+    run.calls = calls
+    return run
+
+
+def test_every_generated_timer_gets_armed():
+    """The set is DERIVED from render_all(), so a timer added to the generator
+    and forgotten cannot be written-but-disabled -- which is the whole failure."""
+    run = _fake_systemctl()
+    statuses = dict(units.activate(runner=run))
+    enabled = {c[2] for c in run.calls if c[0] == "enable"}
+    assert enabled == set(units.timer_units())
+    assert enabled, "a stack with no timers would make this test vacuous"
+    for t in units.timer_units():
+        assert statuses[t] == "ENABLED", (t, statuses[t])
+
+
+def test_the_flow_delta_timer_is_one_of_them():
+    """Named explicitly because it is the one whose absence cost the reports."""
+    assert f"trading-{ENV_NAME}-flow-delta.timer" in units.timer_units()
+
+
+def test_arming_uses_enable_AND_now():
+    """`enable` alone only writes the symlink -- the timer is not armed in the
+    running manager until something starts it, so a promote would leave it
+    inert until the next boot."""
+    run = _fake_systemctl()
+    units.activate(runner=run)
+    for c in run.calls:
+        if c[0] == "enable":
+            assert "--now" in c, c
+
+
+def test_the_daemon_reload_comes_before_any_enable():
+    """`enable --now` asks the RUNNING manager to start a unit; for a newly
+    generated timer it has not read the file yet and the --now half fails with
+    'Unit not found' -- exactly the case this exists for."""
+    run = _fake_systemctl()
+    units.activate(runner=run)
+    verbs = [c[0] for c in run.calls]
+    assert verbs[0] == "daemon-reload"
+    assert "daemon-reload" not in verbs[1:]
+
+
+def test_a_failed_reload_does_not_report_timers_as_armed():
+    run = _fake_systemctl(fail_on=("daemon-reload",))
+    statuses = dict(units.activate(runner=run))
+    assert statuses["daemon-reload"].startswith("FAILED")
+    for t in units.timer_units():
+        assert statuses[t] == "not attempted (daemon-reload failed)"
+    assert not [c for c in run.calls if c[0] == "enable"]
+
+
+def test_a_failed_enable_is_reported_never_swallowed():
+    """The failure mode being fixed is silence, so a timer that could not be
+    armed must not come back looking armed."""
+    victim = units.timer_units()[0]
+    run = _fake_systemctl(fail_on=(victim,))
+    statuses = dict(units.activate(runner=run))
+    assert statuses[victim].startswith("FAILED"), statuses[victim]
+    assert "boom" in statuses[victim]
+
+
+def test_an_already_armed_timer_is_reported_as_such_not_as_newly_enabled():
+    """Arming runs on every promote and must be honest about changing nothing."""
+    def run(cmd):
+        rest = cmd[2:]
+        return True, ""          # is-enabled succeeds => already enabled
+    statuses = dict(units.activate(runner=run))
+    for t in units.timer_units():
+        assert statuses[t] == "already enabled", (t, statuses[t])
+
+
+def test_dev_never_arms_a_schedule(monkeypatch):
+    """Dev generates the same timers and must not run them: its stores are a
+    disposable copy of prod's (so trading-dev-backup.timer is deliberately
+    disabled), and stream/gallery/live-capture drive PUBLIC surfaces a second
+    checkout must never publish to. IS_DEV is a by-value import, so it is
+    patched on the module that consumed it."""
+    monkeypatch.setattr(units, "IS_DEV", True)
+    run = _fake_systemctl()
+    statuses = dict(units.activate(runner=run))
+    assert run.calls == [], "dev must not touch systemctl at all"
+    for t in units.timer_units():
+        assert statuses[t].startswith("skipped")
+
+
+def test_a_dest_run_writes_without_arming(tmp_path, monkeypatch, capsys):
+    """--dest is a dry run into another directory; arming would enable units
+    systemd is not loading from there."""
+    called = []
+    monkeypatch.setattr(units, "activate", lambda *a, **k: called.append(1) or [])
+    assert units.main(["--dest", str(tmp_path)]) == 0
+    assert called == []
+    assert "Not armed" in capsys.readouterr().out
+
+
+def test_install_reports_a_failure_to_arm_with_a_nonzero_exit(tmp_path, monkeypatch, capsys):
+    """A promote runs under `set -e`. If arming fails, the run must not print
+    success over a stack whose schedules are files."""
+    monkeypatch.setattr(units, "install", lambda dest=None: [])
+    monkeypatch.setattr(units, "activate",
+                        lambda *a, **k: [("trading-x.timer", "FAILED: boom")])
+    assert units.main(["--install"]) == 1
+    assert "NOT armed" in capsys.readouterr().out

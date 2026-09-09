@@ -224,8 +224,15 @@ disk for no benefit — the exact hazard `owns_proxy = false` exists to avoid.
 committed, so this is also how you repair them after any port or path change.
 
 ```bash
-.venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
+.venv/bin/python -m deploy.systemd.generate_units --install
 ```
+
+It reloads the daemon itself, and **arms every timer it wrote** (`enable --now`)
+— on a prod checkout. A written `.timer` nothing enables is a file, not a
+schedule, and on this box that silently cost eleven days of flow-delta reports.
+In a **dev** checkout it arms nothing, deliberately: see the warning at step 8.
+Read its output — a timer it could not arm is printed as `FAILED` and the
+command exits non-zero.
 
 Confirm the shape before starting anything: **nine** `trading-dev-*` units and
 **no proxy unit** — ownership is encoded in which units exist, not in a kill-list
@@ -245,6 +252,10 @@ systemctl --user enable --now trading-dev.target
 unit for every environment, but dev's stores are a disposable copy of prod's by
 construction; enabling it would encrypt and ship ~1.5 GB of duplicate data every
 night. Prod's timer is the one that matters.
+
+This is now ENFORCED rather than requested: `--install` arms timers only in a
+prod checkout, so a dev install writes all of them and enables none. Arming one
+by hand still works if you genuinely want it.
 
 **9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §8) the tab title is
 prefixed `DEV ·` and the header carries a **DEV** chip; prod's is bare. Then

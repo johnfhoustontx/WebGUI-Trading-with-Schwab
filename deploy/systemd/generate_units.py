@@ -10,8 +10,14 @@ show up as a Restart button that errors in prod.
 Run it in the checkout you want units for::
 
     .venv/bin/python -m deploy.systemd.generate_units --install
-    systemctl --user daemon-reload
     systemctl --user enable --now trading-<env>.target
+
+``--install`` does the ``daemon-reload`` itself and ARMS every timer it wrote
+(``activate()``); only the target is left to you, because enabling that is the
+deliberate act of making this checkout the one that starts at boot. Until
+2026-09-09 the recipe here was ``daemon-reload`` plus the target and nothing
+else, so a generated ``.timer`` was a FILE and not a schedule -- see
+``activate()`` for what that cost.
 
 **Why user units and not system units.** The System Status page restarts its own
 siblings with ``systemctl --user``. That needs no polkit rule and no sudoers
@@ -28,11 +34,13 @@ logout.
 """
 import argparse
 import pathlib
+import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (ENV_NAME, NICEGUI_LIVE_PORT,  # noqa: E402
+from repo_paths import (ENV_NAME, IS_DEV, NICEGUI_LIVE_PORT,  # noqa: E402
                         NICEGUI_PORT, OWNS_PROXY, PROXY_PORT, REPO_ROOT,
                         SERVICE_PORTS)
 from shared.market_calendar import slot_times, window_bounds  # noqa: E402
@@ -903,18 +911,132 @@ def install(dest=None):
     return written
 
 
+def timer_units():
+    """The `.timer` filenames this environment generates, sorted.
+
+    Derived from `render_all()` rather than listed, for the reason nothing here
+    is listed: a timer added to the generator and forgotten here would be
+    written and never armed, which is the exact failure this module now exists
+    to prevent.
+    """
+    return sorted(n for n in render_all() if n.endswith(".timer"))
+
+
+def _run_systemctl(args, runner=None):
+    """`systemctl --user <args>` -> (ok, output). Never raises."""
+    cmd = ["systemctl", "--user"] + list(args)
+    if runner is not None:
+        return runner(cmd)
+    if shutil.which("systemctl") is None:
+        return False, "systemctl not found on PATH"
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except Exception as e:                                  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+    out = (r.stdout + r.stderr).strip()
+    return r.returncode == 0, out
+
+
+def activate(runner=None):
+    """`daemon-reload`, then `enable --now` every timer this environment writes.
+
+    **WRITING A TIMER IS NOT ARMING IT, and that gap cost eleven days of
+    reports.** `--install` wrote `trading-prod-flow-delta.timer`; the file was
+    present, correct, and `disabled`, so it never fired and nothing failed. Every
+    other timer on that host was armed because a human ran `enable` once, by
+    hand, at some point nobody recorded -- which is the same standing invitation
+    the pre-systemd era's schtasks registration was. A rebuilt box would have got
+    the full set, all disabled, and the first symptom would have been a directory
+    that stopped gaining dates.
+
+    So arming is now DERIVED from what was generated, exactly as the units
+    themselves are. `enable --now` is idempotent: on an already-armed timer both
+    halves are no-ops, so this runs on every promote and changes nothing until
+    something is missing.
+
+    **ORDER IS LOAD-BEARING.** `daemon-reload` first: `enable` reads the unit
+    file off disk and would work without it, but the `--now` half asks the
+    RUNNING manager to start a unit it has not read yet, and that fails with
+    "Unit not found" for a newly generated timer -- the precise case this
+    function exists for.
+
+    **`--now` cannot mis-fire a catch-up.** Starting an already-active timer is a
+    no-op, so a normal promote re-evaluates nothing. On a fresh box or after
+    downtime the only timers that catch up are those that asked to
+    (`Persistent=true`: backup, flow-delta), which is what that setting is for.
+    The stream and gallery timers set it false precisely so they cannot, and this
+    does not override them.
+
+    **PROD ONLY.** Dev generates the same timers and must not arm them: its
+    stores are a disposable copy of prod's, so `trading-dev-backup.timer` is
+    deliberately left disabled, and the stream/gallery/live-capture timers drive
+    PUBLIC surfaces that a second checkout must never publish to. Dev still gets
+    the files, so arming one by hand stays a one-liner.
+
+    Returns ``[(unit, status)]``. Never raises -- a promote must not fail because
+    a timer could not be armed -- but it never stays quiet either: `main` prints
+    every line, and a failure says so.
+    """
+    if IS_DEV:
+        return [(t, "skipped (dev must not arm prod's schedules)")
+                for t in timer_units()]
+
+    results = []
+    ok, out = _run_systemctl(["daemon-reload"], runner)
+    if not ok:
+        # Without the reload the --now half cannot work, so say so once and
+        # stop rather than emit one identical failure per timer.
+        why = out or "unknown error"
+        return ([("daemon-reload", "FAILED: " + why)]
+                + [(t, "not attempted (daemon-reload failed)") for t in timer_units()])
+    results.append(("daemon-reload", "ok"))
+
+    for t in timer_units():
+        was, _ = _run_systemctl(["is-enabled", "--quiet", t], runner)
+        ok, out = _run_systemctl(["enable", "--now", t], runner)
+        if not ok:
+            results.append((t, "FAILED: " + (out or "unknown error")))
+        else:
+            results.append((t, "already enabled" if was else "ENABLED"))
+    return results
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--install", action="store_true",
                     help="write the units into ~/.config/systemd/user")
     ap.add_argument("--dest", help="write them somewhere else instead")
+    ap.add_argument("--no-activate", action="store_true",
+                    help="write the units but do not daemon-reload or arm the "
+                         "timers (a --dest run never arms them either)")
     args = ap.parse_args(argv)
 
     if args.install or args.dest:
         for p in install(args.dest):
             print(f"wrote {p}")
-        print(f"\nNow:  systemctl --user daemon-reload"
-              f"\n      systemctl --user enable --now {target_name()}")
+
+        # --dest is a dry run into another directory; arming would enable units
+        # systemd is not loading from there.
+        if args.dest or args.no_activate:
+            print("\nNot armed (--dest or --no-activate). The timers above "
+                  "are FILES, not schedules, until something enables them.")
+            print(f"\nNow:  systemctl --user daemon-reload"
+                  f"\n      systemctl --user enable --now {target_name()}")
+            return 0
+
+        print()
+        failed = False
+        for unit, status in activate():
+            print(f"{status:>16}  {unit}")
+            failed |= status.startswith("FAILED") or status.startswith("not attempted")
+
+        print(f"\nNow:  systemctl --user enable --now {target_name()}")
+        if failed:
+            # Non-zero so a promote's `set -e` cannot sail past a stack whose
+            # schedules are files rather than timers.
+            print("\n!! Some timers are NOT armed and will not fire. Fix the "
+                  "error above and re-run, or arm them by hand.")
+            return 1
         return 0
 
     for name, text in render_all().items():

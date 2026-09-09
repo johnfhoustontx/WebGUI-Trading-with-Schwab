@@ -68,8 +68,20 @@ else
   echo "[promote] requirements.lock unchanged - skipping install"
 fi
 
-echo "[promote] regenerating units (ports/paths are derived, not committed)"
-"$PY" -m deploy.systemd.generate_units --install
+echo "[promote] regenerating units and arming timers"
+# --install now does its own daemon-reload and `enable --now`s every timer it
+# wrote, because a written .timer is a FILE and not a schedule -- that gap ate
+# eleven days of flow-delta reports while every file on disk looked correct.
+#
+# NOT fatal, and the ordering is why: we are past the stop and past the pull, so
+# a bare failure here would abort under `set -e` and leave prod DOWN and already
+# promoted -- the exact shape the dirty-tree guard is ordered early to avoid. A
+# schedule that did not arm is a tomorrow problem; a stack that did not start is
+# a now problem. Reported loudly after the stack is verified, like .env.live.
+ARMED=1
+"$PY" -m deploy.systemd.generate_units --install || ARMED=0
+# Kept even though --install reloads: it costs nothing, and it means a reload
+# still happens on any path where arming is skipped.
 systemctl --user daemon-reload
 
 # The PUBLIC live unit loads .env.live -- its own minimal file, NOT the stack's
@@ -95,4 +107,14 @@ PROXY_PORT="$("$PY" -c 'import sys;sys.path.insert(0,".");import repo_paths;prin
 "$PY" tools/wait_http.py --port "$PROXY_PORT" --timeout 90 --label "the proxy"
 "$PY" tools/wait_http.py --port "$NICEGUI_PORT" --timeout 90 --label "the web GUI"
 
+if [ "$ARMED" = 0 ]; then
+  echo "[promote] WARNING: one or more TIMERS ARE NOT ARMED - they will not fire."
+  echo "[promote]   The stack itself is up and on the new code; this is the"
+  echo "[promote]   schedules only. See the generate_units output above, then:"
+  echo "[promote]   systemctl --user enable --now trading-$ENV_NAME-<name>.timer"
+  echo "[promote]   systemctl --user list-timers --all"
+fi
 echo "[promote] promoted to $(git rev-parse --short HEAD)."
+
+
+[ "$ARMED" = 1 ] || exit 1

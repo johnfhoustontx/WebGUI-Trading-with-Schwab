@@ -198,7 +198,7 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 | `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
-| `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. |
+| `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. Also reloads systemd and **arms every timer it wrote** — a written `.timer` that nothing enables never fires. Dev arms nothing, by design. |
 
 > The nine processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions

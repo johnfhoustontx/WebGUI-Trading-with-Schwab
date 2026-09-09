@@ -1627,11 +1627,30 @@ proxy. A committed unit would be a second copy of all of that, free to drift, an
 the drift would surface only as a Restart button that errors in prod.
 
 ```bash
-.venv/bin/python -m deploy.systemd.generate_units --install && systemctl --user daemon-reload
+.venv/bin/python -m deploy.systemd.generate_units --install
 ```
 
 Regenerate after anything that changes a port, a path, or the environment
 identity. `tools/promote.sh` already does it on every promote.
+
+⚠ **`--install` ARMS the timers as well as writing them, and that is not a
+convenience.** A generated `.timer` that nothing enables is a FILE, not a
+schedule — it sits there `disabled`, correct in every byte, and never fires.
+That is what happened to `trading-prod-flow-delta.timer`: eleven days of
+instrumentation reports were simply never produced, and because the tool exits
+0 whether it measured anything or not, the only symptom was a directory that
+stopped gaining dates. Every other timer on that host was armed because a human
+ran `enable` once, unrecorded, so a **rebuilt box would have got the whole set,
+all disabled**. `--install` now does its own `daemon-reload` and
+`enable --now`s each timer it wrote, derived from `render_all()` so a timer
+added to the generator cannot be forgotten here. It is idempotent — an
+already-armed timer reports `already enabled` and nothing changes.
+
+**Only the target is still yours to enable**, because that is the deliberate act
+of making this checkout the one that starts at boot (with
+`loginctl enable-linger`). **Dev arms nothing** — it generates the same timers,
+but its stores are a disposable copy of prod's and stream/gallery/live-capture
+drive public surfaces a second checkout must never publish to.
 
 | What it replaces | Directive |
 |---|---|
