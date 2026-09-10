@@ -883,15 +883,18 @@ set actually reported. Low confidence with a strong-looking score is a reason to
 discount it.
 
 **Day read labels.** The sentiment ring shows a word (e.g. *LONG*) and the trend ring
-shows a five-state label from the direction-and-aggression vocabulary:
+shows a five-state label from the direction-and-aggression vocabulary. The labels
+are flight words: each one names the direction *and* whether there is force behind
+it (engine on or off), which are the two things the classifier measures. **Hover
+the word** and it shows its picture:
 
-| Label | Meaning | Suggested tilt |
-|---|---|---|
-| **Bull** | Direction up, buyers aggressive | Long / put credit spreads |
-| **Weak Bull** | Up, but buyers are not pressing | Trim longs, favour call credit spreads |
-| **Neutral** | No directional edge | Neutral structures, or stand aside |
-| **Resilient** | Refuses to fall despite pressure; puts cheap and undefended | Put credit spreads |
-| **Bear** | Direction down, sellers aggressive | Call credit spreads / defensive |
+| Label | State | The picture (the hover text) | Suggested tilt |
+|---|---|---|---|
+| **Climbing** | Bullish | Engine on, gaining height: buyers are pushing and price is rising. | Long / put credit spreads |
+| **Stalling** | Lack of Bullishness | Nose still up but losing lift: price is high and the buying has run out. A stall comes before a drop. | Trim longs, favour call credit spreads |
+| **Circling** | Neutral | Holding pattern, waiting for clearance: buyers and sellers are balanced. | Neutral structures, or stand aside |
+| **Gliding** | Lack of Bearishness | Coming down with the engine off: lower, but nobody is pushing it. A glide ends on a runway — a floor is forming. | Put credit spreads |
+| **Diving** | Bearish | Nose down under power: urgent selling. | Call credit spreads / defensive |
 
 The panel also prints a plain-English gloss — for example *"Lack of Bullishness —
 Buyers exhausted at highs — favor CCS, trim longs."*

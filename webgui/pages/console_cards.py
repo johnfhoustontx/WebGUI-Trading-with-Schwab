@@ -6,7 +6,8 @@ Pure decision helpers first, then ``render_*`` builders that paint into the
 current NiceGUI container. The card contents are REBUILT on each repaint rather
 than updated element-by-element: the handoff recommends not re-mounting rows,
 but this page repaints every 120 s, the console carries no interactive state
-(no hover-held tooltips, no focus, no expanders), and the alternative is ~40
+(no focus, no expanders; its one tooltip, the trend word's picture, is a plain
+hover a repaint may close and the next hover reopens), and the alternative is ~40
 element references threaded through ``_apply``. The page already rebuilds its
 evidence chips the same way.
 
@@ -117,8 +118,23 @@ def _card_head(title, meta, meta_class=None):
             ui.label(meta).classes(meta_class or HEAD_META)
 
 
-def _hero(value, pill_text, pill_hex, kicker, delta):
-    """The big number + its pill and delta line."""
+PILL_TIP_PROPS = "max-width=340px"
+
+
+def pill_tooltip(el, text):
+    """Hang a hover sentence on a pill — nothing when there is no sentence.
+
+    Shared with the Desk, whose trend pill is this card's pill in a smaller
+    frame, so the two describe one word the same way."""
+    from nicegui import ui
+    if text:
+        with el:
+            ui.tooltip(text).props(PILL_TIP_PROPS)
+
+
+def _hero(value, pill_text, pill_hex, kicker, delta, pill_tip=""):
+    """The big number + its pill and delta line. ``pill_tip`` is the pill's
+    hover sentence."""
     from nicegui import ui
     text, hexv = hero_parts(value)
     with ui.row().classes("items-end gap-4 w-full"):
@@ -127,7 +143,8 @@ def _hero(value, pill_text, pill_hex, kicker, delta):
             ui.label(kicker).classes(KICKER)
             with ui.row().classes("items-center gap-2"):
                 if pill_text:
-                    ui.label(pill_text).classes(pill_classes(pill_hex or hexv))
+                    pill_tooltip(ui.label(pill_text).classes(
+                        pill_classes(pill_hex or hexv)), pill_tip)
                 if delta:
                     arrow, dtext, dhex = delta
                     ui.label(f"{arrow} {dtext}").classes(
@@ -174,8 +191,9 @@ def render_sentiment_card(arcs, bias, total, confidence):
 
 
 # --- 4.2 Trend --------------------------------------------------------------
-def render_trend_card(arcs, short_state, verdict, guidance):
-    """Hero + state pill + meters (incl. the NO READ horizon) + verdict block."""
+def render_trend_card(arcs, short_state, verdict, guidance, picture=""):
+    """Hero + state pill + meters (incl. the NO READ horizon) + verdict block.
+    ``picture`` is the state word's hover sentence."""
     from nicegui import ui
     day = (arcs[0].get("value") if arcs else None)
     month = (arcs[2].get("value") if arcs and len(arcs) > 2 else None)
@@ -183,7 +201,7 @@ def render_trend_card(arcs, short_state, verdict, guidance):
     with ui.column().classes(CARD_SHELL):
         _card_head("MARKET TREND", "SCALE 0—100")
         _hero(day, str(short_state or "").upper(), hero_hex, "DAY READ",
-              delta_parts(day, month, "MONTH"))
+              delta_parts(day, month, "MONTH"), pill_tip=picture)
         _meters(arcs)
         with ui.column().classes("mt-auto gap-[9px] w-full"):
             if verdict or guidance:

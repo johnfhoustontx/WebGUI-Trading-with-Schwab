@@ -98,12 +98,40 @@ def gauge_score(total):
 # intraday horizons publish AND the old trend-band vocab the 30-day structural
 # read still uses.
 _TREND_SHORT = {
-    # new five-state vocab (intraday horizons)
-    "bullish": "Bull", "lack_of_bullishness": "Weak Bull", "neutral": "Neutral",
-    "lack_of_bearishness": "Resilient", "bearish": "Bear",
+    # new five-state vocab (intraday horizons) — FLIGHT words. Each names the
+    # direction AND whether there is force behind it (engine on or off), the
+    # two axes the classifier measures. MIRRORED in
+    # services/options_svc/market_snapshot.py for the phone snapshot, and
+    # pinned there by shared/tests/test_cross_tier_mirrors.py.
+    "bullish": "Climbing", "lack_of_bullishness": "Stalling",
+    "neutral": "Circling", "lack_of_bearishness": "Gliding",
+    "bearish": "Diving",
     # old trend-band vocab (30-day structural read)
     "bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
     "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
+
+# The hover on a flight word: the picture behind it, then what that picture
+# means for a trade where it means anything. Five-state only — the 30-day
+# structural words are a different vocabulary with no picture behind them.
+TREND_PICTURE = {
+    "bullish": "Engine on, gaining height: buyers are pushing and price is "
+               "rising.",
+    "lack_of_bullishness": "Nose still up but losing lift: price is high and "
+                           "the buying has run out. A stall comes before a "
+                           "drop — favor call credit spreads, trim longs.",
+    "neutral": "Holding pattern, waiting for clearance: buyers and sellers are "
+               "balanced.",
+    "lack_of_bearishness": "Coming down with the engine off: lower, but nobody "
+                           "is pushing it. A glide ends on a runway — a floor "
+                           "is forming, favor put credit spreads.",
+    "bearish": "Nose down under power: urgent selling.",
+}
+
+
+def trend_picture(state):
+    """The hover sentence for a trend state, or "" when there is no flight
+    word to hover."""
+    return TREND_PICTURE.get(state, "") if isinstance(state, str) else ""
 
 # Market Trend sub-score display metadata (name + weight). Mirrors the service's
 # TREND_WEIGHTS — kept local so the page imports no engine (3-tier rule).
@@ -834,6 +862,7 @@ def render():
             "total": f"{total:.2f}",
             "confidence": _safe_float(comp.get("aggregate_confidence"), None),
             "trend_short": _TREND_SHORT.get(_trend.get("state"), ""),
+            "trend_picture": trend_picture(_trend.get("state")),
             "trend_verdict": _trend.get("label"),
             "trend_guidance": _trend.get("description"),
             "signal_rows": signal_tile_rows(t, prev_total),

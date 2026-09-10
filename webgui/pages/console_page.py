@@ -118,7 +118,8 @@ def apply(container, ctx):
                 ctx.get("confidence"))
             CARDS.render_trend_card(
                 ctx.get("trend_arcs"), ctx.get("trend_short"),
-                ctx.get("trend_verdict"), ctx.get("trend_guidance"))
+                ctx.get("trend_verdict"), ctx.get("trend_guidance"),
+                ctx.get("trend_picture"))
             CARDS.render_signals_card(
                 ctx.get("signal_rows"), ctx.get("velocity_values"),
                 ctx.get("divergence_detail"))

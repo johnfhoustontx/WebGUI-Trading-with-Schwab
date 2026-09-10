@@ -4,7 +4,47 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-10 (**The options glossary grew from 106 terms to
+**Last updated:** 2026-09-10 (**The Market Trend word is now a flight word, and
+hovering it says what it means.** Bull / Weak Bull / Neutral / Resilient / Bear
+became **Climbing / Stalling / Circling / Gliding / Diving** on the `/sentiment`
+console pill, the Desk pill and the phone snapshot.)
+
+- **Why "Resilient" went.** `lack_of_bearishness` comes out of three cells of
+  the direction × aggression grid (`market_state._GRID`), and two of them have
+  the trend score in its bearish band (≤ 40). The pill could read RESILIENT
+  beside a trend ring at 35 — a word contradicting the number next to it. It
+  also broke symmetry with its mirror state, which read "Weak Bull".
+
+- **Why flight words.** Each names the direction AND whether there is force
+  behind it — engine on (Climbing, Diving) or off (Stalling, Gliding) — which
+  are the classifier's two axes. None collides with a word already on those
+  screens (the regime words, the Bias and Signal tiles). Both pills take their
+  colour from the trend SCORE, not the word, so no colouring depended on the
+  old words.
+
+- **The hover.** `sentiment.TREND_PICTURE` / `trend_picture(state)` holds one
+  sentence per state; `console_cards.pill_tooltip` hangs it on the console pill
+  and on the Desk's compact pill alike, so the two screens describe one word
+  identically. The 30-day structural words (BULL / PULLBACK / …) carry none.
+
+- **Display only.** The keys are unchanged — `regime_filter`, the bridge, the
+  state-history store and the driver packet all read them. The verdict line
+  under the console pill still prints the framework name and
+  `STATE_DESCRIPTIONS` guidance, and for Gliding that guidance still says
+  "Refuses to drop", which is wrong for two of its three cells. Left for a
+  follow-up in `sentiment-dashboard/scoring/market_state.py`.
+
+- **A new mirror pin.** `_TREND_SHORT` is copied into
+  `services/options_svc/market_snapshot.py` for the phone snapshot, and
+  `test_cross_tier_mirrors.py::test_trend_pill_words_agree_between_the_page_and_the_push`
+  now holds the two together. It was watched failing with only the page's copy
+  changed.
+
+- Manuals: the Reference Guide's label table (now with the state name and the
+  picture), the User Guide's five-word line, `webgui-routes.md`. Design:
+  [`docs/plans/2026-09-10-market-trend-flight-words-design.md`](plans/2026-09-10-market-trend-flight-words-design.md).
+
+**Prior — 2026-09-10** (**The options glossary grew from 106 terms to
 187**, on the public site and in the app's fifth manual at once, from the one
 markdown source both are built from.)
 

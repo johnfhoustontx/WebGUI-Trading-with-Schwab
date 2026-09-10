@@ -83,6 +83,7 @@ from pages.sentiment import _TREND_SHORT as _TREND_WORDS
 from pages.sentiment import _word_tone as _band_word_tone
 from pages.sentiment import sentiment_arcs as _sentiment_arcs
 from pages.sentiment import trend_arcs as _trend_arcs
+from pages.sentiment import trend_picture as _trend_picture
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _cal
 
@@ -1002,16 +1003,26 @@ def sentiment_pill_text(live, snaps):
     return bias if total is None else f"{bias} {total:.2f}"
 
 
+def _day_trend_state(derived):
+    d = derived if isinstance(derived, dict) else {}
+    trend = d.get("trend") if isinstance(d.get("trend"), dict) else {}
+    return trend.get("state")
+
+
 def trend_pill_text(derived):
-    """'RESILIENT' — the Day horizon's short trend-state word.
+    """'GLIDING' — the Day horizon's short trend-state word.
 
     Straight off ``pages.sentiment._TREND_SHORT``, which is the map the console's
     own Trend pill uses. An unknown or absent state prints nothing: the five
     words are readings, and there is no sixth one meaning "no reading".
     """
-    d = derived if isinstance(derived, dict) else {}
-    trend = d.get("trend") if isinstance(d.get("trend"), dict) else {}
-    return str(_TREND_WORDS.get(trend.get("state")) or "").upper()
+    return str(_TREND_WORDS.get(_day_trend_state(derived)) or "").upper()
+
+
+def trend_pill_tooltip(derived):
+    """The pill word's hover sentence — ``pages.sentiment.trend_picture``, the
+    same sentence the console's pill carries. "" whenever the pill is empty."""
+    return _trend_picture(_day_trend_state(derived))
 
 
 # BIAS and SIGNAL are ONE call's output — ``live_composite.signal_band(total)``
@@ -2608,13 +2619,16 @@ def _mount_ruler():
         ui.element("div").classes("w-[24px] shrink-0")
 
 
-def _compact_card(title, arcs, pill_text, delta):
+def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
     """One compact score card: head · hero · three meters, in a console frame.
 
     The hero and the meters sit SIDE BY SIDE, where the console stacks them.
     That is the whole height saving: stacked, the two blocks are ~39px and ~54px
     and the card cannot fit the strip's budget; side by side the card is as tall
     as the taller of them. Nothing is dropped to buy it.
+
+    ``pill_tip`` is the pill's hover sentence, hung the way the console hangs
+    its own (``console_cards.pill_tooltip``).
     """
     arcs = list(arcs or [])
     text, hexv = _CC.hero_parts(arcs[0].get("value") if arcs else None)
@@ -2629,7 +2643,8 @@ def _compact_card(title, arcs, pill_text, delta):
                     ui.label("DAY READ").classes(_CARD_KICKER)
                     with ui.row().classes("items-center gap-[6px]"):
                         if pill_text:
-                            ui.label(pill_text).classes(_compact_pill(hexv))
+                            _CC.pill_tooltip(ui.label(pill_text).classes(
+                                _compact_pill(hexv)), pill_tip)
                         if delta:
                             arrow, dtext, dhex = delta
                             ui.label(f"{arrow} {dtext}").classes(
@@ -3188,7 +3203,8 @@ def render():
         with trend_box:
             _compact_card("MARKET TREND", t_arcs, trend_pill_text(derived),
                           _CC.delta_parts(_arc_value(t_arcs, 0),
-                                          _arc_value(t_arcs, 2), "MONTH"))
+                                          _arc_value(t_arcs, 2), "MONTH"),
+                          pill_tip=trend_pill_tooltip(derived))
 
     # The seat order the strip last drew, fed back into ``by_day_move`` so its
     # hysteresis has something to hold: the sorter is a pure function of

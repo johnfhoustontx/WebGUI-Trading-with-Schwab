@@ -125,7 +125,7 @@ def test_console_context_reads_the_live_payload_shapes():
                              derived, [{"composite": {"total_score": 5.16}}],
                              composite_at="2026-08-18T01:31:28+00:00")
     assert ctx["total"] == "5.04" and ctx["confidence"] == 0.9
-    assert ctx["trend_short"] == "Neutral" and ctx["trend_verdict"] == "Neutral"
+    assert ctx["trend_short"] == "Circling" and ctx["trend_verdict"] == "Neutral"
     assert [round(a["value"], 1) for a in ctx["trend_arcs"]] == [57.9, 79.8, 88.8]
     assert ctx["as_of"] == "2026-08-18T01:31:28+00:00"
     assert len(ctx["regime_points"]) == 1

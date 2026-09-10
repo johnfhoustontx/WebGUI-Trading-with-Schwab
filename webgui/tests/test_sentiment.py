@@ -131,6 +131,49 @@ def test_trend_short_covers_both_vocabularies():
         assert k in S._TREND_SHORT
 
 
+# The five-state words are FLIGHT words (2026-09-10), replacing Bull / Weak Bull
+# / Neutral / Resilient / Bear. Each names the direction AND whether there is
+# force behind it — engine on or off — which are the two axes the classifier
+# measures. "Resilient" named neither, and it showed beside a trend ring sitting
+# in its bearish band. The internal keys are unchanged.
+_FLIGHT_WORDS = {"bullish": "Climbing", "lack_of_bullishness": "Stalling",
+                 "neutral": "Circling", "lack_of_bearishness": "Gliding",
+                 "bearish": "Diving"}
+
+# The hover text for each word: the picture behind it, then what that picture
+# means for a trade where it means anything.
+_FLIGHT_PICTURES = {
+    "bullish": "Engine on, gaining height: buyers are pushing and price is "
+               "rising.",
+    "lack_of_bullishness": "Nose still up but losing lift: price is high and "
+                           "the buying has run out. A stall comes before a "
+                           "drop — favor call credit spreads, trim longs.",
+    "neutral": "Holding pattern, waiting for clearance: buyers and sellers are "
+               "balanced.",
+    "lack_of_bearishness": "Coming down with the engine off: lower, but nobody "
+                           "is pushing it. A glide ends on a runway — a floor "
+                           "is forming, favor put credit spreads.",
+    "bearish": "Nose down under power: urgent selling.",
+}
+
+
+def test_the_five_state_words_are_the_flight_set():
+    for state, word in _FLIGHT_WORDS.items():
+        assert S._TREND_SHORT[state] == word, state
+
+
+def test_each_flight_word_has_its_picture():
+    for state, picture in _FLIGHT_PICTURES.items():
+        assert S.trend_picture(state) == picture, state
+
+
+def test_a_state_with_no_flight_word_has_no_picture():
+    """The 30-day structural words are a different vocabulary with no picture
+    behind them; an unknown or absent state is not a reading at all."""
+    for state in ("bull_trend", "range", "wat", "", None):
+        assert S.trend_picture(state) == "", state
+
+
 def test_market_state_evidence_rows():
     ev = ["direction 75/100", "aggression -0.37"]
     assert S.market_state_evidence_rows({"evidence": ev}) == ev
@@ -402,7 +445,7 @@ def test_trend_detail_names_the_state_of_all_three_horizons():
     losing this line loses those two readings outright."""
     bus_client.reset()
     _seed_cache()
-    assert ["Day Bull · Week Neutral · Month BULL"] == [
+    assert ["Day Climbing · Week Circling · Month BULL"] == [
         t for t in _trend_detail_texts(_render_card()) if t.startswith("Day ")]
 
 
@@ -413,8 +456,39 @@ def test_trend_detail_dashes_a_horizon_the_service_has_not_published():
     bus_client.bus().cache_set("cache:sentiment:composite", {
         "live": _snap("2026-08-14", 7.2),
         "derived": {"trend": {"score": 64.0, "state": "bullish"}}})
-    assert ["Day Bull · Week — · Month —"] == [
+    assert ["Day Climbing · Week — · Month —"] == [
         t for t in _trend_detail_texts(_render_card()) if t.startswith("Day ")]
+
+
+def _label_tooltips(card):
+    """``(label text, tooltip text)`` for every tooltip hung on a label, so a
+    hover is checked against the word it describes, not merely found."""
+    from nicegui import ui
+    out = []
+    for e in card.descendants():
+        if isinstance(e, ui.tooltip):
+            parent = e.parent_slot.parent
+            if isinstance(parent, ui.label):
+                out.append((parent.text, e.text))
+    return out
+
+
+def test_hovering_the_trend_word_describes_it():
+    bus_client.reset()
+    _seed_cache()
+    assert ("CLIMBING", _FLIGHT_PICTURES["bullish"]) in _label_tooltips(
+        _render_card())
+
+
+def test_a_trend_with_no_word_carries_no_hover():
+    """No pill is drawn for a state outside the vocabulary, so there is nothing
+    to hover — and no picture may appear anywhere else in its place."""
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "derived": {"trend": {"score": 64.0, "state": "wat"}}})
+    tips = [t for _w, t in _label_tooltips(_render_card())]
+    assert not set(tips) & set(_FLIGHT_PICTURES.values())
 
 
 def test_sentiment_avg_or_none_is_none_with_no_snaps():

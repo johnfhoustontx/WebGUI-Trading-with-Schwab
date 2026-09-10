@@ -565,8 +565,9 @@ updates on its own about every two minutes whether or not the page is open; pres
   dial: **Day**, **Week** (the last 5 sessions' average) and **Month** (the full
   history's average). A **Model confidence** figure sits beneath it.
 - **Market Trend ring** — the same three horizons for direction, 0–100, where 50 is
-  neutral. The Day reading carries a five-state label — **Bull / Weak Bull /
-  Neutral / Resilient / Bear** — and a plain-English suggestion.
+  neutral. The Day reading carries a five-state label — **Climbing / Stalling /
+  Circling / Gliding / Diving** — and a plain-English suggestion. Hover the word
+  to see what it means.
 - **Signals** — four tiles (Bias / Signal / Yesterday / Change) with rate-of-change
   readings and a divergence line beneath.
 - **Regime block** — which of five regimes the tape is in (**Balanced**,

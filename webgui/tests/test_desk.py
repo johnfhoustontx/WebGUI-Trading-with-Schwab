@@ -1424,6 +1424,19 @@ def test_trend_pill_is_empty_for_an_unknown_or_absent_state():
     assert d.trend_pill_text({"trend": "nonsense"}) == ""
 
 
+def test_trend_pill_hover_is_the_sentiment_pages_own_picture():
+    """Imported like the word itself — the Desk and /sentiment show one pill,
+    so they must describe it with one sentence."""
+    from pages import sentiment as S
+    for state in ("bullish", "lack_of_bullishness", "neutral",
+                  "lack_of_bearishness", "bearish"):
+        tip = d.trend_pill_tooltip({"trend": {"state": state}})
+        assert tip and tip == S.trend_picture(state), state
+    for derived in ({"trend": {"state": "wat"}}, {}, None,
+                    {"trend": "nonsense"}):
+        assert d.trend_pill_tooltip(derived) == "", derived
+
+
 # ── BIAS / SIGNAL, the strip tiles that replaced VIX ─────────────────────────
 
 
@@ -1825,7 +1838,9 @@ def test_render_mounts_both_score_cards_with_the_consoles_own_anatomy(monkeypatc
     assert texts.count("SCALE 0—100") == 2
     assert texts.count("DAY READ") == 2
     assert "CAUTIOUS 4.45" in texts               # the sentiment hero pill
-    assert "RESILIENT" in texts                   # the trend hero pill
+    assert "GLIDING" in texts                     # the trend hero pill
+    from pages import sentiment as S               # ...and its hover
+    assert S.trend_picture("lack_of_bearishness") in texts
     # Three meters per card, each captioned by ``console.meter_row``.
     for caption in ("DAY", "WEEK", "MONTH"):
         assert texts.count(caption) == 2

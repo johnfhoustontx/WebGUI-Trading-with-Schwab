@@ -74,6 +74,26 @@ def test_sentiment_svc_delegates_rather_than_copying():
     assert "\"mean_reversion\": \"Balanced\"" not in src
 
 
+# --- the market-trend pill words --------------------------------------------
+# The short word on the Market Trend pill (Climbing / Stalling / Circling /
+# Gliding / Diving, plus the 30-day structural words) is drawn by the webgui AND
+# by the phone snapshot options_svc renders. Neither tier may import the other,
+# so the dict is copied; a rename in one used to leave the phone saying a word
+# the screen had stopped using.
+
+TREND_WORDS_SOURCE = "webgui/pages/sentiment.py"
+TREND_WORDS_MIRROR = "services/options_svc/market_snapshot.py"
+
+
+def test_trend_pill_words_agree_between_the_page_and_the_push():
+    page = _const(TREND_WORDS_SOURCE, "_TREND_SHORT")
+    assert page, "the source dict is empty - the pin would be vacuous"
+    assert _const(TREND_WORDS_MIRROR, "_TREND_SHORT") == page, (
+        f"{TREND_WORDS_MIRROR}:_TREND_SHORT has drifted from "
+        f"{TREND_WORDS_SOURCE}:_TREND_SHORT - the phone snapshot would name the "
+        "trend with a word the screen no longer uses.")
+
+
 # --- the covered-call identifier --------------------------------------------
 # ONE string, "COVERED_CALL", in three tiers that cannot import each other:
 #

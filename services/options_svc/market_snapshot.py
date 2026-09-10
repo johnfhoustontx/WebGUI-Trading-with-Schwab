@@ -136,11 +136,13 @@ def prev_total(snaps):
 
 
 # Short state words, one per trend horizon. MIRRORS sentiment._TREND_SHORT —
-# covers BOTH the five-state intraday vocabulary and the older trend-band words
-# the 30-day structural read still publishes.
+# covers BOTH the five-state intraday vocabulary (the flight words) and the
+# older trend-band words the 30-day structural read still publishes. Pinned to
+# the page's copy by shared/tests/test_cross_tier_mirrors.py.
 _TREND_SHORT = {
-    "bullish": "Bull", "lack_of_bullishness": "Weak Bull", "neutral": "Neutral",
-    "lack_of_bearishness": "Resilient", "bearish": "Bear",
+    "bullish": "Climbing", "lack_of_bullishness": "Stalling",
+    "neutral": "Circling", "lack_of_bearishness": "Gliding",
+    "bearish": "Diving",
     "bull_trend": "BULL", "pullback_in_bull": "PULLBACK", "range": "RANGE",
     "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1556,39 +1556,48 @@ a dashboard can do.</p>
 set actually reported. Low confidence with a strong-looking score is a reason to
 discount it.</p>
 <p><strong>Day read labels.</strong> The sentiment ring shows a word (e.g. <em>LONG</em>) and the trend ring
-shows a five-state label from the direction-and-aggression vocabulary:</p>
+shows a five-state label from the direction-and-aggression vocabulary. The labels
+are flight words: each one names the direction <em>and</em> whether there is force behind
+it (engine on or off), which are the two things the classifier measures. <strong>Hover
+the word</strong> and it shows its picture:</p>
 <table>
 <thead>
 <tr>
 <th>Label</th>
-<th>Meaning</th>
+<th>State</th>
+<th>The picture (the hover text)</th>
 <th>Suggested tilt</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Bull</strong></td>
-<td>Direction up, buyers aggressive</td>
+<td><strong>Climbing</strong></td>
+<td>Bullish</td>
+<td>Engine on, gaining height: buyers are pushing and price is rising.</td>
 <td>Long / put credit spreads</td>
 </tr>
 <tr>
-<td><strong>Weak Bull</strong></td>
-<td>Up, but buyers are not pressing</td>
+<td><strong>Stalling</strong></td>
+<td>Lack of Bullishness</td>
+<td>Nose still up but losing lift: price is high and the buying has run out. A stall comes before a drop.</td>
 <td>Trim longs, favour call credit spreads</td>
 </tr>
 <tr>
-<td><strong>Neutral</strong></td>
-<td>No directional edge</td>
+<td><strong>Circling</strong></td>
+<td>Neutral</td>
+<td>Holding pattern, waiting for clearance: buyers and sellers are balanced.</td>
 <td>Neutral structures, or stand aside</td>
 </tr>
 <tr>
-<td><strong>Resilient</strong></td>
-<td>Refuses to fall despite pressure; puts cheap and undefended</td>
+<td><strong>Gliding</strong></td>
+<td>Lack of Bearishness</td>
+<td>Coming down with the engine off: lower, but nobody is pushing it. A glide ends on a runway — a floor is forming.</td>
 <td>Put credit spreads</td>
 </tr>
 <tr>
-<td><strong>Bear</strong></td>
-<td>Direction down, sellers aggressive</td>
+<td><strong>Diving</strong></td>
+<td>Bearish</td>
+<td>Nose down under power: urgent selling.</td>
 <td>Call credit spreads / defensive</td>
 </tr>
 </tbody>
