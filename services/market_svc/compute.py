@@ -383,7 +383,10 @@ _QUADRANTS = ("rising_leading", "rising_lagging", "falling_leading",
 
 
 def _finite(v):
-    """A real number or None — a NaN or a non-number is no reading, never 0."""
+    """A real number or None — a NaN, a bool or a non-number is no reading,
+    never 0 (``float(True)`` is 1.0, and a bool is not a reading)."""
+    if isinstance(v, bool):
+        return None
     try:
         f = float(v)
     except (TypeError, ValueError):
@@ -446,7 +449,11 @@ def build_summary_packet(sentiment, regime, bullbear, now=None):
         "signal": der.get("signal") or None,
         "size": der.get("size") or None,
         # The Desk prints console_regime.regime_name: the service label, else
-        # "Unclear". A withheld confidence stays withheld, as the console does.
+        # the committed key's display word, else "Unclear". sentiment_svc always
+        # publishes the label, so only the first applies in practice; a
+        # label-less payload from an older writer reads "Unclear" here, and the
+        # Desk's moved-since line then says the two differ. A withheld
+        # confidence stays withheld, as the console does.
         "regime": {"word": r.get("label") or "Unclear",
                    "confidence": (None if r.get("unclear")
                                   else _finite(r.get("confidence")))},
@@ -488,7 +495,6 @@ def summary_fingerprint(packet):
         bb.get("horizon"),
         tuple(sorted((bb.get("counts") or {}).items())),
     )
-
 
 
 def _count_anthropic_call():
@@ -541,9 +547,10 @@ def read_summary_packet(bus, now=None):
 def generate_summary(packet, client=None):
     """Call Claude for the 1-2 sentence consolidated read + posture.
 
-    Returns ``{"narrative", "inputs", "as_of"}``; an empty narrative (never a
-    fabricated one) on dev / no key / API error. ``inputs`` is the packet the
-    sentence was written from, so the Desk can tell when it has been overtaken."""
+    Returns ``{"narrative", "inputs", "as_of"}`` on the no-client path (dev / no
+    key) with an empty narrative — never a fabricated one — and on a successful
+    call. Returns ``None`` when the attempt FAILED (API error, timeout), so the
+    caller keeps the last good sentence rather than blanking it."""
     import json
     from datetime import timezone
     out = {"narrative": "", "inputs": packet or {},
@@ -565,4 +572,5 @@ def generate_summary(packet, client=None):
         out["narrative"] = " ".join(text.split()).strip()[:_SUMMARY_MAX_CHARS]
     except Exception:  # noqa: BLE001 — never raise out of a summary attempt.
         log.warning("market summary generation failed", exc_info=True)
+        return None
     return out

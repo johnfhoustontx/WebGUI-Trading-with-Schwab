@@ -189,6 +189,35 @@ def test_no_client_is_an_empty_sentence_never_a_made_up_one():
     assert out["narrative"] == "" and out["inputs"] == _packet()
 
 
+def test_a_bool_is_not_a_reading():
+    assert compute._finite(True) is None and compute._finite(False) is None
+    view = {"benchmark_day_pct": True, "levels": {"sector": [
+        {"symbol": "XLK", "raw": {"trend": 0.3, "excess": 0.2},
+         "day_pct": 1.0, "day_excess": 0.5}]}}
+    assert compute.bullbear_counts(view, now=_OPEN)[0] == "quarter"
+
+
+def test_a_failed_attempt_returns_none_so_the_last_good_sentence_stays():
+    class _Boom:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                raise RuntimeError("rate limited")
+    assert compute.generate_summary(_packet(), client=_Boom()) is None
+
+
+def test_the_quadrant_rule_matches_the_bull_bear_maps():
+    """MIRRORS webgui/pages/bullbear.quadrant (this tier cannot import it):
+    ties go to the cautious side and a missing axis is 'unknown'. If the map's
+    rule changes, this table must change with it."""
+    q = compute._quadrant
+    assert q(0.1, 0.1) == "rising_leading"
+    assert q(0.1, 0.0) == "rising_lagging"        # a zero excess is not leading
+    assert q(0.0, 0.1) == "falling_leading"       # a flat trend is not rising
+    assert q(-0.1, -0.1) == "falling_lagging"
+    assert q(None, 0.1) == "unknown" and q(0.1, None) == "unknown"
+
+
 def test_the_packet_reader_rebuilds_only_when_a_view_moves(monkeypatch):
     from shared.bus import Bus
     bus = Bus()

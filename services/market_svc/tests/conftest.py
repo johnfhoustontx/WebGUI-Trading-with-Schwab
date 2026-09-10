@@ -23,3 +23,14 @@ def _no_live_claude(monkeypatch):
     timing. Tests that inject their own fake client are unaffected.
     """
     monkeypatch.setattr(compute, "_make_summary_client", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_summary_packet_memo():
+    """``read_summary_packet``'s memo is module-level and keyed on small
+    fakeredis version counters, which two tests can share — reset it around
+    every test so one test is never served another's packet."""
+    from services.market_svc import compute
+    compute.reset_packet_memo()
+    yield
+    compute.reset_packet_memo()
