@@ -113,8 +113,9 @@ commands. (Removing `sync_ticker_setting` also retires the `live_main.py` warnin
 that the public process must never call it.)
 
 **Published:** `cache:market:summary` keeps `narrative` and gains **`inputs`** —
-the packet the sentence was written from (additive; `MarketSummary.inputs`
-defaults to `{}`). The envelope timestamp is the "as of".
+the packet the sentence was written from — and **`as_of`**, the UTC time
+`generate_summary` wrote it, which the Desk prints as "as of HH:MM CT" (both
+additive; `MarketSummary.inputs` defaults to `{}`, `as_of` to `""`).
 
 **Failure:** no key / dev → empty narrative, never a fabricated line. An API
 error or timeout instead publishes **nothing** — the last good sentence stays on
