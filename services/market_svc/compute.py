@@ -314,14 +314,23 @@ def collect(bus):
 # Market summary — a periodic Claude-written verdict (cache:market:summary).
 # ---------------------------------------------------------------------------
 _SUMMARY_MODEL = "claude-sonnet-5"
-_SUMMARY_MAX_TOKENS = 220
+# A cap, not a spend (billing is on generated tokens). Headroom so a sentence is
+# never cut mid-word and still rendered as if complete; pinned by a test.
+_SUMMARY_MAX_TOKENS = 300
 _SUMMARY_MAX_CHARS = 400
 _SUMMARY_SYSTEM = (
-    "You are a terse markets desk analyst. Given a compact JSON snapshot of the "
-    "current tape (sentiment, trend, breadth, volatility, index moves, sector/theme "
-    "leaders), write ONE or TWO plain sentences (<=350 chars) summarizing the market "
-    "read and posture. No preamble, no disclaimers, no bullet points, no markdown — "
-    "just the sentences. Lead with the overall condition."
+    "You are a terse markets desk analyst writing the one-line market summary on "
+    "a trading desk. You get six readings as JSON, in the exact words the screen "
+    "shows: sentiment (a 0-10 composite that is CONTRARIAN - a high score means "
+    "the crowd is fearful, which this model reads as opportunity); trend (a word "
+    "and a 0-100 score); bias and signal (two bands of that same composite, with "
+    "a position size); regime (the tape's character, with a confidence); and "
+    "bull/bear (how many of the 11 S&P sectors are rising or falling and leading "
+    "or lagging SPY, counted today or on the quarter). Write at most TWO plain "
+    "sentences (<=350 characters). Treat sentiment, bias and signal as ONE "
+    "reading. Say where the readings agree or conflict. Close with a trading "
+    "posture. Use the given words verbatim. No prices, no percent moves, no "
+    "preamble, no disclaimers, no bullet points, no markdown."
 )
 
 
@@ -494,13 +503,54 @@ def _count_anthropic_call():
     except Exception:  # noqa: BLE001
         pass
 
-def generate_summary(dashboard, sentiment, client=None):
-    """Build the packet, call Claude for a 1-2 sentence verdict. Defensive → {'narrative': ''}."""
+
+_SUMMARY_KEYS = ("cache:sentiment:composite", "cache:sentiment:regime",
+                 "cache:sentiment:bullbear")
+_PACKET_MEMO = {"key": None, "packet": None}
+
+
+def reset_packet_memo():
+    """Drop the version-gated packet memo (test helper)."""
+    _PACKET_MEMO.update(key=None, packet=None)
+
+
+def read_summary_packet(bus, now=None):
+    """The summary packet off its three views, rebuilt only when a version moved
+    or the session-open horizon flipped.
+
+    The Bull/Bear payload is ~190 KB and this runs on every 3 s poll: ungated it
+    would be deserialized ~7,800 times a trading day for a packet that changes a
+    handful of times. ``None`` on a read failure (the gate then skips)."""
+    now = now or datetime.now().astimezone()
+    try:
+        vers = bus.cache_versions(_SUMMARY_KEYS)
+        key = (tuple(vers.get(k) for k in _SUMMARY_KEYS),
+               mc.regular_session_has_opened(now))
+        if key == _PACKET_MEMO["key"] and _PACKET_MEMO["packet"] is not None:
+            return _PACKET_MEMO["packet"]
+        envs = [bus.cache_get(k) for k in _SUMMARY_KEYS]
+        packet = build_summary_packet(*[(e.payload if e else {}) for e in envs],
+                                      now=now)
+        _PACKET_MEMO.update(key=key, packet=packet)
+        return packet
+    except Exception:  # noqa: BLE001
+        log.warning("summary packet read failed", exc_info=True)
+        return None
+
+
+def generate_summary(packet, client=None):
+    """Call Claude for the 1-2 sentence consolidated read + posture.
+
+    Returns ``{"narrative", "inputs", "as_of"}``; an empty narrative (never a
+    fabricated one) on dev / no key / API error. ``inputs`` is the packet the
+    sentence was written from, so the Desk can tell when it has been overtaken."""
     import json
-    packet = build_summary_packet(dashboard, sentiment)
+    from datetime import timezone
+    out = {"narrative": "", "inputs": packet or {},
+           "as_of": datetime.now(timezone.utc).isoformat()}
     c = client if client is not None else _make_summary_client()
     if c is None:
-        return {"narrative": ""}
+        return out
     try:
         _count_anthropic_call()
         resp = c.messages.create(
@@ -508,12 +558,11 @@ def generate_summary(dashboard, sentiment, client=None):
             thinking={"type": "disabled"},
             system=_SUMMARY_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(packet)}])
-        text = ""
-        for block in getattr(resp, "content", []) or []:
-            if getattr(block, "type", None) == "text" or hasattr(block, "text"):
-                text += getattr(block, "text", "")
-        text = " ".join(text.split()).strip()[:_SUMMARY_MAX_CHARS]
-        return {"narrative": text}
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            log.warning("market summary hit max_tokens (%d) - the sentence may "
+                        "be cut", _SUMMARY_MAX_TOKENS)
+        text = "".join(getattr(b, "text", "") for b in getattr(resp, "content", []) or [])
+        out["narrative"] = " ".join(text.split()).strip()[:_SUMMARY_MAX_CHARS]
     except Exception:  # noqa: BLE001 — never raise out of a summary attempt.
         log.warning("market summary generation failed", exc_info=True)
-        return {"narrative": ""}
+    return out

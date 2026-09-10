@@ -61,4 +61,5 @@ def test_generate_summary_degrades_to_empty_narrative(monkeypatch):
     monkeypatch.setattr(compute, "_anthropic_api_key", _boom)
     monkeypatch.setitem(compute.ENV_FLAGS, "allow_claude", False)
 
-    assert compute.generate_summary({}, {}) == {"narrative": ""}
+    out = compute.generate_summary({"sentiment": {"composite": 3.98}})
+    assert out["narrative"] == ""

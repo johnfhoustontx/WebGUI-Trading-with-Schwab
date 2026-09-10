@@ -33,27 +33,6 @@ def _bullbear(benchmark=0.4):
     ]}}
 
 
-def _dash():
-    return {"categories": [
-        {"category": "Volatility", "tiles": [
-            {"display": "VIX", "last": 16.9, "change_pct": 4.8, "color_state": "risk_off_strong"},
-            {"display": "SKEW", "last": 150.0, "change_pct": 2.8, "color_state": "risk_off_strong"}]},
-        {"category": "Cash Index", "tiles": [
-            {"display": "SPX", "last": 7482.0, "change_pct": -0.3, "color_state": "risk_off_mild"},
-            {"display": "NDX", "last": 29252.0, "change_pct": 0.3, "color_state": "risk_on_mild"}]},
-        {"category": "Sector SPDR", "tiles": [
-            {"display": "XLK", "last": 181.0, "change_pct": 1.4, "color_state": "risk_on_strong"},
-            {"display": "XLB", "last": 50.0, "change_pct": -2.6, "color_state": "risk_off_strong"}]},
-    ]}
-
-
-def _sent():
-    return {"live": {"composite": {"total_score": "3.9", "bias": "Cautious"},
-                     "sector_pcr": 1.34,
-                     "breadth": {"interpretation": "A/D 0.41:1 - weak"}},
-            "derived": {"trend": {"score": 42.7, "label": "Neutral"}}}
-
-
 def test_packet_carries_the_six_readings_in_the_screens_words():
     p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
     assert p["sentiment"] == {"composite": 3.98}
@@ -151,20 +130,79 @@ def test_nothing_to_summarize_has_no_fingerprint():
     assert compute.summary_fingerprint(None) is None
 
 
-def test_generate_summary_no_client_is_empty_but_safe():
-    # The autouse _no_live_claude fixture forces _make_summary_client → None, so the
-    # default real-client resolution path returns an empty narrative (no network).
-    out = compute.generate_summary(_dash(), _sent(), client=None)
-    assert out["narrative"] == ""
+class _Msg:
+    def __init__(self, text, stop="end_turn"):
+        self.content = [type("B", (), {"text": text, "type": "text"})()]
+        self.stop_reason = stop
 
 
-def test_generate_summary_with_fake_client_returns_narrative():
-    class _Msg:
-        def __init__(self, text): self.content = [type("B", (), {"text": text, "type": "text"})()]
-    class _FakeClient:
+def _client(text, stop="end_turn", seen=None):
+    class _C:
         class messages:
             @staticmethod
-            def create(**kw): return _Msg("Cautious, narrow tape — breadth weak.")
-    out = compute.generate_summary(_dash(), _sent(), client=_FakeClient())
-    assert "Cautious" in out["narrative"]
-    assert len(out["narrative"]) <= compute._SUMMARY_MAX_CHARS + 50
+            def create(**kw):
+                if seen is not None:
+                    seen.update(kw)
+                return _Msg(text, stop)
+    return _C()
+
+
+def test_generate_summary_returns_the_sentence_its_inputs_and_when():
+    p = _packet()
+    out = compute.generate_summary(p, client=_client("Fear builds; lean defensive."))
+    assert out["narrative"] == "Fear builds; lean defensive."
+    assert out["inputs"] == p
+    assert out["as_of"].endswith("+00:00")
+
+
+def test_generate_summary_sends_only_the_packet():
+    import json
+    seen = {}
+    p = _packet()
+    compute.generate_summary(p, client=_client("x", seen=seen))
+    assert json.loads(seen["messages"][0]["content"]) == p
+    assert seen["model"] == compute._SUMMARY_MODEL
+
+
+def test_the_prompt_asks_for_the_consolidation_and_a_posture():
+    s = compute._SUMMARY_SYSTEM.lower()
+    for phrase in ("contrarian", "one reading", "agree or conflict", "posture",
+                   "verbatim", "no prices"):
+        assert phrase in s, phrase
+
+
+def test_max_tokens_keeps_headroom():
+    """A cap, not a spend: billing is on generated tokens. A trim below 300 risks
+    a sentence cut mid-word that still renders as if complete."""
+    assert compute._SUMMARY_MAX_TOKENS >= 300
+
+
+def test_a_cut_off_reply_is_logged(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
+        compute.generate_summary(_packet(), client=_client("Fear bu", stop="max_tokens"))
+    assert any("max_tokens" in r.getMessage() for r in caplog.records)
+
+
+def test_no_client_is_an_empty_sentence_never_a_made_up_one():
+    out = compute.generate_summary(_packet(), client=None)
+    assert out["narrative"] == "" and out["inputs"] == _packet()
+
+
+def test_the_packet_reader_rebuilds_only_when_a_view_moves(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    compute.reset_packet_memo()
+    bus.cache_set("cache:sentiment:composite", _composite())
+    bus.cache_set("cache:sentiment:regime", _regime())
+    bus.cache_set("cache:sentiment:bullbear", _bullbear())
+    builds = []
+    real = compute.build_summary_packet
+    monkeypatch.setattr(compute, "build_summary_packet",
+                        lambda *a, **k: builds.append(1) or real(*a, **k))
+    first = compute.read_summary_packet(bus, now=_OPEN)
+    again = compute.read_summary_packet(bus, now=_OPEN)
+    assert first == again and len(builds) == 1          # no version moved
+    bus.cache_set("cache:sentiment:regime", _regime(label="Balanced"))
+    assert compute.read_summary_packet(bus, now=_OPEN)["regime"]["word"] == "Balanced"
+    assert len(builds) == 2
