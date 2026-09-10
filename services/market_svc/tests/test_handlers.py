@@ -25,44 +25,16 @@ def test_publish_summary():
     assert env.payload["narrative"] == "Cautious tape."
 
 
-# ── summary enable/disable gate ────────────────────────────────────────────
-# The webgui's "Show the ticker" toggle is a Tier-1 setting; the Claude verdict
-# is generated in Tier 2. The toggle enqueues a command, this service records the
-# flag, and the scheduler reads it — so switching the ticker off actually stops
-# the API calls instead of just hiding the marquee.
-
-
-def test_summary_enabled_defaults_true_when_key_absent():
-    # No key (fresh Redis / never toggled) must preserve today's behavior.
-    assert handlers.summary_enabled(Bus()) is True
-
-
-def test_set_summary_enabled_roundtrips():
+def test_retired_toggle_commands_are_ignored_not_errors():
+    """enable_summary / disable_summary were retired 2026-09-10. A fresh consumer
+    group replays the stream backlog, so an old command WILL arrive - it must be
+    a no-op, never an exception and never a gate."""
     bus = Bus()
-    handlers.set_summary_enabled(bus, False)
-    assert handlers.summary_enabled(bus) is False
-    handlers.set_summary_enabled(bus, True)
-    assert handlers.summary_enabled(bus) is True
+    for t in ("disable_summary", "enable_summary", "nonsense"):
+        handlers.handle_command(bus, Command(type=t))
+    assert bus.cache_get("cache:market:summary_enabled") is None
 
 
-def test_summary_enabled_defaults_true_on_unreadable_key():
-    class _BadBus:
-        def cache_get(self, key):
-            raise RuntimeError("redis down")
-
-    # A bus failure must not silently disable the ticker verdict.
-    assert handlers.summary_enabled(_BadBus()) is True
-
-
-def test_handle_command_toggles_summary():
-    bus = Bus()
-    handlers.handle_command(bus, Command(type="disable_summary"))
-    assert handlers.summary_enabled(bus) is False
-    handlers.handle_command(bus, Command(type="enable_summary"))
-    assert handlers.summary_enabled(bus) is True
-
-
-def test_handle_command_ignores_unknown_type():
-    bus = Bus()
-    handlers.handle_command(bus, Command(type="nonsense"))  # must not raise
-    assert handlers.summary_enabled(bus) is True
+def test_the_toggle_gate_is_gone():
+    assert not hasattr(handlers, "summary_enabled")
+    assert not hasattr(handlers, "set_summary_enabled")

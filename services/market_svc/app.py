@@ -1,10 +1,10 @@
 """Runnable market dashboard service (port 8215).
 
 A scheduler polls the proxy for ~48 macro symbols and publishes
-cache:market:dashboard, plus a periodic Claude verdict for the ticker. The
-command consumer exists only for the webgui's ticker toggle
-(enable_summary/disable_summary) — the page itself is a pure reader. Importable
-without side effects; starts uvicorn only under __main__.
+cache:market:dashboard, plus a change-driven Claude verdict for the ticker and
+the Desk's Market Summary frame. The command consumer is wired but has no
+command types of its own today — the page is a pure reader. Importable without
+side effects; starts uvicorn only under __main__.
 """
 import pathlib
 import sys
