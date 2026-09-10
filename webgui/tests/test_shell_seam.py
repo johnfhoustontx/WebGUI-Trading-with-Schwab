@@ -149,7 +149,18 @@ def test_the_shell_stays_a_leaf_module():
     """``shell.py`` is imported by every page AND by the public entrypoint, so
     what it imports is what they all pay. The CSS moved as plain strings; if it
     ever needs ``theme`` or a page module, that is a decision to take
-    deliberately, not to discover."""
+    deliberately, not to discover.
+
+    ⚠ THAT DECISION WAS TAKEN ON 2026-09-09, and this is the record of it. The
+    brand lockup moved here so the public header could draw it without
+    ``import main``, and a lockup is not a plain string: it reads
+    ``[brand]`` out of ``pages.options.theme``, escapes the configured name
+    with ``html``, resolves the mark against the static tree with ``pathlib``,
+    and asks ``repo_paths`` whether to add the DEV chip. Only ``theme`` is new
+    weight -- ``repo_paths`` arrives with it either way, and the other two are
+    stdlib. The list stays CLOSED: an addition is still a decision, and a page
+    module (or ``bus_client``, or ``app_settings``) appearing here would mean
+    the seam had started becoming main.py again."""
     import ast
     import pathlib
     src = pathlib.Path(__file__).resolve().parents[1] / "shell.py"
@@ -159,7 +170,54 @@ def test_the_shell_stays_a_leaf_module():
             roots |= {a.name.split(".")[0] for a in node.names}
         if isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
-    assert roots == {"nicegui", "pages"}, f"shell.py grew imports: {sorted(roots)}"
+    assert roots == {"html", "nicegui", "pages", "pathlib", "repo_paths"}, \
+        f"shell.py grew imports: {sorted(roots)}"
+
+
+# --- the brand lockup, which BOTH entrypoints draw ---------------------------
+
+def test_the_brand_builders_live_in_the_shell():
+    """Same seam, same reason as ``play_alert`` and ``TABLE_CSS``.
+
+    The public live screens carried no branding at all until 2026-09-09 -- the
+    app name reached them only through the browser TAB TITLE, which is invisible
+    on the YouTube wall stream and on a kiosk. Giving them a header meant the
+    lockup builders had to be reachable from a process that may never
+    ``import main``.
+
+    ⚠ ``__module__``, not merely ``hasattr``. The failure this guards against is
+    the lazy repair -- a ``from main import brand_lockup_html`` at the top of
+    ``shell.py`` would satisfy every other assertion in this file and in
+    ``test_live_main.py`` while putting the entire app route table back into the
+    public process. (``test_the_shell_stays_a_leaf_module`` would catch that
+    particular spelling; this catches it by NAME rather than by import list.)"""
+    import shell
+    for fn in (shell.brand_mark_src, shell.brand_lockup_html):
+        assert callable(fn)
+        assert fn.__module__ == "shell", \
+            f"{fn.__name__} is defined in {fn.__module__}, not the seam"
+
+
+def test_main_re_exports_the_brand_builders():
+    """``main.brand_lockup_html`` has been reached for since the header was
+    built, and ``wall.py`` still calls it by that name. The move keeps it bound
+    to the very same function."""
+    import main
+    import shell
+    assert main.brand_lockup_html is shell.brand_lockup_html
+    assert main.brand_mark_src is shell.brand_mark_src
+
+
+def test_both_entrypoints_resolve_the_mark_against_one_static_tree():
+    """``main._STATIC_DIR`` is what the app MOUNTS at ``/static``;
+    ``shell._STATIC_DIR`` is what ``brand_mark_src`` checks a ``[brand].mark``
+    against. Two paths for one directory would drift, and the failure would be
+    a lockup that renders its mark on one origin and drops it on the other --
+    so main takes the shell's rather than recomputing its own."""
+    import main
+    import shell
+    assert main._STATIC_DIR is shell._STATIC_DIR
+    assert (shell._STATIC_DIR / "img").is_dir()
 
 
 # --- the screenshot session's chrome suppression -----------------------------

@@ -178,6 +178,7 @@ bus_client.set_read_only(True)
 app_settings.freeze(live_screens.SETTINGS_PINS)
 
 import shell                                          # noqa: E402
+from nicegui import app as nicegui_app                # noqa: E402
 from nicegui import ui                                # noqa: E402
 from pages.options import theme                       # noqa: E402
 
@@ -197,7 +198,32 @@ from pages.options import theme                       # noqa: E402
 # ``shell``, which must stay a leaf module.
 shell.publish(live_screens.PUBLIC_ROUTES)
 
-_STATIC_DIR = _HERE / "static"
+_STATIC_DIR = shell._STATIC_DIR
+
+# ── the ONE non-page route this process serves ───────────────────────────────
+# ⚠ A DELIBERATE ADDITION TO "the fourteen routes and nothing else", and it is
+# published to the internet like everything else here.
+#
+# The header's brand mark is ``[brand].mark`` — a URL under ``/static`` — and
+# this process serves its own ASGI app. Measured on prod before this line
+# existed: ``127.0.0.1:8500/static/img/neuralstrike-mark.svg`` answered 200 (the
+# app mounts it) and ``:8501`` answered 404, so a published header would have
+# drawn a broken-image icon while the markup read as entirely correct.
+#
+# ⚠ Mounting a DIRECTORY publishes every file in it, now and later. This tree is
+# seven files — three alert WAVs and four brand images — with no config, no
+# credentials and no data under it; ``webgui/data`` is a different tree and is
+# NOT mounted, which is also why ``/voice`` does not exist in this process.
+# ``tests/test_live_main.py`` pins both halves: that this is the only route
+# beyond the published fourteen, and that nothing but bundled assets lives here.
+#
+# Guarded on ``is_dir()`` exactly as ``main.py``'s mount is: a checkout without
+# the directory must degrade to a wordmark, not fail to start over chrome.
+if _STATIC_DIR.is_dir():
+    nicegui_app.add_static_files("/static", str(_STATIC_DIR))
+else:                                   # pragma: no cover - a broken checkout
+    log.warning("no static directory at %s: the public header will render the "
+                "wordmark without its mark", _STATIC_DIR)
 
 # The private app's content container, minus its ``pb-10``. That padding exists
 # solely to clear the fixed market-summary marquee ``_layout`` mounts, and this
@@ -212,6 +238,57 @@ _STATIC_DIR = _HERE / "static"
 # navy gradient behind the void-black ones. A neutral container is what "cannot
 # drift from the private page" actually means here.
 _CONTENT = "w-full p-4 gap-3"
+
+# ── the public header ────────────────────────────────────────────────────────
+# The brand reached these screens through the browser TAB TITLE alone, which is
+# invisible on the YouTube wall stream and on a kiosk — so a stranger opening a
+# published screen saw a dense trading board with nothing saying whose it is.
+#
+# It is the app header's LEFT half and nothing else: the lockup, a hairline, the
+# screen's name. ⚠ NO NAVIGATION OF ANY KIND, and not because there is nothing
+# worth linking to — Settings, Terminate, Sign out and the whole rail DO NOT
+# EXIST in this process, and that origin separation IS the security control. A
+# link to a route this origin does not serve reads as broken; one pointing at
+# the private host would advertise it. There is nothing here to click.
+_HEADER = ("live-header w-full items-center gap-3 no-wrap px-4 pb-2 "
+           "border-b border-white/[0.06]")
+
+# The app's own "the thing you are looking at" crumb style, taken from the seam
+# rather than restated, so the public screen name and the private breadcrumb
+# leaf cannot drift apart.
+_SCREEN_NAME = shell._CRUMB_LEAF
+
+# The ONE `ui.add_css` this entrypoint owns, and it is the documented escape
+# hatch: `.brand-mark` lives inside a raw HTML string (`brand_lockup_html`), so
+# no `.classes()` can reach it.
+#
+# The app sizes that mark 44px, which is right for a header bar that also holds
+# a breadcrumb and a market pill. These screens are dense by design and this
+# header is pure identity, so it must not cost a row of data: 32px keeps the SVG
+# legible across a room while holding the whole band to ~40px — about 4% of a
+# 1080p wall display, and it is the page's first element rather than a fixed
+# bar, so nothing is pushed off the bottom that was not already there.
+# (Measured in a real browser at this size: band 41px, mark 32x32.)
+#
+# ⚠ The app's `.brand-mark` hairline (`_NAV_CSS`, "so the logo doesn't float on
+# the bar") is deliberately NOT copied. It belongs to a header BAR with its own
+# ground; here the mark sits on whatever the page paints, and a 1px rounded box
+# around a transparent chevron would read as a plate that is not there.
+LIVE_HEADER_CSS = """
+.live-header .brand-mark { width: 32px; height: 32px; border-radius: 9px; }
+"""
+
+
+def _header(screen) -> None:
+    """The brand lockup, a hairline, and the name of the screen you are on."""
+    with ui.row().classes(_HEADER):
+        # mark=True — unlike `main._layout`, which passes mark=False because
+        # there the logo is a real button (the menu's pin control) built beside
+        # the wordmark. This origin has no menu, so the mark rides in the string.
+        ui.html(shell.brand_lockup_html())
+        ui.element("div").classes(
+            "w-px h-[22px] bg-white/[0.09] mx-1 flex-none")
+        ui.label(screen.title).classes(_SCREEN_NAME)
 
 
 def _render(screen) -> None:
@@ -240,9 +317,24 @@ def _render(screen) -> None:
         # controls (switches, sliders, color=primary buttons). Nothing nav-related
         # rides it, so it is safe on a page with no rail.
         ui.colors(primary=theme.MENU_ACCENT)
+    # The brand identity, in ``main._layout``'s own order. The wordmark is two
+    # gradients clipped to text, which the bundled Tailwind JIT will not emit —
+    # so without BRAND_CSS the lockup paints two TRANSPARENT words, i.e. nothing
+    # at all. The brand font is loaded SEPARATELY from the body font above
+    # ([brand].font_url against [typography].font_url): it styles the wordmark
+    # only, never the data tables.
+    if theme.BRAND_FONT_HEAD_HTML:
+        ui.add_head_html(theme.BRAND_FONT_HEAD_HTML)
+    ui.add_css(theme.BRAND_CSS)
+    ui.add_css(LIVE_HEADER_CSS)
     module = importlib.import_module(f"pages.{screen.module}")
-    with ui.column().classes(_CONTENT):
-        module.render(**screen.kwargs)
+    # The header is a SIBLING of the page's own container, not a Quasar
+    # ``ui.header``: a fixed bar would need the layout padding `main._NAV_CSS`
+    # supplies and would float over the very charts these screens exist to show.
+    with ui.column().classes("w-full gap-0"):
+        _header(screen)
+        with ui.column().classes(_CONTENT):
+            module.render(**screen.kwargs)
 
 
 def _register(screen):

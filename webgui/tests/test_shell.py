@@ -1290,24 +1290,31 @@ def test_app_name_comes_from_brand_config():
 
 def test_dev_lockup_carries_a_dev_chip(monkeypatch, tmp_path):
     """Two identical-looking tabs writing to different paper books is a mistake
-    waiting to happen — dev's header says DEV."""
-    import main
+    waiting to happen — dev's header says DEV.
+
+    ⚠ ``IS_DEV`` is patched on ``shell``, not on ``main``. It is a BY-VALUE
+    export, so the name that decides anything is the one in the module that
+    read it — and the lockup moved to ``shell`` on 2026-09-09. Patching ``main``
+    now sets an attribute nothing consults; this test caught the move, and its
+    prod partner below would NOT have (under pytest the real flag is already
+    False, so that one would have gone on passing while asserting nothing)."""
+    import shell
     from pages.options import theme
 
     monkeypatch.setattr(theme, "BRAND_MARK", "")
-    monkeypatch.setattr(main, "IS_DEV", True)
-    assert ">DEV<" in main.brand_lockup_html(tmp_path)
+    monkeypatch.setattr(shell, "IS_DEV", True)
+    assert ">DEV<" in shell.brand_lockup_html(tmp_path)
 
 
 def test_prod_lockup_has_no_dev_chip(monkeypatch, tmp_path):
     """Non-vacuity partner: the chip is conditional, not always painted.
     (Cannot fail if the chip is deleted — see the dev test above.)"""
-    import main
+    import shell
     from pages.options import theme
 
     monkeypatch.setattr(theme, "BRAND_MARK", "")
-    monkeypatch.setattr(main, "IS_DEV", False)
-    assert "DEV" not in main.brand_lockup_html(tmp_path)
+    monkeypatch.setattr(shell, "IS_DEV", False)
+    assert "DEV" not in shell.brand_lockup_html(tmp_path)
 
 
 def test_window_title_is_prefixed_in_dev(monkeypatch):
