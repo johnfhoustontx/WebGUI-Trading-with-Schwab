@@ -37,43 +37,47 @@ def test_slow_cadence_on_holiday():
     assert sch.poll_interval(now) == sch.OFFHOURS_INTERVAL_SEC
 
 
-def test_summary_due_fires_when_interval_elapsed():
-    rth = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)
-    # never run → due
-    assert sch.summary_due(None, secs_since=0, now=rth) is True
-    # just ran → not due
-    assert sch.summary_due(1.0, secs_since=10, now=rth) is False
-    # RTH interval elapsed → due
-    assert sch.summary_due(1.0, secs_since=sch.SUMMARY_RTH_SEC + 1, now=rth) is True
-    # off-hours uses the longer interval
-    off = dt.datetime(2026, 7, 7, 22, 0, tzinfo=_CT)
-    assert sch.summary_due(1.0, secs_since=sch.SUMMARY_RTH_SEC + 1, now=off) is False
-    assert sch.summary_due(1.0, secs_since=sch.SUMMARY_OFFHOURS_SEC + 1, now=off) is True
+_DAY = dt.date(2026, 9, 10)
+_FP = ("fp-a",)
 
 
-def test_summary_never_due_when_disabled():
-    # The ticker toggle is off → no Claude call, no matter how due it otherwise is.
-    rth = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)
-    assert sch.summary_due(None, secs_since=0, now=rth, enabled=False) is False
-    assert sch.summary_due(
-        1.0, secs_since=sch.SUMMARY_RTH_SEC + 1, now=rth, enabled=False) is False
+def test_the_first_poll_after_a_restart_writes_a_sentence():
+    assert sch.summary_due(sch.SummaryGate(), _FP, now_mono=0.0, today=_DAY)
 
 
-def test_summary_due_defaults_to_enabled():
-    # Omitting `enabled` must behave exactly as before (callers/tests unchanged).
-    rth = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)
-    assert sch.summary_due(None, secs_since=0, now=rth) is True
+def test_nothing_to_summarize_never_calls():
+    assert not sch.summary_due(sch.SummaryGate(), None, now_mono=0.0, today=_DAY)
 
 
-def test_loop_gates_summary_on_the_enabled_flag():
-    import inspect
+def test_an_unchanged_reading_never_calls_however_long_it_waits():
+    gate = sch.record_summary(sch.SummaryGate(), _FP, now_mono=0.0, today=_DAY)
+    assert not sch.summary_due(gate, _FP, now_mono=10 * 3600.0, today=_DAY)
 
-    src = inspect.getsource(sch.loop)
-    # The loop must read the live flag and feed it to the gate — so flipping the
-    # toggle takes effect on the next cycle without a service restart.
-    assert "summary_enabled" in src
-    seg = src.split("summary_due", 1)[0]
-    assert "handlers.summary_enabled(bus)" in seg
+
+def test_a_change_waits_out_the_minimum_gap():
+    gate = sch.record_summary(sch.SummaryGate(), _FP, now_mono=0.0, today=_DAY)
+    soon = sch.SUMMARY_MIN_GAP_SEC - 1
+    assert not sch.summary_due(gate, ("fp-b",), now_mono=soon, today=_DAY)
+    assert sch.summary_due(gate, ("fp-b",), now_mono=sch.SUMMARY_MIN_GAP_SEC,
+                           today=_DAY)
+
+
+def test_the_daily_ceiling_holds_and_resets_at_the_date_change():
+    gate = sch.SummaryGate()
+    t = 0.0
+    for i in range(sch.SUMMARY_DAILY_CAP):
+        fp = (f"fp-{i}",)
+        assert sch.summary_due(gate, fp, now_mono=t, today=_DAY), i
+        gate = sch.record_summary(gate, fp, now_mono=t, today=_DAY)
+        t += sch.SUMMARY_MIN_GAP_SEC
+    assert not sch.summary_due(gate, ("fp-new",), now_mono=t, today=_DAY)
+    tomorrow = _DAY + dt.timedelta(days=1)
+    assert sch.summary_due(gate, ("fp-new",), now_mono=t, today=tomorrow)
+
+
+def test_the_gate_constants_are_the_approved_design():
+    assert sch.SUMMARY_MIN_GAP_SEC == 10 * 60
+    assert sch.SUMMARY_DAILY_CAP == 30
 
 
 def test_loop_runs_summary_as_background_task():

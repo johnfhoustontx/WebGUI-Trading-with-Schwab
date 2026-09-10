@@ -10,6 +10,7 @@ nothing). The market-hours gate mirrors the other services.
 import asyncio
 import datetime as _dt
 import logging
+from dataclasses import dataclass
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
@@ -61,32 +62,48 @@ def poll_interval(now=None):
     return OFFHOURS_INTERVAL_SEC
 
 
-# The verdict is the ticker's slow "why" — the live data items beside it refresh on
-# the ~2 s poll, so a narrative that lags the tape by up to 40 min costs the reader
-# little and halves the Claude spend (it was the stack's single biggest caller at
-# 20 min: ~21 of ~39 calls/day).
-SUMMARY_RTH_SEC = 40 * 60       # refresh the Claude verdict every ~40 min during RTH
-SUMMARY_OFFHOURS_SEC = 60 * 60  # ~hourly off-hours
+# The summary is written ON CHANGE, not on a clock (2026-09-10): the Desk's
+# MARKET SUMMARY frame and the ticker both show it, and a clock refresh paid for
+# ~25 calls a day, most of them overnight rewrites of a market that had not
+# moved. Now a sentence is written only when the readings' fingerprint moves
+# (compute.summary_fingerprint), never twice within the gap, and never past the
+# daily ceiling — so a reading flapping at a band boundary cannot run up cost.
+SUMMARY_MIN_GAP_SEC = 10 * 60
+SUMMARY_DAILY_CAP = 30
 
 
-def summary_due(has_run, secs_since, *, now=None, enabled=True):
-    """Whether to regenerate the Claude verdict this cycle (pure).
+@dataclass(frozen=True)
+class SummaryGate:
+    fingerprint: tuple | None = None   # what the last sentence was written from
+    last_call: float | None = None     # monotonic seconds of the last call
+    day: _dt.date | None = None        # CT date the counter belongs to
+    calls_today: int = 0
 
-    ``has_run`` is a True/None sentinel — None until the first run (→ always due).
-    Once it has run, fire when ``secs_since`` the last run exceeds the RTH/off-hours
-    interval.
 
-    ``enabled`` is the webgui ticker toggle (see ``handlers.summary_enabled``);
-    False short-circuits everything — no marquee, no Claude call. ``secs_since``
-    keeps accumulating while off, so re-enabling produces a fresh verdict at once.
-    """
-    if not enabled:
+def summary_due(gate, fingerprint, *, now_mono, today):
+    """Write a new sentence this poll? (pure)
+
+    No — when there is nothing to summarize, when the readings have not changed
+    since the last sentence, within ``SUMMARY_MIN_GAP_SEC`` of the last call, or
+    once ``SUMMARY_DAILY_CAP`` calls have been made on ``today``. The first poll
+    after a restart (empty gate) with readings present is always due."""
+    if fingerprint is None:
         return False
-    if has_run is None:
-        return True
-    now = now or _dt.datetime.now(_CT)
-    threshold = SUMMARY_RTH_SEC if _is_rth(now) else SUMMARY_OFFHOURS_SEC
-    return secs_since >= threshold
+    calls = gate.calls_today if gate.day == today else 0
+    if calls >= SUMMARY_DAILY_CAP:
+        return False
+    if gate.fingerprint == fingerprint:
+        return False
+    if gate.last_call is not None and now_mono - gate.last_call < SUMMARY_MIN_GAP_SEC:
+        return False
+    return True
+
+
+def record_summary(gate, fingerprint, *, now_mono, today):
+    """The gate after a call is launched (pure) — a NEW gate, never mutated."""
+    calls = gate.calls_today if gate.day == today else 0
+    return SummaryGate(fingerprint=fingerprint, last_call=now_mono, day=today,
+                       calls_today=calls + 1)
 
 
 async def _run_summary(loop_, bus, payload, sent_payload) -> None:
