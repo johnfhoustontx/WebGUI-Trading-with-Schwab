@@ -3068,7 +3068,11 @@ def render():
     # over only the ones that moved and most regions read more than one view.
     # ``glow_now`` is the ONE clock a paint runs on — set by ``_paint`` before it
     # calls a painter, so detection, pruning and drawing cannot disagree.
-    state = {"versions": {}, "data": {}, "glow_now": 0.0, **arrival_state()}
+    # ``wall_now`` is its wall-clock sibling: the ONE instant every region that
+    # decides the Bull/Bear horizon (the strip, the MARKET SUMMARY frame) reads,
+    # so they cannot land on opposite sides of the opening bell in one paint.
+    state = {"versions": {}, "data": {}, "glow_now": 0.0, "wall_now": None,
+             **arrival_state()}
 
     # ``DESK_FONT`` where the console pages carry ``CONSOLE_DISPLAY``: this page
     # is nine columns of numbers, so the body face is the monospace and the
@@ -3399,7 +3403,7 @@ def render():
     def _paint_summary():
         f = summary_facts(_view("market:summary"), _view("sentiment:composite"),
                           _view("sentiment:history"), _view("sentiment:regime"),
-                          _view("sentiment:bullbear"))
+                          _view("sentiment:bullbear"), now=state["wall_now"])
         sum_text.text = f["narrative"] or SUMMARY_EMPTY
         sum_text.classes(remove=_ALL_STATE_TEXT,
                          add=CON_TXT if f["narrative"] else CON_TXT_MUTED)
@@ -3423,9 +3427,11 @@ def render():
 
     def _paint_bullbear():
         view = _view("sentiment:bullbear")
-        # ONE clock for the whole paint, as ``_paint`` takes one for the page:
-        # two would let the headline name a horizon the chips were not drawn on.
-        now = datetime.now().astimezone()
+        # The paint's OWN wall clock, not a fresh one: two would let the
+        # headline name a horizon the chips were not drawn on, and — since the
+        # MARKET SUMMARY frame reads the Bull/Bear view too — a horizon the
+        # frame was not drawn on either.
+        now = state["wall_now"]
         chips = bullbear_chips(view, now=now, previous=bb_seats["order"])
         bb_seats["order"] = [c["symbol"] for c in chips]
         bb_headline.text = bullbear_headline(view, now=now)
@@ -3857,6 +3863,10 @@ def render():
         # entry that ``glow_classes`` is then asked to draw, or the reverse.
         now = time.monotonic()
         state["glow_now"] = now
+        # The ONE wall clock for this paint, so every region that decides the
+        # Bull/Bear horizon (the strip and the summary frame) decides it on the
+        # same instant.
+        state["wall_now"] = datetime.now().astimezone()
         # Detection FIRST: the painters read ``state["glow"]``, so a row has to
         # be marked before the paint that is supposed to draw it lit.
         for region, detect in (("flow", _detect_flow),

@@ -2321,28 +2321,34 @@ def test_the_strip_feeds_its_own_seat_order_into_the_next_paint(monkeypatch):
 
 
 def test_one_paint_decides_the_horizon_once(monkeypatch):
-    """One paint, ONE clock — threaded into both the chips and the headline.
+    """One paint, ONE clock — threaded into every region that decides the
+    Bull/Bear horizon: the strip (``_paint_bullbear``) AND the MARKET SUMMARY
+    frame (``_paint_summary`` -> ``summary_facts``).
 
-    Each of the two decides its own horizon from a ``strip_is_live`` call of its
-    own (``bullbear_headline``'s docstring says why that is safe), so they agree
-    only because they are handed the same instant. Give them a clock each and a
-    paint straddling the opening bell renders a headline saying "on the quarter"
-    over chips already drawn on today's axes — precisely the one-word ambiguity
-    ``/sentiment/bullbear`` exists to remove, and precisely what a reader of the
-    strip cannot detect.
+    Each caller decides its own horizon from a ``strip_is_live`` call of its
+    own (``bullbear_headline``'s docstring says why that is safe), so they
+    agree only because they are handed the same instant. Give them a clock
+    each and a paint straddling the opening bell renders a headline saying
+    "on the quarter" over chips already drawn on today's axes — precisely
+    the one-word ambiguity ``/sentiment/bullbear`` exists to remove, and
+    precisely what a reader of the strip (or the frame beneath it) cannot
+    detect.
 
-    Nothing in either SIGNATURE prevents it: taking a second ``datetime.now()``
-    for the headline leaves the whole suite green. Hence this test, and hence
-    identity rather than equality — two ``now()`` calls microseconds apart
-    compare unequal only sometimes, and a guard that fails only sometimes is
-    not a guard.
+    Nothing in any SIGNATURE prevents it: taking a second ``datetime.now()``
+    anywhere in this chain leaves the whole suite green. Hence this test, and
+    hence identity rather than equality — two ``now()`` calls microseconds
+    apart compare unequal only sometimes, and a guard that fails only
+    sometimes is not a guard.
 
-    ``bullbear_headline`` has a SECOND, independent caller since the MARKET
-    SUMMARY frame landed (``summary_facts``, its own clock) — so this only
-    isolates the FIRST chips/headline pair, which is ``_paint_bullbear``'s own
-    (region order puts it before ``summary``); the frame's own instant is
-    covered by ``test_summary_facts_carry_the_sentence_and_when_it_was_written``
-    and friends, not here.
+    The invariant now spans TWO regions, not one: the strip's own
+    ``bullbear_chips``/``bullbear_headline`` pair, and the frame's
+    ``strip_is_live``/``bullbear_headline``/``bullbear_distribution`` trio
+    reached through ``summary_facts``. A test that only watched the strip's
+    pair (as this one briefly did) cannot see the frame mint its own clock —
+    which is exactly the regression: ``summary_facts`` defaults ``now`` to a
+    fresh ``datetime.now()`` when its caller omits it, and until ``_paint``
+    hands it the shared instant, omitting it is exactly what ``_paint_summary``
+    did.
     """
     seen = []
     monkeypatch.setattr(
@@ -2351,15 +2357,25 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     monkeypatch.setattr(
         d, "bullbear_headline",
         lambda view, now=None: seen.append(("headline", now)) or "")
+    monkeypatch.setattr(
+        d, "strip_is_live",
+        lambda view, now=None: seen.append(("live", now)) or True)
+    monkeypatch.setattr(
+        d, "bullbear_distribution",
+        lambda view, now=None: seen.append(("distribution", now)) or "")
     _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
 
     from pages import desk
     desk.render()
 
-    assert [where for where, _ in seen[:2]] == ["chips", "headline"]
-    # A real instant, not each side quietly falling back to its own default.
+    # The strip paints before the frame (region order), so its chips/headline
+    # pair comes first; the frame's own strip_is_live/headline/distribution
+    # trio follows, from inside summary_facts.
+    assert [where for where, _ in seen] == [
+        "chips", "headline", "live", "headline", "distribution"]
+    # A real instant, not any side quietly falling back to its own default.
     assert seen[0][1] is not None
-    assert seen[0][1] is seen[1][1]
+    assert all(now is seen[0][1] for _, now in seen)
 
 
 def test_a_measured_zero_mid_session_is_a_known_false_bearish_reading():
