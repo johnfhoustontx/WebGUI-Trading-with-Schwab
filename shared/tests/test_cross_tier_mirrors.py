@@ -74,6 +74,32 @@ def test_sentiment_svc_delegates_rather_than_copying():
     assert "\"mean_reversion\": \"Balanced\"" not in src
 
 
+# --- the Regime word's hover --------------------------------------------------
+# The service renders the displayed regime word (REGIME_DISPLAY + the
+# _DIRECTIONAL adornments, or "Unclear" from regime_label); the webgui holds a
+# hover per word. A word the service can print with no hover would render bare.
+
+REGIME_PICTURE_PAGE = "webgui/pages/regime_mix.py"
+
+
+def _regime_words():
+    words = set(_const(REGIME_SOURCE, "REGIME_DISPLAY").values())
+    for table in _const(REGIME_SOURCE, "_DIRECTIONAL").values():
+        words |= set(table.values())
+    # regime_label's own literal for an unknown key.
+    return words | {"Unclear"}
+
+
+def test_every_regime_word_the_service_can_print_has_a_hover():
+    words = _regime_words()
+    assert len(words) == 11, sorted(words)
+    pictures = _const(REGIME_PICTURE_PAGE, "REGIME_PICTURE")
+    missing = sorted(w for w in words if not pictures.get(w))
+    assert not missing, (
+        f"{REGIME_PICTURE_PAGE}:REGIME_PICTURE has no hover for {missing} - the "
+        "service can print these words.")
+
+
 # --- the market-trend pill words --------------------------------------------
 # The short word on the Market Trend pill (Climbing / Stalling / Circling /
 # Gliding / Diving, plus the 30-day structural words) is drawn by the webgui AND
