@@ -1677,6 +1677,32 @@ def test_cold_readings_dash_and_carry_no_hover(monkeypatch):
     assert by["regime"]["value"] == "Unclear"      # the console's own cold word
 
 
+def test_the_desk_reads_the_market_summary_on_its_one_poll():
+    assert "market:summary" in d.VIEWS
+    assert d._REGION_VIEWS["summary"] == (
+        "market:summary", "sentiment:composite", "sentiment:history",
+        "sentiment:regime", "sentiment:bullbear")
+
+
+def test_render_mounts_the_market_summary_frame(monkeypatch):
+    from pages import sentiment as S
+    payloads = _full_payloads()
+    payloads["market:summary"] = _summary(
+        bias="Cautious", signal="Bearish",
+        regime={"word": "Rallying", "confidence": 0.71})
+    _seed_bus(monkeypatch, payloads)
+    texts = [t for t in _rendered_texts() if t]
+    assert "MARKET SUMMARY" in texts
+    assert _summary()["narrative"] in texts
+    assert S.band_word_picture("signal", "Bearish") in texts
+
+
+def test_render_says_no_summary_yet_when_none_is_published(monkeypatch):
+    _seed_bus(monkeypatch, _full_payloads())
+    texts = [t for t in _rendered_texts() if t]
+    assert d.SUMMARY_EMPTY in texts
+
+
 def test_the_desk_band_words_match_the_console_tiles_for_one_payload():
     """The two screens read the same two fields off the same ``derived``, so
     for any payload their BIAS and SIGNAL text must be identical."""
@@ -2310,6 +2336,13 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     identity rather than equality — two ``now()`` calls microseconds apart
     compare unequal only sometimes, and a guard that fails only sometimes is
     not a guard.
+
+    ``bullbear_headline`` has a SECOND, independent caller since the MARKET
+    SUMMARY frame landed (``summary_facts``, its own clock) — so this only
+    isolates the FIRST chips/headline pair, which is ``_paint_bullbear``'s own
+    (region order puts it before ``summary``); the frame's own instant is
+    covered by ``test_summary_facts_carry_the_sentence_and_when_it_was_written``
+    and friends, not here.
     """
     seen = []
     monkeypatch.setattr(
@@ -2323,7 +2356,7 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     from pages import desk
     desk.render()
 
-    assert [where for where, _ in seen] == ["chips", "headline"]
+    assert [where for where, _ in seen[:2]] == ["chips", "headline"]
     # A real instant, not each side quietly falling back to its own default.
     assert seen[0][1] is not None
     assert seen[0][1] is seen[1][1]

@@ -1003,6 +1003,16 @@ SENTIMENT_TIP = ("The sentiment composite, 0–10. Contrarian: a higher score "
                  "means more fear, which this model reads as opportunity.")
 _SUMMARY_HORIZON = {True: "today", False: "quarter"}
 
+# The six chip labels, in ``summary_facts``' own order — used ONLY to build the
+# frame's COLD placeholders (every value starts ``_DASH``, exactly like the
+# strip's own cold tiles). Calling ``summary_facts`` itself at build time would
+# reach ``bullbear_headline`` before the page's first real paint, which is both
+# needless (the first paint runs unconditionally, see ``_paint(seed)``) and a
+# second, premature caller a wiring test pins the count of.
+_SUMMARY_CHIP_LABELS = (("sentiment", "SENTIMENT"), ("trend", "TREND"),
+                        ("bias", "BIAS"), ("signal", "SIGNAL"),
+                        ("regime", "REGIME"), ("bullbear", "BULL / BEAR"))
+
 
 def _word_or_none(v):
     v = "" if v is None else str(v).strip()
@@ -1581,8 +1591,8 @@ def signed_class(v):
 # ── the page ─────────────────────────────────────────────────────────────────
 # Every cache view the Desk reads, in ONE tuple, because they are polled as one
 # batch. This page is the landing page and stays open all day, so a per-view
-# poller would be ten Redis round-trips every two seconds for the life of the
-# session; ``read_versions`` reads the ten tiny ``{key}:ver`` counters in a
+# poller would be eleven Redis round-trips every two seconds for the life of the
+# session; ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
 # single pipelined round-trip and only the views that MOVED get deserialized.
 # ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
 # a timer of its own.
@@ -1590,7 +1600,7 @@ VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:paper_account",
          "options:driver_paper_account", "options:captured",
-         "sentiment:bullbear")
+         "sentiment:bullbear", "market:summary")
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -1608,6 +1618,11 @@ _REGION_VIEWS = {
     "flow": ("options:flow_alerts",),
     "positions": ("options:paper_account", "options:driver_paper_account",
                   "options:captured"),
+    # The sentence (market_svc, on change) and the five views its live chips
+    # read. Chips and sentence update IN PLACE, so a repaint here costs nothing
+    # visible when only a day-move ticked.
+    "summary": ("market:summary", "sentiment:composite", "sentiment:history",
+                "sentiment:regime", "sentiment:bullbear"),
 }
 
 POLL_SEC = 2.0
@@ -3276,6 +3291,29 @@ def render():
             flow_body, _ = _panel(*PANEL_HEADS["flow"])
             pos_body, _ = _panel(*PANEL_HEADS["positions"])
 
+        # ── the market summary ───────────────────────────────────────────────
+        # At the BOTTOM, full width: the four panels above are per-symbol, and
+        # this is the page's conclusion — every reading on the strip, said once.
+        with ui.column().classes(f"{_TILE} w-full gap-[8px]"):
+            with ui.row().classes("items-baseline w-full gap-4"):
+                ui.label("MARKET SUMMARY").classes(_STRIP_EYEBROW)
+                sum_asof = ui.label("").classes(
+                    f"text-[11px] leading-none {CON_TXT_DIM}")
+            sum_text = ui.label(SUMMARY_EMPTY).classes(
+                f"text-[15px] leading-[1.5] {CON_TXT_MUTED}")
+            sum_chips = []
+            with ui.row().classes("items-baseline w-full gap-x-6 gap-y-1 flex-wrap"):
+                for _key, _label in _SUMMARY_CHIP_LABELS:
+                    with ui.row().classes("items-baseline gap-2"):
+                        ui.label(_label).classes(_STRIP_EYEBROW)
+                        sum_chips.append(ui.label(_DASH).classes(
+                            f"text-[14px] {CON_TXT_MUTED}"))
+            sum_moved = ui.label(SUMMARY_MOVED).classes(
+                f"text-[11px] {CON_TXT_DIM}")
+            sum_moved.set_visibility(False)
+        # The hover each chip currently carries — "" at build (cold chips).
+        sum_tips = ["" for _ in sum_chips]
+
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
         return state["data"].get(name)
@@ -3357,6 +3395,24 @@ def render():
                           _CC.delta_parts(_arc_value(t_arcs, 0),
                                           _arc_value(t_arcs, 2), "MONTH"),
                           pill_tip=trend_pill_tooltip(derived))
+
+    def _paint_summary():
+        f = summary_facts(_view("market:summary"), _view("sentiment:composite"),
+                          _view("sentiment:history"), _view("sentiment:regime"),
+                          _view("sentiment:bullbear"))
+        sum_text.text = f["narrative"] or SUMMARY_EMPTY
+        sum_text.classes(remove=_ALL_STATE_TEXT,
+                         add=CON_TXT if f["narrative"] else CON_TXT_MUTED)
+        sum_asof.text = f["as_of"]
+        sum_moved.set_visibility(f["moved"])
+        for i, (lbl, chip) in enumerate(zip(sum_chips, f["chips"])):
+            lbl.text = chip["value"]
+            lbl.classes(remove=_ALL_STATE_TEXT, add=chip["cls"])
+            # In place: swap a hover only when its sentence changes.
+            if chip["tip"] != sum_tips[i]:
+                lbl.clear()
+                _CC.pill_tooltip(lbl, chip["tip"])
+                sum_tips[i] = chip["tip"]
 
     # The seat order the strip last drew, fed back into ``by_day_move`` so its
     # hysteresis has something to hold: the sorter is a pure function of
@@ -3773,7 +3829,8 @@ def render():
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
-                "flow": _paint_flow, "positions": _paint_positions}
+                "flow": _paint_flow, "positions": _paint_positions,
+                "summary": _paint_summary}
 
     # ── arrival detection ────────────────────────────────────────────────────
     # Thin: read the cache, build the rows, hand them to the module-level fold.
@@ -3905,9 +3962,9 @@ def render():
     async def _poll():
         """ONE batched version probe per tick, not one per view.
 
-        ``read_versions`` reads the nine tiny ``{key}:ver`` counters in a single
-        pipelined round-trip; a full payload is deserialized only for a view
-        that actually moved."""
+        ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
+        single pipelined round-trip; a full payload is deserialized only for a
+        view that actually moved."""
         vers = await run.io_bound(bus_client.read_versions, list(VIEWS))
         changed = [v for v in VIEWS
                    if vers.get(v) is not None
