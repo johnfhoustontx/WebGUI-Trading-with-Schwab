@@ -65,6 +65,46 @@ ZERO_NOTE = "DORMANT"
 # Below this a share counts as "was at nothing" for the emerging callout.
 _EMERGING_FLOOR = 0.005
 
+# The hover on the Market Regime word, keyed by the DISPLAYED word — the service
+# publishes it with its direction already applied (``regime["label"]``), so the
+# key is exactly what the reader sees. Covers the five REGIME_DISPLAY words, every
+# direction adornment, and "Unclear"; shared/tests/test_cross_tier_mirrors.py
+# fails if the service can print a word this table lacks.
+REGIME_PICTURE = {
+    "Balanced": "Quiet, two-sided tape: price is sitting at its own average, "
+                "trend strength is low, and dealers are dampening moves. Neutral "
+                "premium selling — iron condors — fits best.",
+    "Trending": "Price is moving with persistence, but the two direction reads "
+                "disagree on which way, so no direction is named. Follow the "
+                "move once it shows; avoid fading it.",
+    "Rallying": "A steep, persistent move higher, confirmed by both the price "
+                "slope and the Market Trend score. Follow it; don't sell calls "
+                "into it.",
+    "Firming": "A steady, gentle climb, confirmed by both the price slope and "
+               "the Market Trend score. Follow the direction; avoid fading it.",
+    "Retreating": "A steep, persistent move lower, confirmed by both the price "
+                  "slope and the Market Trend score. Follow it; don't sell puts "
+                  "into it.",
+    "Softening": "A steady, gentle decline, confirmed by both the price slope "
+                 "and the Market Trend score. Follow the direction; avoid "
+                 "fading it.",
+    "Breakout": "The range is expanding into new ground. Momentum trades fit; "
+                "credit spreads against the move are dangerous.",
+    "Breakdown": "The range is expanding to the downside. Momentum favors the "
+                 "downside; put credit spreads here are dangerous.",
+    "Whipsaw": "Plenty of movement, no progress: failed breaks and two-sided "
+               "wicks. The hardest regime — reduce size or stand aside.",
+    "Stressed": "Fear is driving the tape: elevated VIX, an inverted volatility "
+                "curve, gaps that don't fill. Premium is rich but the risk is "
+                "real — defined risk only.",
+    "Unclear": "No regime has enough evidence to name. Wait for one to form.",
+}
+
+
+def regime_picture(word):
+    """The hover sentence for a displayed regime word, or "" for anything else."""
+    return REGIME_PICTURE.get(str(word or "").strip(), "")
+
 # --- geometry (fixed 640-wide coordinate space; the SVG scales itself) -------
 VIEWBOX_W = 640
 ROW_H = 30

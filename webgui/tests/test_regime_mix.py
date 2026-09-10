@@ -181,3 +181,30 @@ def test_label_text_is_escaped():
     out = rm.regime_mix_svg(_session())
     assert "<script" not in out
     assert re.search(r"<text[^>]*>[^<]*</text>", out)
+
+
+# ── the Regime word's hover ──────────────────────────────────────────────────
+# Every word the service can print: the five displays, the direction
+# adornments, and "Unclear". The cross-tier test in shared/tests reads the
+# service's own tables; this list is the page-side statement of the same set.
+_REGIME_WORDS = ("Balanced", "Trending", "Rallying", "Firming", "Retreating",
+                 "Softening", "Breakout", "Breakdown", "Whipsaw", "Stressed",
+                 "Unclear")
+
+
+def test_every_regime_word_has_a_picture():
+    for word in _REGIME_WORDS:
+        assert rm.regime_picture(word).strip(), word
+
+
+def test_a_non_word_has_no_picture():
+    for word in ("", None, "wat", "—", "balanced"):   # keys are the DISPLAY words
+        assert rm.regime_picture(word) == "", word
+
+
+def test_the_directional_pictures_name_their_direction():
+    assert "higher" in rm.regime_picture("Rallying")
+    assert "climb" in rm.regime_picture("Firming")
+    assert "lower" in rm.regime_picture("Retreating")
+    assert "decline" in rm.regime_picture("Softening")
+    assert "downside" in rm.regime_picture("Breakdown")
