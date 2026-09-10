@@ -147,12 +147,17 @@ def _drive_loop(monkeypatch, generate, ticks=40, step=60.0):
     monkeypatch.setattr(sch.time, "monotonic", lambda: clock["t"])
     real_sleep = asyncio.sleep
 
+    async def _inline(self, executor, fn, *args):
+        return fn(*args)
+
+    monkeypatch.setattr(asyncio.BaseEventLoop, "run_in_executor", _inline)
+
     async def _sleep(_secs):
         clock["n"] += 1
         clock["t"] += step
         if clock["n"] > ticks:
             raise _Stop
-        await real_sleep(0.01)      # let the background summary task run
+        await real_sleep(0)         # let the background summary task run
 
     monkeypatch.setattr(sch.asyncio, "sleep", _sleep)
     with pytest.raises(_Stop):
@@ -208,3 +213,18 @@ def test_poll_interval_throttles_deep_weekend():
     # Sunday evening after the futures reopen: back to the normal off-hours pace.
     sun_pm = dt.datetime(2026, 7, 19, 18, 0, tzinfo=sch._CT)
     assert sch.poll_interval(sun_pm) == sch.OFFHOURS_INTERVAL_SEC
+
+
+def test_published_reads_a_finished_task_without_raising():
+    import asyncio
+
+    async def _go():
+        loop = asyncio.get_running_loop()
+        ok, failed, boom, cancelled = (loop.create_future() for _ in range(4))
+        ok.set_result(True)
+        failed.set_result(False)
+        boom.set_exception(RuntimeError("x"))
+        cancelled.cancel()
+        return [sch._published(f) for f in (ok, failed, boom, cancelled)]
+
+    assert asyncio.run(_go()) == [True, False, False, False]

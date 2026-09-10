@@ -161,8 +161,8 @@ async def loop(bus) -> None:
             if summary_task is not None and summary_task.done():
                 if not _published(summary_task):
                     # The attempt still counts toward the gap and the daily cap
-                    # (record_summary ran at launch), but the reading was never
-                    # written — forget its fingerprint so the SAME readings are
+                    # (record_summary ran at launch), but the attempt was never
+                    # published — forget its fingerprint so the SAME readings are
                     # retried once the gap has passed, instead of a transient
                     # failure freezing a stale sentence until the market moves.
                     gate = dataclasses.replace(gate, fingerprint=None)
