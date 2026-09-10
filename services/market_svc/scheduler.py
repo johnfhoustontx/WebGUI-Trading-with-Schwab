@@ -15,6 +15,7 @@ below) — not on a clock, and no longer gated by the webgui ticker toggle
 marquee).
 """
 import asyncio
+import dataclasses
 import datetime as _dt
 import logging
 import time
@@ -114,21 +115,37 @@ def record_summary(gate, fingerprint, *, now_mono, today):
                        calls_today=calls + 1)
 
 
-async def _run_summary(loop_, bus, packet) -> None:
+async def _run_summary(loop_, bus, packet) -> bool:
     """Write the sentence + publish it, OFF the poll loop. Never raises.
 
     ``generate_summary`` returns None when the attempt FAILED (API error,
     timeout): publish nothing then, so the last good sentence stays on the Desk
     rather than being blanked — the Desk's "readings have changed" line already
-    says when a sentence has been overtaken."""
+    says when a sentence has been overtaken.
+
+    Returns True once the summary has actually been published, False when the
+    attempt failed (``generate_summary`` returned None, or anything raised) —
+    ``loop()`` uses this to decide whether the fingerprint it recorded at
+    launch may stand, or must be forgotten so the same readings are retried."""
     try:
         summary = await loop_.run_in_executor(None, compute.generate_summary, packet)
         if summary is not None:
             await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
+            return True
+        return False
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — a summary failure can't affect the poll loop.
         _log.exception("market summary generation failed")
+        return False
+
+
+def _published(task) -> bool:
+    """Did a finished summary task publish? False when it was cancelled, raised,
+    or returned False (the Claude attempt failed)."""
+    if task.cancelled() or task.exception() is not None:
+        return False
+    return task.result() is True
 
 
 async def loop(bus) -> None:
@@ -141,7 +158,16 @@ async def loop(bus) -> None:
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
-            if summary_task is None or summary_task.done():
+            if summary_task is not None and summary_task.done():
+                if not _published(summary_task):
+                    # The attempt still counts toward the gap and the daily cap
+                    # (record_summary ran at launch), but the reading was never
+                    # written — forget its fingerprint so the SAME readings are
+                    # retried once the gap has passed, instead of a transient
+                    # failure freezing a stale sentence until the market moves.
+                    gate = dataclasses.replace(gate, fingerprint=None)
+                summary_task = None
+            if summary_task is None:
                 packet = await loop_.run_in_executor(
                     None, compute.read_summary_packet, bus)
                 fp = compute.summary_fingerprint(packet)

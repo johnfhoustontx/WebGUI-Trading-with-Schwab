@@ -1,6 +1,8 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from services.market_svc import scheduler as sch
 
 _CT = ZoneInfo("America/Chicago")
@@ -100,9 +102,10 @@ def test_a_failed_summary_attempt_publishes_nothing(monkeypatch):
                         lambda bus, s: published.append(s))
 
     async def _go():
-        await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
-    asyncio.run(_go())
+        return await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
+    result = asyncio.run(_go())
     assert published == []
+    assert result is False
 
 
 def test_a_successful_summary_is_published(monkeypatch):
@@ -115,9 +118,71 @@ def test_a_successful_summary_is_published(monkeypatch):
                         lambda bus, s: published.append(s))
 
     async def _go():
-        await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
-    asyncio.run(_go())
+        return await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
+    result = asyncio.run(_go())
     assert published == [out]
+    assert result is True
+
+
+class _Stop(Exception):
+    """Ends the otherwise-infinite loop from inside its sleep."""
+
+
+def _drive_loop(monkeypatch, generate, ticks=40, step=60.0):
+    """Run ``loop()`` for ``ticks`` polls with every seam faked: the packet and
+    its fingerprint never change, each poll advances a fake monotonic clock by
+    ``step`` seconds, and ``generate`` stands in for the Claude call."""
+    import asyncio
+    clock = {"t": 0.0, "n": 0}
+    published = []
+    monkeypatch.setattr(sch, "poll_interval", lambda now=None: 0)
+    monkeypatch.setattr(sch.compute, "collect", lambda bus: {})
+    monkeypatch.setattr(sch.handlers, "publish", lambda bus, payload: None)
+    monkeypatch.setattr(sch.compute, "read_summary_packet", lambda bus: {"p": 1})
+    monkeypatch.setattr(sch.compute, "summary_fingerprint", lambda packet: ("same",))
+    monkeypatch.setattr(sch.compute, "generate_summary",
+                        lambda packet: generate(clock["t"]))
+    monkeypatch.setattr(sch.handlers, "publish_summary",
+                        lambda bus, s: published.append(s))
+    monkeypatch.setattr(sch.time, "monotonic", lambda: clock["t"])
+    real_sleep = asyncio.sleep
+
+    async def _sleep(_secs):
+        clock["n"] += 1
+        clock["t"] += step
+        if clock["n"] > ticks:
+            raise _Stop
+        await real_sleep(0.01)      # let the background summary task run
+
+    monkeypatch.setattr(sch.asyncio, "sleep", _sleep)
+    with pytest.raises(_Stop):
+        asyncio.run(sch.loop(object()))
+    return published
+
+
+def test_a_failed_attempt_is_retried_after_the_gap_when_the_readings_hold(monkeypatch):
+    calls = []
+    outcomes = iter([None, {"narrative": "ok", "inputs": {}, "as_of": ""}])
+
+    def _generate(t):
+        calls.append(t)
+        return next(outcomes, {"narrative": "again", "inputs": {}, "as_of": ""})
+
+    published = _drive_loop(monkeypatch, _generate)
+    assert len(calls) == 2, calls              # failed once, retried once, then held
+    assert calls[1] - calls[0] >= sch.SUMMARY_MIN_GAP_SEC
+    assert [s["narrative"] for s in published] == ["ok"]
+
+
+def test_unchanged_readings_are_written_once_and_then_left_alone(monkeypatch):
+    calls = []
+
+    def _generate(t):
+        calls.append(t)
+        return {"narrative": "ok", "inputs": {}, "as_of": ""}
+
+    published = _drive_loop(monkeypatch, _generate)
+    assert len(calls) == 1 and len(published) == 1
 
 
 def test_loop_runs_summary_as_background_task():
