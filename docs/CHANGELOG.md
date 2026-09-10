@@ -4,7 +4,110 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-10 (**Hovering a Bias or Signal word now explains
+**Last updated:** 2026-09-10 (**The Desk gets a MARKET SUMMARY frame — one
+Claude-written sentence tying six readings together — and hovering the Market
+Regime word now explains it, on the Desk and on `/sentiment`'s regime dial.**)
+
+- **The Regime popup.** Hovering the Market Regime word — the Desk's tile and
+  `/sentiment`'s regime dial alike — shows a sentence per word, from
+  `webgui/pages/regime_mix.REGIME_PICTURE`: 11 entries (Balanced, Trending,
+  Rallying, Firming, Retreating, Softening, Breakout, Breakdown, Whipsaw,
+  Stressed, Unclear) covering every word `console_regime`'s five-regime,
+  direction-adorned vocabulary can print. A cross-tier test
+  (`shared/tests/test_cross_tier_mirrors.py`) reads the service's own display
+  tables and fails if a word it can publish has no hover — the same shape as the
+  Bias/Signal hover pin from the entry below this one.
+
+- **The Desk's MARKET SUMMARY frame.** Full width, at the bottom of the Desk
+  (and the public live Desk) — one Claude-written sentence (at most two, at most
+  350 characters) consolidating Sentiment (0–10 contrarian composite), Trend
+  (flight word + score), Bias, Signal, Regime, and Bull/Bear (sector quadrant
+  counts, today once the bell has rung, else the quarter), closing with a
+  trading posture, beside an **"as of HH:MM CT"** timestamp. Six **live** chips
+  sit under it, reading the same views the page already polls — current even
+  while the sentence lags — each hoverable for the word's own picture; the
+  Sentiment chip's is new: "The sentiment composite, 0–10. Contrarian: a higher
+  score means more fear, which this model reads as opportunity." A dim
+  **"Readings have changed since this was written."** line appears when a
+  chip's word or the Bull/Bear count differs from what the sentence was written
+  from, and before any sentence has ever published, the frame reads **"No
+  summary yet — one is written when the readings next change."**
+
+- **The summary is written on CHANGE, not on a clock.** The existing
+  ticker-narrative Claude call (Sonnet 5, `market_svc`) now feeds ONLY the six
+  readings — no prices, index moves, vol quotes or sector movers, since a
+  sentence quoting a price goes stale between refreshes. Each poll builds the
+  packet (version-gated on `cache:sentiment:composite`, `:regime`,
+  `:bullbear`) and a **fingerprint** of it at display resolution — words exact,
+  composite to 0.5, trend score to 5, regime confidence to 10%, Bull/Bear
+  counts exact with their horizon. A new sentence is written only when the
+  fingerprint moved, at least `SUMMARY_MIN_GAP_SEC` (10 min) has passed since
+  the last attempt, and fewer than `SUMMARY_DAILY_CAP` (30) attempts have run
+  that CT day; the first poll after a restart always writes one, and nothing
+  moves overnight or at weekends so nothing is called. `max_tokens` is 300; a
+  cut-off (`stop_reason == "max_tokens"`) is logged. `cache:market:summary`
+  (`MarketSummary`) keeps `narrative` and gains `inputs` (the six-reading
+  packet the sentence was written from) and `as_of` (UTC ISO).
+
+- **A failed attempt publishes nothing, and is retried — not frozen.** An API
+  error or timeout leaves the last good sentence on the Desk rather than
+  blanking it, and forgets the fingerprint it was launched against, so the same
+  readings are retried once the gap has passed instead of a transient failure
+  freezing a stale sentence until the market moves. The failed attempt still
+  counts toward the gap and the daily cap either way — a wedged endpoint cannot
+  spin faster than the ceiling.
+
+- **Why this call, and not the driver decider.** Measured on prod 2026-09-10:
+  ~20 Claude calls per weekday (driver checkpoints every 30 min 08:45–14:30 CT
+  + four gamma briefings), with the ticker narrative OFF since 2026-08-29. The
+  decider would add no new call SITE, but it runs only 08:45–14:30 CT, stops
+  the moment the driver halts, and would put display text inside a
+  trade-decision call — the wrong call to make load-bearing for a screen two
+  other pages also read. Estimated cost of the summary: ~8–15 calls on a
+  trading day (to be measured after release).
+
+- **The ticker toggle now ONLY hides the marquee.** It no longer stops the
+  Claude call — the sentence also feeds the Desk now, so hiding one surface
+  must not silence the other. Retired: the `enable_summary` / `disable_summary`
+  commands on `cmd:market` (the service has NO command types left and ignores
+  a replay of either from an older webgui), `cache:market:summary_enabled`,
+  `SUMMARY_RTH_SEC` / `SUMMARY_OFFHOURS_SEC` (the old 40-min RTH / 60-min
+  off-hours clock), and the webgui's startup resync `sync_ticker_setting`.
+
+- **One wall clock per Desk paint, restored and extended.** The Bull/Bear strip
+  and the new summary frame both decide the today-vs-quarter horizon from
+  `strip_is_live`, and both now take the SAME `now` `_paint` hands the strip —
+  a paint straddling the opening bell can no longer show one region "on the
+  quarter" and the other "on today's moves". `test_one_paint_decides_the_horizon_once`
+  had watched only the strip's own pair; a narrower version of it would have
+  let the new frame mint a second clock silently, which is exactly what
+  `summary_facts` did on the first pass (it defaulted `now` to a fresh
+  `datetime.now()` when its caller omitted it). The test now spans both
+  regions. As part of the same cleanup, `desk.bullbear_distribution` (the
+  Bull/Bear chip's hover) no longer takes a `now` of its own — it renders the
+  `counts`/`live` pair `summary_facts` already derived, so it cannot mint a
+  clock either.
+
+- **New cross-tier pins.** Every regime word the sentiment service can print
+  has a hover (above); the summary names the Market Trend with the SAME words
+  the pill beside it uses (`market_svc.compute._TREND_WORDS` mirrors
+  `sentiment._TREND_SHORT`'s five states); and the quadrant rule the summary's
+  Bull/Bear count uses mirrors `bullbear.quadrant` exactly (`market_svc`
+  cannot import Tier 1) — all three pinned in
+  `shared/tests/test_cross_tier_mirrors.py` and
+  `services/market_svc/tests/test_summary.py`.
+
+- Design + plan:
+  [`docs/plans/2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md)
+  / [`-plan.md`](plans/2026-09-10-desk-market-summary-plan.md). Manuals: the
+  User Guide and Reference Guide gained the Desk's Market Summary frame and the
+  regime hover (Reference Guide also carries the 11-word hover table); the
+  Technical Reference's `market_svc` cadence row is now change-driven, not
+  clocked; the API/Developer Reference's `MarketSummary` row, constants table
+  and `cmd:market` commands table all follow. `webgui/page_help.py`'s `/desk`
+  and `/sentiment` entries updated to match.
+
+**Prior — 2026-09-10** (**Hovering a Bias or Signal word now explains
 it**, on the `/sentiment` Signals card, the Desk strip, and both Sentiment
 pills.)
 

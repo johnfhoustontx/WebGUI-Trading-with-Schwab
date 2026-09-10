@@ -177,7 +177,7 @@ a contract (listed in *Cache Key Index*).
 | `DriverControl` | `driver.py` | `cache:driver:control` | `enabled`, `halted`, `reason`, `halted_date` (ISO date the latch was set, so it re-arms next day), `timestamp` |
 | `AutonomousState` | `driver.py` | `cache:driver:autonomous` | `date`, `enabled`, `halted`, `halt_reason`, `day_pnl`, `target`, `positions[]`, `decisions[]` (newest-first checkpoint log), `perf{}`, `last_cycle_ts`, `error`, `timestamp` |
 | `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
-| `MarketSummary` | `market.py` | `cache:market:summary` | `narrative` (a short Claude-written verdict; empty when there is no key or the call failed) |
+| `MarketSummary` | `market.py` | `cache:market:summary` | `narrative` (a short Claude-written verdict; empty when there is no key or the call failed), `inputs` (the six-reading packet the sentence was written from — `{}` on an older writer), `as_of` (UTC ISO of the write) |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
@@ -367,7 +367,8 @@ silently rejected every index trade.
 ## Market service — :8215
 
 **Entry:** `services/market_svc/app.py`. Publishes the macro-ticker board that backs
-`/market` and the summary the bottom ticker leads with.
+`/market` and the market summary that feeds both the bottom ticker and the Desk's
+MARKET SUMMARY frame.
 
 **Scheduler cadence** (`services/market_svc/scheduler.py`):
 
@@ -376,8 +377,13 @@ silently rejected every index trade.
 | `RTH_INTERVAL_SEC` | `3` | Regular trading hours. |
 | `OFFHOURS_INTERVAL_SEC` | `15` | Outside RTH — futures trade nearly around the clock, so the board stays live. |
 | `WEEKEND_INTERVAL_SEC` | `60` | Saturday and Sunday before 17:00 CT, when futures are closed. |
-| `SUMMARY_RTH_SEC` | `40 * 60` | Claude verdict refresh during RTH. |
-| `SUMMARY_OFFHOURS_SEC` | `60 * 60` | Claude verdict refresh off-hours. |
+| `SUMMARY_MIN_GAP_SEC` | `10 * 60` | Minimum time between two Claude summary attempts, regardless of how often the readings change. |
+| `SUMMARY_DAILY_CAP` | `30` | Maximum Claude summary attempts per CT calendar day; resets at the date change. |
+
+Also in `services/market_svc/compute.py` — the **fingerprint** resolution the
+summary is written from, in `FINGERPRINT_COMPOSITE_STEP` (`0.5`),
+`FINGERPRINT_TREND_STEP` (`5.0`) and `FINGERPRINT_CONFIDENCE_STEP` (`0.1`); words
+(trend, bias, signal, regime, Bull/Bear horizon and counts) compare exactly.
 
 Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQUITY
 / FUTURE instrument types, computes the `$ADVN-$DECN` breadth spread and the
@@ -385,15 +391,25 @@ Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQ
 the dollar-weighted premium skew from `cache:options:matrix`, and publishes
 `cache:market:dashboard`.
 
-The Claude summary runs as a **background task** rather than inline, so a slow
-completion cannot stall the poll loop.
+**The Claude summary is written on change, not on a clock** (2026-09-10). Each poll
+builds a packet of six readings — sentiment, trend, bias, signal, regime,
+Bull/Bear — off `cache:sentiment:composite`, `:regime` and `:bullbear`, and a
+fingerprint of it at the resolution above. A new sentence is written only when the
+fingerprint differs from the one the current sentence was written from, at least
+`SUMMARY_MIN_GAP_SEC` has passed since the last attempt, and fewer than
+`SUMMARY_DAILY_CAP` attempts have run today; the first poll after a restart with
+readings present always writes one. A **failed** attempt (API error, timeout)
+publishes nothing — the last good sentence stays — but still counts toward the gap
+and the cap, and the same readings are retried once the gap has passed. It runs as
+a **background task** rather than inline, so a slow completion cannot stall the
+poll loop.
 
-**Commands (`cmd:market`):**
-
-| Type | Args | Effect |
-|------|------|--------|
-| `enable_summary` | — | Turn the Claude narrative on (`cache:market:summary_enabled`). |
-| `disable_summary` | — | Turn it off. This stops the API calls, not just the display. |
+**Commands (`cmd:market`):** none. `handle_command` dispatches nothing and ignores
+every command type, including a replayed `enable_summary` / `disable_summary` from
+an older webgui — those, and the `cache:market:summary_enabled` key and the
+`SUMMARY_RTH_SEC` / `SUMMARY_OFFHOURS_SEC` clock they gated, were retired
+2026-09-10: the summary now feeds the Desk as well as the ticker, so the ticker
+toggle only hides the marquee and can no longer stop the Claude call.
 
 ---
 
@@ -530,7 +546,6 @@ cache:driver:control           events:driver:control          (DriverControl)
 cache:driver:autonomous        events:driver:autonomous       (AutonomousState)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cache:market:summary_enabled                                  (ticker/Claude toggle)
 cmd:trade   cmd:portfolio   cmd:driver   cmd:market
 ```
 

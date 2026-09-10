@@ -216,6 +216,12 @@ and no reading at all is not the same thing.
 **Market Regime** is a separate and independent read — the tape's own committed
 direction, not the composite's — which is why it sits at the far end.
 
+**Hover Bias, Signal or the regime word** and a sentence explains what it means —
+for Bias, the position size that band implies; for the regime word, what tends to
+work while the tape is in it. The regime hover is the same table the Market
+Regime Console's dial uses on `/sentiment`, so the two screens never explain the
+same word two different ways.
+
 Note the strip shows *no price at all*, and that is deliberate. SPX and QQQ appear
 in Dealer Positioning immediately below with more context, and the two panels read
 from different caches with independent update counters — so showing both could
@@ -257,6 +263,36 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 **OK**, **Watch**, **At risk**, **Rescue**. The header totals open trades,
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
+
+**Market Summary.** Full width, across the bottom. One Claude-written sentence (at
+most two, at most 350 characters) consolidating the six readings above it —
+Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and closing with a trading
+posture, next to an **"as of HH:MM CT"** timestamp.
+
+It is written **on change, not on a clock**: `market_svc` builds a fingerprint of
+the six readings at display resolution on every poll, and writes a new sentence
+only when that fingerprint differs from the one the current sentence was written
+from, at least ten minutes have passed since the last attempt, and fewer than
+thirty attempts have been made that day. A sentence that sat unchanged for an hour
+means nothing new crossed the display thresholds, not that the app is stuck.
+
+Underneath the sentence sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
+REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear
+strip already poll, so they are current even while the sentence above them lags
+behind. Hovering a chip opens the same hover its counterpart uses elsewhere on the
+page; the Sentiment chip's own hover reads "The sentiment composite, 0–10.
+Contrarian: a higher score means more fear, which this model reads as
+opportunity." and the Bull/Bear chip's hover lists every quadrant's count and
+which horizon (today or the quarter) it was counted on.
+
+A dim **"Readings have changed since this was written."** line appears under the
+chips when a chip's word, or the Bull/Bear count, differs from what the sentence
+was written from — a fact about the gap between the two, not a promise that a
+refresh is imminent. Before any sentence has ever been written — a fresh restart,
+or no Claude key configured — the frame reads **"No summary yet — one is written
+when the readings next change."**
+
+The same frame renders on the **public live Desk** (`live.neuralstrike.co`).
 
 ### Spoken arrivals
 
@@ -933,6 +969,27 @@ question: not *which way*, but *what kind of market is this*.
 appears **only when the tape's own slope and the Market Trend gauge agree**. When they
 disagree, the plain regime name shows instead, so this panel can never contradict the
 gauge above it. Balanced, Whipsaw and Stressed have no direction by nature.
+
+**Hover the regime word on the dial** and a sentence explains what it means and what
+tends to work in it — every word the console can print, including the direction
+adornments and *Unclear*:
+
+| Word | The picture (the hover text) |
+|---|---|
+| **Balanced** | Quiet, two-sided tape: price is sitting at its own average, trend strength is low, and dealers are dampening moves. Neutral premium selling — iron condors — fits best. |
+| **Trending** | Price is moving with persistence, but the two direction reads disagree on which way, so no direction is named. Follow the move once it shows; avoid fading it. |
+| **Rallying** | A steep, persistent move higher, confirmed by both the price slope and the Market Trend score. Follow it; don't sell calls into it. |
+| **Firming** | A steady, gentle climb, confirmed by both the price slope and the Market Trend score. Follow the direction; avoid fading it. |
+| **Retreating** | A steep, persistent move lower, confirmed by both the price slope and the Market Trend score. Follow it; don't sell puts into it. |
+| **Softening** | A steady, gentle decline, confirmed by both the price slope and the Market Trend score. Follow the direction; avoid fading it. |
+| **Breakout** | The range is expanding into new ground. Momentum trades fit; credit spreads against the move are dangerous. |
+| **Breakdown** | The range is expanding to the downside. Momentum favors the downside; put credit spreads here are dangerous. |
+| **Whipsaw** | Plenty of movement, no progress: failed breaks and two-sided wicks. The hardest regime — reduce size or stand aside. |
+| **Stressed** | Fear is driving the tape: elevated VIX, an inverted volatility curve, gaps that don't fill. Premium is rich but the risk is real — defined risk only. |
+| **Unclear** | No regime has enough evidence to name. Wait for one to form. |
+
+This is the same table the Desk's regime tile hovers from, so the two screens
+never explain one word two different ways.
 
 **Confidence and the share table.** The console shows the leading regime with a
 confidence percentage, then ranks all five by **share** — how much of today's tape each
@@ -3049,9 +3106,10 @@ immediately, then ride toward full credit protected by a break-even stop. Off (t
 default) keeps the plain take-profit at +50%. The driver's isolated account is never
 affected by this toggle.
 
-**Market summary ticker.** The scrolling marquee at the bottom of every page. **Turning
-it off also stops the Claude calls behind it**, so this is a cost control as well as a
-display one.
+**Show the ticker.** The scrolling marquee at the bottom of every page. **Turning it off
+only hides the marquee** — the Claude-written sentence behind it also feeds the Desk's
+Market Summary frame, so `market_svc` keeps writing it, on change rather than on a
+clock, whether or not the marquee is showing.
 
 **Appearance.** Every colour, font and menu style, in seven tabs — surfaces, state
 colours, 3D buttons, gauges, charts, text, menu. **Save & restart web GUI** applies the

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -427,7 +427,7 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td><code>MarketSummary</code></td>
 <td><code>market.py</code></td>
 <td><code>cache:market:summary</code></td>
-<td><code>narrative</code> (a short Claude-written verdict; empty when there is no key or the call failed)</td>
+<td><code>narrative</code> (a short Claude-written verdict; empty when there is no key or the call failed), <code>inputs</code> (the six-reading packet the sentence was written from — <code>{}</code> on an older writer), <code>as_of</code> (UTC ISO of the write)</td>
 </tr>
 <tr>
 <td><code>CompositeSnapshot</code></td>
@@ -888,7 +888,8 @@ enabled, which is why <code>run_autonomous_cycle</code> also checks the environm
 <hr />
 <h2 id="market-service-8215">Market service — :8215</h2>
 <p><strong>Entry:</strong> <code>services/market_svc/app.py</code>. Publishes the macro-ticker board that backs
-<code>/market</code> and the summary the bottom ticker leads with.</p>
+<code>/market</code> and the market summary that feeds both the bottom ticker and the Desk's
+MARKET SUMMARY frame.</p>
 <p><strong>Scheduler cadence</strong> (<code>services/market_svc/scheduler.py</code>):</p>
 <table>
 <thead>
@@ -915,46 +916,44 @@ enabled, which is why <code>run_autonomous_cycle</code> also checks the environm
 <td>Saturday and Sunday before 17:00 CT, when futures are closed.</td>
 </tr>
 <tr>
-<td><code>SUMMARY_RTH_SEC</code></td>
-<td><code>40 * 60</code></td>
-<td>Claude verdict refresh during RTH.</td>
+<td><code>SUMMARY_MIN_GAP_SEC</code></td>
+<td><code>10 * 60</code></td>
+<td>Minimum time between two Claude summary attempts, regardless of how often the readings change.</td>
 </tr>
 <tr>
-<td><code>SUMMARY_OFFHOURS_SEC</code></td>
-<td><code>60 * 60</code></td>
-<td>Claude verdict refresh off-hours.</td>
+<td><code>SUMMARY_DAILY_CAP</code></td>
+<td><code>30</code></td>
+<td>Maximum Claude summary attempts per CT calendar day; resets at the date change.</td>
 </tr>
 </tbody>
 </table>
+<p>Also in <code>services/market_svc/compute.py</code> — the <strong>fingerprint</strong> resolution the
+summary is written from, in <code>FINGERPRINT_COMPOSITE_STEP</code> (<code>0.5</code>),
+<code>FINGERPRINT_TREND_STEP</code> (<code>5.0</code>) and <code>FINGERPRINT_CONFIDENCE_STEP</code> (<code>0.1</code>); words
+(trend, bias, signal, regime, Bull/Bear horizon and counts) compare exactly.</p>
 <p>Each tick polls the proxy's raw <code>/quotes</code>, normalizes <code>change</code> across INDEX / EQUITY
 / FUTURE instrument types, computes the <code>$ADVN-$DECN</code> breadth spread and the
 <code>BIG10</code> basket, reads the cap-weighted put/call from <code>cache:sentiment:composite</code> and
 the dollar-weighted premium skew from <code>cache:options:matrix</code>, and publishes
 <code>cache:market:dashboard</code>.</p>
-<p>The Claude summary runs as a <strong>background task</strong> rather than inline, so a slow
-completion cannot stall the poll loop.</p>
-<p><strong>Commands (<code>cmd:market</code>):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Type</th>
-<th>Args</th>
-<th>Effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>enable_summary</code></td>
-<td>—</td>
-<td>Turn the Claude narrative on (<code>cache:market:summary_enabled</code>).</td>
-</tr>
-<tr>
-<td><code>disable_summary</code></td>
-<td>—</td>
-<td>Turn it off. This stops the API calls, not just the display.</td>
-</tr>
-</tbody>
-</table>
+<p><strong>The Claude summary is written on change, not on a clock</strong> (2026-09-10). Each poll
+builds a packet of six readings — sentiment, trend, bias, signal, regime,
+Bull/Bear — off <code>cache:sentiment:composite</code>, <code>:regime</code> and <code>:bullbear</code>, and a
+fingerprint of it at the resolution above. A new sentence is written only when the
+fingerprint differs from the one the current sentence was written from, at least
+<code>SUMMARY_MIN_GAP_SEC</code> has passed since the last attempt, and fewer than
+<code>SUMMARY_DAILY_CAP</code> attempts have run today; the first poll after a restart with
+readings present always writes one. A <strong>failed</strong> attempt (API error, timeout)
+publishes nothing — the last good sentence stays — but still counts toward the gap
+and the cap, and the same readings are retried once the gap has passed. It runs as
+a <strong>background task</strong> rather than inline, so a slow completion cannot stall the
+poll loop.</p>
+<p><strong>Commands (<code>cmd:market</code>):</strong> none. <code>handle_command</code> dispatches nothing and ignores
+every command type, including a replayed <code>enable_summary</code> / <code>disable_summary</code> from
+an older webgui — those, and the <code>cache:market:summary_enabled</code> key and the
+<code>SUMMARY_RTH_SEC</code> / <code>SUMMARY_OFFHOURS_SEC</code> clock they gated, were retired
+2026-09-10: the summary now feeds the Desk as well as the ticker, so the ticker
+toggle only hides the marquee and can no longer stop the Claude call.</p>
 <hr />
 <h1 id="schwab-proxy">Schwab Proxy</h1>
 <p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
@@ -1162,7 +1161,6 @@ cache:driver:control           events:driver:control          (DriverControl)
 cache:driver:autonomous        events:driver:autonomous       (AutonomousState)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cache:market:summary_enabled                                  (ticker/Claude toggle)
 cmd:trade   cmd:portfolio   cmd:driver   cmd:market
 </code></pre>
 <blockquote>

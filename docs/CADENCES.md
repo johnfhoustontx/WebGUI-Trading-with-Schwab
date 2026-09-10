@@ -47,13 +47,16 @@ restarted after 2026-07-14 to count).
 
 | What | Service | Cadence | Gating | Model | Source |
 |---|---|---|---|---|---|
-| Ticker market summary (verdict) | market_svc | every **40 min** RTH / **60 min** off-hours | `summary_due` + the Settings **ticker toggle** (off → no call) | Sonnet 5 | `market_svc/scheduler.py` `SUMMARY_RTH_SEC`/`SUMMARY_OFFHOURS_SEC` |
+| Market summary (ticker + Desk MARKET SUMMARY frame) | market_svc | **change-driven, not clocked** (2026-09-10) — written when the six-reading fingerprint moves, never twice within `SUMMARY_MIN_GAP_SEC` (10 min), never past `SUMMARY_DAILY_CAP` (30/day) | `summary_due`; the Settings **ticker toggle** only hides the marquee and no longer gates the call (both surfaces read the one sentence) | Sonnet 5 | `market_svc/scheduler.py` `SUMMARY_MIN_GAP_SEC`/`SUMMARY_DAILY_CAP`; `compute.summary_fingerprint` |
 | Gamma Analyze auto-briefings | options_svc | **4×/day**: 08:00 / 08:48 / 11:30 / 14:58 CT (20-min grace) | trading days | Sonnet 5 | `options_svc/scheduler.py` `analyze_slot_due` |
 | Gamma Analyze (ad-hoc button) | options_svc | on-demand | — | Sonnet 5 | `compute.gamma_analyze` |
 | Driver autonomous decider | driver_svc | **every 30 min** in the entry window **09:45–15:30 ET** (+ Run now) | master switch ON + trading day + not halted (~12/day max) | `DRIVER_MODEL` override, else Opus 4.8 | `driver_svc/settings.py` `CHECKPOINT_MIN`; `scheduler.checkpoint_due` |
 
-Steady state with the ticker on and the driver off: **~22 calls/day** (≈18 ticker +
-4 briefings). Driver enabled adds up to ~12.
+Measured on prod 2026-09-10: **~20 calls/weekday** (driver checkpoints every 30
+min 08:45–14:30 CT + the 4 briefings) with the ticker narrative OFF since
+2026-08-29 — so that figure carries no summary calls at all. The change-driven
+summary is estimated to add **~8–15 calls on a trading day** (to be measured
+after release), against the old clocked cadence's ~18/day.
 
 ## 3. Internal schedules & publishes (no external API)
 

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-09</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -468,7 +468,7 @@ page surfaces this as its own card.</p>
 <tbody>
 <tr>
 <td><strong><code>ANTHROPIC_API_KEY</code></strong></td>
-<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics + the 4×/day auto-briefings, and the market summary ticker.</td>
+<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics + the 4×/day auto-briefings, and the market summary (the ticker and the Desk's Market Summary frame — one sentence, one generator).</td>
 <td>Optional</td>
 </tr>
 </tbody>
@@ -2243,7 +2243,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>market_svc</td>
-<td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); Claude summary every <strong>40 min</strong> RTH / <strong>60 min</strong> off-hours (<code>SUMMARY_RTH_SEC</code>, <code>SUMMARY_OFFHOURS_SEC</code>).</td>
+<td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); Claude summary is <strong>change-driven, not clocked</strong> (2026-09-10) — each poll builds a fingerprint of the six readings at display resolution and writes a new sentence only when that fingerprint has moved, at least <strong>10 min</strong> have passed since the last attempt (<code>SUMMARY_MIN_GAP_SEC</code>), and fewer than <strong>30</strong> attempts have been made that CT day (<code>SUMMARY_DAILY_CAP</code>); a failed attempt still counts toward both and is retried once the gap has passed; nothing moves overnight or at weekends, so nothing is called.</td>
 </tr>
 </tbody>
 </table>

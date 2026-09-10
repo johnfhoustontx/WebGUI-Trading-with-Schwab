@@ -35,10 +35,14 @@ spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, 
 and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
 hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**
 (newest 5) → **Positions** (paper + driver merged, with `rescue_state` flags and an
-`OPEN n · UNREALIZED $x · AT RISK m` header). Panels sit in a **2×2 grid**
+`OPEN n · UNREALIZED $x · AT RISK m` header) → **MARKET SUMMARY** (full width,
+below the grid — see its own subsection below). Panels sit in a **2×2 grid**
 (`lg:grid-cols-2` — **not `xl`**, which is 1280px and silently collapses a 1265px
 window to one column). Read-only + **click-through**: every row opens its owning page
 already set to that symbol, reusing the one-shot `handoff.send_to_gamma` stash.
+**Hover Bias, Signal or the Market Regime word** and a sentence explains it —
+`regime_mix.REGIME_PICTURE` for the regime word (the same table `/sentiment`'s
+dial hangs its hover from), `sentiment.BAND_WORD_PICTURE` for Bias/Signal.
 
 Tier-1 reader of **nine** views on **ONE batched 2 s `read_versions`** (cheap `:ver`
 probes in a single pipelined round-trip; payloads deserialize only for views that
@@ -133,10 +137,19 @@ into one reading.
   canonical property order** (`border-left-color` follows `border-color`), not on
   DOM class order; `pages/options/leg_editor.py`'s accents depend on the same
   thing.
-- **One clock per paint.** `_paint_bullbear` takes a single `now` for the chips
-  and the headline. Two would let the headline name a horizon the chips were not
-  drawn on, at the opening bell; nothing in the signatures prevents it, so
-  `test_one_paint_decides_the_horizon_once` pins the call site instead.
+- **One clock per paint — now shared with the MARKET SUMMARY frame below.**
+  `_paint_bullbear` takes a single `now` for the chips and the headline, and
+  `_paint_summary` (→ `summary_facts`) is handed the SAME `now` rather than
+  taking a fresh `datetime.now()` of its own. Two clocks would let one region
+  say "on the quarter" while the other has already flipped to "on today's
+  moves", at the opening bell — the one-word ambiguity `/sentiment/bullbear`
+  exists to remove, reintroduced between two regions of one page.
+  `bullbear_distribution` (the Bull/Bear chip's hover) does not mint a clock
+  either: it renders the `counts`/`live` pair `summary_facts` already derived,
+  rather than deciding its own horizon. `test_one_paint_decides_the_horizon_once`
+  pins the call sites, by identity rather than equality — two `now()` calls
+  microseconds apart compare unequal only sometimes, and a guard that fails
+  only sometimes is not a guard.
 - **Tier 2 supplies the second axis for free.** `bullbear_symbols` yields the
   benchmark, so SPY rides the ONE batched `/quotes` call the tree already makes;
   `merge_live` attaches `day_excess = day_pct - benchmark`, and the payload gains
@@ -207,6 +220,56 @@ backlog or light every row.
 
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
+
+**The MARKET SUMMARY frame + the Regime popup (2026-09-10).** Full width, below
+the four panels; the public live Desk renders it too.
+
+- **One Claude-written sentence** (`market_svc`'s existing ticker-narrative call,
+  Sonnet 5) consolidating six readings — Sentiment (0–10 contrarian composite),
+  Trend (flight word + score), Bias, Signal, Regime, Bull/Bear (sector quadrant
+  counts, today once the bell has rung else the quarter) — and closing with a
+  posture, next to an **"as of HH:MM CT"** timestamp. It is written **on change,
+  not on a clock**: `market_svc` fingerprints the six readings at display
+  resolution every poll (words exact, composite to 0.5, trend score to 5, regime
+  confidence to 10%, Bull/Bear counts exact + horizon) and writes only when that
+  fingerprint moves, never twice within `SUMMARY_MIN_GAP_SEC` (10 min), never past
+  `SUMMARY_DAILY_CAP` (30/day). A failed attempt publishes nothing — the last good
+  sentence stays — and is retried once the gap has passed; it still counts toward
+  the gap and the cap.
+- **A new `summary` region on the Desk's existing batched poll** —
+  `cache:market:summary` joins `VIEWS`, read alongside the nine the page already
+  polls. `summary_facts(summary_view, composite_view, history_view, regime_view,
+  bullbear_view, now)` is the pure function that builds everything the frame
+  draws: the narrative, the "as of" text, the `moved` flag, and the six chips
+  (each reusing the strip's own derivation — the pill composite, the band facts,
+  `regime_display`, the map's headline — so the frame and the strip can never name
+  one reading two ways).
+- **Six live chips** — SENTIMENT, TREND, BIAS, SIGNAL, REGIME, BULL/BEAR — read
+  off the views the page already polls, so they are current even while the
+  sentence above them lags. Each carries the same hover its counterpart uses
+  elsewhere on the page, plus two new ones: **Sentiment** — "The sentiment
+  composite, 0–10. Contrarian: a higher score means more fear, which this model
+  reads as opportunity." (`desk.SENTIMENT_TIP`) — and **Bull/Bear** —
+  `bullbear_distribution(counts, live)`, the full four-quadrant distribution and
+  its horizon, e.g. "Rising · Leading 4 · Falling · Lagging 2 — counted on
+  today's moves."
+- **The "moved since" line** (`desk.SUMMARY_MOVED`) appears when a chip's word,
+  or the Bull/Bear count, differs from `cache:market:summary`'s `inputs` — the
+  packet the current sentence was written from. It is a fact about the gap
+  between the live readings and the sentence, not a promise that a refresh is
+  imminent (the gap or the daily cap may delay one).
+- **Empty state** (`desk.SUMMARY_EMPTY`) — "No summary yet — one is written when
+  the readings next change." — before any sentence has ever been published (a
+  fresh restart, or no Claude key configured). An unpublished reading behind a
+  live chip shows a dash, never "Neutral".
+- **The Regime popup.** Hovering the Market Regime word — here and on
+  `/sentiment`'s regime dial — shows one sentence per word from
+  `regime_mix.REGIME_PICTURE`, keyed by the DISPLAYED word (11 entries: Balanced,
+  Trending, Rallying, Firming, Retreating, Softening, Breakout, Breakdown,
+  Whipsaw, Stressed, Unclear). `shared/tests/test_cross_tier_mirrors.py` pins that
+  every word the sentiment service can print has one.
+
+Design: [`2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md).
 
 ## Trade detail panel — Expected Move on captured signals (2026-08-25)
 
@@ -387,7 +450,7 @@ Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expecte
 
 ## `/sentiment`
 
-Sentiment — nav group **Trend & Sentiment** since 2026-07-11 (three-column top: a **Market Sentiment ring** + a **Market Trend ring** + the **Signals** tile stack. **Since 2026-08-14 the four semicircular Highcharts gauges are TWO concentric SVG rings**, each carrying **Day / Week / Month** on one dial — `webgui/pages/rings.py:ring_svg`, mounted with `ui.html` and updated via `el.content`; the Sentiment ring's arcs are the live composite / 5-session mean / full-history mean (`sentiment_arcs`), the Trend ring's are `derived.trend` / `derived.trend_7d` / `derived.trend_30d_ago` (`trend_arcs`). **A horizon with no usable reading draws its track only + an em-dash** — the thing a needle structurally cannot say; see the ring-graphics section below for why that keys on CONFIDENCE, not key presence. **The Today trend reading's state label + regime badge show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Climbing / Stalling / Circling / Gliding / Diving** (the flight words, 2026-09-10 — each carries a hover sentence from `sentiment.TREND_PICTURE`, on this pill and on the Desk's), badge label+description e.g. "Lack of Bearishness — Lower or flat, but sellers aren't pressing — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 arc value is unchanged** (still the direction score); the **structural Week/Month arcs deliberately KEEP the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; the **Signals column is a 1×4 vertical stack of glowing tiles** (BIAS / SIGNAL / YESTERDAY / CHANGE, each icon + letter-spaced label + neon `text-shadow` value + hairline-and-dot rule + footer descriptor; hovering the BIAS or SIGNAL word shows the composite band it covers, from `sentiment.BAND_WORD_PICTURE`, keyed by tile and word, 2026-09-10), with the service's **velocity + divergence lines restored beneath it**; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Balanced → Rallying · 60%", hidden when stable), **⚠ SUPERSEDED the same day by the Market Regime Console** (see the CHANGELOG entry): the three-column ring/tile top region and the Market Regime expander described in the rest of this row were REPLACED by a single-screen console — header · Sentiment/Trend/Signals cards · regime block (confidence dial + diagnostic tags + ranked share table + callout strip) · footer, in `webgui/pages/console*.py`, scoped by the `[console]` palette in `config/theme.toml`. What survives below it: the Daily Sentiment & Trend intraday graphs, the status bar, Refresh, and the Components / Trend Detail popups. The ranked panel below is now rendered BY the console's share table; the description of its logic still holds. Prior text — the classifier's evidence chips, and — **since 2026-08-14, replacing the percent-stacked area chart** — a **ranked membership panel** (`webgui/pages/regime_mix.py:regime_mix_svg`, one inline SVG mounted with `ui.html` + updated via `el.content`, the `rings.py` idiom): one row per regime sorted by current share, each with a bar scaled to **the leader** and a sparkline scaled to **its own** range, a change-since-session-open column, and a footer naming the leader's **margin over the runner-up** plus the session's tightest. The stack was the wrong encoding and the live numbers said so — measured 2026-08-14 over 78 samples, the widest swing all day was 9pp, Breakout sat at exactly 0.000 while holding a fifth of the legend, and percent-stacking then *guarantees* the bands fill the height, so the day's two real events (the lead changing hands out of a **0.2pp** gap; Stressed rising from zero to 7.5pp) were both sub-pixel. The margin is a **new** signal: `unclear` measures evidence strength, not how close the top two are, so at 0.2pp the committed label was very nearly a coin toss and nothing said so. Ranking deliberately gives up the old fixed order's stable reading position — with five rows a lead change is rare and is the most interesting thing that happens, so the ORDER is signal; ties break on `REGIME_ORDER` so identical data cannot jitter. `REGIME_ORDER`/`_LABELS`/`_COLORS` moved to that module (re-exported from `sentiment` for its headline helpers). The panel is **width-capped** (`max-w-[720px]`) because a viewBox scales the TEXT too — uncapped at the full ~1100px content width a 13px label renders at ~22px. Reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells)
+Sentiment — nav group **Trend & Sentiment** since 2026-07-11 (three-column top: a **Market Sentiment ring** + a **Market Trend ring** + the **Signals** tile stack. **Since 2026-08-14 the four semicircular Highcharts gauges are TWO concentric SVG rings**, each carrying **Day / Week / Month** on one dial — `webgui/pages/rings.py:ring_svg`, mounted with `ui.html` and updated via `el.content`; the Sentiment ring's arcs are the live composite / 5-session mean / full-history mean (`sentiment_arcs`), the Trend ring's are `derived.trend` / `derived.trend_7d` / `derived.trend_30d_ago` (`trend_arcs`). **A horizon with no usable reading draws its track only + an em-dash** — the thing a needle structurally cannot say; see the ring-graphics section below for why that keys on CONFIDENCE, not key presence. **The Today trend reading's state label + regime badge show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Climbing / Stalling / Circling / Gliding / Diving** (the flight words, 2026-09-10 — each carries a hover sentence from `sentiment.TREND_PICTURE`, on this pill and on the Desk's), badge label+description e.g. "Lack of Bearishness — Lower or flat, but sellers aren't pressing — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 arc value is unchanged** (still the direction score); the **structural Week/Month arcs deliberately KEEP the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; the **Signals column is a 1×4 vertical stack of glowing tiles** (BIAS / SIGNAL / YESTERDAY / CHANGE, each icon + letter-spaced label + neon `text-shadow` value + hairline-and-dot rule + footer descriptor; hovering the BIAS or SIGNAL word shows the composite band it covers, from `sentiment.BAND_WORD_PICTURE`, keyed by tile and word, 2026-09-10), with the service's **velocity + divergence lines restored beneath it**; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Balanced → Rallying · 60%", hidden when stable), **⚠ SUPERSEDED the same day by the Market Regime Console** (see the CHANGELOG entry): the three-column ring/tile top region and the Market Regime expander described in the rest of this row were REPLACED by a single-screen console — header · Sentiment/Trend/Signals cards · regime block (confidence dial + diagnostic tags + ranked share table + callout strip) · footer, in `webgui/pages/console*.py`, scoped by the `[console]` palette in `config/theme.toml`. **Hover the regime word on the dial (2026-09-10)** and a sentence explains what it means and what tends to work in it — `console_regime.py` hangs `pill_tooltip(dial, regime_mix.regime_picture(name))` on the dial itself, keyed by the SAME `regime_mix.REGIME_PICTURE` table the Desk's regime tile uses, so the two screens can never explain one word two different ways; `shared/tests/test_cross_tier_mirrors.py` pins that every word the sentiment service can print (11, including the direction adornments and "Unclear") has an entry. What survives below it: the Daily Sentiment & Trend intraday graphs, the status bar, Refresh, and the Components / Trend Detail popups. The ranked panel below is now rendered BY the console's share table; the description of its logic still holds. Prior text — the classifier's evidence chips, and — **since 2026-08-14, replacing the percent-stacked area chart** — a **ranked membership panel** (`webgui/pages/regime_mix.py:regime_mix_svg`, one inline SVG mounted with `ui.html` + updated via `el.content`, the `rings.py` idiom): one row per regime sorted by current share, each with a bar scaled to **the leader** and a sparkline scaled to **its own** range, a change-since-session-open column, and a footer naming the leader's **margin over the runner-up** plus the session's tightest. The stack was the wrong encoding and the live numbers said so — measured 2026-08-14 over 78 samples, the widest swing all day was 9pp, Breakout sat at exactly 0.000 while holding a fifth of the legend, and percent-stacking then *guarantees* the bands fill the height, so the day's two real events (the lead changing hands out of a **0.2pp** gap; Stressed rising from zero to 7.5pp) were both sub-pixel. The margin is a **new** signal: `unclear` measures evidence strength, not how close the top two are, so at 0.2pp the committed label was very nearly a coin toss and nothing said so. Ranking deliberately gives up the old fixed order's stable reading position — with five rows a lead change is rare and is the most interesting thing that happens, so the ORDER is signal; ties break on `REGIME_ORDER` so identical data cannot jitter. `REGIME_ORDER`/`_LABELS`/`_COLORS` moved to that module (re-exported from `sentiment` for its headline helpers). The panel is **width-capped** (`max-w-[720px]`) because a viewBox scales the TEXT too — uncapped at the full ~1100px content width a 13px label renders at ~22px. Reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells)
 
 ## `/sentiment/bullbear`
 

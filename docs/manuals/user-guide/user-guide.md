@@ -339,6 +339,10 @@ structure · what should I act on · what am I holding.*
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
 | **Positions** | Your paper trades and Claude's together, with live marks and an **OK / Watch / At risk / Rescue** flag |
+| **Market Summary** | One Claude-written sentence tying Sentiment, Trend, Bias, Signal, Regime and Bull/Bear together, ending with a posture — full width, at the bottom |
+
+**Hover Bias, Signal or the market regime word** and a sentence explains what it
+means and, for Bias, what position size it implies.
 
 **Clicking any row** opens the page it came from, already set to that symbol — a
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
@@ -390,6 +394,27 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   and they refuse silently — nothing is logged and no error is shown. That button is
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.
+
+**Market Summary** is the frame across the bottom. It carries one sentence,
+written by Claude, that reads the six panels above it together and closes with a
+posture — for example "Sentiment is fearful while price grinds higher against a
+weakening trend; favor defined-risk premium over direction." Two things about it
+are easy to misread:
+
+- **It is written when the readings change, not on a schedule.** The **"as of
+  HH:MM CT"** in the top-right corner is when it was last written, and it can sit
+  unchanged for a while on a quiet tape — that is not staleness, it is nothing new
+  to say. The six chips underneath it are **live** regardless: SENTIMENT, TREND,
+  BIAS, SIGNAL, REGIME and BULL/BEAR update on every poll even while the sentence
+  above them lags, and hovering any of them explains that word — the same hover as
+  the top strip.
+- **A dim "Readings have changed since this was written." line** appears when a
+  chip's word, or the Bull/Bear count, has moved past what the sentence was
+  written from. It is a fact about the gap, not a promise that a new sentence is
+  coming soon — a new one is still gated by the change-driven write rule above.
+- **Before the first sentence is ever written** — a fresh restart, or no Claude
+  key configured — the frame reads "No summary yet — one is written when the
+  readings next change." instead of a blank space.
 
 ---
 
@@ -576,7 +601,9 @@ updates on its own about every two minutes whether or not the page is open; pres
   **Trending**, **Breakout**, **Whipsaw**, **Stressed**), a confidence figure,
   diagnostic tags, and a table ranking all five by share with their change since
   the open. Trending and Breakout also carry a direction word (*Rallying*,
-  *Retreating*, *Breakdown* and so on).
+  *Retreating*, *Breakdown* and so on). **Hover the regime word on the dial** and
+  a sentence explains what it means and what tends to work in it — the same
+  hover the Desk's regime tile uses.
 - **Components** and **Trend Detail** — press and hold either for a full breakdown.
 - **Daily Sentiment & Trend** — two intraday graphs over the last five trading days.
 
@@ -1510,8 +1537,8 @@ Preferences, all saved on your machine:
 - **Manual paper: break-even lifecycle (experimental)** — opts the manual paper
   account into that same lifecycle instead of taking profit at +50% immediately.
   The autonomous driver's account is never affected by this toggle.
-- **Market summary ticker** — the scrolling bar at the bottom of every page, with a
-  speed setting.
+- **Show the ticker** — the scrolling bar at the bottom of every page, with a
+  speed setting. It only shows or hides the marquee — see the note below.
 - **Appearance** — every colour, font and menu style, in seven tabs. **Save &
   restart web GUI** applies the change; **Reset to defaults** is confirm-gated.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
@@ -1530,8 +1557,10 @@ Preferences, all saved on your machine:
 > machine and is instant. The app pre-generates the common flow phrases in the
 > background at startup, so in practice you rarely hear the delay.
 
-> **Turning the ticker off also stops the Claude calls behind it**, so it is a cost
-> control as well as a display setting.
+> **Turning the ticker off only hides the scrolling bar.** The Claude-written
+> sentence behind it also feeds the Desk's **Market Summary** frame, so it keeps
+> being written — when the readings change, not on a clock — whether or not the
+> marquee is showing.
 
 > **Run Vacuum after hours.** It locks the database for minutes, and the tool
 > refuses to run while the collector is active.

@@ -116,7 +116,13 @@ that the public process must never call it.)
 the packet the sentence was written from (additive; `MarketSummary.inputs`
 defaults to `{}`). The envelope timestamp is the "as of".
 
-**Failure:** no key / dev / API error → empty narrative, never a fabricated line.
+**Failure:** no key / dev → empty narrative, never a fabricated line. An API
+error or timeout instead publishes **nothing** — the last good sentence stays on
+the Desk — and the fingerprint it was launched against is forgotten, so the same
+readings are retried once `SUMMARY_MIN_GAP_SEC` has passed rather than a
+transient failure freezing a stale sentence until the market moves. The failed
+attempt still counts toward the gap and the daily cap — a wedged Claude endpoint
+cannot spin faster than the ceiling either.
 `stop_reason == "max_tokens"` is logged; `max_tokens` rises 220 → 300 (a cap, not
 a spend) with a tripwire test on the floor.
 
@@ -145,6 +151,13 @@ REGIME Whipsaw · BULL/BEAR 4 of 11 rising & leading today
   `market:summary` joins `VIEWS`. Chips and sentence update **in place**; a popup is
   swapped only when its sentence changes (Bull/Bear repaints often, and a rebuild
   would close a popup under the cursor).
+- **One wall clock per paint.** The Bull/Bear strip and the summary frame both
+  decide the today-vs-quarter horizon from `strip_is_live`, so a paint straddling
+  the opening bell must not let one region see "before the bell" and the other
+  "after" — `summary_facts` takes the SAME `now` `_paint` hands the strip, not a
+  fresh `datetime.now()` of its own. `bullbear_distribution` renders the
+  counts/live pair its caller already derived rather than taking its own clock,
+  so it cannot mint a second one either.
 - The public live Desk renders the frame too.
 
 ## 4 — Testing, rollout, docs

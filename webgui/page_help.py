@@ -58,7 +58,8 @@ on · what am I holding.*
   the move is — Strong Bull … Strong Bear) and the **market regime** word
   (Rallying / Balanced / Whipsaw / Stressed…). Bias and Signal are the same two
   the Sentiment page's Signals column shows, read off the same composite score;
-  the Desk never computes its own.
+  the Desk never computes its own. **Hover Bias, Signal, or the regime word** and
+  a sentence explains what it means and what tends to work in it.
 - **Bull / Bear sectors** — a chip for each of the eleven sectors, and every chip
   shows **two different time frames at once**. The **colour, and the order left to
   right, are today**: whichever sector is doing best on the session sits first.
@@ -101,6 +102,14 @@ on · what am I holding.*
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
+- **Market Summary** — one sentence, written by Claude, pulling the readings
+  above together (sentiment, trend, bias, signal, regime, Bull/Bear) and ending
+  with a trading posture. It is written when those readings **change**, not on a
+  clock, so it carries an **"as of" time** rather than a fixed refresh cadence.
+  The six chips underneath it are **live** — they update on every poll even
+  while the sentence above them lags — and hovering any chip explains that
+  word, the same hover as the strip above. When the chips have moved since the
+  sentence was written, a dim line says so.
 
 **Click any row** to open the page it came from, already set to that symbol.
 Nothing on this page places or changes a trade.
@@ -493,7 +502,9 @@ fear, which can mean opportunity.
 - **Market Regime** — the *character* of the tape: **Balanced** (quiet, price
   pinned near its mean), **Trending**, **Breakout**, **Whipsaw** (plenty of
   movement, no progress) or **Stressed** (fear — high VIX, inverted term
-  structure). The panel below **ranks** the five by how much of today's tape each
+  structure). **Hover the regime word on the dial** and a sentence explains
+  what it means and what tends to work in it — the same hover the Desk's
+  regime tile uses. The panel below **ranks** the five by how much of today's tape each
   one holds — a bar against the leader, a sparkline of its own session, and how
   far it has moved since the open. The footer names the leader's **margin over the
   runner-up**, which is the number that says whether the headline was nearly a

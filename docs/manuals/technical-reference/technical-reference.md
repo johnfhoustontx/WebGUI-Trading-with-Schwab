@@ -137,7 +137,7 @@ The proxy owns all Schwab authentication; no other process holds credentials.
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics + the 4×/day auto-briefings, and the market summary ticker. | Optional |
+| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics + the 4×/day auto-briefings, and the market summary (the ticker and the Desk's Market Summary frame — one sentence, one generator). | Optional |
 
 Without a key those features **degrade safely** — most importantly the autonomous
 driver **stands down rather than trading blind**, and the Gamma infographics render
@@ -1536,7 +1536,7 @@ the source; this table is a summary of them.
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | On-demand only (no scheduler). |
 | driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoints every **30 min** (`CHECKPOINT_MIN`, from `config/driver.toml`) inside the **09:45–15:30 ET** entry window (`checkpoint_due`) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot. |
-| market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); Claude summary every **40 min** RTH / **60 min** off-hours (`SUMMARY_RTH_SEC`, `SUMMARY_OFFHOURS_SEC`). |
+| market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); Claude summary is **change-driven, not clocked** (2026-09-10) — each poll builds a fingerprint of the six readings at display resolution and writes a new sentence only when that fingerprint has moved, at least **10 min** have passed since the last attempt (`SUMMARY_MIN_GAP_SEC`), and fewer than **30** attempts have been made that CT day (`SUMMARY_DAILY_CAP`); a failed attempt still counts toward both and is retried once the gap has passed; nothing moves overnight or at weekends, so nothing is called. |
 
 > **Two cadences are easy to state wrongly, because they used to be the same
 > number.** The **driver's** isolated paper account re-prices every **1 minute**
