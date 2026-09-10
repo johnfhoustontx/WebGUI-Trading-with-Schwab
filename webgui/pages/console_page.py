@@ -115,7 +115,7 @@ def apply(container, ctx):
                 "grid grid-cols-[1fr_1fr_1.05fr] gap-5 w-full items-stretch"):
             CARDS.render_sentiment_card(
                 ctx.get("sent_arcs"), ctx.get("bias"), ctx.get("total"),
-                ctx.get("confidence"))
+                ctx.get("confidence"), ctx.get("bias_picture"))
             CARDS.render_trend_card(
                 ctx.get("trend_arcs"), ctx.get("trend_short"),
                 ctx.get("trend_verdict"), ctx.get("trend_guidance"),

@@ -4,7 +4,37 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-10 (**The Market Trend word is now a flight word, and
+**Last updated:** 2026-09-10 (**Hovering a Bias or Signal word now explains
+it**, on the `/sentiment` Signals card, the Desk strip, and both Sentiment
+pills.)
+
+- **What it says.** Both words are bands of one number —
+  `live_composite.signal_band(total)` over the 0–10 composite — so each hover
+  names its band and, for Bias, the position size that band sets. The scale is
+  CONTRARIAN (a high score is fear, read as opportunity), and the hover says
+  so: a *Bullish* signal is the crowd being fearful, not price rising. That is
+  the misreading the bare tiles invited.
+
+- **Keyed by tile and word** (`sentiment.BAND_WORD_PICTURE` /
+  `band_word_picture(key, word)`), because "Neutral" is in both vocabularies and
+  means "no lean" on Bias but "no edge" on Signal.
+
+- **The Sentiment pill carries the Bias hover**, because its word IS the Bias
+  word — `live_composite` writes both from one `signal_band` call.
+
+- **The Desk strip repaints in place**, so its hover is rebuilt only when the
+  sentence changes; clearing an unchanged tooltip on every composite bump would
+  close it under the cursor.
+
+- **Pinned across tiers.** The prose restates `signal_band`'s cut-offs and
+  sizes, which Tier 1 cannot import. `test_cross_tier_mirrors` reads the
+  function's ladder as text and fails unless every word it can publish has a
+  sentence quoting its threshold and size.
+
+- Manuals: the Reference Guide's Signals paragraph gained the band table; the
+  User Guide says to hover.
+
+**Prior — 2026-09-10** (**The Market Trend word is now a flight word, and
 hovering it says what it means.** Bull / Weak Bull / Neutral / Resilient / Bear
 became **Climbing / Stalling / Circling / Gliding / Diving** on the `/sentiment`
 console pill, the Desk pill and the phone snapshot.)

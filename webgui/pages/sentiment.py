@@ -589,6 +589,51 @@ def _word_tone(word):
     return "warn"
 
 
+# The hover on a BIAS or SIGNAL word. Both come from ONE number —
+# live_composite.signal_band(total) over the 0-10 composite — and that scale is
+# CONTRARIAN: a high score means fear, which this model reads as opportunity. So
+# each sentence says which band its word covers; "Bullish" here means the crowd
+# is fearful, not that price is rising. Keyed by tile as well as word, because
+# "Neutral" is in both vocabularies. The cut-offs and sizes restate
+# signal_band's, and shared/tests/test_cross_tier_mirrors.py fails if the two
+# part company.
+BAND_WORD_PICTURE = {
+    "bias": {
+        "long": "Lean long: the sentiment composite is 7 or higher, so the "
+                "crowd is fearful — and this model reads fear as opportunity. "
+                "Position size 1.10x, or 1.25x at 9 and above.",
+        "neutral": "No lean: the sentiment composite is between 5 and 7, so "
+                   "fear and greed are roughly balanced. Standard position "
+                   "size, 1.00x.",
+        "cautious": "Lean defensive: the sentiment composite is between 3 and "
+                    "5, so the crowd is growing complacent. Position size "
+                    "trimmed to 0.85x.",
+        "short": "Lean short: the sentiment composite is below 3, so greed is "
+                 "extreme — and this model reads complacency as risk. Smallest "
+                 "position size, 0.70x.",
+    },
+    "signal": {
+        "strong bull": "The sentiment composite is 9 or higher: extreme fear, "
+                       "the strongest contrarian buy reading.",
+        "bullish": "The sentiment composite is 7 to 9: elevated fear, a "
+                   "contrarian lean toward buyers.",
+        "neutral": "The sentiment composite is 5 to 7: no contrarian edge "
+                   "either way.",
+        "bearish": "The sentiment composite is 3 to 5: complacency building, "
+                   "a contrarian lean toward sellers.",
+        "strong bear": "The sentiment composite is below 3: extreme greed, "
+                       "the strongest contrarian warning.",
+    },
+}
+
+
+def band_word_picture(key, word):
+    """The hover sentence for a BIAS or SIGNAL word, or "" for anything else —
+    a cold-cache dash, a word the service has not shipped, another tile."""
+    table = BAND_WORD_PICTURE.get(key) or {}
+    return table.get(str(word or "").strip().lower(), "")
+
+
 def _change_tone(change):
     """Signed change string -> tone. '—' / unparseable / exactly flat -> 'flat'."""
     try:
@@ -615,7 +660,10 @@ def signal_tile_rows(t, prev_total):
         "yesterday": "flat" if prev_total is None else _band_tone(prev_total),
         "change": _change_tone(t.get("change")),
     }
-    return [dict(d, value=t.get(d["key"], "—"), tone=tones[d["key"]])
+    # ``tip`` is the word's hover — "" on YESTERDAY / CHANGE, and on a dashed
+    # BIAS / SIGNAL tile, so an absent reading has nothing to explain.
+    return [dict(d, value=t.get(d["key"], "—"), tone=tones[d["key"]],
+                 tip=band_word_picture(d["key"], t.get(d["key"])))
             for d in SIGNAL_TILE_DEFS]
 
 
@@ -859,6 +907,7 @@ def render():
             "sent_arcs": sentiment_arcs(live, snaps),
             "trend_arcs": trend_arcs(derived),
             "bias": comp.get("bias"),
+            "bias_picture": band_word_picture("bias", comp.get("bias")),
             "total": f"{total:.2f}",
             "confidence": _safe_float(comp.get("aggregate_confidence"), None),
             "trend_short": _TREND_SHORT.get(_trend.get("state"), ""),

@@ -900,7 +900,19 @@ The panel also prints a plain-English gloss — for example *"Lack of Bullishnes
 Buyers exhausted at highs — favor CCS, trim longs."*
 
 **The Signals column** is four tiles: **BIAS** (market direction), **SIGNAL** (strength
-and momentum), **YESTERDAY** (previous close) and **CHANGE**. Below them sit
+and momentum), **YESTERDAY** (previous close) and **CHANGE**. **Hover BIAS or SIGNAL**
+and the word explains itself — including the same Bias word on the Sentiment card's
+pill. Both words are bands of the one sentiment composite, and that scale is
+**contrarian**: a *Bullish* signal means the crowd is fearful, not that price is
+rising.
+
+| Composite | Bias | Signal | Position size |
+|---|---|---|---|
+| 9 or higher | Long | Strong Bull | 1.25x |
+| 7 to 9 | Long | Bullish | 1.10x |
+| 5 to 7 | Neutral | Neutral | 1.00x |
+| 3 to 5 | Cautious | Bearish | 0.85x |
+| below 3 | Short | Strong Bear | 0.70x | Below them sit
 rate-of-change readings (3-day, 5-day, 20-day z-score) and a **divergence** line that
 names which two components disagree — a divergence is a low-conviction warning, not a
 signal.

@@ -94,6 +94,51 @@ def test_trend_pill_words_agree_between_the_page_and_the_push():
         "trend with a word the screen no longer uses.")
 
 
+# --- the BIAS / SIGNAL hover sentences --------------------------------------
+# Each hover names the composite band its word covers, restating
+# live_composite.signal_band's cut-offs and position sizes in Tier-1 prose
+# (Tier 1 cannot import the engine). This pins the pairing: every word
+# signal_band can publish has a sentence, and each sentence quotes its band's
+# threshold and the size that band sets — so moving a cut-off without the
+# prose fails here rather than leaving a hover that lies about the number.
+
+BAND_SOURCE = "sentiment-dashboard/live_composite.py"
+BAND_PAGE = "webgui/pages/sentiment.py"
+
+
+def _signal_bands():
+    """``[(threshold or None, size, bias, signal)]``, read out of
+    ``signal_band``'s ``if total >= N: return (...)`` ladder as text."""
+    tree = ast.parse((ROOT / BAND_SOURCE).read_text(encoding="utf-8"))
+    fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == "signal_band"), None)
+    assert fn is not None, f"{BAND_SOURCE} no longer defines signal_band"
+    out = []
+    for node in fn.body:
+        if isinstance(node, ast.If):
+            out.append((ast.literal_eval(node.test.comparators[0]),
+                        *ast.literal_eval(node.body[0].value)))
+        elif isinstance(node, ast.Return):
+            out.append((None, *ast.literal_eval(node.value)))
+    return out
+
+
+def test_every_band_word_the_service_publishes_has_a_hover_quoting_its_band():
+    bands = _signal_bands()
+    assert len(bands) == 5, f"expected signal_band's five bands, read {bands}"
+    pics = _const(BAND_PAGE, "BAND_WORD_PICTURE")
+    for threshold, size, bias, signal in bands:
+        bias_tip = pics["bias"].get(bias.lower(), "")
+        signal_tip = pics["signal"].get(signal.lower(), "")
+        assert bias_tip and signal_tip, f"no hover for {bias!r} / {signal!r}"
+        assert size in bias_tip, f"{bias!r} hover does not quote size {size}"
+        if threshold is not None:
+            cut = f"{threshold:g}"
+            assert cut in bias_tip and cut in signal_tip, (
+                f"the {bias!r} / {signal!r} hovers do not quote the {cut} "
+                "cut-off signal_band uses")
+
+
 # --- the covered-call identifier --------------------------------------------
 # ONE string, "COVERED_CALL", in three tiers that cannot import each other:
 #

@@ -81,6 +81,7 @@ from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
 from pages.sentiment import SIGNAL_TILE_DEFS as _SIGNAL_TILE_DEFS
 from pages.sentiment import _TREND_SHORT as _TREND_WORDS
 from pages.sentiment import _word_tone as _band_word_tone
+from pages.sentiment import band_word_picture as _band_word_picture
 from pages.sentiment import sentiment_arcs as _sentiment_arcs
 from pages.sentiment import trend_arcs as _trend_arcs
 from pages.sentiment import trend_picture as _trend_picture
@@ -978,24 +979,35 @@ def regime_display(regime_view):
 # hero pills must read the SAME words off the SAME payload. ``sentiment_arcs`` /
 # ``trend_arcs`` already carry the three meter values; these two carry the word
 # beside the hero number, which is the only other thing the compact card shows.
-def sentiment_pill_text(live, snaps):
-    """'CAUTIOUS 4.45' — the composite's bias word and its total score.
-
-    ``live`` wins over the newest backfill snapshot, exactly as ``/sentiment``'s
-    own ``_apply`` picks its headline, so the pill can never name a different
-    session than the Day meter beside it.
-
-    ONE deviation from that page, deliberate: it formats the total through a
-    ``_safe_float`` that defaults to **0.0**, so a composite published without a
-    score reads "CAUTIOUS 0.00" — a maximally bearish number nobody measured.
-    Here a missing total drops the number and keeps the word. An absent bias
-    prints nothing at all rather than a filler.
-    """
+def _pill_composite(live, snaps):
+    """The composite the Sentiment pill names. ``live`` wins over the newest
+    backfill snapshot, exactly as ``/sentiment``'s own ``_apply`` picks its
+    headline, so the pill can never name a different session than the Day meter
+    beside it."""
     if not isinstance(snaps, list):
         snaps = []
     latest = live or (snaps[-1] if snaps else None)
     comp = latest.get("composite") if isinstance(latest, dict) else None
-    comp = comp if isinstance(comp, dict) else {}
+    return comp if isinstance(comp, dict) else {}
+
+
+def sentiment_pill_tooltip(live, snaps):
+    """The pill word's hover. The word IS the Bias word — live_composite writes
+    both from one ``signal_band`` call — so it is the Bias tile's sentence."""
+    return _band_word_picture("bias", _pill_composite(live, snaps).get("bias"))
+
+
+def sentiment_pill_text(live, snaps):
+    """'CAUTIOUS 4.45' — the composite's bias word and its total score, off
+    ``_pill_composite``.
+
+    ONE deviation from /sentiment, deliberate: that page formats the total
+    through a ``_safe_float`` that defaults to **0.0**, so a composite published
+    without a score reads "CAUTIOUS 0.00" — a maximally bearish number nobody
+    measured. Here a missing total drops the number and keeps the word. An
+    absent bias prints nothing at all rather than a filler.
+    """
+    comp = _pill_composite(live, snaps)
     bias = str(comp.get("bias") or "").strip().upper()
     if not bias:
         return ""
@@ -1047,11 +1059,12 @@ _BAND_TONE_CLASS = {"pos": CON_POS, "neg": CON_NEG, "warn": CON_WARN,
 
 def signal_band_facts(derived):
     """The strip's BIAS and SIGNAL tiles: ``{"key", "label", "descriptor",
-    "value", "cls"}`` each, in the console's own order.
+    "value", "cls", "tip"}`` each, in the console's own order.
 
     A cold composite prints the em dash at the muted tone and NEVER a band
     word — "Neutral" is the middle reading, and an absent one is not a reading
-    at all.
+    at all. ``tip`` is the word's hover, the /sentiment tile's own sentence; ""
+    when there is no band word to explain.
     """
     d = derived if isinstance(derived, dict) else {}
     out = []
@@ -1060,7 +1073,8 @@ def signal_band_facts(derived):
         word = "" if raw is None else str(raw).strip()
         out.append({"key": key, "label": label, "descriptor": descriptor,
                     "value": word or _DASH,
-                    "cls": _BAND_TONE_CLASS[_band_word_tone(word)]})
+                    "cls": _BAND_TONE_CLASS[_band_word_tone(word)],
+                    "tip": _band_word_picture(key, word)})
     return out
 
 
@@ -3011,12 +3025,16 @@ def render():
             # produces for a composite that has not published — so the tiles
             # never flash a band word they have not read.
             band_lbls = []
+            # The hover each band word currently carries — "" at build, since a
+            # cold tile has no word to explain. The painter compares against it.
+            band_tips = []
             for _fact in signal_band_facts(None):
                 with ui.column().classes(
                         f"{_TILE} {_STRIP_VERDICT_W} shrink-0"):
                     ui.label(_fact["label"]).classes(_STRIP_EYEBROW)
                     band_lbls.append(ui.label(_fact["value"]).classes(
                         f"{_STRIP_WORD} {_fact['cls']}"))
+                    band_tips.append(_fact["tip"])
                     # The console's descriptor earns its line: "Cautious" beside
                     # "Bearish" reads as one word said twice unless the tiles say
                     # that one is positioning and the other is strength.
@@ -3184,9 +3202,18 @@ def render():
         derived = derived if isinstance(derived, dict) else {}
         live = comp.get("live")
 
-        for _lbl, _fact in zip(band_lbls, signal_band_facts(derived)):
+        for _i, (_lbl, _fact) in enumerate(
+                zip(band_lbls, signal_band_facts(derived))):
             _lbl.text = _fact["value"]
             _lbl.classes(remove=_ALL_STATE_TEXT, add=_fact["cls"])
+            # These tiles are updated in place, not rebuilt, so the hover is
+            # replaced only when its sentence CHANGES: this painter runs on
+            # every composite bump, and clearing an unchanged tooltip would
+            # close it under the reader's cursor.
+            if _fact["tip"] != band_tips[_i]:
+                _lbl.clear()
+                _CC.pill_tooltip(_lbl, _fact["tip"])
+                band_tips[_i] = _fact["tip"]
 
         sent_arcs = _sentiment_arcs(live, snaps)
         sent_box.clear()
@@ -3197,7 +3224,8 @@ def render():
             _compact_card("MARKET SENTIMENT", sent_arcs,
                           sentiment_pill_text(live, snaps),
                           _CC.delta_parts(_arc_value(sent_arcs, 0),
-                                          _arc_value(sent_arcs, 1), "WEEK"))
+                                          _arc_value(sent_arcs, 1), "WEEK"),
+                          pill_tip=sentiment_pill_tooltip(live, snaps))
         t_arcs = _trend_arcs(derived)
         trend_box.clear()
         with trend_box:

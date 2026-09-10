@@ -89,3 +89,33 @@ different vocabulary and carry no picture.
   word, deliberately: the pill gives the picture, the verdict gives the term.
 - **The repaint may close an open hover.** The console rebuilds its cards every
   120 s; the tooltip is a plain hover, and the next hover reopens it.
+
+## Follow-up: Bias and Signal hovers
+
+The same popup on the BIAS and SIGNAL words (the `/sentiment` Signals card, the
+Desk strip) and on the Sentiment pill, whose word is the Bias word.
+
+These are not metaphors, so the hover is not a picture: it names the composite
+band the word covers, from `live_composite.signal_band`:
+
+| Composite | Bias | Signal | Size |
+|---|---|---|---|
+| ≥ 9 | Long | Strong Bull | 1.25x |
+| 7–9 | Long | Bullish | 1.10x |
+| 5–7 | Neutral | Neutral | 1.00x |
+| 3–5 | Cautious | Bearish | 0.85x |
+| < 3 | Short | Strong Bear | 0.70x |
+
+The load-bearing word is **contrarian**. The composite is a fear gauge
+(10 = maximum fear, read as opportunity), so "Bullish" means the crowd is
+fearful — the opposite of what the word suggests on its own. Every Signal hover
+says "contrarian", and a test holds that.
+
+Keyed by tile and word (`BAND_WORD_PICTURE[key][word]`) because "Neutral" is in
+both vocabularies. The prose restates the engine's cut-offs, so
+`shared/tests/test_cross_tier_mirrors.py` reads `signal_band` as text and fails
+unless each sentence quotes its band's threshold and size.
+
+The Desk strip updates its tiles in place rather than rebuilding them, so its
+hover is replaced only when the sentence changes — clearing an unchanged one on
+every composite bump would close it under the reader's cursor.

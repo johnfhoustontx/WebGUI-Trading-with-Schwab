@@ -1507,6 +1507,56 @@ def test_signal_band_facts_survive_a_word_the_producer_has_not_shipped_yet():
     assert facts[1]["value"] == "Wat" and facts[1]["cls"] == d.CON_WARN
 
 
+def test_signal_band_facts_carry_the_consoles_own_hover():
+    """The same sentence the /sentiment tiles carry, keyed by tile AND word —
+    the strip must not describe one word two ways."""
+    from pages import sentiment as S
+    facts = d.signal_band_facts({"bias": "Cautious", "signal": "Bearish"})
+    assert facts[0]["tip"] == S.band_word_picture("bias", "Cautious")
+    assert facts[1]["tip"] == S.band_word_picture("signal", "Bearish")
+    assert all(f["tip"] for f in facts)
+
+
+def test_a_cold_or_unknown_band_tile_carries_no_hover():
+    for derived in (None, {}, "nonsense", {"bias": None, "signal": ""},
+                    {"bias": "Very Long", "signal": "Wat"}):
+        assert [f["tip"] for f in d.signal_band_facts(derived)] == ["", ""]
+
+
+def test_sentiment_pill_hover_is_its_bias_words():
+    """The pill's word IS the Bias word — live_composite writes both from one
+    signal_band call — so it carries the Bias tile's sentence."""
+    from pages import sentiment as S
+    live = {"composite": {"bias": "Cautious", "total_score": 4.45}}
+    assert d.sentiment_pill_tooltip(live, []) == S.band_word_picture(
+        "bias", "Cautious")
+    for live, snaps in ((None, []), (None, None), ("nonsense", "nonsense"),
+                        ({"composite": {"total_score": 5.0}}, [])):
+        assert d.sentiment_pill_tooltip(live, snaps) == "", live
+
+
+def test_render_hangs_each_band_words_hover_on_the_strip(monkeypatch):
+    from pages import sentiment as S
+    _seed_bus(monkeypatch, _full_payloads())
+    texts = [t for t in _rendered_texts() if t]
+    assert S.band_word_picture("bias", "Cautious") in texts
+    assert S.band_word_picture("signal", "Bearish") in texts
+
+
+def test_render_hangs_the_bias_words_hover_on_the_sentiment_pill(monkeypatch):
+    """``derived`` carries no band here, so the strip tiles dash — any Long
+    hover on the page can only be the pill's."""
+    from pages import sentiment as S
+    payloads = _full_payloads()
+    payloads["sentiment:composite"] = {
+        "live": {"composite": {"bias": "Long", "total_score": 7.45}},
+        "derived": {}}
+    _seed_bus(monkeypatch, payloads)
+    texts = [t for t in _rendered_texts() if t]
+    assert "LONG 7.45" in texts
+    assert S.band_word_picture("bias", "Long") in texts
+
+
 def test_the_desk_band_words_match_the_console_tiles_for_one_payload():
     """The two screens read the same two fields off the same ``derived``, so
     for any payload their BIAS and SIGNAL text must be identical."""

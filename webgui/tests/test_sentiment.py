@@ -491,6 +491,70 @@ def test_a_trend_with_no_word_carries_no_hover():
     assert not set(tips) & set(_FLIGHT_PICTURES.values())
 
 
+# ── BIAS / SIGNAL hover ──────────────────────────────────────────────────────
+# Both words are bands of ONE number, signal_band(total) over the contrarian
+# 0-10 composite, so the hover says which band — "Bullish" means the crowd is
+# fearful, not that price is rising. Keyed by tile as well as word, because
+# "Neutral" is in both vocabularies.
+_BIAS_WORDS = ("Long", "Neutral", "Cautious", "Short")
+_SIGNAL_WORDS = ("Strong Bull", "Bullish", "Neutral", "Bearish", "Strong Bear")
+
+
+def test_every_bias_and_signal_word_has_a_hover():
+    for word in _BIAS_WORDS:
+        assert S.band_word_picture("bias", word).strip(), word
+    for word in _SIGNAL_WORDS:
+        assert S.band_word_picture("signal", word).strip(), word
+
+
+def test_neutral_is_described_for_its_own_tile():
+    """One word, two tiles, two meanings: no lean on BIAS, no edge on SIGNAL."""
+    assert (S.band_word_picture("bias", "Neutral")
+            != S.band_word_picture("signal", "Neutral"))
+
+
+def test_the_signal_hover_says_the_reading_is_contrarian():
+    """The trap the hover exists for: 'Bullish' read as 'price is rising'."""
+    for word in _SIGNAL_WORDS:
+        assert "contrarian" in S.band_word_picture("signal", word), word
+
+
+def test_a_dash_or_an_unknown_word_has_no_hover():
+    for key, word in (("bias", "—"), ("bias", ""), ("bias", None),
+                      ("signal", "Wat"), ("yesterday", "6.00"),
+                      ("change", "+0.10")):
+        assert S.band_word_picture(key, word) == "", (key, word)
+
+
+def test_signal_tile_rows_carry_each_words_hover():
+    rows = {r["key"]: r for r in
+            S.signal_tile_rows(_tile_values(bias="Short", signal="Strong Bear"),
+                               prev_total=5.5)}
+    assert rows["bias"]["tip"] == S.band_word_picture("bias", "Short")
+    assert rows["signal"]["tip"] == S.band_word_picture("signal", "Strong Bear")
+    assert rows["yesterday"]["tip"] == "" and rows["change"]["tip"] == ""
+
+
+def test_hovering_the_bias_and_signal_words_describes_them():
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "derived": {"size": "0.85x", "bias": "Cautious", "signal": "Bearish",
+                    "trend": {"score": 64.0, "state": "bullish"}}})
+    tips = _label_tooltips(_render_card())
+    assert ("Cautious", S.band_word_picture("bias", "Cautious")) in tips
+    assert ("Bearish", S.band_word_picture("signal", "Bearish")) in tips
+    # The Sentiment card's pill names the live composite's Bias word too.
+    neutral = S.band_word_picture("bias", "Neutral")
+    assert any(w.startswith("NEUTRAL") and t == neutral for w, t in tips)
+
+
+def test_a_dashed_tile_carries_no_hover():
+    bus_client.reset()
+    _seed_cache()          # no size/bias/signal published -> both tiles dash
+    assert not [t for w, t in _label_tooltips(_render_card()) if w == "—"]
+
+
 def test_sentiment_avg_or_none_is_none_with_no_snaps():
     assert S.sentiment_avg_or_none([], 5) is None
     assert S.sentiment_avg_or_none(None) is None

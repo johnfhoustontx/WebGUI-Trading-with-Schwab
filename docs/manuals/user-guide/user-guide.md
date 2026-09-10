@@ -569,7 +569,9 @@ updates on its own about every two minutes whether or not the page is open; pres
   Circling / Gliding / Diving** — and a plain-English suggestion. Hover the word
   to see what it means.
 - **Signals** — four tiles (Bias / Signal / Yesterday / Change) with rate-of-change
-  readings and a divergence line beneath.
+  readings and a divergence line beneath. Hover the Bias or Signal word to see which
+  band of the sentiment composite it covers. The scale is contrarian, so *Bullish*
+  means the crowd is fearful, not that price is rising.
 - **Regime block** — which of five regimes the tape is in (**Balanced**,
   **Trending**, **Breakout**, **Whipsaw**, **Stressed**), a confidence figure,
   diagnostic tags, and a table ranking all five by share with their change since

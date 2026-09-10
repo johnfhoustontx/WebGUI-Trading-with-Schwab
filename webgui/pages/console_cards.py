@@ -167,8 +167,9 @@ def _link(text):
 
 
 # --- 4.1 Sentiment ----------------------------------------------------------
-def render_sentiment_card(arcs, bias, total, confidence):
-    """Hero + bias pill + Day/Week/Month meters + model-confidence footer."""
+def render_sentiment_card(arcs, bias, total, confidence, picture=""):
+    """Hero + bias pill + Day/Week/Month meters + model-confidence footer.
+    ``picture`` is the Bias word's hover sentence."""
     from nicegui import ui
     day = (arcs[0].get("value") if arcs else None)
     week = (arcs[1].get("value") if arcs and len(arcs) > 1 else None)
@@ -178,7 +179,7 @@ def render_sentiment_card(arcs, bias, total, confidence):
         _card_head("MARKET SENTIMENT", "SCALE 0—100")
         pill = f"{str(bias or '').upper()} {total}".strip() if bias else ""
         _hero(day, pill, hero_hex, "DAY READ",
-              delta_parts(day, week, "WEEK"))
+              delta_parts(day, week, "WEEK"), pill_tip=picture)
         _meters(arcs)
         with ui.column().classes("mt-auto gap-[9px] w-full"):
             with ui.row().classes("items-baseline justify-between w-full"):
@@ -245,9 +246,9 @@ def render_signals_card(rows, velocity_values, divergence_detail):
                         f"bg-[{cell_tint(hexv)}]"):
                     ui.label(str(r.get("label", ""))).classes(
                         f"text-[9.5px] tracking-[.24em] {CON_TXT_LABEL}")
-                    ui.label(str(r.get("value", "—"))).classes(
+                    pill_tooltip(ui.label(str(r.get("value", "—"))).classes(
                         f"{CONSOLE_DISPLAY} text-[32px] font-bold "
-                        f"tracking-[.06em] text-[{hexv}]")
+                        f"tracking-[.06em] text-[{hexv}]"), r.get("tip"))
                     ui.label(str(r.get("descriptor", ""))).classes(
                         f"text-[9.5px] tracking-[.16em] {CON_TXT_MUTED}")
         vals = velocity_values if isinstance(velocity_values, dict) else {}
