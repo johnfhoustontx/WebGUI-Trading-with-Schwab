@@ -24,11 +24,17 @@ class MarketDashboard(_Base):
 class MarketSummary(_Base):
     """Market summary narrative payload (cache:market:summary).
 
-    A short Claude-written verdict market_svc publishes on a schedule. The webgui
-    ticker leads its scroll with this, followed by live rule-based data items.
-    Defensive: an empty ``narrative`` (no key / API error) means the ticker shows
-    live items only. Freshness (generated-at) is carried by the bus envelope ts,
-    like the other domain views — no per-payload timestamp.
+    A short Claude-written verdict market_svc writes when the market readings it
+    consolidates change. It feeds both the webgui ticker (which leads its scroll
+    with this, followed by live rule-based data items) and the Desk's MARKET
+    SUMMARY frame. Defensive: an empty ``narrative`` (no key / API error) means
+    the ticker shows live items only and the Desk frame stays quiet.
     """
 
     narrative: str = ""
+    # The six readings the sentence was written from (market_svc's summary
+    # packet). The Desk compares them with the live readings to say when the
+    # sentence has been overtaken. Empty on an older writer.
+    inputs: dict = {}
+    # When the sentence was written (UTC ISO). The Desk prints it as "as of".
+    as_of: str = ""
