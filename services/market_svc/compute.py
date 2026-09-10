@@ -445,6 +445,42 @@ def build_summary_packet(sentiment, regime, bullbear, now=None):
     }
 
 
+# Display resolution: a move smaller than these never reaches the reader's eye,
+# so it must not buy a new sentence.
+FINGERPRINT_COMPOSITE_STEP = 0.5
+FINGERPRINT_TREND_STEP = 5.0
+FINGERPRINT_CONFIDENCE_STEP = 0.1
+
+
+def _bucket(v, step):
+    return None if v is None else round(round(v / step) * step, 6)
+
+
+def summary_fingerprint(packet):
+    """What the sentence is written from, at display resolution — or None when
+    there is nothing to summarize (no composite and no trend word).
+
+    Words compare exactly; numbers to their step; Bull/Bear counts exactly with
+    their horizon. Two packets with one fingerprint would get the same sentence."""
+    p = packet if isinstance(packet, dict) else {}
+    sent = p.get("sentiment") or {}
+    trend = p.get("trend") or {}
+    reg = p.get("regime") or {}
+    bb = p.get("bullbear") or {}
+    if sent.get("composite") is None and trend.get("word") is None:
+        return None
+    return (
+        _bucket(sent.get("composite"), FINGERPRINT_COMPOSITE_STEP),
+        trend.get("word"),
+        _bucket(trend.get("score"), FINGERPRINT_TREND_STEP),
+        p.get("bias"), p.get("signal"),
+        reg.get("word"),
+        _bucket(reg.get("confidence"), FINGERPRINT_CONFIDENCE_STEP),
+        bb.get("horizon"),
+        tuple(sorted((bb.get("counts") or {}).items())),
+    )
+
+
 
 def _count_anthropic_call():
     """Best-effort per-day Claude-call counter (Settings -> API usage).

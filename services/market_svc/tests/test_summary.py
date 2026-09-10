@@ -106,6 +106,51 @@ def test_packet_from_cold_caches_is_all_absent_never_neutral():
     assert p["bullbear"] == {"horizon": None, "counts": {}}
 
 
+def _packet(**over):
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
+    p.update(over)
+    return p
+
+
+def test_fingerprint_ignores_movement_below_display_resolution():
+    a = _packet()
+    b = _packet(sentiment={"composite": 4.10})               # 3.98 -> 4.10: both 4.0
+    b["trend"] = {"word": "Gliding", "score": 39.9}          # 38.6 -> 39.9: both 40
+    assert compute.summary_fingerprint(a) == compute.summary_fingerprint(b)
+
+
+def test_fingerprint_moves_when_a_word_changes():
+    a = _packet()
+    for key, val in (("bias", "Neutral"), ("signal", "Neutral")):
+        assert compute.summary_fingerprint(a) != compute.summary_fingerprint(
+            _packet(**{key: val})), key
+    b = _packet()
+    b["regime"] = {"word": "Balanced", "confidence": 0.62}
+    assert compute.summary_fingerprint(a) != compute.summary_fingerprint(b)
+
+
+def test_fingerprint_moves_when_a_number_crosses_its_step():
+    a = _packet()
+    b = _packet(sentiment={"composite": 4.40})               # 4.0 -> 4.5
+    assert compute.summary_fingerprint(a) != compute.summary_fingerprint(b)
+
+
+def test_fingerprint_moves_when_a_sector_changes_quadrant():
+    a = _packet()
+    b = _packet()
+    b["bullbear"] = {"horizon": "today",
+                     "counts": {**a["bullbear"]["counts"], "rising_leading": 3,
+                                "falling_lagging": 0}}
+    assert compute.summary_fingerprint(a) != compute.summary_fingerprint(b)
+
+
+def test_nothing_to_summarize_has_no_fingerprint():
+    """Cold caches must not trigger a paid call to describe nothing."""
+    assert compute.summary_fingerprint(
+        compute.build_summary_packet({}, {}, {}, now=_OPEN)) is None
+    assert compute.summary_fingerprint(None) is None
+
+
 def test_generate_summary_no_client_is_empty_but_safe():
     # The autouse _no_live_claude fixture forces _make_summary_client → None, so the
     # default real-client resolution path returns an empty narrative (no network).
