@@ -80,6 +80,14 @@ def _child_env(**overrides):
 FORBIDDEN_ROUTES = ("/terminate", "/settings", "/status", "/driver", "/manuals",
                     "/options/paper", "/options/captured", "/eod", "/logout")
 
+# The one NON-PAGE route this process serves, and the only permitted addition to
+# the fourteen. ``app.add_static_files("/static", ...)`` registers a single
+# parameterised path; the header's brand mark is a file under it, so without the
+# mount every published screen draws a broken-image icon. Named as a constant so
+# the allowance in the route-set assertion below reads as a decision rather than
+# as a set literal someone widened. See the two tests beneath that assertion.
+ASSET_ROUTES = frozenset({"/static/{path:path}"})
+
 
 @pytest.fixture(autouse=True, scope="module")
 def _restore_process_state():
@@ -239,13 +247,45 @@ def test_a_real_public_process_holds_no_route_of_the_apps():
         "/terminate included, is now registered in the public process")
 
     import live_screens
-    published = {s.route for s in live_screens.SCREENS}
+    published = {s.route for s in live_screens.SCREENS} | ASSET_ROUTES
     # NiceGUI's own machinery (``/_nicegui/<ver>/...``, the websocket mount) is
     # the framework, not this app's surface. Everything else must be published.
     served = {p for p in ast.literal_eval(routes) if not p.startswith("/_nicegui")}
     assert served == published, (
         f"the public process serves {sorted(served - published)} beyond the "
         f"published screens; missing {sorted(published - served)}")
+
+
+def test_the_static_mount_is_the_only_route_beyond_the_screens():
+    """Non-vacuity for the allowance above: ``ASSET_ROUTES`` is a HOLE in the
+    "fourteen routes and nothing else" assertion, so it is named here rather
+    than left as a set literal a future edit could widen unremarked.
+
+    ``/static`` is mounted because ``[brand].mark`` is a file under it and the
+    header would otherwise draw a broken image (see
+    ``test_the_brand_mark_resolves_on_this_origin``). ⚠ ``/voice`` is NOT
+    mounted and must not be: those clips are synthesized on demand through
+    ``edge_tts``, which is why ``PUBLIC_PINS`` switches voice off here at all."""
+    assert ASSET_ROUTES == {"/static/{path:path}"}, ASSET_ROUTES
+
+
+def test_the_published_static_tree_holds_only_bundled_assets():
+    """⚠ MOUNTING A DIRECTORY PUBLISHES EVERY FILE IN IT, including ones added
+    later by someone thinking about the private app only.
+
+    ``webgui/static`` is the alert WAVs and the brand images -- no config, no
+    credentials, no data (``webgui/data`` is a different tree and is not
+    mounted). This asserts the shape rather than a file list, so a new sound or
+    a new logo passes and a ``.json``, ``.env``, ``.db`` or ``.py`` does not."""
+    import shell
+
+    allowed = {".wav", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".webp"}
+    offenders = [p.relative_to(shell._STATIC_DIR).as_posix()
+                 for p in shell._STATIC_DIR.rglob("*")
+                 if p.is_file() and p.suffix.lower() not in allowed]
+    assert offenders == [], (
+        f"these files under webgui/static would be served unauthenticated on "
+        f"live.neuralstrike.co: {offenders}")
 
 
 # --- the read-only layers, driven from the ENTRYPOINT -----------------------
@@ -344,6 +384,72 @@ def test_no_published_route_takes_a_request_parameter():
 
 # --- what a published page renders inside ------------------------------------
 
+
+class _Slot:
+    """A NiceGUI element stand-in that swallows the builder API."""
+
+    def classes(self, *a, **k):
+        return self
+
+    def props(self, *a, **k):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _drive_render(screen, monkeypatch):
+    """``_render`` one screen against a FAKE ``ui``; returns ``(css, head_html)``.
+
+    A fake rather than the real thing because ``ui.add_css`` reaches the client
+    as an ``addStyle("…")`` JavaScript call with the stylesheet re-escaped into
+    a JS string literal -- so a real-``ui`` run cannot be asked whether a given
+    block went in. What it CAN answer is what elements were built; that is
+    ``_rendered`` below, and the two are used for the two different questions."""
+    import types
+
+    import live_main
+
+    css: list = []
+    head: list = []
+    monkeypatch.setattr(live_main, "ui", types.SimpleNamespace(
+        add_css=css.append, add_head_html=head.append,
+        colors=lambda **_k: None,
+        column=lambda *a, **k: _Slot(), row=lambda *a, **k: _Slot(),
+        html=lambda *a, **k: _Slot(), label=lambda *a, **k: _Slot(),
+        element=lambda *a, **k: _Slot()))
+    monkeypatch.setattr(live_main, "importlib", types.SimpleNamespace(
+        import_module=lambda _n: types.SimpleNamespace(render=lambda **_k: None)))
+    live_main._render(screen)
+    return css, head
+
+
+def _rendered(screen, monkeypatch):
+    """Every element ``_render`` builds for ``screen``, with the PAGE stubbed.
+
+    The page module is replaced -- fourteen real renders would be reading Redis
+    -- but ``ui`` is the REAL one, so what the assertions below read is the
+    element tree a visitor is served rather than a record of calls."""
+    import types
+
+    import live_main
+    from nicegui import ui
+
+    monkeypatch.setattr(live_main, "importlib", types.SimpleNamespace(
+        import_module=lambda _n: types.SimpleNamespace(render=lambda **_k: None)))
+    before = set(ui.context.client.elements)
+    live_main._render(screen)
+    return [e for key, e in ui.context.client.elements.items() if key not in before]
+
+
+def _markup(elements):
+    """The raw HTML every ``ui.html`` among ``elements`` carries."""
+    return [str(getattr(e, "_props", {}).get("innerHTML", "")) for e in elements]
+
+
 def test_the_public_render_injects_the_page_level_css(monkeypatch):
     """A published screen renders the REAL page module, so it needs the CSS that
     module's own widgets depend on -- sticky Deep Slate table headers
@@ -353,38 +459,124 @@ def test_the_public_render_injects_the_page_level_css(monkeypatch):
 
     Driven through ``_render`` rather than asserted as a substring of the file:
     a constant imported and never injected reads identically in the source."""
-    import types
-
-    import live_main
     import live_screens
     import shell
 
-    class _Col:
-        def classes(self, *a, **k):
-            return self
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    seen: list = []
-    fake_ui = types.SimpleNamespace(
-        add_css=seen.append,
-        add_head_html=lambda _h: None,
-        colors=lambda **_k: None,
-        column=_Col)
-    monkeypatch.setattr(live_main, "ui", fake_ui)
-    monkeypatch.setattr(live_main, "importlib", types.SimpleNamespace(
-        import_module=lambda _n: types.SimpleNamespace(render=lambda **_k: None)))
-
     board = next(s for s in live_screens.SCREENS if s.slug == "opportunity")
-    live_main._render(board)
+    seen, _head = _drive_render(board, monkeypatch)
 
     assert shell.TABLE_CSS in seen,         "the published tables render without their sticky headers"
     assert shell.SUBTAB_CSS in seen,         "the published subtab rows render as stock Quasar tabs"
     assert shell.PANEL_SCROLL_CSS in seen,   "the published /desk panels clip instead of scrolling"
+
+
+# --- the public header: whose screen a stranger is looking at ----------------
+# The brand was in the browser TAB TITLE and nowhere on the page -- and a tab
+# title is invisible on the YouTube wall stream and on a kiosk, so the fourteen
+# published screens read as a dense trading board belonging to nobody. These
+# pin the header that fixes that, and the three things it must never become.
+
+def test_every_published_screen_carries_the_brand(monkeypatch):
+    """⚠ Asserted against the BUILDER's own output, never the word
+    "NeuralStrike". The app name is ``[brand]`` config -- two halves, each
+    carrying its own gradient -- so a test looking for a literal would pass a
+    lockup that had lost its mark, its second half or its wrapper, and would
+    fail on a rename that broke nothing."""
+    import live_screens
+    import shell
+
+    lockup = shell.brand_lockup_html()
+    assert "brand-word" in lockup, "the builder returned nothing to look for"
+    for screen in live_screens.SCREENS:
+        assert lockup in _markup(_rendered(screen, monkeypatch)), \
+            f"{screen.route} renders no brand lockup"
+
+
+def test_the_header_names_the_screen_it_is(monkeypatch):
+    """The other half of "whose screen is this": WHICH screen.
+
+    Checked both ways -- the screen's own title is present AND no other
+    screen's is -- because the loop-variable trap this file already pins would
+    show up here as fourteen headers all reading "Premium Divergence · QQQ",
+    which is a header worse than none."""
+    import live_screens
+
+    titles = [s.title for s in live_screens.SCREENS]
+    assert len(set(titles)) == len(titles), "two screens share a title"
+    for screen in live_screens.SCREENS:
+        texts = {str(getattr(e, "text", "")) for e in _rendered(screen, monkeypatch)}
+        assert screen.title in texts, f"{screen.route} does not name itself"
+        wrong = texts & {t for t in titles if t != screen.title}
+        assert not wrong, f"{screen.route} names {sorted(wrong)}"
+
+
+def test_the_public_header_links_to_nothing(monkeypatch):
+    """⚠ Settings, Terminate, Sign out and the rail DO NOT EXIST in this
+    process, and that origin separation IS the security control. A link to a
+    route this origin does not serve reads as broken; one pointing at the
+    private host would advertise it. The header is identity, not navigation."""
+    import live_screens
+
+    elements = _rendered(live_screens.SCREENS[0], monkeypatch)
+    assert elements, "nothing was built -- this test would be vacuous"
+    for element in elements:
+        props = getattr(element, "_props", {})
+        for key in ("href", "to"):
+            assert key not in props, \
+                f"{type(element).__name__} carries {key}={props.get(key)!r}"
+    for markup in _markup(elements):
+        assert "<a " not in markup and "href=" not in markup, markup
+
+
+def test_the_header_survives_a_missing_brand_mark(monkeypatch):
+    """``brand_mark_src`` returns "" for an asset that is not on disk, and the
+    lockup then renders the WORDMARK ALONE. A fresh clone, or a ``[brand].mark``
+    naming a file nobody committed, must not put a broken-image icon on a page
+    served to the internet."""
+    import live_screens
+    import shell
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "/static/img/no-such-mark.svg")
+    assert shell.brand_mark_src() == "", "the guard itself stopped working"
+
+    markup = "".join(_markup(_rendered(live_screens.SCREENS[0], monkeypatch)))
+    assert "brand-word" in markup, "the wordmark went with the mark"
+    assert "<img" not in markup, "a missing asset rendered a broken-image icon"
+
+
+def test_the_public_render_injects_the_brand_css(monkeypatch):
+    """The wordmark is two gradients clipped to text (``background-clip: text``)
+    -- precisely what the bundled Tailwind JIT will not emit -- so without
+    ``theme.BRAND_CSS`` the lockup paints two TRANSPARENT words, which is to say
+    nothing at all. The brand FONT is loaded separately from the body font
+    (``[brand].font_url`` against ``[typography].font_url``), so it needs its
+    own ``<link>`` or the wordmark falls back to the local stack."""
+    import live_screens
+    import shell
+    from pages.options import theme
+
+    css, head = _drive_render(live_screens.SCREENS[0], monkeypatch)
+    assert theme.BRAND_CSS, "the theme built no brand CSS -- this would be vacuous"
+    assert theme.BRAND_CSS in css, "the published wordmark renders transparent"
+    if theme.BRAND_FONT_HEAD_HTML:
+        assert theme.BRAND_FONT_HEAD_HTML in head, \
+            "the published wordmark renders in the body font"
+    # And the brand did not displace what was already going in.
+    assert shell.TABLE_CSS in css
+
+
+def test_the_brand_mark_resolves_on_this_origin():
+    """⚠ THE MOUNT, read from the page's side. ``[brand].mark`` is a URL under
+    ``/static`` and this process serves its OWN ASGI app: measured on prod
+    before the mount existed, ``:8500/static/img/neuralstrike-mark.svg`` was 200
+    and ``:8501`` was 404 -- so every published header would have drawn a broken
+    image while the markup read as entirely correct."""
+    import shell
+
+    mark = shell.brand_mark_src()
+    assert mark.startswith("/static/"), mark
+    assert (shell._STATIC_DIR / mark[len("/static/"):]).is_file()
 
 
 # --- the entrypoint's own shape ---------------------------------------------

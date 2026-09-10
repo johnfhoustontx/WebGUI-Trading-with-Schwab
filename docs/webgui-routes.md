@@ -606,9 +606,38 @@ follows whatever the private app last looked at (see CLAUDE.md). `/net-premium` 
 exception and needs no per-symbol key: `cache:options:net_premium` is multi-symbol and
 symbol-independent by construction.
 
-**The shell is not `_layout`.** The live process mounts no rail, no tab strip, no
-breadcrumb, no market marquee and no page-help tooltips, and its content wrapper is a
-neutral `w-full p-4 gap-3` column — deliberately NOT `theme.PAGE`, since every one of
+**Every screen carries a slim brand header (2026-09-09).** The brand reached these
+screens through the browser TAB TITLE alone, which is invisible on the YouTube wall
+stream and on a kiosk — so a stranger opening one saw a dense trading board belonging
+to nobody. `live_main._header(screen)` draws the app header's LEFT half and nothing
+else: `shell.brand_lockup_html()` (mark + two-tone wordmark), a hairline, and
+`screen.title`, over a `border-b` band about 40px tall. The mark is sized 32px here
+rather than the app's 44px — `LIVE_HEADER_CSS`, this entrypoint's one `ui.add_css`,
+and the documented escape hatch since `.brand-mark` lives inside a raw HTML string.
+The screen name reuses `shell._CRUMB_LEAF`, the private breadcrumb's leaf style, so
+the two cannot drift.
+
+⚠ **The header links to NOTHING, and that is the design.** Settings, Terminate, Sign
+out and the whole rail do not exist in this process; a link to a route this origin
+does not serve reads as broken, and one pointing at the private host would advertise
+it. ⚠ It also forced the **one non-page route** this process serves: `[brand].mark` is
+a file under `/static`, and `live_main` mounts that directory (measured before the
+mount, `:8500/static/img/neuralstrike-mark.svg` was 200 and `:8501` was 404). Mounting
+a directory publishes every file in it — three alert WAVs and four brand images, no
+config and no data — and `tests/test_live_main.py` pins both halves. `/voice` is not
+mounted. A missing or misnamed mark still degrades to the **wordmark alone**, never a
+broken-image icon.
+
+**The brand builders moved to `shell.py`** with that header — `brand_mark_src`,
+`brand_lockup_html` and `_STATIC_DIR`, re-exported by `main` so `wall.py` and the
+tests are unchanged. It is what made `shell.py` stop being import-free; the reasoning
+is in CLAUDE.md and the closed import list is pinned by `test_shell_seam.py`. ⚠
+`IS_DEV` is a by-value export, so a test patching the DEV chip must patch it on
+`shell`, not on `main`.
+
+**The rest of the shell is not `_layout`.** The live process mounts no rail, no tab
+strip, no breadcrumb, no market marquee and no page-help tooltips, and its content
+wrapper is a neutral `w-full p-4 gap-3` column — deliberately NOT `theme.PAGE`, since every one of
 the fourteen pages already supplies its own top-level wrap and background
 (`CONSOLE_PAGE`, `RT_VOID_BG`, `macro-board`, `calc-v2 PAGE`), so wrapping again would
 draw a second frame around each and a navy gradient behind the void-black ones. What

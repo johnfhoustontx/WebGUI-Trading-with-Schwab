@@ -8,13 +8,23 @@ the seam here means the public process is STRUCTURALLY incapable of holding the
 app's route table, rather than incapable by inspection.
 
 Both entrypoints provide it: ``main.py`` populates the slots from ``_layout``;
-``live_main.py`` leaves them empty, and every function here is already a no-op
-without a mounted header. Not to be confused with ``pages/trade_shell.py``,
-which is the Trade section's shared page body.
+``live_main.py`` leaves them empty, and every slot-backed function here is
+already a no-op without a mounted header. Not to be confused with
+``pages/trade_shell.py``, which is the Trade section's shared page body.
+
+⚠ Not everything here is a slot. Since 2026-09-09 this module also owns the
+BRAND LOCKUP, which both entrypoints build their own header out of -- it is a
+real builder with real output, and the reason this module stopped being
+import-free. See the section near the foot of the file.
 """
+import html
+import pathlib
+
 from nicegui import ui
 
+from pages.options import theme
 from pages.ui_guard import guard
+from repo_paths import IS_DEV
 
 
 # ── which ORIGIN this process is ─────────────────────────────────────────────
@@ -269,6 +279,79 @@ PANEL_SCROLL_CSS = """
    the page, which is the only place its per-panel offset is known. */
 .ns-panel-row.ns-pin-2::after { grid-column: 1 / 3; }
 """
+
+
+# ── the brand lockup, which BOTH entrypoints draw ────────────────────────────
+# Same seam, same reason as the CSS above: `main.py` puts it in the app header,
+# `live_main.py` puts it in the public screens' header, and that process may
+# never import this one. It lived in main.py until 2026-09-09, which is why the
+# fourteen published screens carried the app name in the browser TAB TITLE and
+# nowhere on the page -- invisible on the YouTube wall stream and on a kiosk.
+#
+# ⚠ This is what made `shell.py` stop being import-free (see
+# `test_the_shell_stays_a_leaf_module`, which records the decision): a lockup
+# reads `[brand]` out of the theme, escapes the configured name, resolves the
+# mark against the static tree and asks which environment this is.
+
+# The bundled static assets. `main.py` MOUNTS this directory at `/static` and
+# takes the constant from here rather than recomputing it, so the path the mark
+# is checked against and the path it is served from cannot drift.
+_STATIC_DIR = pathlib.Path(__file__).resolve().parent / "static"
+
+
+def brand_mark_src(static_dir=None):
+    """The header logo's URL, or ``""`` when there is no usable image.
+
+    ``[brand].mark`` is a URL under ``/static``; this maps it back to disk and
+    returns it ONLY if the file is actually there, so a missing asset renders the
+    wordmark alone instead of a broken-image icon. Any oddity (blank config, a
+    path outside /static, an unreadable directory) degrades to ``""``.
+
+    ⚠ On the PUBLIC origin the degradation is the only thing standing between a
+    misconfigured `[brand].mark` and a broken-image icon on a page served to
+    anyone, so it is not a nicety. `live_main.py` must also MOUNT `/static`, or
+    the URL this returns 404s there while reading as perfectly correct."""
+    url = str(getattr(theme, "BRAND_MARK", "") or "").strip()
+    if not url.startswith("/static/"):
+        return ""
+    root = pathlib.Path(static_dir) if static_dir else _STATIC_DIR
+    try:
+        if (root / url[len("/static/"):]).is_file():
+            return url
+    except Exception:  # noqa: BLE001 — chrome must never break a page render.
+        pass
+    return ""
+
+
+def brand_lockup_html(static_dir=None, *, mark=True):
+    """The header lockup: the logo mark (when present) + the two-tone wordmark.
+
+    Raw HTML rather than NiceGUI elements because each wordmark half needs a
+    gradient clipped to its text (``theme.build_brand_css``), which Tailwind's
+    bundled JIT can't express. The name comes from ``[brand]`` config, so it is
+    HTML-escaped.
+
+    In dev the lockup carries a DEV chip: two identical-looking tabs that write
+    to DIFFERENT paper books is a mistake waiting to happen. Inline style for the
+    same reason as the rest of this function — it is a raw HTML string, not a
+    NiceGUI element with ``.classes()``.
+
+    ``mark=False`` emits the WORDMARK only. ``main._layout`` uses that, because
+    since 2026-08-16 the logo is the menu's pin control and therefore has to be a
+    real NiceGUI element with a click handler and a tooltip — it cannot live
+    inside an inert HTML string. The PUBLIC header has no menu to pin, so it
+    takes the default and gets the mark inside the string."""
+    mark = brand_mark_src(static_dir) if mark else ""
+    img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
+           if mark else "")
+    chip = ('<span style="margin-left:8px;padding:1px 7px;border-radius:4px;'
+            'background:#b45309;color:#fff;font-size:10px;font-weight:700;'
+            'letter-spacing:.06em">DEV</span>') if IS_DEV else ""
+    return (f'<div style="display:flex;align-items:center;gap:9px">{img}'
+            f'<span class="brand-word">'
+            f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
+            f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
+            f'</span>{chip}</div>')
 
 
 def play_alert(sound: str, volume: float) -> None:

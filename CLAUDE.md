@@ -616,8 +616,14 @@ registers every `@_page` route, so importing it from a second process publishes
 correct. The seam a page needs is **`webgui/shell.py`** (`subtab_slot` ·
 `set_breadcrumb_leaf` · `bind_breadcrumb_leaf` · `play_alert`, plus the page-level
 `TABLE_CSS` / `SUBTAB_CSS` / `PANEL_SCROLL_CSS` that **both** entrypoints inject — those style widgets a
-PAGE mounts, not nav chrome). `main` re-exports every one of them, so nothing else
-moved. `test_shell_seam.py` pins the absence at source level; `test_live_main.py`
+PAGE mounts, not nav chrome — plus, since 2026-09-09, the **brand lockup**
+(`brand_mark_src` / `brand_lockup_html` / `_STATIC_DIR`), which both headers
+draw). `main` re-exports every one of them, so nothing else
+moved. ⚠ The lockup is what made `shell.py` stop being import-free: it reads
+`[brand]` out of `pages.options.theme`, escapes with `html`, resolves the mark
+with `pathlib` and asks `repo_paths` for the DEV chip. That import list is
+CLOSED and pinned — a page module, `bus_client` or `app_settings` appearing
+there means the seam is becoming main.py again. `test_shell_seam.py` pins the absence at source level; `test_live_main.py`
 pins it again by running `live_main.py` ALONE in a fresh interpreter and asserting
 `main` never entered `sys.modules` — the only check that can see a TRANSITIVE import,
 which is how one would actually arrive.
@@ -640,6 +646,17 @@ Sign-out, because those routes **do not exist in the process**. The pinned gamma
 screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates every
 enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
 control that reaches one is built. Both, not either.
+
+⚠ **The published route set is the fourteen screens PLUS exactly one non-page
+route: `/static` (2026-09-09).** Every screen now carries a slim header — the
+brand lockup, a hairline, the screen name, and **no navigation of any kind** —
+and `[brand].mark` is a file under `/static`, which this process serves from its
+OWN ASGI app: measured before the mount, `:8500/static/img/neuralstrike-mark.svg`
+was 200 and `:8501` was 404, so the header would have drawn a broken image while
+the markup read as correct. ⚠ **Mounting a directory publishes every file in it,
+now and later** — that tree is three alert WAVs and four brand images, and
+`test_live_main.py` pins both that `/static` is the only addition and that
+nothing but bundled assets lives under it. `/voice` is deliberately NOT mounted.
 
 ⚠ **`app_settings.freeze()` is not only about pinning defaults.** `settings.json` is a
 **single-user store whose in-memory cache assumes one writer in one process**;

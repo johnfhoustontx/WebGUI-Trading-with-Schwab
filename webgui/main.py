@@ -57,6 +57,15 @@ from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
 from shell import (PANEL_SCROLL_CSS, SUBTAB_CSS, TABLE_CSS,  # noqa: E402
                    capture_chrome_css)
 
+# The brand lockup builders, likewise: `live_main.py` draws the same lockup in
+# the public screens' header and cannot import this module. Re-exported because
+# `wall.py` and the tests have called `main.brand_lockup_html` since it was
+# written. `_STATIC_DIR` comes from there too -- it is the tree the mark is
+# resolved against AND the one mounted at /static below, and two constants for
+# one directory would drift.
+from shell import (_STATIC_DIR, brand_lockup_html,  # noqa: F401,E402
+                   brand_mark_src)
+
 _TABLE_CSS = TABLE_CSS
 
 import logging_setup  # noqa: E402
@@ -73,8 +82,9 @@ logging_setup.install_file_logging()
 # NiceGUI's default handler. See pages/ui_guard.py.
 install_deleted_slot_log_filter()
 
-# Serve bundled static assets (alert sounds) at /static.
-_STATIC_DIR = _REPO_ROOT / "webgui" / "static"
+# Serve bundled static assets (alert sounds, brand images) at /static.
+# `_STATIC_DIR` is imported from `shell` above; `live_main.py` mounts the very
+# same directory on the public origin, for the brand mark.
 if _STATIC_DIR.is_dir():
     app.add_static_files("/static", str(_STATIC_DIR))
 
@@ -836,53 +846,9 @@ def breadcrumb_trail(active: str):
     return [_NAV_LABEL.get(active, theme.BRAND_NAME)]
 
 
-def brand_mark_src(static_dir=None):
-    """The header logo's URL, or ``""`` when there is no usable image.
-
-    ``[brand].mark`` is a URL under ``/static``; this maps it back to disk and
-    returns it ONLY if the file is actually there, so a missing asset renders the
-    wordmark alone instead of a broken-image icon. Any oddity (blank config, a
-    path outside /static, an unreadable directory) degrades to ``""``."""
-    url = str(getattr(theme, "BRAND_MARK", "") or "").strip()
-    if not url.startswith("/static/"):
-        return ""
-    root = pathlib.Path(static_dir) if static_dir else _STATIC_DIR
-    try:
-        if (root / url[len("/static/"):]).is_file():
-            return url
-    except Exception:  # noqa: BLE001 — chrome must never break a page render.
-        pass
-    return ""
-
-
-def brand_lockup_html(static_dir=None, *, mark=True):
-    """The header lockup: the logo mark (when present) + the two-tone wordmark.
-
-    Raw HTML rather than NiceGUI elements because each wordmark half needs a
-    gradient clipped to its text (``theme.build_brand_css``), which Tailwind's
-    bundled JIT can't express. The name comes from ``[brand]`` config, so it is
-    HTML-escaped.
-
-    In dev the lockup carries a DEV chip: two identical-looking tabs that write
-    to DIFFERENT paper books is a mistake waiting to happen. Inline style for the
-    same reason as the rest of this function — it is a raw HTML string, not a
-    NiceGUI element with ``.classes()``.
-
-    ``mark=False`` emits the WORDMARK only. ``_layout`` uses that, because since
-    2026-08-16 the logo is the menu's pin control and therefore has to be a real
-    NiceGUI element with a click handler and a tooltip — it cannot live inside an
-    inert HTML string."""
-    mark = brand_mark_src(static_dir) if mark else ""
-    img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
-           if mark else "")
-    chip = ('<span style="margin-left:8px;padding:1px 7px;border-radius:4px;'
-            'background:#b45309;color:#fff;font-size:10px;font-weight:700;'
-            'letter-spacing:.06em">DEV</span>') if IS_DEV else ""
-    return (f'<div style="display:flex;align-items:center;gap:9px">{img}'
-            f'<span class="brand-word">'
-            f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
-            f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
-            f'</span>{chip}</div>')
+# `brand_mark_src` / `brand_lockup_html` moved to shell.py on 2026-09-09 and are
+# re-exported at the top of this file -- the public live screens draw the same
+# lockup in their own header and may never import this module.
 
 
 def nav_pin_tooltip():

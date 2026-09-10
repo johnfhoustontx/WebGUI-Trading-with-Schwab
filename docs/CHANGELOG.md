@@ -4,7 +4,83 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-09 (**A Desk panel now scrolls sideways INSIDE
+**Last updated:** 2026-09-09 (**The fourteen public live screens now carry a
+brand header** — mark + two-tone wordmark + the screen's name — where before the
+app name reached them only through the browser tab title.)
+
+- **The problem was the surface, not the markup.** `theme.BRAND_NAME` appeared in
+  `live_main.py` twice: the `@ui.page(title=…)` and the `ui.run` server banner.
+  A tab title is invisible on the YouTube wall stream and on a kiosk, so a
+  stranger opening `live.neuralstrike.co/gamma` saw a dense dealer-positioning
+  board with nothing on the page saying whose it is.
+
+- **`_header(screen)` is the app header's LEFT half and nothing else** — the
+  lockup, a hairline, `screen.title` — in a `border-b` band about 40px tall,
+  built as the page's first element rather than a fixed `ui.header` (a fixed bar
+  would need the layout padding `main._NAV_CSS` supplies, and would float over
+  the very charts these screens exist to show). The mark is 32px against the
+  app's 44px: these screens are dense by design and this header is pure
+  identity, so it must not cost a row of data. That one rule is
+  `LIVE_HEADER_CSS`, the entrypoint's single `ui.add_css` and the documented
+  escape hatch — `.brand-mark` lives inside a raw HTML string, so no
+  `.classes()` can reach it. The screen name reuses `shell._CRUMB_LEAF`.
+
+- **⚠ NO NAVIGATION OF ANY KIND, and not for want of somewhere to go.** Settings,
+  Terminate, Sign out and the whole rail *do not exist in this process*, and that
+  origin separation IS the security control. A link to a route this origin does
+  not serve reads as broken; one pointing at the private host would advertise it.
+  `test_the_public_header_links_to_nothing` walks the rendered elements for an
+  `href`/`to` prop and the raw markup for an `<a`.
+
+- **`brand_mark_src` / `brand_lockup_html` / `_STATIC_DIR` moved to
+  `webgui/shell.py`**, re-exported by `main` — the same seam, and the same
+  reason, as `play_alert` and `TABLE_CSS`: the public entrypoint may never
+  `import main`. ⚠ **This is what made `shell.py` stop being import-free**, and
+  `test_the_shell_stays_a_leaf_module` had anticipated exactly that ("if it ever
+  needs `theme` … that is a decision to take deliberately, not to discover"). Its
+  list is now closed at `{html, nicegui, pages, pathlib, repo_paths}`; only
+  `theme` is new weight, since `repo_paths` arrives with it either way.
+
+- **⚠ `IS_DEV` is a BY-VALUE export, and the move caught a test on it.**
+  `test_dev_lockup_carries_a_dev_chip` patched `main.IS_DEV`, which after the move
+  sets an attribute nothing consults. Its non-vacuity partner
+  (`test_prod_lockup_has_no_dev_chip`) would NOT have caught it — under pytest the
+  real flag is already False, so it would have gone on passing while asserting
+  nothing about the patch. Both now patch `shell`.
+
+- **⚠ `/static` is now mounted on the public origin — the ONE non-page route this
+  process serves.** Measured on prod before the change:
+  `127.0.0.1:8500/static/img/neuralstrike-mark.svg` answered **200** and `:8501`
+  answered **404**, so the header would have drawn a broken-image icon while the
+  markup read as entirely correct. Mounting a *directory* publishes every file in
+  it, now and later — this one is three alert WAVs and four brand images, no
+  config, no credentials, no data. `test_live_main.py`'s "the fourteen routes and
+  nothing else" assertion gained a named `ASSET_ROUTES` allowance plus two tests:
+  one saying that is the only addition, one asserting nothing but bundled asset
+  file types lives under the tree. `/voice` is deliberately NOT mounted — those
+  clips are `edge_tts` network calls, which is why `PUBLIC_PINS` switches voice
+  off here at all.
+
+- **The missing-mark degradation survives, and matters more here.**
+  `brand_mark_src` returns `""` for an asset that is not on disk and the lockup
+  then renders the wordmark alone. On an origin served to anyone, that is the only
+  thing between a bad `[brand].mark` and a broken-image icon in front of
+  strangers; `test_the_header_survives_a_missing_brand_mark` drives it through the
+  real `_render`.
+
+- **The brand assertions read the BUILDER's output, never the word
+  "NeuralStrike".** The name is `[brand]` config in two gradient halves, so a
+  literal-matching test would pass a lockup that had lost its mark or its second
+  half and fail on a rename that broke nothing. Fourteen renders are driven for
+  the lockup and for the right screen name — checked both ways, since the
+  loop-variable trap this file already pins would otherwise surface as fourteen
+  headers all reading "Premium Divergence · QQQ".
+
+- **webgui 3565 passed / 1 skipped** (3554 before, +11).
+
+---
+
+**Prior — 2026-09-09** (**A Desk panel now scrolls sideways INSIDE
 itself, with the column that names each row pinned**, instead of the whole
 document sliding and taking the panel heading and the symbol with it. Design +
 plan: [`2026-09-08-panel-scroll-design.md`](plans/2026-09-08-panel-scroll-design.md)
