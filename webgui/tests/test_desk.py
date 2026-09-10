@@ -1581,6 +1581,102 @@ def test_render_hangs_the_bias_words_hover_on_the_sentiment_pill(monkeypatch):
     assert S.band_word_picture("bias", "Long") in texts
 
 
+# ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
+def _summary(narrative="Fear builds while the tape glides; lean defensive.",
+             **inputs):
+    base = {"trend": {"word": "Gliding", "score": 38.6}, "bias": "Cautious",
+            "signal": "Bearish", "regime": {"word": "Rallying", "confidence": 0.7},
+            "bullbear": {"horizon": "today", "counts": {"rising_leading": 1}}}
+    base.update(inputs)
+    return {"narrative": narrative, "inputs": base,
+            "as_of": "2026-09-10T15:42:00+00:00"}
+
+
+def _summary_views(**over):
+    views = {
+        "summary": _summary(),
+        "composite": {"live": {"composite": {"total_score": 3.98,
+                                             "bias": "Cautious"}},
+                      "derived": {"size": "0.85x", "bias": "Cautious",
+                                  "signal": "Bearish",
+                                  "trend": {"state": "lack_of_bearishness"}}},
+        "history": {"snaps": []},
+        "regime": {"label": "Rallying", "committed_label": "trending",
+                   "confidence": 0.7, "direction": 1},
+        "bullbear": _live_bullbear_payload(),
+    }
+    views.update(over)
+    return views
+
+
+def _facts(monkeypatch, live=True, **over):
+    _live_now(monkeypatch, live=live)
+    v = _summary_views(**over)
+    return d.summary_facts(v["summary"], v["composite"], v["history"],
+                           v["regime"], v["bullbear"])
+
+
+def test_summary_facts_carry_the_sentence_and_when_it_was_written(monkeypatch):
+    f = _facts(monkeypatch)
+    assert f["narrative"].startswith("Fear builds")
+    assert f["as_of"] == "as of 10:42 CT"
+
+
+def test_summary_chips_are_the_six_readings_in_order(monkeypatch):
+    f = _facts(monkeypatch)
+    assert [c["key"] for c in f["chips"]] == [
+        "sentiment", "trend", "bias", "signal", "regime", "bullbear"]
+    vals = {c["key"]: c["value"] for c in f["chips"]}
+    assert vals["sentiment"] == "3.98" and vals["trend"] == "Gliding"
+    assert vals["bias"] == "Cautious" and vals["signal"] == "Bearish"
+    assert vals["regime"] == "Rallying"
+    assert vals["bullbear"].endswith("today")
+
+
+def test_every_summary_chip_carries_its_own_hover(monkeypatch):
+    from pages import regime_mix as RM
+    from pages import sentiment as S
+    tips = {c["key"]: c["tip"] for c in _facts(monkeypatch)["chips"]}
+    assert tips["sentiment"] == d.SENTIMENT_TIP
+    assert tips["trend"] == S.trend_picture("lack_of_bearishness")
+    assert tips["bias"] == S.band_word_picture("bias", "Cautious")
+    assert tips["signal"] == S.band_word_picture("signal", "Bearish")
+    assert tips["regime"] == RM.regime_picture("Rallying")
+    assert "Rising · Leading" in tips["bullbear"]
+    assert "today" in tips["bullbear"]
+
+
+def test_the_summary_is_current_when_the_readings_match_its_inputs(monkeypatch):
+    assert _facts(monkeypatch)["moved"] is False
+
+
+def test_the_summary_says_when_the_readings_moved_past_it(monkeypatch):
+    moved = _summary(bias="Neutral")               # written when bias was Neutral
+    assert _facts(monkeypatch, summary=moved)["moved"] is True
+    regime_moved = _summary(regime={"word": "Whipsaw", "confidence": 0.4})
+    assert _facts(monkeypatch, summary=regime_moved)["moved"] is True
+    horizon_moved = _summary(bullbear={"horizon": "quarter",
+                                       "counts": {"rising_leading": 1}})
+    assert _facts(monkeypatch, summary=horizon_moved)["moved"] is True
+
+
+def test_no_sentence_reads_as_no_sentence_never_as_current(monkeypatch):
+    f = _facts(monkeypatch, summary={"narrative": "", "inputs": {}})
+    assert f["narrative"] == "" and f["as_of"] == "" and f["moved"] is False
+    assert _facts(monkeypatch, summary=None)["narrative"] == ""
+
+
+def test_cold_readings_dash_and_carry_no_hover(monkeypatch):
+    f = _facts(monkeypatch, composite={}, regime=None, bullbear=None,
+               summary=None)
+    by = {c["key"]: c for c in f["chips"]}
+    for key in ("sentiment", "trend", "bias", "signal", "bullbear"):
+        assert by[key]["value"] == d._DASH, key
+        assert by[key]["tip"] == "", key
+        assert by[key]["cls"] == d.CON_TXT_MUTED, key
+    assert by["regime"]["value"] == "Unclear"      # the console's own cold word
+
+
 def test_the_desk_band_words_match_the_console_tiles_for_one_payload():
     """The two screens read the same two fields off the same ``derived``, so
     for any payload their BIAS and SIGNAL text must be identical."""

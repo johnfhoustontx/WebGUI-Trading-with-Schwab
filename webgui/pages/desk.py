@@ -992,6 +992,109 @@ def regime_tone(reg):
     return CON_TXT
 
 
+# ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
+# One Claude-written sentence consolidating the six readings (market_svc's
+# change-driven summary, cache:market:summary) over six LIVE chips read off the
+# views this page already polls — so the chips are current even while the
+# sentence lags. Design: docs/plans/2026-09-10-desk-market-summary-design.md.
+SUMMARY_EMPTY = "No summary yet — one is written when the readings next change."
+SUMMARY_MOVED = "Readings have changed since this was written."
+SENTIMENT_TIP = ("The sentiment composite, 0–10. Contrarian: a higher score "
+                 "means more fear, which this model reads as opportunity.")
+_SUMMARY_HORIZON = {True: "today", False: "quarter"}
+
+
+def _word_or_none(v):
+    v = "" if v is None else str(v).strip()
+    return None if v in ("", _DASH) else v
+
+
+def bullbear_distribution(bullbear_view, now=None):
+    """The Bull/Bear chip's hover: every quadrant's count and the horizon."""
+    live = strip_is_live(bullbear_view, now)
+    counts = _bb.quadrant_counts(_bullbear_rows(bullbear_view, live=live),
+                                 live=live)
+    if not sum(counts.values()):
+        return ""
+    parts = [f"{_bb.quadrant_label(q)} {counts[q]}"
+             for q in _bb.QUADRANTS if counts[q]]
+    horizon = "on today's moves" if live else "on the quarter"
+    return f"{' · '.join(parts)} — counted {horizon}."
+
+
+def _as_of_text(iso):
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ""
+    return "" if dt.tzinfo is None else f"as of {dt.astimezone(_CT):%H:%M} CT"
+
+
+def summary_facts(summary_view, composite_view, history_view, regime_view,
+                  bullbear_view, now=None):
+    """Everything the MARKET SUMMARY frame draws, as plain data:
+    ``{"narrative", "as_of", "moved", "chips": [six {key,label,value,cls,tip}]}``.
+
+    Every chip reuses the strip's own derivation (the pill composite, the band
+    facts, ``regime_display``, the map's headline), so the frame and the strip
+    cannot name one reading two ways. ``moved`` compares the WORDS and the
+    Bull/Bear count the sentence was written from (``inputs``) with the live
+    ones — a fact, not a promise of a refresh."""
+    now = now or datetime.now().astimezone()
+    summ = summary_view if isinstance(summary_view, dict) else {}
+    comp = composite_view if isinstance(composite_view, dict) else {}
+    hist = history_view if isinstance(history_view, dict) else {}
+    derived = comp.get("derived") if isinstance(comp.get("derived"), dict) else {}
+    snaps = hist.get("snaps") if isinstance(hist.get("snaps"), list) else []
+
+    total = _finite(_pill_composite(comp.get("live"), snaps).get("total_score"))
+    trend_word = _word_or_none(trend_pill_text(derived).title())
+    band = {f["key"]: f for f in signal_band_facts(derived)}
+    reg = regime_display(regime_view)
+    live = strip_is_live(bullbear_view, now)
+    counts = _bb.quadrant_counts(_bullbear_rows(bullbear_view, live=live),
+                                 live=live)
+    bb_line = bullbear_headline(bullbear_view, now)
+
+    def _chip(key, label, value, cls, tip):
+        return {"key": key, "label": label, "value": value or _DASH,
+                "cls": cls if value else CON_TXT_MUTED,
+                "tip": tip if value else ""}
+
+    chips = [
+        _chip("sentiment", "SENTIMENT",
+              None if total is None else f"{total:.2f}", CON_TXT, SENTIMENT_TIP),
+        _chip("trend", "TREND", trend_word, CON_TXT, trend_pill_tooltip(derived)),
+        _chip("bias", "BIAS", _word_or_none(band["bias"]["value"]),
+              band["bias"]["cls"], band["bias"]["tip"]),
+        _chip("signal", "SIGNAL", _word_or_none(band["signal"]["value"]),
+              band["signal"]["cls"], band["signal"]["tip"]),
+        {"key": "regime", "label": "REGIME", "value": reg["word"],
+         "cls": regime_tone(reg), "tip": reg["tip"]},
+        _chip("bullbear", "BULL / BEAR", bb_line or None, CON_TXT,
+              bullbear_distribution(bullbear_view, now)),
+    ]
+
+    narrative = str(summ.get("narrative") or "").strip()
+    inputs = summ.get("inputs") if isinstance(summ.get("inputs"), dict) else {}
+    moved = False
+    if narrative and inputs:
+        in_bb = inputs.get("bullbear") or {}
+        was = ((inputs.get("trend") or {}).get("word"), inputs.get("bias"),
+               inputs.get("signal"), (inputs.get("regime") or {}).get("word"),
+               in_bb.get("horizon"),
+               (in_bb.get("counts") or {}).get("rising_leading"))
+        counted = bool(sum(counts.values()))
+        now_is = (trend_word, _word_or_none(band["bias"]["value"]),
+                  _word_or_none(band["signal"]["value"]), reg["word"],
+                  _SUMMARY_HORIZON[live] if counted else None,
+                  counts["rising_leading"] if counted else None)
+        moved = was != now_is
+    return {"narrative": narrative,
+            "as_of": _as_of_text(summ.get("as_of")) if narrative else "",
+            "moved": moved, "chips": chips}
+
+
 # ── the Sentiment / Trend hero pills ─────────────────────────────────────────
 # The Desk's two score cards are the Market Regime Console's own cards, so their
 # hero pills must read the SAME words off the SAME payload. ``sentiment_arcs`` /
