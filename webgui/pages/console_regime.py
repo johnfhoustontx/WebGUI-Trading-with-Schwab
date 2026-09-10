@@ -11,6 +11,7 @@ LEAD / TIGHTEST TODAY pair). This module is the console's presentation of it.
 from pages import console as K
 from pages import console_dial
 from pages import regime_mix as RM
+from pages.console_cards import pill_tooltip
 from pages.options import theme
 from pages.options.theme import (CONSOLE_CARD, CONSOLE_CELL, CONSOLE_DISPLAY,
                                  CONSOLE_DIVIDER, CONSOLE_HAIRLINE, CON_TXT,
@@ -126,9 +127,11 @@ def render_dial_card(regime, points):
     with ui.column().classes(f"{_CARD} px-[24px] pt-[22px] pb-[24px] gap-4"):
         ui.label("REGIME IDENTIFIED").classes(
             f"text-[10px] tracking-[.26em] {CON_TXT_DIM}")
-        ui.html(console_dial.dial_svg(
+        dial = ui.html(console_dial.dial_svg(
             None if r.get("unclear") else r.get("confidence"), name,
             uid="regime")).classes("w-full max-w-[244px] self-center")
+        # The dial's centre IS the regime word, so hovering it explains the word.
+        pill_tooltip(dial, RM.regime_picture(name))
         with ui.element("div").classes(
                 f"grid grid-cols-2 gap-px w-full {CONSOLE_HAIRLINE} "
                 f"border {CONSOLE_DIVIDER}"):

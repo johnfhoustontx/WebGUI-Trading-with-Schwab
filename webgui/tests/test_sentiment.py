@@ -555,6 +555,21 @@ def test_a_dashed_tile_carries_no_hover():
     assert not [t for w, t in _label_tooltips(_render_card()) if w == "—"]
 
 
+def test_hovering_the_regime_dial_describes_the_regime():
+    from nicegui import ui
+    from pages import regime_mix as RM
+    bus_client.reset()
+    _seed_cache()
+    bus_client.bus().cache_set("cache:sentiment:regime", {
+        "label": "Whipsaw", "committed_label": "choppy", "confidence": 0.62})
+    card = _render_card()
+    tips = [e.text for e in card.descendants()
+            if isinstance(e, ui.tooltip)
+            and isinstance(e.parent_slot.parent, ui.html)
+            and 'id="regime-dial-' in (e.parent_slot.parent.content or "")]
+    assert tips == [RM.regime_picture("Whipsaw")]
+
+
 def test_sentiment_avg_or_none_is_none_with_no_snaps():
     assert S.sentiment_avg_or_none([], 5) is None
     assert S.sentiment_avg_or_none(None) is None

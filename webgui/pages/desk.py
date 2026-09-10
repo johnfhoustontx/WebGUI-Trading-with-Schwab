@@ -50,6 +50,7 @@ from pages import bullbear as _bb
 from pages import console as _K
 from pages import console_cards as _CC
 from pages import console_regime as _CR
+from pages.regime_mix import regime_picture as _regime_picture
 # The map page, for its ONE sentence. ``headline_line`` is the count line
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
 # imported rather than restated, for the reason at the top of this file.
@@ -962,16 +963,33 @@ def regime_display(regime_view):
     read as absent, not as a maximal one. That is the documented app-wide trap
     in its most expensive form — an all-NaN price read once scored 92.50 at
     confidence 1.0, a data outage rendering as a confident buy signal.
+
+    ``tip`` is the word's hover sentence, off ``regime_mix.regime_picture`` — the
+    same table the Market Regime Console's dial hangs its own hover from.
     """
     r = regime_view if isinstance(regime_view, dict) else {}
+    word = _CR.regime_name(r)
     return {
-        "word": _CR.regime_name(r),
+        "word": word,
+        "tip": _regime_picture(word),
         "committed_label": r.get("committed_label") or "",
         "confidence": _finite(r.get("confidence")),
         "direction": r.get("direction", 0),
         "direction_strong": bool(r.get("direction_strong")),
         "unclear": bool(r.get("unclear")),
     }
+
+
+def regime_tone(reg):
+    """The regime word's colour: follows the direction the service committed,
+    and ONLY when it committed one — a fixed green would paint "Retreating" as
+    bullish. Shared by the strip tile and the summary chip."""
+    if reg.get("unclear"):
+        return CON_TXT_MUTED
+    direction = reg.get("direction")
+    if direction:
+        return CON_POS if direction > 0 else CON_NEG
+    return CON_TXT
 
 
 # ── the Sentiment / Trend hero pills ─────────────────────────────────────────
@@ -3045,6 +3063,8 @@ def render():
                 regime_lbl = ui.label(_DASH).classes(
                     f"{_STRIP_WORD} {CON_TXT}")
                 regime_sub = ui.label("").classes(_STRIP_FOOT)
+                # The hover the regime word currently carries — "" at build.
+                regime_tip = {"text": ""}
 
         # ── the Bull / Bear sector strip ─────────────────────────────────────
         # It sits between the TOP STRIP and the panels, and that position is
@@ -3171,12 +3191,13 @@ def render():
     def _paint_strip():
         reg = regime_display(_view("sentiment:regime"))
         regime_lbl.text = reg["word"]
-        # Colour follows the direction the service committed, and ONLY when it
-        # committed one — a fixed green would paint "Retreating" as bullish.
-        tone = CON_TXT_MUTED if reg["unclear"] else CON_TXT
-        if not reg["unclear"] and reg["direction"]:
-            tone = CON_POS if reg["direction"] > 0 else CON_NEG
-        regime_lbl.classes(remove=_ALL_STATE_TEXT, add=tone)
+        regime_lbl.classes(remove=_ALL_STATE_TEXT, add=regime_tone(reg))
+        # Updated in place, so the hover is swapped only when its sentence
+        # changes — clearing an unchanged one would close it under the cursor.
+        if reg["tip"] != regime_tip["text"]:
+            regime_lbl.clear()
+            _CC.pill_tooltip(regime_lbl, reg["tip"])
+            regime_tip["text"] = reg["tip"]
         conf = reg["confidence"]
         # A withheld confidence prints NOTHING. It must never print 0% — that
         # is a reading, and "absent" is not one.

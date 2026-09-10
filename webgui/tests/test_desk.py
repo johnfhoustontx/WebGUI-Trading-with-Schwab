@@ -1535,6 +1535,29 @@ def test_sentiment_pill_hover_is_its_bias_words():
         assert d.sentiment_pill_tooltip(live, snaps) == "", live
 
 
+def test_regime_display_carries_the_regime_words_hover():
+    from pages import regime_mix as RM
+    reg = d.regime_display({"label": "Rallying", "committed_label": "trending",
+                            "confidence": 0.7, "direction": 1})
+    assert reg["tip"] == RM.regime_picture("Rallying")
+    # A cold regime reads "Unclear" — and "Unclear" has its own sentence.
+    assert d.regime_display(None)["tip"] == RM.regime_picture("Unclear")
+
+
+def test_regime_tone_follows_the_committed_direction_only():
+    assert d.regime_tone({"unclear": True, "direction": 1}) == d.CON_TXT_MUTED
+    assert d.regime_tone({"unclear": False, "direction": 0}) == d.CON_TXT
+    assert d.regime_tone({"unclear": False, "direction": 1}) == d.CON_POS
+    assert d.regime_tone({"unclear": False, "direction": -1}) == d.CON_NEG
+
+
+def test_render_hangs_the_regime_words_hover_on_the_strip(monkeypatch):
+    from pages import regime_mix as RM
+    _seed_bus(monkeypatch, _full_payloads())          # regime label "Rallying"
+    texts = [t for t in _rendered_texts() if t]
+    assert RM.regime_picture("Rallying") in texts
+
+
 def test_render_hangs_each_band_words_hover_on_the_strip(monkeypatch):
     from pages import sentiment as S
     _seed_bus(monkeypatch, _full_payloads())
