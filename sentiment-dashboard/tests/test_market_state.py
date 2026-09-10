@@ -33,6 +33,18 @@ def test_neutral_with_selling_is_lack_of_bullishness():
     assert classify_market_state(50, -0.5).state == "lack_of_bullishness"
 
 
+def test_lack_of_bearishness_guidance_is_true_in_every_cell_it_comes_from():
+    """The state comes out of three grid cells, two of them in the bearish
+    direction band (<= 40). The old guidance, "Refuses to drop", was false in
+    both of those — and it sat under the trend word Gliding, which says the
+    market is coming down. The guidance must hold wherever the state can."""
+    for direction, aggression in ((35, 0.0), (35, 0.4), (50, 0.4)):
+        s = classify_market_state(direction, aggression)
+        assert s.state == "lack_of_bearishness", (direction, aggression)
+        assert s.description == (
+            "Lower or flat, but sellers aren't pressing — favor PCS.")
+
+
 def test_evidence_passthrough_and_labels():
     s = classify_market_state(75, 0.6, evidence=["up-volume +40% vs 20d"])
     assert s.label == STATE_LABELS["bullish"] and "up-volume +40% vs 20d" in s.evidence

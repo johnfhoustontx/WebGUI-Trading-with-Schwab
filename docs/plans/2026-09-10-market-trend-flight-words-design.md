@@ -84,10 +84,8 @@ different vocabulary and carry no picture.
   ring in every cell would mean deriving it from (band × aggression) rather than
   from the committed state, and the state is hysteresis-committed, so it can lag
   the band by a read anyway.
-- **The guidance line is unchanged.** The console's verdict block still prints
-  `market_state.STATE_LABELS` / `STATE_DESCRIPTIONS`. For `lack_of_bearishness`
-  that is "Refuses to drop, puts cheap/undefended — favor PCS", which is wrong for
-  its two bearish-band cells. It is service-side (sentiment_svc) and is a separate
-  change.
+- **The verdict line keeps the framework name.** The console's verdict block
+  prints `market_state.STATE_LABELS` (e.g. "Lack of Bearishness") under the flight
+  word, deliberately: the pill gives the picture, the verdict gives the term.
 - **The repaint may close an open hover.** The console rebuilds its cards every
   120 s; the tooltip is a plain hover, and the next hover reopens it.

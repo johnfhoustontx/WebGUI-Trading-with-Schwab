@@ -27,12 +27,19 @@ console pill, the Desk pill and the phone snapshot.)
   and on the Desk's compact pill alike, so the two screens describe one word
   identically. The 30-day structural words (BULL / PULLBACK / …) carry none.
 
-- **Display only.** The keys are unchanged — `regime_filter`, the bridge, the
-  state-history store and the driver packet all read them. The verdict line
-  under the console pill still prints the framework name and
-  `STATE_DESCRIPTIONS` guidance, and for Gliding that guidance still says
-  "Refuses to drop", which is wrong for two of its three cells. Left for a
-  follow-up in `sentiment-dashboard/scoring/market_state.py`.
+- **The keys are unchanged** — `regime_filter`, the bridge, the state-history
+  store and the driver packet all read them — and the verdict line under the
+  console pill still prints the framework name.
+
+- **The Gliding guidance is corrected.**
+  `market_state.STATE_DESCRIPTIONS["lack_of_bearishness"]` went from "Refuses
+  to drop, puts cheap/undefended — favor PCS." to "Lower or flat, but sellers
+  aren't pressing — favor PCS." The old sentence was false in two of the
+  state's three grid cells (both in the bearish band) and contradicted the
+  word above it. "Puts cheap/undefended" went too: in the no-aggression cell
+  nothing has measured the puts. The sentence also reaches the Telegram /
+  Discord state-change alert and the driver's market context, and takes
+  effect when sentiment_svc restarts.
 
 - **A new mirror pin.** `_TREND_SHORT` is copied into
   `services/options_svc/market_snapshot.py` for the phone snapshot, and

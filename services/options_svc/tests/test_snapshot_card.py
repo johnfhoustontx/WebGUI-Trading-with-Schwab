@@ -46,7 +46,7 @@ DASHBOARD = {
     "proxy_up": True,
 }
 TREND = {"smoothed_score": 38.62, "score": 37.31, "label": "Lack of Bearishness",
-         "description": "Refuses to drop, puts cheap/undefended - favor PCS.",
+         "description": "Lower or flat, but sellers aren't pressing - favor PCS.",
          "confidence": 0.674}
 SENTIMENT = {"total_score": "3.87", "bias": "Cautious",
              "size_modifier": "0.85x", "aggregate_confidence": 0.9}

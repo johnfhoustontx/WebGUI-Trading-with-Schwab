@@ -32,7 +32,9 @@ STATE_DESCRIPTIONS = {
     "bullish":              "Motivated buying absorbing supply — favor long/PCS, full size.",
     "lack_of_bullishness":  "Buyers exhausted at highs — favor CCS, trim longs.",
     "neutral":              "Balance — sell premium (iron condors/straddles), fade extremes.",
-    "lack_of_bearishness":  "Refuses to drop, puts cheap/undefended — favor PCS.",
+    # Must hold in all three cells _GRID maps here, two of them in the bearish
+    # direction band — so it cannot claim price "refuses to drop".
+    "lack_of_bearishness":  "Lower or flat, but sellers aren't pressing — favor PCS.",
     "bearish":              "Urgent selling/liquidation — favor debit puts, stand down on credit.",
 }
 
