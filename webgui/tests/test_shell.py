@@ -490,51 +490,14 @@ def test_market_status_parts():
     assert main.market_status_parts(closed_dt) == ("MARKET CLOSED", False)
 
 
-# ── ticker setting resync at startup ───────────────────────────────────────
-# The ticker toggle lives in settings.json (webgui) but gates a Claude call in
-# market_svc, mirrored through Redis. Re-assert it at startup so a wiped/restarted
-# Redis (key gone → service defaults back to enabled) can't silently resume the
-# API calls while the GUI still says the ticker is off.
-
-
-def test_sync_ticker_setting_reasserts_the_flag(monkeypatch):
-    import main
-
-    sent = []
-    monkeypatch.setattr(main.bus_client, "request",
-                        lambda domain, cmd: sent.append((domain, cmd)))
-    monkeypatch.setattr(main.app_settings, "get", lambda k: False)
-    main.sync_ticker_setting()
-    assert sent == [("market", {"type": "disable_summary"})]
-
-    sent.clear()
-    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
-    main.sync_ticker_setting()
-    assert sent == [("market", {"type": "enable_summary"})]
-
-
-def test_sync_ticker_setting_survives_a_down_bus(monkeypatch):
-    import main
-
-    def _boom(domain, cmd):
-        raise RuntimeError("redis down")
-
-    monkeypatch.setattr(main.bus_client, "request", _boom)
-    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
-    main.sync_ticker_setting()  # startup must not fail because Memurai is down
-
-
-def test_sync_ticker_setting_registered_inside_the_main_guard():
+def test_the_ticker_resync_is_gone():
+    """It existed only to re-assert the toggle's grip on market_svc's Claude
+    call, retired 2026-09-10 — a startup hook with nothing left to sync."""
     import inspect
 
     import main
-
-    src = inspect.getsource(main)
-    head, guard, tail = src.partition('if __name__ in {"__main__", "__mp_main__"}:')
-    assert guard, "the __main__ guard moved — this test needs updating"
-    # Registered exactly once, and only on the entry path (see the reimport test).
-    assert "app.on_startup(" not in head
-    assert "app.on_startup(sync_ticker_setting)" in tail
+    assert not hasattr(main, "sync_ticker_setting")
+    assert "sync_ticker_setting" not in inspect.getsource(main)
 
 
 # ── manual-paper break-even lifecycle setting resync (Task 3) ───────────────

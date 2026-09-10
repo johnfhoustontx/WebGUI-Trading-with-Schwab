@@ -166,14 +166,14 @@ def test_live_main_does_not_import_main():
 
 
 def test_live_main_calls_none_of_the_sync_helpers():
-    """``main``'s three ``sync_*`` helpers are cross-process WRITERS, not readers.
+    """``main``'s two ``sync_*`` helpers are cross-process WRITERS, not readers.
 
     Each reads ``app_settings.get(...)`` and then ``bus_client.request(...)``s the
     value to a Tier-2 service. Against a FROZEN store they would read the pinned
-    default and re-assert it to the shared services — ``ticker_enabled`` defaults
-    True, so the public process would re-enable the ~20-minute PAID Claude
-    verdict the owner may have deliberately switched off, and
-    ``captured_autoclose_enabled`` would re-arm auto-close on the paper book.
+    default and re-assert it to the shared services — ``captured_autoclose_enabled``
+    would re-arm auto-close on the paper book. (A third, ``sync_ticker_setting``,
+    existed for the same reason until 2026-09-10, when the toggle it re-asserted
+    stopped writing to any service at all.)
 
     Source-level and by NAME PREFIX, so a copy grown here "for symmetry" is
     caught as surely as a call. ``set_read_only`` would in fact refuse them; the

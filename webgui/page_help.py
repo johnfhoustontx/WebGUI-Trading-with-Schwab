@@ -785,8 +785,9 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
-  Switching it off also stops the app paying for its Claude-written verdict, so
-  it is a cost control as well as a display one.
+  Switching it off only hides the bar — the Claude-written verdict it shows
+  also feeds the Desk's Market Summary frame, so it keeps being written either
+  way.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
 - **API usage** — how many calls the app made to Schwab (counted at the

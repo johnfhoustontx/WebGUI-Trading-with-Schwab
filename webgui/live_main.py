@@ -39,14 +39,13 @@ cannot capture an unrefused bus, or the owner's real settings, at import time.
 That is what the ``# noqa: E402`` imports below are buying, and the reason they
 are not tidied up into one block at the top.
 
-⚠ NEVER call ``main``'s ``sync_ticker_setting`` /
-``sync_captured_autoclose_setting`` / ``sync_manual_paper_lifecycle_setting``,
-and do not grow a copy of them here "for symmetry". They read like harmless
-``app_settings.get`` readers and are not: each then does
-``bus_client.request(...)``, so they are cross-process WRITERS to Tier-2
-services. Against a frozen store they would read the PINNED value and re-assert
-it — ``ticker_enabled`` defaults True, so this process would re-enable the
-~20-minute paid Claude verdict the owner may have deliberately switched off.
+⚠ NEVER call ``main``'s ``sync_captured_autoclose_setting`` /
+``sync_manual_paper_lifecycle_setting``, and do not grow a copy of them here
+"for symmetry". They read like harmless ``app_settings.get`` readers and are
+not: each then does ``bus_client.request(...)``, so they are cross-process
+WRITERS to Tier-2 services. Against a frozen store they would read the PINNED
+value and re-assert it — silently overriding whatever the owner deliberately
+chose for the private app.
 """
 import importlib
 import logging

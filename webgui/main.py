@@ -143,25 +143,6 @@ install_auth_gate()
 _CT = _ZoneInfo("America/Chicago")
 
 
-def sync_ticker_setting() -> None:
-    """Re-assert the ticker toggle to market_svc at startup (best-effort).
-
-    ``ticker_enabled`` is a webgui setting, but it also gates market_svc's ~20-min
-    Claude verdict (see pages/settings.py:apply_ticker_enabled). The service reads
-    that flag from Redis and defaults to ENABLED when the key is missing, so a
-    wiped/restarted Memurai would silently resume the API calls while the GUI still
-    showed the ticker as off. Settings.json is the source of truth — restate it on
-    every startup. Never raises: a down bus must not stop the web GUI from booting
-    (the toggle re-syncs on the next change or startup).
-    """
-    try:
-        enabled = bool(app_settings.get("ticker_enabled"))
-        bus_client.request(
-            "market", {"type": "enable_summary" if enabled else "disable_summary"})
-    except Exception:  # noqa: BLE001
-        logging.getLogger("webgui").warning("ticker setting resync failed", exc_info=True)
-
-
 def sync_captured_autoclose_setting() -> None:
     """Re-assert the captured auto-close toggle to options_svc at startup (best-effort).
 
@@ -2533,7 +2514,6 @@ if __name__ in {"__main__", "__mp_main__"}:
     # because this script runs as __main__ that re-executes this file as a second
     # module object AFTER NiceGUI has started — where app.on_startup() raises and
     # 500s the page. Inside this guard it runs once, before ui.run().
-    app.on_startup(sync_ticker_setting)
     app.on_startup(sync_captured_autoclose_setting)
     app.on_startup(sync_manual_paper_lifecycle_setting)
 

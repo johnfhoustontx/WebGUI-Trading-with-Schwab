@@ -21,22 +21,13 @@ from pages.ui_guard import guard_async
 
 
 def apply_ticker_enabled(value) -> None:
-    """Persist the ticker toggle AND tell market_svc to stop/start the verdict.
+    """Persist the ticker toggle. It only shows or hides the marquee.
 
-    The marquee is rendered Tier-1 off ``ticker_enabled``, but the narrative it
-    shows is a Claude call made by market_svc every ~20 min — so the toggle has
-    to reach the service too, or switching the ticker off would just hide a
-    marquee the stack kept paying for. The command is best-effort: the setting
-    is what the GUI renders from, so it must persist even with the bus down (the
-    service keeps its last known flag; a resync happens at webgui startup).
-    """
-    enabled = bool(value)
-    app_settings.set("ticker_enabled", enabled)
-    try:
-        bus_client.request(
-            "market", {"type": "enable_summary" if enabled else "disable_summary"})
-    except Exception:  # noqa: BLE001 — a bus outage must not break the toggle.
-        pass
+    Until 2026-09-10 it also stopped market_svc's Claude call. That call now
+    writes the Desk's MARKET SUMMARY sentence too, so hiding the marquee must
+    not stop it — and it no longer runs on a clock: it is written only when the
+    market readings change."""
+    app_settings.set("ticker_enabled", bool(value))
 
 
 def apply_captured_autoclose(value) -> None:
@@ -202,9 +193,9 @@ def render():
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
         ui.label("Scrolling market-summary marquee at the bottom of every page "
-                 "(live data items + a periodic Claude verdict). Turning it off "
-                 "also stops the Claude calls, not just the marquee.").classes(
-                 "opacity-70 text-sm")
+                 "(live data items + the Claude market summary, which also "
+                 "feeds the Desk's Market Summary frame). Turning it off hides "
+                 "the marquee only.").classes("opacity-70 text-sm")
 
         tick = ui.switch("Show the ticker", value=s["ticker_enabled"])
         tick.on_value_change(lambda e: apply_ticker_enabled(e.value))
