@@ -1,15 +1,23 @@
 """Market dashboard scheduler — poll the proxy, publish, repeat.
 
-~2 s cadence during regular trading hours; a slower ~5 s off-hours/weekends/
-holidays. It is NOT throttled hard off-hours because the equity-index FUTURES
-(/ES, /NQ) trade almost 24 h — they're the main thing moving after the cash
-close, so a 5 s cadence keeps them visibly ticking (the cash indices/internals
-are stale then anyway, and skip_unchanged means an unchanged payload costs
+3 s cadence during regular trading hours; a slower 15 s off-hours/weekends and
+60 s once the equity-index futures are also closed (deep weekend). It is NOT
+throttled hard off-hours because the equity-index FUTURES (/ES, /NQ) trade
+almost 24 h — they're the main thing moving after the cash close, so the
+off-hours cadence keeps them visibly ticking (the cash indices/internals are
+stale then anyway, and skip_unchanged means an unchanged payload costs
 nothing). The market-hours gate mirrors the other services.
+
+The Claude-written market summary is written ON THIS SAME LOOP, but only when
+the readings' fingerprint has changed (see ``SummaryGate``/``summary_due``
+below) — not on a clock, and no longer gated by the webgui ticker toggle
+(retired 2026-09-10, when the summary began feeding the Desk as well as the
+marquee).
 """
 import asyncio
 import datetime as _dt
 import logging
+import time
 from dataclasses import dataclass
 from datetime import time as _time
 from zoneinfo import ZoneInfo
@@ -106,12 +114,17 @@ def record_summary(gate, fingerprint, *, now_mono, today):
                        calls_today=calls + 1)
 
 
-async def _run_summary(loop_, bus, payload, sent_payload) -> None:
-    """Generate the Claude verdict + publish it, OFF the poll loop. Never raises."""
+async def _run_summary(loop_, bus, packet) -> None:
+    """Write the sentence + publish it, OFF the poll loop. Never raises.
+
+    ``generate_summary`` returns None when the attempt FAILED (API error,
+    timeout): publish nothing then, so the last good sentence stays on the Desk
+    rather than being blanked — the Desk's "readings have changed" line already
+    says when a sentence has been overtaken."""
     try:
-        summary = await loop_.run_in_executor(
-            None, compute.generate_summary, payload, sent_payload)
-        await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
+        summary = await loop_.run_in_executor(None, compute.generate_summary, packet)
+        if summary is not None:
+            await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — a summary failure can't affect the poll loop.
@@ -119,32 +132,28 @@ async def _run_summary(loop_, bus, payload, sent_payload) -> None:
 
 
 async def loop(bus) -> None:
-    """Poll → publish → (periodic Claude summary) → sleep, forever. Never raises out."""
+    """Poll → publish → (a new summary when the readings changed) → sleep."""
     loop_ = asyncio.get_running_loop()
-    summary_started = None
-    secs_since_summary = 0.0
+    gate = SummaryGate()
     summary_task = None
     while True:
         interval = poll_interval()
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
-            # Read the toggle every cycle (a cheap local cache hit) so flipping it
-            # in Settings takes effect on the next poll, with no service restart.
-            enabled = handlers.summary_enabled(bus)
-            if (summary_due(summary_started, secs_since_summary, enabled=enabled)
-                    and (summary_task is None or summary_task.done())):
-                sent = bus.cache_get("cache:sentiment:composite")
-                sent_payload = sent.payload if sent else {}
-                # Launch the Claude summary as a BACKGROUND task — it can take up to
-                # ~60s (30s timeout + retry) and must NOT stall the ~2s poll cadence.
-                summary_task = asyncio.create_task(
-                    _run_summary(loop_, bus, payload, sent_payload))
-                summary_started = True
-                secs_since_summary = 0.0
+            if summary_task is None or summary_task.done():
+                packet = await loop_.run_in_executor(
+                    None, compute.read_summary_packet, bus)
+                fp = compute.summary_fingerprint(packet)
+                mono, today = time.monotonic(), _dt.datetime.now(_CT).date()
+                if summary_due(gate, fp, now_mono=mono, today=today):
+                    gate = record_summary(gate, fp, now_mono=mono, today=today)
+                    # A BACKGROUND task: the call can take ~60 s (30 s timeout +
+                    # a retry) and must not stall the 3 s poll.
+                    summary_task = asyncio.create_task(
+                        _run_summary(loop_, bus, packet))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — never let the scheduler die.
             _log.exception("market poll cycle failed")
         await asyncio.sleep(interval)
-        secs_since_summary += interval

@@ -80,6 +80,46 @@ def test_the_gate_constants_are_the_approved_design():
     assert sch.SUMMARY_DAILY_CAP == 30
 
 
+def test_the_loop_is_gated_on_change_not_on_the_ticker_toggle():
+    import inspect
+
+    src = inspect.getsource(sch.loop)
+    assert "summary_enabled" not in src
+    assert "compute.read_summary_packet" in src
+    assert "compute.summary_fingerprint(" in src
+    assert "summary_due(" in src and "record_summary(" in src
+
+
+def test_a_failed_summary_attempt_publishes_nothing(monkeypatch):
+    """generate_summary returns None when the Claude call failed; the last good
+    sentence must stay on screen rather than be blanked."""
+    import asyncio
+    published = []
+    monkeypatch.setattr(sch.compute, "generate_summary", lambda packet: None)
+    monkeypatch.setattr(sch.handlers, "publish_summary",
+                        lambda bus, s: published.append(s))
+
+    async def _go():
+        await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
+    asyncio.run(_go())
+    assert published == []
+
+
+def test_a_successful_summary_is_published(monkeypatch):
+    import asyncio
+    published = []
+    out = {"narrative": "Fear builds; lean defensive.", "inputs": {"x": 1},
+           "as_of": "2026-09-10T15:42:00+00:00"}
+    monkeypatch.setattr(sch.compute, "generate_summary", lambda packet: out)
+    monkeypatch.setattr(sch.handlers, "publish_summary",
+                        lambda bus, s: published.append(s))
+
+    async def _go():
+        await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
+    asyncio.run(_go())
+    assert published == [out]
+
+
 def test_loop_runs_summary_as_background_task():
     """The Claude summary (30s timeout, up to ~60s) must NOT be awaited inline in
     the 2s poll loop — it launches as a background task so the dashboard cadence
