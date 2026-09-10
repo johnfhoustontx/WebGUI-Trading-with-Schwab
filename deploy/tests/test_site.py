@@ -713,7 +713,7 @@ def test_the_site_glossary_carries_every_term_in_the_source():
     missing = source - _glossary_terms_on_page()
     assert not missing, (
         f"{len(missing)} term(s) in glossary.md are not on the site page — "
-        f"re-run the generator. e.g. {sorted(missing)[:5]}")
+        f"run tools/generate_glossary_page.py. e.g. {sorted(missing)[:5]}")
 
 
 def test_the_site_glossary_invents_nothing():

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Options Glossary</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
 </div>
 <h1 id="options-trading-glossary">Options Trading Glossary</h1>
 <p>Plain-English definitions of the terms you'll run into trading and analyzing options.</p>
@@ -105,6 +105,18 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Option chain</strong> — The full grid of every strike and expiration for an underlying, with bids, asks, volume, OI, and greeks.</p>
 <p><strong>Pin risk</strong> — When the price sits almost exactly on a big strike at expiration and you don't know whether you'll be assigned. Also describes the tendency of price to gravitate toward heavily-traded strikes.</p>
 <p><strong>Exercise by exception (auto-exercise)</strong> — Brokers automatically exercise anything ITM by a penny or more at expiration unless you tell them not to.</p>
+<p><strong>Do-not-exercise (DNE) instruction</strong> — Telling your broker <em>not</em> to auto-exercise a barely-ITM option, usually because commissions and overnight share risk cost more than the pennies of intrinsic value.</p>
+<p><strong>AM settlement</strong> — The contract settles off the opening prices of the index components on expiration morning. SPX monthly contracts work this way, and the settlement value can differ noticeably from where the index printed at Thursday's close.</p>
+<p><strong>PM settlement</strong> — Settles off the closing price on expiration day. SPXW (weeklies and dailies) and all equity options are PM settled.</p>
+<p><strong>SET</strong> — The specific published settlement value for AM-settled SPX contracts. It's a calculated number, not a price anything actually traded at, which is why you occasionally see it land outside the day's range.</p>
+<p><strong>Adjusted option</strong> — A contract whose terms were changed after a split, merger, spinoff, or special dividend. The deliverable may no longer be 100 clean shares. These trade badly, price strangely, and are usually best avoided.</p>
+<p><strong>Deliverable</strong> — What actually changes hands on exercise. Normally 100 shares, but adjusted options can deliver odd share counts plus cash or shares of a second company.</p>
+<p><strong>Ex-dividend risk</strong> — The reason short ITM calls get assigned early. If the remaining time value of the call is less than the dividend, it's rational for the holder to exercise the day before ex-date to capture it.</p>
+<p><strong>Hard to borrow (HTB)</strong> — When shares are expensive or impossible to short. This distorts option pricing: puts get bid up, calls get cheap, and put-call parity appears to break because the borrow cost is buried in the prices.</p>
+<p><strong>OCC (Options Clearing Corporation)</strong> — The clearinghouse that stands between every option buyer and seller. It guarantees the contracts, handles assignment, and publishes open interest.</p>
+<p><strong>Random allocation</strong> — How assignment actually gets assigned. The OCC picks a clearing firm at random, and the firm picks a customer account by its own method. Being assigned isn't personal and isn't predictable.</p>
+<p><strong>Position limits / exercise limits</strong> — Caps on how many contracts one trader can hold or exercise on the same side of the market in a single name. Rarely relevant at retail size.</p>
+<p><strong>FLEX options</strong> — Customized exchange-traded contracts with negotiated strikes, expirations, and exercise styles. Institutional; almost no secondary liquidity.</p>
 <hr />
 <h2 id="3-the-greeks">3. The Greeks</h2>
 <p>The greeks measure how an option's price reacts to different things changing.</p>
@@ -118,6 +130,13 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Vomma (volga)</strong> — How vega changes when volatility changes. Matters for volatility trades and far OTM wings.</p>
 <p><strong>Speed, Zomma, Color</strong> — Third-order greeks: how gamma changes with price (speed), with volatility (zomma), and with time (color). Mostly relevant to market makers and modeling work.</p>
 <p><strong>Net delta / dollar delta</strong> — Total directional exposure of a position or book, expressed in share-equivalents or dollars. A book with +5,000 net delta behaves like 5,000 shares of stock.</p>
+<p><strong>Lambda (omega, elasticity)</strong> — The leverage ratio. What percentage the option moves for a 1% move in the underlying. A 0.30 delta call on a $500 stock trading at $4 has roughly 37x leverage. This is the number that explains why small option positions blow up accounts.</p>
+<p><strong>Probability ITM</strong> — The model's actual estimate of finishing in the money. Close to delta but not identical — delta is a hedge ratio that happens to approximate it. For skewed names the two can diverge meaningfully.</p>
+<p><strong>Probability of touch</strong> — The chance price <em>ever</em> trades through the strike before expiration, roughly double the probability of finishing ITM. This is the number that matters if you'll be forced to manage or close the position early.</p>
+<p><strong>Gamma scalping</strong> — Holding long gamma (long options) and repeatedly re-hedging delta as price swings: sell into rallies, buy into dips, bank the difference. You're trying to earn more from the scalps than you pay in theta. The whole trade is a bet that realized volatility beats implied.</p>
+<p><strong>Vega notional</strong> — Dollar P&amp;L per 1-point IV move for a whole position or book, rather than per contract.</p>
+<p><strong>Bucketed greeks</strong> — Greeks broken out by expiration or strike range instead of summed into one number. A book can look delta-neutral overall while carrying big offsetting risks in the front week and the back month.</p>
+<p><strong>Greek units caveat</strong> — Vendors disagree on scaling. Gamma may be quoted per share or per contract, theta per day or per year, vega per 1 point or per 1% of IV. Always confirm the convention before wiring an API feed into a risk calculation.</p>
 <hr />
 <h2 id="4-volatility">4. Volatility</h2>
 <p><strong>Historical volatility (HV) / realized volatility (RV)</strong> — How much the underlying <em>actually</em> moved, measured from past prices.</p>
@@ -131,6 +150,23 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>VIX</strong> — The 30-day implied volatility of SPX options, expressed annualized. The market's fear gauge.</p>
 <p><strong>Variance risk premium</strong> — The persistent tendency of implied volatility to price above what actually gets realized. The structural reason option selling has an edge over long periods.</p>
 <p><strong>Expected move</strong> — How far the market is pricing the underlying to travel by a given expiration. Roughly the ATM straddle price, or spot × IV × √(days/365).</p>
+<p><strong>Volatility surface</strong> — Skew and term structure combined: IV plotted across both strike and expiration. The full picture of how the market prices every contract at once.</p>
+<p><strong>ATM volatility</strong> — The IV at the at-the-money strike. The reference point everything else is quoted against.</p>
+<p><strong>25-delta risk reversal</strong> — The IV of the 25-delta call minus the IV of the 25-delta put. The standard single number for how steep the skew is. Deeply negative means downside protection is expensive relative to upside.</p>
+<p><strong>25-delta butterfly</strong> — The average IV of the 25-delta wings minus ATM IV. Measures how much the curve smiles — how much extra the market charges for tails on both sides.</p>
+<p><strong>Sticky strike</strong> — The assumption that each strike's IV stays put as spot moves. Under sticky strike, an option's delta is just its Black-Scholes delta.</p>
+<p><strong>Sticky delta (sticky moneyness)</strong> — The assumption that the whole IV curve slides along with spot, so a 25-delta option keeps the same IV as price moves. Which regime you assume changes your effective delta materially, and equity indexes behave somewhere between the two.</p>
+<p><strong>Forward volatility</strong> — The volatility implied for a future window, backed out from two expirations. Useful for isolating what the market expects around a specific event once you strip out the vol on either side of it.</p>
+<p><strong>Volatility cone</strong> — Realized volatility over various lookback windows plotted against its own historical range. Shows whether current vol is high or low for that particular measurement horizon.</p>
+<p><strong>Realized vol estimators</strong> — Different math for measuring how much something actually moved. Close-to-close is the simple one; Parkinson uses the high-low range, Garman-Klass adds open and close, and Yang-Zhang handles overnight gaps. Range-based estimators are far more efficient on limited data, which matters for intraday work.</p>
+<p><strong>Contango</strong> — Far-dated volatility priced above near-dated. The normal, calm state of the VIX term structure.</p>
+<p><strong>Backwardation</strong> — Near-dated volatility above far-dated. Signals acute stress and often marks the panic phase of a selloff.</p>
+<p><strong>VIX futures (VX)</strong> — Exchange-traded futures on the VIX. What VIX ETPs actually hold. They converge to spot VIX at expiration, and the roll between contracts is why long-vol products bleed in calm markets.</p>
+<p><strong>VVIX</strong> — The implied volatility of VIX options. Volatility of volatility. Elevated VVIX with a calm VIX often precedes a shock.</p>
+<p><strong>SKEW index</strong> — CBOE's measure of how much the market is paying for far OTM SPX puts relative to a normal distribution. High readings mean tail hedges are in demand.</p>
+<p><strong>Dispersion</strong> — The relationship between index volatility and the volatility of its components. Index vol is suppressed by diversification, so selling index vol against buying single-name vol is a common institutional trade. When correlation spikes, dispersion trades hurt.</p>
+<p><strong>Correlation (implied)</strong> — Backed out from index vol versus component vols. Rises toward 1 in selloffs, which is exactly when diversification stops helping.</p>
+<p><strong>Volatility arbitrage</strong> — Trading the gap between implied and expected realized volatility while hedging away direction. The purest expression is a delta-hedged straddle.</p>
 <hr />
 <h2 id="5-strategies">5. Strategies</h2>
 <p><strong>Covered call</strong> — Own 100 shares, sell a call against them. Collects premium, caps your upside.</p>
@@ -144,6 +180,8 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Diagonal spread</strong> — A calendar with different strikes too.</p>
 <p><strong>Straddle</strong> — Buy (or sell) a call and put at the same strike. Long straddle bets on a big move either way; short straddle bets on stillness.</p>
 <p><strong>Strangle</strong> — Same idea, but OTM strikes on both sides. Cheaper than a straddle, needs a bigger move.</p>
+<p><strong>Butterfly spread</strong> — Buy one strike, sell two of a middle strike, buy one higher strike, all same type and expiration. Cheap, defined risk, and pays off big only if price lands right on the middle strike. A precision bet on where something finishes.</p>
+<p><strong>Condor</strong> — Same idea as a butterfly but with two different middle strikes, giving you a wider profit zone and a smaller maximum payoff.</p>
 <p><strong>Iron condor</strong> — Sell a call spread and a put spread. Profits if price stays in the middle range. Defined risk on both sides.</p>
 <p><strong>Iron butterfly</strong> — Like a condor but the short strikes are the same. Tighter range, bigger credit.</p>
 <p><strong>Ratio spread</strong> — Buy one, sell two (or more) further out. Collects premium but leaves naked exposure past the short strikes.</p>
@@ -152,6 +190,14 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Synthetic long / short</strong> — Buy a call and sell a put at the same strike (synthetic long stock), or the reverse. Replicates share exposure using options.</p>
 <p><strong>Box spread</strong> — A bull call spread plus a bear put spread at the same strikes. Locks in a fixed payoff; used as a financing trade, essentially a loan.</p>
 <p><strong>Jelly roll</strong> — The combined value of a calendar spread on both calls and puts. Prices the cost of carry between two expirations.</p>
+<p><strong>Risk reversal</strong> — Sell a put and buy a call (or the reverse), both OTM. Bullish exposure financed by selling downside. The building block behind collars and the standard way skew gets traded.</p>
+<p><strong>Poor man's covered call (PMCC)</strong> — A long-dated deep ITM call standing in for shares, with a short-dated OTM call sold against it. A diagonal that mimics a covered call for a fraction of the capital, at the cost of assignment and vol risk.</p>
+<p><strong>Buy-write</strong> — Buying shares and selling the call in a single order. An entry method for a covered call.</p>
+<p><strong>Overwriting</strong> — Systematically selling calls against a long portfolio to generate income. Works until it doesn't; the cost is your best-performing positions get called away.</p>
+<p><strong>Ladder</strong> — Multiple strikes of the same type spread out at different levels, either bought or sold, to stagger entries or scale exposure.</p>
+<p><strong>Strip / strap</strong> — An unbalanced straddle. A strip is one call and two puts (bearish lean); a strap is two calls and one put (bullish lean). Both bet on a move with a directional tilt.</p>
+<p><strong>Guts</strong> — A straddle built with ITM strikes instead of OTM. Mostly a curiosity, occasionally useful for capturing wide bid-ask inefficiencies.</p>
+<p><strong>Stock repair</strong> — Adding a ratio call spread to an underwater long position so it breaks even on a smaller bounce, in exchange for capping upside.</p>
 <p><strong>Wheel</strong> — A repeating loop: sell cash-secured puts until assigned, then sell covered calls until called away, repeat.</p>
 <p><strong>Roll</strong> — Close an existing position and open a similar one further out in time or at a different strike. "Rolling up," "rolling out," "rolling for a credit."</p>
 <hr />
@@ -175,8 +221,16 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Sweep</strong> — An aggressive order split across multiple exchanges to fill immediately. Often read as urgent, informed buying.</p>
 <p><strong>Block trade</strong> — A single large negotiated trade, usually institutional.</p>
 <p><strong>Unusual options activity</strong> — Volume far above the strike's normal levels, particularly volume exceeding open interest, which means new positions are opening.</p>
+<p><strong>Gamma squeeze</strong> — Heavy call buying forces dealers to buy shares to hedge, which pushes price up, which increases the deltas they must hedge, which forces more buying. A self-reinforcing loop that runs until the buying stops or the calls go so deep ITM that gamma collapses.</p>
+<p><strong>VEX (vega exposure)</strong> — Aggregate dealer vega. Indicates how the book reacts to IV changes and how much vol-driven hedging is latent in the system.</p>
+<p><strong>Volatility trigger</strong> — A commonly-used name for the spot level where dealer gamma flips sign. Above it the market tends to be stable and mean-reverting; below it, trending and volatile.</p>
+<p><strong>Sign convention (the big caveat)</strong> — Every GEX/DEX number depends on an assumption about who bought and who sold, since exchanges don't publish that. The standard simplification is that customers buy calls and sell puts, making dealers short calls and long puts. This assumption is wrong often enough to matter, and it is the single largest source of error in dealer-positioning models.</p>
+<p><strong>Trade classification</strong> — Inferring whether a trade was buyer- or seller-initiated by comparing the print to the prevailing bid and ask. The foundation of any attempt to build positioning data from raw tape rather than assumptions.</p>
+<p><strong>Gamma units</strong> — GEX can be expressed as shares per 1% move, dollars per 1% move, or dollars per 1-point move. Comparing numbers across sources without checking units produces nonsense.</p>
+<p><strong>Open interest change</strong> — Day-over-day OI change tells you whether positions opened or closed. Volume alone can't distinguish a new position from a closed one, and OI publishes with a delay.</p>
+<p><strong>Hedging window</strong> — The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.</p>
 <hr />
-<h2 id="7-orders-pricing-and-risk">7. Orders, Pricing, and Risk</h2>
+<h2 id="7-orders-execution-and-risk">7. Orders, Execution, and Risk</h2>
 <p><strong>Bid / Ask</strong> — What buyers will pay and what sellers will take. Options spreads are usually much wider than stock spreads.</p>
 <p><strong>Mid price</strong> — Halfway between bid and ask. The realistic starting point for a limit order.</p>
 <p><strong>Slippage</strong> — The gap between the price you expected and the price you got. Kills multi-leg strategies traded in illiquid chains.</p>
@@ -192,8 +246,38 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Max profit / max loss</strong> — The best and worst outcomes at expiration. Every defined-risk structure has both; naked shorts do not.</p>
 <p><strong>P&amp;L attribution</strong> — Breaking down a trade's gain or loss into how much came from direction (delta), from movement (gamma), from time (theta), and from vol (vega). Tells you whether you were right for the reason you thought.</p>
 <p><strong>Payoff diagram</strong> — The chart of profit against underlying price at expiration. Worth sketching before every unfamiliar structure.</p>
+<p><strong>NBBO</strong> — The best bid and offer across all options exchanges combined. Your quoted spread, but it can be one contract deep and vanish the moment you send size.</p>
+<p><strong>Complex order book (COB)</strong> — The separate book where multi-leg spreads trade as single instruments. Spread orders often fill better than the sum of the individual legs' quotes suggest, which is why you should send combos as combos.</p>
+<p><strong>Price improvement / auction</strong> — Many retail option orders get routed into exchange auctions where firms compete to fill them inside the NBBO. It's why your limit sometimes fills better than expected.</p>
+<p><strong>Payment for order flow (PFOF)</strong> — Brokers being paid to route your orders to specific market makers. Very common in options and part of why option commissions are low.</p>
+<p><strong>Reg T margin</strong> — The standard, rules-based margin system. Fixed formulas per strategy, no credit for how positions offset each other.</p>
+<p><strong>Portfolio margin</strong> — Risk-based margin that stress-tests the whole account across a range of price moves. Dramatically lower requirements for hedged books, but it requires a larger account and it can tighten fast in a crisis.</p>
+<p><strong>SPAN margin</strong> — The risk-based system used for futures and futures options. Scenario-driven, and generally the most capital-efficient of the three.</p>
+<p><strong>Early exercise premium</strong> — The extra value an American option carries over an otherwise identical European one, because of the right to exercise early. Meaningful for deep ITM puts and for calls facing dividends.</p>
+<p><strong>Section 1256 contracts</strong> — Broad-based index options like SPX and futures options. They're marked to market annually and taxed 60% long-term / 40% short-term regardless of holding period. Materially better tax treatment than SPY options, which are taxed as ordinary short-term gains. Worth understanding before choosing which product to trade. Not tax advice — confirm with a professional for your situation.</p>
+<p><strong>Wash sale</strong> — A loss disallowed because you re-entered a substantially identical position within 30 days. Options complicate this considerably. Section 1256 contracts are exempt.</p>
+<p><strong>Liquidation risk</strong> — Brokers can close positions without warning when margin is breached, usually at the worst possible price. Short options in a fast market are the classic case.</p>
 <hr />
-<h2 id="8-quick-reference">8. Quick Reference</h2>
+<h2 id="8-pricing-models-and-math">8. Pricing Models and Math</h2>
+<p>Relevant if you're calculating any of this yourself rather than reading it off a screen.</p>
+<p><strong>Black-Scholes-Merton</strong> — The standard closed-form model for European options. Fast, analytic greeks, and the common language of the market. Its assumptions (constant volatility, lognormal returns, no jumps) are all wrong, which is precisely why the volatility surface exists — traders bend IV per strike to force the model to match reality.</p>
+<p><strong>Implied volatility solve</strong> — IV isn't calculated directly; you invert the pricing model numerically until the theoretical price matches the market price. Bisection is robust, Newton-Raphson is fast, and hybrid approaches handle the deep wings where vega goes to nearly zero and the solve becomes unstable.</p>
+<p><strong>Binomial model (Cox-Ross-Rubinstein)</strong> — A price tree stepped backward from expiration. Slower than closed-form but handles American early exercise and discrete dividends naturally.</p>
+<p><strong>Bjerksund-Stensland / Barone-Adesi-Whaley</strong> — Closed-form approximations for American options. The practical choice when you need American pricing across thousands of contracts and can't afford a tree per contract.</p>
+<p><strong>Monte Carlo</strong> — Simulating many random price paths and averaging the payoffs. Overkill for vanillas, necessary for path-dependent structures.</p>
+<p><strong>Put-call parity</strong> — The fixed arithmetic relationship between a call, a put, the underlying, and a bond at the same strike and expiry: call − put = spot − discounted strike. It's an arbitrage identity, not a theory. When it appears violated, the cause is almost always dividends, borrow cost, or stale quotes rather than free money.</p>
+<p><strong>Conversion / reversal</strong> — The trades that enforce put-call parity. Long stock plus long put plus short call (conversion), or the reverse. Market makers use them to extract small financing edges.</p>
+<p><strong>Forward price</strong> — Where the market prices the underlying at expiration once carry, dividends, and financing are accounted for. Options are properly priced off the forward, not off spot. Ignoring this is a common source of IV calculation errors in dividend-paying names.</p>
+<p><strong>Moneyness</strong> — Strike relative to spot or forward. Often expressed as log-moneyness, ln(K/F), which makes skew comparable across underlyings and price levels.</p>
+<p><strong>Risk-neutral probability</strong> — The probability distribution implied by option prices. Not a forecast of what will happen — it's real-world probability tilted by what people will pay to hedge. This is why option-implied "probabilities" persistently overstate crash odds.</p>
+<p><strong>Local volatility (Dupire)</strong> — A model where volatility is a deterministic function of spot and time, fitted to reproduce the entire observed surface exactly.</p>
+<p><strong>Stochastic volatility (Heston, SABR)</strong> — Models where volatility has its own random process. Produce more realistic skew dynamics and are the standard for anything vol-sensitive.</p>
+<p><strong>Jump diffusion</strong> — Adding discrete jumps to the price process. Explains why short-dated wings trade far above what a pure diffusion model says they're worth.</p>
+<p><strong>Arbitrage-free surface</strong> — A fitted volatility surface with no butterfly arbitrage (negative implied densities across strikes) and no calendar arbitrage (vol decreasing in total variance across time). Raw interpolation of market IVs frequently violates both, which produces garbage greeks downstream.</p>
+<p><strong>Finite-difference greeks</strong> — Computing greeks by re-pricing with a small bump to an input instead of using an analytic formula. Slower, but the only option for models without closed-form derivatives, and a useful sanity check against analytic values.</p>
+<p><strong>Interest rate and dividend inputs</strong> — The quiet source of most pricing discrepancies. Wrong rate, wrong dividend assumption, or wrong day-count convention will shift your IVs and greeks enough to invalidate comparisons against vendor data.</p>
+<hr />
+<h2 id="9-quick-reference">9. Quick Reference</h2>
 <table>
 <thead>
 <tr>

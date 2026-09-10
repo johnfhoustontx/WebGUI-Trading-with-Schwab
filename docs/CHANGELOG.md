@@ -4,7 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-09 (**The fourteen public live screens now carry a
+**Last updated:** 2026-09-10 (**The options glossary grew from 106 terms to
+187**, on the public site and in the app's fifth manual at once, from the one
+markdown source both are built from.)
+
+- **81 new definitions, no existing one reworded.** Contract Mechanics gained
+  settlement detail (AM/PM settlement, SET, adjusted options, ex-dividend and
+  hard-to-borrow risk, the OCC and random allocation); The Greeks gained
+  lambda, probability ITM vs probability of touch, gamma scalping and bucketed
+  greeks; Volatility gained the surface vocabulary (risk reversals, sticky
+  strike vs sticky delta, forward vol, VVIX, SKEW, dispersion); Strategies
+  gained butterflies, condors, the PMCC and friends; Dealer Positioning gained
+  VEX, the volatility trigger and — the one that matters most for this app —
+  the **sign-convention caveat** behind every GEX/DEX number. Section 7 is
+  renamed **Orders, Execution, and Risk** (NBBO, the complex order book,
+  Reg T / portfolio / SPAN margin, Section 1256 tax treatment) and a new
+  section 8, **Pricing Models and Math**, covers Black-Scholes through
+  arbitrage-free surfaces. Quick Reference is now section 9.
+
+- **The site page's generator is now in the repo:
+  `tools/generate_glossary_page.py`.** The page was first produced by a
+  one-shot script that was never committed, so `test_site.py`'s advice to
+  "re-run the generator" pointed at nothing. It rewrites only the TOC through
+  `</main>` and the nav's term count; the head, nav and footer stay
+  hand-owned. Regenerating the existing page with it changed nothing but the
+  new content, which is the check that it is the same shape as the original.
+
+- **`tools/tests/test_generate_glossary_page.py` closes a gap the set tests
+  could not see.** `test_site.py` compares the term SETS of the markdown and
+  the page, so a reworded definition under an unchanged term passed. The new
+  test asserts the committed page is exactly what the generator emits.
+
+- **Updating the glossary is now three steps:** edit
+  `docs/manuals/glossary/glossary.md`, run
+  `python tools/generate_glossary_page.py`, run
+  `python docs/manuals/build_docs.py glossary`.
+
+**Prior — 2026-09-09** (**The fourteen public live screens now carry a
 brand header** — mark + two-tone wordmark + the screen's name — where before the
 app name reached them only through the browser tab title.)
 
