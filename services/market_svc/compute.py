@@ -5,11 +5,14 @@ I/O seams (``fetch_raw_quotes`` / ``read_sector_pcr``) are thin + defensive;
 the coverage. All defensive — a fetch/parse failure degrades to no-data tiles.
 """
 import logging
+import math
+from datetime import datetime
 
 import requests
 
 from repo_paths import ENV_FLAGS, PROXY_URL
 from services.market_svc import classify, symbols
+from shared import market_calendar as mc
 
 log = logging.getLogger("market_svc.compute")
 
@@ -358,36 +361,87 @@ def _make_summary_client():
         return None
 
 
-def _tiles_by_cat(dashboard):
-    out = {}
-    for c in (dashboard or {}).get("categories", []):
-        out[c.get("category")] = c.get("tiles", [])
-    return out
+# The five Market Trend flight words. MIRRORS the five-state entries of
+# webgui/pages/sentiment._TREND_SHORT (this tier cannot import Tier 1); pinned by
+# shared/tests/test_cross_tier_mirrors.py. The sentence must use the words the
+# screen shows, or it names the trend one way while the pill beside it says another.
+_TREND_WORDS = {"bullish": "Climbing", "lack_of_bullishness": "Stalling",
+                "neutral": "Circling", "lack_of_bearishness": "Gliding",
+                "bearish": "Diving"}
+
+_QUADRANTS = ("rising_leading", "rising_lagging", "falling_leading",
+              "falling_lagging", "unknown")
 
 
-def build_summary_packet(dashboard, sentiment):
-    """PURE: compact facts for the summary prompt from the two cache payloads."""
-    byc = _tiles_by_cat(dashboard)
-    live = (sentiment or {}).get("live") or {}
-    der = (sentiment or {}).get("derived") or {}
-    comp = live.get("composite") or {}
-    trend = der.get("trend") or {}
+def _finite(v):
+    """A real number or None — a NaN or a non-number is no reading, never 0."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
-    def _movers(cats, n=3):
-        tiles = [t for c in cats for t in byc.get(c, []) if t.get("change_pct") is not None]
-        tiles.sort(key=lambda t: abs(t.get("change_pct") or 0), reverse=True)
-        return [{"display": t.get("display"), "change_pct": t.get("change_pct")} for t in tiles[:n]]
 
+def _quadrant(trend, excess):
+    """MIRRORS webgui/pages/bullbear.quadrant: ties go to the cautious side (a
+    flat trend is not rising, a zero excess is not leading), and a missing axis
+    is ``unknown`` rather than a default bucket."""
+    if trend is None or excess is None:
+        return "unknown"
+    if trend > 0:
+        return "rising_leading" if excess > 0 else "rising_lagging"
+    return "falling_leading" if excess > 0 else "falling_lagging"
+
+
+def bullbear_counts(bullbear, now=None):
+    """``(horizon, {quadrant: n})`` over the sector rows.
+
+    Today's axes once the regular session has opened AND a benchmark move
+    exists; the quarter's otherwise — the Desk strip's own rule
+    (``desk.strip_is_live``), so the sentence counts on the horizon the chips
+    are drawn on. ``(None, {})`` when there are no rows to count."""
+    view = bullbear if isinstance(bullbear, dict) else {}
+    levels = view.get("levels") if isinstance(view.get("levels"), dict) else {}
+    rows = levels.get("sector") if isinstance(levels.get("sector"), list) else []
+    rows = [r for r in rows if isinstance(r, dict)]
+    if not rows:
+        return None, {}
+    live = (_finite(view.get("benchmark_day_pct")) is not None
+            and mc.regular_session_has_opened(now or datetime.now().astimezone()))
+    counts = {q: 0 for q in _QUADRANTS}
+    for row in rows:
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        trend, excess = ((row.get("day_pct"), row.get("day_excess")) if live
+                         else (raw.get("trend"), raw.get("excess")))
+        counts[_quadrant(_finite(trend), _finite(excess))] += 1
+    return ("today" if live else "quarter"), counts
+
+
+def build_summary_packet(sentiment, regime, bullbear, now=None):
+    """The six readings the Desk shows, in the screen's own words — the ONLY
+    facts the summary is written from. Prices are deliberately absent: a
+    sentence quoting them goes stale between refreshes."""
+    s = sentiment if isinstance(sentiment, dict) else {}
+    live = s.get("live") if isinstance(s.get("live"), dict) else {}
+    comp = live.get("composite") if isinstance(live.get("composite"), dict) else {}
+    der = s.get("derived") if isinstance(s.get("derived"), dict) else {}
+    trend = der.get("trend") if isinstance(der.get("trend"), dict) else {}
+    r = regime if isinstance(regime, dict) else {}
+    horizon, counts = bullbear_counts(bullbear, now)
     return {
-        "sentiment": {"score": comp.get("total_score"), "bias": comp.get("bias")},
-        "trend": {"label": trend.get("label"), "score": trend.get("score")},
-        "breadth": (live.get("breadth") or {}).get("interpretation"),
-        "put_call": live.get("sector_pcr"),
-        "vol": [{"display": t.get("display"), "last": t.get("last"), "change_pct": t.get("change_pct")}
-                for t in byc.get("Volatility", [])],
-        "index": [{"display": t.get("display"), "change_pct": t.get("change_pct")}
-                  for t in byc.get("Cash Index", [])],
-        "movers": _movers(["Sector SPDR", "Thematic / Industry ETF"], 4),
+        "sentiment": {"composite": _finite(comp.get("total_score"))},
+        "trend": {"word": _TREND_WORDS.get(trend.get("state")),
+                  "score": _finite(trend.get("smoothed_score",
+                                              trend.get("score")))},
+        "bias": der.get("bias") or None,
+        "signal": der.get("signal") or None,
+        "size": der.get("size") or None,
+        # The Desk prints console_regime.regime_name: the service label, else
+        # "Unclear". A withheld confidence stays withheld, as the console does.
+        "regime": {"word": r.get("label") or "Unclear",
+                   "confidence": (None if r.get("unclear")
+                                  else _finite(r.get("confidence")))},
+        "bullbear": {"horizon": horizon, "counts": counts},
     }
 
 

@@ -1,4 +1,36 @@
+import datetime as dt
+from zoneinfo import ZoneInfo
+
 from services.market_svc import compute
+
+_CT = ZoneInfo("America/Chicago")
+_OPEN = dt.datetime(2026, 9, 10, 10, 0, tzinfo=_CT)      # Thursday, session open
+_PRE = dt.datetime(2026, 9, 10, 7, 0, tzinfo=_CT)        # before the bell
+
+
+def _composite(**trend):
+    return {"live": {"composite": {"total_score": "3.98", "bias": "Cautious"}},
+            "derived": {"size": "0.85x", "bias": "Cautious", "signal": "Bearish",
+                        "trend": {"state": "lack_of_bearishness",
+                                  "smoothed_score": 38.6, **trend}}}
+
+
+def _regime(**over):
+    return {"label": "Whipsaw", "committed_label": "choppy",
+            "confidence": 0.62, **over}
+
+
+def _row(sym, trend, excess, day_pct=None, day_excess=None):
+    return {"symbol": sym, "raw": {"trend": trend, "excess": excess},
+            "day_pct": day_pct, "day_excess": day_excess}
+
+
+def _bullbear(benchmark=0.4):
+    return {"benchmark_day_pct": benchmark, "levels": {"sector": [
+        _row("XLK", 0.3, 0.2, day_pct=-0.5, day_excess=-0.9),   # quarter RL, today FL
+        _row("XLU", -0.2, 0.1, day_pct=0.8, day_excess=0.4),    # quarter FL, today RL
+        _row("XLE", -0.1, -0.3, day_pct=1.1, day_excess=0.7),   # quarter FLag, today RL
+    ]}}
 
 
 def _dash():
@@ -22,14 +54,56 @@ def _sent():
             "derived": {"trend": {"score": 42.7, "label": "Neutral"}}}
 
 
-def test_build_summary_packet_extracts_compact_facts():
-    p = compute.build_summary_packet(_dash(), _sent())
-    assert p["sentiment"]["score"] == "3.9" and p["sentiment"]["bias"] == "Cautious"
-    assert p["trend"]["label"] == "Neutral" and p["trend"]["score"] == 42.7
-    assert p["put_call"] == 1.34
-    # a few notable movers are captured
-    assert any(m["display"] == "XLK" for m in p["movers"])
-    assert "VIX" in {t["display"] for t in p["vol"]}
+def test_packet_carries_the_six_readings_in_the_screens_words():
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
+    assert p["sentiment"] == {"composite": 3.98}
+    assert p["trend"] == {"word": "Gliding", "score": 38.6}
+    assert (p["bias"], p["signal"], p["size"]) == ("Cautious", "Bearish", "0.85x")
+    assert p["regime"] == {"word": "Whipsaw", "confidence": 0.62}
+
+
+def test_packet_counts_bullbear_on_today_once_the_bell_has_rung():
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
+    assert p["bullbear"]["horizon"] == "today"
+    assert p["bullbear"]["counts"]["rising_leading"] == 2
+    assert p["bullbear"]["counts"]["falling_lagging"] == 1
+
+
+def test_packet_counts_bullbear_on_the_quarter_before_the_bell():
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_PRE)
+    assert p["bullbear"]["horizon"] == "quarter"
+    assert p["bullbear"]["counts"]["rising_leading"] == 1
+
+
+def test_packet_counts_the_quarter_when_no_benchmark_move_exists():
+    """A dead proxy mid-session leaves benchmark_day_pct None - the Desk strip's
+    rule: no benchmark, no 'today'."""
+    p = compute.build_summary_packet(_composite(), _regime(),
+                                     _bullbear(benchmark=None), now=_OPEN)
+    assert p["bullbear"]["horizon"] == "quarter"
+
+
+def test_packet_withholds_confidence_on_an_unclear_sample():
+    p = compute.build_summary_packet(_composite(), _regime(unclear=True), {},
+                                     now=_OPEN)
+    assert p["regime"]["confidence"] is None
+    assert p["regime"]["word"] == "Whipsaw"
+
+
+def test_packet_quotes_no_prices():
+    """Index moves, vol quotes and sector movers were dropped on purpose: a
+    sentence quoting them is stale between refreshes."""
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
+    assert set(p) == {"sentiment", "trend", "bias", "signal", "size",
+                      "regime", "bullbear"}
+
+
+def test_packet_from_cold_caches_is_all_absent_never_neutral():
+    p = compute.build_summary_packet({}, {}, {}, now=_OPEN)
+    assert p["sentiment"]["composite"] is None and p["trend"]["word"] is None
+    assert p["bias"] is None and p["signal"] is None
+    assert p["regime"]["word"] == "Unclear"
+    assert p["bullbear"] == {"horizon": None, "counts": {}}
 
 
 def test_generate_summary_no_client_is_empty_but_safe():
