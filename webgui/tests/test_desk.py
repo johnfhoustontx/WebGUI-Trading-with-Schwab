@@ -2342,13 +2342,15 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
 
     The invariant now spans TWO regions, not one: the strip's own
     ``bullbear_chips``/``bullbear_headline`` pair, and the frame's
-    ``strip_is_live``/``bullbear_headline``/``bullbear_distribution`` trio
-    reached through ``summary_facts``. A test that only watched the strip's
-    pair (as this one briefly did) cannot see the frame mint its own clock —
-    which is exactly the regression: ``summary_facts`` defaults ``now`` to a
-    fresh ``datetime.now()`` when its caller omits it, and until ``_paint``
-    hands it the shared instant, omitting it is exactly what ``_paint_summary``
-    did.
+    ``strip_is_live``/``bullbear_headline`` pair reached through
+    ``summary_facts``. ``bullbear_distribution`` no longer takes a ``now`` of
+    its own — it renders the counts/live ``summary_facts`` already derived on
+    this same clock, so it dropped out of the spy list along with its ability
+    to mint a second one. A test that only watched the strip's pair (as this
+    one briefly did) cannot see the frame mint its own clock — which is
+    exactly the regression: ``summary_facts`` defaults ``now`` to a fresh
+    ``datetime.now()`` when its caller omits it, and until ``_paint`` hands it
+    the shared instant, omitting it is exactly what ``_paint_summary`` did.
     """
     seen = []
     monkeypatch.setattr(
@@ -2360,22 +2362,37 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     monkeypatch.setattr(
         d, "strip_is_live",
         lambda view, now=None: seen.append(("live", now)) or True)
-    monkeypatch.setattr(
-        d, "bullbear_distribution",
-        lambda view, now=None: seen.append(("distribution", now)) or "")
     _seed_bus(monkeypatch, {"sentiment:bullbear": _live_bullbear_payload()})
 
     from pages import desk
     desk.render()
 
     # The strip paints before the frame (region order), so its chips/headline
-    # pair comes first; the frame's own strip_is_live/headline/distribution
-    # trio follows, from inside summary_facts.
+    # pair comes first; the frame's own strip_is_live/headline pair follows,
+    # from inside summary_facts.
     assert [where for where, _ in seen] == [
-        "chips", "headline", "live", "headline", "distribution"]
+        "chips", "headline", "live", "headline"]
     # A real instant, not any side quietly falling back to its own default.
     assert seen[0][1] is not None
     assert all(now is seen[0][1] for _, now in seen)
+
+
+def test_bullbear_distribution_renders_the_counts_it_is_handed():
+    """``bullbear_distribution`` no longer derives anything — it renders the
+    ``counts``/``live`` pair its caller (``summary_facts``) already computed on
+    the paint's one clock. A zero-count dict (nothing counted) renders empty
+    regardless of ``live``."""
+    counts = {"rising_leading": 2, "rising_lagging": 0,
+              "falling_leading": 0, "falling_lagging": 1, "unknown": 0}
+    text = d.bullbear_distribution(counts, True)
+    assert "Rising · Leading 2" in text
+    assert "Falling · Lagging 1" in text
+    assert "on today's moves" in text
+    for zero_label in ("Rising · Lagging", "Falling · Leading", "No reading"):
+        assert zero_label not in text
+
+    zero_counts = {q: 0 for q in d._bb.QUADRANTS}
+    assert d.bullbear_distribution(zero_counts, False) == ""
 
 
 def test_a_measured_zero_mid_session_is_a_known_false_bearish_reading():

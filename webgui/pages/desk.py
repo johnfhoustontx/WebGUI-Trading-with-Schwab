@@ -1019,11 +1019,11 @@ def _word_or_none(v):
     return None if v in ("", _DASH) else v
 
 
-def bullbear_distribution(bullbear_view, now=None):
-    """The Bull/Bear chip's hover: every quadrant's count and the horizon."""
-    live = strip_is_live(bullbear_view, now)
-    counts = _bb.quadrant_counts(_bullbear_rows(bullbear_view, live=live),
-                                 live=live)
+def bullbear_distribution(counts, live):
+    """The Bull/Bear chip's hover: every quadrant's count and the horizon.
+    Takes the quadrant counts and the live/quarter flag the caller already
+    derived (``summary_facts``' own ``live`` — the paint's one wall clock) —
+    it decides neither, only renders them."""
     if not sum(counts.values()):
         return ""
     parts = [f"{_bb.quadrant_label(q)} {counts[q]}"
@@ -1082,7 +1082,7 @@ def summary_facts(summary_view, composite_view, history_view, regime_view,
         {"key": "regime", "label": "REGIME", "value": reg["word"],
          "cls": regime_tone(reg), "tip": reg["tip"]},
         _chip("bullbear", "BULL / BEAR", bb_line or None, CON_TXT,
-              bullbear_distribution(bullbear_view, now)),
+              bullbear_distribution(counts, live)),
     ]
 
     narrative = str(summ.get("narrative") or "").strip()
