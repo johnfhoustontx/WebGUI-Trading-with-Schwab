@@ -131,6 +131,10 @@ def render_dial_card(regime, points):
             None if r.get("unclear") else r.get("confidence"), name,
             uid="regime")).classes("w-full max-w-[244px] self-center")
         # The dial's centre IS the regime word, so hovering it explains the word.
+        # No swap-only-when-changed logic needed here (unlike the Desk): the
+        # console rebuilds this whole regime block from scratch on every
+        # version bump, so there is no persistent element that could be left
+        # holding an open tooltip across a repaint.
         pill_tooltip(dial, RM.regime_picture(name))
         with ui.element("div").classes(
                 f"grid grid-cols-2 gap-px w-full {CONSOLE_HAIRLINE} "

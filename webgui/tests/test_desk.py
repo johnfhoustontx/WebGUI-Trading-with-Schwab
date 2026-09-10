@@ -1549,6 +1549,7 @@ def test_regime_tone_follows_the_committed_direction_only():
     assert d.regime_tone({"unclear": False, "direction": 0}) == d.CON_TXT
     assert d.regime_tone({"unclear": False, "direction": 1}) == d.CON_POS
     assert d.regime_tone({"unclear": False, "direction": -1}) == d.CON_NEG
+    assert d.regime_tone({"unclear": True, "direction": -1}) == d.CON_TXT_MUTED
 
 
 def test_render_hangs_the_regime_words_hover_on_the_strip(monkeypatch):

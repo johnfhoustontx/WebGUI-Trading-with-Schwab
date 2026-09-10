@@ -105,6 +105,7 @@ def regime_picture(word):
     """The hover sentence for a displayed regime word, or "" for anything else."""
     return REGIME_PICTURE.get(str(word or "").strip(), "")
 
+
 # --- geometry (fixed 640-wide coordinate space; the SVG scales itself) -------
 VIEWBOX_W = 640
 ROW_H = 30
