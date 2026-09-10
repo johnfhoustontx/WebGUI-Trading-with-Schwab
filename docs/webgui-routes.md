@@ -44,7 +44,7 @@ already set to that symbol, reusing the one-shot `handoff.send_to_gamma` stash.
 `regime_mix.REGIME_PICTURE` for the regime word (the same table `/sentiment`'s
 dial hangs its hover from), `sentiment.BAND_WORD_PICTURE` for Bias/Signal.
 
-Tier-1 reader of **nine** views on **ONE batched 2 s `read_versions`** (cheap `:ver`
+Tier-1 reader of **eleven** views on **ONE batched 2 s `read_versions`** (cheap `:ver`
 probes in a single pipelined round-trip; payloads deserialize only for views that
 moved) — this page is open all day, so that matters. **No Highcharts at all**,
 deliberately: nothing here is a time series, and the chart element collapses when it
@@ -237,7 +237,7 @@ the four panels; the public live Desk renders it too.
   sentence stays — and is retried once the gap has passed; it still counts toward
   the gap and the cap.
 - **A new `summary` region on the Desk's existing batched poll** —
-  `cache:market:summary` joins `VIEWS`, read alongside the nine the page already
+  `cache:market:summary` joins `VIEWS`, read alongside the ten the page already
   polls. `summary_facts(summary_view, composite_view, history_view, regime_view,
   bullbear_view, now)` is the pure function that builds everything the frame
   draws: the narrative, the "as of" text, the `moved` flag, and the six chips
