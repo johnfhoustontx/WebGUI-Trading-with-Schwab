@@ -237,11 +237,17 @@ the four panels; the public live Desk renders it too.
   or states a wrong sector count. It is written **on change,
   not on a clock**: `market_svc` fingerprints the six readings at display
   resolution every poll (words exact, composite to 0.5, trend score to 5, regime
-  confidence to 10%, Bull/Bear counts exact + horizon) and writes only when that
-  fingerprint moves, never twice within `SUMMARY_MIN_GAP_SEC` (10 min), never past
-  `SUMMARY_DAILY_CAP` (30/day). A failed attempt publishes nothing — the last good
-  sentence stays — and is retried once the gap has passed; it still counts toward
-  the gap and the cap.
+  confidence to 10%, horizon exact, and the Bull/Bear rising + beating counts
+  within one sector — `FINGERPRINT_SECTOR_TOLERANCE`, compared by
+  `same_summary_readings`) and writes only when that fingerprint moves, never
+  twice within `SUMMARY_MIN_GAP_SEC` (10 min), never past `SUMMARY_DAILY_CAP`
+  (30/day). A **failed** attempt (API error, timeout) publishes nothing — the last
+  good sentence stays — and is retried once the gap has passed. A **withheld**
+  reply also publishes nothing but is NOT retried: the same readings would be
+  refused the same way, so a new sentence waits for them to move. Both count
+  toward the gap and the cap. ⚠ A sentence's sector counts may therefore be one
+  sector off the live chips; the frame's moved-since line reads the exact counts
+  out of `inputs` and says so.
 - **A new `summary` region on the Desk's existing batched poll** —
   `cache:market:summary` joins `VIEWS`, read alongside the ten the page already
   polls. `summary_facts(summary_view, composite_view, history_view, regime_view,

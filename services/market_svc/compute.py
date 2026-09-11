@@ -624,18 +624,36 @@ def build_summary_packet(sentiment, regime, bullbear, now=None):
 FINGERPRINT_COMPOSITE_STEP = 0.5
 FINGERPRINT_TREND_STEP = 5.0
 FINGERPRINT_CONFIDENCE_STEP = 0.1
+# The sector counts are compared with a TOLERANCE, not in bands: a band still
+# flips whenever a count sits on its edge, and in session one of eleven sectors
+# crosses flat or crosses the S&P 500 inside every ten-minute gap. Compared
+# exactly, that bought a new paid sentence every gap from 09:14 to 16:40 CT on
+# 2026-09-11 (43 of them). A sentence's rising and beating counts may now be
+# this many sectors off the live ones before it is rewritten; the Desk's
+# moved-since line still says when they differ at all.
+FINGERPRINT_SECTOR_TOLERANCE = 1
 
 
 def _bucket(v, step):
     return None if v is None else round(round(v / step) * step, 6)
 
 
+def _sector_reading(counts):
+    """``(sectors counted, rising, beating the S&P 500)`` — the three numbers
+    the sector fact states — or None when nothing was counted."""
+    t = _bullbear_totals(counts)
+    if not t:
+        return None
+    return t["sectors"], t["rising"], t["beating_sp500"]
+
+
 def summary_fingerprint(packet):
     """What the sentence is written from, at display resolution — or None when
     there is nothing to summarize (no composite and no trend word).
 
-    Words compare exactly; numbers to their step; Bull/Bear counts exactly with
-    their horizon. Two packets with one fingerprint would get the same sentence."""
+    Words compare exactly and numbers to their step; the LAST element is the
+    Bull/Bear ``_sector_reading``, which ``same_summary_readings`` compares
+    with a tolerance. Compare two fingerprints with that, never with ``==``."""
     p = packet if isinstance(packet, dict) else {}
     sent = p.get("sentiment") or {}
     trend = p.get("trend") or {}
@@ -651,8 +669,33 @@ def summary_fingerprint(packet):
         reg.get("word"),
         _bucket(reg.get("confidence"), FINGERPRINT_CONFIDENCE_STEP),
         bb.get("horizon"),
-        tuple(sorted((bb.get("counts") or {}).items())),
+        _sector_reading(bb.get("counts")),
     )
+
+
+def same_summary_readings(a, b):
+    """Would one sentence describe both fingerprints' readings?
+
+    Every element must match exactly except the sector reading, where the
+    rising and beating counts may each differ by ``FINGERPRINT_SECTOR_TOLERANCE``
+    (the number of sectors counted must still match), so a drift of one sector at
+    a time is still caught once it has moved past the tolerance.
+
+    ⚠ The gate anchors on the last ATTEMPT, not on the sentence on screen:
+    ``record_summary`` runs at launch, so a WITHHELD attempt re-anchors the gate
+    while the published sentence stays where it was. This tolerance therefore
+    bounds what earns a new CALL, never how stale the displayed counts may be —
+    the Desk's moved-since line compares the exact counts out of ``inputs``
+    itself, and is what tells the reader they differ."""
+    if a is None or b is None:
+        return a == b
+    if a[:-1] != b[:-1]:
+        return False
+    sa, sb = a[-1], b[-1]
+    if sa is None or sb is None:
+        return sa == sb
+    return sa[0] == sb[0] and all(
+        abs(x - y) <= FINGERPRINT_SECTOR_TOLERANCE for x, y in zip(sa[1:], sb[1:]))
 
 
 def _count_anthropic_call():
@@ -731,8 +774,8 @@ def _spread_direction_error(text):
     spread itself ("bearish trades like put credit spreads", "put credit spreads
     are a bearish play"), not anywhere in the same sentence — so a correct
     "despite the bearish read, put credit spreads still fit" passes. A hit
-    withholds the sentence: the last good one stays up and the same readings are
-    retried after the gap."""
+    withholds the sentence: the last good one stays up until the readings
+    change."""
     t = " ".join(str(text or "").lower().split())
     for adj, side in _WRONG_SPREAD_DIRECTION:
         spread = rf"{side} credit spreads?"
@@ -790,6 +833,22 @@ def _count_claim_error(text, totals):
     return None
 
 
+class _Withheld:
+    """``generate_summary``'s answer when the readings were answered and the
+    answer REFUSED, or there was nothing to state. Kept apart from ``None`` (the
+    call itself failed) because the loop treats them differently: a failure is
+    retried on the same readings once the gap has passed, a refusal is not. The
+    same readings are refused the same way — the Circling fact's semicolon came
+    back as a comma in 3 of 3 live replies, and retrying it bought 30 paid calls
+    and no sentence between 02:30 and 09:06 CT on 2026-09-11."""
+
+    def __repr__(self):
+        return "WITHHELD"
+
+
+WITHHELD = _Withheld()
+
+
 def generate_summary(packet, client=None):
     """Call Claude for the 1-2 sentence consolidated read + posture.
 
@@ -801,14 +860,16 @@ def generate_summary(packet, client=None):
     The model is sent ONLY ``summary_facts(packet)`` — statements the code
     wrote from the readings — and may only join them and add the posture.
 
-    Returns ``None`` — so the caller keeps the last good sentence and the same
-    readings are retried after the gap — when there are no facts to state
-    (no call is made), when the attempt FAILED (API error, timeout), when a
-    reply that ran out of room has no complete sentence, when the reply ties a
-    credit spread to the wrong direction, when it states a sector count that
-    disagrees with the packet's ready-made totals, or when it drops or rewords
-    any fact (accuracy first: a wrong sentence is worse than a slightly older
-    right one)."""
+    Returns ``None`` when the attempt FAILED (API error, timeout): the caller
+    keeps the last good sentence and retries the same readings after the gap.
+
+    Returns ``WITHHELD`` — the caller keeps the last good sentence and waits
+    for the readings to change — when there are no facts to state (no call is
+    made), when a reply that ran out of room has no complete sentence, when the
+    reply ties a credit spread to the wrong direction, when it states a sector
+    count that disagrees with the packet's ready-made totals, or when it drops
+    or rewords any fact (accuracy first: a wrong sentence is worse than a
+    slightly older right one)."""
     import json
     from datetime import timezone
     out = {"narrative": "", "inputs": packet or {},
@@ -818,7 +879,7 @@ def generate_summary(packet, client=None):
         return out
     facts = summary_facts(packet)
     if not facts:
-        return None
+        return WITHHELD
     try:
         _count_anthropic_call()
         resp = c.messages.create(
@@ -840,22 +901,22 @@ def generate_summary(packet, client=None):
         if not text:
             log.warning("market summary withheld - it ran out of room before "
                         "finishing a sentence")
-            return None
+            return WITHHELD
     wrong = _spread_direction_error(text)
     if wrong:
         log.warning("market summary withheld - it ties a credit spread to the "
                     "wrong direction: %r", wrong)
-        return None
+        return WITHHELD
     totals = ((packet or {}).get("bullbear") or {}).get("totals") or {}
     miscount = _count_claim_error(text, totals)
     if miscount:
         log.warning("market summary withheld - a sector count disagrees with "
                     "the totals %s: %r", totals, miscount)
-        return None
+        return WITHHELD
     dropped = _missing_fact(text, facts)
     if dropped:
         log.warning("market summary withheld - it dropped or reworded the "
                     "fact %r", dropped)
-        return None
+        return WITHHELD
     out["narrative"] = text
     return out

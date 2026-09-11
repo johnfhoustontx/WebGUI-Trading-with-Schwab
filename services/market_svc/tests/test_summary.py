@@ -114,13 +114,62 @@ def test_fingerprint_moves_when_a_number_crosses_its_step():
     assert compute.summary_fingerprint(a) != compute.summary_fingerprint(b)
 
 
-def test_fingerprint_moves_when_a_sector_changes_quadrant():
-    a = _packet()
-    b = _packet()
-    b["bullbear"] = {"horizon": "today",
-                     "counts": {**a["bullbear"]["counts"], "rising_leading": 3,
-                                "falling_lagging": 0}}
-    assert compute.summary_fingerprint(a) != compute.summary_fingerprint(b)
+def _counts(rl, rg, fl, fg):
+    return {"rising_leading": rl, "rising_lagging": rg, "falling_leading": fl,
+            "falling_lagging": fg, "unknown": 0}
+
+
+def _with_counts(counts, horizon="today"):
+    p = _packet()
+    p["bullbear"] = {"horizon": horizon, "counts": counts,
+                     "totals": compute._bullbear_totals(counts)}
+    return p
+
+
+# The 2026-09-11 close: 3 rising and beating the S&P 500, 6 rising but trailing
+# it, 2 falling and trailing.
+_CLOSE_0911 = _counts(3, 6, 0, 2)
+
+
+def test_a_one_sector_change_is_not_a_new_reading():
+    """Compared exactly, one of eleven sectors crossing flat or crossing the S&P
+    500 was a new reading - and in session one always does inside ten minutes,
+    so on 2026-09-11 every gap from 09:14 to 16:40 CT bought a new paid sentence
+    (43 of them). A sentence's sector counts may now be one sector off."""
+    same, fp = compute.same_summary_readings, compute.summary_fingerprint
+    base = fp(_with_counts(_CLOSE_0911))
+    for counts in (_counts(4, 5, 0, 2),     # one more beating the S&P 500
+                   _counts(3, 7, 0, 1),     # one more rising
+                   _counts(3, 5, 0, 3),     # one fewer rising
+                   _counts(2, 7, 1, 1)):    # two sectors trade places
+        assert same(base, fp(_with_counts(counts))), counts
+
+
+def test_a_two_sector_shift_is_a_new_reading():
+    same, fp = compute.same_summary_readings, compute.summary_fingerprint
+    base = fp(_with_counts(_CLOSE_0911))
+    assert not same(base, fp(_with_counts(_counts(3, 4, 0, 4))))   # 9 rising -> 7
+    assert not same(base, fp(_with_counts(_counts(5, 4, 0, 2))))   # 3 beating -> 5
+
+
+def test_the_sector_horizon_and_number_counted_still_compare_exactly():
+    same, fp = compute.same_summary_readings, compute.summary_fingerprint
+    base = fp(_with_counts(_CLOSE_0911))
+    assert not same(base, fp(_with_counts(_CLOSE_0911, horizon="quarter")))
+    assert not same(base, fp(_with_counts(_counts(3, 6, 0, 1))))   # 10 counted
+
+
+def test_the_other_readings_are_not_loosened_with_the_sectors():
+    same, fp = compute.same_summary_readings, compute.summary_fingerprint
+    a = _with_counts(_CLOSE_0911)
+    b = _with_counts(_counts(4, 5, 0, 2))
+    b["bias"] = "Neutral"
+    assert not same(fp(a), fp(b))
+    b = _with_counts(_CLOSE_0911)
+    b["sentiment"] = {"composite": 4.40}                 # 4.0 -> 4.5
+    assert not same(fp(a), fp(b))
+    # A failed attempt leaves no fingerprint on the gate; any reading differs.
+    assert not same(None, fp(a))
 
 
 def test_nothing_to_summarize_has_no_fingerprint():
@@ -279,7 +328,8 @@ def test_a_reply_that_changes_a_fact_is_not_published(caplog):
     reworded = _with_facts("Stay defensive.").replace(
         "sellers are not pushing them", "buyers are absent")
     with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
-        assert compute.generate_summary(_packet(), client=_client(reworded)) is None
+        assert compute.generate_summary(
+            _packet(), client=_client(reworded)) is compute.WITHHELD
     assert any("fact" in r.getMessage() for r in caplog.records)
 
 
@@ -313,12 +363,13 @@ def test_generate_summary_sends_only_the_facts():
 
 
 def test_nothing_to_state_makes_no_call():
-    """No facts means nothing for the model to join - no paid call, no sentence."""
+    """No facts means nothing for the model to join - no paid call, no
+    sentence, and nothing a retry of the same readings could change."""
     seen = {}
     out = compute.generate_summary(
         compute.build_summary_packet({}, {}, {}, now=_OPEN),
         client=_client("x.", seen=seen))
-    assert seen == {} and out is None
+    assert seen == {} and out is compute.WITHHELD
 
 
 def test_max_tokens_keeps_headroom():
@@ -437,7 +488,8 @@ def test_a_sentence_with_a_wrong_sector_count_is_not_published(caplog):
     import logging
     wrong = _with_facts("Also, 3 of the 3 sectors are rising.")   # packet: 2 rising
     with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
-        assert compute.generate_summary(_packet(), client=_client(wrong)) is None
+        assert compute.generate_summary(
+            _packet(), client=_client(wrong)) is compute.WITHHELD
     assert any("sector count" in r.getMessage() for r in caplog.records)
 
 
@@ -462,7 +514,8 @@ def test_a_reply_that_ran_out_of_room_keeps_only_its_complete_sentences():
 
 def test_a_cut_off_reply_with_no_complete_sentence_publishes_nothing():
     assert compute.generate_summary(
-        _packet(), client=_client("Prices drift lower and", stop="max_tokens")) is None
+        _packet(), client=_client("Prices drift lower and", stop="max_tokens")
+    ) is compute.WITHHELD
 
 
 def test_a_decimal_point_is_not_a_sentence_end():
@@ -486,13 +539,15 @@ def test_the_prompt_puts_accuracy_first_and_states_each_spreads_direction():
 
 
 def test_a_sentence_that_gets_a_spreads_direction_wrong_is_not_published(caplog):
-    """Withheld, not shown: the last good sentence stays, and the loop retries
-    the same readings after the gap (generate_summary returning None)."""
+    """Withheld, not shown: the last good sentence stays, and the loop waits
+    for the readings to change rather than asking the same question again
+    (generate_summary returning WITHHELD, not None)."""
     import logging
     wrong = _with_facts("Stay defensive with smaller bearish trades like put "
                         "credit spreads.")
     with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
-        assert compute.generate_summary(_packet(), client=_client(wrong)) is None
+        assert compute.generate_summary(
+            _packet(), client=_client(wrong)) is compute.WITHHELD
     assert any("spread" in r.getMessage() for r in caplog.records)
 
 

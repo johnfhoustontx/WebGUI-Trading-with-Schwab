@@ -92,54 +92,67 @@ def test_the_loop_is_gated_on_change_not_on_the_ticker_toggle():
     assert "summary_due(" in src and "record_summary(" in src
 
 
+def _run_once(monkeypatch, result):
+    """One ``_run_summary`` over a faked ``generate_summary`` returning
+    ``result``: ``(outcome, what was published)``."""
+    import asyncio
+    published = []
+    monkeypatch.setattr(sch.compute, "generate_summary", lambda packet: result())
+    monkeypatch.setattr(sch.handlers, "publish_summary",
+                        lambda bus, s: published.append(s))
+
+    async def _go():
+        return await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
+    return asyncio.run(_go()), published
+
+
 def test_a_failed_summary_attempt_publishes_nothing(monkeypatch):
     """generate_summary returns None when the Claude call failed; the last good
     sentence must stay on screen rather than be blanked."""
-    import asyncio
-    published = []
-    monkeypatch.setattr(sch.compute, "generate_summary", lambda packet: None)
-    monkeypatch.setattr(sch.handlers, "publish_summary",
-                        lambda bus, s: published.append(s))
-
-    async def _go():
-        return await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
-    result = asyncio.run(_go())
+    outcome, published = _run_once(monkeypatch, lambda: None)
     assert published == []
-    assert result is False
+    assert outcome == "failed"
+
+
+def test_a_withheld_reply_publishes_nothing(monkeypatch):
+    """generate_summary returns WITHHELD when the reply was checked and refused;
+    the last good sentence stays, exactly as after a failure."""
+    outcome, published = _run_once(monkeypatch, lambda: sch.compute.WITHHELD)
+    assert published == []
+    assert outcome == "withheld"
 
 
 def test_a_successful_summary_is_published(monkeypatch):
-    import asyncio
-    published = []
     out = {"narrative": "Fear builds; lean defensive.", "inputs": {"x": 1},
            "as_of": "2026-09-10T15:42:00+00:00"}
-    monkeypatch.setattr(sch.compute, "generate_summary", lambda packet: out)
-    monkeypatch.setattr(sch.handlers, "publish_summary",
-                        lambda bus, s: published.append(s))
-
-    async def _go():
-        return await sch._run_summary(asyncio.get_running_loop(), object(), {"x": 1})
-    result = asyncio.run(_go())
+    outcome, published = _run_once(monkeypatch, lambda: out)
     assert published == [out]
-    assert result is True
+    assert outcome == "published"
 
 
 class _Stop(Exception):
     """Ends the otherwise-infinite loop from inside its sleep."""
 
 
-def _drive_loop(monkeypatch, generate, ticks=40, step=60.0):
-    """Run ``loop()`` for ``ticks`` polls with every seam faked: the packet and
-    its fingerprint never change, each poll advances a fake monotonic clock by
-    ``step`` seconds, and ``generate`` stands in for the Claude call."""
+def _drive_loop(monkeypatch, generate, ticks=40, step=60.0, packet_at=None):
+    """Run ``loop()`` for ``ticks`` polls with every seam faked: each poll
+    advances a fake monotonic clock by ``step`` seconds, and ``generate`` stands
+    in for the Claude call. Without ``packet_at`` the packet and its fingerprint
+    never change; with it, ``packet_at(t)`` is the packet at clock ``t`` and the
+    REAL fingerprint and comparison decide what changed."""
     import asyncio
     clock = {"t": 0.0, "n": 0}
     published = []
     monkeypatch.setattr(sch, "poll_interval", lambda now=None: 0)
     monkeypatch.setattr(sch.compute, "collect", lambda bus: {})
     monkeypatch.setattr(sch.handlers, "publish", lambda bus, payload: None)
-    monkeypatch.setattr(sch.compute, "read_summary_packet", lambda bus: {"p": 1})
-    monkeypatch.setattr(sch.compute, "summary_fingerprint", lambda packet: ("same",))
+    if packet_at is None:
+        monkeypatch.setattr(sch.compute, "read_summary_packet", lambda bus: {"p": 1})
+        monkeypatch.setattr(sch.compute, "summary_fingerprint",
+                            lambda packet: ("same",))
+    else:
+        monkeypatch.setattr(sch.compute, "read_summary_packet",
+                            lambda bus: packet_at(clock["t"]))
     monkeypatch.setattr(sch.compute, "generate_summary",
                         lambda packet: generate(clock["t"]))
     monkeypatch.setattr(sch.handlers, "publish_summary",
@@ -165,6 +178,27 @@ def _drive_loop(monkeypatch, generate, ticks=40, step=60.0):
     return published
 
 
+def _counts(rl, rg, fl, fg):
+    return {"rising_leading": rl, "rising_lagging": rg,
+            "falling_leading": fl, "falling_lagging": fg, "unknown": 0}
+
+
+def _readings(counts, trend="Circling"):
+    """A packet as ``read_summary_packet`` builds it — the 2026-09-11 close."""
+    return {"sentiment": {"composite": 6.33},
+            "trend": {"word": trend, "score": 53.77},
+            "bias": "Neutral", "signal": "Neutral", "size": "1.00x",
+            "regime": {"word": "Balanced", "confidence": 0.76},
+            "bullbear": {"horizon": "today", "counts": counts}}
+
+
+def _ok(calls):
+    def _generate(t):
+        calls.append(t)
+        return {"narrative": "ok", "inputs": {}, "as_of": ""}
+    return _generate
+
+
 def test_a_failed_attempt_is_retried_after_the_gap_when_the_readings_hold(monkeypatch):
     calls = []
     outcomes = iter([None, {"narrative": "ok", "inputs": {}, "as_of": ""}])
@@ -179,15 +213,64 @@ def test_a_failed_attempt_is_retried_after_the_gap_when_the_readings_hold(monkey
     assert [s["narrative"] for s in published] == ["ok"]
 
 
-def test_unchanged_readings_are_written_once_and_then_left_alone(monkeypatch):
+def test_a_withheld_reply_is_not_retried_while_the_readings_hold(monkeypatch):
+    """A withheld reply was answered and refused, and the same readings are
+    refused the same way: the Circling fact's semicolon came back as a comma in
+    3 of 3 live replies. Retrying them bought 30 paid calls and no sentence
+    between 02:30 and 09:06 CT on 2026-09-11. Only a changed reading earns
+    another attempt."""
     calls = []
 
     def _generate(t):
         calls.append(t)
-        return {"narrative": "ok", "inputs": {}, "as_of": ""}
+        return sch.compute.WITHHELD
 
     published = _drive_loop(monkeypatch, _generate)
+    assert len(calls) == 1, calls
+    assert published == []
+
+
+def test_after_a_withheld_reply_a_changed_reading_is_written(monkeypatch):
+    calls = []
+
+    def _generate(t):
+        calls.append(t)
+        if len(calls) == 1:
+            return sch.compute.WITHHELD
+        return {"narrative": "ok", "inputs": {}, "as_of": ""}
+
+    published = _drive_loop(
+        monkeypatch, _generate,
+        packet_at=lambda t: _readings(_counts(3, 6, 0, 2),
+                                      trend="Circling" if t < 15 * 60 else "Climbing"))
+    assert len(calls) == 2, calls
+    assert [s["narrative"] for s in published] == ["ok"]
+
+
+def test_unchanged_readings_are_written_once_and_then_left_alone(monkeypatch):
+    calls = []
+    published = _drive_loop(monkeypatch, _ok(calls))
     assert len(calls) == 1 and len(published) == 1
+
+
+def test_a_one_sector_wobble_does_not_buy_a_new_sentence(monkeypatch):
+    """2026-09-11: with the Bull/Bear counts compared exactly, one of eleven
+    sectors crossing flat or crossing the S&P 500 inside every ten-minute gap
+    bought a new paid sentence each gap from 09:14 to 16:40 CT (43 of them)."""
+    wobble = [_counts(3, 6, 0, 2), _counts(4, 5, 0, 2), _counts(3, 7, 0, 1),
+              _counts(3, 5, 0, 3), _counts(2, 7, 1, 1)]
+    calls = []
+    _drive_loop(monkeypatch, _ok(calls),
+                packet_at=lambda t: _readings(wobble[int(t // 60) % len(wobble)]))
+    assert len(calls) == 1, calls
+
+
+def test_a_two_sector_shift_is_written_after_the_gap(monkeypatch):
+    calls = []
+    _drive_loop(monkeypatch, _ok(calls),
+                packet_at=lambda t: _readings(
+                    _counts(3, 6, 0, 2) if t < 15 * 60 else _counts(3, 4, 0, 4)))
+    assert len(calls) == 2, calls
 
 
 def test_loop_runs_summary_as_background_task():
@@ -215,16 +298,18 @@ def test_poll_interval_throttles_deep_weekend():
     assert sch.poll_interval(sun_pm) == sch.OFFHOURS_INTERVAL_SEC
 
 
-def test_published_reads_a_finished_task_without_raising():
+def test_outcome_reads_a_finished_task_without_raising():
     import asyncio
 
     async def _go():
         loop = asyncio.get_running_loop()
-        ok, failed, boom, cancelled = (loop.create_future() for _ in range(4))
-        ok.set_result(True)
-        failed.set_result(False)
+        done, held, failed, boom, cancelled = (loop.create_future() for _ in range(5))
+        done.set_result("published")
+        held.set_result("withheld")
+        failed.set_result("failed")
         boom.set_exception(RuntimeError("x"))
         cancelled.cancel()
-        return [sch._published(f) for f in (ok, failed, boom, cancelled)]
+        return [sch._outcome(f) for f in (done, held, failed, boom, cancelled)]
 
-    assert asyncio.run(_go()) == [True, False, False, False]
+    assert asyncio.run(_go()) == ["published", "withheld", "failed", "failed",
+                                  "failed"]
