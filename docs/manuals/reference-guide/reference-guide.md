@@ -159,7 +159,9 @@ Three things are worth knowing before you trust a screen:
 
 - **All times are US Central (CT)** unless stated. The regular session is
   08:30–15:00 CT (09:30–16:00 ET).
-- **DTE** means days to expiration. **0-DTE** means expiring today.
+- **DTE** means days to expiration. **0-DTE** as a *term* means expiring today; the
+  Market Scanner's **0-DTE tab** is a wider bucket covering **0–4 DTE**, so check the
+  Exp column rather than assuming same-day.
 - **PCS** = put credit spread (mildly bullish). **CCS** = call credit spread (mildly
   bearish). **IC** = iron condor (both, neutral).
 - Scores are **0–100 with higher meaning better**. The sentiment composite runs
@@ -1812,7 +1814,7 @@ never be confused.
 
 | Tab | Contents |
 |---|---|
-| **0-DTE** | Same-day expirations. Fast, high-decay, unforgiving. |
+| **0-DTE** | The *short-dated* bucket: **0 to 4 DTE**, not only today. Fast, high-decay, unforgiving. Read the Exp column — a 3-DTE spread in this tab is held across sessions, and can straddle an earnings report. |
 | **Swing** | Multi-day credit spreads, typically 5–15 DTE. |
 | **Directional** | Single-leg long and short calls and puts. |
 
@@ -2042,10 +2044,15 @@ reached this board, so nothing listed here is knowingly exposed to one.
 ### Why it matters
 
 At 30–45 days a straddled earnings report is close to certain for most names, which is
-why the gate matters more here than at any shorter horizon — and why the third state
-matters. A symbol the calendar has never heard of and a symbol it knows is clear both
-leave the date blank; collapsing them would let the gate fail open silently on exactly
-the names most likely to be traded.
+why the gate bites hardest here — and why the third state matters. A symbol the calendar
+has never heard of and a symbol it knows is clear both leave the date blank; collapsing
+them would let the gate fail open silently on exactly the names most likely to be traded.
+
+The shorter windows are gated too, as of **2026-09-09**. They were not before: the live
+scan never handed the gate a date to check, so it was a no-op everywhere except here.
+The Market Scanner's swing signals, and every 0-DTE-bucket candidate that is not a
+*same-day* expiry, now consult the same calendar. This screen remains the only one that
+**shows** you the three-state answer; the others simply drop what straddles a report.
 
 **Where it is weak.** Without an Alpha Vantage API key configured, the earnings
 calendar is empty and **every** row reads *Not checked*. That is honest but it is not
@@ -2325,6 +2332,29 @@ price, status and reason.
 
 **Reset** sets a new starting balance.
 
+### What the engine will refuse
+
+Four limits, checked in this order. The first three refuse one trade; the fourth
+stops the day.
+
+| Limit | Default | Refuses |
+|---|---|---|
+| Risk per trade | $250 | A spread whose single contract already exceeds the cap |
+| **Positions in one symbol** | **3** | A fourth open position in the same underlying |
+| **Risk in one symbol** | **$750** | An entry that would push one name's summed max loss past the cap |
+| **Positions in one expiry** | **5** | A sixth open position sharing an expiration date, *across all names* |
+| Session drawdown | $2,500 | Halts the account for the day |
+
+The three concentration limits were added on 2026-09-09. Before them the engine had
+nothing between "one trade" and "the whole account", and a book could be entirely one
+name while clearing both ends — which is what happened: fourteen open positions, all
+ORCL, all expiring the same Friday, over an earnings report scheduled the day before.
+
+The expiry limit counts **across symbols on purpose**. Five positions expiring the same
+Friday is a bet on one date even when no single name is over its own cap.
+
+All three live in `options-scanner/config_paper.py` — edit and restart `options_svc`.
+
 ### Why it matters
 
 This is the app's mechanical baseline. The engine applies the same rules every time
@@ -2339,6 +2369,15 @@ The fills log is also the best available audit trail when a position behaves une
 - The automatic cycle is **hourly**, not continuous — a target hit at 09:15 is acted on
   at the 10:00 run unless you press **Run manage cycle**.
 - **Reset wipes the book.** There is no undo.
+- ⚠ **A concentration refusal leaves no row on this screen.** The risk-per-trade and
+  buying-power refusals appear in the fills log as `REJECTED`; the three concentration
+  limits do not — they skip the signal silently and log to the service journal
+  (`SKIPPED <symbol> <reason> (concentration cap)`). That is deliberate: the condition
+  is *temporary*, and a rejected order row would blacklist the signal permanently, so a
+  name that freed up an hour later could never be entered. The visible symptom is a
+  high-scoring captured signal that simply never opens. Check
+  `journalctl --user -u trading-prod-options_svc | grep concentration` before assuming
+  the engine is stuck.
 
 ### Related pages
 
@@ -3295,7 +3334,9 @@ your work.
 
 Terms the app uses without defining them on screen.
 
-**0-DTE** — expiring today. Maximum time decay, maximum gamma risk.
+**0-DTE** — expiring today. Maximum time decay, maximum gamma risk. ⚠ The Market
+Scanner's **0-DTE tab** is named for this but spans **0–4 DTE**, so a position opened
+from it is not necessarily flat by the close.
 
 **ADX** — Average Directional Index. Trend *strength* regardless of direction. Above
 ~25 is generally read as trending.

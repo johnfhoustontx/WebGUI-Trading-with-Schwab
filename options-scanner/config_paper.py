@@ -26,6 +26,23 @@ MAX_RISK_PER_TRADE   = 250.0
 MAX_SESSION_DRAWDOWN = 2_500.0
 
 #############################################
+# CONCENTRATION (per name / per expiry)
+#############################################
+# The rung that was missing between MAX_RISK_PER_TRADE (one trade) and
+# MAX_SESSION_DRAWDOWN (the whole account). Without it a book could be entirely
+# one name and still clear both ends: on 2026-09-08 all fourteen open positions
+# were ORCL spreads expiring 2026-09-11 -- $2,829, 11.6% of a $24,490 account,
+# one name, one direction, one expiry, over a report scheduled for 09-10.
+#
+# Enforced by paper_concentration.concentration_reject at the entry path. A
+# breach SKIPS the signal for this cycle rather than recording a rejected order:
+# the condition is transient, and an order row would blacklist the signal for
+# good (see that module's header).
+MAX_POSITIONS_PER_SYMBOL = 3       # open positions in one underlying
+MAX_RISK_PER_SYMBOL      = 750.0   # summed max loss in one underlying (~3% of account)
+MAX_POSITIONS_PER_EXPIRY = 5       # open positions sharing one expiration, book-wide
+
+#############################################
 # ENTRY QUALITY BAR
 #############################################
 
