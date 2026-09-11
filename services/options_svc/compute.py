@@ -6703,7 +6703,10 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
                 "units": _POSITION_UNITS}
                if len(rows) >= 2 else None)
 
-    return {"spot": snap.spot, "whatif_rows": whatif_rows,
+    # ``symbol`` + ``legs`` echo what was priced, so the page can tell a result for
+    # the legs on screen from one still in flight for the previous legs.
+    return {"spot": snap.spot, "symbol": snap.symbol, "legs": list(legs),
+            "whatif_rows": whatif_rows,
             "whatif_baseline": whatif_baseline, "ivshock": ivshock}
 
 

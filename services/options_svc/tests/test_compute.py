@@ -2556,6 +2556,25 @@ def test_sim_run_ivshock_scales_every_greek_to_the_position(monkeypatch):
     assert base["vega"] == 30.0
 
 
+def test_sim_run_echoes_the_symbol_and_legs_it_priced(monkeypatch):
+    """The page's position tiles combine the result's entry baseline with the legs
+    on screen; without the echo, a leg edit would sit beside the PREVIOUS legs'
+    price until the next result landed, printing a confident wrong entry."""
+    from datetime import date, timedelta
+
+    exp = (date.today() + timedelta(days=10)).isoformat()
+    snap = _SimSnap("TEST", 100.0, [_SimRow(exp, "put", 95), _SimRow(exp, "put", 90)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["TEST"] = snap
+    legs = [{"kind": "put", "strike": 95, "expiry": exp, "side": "short", "qty": 1},
+            {"kind": "put", "strike": 90, "expiry": exp, "side": "long", "qty": 1}]
+
+    out = compute.sim_run("TEST", legs=legs, dt=0.0, mult=1.5)
+    assert out["symbol"] == "TEST"
+    assert out["legs"] == legs
+
+
 def test_sim_run_empty_when_no_snapshot(monkeypatch):
     _patch_sim(monkeypatch, _SimSnap("SPY", 450.0, []))
     compute._SIM_SNAPSHOTS.clear()
