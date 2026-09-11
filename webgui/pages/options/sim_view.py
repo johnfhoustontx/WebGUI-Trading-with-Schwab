@@ -535,3 +535,99 @@ def ivshock_table(ivshock, mult):
         return {"headline": f"{head} barely changes.", "tone": "neutral", "rows": rows}
     word, tone = ("gains", "pos") if delta > 0 else ("loses", "neg")
     return {"headline": f"{head} {word} {_money(abs(delta))}.", "tone": tone, "rows": rows}
+
+
+# -- Task 7: replay axis + cursor ------------------------------------------------
+
+_MAX_REPLAY_TICKS = 10
+_DAILY_GAP_HOURS = 20
+
+
+def replay_in_position_units(trace):
+    """``trace`` with its Greek series in position units (see ``position_units``).
+    A trace already marked ``units: "position"`` is returned unchanged."""
+    trace = dict(trace or {})
+    if trace.get("units") == POSITION_UNITS:
+        return trace
+    greeks = {}
+    for g, series in (trace.get("greeks") or {}).items():
+        greeks[g] = [(v * SHARES_PER_CONTRACT if num(v) is not None else v)
+                     for v in series or []]
+    trace["greeks"] = greeks
+    return trace
+
+
+def _parse_ts(ts):
+    try:
+        return _dt.datetime.fromisoformat(str(ts))
+    except ValueError:
+        return None
+
+
+def replay_categories(timestamps):
+    """One label per bar, used as the x-axis categories so the tooltip header and
+    the tick labels show real time, not a bar number. Dates alone for daily bars
+    (a time of day is noise there), date and time for intraday bars. An
+    unparseable stamp is passed through as-is rather than dropped, which would
+    shift every later label onto the wrong bar."""
+    stamps = list(timestamps or [])
+    parsed = [_parse_ts(t) for t in stamps]
+    good = [p for p in parsed if p is not None]
+    gaps = sorted((b - a).total_seconds() for a, b in zip(good, good[1:]))
+    daily = bool(gaps) and gaps[len(gaps) // 2] >= _DAILY_GAP_HOURS * 3600
+    out = []
+    for raw, p in zip(stamps, parsed):
+        if p is None:
+            out.append(str(raw))
+        elif daily:
+            out.append(f"{p:%b} {p.day}")
+        else:
+            out.append(f"{p:%b} {p.day} {p:%H:%M}")
+    return out
+
+
+def replay_tick_positions(trace):
+    """Where the x-axis labels sit: each session's first bar when the window spans
+    several sessions (thinned to at most ten), else the service's own evenly
+    spaced ``ticks``, else eight evenly spaced bars."""
+    trace = trace or {}
+    sessions = trace.get("sessions") or []
+    n = len(trace.get("x") or [])
+    if len(sessions) > 1:
+        starts = [int(s.get("start", 0)) for s in sessions]
+        stride = max(1, math.ceil(len(starts) / _MAX_REPLAY_TICKS))
+        return starts[::stride]
+    pos = (trace.get("ticks") or {}).get("pos")
+    if pos:
+        return [int(p) for p in pos]
+    if n == 0:
+        return []
+    k = min(8, n)
+    return sorted({round(i * (n - 1) / max(k - 1, 1)) for i in range(k)})
+
+
+def replay_cursor_text(trace, i):
+    """What the scrubbed bar says: ``"Aug 24 13:45 — price 356.20, profit $1,230,
+    delta +145"``. Parts with no reading are left out rather than zeroed."""
+    trace = replay_in_position_units(trace)
+    stamps = trace.get("timestamps") or []
+    if not isinstance(i, int) or not 0 <= i < len(stamps):
+        return ""
+    parts = []
+    prices = trace.get("prices") or []
+    price = num(prices[i]) if i < len(prices) else None
+    if price is not None:
+        parts.append(f"price {price:,.2f}")
+    pnl_series = trace.get("pnl") or []
+    pnl = num(pnl_series[i]) if i < len(pnl_series) else None
+    if pnl is not None:
+        if abs(pnl) < 0.5:
+            parts.append("break-even")
+        else:
+            parts.append(f"{'profit' if pnl > 0 else 'loss'} {_money(abs(pnl))}")
+    deltas = (trace.get("greeks") or {}).get("delta") or []
+    delta = num(deltas[i]) if i < len(deltas) else None
+    if delta is not None:
+        parts.append(f"delta {delta:+,.0f}")
+    head = replay_categories([stamps[i]])[0]
+    return f"{head} — {', '.join(parts)}" if parts else head

@@ -191,8 +191,12 @@ def ivshock_figure(base, shock, mult=1.5):
     }
 
 
-_GREEK_PANELS = ["delta", "gamma", "theta", "vega", "rho"]
-_PANEL_TITLES = ["Price", "Delta", "Gamma", "Theta", "Vega", "Rho"]
+# Replay panels, top to bottom: the underlying, the POSITION's own P/L (the
+# question the tab exists to answer), then four Greeks in position units. Rho is
+# left out of the panels (it stays in the payload): it matters least at these
+# tenors, and a seventh panel in the same height crowded all six.
+_REPLAY_PANELS = [("price", "Price"), ("pnl", "Profit / loss"), ("delta", "Delta"),
+                  ("gamma", "Gamma"), ("theta", "Theta per day"), ("vega", "Vega")]
 CURSOR_COLOR = "#ef5350"
 PRICE_COLOR = "#66bb6a"
 GREEK_COLOR = "#42a5f5"
@@ -215,37 +219,53 @@ def lookback_options():
 
 
 def replay_figure(trace, cursor=None):
-    """Stacked price + 5-Greek replay chart over an integer (gap-compressed) x.
+    """Stacked price + position P/L + 4-Greek replay chart over an integer
+    (gap-compressed) x.
 
     One Highcharts element with six stacked yAxes sharing the integer x-axis
-    (overnight/weekend breaks already collapsed by ``compute.sim_replay``).
-    Session boundaries render as dashed xAxis plotLines; ``cursor`` (an int
-    x-index) draws one more vertical plotLine — the client-side scrub cursor. The
-    x-axis stays NUMERIC (dates live in the tooltip / tick labels) to avoid the
-    datetime-crosshair epoch-ms gotcha. Returns an empty-but-valid chart when
+    (overnight/weekend breaks already collapsed by ``compute.sim_replay``). The
+    axis carries one CATEGORY per bar — its real time — so the tooltip header and
+    the tick labels (on session starts) read as dates, not bar numbers. A
+    category axis still takes numeric plotLines, so session boundaries render as
+    dashed lines and ``cursor`` (an int x-index) as the scrub line; categories
+    also sidestep the datetime-crosshair epoch-ms gotcha. The P/L panel is the
+    What-if payoff's green-above / red-below area. Greeks arrive in position
+    units; a pre-upgrade per-share trace is scaled by
+    ``sim_view.replay_in_position_units``. Returns an empty-but-valid chart when
     ``trace`` is missing."""
-    trace = trace or {}
+    from . import sim_view
+    trace = sim_view.replay_in_position_units(trace)
     x = trace.get("x") or []
-    prices = trace.get("prices") or []
     greeks = trace.get("greeks") or {}
     sessions = trace.get("sessions") or []
 
-    panels = ["price"] + _GREEK_PANELS
-    n = len(panels)
+    n = len(_REPLAY_PANELS)
     gap = 3                                  # % vertical gap between panels
     h = (100 - gap * (n - 1)) / n
     yaxes, series = [], []
-    for i, (panel, title) in enumerate(zip(panels, _PANEL_TITLES)):
+    for i, (panel, title) in enumerate(_REPLAY_PANELS):
         top = i * (h + gap)
-        yaxes.append({**_DARK_AXIS,
-                      "title": {"text": title, "style": {"color": "#bdbdbd"}},
-                      "top": f"{top}%", "height": f"{h}%", "offset": 0,
-                      "lineWidth": 1})
-        col = prices if panel == "price" else (greeks.get(panel) or [])
+        yaxis = {**_DARK_AXIS,
+                 "title": {"text": title, "style": {"color": "#bdbdbd"}},
+                 "top": f"{top}%", "height": f"{h}%", "offset": 0, "lineWidth": 1}
+        if panel == "price":
+            col = trace.get("prices") or []
+        elif panel == "pnl":
+            col = trace.get("pnl") or []
+            yaxis["plotLines"] = [_plotline(0, "rgba(255,255,255,0.35)", width=1)]
+        else:
+            col = greeks.get(panel) or []
+        yaxes.append(yaxis)
         data = [[xi, v] for xi, v in zip(x, col)]
-        series.append({"name": title, "type": "line", "yAxis": i, "data": data,
-                       "color": PRICE_COLOR if panel == "price" else GREEK_COLOR,
-                       "marker": {"enabled": False}})
+        if panel == "pnl":
+            series.append({"name": title, "type": "area", "yAxis": i, "data": data,
+                           "threshold": 0, "lineWidth": 1.5, "marker": {"enabled": False},
+                           "color": PNL_GREEN, "fillColor": _PNL_GREEN_FILL,
+                           "negativeColor": PNL_RED, "negativeFillColor": _PNL_RED_FILL})
+        else:
+            series.append({"name": title, "type": "line", "yAxis": i, "data": data,
+                           "color": PRICE_COLOR if panel == "price" else GREEK_COLOR,
+                           "marker": {"enabled": False}})
 
     # Dashed session boundaries (skip the first session's start) + scrub cursor.
     xplotlines = [_plotline(s["start"] - 0.5, "#777777", dash="Dot", width=1)
@@ -254,13 +274,15 @@ def replay_figure(trace, cursor=None):
         xplotlines.append(_plotline(cursor, CURSOR_COLOR, width=1))
 
     return {
-        "chart": {"height": 600, "backgroundColor": "transparent"},
+        "chart": {"height": 640, "backgroundColor": "transparent"},
         "title": {"text": f"Replay — {trace.get('resolution', '')}".rstrip(" —"),
                   "style": {"color": "#e6e6e6"}},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
         "xAxis": {**_DARK_AXIS, "plotLines": xplotlines,
+                  "categories": sim_view.replay_categories(trace.get("timestamps")),
+                  "tickPositions": sim_view.replay_tick_positions(trace),
                   "labels": {"style": {"color": "#bdbdbd"}}},
         "yAxis": yaxes,
         # valueDecimals caps the hover readout at 2dp (raw float precision is noise).

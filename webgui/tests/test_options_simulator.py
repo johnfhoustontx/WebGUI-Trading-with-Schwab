@@ -79,22 +79,14 @@ def test_whatif_figure_profit_loss_shading_and_bands():
     assert [110, 0] in s["data"]                  # zero at spot
 
 
-def test_ivshock_figure_two_series():
-    base = {"theo_price": 1.0, "delta": 0.5, "gamma": 0.02, "theta": -0.1, "vega": 0.3}
-    shock = {"theo_price": 1.6, "delta": 0.55, "gamma": 0.018, "theta": -0.12, "vega": 0.45}
-    fig = sim.ivshock_figure(base, shock, mult=1.5)
-    assert len(fig["series"]) == 2 and fig["chart"]["type"] == "column"
-
-
-def test_whatif_and_ivshock_figures_set_explicit_height():
-    # These charts mount inside INACTIVE tab panels (default tab is Replay). NiceGUI's
+def test_whatif_figure_sets_explicit_height():
+    # This chart mounts inside an INACTIVE tab panel (default tab is Replay). NiceGUI's
     # highchart only reflows once at mount and never re-measures, so a chart that
     # mounts in a 0-height (display:none) panel must carry an explicit height or it
-    # collapses to title-height when the tab is finally shown (the IV-shock bug).
+    # collapses to title-height when the tab is finally shown (the IV-shock bug —
+    # that chart is now a table, 2026-09-11, so only What-if still needs this).
     wf = sim.whatif_figure([{"S": 1, "theo_price": 2}], spot=1.0)
-    iv = sim.ivshock_figure({"theo_price": 1.0}, {"theo_price": 1.2}, mult=1.5)
     assert isinstance(wf["chart"].get("height"), (int, float)) and wf["chart"]["height"] >= 300
-    assert isinstance(iv["chart"].get("height"), (int, float)) and iv["chart"]["height"] >= 300
 
 
 def test_replay_figure_stacks_price_and_greeks():
@@ -109,13 +101,20 @@ def test_replay_figure_stacks_price_and_greeks():
         "ticks": {"pos": [0, 1], "labels": ["09:30", "09:31"]},
         "resolution": "2 bars, 1-min × 1 sessions",
     }
+    trace["value"] = [-1000.0, -900.0]
+    trace["pnl"] = [0.0, 100.0]
+    trace["units"] = "position"
     fig = sim.replay_figure(trace, cursor=1)
-    # 6 stacked series (price + 5 greeks) over 6 stacked yAxes.
-    assert len(fig["series"]) == 6
+    # 6 stacked series over 6 stacked yAxes: price, the POSITION's P/L, then four
+    # Greeks. Rho left the panels on 2026-09-11 (still in the payload) — it is the
+    # Greek that matters least at these tenors, and a seventh panel crowded all six.
+    assert [s["name"] for s in fig["series"]] == [
+        "Price", "Profit / loss", "Delta", "Gamma", "Theta per day", "Vega"]
     assert len(fig["yAxis"]) == 6
-    # Each greek series points at its own yAxis index.
+    # Each series points at its own yAxis index.
     assert [s["yAxis"] for s in fig["series"]] == [0, 1, 2, 3, 4, 5]
     assert fig["series"][0]["data"] == [[0, 450.0], [1, 451.0]]
+    assert fig["series"][1]["data"] == [[0, 0.0], [1, 100.0]]
     # Scrub cursor present as an xAxis plotLine at the cursor index.
     assert any(pl["value"] == 1 for pl in fig["xAxis"]["plotLines"])
 
@@ -402,3 +401,32 @@ def test_simulator_card_is_width_capped_in_its_flex_grow_column():
     from pages.options import leg_editor as LE
     for card in _leg_cards(_sim_container()):
         assert LE._CARD_MAX_W in card._classes
+
+
+def test_replay_pnl_panel_is_green_above_zero_and_red_below():
+    trace = {"x": [0, 1], "prices": [1, 2], "pnl": [0.0, -50.0], "value": [10.0, -40.0],
+             "greeks": {}, "sessions": [], "units": "position"}
+    pnl = sim.replay_figure(trace)["series"][1]
+    assert pnl["type"] == "area" and pnl["threshold"] == 0
+    assert pnl["color"] == sim.PNL_GREEN and pnl["negativeColor"] == sim.PNL_RED
+
+
+def test_replay_x_axis_shows_dates_not_bar_numbers():
+    """The bar index meant nothing to a reader. Categories carry each bar's real
+    time (the tooltip header), and the ticks sit on session starts."""
+    trace = {
+        "x": [0, 1, 2, 3], "prices": [1, 2, 3, 4], "greeks": {},
+        "timestamps": ["2026-08-24T09:30:00", "2026-08-24T09:45:00",
+                       "2026-08-25T09:30:00", "2026-08-25T09:45:00"],
+        "sessions": [{"start": 0, "end": 2, "date": "2026-08-24"},
+                     {"start": 2, "end": 4, "date": "2026-08-25"}],
+    }
+    x = sim.replay_figure(trace)["xAxis"]
+    assert x["categories"] == ["Aug 24 09:30", "Aug 24 09:45", "Aug 25 09:30", "Aug 25 09:45"]
+    assert x["tickPositions"] == [0, 2]
+
+
+def test_replay_legacy_per_share_greeks_are_scaled():
+    trace = {"x": [0], "prices": [1.0], "greeks": {"delta": [0.45]}, "sessions": []}
+    fig = sim.replay_figure(trace)
+    assert fig["series"][2]["data"] == [[0, 45.0]]

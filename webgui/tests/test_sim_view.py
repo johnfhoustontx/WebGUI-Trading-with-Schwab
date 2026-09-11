@@ -393,3 +393,46 @@ def test_ivshock_table_em_dashes_a_missing_greek():
     rows = {r["label"]: r for r in sv.ivshock_table(shock, 1.5)["rows"]}
     assert rows["Delta"]["base"] == sv.NO_READING
     assert rows["Delta"]["change"] == sv.NO_READING
+
+
+# -- Task 7: replay axis + cursor ------------------------------------------------
+
+def test_replay_categories_are_dates_for_daily_bars():
+    ts = ["2026-08-20T00:00:00", "2026-08-21T00:00:00", "2026-08-24T00:00:00"]
+    assert sv.replay_categories(ts) == ["Aug 20", "Aug 21", "Aug 24"]
+
+
+def test_replay_categories_tolerate_junk():
+    assert sv.replay_categories(["2026-08-20T09:30:00", "junk"]) == ["Aug 20 09:30", "junk"]
+    assert sv.replay_categories(None) == []
+
+
+def test_replay_tick_positions_thin_many_sessions():
+    sessions = [{"start": i * 10} for i in range(20)]
+    ticks = sv.replay_tick_positions({"sessions": sessions, "x": list(range(200))})
+    assert ticks[0] == 0 and len(ticks) <= 10
+
+
+def test_replay_tick_positions_for_one_session_use_the_service_ticks():
+    trace = {"sessions": [{"start": 0}], "x": list(range(50)),
+             "ticks": {"pos": [0, 10, 20, 49]}}
+    assert sv.replay_tick_positions(trace) == [0, 10, 20, 49]
+
+
+def test_replay_cursor_text_states_the_bar():
+    trace = {"timestamps": ["2026-08-24T13:45:00"], "prices": [356.2],
+             "pnl": [1230.0], "greeks": {"delta": [145.2]}, "units": "position"}
+    assert sv.replay_cursor_text(trace, 0) ==         "Aug 24 13:45 — price 356.20, profit $1,230, delta +145"
+
+
+def test_replay_cursor_text_at_the_first_bar_and_without_pnl():
+    trace = {"timestamps": ["2026-08-24T13:45:00"], "prices": [356.2],
+             "pnl": [0.0], "greeks": {}, "units": "position"}
+    assert sv.replay_cursor_text(trace, 0) == "Aug 24 13:45 — price 356.20, break-even"
+    legacy = {"timestamps": ["2026-08-24T13:45:00"], "prices": [356.2],
+              "greeks": {"delta": [1.452]}}
+    assert sv.replay_cursor_text(legacy, 0) == "Aug 24 13:45 — price 356.20, delta +145"
+
+
+def test_replay_cursor_text_out_of_range_is_blank():
+    assert sv.replay_cursor_text({"timestamps": []}, 3) == ""
