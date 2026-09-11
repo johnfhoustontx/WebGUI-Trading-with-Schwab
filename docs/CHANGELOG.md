@@ -31,7 +31,7 @@ position's own profit and loss on a scrubber that finally reaches every bar.)
   (pre-upgrade) cache itself. ⚠ Needs an **options_svc restart** as well as the
   webgui's; until then the page runs on the old payloads through that fallback,
   with the tiles trusting the echo-less result as before.
-- **Pieces.** New pure module `webgui/pages/options/sim_view.py` (68 unit tests);
+- **Pieces.** New pure module `webgui/pages/options/sim_view.py` (74 unit tests);
   render tests drive the page through its own poll timers, and the scrubber,
   stale-result and legacy-units tests were mutation-checked. Verified in a local
   harness that served the real page over the real `options_svc` handlers and
@@ -39,6 +39,16 @@ position's own profit and loss on a scrubber that finally reaches every bar.)
   (the readout named a day past expiry; a one-lot's theta printed "+$0"; the
   expiry select sat off the picker's baseline). **Not verified against a live
   Schwab chain** — there is no dev environment on the VPS.
+- **Review fixes before promoting.** An independent review found one Medium
+  issue: only the tiles refused a result priced for other legs, so after a webgui
+  restart the What-if chart, its readout and the IV-shock verdict described the
+  last priced position beside the default template. Every readout now goes
+  through one gate, and `sim_replay` echoes its legs too. Also fixed: a
+  Calculator hand-off now sets the picker to the strategy it carries (the Edited
+  chip had flagged untouched legs); the coverage warning compares legs of one
+  option type only (a Sep put spread beside an Oct call spread was called
+  uncovered); `whatif_baseline` is `None`, not `0.0`, when its sweep is empty;
+  and a near-zero delta reads "0", not "-0".
 - **Design:** [2026-09-11-simulator-friendlier-ui-design.md](plans/2026-09-11-simulator-friendlier-ui-design.md).
 
 **Prior — 2026-09-11** (**IYT joins the Market Dashboard** — the iShares

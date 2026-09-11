@@ -5641,3 +5641,37 @@ def test_sim_snapshots_refresh_keeps_a_symbol_recent():
         assert compute._SIM_SNAPSHOTS["KEEP"] == {"v": 2}
     finally:
         compute.reset_sim_snapshots()
+
+
+def test_sim_replay_echoes_the_symbol_and_legs_it_priced(monkeypatch):
+    """Like sim_run: lets the page tell a trace for the legs on screen from one
+    left in the cache by a different position (review finding, 2026-09-11)."""
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+    _patch_replay_history(
+        monkeypatch,
+        ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"],
+        [450.0, 451.0, 452.0])
+    legs = [{"kind": "call", "strike": 450.0, "expiry": "2026-06-26", "side": "long", "qty": 1}]
+    out = compute.sim_replay("SPY", legs=legs)
+    assert out["symbol"] == "SPY"
+    assert out["legs"] == legs
+
+
+def test_sim_run_baseline_is_none_not_zero_when_the_sweep_is_empty(monkeypatch):
+    """A 0.0 fallback read as 'Entry credit $0 / Max profit $0' on the tiles."""
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = snap
+    import sys as _sys
+    eng = _sys.modules["options_simulator.engine"]
+    real = eng.aggregate_position
+    calls = {"n": 0}
+
+    def _agg(pos, fn):
+        calls["n"] += 1
+        return [] if calls["n"] == 2 else real(pos, fn)   # the 2nd call is the baseline sweep
+    monkeypatch.setattr(eng, "aggregate_position", _agg)
+    out = compute.sim_run("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
+    assert out["whatif_baseline"] is None

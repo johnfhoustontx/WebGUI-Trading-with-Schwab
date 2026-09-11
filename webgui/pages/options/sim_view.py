@@ -43,7 +43,9 @@ def _money(v, signed=False):
     v = num(v)
     if v is None:
         return NO_READING
-    txt = f"${abs(v):,.2f}" if 0 < abs(v) < _CENTS_BELOW else f"${abs(v):,.0f}"
+    if abs(v) < 0.005:              # rounds to zero cents: never "-$0.00"
+        return "$0"
+    txt = f"${abs(v):,.2f}" if abs(v) < _CENTS_BELOW else f"${abs(v):,.0f}"
     if signed:
         return f"{'+' if v >= 0 else '-'}{txt}"
     return f"-{txt}" if v < 0 else txt
@@ -224,14 +226,19 @@ def position_tiles(legs, result):
         spot = num(result.get("spot"))
         sub = ""
         if spot:
-            pct = (bes[0] - spot) / spot * 100.0
-            sub = f"{abs(pct):.1f}% {'above' if pct >= 0 else 'below'} spot"
+            def _dist(b):
+                pct = (b - spot) / spot * 100.0
+                return f"{abs(pct):.1f}% {'above' if pct >= 0 else 'below'}"
+            shown = bes[:2] if len(bes) == 2 else bes[:1]
+            sub = " and ".join(_dist(b) for b in shown) + " spot"
         t_be = _tile("breakeven", label, value, sub)
 
     greeks = position_greeks(result) or {}
     delta = num(greeks.get("delta"))
     if delta is None:
         t_delta = _tile("delta", "Delta")
+    elif round(delta) == 0:
+        t_delta = _tile("delta", "Delta", "0", "barely moves with the price")
     else:
         shares = abs(round(delta))
         side = "long" if delta >= 0 else "short"
@@ -398,14 +405,21 @@ def structure_warnings(legs):
     """
     legs = list(legs or [])
     out = []
-    shorts = [(i, l) for i, l in enumerate(legs) if l.get("side") == "short" and l.get("expiry")]
-    longs = [(i, l) for i, l in enumerate(legs) if l.get("side") != "short" and l.get("expiry")]
-    if shorts and longs:
-        si, s = max(shorts, key=lambda p: str(p[1]["expiry"]))
+    # Per option TYPE: a long put cannot cover a short call. Comparing across types
+    # flagged a Sep put spread beside an Oct call spread as uncovered (review,
+    # 2026-09-11) — a named-leg sentence that was simply false.
+    for otype in ("put", "call"):
+        same = [(i, l) for i, l in enumerate(legs)
+                if l.get("option_type") == otype and l.get("expiry")]
+        shorts = [p for p in same if p[1].get("side") == "short"]
+        longs = [p for p in same if p[1].get("side") != "short"]
+        if not (shorts and longs):
+            continue
+        si, sh = max(shorts, key=lambda p: str(p[1]["expiry"]))
         li, lg = min(longs, key=lambda p: str(p[1]["expiry"]))
-        if str(s["expiry"]) > str(lg["expiry"]):
+        if str(sh["expiry"]) > str(lg["expiry"]):
             out.append(
-                f"Leg {si + 1:02d} is short and expires {_date_text(s['expiry'])}, "
+                f"Leg {si + 1:02d} is short and expires {_date_text(sh['expiry'])}, "
                 f"after leg {li + 1:02d} (long, {_date_text(lg['expiry'])}). "
                 f"From {_date_text(lg['expiry'])} it is no longer covered.")
     net_calls = 0.0
@@ -460,6 +474,18 @@ def matches_template(code, legs):
     if near and far and next(iter(far)) < next(iter(near)):
         return False
     return True
+
+
+def template_for(legs):
+    """The first strategy code whose shape ``legs`` have, or ``None``.
+
+    Used when legs arrive from outside the strategy picker (a Calculator
+    hand-off): without it the picker keeps whatever it last showed and the Edited
+    chip calls legs nobody edited "edited" (review, 2026-09-11)."""
+    from .strategies import STRATEGY_TEMPLATES
+    if not legs:
+        return None
+    return next((code for code in STRATEGY_TEMPLATES if matches_template(code, legs)), None)
 
 
 def empty_state_text(meta, legs):
@@ -646,7 +672,7 @@ def replay_cursor_text(trace, i):
     delta = num(deltas[i]) if i < len(deltas) else None
     if delta is not None:
         parts.append(f"delta {delta:+,.0f}")
-    head = replay_categories([stamps[i]])[0]
+    head = replay_categories(stamps)[i]     # the whole series decides daily vs intraday
     return f"{head} — {', '.join(parts)}" if parts else head
 
 

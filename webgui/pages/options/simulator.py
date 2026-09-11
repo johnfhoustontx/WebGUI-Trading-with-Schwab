@@ -519,13 +519,21 @@ def render():
     def _set_tone(el, tone):
         el.classes(remove=_TONE_REMOVE, add=_TONE_CLASS.get(tone, _TONE_CLASS["neutral"]))
 
+    def _for_screen(payload):
+        """``payload`` if it was priced for the symbol and legs on screen, else None.
+
+        ONE gate for every readout — tiles, What-if chart + readout, IV-shock
+        table, Replay. The review of 2026-09-11 found only the tiles gated: after
+        a webgui restart the page drew the LAST priced position's chart and
+        verdicts beside the default template's legs. Both services echo what they
+        priced; a pre-upgrade payload without the echo is trusted, as before."""
+        return payload if sv.result_matches(payload, _sym(), _legs_payload()) else None
+
     def _paint_tiles():
-        """The six position tiles. The result counts only if it was priced for the
-        legs on screen (``sim_run`` echoes them); otherwise the tiles say they are
-        waiting rather than pair new legs with the previous legs' price."""
-        res = state.get("result")
-        ok = sv.result_matches(res, _sym(), _legs_payload())
-        for t in sv.position_tiles(editor.get_legs(), res if ok else None):
+        """The six position tiles, from the result for the legs on screen only —
+        otherwise they say they are waiting rather than pair new legs with the
+        previous legs' price."""
+        for t in sv.position_tiles(editor.get_legs(), _for_screen(state.get("result"))):
             lbl, val, sub = tile_refs[t["key"]]
             lbl.text, val.text, sub.text = t["label"], t["value"], t["sub"]
             _set_tone(val, t["tone"])
@@ -570,18 +578,20 @@ def render():
         dt_slider.value = days      # fires on_value_change → debounced sim_run
 
     def _legs_ui():
-        """Everything that reads the legs and not the result."""
+        """Everything that reads the legs — including every readout's gate, so an
+        edit hides the previous legs' figures until the new ones are priced."""
         _paint_structure()
         _apply_days_range()
         _paint_tiles()
-        _paint_empty_states()
+        _render_figures()
+        _render_replay()
 
     # ── render figures from the cached sweep result ──────────────────────────
     def _paint_empty_states():
         text = sv.empty_state_text(state.get("meta"), editor.get_legs())
         whatif_empty.text = text
         ivshock_empty.text = text
-        tr = state.get("replay") or {}
+        tr = _for_screen(state.get("replay")) or {}
         replay_empty.text = tr.get("error") or text
 
     def _render_ivshock(result):
@@ -608,7 +618,7 @@ def render():
         dt_lbl.text = f"Time passed: {sv.days_text(dt_slider.value)}"
         _paint_empty_states()
 
-        result = state["result"]
+        result = _for_screen(state["result"])
         _render_ivshock(result)
         if not result:
             whatif_empty.set_visibility(True)
@@ -653,7 +663,7 @@ def render():
         scrub_slider.update()
 
     def _render_replay():
-        tr = state["replay"]
+        tr = _for_screen(state["replay"])
         if not tr or tr.get("error") or not tr.get("x"):
             replay_empty.text = (tr or {}).get("error") or \
                 sv.empty_state_text(state.get("meta"), editor.get_legs())
@@ -911,6 +921,16 @@ def render():
     if seed == "handoff":
         symbol_in.value = p.get("symbol") or symbol_in.value
         state["pending_legs"] = p.get("legs") or []
+        # Name the strategy the copied legs carry, so the picker and the Edited
+        # chip describe THEM rather than whatever the picker last showed. Under
+        # the restoring guard: the template must not overwrite the copied legs.
+        code = sv.template_for(state["pending_legs"])
+        if code:
+            state["restoring"] = True
+            try:
+                strategy_sel.value = code
+            finally:
+                state["restoring"] = False
         _request_fetch()
     elif seed == "restore":
         _restore(_LAST_SIM)

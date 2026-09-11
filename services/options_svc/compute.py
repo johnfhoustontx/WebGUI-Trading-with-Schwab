@@ -6688,9 +6688,11 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
     bdf = seng.aggregate_position(
         pos, lambda c: whatif_eng.sweep(c, [snap.spot], _days_after(c, 0.0)))
     brows = _sim_records(bdf)
+    # None, never 0.0, when the baseline sweep came back empty: the page's position
+    # tiles read the entry off this, and a 0.0 printed "Entry credit $0".
     whatif_baseline = (float(brows[0]["theo_price"]) * _CONTRACT_MULT
                        if brows and isinstance(brows[0].get("theo_price"), (int, float))
-                       else 0.0)
+                       else None)
 
     shock_eng = seng.IVShockEngine(snap)
     sdf = seng.aggregate_position(pos, lambda c: shock_eng.sweep(c, [1.0, float(mult)]))
@@ -6876,6 +6878,8 @@ def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
 
     return {
         "spot": snap.spot,
+        # echoed like sim_run's, so the page can refuse a trace for other legs
+        "symbol": snap.symbol, "legs": list(legs),
         "timestamps": [ts.isoformat() for ts in hist.index],
         "x": list(range(len(hist))),
         "prices": _f(hist.values),

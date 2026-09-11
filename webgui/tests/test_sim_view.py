@@ -504,3 +504,51 @@ def test_small_dollar_figures_keep_their_cents():
     text, _ = sv.whatif_readout([[100.0, 0.0], [110.0, 4.28]], 105.0, 0,
                                 dt.datetime(2026, 9, 11, tzinfo=CT))
     assert text.endswith("profit $2.14")
+
+
+# -- review fixes (2026-09-11) ----------------------------------------------------
+
+def test_the_coverage_warning_compares_legs_of_the_same_type_only():
+    """A Sep put credit spread beside an Oct call credit spread is fully covered:
+    the Oct short call has its Oct long call. Comparing across types named leg 03
+    as uncovered from Sep 18 (review finding)."""
+    legs = [_leg("put", "short", 95.0, 1, "2026-09-18"), _leg("put", "long", 90.0, 1, "2026-09-18"),
+            _leg("call", "short", 105.0, 1, "2026-10-16"), _leg("call", "long", 110.0, 1, "2026-10-16")]
+    assert sv.structure_warnings(legs) == []
+    uncovered = [_leg("call", "short", 105.0, 1, "2026-10-16"),
+                 _leg("call", "long", 110.0, 1, "2026-09-18")]
+    assert len(sv.structure_warnings(uncovered)) == 1
+
+
+def test_template_for_names_the_strategy_a_handoff_carries():
+    ic = [_leg("put", "short", 95.0), _leg("put", "long", 90.0),
+          _leg("call", "short", 105.0), _leg("call", "long", 110.0)]
+    assert sv.template_for(ic) == "IC"
+    assert sv.template_for(PCS_10) == "PCS"
+    odd = [_leg("put", "short", 95.0, 3), _leg("call", "long", 110.0, 1)]
+    assert sv.template_for(odd) is None
+    assert sv.template_for([]) is None
+
+
+def test_a_near_zero_delta_is_not_minus_zero():
+    t = _by_key(sv.position_tiles(PCS_10, _result(delta=-0.3)))
+    assert t["delta"]["value"] == "0"
+    assert t["delta"]["sub"] == "barely moves with the price"
+
+
+def test_a_rounding_zero_dollar_figure_is_plain_zero():
+    t = _by_key(sv.position_tiles(PCS_10, _result(theta=-0.004)))
+    assert t["theta"]["value"] == "$0"
+
+
+def test_two_breakevens_give_both_distances():
+    legs = [_leg("put", "short", 95.0), _leg("put", "long", 90.0),
+            _leg("call", "short", 105.0), _leg("call", "long", 110.0)]
+    t = _by_key(sv.position_tiles(legs, _result(baseline=-150.0, spot=100.0)))
+    assert t["breakeven"]["sub"] == "6.5% below and 6.5% above spot"
+
+
+def test_the_cursor_on_a_daily_bar_reads_a_date_like_the_axis():
+    trace = {"timestamps": ["2026-08-24T00:00:00", "2026-08-25T00:00:00"],
+             "prices": [1.0, 2.0], "units": "position"}
+    assert sv.replay_cursor_text(trace, 1) == "Aug 25 — price 2.00"

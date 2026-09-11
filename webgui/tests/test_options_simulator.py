@@ -602,3 +602,75 @@ def test_a_new_replay_trace_resizes_the_scrubber_and_parks_it_on_the_last_bar():
     scrub = next(e for e in container.descendants() if "sim-scrub" in e._classes)
     assert scrub._props["max"] == n - 1
     assert scrub.value == n - 1
+
+
+# -- review fix: every readout refuses a result priced for other legs ------------
+
+_OTHER_LEGS = [{"kind": "call", "strike": 999.0, "expiry": "2030-01-01",
+                "side": "long", "qty": 1}]
+
+
+def _visible(container, cls):
+    return next(e for e in container.descendants() if cls in e._classes).visible
+
+
+def test_a_stale_result_for_other_legs_draws_no_whatif_and_no_ivshock():
+    """Review finding: after a webgui restart the page painted the LAST priced
+    position's chart, readout ("At 386.00 …: profit $8,240") and IV-shock verdict
+    beside the default template's legs. Every readout now refuses it."""
+    import bus_client
+    from nicegui import ui
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    bus_client.bus().cache_set("cache:options:sim_result", {
+        "spot": 450.0, "symbol": "SPY", "legs": _OTHER_LEGS, "dt": 5.0, "mult": 1.5,
+        "whatif_rows": [{"S": 440.0, "theo_price": -1500.0}, {"S": 460.0, "theo_price": -500.0}],
+        "whatif_baseline": -1000.0,
+        "ivshock": {"base": {"theo_price": -1000.0}, "shock": {"theo_price": -2050.0},
+                    "units": "position"}})
+    with ui.card() as container:
+        sim.render()
+    charts = [e for e in container.descendants() if isinstance(e, ui.highchart)]
+    assert all(not c.visible for c in charts)
+    assert _texts(container, "sim-readout") == [""]
+    assert _visible(container, "sim-shock-grid") is False
+    assert _visible(container, "sim-shock-head") is False
+
+
+def test_a_stale_replay_for_other_legs_is_not_drawn():
+    import bus_client
+    from nicegui import ui
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    bus_client.bus().cache_set("cache:options:sim_replay", {
+        "symbol": "SPY", "legs": _OTHER_LEGS, "x": [0, 1], "prices": [1.0, 2.0],
+        "timestamps": ["2026-08-24T09:30:00", "2026-08-24T09:31:00"], "pnl": [0.0, 5.0],
+        "greeks": {}, "sessions": [], "units": "position"})
+    _fire(container, "_poll_replay")
+    charts = [e for e in container.descendants() if isinstance(e, ui.highchart)]
+    assert not charts[0].visible                     # the Replay chart
+    assert "Pricing this position…" in _texts(container, "opacity-70")
+
+
+def test_a_calculator_handoff_names_its_strategy_and_raises_no_edited_chip():
+    """Review finding: the picker stayed on PCS after an iron condor was copied in,
+    and the Edited chip called legs nobody edited 'edited'."""
+    import bus_client
+    from nicegui import ui
+    from pages.options import handoff
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    meta = _future_meta()
+    exp = meta["expiries"][0]
+    ic = [{"option_type": "put", "side": "short", "strike": 445.0, "expiry": exp, "qty": 1},
+          {"option_type": "put", "side": "long", "strike": 440.0, "expiry": exp, "qty": 1},
+          {"option_type": "call", "side": "short", "strike": 455.0, "expiry": exp, "qty": 1},
+          {"option_type": "call", "side": "long", "strike": 460.0, "expiry": exp, "qty": 1}]
+    handoff.set_pending_simulator({"symbol": "SPY", "legs": ic})
+    with ui.card() as container:
+        sim.render()
+    bus_client.bus().cache_set("cache:options:sim_meta", meta)
+    _fire(container, "_poll_meta")
+    assert _visible(container, "sim-edited") is False
+    assert len(_leg_cards(container)) == 4
