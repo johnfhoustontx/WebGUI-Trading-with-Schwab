@@ -2522,7 +2522,6 @@ root to `sys.path` at runtime):
 (cd sentiment-dashboard && ../.venv/bin/python -m pytest tests)
 (cd trade-analyzer      && ../.venv/bin/python -m pytest .)
 (cd portfolio-analyzer  && ../.venv/bin/python -m pytest tests)
-(cd claude-driver       && ../.venv/bin/python -m pytest .)
 (cd webgui              && ../.venv/bin/python -m pytest .)
 ```
 
@@ -2669,8 +2668,10 @@ the healthy signal.) **sentiment_svc reads 325 passed / 1 failed** — the docum
 ## External processes (not in this repo)
 
 The ML prediction servers (MES 8000 / MNQ 8001 / ES 8004 / NQ 8005) and the
-options analytics service on 8200 are **separate, external processes**.
-claude-driver addresses them over HTTP; this repo does not contain or start them.
+options analytics service on 8200 are **separate, external processes**. Nothing
+in this repo calls them any more (the claude-driver scripts that did were removed
+2026-09-11); their ports stay in `config/ports.toml` only because
+`claude-driver/config.py` still reads them.
 
 ## Design / plan docs
 

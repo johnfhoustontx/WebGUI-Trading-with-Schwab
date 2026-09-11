@@ -17,21 +17,14 @@ pure `guardrails.py`, publishing to the `/driver` page over Redis). See the root
 
 ## What remains here
 
-This folder is now a small support library, **not** a runnable agent:
+This folder is now a single config module, **not** a runnable agent:
 
 | File                  | Role                                              |
 |-----------------------|---------------------------------------------------|
 | `config.py`           | App config incl. `RISK_LIMITS` — still imported by `services/driver_svc/compute.py` for the daily-loss-halt fallback. **Do not delete.** |
-| `feature_engineer.py` | Builds features for the external ML prediction servers — used by the ML/diagnostic scripts, unrelated to the removed morning agent. |
-| ML / diagnostic scripts + tests | Standalone utilities for the external ML servers (MES/MNQ/ES/NQ). |
 
-There is **no entry point / port** in this folder anymore — nothing here is started
-by `start_all.bat`. The proxy (:8100) and the external ML servers
-(MES 8000 / MNQ 8001 / ES 8004 / NQ 8005, `ML_SERVER_URLS`) are separate processes
-not started by this repo.
-
-## Tests
-
-```powershell
-cd claude-driver && python -m pytest .
-```
+There is **no entry point, port or test suite** in this folder. `feature_engineer.py`
+and the nine ML-server diagnostic scripts (`test_ml_*.py`, `test_preflight.py`, …)
+served the removed morning agent and were deleted on 2026-09-11; nothing in this
+repo talks to the external ML servers (MES 8000 / MNQ 8001 / ES 8004 / NQ 8005).
+`config.py` still reads `ML_SERVER_URLS` from `repo_paths`, which is harmless.

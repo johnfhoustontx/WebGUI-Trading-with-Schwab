@@ -307,7 +307,9 @@ There is no Tk UI here to verify manually; check webgui behaviour on
 | `validate_market_state.py` | OFFLINE five-state validation study. Run manually; never imported by a service. |
 | `scoring/` | All scoring logic. Pure functions. |
 | `tests/` | pytest suite. Includes `fixtures/bridge_v39_snapshot.json` regression oracle. |
-| `README.md` | User-facing docs. |
+
+(The old `README.md` documented the Tk desktop app, which is not in this repo; it
+was removed 2026-09-11. User-facing docs are `docs/manuals/`.)
 
 
 ## Notifications
