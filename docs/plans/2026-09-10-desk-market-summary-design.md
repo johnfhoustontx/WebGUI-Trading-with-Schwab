@@ -141,7 +141,10 @@ states a fact.
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,
-trend score to 5, regime confidence to 10 %, Bull/Bear counts exact + horizon. A
+trend score to 5, regime confidence to 10 %, horizon exact, and the Bull/Bear
+rising + beating counts within one sector (`FINGERPRINT_SECTOR_TOLERANCE`, added
+2026-09-11: counted exactly, one of eleven sectors crossing flat or crossing the
+S&P 500 bought a new sentence every gap, all session). A
 new sentence is written only when:
 
 - the fingerprint differs from the one the last sentence was written from, **and**
@@ -149,7 +152,8 @@ new sentence is written only when:
 - fewer than **30** calls have been made today (resets at the CT date change).
 
 The first poll after a restart always writes one. Overnight and at weekends
-nothing moves, so nothing is called. Estimate: 8–15 calls on a trading day.
+nothing moves, so nothing is called. Estimate: 8–15 calls on a trading day —
+measured on 2026-09-11, before the two fixes below, it was **84**.
 
 **The ticker toggle goes back to hiding the marquee only.** The Desk needs the
 sentence regardless. Removed: `settings.apply_ticker_enabled`'s command,
@@ -170,6 +174,15 @@ readings are retried once `SUMMARY_MIN_GAP_SEC` has passed rather than a
 transient failure freezing a stale sentence until the market moves. The failed
 attempt still counts toward the gap and the daily cap — a wedged Claude endpoint
 cannot spin faster than the ceiling either.
+
+**A reply the checks REFUSE is a different case, and KEEPS its fingerprint**
+(2026-09-11). `generate_summary` returns the `WITHHELD` sentinel rather than
+`None`, and the loop leaves the gate alone, so the same readings are never asked
+about again: they would be refused the same way. The Circling fact's semicolon
+came back as a comma in 3 of 3 live replies, and retrying it bought 30 paid calls
+and no published sentence between 02:30 and 09:06 CT. "Nothing to state" is a
+refusal too — no call is made, and no retry of the same readings could change
+it.
 `stop_reason == "max_tokens"` is logged; `max_tokens` rises 220 → 300 (a cap, not
 a spend) with a tripwire test on the floor.
 

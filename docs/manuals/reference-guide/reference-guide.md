@@ -284,8 +284,12 @@ It is written **on change, not on a clock**: `market_svc` builds a fingerprint o
 the six readings at display resolution on every poll, and writes a new sentence
 only when that fingerprint differs from the one the current sentence was written
 from, at least ten minutes have passed since the last attempt, and fewer than
-thirty attempts have been made that day. A sentence that sat unchanged for an hour
-means nothing new crossed the display thresholds, not that the app is stuck.
+thirty attempts have been made that day. Small moves do not count as a change: a
+sector count one sector off, or a composite that has not crossed its step, still
+reads as the same market, and a reply the accuracy checks refused waits for the
+readings to move rather than asking the same question again. A sentence that sat
+unchanged for an hour means nothing new crossed the display thresholds, not that
+the app is stuck.
 
 Underneath the sentence sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
 REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear

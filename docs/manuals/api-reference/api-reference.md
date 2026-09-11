@@ -382,8 +382,11 @@ MARKET SUMMARY frame.
 
 Also in `services/market_svc/compute.py` — the **fingerprint** resolution the
 summary is written from, in `FINGERPRINT_COMPOSITE_STEP` (`0.5`),
-`FINGERPRINT_TREND_STEP` (`5.0`) and `FINGERPRINT_CONFIDENCE_STEP` (`0.1`); words
-(trend, bias, signal, regime, Bull/Bear horizon and counts) compare exactly.
+`FINGERPRINT_TREND_STEP` (`5.0`), `FINGERPRINT_CONFIDENCE_STEP` (`0.1`) and
+`FINGERPRINT_SECTOR_TOLERANCE` (`1`); words (trend, bias, signal, regime and the
+Bull/Bear horizon) compare exactly, while the Bull/Bear rising and beating counts
+may each differ by that many sectors. Compare two fingerprints with
+`same_summary_readings`, never with `==`.
 
 Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQUITY
 / FUTURE instrument types, computes the `$ADVN-$DECN` breadth spread and the
@@ -401,11 +404,14 @@ fingerprint differs from the one the current sentence was written from, at least
 readings present always writes one. The model is sent only
 `{"facts": summary_facts(packet)}` — one plain-English statement per reading,
 written by the code — and may only join them and add a closing posture. A
-**failed** attempt (API error, timeout) or a **withheld** reply (a fact dropped or
-reworded, a wrong sector count, a credit spread tied to the wrong direction, or a
-cut-off reply with no complete sentence) publishes nothing — the last good
-sentence stays — but still counts toward the gap and the cap, and the same
-readings are retried once the gap has passed. It runs as
+**failed** attempt (API error, timeout) returns `None`, publishes nothing — the
+last good sentence stays — and is retried on the same readings once the gap has
+passed. A **withheld** reply (a fact dropped or reworded, a wrong sector count, a
+credit spread tied to the wrong direction, a cut-off reply with no complete
+sentence, or nothing to state at all) returns the `WITHHELD` sentinel and also
+publishes nothing, but is **not** retried: the same readings are refused the same
+way, so a new sentence waits for the readings to move. Both still count toward the
+gap and the cap. It runs as
 a **background task** rather than inline, so a slow completion cannot stall the
 poll loop.
 

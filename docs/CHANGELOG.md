@@ -4,7 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The sentiment score was described backwards
+**Last updated:** 2026-09-11 (**The Desk market summary made 84 paid Claude
+calls in one day against a design estimate of 8-15** - 30 of them re-asking a
+question the accuracy checks had already refused, and 43 because one sector of
+eleven crossing flat counted as a new market.)
+
+- **How it surfaced.** A scheduled read-only check of the prod stack: 119 Claude
+  calls on 2026-09-11 against a ~20-22 weekday baseline, **84** of them the market
+  summary (driver 14, gamma briefings 10). Every call returned 200 OK, so nothing
+  looked broken from the outside; the `market_svc` journal carried the rest.
+- **Bug 1 - a refused reply was re-asked every ten minutes.** `generate_summary`
+  returned `None` both when the CALL failed and when a reply was checked and
+  REFUSED, and the loop forgets the fingerprint on `None` - so the same readings
+  were retried after every gap. The Circling fact's semicolon came back as a comma
+  in 3 of 3 live replies, so from 02:30 to 09:06 CT, in a closed market, every gap
+  bought a paid call and published nothing: **30 calls, no sentence**. (The fact's
+  wording was fixed at 09:13 in `afb91eea`; this is the mechanism that made it
+  expensive.) A refusal now returns the **`WITHHELD`** sentinel, `_run_summary`
+  reports `published` / `withheld` / `failed`, and **only `failed` forgets the
+  fingerprint**. "Nothing to state" counts as a refusal too - no call is made, and
+  no retry of the same readings could change it.
+- **Bug 2 - the sector counts were compared exactly.** In session one of eleven
+  sectors crosses flat or crosses the S&P 500 inside every ten-minute gap, so after
+  the 09:14 restart the GAP, not the market, set the pace: **43 sentences, one
+  every ~10 minutes to 16:40 CT**. The fingerprint now carries `_sector_reading`
+  (sectors counted, rising, beating) and `same_summary_readings` compares the last
+  two within **`FINGERPRINT_SECTOR_TOLERANCE`** (1). A tolerance, not bands: a band
+  flips whenever a count sits on its edge, and 9-of-11 rising sat on one.
+- **Accepted consequence.** A published sentence's sector counts may be one sector
+  off the live chips beside it. `inputs` still carries the exact counts, so the
+  frame's "Readings have changed since this was written" line already says when
+  they differ - it was unchanged.
+- **Not changed:** the composite (0.5), trend score (5.0) and regime confidence
+  (0.1) still compare in bands, so a reading parked on a band edge can still flap -
+  at the close the composite sat 0.08 above a 6.25 edge and the regime confidence
+  0.01 above 0.75. The 10-min gap and the 30/day cap remain the backstop, and the
+  cap **did** bind that day: the 10:12 run hit 30 at 15:27, and a 15:32 restart
+  reset the in-memory counter for 7 more. Eight restarts cost one first-poll
+  sentence each.
+- **Guards.** `test_a_withheld_reply_is_not_retried_while_the_readings_hold` and
+  `test_a_one_sector_wobble_does_not_buy_a_new_sentence` drive the REAL loop
+  through the REAL fingerprint over the 2026-09-11 close counts, and both fail
+  against the old code; `test_after_a_withheld_reply_a_changed_reading_is_written`
+  and `test_a_two_sector_shift_is_written_after_the_gap` pin that neither fix
+  wedges the loop shut. `test_outcome_reads_a_finished_task_without_raising` pins
+  the tri-state and all four refusal paths are pinned to `WITHHELD`.
+  `test_fingerprint_moves_when_a_sector_changes_quadrant` was **replaced**: its
+  premise - one sector moving earns a new sentence - is the bug.
+- **Suites:** market_svc **133 passed** (was 125), `shared/tests` 239, webgui
+  Desk + Market 342. Docs: CADENCES, webgui-routes, the API / Technical /
+  Reference manuals (rebuilt) and the summary design doc.
+
+**Prior - 2026-09-11** (**The sentiment score was described backwards
 everywhere a person reads it** — every screen and manual called it contrarian,
 "a high score means fear", while every scorer rates calm, supportive conditions
 HIGH and stress LOW. On a calm, rising morning the Desk told the reader
