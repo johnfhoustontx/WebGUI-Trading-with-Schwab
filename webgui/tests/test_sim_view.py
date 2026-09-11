@@ -247,3 +247,93 @@ def test_whatif_readout_states_price_date_and_result():
 def test_whatif_readout_with_no_curve_is_blank():
     assert sv.whatif_readout([], 101.0, 0, dt.datetime(2026, 9, 11, tzinfo=CT)) == \
         ("", "neutral")
+
+
+# -- Task 4: structure checks and copy -------------------------------------------
+
+def test_a_short_leg_outliving_its_long_leg_is_flagged():
+    legs = [_leg("put", "short", 330.0, 10, "2026-10-23"),
+            _leg("put", "long", 325.0, 10, "2026-09-09")]
+    warnings = sv.structure_warnings(legs)
+    assert warnings == [
+        "Leg 01 is short and expires Oct 23, after leg 02 (long, Sep 9). "
+        "From Sep 9 it is no longer covered."]
+
+
+def test_net_short_calls_warn_of_unlimited_loss():
+    legs = [_leg("call", "short", 110.0, 2), _leg("call", "long", 115.0, 1)]
+    assert sv.structure_warnings(legs) == [
+        "More calls sold than bought, so losses are unlimited if the price rises."]
+
+
+@pytest.mark.parametrize("legs", [
+    PCS_10,
+    [_leg("put", "short", 95.0)],                                   # cash-secured put
+    [_leg("call", "short", 100.0, 1, "2026-09-28"),                 # a real calendar
+     _leg("call", "long", 100.0, 1, "2026-10-23")],
+    []])
+def test_ordinary_structures_raise_no_warning(legs):
+    assert sv.structure_warnings(legs) == []
+
+
+def test_matches_template_ignores_strikes_but_not_shape():
+    one = [_leg("put", "short", 330.0), _leg("put", "long", 300.0)]
+    assert sv.matches_template("PCS", one) is True              # strikes moved: still a PCS
+    flipped = [_leg("put", "long", 330.0), _leg("put", "long", 325.0)]
+    assert sv.matches_template("PCS", flipped) is False
+
+
+def test_matches_template_scales_quantities_as_a_ratio():
+    """The template's legs times ten contracts is still the same strategy, so
+    sizing a position up never raises the Edited chip; a broken ratio does."""
+    assert sv.matches_template("PCS", PCS_10) is True
+    fly = [_leg("call", "long", 95.0, 3), _leg("call", "short", 100.0, 6),
+           _leg("call", "long", 105.0, 3)]
+    assert sv.matches_template("BUTTERFLY_CALL", fly) is True
+    lopsided = [_leg("put", "short", 330.0, 10), _leg("put", "long", 325.0, 5)]
+    assert sv.matches_template("PCS", lopsided) is False
+
+
+def test_matches_template_checks_the_expiry_pattern():
+    mixed = [_leg("put", "short", 330.0, 1, "2026-10-23"),
+             _leg("put", "long", 325.0, 1, "2026-09-09")]
+    assert sv.matches_template("PCS", mixed) is False
+    cal = [_leg("call", "short", 100.0, 1, "2026-09-28"),
+           _leg("call", "long", 100.0, 1, "2026-10-23")]
+    assert sv.matches_template("CALENDAR_CALL", cal) is True
+    backwards = [_leg("call", "short", 100.0, 1, "2026-10-23"),
+                 _leg("call", "long", 100.0, 1, "2026-09-28")]
+    assert sv.matches_template("CALENDAR_CALL", backwards) is False
+
+
+def test_matches_template_for_an_unknown_code_claims_no_edit():
+    assert sv.matches_template("NOPE", PCS_10) is True
+    assert sv.matches_template(None, PCS_10) is True
+
+
+_META = {"symbol": "TSLA", "spot": 354.08,
+         "expiries": ["2026-09-09", "2026-10-23"],
+         "strikes": {"2026-09-09": {"put": [320.0, 325.0], "call": [360.0]},
+                     "2026-10-23": {"put": [325.0, 330.0], "call": [360.0]}}}
+
+
+def test_empty_state_without_a_chain():
+    assert sv.empty_state_text(None, PCS_10) == "Load a symbol to see this chart."
+
+
+def test_empty_state_names_the_leg_without_a_strike():
+    legs = [_leg("put", "short", 330.0), _leg("put", "long", None)]
+    assert sv.empty_state_text(_META, legs) == "Pick a strike for leg 02."
+
+
+def test_empty_state_names_a_strike_the_chain_does_not_list():
+    legs = [_leg("put", "short", 330.0, 1, "2026-10-23"),
+            _leg("put", "long", 330.0, 1, "2026-09-09")]
+    assert sv.empty_state_text(_META, legs) == (
+        "Leg 02: the 330 put is not listed for Sep 9. "
+        "Pick another strike or reload the chain.")
+
+
+def test_empty_state_while_pricing():
+    legs = [_leg("put", "short", 330.0, 1, "2026-10-23")]
+    assert sv.empty_state_text(_META, legs) == "Pricing this position…"

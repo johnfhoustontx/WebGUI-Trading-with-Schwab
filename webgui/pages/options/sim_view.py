@@ -359,3 +359,109 @@ def whatif_readout(pairs, target_s, days, now=None):
         return f"{head}: break-even", "neutral"
     word, tone = ("profit", "pos") if pnl > 0 else ("loss", "neg")
     return f"{head}: {word} {_money(abs(pnl))}", tone
+
+
+# -- Task 4: structure checks and copy -------------------------------------------
+
+def _date_text(expiry):
+    """``"2026-09-09"`` -> ``"Sep 9"``; the raw string when it will not parse."""
+    try:
+        d = _dt.date.fromisoformat(str(expiry)[:10])
+    except ValueError:
+        return str(expiry)
+    return f"{d:%b} {d.day}"
+
+
+def structure_warnings(legs):
+    """Plain-sentence warnings for a position whose risk is not what its shape
+    suggests. Two conditions, each silent on an ordinary structure:
+
+    * a SHORT leg expiring after a LONG leg — once the long leg settles the short
+      one is uncovered (the Calculator's ``_short_outlives_long`` condition);
+    * net SHORT calls — loss grows without bound above the last strike.
+    """
+    legs = list(legs or [])
+    out = []
+    shorts = [(i, l) for i, l in enumerate(legs) if l.get("side") == "short" and l.get("expiry")]
+    longs = [(i, l) for i, l in enumerate(legs) if l.get("side") != "short" and l.get("expiry")]
+    if shorts and longs:
+        si, s = max(shorts, key=lambda p: str(p[1]["expiry"]))
+        li, lg = min(longs, key=lambda p: str(p[1]["expiry"]))
+        if str(s["expiry"]) > str(lg["expiry"]):
+            out.append(
+                f"Leg {si + 1:02d} is short and expires {_date_text(s['expiry'])}, "
+                f"after leg {li + 1:02d} (long, {_date_text(lg['expiry'])}). "
+                f"From {_date_text(lg['expiry'])} it is no longer covered.")
+    net_calls = 0.0
+    for leg in legs:
+        if leg.get("option_type") == "call":
+            qty = num(leg.get("qty", 1)) or 0.0
+            net_calls += -qty if leg.get("side") == "short" else qty
+    if net_calls < 0:
+        out.append("More calls sold than bought, so losses are unlimited if the price rises.")
+    return out
+
+
+def matches_template(code, legs):
+    """Whether ``legs`` still have the SHAPE of strategy ``code``.
+
+    Shape is the (type, side) multiset with quantities in the template's RATIO —
+    ten contracts of a credit spread is still a credit spread — plus the
+    template's expiry pattern: every "near" leg on one date, every "far" leg on
+    one date no earlier than that. Strikes never count (the
+    ``strategies.summary_code`` rule). An unknown code claims nothing: ``True``."""
+    from .strategies import STRATEGY_TEMPLATES
+    specs = STRATEGY_TEMPLATES.get(code) if code else None
+    if not specs:
+        return True
+    legs = list(legs or [])
+    if len(legs) != len(specs):
+        return False
+    qtys = [num(l.get("qty", 1)) for l in legs]
+    if any(q is None or q <= 0 for q in qtys):
+        return False
+    # the scale: one leg's qty over its spec's; every leg must share it
+    unmatched = list(range(len(specs)))
+    scale = None
+    near, far = set(), set()
+    for leg, q in zip(legs, qtys):
+        hit = None
+        for j in unmatched:
+            spec = specs[j]
+            if spec["option_type"] != leg.get("option_type") or spec["side"] != leg.get("side"):
+                continue
+            ratio = q / spec["qty"]
+            if scale is None or math.isclose(ratio, scale):
+                hit = j
+                scale = ratio if scale is None else scale
+                break
+        if hit is None:
+            return False
+        unmatched.remove(hit)
+        (far if specs[hit]["expiry_role"] == "far" else near).add(str(leg.get("expiry")))
+    if len(near) > 1 or len(far) > 1:
+        return False
+    if near and far and next(iter(far)) < next(iter(near)):
+        return False
+    return True
+
+
+def empty_state_text(meta, legs):
+    """The ONE sentence the What-if and Replay panels show when they have nothing
+    to draw — what is true, not which service is cold (the 2026-09-04 copy rule):
+
+    no chain loaded · a leg without a strike · a strike the loaded chain does not
+    list for that leg's expiry · otherwise the price is on its way."""
+    if not meta:
+        return "Load a symbol to see this chart."
+    strikes = meta.get("strikes") or {}
+    for i, leg in enumerate(legs or []):
+        strike = num(leg.get("strike"))
+        if strike is None:
+            return f"Pick a strike for leg {i + 1:02d}."
+        listed = (strikes.get(str(leg.get("expiry"))) or {}).get(leg.get("option_type")) or []
+        if not any(num(k) is not None and math.isclose(num(k), strike) for k in listed):
+            return (f"Leg {i + 1:02d}: the {strike:g} {leg.get('option_type')} is not listed "
+                    f"for {_date_text(leg.get('expiry'))}. "
+                    f"Pick another strike or reload the chain.")
+    return "Pricing this position…"
