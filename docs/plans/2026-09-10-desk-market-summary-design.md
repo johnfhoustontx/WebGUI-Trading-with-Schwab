@@ -97,7 +97,12 @@ mean instead of repeating them — no app labels (composite, regime, breadth, th
 trend and regime words), no scores, decimals or size multipliers; simple counts
 ("2 of the 11 sectors") and standard options terms ("put credit spreads") stay.
 The first draft asked for "the given words verbatim", which produced sentences
-like "Composite reads Cautious/Bearish at 3.16 … run 0.85x size".
+like "Composite reads Cautious/Bearish at 3.16 … run 0.85x size". The prompt also
+carries a plain **meaning for every trend and regime label**
+(`compute._TREND_MEANINGS` / `_REGIME_MEANINGS`, pinned against the screen's
+words by `shared/tests/test_cross_tier_mirrors.py`) and tells the model never to
+guess one: with the labels banned but undefined, the first plain-English sentence
+described Gliding — lower, but nobody pushing — as "real weight behind the slide".
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

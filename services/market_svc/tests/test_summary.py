@@ -242,3 +242,24 @@ def test_the_packet_reader_rebuilds_only_when_a_view_moves(monkeypatch):
     bus.cache_set("cache:sentiment:regime", _regime(label="Balanced"))
     assert compute.read_summary_packet(bus, now=_OPEN)["regime"]["word"] == "Balanced"
     assert len(builds) == 2
+
+
+def test_the_prompt_says_what_every_trend_word_means():
+    """The prompt forbids repeating the labels, so it must tell the model what
+    each one MEANS. Without that, on 2026-09-10 it read Gliding (lower, but
+    nobody pushing) beside a Stressed regime as 'real weight behind the
+    slide' - the opposite of the reading."""
+    for word in compute._TREND_WORDS.values():
+        assert f"{word} = {compute._TREND_MEANINGS[word]}" in compute._SUMMARY_SYSTEM, word
+    assert "nobody is pushing" in compute._TREND_MEANINGS["Gliding"]
+    assert "heavy selling" in compute._TREND_MEANINGS["Diving"]
+
+
+def test_the_prompt_says_what_every_regime_word_means():
+    for word, meaning in compute._REGIME_MEANINGS.items():
+        assert f"{word} = {meaning}" in compute._SUMMARY_SYSTEM, word
+
+
+def test_the_prompt_tells_the_model_to_translate_rather_than_guess():
+    s = compute._SUMMARY_SYSTEM.lower()
+    assert "never guess what a label means" in s

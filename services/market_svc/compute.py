@@ -318,6 +318,36 @@ _SUMMARY_MODEL = "claude-sonnet-5"
 # never cut mid-word and still rendered as if complete; pinned by a test.
 _SUMMARY_MAX_TOKENS = 300
 _SUMMARY_MAX_CHARS = 400
+# What each on-screen word MEANS, for the model to translate from. The prompt
+# forbids repeating the labels, so without these it guesses — and on 2026-09-10
+# it wrote up "Gliding" (lower, but nobody pushing) beside a Stressed regime as
+# "real weight behind the slide", the opposite of the reading. Plain paraphrases
+# of the webgui's hovers (sentiment.TREND_PICTURE, regime_mix.REGIME_PICTURE);
+# the key sets are pinned by shared/tests/test_cross_tier_mirrors.py, so a new
+# word cannot reach the screen without a meaning here.
+_TREND_MEANINGS = {
+    "Climbing": "prices rising, with buyers actively pushing them up",
+    "Stalling": "prices still high, but the buying has run out",
+    "Circling": "no clear direction; buyers and sellers are balanced",
+    "Gliding": "prices drifting lower, but nobody is pushing them down; "
+               "sellers are absent",
+    "Diving": "prices falling under urgent, heavy selling",
+}
+_REGIME_MEANINGS = {
+    "Balanced": "a quiet, two-sided market sitting near its average",
+    "Trending": "a persistent move whose direction the two reads disagree on",
+    "Rallying": "a steep, persistent move higher",
+    "Firming": "a steady, gentle climb",
+    "Retreating": "a steep, persistent move lower",
+    "Softening": "a steady, gentle decline",
+    "Breakout": "the trading range is expanding into new ground",
+    "Breakdown": "the trading range is expanding to the downside",
+    "Whipsaw": "plenty of movement but no progress; breakouts keep failing",
+    "Stressed": "fear is driving the market: volatility is high and gaps do "
+                "not fill",
+    "Unclear": "no clear kind of market has formed yet",
+}
+
 # Plain everyday English (2026-09-10, by request). The six chips under the
 # sentence already show the labels and the numbers, so the sentence explains
 # what they MEAN instead of repeating them; the first draft asked for "the given
@@ -338,12 +368,17 @@ _SUMMARY_SYSTEM = (
     "mean. Do not repeat the app's labels or jargon (composite, contrarian, "
     "regime, breadth, tape, bias, signal, or the trend and regime labels "
     "themselves) and quote no scores, decimals or position-size multipliers; "
-    "simple counts such as '2 of the 11 sectors' are fine. Treat sentiment, bias "
-    "and signal as ONE reading. Say where the readings agree or conflict. Close "
-    "with a practical trading posture in plain words; standard options terms "
-    "such as 'put credit spreads' are fine when the advice needs them. No "
-    "prices, no percent moves, no preamble, no disclaimers, no bullet points, no "
-    "markdown."
+    "simple counts such as '2 of the 11 sectors' are fine. Translate each label "
+    "into plain words using the meanings listed at the end, and never guess what "
+    "a label means. Treat sentiment, bias and signal as ONE reading. Say where "
+    "the readings agree or conflict. Close with a practical trading posture in "
+    "plain words; standard options terms such as 'put credit spreads' are fine "
+    "when the advice needs them. No prices, no percent moves, no preamble, no "
+    "disclaimers, no bullet points, no markdown. What the trend labels mean: "
+    + " | ".join(f"{w} = {m}" for w, m in _TREND_MEANINGS.items())
+    + ". What the regime labels mean: "
+    + " | ".join(f"{w} = {m}" for w, m in _REGIME_MEANINGS.items())
+    + "."
 )
 
 

@@ -134,6 +134,17 @@ def test_the_summary_names_the_trend_with_the_pills_words():
     assert summary == {k: page[k] for k in _FIVE_STATES}
 
 
+def test_the_summary_prompt_explains_every_word_the_screen_can_show():
+    """market_svc's prompt forbids repeating the app's labels, so it carries a
+    plain meaning for each one to translate from. A word added to the screen
+    without a meaning here would be GUESSED at - which is how 'Gliding' (lower,
+    nobody pushing) was once written up as 'real weight behind the slide'."""
+    page = _const(TREND_WORDS_SOURCE, "_TREND_SHORT")
+    flight = {page[k] for k in _FIVE_STATES}
+    assert set(_const(TREND_WORDS_SUMMARY, "_TREND_MEANINGS")) == flight
+    assert set(_const(TREND_WORDS_SUMMARY, "_REGIME_MEANINGS")) == _regime_words()
+
+
 # --- the BIAS / SIGNAL hover sentences --------------------------------------
 # Each hover names the composite band its word covers, restating
 # live_composite.signal_band's cut-offs and position sizes in Tier-1 prose

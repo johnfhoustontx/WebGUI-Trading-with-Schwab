@@ -25,6 +25,14 @@ app's labels and scores.)
 - **No cost change** — same call, same change-driven trigger. The next
   market_svc restart writes the first plain-English sentence. The test pinning
   the prompt now requires "plain everyday English" and forbids "verbatim".
+- **Word meanings in the prompt (same evening).** The first plain-English
+  sentence (20:36 CT) said prices "drift lower with real weight behind the
+  slide" while the trend word was Gliding — lower, but nobody pushing. With the
+  labels banned but never defined, the model guessed. The prompt now carries a
+  plain meaning for every trend and regime word (`compute._TREND_MEANINGS` /
+  `_REGIME_MEANINGS`) and tells the model never to guess;
+  `test_the_summary_prompt_explains_every_word_the_screen_can_show` pins both key
+  sets against the words the screen can show.
 - Docs: the design doc's Prompt paragraph, the User Guide and Reference Guide
   Market Summary descriptions, `page_help.py`, `docs/webgui-routes.md`.
 
