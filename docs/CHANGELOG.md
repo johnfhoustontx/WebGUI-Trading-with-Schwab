@@ -31,10 +31,14 @@ eleven crossing flat counted as a new market.)
   (sectors counted, rising, beating) and `same_summary_readings` compares the last
   two within **`FINGERPRINT_SECTOR_TOLERANCE`** (1). A tolerance, not bands: a band
   flips whenever a count sits on its edge, and 9-of-11 rising sat on one.
-- **Accepted consequence.** A published sentence's sector counts may be one sector
-  off the live chips beside it. `inputs` still carries the exact counts, so the
-  frame's "Readings have changed since this was written" line already says when
-  they differ - it was unchanged.
+- **Accepted consequence.** A published sentence's sector counts may lag the live
+  chips beside it: by one sector while attempts keep publishing, and by more once
+  an attempt is WITHHELD, because `record_summary` anchors the gate on the
+  ATTEMPT (it runs at launch) while the screen keeps the last PUBLISHED sentence.
+  The tolerance bounds what earns a new call, not how stale the display can get.
+  `inputs` still carries the exact counts and `desk.summary_facts` compares them
+  itself, so the frame's "Readings have changed since this was written" line -
+  independent of the gate - already says when they differ; it was unchanged.
 - **Not changed:** the composite (0.5), trend score (5.0) and regime confidence
   (0.1) still compare in bands, so a reading parked on a band edge can still flap -
   at the close the composite sat 0.08 above a 6.25 edge and the regime confidence

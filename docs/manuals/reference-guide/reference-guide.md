@@ -282,14 +282,19 @@ words.
 
 It is written **on change, not on a clock**: `market_svc` builds a fingerprint of
 the six readings at display resolution on every poll, and writes a new sentence
-only when that fingerprint differs from the one the current sentence was written
-from, at least ten minutes have passed since the last attempt, and fewer than
-thirty attempts have been made that day. Small moves do not count as a change: a
-sector count one sector off, or a composite that has not crossed its step, still
-reads as the same market, and a reply the accuracy checks refused waits for the
-readings to move rather than asking the same question again. A sentence that sat
-unchanged for an hour means nothing new crossed the display thresholds, not that
-the app is stuck.
+only when that fingerprint differs from the one the last attempt was made from,
+at least ten minutes have passed since that attempt, and fewer than thirty
+attempts have been made that day. Small moves do not count as a change: a sector
+count one sector off, or a composite that has not crossed its step, still reads as
+the same market. A reply the accuracy checks refused also waits for the readings
+to move rather than putting the same question again, since the same readings are
+refused the same way.
+
+So a sentence that sits unchanged is usually just a quiet tape — nothing crossed
+the display thresholds — but it can also be a reply that was refused. The line
+**"Readings have changed since this was written"** tells you which: while it is
+absent the market really has not moved, and when it is showing, the six chips
+below the sentence are the current reading.
 
 Underneath the sentence sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
 REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear

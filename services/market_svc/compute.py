@@ -678,9 +678,15 @@ def same_summary_readings(a, b):
 
     Every element must match exactly except the sector reading, where the
     rising and beating counts may each differ by ``FINGERPRINT_SECTOR_TOLERANCE``
-    (the number of sectors counted must still match). The gate compares against
-    the fingerprint the CURRENT sentence was written from, so a slow drift is
-    still caught once it has moved past the tolerance."""
+    (the number of sectors counted must still match), so a drift of one sector at
+    a time is still caught once it has moved past the tolerance.
+
+    ⚠ The gate anchors on the last ATTEMPT, not on the sentence on screen:
+    ``record_summary`` runs at launch, so a WITHHELD attempt re-anchors the gate
+    while the published sentence stays where it was. This tolerance therefore
+    bounds what earns a new CALL, never how stale the displayed counts may be —
+    the Desk's moved-since line compares the exact counts out of ``inputs``
+    itself, and is what tells the reader they differ."""
     if a is None or b is None:
         return a == b
     if a[:-1] != b[:-1]:

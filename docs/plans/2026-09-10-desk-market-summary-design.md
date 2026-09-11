@@ -111,8 +111,9 @@ spread bullish-to-neutral, call credit spread bearish-to-neutral, debit spreads
 and long options by their side, iron condors neutral), and a conflict between the
 facts is named, not blended.
 
-`generate_summary` then withholds the reply (the last good sentence stays; the
-same readings are retried after the gap) if:
+`generate_summary` then withholds the reply — it returns the `WITHHELD`
+sentinel, the last good sentence stays, and the readings must MOVE before
+anything is asked again (2026-09-11; see the failure section below) — if:
 
 - it ran out of room with no complete sentence (a cut-off reply is trimmed to
   its complete sentences — nothing is ever cut mid-word; the old 400-character
