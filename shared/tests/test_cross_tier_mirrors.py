@@ -145,6 +145,17 @@ def test_the_summary_prompt_explains_every_word_the_screen_can_show():
     assert set(_const(TREND_WORDS_SUMMARY, "_REGIME_MEANINGS")) == _regime_words()
 
 
+def test_the_summary_counts_the_bull_bear_maps_own_quadrants():
+    """market_svc counts sectors into ``bullbear.quadrant``'s buckets (it cannot
+    import Tier 1) and explains each bucket to Claude. A bucket added to the map
+    but not here would be miscounted, or counted and left unexplained - and an
+    unexplained count is how '2 rising AND beating the S&P' was once written up
+    as '2 of 11 outperforming'."""
+    page = tuple(_const("webgui/pages/bullbear.py", "QUADRANTS"))
+    assert tuple(_const(TREND_WORDS_SUMMARY, "_QUADRANTS")) == page
+    assert set(_const(TREND_WORDS_SUMMARY, "_QUADRANT_MEANINGS")) == set(page)
+
+
 # --- the BIAS / SIGNAL hover sentences --------------------------------------
 # Each hover names the composite band its word covers, restating
 # live_composite.signal_band's cut-offs and position sizes in Tier-1 prose

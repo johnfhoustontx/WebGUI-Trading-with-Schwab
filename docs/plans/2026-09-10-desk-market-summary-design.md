@@ -113,7 +113,10 @@ the wrong direction (`_spread_direction_error` — the 20:42 CT sentence called 
 credit spreads "bearish trades"). And nothing is ever cut mid-word: a finished
 reply is shown whole, one that ran out of room is trimmed to its complete
 sentences, one with none is withheld. The 400-character slice that published
-"… rather than chas" is gone.
+"… rather than chas" is gone. The Bull/Bear buckets are explained the same way
+(`compute._QUADRANT_MEANINGS`, pinned to `bullbear.QUADRANTS`), with
+"outperforming" defined as rising_leading plus falling_leading: unexplained, the
+counts were once written up as "only 2 of 11 outperforming" when 6 were.
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

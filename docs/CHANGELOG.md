@@ -44,6 +44,16 @@ app's labels and scores.)
   readings are retried after the gap — and never truncates: a finished reply is
   shown whole, one that ran out of room is trimmed to its complete sentences, and
   one with none is withheld. `_SUMMARY_MAX_CHARS` is gone.
+- **Sector counts explained (same evening).** The 20:53 CT sentence said "only 2
+  of the 11 sectors are outperforming" — 2 were rising AND beating the S&P 500,
+  and 4 more were beating it while falling, so 6 were outperforming. The packet
+  carries the Bull/Bear quadrant keys but the prompt described them only in
+  general terms. It now carries a meaning for each bucket
+  (`compute._QUADRANT_MEANINGS`), defines "beating the S&P 500" as
+  rising_leading plus falling_leading and "rising" as rising_leading plus
+  rising_lagging, and asks for counts exactly as given.
+  `test_the_summary_counts_the_bull_bear_maps_own_quadrants` pins market_svc's
+  buckets to the map's own.
 - Docs: the design doc's Prompt paragraph, the User Guide and Reference Guide
   Market Summary descriptions, `page_help.py`, `docs/webgui-routes.md`.
 

@@ -265,6 +265,20 @@ def test_the_prompt_tells_the_model_to_translate_rather_than_guess():
     assert "never guess what a label means" in s
 
 
+def test_the_prompt_says_what_every_bull_bear_count_means():
+    """On 2026-09-10 the sentence said 'only 2 of the 11 sectors are
+    outperforming' when 2 were rising AND beating the S&P 500 and 4 more were
+    beating it while falling - 6 outperforming. Every quadrant key the packet
+    carries is explained, and the combined phrases are defined."""
+    assert set(compute._QUADRANT_MEANINGS) == set(compute._QUADRANTS)
+    for key, meaning in compute._QUADRANT_MEANINGS.items():
+        assert f"{key} = {meaning}" in compute._SUMMARY_SYSTEM, key
+    s = compute._SUMMARY_SYSTEM.lower()
+    assert "report sector counts exactly as given" in s
+    assert "rising_leading plus falling_leading" in s      # = outperforming
+    assert "rising_leading plus rising_lagging" in s       # = rising
+
+
 # ── never a cut-off sentence ─────────────────────────────────────────────────
 # On 2026-09-10 a 400-character slice published "... rather than chas". A reply
 # that finished is shown whole; one that ran out of room keeps only its

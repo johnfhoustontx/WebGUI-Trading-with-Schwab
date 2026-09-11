@@ -350,6 +350,18 @@ _REGIME_MEANINGS = {
                 "not fill",
     "Unclear": "no clear kind of market has formed yet",
 }
+# The Bull/Bear buckets the packet counts sectors into (the keys of
+# ``bullbear.counts``). Unexplained, "rising_leading: 2" was once written up as
+# "only 2 of the 11 sectors are outperforming" when 4 more were beating the
+# S&P 500 while falling. Keys pinned to ``webgui/pages/bullbear.QUADRANTS`` by
+# shared/tests/test_cross_tier_mirrors.py.
+_QUADRANT_MEANINGS = {
+    "rising_leading": "sectors rising AND beating the S&P 500",
+    "rising_lagging": "sectors rising but trailing the S&P 500",
+    "falling_leading": "sectors falling but still beating the S&P 500",
+    "falling_lagging": "sectors falling AND trailing the S&P 500",
+    "unknown": "sectors with no reading",
+}
 
 # Plain everyday English (2026-09-10, by request). The six chips under the
 # sentence already show the labels and the numbers, so the sentence explains
@@ -383,7 +395,11 @@ _SUMMARY_SYSTEM = (
     "Never describe a call credit spread as bullish. If the readings point "
     "different ways, say so plainly and let the posture reflect the conflict "
     "rather than blending them; if you are not sure a strategy fits, give the "
-    "posture without naming one. Treat sentiment, bias and signal as ONE "
+    "posture without naming one. Report sector counts exactly as given, and "
+    "combine buckets only as defined here: sectors beating the S&P 500 "
+    "(outperforming) means rising_leading plus falling_leading, and sectors "
+    "rising means rising_leading plus rising_lagging - never describe one "
+    "bucket alone as either. Treat sentiment, bias and signal as ONE "
     "reading. Say where "
     "the readings agree or conflict. Close with a practical trading posture in "
     "plain words; standard options terms such as 'put credit spreads' are fine "
@@ -392,6 +408,8 @@ _SUMMARY_SYSTEM = (
     + " | ".join(f"{w} = {m}" for w, m in _TREND_MEANINGS.items())
     + ". What the regime labels mean: "
     + " | ".join(f"{w} = {m}" for w, m in _REGIME_MEANINGS.items())
+    + ". What the bull/bear counts mean: "
+    + " | ".join(f"{k} = {m}" for k, m in _QUADRANT_MEANINGS.items())
     + "."
 )
 
