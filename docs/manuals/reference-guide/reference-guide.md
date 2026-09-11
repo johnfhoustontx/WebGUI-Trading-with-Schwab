@@ -814,7 +814,7 @@ intensity scales with the size of the move.
 | **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
 | **Sector SPDR** | The eleven S&P sectors | Ranked by the day's move. |
-| **Thematic / Industry ETF** | Semis, biotech, software, retail, oil… | Ranked. |
+| **Thematic / Industry ETF** | Semis, biotech, software, retail, oil, transports (IYT)… | Ranked. |
 | **Factor / Momentum** | MTUM, SPMO | Whether momentum as a style is working. |
 | **Fixed Income / Credit** | TLT, HYG, LQD | HYG weak while equities rally is a classic warning. |
 | **Crypto / Alternatives**, **Countries** | | Countries is ranked. |

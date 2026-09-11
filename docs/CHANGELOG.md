@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-10 (**The Desk's market summary is written in plain
+**Last updated:** 2026-09-11 (**IYT joins the Market Dashboard** — the iShares
+Transportation Average ETF is a new tile in the Thematic / Industry ETF frame,
+and it counts in the rail's advance/decline meter.)
+
+- **What changed.** One entry in `services/market_svc/symbols.py`, after USO.
+  The board goes from 69 tiles to 70; the one extra symbol rides the existing
+  batched `/quotes` call, so there are no new Schwab calls.
+- **The advance/decline meter needed no code of its own.**
+  `webgui/pages/market.breadth_counts` counts every tile in the four equity
+  frames (`BREADTH_CATEGORIES`), and Thematic / Industry ETF is one of them. A
+  new test, `test_iyt_counts_in_the_advance_decline_meter_from_the_producer`,
+  builds the payload with `market_svc`'s own `build_dashboard` and checks that
+  IYT up reads (1, 0) and IYT down reads (0, 1). Moving IYT out of a counted
+  frame would fail it.
+- **Manual.** The Reference Guide's Thematic row now names transports (IYT).
+- **Takes effect** when `market_svc` restarts (the symbol map loads at
+  import). The web app needs no restart.
+
+**Prior — 2026-09-10** (**The Desk's market summary is written in plain
 English** — it explains what the six readings mean instead of repeating the
 app's labels and scores, and the app now writes every factual statement itself.)
 

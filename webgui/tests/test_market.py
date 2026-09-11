@@ -191,6 +191,20 @@ def test_breadth_categories_are_the_four_requested_and_real_frames():
     assert set(market.BREADTH_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
 
 
+def test_iyt_counts_in_the_advance_decline_meter_from_the_producer():
+    # Driven from market_svc's own build_dashboard, not a hand-written payload:
+    # IYT only reaches the meter if the service files it under a counted frame.
+    from services.market_svc import compute
+    for pct, expected in ((1.2, (1, 0)), (-1.2, (0, 1))):
+        raw = {"IYT": {"assetMainType": "EQUITY",
+                       "quote": {"lastPrice": 70.0, "netPercentChange": pct}}}
+        payload = compute.build_dashboard(raw, sector_pcr=None, proxy_up=True)
+        thematic = next(c for c in payload["categories"]
+                        if c["category"] == "Thematic / Industry ETF")
+        assert "IYT" in [t["display"] for t in thematic["tiles"]]
+        assert market.breadth_counts(payload) == expected
+
+
 def test_breadth_counts_skip_the_basket_composite():
     # BIG10 is the AVERAGE of the ten constituents sitting beside it in the same
     # frame — counting it too would double-count the mega-caps.
