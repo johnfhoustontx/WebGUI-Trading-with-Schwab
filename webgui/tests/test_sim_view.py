@@ -467,3 +467,24 @@ def test_tiles_without_a_result_say_whether_the_legs_are_incomplete():
     assert t["max_loss"]["sub"] == "pick a strike for every leg"
     t = _by_key(sv.position_tiles(PCS_10, None))
     assert t["max_loss"]["sub"] == "waiting for a price"
+
+
+def test_whatif_readout_says_at_expiration_once_time_reaches_the_close():
+    """The Days slider steps in whole days, so its Expiry snap rounds 7.2 days up
+    to 8 — and "on Sep 19" for a spread that expires Sep 18 is a false date. The
+    service settles the legs at intrinsic past the close, so the figure is right;
+    the WORDS must say expiration, not a day that never happens for the position."""
+    now = dt.datetime(2026, 9, 11, 10, 0, tzinfo=CT)
+    pairs = [[340.0, -300.0], [360.0, 204.0]]
+    legs = [_leg("put", "short", 350.0, expiry="2026-09-18"),
+            _leg("put", "long", 345.0, expiry="2026-09-18")]
+    text, _ = sv.whatif_readout(pairs, 354.0, 8, now, legs=legs)
+    assert text.startswith("At 354.00 at expiration:")
+    text, _ = sv.whatif_readout(pairs, 354.0, 3, now, legs=legs)
+    assert text.startswith("At 354.00 on Sep 14:")
+    mixed = [_leg("put", "short", 350.0, expiry="2026-09-18"),
+             _leg("put", "long", 345.0, expiry="2026-10-16")]
+    text, _ = sv.whatif_readout(pairs, 354.0, 40, now, legs=mixed)
+    assert text.startswith("At 354.00 after the last expiration:")
+    text, _ = sv.whatif_readout(pairs, 354.0, 8, now, legs=mixed)
+    assert text.startswith("At 354.00 on Sep 19:")

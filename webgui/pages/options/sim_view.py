@@ -334,24 +334,35 @@ def curve_pnl_at(pairs, x):
     return pts[-1][1]
 
 
-def _when_text(days, now):
+def _when_text(days, now, legs=None):
+    """When the Days slider lands. Past the LAST leg's close it names expiration
+    rather than a date: the slider steps in whole days, so its Expiry snap rounds
+    7.2 days up to 8, and "on Sep 19" for a spread that expires Sep 18 would be a
+    date that never happens for the position (the service prices it at intrinsic
+    there, so the figure beside it is still right)."""
     d = num(days) or 0.0
     if d == 0:
         return "today"
+    dtes = [x for x in (fractional_dte(l.get("expiry"), now) for l in legs or [])
+            if x is not None]
+    if dtes and d >= max(dtes):
+        mixed = len({str(l.get("expiry")) for l in legs or [] if l.get("expiry")}) > 1
+        return "after the last expiration" if mixed else "at expiration"
     if d < 1:
         return f"in {days_text(d)}"
     when = _aware(now) + _dt.timedelta(days=d)
     return f"on {when:%b} {when.day}"
 
 
-def whatif_readout(pairs, target_s, days, now=None):
+def whatif_readout(pairs, target_s, days, now=None, legs=None):
     """``("At 386.00 on Sep 28: profit $8,240", "pos")`` — the price the Price
     slider lands on, the date the Days slider lands on, and what the position is
-    worth there. ``("", "neutral")`` when there is no curve to read."""
+    worth there. With ``legs``, time at or past the last close reads as
+    expiration (see ``_when_text``). ``("", "neutral")`` when there is no curve."""
     target_s = num(target_s)
     if not pairs or target_s is None:
         return "", "neutral"
-    head = f"At {target_s:,.2f} {_when_text(days, now)}"
+    head = f"At {target_s:,.2f} {_when_text(days, now, legs)}"
     pnl = curve_pnl_at(pairs, target_s)
     if pnl is None:
         return f"{head}: {NO_READING}", "neutral"

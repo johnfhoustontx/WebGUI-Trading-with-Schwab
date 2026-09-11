@@ -629,7 +629,8 @@ def render():
         # when it carries one — the slider may be mid-drag ahead of the pricing.
         priced_dt = result.get("dt")
         days = priced_dt if isinstance(priced_dt, (int, float)) else dt_slider.value
-        text, tone = sv.whatif_readout(whatif_pnl(rows, spot, baseline), target_s, days)
+        text, tone = sv.whatif_readout(whatif_pnl(rows, spot, baseline), target_s, days,
+                                       legs=editor.get_legs())
         readout_lbl.text = text
         _set_tone(readout_lbl, tone)
 
