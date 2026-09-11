@@ -1016,6 +1016,7 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   the figure BUILDER, e.g. `heatmap_figure`/`term_heatmap`, not just the init fig).
   Don't re-set the global `tooltip`/`chart.events` on in-place updates or you rebuild
   the tooltip and lose the runtime monkeypatch.
+- **`ui.slider` keeps `min`/`max`/`step` in `_props`, so `slider.max = n` does NOTHING in the browser** — it sets a plain Python attribute. The Simulator's Replay scrubber sat on bars 0–1 for months that way, with a green suite. For a range that changes at runtime write `slider._props["max"] = n` then `slider.update()`; not `.props("max=n")`, whose parser sends the number as a STRING.
 - Tables: `ui.table(columns=[{name,label,field,...}], rows=[...], row_key="id")`;
   selection via `selection="single"` + `table.selected`; row click via
   `table.on("rowClick", handler)` where `event.args[1]` is the row dict.

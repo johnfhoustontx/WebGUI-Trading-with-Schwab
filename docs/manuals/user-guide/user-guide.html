@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-11</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1054,26 +1054,53 @@ keeps them.</p>
 <h2 id="simulator">Simulator</h2>
 <p><strong>Route:</strong> <code>/options/simulator</code>.</p>
 <p>Re-prices a <strong>multi-leg</strong> option position under different scenarios using
-Black-Scholes. Start by entering a <strong>Symbol</strong> and pressing <strong>Fetch snapshot</strong>, then
-pick a <strong>Strategy</strong> (the same template menu as the Calculator — singles, verticals,
-condors, butterflies, calendars/diagonals) and adjust the <strong>legs</strong> in the editor —
-one <strong>card</strong> per leg with <strong>Type</strong> (call/put), <strong>Side</strong> (long/short), <strong>Expiry</strong>,
-<strong>Strike</strong> and <strong>Qty</strong>, plus <strong>Add leg</strong> and a remove ✕ that locks at the last leg
-(a position with no legs has nothing to simulate). The Simulator's snapshot carries
-no Greeks, so its leg cards show no Delta column — the Calculator's do. Every tab
-below operates on the <strong>netted</strong> position (all legs summed). Three tabs:</p>
+Black-Scholes. Start by entering a <strong>Symbol</strong> and pressing <strong>Load chain</strong> (or just
+press Enter / tab out of the field), then pick a <strong>Strategy</strong> (the same template
+menu as the Calculator — singles, verticals, condors, butterflies,
+calendars/diagonals) and adjust the <strong>legs</strong> in the editor — one <strong>card</strong> per leg
+with <strong>Type</strong> (call/put), <strong>Side</strong> (long/short), <strong>Expiry</strong>, <strong>Strike</strong> and <strong>Qty</strong>,
+plus <strong>Add leg</strong> and a remove ✕ that locks at the last leg (a position with no legs
+has nothing to simulate). <strong>Set all legs to</strong> puts every leg on one expiry in a
+single pick. The Simulator's chain carries no per-contract Greeks, so its leg cards
+show no Delta column — the Calculator's do. Every tab below operates on the
+<strong>netted</strong> position (all legs summed).</p>
+<p><strong>Position tiles.</strong> Beside the legs, six tiles state the position without any
+hovering: <strong>Entry credit</strong> (or <strong>Entry debit</strong>), <strong>Max profit</strong>, <strong>Max loss</strong>,
+<strong>Breakeven(s)</strong>, <strong>Delta</strong> (as shares — "moves like 145 shares long") and <strong>Theta
+per day</strong>. The entry is the model price at today's spot, not a market fill. Max
+profit, max loss and breakevens are the <strong>expiration</strong> payoff; when the legs expire
+on different dates they read "—" with that reason, because a single-date payoff
+would get a calendar's back leg wrong. A tile that has nothing to show says why
+("pick a strike for every leg", "waiting for a price") rather than showing a zero.</p>
+<p><strong>Warnings.</strong> An <strong>Edited</strong> chip appears when the legs no longer match the strategy
+you picked (resizing every leg together does not count). A warning line appears when
+a short leg expires after a long one ("From Sep 18 it is no longer covered") or when
+more calls are sold than bought (losses unlimited if the price rises).</p>
+<p>Three tabs:</p>
 <ul>
 <li><strong>Replay</strong> (default) — re-prices the position along the underlying's recent price
-  path and shows a <strong>six-panel stack</strong> (price plus Delta, Gamma, Theta, Vega, Rho).
-  A <strong>scrub slider</strong> moves a cursor through the trace; a <strong>Look-back</strong> dropdown
-  controls how far back the path runs (Auto by DTE, or fixed windows).</li>
-<li><strong>What-if</strong> — a <strong>ΔS</strong> slider (instant client-side price overlay) and a <strong>Δt</strong>
-  slider that fast-forwards <strong>elapsed</strong> days from now; each leg decays on its <strong>own</strong>
-  clock, so a <strong>calendar's</strong> back leg correctly keeps its time value while the front
-  leg expires. An IV-shock comparison bar chart appears below.</li>
-<li><strong>IV Shock</strong> — an <strong>IV multiplier</strong> slider compares the position at base IV vs
-  shocked IV across Price, Delta, Gamma, Theta, and Vega.</li>
+  path and shows six stacked panels: <strong>Price</strong>, the position's own <strong>Profit / loss</strong>
+  (green above zero, red below — measured from the first bar, as if opened then),
+  then <strong>Delta, Gamma, Theta per day, Vega</strong>. The axis shows real dates. Drag the
+  <strong>scrub slider</strong> to step through the bars; the line beside it states that bar's
+  time, price, profit or loss and delta. It starts on the latest bar. A
+  <strong>Look-back</strong> dropdown controls how far back the path runs (Auto by DTE, or fixed
+  windows).</li>
+<li><strong>What-if</strong> — a <strong>Price change</strong> slider (an instant price overlay) and a <strong>Time
+  passed</strong> slider that fast-forwards from now. Time passed runs only as far as your
+  position's last expiry (in quarter days when it is three days or less away), and
+  <strong>Now / Halfway / Expiry</strong> buttons jump straight there. A line under the sliders
+  reads the result, e.g. <em>"At 386.00 on Sep 28: profit $8,240"</em>. Each leg decays on
+  its <strong>own</strong> clock, so a <strong>calendar's</strong> back leg correctly keeps its time value while
+  the front leg expires.</li>
+<li><strong>IV Shock</strong> — a <strong>Volatility multiplier</strong> slider and a table comparing the
+  position at today's volatility and at the multiplied volatility: position value,
+  delta, gamma, theta per day and vega per volatility point, with the change. A line
+  above states the result, e.g. <em>"If volatility rises 50%, this position loses
+  $1,050."</em></li>
 </ul>
+<p>All Simulator figures are for the <strong>whole position</strong> (every contract, times 100),
+the same basis a broker shows.</p>
 <p><strong>Copy to Calculator</strong> sends the current legs to the Calculator for the metric cards
 + P&amp;L matrix (the Calculator's <strong>Copy to Simulator</strong> brings them back).</p>
 <h2 id="market-scanner">Market Scanner</h2>

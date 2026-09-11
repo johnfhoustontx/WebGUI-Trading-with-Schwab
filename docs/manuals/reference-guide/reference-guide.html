@@ -2633,26 +2633,39 @@ changes.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_11">Reading the screen</h3>
-<p>Fetch a snapshot for a symbol, pick a <strong>Strategy</strong>, adjust the <strong>legs</strong> — one card per
+<p>Load a chain for a symbol, pick a <strong>Strategy</strong>, adjust the <strong>legs</strong> — one card per
 leg, the same widget the Calculator uses, in this page's navy rather than the
-Calculator's near-black; the controls and the strategy sit side by side in one panel.
-The snapshot carries no Greeks, so the cards here show no per-leg delta, and the last
-leg cannot be removed (a position with no legs leaves the charts frozen on the previous
-sweep). Then use the three subtabs:</p>
+Calculator's near-black. The chain carries no per-contract Greeks, so the cards here
+show no per-leg delta, and the last leg cannot be removed (a position with no legs
+leaves the charts frozen on the previous sweep).</p>
+<p>The top panel has three columns: the symbol controls, the strategy and its legs, and
+six <strong>position tiles</strong> — entry credit or debit, max profit, max loss, breakevens,
+delta as a share count, and theta per day. The expiry figures are the exact
+expiration payoff; they go blank, with the reason, when the legs expire on different
+dates. An <strong>Edited</strong> chip and plain-sentence warnings flag a structure whose risk is
+not what its name suggests — the classic one being a short leg that outlives its
+long leg, which is uncovered from that date on.</p>
+<p>Then use the three subtabs:</p>
 <p><strong>Replay.</strong> Re-prices the whole netted position along the underlying's recent actual
-price path. Stacked panels show price plus the five Greeks, with a scrub cursor.</p>
+price path. Stacked panels show price, the position's own <strong>profit and loss</strong> from the
+first bar, and four Greeks, over a dated axis; the scrub cursor's line states each
+bar's price, profit or loss and delta.</p>
 <p>This is the most under-used view in the app. It answers "would I have been stopped out
 of this?" using real historical movement rather than a hypothetical slider.</p>
 <p><strong>What-if.</strong> A dollar profit-and-loss payoff measured <strong>from your entry</strong>. Two sliders:</p>
 <ul>
 <li><strong>Price change</strong> moves the underlying up or down.</li>
-<li><strong>Days passed</strong> fast-forwards time. Each leg decays on its own clock, so calendars
+<li><strong>Time passed</strong> fast-forwards time, as far as the position's last expiry, with
+  <strong>Now / Halfway / Expiry</strong> jumps. Each leg decays on its own clock, so calendars
   behave correctly and <strong>theta becomes visible</strong> as you slide.</li>
 </ul>
+<p>A line under the sliders reads the curve where they land — price, date, profit or loss.</p>
 <p>Profit fills green above breakeven, loss fills red below. For a credit spread the
 profit caps at the net credit and the loss floors at width minus credit — matching the
 Calculator exactly.</p>
-<p><strong>IV Shock.</strong> Multiplies volatility to expose <strong>vega</strong> risk. This is the view that
+<p><strong>IV Shock.</strong> Multiplies volatility to expose <strong>vega</strong> risk, as a table (today's
+volatility against the shocked one, with the change) under a one-line verdict. This is
+the view that
 explains losses people find inexplicable: a position can be correct on direction and
 still lose money because implied volatility collapsed after an event, or gained value
 purely because it rose. Selling premium into an IV spike and buying it back after the

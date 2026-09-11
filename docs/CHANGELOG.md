@@ -4,7 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**IYT joins the Market Dashboard** — the iShares
+**Last updated:** 2026-09-11 (**The Simulator states its numbers** — six
+position tiles, a readout under the What-if sliders, a Days slider fitted to the
+position, structure warnings, IV shock as a table, and a Replay that shows the
+position's own profit and loss on a scrubber that finally reaches every bar.)
+
+- **What changed on screen.** The controls card gained a third column of six
+  tiles (entry credit or debit, max profit, max loss, breakevens, delta as a
+  share count, theta per day) in the width the capped leg cards left empty, so
+  they cost no height. What-if reads its result in words under the sliders;
+  its Days slider runs only to the legs' last expiry, with Now / Halfway /
+  Expiry snaps. A **Set all legs to** expiry select, an **Edited** chip and
+  plain-sentence warnings (a short leg outliving its long leg; net short calls)
+  sit under the strategy picker. IV shock is a table with a one-line verdict.
+  Replay adds a Profit / loss panel, real dates on the axis, and a cursor line
+  stating each bar's price, P/L and delta. "Fetch snapshot" became "Load chain".
+- **Two real bugs fixed.** (1) The Replay scrubber could only reach bars 0 and
+  1: `scrub_slider.max = …` set a Python attribute, while `ui.slider` keeps `max`
+  in `_props` (now a CLAUDE.md gotcha). (2) The IV-shock rows and Replay Greeks
+  were per share while the What-if rows beside them were position dollars, so the
+  same spread read in thousands on one tab and tens on the next.
+- **Service.** `sim_run` scales its IV-shock rows ×100 and marks them
+  `units: "position"`, and echoes the `symbol`, `legs`, `dt` and `mult` it priced
+  so the tiles never pair new legs with the previous legs' price. `sim_replay`
+  adds `value` / `pnl` and position-unit Greeks. The page scales an unmarked
+  (pre-upgrade) cache itself. ⚠ Needs an **options_svc restart** as well as the
+  webgui's; until then the page runs on the old payloads through that fallback,
+  with the tiles trusting the echo-less result as before.
+- **Pieces.** New pure module `webgui/pages/options/sim_view.py` (68 unit tests);
+  render tests drive the page through its own poll timers, and the scrubber,
+  stale-result and legacy-units tests were mutation-checked. Verified in a local
+  harness that served the real page over the real `options_svc` handlers and
+  pricing engine on a synthetic chain: three rough edges it surfaced were fixed
+  (the readout named a day past expiry; a one-lot's theta printed "+$0"; the
+  expiry select sat off the picker's baseline). **Not verified against a live
+  Schwab chain** — there is no dev environment on the VPS.
+- **Design:** [2026-09-11-simulator-friendlier-ui-design.md](plans/2026-09-11-simulator-friendlier-ui-design.md).
+
+**Prior — 2026-09-11** (**IYT joins the Market Dashboard** — the iShares
 Transportation Average ETF is a new tile in the Thematic / Industry ETF frame,
 and it counts in the rail's advance/decline meter.)
 

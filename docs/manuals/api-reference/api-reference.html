@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-11</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -623,12 +623,12 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 <tr>
 <td><code>sim_run</code></td>
 <td><code>{symbol, legs[], dt, mult}</code> (legs: <code>{kind, strike, expiry, side, qty}</code>; legacy <code>{expiry, kind, strike, direction}</code> single-leg args still accepted)</td>
-<td><code>cache:options:sim_result</code></td>
+<td><code>cache:options:sim_result</code> — <code>{spot, symbol, legs, dt, mult, whatif_rows, whatif_baseline, ivshock: {base, shock, units: "position"}}</code>; the four inputs are echoed so a reader can match a result to what it asked for</td>
 </tr>
 <tr>
 <td><code>sim_replay</code></td>
 <td><code>{symbol, legs[], lookback}</code> (same multi-leg shape; legacy single-leg args still accepted)</td>
-<td><code>cache:options:sim_replay</code></td>
+<td><code>cache:options:sim_replay</code> — adds <code>value</code> + <code>pnl</code> per bar and <code>units: "position"</code> (Greeks × 100 × qty)</td>
 </tr>
 <tr>
 <td><code>calc_load</code></td>

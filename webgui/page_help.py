@@ -307,18 +307,24 @@ accelerate price.
 
 Re-prices a **multi-leg** option position under different what-ifs (Black-Scholes).
 
-- **Fetch snapshot**, then pick a **Strategy** and adjust the **legs** (kind / side /
-  strike / expiry / qty) — singles, spreads, condors, butterflies, calendars.
-  The controls and strategy sit side-by-side in one panel.
+- **Load chain** (or press Enter in the Symbol box), then pick a **Strategy** and
+  adjust the **legs** (type / side / strike / expiry / qty) — singles, spreads,
+  condors, butterflies, calendars. **Set all legs to** puts every leg on one expiry.
+- **The six tiles** beside the legs state the trade: entry credit or debit, max
+  profit, max loss, breakevens, delta (as shares) and theta per day. A dash always
+  says why it is blank.
+- **Edited** and the orange warnings mean the legs no longer match the strategy
+  name — for example a short leg that expires after its long leg.
 - **Replay / What-if / IV shock** — the small tabs at the very top (under the
   page tabs) switch the three views below.
-- **Replay** — how the whole position would have behaved along recent price moves.
-- **What-if** — the **Price change** slider moves the underlying up or down, and the
-  **Days passed** slider fast-forwards time;
-  each leg decays on its own clock, so calendars behave correctly. Watch the price
-  and Greeks change.
-- **IV Shock** — multiply volatility to see vega risk. More time or volatility =
-  more option value.
+- **Replay** — how the whole position would have done along recent real price
+  moves, with its own profit / loss panel. Drag the slider to read any bar.
+- **What-if** — **Price change** moves the underlying; **Time passed** fast-forwards
+  up to your expiry (**Now / Halfway / Expiry** jump there). The line under the
+  sliders reads the result. Each leg decays on its own clock, so calendars behave.
+- **IV Shock** — multiply volatility; the table shows what that does to value and
+  the Greeks, and one line says how much you gain or lose.
+- Every figure is for the whole position, the way a broker shows it.
 - **Copy to Calculator** sends the exact legs across for the P&L tiles + heat map.
 """,
     "/options/expected-move": """
@@ -912,12 +918,12 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                     "Your ticked symbols stay selected across groups.",
     },
     "/options/simulator": {
-        "Replay": "Replay — how the whole position would have behaved along the "
-                  "underlying's recent price path, bar by bar.",
-        "What-if": "What-if — slide the price up/down and fast-forward days to watch "
-                   "the value and the Greeks change.",
-        "IV shock": "IV shock — multiply implied volatility to see vega risk (how "
-                    "much a volatility move helps or hurts the position).",
+        "Replay": "Replay — how the whole position would have done along the "
+                  "underlying's recent price path, bar by bar, with its profit / loss.",
+        "What-if": "What-if — slide the price up/down and fast-forward time to your "
+                   "expiry; a line under the sliders reads the profit or loss.",
+        "IV shock": "IV shock — multiply implied volatility and see, in a table, how "
+                    "much a volatility move helps or hurts the position.",
     },
     "/options/rescue": {
         "At-Risk Board": "Your paper credit spreads that are tested or critical, "

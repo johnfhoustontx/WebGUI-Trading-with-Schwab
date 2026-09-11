@@ -863,25 +863,56 @@ keeps them.
 **Route:** `/options/simulator`.
 
 Re-prices a **multi-leg** option position under different scenarios using
-Black-Scholes. Start by entering a **Symbol** and pressing **Fetch snapshot**, then
-pick a **Strategy** (the same template menu as the Calculator — singles, verticals,
-condors, butterflies, calendars/diagonals) and adjust the **legs** in the editor —
-one **card** per leg with **Type** (call/put), **Side** (long/short), **Expiry**,
-**Strike** and **Qty**, plus **Add leg** and a remove ✕ that locks at the last leg
-(a position with no legs has nothing to simulate). The Simulator's snapshot carries
-no Greeks, so its leg cards show no Delta column — the Calculator's do. Every tab
-below operates on the **netted** position (all legs summed). Three tabs:
+Black-Scholes. Start by entering a **Symbol** and pressing **Load chain** (or just
+press Enter / tab out of the field), then pick a **Strategy** (the same template
+menu as the Calculator — singles, verticals, condors, butterflies,
+calendars/diagonals) and adjust the **legs** in the editor — one **card** per leg
+with **Type** (call/put), **Side** (long/short), **Expiry**, **Strike** and **Qty**,
+plus **Add leg** and a remove ✕ that locks at the last leg (a position with no legs
+has nothing to simulate). **Set all legs to** puts every leg on one expiry in a
+single pick. The Simulator's chain carries no per-contract Greeks, so its leg cards
+show no Delta column — the Calculator's do. Every tab below operates on the
+**netted** position (all legs summed).
+
+**Position tiles.** Beside the legs, six tiles state the position without any
+hovering: **Entry credit** (or **Entry debit**), **Max profit**, **Max loss**,
+**Breakeven(s)**, **Delta** (as shares — "moves like 145 shares long") and **Theta
+per day**. The entry is the model price at today's spot, not a market fill. Max
+profit, max loss and breakevens are the **expiration** payoff; when the legs expire
+on different dates they read "—" with that reason, because a single-date payoff
+would get a calendar's back leg wrong. A tile that has nothing to show says why
+("pick a strike for every leg", "waiting for a price") rather than showing a zero.
+
+**Warnings.** An **Edited** chip appears when the legs no longer match the strategy
+you picked (resizing every leg together does not count). A warning line appears when
+a short leg expires after a long one ("From Sep 18 it is no longer covered") or when
+more calls are sold than bought (losses unlimited if the price rises).
+
+Three tabs:
 
 - **Replay** (default) — re-prices the position along the underlying's recent price
-  path and shows a **six-panel stack** (price plus Delta, Gamma, Theta, Vega, Rho).
-  A **scrub slider** moves a cursor through the trace; a **Look-back** dropdown
-  controls how far back the path runs (Auto by DTE, or fixed windows).
-- **What-if** — a **ΔS** slider (instant client-side price overlay) and a **Δt**
-  slider that fast-forwards **elapsed** days from now; each leg decays on its **own**
-  clock, so a **calendar's** back leg correctly keeps its time value while the front
-  leg expires. An IV-shock comparison bar chart appears below.
-- **IV Shock** — an **IV multiplier** slider compares the position at base IV vs
-  shocked IV across Price, Delta, Gamma, Theta, and Vega.
+  path and shows six stacked panels: **Price**, the position's own **Profit / loss**
+  (green above zero, red below — measured from the first bar, as if opened then),
+  then **Delta, Gamma, Theta per day, Vega**. The axis shows real dates. Drag the
+  **scrub slider** to step through the bars; the line beside it states that bar's
+  time, price, profit or loss and delta. It starts on the latest bar. A
+  **Look-back** dropdown controls how far back the path runs (Auto by DTE, or fixed
+  windows).
+- **What-if** — a **Price change** slider (an instant price overlay) and a **Time
+  passed** slider that fast-forwards from now. Time passed runs only as far as your
+  position's last expiry (in quarter days when it is three days or less away), and
+  **Now / Halfway / Expiry** buttons jump straight there. A line under the sliders
+  reads the result, e.g. *"At 386.00 on Sep 28: profit $8,240"*. Each leg decays on
+  its **own** clock, so a **calendar's** back leg correctly keeps its time value while
+  the front leg expires.
+- **IV Shock** — a **Volatility multiplier** slider and a table comparing the
+  position at today's volatility and at the multiplied volatility: position value,
+  delta, gamma, theta per day and vega per volatility point, with the change. A line
+  above states the result, e.g. *"If volatility rises 50%, this position loses
+  $1,050."*
+
+All Simulator figures are for the **whole position** (every contract, times 100),
+the same basis a broker shows.
 
 **Copy to Calculator** sends the current legs to the Calculator for the metric cards
 + P&L matrix (the Calculator's **Copy to Simulator** brings them back).

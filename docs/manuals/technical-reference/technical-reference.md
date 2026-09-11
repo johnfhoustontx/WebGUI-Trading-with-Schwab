@@ -1282,6 +1282,25 @@ Both `compute.sim_run` and `compute.sim_replay` take a `legs` list (each
 `{kind, strike, expiry, side, qty}`) and remain **backward-compatible** with the
 legacy single-contract positional arguments.
 
+**Units (2026-09-11).** Every Simulator figure is in **position** units — the engine's
+per-share value and Greeks times the contract multiplier (100) and the leg quantity.
+The What-if rows always were; the IV-shock rows and the Replay Greeks were per share
+until 2026-09-11, so the same spread read in thousands on one tab and tens on the next.
+Both payloads now carry `units: "position"`, and the page scales a payload without the
+marker (a pre-upgrade cache) itself. Theta is dollars per day and vega dollars per
+volatility point, because `bs_theta` is per day and `bs_vega` per 1 vol point.
+
+**Replay P/L.** `sim_replay` also returns `value` (the position's dollars per bar) and
+`pnl` (`value − value[0]`, i.e. as if opened at the start of the window).
+
+**The page's readouts** are pure functions in `webgui/pages/options/sim_view.py`. The
+position tiles' max profit, max loss and breakevens solve the expiration payoff
+exactly — it is piecewise linear with corners only at the strikes, so `{0} ∪ strikes`
+plus the slope past the last strike (the net call quantity × 100) decides every figure,
+the method of the Calculator's `max_loss_estimate`. The entry is `−whatif_baseline`,
+the model value at today's spot and time. `sim_run` echoes the `symbol`, `legs`, `dt`
+and `mult` it priced so the page never pairs new legs with the previous legs' price.
+
 ---
 
 # GEX / Gamma
