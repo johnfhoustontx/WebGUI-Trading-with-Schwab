@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-10 (**The Desk gets a MARKET SUMMARY frame — one
+**Last updated:** 2026-09-10 (**The Desk's market summary is written in plain
+English** — it explains what the six readings mean instead of repeating the
+app's labels and scores.)
+
+- **What changed.** `market_svc`'s summary prompt (`compute._SUMMARY_SYSTEM`)
+  no longer asks Claude to use the screen's words verbatim. It asks for plain
+  everyday English: no app labels (composite, regime, breadth, the trend and
+  regime words), no scores, decimals or position-size multipliers; simple
+  counts and standard options terms stay. The six chips under the sentence
+  still carry the exact labels and numbers, so nothing is lost — the sentence
+  explains, the chips cite.
+- **Why.** The first live sentence (17:29 CT) read "Composite reads
+  Cautious/Bearish at 3.16, low but not fearful enough to flag contrarian
+  opportunity, aligning with Gliding trend at 31.3 and a Stressed regime (0.77
+  confidence) … run 0.85x size". The style now asked for reads like "Investors
+  are unusually relaxed, and this model reads that as a warning rather than an
+  opportunity … keep new trades small and lean defensive rather than buying the
+  dip."
+- **No cost change** — same call, same change-driven trigger. The next
+  market_svc restart writes the first plain-English sentence. The test pinning
+  the prompt now requires "plain everyday English" and forbids "verbatim".
+- Docs: the design doc's Prompt paragraph, the User Guide and Reference Guide
+  Market Summary descriptions, `page_help.py`, `docs/webgui-routes.md`.
+
+**Prior — 2026-09-10** (**The Desk gets a MARKET SUMMARY frame — one
 Claude-written sentence tying six readings together — and hovering the Market
 Regime word now explains it, on the Desk and on `/sentiment`'s regime dial.**)
 

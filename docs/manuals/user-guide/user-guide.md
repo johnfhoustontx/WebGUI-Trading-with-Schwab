@@ -339,7 +339,7 @@ structure · what should I act on · what am I holding.*
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
 | **Positions** | Your paper trades and Claude's together, with live marks and an **OK / Watch / At risk / Rescue** flag |
-| **Market Summary** | One Claude-written sentence tying Sentiment, Trend, Bias, Signal, Regime and Bull/Bear together, ending with a posture — full width, at the bottom |
+| **Market Summary** | One Claude-written sentence, in plain English, tying Sentiment, Trend, Bias, Signal, Regime and Bull/Bear together and ending with a posture — full width, at the bottom |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
 means and, for Bias, what position size it implies.
@@ -396,10 +396,12 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   other click on the page unlocks it too, the button just says so.
 
 **Market Summary** is the frame across the bottom. It carries one sentence,
-written by Claude, that reads the six panels above it together and closes with a
-posture — for example "Sentiment is fearful while price grinds higher against a
-weakening trend; favor defined-risk premium over direction." Two things about it
-are easy to misread:
+written by Claude in plain English, that reads the six panels above it together
+and closes with a posture — for example "Investors are unusually relaxed, and
+this model reads that as a warning rather than an opportunity; prices are
+drifting lower with only 2 of the 11 big sectors rising, so keep new trades small
+and lean defensive." It deliberately avoids the app's labels and scores — the six
+chips under it show those. Two things about it are easy to misread:
 
 - **It is written when the readings change, not on a schedule.** The **"as of
   HH:MM CT"** in the top-right corner is when it was last written, and it can sit

@@ -164,11 +164,18 @@ def test_generate_summary_sends_only_the_packet():
     assert seen["model"] == compute._SUMMARY_MODEL
 
 
-def test_the_prompt_asks_for_the_consolidation_and_a_posture():
+def test_the_prompt_asks_for_plain_english_that_explains_the_readings():
+    """The sentence sits above six chips that already show the labels and the
+    numbers, so it explains what they MEAN in everyday words instead of
+    repeating them (2026-09-10, by request). It still consolidates, still says
+    where the readings agree or conflict, and still closes with a posture."""
     s = compute._SUMMARY_SYSTEM.lower()
-    for phrase in ("contrarian", "one reading", "agree or conflict", "posture",
-                   "verbatim", "no prices"):
+    for phrase in ("plain everyday english", "do not repeat the app's labels",
+                   "no scores", "contrarian", "one reading",
+                   "agree or conflict", "posture", "no prices"):
         assert phrase in s, phrase
+    # "Use the given words verbatim" is what dragged the labels and decimals in.
+    assert "verbatim" not in s
 
 
 def test_max_tokens_keeps_headroom():

@@ -90,8 +90,14 @@ items already carry prices. The flight words need a **third copy** in
 
 **Prompt:** the composite is contrarian (high = fear, read as opportunity);
 Sentiment/Bias/Signal are one number, say it once; name where the reads agree or
-conflict; ≤ 2 sentences, ≤ 350 chars; use the given words verbatim; no prices;
-close with a posture.
+conflict; ≤ 2 sentences, ≤ 350 chars; no prices; close with a posture. **In plain
+everyday English** (revised 2026-09-10, by request): the six chips under the
+sentence already show the labels and numbers, so the sentence explains what they
+mean instead of repeating them — no app labels (composite, regime, breadth, the
+trend and regime words), no scores, decimals or size multipliers; simple counts
+("2 of the 11 sectors") and standard options terms ("put credit spreads") stay.
+The first draft asked for "the given words verbatim", which produced sentences
+like "Composite reads Cautious/Bearish at 3.16 … run 0.85x size".
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

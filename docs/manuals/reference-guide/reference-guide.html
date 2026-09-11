@@ -725,7 +725,10 @@ that count toward that total; <em>Watch</em> does not.</p>
 <p><strong>Market Summary.</strong> Full width, across the bottom. One Claude-written sentence (at
 most two, at most 350 characters) consolidating the six readings above it —
 Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and closing with a trading
-posture, next to an <strong>"as of HH:MM CT"</strong> timestamp.</p>
+posture, next to an <strong>"as of HH:MM CT"</strong> timestamp. It is written in <strong>plain
+everyday English</strong>: it says what the readings mean rather than repeating the
+app's labels, scores or position sizes (the chips under it carry those), keeping
+only simple counts and standard options terms such as "put credit spreads".</p>
 <p>It is written <strong>on change, not on a clock</strong>: <code>market_svc</code> builds a fingerprint of
 the six readings at display resolution on every poll, and writes a new sentence
 only when that fingerprint differs from the one the current sentence was written

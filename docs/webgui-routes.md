@@ -228,7 +228,9 @@ the four panels; the public live Desk renders it too.
   Sonnet 5) consolidating six readings — Sentiment (0–10 contrarian composite),
   Trend (flight word + score), Bias, Signal, Regime, Bull/Bear (sector quadrant
   counts, today once the bell has rung else the quarter) — and closing with a
-  posture, next to an **"as of HH:MM CT"** timestamp. It is written **on change,
+  posture, **in plain everyday English** (no app labels, scores or size
+  multipliers — the chips carry those; `test_the_prompt_asks_for_plain_english_that_explains_the_readings`
+  pins the prompt), next to an **"as of HH:MM CT"** timestamp. It is written **on change,
   not on a clock**: `market_svc` fingerprints the six readings at display
   resolution every poll (words exact, composite to 0.5, trend score to 5, regime
   confidence to 10%, Bull/Bear counts exact + horizon) and writes only when that
