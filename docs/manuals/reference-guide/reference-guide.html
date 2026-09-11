@@ -273,6 +273,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_19">What it is</a></li>
 <li><a href="#where-the-data-comes-from_18">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_18">Reading the screen</a></li>
+<li><a href="#what-the-engine-will-refuse">What the engine will refuse</a></li>
 <li><a href="#why-it-matters_18">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_9">Caveats and gotchas</a></li>
 <li><a href="#related-pages_18">Related pages</a></li>
@@ -638,7 +639,9 @@ Send it to <strong>Paper Ledger</strong> (your own book) or let the engine work 
 <ul>
 <li><strong>All times are US Central (CT)</strong> unless stated. The regular session is
   08:30–15:00 CT (09:30–16:00 ET).</li>
-<li><strong>DTE</strong> means days to expiration. <strong>0-DTE</strong> means expiring today.</li>
+<li><strong>DTE</strong> means days to expiration. <strong>0-DTE</strong> as a <em>term</em> means expiring today; the
+  Market Scanner's <strong>0-DTE tab</strong> is a wider bucket covering <strong>0–4 DTE</strong>, so check the
+  Exp column rather than assuming same-day.</li>
 <li><strong>PCS</strong> = put credit spread (mildly bullish). <strong>CCS</strong> = call credit spread (mildly
   bearish). <strong>IC</strong> = iron condor (both, neutral).</li>
 <li>Scores are <strong>0–100 with higher meaning better</strong>. The sentiment composite runs
@@ -2736,7 +2739,7 @@ never be confused.</p>
 <tbody>
 <tr>
 <td><strong>0-DTE</strong></td>
-<td>Same-day expirations. Fast, high-decay, unforgiving.</td>
+<td>The <em>short-dated</em> bucket: <strong>0 to 4 DTE</strong>, not only today. Fast, high-decay, unforgiving. Read the Exp column — a 3-DTE spread in this tab is held across sessions, and can straddle an earnings report.</td>
 </tr>
 <tr>
 <td><strong>Swing</strong></td>
@@ -3036,10 +3039,14 @@ deliberately not a yes/no:</p>
 reached this board, so nothing listed here is knowingly exposed to one.</p>
 <h3 id="why-it-matters_14">Why it matters</h3>
 <p>At 30–45 days a straddled earnings report is close to certain for most names, which is
-why the gate matters more here than at any shorter horizon — and why the third state
-matters. A symbol the calendar has never heard of and a symbol it knows is clear both
-leave the date blank; collapsing them would let the gate fail open silently on exactly
-the names most likely to be traded.</p>
+why the gate bites hardest here — and why the third state matters. A symbol the calendar
+has never heard of and a symbol it knows is clear both leave the date blank; collapsing
+them would let the gate fail open silently on exactly the names most likely to be traded.</p>
+<p>The shorter windows are gated too, as of <strong>2026-09-09</strong>. They were not before: the live
+scan never handed the gate a date to check, so it was a no-op everywhere except here.
+The Market Scanner's swing signals, and every 0-DTE-bucket candidate that is not a
+<em>same-day</em> expiry, now consult the same calendar. This screen remains the only one that
+<strong>shows</strong> you the three-state answer; the others simply drop what straddles a report.</p>
 <p><strong>Where it is weak.</strong> Without an Alpha Vantage API key configured, the earnings
 calendar is empty and <strong>every</strong> row reads <em>Not checked</em>. That is honest but it is not
 protection — check reports yourself before selling premium into one.</p>
@@ -3362,6 +3369,52 @@ credit collected — you sold high and can buy back lower.</p>
 (<code>SELL_TO_OPEN</code> / <code>BUY_TO_CLOSE</code>), symbol, qty, type (<code>NET_CREDIT</code> / <code>NET_DEBIT</code>), fill
 price, status and reason.</p>
 <p><strong>Reset</strong> sets a new starting balance.</p>
+<h3 id="what-the-engine-will-refuse">What the engine will refuse</h3>
+<p>Five limits. The first four each refuse a single trade; the fifth
+stops the day.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Refuses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Risk per trade</td>
+<td>$250</td>
+<td>A spread whose single contract already exceeds the cap</td>
+</tr>
+<tr>
+<td><strong>Positions in one symbol</strong></td>
+<td><strong>3</strong></td>
+<td>A fourth open position in the same underlying</td>
+</tr>
+<tr>
+<td><strong>Risk in one symbol</strong></td>
+<td><strong>$750</strong></td>
+<td>An entry that would push one name's summed max loss past the cap</td>
+</tr>
+<tr>
+<td><strong>Positions in one expiry</strong></td>
+<td><strong>5</strong></td>
+<td>A sixth open position sharing an expiration date, <em>across all names</em></td>
+</tr>
+<tr>
+<td>Session drawdown</td>
+<td>$2,500</td>
+<td>Halts the account for the day</td>
+</tr>
+</tbody>
+</table>
+<p>The three concentration limits were added on 2026-09-09. Before them the engine had
+nothing between "one trade" and "the whole account", and a book could be entirely one
+name while clearing both ends — which is what happened: fourteen open positions, all
+ORCL, all expiring the same Friday, over an earnings report scheduled the day before.</p>
+<p>The expiry limit counts <strong>across symbols on purpose</strong>. Five positions expiring the same
+Friday is a bet on one date even when no single name is over its own cap.</p>
+<p>All three live in <code>options-scanner/config_paper.py</code> — edit and restart <code>options_svc</code>.</p>
 <h3 id="why-it-matters_18">Why it matters</h3>
 <p>This is the app's mechanical baseline. The engine applies the same rules every time
 without hesitation, fear or improvisation — so comparing it against your hand-kept
@@ -3373,6 +3426,15 @@ rules, or subtracts it. That is an uncomfortable comparison and a genuinely usef
 <li>The automatic cycle is <strong>hourly</strong>, not continuous — a target hit at 09:15 is acted on
   at the 10:00 run unless you press <strong>Run manage cycle</strong>.</li>
 <li><strong>Reset wipes the book.</strong> There is no undo.</li>
+<li>⚠ <strong>A concentration refusal leaves no row on this screen.</strong> The risk-per-trade and
+  buying-power refusals appear in the fills log as <code>REJECTED</code>; the three concentration
+  limits do not — they skip the signal silently and log to the service journal
+  (<code>SKIPPED &lt;symbol&gt; &lt;reason&gt; (concentration cap)</code>). That is deliberate: the condition
+  is <em>temporary</em>, and a rejected order row would blacklist the signal permanently, so a
+  name that freed up an hour later could never be entered. The visible symptom is a
+  high-scoring captured signal that simply never opens. Check
+  <code>journalctl --user -u trading-prod-options_svc | grep concentration</code> before assuming
+  the engine is stuck.</li>
 </ul>
 <h3 id="related-pages_18">Related pages</h3>
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#captured-signals">Captured Signals</a> (the entry source)
@@ -4580,7 +4642,9 @@ strategy, legs, slider positions and active tab — so moving away and back does
 your work.</p>
 <h1 id="appendix-d-glossary">Appendix D — Glossary</h1>
 <p>Terms the app uses without defining them on screen.</p>
-<p><strong>0-DTE</strong> — expiring today. Maximum time decay, maximum gamma risk.</p>
+<p><strong>0-DTE</strong> — expiring today. Maximum time decay, maximum gamma risk. ⚠ The Market
+Scanner's <strong>0-DTE tab</strong> is named for this but spans <strong>0–4 DTE</strong>, so a position opened
+from it is not necessarily flat by the close.</p>
 <p><strong>ADX</strong> — Average Directional Index. Trend <em>strength</em> regardless of direction. Above
 ~25 is generally read as trending.</p>
 <p><strong>Breadth</strong> — how many stocks participate in a move. Advancing minus declining issues.

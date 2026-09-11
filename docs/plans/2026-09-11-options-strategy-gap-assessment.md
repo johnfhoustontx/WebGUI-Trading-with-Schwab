@@ -20,7 +20,7 @@ Three findings matter more than any missing strategy:
 
 1. **Positions the app already opens are left unmanaged.** Cash-secured puts and covered calls opened from the Income Window get no profit target, no stop, and no close action. The repricer cannot price a single leg, so every exit rule is skipped and they ride to expiry (§3.1, checked by hand).
 2. **Entry rules are applied on some scan surfaces and not others.** The implied-volatility floor binds one of four surfaces, and the earnings gate is live on one of three paths. The Strategy Finder and Income Window can sell premium at any volatility, into regimes the Market Scanner would refuse (§2.3).
-3. **Two of the largest risk gaps already have a tested fix that never shipped.** Commit `dde98b8` on `claude/orcl-concentration-risk-9ad685` (2026-09-09) adds per-symbol and per-expiry concentration caps and makes the earnings gate fire on the live scan. It is not in `main`, so it is not in prod. A trial merge conflicts only in `docs/CHANGELOG.md` (§7, A1).
+3. **Two of the largest risk gaps already had a tested fix that hadn't shipped.** Commit `dde98b8` on `claude/orcl-concentration-risk-9ad685` (2026-09-09) adds per-symbol and per-expiry concentration caps and makes the earnings gate fire on the live scan. It was not in `main` at `c152b00`. **It has since been merged on this branch as `05ed539`** (§7, A1), and it reaches prod once `main` is fast-forwarded and promoted.
 
 **Most gaps can be closed, and cheaply.** §7 makes 25 recommendations, and 11 of them are a day of work or less. The order that pays:
 
@@ -183,7 +183,7 @@ The hourly cadence is slower than two sources in the repo say, both stale (§8).
 | ID | Playbook rule | What the app does | Verdict |
 |---|---|---|---|
 | **S2** | Keep 30–50% of the account in cash | Manual book: no cap; it can commit nearly all its cash. Driver: open max loss ≤ $12,000, 48% of the book (`driver.toml:38`), so at least ~52% stays idle. | Gap (manual) · Met (driver) |
-| **S4** | Diversify across sectors; avoid correlated positions | Driver: one position per symbol, at most 10 open. Manual book: nothing on `main`; caps sit on unmerged `dde98b8`. No sector or correlation check anywhere. The scan universe leans heavily on semiconductors. | Gap |
+| **S4** | Diversify across sectors; avoid correlated positions | Driver: one position per symbol, at most 10 open. Manual book: nothing on `main` at `c152b00`. Per-symbol and per-expiry caps arrive with `dde98b8`, merged on this branch as `05ed539`. No sector or correlation check anywhere. The scan universe leans heavily on semiconductors. | Gap |
 | — | Drawdown limits (not in the playbook) | $2,500 session drawdown halt on both books (`config_paper.py:26`). Driver: $1,500 daily loss halt, VIX 35 ceiling, bank-the-day target. | Beyond the playbook |
 | **P1** | A written plan for every trade | No plan is stored per trade. Managed positions carry their plan as rules. The driver's model writes a rationale into a 50-entry rolling log only. | Partial |
 | **P2** | Keep a trading journal | Captured signals, the EOD report, equity curve and MAE/MFE for both books, a driver scorecard, and a nightly calibration of entry score against realized R. Missing: a scorecard for the manual book, notes, and one commission convention (§8). | Beyond the playbook, with gaps |
@@ -252,7 +252,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 
 | # | Recommendation | Closes | Effort | Value |
 |---|---|---|---|---|
-| **A1** | Merge and promote `dde98b8` (concentration caps; live earnings gate) | S4, V3 | S | High |
+| **A1** | Merge and promote `dde98b8` (concentration caps; live earnings gate) — **merged as `05ed539`; promote pending** | S4, V3 | S | High |
 | **A2** | Teach the repricer single legs (`SHORT_PUT`, `COVERED_CALL`) | X1–X3 for income | S–M | High |
 | **A3** | Fix Rescue's put-side test for short puts | §3.1 | S | Medium |
 | **A4** | Give the income cash-secured put its own delta band | §2.3 | S | Medium |
@@ -285,6 +285,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 - **Evidence it works:** 61 new tests, and a replay against the prod ORCL book, which it cuts from 14 positions to 3.
 - **Cost:** `main` has moved 64 commits since; a trial merge conflicts only in `docs/CHANGELOG.md`.
 - **When:** promoting stops the whole target, so run it after the close (15:25–16:15 CT).
+- **Status (2026-09-11):** merged on this branch as `05ed539`. The one conflict was the CHANGELOG. The failing test set was empty before and after; options-scanner gained 48 tests and options_svc 13. Fast-forwarding `main` and promoting remain.
 
 **A2. Teach the repricer single legs.** Add `SHORT_PUT`/`NAKED_PUT` (put map, short strike) and `COVERED_CALL` (call map) to `signal_repricer.reprice_swing`, with the same worked-limit buy-to-close on one leg. That alone restores marks, P&L, `recommend()` and the Rescue board's "Close now" for every Income-board position, and ends an error per position per cycle. Do it with A3, then B1.
 
@@ -367,7 +368,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 1. Income Window positions get no mark and no exit rules, and log an error on every manage cycle **(checked)**.
 2. Rescue treats a cash-secured put as call-side, and offers it no candidates, not even "Close now" **(checked)**.
 3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**.
-4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**; partly fixed on `dde98b8`.
+4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
 6. The width search is sized for a phantom $100,000 account **(checked)**.
 7. Three commission conventions across the paper books (§A7).
@@ -390,7 +391,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 
 ## 9. Decisions for you
 
-1. **Merge `dde98b8` now?** It is tested, replayed on prod data, and one CHANGELOG conflict away. It would promote after the close.
+1. **Promote `dde98b8`?** It is merged on this branch as `05ed539`, with the failing test set unchanged. What remains is fast-forwarding `main` and promoting after the close.
 2. **Cash-secured puts and covered calls: stops, or the wheel?** The wheel accepts assignment and keeps selling; a stop-based rule set exits instead. This shapes B1.
 3. **Driver sizing.** Keep the "Very Aggressive" 12%-per-trade profile, or move toward the playbook's 1–2% and the sources' 1–5%? The driver's own realized record is the evidence to weigh.
 4. **How tight a deployment cap for the manual book?** 50% of equity at risk, or theoptionpremium's 20–25%?

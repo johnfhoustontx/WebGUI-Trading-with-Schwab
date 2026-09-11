@@ -2334,7 +2334,7 @@ price, status and reason.
 
 ### What the engine will refuse
 
-Four limits, checked in this order. The first three refuse one trade; the fourth
+Five limits. The first four each refuse a single trade; the fifth
 stops the day.
 
 | Limit | Default | Refuses |

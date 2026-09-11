@@ -82,6 +82,14 @@ book in one name, and the earnings gate fires for the first time.** Written
   every "was dropped" assertion pass for the wrong reason.
   `test_the_harness_itself_produces_a_row` now guards the rest of that file.
 
+- **Merged 2026-09-11, with two fixes to the Reference Guide.** First, the branch
+  had edited `reference-guide.md` but not its built `.html`/`.docx`, which `main`
+  had since rebuilt, so the served manual would have kept the old wording; it was
+  rebuilt on merge. Second, its limits paragraph said "four limits, checked in this
+  order" above a table of five, and `run_entry_cycle` checks the concentration
+  limits twice — before sizing and again against the fill — so no single order
+  exists. It now says five limits and claims no order.
+
 ---
 
 **Prior — 2026-09-11** (**The sentiment score was described backwards
