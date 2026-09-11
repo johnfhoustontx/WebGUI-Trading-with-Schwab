@@ -161,3 +161,89 @@ def test_a_legacy_per_share_payload_is_scaled_to_the_position():
 def test_a_nan_greek_is_an_em_dash():
     t = _by_key(sv.position_tiles(PCS_10, _result(delta=float("nan"))))
     assert t["delta"]["value"] == sv.NO_READING
+
+
+# -- Task 3: slider readouts and the Days range ----------------------------------
+
+import datetime as dt
+from zoneinfo import ZoneInfo
+
+CT = ZoneInfo("America/Chicago")
+NY = ZoneInfo("America/New_York")
+
+
+def test_fractional_dte_counts_to_the_new_york_close():
+    now = dt.datetime(2026, 9, 11, 11, 0, tzinfo=NY)
+    assert sv.fractional_dte("2026-09-11", now) == pytest.approx(5 / 24)
+    assert sv.fractional_dte("2026-09-12", now) == pytest.approx(1 + 5 / 24)
+
+
+def test_fractional_dte_reads_a_naive_clock_as_central():
+    """The project convention: a tz-naive datetime is CENTRAL wall-clock time.
+    10:00 naive = 11:00 ET, five hours to the close."""
+    assert sv.fractional_dte("2026-09-11", dt.datetime(2026, 9, 11, 10, 0)) == \
+        pytest.approx(5 / 24)
+
+
+def test_fractional_dte_floors_at_zero_and_refuses_junk():
+    now = dt.datetime(2026, 9, 11, 17, 0, tzinfo=NY)
+    assert sv.fractional_dte("2026-09-11", now) == 0.0
+    assert sv.fractional_dte("not-a-date", now) is None
+    assert sv.fractional_dte(None, now) is None
+
+
+def test_days_range_for_a_zero_dte_position_steps_in_quarter_days():
+    now = dt.datetime(2026, 9, 11, 11, 0, tzinfo=NY)
+    r = sv.days_range([_leg("put", "short", 100.0, expiry="2026-09-11")], now)
+    assert r["step"] == 0.25
+    assert r["max"] == 0.25                      # reaches the close, not 30 days
+    assert r["snaps"] == [("Now", 0.0), ("Expiry", 0.25)]
+
+
+def test_days_range_for_mixed_expiries_names_the_first_one():
+    now = dt.datetime(2026, 9, 11, 11, 0, tzinfo=NY)
+    legs = [_leg("put", "short", 330.0, expiry="2026-09-28"),     # ~17.2 days
+            _leg("put", "long", 325.0, expiry="2026-10-23")]      # ~42.2 days
+    r = sv.days_range(legs, now)
+    assert r["step"] == 1
+    assert r["max"] == 43
+    assert r["snaps"] == [("Now", 0.0), ("Halfway", 9.0), ("First expiry", 18.0)]
+
+
+def test_days_range_with_no_expiry_falls_back_to_a_month():
+    r = sv.days_range([], dt.datetime(2026, 9, 11, 11, 0, tzinfo=NY))
+    assert r == {"max": 30, "step": 1, "snaps": [("Now", 0.0)]}
+
+
+@pytest.mark.parametrize("days,text", [
+    (0, "0 days"), (0.25, "6 hours"), (1 / 24, "1 hour"), (1, "1 day"),
+    (5, "5 days"), (1.25, "1.25 days")])
+def test_days_text(days, text):
+    assert sv.days_text(days) == text
+
+
+def test_curve_pnl_at_interpolates_and_refuses_outside_the_sweep():
+    pairs = [[100.0, -200.0], [110.0, 300.0], [120.0, 300.0]]
+    assert sv.curve_pnl_at(pairs, 105.0) == pytest.approx(50.0)
+    assert sv.curve_pnl_at(pairs, 110.0) == pytest.approx(300.0)
+    assert sv.curve_pnl_at(pairs, 99.0) is None
+    assert sv.curve_pnl_at([], 105.0) is None
+    assert sv.curve_pnl_at(pairs, None) is None
+
+
+def test_whatif_readout_states_price_date_and_result():
+    now = dt.datetime(2026, 9, 11, 11, 0, tzinfo=CT)
+    pairs = [[100.0, -200.0], [110.0, 300.0]]
+    text, tone = sv.whatif_readout(pairs, 105.0, 17, now)
+    assert text == "At 105.00 on Sep 28: profit $50"
+    assert tone == "pos"
+    text, tone = sv.whatif_readout(pairs, 101.0, 0, now)
+    assert text == "At 101.00 today: loss $150"
+    assert tone == "neg"
+    text, _ = sv.whatif_readout(pairs, 101.0, 0.25, now)
+    assert text.startswith("At 101.00 in 6 hours:")
+
+
+def test_whatif_readout_with_no_curve_is_blank():
+    assert sv.whatif_readout([], 101.0, 0, dt.datetime(2026, 9, 11, tzinfo=CT)) == \
+        ("", "neutral")

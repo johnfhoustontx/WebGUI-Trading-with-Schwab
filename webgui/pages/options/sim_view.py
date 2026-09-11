@@ -240,3 +240,122 @@ def position_tiles(legs, result):
                         "earned from time passing" if theta >= 0 else "lost to time passing",
                         "pos" if theta > 0 else ("neg" if theta < 0 else "neutral"))
     return [t_entry, t_profit, t_loss, t_be, t_delta, t_theta]
+
+
+# -- Task 3: slider readouts and the Days range ----------------------------------
+
+# A tz-naive "now" in this project is CENTRAL wall-clock time (CLAUDE.md, the
+# 2026-08-20 time-basis fix). Read it as such, or every 0-DTE figure is an hour off.
+_NAIVE_TZ = ZoneInfo("America/Chicago")
+_DEFAULT_DAYS_MAX = 30
+_FINE_STEP_BELOW_DAYS = 3        # a position this close to expiry steps in quarter days
+
+
+def _aware(now):
+    now = now or _dt.datetime.now(_NAIVE_TZ)
+    return now if now.tzinfo else now.replace(tzinfo=_NAIVE_TZ)
+
+
+def fractional_dte(expiry, now=None):
+    """Days from ``now`` to 16:00 America/New_York on ``expiry``, floored at 0.
+
+    The service's own settlement convention (``_leg_days_to_expiry``), so the
+    slider's Expiry snap lands where the service prices the legs to intrinsic.
+    ``None`` for an unparseable expiry."""
+    if not expiry:
+        return None
+    try:
+        d = _dt.date.fromisoformat(str(expiry)[:10])
+    except ValueError:
+        return None
+    settle = _dt.datetime(d.year, d.month, d.day, _SETTLE_HOUR, tzinfo=_SETTLE_TZ)
+    days = (settle - _aware(now)).total_seconds() / 86400.0
+    return max(days, 0.0)
+
+
+def _ceil_to(x, step):
+    return round(math.ceil(x / step - 1e-9) * step, 2)
+
+
+def days_range(legs, now=None):
+    """The Days-passed slider fitted to the position: ``{max, step, snaps}``.
+
+    * ``max`` — the LONGEST leg's time to its close, rounded up to the step, so
+      the slider can reach the last expiry and never runs far past it.
+    * ``step`` — one day, or a quarter day when the longest leg is within three
+      days (a 0-DTE position has hours, not days, to play with).
+    * ``snaps`` — Now · Halfway · Expiry, the last named **First expiry** when
+      the legs settle on different dates; a snap that would duplicate another
+      (or land at zero) is dropped.
+
+    No leg with a usable expiry falls back to the old fixed month."""
+    dtes = [d for d in (fractional_dte(l.get("expiry"), now) for l in legs or [])
+            if d is not None]
+    if not dtes:
+        return {"max": _DEFAULT_DAYS_MAX, "step": 1, "snaps": [("Now", 0.0)]}
+    longest, first = max(dtes), min(dtes)
+    step = 0.25 if longest <= _FINE_STEP_BELOW_DAYS else 1
+    top = max(_ceil_to(longest, step), step)
+    expiries = {str(l.get("expiry")) for l in legs or [] if l.get("expiry")}
+    snaps = [("Now", 0.0)]
+    half = _ceil_to(first / 2, step)
+    end = min(_ceil_to(first, step), top)
+    if 0 < half < end:
+        snaps.append(("Halfway", half))
+    if end > 0:
+        snaps.append(("Expiry" if len(expiries) <= 1 else "First expiry", end))
+    return {"max": top, "step": step, "snaps": snaps}
+
+
+def days_text(days):
+    """``"5 days"`` / ``"1 day"`` / ``"6 hours"`` — hours under one day, because a
+    0-DTE slider in fractions of a day reads as noise."""
+    d = num(days) or 0.0
+    if 0 < d < 1:
+        hours = round(d * 24)
+        return f"{hours} hour{'' if hours == 1 else 's'}"
+    if d == 1:
+        return "1 day"
+    return f"{d:g} days"
+
+
+def curve_pnl_at(pairs, x):
+    """The What-if curve's P/L at price ``x`` by linear interpolation between the
+    sweep points the chart draws — so the readout and the chart cannot disagree.
+    ``None`` outside the sweep (it spans spot ±20%) or with no curve."""
+    x = num(x)
+    pts = sorted((p for p in pairs or [] if num(p[0]) is not None and num(p[1]) is not None),
+                 key=lambda p: p[0])
+    if x is None or not pts or x < pts[0][0] or x > pts[-1][0]:
+        return None
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x0 <= x <= x1:
+            return y0 if x1 == x0 else y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
+def _when_text(days, now):
+    d = num(days) or 0.0
+    if d == 0:
+        return "today"
+    if d < 1:
+        return f"in {days_text(d)}"
+    when = _aware(now) + _dt.timedelta(days=d)
+    return f"on {when:%b} {when.day}"
+
+
+def whatif_readout(pairs, target_s, days, now=None):
+    """``("At 386.00 on Sep 28: profit $8,240", "pos")`` — the price the Price
+    slider lands on, the date the Days slider lands on, and what the position is
+    worth there. ``("", "neutral")`` when there is no curve to read."""
+    target_s = num(target_s)
+    if not pairs or target_s is None:
+        return "", "neutral"
+    head = f"At {target_s:,.2f} {_when_text(days, now)}"
+    pnl = curve_pnl_at(pairs, target_s)
+    if pnl is None:
+        return f"{head}: {NO_READING}", "neutral"
+    if abs(pnl) < 0.5:
+        return f"{head}: break-even", "neutral"
+    word, tone = ("profit", "pos") if pnl > 0 else ("loss", "neg")
+    return f"{head}: {word} {_money(abs(pnl))}", tone
