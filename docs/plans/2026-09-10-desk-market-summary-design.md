@@ -117,6 +117,11 @@ sentences, one with none is withheld. The 400-character slice that published
 (`compute._QUADRANT_MEANINGS`, pinned to `bullbear.QUADRANTS`), with
 "outperforming" defined as rising_leading plus falling_leading: unexplained, the
 counts were once written up as "only 2 of 11 outperforming" when 6 were.
+Definitions alone did not hold — the next sentence repeated the error — so the
+arithmetic moved into code: the packet carries the combined counts ready-made
+(`bullbear.totals`: sectors, rising, falling, beating_sp500, trailing_sp500), and
+`generate_summary` withholds a sentence whose "N of M sectors are …" claim
+disagrees with them (`_count_claim_error`).
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

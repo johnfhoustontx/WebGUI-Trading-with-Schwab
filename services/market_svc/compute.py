@@ -399,7 +399,10 @@ _SUMMARY_SYSTEM = (
     "combine buckets only as defined here: sectors beating the S&P 500 "
     "(outperforming) means rising_leading plus falling_leading, and sectors "
     "rising means rising_leading plus rising_lagging - never describe one "
-    "bucket alone as either. Treat sentiment, bias and signal as ONE "
+    "bucket alone as either. State every sector count from the bull/bear "
+    "totals exactly as given (sectors, rising, falling, beating_sp500 = "
+    "outperforming, trailing_sp500); never add or subtract buckets yourself. "
+    "Treat sentiment, bias and signal as ONE "
     "reading. Say where "
     "the readings agree or conflict. Close with a practical trading posture in "
     "plain words; standard options terms such as 'put credit spreads' are fine "
@@ -509,6 +512,26 @@ def bullbear_counts(bullbear, now=None):
     return ("today" if live else "quarter"), counts
 
 
+def _bullbear_totals(counts):
+    """The combined sector counts, ready-made, so the model never adds buckets.
+
+    "Beating the S&P 500" is TWO buckets (rising_leading + falling_leading) and
+    "rising" another two; left to combine them itself, the model twice reported
+    the rising-and-beating bucket alone as the whole (2026-09-10: "only 2 of the
+    11 sectors are beating the S&P 500" when 6 were). ``{}`` when nothing was
+    counted."""
+    c = counts or {}
+    if not c:
+        return {}
+    return {
+        "sectors": sum(c.values()),
+        "rising": c.get("rising_leading", 0) + c.get("rising_lagging", 0),
+        "falling": c.get("falling_leading", 0) + c.get("falling_lagging", 0),
+        "beating_sp500": c.get("rising_leading", 0) + c.get("falling_leading", 0),
+        "trailing_sp500": c.get("rising_lagging", 0) + c.get("falling_lagging", 0),
+    }
+
+
 def build_summary_packet(sentiment, regime, bullbear, now=None):
     """The six readings the Desk shows, in the screen's own words — the ONLY
     facts the summary is written from. Prices are deliberately absent: a
@@ -537,7 +560,11 @@ def build_summary_packet(sentiment, regime, bullbear, now=None):
         "regime": {"word": r.get("label") or "Unclear",
                    "confidence": (None if r.get("unclear")
                                   else _finite(r.get("confidence")))},
-        "bullbear": {"horizon": horizon, "counts": counts},
+        # ``totals`` is derived from ``counts`` (so the fingerprint, which reads
+        # the counts, is unchanged); it exists so the model states sector
+        # counts from ready-made sums instead of adding buckets itself.
+        "bullbear": {"horizon": horizon, "counts": counts,
+                     "totals": _bullbear_totals(counts)},
     }
 
 
@@ -667,6 +694,51 @@ def _spread_direction_error(text):
     return None
 
 
+# "N of M sectors are <verb>" — every verb maps to the ready-made total it
+# claims. Only unambiguous verbs: "holding up" or "up" could mean rising or
+# merely resilient, so a claim phrased that way is left unchecked rather than
+# forced onto a total it may not mean.
+_COUNT_VERBS = {
+    "beating": "beating_sp500", "outperforming": "beating_sp500",
+    "outpacing": "beating_sp500", "leading": "beating_sp500",
+    "trailing": "trailing_sp500", "lagging": "trailing_sp500",
+    "underperforming": "trailing_sp500",
+    "rising": "rising", "gaining": "rising", "advancing": "rising",
+    "climbing": "rising",
+    "falling": "falling", "declining": "falling", "dropping": "falling",
+    "sliding": "falling",
+}
+_NUMBER_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+                 "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                 "ten": 10, "eleven": 11, "twelve": 12}
+_COUNT_NUMBER = r"(\d+|" + "|".join(_NUMBER_WORDS) + r")"
+# The window after "sectors" stops at a comma or sentence mark, so "2 of the 11
+# sectors, while most are falling" is not read as "2 falling".
+_COUNT_CLAIM = re.compile(
+    rf"\b{_COUNT_NUMBER} of (?:the |all )?{_COUNT_NUMBER}(?:\s+[a-z&-]+){{0,2}}?"
+    rf"\s+sectors?\b[^.;:,!?]{{0,30}}?\b({'|'.join(_COUNT_VERBS)})\b")
+
+
+def _as_count(word):
+    return int(word) if word.isdigit() else _NUMBER_WORDS[word]
+
+
+def _count_claim_error(text, totals):
+    """The first "N of M sectors are <verb>" claim that disagrees with the
+    packet's ready-made ``totals``, or None (also None when there are no
+    totals to check against). Accuracy is paramount: a sentence stating a
+    wrong count is withheld, not shown."""
+    if not totals:
+        return None
+    t = " ".join(str(text or "").lower().split())
+    for claim in _COUNT_CLAIM.finditer(t):
+        n, of = _as_count(claim.group(1)), _as_count(claim.group(2))
+        key = _COUNT_VERBS[claim.group(3)]
+        if of != totals.get("sectors") or n != totals.get(key):
+            return claim.group(0)
+    return None
+
+
 def generate_summary(packet, client=None):
     """Call Claude for the 1-2 sentence consolidated read + posture.
 
@@ -677,9 +749,10 @@ def generate_summary(packet, client=None):
 
     Returns ``None`` — so the caller keeps the last good sentence and the same
     readings are retried after the gap — when the attempt FAILED (API error,
-    timeout), when a reply that ran out of room has no complete sentence, or when
-    the reply ties a credit spread to the wrong direction (accuracy first: a
-    wrong sentence is worse than a slightly older right one)."""
+    timeout), when a reply that ran out of room has no complete sentence, when
+    the reply ties a credit spread to the wrong direction, or when it states a
+    sector count that disagrees with the packet's ready-made totals (accuracy
+    first: a wrong sentence is worse than a slightly older right one)."""
     import json
     from datetime import timezone
     out = {"narrative": "", "inputs": packet or {},
@@ -712,6 +785,12 @@ def generate_summary(packet, client=None):
     if wrong:
         log.warning("market summary withheld - it ties a credit spread to the "
                     "wrong direction: %r", wrong)
+        return None
+    totals = ((packet or {}).get("bullbear") or {}).get("totals") or {}
+    miscount = _count_claim_error(text, totals)
+    if miscount:
+        log.warning("market summary withheld - a sector count disagrees with "
+                    "the totals %s: %r", totals, miscount)
         return None
     out["narrative"] = text
     return out

@@ -82,7 +82,7 @@ def test_packet_from_cold_caches_is_all_absent_never_neutral():
     assert p["sentiment"]["composite"] is None and p["trend"]["word"] is None
     assert p["bias"] is None and p["signal"] is None
     assert p["regime"]["word"] == "Unclear"
-    assert p["bullbear"] == {"horizon": None, "counts": {}}
+    assert p["bullbear"] == {"horizon": None, "counts": {}, "totals": {}}
 
 
 def _packet(**over):
@@ -277,6 +277,64 @@ def test_the_prompt_says_what_every_bull_bear_count_means():
     assert "report sector counts exactly as given" in s
     assert "rising_leading plus falling_leading" in s      # = outperforming
     assert "rising_leading plus rising_lagging" in s       # = rising
+
+
+# ── sector counts: computed in code, checked before publishing ───────────────
+# Definitions in the prompt were not enough: at 21:00 CT it wrote "only 2 of the
+# 11 sectors are beating the S&P 500" when 6 were. Arithmetic is not the model's.
+
+def test_the_packet_carries_the_combined_sector_counts_ready_made():
+    p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
+    # today: XLU and XLE rising and beating, XLK falling and trailing
+    assert p["bullbear"]["totals"] == {"sectors": 3, "rising": 2, "falling": 1,
+                                       "beating_sp500": 2, "trailing_sp500": 1}
+
+
+def test_the_totals_add_the_buckets_the_way_the_words_mean():
+    t = compute._bullbear_totals({"rising_leading": 2, "rising_lagging": 0,
+                                  "falling_leading": 4, "falling_lagging": 5,
+                                  "unknown": 0})
+    assert t == {"sectors": 11, "rising": 2, "falling": 9,
+                 "beating_sp500": 6, "trailing_sp500": 5}
+    assert compute._bullbear_totals({}) == {}
+
+
+def test_the_prompt_says_to_state_counts_only_from_the_totals():
+    s = compute._SUMMARY_SYSTEM.lower()
+    assert "state every sector count from the bull/bear totals" in s
+
+
+_TOTALS_21H = {"sectors": 11, "rising": 2, "falling": 9,
+               "beating_sp500": 6, "trailing_sp500": 5}
+
+
+def test_the_count_check_catches_the_21_00_ct_mistake():
+    bad = compute._count_claim_error
+    assert bad("only 2 of the 11 sectors are beating the S&P 500 today", _TOTALS_21H)
+    assert bad("only 2 of the 11 sectors are outperforming today", _TOTALS_21H)
+    assert bad("3 of the 11 sectors are rising", _TOTALS_21H)
+    assert bad("two of the eleven sectors are falling", _TOTALS_21H)
+    assert bad("2 of the 12 sectors are rising", _TOTALS_21H)   # wrong denominator
+
+
+def test_the_count_check_passes_correct_counts_and_leaves_other_text_alone():
+    ok = compute._count_claim_error
+    assert ok("6 of the 11 sectors are beating the S&P 500", _TOTALS_21H) is None
+    assert ok("only 2 of the 11 sectors are rising, with most falling",
+              _TOTALS_21H) is None
+    assert ok("nine of the 11 sectors are falling", _TOTALS_21H) is None
+    assert ok("5 of 11 sectors are trailing the S&P 500", _TOTALS_21H) is None
+    assert ok("2 of the 11 sectors, while most are falling", _TOTALS_21H) is None
+    assert ok("only 2 of the 11 sectors are actually holding up", _TOTALS_21H) is None
+    assert ok("anything at all", {}) is None     # no totals: nothing to check against
+
+
+def test_a_sentence_with_a_wrong_sector_count_is_not_published(caplog):
+    import logging
+    wrong = "Prices drift lower and 3 of the 3 sectors are rising."   # packet: 2 rising
+    with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
+        assert compute.generate_summary(_packet(), client=_client(wrong)) is None
+    assert any("sector count" in r.getMessage() for r in caplog.records)
 
 
 # ── never a cut-off sentence ─────────────────────────────────────────────────
