@@ -1851,6 +1851,39 @@ builds one from resolved contracts.</p>
   service (<code>compute.sim_replay</code>) wraps this and compresses overnight/weekend gaps
   onto a consecutive integer x-axis for the six-panel chart.</li>
 </ul>
+<p><strong>Replay time basis (fixed 2026-09-11).</strong> Each bar is priced with
+<code>expiry_time_to_years(bar_time, expiry)</code> — years to the 16:00 ET settlement — and
+that helper reads a <strong>naive</strong> datetime as Central (<code>NAIVE_WALLCLOCK_TZ</code>). The proxy
+client hands over its candle stamps as <strong>naive UTC</strong> (<code>pd.to_datetime(ms,
+unit="ms")</code>), so <code>compute._replay_index</code> converts them first: take a naive stamp as
+UTC, convert to Central, drop the zone.</p>
+<table>
+<thead>
+<tr>
+<th>bars</th>
+<th>Schwab stamps them</th>
+<th>the Replay index</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>intraday</td>
+<td>the bar's own minute, epoch-ms UTC (the 08:30 CT open arrives as 13:30)</td>
+<td>that minute in Central</td>
+</tr>
+<tr>
+<td>daily</td>
+<td>midnight <strong>Central</strong> (05:00 UTC in summer, 06:00 in winter), so the date survives the conversion</td>
+<td>the regular close, 15:00 CT (<code>market_calendar.regular_close_on</code>), never later than now</td>
+</tr>
+</tbody>
+</table>
+<p>Until 2026-09-11 the stamps went through unconverted, so every intraday bar was
+priced five hours late (six in winter): a 0-DTE replay treated the option as
+expired from about 10:00 CT on, and the axis labelled the open 13:30. Daily bars
+were priced at 05:00 CT, ten hours before their close. A daily bar is stamped at
+the close because that is when its price was printed; at midnight it would carry
+fifteen hours of time value it never had.</p>
 <p>Both <code>compute.sim_run</code> and <code>compute.sim_replay</code> take a <code>legs</code> list (each
 <code>{kind, strike, expiry, side, qty}</code>) and remain <strong>backward-compatible</strong> with the
 legacy single-contract positional arguments.</p>

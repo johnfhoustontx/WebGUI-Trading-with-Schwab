@@ -273,6 +273,25 @@ def test_next_regular_open_reads_the_configured_regular_start(monkeypatch):
     assert mc.next_regular_open(_ct(2026, 8, 17, 6, 0)) == _ct(2026, 8, 17, 9, 5)
 
 
+def test_regular_close_on_is_the_15_00_ct_close_of_that_date():
+    # 15:00 CT == 16:00 ET in both halves of the year: the zones shift together.
+    assert mc.regular_close_on(date(2026, 9, 10)) == _ct(2026, 9, 10, 15, 0)
+    assert mc.regular_close_on(date(2026, 1, 15)) == _ct(2026, 1, 15, 15, 0)
+
+
+def test_regular_close_on_is_the_instant_mins_to_close_counts_down_to():
+    close = mc.regular_close_on(date(2026, 8, 17))
+    assert mc.mins_to_close(close) == 0.0
+    assert mc.mins_to_close(close - dt.timedelta(minutes=30)) == 30.0
+
+
+def test_regular_close_on_reads_the_configured_regular_end(monkeypatch):
+    """No time literal of its own, like ``next_regular_open``."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(8, 30), dt.time(12, 0)))
+    assert mc.regular_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 12, 0)
+
+
 def test_is_extended_hours_only_after_activation():
     assert mc.is_extended_hours(_ct(2026, 8, 17, 7, 0)) is True
     assert mc.is_extended_hours(_ct(2026, 8, 14, 7, 0)) is False

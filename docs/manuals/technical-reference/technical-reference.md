@@ -1278,6 +1278,25 @@ builds one from resolved contracts.
   service (`compute.sim_replay`) wraps this and compresses overnight/weekend gaps
   onto a consecutive integer x-axis for the six-panel chart.
 
+**Replay time basis (fixed 2026-09-11).** Each bar is priced with
+`expiry_time_to_years(bar_time, expiry)` — years to the 16:00 ET settlement — and
+that helper reads a **naive** datetime as Central (`NAIVE_WALLCLOCK_TZ`). The proxy
+client hands over its candle stamps as **naive UTC** (`pd.to_datetime(ms,
+unit="ms")`), so `compute._replay_index` converts them first: take a naive stamp as
+UTC, convert to Central, drop the zone.
+
+| bars | Schwab stamps them | the Replay index |
+|---|---|---|
+| intraday | the bar's own minute, epoch-ms UTC (the 08:30 CT open arrives as 13:30) | that minute in Central |
+| daily | midnight **Central** (05:00 UTC in summer, 06:00 in winter), so the date survives the conversion | the regular close, 15:00 CT (`market_calendar.regular_close_on`), never later than now |
+
+Until 2026-09-11 the stamps went through unconverted, so every intraday bar was
+priced five hours late (six in winter): a 0-DTE replay treated the option as
+expired from about 10:00 CT on, and the axis labelled the open 13:30. Daily bars
+were priced at 05:00 CT, ten hours before their close. A daily bar is stamped at
+the close because that is when its price was printed; at midnight it would carry
+fifteen hours of time value it never had.
+
 Both `compute.sim_run` and `compute.sim_replay` take a `legs` list (each
 `{kind, strike, expiry, side, qty}`) and remain **backward-compatible** with the
 legacy single-contract positional arguments.

@@ -4,7 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The Simulator states its numbers** — six
+**Last updated:** 2026-09-11 (**Replay prices each bar at the time it was
+printed** — the Simulator's Replay read the proxy's UTC candle stamps as Central
+wall-clock, so every intraday bar was priced five hours late and a 0-DTE replay
+treated the option as expired from about 10:00 CT on.)
+
+- **The bug.** `options_svc.compute._fetch_replay_history` built its index with
+  `pd.to_datetime(df["datetime"])`, and `proxy_client` makes that column with
+  `pd.to_datetime(ms, unit="ms")` — naive UTC. `ReplayEngine.full_trace` passes
+  each stamp to `expiry_time_to_years`, whose naive branch means Central
+  (`NAIVE_WALLCLOCK_TZ`). Found verifying the Simulator promote on prod: a
+  5-minute SPY window's first bar read "Sep 3 13:30" (the 08:30 CT open) and the
+  last "Sep 10 19:55". `options_simulator/data.py` had always converted its own
+  history; this helper, added later, skipped it.
+- **Measured on prod before the fix** (07:32 CT, two `/pricehistory` calls through
+  the real client): 1-minute SPY stamps `1789047000000` → naive `13:30` → 08:30
+  CDT; daily stamps are `05:00` naive, i.e. **midnight Central**, not midnight UTC —
+  so converting a daily bar keeps its date.
+- **The fix.** New `compute._replay_index`: a naive stamp is taken as UTC,
+  converted to `NAIVE_WALLCLOCK_TZ` and made naive again. A daily bar is then
+  re-stamped at its date's regular close, 15:00 CT (new
+  `shared.market_calendar.regular_close_on`, which reads the same bound
+  `mins_to_close` does), clamped to now for today's in-progress bar — its price
+  was printed at the close; at midnight it would carry fifteen hours of time value.
+  Before, daily bars priced at 05:00 CT.
+- **Tests.** Built from raw epoch-ms through the real `SchwabProxyClient` parsing
+  (only the HTTP GET stubbed): a 0-DTE ATM call at 12:00 CT prices with three
+  hours left ($96.42 a contract at 20% IV) where the old code gave $5.19, the
+  engine's `T=1e-6` floor; the first bar reads 08:30; daily bars in both DST halves
+  keep their date and an expiration-day close prices at intrinsic. The existing
+  replay fixture handed the service already-naive stamps, which cannot say which
+  zone they mean; it now encodes them as the real client does, with its
+  assertions unchanged. The Expected Move page's intraday path is unaffected: a
+  naive pandas `Timestamp.timestamp()` reads as UTC, so its epoch-ms were right.
+- ⚠ Needs an **options_svc restart**; a Replay cached before it still carries
+  UTC stamps until the next run.
+
+**Prior — 2026-09-11** (**The Simulator states its numbers** — six
 position tiles, a readout under the What-if sliders, a Days slider fitted to the
 position, structure warnings, IV shock as a table, and a Replay that shows the
 position's own profit and loss on a scrubber that finally reaches every bar.)

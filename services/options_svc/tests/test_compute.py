@@ -2647,9 +2647,16 @@ def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None, contracts=No
 def _patch_replay_history(monkeypatch, index, prices, calls=None):
     """Monkeypatch ``compute._proxy.schwab_client`` to return the given path from
     BOTH intraday + daily fetches, so ``sim_replay`` gets a deterministic history
-    regardless of which DTE tier today's date lands on."""
+    regardless of which DTE tier today's date lands on.
+
+    ``index`` is CENTRAL wall-clock (what the page should show). The fake hands it
+    over the way the real ``proxy_client`` does — ``pd.to_datetime(ms,
+    unit="ms")``, i.e. NAIVE UTC — so a test here cannot pass by handing the
+    service stamps already in the zone it is meant to convert to."""
     import pandas as pd, types
-    dframe = pd.DataFrame({"datetime": pd.to_datetime(index), "close": list(prices)})
+    utc = (pd.DatetimeIndex(pd.to_datetime(index)).tz_localize("America/Chicago")
+           .tz_convert("UTC").tz_localize(None))
+    dframe = pd.DataFrame({"datetime": utc, "close": list(prices)})
 
     def _intraday(symbol, minutes, days):
         if calls is not None:
@@ -2806,6 +2813,120 @@ def test_sim_replay_multileg_put_spread(monkeypatch):
     assert out.get("x") and out.get("prices")
     assert len(out["greeks"]["delta"]) == len(out["prices"])
     assert "error" not in out
+
+
+# ── Replay time basis: the proxy's candle stamps are UTC epoch-ms ─────────────
+# These go through the REAL ``SchwabProxyClient`` parsing (only the HTTP GET is
+# stubbed), starting from raw epoch-ms values — the only input that states its
+# zone. 1789047000000 and 1789070340000 are the first and last 1-minute SPY stamps
+# the prod proxy returned for 2026-09-10, measured 2026-09-11.
+_EPOCH_0830_CT = 1789047000000      # 2026-09-10 13:30 UTC = 08:30 CDT, the open
+_EPOCH_1200_CT = 1789059600000      # 2026-09-10 17:00 UTC = 12:00 CDT
+_EPOCH_1459_CT = 1789070340000      # 2026-09-10 19:59 UTC = 14:59 CDT
+
+
+def _stub_proxy_candles(monkeypatch, candles):
+    """Stub only the HTTP layer of the real client, so its own
+    ``pd.to_datetime(..., unit="ms")`` produces the frame ``sim_replay`` reads."""
+    monkeypatch.setattr(compute._proxy.schwab_client, "_proxy_get",
+                        lambda path, params=None: {"candles": candles})
+
+
+def _replay_contract_snapshot(symbol, strike, expiry, iv=0.20, kind="call"):
+    from options_simulator import engine as seng
+    return _real_replay_snapshot(symbol, contracts=[
+        seng.ContractRow(strike=strike, kind=kind, bid=1.0, ask=1.2, mid=1.1,
+                         iv=iv, expiry=expiry)])
+
+
+def test_replay_prices_a_0dte_bar_with_the_time_actually_left(monkeypatch):
+    """A 0-DTE call at 12:00 CT has three hours to the 16:00 ET settlement. Read
+    as a naive UTC 17:00 — which the naive-means-Central convention takes for
+    17:00 CT — it had already expired, and priced at intrinsic."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from options_calculator import bs_greeks, expiry_time_to_years
+
+    expiry = _dt.date(2026, 9, 10)
+    mid_price = 650.0                                    # ATM at the 12:00 bar
+    _stub_proxy_candles(monkeypatch, [
+        {"datetime": _EPOCH_0830_CT, "close": 648.0},
+        {"datetime": _EPOCH_1200_CT, "close": mid_price},
+        {"datetime": _EPOCH_1459_CT, "close": 651.0},
+    ])
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _replay_contract_snapshot("SPY", mid_price, expiry)
+
+    out = compute.sim_replay("SPY", legs=[{"kind": "call", "strike": mid_price,
+                                           "expiry": "2026-09-10", "side": "long",
+                                           "qty": 1}], lookback="1m_1d")
+
+    # The time left, from the tz-AWARE instant — independent of any naive convention.
+    t_left = expiry_time_to_years(
+        _dt.datetime(2026, 9, 10, 12, 0, tzinfo=ZoneInfo("America/Chicago")), expiry)
+    assert abs(t_left * 365 * 24 - 3.0) < 1e-9          # three hours, not zero
+    want = bs_greeks(S=mid_price, K=mid_price, T=t_left, r=0.04, sigma=0.20,
+                     option_type="call")["price"] * 100
+    assert want > 50.0                                    # an ATM call with 3h left is not worthless
+    assert abs(out["value"][1] - want) < 1e-6
+
+
+def test_replay_labels_a_session_in_central_time(monkeypatch):
+    """The first bar of a session is the 08:30 CT open, not 13:30."""
+    import datetime as _dt
+    _stub_proxy_candles(monkeypatch, [
+        {"datetime": _EPOCH_0830_CT, "close": 648.0},
+        {"datetime": _EPOCH_1200_CT, "close": 650.0},
+        {"datetime": _EPOCH_1459_CT, "close": 651.0},
+    ])
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _replay_contract_snapshot(
+        "SPY", 650.0, _dt.date(2026, 9, 10))
+
+    out = compute.sim_replay("SPY", legs=[{"kind": "call", "strike": 650.0,
+                                           "expiry": "2026-09-10", "side": "long",
+                                           "qty": 1}], lookback="1m_1d")
+    assert out["timestamps"] == ["2026-09-10T08:30:00", "2026-09-10T12:00:00",
+                                 "2026-09-10T14:59:00"]
+    assert out["ticks"]["labels"] == ["08:30", "12:00", "14:59"]
+    assert out["sessions"][0]["date"] == "2026-09-10"
+
+
+def test_replay_daily_bars_keep_their_date_and_price_at_the_close(monkeypatch):
+    """Schwab stamps a daily candle at MIDNIGHT CENTRAL (05:00 UTC in summer, 06:00
+    in winter; measured on prod 2026-09-11), so converting to Central keeps the
+    trading date. A daily close is the price at the 15:00 CT close, so that is the
+    instant it is priced at — on expiration day, intrinsic, where a midnight
+    stamp would have added sixteen hours of time value."""
+    import datetime as _dt
+    _stub_proxy_candles(monkeypatch, [
+        {"datetime": 1768370400000, "close": 640.0},     # 2026-01-14 06:00 UTC (CST)
+        {"datetime": 1768456800000, "close": 641.0},     # 2026-01-15 06:00 UTC (CST)
+        {"datetime": 1788930000000, "close": 655.0},     # 2026-09-09 05:00 UTC (CDT)
+        {"datetime": 1789016400000, "close": 652.0},     # 2026-09-10 05:00 UTC (CDT)
+    ])
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _replay_contract_snapshot(
+        "SPY", 650.0, _dt.date(2026, 9, 10))
+
+    out = compute.sim_replay("SPY", legs=[{"kind": "call", "strike": 650.0,
+                                           "expiry": "2026-09-10", "side": "long",
+                                           "qty": 1}], lookback="1d_20d")
+    assert out["timestamps"] == ["2026-01-14T15:00:00", "2026-01-15T15:00:00",
+                                 "2026-09-09T15:00:00", "2026-09-10T15:00:00"]
+    # the expiration-day close is worth its intrinsic value, 652 - 650 (the engine
+    # floors T at 1e-6 years, which is worth a fraction of a cent here; a midnight
+    # stamp would read about $350)
+    assert abs(out["value"][-1] - 200.0) < 0.01
+
+
+def test_replay_index_never_stamps_todays_daily_bar_in_the_future():
+    """Today's daily bar during the session is the LAST price, not the close."""
+    import pandas as pd
+    utc_midnight_ct = pd.to_datetime([1788930000000, 1789016400000], unit="ms")
+    idx = compute._replay_index(utc_midnight_ct, daily=True,
+                                now=pd.Timestamp("2026-09-10 10:15"))
+    assert [str(t) for t in idx] == ["2026-09-09 15:00:00", "2026-09-10 10:15:00"]
 
 
 # ── Calculator (moved from webgui/pages/options/calculator.py) ───────────────

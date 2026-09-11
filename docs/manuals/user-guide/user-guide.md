@@ -893,7 +893,8 @@ Three tabs:
 - **Replay** (default) — re-prices the position along the underlying's recent price
   path and shows six stacked panels: **Price**, the position's own **Profit / loss**
   (green above zero, red below — measured from the first bar, as if opened then),
-  then **Delta, Gamma, Theta per day, Vega**. The axis shows real dates. Drag the
+  then **Delta, Gamma, Theta per day, Vega**. The axis shows real dates, and times
+  are **Central** — a session's first bar reads 08:30. Drag the
   **scrub slider** to step through the bars; the line beside it states that bar's
   time, price, profit or loss and delta. It starts on the latest bar. A
   **Look-back** dropdown controls how far back the path runs (Auto by DTE, or fixed

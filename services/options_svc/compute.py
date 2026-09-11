@@ -6900,8 +6900,10 @@ def _fetch_replay_history(symbol, spec):
     """Fetch a price-history Series for a Replay ``spec`` (from
     ``replay_lookback_spec``) via the flexible proxy client. Intraday specs use
     ``get_intraday_history(minutes, days)``; daily specs use
-    ``get_daily_history(months)`` sliced to the last ``bars`` rows. Defensive:
-    returns an EMPTY Series on any failure (caller degrades to an error payload)."""
+    ``get_daily_history(months)`` sliced to the last ``bars`` rows. The index is
+    naive CENTRAL wall-clock (``_replay_index``), not the client's naive UTC.
+    Defensive: returns an EMPTY Series on any failure (caller degrades to an
+    error payload)."""
     import pandas as pd
     sc = _proxy.schwab_client
     try:
@@ -6911,13 +6913,47 @@ def _fetch_replay_history(symbol, spec):
             df = sc.get_daily_history(symbol, months=spec.get("months", 1))
         if df is None or len(df) == 0:
             return pd.Series(dtype=float)
-        series = pd.Series(df["close"].values, index=pd.to_datetime(df["datetime"]))
+        index = _replay_index(df["datetime"], daily=spec.get("freq_type") != "minute")
+        series = pd.Series(df["close"].values, index=index)
         bars = spec.get("bars")
         if bars:
             series = series.iloc[-int(bars):]
         return series
     except Exception:
         return pd.Series(dtype=float)
+
+
+def _replay_index(stamps, daily, now=None):
+    """Candle stamps -> the NAIVE CENTRAL wall-clock the Replay engine reads.
+
+    ``proxy_client`` builds its ``datetime`` column with ``pd.to_datetime(ms,
+    unit="ms")``, which is NAIVE UTC, while ``expiry_time_to_years`` reads a naive
+    datetime as :data:`options_calculator.NAIVE_WALLCLOCK_TZ` (Central). Passed on
+    as-is, every bar was priced five hours late: a 0-DTE replay treated the option
+    as expired from about 10:00 CT on, and the axis labelled the open 13:30. So a
+    naive stamp is taken as UTC, converted, and made naive again — the convention
+    ``options_simulator/data.py`` already applies to its own history.
+
+    Daily bars (``daily``): Schwab stamps a daily candle at midnight CENTRAL
+    (05:00 UTC in summer, 06:00 in winter; measured on prod 2026-09-11), so the
+    conversion keeps its trading date. Its close was printed at the regular
+    close, so that is the instant the bar is stamped — at midnight it would carry
+    fifteen extra hours of time value. Today's bar, fetched mid-session, holds the
+    last price rather than the close, so its stamp never runs past ``now``."""
+    import pandas as pd
+    from options_calculator import NAIVE_WALLCLOCK_TZ
+    from shared import market_calendar as _mc
+    idx = pd.DatetimeIndex(pd.to_datetime(stamps))
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    idx = idx.tz_convert(NAIVE_WALLCLOCK_TZ).tz_localize(None)
+    if not daily:
+        return idx
+    if now is None:
+        now = pd.Timestamp.now(tz=NAIVE_WALLCLOCK_TZ).tz_localize(None)
+    closes = [pd.Timestamp(_mc.regular_close_on(t.date()).replace(tzinfo=None))
+              for t in idx]
+    return pd.DatetimeIndex([min(c, now) for c in closes])
 
 
 def atm_iv_from_chain(chain, spot, expiry=None):

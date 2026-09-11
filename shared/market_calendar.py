@@ -510,6 +510,19 @@ def next_regular_open(now) -> datetime:
     return datetime.combine(next_trading_day(ct.date()), start, tzinfo=CT)
 
 
+def regular_close_on(d) -> datetime:
+    """The regular-session CLOSE on date ``d``, CT-aware (15:00 CT = 4pm ET).
+
+    The instant a daily bar's close price was printed, so a caller pricing a
+    daily bar has one to use. Reads the SAME ``sessions.regular`` end
+    ``mins_to_close`` counts down to, and adds no time literal of its own. It
+    does not ask whether ``d`` is a trading day: a caller holding a daily bar
+    for ``d`` already has that answer.
+    """
+    _start, end = _session_bounds("regular")
+    return datetime.combine(d, end, tzinfo=CT)
+
+
 def is_extended_hours(now) -> bool:
     """True during GTH or Curb -- so always False before the activation date."""
     return session_at(now) in (Session.GTH, Session.CURB)
