@@ -2514,9 +2514,12 @@ def test_sim_run_returns_whatif_and_ivshock(monkeypatch):
     assert len(out["whatif_rows"]) == 81
     assert out["whatif_rows"][0]["S"] == 450.0 * 0.8
     assert out["whatif_rows"][-1]["S"] == 450.0 * 1.2
-    # IV-shock: base (×1.0) + shock (×1.5).
-    assert out["ivshock"]["base"]["theo_price"] == 1.0
-    assert out["ivshock"]["shock"]["theo_price"] == 1.5
+    # IV-shock: base (×1.0) + shock (×1.5), in POSITION units since 2026-09-11 —
+    # the same ×100 contract multiplier the What-if rows carry, so the two tabs
+    # beside each other on the page no longer disagree by a factor of 100.
+    assert out["ivshock"]["base"]["theo_price"] == 100.0
+    assert out["ivshock"]["shock"]["theo_price"] == 150.0
+    assert out["ivshock"]["units"] == "position"
 
 
 def test_sim_run_whatif_dollars_and_entry_baseline(monkeypatch):
@@ -2535,6 +2538,22 @@ def test_sim_run_whatif_dollars_and_entry_baseline(monkeypatch):
     assert out["whatif_rows"][-1]["theo_price"] == (450.0 * 1.2 - 100.0) * 100
     # Entry baseline = position value at (spot, now) = (spot − 100) × 100.
     assert out["whatif_baseline"] == (450.0 - 100.0) * 100
+
+
+def test_sim_run_ivshock_scales_every_greek_to_the_position(monkeypatch):
+    """Delta becomes shares-equivalent, theta dollars per day, vega dollars per
+    volatility point — what a broker shows for a position. The page reads the
+    ``units`` marker to know a cached payload is already scaled."""
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = snap
+
+    base = compute.sim_run("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)["ivshock"]["base"]
+    assert base["delta"] == 50.0
+    assert base["gamma"] == 2.0
+    assert base["theta"] == -10.0
+    assert base["vega"] == 30.0
 
 
 def test_sim_run_empty_when_no_snapshot(monkeypatch):
@@ -2647,6 +2666,28 @@ def test_sim_replay_builds_jsonsafe_trace(monkeypatch):
     assert out["sessions"][0]["date"] == "2026-06-18"
     assert out["lookback"]["key"] == "auto"
     json.dumps(out)                                # JSON-serializable end to end
+
+
+def test_sim_replay_carries_the_position_value_and_its_pnl(monkeypatch):
+    """Replay's question is how the POSITION would have done along the path, so the
+    trace carries its dollar value per bar and the P/L from the first bar (as if
+    opened at the start of the window). Greeks are in position units, marked."""
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+    _patch_replay_history(
+        monkeypatch,
+        ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"],
+        [450.0, 451.0, 452.0])
+
+    out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy")
+    assert out["units"] == "position"
+    assert len(out["value"]) == len(out["pnl"]) == 3
+    assert out["pnl"][0] == 0.0
+    assert out["pnl"] == [v - out["value"][0] for v in out["value"]]
+    # a long call gains as the underlying rises
+    assert out["pnl"][2] > out["pnl"][1] > 0
+    # one long ATM call is roughly 50 shares of delta per contract, not 0.5
+    assert 20.0 < out["greeks"]["delta"][0] < 80.0
 
 
 def test_sim_replay_detects_overnight_gap(monkeypatch):

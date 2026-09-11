@@ -6554,6 +6554,22 @@ def _stash_sim_snapshot(symbol, snap) -> None:
 # by the same literal 100). The old What-if path dropped this entirely.
 _CONTRACT_MULT = 100
 
+# Marker on the Simulator payloads whose Greeks are already multiplied by
+# ``_CONTRACT_MULT`` (position units). The page scales a payload without it.
+_POSITION_UNITS = "position"
+_POSITION_COLS = ("theo_price", "delta", "gamma", "theta", "vega", "rho")
+
+
+def _position_scaled(row):
+    """``row`` with its value + Greek columns multiplied by ``_CONTRACT_MULT``.
+    Other keys (``sigma_mult``, ``sigma``) are copied unchanged."""
+    out = dict(row)
+    for col in _POSITION_COLS:
+        v = out.get(col)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[col] = float(v) * _CONTRACT_MULT
+    return out
+
 
 def expiries_of(snapshot):
     """Sorted unique expiries (as ISO strings) in the snapshot. (Moved from page.)"""
@@ -6679,7 +6695,13 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
     shock_eng = seng.IVShockEngine(snap)
     sdf = seng.aggregate_position(pos, lambda c: shock_eng.sweep(c, [1.0, float(mult)]))
     rows = sdf.to_dict("records") if hasattr(sdf, "to_dict") else list(sdf or [])
-    ivshock = {"base": rows[0], "shock": rows[1]} if len(rows) >= 2 else None
+    # Position units, like the What-if rows above: value in dollars, delta in
+    # shares, theta dollars per day, vega dollars per volatility point. The
+    # ``units`` marker tells the page the scaling is done, so a cache written
+    # before 2026-09-11 (per share, no marker) is scaled there instead.
+    ivshock = ({"base": _position_scaled(rows[0]), "shock": _position_scaled(rows[1]),
+                "units": _POSITION_UNITS}
+               if len(rows) >= 2 else None)
 
     return {"spot": snap.spot, "whatif_rows": whatif_rows,
             "whatif_baseline": whatif_baseline, "ivshock": ivshock}
@@ -6838,15 +6860,25 @@ def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
         ticks = {"pos": list(range(len(hist))),
                  "labels": [hist.index[i].strftime("%H:%M") for i in range(len(hist))]}
 
-    def _f(seq):
-        return [float(v) for v in seq]
+    def _f(seq, scale=1.0):
+        return [float(v) * scale for v in seq]
+
+    # The position's own dollar value per bar, and its P/L from the first bar —
+    # "had you opened it at the start of this window". Greeks in position units
+    # (see ``_POSITION_UNITS``), matching sim_run's IV-shock rows.
+    value = (_f(trace["theo_price"].values, _CONTRACT_MULT)
+             if "theo_price" in trace.columns else [])
+    pnl = [v - value[0] for v in value] if value else []
 
     return {
         "spot": snap.spot,
         "timestamps": [ts.isoformat() for ts in hist.index],
         "x": list(range(len(hist))),
         "prices": _f(hist.values),
-        "greeks": {g: _f(trace[g].values)
+        "value": value,
+        "pnl": pnl,
+        "units": _POSITION_UNITS,
+        "greeks": {g: _f(trace[g].values, _CONTRACT_MULT)
                    for g in ("delta", "gamma", "theta", "vega", "rho")},
         "gaps": [int(i) for i in gap_indices],
         "sessions": sessions,
