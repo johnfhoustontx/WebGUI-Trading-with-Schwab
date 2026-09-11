@@ -337,3 +337,59 @@ def test_empty_state_names_a_strike_the_chain_does_not_list():
 def test_empty_state_while_pricing():
     legs = [_leg("put", "short", 330.0, 1, "2026-10-23")]
     assert sv.empty_state_text(_META, legs) == "Pricing this position…"
+
+
+# -- Task 5: the IV-shock table ---------------------------------------------------
+
+def _shock(units, scale=1.0):
+    base = {"theo_price": -10.0, "delta": 1.45, "gamma": -0.01, "theta": 0.42, "vega": -0.8}
+    shock = {"theo_price": -20.5, "delta": 1.9, "gamma": -0.008, "theta": 0.6, "vega": -0.9}
+    scaled = lambda r: {k: v * scale for k, v in r.items()}
+    return {"base": scaled(base), "shock": scaled(shock), "units": units}
+
+
+def test_ivshock_table_rows_are_in_position_units():
+    t = sv.ivshock_table(_shock("position", 100.0), 1.5)
+    rows = {r["label"]: r for r in t["rows"]}
+    assert list(rows) == ["Position value", "Delta", "Gamma", "Theta per day",
+                          "Vega per volatility point"]
+    assert rows["Position value"]["base"] == "-$1,000"
+    assert rows["Position value"]["shock"] == "-$2,050"
+    assert rows["Position value"]["change"] == "-$1,050"
+    assert rows["Position value"]["tone"] == "neg"
+    assert rows["Delta"]["base"] == "+145"
+    assert rows["Theta per day"]["change"] == "+$18"
+    assert rows["Theta per day"]["tone"] == "pos"
+
+
+def test_a_legacy_per_share_payload_builds_the_same_table():
+    assert sv.ivshock_table(_shock(None), 1.5) == sv.ivshock_table(_shock("position", 100.0), 1.5)
+
+
+def test_ivshock_headline_states_the_result_in_words():
+    t = sv.ivshock_table(_shock("position", 100.0), 1.5)
+    assert t["headline"] == "If volatility rises 50%, this position loses $1,050."
+    assert t["tone"] == "neg"
+    gain = {"base": {"theo_price": 500.0}, "shock": {"theo_price": 350.0}, "units": "position"}
+    t = sv.ivshock_table(gain, 0.7)
+    assert t["headline"] == "If volatility falls 30%, this position loses $150."
+    flat = {"base": {"theo_price": 500.0}, "shock": {"theo_price": 500.2}, "units": "position"}
+    assert sv.ivshock_table(flat, 2.0)["headline"] == \
+        "If volatility doubles, this position barely changes."
+
+
+def test_ivshock_at_a_multiplier_of_one_says_to_move_it():
+    t = sv.ivshock_table(_shock("position", 100.0), 1.0)
+    assert t["headline"] == "Move the slider to see what a change in volatility does."
+
+
+def test_ivshock_table_without_a_payload_is_empty():
+    assert sv.ivshock_table(None, 1.5) == {"headline": "", "tone": "neutral", "rows": []}
+
+
+def test_ivshock_table_em_dashes_a_missing_greek():
+    shock = {"base": {"theo_price": -1000.0}, "shock": {"theo_price": -2000.0},
+             "units": "position"}
+    rows = {r["label"]: r for r in sv.ivshock_table(shock, 1.5)["rows"]}
+    assert rows["Delta"]["base"] == sv.NO_READING
+    assert rows["Delta"]["change"] == sv.NO_READING

@@ -465,3 +465,73 @@ def empty_state_text(meta, legs):
                     f"for {_date_text(leg.get('expiry'))}. "
                     f"Pick another strike or reload the chain.")
     return "Pricing this position…"
+
+
+# -- Task 5: the IV-shock table ---------------------------------------------------
+
+# (label, column, formatter kind, does a RISE help the position?) — only the value
+# and theta rows carry a verdict; a change in delta, gamma or vega is exposure,
+# not profit, so tinting it green or red would state an opinion the page lacks.
+_SHOCK_ROWS = (
+    ("Position value", "theo_price", "money", True),
+    ("Delta", "delta", "int", None),
+    ("Gamma", "gamma", "dec", None),
+    ("Theta per day", "theta", "money", True),
+    ("Vega per volatility point", "vega", "money", None),
+)
+
+
+def _fmt(kind, v):
+    if v is None:
+        return NO_READING
+    if kind == "money":
+        return _money(v, signed=True) if v else "$0"
+    if kind == "int":
+        return f"{v:+,.0f}"
+    return f"{v:+,.2f}"
+
+
+def _vol_move_text(mult):
+    if math.isclose(mult, 2.0):
+        return "doubles"
+    if math.isclose(mult, 0.5):
+        return "halves"
+    pct = abs(mult - 1.0) * 100.0
+    return f"{'rises' if mult > 1 else 'falls'} {pct:.0f}%"
+
+
+def ivshock_table(ivshock, mult):
+    """The IV-shock view as a table plus one headline sentence.
+
+    The old view was a column chart with dollar values and Greeks on one axis,
+    so four of its five categories drew as flat lines. A table states every row
+    at its own scale. ``rows`` are ``{label, base, shock, change, tone}`` strings;
+    ``headline`` says what the volatility move does to the position's value."""
+    if not ivshock or not ivshock.get("base") or not ivshock.get("shock"):
+        return {"headline": "", "tone": "neutral", "rows": []}
+    units = ivshock.get("units")
+    base = position_units(ivshock["base"], units)
+    shock = position_units(ivshock["shock"], units)
+    rows = []
+    for label, col, kind, rise_helps in _SHOCK_ROWS:
+        b, s = num(base.get(col)), num(shock.get(col))
+        change = s - b if (b is not None and s is not None) else None
+        tone = "neutral"
+        if rise_helps and change is not None and abs(change) >= 0.5:
+            tone = "pos" if change > 0 else "neg"
+        rows.append({"label": label, "base": _fmt(kind, b), "shock": _fmt(kind, s),
+                     "change": _fmt(kind, change), "tone": tone})
+
+    m = num(mult) or 1.0
+    b, s = num(base.get("theo_price")), num(shock.get("theo_price"))
+    if math.isclose(m, 1.0):
+        return {"headline": "Move the slider to see what a change in volatility does.",
+                "tone": "neutral", "rows": rows}
+    if b is None or s is None:
+        return {"headline": "", "tone": "neutral", "rows": rows}
+    delta = s - b
+    head = f"If volatility {_vol_move_text(m)}, this position"
+    if abs(delta) < 0.5:
+        return {"headline": f"{head} barely changes.", "tone": "neutral", "rows": rows}
+    word, tone = ("gains", "pos") if delta > 0 else ("loses", "neg")
+    return {"headline": f"{head} {word} {_money(abs(delta))}.", "tone": tone, "rows": rows}
