@@ -184,6 +184,22 @@ def test_every_word_the_screen_can_show_has_its_fact():
     assert all(f.endswith(".") for f in compute._SENTIMENT_FACTS.values())
 
 
+def test_no_fact_carries_punctuation_the_model_rewrites():
+    """A fact must survive the word-for-word check, so it may not carry
+    punctuation the model is known to change. Measured on prod 2026-09-11: the
+    Circling fact's semicolon came back as a comma in 3 of 3 live replies, and
+    every summary written while the trend read Circling was withheld - the Desk
+    held one sentence for hours. Apostrophes and quotes: a curly one in the
+    reply fails the check the same way."""
+    facts = [*compute._SENTIMENT_FACTS.values(), *compute._TREND_FACTS.values(),
+             *compute._REGIME_FACTS.values()]
+    for fact in facts:
+        for mark in (";", "'", '"', "‘", "’", "“", "”"):
+            assert mark not in fact, (mark, fact)
+    assert "no clear direction" in compute._TREND_FACTS["Circling"]
+    assert "balanced" in compute._TREND_FACTS["Circling"]
+
+
 def test_absent_readings_state_no_fact():
     """An absent reading says nothing - never a neutral stand-in. 'Unclear' is
     the regime's word for having no reading, so it states nothing either."""

@@ -4,7 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**Replay prices each bar at the time it was
+**Last updated:** 2026-09-11 (**The Desk's market summary stopped updating
+whenever the trend read Circling** — the model changed one semicolon, and the
+word-for-word fact check withheld every summary.)
+
+- **What happened.** The Circling fact read "Prices have no clear direction;
+  buyers and sellers are balanced." Claude kept every word but wrote the
+  semicolon as a comma, and `_missing_fact` compares punctuation too, so the
+  reply was withheld and the last good sentence stayed up. From 07:45 to 09:06
+  CT all nine attempts were withheld (the Desk held its 07:34 sentence), and
+  since 02:30 CT every withheld attempt named this one fact — never another.
+  Reproduced on prod: 3 of 3 live replies made the same swap, every other fact
+  verbatim.
+- **Fix.** The fact now reads "Prices have no clear direction, with buyers and
+  sellers balanced." (the Climbing fact's shape). The check stays strict — the
+  fix is in the fact's wording, the same way facts already avoid apostrophes
+  and quotes. Tried against the live API before promoting: 3 of 3 replies
+  passed every check.
+- **Guard.** `test_no_fact_carries_punctuation_the_model_rewrites` fails on any
+  fact holding a semicolon, apostrophe or quote mark (the apostrophe rule was
+  only a comment until now).
+- **Not changed, worth knowing.** A withheld attempt is retried every 10 min
+  for as long as it keeps failing, even on unchanged readings overnight (~20
+  paid calls between 02:30 and 06:00 CT), and the 30-a-day cap resets on every
+  restart (five this morning). The withheld log line names the fact but not the
+  reply, so diagnosing this took three extra calls.
+- **IYT (the entry below) went live at 07:45 CT** with the Simulator promote,
+  which already carried it.
+
+**Prior — 2026-09-11** (**Replay prices each bar at the time it was
 printed** — the Simulator's Replay read the proxy's UTC candle stamps as Central
 wall-clock, so every intraday bar was priced five hours late and a 0-DTE replay
 treated the option as expired from about 10:00 CT on.)

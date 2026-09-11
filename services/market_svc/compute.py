@@ -332,7 +332,9 @@ _SUMMARY_MAX_TOKENS = 300
 # (sentiment.BAND_WORD_PICTURE / TREND_PICTURE, regime_mix.REGIME_PICTURE); the
 # key sets are pinned by shared/tests/test_cross_tier_mirrors.py, so a word
 # cannot reach the screen without its statement here. No apostrophes or quotes:
-# a curly one in the reply must not fail the word-for-word check.
+# a curly one in the reply must not fail the word-for-word check. No semicolons
+# either: the model turned Circling's into a comma in 3 of 3 live replies on
+# 2026-09-11, withholding every summary while the trend read Circling.
 #
 # Keyed by the SIGNAL word: the sentiment composite is CONTRARIAN (high = fear =
 # opportunity), and bias and signal are two bands of that one number, so one
@@ -352,7 +354,7 @@ _SENTIMENT_FACTS = {
 _TREND_FACTS = {
     "Climbing": "Prices are rising, with buyers pushing them up.",
     "Stalling": "Prices are still high, but the buying has run out.",
-    "Circling": "Prices have no clear direction; buyers and sellers are "
+    "Circling": "Prices have no clear direction, with buyers and sellers "
                 "balanced.",
     "Gliding": "Prices are drifting lower, but sellers are not pushing them.",
     "Diving": "Prices are falling under heavy selling.",
