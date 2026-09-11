@@ -430,3 +430,175 @@ def test_replay_legacy_per_share_greeks_are_scaled():
     trace = {"x": [0], "prices": [1.0], "greeks": {"delta": [0.45]}, "sessions": []}
     fig = sim.replay_figure(trace)
     assert fig["series"][2]["data"] == [[0, 45.0]]
+
+
+# -- the 2026-09-11 readouts, driven through the real wiring --------------------
+# These render the page, then fire its own poll timers after writing the cache,
+# so ``_apply_meta`` / ``_poll_result`` / ``_poll_replay`` run exactly as they do
+# in the browser. A source grep would pass on wiring that never runs.
+
+def _future_meta(days_near=10, days_far=40):
+    from datetime import date, timedelta
+    near = (date.today() + timedelta(days=days_near)).isoformat()
+    far = (date.today() + timedelta(days=days_far)).isoformat()
+    ladder = {"call": [440.0, 445.0, 450.0, 455.0, 460.0],
+              "put": [440.0, 445.0, 450.0, 455.0, 460.0]}
+    return {"symbol": "SPY", "spot": 450.0, "n_contracts": 20,
+            "expiries": [near, far], "strikes": {near: ladder, far: ladder}}
+
+
+def _render_cold():
+    import bus_client
+    from nicegui import ui
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    with ui.card() as container:
+        sim.render()
+    return container
+
+
+def _fire(container, name):
+    from nicegui import ui
+    timers = [e for e in container.descendants()
+              if isinstance(e, ui.timer) and getattr(e.callback, "__name__", "") == name]
+    assert timers, f"no {name} timer mounted"
+    timers[0].callback()
+
+
+def _texts(container, cls):
+    from nicegui import ui
+    return [d.text for e in container.descendants() if cls in e._classes
+            for d in [e, *e.descendants()] if isinstance(d, ui.label)]
+
+
+def _last_command(kind):
+    import json
+    import bus_client
+    entries = bus_client.bus()._r.xrange("cmd:options")
+    for _id, fields in reversed(entries):
+        cmd = json.loads(fields["data"])
+        if cmd.get("type") == kind:
+            return cmd
+    return None
+
+
+def test_the_load_button_says_load_chain():
+    labels = [b.text for b in _sim_buttons(_render_cold())]
+    assert "Load chain" in labels
+    assert "Fetch snapshot" not in labels
+
+
+def test_six_position_tiles_mount_as_em_dashes_before_any_price():
+    container = _render_cold()
+    tiles = [e for e in container.descendants() if "sim-tile" in e._classes]
+    assert len(tiles) == 6
+    values = _texts(container, "sim-tile")
+    assert values.count("—") >= 6
+
+
+def test_the_ivshock_view_is_a_table_not_a_chart():
+    from nicegui import ui
+    container = _render_cold()
+    charts = [e for e in container.descendants() if isinstance(e, ui.highchart)]
+    assert len(charts) == 2          # Replay + What-if; IV shock is the table
+    assert any("sim-shock-grid" in e._classes for e in container.descendants())
+
+
+def test_a_legacy_ivshock_cache_renders_in_position_dollars():
+    """A result cached BEFORE the service stated its units is per share; the table
+    must scale it, not print -$10 for a position worth -$1,000."""
+    import bus_client
+    from nicegui import ui
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    base = {"theo_price": -10.0, "delta": 1.45, "gamma": -0.01, "theta": 0.42, "vega": -0.8}
+    shock = {"theo_price": -20.5, "delta": 1.9, "gamma": -0.008, "theta": 0.6, "vega": -0.9}
+    bus_client.bus().cache_set("cache:options:sim_result", {
+        "spot": 450.0, "whatif_rows": [{"S": 440.0, "theo_price": -1500.0},
+                                        {"S": 460.0, "theo_price": -500.0}],
+        "whatif_baseline": -1000.0, "ivshock": {"base": base, "shock": shock}})
+    with ui.card() as container:
+        sim.render()
+    cells = _texts(container, "sim-shock-grid")
+    assert "-$1,000" in cells and "-$2,050" in cells and "-$1,050" in cells
+
+
+def test_meta_arrival_fits_the_days_slider_and_offers_snaps():
+    import bus_client
+    from nicegui import ui
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+
+    days = next(e for e in container.descendants() if "sim-days" in e._classes)
+    assert 9 <= days._props["max"] <= 11          # the near expiry, not a fixed month
+    snaps = [b.text for e in container.descendants() if "sim-snaps" in e._classes
+             for b in e.descendants() if isinstance(b, ui.button)]
+    assert snaps == ["Now", "Halfway", "Expiry"]
+    expiry_all = next(e for e in container.descendants() if "sim-expiry-all" in e._classes)
+    assert list(expiry_all.options) == _future_meta()["expiries"]
+    edited = next(e for e in container.descendants() if "sim-edited" in e._classes)
+    assert edited.visible is False                # the template, untouched
+
+
+def test_a_result_for_the_legs_on_screen_fills_the_tiles():
+    """End to end through the wiring: meta lands, the page enqueues sim_run with
+    its legs, the service's echo of those legs comes back, and the tiles state
+    the entry and the expiry figures."""
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    run = _last_command("sim_run")
+    assert run is not None
+    legs = run["args"]["legs"]
+    short = next(l for l in legs if l["side"] == "short")
+    long_ = next(l for l in legs if l["side"] == "long")
+    width = (short["strike"] - long_["strike"]) * 100
+
+    bus_client.bus().cache_set("cache:options:sim_result", {
+        "spot": 450.0, "symbol": "SPY", "legs": legs, "dt": 5.0, "mult": 1.5,
+        "whatif_rows": [{"S": 400.0, "theo_price": -width}, {"S": 500.0, "theo_price": 0.0}],
+        "whatif_baseline": -120.0,
+        "ivshock": {"base": {"theo_price": -120.0, "delta": 12.0, "theta": 3.0},
+                    "shock": {"theo_price": -160.0, "delta": 14.0, "theta": 4.0},
+                    "units": "position"}})
+    _fire(container, "_poll_result")
+    values = _texts(container, "sim-tile")
+    assert "Entry credit" in values and "$120" in values
+    assert f"${width - 120:,.0f}" in values        # max loss = width minus the credit
+    assert "+12" in values                          # delta, shares-equivalent
+
+
+def test_a_result_for_other_legs_leaves_the_tiles_waiting():
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    bus_client.bus().cache_set("cache:options:sim_result", {
+        "spot": 450.0, "symbol": "SPY",
+        "legs": [{"kind": "call", "strike": 999.0, "expiry": "2030-01-01",
+                  "side": "long", "qty": 1}],
+        "whatif_rows": [], "whatif_baseline": -120.0, "ivshock": None})
+    _fire(container, "_poll_result")
+    values = _texts(container, "sim-tile")
+    assert "$120" not in values
+    assert "waiting for a price" in values
+
+
+def test_a_new_replay_trace_resizes_the_scrubber_and_parks_it_on_the_last_bar():
+    """The bug this pins: ``scrub_slider.max = …`` set a Python attribute the
+    browser never saw, so the cursor could only reach bars 0 and 1."""
+    import bus_client
+    container = _render_cold()
+    n = 12
+    bus_client.bus().cache_set("cache:options:sim_replay", {
+        "x": list(range(n)), "prices": [450.0 + i for i in range(n)],
+        "timestamps": [f"2026-08-24T09:{30 + i:02d}:00" for i in range(n)],
+        "pnl": [float(i) for i in range(n)], "value": [float(i) for i in range(n)],
+        "greeks": {"delta": [50.0] * n}, "sessions": [{"start": 0, "end": n}],
+        "units": "position", "resolution": "12 bars"})
+    _fire(container, "_poll_replay")
+    scrub = next(e for e in container.descendants() if "sim-scrub" in e._classes)
+    assert scrub._props["max"] == n - 1
+    assert scrub.value == n - 1
