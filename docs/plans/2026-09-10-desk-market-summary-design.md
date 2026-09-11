@@ -88,40 +88,56 @@ sentence quoting "SPX +0.4%" is stale between refreshes, and the ticker's live
 items already carry prices. The flight words need a **third copy** in
 `market_svc`; the existing cross-tier mirror test is extended to all three.
 
-**Prompt:** the composite is contrarian (high = fear, read as opportunity);
-Sentiment/Bias/Signal are one number, say it once; name where the reads agree or
-conflict; ≤ 2 sentences, aiming near 350 chars but never cut; no prices; close
-with a posture. **In plain
-everyday English** (revised 2026-09-10, by request): the six chips under the
-sentence already show the labels and numbers, so the sentence explains what they
-mean instead of repeating them — no app labels (composite, regime, breadth, the
-trend and regime words), no scores, decimals or size multipliers; simple counts
-("2 of the 11 sectors") and standard options terms ("put credit spreads") stay.
-The first draft asked for "the given words verbatim", which produced sentences
-like "Composite reads Cautious/Bearish at 3.16 … run 0.85x size". The prompt also
-carries a plain **meaning for every trend and regime label**
-(`compute._TREND_MEANINGS` / `_REGIME_MEANINGS`, pinned against the screen's
-words by `shared/tests/test_cross_tier_mirrors.py`) and tells the model never to
-guess one: with the labels banned but undefined, the first plain-English sentence
-described Gliding — lower, but nobody pushing — as "real weight behind the slide".
-**Accuracy is paramount** (same evening, by request): the prompt states each
-strategy's real direction (put credit spread bullish-to-neutral, call credit
-spread bearish-to-neutral, debit spreads and long options by their side, iron
-condors neutral) and asks for a conflict between the readings to be named rather
-than blended; `generate_summary` withholds a reply that ties a credit spread to
-the wrong direction (`_spread_direction_error` — the 20:42 CT sentence called put
-credit spreads "bearish trades"). And nothing is ever cut mid-word: a finished
-reply is shown whole, one that ran out of room is trimmed to its complete
-sentences, one with none is withheld. The 400-character slice that published
-"… rather than chas" is gone. The Bull/Bear buckets are explained the same way
-(`compute._QUADRANT_MEANINGS`, pinned to `bullbear.QUADRANTS`), with
-"outperforming" defined as rising_leading plus falling_leading: unexplained, the
-counts were once written up as "only 2 of 11 outperforming" when 6 were.
-Definitions alone did not hold — the next sentence repeated the error — so the
-arithmetic moved into code: the packet carries the combined counts ready-made
-(`bullbear.totals`: sectors, rising, falling, beating_sp500, trailing_sp500), and
-`generate_summary` withholds a sentence whose "N of M sectors are …" claim
-disagrees with them (`_count_claim_error`).
+**Prompt — the code states the facts, the model joins them and adds the posture**
+(revised 2026-09-10, by request; accuracy is paramount). The code writes each
+reading as one plain-English statement (`compute.summary_facts`), in reading
+order:
+
+| Reading | Statement comes from | Example |
+|---|---|---|
+| Sentiment (bias and signal are bands of the same composite, so one statement) | `_SENTIMENT_FACTS`, keyed by the signal word | "Investors are growing complacent, which this model reads as a warning." |
+| Position size | `_size_fact` — below, at or above 1.00x, never the number | "The model suggests trading smaller than usual." |
+| Trend | `_TREND_FACTS`, keyed by the flight word | "Prices are drifting lower, but sellers are not pushing them." |
+| Regime | `_REGIME_FACTS`, keyed by the display word (Unclear states nothing) | "Fear is driving the market: volatility is high and price gaps are not filling." |
+| Sectors | `_sector_fact`, from the ready-made `bullbear.totals` | "Today, 2 of the 11 sectors are rising and 9 are falling, and 6 are beating the S&P 500." |
+
+An absent reading states nothing, never a neutral stand-in, and with no facts at
+all no call is made. The model is sent **only** `{"facts": [...]}`, never the
+app's labels or numbers, so it has nothing to mistranslate. The prompt asks it to
+include every fact exactly as written, in order (it may join neighbours with a
+comma or "and"), add no other claims, and close with one sentence of practical
+posture. It keeps the accuracy rules: each strategy's real direction (put credit
+spread bullish-to-neutral, call credit spread bearish-to-neutral, debit spreads
+and long options by their side, iron condors neutral), and a conflict between the
+facts is named, not blended.
+
+`generate_summary` then withholds the reply (the last good sentence stays; the
+same readings are retried after the gap) if:
+
+- it ran out of room with no complete sentence (a cut-off reply is trimmed to
+  its complete sentences — nothing is ever cut mid-word; the old 400-character
+  slice that published "… rather than chas" is gone);
+- it ties a credit spread to the wrong direction (`_spread_direction_error`);
+- it states an "N of M sectors are …" count that disagrees with the totals
+  (`_count_claim_error`);
+- **any fact is missing or reworded** (`_missing_fact` — case-insensitive and
+  blind to the fact's own closing full stop, otherwise word for word).
+
+The fact tables' keys are pinned against the words the screen can show (trend
+flight words, regime display words, `signal_band`'s signal words) by
+`shared/tests/test_cross_tier_mirrors.py`, so a new word cannot reach the screen
+without its statement.
+
+*Why the model no longer writes the facts.* Every paraphrase bent one. The first
+draft quoted labels and scores verbatim ("Composite reads Cautious/Bearish at
+3.16 … run 0.85x size"). Asked for plain English with the labels undefined, it
+guessed: Gliding (lower, but nobody pushing) became "real weight behind the
+slide". Given a meaning table, it still called put credit spreads "bearish
+trades" (20:42 CT), wrote "only 2 of the 11 sectors are outperforming" when 6
+were (20:53, and again at 21:00 with the buckets defined), and finally described
+Gliding as "absent buyers" (21:05) — sellers are what is absent. Checks caught
+some of these classes; the fix for all of them is that the model no longer
+states a fact.
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

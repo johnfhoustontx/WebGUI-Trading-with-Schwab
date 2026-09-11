@@ -134,26 +134,26 @@ def test_the_summary_names_the_trend_with_the_pills_words():
     assert summary == {k: page[k] for k in _FIVE_STATES}
 
 
-def test_the_summary_prompt_explains_every_word_the_screen_can_show():
-    """market_svc's prompt forbids repeating the app's labels, so it carries a
-    plain meaning for each one to translate from. A word added to the screen
-    without a meaning here would be GUESSED at - which is how 'Gliding' (lower,
-    nobody pushing) was once written up as 'real weight behind the slide'."""
+def test_the_summary_has_a_fact_for_every_word_the_screen_can_show():
+    """market_svc writes every factual statement of the Desk summary itself -
+    the model only joins them and adds a posture, because every time it
+    paraphrased a reading it bent it. A word the screen can show with no
+    statement here would silently drop that reading from the sentence."""
     page = _const(TREND_WORDS_SOURCE, "_TREND_SHORT")
     flight = {page[k] for k in _FIVE_STATES}
-    assert set(_const(TREND_WORDS_SUMMARY, "_TREND_MEANINGS")) == flight
-    assert set(_const(TREND_WORDS_SUMMARY, "_REGIME_MEANINGS")) == _regime_words()
+    assert set(_const(TREND_WORDS_SUMMARY, "_TREND_FACTS")) == flight
+    assert set(_const(TREND_WORDS_SUMMARY, "_REGIME_FACTS")) == _regime_words()
+    signals = {signal for _t, _size, _bias, signal in _signal_bands()}
+    assert set(_const(TREND_WORDS_SUMMARY, "_SENTIMENT_FACTS")) == signals
 
 
 def test_the_summary_counts_the_bull_bear_maps_own_quadrants():
     """market_svc counts sectors into ``bullbear.quadrant``'s buckets (it cannot
-    import Tier 1) and explains each bucket to Claude. A bucket added to the map
-    but not here would be miscounted, or counted and left unexplained - and an
-    unexplained count is how '2 rising AND beating the S&P' was once written up
-    as '2 of 11 outperforming'."""
+    import Tier 1) and states the sector counts itself from those buckets. A
+    bucket added to the map but not here would be miscounted, and the summary's
+    sector sentence would disagree with the chips beside it."""
     page = tuple(_const("webgui/pages/bullbear.py", "QUADRANTS"))
     assert tuple(_const(TREND_WORDS_SUMMARY, "_QUADRANTS")) == page
-    assert set(_const(TREND_WORDS_SUMMARY, "_QUADRANT_MEANINGS")) == set(page)
 
 
 # --- the BIAS / SIGNAL hover sentences --------------------------------------

@@ -147,35 +147,139 @@ def _client(text, stop="end_turn", seen=None):
     return _C()
 
 
+def _facts_text(packet=None):
+    """The packet's facts, joined as written — what a faithful reply contains."""
+    return " ".join(compute.summary_facts(packet or _packet()))
+
+
+def _with_facts(posture, packet=None):
+    return f"{_facts_text(packet)} {posture}"
+
+
+# ── the facts are stated by the code, not by the model ───────────────────────
+# Four reworded facts in four sentences on 2026-09-10: the trend ("real weight
+# behind the slide" for a trend whose sellers are absent), a spread's direction,
+# the sector counts, then "absent buyers" for that same trend. Now the code
+# writes every factual statement; the model may only join them and add the
+# posture, and a reply that changes a fact is withheld.
+
+def test_the_facts_state_each_reading_in_plain_english():
+    assert compute.summary_facts(_packet()) == [
+        "Investors are growing complacent, which this model reads as a warning.",
+        "The model suggests trading smaller than usual.",
+        "Prices are drifting lower, but sellers are not pushing them.",
+        "The market is choppy: lots of movement but no progress.",
+        "Today, 2 of the 3 sectors are rising and 1 is falling, and 2 are "
+        "beating the S&P 500.",
+    ]
+
+
+def test_every_word_the_screen_can_show_has_its_fact():
+    for word in compute._TREND_WORDS.values():
+        assert compute._TREND_FACTS[word].endswith("."), word
+    assert "sellers are not pushing" in compute._TREND_FACTS["Gliding"]
+    assert "heavy selling" in compute._TREND_FACTS["Diving"]
+    for word, fact in compute._REGIME_FACTS.items():
+        assert fact == "" if word == "Unclear" else fact.endswith("."), word
+    assert all(f.endswith(".") for f in compute._SENTIMENT_FACTS.values())
+
+
+def test_absent_readings_state_no_fact():
+    """An absent reading says nothing - never a neutral stand-in. 'Unclear' is
+    the regime's word for having no reading, so it states nothing either."""
+    assert compute.summary_facts(
+        compute.build_summary_packet({}, {}, {}, now=_OPEN)) == []
+    assert compute.summary_facts(None) == []
+
+
+def test_the_size_fact_reads_the_multiplier_without_quoting_it():
+    f = compute._size_fact
+    assert f("0.85x") == "The model suggests trading smaller than usual."
+    assert f("1.00x") == "The model suggests trading at normal size."
+    assert f("1.25x") == "The model suggests trading larger than usual."
+    assert f(None) == "" and f("wat") == ""
+
+
+def test_the_sector_fact_uses_the_ready_made_totals_and_grammar():
+    f = compute._sector_fact
+    assert f("today", _TOTALS_21H) == (
+        "Today, 2 of the 11 sectors are rising and 9 are falling, and 6 are "
+        "beating the S&P 500.")
+    assert f("quarter", {"sectors": 11, "rising": 1, "falling": 10,
+                         "beating_sp500": 1, "trailing_sp500": 10}) == (
+        "Over the quarter, 1 of the 11 sectors is rising and 10 are falling, "
+        "and 1 is beating the S&P 500.")
+    assert f(None, {}) == ""
+
+
+def test_the_fact_check_finds_a_reworded_fact():
+    facts = compute.summary_facts(_packet())
+    assert compute._missing_fact(_with_facts("Stay defensive."), facts) is None
+    reworded = _facts_text().replace("sellers are not pushing them",
+                                     "buyers are absent")
+    assert compute._missing_fact(reworded, facts) == (
+        "Prices are drifting lower, but sellers are not pushing them.")
+
+
+def test_a_fact_joined_mid_sentence_still_counts_as_stated():
+    """Joining may lower-case a fact's first letter and swap its full stop for
+    a comma or 'and' - the words themselves must survive."""
+    facts = compute.summary_facts(_packet())
+    joined = ("Investors are growing complacent, which this model reads as a "
+              "warning, and "
+              "the model suggests trading smaller than usual; prices are "
+              "drifting lower, but sellers are not pushing them. The market is "
+              "choppy: lots of movement but no progress. Today, 2 of the 3 "
+              "sectors are rising and 1 is falling, and 2 are beating the "
+              "S&P 500. Stay defensive.")
+    assert compute._missing_fact(joined, facts) is None
+
+
+def test_a_reply_that_changes_a_fact_is_not_published(caplog):
+    import logging
+    reworded = _with_facts("Stay defensive.").replace(
+        "sellers are not pushing them", "buyers are absent")
+    with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
+        assert compute.generate_summary(_packet(), client=_client(reworded)) is None
+    assert any("fact" in r.getMessage() for r in caplog.records)
+
+
+def test_the_prompt_asks_only_for_joining_the_facts_and_a_posture():
+    s = compute._SUMMARY_SYSTEM.lower()
+    for phrase in ("plain everyday english", "include every fact exactly as written",
+                   "do not reword", "one closing sentence", "posture",
+                   "no prices"):
+        assert phrase in s, phrase
+
+
 def test_generate_summary_returns_the_sentence_its_inputs_and_when():
     p = _packet()
-    out = compute.generate_summary(p, client=_client("Fear builds; lean defensive."))
-    assert out["narrative"] == "Fear builds; lean defensive."
+    reply = _with_facts("Stay defensive and keep new trades small.")
+    out = compute.generate_summary(p, client=_client(reply))
+    assert out["narrative"] == reply
     assert out["inputs"] == p
     assert out["as_of"].endswith("+00:00")
 
 
-def test_generate_summary_sends_only_the_packet():
+def test_generate_summary_sends_only_the_facts():
+    """The model never sees the app's labels or numbers - only the statements
+    the code wrote from them - so it has nothing to mistranslate."""
     import json
     seen = {}
     p = _packet()
-    compute.generate_summary(p, client=_client("x", seen=seen))
-    assert json.loads(seen["messages"][0]["content"]) == p
+    compute.generate_summary(p, client=_client(_with_facts("x."), seen=seen))
+    assert json.loads(seen["messages"][0]["content"]) == {
+        "facts": compute.summary_facts(p)}
     assert seen["model"] == compute._SUMMARY_MODEL
 
 
-def test_the_prompt_asks_for_plain_english_that_explains_the_readings():
-    """The sentence sits above six chips that already show the labels and the
-    numbers, so it explains what they MEAN in everyday words instead of
-    repeating them (2026-09-10, by request). It still consolidates, still says
-    where the readings agree or conflict, and still closes with a posture."""
-    s = compute._SUMMARY_SYSTEM.lower()
-    for phrase in ("plain everyday english", "do not repeat the app's labels",
-                   "no scores", "contrarian", "one reading",
-                   "agree or conflict", "posture", "no prices"):
-        assert phrase in s, phrase
-    # "Use the given words verbatim" is what dragged the labels and decimals in.
-    assert "verbatim" not in s
+def test_nothing_to_state_makes_no_call():
+    """No facts means nothing for the model to join - no paid call, no sentence."""
+    seen = {}
+    out = compute.generate_summary(
+        compute.build_summary_packet({}, {}, {}, now=_OPEN),
+        client=_client("x.", seen=seen))
+    assert seen == {} and out is None
 
 
 def test_max_tokens_keeps_headroom():
@@ -244,44 +348,10 @@ def test_the_packet_reader_rebuilds_only_when_a_view_moves(monkeypatch):
     assert len(builds) == 2
 
 
-def test_the_prompt_says_what_every_trend_word_means():
-    """The prompt forbids repeating the labels, so it must tell the model what
-    each one MEANS. Without that, on 2026-09-10 it read Gliding (lower, but
-    nobody pushing) beside a Stressed regime as 'real weight behind the
-    slide' - the opposite of the reading."""
-    for word in compute._TREND_WORDS.values():
-        assert f"{word} = {compute._TREND_MEANINGS[word]}" in compute._SUMMARY_SYSTEM, word
-    assert "nobody is pushing" in compute._TREND_MEANINGS["Gliding"]
-    assert "heavy selling" in compute._TREND_MEANINGS["Diving"]
-
-
-def test_the_prompt_says_what_every_regime_word_means():
-    for word, meaning in compute._REGIME_MEANINGS.items():
-        assert f"{word} = {meaning}" in compute._SUMMARY_SYSTEM, word
-
-
-def test_the_prompt_tells_the_model_to_translate_rather_than_guess():
-    s = compute._SUMMARY_SYSTEM.lower()
-    assert "never guess what a label means" in s
-
-
-def test_the_prompt_says_what_every_bull_bear_count_means():
-    """On 2026-09-10 the sentence said 'only 2 of the 11 sectors are
-    outperforming' when 2 were rising AND beating the S&P 500 and 4 more were
-    beating it while falling - 6 outperforming. Every quadrant key the packet
-    carries is explained, and the combined phrases are defined."""
-    assert set(compute._QUADRANT_MEANINGS) == set(compute._QUADRANTS)
-    for key, meaning in compute._QUADRANT_MEANINGS.items():
-        assert f"{key} = {meaning}" in compute._SUMMARY_SYSTEM, key
-    s = compute._SUMMARY_SYSTEM.lower()
-    assert "report sector counts exactly as given" in s
-    assert "rising_leading plus falling_leading" in s      # = outperforming
-    assert "rising_leading plus rising_lagging" in s       # = rising
-
-
 # ── sector counts: computed in code, checked before publishing ───────────────
-# Definitions in the prompt were not enough: at 21:00 CT it wrote "only 2 of the
-# 11 sectors are beating the S&P 500" when 6 were. Arithmetic is not the model's.
+# At 21:00 CT the model wrote "only 2 of the 11 sectors are beating the S&P 500"
+# when 6 were. The totals are computed in code, the sector fact states them, and
+# any other count the reply adds is checked against them.
 
 def test_the_packet_carries_the_combined_sector_counts_ready_made():
     p = compute.build_summary_packet(_composite(), _regime(), _bullbear(), now=_OPEN)
@@ -297,11 +367,6 @@ def test_the_totals_add_the_buckets_the_way_the_words_mean():
     assert t == {"sectors": 11, "rising": 2, "falling": 9,
                  "beating_sp500": 6, "trailing_sp500": 5}
     assert compute._bullbear_totals({}) == {}
-
-
-def test_the_prompt_says_to_state_counts_only_from_the_totals():
-    s = compute._SUMMARY_SYSTEM.lower()
-    assert "state every sector count from the bull/bear totals" in s
 
 
 _TOTALS_21H = {"sectors": 11, "rising": 2, "falling": 9,
@@ -331,7 +396,7 @@ def test_the_count_check_passes_correct_counts_and_leaves_other_text_alone():
 
 def test_a_sentence_with_a_wrong_sector_count_is_not_published(caplog):
     import logging
-    wrong = "Prices drift lower and 3 of the 3 sectors are rising."   # packet: 2 rising
+    wrong = _with_facts("Also, 3 of the 3 sectors are rising.")   # packet: 2 rising
     with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
         assert compute.generate_summary(_packet(), client=_client(wrong)) is None
     assert any("sector count" in r.getMessage() for r in caplog.records)
@@ -343,7 +408,7 @@ def test_a_sentence_with_a_wrong_sector_count_is_not_published(caplog):
 # complete sentences; one with no complete sentence publishes nothing.
 
 def test_a_long_complete_reply_is_published_whole():
-    long = ("Investors look relaxed, which this model reads as a warning. " * 8).strip()
+    long = _with_facts(("Keep new trades small and stay defensive. " * 8).strip())
     assert len(long) > 400
     out = compute.generate_summary(_packet(), client=_client(long))
     assert out["narrative"] == long
@@ -351,9 +416,9 @@ def test_a_long_complete_reply_is_published_whole():
 
 def test_a_reply_that_ran_out_of_room_keeps_only_its_complete_sentences():
     out = compute.generate_summary(
-        _packet(), client=_client("Prices drift lower. Stay defensive and favor sma",
+        _packet(), client=_client(_with_facts("Stay defensive and favor sma"),
                                   stop="max_tokens"))
-    assert out["narrative"] == "Prices drift lower."
+    assert out["narrative"] == _facts_text()
 
 
 def test_a_cut_off_reply_with_no_complete_sentence_publishes_nothing():
@@ -377,7 +442,7 @@ def test_the_prompt_puts_accuracy_first_and_states_each_spreads_direction():
                    "a call credit spread profits if prices stay down",
                    "never describe a put credit spread as bearish",
                    "never describe a call credit spread as bullish",
-                   "if the readings point different ways, say so"):
+                   "if the facts point different ways, say so"):
         assert phrase in s, phrase
 
 
@@ -385,8 +450,8 @@ def test_a_sentence_that_gets_a_spreads_direction_wrong_is_not_published(caplog)
     """Withheld, not shown: the last good sentence stays, and the loop retries
     the same readings after the gap (generate_summary returning None)."""
     import logging
-    wrong = ("Prices drift lower; stay defensive and favor hedged, smaller "
-             "bearish trades like put credit spreads.")
+    wrong = _with_facts("Stay defensive with smaller bearish trades like put "
+                        "credit spreads.")
     with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
         assert compute.generate_summary(_packet(), client=_client(wrong)) is None
     assert any("spread" in r.getMessage() for r in caplog.records)

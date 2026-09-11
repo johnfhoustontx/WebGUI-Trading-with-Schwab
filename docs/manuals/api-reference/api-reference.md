@@ -398,9 +398,14 @@ fingerprint of it at the resolution above. A new sentence is written only when t
 fingerprint differs from the one the current sentence was written from, at least
 `SUMMARY_MIN_GAP_SEC` has passed since the last attempt, and fewer than
 `SUMMARY_DAILY_CAP` attempts have run today; the first poll after a restart with
-readings present always writes one. A **failed** attempt (API error, timeout)
-publishes nothing — the last good sentence stays — but still counts toward the gap
-and the cap, and the same readings are retried once the gap has passed. It runs as
+readings present always writes one. The model is sent only
+`{"facts": summary_facts(packet)}` — one plain-English statement per reading,
+written by the code — and may only join them and add a closing posture. A
+**failed** attempt (API error, timeout) or a **withheld** reply (a fact dropped or
+reworded, a wrong sector count, a credit spread tied to the wrong direction, or a
+cut-off reply with no complete sentence) publishes nothing — the last good
+sentence stays — but still counts toward the gap and the cap, and the same
+readings are retried once the gap has passed. It runs as
 a **background task** rather than inline, so a slow completion cannot stall the
 poll loop.
 

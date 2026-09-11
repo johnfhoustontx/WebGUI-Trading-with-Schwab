@@ -395,13 +395,16 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.
 
-**Market Summary** is the frame across the bottom. It carries one sentence,
-written by Claude in plain English, that reads the six panels above it together
-and closes with a posture — for example "Investors are unusually relaxed, and
-this model reads that as a warning rather than an opportunity; prices are
-drifting lower with only 2 of the 11 big sectors rising, so keep new trades small
-and lean defensive." It deliberately avoids the app's labels and scores — the six
-chips under it show those. Two things about it are easy to misread:
+**Market Summary** is the frame across the bottom. It reads the six panels above
+it together in plain English and closes with a posture — for example "Investors
+are growing complacent, which this model reads as a warning. The model suggests
+trading smaller than usual. Prices are drifting lower, but sellers are not
+pushing them. … Stay cautious and favor defined-risk trades." The statement of
+each reading is written by the app itself, so it always matches the reading;
+Claude only joins the statements and adds the closing posture, and a reply that
+changes any statement is discarded — the previous summary stays up. It
+deliberately avoids the app's labels and scores — the six chips under it show
+those. Two things about it are easy to misread:
 
 - **It is written when the readings change, not on a schedule.** The **"as of
   HH:MM CT"** in the top-right corner is when it was last written, and it can sit

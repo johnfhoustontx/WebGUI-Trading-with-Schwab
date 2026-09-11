@@ -6,7 +6,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 **Last updated:** 2026-09-10 (**The Desk's market summary is written in plain
 English** — it explains what the six readings mean instead of repeating the
-app's labels and scores.)
+app's labels and scores, and the app now writes every factual statement itself.)
 
 - **What changed.** `market_svc`'s summary prompt (`compute._SUMMARY_SYSTEM`)
   no longer asks Claude to use the screen's words verbatim. It asks for plain
@@ -55,8 +55,28 @@ app's labels and scores.)
   the prompt says to state sector counts only from them, and `generate_summary`
   withholds a sentence whose "N of M sectors are rising / falling / beating /
   trailing …" claim disagrees with them (`_count_claim_error`).
-- Docs: the design doc's Prompt paragraph, the User Guide and Reference Guide
-  Market Summary descriptions, `page_help.py`, `docs/webgui-routes.md`.
+- **The code states the facts; Claude only joins them and adds the posture
+  (same evening).** At 21:05 CT, with all of the above in place, the sentence
+  still described Gliding as "prices drifting lower on absent buyers" — sellers
+  are what is absent. Every paraphrase had bent a reading, so the model no
+  longer writes one. `compute.summary_facts` turns each reading into one fixed
+  plain-English statement (`_SENTIMENT_FACTS` keyed by the signal word,
+  `_size_fact`, `_TREND_FACTS`, `_REGIME_FACTS`, `_sector_fact` from the
+  ready-made totals); the model is sent only `{"facts": [...]}` — never the
+  labels or numbers — and asked to include every fact exactly as written and add
+  one closing posture. `generate_summary` withholds a reply that drops or rewords
+  any fact (`_missing_fact`: case-insensitive, blind to the fact's own closing
+  full stop, otherwise word for word), after the cut-off, spread-direction and
+  sector-count checks. No facts, no call. The meaning tables
+  (`_TREND_MEANINGS`, `_REGIME_MEANINGS`, `_QUADRANT_MEANINGS`) are gone; the
+  cross-tier mirror test now pins the fact tables' keys against the trend,
+  regime and signal words the screen can show. Still one call per change.
+  Checked against the live API before shipping: two packets (one with
+  conflicting readings) both kept all five facts verbatim, and the second
+  posture named the conflict.
+- Docs: the design doc's Prompt paragraph, the User Guide, Reference Guide and
+  API Reference Market Summary descriptions, `page_help.py`,
+  `docs/webgui-routes.md`.
 
 **Prior — 2026-09-10** (**The Desk gets a MARKET SUMMARY frame — one
 Claude-written sentence tying six readings together — and hovering the Market

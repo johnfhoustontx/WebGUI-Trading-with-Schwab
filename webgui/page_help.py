@@ -102,11 +102,13 @@ on · what am I holding.*
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
-- **Market Summary** — one sentence, written by Claude **in plain English**,
-  pulling the readings above together (sentiment, trend, bias, signal, regime,
-  Bull/Bear) and ending with a trading posture. It says what the readings *mean*
-  rather than repeating their labels and numbers — the chips underneath show
-  those. It is written when those readings **change**, not on a
+- **Market Summary** — a short **plain-English** read of the readings above
+  (sentiment, trend, bias, signal, regime, Bull/Bear), ending with a trading
+  posture. The statement of each reading is **written by the app itself**, so it
+  cannot be misread; Claude only joins them and adds the closing posture, and a
+  reply that changes any statement is thrown away (the previous one stays). It
+  says what the readings *mean* rather than repeating their labels and numbers —
+  the chips underneath show those. It is written when those readings **change**, not on a
   clock, so it carries an **"as of" time** rather than a fixed refresh cadence.
   The six chips underneath it are **live** — they update on every poll even
   while the sentence above them lags — and hovering any chip explains that

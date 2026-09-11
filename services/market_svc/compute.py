@@ -321,99 +321,144 @@ _SUMMARY_MODEL = "claude-sonnet-5"
 # is ever cut mid-word. The 400-character slice that once published "... rather
 # than chas" is gone (2026-09-10). Pinned by a test.
 _SUMMARY_MAX_TOKENS = 300
-# What each on-screen word MEANS, for the model to translate from. The prompt
-# forbids repeating the labels, so without these it guesses — and on 2026-09-10
-# it wrote up "Gliding" (lower, but nobody pushing) beside a Stressed regime as
-# "real weight behind the slide", the opposite of the reading. Plain paraphrases
-# of the webgui's hovers (sentiment.TREND_PICTURE, regime_mix.REGIME_PICTURE);
-# the key sets are pinned by shared/tests/test_cross_tier_mirrors.py, so a new
-# word cannot reach the screen without a meaning here.
-_TREND_MEANINGS = {
-    "Climbing": "prices rising, with buyers actively pushing them up",
-    "Stalling": "prices still high, but the buying has run out",
-    "Circling": "no clear direction; buyers and sellers are balanced",
-    "Gliding": "prices drifting lower, but nobody is pushing them down; "
-               "sellers are absent",
-    "Diving": "prices falling under urgent, heavy selling",
+# The code states the facts; the model only joins them and adds the posture.
+# Every time the model paraphrased a reading on 2026-09-10 it bent one: "Gliding"
+# (lower, but nobody pushing) became "real weight behind the slide" and later
+# "absent buyers"; a put credit spread became a "bearish trade"; "2 rising and
+# beating" became "only 2 of 11 outperforming" when 6 were. So each reading is
+# written here as one plain-English statement, the model sees ONLY these
+# statements, and ``generate_summary`` withholds any reply that drops or rewords
+# one (``_missing_fact``). Plain paraphrases of the webgui's hovers
+# (sentiment.BAND_WORD_PICTURE / TREND_PICTURE, regime_mix.REGIME_PICTURE); the
+# key sets are pinned by shared/tests/test_cross_tier_mirrors.py, so a word
+# cannot reach the screen without its statement here. No apostrophes or quotes:
+# a curly one in the reply must not fail the word-for-word check.
+#
+# Keyed by the SIGNAL word: the sentiment composite is CONTRARIAN (high = fear =
+# opportunity), and bias and signal are two bands of that one number, so one
+# statement covers both.
+_SENTIMENT_FACTS = {
+    "Strong Bull": "Investors are very fearful, which this model reads as a "
+                   "strong buying opportunity.",
+    "Bullish": "Investors are fearful, which this model reads as a buying "
+               "opportunity.",
+    "Neutral": "Investors are neither fearful nor complacent, so this model "
+               "sees no edge either way.",
+    "Bearish": "Investors are growing complacent, which this model reads as a "
+               "warning.",
+    "Strong Bear": "Investors are very complacent, which this model reads as a "
+                   "strong warning.",
 }
-_REGIME_MEANINGS = {
-    "Balanced": "a quiet, two-sided market sitting near its average",
-    "Trending": "a persistent move whose direction the two reads disagree on",
-    "Rallying": "a steep, persistent move higher",
-    "Firming": "a steady, gentle climb",
-    "Retreating": "a steep, persistent move lower",
-    "Softening": "a steady, gentle decline",
-    "Breakout": "the trading range is expanding into new ground",
-    "Breakdown": "the trading range is expanding to the downside",
-    "Whipsaw": "plenty of movement but no progress; breakouts keep failing",
-    "Stressed": "fear is driving the market: volatility is high and gaps do "
-                "not fill",
-    "Unclear": "no clear kind of market has formed yet",
+_TREND_FACTS = {
+    "Climbing": "Prices are rising, with buyers pushing them up.",
+    "Stalling": "Prices are still high, but the buying has run out.",
+    "Circling": "Prices have no clear direction; buyers and sellers are "
+                "balanced.",
+    "Gliding": "Prices are drifting lower, but sellers are not pushing them.",
+    "Diving": "Prices are falling under heavy selling.",
 }
-# The Bull/Bear buckets the packet counts sectors into (the keys of
-# ``bullbear.counts``). Unexplained, "rising_leading: 2" was once written up as
-# "only 2 of the 11 sectors are outperforming" when 4 more were beating the
-# S&P 500 while falling. Keys pinned to ``webgui/pages/bullbear.QUADRANTS`` by
-# shared/tests/test_cross_tier_mirrors.py.
-_QUADRANT_MEANINGS = {
-    "rising_leading": "sectors rising AND beating the S&P 500",
-    "rising_lagging": "sectors rising but trailing the S&P 500",
-    "falling_leading": "sectors falling but still beating the S&P 500",
-    "falling_lagging": "sectors falling AND trailing the S&P 500",
-    "unknown": "sectors with no reading",
+# "Unclear" is the regime's word for having no reading, so it states nothing.
+_REGIME_FACTS = {
+    "Balanced": "The market is quiet and two-sided, sitting near its average.",
+    "Trending": "Prices are moving with persistence, but which way is not yet "
+                "confirmed.",
+    "Rallying": "The market is in a steep, steady move higher.",
+    "Firming": "The market is climbing steadily and gently.",
+    "Retreating": "The market is in a steep, steady move lower.",
+    "Softening": "The market is declining steadily and gently.",
+    "Breakout": "The market is breaking out of its range into new ground.",
+    "Breakdown": "The market is breaking down out of its range to the "
+                 "downside.",
+    "Whipsaw": "The market is choppy: lots of movement but no progress.",
+    "Stressed": "Fear is driving the market: volatility is high and price gaps "
+                "are not filling.",
+    "Unclear": "",
 }
+_HORIZON_LEAD = {"today": "Today", "quarter": "Over the quarter"}
 
-# Plain everyday English (2026-09-10, by request). The six chips under the
-# sentence already show the labels and the numbers, so the sentence explains
-# what they MEAN instead of repeating them; the first draft asked for "the given
-# words verbatim" and produced "Composite reads Cautious/Bearish at 3.16 ...".
+
+def _size_fact(size):
+    """The position-size multiplier ("0.85x") as a plain statement, without
+    quoting it; "" when there is no usable multiplier."""
+    m = _finite(str(size).strip().rstrip("xX")) if size is not None else None
+    if m is None:
+        return ""
+    if abs(m - 1.0) < 1e-9:
+        return "The model suggests trading at normal size."
+    return ("The model suggests trading "
+            f"{'smaller' if m < 1.0 else 'larger'} than usual.")
+
+
+def _sector_fact(horizon, totals):
+    """The Bull/Bear counts as one statement, straight from the ready-made
+    totals — the model never counts. "" when there is nothing counted."""
+    t = totals or {}
+    lead = _HORIZON_LEAD.get(horizon)
+    n = t.get("sectors")
+    if not lead or not n:
+        return ""
+
+    def verb(k):
+        return "is" if k == 1 else "are"
+
+    rising, falling, beating = t.get("rising", 0), t.get("falling", 0), \
+        t.get("beating_sp500", 0)
+    return (f"{lead}, {rising} of the {n} {'sector' if n == 1 else 'sectors'} "
+            f"{verb(rising)} rising and {falling} {verb(falling)} falling, and "
+            f"{beating} {verb(beating)} beating the S&P 500.")
+
+
+def summary_facts(packet):
+    """The packet's readings as plain-English statements, in reading order:
+    sentiment, position size, trend, regime, sectors. An absent reading states
+    nothing — never a neutral stand-in. ``[]`` when there is nothing to say."""
+    p = packet if isinstance(packet, dict) else {}
+    bb = p.get("bullbear") if isinstance(p.get("bullbear"), dict) else {}
+    facts = [
+        _SENTIMENT_FACTS.get(p.get("signal"), ""),
+        _size_fact(p.get("size")),
+        _TREND_FACTS.get((p.get("trend") or {}).get("word"), ""),
+        _REGIME_FACTS.get((p.get("regime") or {}).get("word"), ""),
+        _sector_fact(bb.get("horizon"), bb.get("totals")),
+    ]
+    return [f for f in facts if f]
+
+
+def _missing_fact(text, facts):
+    """The first statement the reply does not carry word for word, or None.
+
+    Case-insensitive and blind to the statement's own closing full stop, so a
+    fact the model joined mid-sentence ("..., and the model suggests ...")
+    still counts; anything else — a changed word, a dropped clause — does not."""
+    t = " ".join(str(text or "").lower().split())
+    for fact in facts:
+        want = " ".join(fact.lower().split()).rstrip(".")
+        if want not in t:
+            return fact
+    return None
+
+
 _SUMMARY_SYSTEM = (
-    "You write the one-line market summary on a trading desk, for a trader who "
-    "wants it in plain everyday English. You get six readings as JSON, using "
-    "the app's own labels: sentiment (a 0-10 composite that is CONTRARIAN - a "
-    "high score means investors are fearful, which this model reads as an "
-    "opportunity; a low score means they are relaxed or complacent, which it "
-    "reads as a warning); trend (a label and a 0-100 score for which way prices "
-    "are heading and how much force is behind the move); bias and signal (two "
-    "bands of that same sentiment composite, with a position size); regime "
-    "(what kind of market it is, with a confidence); and bull/bear (how many of "
-    "the 11 S&P sectors are rising or falling and beating or trailing the S&P "
-    "500, counted today or over the quarter). Write at most TWO complete "
-    "sentences, aiming for about 350 characters, in plain everyday English that "
-    "say what these readings mean. Do not repeat the app's labels or jargon "
-    "(composite, contrarian, regime, breadth, tape, bias, signal, or the trend "
-    "and regime labels themselves) and quote no scores, decimals or "
-    "position-size multipliers; simple counts such as '2 of the 11 sectors' are "
-    "fine. Translate each label into plain words using the meanings listed at "
-    "the end, and never guess what a label means. ACCURACY IS PARAMOUNT: every "
-    "claim must follow from the readings given, and any strategy you name must "
-    "match its real direction. A put credit spread profits if prices hold up or "
-    "rise (bullish to neutral). A call credit spread profits if prices stay down "
-    "(bearish to neutral). Buying puts or a put debit spread is bearish; buying "
-    "calls or a call debit spread is bullish; an iron condor profits if prices "
-    "stay in a range (neutral). Never describe a put credit spread as bearish. "
-    "Never describe a call credit spread as bullish. If the readings point "
-    "different ways, say so plainly and let the posture reflect the conflict "
-    "rather than blending them; if you are not sure a strategy fits, give the "
-    "posture without naming one. Report sector counts exactly as given, and "
-    "combine buckets only as defined here: sectors beating the S&P 500 "
-    "(outperforming) means rising_leading plus falling_leading, and sectors "
-    "rising means rising_leading plus rising_lagging - never describe one "
-    "bucket alone as either. State every sector count from the bull/bear "
-    "totals exactly as given (sectors, rising, falling, beating_sp500 = "
-    "outperforming, trailing_sp500); never add or subtract buckets yourself. "
-    "Treat sentiment, bias and signal as ONE "
-    "reading. Say where "
-    "the readings agree or conflict. Close with a practical trading posture in "
-    "plain words; standard options terms such as 'put credit spreads' are fine "
-    "when the advice needs them. No prices, no percent moves, no preamble, no "
-    "disclaimers, no bullet points, no markdown. What the trend labels mean: "
-    + " | ".join(f"{w} = {m}" for w, m in _TREND_MEANINGS.items())
-    + ". What the regime labels mean: "
-    + " | ".join(f"{w} = {m}" for w, m in _REGIME_MEANINGS.items())
-    + ". What the bull/bear counts mean: "
-    + " | ".join(f"{k} = {m}" for k, m in _QUADRANT_MEANINGS.items())
-    + "."
+    "You write the market summary on a trading desk, in plain everyday "
+    "English. You get a list of facts as JSON. Each fact was written by the "
+    "app from its own readings and is exactly right. Include every fact "
+    "exactly as written, in the order given. Do not reword, shorten, merge, "
+    "reorder or drop any fact, and add no other facts or claims about the "
+    "market. You may join neighbouring facts with a comma or 'and' and lower "
+    "a fact's first letter when you do. Then add one closing sentence with a "
+    "practical trading posture that follows from the facts; standard options "
+    "terms such as 'put credit spreads' are fine when the advice needs them. "
+    "ACCURACY IS PARAMOUNT: any strategy you name must match its real "
+    "direction. A put credit spread profits if prices hold up or rise (bullish "
+    "to neutral). A call credit spread profits if prices stay down (bearish to "
+    "neutral). Buying puts or a put debit spread is bearish; buying calls or a "
+    "call debit spread is bullish; an iron condor profits if prices stay in a "
+    "range (neutral). Never describe a put credit spread as bearish. Never "
+    "describe a call credit spread as bullish. If the facts point different "
+    "ways, say so plainly in the posture rather than blending them; if you "
+    "are not sure a strategy fits, give the posture without naming one. No "
+    "prices, no numbers beyond those in the facts, no preamble, no "
+    "disclaimers, no bullet points, no markdown."
 )
 
 
@@ -513,7 +558,8 @@ def bullbear_counts(bullbear, now=None):
 
 
 def _bullbear_totals(counts):
-    """The combined sector counts, ready-made, so the model never adds buckets.
+    """The combined sector counts, ready-made — ``_sector_fact`` states them and
+    ``_count_claim_error`` checks the reply against them.
 
     "Beating the S&P 500" is TWO buckets (rising_leading + falling_leading) and
     "rising" another two; left to combine them itself, the model twice reported
@@ -561,8 +607,8 @@ def build_summary_packet(sentiment, regime, bullbear, now=None):
                    "confidence": (None if r.get("unclear")
                                   else _finite(r.get("confidence")))},
         # ``totals`` is derived from ``counts`` (so the fingerprint, which reads
-        # the counts, is unchanged); it exists so the model states sector
-        # counts from ready-made sums instead of adding buckets itself.
+        # the counts, is unchanged); the sector fact is written from it, so no
+        # count in the summary is ever added up by the model.
         "bullbear": {"horizon": horizon, "counts": counts,
                      "totals": _bullbear_totals(counts)},
     }
@@ -747,12 +793,17 @@ def generate_summary(packet, client=None):
     call. A finished reply is shown whole, never shortened; one that ran out of
     room keeps only its complete sentences.
 
+    The model is sent ONLY ``summary_facts(packet)`` — statements the code
+    wrote from the readings — and may only join them and add the posture.
+
     Returns ``None`` — so the caller keeps the last good sentence and the same
-    readings are retried after the gap — when the attempt FAILED (API error,
-    timeout), when a reply that ran out of room has no complete sentence, when
-    the reply ties a credit spread to the wrong direction, or when it states a
-    sector count that disagrees with the packet's ready-made totals (accuracy
-    first: a wrong sentence is worse than a slightly older right one)."""
+    readings are retried after the gap — when there are no facts to state
+    (no call is made), when the attempt FAILED (API error, timeout), when a
+    reply that ran out of room has no complete sentence, when the reply ties a
+    credit spread to the wrong direction, when it states a sector count that
+    disagrees with the packet's ready-made totals, or when it drops or rewords
+    any fact (accuracy first: a wrong sentence is worse than a slightly older
+    right one)."""
     import json
     from datetime import timezone
     out = {"narrative": "", "inputs": packet or {},
@@ -760,13 +811,17 @@ def generate_summary(packet, client=None):
     c = client if client is not None else _make_summary_client()
     if c is None:
         return out
+    facts = summary_facts(packet)
+    if not facts:
+        return None
     try:
         _count_anthropic_call()
         resp = c.messages.create(
             model=_SUMMARY_MODEL, max_tokens=_SUMMARY_MAX_TOKENS,
             thinking={"type": "disabled"},
             system=_SUMMARY_SYSTEM,
-            messages=[{"role": "user", "content": json.dumps(packet)}])
+            messages=[{"role": "user",
+                       "content": json.dumps({"facts": facts})}])
         text = "".join(getattr(b, "text", "") for b in getattr(resp, "content", []) or [])
         cut_off = getattr(resp, "stop_reason", None) == "max_tokens"
     except Exception:  # noqa: BLE001 — never raise out of a summary attempt.
@@ -791,6 +846,11 @@ def generate_summary(packet, client=None):
     if miscount:
         log.warning("market summary withheld - a sector count disagrees with "
                     "the totals %s: %r", totals, miscount)
+        return None
+    dropped = _missing_fact(text, facts)
+    if dropped:
+        log.warning("market summary withheld - it dropped or reworded the "
+                    "fact %r", dropped)
         return None
     out["narrative"] = text
     return out

@@ -264,17 +264,22 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
-**Market Summary.** Full width, across the bottom. One Claude-written sentence (at
-most two, always shown complete — never cut off mid-sentence) consolidating the
-six readings above it — Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and
-closing with a trading posture, next to an **"as of HH:MM CT"** timestamp. It is
-written in **plain everyday English**: it says what the readings mean rather than
-repeating the app's labels, scores or position sizes (the chips under it carry
-those), keeping only simple counts and standard options terms such as "put credit
-spreads". **Accuracy comes first**: the prompt states each strategy's real
-direction (a put credit spread is bullish-to-neutral, a call credit spread
-bearish-to-neutral), and a sentence that ties a credit spread to the wrong
-direction is withheld rather than shown — the previous sentence stays up.
+**Market Summary.** Full width, across the bottom. A short read of the six
+readings above it — Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — closing
+with a trading posture, next to an **"as of HH:MM CT"** timestamp, always shown
+complete (never cut off mid-sentence). It is written in **plain everyday
+English**: it says what the readings mean rather than repeating the app's labels,
+scores or position sizes (the chips under it carry those). **Accuracy comes
+first, so the app states the facts itself**: each reading becomes one fixed
+plain-English statement written by the code ("Prices are drifting lower, but
+sellers are not pushing them."; "Today, 2 of the 11 sectors are rising and 9 are
+falling, and 6 are beating the S&P 500."). Claude is given only those statements,
+joins them, and adds one closing posture. The app then checks the reply and
+**withholds it** — the previous summary stays up — if any statement is missing or
+reworded, if a sector count disagrees with the app's own, or if it ties a credit
+spread to the wrong direction (a put credit spread is bullish-to-neutral, a call
+credit spread bearish-to-neutral). The posture is the only part in Claude's own
+words.
 
 It is written **on change, not on a clock**: `market_svc` builds a fingerprint of
 the six readings at display resolution on every poll, and writes a new sentence

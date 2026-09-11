@@ -224,13 +224,17 @@ Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-
 **The MARKET SUMMARY frame + the Regime popup (2026-09-10).** Full width, below
 the four panels; the public live Desk renders it too.
 
-- **One Claude-written sentence** (`market_svc`'s existing ticker-narrative call,
-  Sonnet 5) consolidating six readings — Sentiment (0–10 contrarian composite),
-  Trend (flight word + score), Bias, Signal, Regime, Bull/Bear (sector quadrant
-  counts, today once the bell has rung else the quarter) — and closing with a
-  posture, **in plain everyday English** (no app labels, scores or size
-  multipliers — the chips carry those; `test_the_prompt_asks_for_plain_english_that_explains_the_readings`
-  pins the prompt), next to an **"as of HH:MM CT"** timestamp. It is written **on change,
+- **A short plain-English summary** (`market_svc`'s existing ticker-narrative
+  call, Sonnet 5) consolidating six readings — Sentiment (0–10 contrarian
+  composite), Trend (flight word + score), Bias, Signal, Regime, Bull/Bear
+  (sector quadrant counts, today once the bell has rung else the quarter) — and
+  closing with a posture, next to an **"as of HH:MM CT"** timestamp. **The code
+  states the facts**: `compute.summary_facts` writes one plain-English statement
+  per reading (no app labels, scores or size multipliers — the chips carry
+  those), Claude is sent only those statements, joins them and adds one posture
+  sentence, and a reply that drops or rewords any statement is withheld
+  (`_missing_fact`), as is one that ties a credit spread to the wrong direction
+  or states a wrong sector count. It is written **on change,
   not on a clock**: `market_svc` fingerprints the six readings at display
   resolution every poll (words exact, composite to 0.5, trend score to 5, regime
   confidence to 10%, Bull/Bear counts exact + horizon) and writes only when that
