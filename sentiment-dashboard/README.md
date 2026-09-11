@@ -226,31 +226,11 @@ third-party scraping). Symbols used:
 
 ## Discord / Telegram Notifications
 
-The dashboard can post each sentiment reading to Discord and/or
-Telegram as it autosaves. Credentials are resolved in this order
-(first match wins):
-
-1. **Constructor kwargs** (when programmatically instantiating
-   `SentimentNotifier`).
-2. **Environment variables** — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-   `DISCORD_WEBHOOK_URL`.
-3. **Local file** — copy `config_notifications.example.py` to
-   `config_notifications.py` next to `sentiment_dashboard.py` (or
-   anywhere on `sys.path`) and fill in the values. The real file is
-   gitignored.
-4. **Shared OptionsScanner file** — if you already have credentials
-   configured at
-   `D:\Schwab Test Project\OptionsScanner\config_notifications.py`,
-   the dashboard loads them from there automatically. Both apps share
-   one place to rotate tokens.
-
-Leave any field blank/missing to disable that channel. Set none of
-them and the notifier is a silent no-op — no configuration required.
-
-Posts are throttled so the 15-min autofetch doesn't spam the channel:
-the first save per session always posts, then subsequent saves post
-only on a ≥ 0.3 composite-score move, a bias change, a fresh regime
-break / divergence flag, or once an hour as a heartbeat.
+The Tk dashboard's `SentimentNotifier` and its `config_notifications.py`
+file are not part of this repo. Notifications now go through
+`shared/notify/` (Telegram, Discord, Fi-SMS), configured from
+`shared/notifications.json`; the sentiment state-transition alert lives in
+`services/sentiment_svc/state_alert.py`.
 
 ---
 

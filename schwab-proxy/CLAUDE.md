@@ -14,7 +14,7 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
 
 ## Entry point & port
 
-- Entry: `schwab_proxy.py` (also `Launch_Proxy.bat`).
+- Entry: `schwab_proxy.py` (run as the `trading-prod-proxy` systemd unit).
 - Serves on `http://127.0.0.1:8100` (`PROXY_URL` / `PROXY_PORT` from
   `repo_paths.py`).
 - **Runs until explicitly stopped.** The legacy daily auto-shutdown (the proxy
