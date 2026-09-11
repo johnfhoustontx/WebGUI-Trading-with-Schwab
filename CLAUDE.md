@@ -1413,6 +1413,15 @@ page whose other two engines were intraday-aware. It now calls the new
 There is one settlement instant (16:00 ET) and one helper per tier —
 `options_calculator.expiry_time_to_years` and `options_svc.compute.time_to_expiry_years`.**
 
+⚠ **`proxy_client`'s `get_intraday_history` / `get_daily_history` return NAIVE
+UTC** in their `datetime` column (`pd.to_datetime(ms, unit="ms")`), so they break
+the convention above the moment a naive stamp reaches a pricer. The Replay path
+did exactly that until 2026-09-11 — every bar priced five hours late, a 0-DTE
+option "expired" by 10:00 CT — and `compute._replay_index` is the conversion to
+reuse. Daily candles are stamped at midnight **Central** (05:00/06:00 UTC), so
+converting keeps their date. A naive pandas `Timestamp.timestamp()` reads as
+UTC, which is why the Expected Move path's epoch-ms happened to come out right.
+
 **Four config files were extracted on 2026-08-21, and all four exist because the
 value was duplicated across modules that CANNOT import each other.** That is the
 test for whether a value belongs in a TOML here: a config file genuinely
