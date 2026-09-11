@@ -488,3 +488,19 @@ def test_whatif_readout_says_at_expiration_once_time_reaches_the_close():
     assert text.startswith("At 354.00 after the last expiration:")
     text, _ = sv.whatif_readout(pairs, 354.0, 8, now, legs=mixed)
     assert text.startswith("At 354.00 on Sep 19:")
+
+
+def test_small_dollar_figures_keep_their_cents():
+    """Found in the browser: a one-lot's theta of $0.38 printed '+$0', which reads
+    as a measured zero. Under $10 the cents are the figure."""
+    t = _by_key(sv.position_tiles(PCS_10, _result(theta=0.38)))
+    assert t["theta"]["value"] == "+$0.38"
+    rows = {r["label"]: r for r in sv.ivshock_table(
+        {"base": {"theo_price": -230.0, "vega": -0.82},
+         "shock": {"theo_price": -243.0, "vega": -0.9}, "units": "position"}, 1.5)["rows"]}
+    assert rows["Vega per volatility point"]["base"] == "-$0.82"
+    assert rows["Vega per volatility point"]["change"] == "-$0.08"
+    assert rows["Position value"]["base"] == "-$230"
+    text, _ = sv.whatif_readout([[100.0, 0.0], [110.0, 4.28]], 105.0, 0,
+                                dt.datetime(2026, 9, 11, tzinfo=CT))
+    assert text.endswith("profit $2.14")

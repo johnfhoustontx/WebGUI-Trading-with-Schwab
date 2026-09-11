@@ -33,12 +33,17 @@ _SETTLE_TZ = ZoneInfo("America/New_York")
 _SETTLE_HOUR = 16
 
 
+# Below this, a dollar figure keeps its cents: a one-lot's theta of $0.38 printed
+# as "+$0" reads as a measured zero (found in the browser, 2026-09-11).
+_CENTS_BELOW = 10.0
+
+
 def _money(v, signed=False):
-    """``$1,234`` (whole dollars — a position figure, not a quote)."""
+    """``$1,234`` — whole dollars for a position figure, cents under $10."""
     v = num(v)
     if v is None:
         return NO_READING
-    txt = f"${abs(v):,.0f}"
+    txt = f"${abs(v):,.2f}" if 0 < abs(v) < _CENTS_BELOW else f"${abs(v):,.0f}"
     if signed:
         return f"{'+' if v >= 0 else '-'}{txt}"
     return f"-{txt}" if v < 0 else txt

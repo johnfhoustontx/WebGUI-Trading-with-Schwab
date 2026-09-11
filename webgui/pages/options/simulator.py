@@ -363,8 +363,9 @@ def render():
                     with ui.row().classes("items-end gap-2 w-full no-wrap"):
                         strategy_sel = strategy_menu.build_strategy_menu(
                             value="PCS", classes="w-52", boxed=True)
+                        # dense, so the box sits level with the boxed strategy trigger
                         expiry_all = ui.select([], label="Set all legs to") \
-                            .classes("w-40 sim-expiry-all")
+                            .props("dense options-dense").classes("w-40 sim-expiry-all")
                     edited_chip = ui.label(
                         "Edited: these legs no longer match the strategy's shape") \
                         .classes(f"sim-edited {TXT_WARN} text-xs border border-[#5a4a1f] "
