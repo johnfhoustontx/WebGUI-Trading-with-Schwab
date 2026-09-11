@@ -90,7 +90,8 @@ items already carry prices. The flight words need a **third copy** in
 
 **Prompt:** the composite is contrarian (high = fear, read as opportunity);
 Sentiment/Bias/Signal are one number, say it once; name where the reads agree or
-conflict; ≤ 2 sentences, ≤ 350 chars; no prices; close with a posture. **In plain
+conflict; ≤ 2 sentences, aiming near 350 chars but never cut; no prices; close
+with a posture. **In plain
 everyday English** (revised 2026-09-10, by request): the six chips under the
 sentence already show the labels and numbers, so the sentence explains what they
 mean instead of repeating them — no app labels (composite, regime, breadth, the
@@ -103,6 +104,16 @@ carries a plain **meaning for every trend and regime label**
 words by `shared/tests/test_cross_tier_mirrors.py`) and tells the model never to
 guess one: with the labels banned but undefined, the first plain-English sentence
 described Gliding — lower, but nobody pushing — as "real weight behind the slide".
+**Accuracy is paramount** (same evening, by request): the prompt states each
+strategy's real direction (put credit spread bullish-to-neutral, call credit
+spread bearish-to-neutral, debit spreads and long options by their side, iron
+condors neutral) and asks for a conflict between the readings to be named rather
+than blended; `generate_summary` withholds a reply that ties a credit spread to
+the wrong direction (`_spread_direction_error` — the 20:42 CT sentence called put
+credit spreads "bearish trades"). And nothing is ever cut mid-word: a finished
+reply is shown whole, one that ran out of room is trimmed to its complete
+sentences, one with none is withheld. The 400-character slice that published
+"… rather than chas" is gone.
 
 **Refresh — on change, not on a clock.** Each `market_svc` poll builds the packet
 and a **fingerprint** of it at display resolution: words exact, composite to 0.5,

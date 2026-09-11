@@ -6,6 +6,7 @@ the coverage. All defensive — a fetch/parse failure degrades to no-data tiles.
 """
 import logging
 import math
+import re
 from datetime import datetime
 
 import requests
@@ -314,10 +315,12 @@ def collect(bus):
 # Market summary — a periodic Claude-written verdict (cache:market:summary).
 # ---------------------------------------------------------------------------
 _SUMMARY_MODEL = "claude-sonnet-5"
-# A cap, not a spend (billing is on generated tokens). Headroom so a sentence is
-# never cut mid-word and still rendered as if complete; pinned by a test.
+# A cap, not a spend (billing is on generated tokens), and the ONLY ceiling on
+# the reply: a finished reply is shown whole, however long. A reply that hits
+# this cap keeps only its complete sentences (``_complete_sentences``) — nothing
+# is ever cut mid-word. The 400-character slice that once published "... rather
+# than chas" is gone (2026-09-10). Pinned by a test.
 _SUMMARY_MAX_TOKENS = 300
-_SUMMARY_MAX_CHARS = 400
 # What each on-screen word MEANS, for the model to translate from. The prompt
 # forbids repeating the labels, so without these it guesses — and on 2026-09-10
 # it wrote up "Gliding" (lower, but nobody pushing) beside a Stressed regime as
@@ -363,14 +366,25 @@ _SUMMARY_SYSTEM = (
     "bands of that same sentiment composite, with a position size); regime "
     "(what kind of market it is, with a confidence); and bull/bear (how many of "
     "the 11 S&P sectors are rising or falling and beating or trailing the S&P "
-    "500, counted today or over the quarter). Write at most TWO short sentences "
-    "(<=350 characters) in plain everyday English that say what these readings "
-    "mean. Do not repeat the app's labels or jargon (composite, contrarian, "
-    "regime, breadth, tape, bias, signal, or the trend and regime labels "
-    "themselves) and quote no scores, decimals or position-size multipliers; "
-    "simple counts such as '2 of the 11 sectors' are fine. Translate each label "
-    "into plain words using the meanings listed at the end, and never guess what "
-    "a label means. Treat sentiment, bias and signal as ONE reading. Say where "
+    "500, counted today or over the quarter). Write at most TWO complete "
+    "sentences, aiming for about 350 characters, in plain everyday English that "
+    "say what these readings mean. Do not repeat the app's labels or jargon "
+    "(composite, contrarian, regime, breadth, tape, bias, signal, or the trend "
+    "and regime labels themselves) and quote no scores, decimals or "
+    "position-size multipliers; simple counts such as '2 of the 11 sectors' are "
+    "fine. Translate each label into plain words using the meanings listed at "
+    "the end, and never guess what a label means. ACCURACY IS PARAMOUNT: every "
+    "claim must follow from the readings given, and any strategy you name must "
+    "match its real direction. A put credit spread profits if prices hold up or "
+    "rise (bullish to neutral). A call credit spread profits if prices stay down "
+    "(bearish to neutral). Buying puts or a put debit spread is bearish; buying "
+    "calls or a call debit spread is bullish; an iron condor profits if prices "
+    "stay in a range (neutral). Never describe a put credit spread as bearish. "
+    "Never describe a call credit spread as bullish. If the readings point "
+    "different ways, say so plainly and let the posture reflect the conflict "
+    "rather than blending them; if you are not sure a strategy fits, give the "
+    "posture without naming one. Treat sentiment, bias and signal as ONE "
+    "reading. Say where "
     "the readings agree or conflict. Close with a practical trading posture in "
     "plain words; standard options terms such as 'put credit spreads' are fine "
     "when the advice needs them. No prices, no percent moves, no preamble, no "
@@ -592,13 +606,62 @@ def read_summary_packet(bus, now=None):
         return None
 
 
+# A sentence end: . ! or ? (optionally followed by a closing quote or bracket)
+# that is followed by whitespace or the end of the text — so the point in
+# "0.85x" is not one.
+_SENTENCE_END = re.compile(r"[.!?][\"'”’)\]]*(?=\s|$)")
+
+
+def _complete_sentences(text):
+    """``text`` up to the end of its last complete sentence, or "" when it has
+    none. Used only on a reply that ran out of room: what the reader sees is
+    always whole sentences, never a word cut in half."""
+    text = str(text or "")
+    ends = list(_SENTENCE_END.finditer(text))
+    return text[:ends[-1].end()].strip() if ends else ""
+
+
+# (wrong direction word, spread side): a PUT credit spread is bullish-to-neutral
+# (it profits when prices hold up), a CALL credit spread bearish-to-neutral.
+# Accuracy is paramount — the 20:42 CT sentence on 2026-09-10 called put credit
+# spreads "bearish trades".
+_WRONG_SPREAD_DIRECTION = (("bearish", "put"), ("bullish", "call"))
+
+
+def _spread_direction_error(text):
+    """The phrase that ties a credit spread to the WRONG direction, or None.
+
+    Deliberately narrow: it looks only where a direction word is attached to the
+    spread itself ("bearish trades like put credit spreads", "put credit spreads
+    are a bearish play"), not anywhere in the same sentence — so a correct
+    "despite the bearish read, put credit spreads still fit" passes. A hit
+    withholds the sentence: the last good one stays up and the same readings are
+    retried after the gap."""
+    t = " ".join(str(text or "").lower().split())
+    for adj, side in _WRONG_SPREAD_DIRECTION:
+        spread = rf"{side} credit spreads?"
+        for pattern in (
+                rf"\b{adj}\b[^.;:!?]{{0,25}}?\b(?:like|such as|via|using|with|through)\s+{spread}\b",
+                rf"\b{spread}\s*(?:,|—|-|are|is)?\s*(?:an?\s+|the\s+)?{adj}\b"):
+            found = re.search(pattern, t)
+            if found:
+                return found.group(0)
+    return None
+
+
 def generate_summary(packet, client=None):
     """Call Claude for the 1-2 sentence consolidated read + posture.
 
     Returns ``{"narrative", "inputs", "as_of"}`` on the no-client path (dev / no
     key) with an empty narrative — never a fabricated one — and on a successful
-    call. Returns ``None`` when the attempt FAILED (API error, timeout), so the
-    caller keeps the last good sentence rather than blanking it."""
+    call. A finished reply is shown whole, never shortened; one that ran out of
+    room keeps only its complete sentences.
+
+    Returns ``None`` — so the caller keeps the last good sentence and the same
+    readings are retried after the gap — when the attempt FAILED (API error,
+    timeout), when a reply that ran out of room has no complete sentence, or when
+    the reply ties a credit spread to the wrong direction (accuracy first: a
+    wrong sentence is worse than a slightly older right one)."""
     import json
     from datetime import timezone
     out = {"narrative": "", "inputs": packet or {},
@@ -613,12 +676,24 @@ def generate_summary(packet, client=None):
             thinking={"type": "disabled"},
             system=_SUMMARY_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(packet)}])
-        if getattr(resp, "stop_reason", None) == "max_tokens":
-            log.warning("market summary hit max_tokens (%d) - the sentence may "
-                        "be cut", _SUMMARY_MAX_TOKENS)
         text = "".join(getattr(b, "text", "") for b in getattr(resp, "content", []) or [])
-        out["narrative"] = " ".join(text.split()).strip()[:_SUMMARY_MAX_CHARS]
+        cut_off = getattr(resp, "stop_reason", None) == "max_tokens"
     except Exception:  # noqa: BLE001 — never raise out of a summary attempt.
         log.warning("market summary generation failed", exc_info=True)
         return None
+    text = " ".join(text.split()).strip()
+    if cut_off:
+        log.warning("market summary hit max_tokens (%d) - keeping only its "
+                    "complete sentences", _SUMMARY_MAX_TOKENS)
+        text = _complete_sentences(text)
+        if not text:
+            log.warning("market summary withheld - it ran out of room before "
+                        "finishing a sentence")
+            return None
+    wrong = _spread_direction_error(text)
+    if wrong:
+        log.warning("market summary withheld - it ties a credit spread to the "
+                    "wrong direction: %r", wrong)
+        return None
+    out["narrative"] = text
     return out

@@ -723,12 +723,16 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&amp;L, and how many need attention. <em>At risk</em> and <em>Rescue</em> are the two
 that count toward that total; <em>Watch</em> does not.</p>
 <p><strong>Market Summary.</strong> Full width, across the bottom. One Claude-written sentence (at
-most two, at most 350 characters) consolidating the six readings above it —
-Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and closing with a trading
-posture, next to an <strong>"as of HH:MM CT"</strong> timestamp. It is written in <strong>plain
-everyday English</strong>: it says what the readings mean rather than repeating the
-app's labels, scores or position sizes (the chips under it carry those), keeping
-only simple counts and standard options terms such as "put credit spreads".</p>
+most two, always shown complete — never cut off mid-sentence) consolidating the
+six readings above it — Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and
+closing with a trading posture, next to an <strong>"as of HH:MM CT"</strong> timestamp. It is
+written in <strong>plain everyday English</strong>: it says what the readings mean rather than
+repeating the app's labels, scores or position sizes (the chips under it carry
+those), keeping only simple counts and standard options terms such as "put credit
+spreads". <strong>Accuracy comes first</strong>: the prompt states each strategy's real
+direction (a put credit spread is bullish-to-neutral, a call credit spread
+bearish-to-neutral), and a sentence that ties a credit spread to the wrong
+direction is withheld rather than shown — the previous sentence stays up.</p>
 <p>It is written <strong>on change, not on a clock</strong>: <code>market_svc</code> builds a fingerprint of
 the six readings at display resolution on every poll, and writes a new sentence
 only when that fingerprint differs from the one the current sentence was written

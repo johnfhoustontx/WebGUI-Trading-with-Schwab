@@ -33,6 +33,17 @@ app's labels and scores.)
   `_REGIME_MEANINGS`) and tells the model never to guess;
   `test_the_summary_prompt_explains_every_word_the_screen_can_show` pins both key
   sets against the words the screen can show.
+- **Accuracy first, and never a cut-off sentence (same evening).** The next
+  sentence (20:42 CT) called put credit spreads "bearish trades" — they are
+  bullish-to-neutral — and ended "… rather than chas", because the old
+  400-character slice cut it mid-word. The prompt now leads its rules with
+  "accuracy is paramount", states each strategy's real direction, and asks for a
+  conflict between the readings to be named rather than blended.
+  `generate_summary` withholds a reply that ties a credit spread to the wrong
+  direction (`_spread_direction_error`) — the last good sentence stays and the
+  readings are retried after the gap — and never truncates: a finished reply is
+  shown whole, one that ran out of room is trimmed to its complete sentences, and
+  one with none is withheld. `_SUMMARY_MAX_CHARS` is gone.
 - Docs: the design doc's Prompt paragraph, the User Guide and Reference Guide
   Market Summary descriptions, `page_help.py`, `docs/webgui-routes.md`.
 

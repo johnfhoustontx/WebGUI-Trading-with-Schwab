@@ -263,3 +263,77 @@ def test_the_prompt_says_what_every_regime_word_means():
 def test_the_prompt_tells_the_model_to_translate_rather_than_guess():
     s = compute._SUMMARY_SYSTEM.lower()
     assert "never guess what a label means" in s
+
+
+# ── never a cut-off sentence ─────────────────────────────────────────────────
+# On 2026-09-10 a 400-character slice published "... rather than chas". A reply
+# that finished is shown whole; one that ran out of room keeps only its
+# complete sentences; one with no complete sentence publishes nothing.
+
+def test_a_long_complete_reply_is_published_whole():
+    long = ("Investors look relaxed, which this model reads as a warning. " * 8).strip()
+    assert len(long) > 400
+    out = compute.generate_summary(_packet(), client=_client(long))
+    assert out["narrative"] == long
+
+
+def test_a_reply_that_ran_out_of_room_keeps_only_its_complete_sentences():
+    out = compute.generate_summary(
+        _packet(), client=_client("Prices drift lower. Stay defensive and favor sma",
+                                  stop="max_tokens"))
+    assert out["narrative"] == "Prices drift lower."
+
+
+def test_a_cut_off_reply_with_no_complete_sentence_publishes_nothing():
+    assert compute.generate_summary(
+        _packet(), client=_client("Prices drift lower and", stop="max_tokens")) is None
+
+
+def test_a_decimal_point_is_not_a_sentence_end():
+    assert compute._complete_sentences("Size is 0.85x now. Then it tri") == \
+        "Size is 0.85x now."
+
+
+# ── accuracy is paramount: spread directions ─────────────────────────────────
+# The 20:42 CT sentence called put credit spreads "bearish trades". They are
+# bullish-to-neutral (they profit when prices hold up).
+
+def test_the_prompt_puts_accuracy_first_and_states_each_spreads_direction():
+    s = compute._SUMMARY_SYSTEM.lower()
+    for phrase in ("accuracy is paramount",
+                   "a put credit spread profits if prices hold up or rise",
+                   "a call credit spread profits if prices stay down",
+                   "never describe a put credit spread as bearish",
+                   "never describe a call credit spread as bullish",
+                   "if the readings point different ways, say so"):
+        assert phrase in s, phrase
+
+
+def test_a_sentence_that_gets_a_spreads_direction_wrong_is_not_published(caplog):
+    """Withheld, not shown: the last good sentence stays, and the loop retries
+    the same readings after the gap (generate_summary returning None)."""
+    import logging
+    wrong = ("Prices drift lower; stay defensive and favor hedged, smaller "
+             "bearish trades like put credit spreads.")
+    with caplog.at_level(logging.WARNING, logger="market_svc.compute"):
+        assert compute.generate_summary(_packet(), client=_client(wrong)) is None
+    assert any("spread" in r.getMessage() for r in caplog.records)
+
+
+def test_the_spread_direction_check_flags_real_contradictions():
+    bad = compute._spread_direction_error
+    assert bad("favor hedged, smaller bearish trades like put credit spreads")
+    assert bad("put credit spreads are a bearish play here")
+    assert bad("put credit spreads, a bearish bet")
+    assert bad("lean bullish with call credit spreads")
+    assert bad("call credit spreads are a bullish trade")
+
+
+def test_the_spread_direction_check_leaves_correct_sentences_alone():
+    ok = compute._spread_direction_error
+    assert ok("despite the bearish read, put credit spreads still fit a market "
+              "that is holding up") is None
+    assert ok("favor put credit spreads, a bullish-to-neutral trade") is None
+    assert ok("the tone is bearish, so favor call credit spreads") is None
+    assert ok("lean bearish with put debit spreads") is None
+    assert ok("") is None and ok(None) is None

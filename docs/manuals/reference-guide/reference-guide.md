@@ -265,12 +265,16 @@ unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
 **Market Summary.** Full width, across the bottom. One Claude-written sentence (at
-most two, at most 350 characters) consolidating the six readings above it —
-Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and closing with a trading
-posture, next to an **"as of HH:MM CT"** timestamp. It is written in **plain
-everyday English**: it says what the readings mean rather than repeating the
-app's labels, scores or position sizes (the chips under it carry those), keeping
-only simple counts and standard options terms such as "put credit spreads".
+most two, always shown complete — never cut off mid-sentence) consolidating the
+six readings above it — Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — and
+closing with a trading posture, next to an **"as of HH:MM CT"** timestamp. It is
+written in **plain everyday English**: it says what the readings mean rather than
+repeating the app's labels, scores or position sizes (the chips under it carry
+those), keeping only simple counts and standard options terms such as "put credit
+spreads". **Accuracy comes first**: the prompt states each strategy's real
+direction (a put credit spread is bullish-to-neutral, a call credit spread
+bearish-to-neutral), and a sentence that ties a credit spread to the wrong
+direction is withheld rather than shown — the previous sentence stays up.
 
 It is written **on change, not on a clock**: `market_svc` builds a fingerprint of
 the six readings at display resolution on every poll, and writes a new sentence
