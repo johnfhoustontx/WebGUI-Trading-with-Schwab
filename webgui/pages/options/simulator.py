@@ -77,6 +77,13 @@ _PNL_GREEN_FILL = {"linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
                    "stops": [[0, "rgba(52,211,153,0.45)"], [1, "rgba(52,211,153,0.04)"]]}
 _PNL_RED_FILL = {"linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
                  "stops": [[0, "rgba(248,113,113,0.04)"], [1, "rgba(248,113,113,0.45)"]]}
+# What-if tooltip: price and P/L to exactly two decimals, sign before the "$".
+_WHATIF_TOOLTIP_JS = (
+    "function(){var y=this.y;"
+    "var m=Math.abs(y).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});"
+    "return 'Price <b>'+this.x.toFixed(2)+'</b><br/>Profit / loss <b>'"
+    "+(y<0?'-':'')+'$'+m+'</b>';}"
+)
 _BAND_GREEN = "rgba(52,211,153,0.06)"
 _BAND_RED = "rgba(248,113,113,0.06)"
 
@@ -160,7 +167,11 @@ def whatif_figure(df, spot, target_s=None, baseline=None):
         "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying price"}, "plotLines": xplotlines},
         "yAxis": {**_DARK_AXIS, "title": {"text": "Profit / loss"}, "plotLines": yplotlines,
                   "plotBands": yplotbands},
-        "tooltip": {"pointFormat": "Price {point.x:g}: profit / loss <b>${point.y:,.0f}</b>"},
+        # Two decimals on both figures, and a loss reads "-$1,317.00" rather than
+        # "$-1,317". A formatter is the only way to put the sign before the "$" —
+        # and it replaces the default header, which printed the raw sweep price
+        # (87.33760000000001). Shipped via NiceGUI's ":"-prefixed key.
+        "tooltip": {":formatter": _WHATIF_TOOLTIP_JS},
         # Smooth transition when the chart is updated in place on a slider change.
         "plotOptions": {"series": {"animation": {"duration": 500}}},
         # Area filled to the 0 threshold: the part above zero is green (profit), the

@@ -674,3 +674,18 @@ def test_a_calculator_handoff_names_its_strategy_and_raises_no_edited_chip():
     _fire(container, "_poll_meta")
     assert _visible(container, "sim-edited") is False
     assert len(_leg_cards(container)) == 4
+
+
+def test_whatif_tooltip_shows_two_decimals_and_a_leading_minus():
+    """Reported from prod: the tooltip printed the raw sweep price
+    '87.33760000000001' (twice: the header plus the '{point.x:g}' line) and the
+    P/L as '$-1,317'. The price and the P/L now show exactly two decimals, and a
+    loss reads '-$1,317.00'. A JS formatter (NiceGUI's ':'-prefixed key) is the
+    only way to put the sign before the dollar sign; it also replaces the default
+    header, which is where the unrounded x came from."""
+    tip = sim.whatif_figure([{"S": 87.33760000000001, "theo_price": -1317.0}], spot=89.0)["tooltip"]
+    assert "pointFormat" not in tip and "headerFormat" not in tip
+    js = tip[":formatter"]
+    assert js.startswith("function(){") and "this.x.toFixed(2)" in js
+    assert "minimumFractionDigits:2" in js and "maximumFractionDigits:2" in js
+    assert "y<0?'-':''" in js                      # the sign goes before the $

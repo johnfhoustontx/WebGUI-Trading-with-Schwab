@@ -49,6 +49,10 @@ position's own profit and loss on a scrubber that finally reaches every bar.)
   option type only (a Sep put spread beside an Oct call spread was called
   uncovered); `whatif_baseline` is `None`, not `0.0`, when its sweep is empty;
   and a near-zero delta reads "0", not "-0".
+- **Follow-up from prod (07:40 CT).** The What-if tooltip printed the raw sweep
+  price (`87.33760000000001`) and a loss as `$-1,317`. A formatter now shows
+  exactly two decimals on both and puts the sign first (`-$1,317.00`); checked
+  in a browser, including after a slider moves the chart in place.
 - **Design:** [2026-09-11-simulator-friendlier-ui-design.md](plans/2026-09-11-simulator-friendlier-ui-design.md).
 
 **Prior — 2026-09-11** (**IYT joins the Market Dashboard** — the iShares
