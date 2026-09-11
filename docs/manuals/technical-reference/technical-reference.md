@@ -312,8 +312,12 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 ## Scoring conventions (shared idioms)
 
-- **Sentiment scores** are integers **1–10, contrarian** (10 = max fear /
-  opportunity, 1 = max greed / risk). `0` means "input undefined".
+- **Sentiment scores** are integers **1–10, where higher means calmer, more
+  supportive conditions** (10 = calmest / most risk-on, 1 = most stress). They are
+  **not** contrarian: a VIX spike, VIX backwardation, heavy put buying and a weak
+  tape all score low (pinned by `sentiment-dashboard/tests/test_scale_direction.py`).
+  This manual called the scale contrarian until 2026-09-11, which was backwards.
+  `0` means "input undefined".
 - **Confidence** is a float in `[0.0, 1.0]`. Missing data → `0.0`; partial →
   fractional (often `sqrt(fields_present / fields_possible)`).
 - **Composites are confidence-weighted**, never a plain weighted average, so a
@@ -411,12 +415,13 @@ The composite uses **cap-weighted per-sector** put/call ratios
 
 ```
 blended_pcr = Σ(pcr_etf · weight_etf) / Σ(weight_etf)        # S&P cap weights
-score       = interpolate(PC_THRESHOLDS, blended_pcr)        # clamp 1..10
+score       = step_lookup(PC_THRESHOLDS, blended_pcr)        # clamp 1..10
 confidence  = sqrt(sectors_used / sectors_possible)
 ```
 
-`PC_THRESHOLDS` (ratio, score) — interpolated linearly between points; higher P/C
-(more fear) scores higher:
+`PC_THRESHOLDS` (ratio, score) — a step lookup, not an interpolation: the first row
+whose ratio the blended P/C meets or exceeds sets the score. Heavier put buying
+(higher P/C) scores **lower**; call-heavy flow scores higher:
 
 ```
 [(1.3, 1), (1.1, 2), (0.9, 5), (0.7, 8), (0.0, 10)]

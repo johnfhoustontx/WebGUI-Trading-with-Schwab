@@ -162,9 +162,8 @@ Three things are worth knowing before you trust a screen:
 - **DTE** means days to expiration. **0-DTE** means expiring today.
 - **PCS** = put credit spread (mildly bullish). **CCS** = call credit spread (mildly
   bearish). **IC** = iron condor (both, neutral).
-- Scores are **0–100 with higher meaning better**, except the sentiment composite,
-  which is **0–10 and contrarian** — high means fearful, which historically has been
-  the better time to sell premium.
+- Scores are **0–100 with higher meaning better**. The sentiment composite runs
+  **0–10**: high means calm, supportive conditions and low means stress.
 
 ---
 
@@ -292,9 +291,9 @@ Underneath the sentence sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNA
 REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear
 strip already poll, so they are current even while the sentence above them lags
 behind. Hovering a chip opens the same hover its counterpart uses elsewhere on the
-page; the Sentiment chip's own hover reads "The sentiment composite, 0–10.
-Contrarian: a higher score means more fear, which this model reads as
-opportunity." and the Bull/Bear chip's hover lists every quadrant's count and
+page; the Sentiment chip's own hover reads "The sentiment composite, 0–10. A
+higher score means calmer, more supportive conditions (quieter volatility, more
+call buying, broader gains); a lower score means stress." and the Bull/Bear chip's hover lists every quadrant's count and
 which horizon (today or the quarter) it was counted on.
 
 A dim **"Readings have changed since this was written."** line appears under the
@@ -887,12 +886,13 @@ The app's mood reading, presented as the **Market Regime Console** — a single 
 that answers two separate questions: *how does the market feel* (sentiment) and *how is
 it behaving* (regime).
 
-**The most important thing to understand: the sentiment score is contrarian.** It runs
-0–10, and **high means fearful**. A reading of 8 does not mean the market is happy; it
-means participants are defensive — buying puts, bidding volatility, rotating to
-defensives. Historically that has been the better environment to *sell* premium, which
-is what this app is mostly built to do. A low reading means complacency, which is when
-selling premium pays least and hurts most.
+**The most important thing to understand: a high sentiment score means calm,
+supportive conditions — not fear.** It runs 0–10. A reading of 8 means volatility is
+quiet, options traders lean toward calls, most stocks are advancing and cyclical
+sectors are leading. A low reading means stress: volatility bid, heavy put buying, a
+weak tape, money rotating into defensives. Every input scores stress low. (Earlier
+versions of this guide called the scale contrarian, with high meaning fearful. That
+was backwards.)
 
 Alongside it sits **Market Trend**, which is directional and runs 0–100 on the ordinary
 convention: 50 is neutral, 100 is strongly bullish.
@@ -950,9 +950,9 @@ Buyers exhausted at highs — favor CCS, trim longs."*
 **The Signals column** is four tiles: **BIAS** (market direction), **SIGNAL** (strength
 and momentum), **YESTERDAY** (previous close) and **CHANGE**. **Hover BIAS or SIGNAL**
 and the word explains itself — including the same Bias word on the Sentiment card's
-pill. Both words are bands of the one sentiment composite, and that scale is
-**contrarian**: a *Bullish* signal means the crowd is fearful, not that price is
-rising.
+pill. Both words are bands of the one sentiment composite, where high means calm,
+supportive conditions: a *Bullish* signal describes a supportive backdrop — not fear,
+and not a promise that price will rise.
 
 | Composite | Bias | Signal | Position size |
 |---|---|---|---|

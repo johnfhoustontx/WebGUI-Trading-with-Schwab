@@ -225,8 +225,8 @@ Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-
 the four panels; the public live Desk renders it too.
 
 - **A short plain-English summary** (`market_svc`'s existing ticker-narrative
-  call, Sonnet 5) consolidating six readings — Sentiment (0–10 contrarian
-  composite), Trend (flight word + score), Bias, Signal, Regime, Bull/Bear
+  call, Sonnet 5) consolidating six readings — Sentiment (0–10 composite,
+  high = calm and supportive, low = stress), Trend (flight word + score), Bias, Signal, Regime, Bull/Bear
   (sector quadrant counts, today once the bell has rung else the quarter) — and
   closing with a posture, next to an **"as of HH:MM CT"** timestamp. **The code
   states the facts**: `compute.summary_facts` writes one plain-English statement
@@ -254,8 +254,10 @@ the four panels; the public live Desk renders it too.
   off the views the page already polls, so they are current even while the
   sentence above them lags. Each carries the same hover its counterpart uses
   elsewhere on the page, plus two new ones: **Sentiment** — "The sentiment
-  composite, 0–10. Contrarian: a higher score means more fear, which this model
-  reads as opportunity." (`desk.SENTIMENT_TIP`) — and **Bull/Bear** —
+  composite, 0–10. A higher score means calmer, more supportive conditions
+  (quieter volatility, more call buying, broader gains); a lower score means
+  stress." (`desk.SENTIMENT_TIP`; it called the scale contrarian until
+  2026-09-11, which was backwards) — and **Bull/Bear** —
   `bullbear_distribution(counts, live)`, the full four-quadrant distribution and
   its horizon, e.g. "Rising · Leading 4 · Falling · Lagging 2 — counted on
   today's moves."

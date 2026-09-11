@@ -51,7 +51,7 @@ def _safe_float(v, default=0.0):
 
 
 def cap_weighted_pcr(pcr, weights):
-    """Cap-weighted RAW cross-sector Put/Call ratio (NOT the 1-10 contrarian score).
+    """Cap-weighted RAW cross-sector Put/Call ratio (NOT the 1-10 put_call score).
 
     Only sectors that have BOTH a pcr and a non-zero cap weight contribute.
     Higher = more puts = more downside hedging. Returns None when no usable

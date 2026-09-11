@@ -811,8 +811,12 @@ clamping is pure code in <code>guardrails.py</code>, never the model.</p>
 </table>
 <h2 id="scoring-conventions-shared-idioms">Scoring conventions (shared idioms)</h2>
 <ul>
-<li><strong>Sentiment scores</strong> are integers <strong>1–10, contrarian</strong> (10 = max fear /
-  opportunity, 1 = max greed / risk). <code>0</code> means "input undefined".</li>
+<li><strong>Sentiment scores</strong> are integers <strong>1–10, where higher means calmer, more
+  supportive conditions</strong> (10 = calmest / most risk-on, 1 = most stress). They are
+  <strong>not</strong> contrarian: a VIX spike, VIX backwardation, heavy put buying and a weak
+  tape all score low (pinned by <code>sentiment-dashboard/tests/test_scale_direction.py</code>).
+  This manual called the scale contrarian until 2026-09-11, which was backwards.
+  <code>0</code> means "input undefined".</li>
 <li><strong>Confidence</strong> is a float in <code>[0.0, 1.0]</code>. Missing data → <code>0.0</code>; partial →
   fractional (often <code>sqrt(fields_present / fields_possible)</code>).</li>
 <li><strong>Composites are confidence-weighted</strong>, never a plain weighted average, so a
@@ -933,11 +937,12 @@ where the two present components average <strong>6.5</strong>.</p>
 <p>The composite uses <strong>cap-weighted per-sector</strong> put/call ratios
 (<code>score_sector_weighted</code>):</p>
 <pre><code>blended_pcr = Σ(pcr_etf · weight_etf) / Σ(weight_etf)        # S&amp;P cap weights
-score       = interpolate(PC_THRESHOLDS, blended_pcr)        # clamp 1..10
+score       = step_lookup(PC_THRESHOLDS, blended_pcr)        # clamp 1..10
 confidence  = sqrt(sectors_used / sectors_possible)
 </code></pre>
-<p><code>PC_THRESHOLDS</code> (ratio, score) — interpolated linearly between points; higher P/C
-(more fear) scores higher:</p>
+<p><code>PC_THRESHOLDS</code> (ratio, score) — a step lookup, not an interpolation: the first row
+whose ratio the blended P/C meets or exceeds sets the score. Heavier put buying
+(higher P/C) scores <strong>lower</strong>; call-heavy flow scores higher:</p>
 <pre><code>[(1.3, 1), (1.1, 2), (0.9, 5), (0.7, 8), (0.0, 10)]
 </code></pre>
 <p>The single-market variant <code>score(pc_equity, pc_ma, skew)</code> adds ±1 adjustments for

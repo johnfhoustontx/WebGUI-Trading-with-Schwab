@@ -1646,6 +1646,15 @@ def test_every_summary_chip_carries_its_own_hover(monkeypatch):
     assert "today" in tips["bullbear"]
 
 
+def test_the_sentiment_chip_hover_states_the_scales_real_direction():
+    """High = calm and supportive (sentiment-dashboard test_scale_direction.py
+    pins it). Until 2026-09-11 this hover called the scale contrarian."""
+    tip = d.SENTIMENT_TIP.lower()
+    assert "calm" in tip and "stress" in tip
+    for banned in ("contrarian", "fear", "greed", "complacen"):
+        assert banned not in tip, banned
+
+
 def test_the_summary_is_current_when_the_readings_match_its_inputs(monkeypatch):
     assert _facts(monkeypatch)["moved"] is False
 

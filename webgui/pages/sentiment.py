@@ -590,39 +590,40 @@ def _word_tone(word):
 
 
 # The hover on a BIAS or SIGNAL word. Both come from ONE number —
-# live_composite.signal_band(total) over the 0-10 composite — and that scale is
-# CONTRARIAN: a high score means fear, which this model reads as opportunity. So
-# each sentence says which band its word covers; "Bullish" here means the crowd
-# is fearful, not that price is rising. Keyed by tile as well as word, because
-# "Neutral" is in both vocabularies. The cut-offs and sizes restate
-# signal_band's, and shared/tests/test_cross_tier_mirrors.py fails if the two
-# part company.
+# live_composite.signal_band(total) over the 0-10 composite — and that scale
+# scores calm, supportive conditions HIGH and stress LOW (a VIX spike and heavy
+# put buying both score low; sentiment-dashboard/tests/test_scale_direction.py).
+# Until 2026-09-11 these hovers called it contrarian ("Bullish means the crowd
+# is fearful"), the opposite of what the scorers measure. Keyed by tile as well
+# as word, because "Neutral" is in both vocabularies. The cut-offs and sizes
+# restate signal_band's, and shared/tests/test_cross_tier_mirrors.py fails if
+# the two part company.
 BAND_WORD_PICTURE = {
     "bias": {
-        "long": "Lean long: the sentiment composite is 7 or higher, so the "
-                "crowd is fearful — and this model reads fear as opportunity. "
-                "Position size 1.10x, or 1.25x at 9 and above.",
+        "long": "Lean long: the sentiment composite is 7 or higher, so market "
+                "conditions are calm and supportive. Position size 1.10x, or "
+                "1.25x at 9 and above.",
         "neutral": "No lean: the sentiment composite is between 5 and 7, so "
-                   "fear and greed are roughly balanced. Standard position "
-                   "size, 1.00x.",
+                   "conditions are mixed. Standard position size, 1.00x.",
         "cautious": "Lean defensive: the sentiment composite is between 3 and "
-                    "5, so the crowd is growing complacent. Position size "
+                    "5, so conditions are under some stress. Position size "
                     "trimmed to 0.85x.",
-        "short": "Lean short: the sentiment composite is below 3, so greed is "
-                 "extreme — and this model reads complacency as risk. Smallest "
-                 "position size, 0.70x.",
+        "short": "Lean short: the sentiment composite is below 3, so "
+                 "conditions are under heavy stress. Smallest position size, "
+                 "0.70x.",
     },
     "signal": {
-        "strong bull": "The sentiment composite is 9 or higher: extreme fear, "
-                       "the strongest contrarian buy reading.",
-        "bullish": "The sentiment composite is 7 to 9: elevated fear, a "
-                   "contrarian lean toward buyers.",
-        "neutral": "The sentiment composite is 5 to 7: no contrarian edge "
-                   "either way.",
-        "bearish": "The sentiment composite is 3 to 5: complacency building, "
-                   "a contrarian lean toward sellers.",
-        "strong bear": "The sentiment composite is below 3: extreme greed, "
-                       "the strongest contrarian warning.",
+        "strong bull": "The sentiment composite is 9 or higher: very calm, "
+                       "supportive conditions, the strongest reading in favor "
+                       "of buyers.",
+        "bullish": "The sentiment composite is 7 to 9: calm, supportive "
+                   "conditions, a lean toward buyers.",
+        "neutral": "The sentiment composite is 5 to 7: mixed conditions, no "
+                   "edge either way.",
+        "bearish": "The sentiment composite is 3 to 5: conditions under some "
+                   "stress, a lean toward sellers.",
+        "strong bear": "The sentiment composite is below 3: heavy stress, the "
+                       "strongest warning.",
     },
 }
 

@@ -999,8 +999,9 @@ def regime_tone(reg):
 # sentence lags. Design: docs/plans/2026-09-10-desk-market-summary-design.md.
 SUMMARY_EMPTY = "No summary yet — one is written when the readings next change."
 SUMMARY_MOVED = "Readings have changed since this was written."
-SENTIMENT_TIP = ("The sentiment composite, 0–10. Contrarian: a higher score "
-                 "means more fear, which this model reads as opportunity.")
+SENTIMENT_TIP = ("The sentiment composite, 0–10. A higher score means calmer, "
+                 "more supportive conditions (quieter volatility, more call "
+                 "buying, broader gains); a lower score means stress.")
 _SUMMARY_HORIZON = {True: "today", False: "quarter"}
 
 # The six chip labels, in ``summary_facts``' own order — used ONLY to build the

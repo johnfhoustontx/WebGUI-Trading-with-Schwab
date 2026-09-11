@@ -196,7 +196,7 @@ flow) are independent.
 
 ## Scoring conventions
 
-- Scores are **integers 1–10**, contrarian (10 = max fear / opportunity, 1 = max greed / risk). Use `0` only when the input is undefined.
+- Scores are **integers 1–10, higher = calmer, more supportive conditions** (10 = calmest / most risk-on, 1 = most stress). **Not contrarian**: a VIX spike, backwardation, heavy put buying and a weak tape all score LOW - `tests/test_scale_direction.py` pins it. Every screen and manual called the scale contrarian ("10 = max fear") until 2026-09-11 and told the reader investors were fearful on calm days; any sentence describing the scale must match these tests. (`options-scanner/regime_filter.py` always read it correctly.) The bridge field `contrarian_signal` keeps its historical name - bridge fields are additive-only. Use `0` only when the input is undefined.
 - Confidence is `float ∈ [0.0, 1.0]`. Missing data → `0.0`. Partial data → fractional.
 - Piecewise mappings use **narrow neutral bands** (typically 0.95–1.05 of normal) so small moves through the breakpoint produce visible score changes.
 - Composite is **confidence-weighted**: `composite = Σ(w·s·c) / Σ(w·c)`. A low-confidence component cannot dominate.

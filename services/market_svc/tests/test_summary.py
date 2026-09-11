@@ -165,7 +165,8 @@ def _with_facts(posture, packet=None):
 
 def test_the_facts_state_each_reading_in_plain_english():
     assert compute.summary_facts(_packet()) == [
-        "Investors are growing complacent, which this model reads as a warning.",
+        "Market conditions are under some stress, which this model reads as a "
+        "warning.",
         "The model suggests trading smaller than usual.",
         "Prices are drifting lower, but sellers are not pushing them.",
         "The market is choppy: lots of movement but no progress.",
@@ -182,6 +183,28 @@ def test_every_word_the_screen_can_show_has_its_fact():
     for word, fact in compute._REGIME_FACTS.items():
         assert fact == "" if word == "Unclear" else fact.endswith("."), word
     assert all(f.endswith(".") for f in compute._SENTIMENT_FACTS.values())
+
+
+def test_the_sentiment_facts_describe_conditions_not_fear():
+    """The composite scores calm, supportive conditions HIGH (a VIX spike and
+    heavy put buying score low - pinned by sentiment-dashboard's
+    test_scale_direction.py). Until 2026-09-11 these read it as contrarian and
+    told the Desk investors were fearful on a calm, rising morning."""
+    assert compute._SENTIMENT_FACTS == {
+        "Strong Bull": "Market conditions are very calm and supportive, which "
+                       "this model reads as a strong reason to lean long.",
+        "Bullish": "Market conditions are calm and supportive, which this "
+                   "model reads as a reason to lean long.",
+        "Neutral": "Market conditions are mixed, so this model sees no edge "
+                   "either way.",
+        "Bearish": "Market conditions are under some stress, which this model "
+                   "reads as a warning.",
+        "Strong Bear": "Market conditions are under heavy stress, which this "
+                       "model reads as a strong warning.",
+    }
+    for fact in compute._SENTIMENT_FACTS.values():
+        for word in ("fear", "complacen", "contrarian", "greed"):
+            assert word not in fact.lower(), (word, fact)
 
 
 def test_no_fact_carries_punctuation_the_model_rewrites():
@@ -241,8 +264,8 @@ def test_a_fact_joined_mid_sentence_still_counts_as_stated():
     """Joining may lower-case a fact's first letter and swap its full stop for
     a comma or 'and' - the words themselves must survive."""
     facts = compute.summary_facts(_packet())
-    joined = ("Investors are growing complacent, which this model reads as a "
-              "warning, and "
+    joined = ("Market conditions are under some stress, which this model "
+              "reads as a warning, and "
               "the model suggests trading smaller than usual; prices are "
               "drifting lower, but sellers are not pushing them. The market is "
               "choppy: lots of movement but no progress. Today, 2 of the 3 "

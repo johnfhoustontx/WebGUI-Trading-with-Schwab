@@ -492,10 +492,11 @@ def test_a_trend_with_no_word_carries_no_hover():
 
 
 # ── BIAS / SIGNAL hover ──────────────────────────────────────────────────────
-# Both words are bands of ONE number, signal_band(total) over the contrarian
-# 0-10 composite, so the hover says which band — "Bullish" means the crowd is
-# fearful, not that price is rising. Keyed by tile as well as word, because
-# "Neutral" is in both vocabularies.
+# Both words are bands of ONE number, signal_band(total) over the 0-10
+# composite, so the hover says which band. High means calm, supportive
+# conditions (sentiment-dashboard's test_scale_direction.py pins that); until
+# 2026-09-11 these hovers called the scale contrarian. Keyed by tile as well as
+# word, because "Neutral" is in both vocabularies.
 _BIAS_WORDS = ("Long", "Neutral", "Cautious", "Short")
 _SIGNAL_WORDS = ("Strong Bull", "Bullish", "Neutral", "Bearish", "Strong Bear")
 
@@ -513,10 +514,22 @@ def test_neutral_is_described_for_its_own_tile():
             != S.band_word_picture("signal", "Neutral"))
 
 
-def test_the_signal_hover_says_the_reading_is_contrarian():
-    """The trap the hover exists for: 'Bullish' read as 'price is rising'."""
-    for word in _SIGNAL_WORDS:
-        assert "contrarian" in S.band_word_picture("signal", word), word
+def test_the_hovers_describe_conditions_in_the_scales_real_direction():
+    """High = calm and supportive, low = stress. The old hovers read the
+    scale as contrarian ('Bullish means the crowd is fearful'), the opposite
+    of what every scorer measures."""
+    for key, words in (("bias", _BIAS_WORDS), ("signal", _SIGNAL_WORDS)):
+        for word in words:
+            tip = S.band_word_picture(key, word).lower()
+            for banned in ("contrarian", "fear", "greed", "complacen"):
+                assert banned not in tip, (key, word, banned)
+    for word in ("Strong Bull", "Bullish"):
+        assert "calm" in S.band_word_picture("signal", word), word
+    assert "calm" in S.band_word_picture("bias", "Long")
+    for word in ("Bearish", "Strong Bear"):
+        assert "stress" in S.band_word_picture("signal", word), word
+    for word in ("Cautious", "Short"):
+        assert "stress" in S.band_word_picture("bias", word), word
 
 
 def test_a_dash_or_an_unknown_word_has_no_hover():

@@ -396,8 +396,8 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   other click on the page unlocks it too, the button just says so.
 
 **Market Summary** is the frame across the bottom. It reads the six panels above
-it together in plain English and closes with a posture — for example "Investors
-are growing complacent, which this model reads as a warning. The model suggests
+it together in plain English and closes with a posture — for example "Market
+conditions are under some stress, which this model reads as a warning. The model suggests
 trading smaller than usual. Prices are drifting lower, but sellers are not
 pushing them. … Stay cautious and favor defined-risk trades." The statement of
 each reading is written by the app itself, so it always matches the reading;
@@ -590,8 +590,9 @@ The **Market Regime Console** — market mood and market character on one screen
 updates on its own about every two minutes whether or not the page is open; press
 **Refresh** to force it.
 
-- **Market Sentiment ring** — a 0–10 **contrarian** composite (higher = more fear,
-  historically the better environment to sell premium), drawn as three arcs on one
+- **Market Sentiment ring** — a 0–10 composite of market conditions (higher =
+  calmer and more supportive: quieter volatility, more call buying, broader gains;
+  lower = stress). It is **not** a fear gauge. Drawn as three arcs on one
   dial: **Day**, **Week** (the last 5 sessions' average) and **Month** (the full
   history's average). A **Model confidence** figure sits beneath it.
 - **Market Trend ring** — the same three horizons for direction, 0–100, where 50 is
@@ -600,8 +601,9 @@ updates on its own about every two minutes whether or not the page is open; pres
   to see what it means.
 - **Signals** — four tiles (Bias / Signal / Yesterday / Change) with rate-of-change
   readings and a divergence line beneath. Hover the Bias or Signal word to see which
-  band of the sentiment composite it covers. The scale is contrarian, so *Bullish*
-  means the crowd is fearful, not that price is rising.
+  band of the sentiment composite it covers. A high composite means calm, supportive
+  conditions, so *Bullish* describes a supportive backdrop — not fear, and not a
+  promise that price will rise.
 - **Regime block** — which of five regimes the tape is in (**Balanced**,
   **Trending**, **Breakout**, **Whipsaw**, **Stressed**), a confidence figure,
   diagnostic tags, and a table ranking all five by share with their change since

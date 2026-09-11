@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The Desk's market summary stopped updating
+**Last updated:** 2026-09-11 (**The sentiment score was described backwards
+everywhere a person reads it** — every screen and manual called it contrarian,
+"a high score means fear", while every scorer rates calm, supportive conditions
+HIGH and stress LOW. On a calm, rising morning the Desk told the reader
+"Investors are fearful".)
+
+- **How it surfaced.** The user asked "are investors fearful?" on 2026-09-11 at
+  ~10:00 CT with the composite at 7.72 (Bullish). The tape said no: VIX 16.1 and
+  down ~10%, VIX1D down 46%, VIX under VIX3M, sector put/call 0.88, advance/decline
+  ~1.9:1, cyclicals leading. Each component's own `interp` string agreed —
+  "call-dominated" scored 8, "risk-on rotation" 9.
+- **The scale, measured from the code.** `put_call.PC_THRESHOLDS` gives P/C ≥ 1.3
+  (heavy puts) a 1 and < 0.7 a 10; `vix.score_term` labels ≥ 8 "calm term
+  structure, bullish" and < 5 "stress"; VIX backwardation scores 1; a 4:1 A/D day
+  scores 10. `options-scanner/regime_filter.py` — the one consumer that trades on
+  the score — always read it correctly ("non-contrarian: high = bullish"); only the
+  prose was wrong. The bridge field `contrarian_signal` keeps its name
+  (additive-only contract).
+- **Rewritten:** the five summary facts (`market_svc.compute._SENTIMENT_FACTS`,
+  e.g. Bullish → "Market conditions are calm and supportive, which this model reads
+  as a reason to lean long."), `desk.SENTIMENT_TIP`, the nine BIAS/SIGNAL hovers
+  (`sentiment.BAND_WORD_PICTURE`, cut-offs and sizes unchanged), the `/sentiment`
+  page guide, the User Guide, Reference Guide and Technical Reference (which also
+  called the P/C table "interpolated linearly" — it is a step lookup),
+  `docs/webgui-routes.md` and `sentiment-dashboard/CLAUDE.md`.
+- **Guards.** `sentiment-dashboard/tests/test_scale_direction.py` pins the
+  premise (heavy puts, a VIX spike, backwardation and a weak tape score low). Three
+  wording tests forbid "fear / greed / complacent / contrarian" in the summary
+  facts, the Desk chip hover and the BIAS/SIGNAL hovers, and require "calm" on the
+  bullish bands and "stress" on the bearish ones. The old
+  `test_the_signal_hover_says_the_reading_is_contrarian` — which REQUIRED the wrong
+  word — is replaced.
+- **Tried against the live API before promoting:** each of the five new
+  statements, one call each, passed every check.
+
+**Prior — 2026-09-11** (**The Desk's market summary stopped updating
 whenever the trend read Circling** — the model changed one semicolon, and the
 word-for-word fact check withheld every summary.)
 

@@ -336,20 +336,23 @@ _SUMMARY_MAX_TOKENS = 300
 # either: the model turned Circling's into a comma in 3 of 3 live replies on
 # 2026-09-11, withholding every summary while the trend read Circling.
 #
-# Keyed by the SIGNAL word: the sentiment composite is CONTRARIAN (high = fear =
-# opportunity), and bias and signal are two bands of that one number, so one
-# statement covers both.
+# Keyed by the SIGNAL word: bias and signal are two bands of the one sentiment
+# composite, so one statement covers both. The composite scores calm,
+# supportive conditions HIGH and stress LOW (a VIX spike and heavy put buying
+# both score low - sentiment-dashboard/tests/test_scale_direction.py). Until
+# 2026-09-11 these read it as contrarian and told the Desk investors were
+# fearful on a calm, rising morning.
 _SENTIMENT_FACTS = {
-    "Strong Bull": "Investors are very fearful, which this model reads as a "
-                   "strong buying opportunity.",
-    "Bullish": "Investors are fearful, which this model reads as a buying "
-               "opportunity.",
-    "Neutral": "Investors are neither fearful nor complacent, so this model "
-               "sees no edge either way.",
-    "Bearish": "Investors are growing complacent, which this model reads as a "
-               "warning.",
-    "Strong Bear": "Investors are very complacent, which this model reads as a "
-                   "strong warning.",
+    "Strong Bull": "Market conditions are very calm and supportive, which this "
+                   "model reads as a strong reason to lean long.",
+    "Bullish": "Market conditions are calm and supportive, which this model "
+               "reads as a reason to lean long.",
+    "Neutral": "Market conditions are mixed, so this model sees no edge either "
+               "way.",
+    "Bearish": "Market conditions are under some stress, which this model reads "
+               "as a warning.",
+    "Strong Bear": "Market conditions are under heavy stress, which this model "
+                   "reads as a strong warning.",
 }
 _TREND_FACTS = {
     "Climbing": "Prices are rising, with buyers pushing them up.",

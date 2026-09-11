@@ -497,8 +497,10 @@ the strike. Those shares land here.
     "/sentiment": """
 **Sentiment — the simple version**
 
-A **0–10** read on market mood. It's **contrarian**: a high score means lots of
-fear, which can mean opportunity.
+A **0–10** read on market conditions. A **high score means calm, supportive
+conditions** — quieter volatility, more call buying, broader gains — and a low
+score means stress. It is not a fear gauge: a VIX spike or heavy put buying
+pulls it *down*.
 
 - **Sentiment ring** — three arcs on one dial: **Day** (right now), **Week** (the
   last 5 sessions' average) and **Month** (the full history's average), so you can

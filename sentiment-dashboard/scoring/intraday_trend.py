@@ -2,8 +2,8 @@
 
 Pure functions — scalar in, scalar out (no pandas, no tk, no I/O). The sentiment
 service extracts scalars from proxy data and calls these; the webgui renders the
-result. Distinct from the 1-10 *contrarian* composite: this is *directional*
-(100 = max bull, 0 = max bear). Reuses the confidence-weighted blend idiom of
+result. Distinct from the 1-10 sentiment composite (a read of CONDITIONS -
+calm high, stress low): this is *directional* (100 = max bull, 0 = max bear). Reuses the confidence-weighted blend idiom of
 scoring/composite.py and the state vocabulary of scoring/trend_regime.py.
 """
 from __future__ import annotations
