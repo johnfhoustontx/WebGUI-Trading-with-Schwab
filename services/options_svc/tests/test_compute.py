@@ -2570,9 +2570,12 @@ def test_sim_run_echoes_the_symbol_and_legs_it_priced(monkeypatch):
     legs = [{"kind": "put", "strike": 95, "expiry": exp, "side": "short", "qty": 1},
             {"kind": "put", "strike": 90, "expiry": exp, "side": "long", "qty": 1}]
 
-    out = compute.sim_run("TEST", legs=legs, dt=0.0, mult=1.5)
+    out = compute.sim_run("TEST", legs=legs, dt=3.0, mult=1.5)
     assert out["symbol"] == "TEST"
     assert out["legs"] == legs
+    # and the sliders it was priced at, so the IV-shock headline names the
+    # multiplier that was priced rather than wherever the slider is mid-drag
+    assert out["dt"] == 3.0 and out["mult"] == 1.5
 
 
 def test_sim_run_empty_when_no_snapshot(monkeypatch):

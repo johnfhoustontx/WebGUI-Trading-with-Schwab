@@ -182,9 +182,9 @@ def position_tiles(legs, result):
     never reflows between renders: Entry · Max profit · Max loss · Breakeven(s) ·
     Delta · Theta per day. Every absence is an em-dash with a reason line."""
     result = result or {}
-    facts = payoff_facts(legs, result.get("whatif_baseline")) if result else \
-        {"entry": None, "max_profit": None, "max_loss": None,
-         "breakevens": None, "reason": "unpriced"}
+    # No result is simply no baseline: payoff_facts then says whether the legs are
+    # incomplete or merely unpriced, which are different things to tell a reader.
+    facts = payoff_facts(legs, result.get("whatif_baseline"))
     why = _REASON_TEXT.get(facts["reason"], "")
 
     entry = facts["entry"]
@@ -479,6 +479,7 @@ _SHOCK_ROWS = (
     ("Theta per day", "theta", "money", True),
     ("Vega per volatility point", "vega", "money", None),
 )
+SHOCK_ROW_LABELS = tuple(r[0] for r in _SHOCK_ROWS)
 
 
 def _fmt(kind, v):
@@ -631,3 +632,26 @@ def replay_cursor_text(trace, i):
         parts.append(f"delta {delta:+,.0f}")
     head = replay_categories([stamps[i]])[0]
     return f"{head} — {', '.join(parts)}" if parts else head
+
+
+# -- Task 8: does a result belong to the legs on screen? ---------------------------
+
+def _leg_key(leg):
+    return (str(leg.get("kind") or leg.get("option_type")), num(leg.get("strike")),
+            str(leg.get("expiry")), str(leg.get("side")), num(leg.get("qty", 1)))
+
+
+def result_matches(result, symbol, legs_payload):
+    """Whether ``result`` was priced for ``symbol`` and exactly these legs.
+
+    ``sim_run`` echoes both since 2026-09-11. A result WITHOUT the echo (a cache
+    from before the upgrade) is trusted, as the page always did — refusing it
+    would blank every tile on the first visit after a deploy."""
+    if not result:
+        return False
+    if "legs" not in result:
+        return True
+    if str(result.get("symbol") or "").upper() != str(symbol or "").upper():
+        return False
+    return sorted(map(_leg_key, result.get("legs") or []), key=repr) == \
+        sorted(map(_leg_key, legs_payload or []), key=repr)

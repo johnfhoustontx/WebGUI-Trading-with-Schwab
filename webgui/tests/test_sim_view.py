@@ -436,3 +436,34 @@ def test_replay_cursor_text_at_the_first_bar_and_without_pnl():
 
 def test_replay_cursor_text_out_of_range_is_blank():
     assert sv.replay_cursor_text({"timestamps": []}, 3) == ""
+
+
+# -- Task 8: does a result belong to the legs on screen? ---------------------------
+
+_PAYLOAD = [{"kind": "put", "strike": 330.0, "expiry": EXP, "side": "short", "qty": 10},
+            {"kind": "put", "strike": 325.0, "expiry": EXP, "side": "long", "qty": 10}]
+
+
+def test_result_matches_the_legs_it_priced():
+    res = {"symbol": "TSLA", "legs": [dict(l, strike=int(l["strike"])) for l in _PAYLOAD]}
+    assert sv.result_matches(res, "tsla", _PAYLOAD) is True
+
+
+def test_result_for_other_legs_or_symbol_does_not_match():
+    res = {"symbol": "TSLA", "legs": _PAYLOAD}
+    moved = [dict(_PAYLOAD[0], strike=335.0), _PAYLOAD[1]]
+    assert sv.result_matches(res, "TSLA", moved) is False
+    assert sv.result_matches(res, "SPY", _PAYLOAD) is False
+    assert sv.result_matches(None, "TSLA", _PAYLOAD) is False
+
+
+def test_a_legacy_result_without_the_echo_is_trusted():
+    assert sv.result_matches({"spot": 1.0}, "TSLA", _PAYLOAD) is True
+
+
+def test_tiles_without_a_result_say_whether_the_legs_are_incomplete():
+    legs = [_leg("put", "short", None), _leg("put", "long", 325.0)]
+    t = _by_key(sv.position_tiles(legs, None))
+    assert t["max_loss"]["sub"] == "pick a strike for every leg"
+    t = _by_key(sv.position_tiles(PCS_10, None))
+    assert t["max_loss"]["sub"] == "waiting for a price"
