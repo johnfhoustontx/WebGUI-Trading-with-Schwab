@@ -10,6 +10,14 @@ log = logging.getLogger("signal_repricer")
 
 MULTIPLIER = 100
 
+# The Income Window's two single-leg structures. Each is ONE short option, so it
+# prices off that leg's own market (``fill_model.realistic_single_fill``) and not
+# a net spread market. Two spellings for the short put already exist - SHORT_PUT
+# on the scan side, NAKED_PUT on the Calculator/rescue side - and both can sit in
+# the book, so both are listed here.
+SHORT_PUT_STRATEGIES = ("SHORT_PUT", "NAKED_PUT")
+COVERED_CALL_STRATEGY = "COVERED_CALL"
+
 # Per-run cache keyed by (symbol, expiration) — avoids redundant API calls
 _chain_cache = {}
 
@@ -234,6 +242,20 @@ def reprice_swing(trade, client, today=None):
                 raise RuntimeError("missing leg quotes")
             debit = (fill_model.realistic_vertical_fill(psb, psa, plb, pla, "BUY_TO_CLOSE")
                      + fill_model.realistic_vertical_fill(csb, csa, clb, cla, "BUY_TO_CLOSE"))
+        elif strat in SHORT_PUT_STRATEGIES:
+            pm = chain.get("putExpDateMap", {})
+            sb, sa, short_delta = _leg_bid_ask(pm, trade["short_strike"])
+            if None in (sb, sa):
+                raise RuntimeError("missing leg quotes")
+            debit = fill_model.realistic_single_fill(sb, sa, "BUY_TO_CLOSE")
+        elif strat == COVERED_CALL_STRATEGY:
+            # The call's strike is stored in ``short_strike``, the same field the
+            # spread structures use for their short leg.
+            cm = chain.get("callExpDateMap", {})
+            sb, sa, short_delta = _leg_bid_ask(cm, trade["short_strike"])
+            if None in (sb, sa):
+                raise RuntimeError("missing leg quotes")
+            debit = fill_model.realistic_single_fill(sb, sa, "BUY_TO_CLOSE")
         else:
             raise RuntimeError(f"unknown strategy {strat}")
         debit = round(debit, 2)

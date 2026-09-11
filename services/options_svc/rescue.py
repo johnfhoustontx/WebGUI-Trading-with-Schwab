@@ -36,6 +36,34 @@ def _dte(expiration: str, today: _dt.date | None = None) -> int:
     return (exp - today).days
 
 
+# Put-side structures: the danger is the underlying FALLING toward the short
+# strike. The Income Window's cash-secured put belongs here and was missing, so
+# it was scored with the CALL-side formula - a put drifting toward its strike
+# looked safe, one well clear of it read as already breached, and the context
+# notes hunted for a call wall. Both spellings are listed: SHORT_PUT on the scan
+# side, NAKED_PUT on the Calculator/rescue side.
+#
+# An iron condor is both sides; it counts as put-side here because ``short_strike``
+# holds its put short, which is the field the proximity test reads.
+#
+# ONE predicate, called everywhere the side is needed, so a structure cannot be
+# added to one copy of the membership test and missed in another.
+PUT_SIDE_STRATEGIES = ("PCS", "IC", "SHORT_PUT", "NAKED_PUT")
+
+# One short option, not a spread: the Income Window's two structures. Used for
+# the commission leg count. ⚠ Three tiers now name this same set for their own
+# purpose - ``signal_repricer`` to pick a pricing branch and
+# ``signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES`` to pick a rule set - and
+# they cannot import each other. Fold them into one home when the per-structure
+# rule table lands (gap assessment B1); until then, change all three together.
+SINGLE_LEG_STRATEGIES = ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL")
+
+
+def is_put_side(position) -> bool:
+    """True when the position's risk is to the DOWNSIDE."""
+    return position.get("strategy") in PUT_SIDE_STRATEGIES
+
+
 def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> dict:
     """Classify a single open position into ok/watch/tested/critical + 0-100 heat.
 
@@ -50,7 +78,7 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> d
 
     short = position.get("short_strike")
     und = mark.get("current_underlying")
-    is_put_side = position.get("strategy") in ("PCS", "IC")
+    put_side = is_put_side(position)
     dte = mark.get("dte")
     if dte is None:
         dte = _dte(position.get("expiration"), today)
@@ -58,7 +86,7 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> d
     # 1. proximity to short strike
     if short and und:
         # for a put spread, danger is underlying falling toward/below short
-        gap = (und - short) / short if is_put_side else (short - und) / short
+        gap = (und - short) / short if put_side else (short - und) / short
         if gap <= 0:                       # through the short strike
             state = _max(state, "critical"); heat += 45
         elif gap <= th["proximity_tested_pct"]:
@@ -94,18 +122,18 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> d
     # 5. GEX modifier — short strike on the wrong side of the gamma flip
     if gex and short and und:
         flip = gex.get("flip")
-        if flip and is_put_side and und < flip:
+        if flip and put_side and und < flip:
             heat += 8            # negative-gamma, vol-expansion danger
-        wall = gex.get("put_wall") if is_put_side else gex.get("call_wall")
+        wall = gex.get("put_wall") if put_side else gex.get("call_wall")
         if wall and short and abs(short - wall) / short <= 0.005:
             heat -= 5            # resting on a wall -> bounce more likely
 
     # 6. regime modifier — strategy fighting the tape
     if regime:
         ts = (regime.get("trend_state") or "").lower()
-        if is_put_side and "bear" in ts:
+        if put_side and "bear" in ts:
             heat += 6
-        if (not is_put_side) and "bull" in ts:
+        if (not put_side) and "bull" in ts:
             heat += 6
 
     heat = max(0.0, min(100.0, heat))
@@ -129,7 +157,7 @@ def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
     notes: list[str] = []
     kind = _instrument_kind(position.get("symbol", ""))
     short = position.get("short_strike")
-    is_put = position.get("strategy") in ("PCS", "IC")
+    is_put = is_put_side(position)
 
     negative_gamma = False
     near_wall = False
@@ -263,8 +291,16 @@ def _close_legs(position) -> int:
     was charged unconditionally until 2026-08-20, understating every IC close by
     $0.65 x 2 x qty and making the close look cheaper than it is against the
     adjustment alternatives it is ranked against.
+
+    The Income Window's structures are ONE leg. They reached this function only
+    once they could be marked (2026-09-11) - before that ``build_close`` returned
+    None for them - so the two-leg default was never actually charged, and it
+    would have overstated every such close by $0.65 a contract.
     """
-    return 4 if position.get("strategy") == "IC" else 2
+    strategy = position.get("strategy")
+    if strategy == "IC":
+        return 4
+    return 1 if strategy in SINGLE_LEG_STRATEGIES else 2
 
 
 def _close_pair(position, mark, price_leg, right):
@@ -571,7 +607,9 @@ def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
     if cv is None:
         return None
     cur_delta = mark.get("current_short_delta")
-    is_put = strategy in ("PCS", "IC")
+    # Equivalent to the membership test it replaces - this builder returns early
+    # for anything outside PCS/CCS/IC - but it keeps the side in one place.
+    is_put = is_put_side(position)
     entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
     new_expiry = _add_days(expiry, 30)
     right = "PUT" if is_put else "CALL"

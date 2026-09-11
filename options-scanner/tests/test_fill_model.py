@@ -74,3 +74,26 @@ def test_untradeable_when_market_wider_than_30pct_of_width():
 def test_market_width_exactly_at_cap_is_tradeable():
     # net_bid 0.40, net_ask 0.70 -> market 0.30 == 0.30 * 1.0
     assert fm.is_tradeable(1.10, 1.30, 0.60, 0.70, width=1.0) is True
+
+
+# Single-leg fill. A lone short leg has no long quote, so the net market IS the
+# leg's own bid/ask: net_bid = bid, net_ask = ask. Quotes below: 1.10 x 1.20.
+
+
+def test_realistic_single_sell_is_40pct_into_the_leg_market():
+    # 1.10 + 0.40*(1.20-1.10) = 1.14
+    assert round(fm.realistic_single_fill(1.10, 1.20, "SELL_TO_OPEN"), 2) == 1.14
+
+
+def test_realistic_single_buy_to_close_is_40pct_into_the_leg_market():
+    # 1.20 - 0.40*(1.20-1.10) = 1.16
+    assert round(fm.realistic_single_fill(1.10, 1.20, "BUY_TO_CLOSE"), 2) == 1.16
+
+
+def test_single_fill_equals_the_vertical_with_no_long_leg():
+    """The single-leg form IS the vertical with a worthless long leg. Stated as a
+    test so nobody "simplifies" a call site into passing zero quotes for a leg
+    that does not exist - which prices the same and reads like a real leg."""
+    for side in ("SELL_TO_OPEN", "BUY_TO_CLOSE"):
+        assert (round(fm.realistic_single_fill(1.10, 1.20, side), 6)
+                == round(fm.realistic_vertical_fill(1.10, 1.20, 0.0, 0.0, side), 6))

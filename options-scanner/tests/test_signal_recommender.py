@@ -45,6 +45,51 @@ def test_arms_beyond_threshold_still_holds():
     assert "break-even armed" in r["reason"]
 
 
+# ── The Income Window's single-leg structures ────────────────────────────────
+# A covered call losing 2x its credit is the stock rallying - the shares hold
+# that gain - and a cash-secured put's delta stop fires exactly when assignment,
+# which is the wheel's plan, becomes likely. So these two take profit and
+# otherwise ride to expiry or assignment until a per-structure rule table exists.
+# Each test pairs the exempt structure against a spread on the SAME numbers, so
+# it is the strategy, not the thresholds, that changes the outcome.
+
+
+def test_a_cash_secured_put_is_not_money_stopped():
+    numbers = _ctx(credit=1.70, pnl=-510.0)          # -3x the credit
+    assert rec.recommend({**numbers, "strategy": "PCS"})["code"] == "MONEY_STOP"
+
+    r = rec.recommend({**numbers, "strategy": "SHORT_PUT"})
+
+    assert r["action"] == "HOLD" and r["code"] == "HOLD"
+
+
+def test_a_covered_call_is_not_delta_stopped():
+    numbers = _ctx(credit=0.80, pnl=-40.0, short_delta=0.62, dte_remaining=9)
+    assert rec.recommend({**numbers, "strategy": "CCS"})["code"] == "DELTA_STOP"
+
+    assert rec.recommend({**numbers, "strategy": "COVERED_CALL"})["action"] == "HOLD"
+
+
+def test_a_cash_secured_put_is_not_time_stopped():
+    numbers = _ctx(credit=1.70, pnl=-20.0, dte_remaining=1)
+    assert rec.recommend({**numbers, "strategy": "PCS"})["code"] == "TIME_STOP"
+
+    assert rec.recommend({**numbers, "strategy": "NAKED_PUT"})["action"] == "HOLD"
+
+
+def test_the_income_structures_still_take_profit():
+    for strategy in ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL"):
+        r = rec.recommend({**_ctx(credit=1.70, pnl=90.0), "strategy": strategy})
+        assert r["action"] == "TAKE_PROFIT", strategy
+        assert r["code"] == "TARGET_HIT", strategy
+
+
+def test_a_ctx_without_a_strategy_keeps_every_rule():
+    """Callers that omit the key - the captured cycle's non-lifecycle path among
+    them - must be completely unaffected by the exemption."""
+    assert rec.recommend(_ctx(credit=1.0, pnl=-200.0))["code"] == "MONEY_STOP"
+
+
 def test_cut_at_2x_credit_loss():
     r = rec.recommend(_ctx(credit=1.0, pnl=-200.0))
     assert r["action"] == "CUT"

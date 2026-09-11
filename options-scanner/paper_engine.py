@@ -697,9 +697,16 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
         if per_contract is None:
             continue   # unpriceable this cycle; leave the position open
 
+        # ``strategy`` belongs in the BASE ctx, not just the lifecycle branch: the
+        # rule engine needs it to tell which structures carry the loss-side rules
+        # at all (``signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES``). Without
+        # it a cash-secured put is indistinguishable from a put credit spread and
+        # gets the spread's money, time and delta stops. It cannot change spread
+        # behaviour: ``_recoverable`` also needs ``spot`` + ``short_strike``, which
+        # only the lifecycle branch supplies.
         ctx = {"entry_credit": pos["entry_credit"], "unrealized_pnl": per_contract,
                "current_short_delta": mark.get("current_short_delta"),
-               "dte_remaining": dte}
+               "dte_remaining": dte, "strategy": pos.get("strategy")}
         if lifecycle:
             ctx["lifecycle"] = True
             ctx["be_armed"] = bool(pos.get("be_armed"))
@@ -707,7 +714,6 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             ctx["spot"] = mark.get("current_underlying")
             ctx["short_strike"] = pos.get("short_strike")
             ctx["call_short"] = pos.get("call_short")
-            ctx["strategy"] = pos.get("strategy")
             # paper_positions carries no entry_short_delta column — recommend()
             # falls back to the absolute-breach delta stop when this is None.
             ctx["entry_short_delta"] = pos.get("entry_short_delta")

@@ -166,6 +166,81 @@ def test_reprice_legs_debit_spread_and_missing_quote():
     assert rep2["error"] == "repricing failed" and rep2["unrealized_pnl"] is None
 
 
+# ── Single-leg income structures: cash-secured put and covered call ──────────
+# Before 2026-09-11 reprice_swing knew only PCS/CCS/IC and raised on anything
+# else, so every Income Window position was skipped by the manage cycle with no
+# mark, no P&L and no way to close it.
+
+
+def _short_put(strike=95, credit=1.70, strategy="SHORT_PUT"):
+    return {"strategy": strategy, "symbol": "SPY", "expiration": _FUTURE_EXP,
+            "short_strike": strike, "long_strike": None, "entry_credit": credit,
+            "call_short": None, "call_long": None}
+
+
+def test_reprice_swing_prices_a_cash_secured_put():
+    signal_repricer.clear_chain_cache()
+    client = _chain_client(put_quotes={95: (1.00, 1.20)}, last=99.0)
+
+    rep = signal_repricer.reprice_swing(_short_put(strike=95, credit=1.70), client)
+
+    assert rep["error"] is None
+    # one leg bought to close, worked 40% into its own market: 1.20 - 0.4*0.20
+    assert rep["current_value"] == 1.12
+    # pnl is unrounded here, as it is for the spread structures - the paper
+    # engine rounds when it scales by quantity.
+    assert abs(rep["unrealized_pnl"] - (1.70 - 1.12) * 100) < 1e-6
+    assert rep["current_short_delta"] == 0.5        # carried through for the delta stop
+    assert rep["current_underlying"] == 99.0
+
+
+def test_the_naked_put_spelling_prices_the_same():
+    """Two spellings for one structure already exist - SHORT_PUT on the scan side,
+    NAKED_PUT on the Calculator/rescue side - and both can sit in the book."""
+    signal_repricer.clear_chain_cache()
+    client = _chain_client(put_quotes={95: (1.00, 1.20)}, last=99.0)
+
+    rep = signal_repricer.reprice_swing(_short_put(strategy="NAKED_PUT"), client)
+
+    assert rep["error"] is None and rep["current_value"] == 1.12
+
+
+def test_reprice_swing_prices_a_covered_call():
+    signal_repricer.clear_chain_cache()
+    t = {"strategy": "COVERED_CALL", "symbol": "SPY", "expiration": _FUTURE_EXP,
+         "short_strike": 105, "long_strike": None, "entry_credit": 0.80,
+         "call_short": None, "call_long": None}
+    client = _chain_client(call_quotes={105: (0.40, 0.60)}, last=101.0)
+
+    rep = signal_repricer.reprice_swing(t, client)
+
+    assert rep["error"] is None
+    assert rep["current_value"] == 0.52             # 0.60 - 0.4*0.20
+    assert abs(rep["unrealized_pnl"] - (0.80 - 0.52) * 100) < 1e-6
+
+
+def test_a_missing_quote_on_the_single_leg_still_degrades():
+    signal_repricer.clear_chain_cache()
+    client = _chain_client(put_quotes={90: (1.0, 1.2)})     # the 95 strike is absent
+
+    rep = signal_repricer.reprice_swing(_short_put(strike=95), client)
+
+    assert rep["error"] == "repricing failed" and rep["unrealized_pnl"] is None
+
+
+def test_reprice_swing_still_refuses_a_structure_it_cannot_price():
+    """Adding single legs must not turn the unknown-structure guard into a
+    silent zero - a calendar has two expirations and this function prices one."""
+    signal_repricer.clear_chain_cache()
+    t = {"strategy": "CALENDAR_CALL", "symbol": "SPY", "expiration": _FUTURE_EXP,
+         "short_strike": 100, "long_strike": None, "entry_credit": 1.0,
+         "call_short": None, "call_long": None}
+
+    rep = signal_repricer.reprice_swing(t, _chain_client(call_quotes={100: (1.0, 1.2)}))
+
+    assert rep["error"] == "repricing failed" and rep["unrealized_pnl"] is None
+
+
 def test_intrinsic_ic_both_wings_safe():
     t = {"strategy": "IC", "short_strike": 690, "long_strike": 688,
          "call_short": 710, "call_long": 712, "entry_credit": 1.0}

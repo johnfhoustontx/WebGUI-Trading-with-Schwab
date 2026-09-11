@@ -4,7 +4,74 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The Desk market summary made 84 paid Claude
+**Last updated:** 2026-09-11 (**The Income Window's positions were unmanaged —
+nothing marked them, no rule could close them, and the Rescue board scored a
+cash-secured put backwards.** Gap assessment items A2 and A3.)
+
+- **The chain that made them invisible.** `signal_repricer.reprice_swing` knew
+  only PCS/CCS/IC and raised on anything else, so `run_manage_cycle` hit
+  `per_contract is None`, `continue`d, and logged an ERROR for every income
+  position on every cycle. No mark, no P&L, no rule, and no "Close now" on the
+  Rescue board — which needs a mark. The only exit was expiry settlement, which
+  worked all along. So the wheel could open a position the app then ignored.
+
+- **`fill_model.realistic_single_fill`.** One short leg has no long quote, so its
+  net market IS its own bid/ask. Same `FILL_FRAC` convention as the vertical form.
+  It is a named helper rather than `realistic_vertical_fill(bid, ask, 0.0, 0.0, …)`
+  — arithmetically identical, which a test now pins, but a zero-quote long leg
+  reads like a real leg to whoever debugs it next.
+
+- **⚠ The exit rules for these two structures are deliberately partial.**
+  `signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES` skips rules 1, 2 and 4 — the
+  money, time and delta stops — for `SHORT_PUT`/`NAKED_PUT`/`COVERED_CALL`. Each
+  is wrong here, not merely unproven: a covered call losing 2× its credit is the
+  stock rallying, and a put's delta and time stops fire exactly when assignment,
+  the wheel's plan, becomes likely. They still take the +50% target. **Interim
+  pending a per-structure rule table** (assessment B1) — putting the money stop
+  back without that decision re-breaks the wheel.
+
+- **The plumbing that policy depends on:** `strategy` moved into
+  `run_manage_cycle`'s BASE ctx, where it had been set only in the `lifecycle`
+  branch. Without it the rule engine cannot tell a cash-secured put from a put
+  credit spread. It cannot change spread behaviour — `_recoverable` also needs
+  `spot` + `short_strike`, which only the lifecycle branch supplies — and a test
+  pins that a ctx with no `strategy` keeps every rule.
+
+- **`rescue.is_put_side` replaces three copies** of `strategy in ("PCS", "IC")`,
+  none of which matched a `SHORT_PUT`. The at-risk board therefore scored a
+  cash-secured put with the call-side formula, and its context notes looked for a
+  call wall. The third copy (`build_roll_out`) was already equivalent — that
+  builder returns early outside PCS/CCS/IC — and was converted anyway so a fourth
+  copy cannot appear.
+
+- **A defect the fix itself exposed: `rescue._close_legs` billed a single-leg
+  close as a spread.** It returned `4 if IC else 2`, and `build_close` returned
+  None for these positions until they could be marked — so the two-leg default
+  had never been charged. Reached now, it would overstate every income close by
+  $0.65 a contract and make closing look dearer than the adjustments it is ranked
+  against. ⚠ Three tiers now name this same structure set for three purposes and
+  cannot import each other (`signal_repricer` for a pricing branch,
+  `PROFIT_TARGET_ONLY_STRATEGIES` for a rule set, `SINGLE_LEG_STRATEGIES` for a
+  leg count); fold them into one home when B1's rule table lands.
+
+- **Tests, 22 new, each watched to fail first:** options-scanner **1310 → 1327
+  passed** / 2 skipped, options_svc **1536 → 1541**. The discriminating ones pair
+  an exempt structure against a spread on the SAME numbers, so it is the strategy
+  and not the thresholds that changes the outcome; and the manage-cycle tests
+  drive the REAL recommender, stubbing only the repricer, so they fail if either
+  half of the change is missing. ⚠ Two of the new repricer tests pass before the
+  change for the wrong reason — the unknown-structure guard and the missing-quote
+  path both returned "repricing failed" already — which is why the three positive
+  pricing tests carry the proof.
+
+- **⚠ Not verified live.** Both surfaces are behind scheduled cycles: the caps and
+  rules act on the hourly paper entry/manage cycle (09:00–14:00 CT) and the Rescue
+  board is read on demand. Nothing exercised either on the Friday evening this
+  shipped.
+
+---
+
+**Prior — 2026-09-11** (**The Desk market summary made 84 paid Claude
 calls in one day against a design estimate of 8-15** - 30 of them re-asking a
 question the accuracy checks had already refused, and 43 because one sector of
 eleven crossing flat counted as a new market.)

@@ -73,6 +73,23 @@ def realistic_vertical_fill(short_bid, short_ask, long_bid, long_ask, side,
     return net_ask - frac * (net_ask - net_bid)
 
 
+def realistic_single_fill(bid, ask, side, frac=FILL_FRAC):
+    """Price for ONE option leg assuming a limit worked `frac` into its own
+    bid/ask market from the natural side (unrounded; caller rounds).
+
+    A lone leg has no long quote, so the net market IS the leg's own market:
+    side == "SELL_TO_OPEN": credit = bid + frac * (ask - bid)
+    side == "BUY_TO_CLOSE": debit  = ask - frac * (ask - bid)
+
+    Identical to ``realistic_vertical_fill`` with a zero-quote long leg, which is
+    exactly why this exists: a call site passing zeros for a leg that does not
+    exist prices correctly and reads like a bug to the next person.
+    """
+    if side == "SELL_TO_OPEN":
+        return bid + frac * (ask - bid)
+    return ask - frac * (ask - bid)
+
+
 #############################################
 # TRADEABILITY GATE
 #############################################

@@ -2387,6 +2387,16 @@ The fills log is also the best available audit trail when a position behaves une
   high-scoring captured signal that simply never opens. Check
   `journalctl --user -u trading-prod-options_svc | grep concentration` before assuming
   the engine is stuck.
+- ⚠ **An Income position takes the profit target and nothing else.** A cash-secured
+  put or covered call opened from the Income board is priced and marked like any other
+  position, and it closes automatically at **+50% of the credit**. It has no money,
+  delta or time stop, so otherwise it rides to expiry, assignment or call-away. That is
+  deliberate — a covered call losing twice its credit is simply the stock rallying, and a
+  short put's stops would fire exactly when assignment, which is the point of the wheel,
+  becomes likely. Before 2026-09-11 these positions were not even marked.
+- ⚠ **A covered call's unrealized figure covers the option only.** Nothing here prices a
+  bare share, so the shares' gain or loss is not in it. Read it as what buying the call
+  back would cost.
 
 ### Related pages
 

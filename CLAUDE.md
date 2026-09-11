@@ -2203,6 +2203,47 @@ on", not "no earnings"**: `not_listed` deliberately does not block, because
 failing closed would empty the watchlist whenever vendor coverage thins. The
 older `data/earnings_cache.json` is dead — all-`null` since 2026-08-29.
 
+## The Income Window's single-leg positions are priced, and take the TARGET ONLY
+
+`signal_repricer.reprice_swing` prices PCS/CCS/IC **and** the two single-leg
+income structures — `SHORT_PUT`/`NAKED_PUT` off the put map, and `COVERED_CALL`
+off the call map (its strike lives in `short_strike`, the same field the spreads
+use for their short leg). Each is ONE short option, so the mark comes from
+`fill_model.realistic_single_fill` — that leg's own bid/ask, worked `FILL_FRAC`
+from the natural side — never the net-spread form with zero quotes for a leg that
+does not exist. ⚠ Until 2026-09-11 the repricer raised on anything but the three
+spreads, so `run_manage_cycle` hit `per_contract is None`, skipped the position
+and logged an ERROR every cycle: the Income board could open a position that
+nothing would ever mark, manage or close, and the Rescue board could not even
+offer "Close now" because that needs a mark.
+
+**Those two structures take the PROFIT TARGET and no loss-side rule** —
+`signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES`, read off `ctx["strategy"]`,
+which `run_manage_cycle` now puts in the BASE ctx and not only the lifecycle
+branch. Rules 1, 2 and 4 (the 2× credit money stop, the `cut_dte` time stop and
+the delta stop) are skipped, because each is wrong here rather than merely
+unproven: a covered call losing 2× its credit is the stock rallying — the shares
+hold that gain, and Option Alpha's covered-call study found stops simply produce
+more losers — while a cash-secured put's delta and time stops fire exactly when
+assignment becomes likely, which is the wheel's plan and the reason `equity_lots`
+exists. ⚠ **This is an interim policy.** The per-structure rule table belongs in
+`config/trade_mgmt.toml`; when it lands, this constant goes with it. Putting the
+money stop back without that decision re-breaks the wheel.
+
+⚠ **A covered call's mark is the OPTION LEG only.** Nothing here prices a bare
+share — which is why `/options/shares` dashes Mark and Unrealized — so its
+`unrealized_pnl` is not the position's economics: the shares' gain is invisible to
+it. Read it as "what closing the call would cost", never as the trade's P&L.
+
+**`rescue.is_put_side` is the ONE side test** (`PUT_SIDE_STRATEGIES`). Three
+copies of `strategy in ("PCS", "IC")` had drifted from the structures the book can
+actually hold, and a `SHORT_PUT` matched none of them — so the at-risk board
+scored a cash-secured put with the CALL-side formula: a put drifting toward its
+strike read as safe, one well clear of it read as already breached, and the
+context notes hunted for a call wall. An iron condor counts as put-side there
+because `short_strike` holds its put short, which is the field the proximity test
+reads.
+
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 
 `strategy_scoring._reward_metric`'s NAKED branch returns

@@ -18,7 +18,7 @@ Outside those three structures, coverage thins quickly:
 
 Three findings matter more than any missing strategy:
 
-1. **Positions the app already opens are left unmanaged.** Cash-secured puts and covered calls opened from the Income Window get no profit target, no stop, and no close action. The repricer cannot price a single leg, so every exit rule is skipped and they ride to expiry (§3.1, checked by hand).
+1. **Positions the app already opens were left unmanaged.** Cash-secured puts and covered calls opened from the Income Window got no profit target, no stop, and no close action: the repricer could not price a single leg, so every exit rule was skipped and they rode to expiry (§3.1, checked by hand). **Fixed 2026-09-11** by A2 and A3 — they are now marked and take the profit target, with the loss-side rules deliberately held back pending B1.
 2. **Entry rules are applied on some scan surfaces and not others.** The implied-volatility floor binds one of four surfaces, and the earnings gate is live on one of three paths. The Strategy Finder and Income Window can sell premium at any volatility, into regimes the Market Scanner would refuse (§2.3).
 3. **Two of the largest risk gaps already had a tested fix that hadn't shipped.** Commit `dde98b8` on `claude/orcl-concentration-risk-9ad685` (2026-09-09) adds per-symbol and per-expiry concentration caps and makes the earnings gate fire on the live scan. It was not in `main` at `c152b00`. **It has since been merged on this branch as `05ed539`** (§7, A1), and it reaches prod once `main` is fast-forwarded and promoted.
 
@@ -132,7 +132,10 @@ The Market Scanner carries the market-context gates but ranks gross of commissio
 | **X6** | Exits for long options and debit spreads | None. They live in the ledger, which only settles at expiry or closes by hand. | Gap |
 | **X7** | Handle assignment deliberately (the wheel) | Put assignment creates a share lot at the strike, a covered call can be written against it, and the lot is called away above the strike. The loop can repeat. There is no cash-settled-index branch and no ex-dividend check. | Met (paper) |
 
-### 3.1 Income Window positions are unmanaged (checked)
+### 3.1 Income Window positions were unmanaged (checked)
+
+**Fixed 2026-09-11 by A2 and A3.** The chain below is what was wrong, kept because
+it explains why the fix has two halves — a mark and a strategy-aware rule set.
 
 Here is the whole chain, each link read by hand:
 
@@ -253,8 +256,8 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | # | Recommendation | Closes | Effort | Value |
 |---|---|---|---|---|
 | **A1** | Merge and promote `dde98b8` (concentration caps; live earnings gate) — **merged as `05ed539`; promote pending** | S4, V3 | S | High |
-| **A2** | Teach the repricer single legs (`SHORT_PUT`, `COVERED_CALL`) | X1–X3 for income | S–M | High |
-| **A3** | Fix Rescue's put-side test for short puts | §3.1 | S | Medium |
+| **A2** | Teach the repricer single legs (`SHORT_PUT`, `COVERED_CALL`) — **shipped 2026-09-11** | X1–X3 for income | S–M | High |
+| **A3** | Fix Rescue's put-side test for short puts — **shipped 2026-09-11** | §3.1 | S | Medium |
 | **A4** | Give the income cash-secured put its own delta band | §2.3 | S | Medium |
 | **A5** | Pass an earnings date from the Strategy Finder | V3 | S | Medium |
 | **A6** | Size the width search against the real book | S3, W1, W4 | S–M | Medium–high |
@@ -287,9 +290,14 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 - **When:** promoting stops the whole target, so run it after the close (15:25–16:15 CT).
 - **Status (2026-09-11):** merged on this branch as `05ed539`. The one conflict was the CHANGELOG. The failing test set was empty before and after; options-scanner gained 48 tests and options_svc 13. Fast-forwarding `main` and promoting remain.
 
-**A2. Teach the repricer single legs.** Add `SHORT_PUT`/`NAKED_PUT` (put map, short strike) and `COVERED_CALL` (call map) to `signal_repricer.reprice_swing`, with the same worked-limit buy-to-close on one leg. That alone restores marks, P&L, `recommend()` and the Rescue board's "Close now" for every Income-board position, and ends an error per position per cycle. Do it with A3, then B1.
+**A2. Teach the repricer single legs.** **Shipped 2026-09-11** with a
+`fill_model.realistic_single_fill` helper, and with `strategy` moved into the
+manage cycle's base context so the rule engine can tell these structures apart.
+The interim exit policy is the profit target only — `PROFIT_TARGET_ONLY_STRATEGIES`
+skips the money, time and delta stops until B1 decides. 21 new tests. Add `SHORT_PUT`/`NAKED_PUT` (put map, short strike) and `COVERED_CALL` (call map) to `signal_repricer.reprice_swing`, with the same worked-limit buy-to-close on one leg. That alone restores marks, P&L, `recommend()` and the Rescue board's "Close now" for every Income-board position, and ends an error per position per cycle. Do it with A3, then B1.
 
-**A3. Fix Rescue's put-side test.** `is_put_side` (`rescue.py:53`) must include `SHORT_PUT` and `NAKED_PUT`. The structural repairs (roll down-and-out for a credit) are the natural cash-secured-put repair and belong in B1.
+**A3. Fix Rescue's put-side test.** **Shipped 2026-09-11** as one predicate,
+`rescue.is_put_side`, replacing three copies of the membership test. `is_put_side` (`rescue.py:53`) must include `SHORT_PUT` and `NAKED_PUT`. The structural repairs (roll down-and-out for a credit) are the natural cash-secured-put repair and belong in B1.
 
 **A4. Give the income cash-secured put its own delta band.** Pass `INCOME_PUT_DELTA` to the single-leg builder. Today it ignores the band and sells 0.28 delta, which is richer premium and more assignment than the window documents.
 
@@ -365,8 +373,8 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 
 Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re-read by hand.
 
-1. Income Window positions get no mark and no exit rules, and log an error on every manage cycle **(checked)**.
-2. Rescue treats a cash-secured put as call-side, and offers it no candidates, not even "Close now" **(checked)**.
+1. Income Window positions got no mark and no exit rules, and logged an error on every manage cycle **(checked)** — fixed 2026-09-11 (A2).
+2. Rescue treated a cash-secured put as call-side, and offered it no candidates, not even "Close now" **(checked)** — fixed 2026-09-11 (A3).
 3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**.
 4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
@@ -392,7 +400,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 ## 9. Decisions for you
 
 1. **Promote `dde98b8`?** It is merged on this branch as `05ed539`, with the failing test set unchanged. What remains is fast-forwarding `main` and promoting after the close.
-2. **Cash-secured puts and covered calls: stops, or the wheel?** The wheel accepts assignment and keeps selling; a stop-based rule set exits instead. This shapes B1.
+2. **Cash-secured puts and covered calls: stops, or the wheel?** The wheel accepts assignment and keeps selling; a stop-based rule set exits instead. A2 shipped with the wheel-shaped interim answer — the profit target acts, the money, time and delta stops do not — so this decision is still open, and B1 is where it lands for good.
 3. **Driver sizing.** Keep the "Very Aggressive" 12%-per-trade profile, or move toward the playbook's 1–2% and the sources' 1–5%? The driver's own realized record is the evidence to weigh.
 4. **How tight a deployment cap for the manual book?** 50% of equity at risk, or theoptionpremium's 20–25%?
 5. **Income Window: screen or feed?** Should it stay a human-picked screen, or feed auto-entry once C1 has produced outcome data?

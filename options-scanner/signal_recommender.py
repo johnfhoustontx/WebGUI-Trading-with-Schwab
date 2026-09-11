@@ -125,6 +125,18 @@ def _locked_profit_level(ctx, credit_total):
     return lock * credit_total
 
 
+# Structures that take the PROFIT TARGET and no loss-side rule. The credit-spread
+# stops are wrong for both: a covered call losing 2x its credit is the stock
+# rallying - the shares hold that gain, and published covered-call research finds
+# stops simply produce more losers - while a cash-secured put's delta and time
+# stops fire exactly when assignment, which is the wheel's plan, becomes likely.
+#
+# So they ride to expiry, assignment or call-away unless the target is hit. This
+# is an interim policy pending a per-structure rule table in trade_mgmt.toml
+# (gap assessment B1); when that lands, delete this and key the rules off it.
+PROFIT_TARGET_ONLY_STRATEGIES = ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL")
+
+
 def recommend(ctx):
     """Return {'action', 'reason', 'code'}. action in HOLD/CUT; code in
     HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP.
@@ -144,21 +156,28 @@ def recommend(ctx):
          pre-lifecycle behavior, so the captured-autoclose rework never changes how
          those separate books exit.
       6. HOLD with the score-drift note.
+
+    A ``ctx["strategy"]`` in ``PROFIT_TARGET_ONLY_STRATEGIES`` skips rules 1, 2
+    and 4 — the loss-side rules — for the reasons given at that constant. A ctx
+    without the key keeps every rule.
     """
     credit_total = ctx["entry_credit"] * MULTIPLIER
     pnl = ctx.get("unrealized_pnl") or 0
     short_delta = ctx.get("current_short_delta")
     dte = ctx.get("dte_remaining", 99)
+    # False for the single-leg income structures, which take the target only.
+    loss_rules = ctx.get("strategy") not in PROFIT_TARGET_ONLY_STRATEGIES
 
-    # Rule 1: 2x credit money-stop (HARD floor — always fires)
-    if pnl <= -STOP_MULT * credit_total:
+    # Rule 1: 2x credit money-stop (HARD floor — fires for every structure that
+    # carries the loss-side rules at all)
+    if loss_rules and pnl <= -STOP_MULT * credit_total:
         return {"action": "CUT", "reason": f"{STOP_MULT:g}x credit stop",
                 "code": "MONEY_STOP"}
 
     # Rule 2: low DTE and underwater (HARD floor). An armed, PROFITABLE trade near
     # expiry is NOT time-stopped (it rides to full credit, protected by the
     # break-even stop below).
-    if dte <= CUT_DTE and pnl < 0:
+    if loss_rules and dte <= CUT_DTE and pnl < 0:
         return {"action": "CUT", "reason": f"DTE <= {CUT_DTE} and underwater",
                 "code": "TIME_STOP"}
 
@@ -186,7 +205,7 @@ def recommend(ctx):
     # unchanged for those callers. A SOFT stop: deferred to HOLD when the trade is
     # recoverable (ample time + no imminent strike breach).
     entry_delta = ctx.get("entry_short_delta")
-    if short_delta is not None:
+    if loss_rules and short_delta is not None:
         if entry_delta is None:
             breached = abs(short_delta) >= DELTA_ABS_FALLBACK
             reason = (f"short delta {abs(short_delta):.2f} breached "

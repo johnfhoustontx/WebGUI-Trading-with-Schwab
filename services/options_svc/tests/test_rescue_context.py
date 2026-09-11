@@ -20,6 +20,17 @@ def test_futures_flag_assignment_risk():
     assert any("assignment" in s.lower() for s in ctx["notes"])
 
 
+def test_a_cash_secured_put_reads_the_put_side_flip_and_wall():
+    """The same side test drives the context notes. Scored as a call side, a short
+    put below the flip showed no negative gamma and looked for a CALL wall."""
+    ctx = rescue.strategic_context(
+        _pos(strategy="SHORT_PUT"), gex={"flip": 5995.0, "put_wall": 5950.0},
+        regime=None, underlying=5985.0)
+
+    assert ctx["negative_gamma"] is True
+    assert ctx["near_wall"] is True
+
+
 def test_below_flip_flags_negative_gamma():
     ctx = rescue.strategic_context(
         _pos(), gex={"flip": 5995.0, "put_wall": 5950.0},
