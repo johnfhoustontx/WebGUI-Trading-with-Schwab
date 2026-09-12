@@ -4,6 +4,90 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**Stock legs in the leg model — covered call,
+protective put and collar analysis.** Gap assessment **D4**.)
+
+- **The first D-tier premise measured TRUE.** The leg model really had no share
+  leg (24 templates, every leg a call or a put), nothing anywhere priced one, and
+  the three structures that need shares were correspondingly absent.
+- ⚠ **`qty` on a share leg counts 100-share LOTS, not shares**, and that
+  convention is why this was a small change: every consumer already multiplies
+  `value × qty × 100`, so one lot of a $100 stock is $10,000 with no new branch.
+  The pricing core needed only `options_calculator.leg_value` — a share is worth
+  the underlying at any T and any IV, and `bs_price(price, None, …)` raises.
+- ⚠ **The max-loss scan now reaches ZERO for a leg set holding shares.** The old
+  `0.5×spot` floor reported a covered call on a $100 stock as risking **$4,800**
+  against a real **$9,800**. It is also what proves a protective put's loss is
+  bounded. Option-only structures keep the old floor, pinned by a control test.
+- ⚠ **Five Calculator sites read "no strike" as "not a leg", and one SILENTLY
+  DROPPED the leg** — the page would have priced a covered call as a naked short
+  call with no warning. One shared predicate now (`leg_editor.legs_ready`), which
+  also rejects a NaN strike that `is None` passed through to `bs_price`.
+  `max_loss_estimate` declines rather than booking the share leg as a *put*.
+- ⚠ **A stale `expiry` on a share leg would move the pricing horizon** — it joins
+  the front-expiry computation, and earlier than the option's it prices the option
+  with time left at the wrong horizon. Closed at three writers and at the
+  chokepoint both summary paths share.
+- **Only the Calculator offers the three, and it takes TWO gates** — the strategy
+  menu (`exclude=STOCK_STRATEGIES`) and the leg TYPE select (`allow_stock`) —
+  because either alone leaves a hole. ⚠ The exclusions are safety: the Simulator
+  prices a `ContractRow` off the option chain and has no share concept, and the
+  Rescue ad-hoc form **books** into an account that keeps shares in `equity_lots`
+  rather than `paper_positions`, so a covered call would be stored as a bare
+  short call.
+- ⚠ **`COVERED_CALL` now names two different objects**: the Calculator's whole
+  position (tags lead **DEBIT** — you pay for the shares) and the rest of the
+  app's option leg only (correctly a credit structure). A **`100 SHARES`** chip
+  on all three templates is what distinguishes them on screen.
+- Design: [`docs/plans/2026-09-12-stock-legs-design.md`](plans/2026-09-12-stock-legs-design.md).
+  The Portfolio "protect a holding" view is **not** built — the item says "could
+  *then* extend", and it needs the real holdings feed plus a decision about lots
+  that are not multiples of 100.
+
+---
+
+**Last updated:** 2026-09-12 (**Stock legs in the leg model — covered call,
+protective put and collar analysis.** Gap assessment **D4**.)
+
+- **The first D-tier premise measured TRUE.** The leg model really had no share
+  leg (24 templates, every leg a call or a put), nothing anywhere priced one, and
+  the three structures that need shares were correspondingly absent.
+- ⚠ **`qty` on a share leg counts 100-share LOTS, not shares**, and that
+  convention is why this was a small change: every consumer already multiplies
+  `value × qty × 100`, so one lot of a $100 stock is $10,000 with no new branch.
+  The pricing core needed only `options_calculator.leg_value` — a share is worth
+  the underlying at any T and any IV, and `bs_price(price, None, …)` raises.
+- ⚠ **The max-loss scan now reaches ZERO for a leg set holding shares.** The old
+  `0.5×spot` floor reported a covered call on a $100 stock as risking **$4,800**
+  against a real **$9,800**. It is also what proves a protective put's loss is
+  bounded. Option-only structures keep the old floor, pinned by a control test.
+- ⚠ **Five Calculator sites read "no strike" as "not a leg", and one SILENTLY
+  DROPPED the leg** — the page would have priced a covered call as a naked short
+  call with no warning. One shared predicate now (`leg_editor.legs_ready`), which
+  also rejects a NaN strike that `is None` passed through to `bs_price`.
+  `max_loss_estimate` declines rather than booking the share leg as a *put*.
+- ⚠ **A stale `expiry` on a share leg would move the pricing horizon** — it joins
+  the front-expiry computation, and earlier than the option's it prices the option
+  with time left at the wrong horizon. Closed at three writers and at the
+  chokepoint both summary paths share.
+- **Only the Calculator offers the three, and it takes TWO gates** — the strategy
+  menu (`exclude=STOCK_STRATEGIES`) and the leg TYPE select (`allow_stock`) —
+  because either alone leaves a hole. ⚠ The exclusions are safety: the Simulator
+  prices a `ContractRow` off the option chain and has no share concept, and the
+  Rescue ad-hoc form **books** into an account that keeps shares in `equity_lots`
+  rather than `paper_positions`, so a covered call would be stored as a bare
+  short call.
+- ⚠ **`COVERED_CALL` now names two different objects**: the Calculator's whole
+  position (tags lead **DEBIT** — you pay for the shares) and the rest of the
+  app's option leg only (correctly a credit structure). A **`100 SHARES`** chip
+  on all three templates is what distinguishes them on screen.
+- Design: [`docs/plans/2026-09-12-stock-legs-design.md`](plans/2026-09-12-stock-legs-design.md).
+  The Portfolio "protect a holding" view is **not** built — the item says "could
+  *then* extend", and it needs the real holdings feed plus a decision about lots
+  that are not multiples of 100.
+
+---
+
 **Last updated:** 2026-09-12 (**Exits for long options and debit spreads — and
 two defects that had to be fixed before any rule could be added safely.** Gap
 assessment **D3**.)

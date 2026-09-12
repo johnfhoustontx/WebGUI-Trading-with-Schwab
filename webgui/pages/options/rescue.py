@@ -618,6 +618,7 @@ def render():
     from .calculator import chain_expiries, chain_strikes
     from . import leg_editor
     from .strategy_menu import build_strategy_menu
+    from . import strategies as _strategies
     from .strategies import strategy_label
 
     def _adhoc_unsupported(code):
@@ -815,7 +816,16 @@ def render():
             with ui.row().classes("w-full gap-4 no-wrap items-start"):
                 with ui.column().classes("min-w-0 grow-[3] shrink basis-0 gap-3"):
                     with ui.row().classes("items-end gap-3 flex-wrap"):
-                        adhoc_strat = build_strategy_menu(value="PCS", classes="w-52", boxed=True)
+                        # ⚠ The three STOCK structures are excluded: this form
+                        # BOOKS into the paper account, and that account cannot
+                        # hold shares inside ``paper_positions`` — they live in
+                        # ``equity_lots``, which is the whole reason that table
+                        # exists. A covered call submitted here would be stored
+                        # as a bare short call, the same defect shape as the
+                        # iron butterfly this form relabels an iron condor.
+                        adhoc_strat = build_strategy_menu(
+                            value="PCS", classes="w-52", boxed=True,
+                            exclude=_strategies.STOCK_STRATEGIES)
                         adhoc_sym = select_all_on_focus(
                             ui.input("Symbol").props("dense").classes("w-40"))
                         adhoc_load_btn = ui.button("Load", icon="cloud_upload").props("no-caps")

@@ -282,7 +282,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **D1** | Straddle and strangle templates — **shipped 2026-09-12, analysis only, with that rule tested on both sides of the tier boundary** | coverage | S | Low–medium |
 | **D2** | Iron butterfly scanner on the IC pipeline — **measured 2026-09-12 and NOT built: the premise is false twice over. Two CCS bugs fixed instead** | coverage | **L** | Medium |
 | **D3** | Exits for long options and debit spreads — **BUILT 2026-09-12; two defects fixed with it** | X6 | M | Medium |
-| **D4** | Stock legs → covered call, protective put, collar analysis | coverage | M–L | Medium |
+| **D4** | Stock legs → covered call, protective put, collar analysis — **BUILT 2026-09-12** | coverage | M–L | Medium |
 | **D5** | Calendars and diagonals end to end | coverage | L | Low–medium |
 
 ### Tier A — ship the fix that exists; fix what is broken
@@ -749,6 +749,32 @@ prod's ledger is empty, so nothing was corrupted.
 level is sourced rather than fitted — hence config.
 
 **D4. Stock legs in the leg model.** This unlocks covered call, protective put and collar analysis. It could then extend to a "protect a holding" view on the real Portfolio page, as analysis only.
+
+✅ **BUILT 2026-09-12** — [design](2026-09-12-stock-legs-design.md). **The first
+D-tier premise to measure TRUE**: no share leg existed, nothing priced one, and
+the three structures were absent for exactly that reason.
+
+⚠ **`qty` counts 100-share LOTS**, which is why this was small — every consumer
+already multiplies `× qty × 100`, so the pricing core needed only a per-share
+value function (`leg_value`; `bs_price` with a `None` strike raises).
+
+**Three things the measurement changed.** The max-loss scan now reaches **zero**
+for a leg set holding shares (the old `0.5×spot` floor called a covered call's
+risk $4,800 against a real $9,800, and reaching zero is what proves a protective
+put's loss is bounded). Five Calculator sites read "no strike" as "not a leg" and
+⚠ **one silently DROPPED it**, so the page would have priced a covered call as a
+naked short call. And a stale `expiry` on a share leg would have moved the
+pricing horizon — closed at three writers plus the chokepoint.
+
+**Gated to the Calculator on TWO controls** (the strategy menu and the leg TYPE
+select), because either alone leaves a hole. ⚠ Safety, not taste: the Simulator
+cannot price a share, and the Rescue ad-hoc form BOOKS into an account that keeps
+shares in `equity_lots` — a covered call would be stored as a bare short call,
+which is defect 12's shape.
+
+**The Portfolio "protect a holding" view is NOT built** — the item says "could
+then extend", and it needs the real holdings feed plus a rule for a lot that is
+not a multiple of 100.
 
 **D5. Calendars and diagonals end to end:** scanner, two-expiry repricing, and settlement at the front expiry. Revisit after C1.
 

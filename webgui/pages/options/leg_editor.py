@@ -31,6 +31,120 @@ from . import strategies as S
 
 _KEYS = ("option_type", "side", "strike", "expiry", "qty", "premium")
 
+#: Every leg type the TYPE select can offer. ``stock`` last — nearly every leg
+#: is an option and shares are the exception (D4).
+TYPE_OPTIONS = ["call", "put", S.STOCK]
+
+#: Option-only, which is what every mount gets unless it opts in.
+OPTION_TYPE_OPTIONS = ["call", "put"]
+
+
+def type_options(allow_stock=False) -> list:
+    """The TYPE select's options for one MOUNT.
+
+    ⚠ **Stock is opt-in per mount, and the default is off.** Gating the strategy
+    MENU is not enough on its own: the Simulator mounts this same card layout, so
+    an always-on ``stock`` entry would let a user hand-build a share leg on a page
+    whose Replay and IV-shock engines price a ``ContractRow`` off the option chain
+    and cannot value one. The Rescue ad-hoc form is worse — it BOOKS, into an
+    account that holds shares in ``equity_lots`` and not in ``paper_positions``.
+
+    Only the Calculator passes ``allow_stock=True``, which is D4's analysis
+    surface.
+    """
+    return list(TYPE_OPTIONS) if allow_stock else list(OPTION_TYPE_OPTIONS)
+
+_OPTION_LABELS = {"type": "TYPE", "side": "SIDE", "expiry": "EXPIRY",
+                  "strike": "STRIKE", "qty": "QTY", "premium": "PREMIUM"}
+#: ⚠ A share leg's two numbers mean something else. ``qty`` counts 100-share
+#: LOTS (a reader who thinks it is shares types 100 and builds a 10,000-share
+#: position), and ``premium`` is the price PAID PER SHARE, not an option
+#: premium. Strike and expiry are dashed rather than blanked: an em-dash reads
+#: as "does not apply", a blank cell as "missing".
+_STOCK_LABELS = {**_OPTION_LABELS, "expiry": "—", "strike": "—",
+                 "qty": "LOTS", "premium": "$/SHARE"}
+
+
+#: The share-leg predicate lives in the PURE model (``strategies``), which
+#: ``calculator`` can import without dragging in nicegui. Re-exported here
+#: because this module is where the leg-editing helpers live.
+is_stock_leg = S.is_stock_leg
+_is_stock = S.is_stock_leg
+
+
+def leg_labels(leg) -> dict:
+    """The six column labels for one leg — option wording, or share wording."""
+    return dict(_STOCK_LABELS if _is_stock(leg) else _OPTION_LABELS)
+
+
+def leg_strike_options(leg, options) -> list:
+    """Strikes this leg may take. A share leg has none, so the control goes
+    inert rather than offering a stale option strike."""
+    if _is_stock(leg):
+        return []
+    return list(options or [])
+
+
+def leg_expiry_options(leg, options) -> list:
+    """Expiries this leg may take — none for a share leg, which never expires."""
+    if _is_stock(leg):
+        return []
+    return list(options or [])
+
+
+def retype_leg(leg, new_type) -> dict:
+    """A COPY of ``leg`` with its type changed to ``new_type``.
+
+    ⚠ **Crossing the stock/option boundary clears the strike and expiry, and
+    that is load-bearing rather than tidy.** A share leg carrying a stale expiry
+    joins the front-expiry computation in
+    ``options_calculator.calc_summary_generic``; if that expiry were EARLIER than
+    the real option leg's, the option would be priced with time remaining at the
+    wrong horizon. Going the other way there is no remembered strike to restore,
+    and inventing one would put a number the user never chose into a priced leg.
+
+    Call↔put keeps both, which is the pre-D4 behaviour: they are option legs on
+    the same ladder.
+    """
+    src = leg if isinstance(leg, dict) else {}
+    out = {k: src.get(k) for k in _KEYS}
+    out["option_type"] = new_type
+    was_stock = _is_stock(src)
+    now_stock = (isinstance(new_type, str)
+                 and new_type.strip().lower() == S.STOCK)
+    if was_stock != now_stock:
+        out["strike"] = None
+        out["expiry"] = None
+    return out
+
+
+def leg_ready(leg) -> bool:
+    """Is this leg complete enough to price?
+
+    ⚠ **A SHARE leg needs no strike, and five places on the Calculator read
+    "no strike" as incomplete** — four blocked or asked the user to pick a strike
+    that does not exist, and one silently DROPPED the leg, which made the page
+    price a covered call as a naked short call with no warning. One predicate, so
+    a sixth site added later cannot reintroduce it.
+
+    An option leg needs a REAL strike: ``strike is None`` alone would pass a NaN
+    straight through to ``bs_price`` and poison every cell of the grid.
+    """
+    if not isinstance(leg, dict):
+        return False
+    if _is_stock(leg):
+        return True
+    k = leg.get("strike")
+    if isinstance(k, bool) or not isinstance(k, (int, float)):
+        return False
+    return k == k          # not NaN
+
+
+def legs_ready(legs) -> bool:
+    """Every leg complete, and at least one of them — "nothing" is no position."""
+    legs = list(legs or [])
+    return bool(legs) and all(leg_ready(l) for l in legs)
+
 
 def normalize_legs(legs, keep_premium=True):
     """Return legs reduced to exactly the normalized keys (strips widget refs /
@@ -49,10 +163,20 @@ def normalize_legs(legs, keep_premium=True):
 
 
 def set_legs_expiry(legs, expiry):
-    """Return normalized legs with EVERY leg's expiry set to ``expiry`` (used by the
-    Calculator's top-level Expiry → propagate to all legs). Other fields preserved."""
+    """Return normalized legs with every OPTION leg's expiry set to ``expiry``
+    (the Calculator's top-level Expiry → propagate to all legs). Other fields
+    preserved.
+
+    ⚠ **A SHARE leg is skipped.** Shares do not expire, and stamping a date onto
+    one is the same stale-expiry hazard ``retype_leg`` guards against, arriving
+    from the other direction: that date would join the front-expiry computation
+    in ``options_calculator.calc_summary_generic`` and, if earlier than the real
+    option leg's, price the option with time remaining at the wrong horizon.
+    """
     out = normalize_legs(legs)
     for l in out:
+        if _is_stock(l):
+            continue
         l["expiry"] = expiry
     return out
 
@@ -194,7 +318,7 @@ def delta_text(delta):
 def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                      on_change=lambda: None, spot_getter=lambda: 0.0, header=False,
                      layout="row", tokens=None, delta_for=None, min_legs=1,
-                     on_reset=None):
+                     on_reset=None, allow_stock=False):
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty().
 
@@ -220,6 +344,19 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         state["dirty"] = True
         if field in ("option_type", "expiry"):
             _sync_row_strikes(i)
+        on_change()
+
+    def _set_type(i, value):
+        """A leg's TYPE change re-SHAPES its row, so it re-renders rather than
+        patching one field: crossing the stock/option boundary clears the strike
+        and expiry (``retype_leg``), the column labels swap, and both of those
+        controls go inert. ``_render`` re-registers ``_strike_widget``, which
+        ``retype_leg`` drops along with every other non-normalized key."""
+        if not (0 <= i < len(state["legs"])):
+            return
+        state["legs"][i] = retype_leg(state["legs"][i], value)
+        state["dirty"] = True
+        _render()
         on_change()
 
     def _sync_row_strikes(i):
@@ -273,30 +410,41 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 f"flex items-stretch gap-2 px-2 py-1.5"):
             ui.label(f"{i + 1:02d}").classes(f"{tk['num']} shrink-0 w-5 pt-1")
             with ui.element("div").classes("flex-1 min-w-0 flex flex-col gap-1"):
+                lbl = leg_labels(leg)
                 with ui.element("div").classes(_CARD_ROW1_COLS):
-                    ui.label("TYPE").classes(tk["eyebrow"])
-                    ui.label("SIDE").classes(tk["eyebrow"])
-                    ui.label("EXPIRY").classes(tk["eyebrow"])
-                    ui.select(["call", "put"], value=leg.get("option_type")) \
+                    ui.label(lbl["type"]).classes(tk["eyebrow"])
+                    ui.label(lbl["side"]).classes(tk["eyebrow"])
+                    ui.label(lbl["expiry"]).classes(tk["eyebrow"])
+                    ui.select(type_options(allow_stock),
+                              value=leg.get("option_type")) \
                         .props("dense options-dense").classes("w-full") \
-                        .on_value_change(lambda e, i=i: _set_field(i, "option_type", e.value))
+                        .on_value_change(lambda e, i=i: _set_type(i, e.value))
                     ui.select(["long", "short"], value=leg.get("side")) \
                         .props("dense options-dense").classes("w-full") \
                         .on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
-                    ui.select(exps, value=e_val).props("dense options-dense").classes("w-full") \
-                        .on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
+                    # A SHARE leg has no expiry to pick, so the control is emptied
+                    # and disabled rather than offering the option ladder's dates
+                    # against something that never expires.
+                    _e_opts = leg_expiry_options(leg, exps)
+                    _ew = ui.select(_e_opts, value=(e_val if _e_opts else None)) \
+                        .props("dense options-dense").classes("w-full")
+                    _ew.on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
+                    _ew.set_enabled(bool(_e_opts))
                 show_delta = delta_for is not None
                 with ui.element("div").classes(
                         _CARD_ROW2_GRIDS[(bool(show_premium), show_delta)]):
-                    ui.label("STRIKE").classes(tk["eyebrow"])
-                    ui.label("QTY").classes(tk["eyebrow"])
+                    ui.label(lbl["strike"]).classes(tk["eyebrow"])
+                    ui.label(lbl["qty"]).classes(tk["eyebrow"])
                     if show_premium:
-                        ui.label("PREMIUM").classes(tk["eyebrow"])
+                        ui.label(lbl["premium"]).classes(tk["eyebrow"])
                     if show_delta:
                         ui.label("DELTA").classes(f"{tk['eyebrow']} text-right")
-                    sw = ui.select(s_opts, value=s_val).props("dense options-dense") \
-                        .classes("w-full leg-strike")
+                    # Inert for a share leg, for the same reason as the expiry.
+                    _s_opts = leg_strike_options(leg, s_opts)
+                    sw = ui.select(_s_opts, value=(s_val if _s_opts else None)) \
+                        .props("dense options-dense").classes("w-full leg-strike")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
+                    sw.set_enabled(bool(_s_opts))
                     ui.number(value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
                         .props("dense").classes("w-full") \
                         .on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))

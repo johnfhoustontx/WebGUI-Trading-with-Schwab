@@ -292,6 +292,7 @@ def render():
     Replay / What-if / IV-shock tabs."""
     from . import handoff
     from . import leg_editor
+    from . import strategies
     from . import strategy_menu
     from . import overlay as _overlay
     from . import sim_view as sv
@@ -372,8 +373,15 @@ def render():
                 # each leg from the chain's IV, so no manual premium input.
                 with ui.column().classes("gap-2 w-[440px] max-w-full shrink-0"):
                     with ui.row().classes("items-end gap-2 w-full no-wrap"):
+                        # ⚠ The three STOCK structures are excluded here. The
+                        # Replay and IV-shock engines price a ``ContractRow``
+                        # pulled from the option chain and have NO share concept,
+                        # so a covered call selected here would draw an
+                        # option-only curve under a frame that said "covered
+                        # call". The Calculator is D4's analysis surface.
                         strategy_sel = strategy_menu.build_strategy_menu(
-                            value="PCS", classes="w-52", boxed=True)
+                            value="PCS", classes="w-52", boxed=True,
+                            exclude=strategies.STOCK_STRATEGIES)
                         # dense, so the box sits level with the boxed strategy trigger
                         expiry_all = ui.select([], label="Set all legs to") \
                             .props("dense options-dense").classes("w-40 sim-expiry-all")

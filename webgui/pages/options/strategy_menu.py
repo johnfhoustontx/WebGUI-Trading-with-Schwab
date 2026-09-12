@@ -19,7 +19,8 @@ class StrategyMenu:
     """Cascading Strategy picker with a ui.select-compatible interface."""
 
     def __init__(self, value="PCS", *, classes="", boxed=False,
-                 menu_class=None, btn_class=None, caption=True):
+                 menu_class=None, btn_class=None, caption=True,
+                 exclude=None):
         self._value = value
         self._handlers = []
 
@@ -58,7 +59,7 @@ class StrategyMenu:
                 # nested submenu that Quasar opens to the side on hover.
                 self._menu = ui.menu().props('anchor="bottom left" self="top left"').classes(menu_cls)
                 with self._menu:
-                    for family, variants in S.STRATEGY_MENU:
+                    for family, variants in S.menu_families(exclude):
                         with ui.item().props("clickable"):
                             with ui.item_section():
                                 ui.label(family)
@@ -99,7 +100,8 @@ class StrategyMenu:
 
 
 def build_strategy_menu(value="PCS", *, classes="", boxed=False,
-                        menu_class=None, btn_class=None, caption=True):
+                        menu_class=None, btn_class=None, caption=True,
+                        exclude=None):
     """Mount a cascading Strategy picker and return its ui.select-compatible handle.
 
     ``boxed=True`` renders an input-box-styled trigger (for the Calculator's dark
@@ -111,7 +113,14 @@ def build_strategy_menu(value="PCS", *, classes="", boxed=False,
     them ``None`` reproduces the ``boxed`` defaults exactly.
 
     ``caption=False`` drops the small "Strategy" label above the trigger, for a
-    page whose own chrome already names the control."""
+    page whose own chrome already names the control.
+
+    ``exclude`` hides strategy codes from THIS mount (the menu data itself must
+    stay complete — see ``strategies.menu_families``). Used to keep the three
+    stock structures off the Simulator, which prices a ``ContractRow`` off the
+    option chain and has no share concept, and off the Rescue ad-hoc form, which
+    books into a paper account that holds shares in ``equity_lots`` rather than
+    in ``paper_positions``."""
     return StrategyMenu(value, classes=classes, boxed=boxed,
                         menu_class=menu_class, btn_class=btn_class,
-                        caption=caption)
+                        caption=caption, exclude=exclude)

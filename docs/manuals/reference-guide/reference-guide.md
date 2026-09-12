@@ -1588,8 +1588,9 @@ beside them. The page wears its own near-black palette rather than the app-wide 
 that is deliberate, not a theming accident.
 
 1. **① Strategy** — a cascading menu of templates: singles, verticals (credit and
-   debit), iron condors, butterflies (long and iron), calendars and diagonals. Picking
-   one fills the leg editor. Tag chips below name the cash-flow direction (**credit**
+   debit), iron condors, butterflies (long and iron), calendars, diagonals, and —
+   since 2026-09-12 — **Stock + options** (covered call, protective put, collar).
+   Picking one fills the leg editor. Tag chips below name the cash-flow direction (**credit**
    or **debit**), the leg count and the lean; only the credit/debit chip is coloured,
    because the rest are descriptions rather than opinions. A one-line thesis says what
    the structure is betting on.
@@ -1599,15 +1600,64 @@ that is deliberate, not a theming accident.
    scalar inputs live in this frame, and the line under them reports how many strikes
    and expiries the chain actually carried — which is what explains a leg whose strike
    will not snap where you expect.
-3. **③ Legs** — one editable **card** per leg. Each has its own **type** (put/call),
-   **side** (long/short), **expiry**, **strike**, **quantity**, **premium**, and its
-   **delta** read from the chain. Add or remove legs freely; the last one is locked,
+3. **③ Legs** — one editable **card** per leg. Each has its own **type** (put, call
+   or **stock** — see *Stock legs* below), **side** (long/short), **expiry**,
+   **strike**, **quantity**, **premium**, and its **delta** read from the chain. Add or remove legs freely; the last one is locked,
    because a calculator with no legs has nothing to price. Per-leg expiry is what
    makes **calendars price correctly** — each leg is valued at its own time to
    expiration. The strip on the frame keeps a running **leg count, net premium and max
    loss** as you edit.
 4. **Fetch Premiums** pulls live marks for the legs you have built.
 5. **Calculate** produces the six metric cards and the P&L matrix.
+
+### Stock legs — covered call, protective put, collar
+
+⚠ **A leg can be SHARES**, not an option: set its Type to **stock**. That is what
+makes three whole-position structures analysable here, and they are the three the
+**Stock + options** family in the Strategy menu offers:
+
+| Structure | What it is | What it bounds |
+|---|---|---|
+| **Covered call** | shares you own, a call written above them | caps the upside at the strike; keeps the premium |
+| **Protective put** | shares plus a put below them | a floor you cannot fall through — insurance |
+| **Collar** | shares, a put below, a call above | both ends, and the call pays for the put |
+
+**A share leg's two numbers do not mean what an option leg's mean**, and the
+column labels change to say so:
+
+* **LOTS**, not Qty — it counts **hundreds** of shares. One lot is 100 shares,
+  which is what one option contract covers, so one lot against one contract is a
+  standard covered call. ⚠ Typing 100 there builds a **10,000-share** position
+  and multiplies every figure by a hundred.
+* **$/SHARE**, not Premium — what you **paid** for the shares. Leave it blank and
+  **Fetch Premiums** fills today's price; type your own cost basis and nothing
+  overwrites it, which is the point if you are asking what a call written against
+  shares you have held for a year is worth.
+* **Strike** and **Expiry** show a dash. Shares have neither, and the controls are
+  disabled rather than offering the option ladder's values against something that
+  never expires.
+
+⚠ **Max risk on a covered call is the stock going to zero**, so it is a large
+number — and a true one. The matrix and the cards scan all the way down to zero
+for any position holding shares, which is also what demonstrates that a
+**protective put** or a **collar** caps that loss. (For option-only structures the
+scan stays in its old range; nothing about those figures has changed.)
+
+⚠ **These three are ANALYSIS ONLY**, and two other pages deliberately do not
+offer them. The [Simulator](#simulator) prices from the option chain and has no
+way to value a share. Rescue's ad-hoc form **books** a position, and the paper
+account keeps shares in a separate store from options — so a covered call
+submitted there would be recorded as a bare short call. Nothing on this page
+places a trade in any case.
+
+⚠ **"Covered call" means something narrower elsewhere in the app.** The
+[Income Window](#income), [Paper Account](#paper-account) and [Rescue](#rescue)
+all use the name for the **option leg on its own**, because the paper book tracks
+the shares separately — which is why such a position's P&L there covers the call
+and not the stock. Here it is the whole position, shares included; the
+**100 SHARES** chip under the Strategy menu is what tells you which one you are
+looking at.
+
 
 **The other inputs:**
 

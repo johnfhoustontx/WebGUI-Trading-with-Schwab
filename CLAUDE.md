@@ -2661,6 +2661,160 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## A STOCK leg is 100-share LOTS, and five sites read "no strike" as "no leg"
+
+⚠ **A share leg is a normalized leg dict like any other** — same six keys, with
+`option_type = "stock"` (`strategies.STOCK` / `options_calculator.STOCK_KIND`,
+pinned together by `test_stock_leg_mirror.py` because neither tier may import the
+other), `strike` and `expiry` `None`, `premium` the price paid **per share**, and
+⚠ **`qty` counting 100-share LOTS, not shares.**
+
+**That lot convention is why D4 was a small change.** Every consumer already
+multiplies `value × qty × 100`, so one lot of a $100 stock comes out at $10,000
+with no new branch — exactly as one $100 option contract would. `qty` in shares
+plus a per-leg multiplier would have needed a branch at each of the ~six places
+that multiply by 100, and each is a place a units bug hides. So the pricing core
+needed only a per-share **value** function, `options_calculator.leg_value`: a
+share is worth the underlying at any T and any IV, and `bs_price(price, None, …)`
+raises — on a grid rebuilt every keystroke.
+
+**The max-loss scan reaches ZERO when a leg set holds shares.**
+`calc_summary_generic` scanned `0.5×spot … 1.5×spot`, which is right for an
+option-only structure (no vertical, condor or fly can lose more than its width)
+and wrong the moment shares are involved: it reported a covered call on a $100
+stock as risking **$4,800** — the loss at $50 — against a real **$9,800**. It is
+also what proves a protective put's loss is *bounded*, which is the entire reason
+to own one. Option-only sets keep the old floor.
+
+⚠ **Five places on the Calculator open-coded `l.get("strike") is None`, and one
+SILENTLY DROPPED the leg** — so the page would have priced a covered call as a
+naked short call with no warning. They go through
+`leg_editor.legs_ready` now, which also rejects a **NaN** strike that `is None`
+passed straight to `bs_price`. `max_loss_estimate` **declines** a leg set holding
+shares rather than mapping the share leg to a *put*, which is what it did; Send
+to Expected Move still drops it, and that one is right — a share leg has no
+strike **line** to draw.
+
+⚠ **A stale `expiry` on a share leg moves the PRICING HORIZON**, which is not
+cosmetic: it joins `calc_summary_generic`'s front-expiry computation, and if it
+were earlier than the real option leg's, the option would be priced with time
+remaining at the wrong horizon — a payoff diagram that is not a payoff. Closed at
+three writers (`build_default_legs` never sets one, `retype_leg` clears both
+fields when a leg crosses the stock/option boundary, `set_legs_expiry` skips
+share legs) **and** at the chokepoint both summary paths share:
+`_leg_expiry_years` returns `None` for a share leg regardless, since a pasted or
+hand-built leg set can still arrive carrying one.
+
+**Only the CALCULATOR offers the three stock structures, and it takes TWO gates.**
+Adding a template exposes it on every page that mounts the picker, and
+`test_strategies.py` requires `STRATEGY_MENU` to cover every template *exactly*
+(a template missing from the menu is unreachable) — so they cannot be hidden in
+the data:
+
+| surface | strategy menu | leg TYPE select |
+|---|---|---|
+| **Calculator** | offers them | `allow_stock=True` |
+| **Simulator** | `exclude=STOCK_STRATEGIES` | option-only |
+| **Rescue** ad-hoc | `exclude=STOCK_STRATEGIES` | option-only |
+
+Both, because either alone leaves a hole: gating the menu still lets a user flip
+a leg's TYPE by hand, and gating the TYPE select still lets them pick the
+template. ⚠ And the exclusions are **safety**: the Simulator's Replay/IV-shock
+engines price a `ContractRow` off the option chain and have no share concept,
+while the Rescue ad-hoc form **books into the paper account**, which cannot hold
+shares in `paper_positions` at all — they live in `equity_lots` — so a covered
+call submitted there would be stored as a **bare short call**, the shape of
+assessment defect 12.
+
+⚠ **`COVERED_CALL` now names two different objects.** The Calculator's template
+is the whole position (shares + call) and its tags lead with **DEBIT**, because
+you pay for the shares; the rest of the app's `COVERED_CALL` is the **option leg
+only** (`paper_positions` holds no shares, and such a position's
+`unrealized_pnl` covers the option alone), which is correctly a credit
+structure. The **`100 SHARES`** chip on all three templates is what
+distinguishes them on screen. All three route to the NUMERIC summary — none is in
+`_ANALYTIC_CODES`, and a share leg pasted into an analytic strategy falls to
+`CUSTOM` because the shape multiset cannot match, so the analytic formulas are
+structurally unreachable from a share leg. Design:
+[the D4 doc](docs/plans/2026-09-12-stock-legs-design.md).
+
+## A STOCK leg is 100-share LOTS, and five sites read "no strike" as "no leg"
+
+⚠ **A share leg is a normalized leg dict like any other** — same six keys, with
+`option_type = "stock"` (`strategies.STOCK` / `options_calculator.STOCK_KIND`,
+pinned together by `test_stock_leg_mirror.py` because neither tier may import the
+other), `strike` and `expiry` `None`, `premium` the price paid **per share**, and
+⚠ **`qty` counting 100-share LOTS, not shares.**
+
+**That lot convention is why D4 was a small change.** Every consumer already
+multiplies `value × qty × 100`, so one lot of a $100 stock comes out at $10,000
+with no new branch — exactly as one $100 option contract would. `qty` in shares
+plus a per-leg multiplier would have needed a branch at each of the ~six places
+that multiply by 100, and each is a place a units bug hides. So the pricing core
+needed only a per-share **value** function, `options_calculator.leg_value`: a
+share is worth the underlying at any T and any IV, and `bs_price(price, None, …)`
+raises — on a grid rebuilt every keystroke.
+
+**The max-loss scan reaches ZERO when a leg set holds shares.**
+`calc_summary_generic` scanned `0.5×spot … 1.5×spot`, which is right for an
+option-only structure (no vertical, condor or fly can lose more than its width)
+and wrong the moment shares are involved: it reported a covered call on a $100
+stock as risking **$4,800** — the loss at $50 — against a real **$9,800**. It is
+also what proves a protective put's loss is *bounded*, which is the entire reason
+to own one. Option-only sets keep the old floor.
+
+⚠ **Five places on the Calculator open-coded `l.get("strike") is None`, and one
+SILENTLY DROPPED the leg** — so the page would have priced a covered call as a
+naked short call with no warning. They go through
+`leg_editor.legs_ready` now, which also rejects a **NaN** strike that `is None`
+passed straight to `bs_price`. `max_loss_estimate` **declines** a leg set holding
+shares rather than mapping the share leg to a *put*, which is what it did; Send
+to Expected Move still drops it, and that one is right — a share leg has no
+strike **line** to draw.
+
+⚠ **A stale `expiry` on a share leg moves the PRICING HORIZON**, which is not
+cosmetic: it joins `calc_summary_generic`'s front-expiry computation, and if it
+were earlier than the real option leg's, the option would be priced with time
+remaining at the wrong horizon — a payoff diagram that is not a payoff. Closed at
+three writers (`build_default_legs` never sets one, `retype_leg` clears both
+fields when a leg crosses the stock/option boundary, `set_legs_expiry` skips
+share legs) **and** at the chokepoint both summary paths share:
+`_leg_expiry_years` returns `None` for a share leg regardless, since a pasted or
+hand-built leg set can still arrive carrying one.
+
+**Only the CALCULATOR offers the three stock structures, and it takes TWO gates.**
+Adding a template exposes it on every page that mounts the picker, and
+`test_strategies.py` requires `STRATEGY_MENU` to cover every template *exactly*
+(a template missing from the menu is unreachable) — so they cannot be hidden in
+the data:
+
+| surface | strategy menu | leg TYPE select |
+|---|---|---|
+| **Calculator** | offers them | `allow_stock=True` |
+| **Simulator** | `exclude=STOCK_STRATEGIES` | option-only |
+| **Rescue** ad-hoc | `exclude=STOCK_STRATEGIES` | option-only |
+
+Both, because either alone leaves a hole: gating the menu still lets a user flip
+a leg's TYPE by hand, and gating the TYPE select still lets them pick the
+template. ⚠ And the exclusions are **safety**: the Simulator's Replay/IV-shock
+engines price a `ContractRow` off the option chain and have no share concept,
+while the Rescue ad-hoc form **books into the paper account**, which cannot hold
+shares in `paper_positions` at all — they live in `equity_lots` — so a covered
+call submitted there would be stored as a **bare short call**, the shape of
+assessment defect 12.
+
+⚠ **`COVERED_CALL` now names two different objects.** The Calculator's template
+is the whole position (shares + call) and its tags lead with **DEBIT**, because
+you pay for the shares; the rest of the app's `COVERED_CALL` is the **option leg
+only** (`paper_positions` holds no shares, and such a position's
+`unrealized_pnl` covers the option alone), which is correctly a credit
+structure. The **`100 SHARES`** chip on all three templates is what
+distinguishes them on screen. All three route to the NUMERIC summary — none is in
+`_ANALYTIC_CODES`, and a share leg pasted into an analytic strategy falls to
+`CUSTOM` because the shape multiset cannot match, so the analytic formulas are
+structurally unreachable from a share leg. Design:
+[the D4 doc](docs/plans/2026-09-12-stock-legs-design.md).
+
 ## A DEBIT position inverts every credit rule, and the ledger had none of its own
 
 ⚠ **A debit trade stores `entry_credit` as the NEGATIVE per-share debit**, so

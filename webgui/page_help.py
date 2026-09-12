@@ -260,9 +260,10 @@ Shows what an options trade makes or loses **before** you place it — any
 results appear on the right.
 
 - **① Strategy** — pick a template (single, vertical, **iron condor**,
-  **butterfly**, **calendar/diagonal**…). The chips say whether it takes in a
-  **credit** or costs a **debit**, how many legs it has, and its lean; the line
-  under them is the trade's thesis in one sentence.
+  **butterfly**, **calendar/diagonal**, and under **Stock + options** the
+  **covered call**, **protective put** and **collar**). The chips say whether it
+  takes in a **credit** or costs a **debit**, how many legs it has, and its lean;
+  the line under them is the trade's thesis in one sentence.
 - **② Symbol** — type a ticker and tab out (or press **Load chain**). The pill
   top-right says whether a chain is loaded. **Price, IV %, IV Δ, Rate,
   Contracts, Strikes** and **Expiry** live here — Expiry sets *every* leg's
@@ -274,6 +275,19 @@ results appear on the right.
   **leg count, net premium and max loss**. A dash means *not known yet*, not
   zero: premiums are blank until you press **Fetch Premiums**, and delta is
   blank whenever the chain carries no Greeks — normal outside market hours.
+- **A leg can be SHARES** — set its type to **stock**. It has no strike and no
+  expiry, so both of those cells show a dash, and its two numbers mean something
+  different: **LOTS** is *hundreds* of shares (1 lot = 100 shares, which is what
+  one option contract covers), and **$/SHARE** is what you paid for them, not an
+  option premium. Leave it blank and **Fetch Premiums** fills today's price;
+  type your own cost basis and nothing overwrites it — which is the point if you
+  are asking what a call written against shares you already hold is worth.
+  ⚠ Max risk on these is the stock going to **zero**, so it is a large number
+  and a true one; a **protective put** or a **collar** is what caps it.
+  ⚠ These three are **analysis only**. They are not on the Simulator (it prices
+  from the option chain and cannot value a share) and not on Rescue's ad-hoc
+  form (the paper account tracks shares separately from options, so it could not
+  book one). Nothing here places a trade in any case.
 - **Calculate** fills the **six cards** — entry credit/debit, max risk, max
   return, return on risk, breakeven(s), probability of profit — and the **P&L
   matrix** under them: one row per real strike, one column per date from **Now**

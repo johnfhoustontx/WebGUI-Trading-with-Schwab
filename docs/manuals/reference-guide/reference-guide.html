@@ -199,6 +199,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_11">What it is</a></li>
 <li><a href="#where-the-data-comes-from_10">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_10">Reading the screen</a></li>
+<li><a href="#stock-legs-covered-call-protective-put-collar">Stock legs — covered call, protective put, collar</a></li>
 <li><a href="#why-it-matters_10">Why it matters</a></li>
 <li><a href="#when-to-use-it_10">When to use it</a></li>
 <li><a href="#caveats-and-gotchas_6">Caveats and gotchas</a></li>
@@ -2483,8 +2484,9 @@ beside them. The page wears its own near-black palette rather than the app-wide 
 that is deliberate, not a theming accident.</p>
 <ol>
 <li><strong>① Strategy</strong> — a cascading menu of templates: singles, verticals (credit and
-   debit), iron condors, butterflies (long and iron), calendars and diagonals. Picking
-   one fills the leg editor. Tag chips below name the cash-flow direction (<strong>credit</strong>
+   debit), iron condors, butterflies (long and iron), calendars, diagonals, and —
+   since 2026-09-12 — <strong>Stock + options</strong> (covered call, protective put, collar).
+   Picking one fills the leg editor. Tag chips below name the cash-flow direction (<strong>credit</strong>
    or <strong>debit</strong>), the leg count and the lean; only the credit/debit chip is coloured,
    because the rest are descriptions rather than opinions. A one-line thesis says what
    the structure is betting on.</li>
@@ -2494,9 +2496,9 @@ that is deliberate, not a theming accident.</p>
    scalar inputs live in this frame, and the line under them reports how many strikes
    and expiries the chain actually carried — which is what explains a leg whose strike
    will not snap where you expect.</li>
-<li><strong>③ Legs</strong> — one editable <strong>card</strong> per leg. Each has its own <strong>type</strong> (put/call),
-   <strong>side</strong> (long/short), <strong>expiry</strong>, <strong>strike</strong>, <strong>quantity</strong>, <strong>premium</strong>, and its
-   <strong>delta</strong> read from the chain. Add or remove legs freely; the last one is locked,
+<li><strong>③ Legs</strong> — one editable <strong>card</strong> per leg. Each has its own <strong>type</strong> (put, call
+   or <strong>stock</strong> — see <em>Stock legs</em> below), <strong>side</strong> (long/short), <strong>expiry</strong>,
+   <strong>strike</strong>, <strong>quantity</strong>, <strong>premium</strong>, and its <strong>delta</strong> read from the chain. Add or remove legs freely; the last one is locked,
    because a calculator with no legs has nothing to price. Per-leg expiry is what
    makes <strong>calendars price correctly</strong> — each leg is valued at its own time to
    expiration. The strip on the frame keeps a running <strong>leg count, net premium and max
@@ -2504,6 +2506,69 @@ that is deliberate, not a theming accident.</p>
 <li><strong>Fetch Premiums</strong> pulls live marks for the legs you have built.</li>
 <li><strong>Calculate</strong> produces the six metric cards and the P&amp;L matrix.</li>
 </ol>
+<h3 id="stock-legs-covered-call-protective-put-collar">Stock legs — covered call, protective put, collar</h3>
+<p>⚠ <strong>A leg can be SHARES</strong>, not an option: set its Type to <strong>stock</strong>. That is what
+makes three whole-position structures analysable here, and they are the three the
+<strong>Stock + options</strong> family in the Strategy menu offers:</p>
+<table>
+<thead>
+<tr>
+<th>Structure</th>
+<th>What it is</th>
+<th>What it bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Covered call</strong></td>
+<td>shares you own, a call written above them</td>
+<td>caps the upside at the strike; keeps the premium</td>
+</tr>
+<tr>
+<td><strong>Protective put</strong></td>
+<td>shares plus a put below them</td>
+<td>a floor you cannot fall through — insurance</td>
+</tr>
+<tr>
+<td><strong>Collar</strong></td>
+<td>shares, a put below, a call above</td>
+<td>both ends, and the call pays for the put</td>
+</tr>
+</tbody>
+</table>
+<p><strong>A share leg's two numbers do not mean what an option leg's mean</strong>, and the
+column labels change to say so:</p>
+<ul>
+<li><strong>LOTS</strong>, not Qty — it counts <strong>hundreds</strong> of shares. One lot is 100 shares,
+  which is what one option contract covers, so one lot against one contract is a
+  standard covered call. ⚠ Typing 100 there builds a <strong>10,000-share</strong> position
+  and multiplies every figure by a hundred.</li>
+<li><strong>$/SHARE</strong>, not Premium — what you <strong>paid</strong> for the shares. Leave it blank and
+  <strong>Fetch Premiums</strong> fills today's price; type your own cost basis and nothing
+  overwrites it, which is the point if you are asking what a call written against
+  shares you have held for a year is worth.</li>
+<li><strong>Strike</strong> and <strong>Expiry</strong> show a dash. Shares have neither, and the controls are
+  disabled rather than offering the option ladder's values against something that
+  never expires.</li>
+</ul>
+<p>⚠ <strong>Max risk on a covered call is the stock going to zero</strong>, so it is a large
+number — and a true one. The matrix and the cards scan all the way down to zero
+for any position holding shares, which is also what demonstrates that a
+<strong>protective put</strong> or a <strong>collar</strong> caps that loss. (For option-only structures the
+scan stays in its old range; nothing about those figures has changed.)</p>
+<p>⚠ <strong>These three are ANALYSIS ONLY</strong>, and two other pages deliberately do not
+offer them. The <a href="#simulator">Simulator</a> prices from the option chain and has no
+way to value a share. Rescue's ad-hoc form <strong>books</strong> a position, and the paper
+account keeps shares in a separate store from options — so a covered call
+submitted there would be recorded as a bare short call. Nothing on this page
+places a trade in any case.</p>
+<p>⚠ <strong>"Covered call" means something narrower elsewhere in the app.</strong> The
+<a href="#income">Income Window</a>, <a href="#paper-account">Paper Account</a> and <a href="#rescue">Rescue</a>
+all use the name for the <strong>option leg on its own</strong>, because the paper book tracks
+the shares separately — which is why such a position's P&amp;L there covers the call
+and not the stock. Here it is the whole position, shares included; the
+<strong>100 SHARES</strong> chip under the Strategy menu is what tells you which one you are
+looking at.</p>
 <p><strong>The other inputs:</strong></p>
 <table>
 <thead>

@@ -46,6 +46,10 @@ from .theme import (THEME, CALC_CSS, CALC_KEYFRAMES_CSS, CALC_FONT_HEAD_HTML,
                     CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
                     CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN)
 from . import page_state as _ps
+# The PURE leg model (no nicegui), so the module-level helpers below stay
+# importable without it — ``leg_editor`` and ``ui`` are imported lazily in
+# ``render`` for exactly that reason.
+from . import strategies as _strategies
 
 # Persisted (single-user) Calculator input snapshot — survives navigation + browser
 # reload, resets on a webgui restart (same as the other persisting pages). The pure
@@ -392,6 +396,32 @@ def _short_outlives_long(legs):
     return bool(shorts and longs and max(shorts) > min(longs))
 
 
+def fill_stock_premiums(legs, spot):
+    """Copy of ``legs`` with every SHARE leg's premium defaulted to ``spot``.
+
+    A share leg's "premium" is the price PAID PER SHARE, and there is no chain
+    row to look it up in. Unset (or the ``0.0`` an untouched ``ui.number``
+    reports) means "what they cost now", i.e. spot.
+
+    ⚠ **An existing price is never overwritten**, because the user's own cost
+    basis is the whole point of the analysis: asking what a call written against
+    shares you already hold is worth only makes sense against what you paid for
+    them. And an unusable spot leaves the leg ALONE rather than writing a
+    fabricated basis — the readiness predicate still lets the user type one.
+    """
+    usable = _finite(spot)
+    if usable is not None and usable <= 0:
+        usable = None
+    out = []
+    for leg in legs or []:
+        leg = dict(leg)
+        if (_strategies.is_stock_leg(leg) and usable is not None
+                and not _finite(leg.get("premium"))):
+            leg["premium"] = usable
+        out.append(leg)
+    return out
+
+
 def max_loss_estimate(legs):
     """The ③ LEGS strip's max-loss figure, in dollars, or ``None``.
 
@@ -419,6 +449,12 @@ def max_loss_estimate(legs):
     """
     net = net_premium(legs)
     if net is None:
+        return None
+    # ⚠ Every leg below is mapped to "call" or "put" and the estimate reasons
+    # from STRIKES, so a share leg was silently booked as a put. There is no
+    # strike-based estimate that describes shares — Tier 2's numeric summary is
+    # what prices these structures, and it already does — so decline.
+    if any(_strategies.is_stock_leg(l) for l in (legs or [])):
         return None
     rows = []
     for leg in legs or []:
@@ -1397,6 +1433,11 @@ def render():
         show_premium=True, on_change=lambda: (_capture(), _sync_legs()),
         spot_getter=lambda: float(price_in.value or 0),
         layout="card", tokens=_LEG_TOKENS, delta_for=_delta_for,
+        # D4: the Calculator is the ANALYSIS surface, so it is the one mount that
+        # offers a SHARE leg — covered call / protective put / collar. The
+        # Simulator and the Rescue ad-hoc form deliberately do not; see
+        # leg_editor.type_options.
+        allow_stock=True,
         # A floor of ONE, not the mock's two. The mock locks at two because its
         # own buildLegs PADS a single-leg spec with a synthetic opposite leg;
         # this app does not pad, and ships four genuine single-leg templates
@@ -1496,7 +1537,7 @@ def render():
         ready = _has_contracts(state.get("chain"))
         if not ready:
             action_lbl.text = "load a chain before pricing"
-        elif any(l.get("strike") is None for l in legs) or not legs:
+        elif not leg_editor.legs_ready(legs):
             action_lbl.text = "pick every leg strike to calculate"
         else:
             action_lbl.text = "ready to calculate"
@@ -1593,11 +1634,16 @@ def render():
             ui.notify("Load symbol first.", type="warning")
             return
         legs = editor.get_legs()
-        if any(l.get("strike") is None for l in legs):
+        if not leg_editor.legs_ready(legs):
             ui.notify("Pick all leg strikes first.", type="warning")
             return
+        # A SHARE leg has no chain row to look up: its "premium" is what the
+        # shares cost, which defaults to spot and is never overwritten once set.
+        legs = fill_stock_premiums(legs, _finite(price_in.value))
         filled, missing = 0, []
         for leg in legs:
+            if leg_editor.is_stock_leg(leg):
+                continue
             strike = float(leg["strike"])
             leg_exp = leg.get("expiry") or expiry_sel.value
             prem = extract_premium(chain, leg["option_type"], strike, expiry=leg_exp)
@@ -1738,11 +1784,13 @@ def render():
         if not legs:
             ui.notify("Add at least one leg first.", type="warning")
             return
-        if any(l.get("strike") is None for l in legs):
+        if not leg_editor.legs_ready(legs):
             ui.notify("Pick all leg strikes first.", type="warning")
             return
         try:
             spot = float(price_in.value)
+            # A share leg priced at 0 would make the whole position look free.
+            legs = fill_stock_premiums(legs, spot)
             page_qty = int(contracts_in.value or 1)
             page_exp = str(expiry_sel.value)
             # Route analytic vs generic summary (see _summary_strategy): a copied

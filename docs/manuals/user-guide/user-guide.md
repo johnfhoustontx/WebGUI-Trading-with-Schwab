@@ -801,7 +801,9 @@ app-wide navy.
 
 - **① Strategy** — a cascading menu of templates: **Single** (long/short call/put),
   **Credit spread** and **Debit spread** (call/put), **Condor** (iron, all-call,
-  all-put), **Butterfly** (call, put, iron), **Calendar** and **Diagonal** (call/put).
+  all-put), **Butterfly** (call, put, iron), **Calendar** and **Diagonal** (call/put),
+  and **Stock + options** (**covered call**, **protective put**, **collar** — the
+  three that need shares; see the note below).
   Picking one fills the leg editor with sensible at-the-money strikes. Underneath,
   tag chips say whether the structure takes in a **credit** or costs a **debit**, how
   many legs it has, and its lean (bullish, range, pin, defined risk…), followed by a
@@ -813,13 +815,14 @@ app-wide navy.
   line under the buttons reports how many strikes and expiries arrived. The same
   frame holds **Spot**, **Price**, **IV %**, **Rate %**, **IV Δ %**, **Contracts**,
   **Strikes** (how many real chain strikes either side of spot the matrix spans,
-  default 24) and **Expiry**. The top-level **Expiry** propagates to *every* leg.
+  default 24) and **Expiry**. The top-level **Expiry** propagates to every *option*
+  leg — a **stock** leg is skipped, because shares do not expire.
   **IV Update** implies the volatility from the traded contract's own mark, the way
   ThinkorSwim does, falling back to the chain's at-the-money volatility before you
   have picked a strike.
-- **③ Legs** — an editable **card per leg**: **Type** (call/put), **Side**
-  (long/short), **Expiry**, **Strike**, **Qty**, **Premium**, and the leg's **Delta**
-  read straight from the option chain. **Add leg**, **Reset to template**, and a
+- **③ Legs** — an editable **card per leg**: **Type** (call, put or **stock**),
+  **Side** (long/short), **Expiry**, **Strike**, **Qty**, **Premium**, and the leg's
+  **Delta** read straight from the option chain. **Add leg**, **Reset to template**, and a
   remove ✕ that locks at the last leg. Each leg carries its **own expiry** (so
   **calendars/diagonals** price each leg on its own clock) and its own quantity (so a
   1-2-1 butterfly body trades at 2×). **Fetch Premiums** fills each leg's premium
@@ -827,7 +830,29 @@ app-wide navy.
 - The frame's header strip keeps a running **leg count**, **net premium** and **max
   loss**. All three update as you edit. A **dash** there means *not known yet* rather
   than zero — net premium is blank until every leg is priced, and max loss is blank
-  when the loss has no bound (a naked call) or cannot be settled on one date.
+  when the loss has no bound (a naked call), cannot be settled on one date, or the
+  position holds **shares** (that strip reasons from strikes, and shares have none —
+  press **Calculate** and the cards give the real figure).
+
+**Stock legs (covered call, protective put, collar).** Set a leg's Type to
+**stock** and it becomes shares rather than a contract:
+
+- **LOTS** replaces Qty and counts **hundreds** of shares — one lot is 100 shares,
+  which is what one option contract covers. ⚠ Typing 100 builds a 10,000-share
+  position and multiplies every figure by a hundred.
+- **$/SHARE** replaces Premium: what you **paid**. Blank means "today's price" and
+  **Fetch Premiums** fills it; a value you typed is never overwritten, which is the
+  point when you are pricing a call against shares you already hold.
+- **Strike** and **Expiry** show a dash and are disabled — shares have neither.
+- ⚠ **Max risk is the stock going to zero**, and the cards now scan that far, which
+  is also what shows a **protective put** or **collar** capping it.
+- ⚠ **Analysis only.** The Simulator and Rescue's ad-hoc form do not offer these:
+  the Simulator prices from the option chain and cannot value a share, and Rescue
+  books trades into a paper account that tracks shares separately. Nothing on the
+  Calculator places a trade regardless.
+- ⚠ Elsewhere in the app "covered call" means the **option leg alone** (the paper
+  book tracks the shares separately). Here it is the whole position — the
+  **100 SHARES** chip is what tells you which.
   **Delta** shows a dash the same way whenever the chain carries no Greeks, which is
   normal outside regular trading hours.
 

@@ -8,6 +8,28 @@ Both pages import this so the templates + copy payload never drift.
 
 # Normalized leg dict keys: option_type, side, strike, expiry, qty, premium.
 
+#: ``option_type`` of a SHARES leg (D4). Mirrors
+#: ``options_calculator.STOCK_KIND`` — Tier 1 cannot import that module, and
+#: ``webgui/tests/test_stock_leg_mirror.py`` pins the two together.
+STOCK = "stock"
+
+
+def is_stock_leg(leg) -> bool:
+    """Is this normalized leg SHARES rather than an option contract?
+
+    Lives HERE, in the pure model, rather than in ``leg_editor`` — ``calculator``
+    needs it in its module-level helpers and imports ``nicegui`` only lazily, on
+    purpose, so that those helpers stay importable without it. Mirrors
+    ``options_calculator.is_stock_leg`` exactly, including matching the kind name
+    exactly (case- and space-insensitively) rather than by prefix: a near-miss
+    like ``"stocks"`` must read as an OPTION and fail on its missing strike, not
+    silently price as a share.
+    """
+    if not isinstance(leg, dict):
+        return False
+    kind = leg.get("option_type")
+    return isinstance(kind, str) and kind.strip().lower() == STOCK
+
 # Each template leg spec: option_type, side, qty, strike_role, expiry_role.
 # strike_role drives default strike placement relative to ATM; expiry_role is
 # "near" (front) or "far" (back) for calendars/diagonals (else "near").
@@ -59,7 +81,32 @@ STRATEGY_TEMPLATES = {
     "CALENDAR_PUT": [_leg("put", "short", 1, "atm", "near"), _leg("put", "long", 1, "atm", "far")],
     "DIAGONAL_CALL": [_leg("call", "short", 1, "otm_up_1", "near"), _leg("call", "long", 1, "atm", "far")],
     "DIAGONAL_PUT": [_leg("put", "short", 1, "otm_dn_1", "near"), _leg("put", "long", 1, "atm", "far")],
+
+    # stock + options (D4). ⚠ The share leg's qty counts 100-share LOTS, so one
+    # lot covers one contract and every consumer's `x qty x 100` is unchanged.
+    # Its strike_role is "atm" only to satisfy the spec shape — build_default_legs
+    # DROPS a share leg's strike and expiry, because it has neither.
+    "COVERED_CALL":   [_leg(STOCK, "long", 1, "atm"),
+                       _leg("call", "short", 1, "otm_up_1")],
+    "PROTECTIVE_PUT": [_leg(STOCK, "long", 1, "atm"),
+                       _leg("put", "long", 1, "otm_dn_1")],
+    "COLLAR":         [_leg(STOCK, "long", 1, "atm"),
+                       _leg("put", "long", 1, "otm_dn_1"),
+                       _leg("call", "short", 1, "otm_up_1")],
 }
+
+#: The structures that hold SHARES. ⚠ Named once, and used for two opposite
+#: purposes: the Calculator OFFERS them, and the Simulator + the Rescue ad-hoc
+#: form EXCLUDE them (``strategy_menu.build_strategy_menu(exclude=...)``).
+#:
+#: The exclusions are safety, not tidiness. The Simulator's Replay/IV-shock
+#: engines price a ``ContractRow`` off the option chain and have no share
+#: concept; the Rescue ad-hoc form **books into the paper account**, which cannot
+#: hold shares inside ``paper_positions`` at all — that is what ``equity_lots``
+#: exists for — so a covered call submitted there would be stored as a bare short
+#: call. Same defect shape as assessment defect 12, where the form lists an iron
+#: butterfly and relabels it an iron condor on the way out.
+STOCK_STRATEGIES = ("COVERED_CALL", "PROTECTIVE_PUT", "COLLAR")
 
 # Display groups for the UI dropdown (label -> codes).
 STRATEGY_GROUPS = [
@@ -70,6 +117,7 @@ STRATEGY_GROUPS = [
     ("Condors", ["IC", "CONDOR_CALL", "CONDOR_PUT"]),
     ("Butterflies", ["BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY"]),
     ("Calendars", ["CALENDAR_CALL", "CALENDAR_PUT", "DIAGONAL_CALL", "DIAGONAL_PUT"]),
+    ("Stock + options", ["COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"]),
 ]
 
 # Cascading Strategy menu: (family label, [(variant label, code), …]). The display
@@ -88,7 +136,31 @@ STRATEGY_MENU = [
                    ("Iron", "IRON_BUTTERFLY")]),
     ("Calendar", [("Call", "CALENDAR_CALL"), ("Put", "CALENDAR_PUT")]),
     ("Diagonal", [("Call", "DIAGONAL_CALL"), ("Put", "DIAGONAL_PUT")]),
+    ("Stock + options", [("Covered call", "COVERED_CALL"),
+                         ("Protective put", "PROTECTIVE_PUT"),
+                         ("Collar", "COLLAR")]),
 ]
+
+
+def menu_families(exclude=None):
+    """``STRATEGY_MENU`` with ``exclude``d codes removed, empty families dropped.
+
+    ⚠ **The menu DATA must stay complete** — ``test_strategies.py`` requires it to
+    cover every template exactly, because a template missing from the menu is
+    unreachable. Hiding a structure is therefore a per-MOUNT decision, and this is
+    the one filter all three mounts go through.
+
+    Membership is by exact code, so a bare string (``exclude="COVERED_CALL"``,
+    which iterates as characters) drops nothing rather than everything. Returns
+    fresh lists: ``STRATEGY_MENU`` is module-level state three pages read.
+    """
+    skip = set(exclude) if isinstance(exclude, (list, tuple, set, frozenset)) else set()
+    out = []
+    for family, variants in STRATEGY_MENU:
+        kept = [(label, code) for label, code in variants if code not in skip]
+        if kept:
+            out.append((family, kept))
+    return out
 
 
 def strategy_label(code):
@@ -97,7 +169,11 @@ def strategy_label(code):
     for family, variants in STRATEGY_MENU:
         for vlabel, vcode in variants:
             if vcode == code:
-                return vlabel if family == "Single" else f"{family} — {vlabel.lower()}"
+                # "Covered call", not "Stock + options — covered call": these
+                # variant labels are already the whole name, as Single's are.
+                if family in ("Single", "Stock + options"):
+                    return vlabel
+                return f"{family} — {vlabel.lower()}"
     return code
 
 
@@ -155,6 +231,25 @@ _STRATEGY_FACTS = {
                       "A call calendar with the short leg pushed out of the money: front-expiry decay plus an upside lean."),
     "DIAGONAL_PUT": ("DEBIT", ["TERM STRUCTURE", "BEARISH"],
                      "A put calendar with the short leg pushed below spot: front-expiry decay plus a downside lean."),
+
+    # Stock + options (D4). ⚠ All three lead with DEBIT, and that is a judgement
+    # call worth stating: a covered call's OPTION leg is a credit, and the
+    # POSITION is a debit — you pay for 100 shares. The tag names the cash flow at
+    # entry, which is what the frame colours. Note the rest of the app calls
+    # COVERED_CALL a credit structure and is right to: ITS covered call is the
+    # option leg only, because paper_positions holds no shares. Two objects, one
+    # name — hence "100 SHARES" as the second chip on every one of them, so the
+    # reader cannot mistake which is on screen.
+    "COVERED_CALL": ("DEBIT", ["100 SHARES", "INCOME", "CAPPED UPSIDE"],
+                     "Shares you own with a call written above them: the premium is "
+                     "yours, and so is the stock up to the strike. Loss is the "
+                     "stock's, all the way to zero."),
+    "PROTECTIVE_PUT": ("DEBIT", ["100 SHARES", "HEDGE", "DEFINED RISK"],
+                       "Shares plus a put below them — insurance. The put's cost is "
+                       "the premium you pay for a floor you cannot fall through."),
+    "COLLAR": ("DEBIT", ["100 SHARES", "HEDGE", "CAPPED UPSIDE"],
+               "Shares, a put below and a call above: the call pays for the put, "
+               "and both ends of the outcome are bounded."),
 }
 
 
@@ -214,12 +309,20 @@ def build_default_legs(template, spot, strikes, expiries):
     far = next((e for e in exps if e != near), near)
     legs = []
     for spec in specs:
+        stock = spec["option_type"] == STOCK
         legs.append({
             "option_type": spec["option_type"],
             "side": spec["side"],
             "qty": spec["qty"],
-            "strike": _role_strike(spec["strike_role"], spot, strikes),
-            "expiry": far if spec["expiry_role"] == "far" else near,
+            # ⚠ A SHARE leg has neither. A strike on it would look meaningful
+            # and mean nothing; an expiry would make it a candidate for the
+            # FRONT-leg horizon in options_calculator._leg_expiry_years and pin
+            # the whole P&L grid at T=0. The key set stays identical either way,
+            # so no consumer needs to know.
+            "strike": (None if stock
+                       else _role_strike(spec["strike_role"], spot, strikes)),
+            "expiry": (None if stock
+                       else (far if spec["expiry_role"] == "far" else near)),
             "premium": None,
         })
     return legs

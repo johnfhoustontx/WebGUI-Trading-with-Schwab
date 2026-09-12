@@ -485,6 +485,49 @@ def bs_greeks(S, K, T, r, sigma, option_type="call"):
 # SPREAD SUMMARY
 #############################################
 
+#: ``option_type`` of a STOCK leg (gap assessment D4). Shares in the leg model
+#: are what makes covered call / protective put / collar analysable at all.
+STOCK_KIND = "stock"
+
+
+def is_stock_leg(leg) -> bool:
+    """Is this normalized leg SHARES rather than an option contract?
+
+    ⚠ Matched exactly (case- and space-insensitively) rather than by prefix: a
+    near-miss like ``"stocks"`` must read as an OPTION and raise on its missing
+    strike, not silently price as a share.
+    """
+    if not isinstance(leg, dict):
+        return False
+    kind = leg.get("option_type")
+    return isinstance(kind, str) and kind.strip().lower() == STOCK_KIND
+
+
+def leg_value(price, leg, T, r, sigma):
+    """Per-SHARE value of one normalized leg with the underlying at ``price``.
+
+    ⚠ **A share is worth the underlying at any T and any IV**, so a stock leg
+    cannot go through ``bs_price`` — which would raise on its ``strike = None``
+    long before the numbers were wrong. Every consumer's existing
+    ``value x qty x 100`` arithmetic is unchanged, because a stock leg's ``qty``
+    counts **100-share LOTS, not shares**: one lot of a $100 stock is $10,000,
+    exactly as one $100 option contract would be.
+
+    That convention is the whole reason this is a small change. The alternative —
+    ``qty`` in shares with a per-leg multiplier — would have needed a branch at
+    every one of the ~six places that multiply by 100.
+    """
+    if is_stock_leg(leg):
+        return float(price)
+    return bs_price(price, leg["strike"], T, r, sigma,
+                    str(leg["option_type"]).lower())
+
+
+def has_stock_leg(legs) -> bool:
+    """True when any leg is shares — the flag that widens a P&L scan to zero."""
+    return any(is_stock_leg(l) for l in (legs or []))
+
+
 def calc_summary(legs, strategy, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     """
     Calculate summary metrics for a credit spread or iron condor.
@@ -678,7 +721,14 @@ def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
             return 0.0                 # same-expiry set -> expiration payoff
         return max(t - front_t0, 0.0)
 
-    lo, hi = spot * 0.5, spot * 1.5
+    # ⚠ A leg set holding SHARES scans from ZERO. 0.5x spot is the right floor
+    # for an option-only structure — no vertical, condor or fly can lose more
+    # than its width — but shares really can go to nothing, and the old floor
+    # reported a covered call on a $100 stock as risking $4,800 (the loss at
+    # $50) when the position risks $9,800. It is also what proves a protective
+    # put's loss is BOUNDED, which is the entire reason to own one.
+    lo = 0.0 if has_stock_leg(legs) else spot * 0.5
+    hi = spot * 1.5
     n = 601
     xs = [lo + (hi - lo) * k / (n - 1) for k in range(n)]
     pnl = []
@@ -686,8 +736,7 @@ def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
         val = 0.0
         for i, leg in enumerate(legs):
             q = leg.get("qty", 1)
-            price = bs_price(S, leg["strike"], _leg_T(i), r, max(iv, 0.01),
-                             leg["option_type"].lower())
+            price = leg_value(S, leg, _leg_T(i), r, max(iv, 0.01))
             val += price * q * 100 * (1 if leg["side"] == "long" else -1)
         pnl.append(entry_credit + val)
 
@@ -920,6 +969,15 @@ def _leg_expiry_years(leg, expiry_date=None):
     time value in every cell, including the T=0 "Exp" column (fixed 2026-08-20).
     """
     import datetime as _dt
+    # ⚠ A SHARE leg never expires, so it contributes NO horizon — even if it is
+    # carrying a stale ``expiry`` (the leg editor clears it on retype, but a
+    # pasted or hand-built leg set can still arrive with one). Without this, a
+    # stale share expiry EARLIER than the real option leg's would become the
+    # front expiry in ``calc_summary_generic``, and the option would be priced
+    # with time remaining at the wrong horizon — a payoff diagram that is not a
+    # payoff.
+    if is_stock_leg(leg):
+        return None
     e = leg.get("expiry")
     if not e:
         return None
@@ -1032,12 +1090,12 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
             position_value = 0.0
             for li, leg in enumerate(legs):
                 qty = leg.get("qty", 1)
-                opt_type = leg["option_type"].lower()
-                strike = leg["strike"]
 
                 base = leg_t0[li]
                 t_leg = T if base is None else max(base - (t0 - T), 0.0)
-                current_price = bs_price(price, strike, t_leg, r, adjusted_iv, opt_type)
+                # ⚠ Not bs_price: a stock leg has no strike, and this loop runs
+                # on every keystroke of the Calculator's grid.
+                current_price = leg_value(price, leg, t_leg, r, adjusted_iv)
 
                 if leg["side"] == "long":
                     # Long position: we own it, positive value
