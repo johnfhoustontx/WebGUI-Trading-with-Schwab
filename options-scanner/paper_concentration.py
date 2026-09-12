@@ -34,6 +34,7 @@ from shared.driver_policy import open_risk_dollars  # noqa: E402
 SYMBOL_POSITION_CAP = "SYMBOL_POSITION_CAP"
 SYMBOL_RISK_CAP = "SYMBOL_RISK_CAP"
 EXPIRY_POSITION_CAP = "EXPIRY_POSITION_CAP"
+DEPLOYMENT_CAP = "DEPLOYMENT_CAP"
 
 #############################################
 # POLICY
@@ -51,6 +52,7 @@ def default_limits():
         "max_positions_per_symbol": config_paper.MAX_POSITIONS_PER_SYMBOL,
         "max_risk_per_symbol": config_paper.MAX_RISK_PER_SYMBOL,
         "max_positions_per_expiry": config_paper.MAX_POSITIONS_PER_EXPIRY,
+        "max_deployed_risk_pct": config_paper.MAX_DEPLOYED_RISK_PCT,
     }
 
 
@@ -62,7 +64,7 @@ def _key(value):
 
 
 def concentration_reject(positions, symbol, expiration, added_risk,
-                         limits=None):
+                         limits=None, equity=None):
     """Return the reason opening this candidate would breach a cap, else None.
 
     ``positions`` is the OPEN book (closed rows tie up no capital and must not
@@ -71,9 +73,31 @@ def concentration_reject(positions, symbol, expiration, added_risk,
     The position cap is reported ahead of the risk cap when both bind: a count
     is the more legible thing to read in a log line, and it is the limit the
     operator set out to enforce.
+
+    ``equity`` enables the BOOK-WIDE deployment cap (gap assessment B3) — total
+    open max loss as a fraction of it. It is reported FIRST when it binds: if the
+    book as a whole is full, which symbol was asked for is irrelevant, and the
+    broader reason is the more useful log line.
+
+    ⚠ **No equity, or a non-finite one, SKIPS that cap rather than treating it as
+    zero.** A fraction of an unknown cannot be enforced, and a zero denominator
+    would refuse every trade forever — which reads as a broken engine, not as a
+    cap. The cap is likewise opt-in by DATA: a ``limits`` dict without
+    ``max_deployed_risk_pct`` keeps the pre-B3 behaviour, so every existing caller
+    is untouched.
     """
     limits = limits or default_limits()
     rows = [p for p in positions or () if isinstance(p, dict)]
+
+    # Book-wide first — see the docstring.
+    pct = limits.get("max_deployed_risk_pct")
+    eq = _finite(equity)
+    if pct and eq and eq > 0:
+        # ``open_risk_dollars`` for the same reason the symbol sum uses it: it
+        # drops a non-finite row instead of poisoning the total, and a NaN total
+        # makes every ``>`` False — silently switching the ceiling off.
+        if open_risk_dollars(rows) + _finite(added_risk) > pct * eq:
+            return DEPLOYMENT_CAP
 
     sym = _key(symbol)
     same_symbol = [p for p in rows if _key(p.get("symbol")) == sym]

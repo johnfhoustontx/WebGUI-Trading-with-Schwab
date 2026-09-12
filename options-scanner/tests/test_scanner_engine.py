@@ -1069,7 +1069,13 @@ class TestScreenSpreadsAutoSelectWidth:
         """Short at 510 (mark=2.50). Longs at 505 (width=5) and 500 (width=10).
         Realistic fill credits are mid − 0.008 (±0.02 quotes): 0.992 and 1.992.
         E[PnL] = $492 (w=5, 10 contracts) vs $496 (w=10, 5 contracts) — the
-        realistic haircut hurts the doubled contract count more, width 10 wins."""
+        realistic haircut hurts the doubled contract count more, width 10 wins.
+
+        ⚠ ``max_risk_dollars=None`` keeps the PHANTOM $100k/5% budget on purpose:
+        this test is about which width wins the E[PnL] race, and both widths here
+        cost $400-$800 a contract, which the real $250 book cannot open at all
+        (gap assessment A6). The production default is covered by
+        ``TestWidthSearchSizesAgainstTheRealBook``."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
         now_ct = datetime(2026, 4, 24, 8, 30, tzinfo=ZoneInfo("America/Chicago"))
@@ -1077,7 +1083,7 @@ class TestScreenSpreadsAutoSelectWidth:
         chain = self._build_chain(strikes)
         results = screen_spreads(chain, "TEST", 0, 0, -0.30, -0.01, 0.01, 0.30,
                                  0.01, "0-DTE", spot=530.0, daily_expected_move=8.0,
-                                 widths=None, now_ct=now_ct)
+                                 widths=None, now_ct=now_ct, max_risk_dollars=None)
         sig_510 = next((s for s in results if s["short_strike"] == 510.0), None)
         assert sig_510 is not None, "Expected a signal for short_strike=510"
         assert sig_510["width"] == 10.0
@@ -1474,10 +1480,15 @@ class TestModeTagging:
         assert all(s.get("mode") == "PREMIUM" for s in signals)
 
     def test_premium_signals_tagged_mode_premium_auto_width(self):
-        """Auto-width branch (widths=None): every result tagged mode='PREMIUM'."""
+        """Auto-width branch (widths=None): every result tagged mode='PREMIUM'.
+
+        ⚠ ``max_risk_dollars=None`` keeps the phantom budget: this fixture's chain
+        is 5-wide on a $530 underlying, so one contract risks $377 and the real
+        $250 book cannot open it (gap assessment A6). The property under test is
+        the mode TAG, not affordability."""
         chain = self._mock_chain()
         signals = screen_spreads(chain, "TEST", 0, 1, -0.25, -0.08, 0.08, 0.25, 0.05,
-                                 "0-DTE", widths=None)
+                                 "0-DTE", widths=None, max_risk_dollars=None)
         assert len(signals) > 0
         assert all(s.get("mode") == "PREMIUM" for s in signals)
 
@@ -2562,3 +2573,87 @@ class TestScannerConfigWiring:
         finally:
             monkeypatch.undo()
             importlib.reload(scanner_engine)
+
+
+class TestWidthSearchSizesAgainstTheRealBook:
+    """A6: the width search sized against a phantom $100,000 account at 5%.
+
+    ``select_best_width`` defaulted to ``account_size=100000, max_risk_pct=0.05``
+    — a $5,000 per-trade risk budget — while the manual paper book caps one trade
+    at ``config_paper.MAX_RISK_PER_TRADE`` ($250). So the E[PnL] race was decided
+    for a book 20x the real one, and it routinely picked a width whose single
+    contract the engine then refused.
+
+    Measured on the live book 2026-09-11: **169 of 773 paper orders (21.9%) were
+    rejected RISK_TOO_HIGH**, across 35 trading dates, 75 of them MU. That is the
+    defect, not a hypothetical.
+
+    ``max_risk_dollars`` replaces the phantom when supplied and does two things:
+    it sizes the contract count against the real budget, and it DROPS a width
+    whose one-contract max loss exceeds it — a width that cannot be opened at all
+    should not win a comparison about expected profit.
+    """
+
+    def test_a_width_one_contract_cannot_afford_is_dropped(self):
+        # width 1 -> max_loss 0.40/share = $40; width 5 -> 4.55/share = $455.
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.20, 505.0: 0.05})
+        result = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                  trade_type="0-DTE", min_cr_pct=0.05,
+                                  max_risk_dollars=250.0)
+        assert result is not None
+        width, _, _, max_loss = result
+        assert max_loss * 100 <= 250.0, "picked a width one contract cannot afford"
+        assert width == 1.0
+
+    def test_the_same_chain_picks_a_WIDER_width_on_the_phantom_budget(self):
+        """The discriminating pair: without the budget the old behaviour stands,
+        so the test above is about the budget and not about this chain."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.20, 505.0: 0.05})
+        narrow = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                   trade_type="0-DTE", min_cr_pct=0.05,
+                                   max_risk_dollars=250.0)
+        phantom = select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                    trade_type="0-DTE", min_cr_pct=0.05)
+        assert phantom is not None and narrow is not None
+        assert phantom[0] >= narrow[0]
+
+    def test_no_budget_keeps_the_legacy_phantom_sizing(self):
+        """Back-compat: every existing caller and the Market Scanner's display
+        path pass nothing and must be untouched."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.40, 508.0: 0.25, 505.0: 0.05})
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.05) is not None
+
+    def test_an_impossible_budget_returns_None_rather_than_a_width(self):
+        """Every width priced out is 'no trade here', which the caller already
+        counts as ``no_width`` — not a width it will refuse a moment later."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.20, 505.0: 0.05})
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.05,
+                                 max_risk_dollars=5.0) is None
+
+    def test_a_non_finite_budget_is_ignored_rather_than_refusing_everything(self):
+        """The pins-the-bound trap: a NaN budget makes every ``>`` False, which
+        would silently restore the phantom; a 0 would refuse every width. Both
+        degrade to 'no budget supplied'."""
+        opts = _opts_from(510.0, {510.0: 0.60, 509.0: 0.40, 508.0: 0.25, 505.0: 0.05})
+        for bad in (float("nan"), 0.0, -5.0, None):
+            assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                     trade_type="0-DTE", min_cr_pct=0.05,
+                                     max_risk_dollars=bad) is not None
+
+    def test_screen_spreads_threads_the_budget_through(self):
+        """The parameter is dead unless the pipeline carries it."""
+        import inspect
+
+        sig = inspect.signature(screen_spreads)
+        assert "max_risk_dollars" in sig.parameters
+
+    def test_the_scan_defaults_to_the_MANUAL_books_cap(self):
+        """``run_full_scan``'s captured signals feed the manual entry cycle, whose
+        cap is the one that was being violated. The driver's cap is 12x larger, so
+        a width chosen for $250 stays openable there — the conservative direction."""
+        import config_paper
+        import scanner_engine as se
+
+        assert se.DEFAULT_MAX_RISK_DOLLARS == config_paper.MAX_RISK_PER_TRADE

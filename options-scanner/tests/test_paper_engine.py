@@ -203,8 +203,22 @@ def test_entry_cycle_halted_blocks_entries(tmp_path):
 
 
 def test_entry_cycle_rejects_insufficient_bp(tmp_path):
+    """Out of CASH while the book is otherwise healthy.
+
+    ⚠ The fixture used to be a $100 account, where cash and equity were the same
+    number — so once the book-wide deployment cap landed (B3) a $100 equity also
+    trips the 20% cap and this test stopped reaching the branch it names. The
+    realistic way to run out of buying power is equity held in STOCK: the lot
+    counts toward equity (so the deployment cap has room) and toward no open
+    option risk, while cash is gone. Same assertion, a scenario that isolates it.
+    """
     db = str(tmp_path / "acct.db")
-    pdb.ensure_account(db, 100.0, "2026-06-03")   # tiny cash
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    # Spend nearly all the cash on shares: equity stays ~25k, open risk stays 0.
+    pdb.debit_cash(db, 24_900.0)
+    pdb.insert_equity_lot(db, {"symbol": "AAPL", "shares": 100,
+                               "cost_basis": 249.0, "source": "bought",
+                               "source_position_id": None})
     sig = _sig(width=1.0, entry_credit=0.50)      # needs 260 BP -> reject
     pe.run_entry_cycle(None, "2026-06-03", [sig], _FakeBroker(0.48), db)
     assert pdb.fetch_open_positions(db) == []

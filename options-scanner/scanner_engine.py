@@ -51,6 +51,20 @@ log = logging.getLogger("scanner")
 # its perceived edge is net-of-commission. See the 2026-07-01 calc-accuracy
 # remediation in the root CLAUDE.md.
 from commissions import round_trip_commission
+import config_paper as _config_paper
+
+# Per-trade risk budget the WIDTH SEARCH sizes against (gap assessment A6).
+#
+# ⚠ It defaulted to a phantom $100,000 account at 5% - a $5,000 budget - while the
+# manual paper book caps one trade at $250, so the E[PnL] race was decided for a
+# book 20x the real one and routinely picked a width whose single contract the
+# engine then refused. Measured on the live book 2026-09-11: 169 of 773 paper
+# orders (21.9%) rejected RISK_TOO_HIGH across 35 dates, 75 of them MU.
+#
+# The MANUAL book's cap is the default because run_full_scan's captured signals
+# feed that entry cycle. The driver's cap is 12x larger, so a width chosen for
+# $250 stays openable there - the conservative direction.
+DEFAULT_MAX_RISK_DOLLARS = _config_paper.MAX_RISK_PER_TRADE
 
 _CONTRACT_MULT = 100.0                       # shares per option contract
 _LEGS_BY_TYPE = {"PCS": 2, "CCS": 2, "IC": 4}
@@ -934,7 +948,8 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                    call_d_min, call_d_max, min_cr_pct, trade_type,
                    spot=None, daily_expected_move=None, earnings_date=None,
                    widths=None, account_size=100000, max_risk_pct=0.05,
-                   now_ct=None, mode="PREMIUM"):
+                   now_ct=None, mode="PREMIUM",
+                   max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS):
     if not chain:
         return []
     if now_ct is None:
@@ -1066,7 +1081,8 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 if widths is None:
                     selection = select_best_width(
                         short, opts, side, std_increment or 1.0, trade_type, min_cr_pct,
-                        account_size=account_size, max_risk_pct=max_risk_pct)
+                        account_size=account_size, max_risk_pct=max_risk_pct,
+                        max_risk_dollars=max_risk_dollars)
                     if selection is None:
                         no_width += 1
                         continue
@@ -1319,7 +1335,8 @@ def size_contracts(n_target, n_risk):
 
 
 def select_best_width(short, opts, side, strike_increment, trade_type,
-                      min_cr_pct, account_size=100000, max_risk_pct=0.05):
+                      min_cr_pct, account_size=100000, max_risk_pct=0.05,
+                      max_risk_dollars=None):
     """Select the width that maximizes expected total dollar P&L.
 
     For each candidate width that passes liquidity and the credit/width sanity
@@ -1341,6 +1358,15 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         min_cr_pct: minimum credit as fraction of width (regime sanity floor)
         account_size: account size for risk-cap contract sizing
         max_risk_pct: max % of account to risk per trade (0.05 = 5%)
+        max_risk_dollars: the REAL per-trade risk budget in dollars (gap
+            assessment A6). When supplied it replaces ``account_size *
+            max_risk_pct`` for contract sizing AND drops any width whose ONE
+            contract exceeds it — a width that cannot be opened at all must not
+            win a comparison about expected profit. ⚠ A non-positive or
+            non-finite value is treated as "not supplied" rather than as a budget
+            of zero: zero would refuse every width (reading as a broken scanner)
+            and a NaN would make every ``>`` False, silently restoring the
+            phantom. See ``DEFAULT_MAX_RISK_DOLLARS``.
 
     Returns:
         Tuple (width, long_leg_opts, credit, max_loss) or None.
@@ -1348,6 +1374,14 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
     k = short["strike"]
     d = short["delta"]
     pop = (1 + d) if side == "PCS" else (1 - d)
+
+    # "Not supplied" covers None, 0, negative and NaN — see the arg docs.
+    try:
+        budget = float(max_risk_dollars)
+        if not (budget > 0) or budget != budget:
+            budget = None
+    except (TypeError, ValueError):
+        budget = None
 
     candidates = []
     for mult in WIDTH_MULTIPLIERS:
@@ -1379,9 +1413,16 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         if credit / w < abs(d) + EDGE_MARGIN:
             continue
 
+        # A width whose ONE contract busts the real budget can never be opened,
+        # so it is not a candidate — dropping it here is what stops the search
+        # winning a race the entry cycle then refuses (A6).
+        if budget is not None and ml * 100 > budget:
+            continue
+
         # Contract sizing: hit profit target on a win, bounded by risk cap.
         n_target = calc_contracts_for_target(credit)
-        n_risk = calculate_position_size(ml, account_size, max_risk_pct)
+        n_risk = (int(budget // (ml * 100)) if budget is not None
+                  else calculate_position_size(ml, account_size, max_risk_pct))
         contracts = size_contracts(n_target, n_risk)
         if contracts <= 0:
             continue   # the risk cap leaves no room for this width

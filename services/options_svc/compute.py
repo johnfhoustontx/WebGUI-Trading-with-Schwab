@@ -551,6 +551,24 @@ def _income_earnings(symbol, db_path=None):
             _earn.close_db(conn)
 
 
+def scan_earnings(symbol):
+    """``(coverage, next report date or None)`` for ANY scan's earnings gate.
+
+    The same lookup :func:`_income_earnings` does, under the name the non-income
+    callers need — the Strategy Finder's handler passed no date at all until
+    2026-09-11 (gap assessment A5), so its gate was a no-op on that whole surface
+    while reading exactly like protection.
+
+    ⚠ A thin wrapper rather than an alias, deliberately: ``scan_earnings =
+    _income_earnings`` would bind the function OBJECT at import, so the ~15 tests
+    that monkeypatch ``_income_earnings`` by name would silently not intercept
+    this path. ``_income_earnings`` keeps its own name because renaming it buys
+    nothing — what was wrong was never the name, it was that only the income
+    window ever called it.
+    """
+    return _income_earnings(symbol)
+
+
 def income_earnings_map(symbols) -> dict:
     """``{symbol: (status, report date or None)}`` for the window's earnings gate.
 

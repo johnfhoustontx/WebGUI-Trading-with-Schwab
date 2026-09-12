@@ -645,8 +645,26 @@ def swing_scan(bus, args: dict) -> None:
     env = bus.cache_get("cache:sentiment:composite")
     payload = env.payload if env is not None else None
     market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
-    result = compute.swing_scan(**params, market_state=market_state)
-    payload = {"signals": result["signals"], "view": result.get("view"),
+    # The earnings gate (gap assessment A5). ``swing_scan`` has gated per signal
+    # since the 0-DTE-bucket fix and ``income_scan`` supplied a date, but this
+    # handler passed NONE — so ``if earnings_date and ...`` was always False and
+    # the gate was a no-op on this whole surface while reading like protection.
+    # Guarded: a gate that raises costs the user the page, and ``not_listed``
+    # deliberately does not block (with no vendor key it is every symbol).
+    try:
+        status, earnings_date = compute.scan_earnings(params["symbol"])
+    except Exception:  # noqa: BLE001 — see above.
+        _degrade.degraded("options.swing_earnings")
+        status, earnings_date = "not_listed", None
+    result = compute.swing_scan(**params, market_state=market_state,
+                               earnings_date=earnings_date)
+    # STAMP every row with the coverage it actually got, the same field the
+    # income board carries: a row that skipped the check must not look like a row
+    # that passed it.
+    signals = result["signals"]
+    for sig in signals:
+        sig["earnings_status"] = status
+    payload = {"signals": signals, "view": result.get("view"),
                "filtered_out": result.get("filtered_out") or 0,
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)

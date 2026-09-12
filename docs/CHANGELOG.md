@@ -4,7 +4,72 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The income short-delta band reached the spreads
+**Last updated:** 2026-09-11 (**Three correctness/risk items: the Strategy
+Finder never read the earnings calendar, the width search sized against a phantom
+$100k book, and nothing capped total open risk.** Gap assessment **A5, A6, B3** —
+each measured against the live book first.)
+
+- **A5 — the earnings gate was live on ONE of three scan paths.** `swing_scan` has
+  gated per signal since the 0-DTE-bucket fix and `income_scan` supplied a date,
+  but the Strategy Finder's handler passed **none**, so `if earnings_date and ...`
+  was always False and the gate was a no-op on that whole surface while reading
+  exactly like protection — the same shape as the defect A1 fixed on the Market
+  Scanner. `compute.scan_earnings` is the one lookup now, and every row is
+  **stamped** with the coverage it got: a row that skipped the check must not look
+  like one that passed it. ⚠ A thin wrapper, not `scan_earnings =
+  _income_earnings` — an alias binds the function object at import, so the ~15
+  tests monkeypatching `_income_earnings` by name would silently miss the path.
+
+- **A6 — measured: 169 of 773 paper orders (21.9%) rejected `RISK_TOO_HIGH`**,
+  across 35 trading dates. `select_best_width` defaulted to a phantom
+  `account_size=100000, max_risk_pct=0.05` — a **$5,000** per-trade budget — while
+  the manual book caps a trade at **$250**, so the E[PnL] race that picks a width
+  was decided for a book 20× the real one. Per symbol, the chosen width cost
+  **$425** a contract on MU (75 of the 169; $894 underlying, $5 strikes), $645 on
+  MSFT (7.5-wide) and **$2,044** on ALAB (25-wide).
+  `scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is now `config_paper.MAX_RISK_PER_TRADE`
+  and the existing `contracts <= 0` guard drops a width nothing can size, so ~92%
+  of those rejections are no longer emitted at all.
+  ⚠ **The honest consequence: a $250 cap excludes high-priced underlyings with
+  wide strike increments entirely.** MU's narrowest available width is $5 = $425,
+  so the scan emits nothing for it — the truth made visible instead of a rejection
+  buried in the fills log. Raising the cap is the operator's call; the driver's cap
+  is 12× larger, so a width chosen for $250 stays openable there.
+
+- **B3 — a fifth risk rung, at the TIGHT end.** The four existing caps are per
+  trade, per symbol, per expiry and per account-drawdown; nothing capped the book
+  as a whole, so three symbols at the $750 symbol cap is $2,250 and clears every
+  one. `MAX_DEPLOYED_RISK_PCT = 0.20` — theoptionpremium's 20–25% rather than the
+  50% the audit suggested. Measured first: $1,933 committed against $24,184 equity
+  (**8.0%**), so it is a real ceiling with ~11 more $250 spreads of headroom.
+  - The denominator is `session_start_equity`, and **this is that field's first
+    reader** — it was written correctly and consumed by nothing, its own comment
+    saying so. Fixed for the session deliberately: a live-equity denominator would
+    loosen the cap as unrealized P&L ticks up and tighten it on a blip.
+  - ⚠ No equity **skips** the cap rather than treating it as zero, and a `limits`
+    dict without the key keeps the old behaviour — a zero denominator would refuse
+    every trade forever, which reads as a broken engine.
+  - ⚠ **A hand-opened cash-secured put consumes it fast:** that structure's
+    `max_loss_total` is the whole strike notional, so one $15k CSP is 62% of this
+    book and auto-entry then stops — correctly, since the cash really is
+    committed, but invisibly, because a concentration breach leaves no UI trace by
+    design. Check the journal before assuming the engine is stuck.
+
+- **Three existing tests moved, none weakened.** Two width tests now state
+  `max_risk_dollars=None` because their chains are 5-wide on a $530 underlying —
+  unopenable for a $250 book — and they test which width wins, not affordability.
+  And `test_entry_cycle_rejects_insufficient_bp` used a $100 account where cash and
+  equity were the same number, so the deployment cap tripped before the branch it
+  names; it now holds its equity in **stock**, which is the realistic way to run
+  out of buying power and isolates the two gates. Every assertion is unchanged.
+
+- **Tests: 24 new.** options-scanner **1367 → 1385 passed / 2 skipped**,
+  options_svc **1582 → 1588**; shared + page-help + tools 1381. Ruff and pyright
+  clean. Not verified live — Monday's cycles are the first to run any of it.
+
+---
+
+**Prior —** 2026-09-11 (**The income short-delta band reached the spreads
 and not the cash-secured put — and the realised delta was worse than the target
 suggested.** Gap assessment **A4**.)
 

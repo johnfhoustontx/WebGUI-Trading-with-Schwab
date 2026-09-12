@@ -42,6 +42,18 @@ MAX_POSITIONS_PER_SYMBOL = 3       # open positions in one underlying
 MAX_RISK_PER_SYMBOL      = 750.0   # summed max loss in one underlying (~3% of account)
 MAX_POSITIONS_PER_EXPIRY = 5       # open positions sharing one expiration, book-wide
 
+# Book-wide DEPLOYMENT cap: total open max loss as a fraction of session-start
+# equity (gap assessment B3). The three caps above are per symbol and per expiry;
+# nothing capped the book as a whole, so three symbols at the $750 symbol cap is
+# $2,250 and clears every one of them.
+#
+# 0.20 is the TIGHT end of the published range on purpose - theoptionpremium caps
+# open risk at 20-25%, Option Alpha keeps 40-50% in cash (i.e. 50-60% deployed).
+# Measured on the live book 2026-09-11: $1,933 committed against $24,184 equity,
+# 8.0%, so 20% is a real ceiling with ~11 more $250 spreads of headroom rather
+# than something that bites on day one. Raise it here to loosen.
+MAX_DEPLOYED_RISK_PCT = 0.20
+
 #############################################
 # ENTRY QUALITY BAR
 #############################################

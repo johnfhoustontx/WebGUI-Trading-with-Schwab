@@ -2190,6 +2190,33 @@ never be entered. **Accepted consequence: it leaves no trace in the UI**, only
 the journal (`SKIPPED <sym> <reason> (concentration cap)`); the visible symptom
 is a good signal that never opens. Do not "fix" that by recording the row.
 
+**The FIFTH rung is the book-wide deployment cap** (`MAX_DEPLOYED_RISK_PCT`,
+0.20): total open max loss as a fraction of equity. The four above are per trade,
+per symbol, per expiry and per account-drawdown — so three symbols at the $750
+symbol cap is $2,250 and clears every one of them. 0.20 is the **tight end** of
+the published range (theoptionpremium 20–25%; Option Alpha keeps 40–50% in cash,
+i.e. 50–60% deployed). Measured on the live book 2026-09-11: $1,933 committed
+against $24,184 equity — 8.0% — so it is a real ceiling with ~11 more $250 spreads
+of headroom rather than something that bites on day one.
+
+The denominator is **`session_start_equity`, and this is that field's FIRST
+reader** — it was written correctly and consumed by nothing, its own comment
+saying so. Right here for two reasons beyond being free: it already includes
+`equity_at_cost` (share lots are committed capital), and being fixed for the
+session it gives a **stable** ceiling, where a live-equity denominator would
+loosen the cap as unrealized P&L ticks up and tighten it on a blip — how much the
+book may commit would depend on the minute you asked. Intraday losses are the
+drawdown halt's job; live-equity *sizing* is B8.
+
+⚠ **No equity SKIPS the cap rather than treating it as zero**, and a `limits` dict
+without the key keeps the pre-cap behaviour — a fraction of an unknown cannot be
+enforced, and a zero denominator would refuse every trade forever, which reads as
+a broken engine. ⚠ **A hand-opened cash-secured put consumes it fast**: that
+structure's `max_loss_total` is the whole strike notional, so one $15k CSP is 62%
+of this book and the auto entry cycle then stops opening spreads — correctly (the
+cash really is committed) but invisibly, since a concentration breach leaves no UI
+trace. Check the journal before assuming the engine is stuck.
+
 The risk sum goes through **`shared.driver_policy.open_risk_dollars`** rather
 than a local `sum(...)` — a NaN total makes every `>` False and silently
 switches the ceiling off, the documented pins-the-bound trap.
@@ -2417,6 +2444,45 @@ Three rules, and each is a decision rather than an implementation detail:
 which would aim every short at the far wing. **Consequence worth knowing: the
 Strategy Finder's own Δ inputs now bind on its single-leg shorts**, which they
 never did — the page's help already claimed they did.
+
+## The width search sizes against the REAL book, and the scan reads the calendar
+
+**`scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is `config_paper.MAX_RISK_PER_TRADE`
+($250).** `select_best_width` defaulted to a phantom `account_size=100000,
+max_risk_pct=0.05` — a $5,000 per-trade budget — so the E[PnL] race that picks a
+width was decided for a book **20× the real one**, and it routinely chose a width
+whose single contract the entry cycle then refused. ⚠ Measured on the live book
+2026-09-11: **169 of 773 paper orders (21.9%) rejected `RISK_TOO_HIGH`**, over 35
+trading dates.
+
+The mechanism, measured per symbol: the chosen width cost **$425** a contract on
+MU (75 rejections, $894 underlying, $5 strikes), $645 on MSFT (7.5-wide) and
+**$2,044** on ALAB (25-wide). `max_risk_dollars` makes `n_risk` real, and the
+existing `contracts <= 0 → continue` guard then drops a width nothing can size —
+so ~92% of those rejections stop being emitted at all rather than being emitted
+and refused.
+
+⚠ **The honest consequence: a $250 per-trade cap excludes high-priced underlyings
+with wide strike increments entirely.** MU's narrowest available width is $5 =
+$425, so no width is affordable and the scan now emits nothing for it. That is the
+truth made visible (no signal) instead of invisible (a rejection buried in the
+fills log) — and raising `MAX_RISK_PER_TRADE` is the operator's decision, not the
+scanner's. The **driver's** cap is 12× larger, so a width chosen for $250 stays
+openable there: the conservative direction.
+
+**`compute.scan_earnings` is the one earnings lookup every scan uses.**
+`swing_scan` has gated per signal since the 0-DTE-bucket fix and `income_scan`
+supplied a date, but the Strategy Finder's handler passed **none** — so
+`if earnings_date and ...` was always False and the gate was a no-op on that whole
+surface while reading exactly like protection, the same shape as the defect A1
+fixed on the Market Scanner. Three scan paths; the gate was live on one. Every row
+is now **stamped** with the coverage it got (`earnings_status`), because a row that
+skipped the check must not look like one that passed it, and `not_listed`
+deliberately does not block — with no vendor key it is every symbol, so failing
+closed would empty the page. ⚠ `scan_earnings` is a thin WRAPPER, not
+`scan_earnings = _income_earnings`: an alias binds the function object at import,
+so the ~15 tests that monkeypatch `_income_earnings` by name would silently miss
+this path.
 
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 

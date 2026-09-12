@@ -170,6 +170,37 @@ def _log_capped(seen, symbol, reason):
              _default_broker.PREFIX, symbol, reason)
 
 
+def _deployment_equity(db_path):
+    """Denominator for the book-wide deployment cap (gap assessment B3), or None.
+
+    ``session_start_equity`` — and this is its FIRST reader. The field was written
+    correctly and consumed by nothing, its own comment in ``paper_account_db``
+    saying so and that it was "about storing the correct number for the first
+    reader". It is the right denominator here for two reasons beyond being free:
+    it already includes ``equity_at_cost`` (share lots are committed capital), and
+    being fixed for the session it gives a STABLE ceiling — a live-equity
+    denominator would loosen the cap as unrealized P&L ticks up and tighten it on
+    a blip, so how much the book may commit would depend on the minute you asked.
+    Intraday losses are the session drawdown halt's job, and the live-equity
+    version of sizing is its own recommendation (B8).
+
+    Falls back to the live ``cash + reserved + lots`` sum for an account that has
+    not rolled a session yet, and to None when even that is unreadable — None
+    SKIPS the cap rather than refusing every trade. Never raises: the cap must not
+    be able to cost the cycle.
+    """
+    try:
+        acct = paper_account_db.get_account(db_path) or {}
+        equity = acct.get("session_start_equity")
+        if equity and float(equity) > 0:
+            return float(equity)
+        return ((acct.get("cash") or 0.0) + (acct.get("buying_power_reserved") or 0.0)
+                + (paper_account_db.equity_at_cost(db_path) or 0.0)) or None
+    except Exception:
+        log.warning("deployment-cap equity unreadable - cap skipped", exc_info=True)
+        return None
+
+
 def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
     """Open new paper positions from eligible captured signals. RTH gating is the
     caller's responsibility; this opens nothing when the account is halted."""
@@ -211,7 +242,8 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
         # has_order_for_signal blacklist the signal for good.
         book = paper_account_db.fetch_open_positions(db_path)
         capped = paper_concentration.concentration_reject(
-            book, sig["symbol"], sig["expiration"], 0.0)
+            book, sig["symbol"], sig["expiration"], 0.0,
+            equity=_deployment_equity(db_path))
         if capped:
             _log_capped(capped_seen, sig["symbol"], capped)
             continue
@@ -258,7 +290,8 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
                 continue
             max_loss_total = round(max_loss_per * qty, 2)
             capped = paper_concentration.concentration_reject(
-                book, sig["symbol"], sig["expiration"], max_loss_total)
+                book, sig["symbol"], sig["expiration"], max_loss_total,
+                equity=_deployment_equity(db_path))
             if capped:
                 _log_capped(capped_seen, sig["symbol"], capped)
                 continue

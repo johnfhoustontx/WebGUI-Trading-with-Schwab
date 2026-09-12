@@ -1,6 +1,6 @@
 # Options strategy playbook vs the app — gap assessment
 
-**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis, since acted on — **A1, A2, A3, B1, B6, C1 and A4 have shipped on `claude/options-strategies-gaps-8636bf`**, and the rows they changed say so inline. Everything unmarked still describes `c152b00`.
+**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis, since acted on — **A1–A6, B1, B3, B6 and C1 have shipped on `claude/options-strategies-gaps-8636bf`**, and the rows they changed say so inline. Everything unmarked still describes `c152b00`.
 **Companion:** [Options strategy playbook](2026-09-11-options-strategy-playbook.md). Rule IDs such as **S1**, **M2** or **X4** refer to its Part 1.
 
 ## Verdict
@@ -263,12 +263,12 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **A2** | Teach the repricer single legs (`SHORT_PUT`, `COVERED_CALL`) — **shipped 2026-09-11** | X1–X3 for income | S–M | High |
 | **A3** | Fix Rescue's put-side test for short puts — **shipped 2026-09-11** | §3.1 | S | Medium |
 | **A4** | Give the income cash-secured put its own delta band — **shipped 2026-09-11** | §2.3 | S | Medium |
-| **A5** | Pass an earnings date from the Strategy Finder | V3 | S | Medium |
-| **A6** | Size the width search against the real book | S3, W1, W4 | S–M | Medium–high |
+| **A5** | Pass an earnings date from the Strategy Finder — **shipped 2026-09-11** | V3 | S | Medium |
+| **A6** | Size the width search against the real book — **shipped 2026-09-11** | S3, W1, W4 | S–M | Medium–high |
 | **A7** | One commission convention; rank on net — **measured 2026-09-11: the analytics half is worth −0.019R and reorders nothing; see below** | P2, W4 | S–M | ~~Medium~~ **Low** |
 | **B1** | Exit rules for cash-secured puts and covered calls — **shipped 2026-09-11** | X1, X3, X5 | M | High |
 | **B2** | Apply the volatility floor wherever premium is sold | V1 | S | Medium |
-| **B3** | Deployment cap for the manual book | S2 | S | Medium–high |
+| **B3** | Deployment cap for the manual book — **shipped 2026-09-11** | S2 | S | Medium–high |
 | **B4** | Sector cap | S4 | M | Medium |
 | **B5** | Expiry-day rule for physically-settled names | X4 | M | Medium |
 | **B6** | Store the entry short delta — **shipped 2026-09-11** | X2 | S | Medium |
@@ -327,9 +327,35 @@ help became true rather than changing. Disclosed in `page_help.py`.
 
 **A5. Pass an earnings date from the Strategy Finder.** Its handler supplies none (`handlers.py:470-480`). Do it after A1, so every scanner reads the same store.
 
+**Shipped 2026-09-11.** `compute.scan_earnings` is the one lookup — a thin wrapper
+over the income window's, not an alias (an alias binds the function object at
+import, so the ~15 tests monkeypatching `_income_earnings` by name would miss the
+new path). Every row is also **stamped** with the coverage it got, because a row
+that skipped the check must not look like one that passed it, and `not_listed`
+deliberately does not block: with no vendor key it is every symbol, so failing
+closed would empty the page.
+
 **A6. Size the width search against the real book.**
 - **The change:** feed the book's equity and per-trade cap into `select_best_width` instead of $100,000 at 5%, and cap width so that one contract fits the cap.
 - **Measure first:** count today's `RISK_TOO_HIGH` rejections to size the problem.
+
+**Shipped 2026-09-11, and the measurement is the headline.** **169 of 773 paper
+orders — 21.9% — were rejected `RISK_TOO_HIGH`**, across 35 trading dates. The
+mechanism, per symbol: the chosen width cost **$425** a contract on MU (75 of the
+169; $894 underlying, $5 strikes), $645 on MSFT (7.5-wide), **$2,044** on ALAB
+(25-wide), against a $250 cap. `scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is now
+`config_paper.MAX_RISK_PER_TRADE`, and the existing `contracts <= 0` guard drops a
+width nothing can size — so ~92% of those rejections are no longer emitted at all.
+
+⚠ **The honest consequence: a $250 cap excludes high-priced underlyings with wide
+strike increments entirely.** MU's narrowest available width is $5 = $425, so the
+scan now emits nothing for it — the truth made visible instead of a rejection
+buried in the fills log. Raising `MAX_RISK_PER_TRADE` is the operator's call. The
+driver's cap is 12× larger, so a width chosen for $250 stays openable there.
+
+⚠ **Two existing tests needed the phantom budget stated explicitly** (their chains
+are 5-wide on a $530 underlying, which a $250 book cannot open at all). Their
+assertions are untouched; the production default is covered by a new test class.
 - **A useful extra:** a days-to-expiration width preference (W3). One published table puts 7–13 DTE at $1–2 wide and 30–44 DTE at $2.50–3.50, though it cites no backtest.
 
 **A7. One commission convention.**
@@ -397,6 +423,22 @@ global set. The sourced rules:
 **B2. Apply the volatility floor wherever premium is sold.** The Strategy Finder, the Income Window and the directional tab's naked shorts have none. Add an optional *ceiling* for the long-premium profiles: buy when volatility is low.
 
 **B3. A deployment cap for the manual book.** Total open max loss should stay at or below a set fraction of equity. Option Alpha keeps 40–50% in cash; theoptionpremium caps open risk at 20–25%. Start at 50%, as config, so tightening is one edit.
+
+**Shipped 2026-09-11 at 0.20, the TIGHT end rather than the suggested 50%** —
+`config_paper.MAX_DEPLOYED_RISK_PCT`, enforced as a fifth rung in
+`paper_concentration.concentration_reject`. Measured first: the live book had
+$1,933 committed against $24,184 equity (**8.0%**), so 20% is a real ceiling with
+~11 more $250 spreads of headroom rather than something that bites on day one.
+
+The denominator is `session_start_equity` — **this is that field's first reader**;
+it was written correctly and consumed by nothing. Fixed for the session on purpose:
+a live-equity denominator would loosen the cap as unrealized P&L ticks up and
+tighten it on a blip, so how much the book may commit would depend on the minute
+you asked. ⚠ No equity SKIPS the cap rather than treating it as zero, and a
+`limits` dict without the key keeps the old behaviour. ⚠ **A hand-opened
+cash-secured put consumes it fast** — that structure's `max_loss_total` is the whole
+strike notional, so one $15k CSP is 62% of this book and auto-entry then stops,
+correctly but invisibly (a concentration breach leaves no UI trace by design).
 
 **B4. A sector cap.** Limit both the count and the max loss per sector, with the sector map taken from `config/symbols.toml` or the sentiment service's sector reference. The scan universe's tilt to semiconductors is exactly the correlated book the playbook warns about.
 
