@@ -305,6 +305,25 @@ def synth_from_trade(trade):
     }
 
 
+def close_prompt_label(trade) -> str:
+    """The Close dialog's input label for one ledger row.
+
+    ⚠ **The two directions close in opposite directions.** A credit spread pays a
+    DEBIT to close; a long option or debit vertical RECEIVES a credit — so asking
+    a long call for its "Exit debit" named the wrong side of the trade, on top of
+    an engine that then booked the P&L with the credit formula.
+
+    Both spell out "per spread", because the ledger stores per-SHARE prices: a
+    200 typed where 2.00 belongs books a 100x result that nothing downstream
+    flags. An absent ``direction`` reads as a credit spread, which is what every
+    pre-D3 row is.
+    """
+    row = trade if isinstance(trade, dict) else {}
+    if str(row.get("direction") or "").upper() == "DEBIT":
+        return "Exit credit received (per spread)"
+    return "Exit debit paid (per spread)"
+
+
 def merge_detail(base, detail):
     """Overlay non-None live-analyze ``detail`` fields onto a synth signal dict.
 
@@ -473,7 +492,7 @@ def render():
             return
         with ui.dialog() as dlg, ui.card():
             ui.label(f"Close {t.get('symbol')} {t.get('strategy')}").classes("text-subtitle1")
-            debit = ui.number("Exit debit (per spread)", value=0.0, format="%.2f")
+            debit = ui.number(close_prompt_label(t), value=0.0, format="%.2f")
 
             def confirm():
                 bus_client.request("options", {

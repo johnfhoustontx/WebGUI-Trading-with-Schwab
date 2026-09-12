@@ -189,7 +189,21 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
 
 
 def close_paper_trade(trade, exit_debit, reason="MANUAL"):
-    """Close a paper trade. In the future, this places a closing order."""
+    """Close a paper trade. In the future, this places a closing order.
+
+    ⚠ **The two directions do not share the arithmetic, and this function used
+    the credit one for both.** A credit spread pays a debit to close, so its P&L
+    is ``credit - debit``. A DEBIT trade *receives* a credit to close, and stores
+    ``entry_credit`` as the NEGATIVE per-share debit — so the credit formula made
+    a long call bought at $2.00 and sold at $3.00 book ``(-2.00 - 3.00) x 100 =
+    -$500`` where the truth is **+$100**: a winner recorded as a five-times-larger
+    loss. ``_expire_debit_trade`` exists because the same formula is wrong at
+    expiry; the manual close is the ledger's only pre-expiry exit and never got
+    the same treatment.
+
+    ``exit_debit`` therefore means what it already means at expiry: the debit PAID
+    to close a credit spread, the credit RECEIVED for a debit trade (its value).
+    """
     now = datetime.now(TZ)
     multiplier = 100
     qty = trade["quantity"]
@@ -198,7 +212,16 @@ def close_paper_trade(trade, exit_debit, reason="MANUAL"):
     trade["exit_time"] = now.isoformat()
     trade["exit_debit"] = round(exit_debit, 2)
     trade["exit_debit_total"] = round(exit_debit * qty * multiplier, 2)
-    trade["realized_pnl"] = round((trade["entry_credit"] - exit_debit) * qty * multiplier, 2)
+    if trade.get("direction") == "DEBIT":
+        # Value received (per share x 100) minus the debit paid. ``entry_debit``
+        # is PER CONTRACT dollars, matching ``legs_intrinsic_value``, so the
+        # manual close and the expiry settlement agree on identical economics.
+        entry_debit = trade.get("entry_debit") or 0.0
+        trade["realized_pnl"] = round(
+            (exit_debit * multiplier - entry_debit) * qty, 2)
+    else:
+        trade["realized_pnl"] = round(
+            (trade["entry_credit"] - exit_debit) * qty * multiplier, 2)
     trade["exit_reason"] = reason
     return trade
 

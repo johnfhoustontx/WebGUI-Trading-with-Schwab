@@ -91,11 +91,14 @@ active = "ratchet"
 #   table below, so they cannot be given different exit rules. A
 #   [structures.NAKED_PUT] table would look authoritative and be ignored.
 #
-#   Two keys exist only here, with no [stops] counterpart:
+#   Four keys exist only here, with no [stops] counterpart:
 #     loss_rules  false = no money stop, no time stop, no delta stop.
 #     manage_dte  close a PROFITABLE position at or below this DTE. A LOSING one
 #                 is HELD — closing it there would be the loss-side stop under
 #                 another name. Unset = off.
+#   ...and two that only the DEBIT structures read (see below):
+#     exit_dte         time exit, profit-blind. Unset = off.
+#     debit_stop_frac  percent-of-debit stop. Unset = OFF, and that is sourced.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The Income Window's cash-secured put (both spellings).
@@ -123,6 +126,62 @@ manage_dte = 21
 loss_rules = false
 manage_dte = 21
 # TradingBlock takes ~95% here; same reasoning as above. `tp_frac = 0.95`.
+
+# ─── THE LEDGER'S FOUR DEBIT STRUCTURES (gap assessment D3) ─────────────────
+#
+#   Long options and debit verticals sent to the Paper Ledger from the Strategy
+#   Finder or the Market Scanner's Directional tab. They had NO pre-expiry exit
+#   at all: the ledger reprices them and settles their expiries every 5 minutes,
+#   but nothing closed one before expiry except the page's Close button.
+#
+#   ⚠ They read `exit_dte` and `debit_stop_frac`, and NOT `loss_rules` /
+#   `stop_mult` / `cut_dte` / the delta keys. Those are credit-denominated, and a
+#   debit stores entry_credit NEGATIVE, which INVERTS them — measured, handing a
+#   healthy long call to the credit rules returns CUT/MONEY_STOP at every P&L
+#   from -$199 to +$399. signal_recommender dispatches a debit to its own rules.
+#
+#   `exit_dte` = the time exit. Unlike manage_dte it is NOT profit-conditional
+#   (the sourced rule is to be out before the final weeks either way), and it
+#   fires ONLY when the position's dte_at_entry was greater than the threshold.
+#   ⚠ That guard is what makes 21 shippable: the Directional tab's windows are
+#   DTE 0-4 and 5-15, so EVERY debit it can produce arrives inside 21 days, and
+#   an unguarded rule would close 100% of them on the tick after they opened.
+#   Those keep their target and the expiry settlement, which is what bounds them.
+#
+#   `tp_frac` is inherited (0.50) — the lower of the two sourced numbers
+#   (tastylive 50% on debit spreads, TradingBlock ~80%; set `tp_frac = 0.80` to
+#   try the other). ⚠ The source gives a percentage but not of WHAT, and the two
+#   readings differ: a bounded vertical targets a fraction of its MAX PROFIT (the
+#   mirror of the credit side, where the credit IS the max profit), a long option
+#   a fraction of the DEBIT PAID, because it has no max profit at all. On one
+#   $2.00 debit over a $5 width those are +$150 and +$100. That choice lives in
+#   signal_recommender._debit_target_base, not here.
+#
+#   `debit_stop_frac` is COMMENTED OUT, and that is the SOURCED default: the
+#   practitioner sources close debit spreads before expiry rather than stopping
+#   them out (tastylive), so any level here would be invention. Uncomment to cut
+#   once that fraction of the debit paid is gone — 0.60 = cut at -60%.
+#
+#   There is no debit outcome data in this app yet (signals.db holds only
+#   PCS/CCS/IC and the ledger is empty), so these are SOURCED, not fitted. When
+#   the ledger has closed debit trades, measure before moving them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[structures.LONG_CALL]
+exit_dte = 21
+# debit_stop_frac = 0.60
+
+[structures.LONG_PUT]
+exit_dte = 21
+# debit_stop_frac = 0.60
+
+[structures.BULL_CALL]
+exit_dte = 21
+# debit_stop_frac = 0.60
+
+[structures.BEAR_PUT]
+exit_dte = 21
+# debit_stop_frac = 0.60
 
 [rescue]
 # Escalation bands the at-risk board owns ALONE. The four it shares with [stops]

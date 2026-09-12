@@ -1039,6 +1039,19 @@ def run_manage_and_refresh(bus) -> None:
     ``run_driver_manage_and_refresh``, which never reads this flag)."""
     if compute.has_paper_account():
         compute.run_manage_cycle(lifecycle=manual_paper_lifecycle_enabled(bus))
+    # Apply the LEDGER's pre-expiry exit rules to its DEBIT positions (D3 — the
+    # target and the time exit; long options and debit spreads otherwise rode to
+    # expiry whatever they did in between).
+    #
+    # ⚠ BEFORE the settlement below, and the order is load-bearing: a position at
+    # its target ON its expiration day should book the target it reached, not an
+    # intrinsic settlement — ``should_settle`` fires from 15:00 CT while the
+    # target may have been hit hours earlier. Exits first, then settle whatever
+    # is left.
+    try:
+        compute.manage_ledger_trades()
+    except Exception:
+        log.exception("manage_ledger_trades degraded")
     # Auto-settle expired LEDGER trades (the Paper Trades tab otherwise never
     # closes on expiration). Defensive so a settlement hiccup never skips the
     # refreshes below; the piggyback ledger refresh further down republishes the

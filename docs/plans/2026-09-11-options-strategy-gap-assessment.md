@@ -281,7 +281,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **C5** | Trade plan snapshot and a manual-book scorecard — **scorecard shipped 2026-09-12; the trade-plan snapshot is bigger than written and stays open** | P1, P2 | M | Medium |
 | **D1** | Straddle and strangle templates — **shipped 2026-09-12, analysis only, with that rule tested on both sides of the tier boundary** | coverage | S | Low–medium |
 | **D2** | Iron butterfly scanner on the IC pipeline — **measured 2026-09-12 and NOT built: the premise is false twice over. Two CCS bugs fixed instead** | coverage | **L** | Medium |
-| **D3** | Exits for long options and debit spreads | X6 | M | Medium |
+| **D3** | Exits for long options and debit spreads — **BUILT 2026-09-12; two defects fixed with it** | X6 | M | Medium |
 | **D4** | Stock legs → covered call, protective put, collar analysis | coverage | M–L | Medium |
 | **D5** | Calendars and diagonals end to end | coverage | L | Low–medium |
 
@@ -716,6 +716,37 @@ wrong fields so every CCS returned no Greeks. Both trace to the same fact: **onl
 an IC uses `call_short`; a standalone CCS keeps its strikes in `short_strike`.**
 
 **D3. Exits for long options and debit spreads.** Move them into the account, or give the ledger a manage cycle. Give them a profit target — tastylive uses 50% on debit spreads, TradingBlock about 80% — and a time exit before the final weeks. The practitioner sources don't stop out losing debit spreads (tastylive closes them before expiry instead), so a percent-of-debit stop is an option, not a sourced rule.
+
+✅ **BUILT 2026-09-12** — [design](2026-09-12-debit-exit-rules-design.md).
+
+⚠ **"Give the ledger a manage cycle" was half wrong: it already has one.** The
+ledger is repriced and its expiries settled on the same 5-minute tick as the
+account. What it lacked was a rule closing a position BEFORE expiry — the only
+pre-expiry exit was the page's Close button. So the change is an exit-rule pass
+on a cycle that already runs, not a new cycle and not a migration into the
+account (which reserves buying power against `max_loss_total`, a cash-mechanism
+change a debit does not need).
+
+**Shipped:** a target at `tp_frac` 0.50 — ⚠ on a denominator that differs by
+structure, since the source gives a percentage but not of what: **max profit**
+for a bounded vertical (the mirror of the credit side, where the credit IS the
+max profit), the **debit paid** for a long option, which has none. On one $2.00
+debit over a $5 width those are +$150 and +$100. Plus `exit_dte = 21`,
+profit-blind, ⚠ firing only when `dte_at_entry` was greater — the Directional
+tab's windows are DTE 0–4 and 5–15, so every debit it can produce arrives inside
+21 days and an unguarded rule would close 100% of them at entry. The loss side
+ships OFF, as sourced.
+
+**Two defects found measuring it, both fixed:** `recommend`'s credit rules are
+**INVERTED** for a debit (a negative `entry_credit` makes rule 1 read
+`pnl <= +400`, so a healthy long call returns CUT/MONEY_STOP at every P&L from
+−$199 to +$399 — measured), and `close_paper_trade` booked a debit's realized
+P&L with the credit formula, so a long call bought at $2.00 and sold at $3.00
+recorded **−$500** against a true **+$100**. That one was live on the money path;
+prod's ledger is empty, so nothing was corrupted.
+
+⚠ **No debit outcome data exists** (`signals.db` holds only PCS/CCS/IC), so every
+level is sourced rather than fitted — hence config.
 
 **D4. Stock legs in the leg model.** This unlocks covered call, protective put and collar analysis. It could then extend to a "protect a holding" view on the real Portfolio page, as analysis only.
 

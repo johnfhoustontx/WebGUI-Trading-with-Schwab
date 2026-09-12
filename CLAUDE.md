@@ -2661,6 +2661,84 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## A DEBIT position inverts every credit rule, and the ledger had none of its own
+
+⚠ **A debit trade stores `entry_credit` as the NEGATIVE per-share debit**, so
+`signal_recommender.recommend`'s `credit_total` is negative and its rules do not
+merely fail to apply — they **invert**. Measured on the real function, a healthy
+long call came back **CUT/MONEY_STOP at every P&L from −$199 to +$399** (rule 1
+reads `pnl <= -2 × -200`, i.e. `pnl <= +400`) and TAKE_PROFIT above that. So
+`recommend` **DISPATCHES** a debit to `_recommend_debit` before any credit rule
+runs; nothing may reach them with a negative credit.
+
+**The Paper Ledger already had a manage cycle — what it lacked was an exit
+RULE.** `run_manage_and_refresh` has repriced it and settled its expiries
+(`expire_ledger_trades`) on the manual account's cycle all along. Nothing closed
+a position *before* expiry except the page's Close button, so a long option or
+debit vertical sent from the Strategy Finder or the Market Scanner's
+**Directional** tab (`strategy_table._PAPER_TYPES` lists all four) rode to expiry
+whatever it did in between. `compute.manage_ledger_trades` is that rule pass,
+**before** the settlement on the same tick — a position at its target *on* its
+expiration day must book the target it reached, and `should_settle` fires from
+15:00 CT while the target may have been hit hours earlier.
+
+⚠ **That cycle is HOURLY (`paper_cycle_due`, 09:00–14:00 CT — six times a trading
+day), not 5-minute**, and `expire_ledger_trades`' own docstring claimed 5-minute
+for months. The 1-minute `manage_due` slot belongs to the isolated DRIVER
+account. Six checks a day is the honest resolution of these rules — a target
+reached at 09:15 is acted on at 10:00 — and the pass rides that cadence rather
+than adding a seventh scheduler slot, because the rules are day-scale (a +50%
+target, a 21-DTE exit) and not intraday.
+
+**Three rules, from `config/trade_mgmt.toml`'s `[structures.*]` — and the debit
+structures read `exit_dte` / `debit_stop_frac`, never `loss_rules` / `stop_mult`
+/ `cut_dte`, which are all credit-denominated** (*2× a debit* is a loss that
+cannot happen):
+
+- **The loss side ships OFF** (`debit_stop_frac` unset). Sourced: the
+  practitioners close debit spreads before expiry rather than stopping them out,
+  so a level would be invention. One line to opt in.
+- ⚠ **The profit target's DENOMINATOR differs by structure, and the two readings
+  are genuinely different numbers.** A bounded vertical takes a fraction of its
+  **max profit** — the mirror of the credit side, where the credit *is* the max
+  profit — and a long option a fraction of the **debit paid**, because it has no
+  max profit at all (the ledger stores `unbounded = True` /
+  `max_profit_total = None` for exactly that). On one $2.00 debit over a $5
+  width those are **+$150 and +$100**. `_debit_target_base` owns the choice; an
+  unusable max profit falls back to the debit rather than making the target
+  unreachable, or at zero firing it at break-even. ⚠ `max_profit_total` is
+  already × quantity while the repricer's P&L is per contract — `_ledger_exit_ctx`
+  divides, or a 3-lot's target sits three times too far away.
+- ⚠ **The time exit fires only when `dte_at_entry` was GREATER than
+  `exit_dte`**, and that guard is what makes 21 shippable. The Directional tab
+  builds from two windows — **DTE 0–4** and **DTE 5–15** — so every debit it can
+  produce arrives inside 21 days, and an unguarded rule would close **100% of
+  them on the tick after they opened**. A rule that fires at entry is worse than
+  no rule. Those positions keep their target and the expiry settlement. Unlike
+  the credit side's `manage_dte` it is **not** profit-conditional (`TAKE_PROFIT`
+  ahead, `CUT` behind, code `TIME_EXIT` either way — distinct from `TIME_STOP`,
+  which means DTE ≤ `cut_dte` **and** underwater).
+
+**`close_paper_trade` booked a debit's P&L backwards, and that was live.** It
+computed `(entry_credit − exit_debit) × qty × 100` with no direction branch, so a
+long call bought at $2.00 and sold at $3.00 booked **−$500** where the truth is
+**+$100**. `_expire_debit_trade` exists because the same formula is wrong at
+expiry; the manual close is the ledger's only pre-expiry exit and never got the
+same treatment. The control that holds it: closing at $8.00 by hand and expiring
+at an $8.00 intrinsic are identical economics and must book the same number.
+`exit_debit` therefore means the debit PAID on a credit row and the credit
+RECEIVED on a debit row — and `paper.close_prompt_label` now names the side the
+position is actually on, where the dialog used to ask a long call for its "Exit
+debit".
+
+**Scope is DEBIT rows only.** The ledger's credit spreads are equally ruleless,
+but handing them the credit rules would change how a second book exits with its
+own measurement attached — the same reason the credit spreads have no
+`manage_dte`. ⚠ And there is **no debit outcome data in this app**: `signals.db`
+holds only PCS/CCS/IC and the ledger is empty, so these levels are **sourced,
+not fitted**, which is why they are config. Design:
+[the D3 doc](docs/plans/2026-09-12-debit-exit-rules-design.md).
+
 ## A CCS keeps its strikes in `short_strike`, and two bugs turned on forgetting it
 
 ⚠ **Only an IC uses `call_short` / `call_long`.** A standalone **CCS** keeps its

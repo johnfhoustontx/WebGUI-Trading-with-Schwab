@@ -153,9 +153,135 @@ def _locked_profit_level(ctx, credit_total):
     return lock * credit_total
 
 
+def _finite(value):
+    """A real usable number, or ``None``. Rejects ``bool`` (``float(True)`` is
+    1.0) and non-finites — the repo's documented NaN trap, which here would make
+    every ``>=`` comparison against a target False."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    v = float(value)
+    return v if v == v and v not in (float("inf"), float("-inf")) else None
+
+
+def _is_debit(ctx) -> bool:
+    """Is this a DEBIT position (long option / debit vertical)?
+
+    ``direction == "DEBIT"`` is the ledger's own field and the primary key; a
+    NEGATIVE ``entry_credit`` is the second, because the sign is what actually
+    breaks the credit arithmetic and a row reaching here without the flag would
+    be silently mis-managed rather than merely unmanaged.
+    """
+    if not isinstance(ctx, dict):
+        return False
+    if str(ctx.get("direction") or "").upper() == "DEBIT":
+        return True
+    credit = _finite(ctx.get("entry_credit"))
+    return credit is not None and credit < 0
+
+
+def _debit_target_base(ctx):
+    """``(dollars, basis_words)`` a debit position's profit target is a FRACTION
+    OF — ``(None, None)`` when no denominator exists at all.
+
+    ⚠ **The denominator differs by structure and the two are genuinely different
+    numbers.** A bounded vertical has a max profit, and a fraction of it is what
+    ``tp_frac`` already means on the credit side (where the credit IS the max
+    profit) — so a $2.00 debit on a $5 width targets 50% of $300, i.e. +$150. A
+    LONG option has **no max profit at all** (the ledger stores
+    ``unbounded = True`` / ``max_profit_total = None`` for exactly that), so the
+    only denominator that exists is the capital committed: 50% of the $200 paid,
+    i.e. +$100. On that same vertical those two rules are +$150 and +$100.
+
+    An unusable max profit (absent, zero, negative, NaN, a string, a bool) falls
+    back to the debit paid rather than making the target unreachable — or, with a
+    zero, firing it at break-even.
+    """
+    mp = _finite(ctx.get("max_profit"))
+    if mp is not None and mp > 0:
+        return mp, "max profit"
+    debit = _finite(ctx.get("entry_debit"))
+    if debit is not None and debit > 0:
+        return debit, "the debit paid"
+    return None, None
+
+
+def _recommend_debit(ctx):
+    """Exit rules for a long option / debit vertical (gap assessment D3).
+
+    ⚠ **The credit rules are not merely absent here — they are INVERTED.** A
+    debit trade stores ``entry_credit`` as the NEGATIVE per-share debit, so
+    ``recommend``'s ``credit_total`` is negative and rule 1 reads
+    ``pnl <= -2 x -200`` = ``pnl <= +400``: measured, a healthy long call returns
+    **CUT/MONEY_STOP at every P&L from -$199 to +$399** and would be closed on its
+    first manage tick. ``recommend`` dispatches here so no path can reach the
+    credit rules with a negative credit.
+
+    Three rules, first match wins:
+
+    1. The OPTIONAL percent-of-debit stop (``debit_stop_frac``), **off by
+       default** — the practitioner sources close debit spreads before expiry
+       rather than stopping them out, so a shipped level would be invention.
+       Checked first, as the credit side checks its hard floors first.
+    2. The profit target on ``_debit_target_base`` — see there for why the
+       denominator differs by structure.
+    3. The time exit at ``exit_dte``, firing whether the trade is up or down
+       (unlike the credit side's profit-conditional ``manage_dte``), and ⚠ ONLY
+       when ``dte_at_entry`` was greater than the threshold. Every debit the
+       Market Scanner's Directional tab can produce arrives at DTE 0-15 (its
+       windows are 0-4 and 5-15), so an unguarded 21-DTE exit would close 100% of
+       them on the tick after they opened — a rule that fires at entry is worse
+       than no rule. Those positions keep their target and the ledger's expiry
+       settlement, which is what bounds them.
+
+    ``unrealized_pnl`` of ``None`` means NOT MARKED and holds — never read as a
+    zero, which would satisfy a zero-threshold stop.
+    """
+    rules = _trade_mgmt.structure_rules((ctx or {}).get("strategy"))
+    pnl = _finite((ctx or {}).get("unrealized_pnl"))
+    if pnl is None:
+        return {"action": "HOLD", "reason": "no mark yet", "code": "HOLD"}
+
+    # Rule 1: the configured percent-of-debit stop (off unless set).
+    stop_frac = _finite(rules.get("debit_stop_frac"))
+    debit = _finite(ctx.get("entry_debit"))
+    if stop_frac is not None and debit is not None and debit > 0:
+        if pnl <= -stop_frac * debit:
+            return {"action": "CUT",
+                    "reason": f"lost {stop_frac:.0%} of the debit paid",
+                    "code": "DEBIT_STOP"}
+
+    # Rule 2: the profit target, on whichever denominator this structure has.
+    base, basis = _debit_target_base(ctx)
+    tp_frac = _finite(rules.get("tp_frac"))
+    if base is not None and tp_frac is not None and pnl >= tp_frac * base:
+        return {"action": "TAKE_PROFIT",
+                "reason": f">={int(tp_frac * 100)}% of {basis}",
+                "code": "TARGET_HIT"}
+
+    # Rule 3: the time exit — profit-blind, and only for a position that HAD a
+    # longer horizon than the threshold.
+    exit_dte = _finite(rules.get("exit_dte"))
+    dte = _finite(ctx.get("dte_remaining"))
+    entry_dte = _finite(ctx.get("dte_at_entry"))
+    if (exit_dte is not None and dte is not None and entry_dte is not None
+            and entry_dte > exit_dte and dte <= exit_dte):
+        return {"action": "TAKE_PROFIT" if pnl > 0 else "CUT",
+                "reason": f"time exit at DTE <= {exit_dte:g}",
+                "code": "TIME_EXIT"}
+
+    return {"action": "HOLD", "reason": "holding", "code": "HOLD"}
+
+
 def recommend(ctx):
     """Return {'action', 'reason', 'code'}. action in HOLD/CUT/TAKE_PROFIT; code in
-    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP/TARGET_HIT/MANAGE_DTE.
+    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP/TARGET_HIT/MANAGE_DTE —
+    plus TIME_EXIT/DEBIT_STOP on the DEBIT branch.
+
+    ⚠ **A DEBIT position is DISPATCHED to ``_recommend_debit`` before any rule
+    below runs.** The rules here are credit-denominated and a debit stores its
+    ``entry_credit`` negative, which inverts them: measured, a healthy long call
+    came back CUT/MONEY_STOP at every P&L from -$199 to +$399. See
+    ``_recommend_debit``.
 
     **Every threshold is resolved PER STRUCTURE** through
     ``shared.trade_mgmt.structure_rules(ctx["strategy"])`` — ``[stops]`` overlaid
@@ -190,6 +316,8 @@ def recommend(ctx):
     is what replaces them, and it is one-directional by construction: closing an
     underwater position there would be the time stop under another name.
     """
+    if _is_debit(ctx):
+        return _recommend_debit(ctx)
     rules = _trade_mgmt.structure_rules(ctx.get("strategy"))
     credit_total = ctx["entry_credit"] * MULTIPLIER
     pnl = ctx.get("unrealized_pnl") or 0

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -263,6 +263,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-ledger">Paper Ledger</a><ul>
 <li><a href="#what-it-is_18">What it is</a></li>
 <li><a href="#where-the-data-comes-from_17">Where the data comes from</a></li>
+<li><a href="#automatic-exits">Automatic exits</a></li>
 <li><a href="#reading-the-screen_17">Reading the screen</a></li>
 <li><a href="#why-it-matters_17">Why it matters</a></li>
 <li><a href="#when-to-use-it_16">When to use it</a></li>
@@ -2915,7 +2916,7 @@ a volatility regime. It then scores each candidate on two things:</p>
 </ol>
 <p>That is what makes a long call and a put credit spread comparable on one 0–100 number.</p>
 <p><strong>The columns:</strong> Strategy · Bias · Legs · Exp · DTE · Debit/Credit · Max P · Max L ·
-R:R · PoP · BE (breakeven) · IV Rank · Score · <strong>Grade</strong>.</p>
+R:R · PoP · BE (breakeven) · Vol Rank · Score · <strong>Grade</strong>.</p>
 <p><strong>The Grade is quality-gated, not fit-gated</strong> — it is driven by structural quality and
 per-family hard gates, and carries a tooltip explaining the reason. A high score with a
 poor grade means "fits your view, but badly constructed".</p>
@@ -3274,6 +3275,10 @@ commission. Real fills are worse. The P&amp;L column is an upper bound.</p>
 <h3 id="what-it-is_18">What it is</h3>
 <p>Your <strong>hand-kept</strong> practice book. Trades you sent here yourself, with live unrealized
 P&amp;L. No real money.</p>
+<p>⚠ <strong>Since 2026-09-12 it is not entirely hand-kept.</strong> Long options and debit
+spreads here now <strong>close themselves</strong> on two rules (see <em>Automatic exits</em> below).
+Credit spreads are still tracked only, and every row remains closable by hand at
+any time.</p>
 <p><strong>This is one of three separate paper books</strong>, and confusing them is the most common
 source of "why does this number not match" in the app:</p>
 <table>
@@ -3288,7 +3293,7 @@ source of "why does this number not match" in the app:</p>
 <tr>
 <td><strong>Paper Ledger</strong></td>
 <td>this page</td>
-<td><strong>You</strong>, by hand</td>
+<td><strong>You</strong> — you open every row. Long options and debit spreads then exit automatically</td>
 </tr>
 <tr>
 <td><strong>Paper Account</strong></td>
@@ -3320,8 +3325,71 @@ source of "why does this number not match" in the app:</p>
 <td>Re-pricing</td>
 <td>Open trades are re-priced on page load and on the management cycle, during market hours only</td>
 </tr>
+<tr>
+<td>Management cycle</td>
+<td><strong>Hourly, 09:00–14:00 CT</strong> on trading days (the manual paper account's own cadence — there is no 15:00 run), plus <strong>Run manage cycle</strong> on <a href="#paper-account">Paper Account</a></td>
+</tr>
 </tbody>
 </table>
+<h3 id="automatic-exits">Automatic exits</h3>
+<p><strong>What closes itself, and what does not:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Automatic exits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Long option (<code>LONG_CALL</code> / <code>LONG_PUT</code>)</td>
+<td>profit target · time exit · expiry settlement</td>
+</tr>
+<tr>
+<td>Debit spread (<code>BULL_CALL</code> / <code>BEAR_PUT</code>)</td>
+<td>profit target · time exit · expiry settlement</td>
+</tr>
+<tr>
+<td>Credit spread (<code>PCS</code> / <code>CCS</code> / <code>IC</code>)</td>
+<td><strong>expiry settlement only</strong> — tracked, not managed</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The profit target is +50%, but of two different things</strong>, because a debit
+spread and a single long option do not have the same ceiling:</p>
+<ul>
+<li>a <strong>debit spread</strong> has a maximum profit (the width less what you paid), and the
+  target is half of <em>that</em>;</li>
+<li>a <strong>long option</strong> has no maximum profit at all, so the target is half of <strong>what
+  you paid</strong> — the only figure that exists.</li>
+</ul>
+<p>On a $2.00 spread over $5 strikes those two rules are <strong>+$150</strong> and <strong>+$100</strong>, so
+the distinction is worth knowing rather than a technicality.</p>
+<p><strong>The time exit is 21 days to expiry</strong>, and it fires whether the position is up
+or down — the practitioner rule this follows is to be out before the final weeks
+either way, because that is where an option's remaining time value bleeds
+fastest.</p>
+<p>⚠ <strong>A position you opened with 21 days or fewer already left is never time-exited</strong>
+— otherwise the rule would close it on the next hourly run, which is worse than
+having no rule. Everything the Market Scanner's <strong>Directional</strong> tab produces is
+in that category (it scans 0–4 and 5–15 days out), so those rows are bounded by
+their profit target and by expiry, not by the clock rule. The <a href="#strategy-finder">Strategy
+Finder</a> is the page that produces longer-dated debits.</p>
+<p><strong>There is no automatic loss stop</strong>, and that is deliberate rather than an
+omission: the research this follows (tastylive) closes debit spreads out before
+expiry rather than stopping them, having found that a stop on a defined-risk debit
+mostly converts recoverable trades into realised losses. Your whole risk is
+already the premium you paid. One line in <code>config/trade_mgmt.toml</code> turns a
+percent-of-premium stop on if you want one.</p>
+<blockquote>
+<p>⚠ <strong>Six checks a trading day is the real resolution of these rules.</strong> A target
+reached at 09:15 is acted on at 10:00. Press <strong>Run manage cycle</strong> on <a href="#paper-account">Paper
+Account</a> to check immediately.</p>
+<p>⚠ <strong>No results exist yet to judge these levels by.</strong> Nothing in this app has
+ever recorded a closed long option or debit spread, so 50% and 21 days come
+from published practitioner guidance rather than from this book's own history.
+They live in a config file for exactly that reason.</p>
+</blockquote>
 <h3 id="reading-the-screen_17">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open

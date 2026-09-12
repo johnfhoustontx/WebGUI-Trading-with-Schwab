@@ -462,6 +462,18 @@ engine's positions live on **Paper Account**.
 - **Analyze** re-prices it now and shows current Greeks. **Close trade** records
   an exit; **Delete** removes the row entirely. Both are sent to the engine, so
   the ledger updates a moment later rather than instantly.
+- **Long options and debit spreads now close themselves** on two rules, checked
+  **once an hour between 09:00 and 14:00 CT** (so a target reached at 09:15 is
+  acted on at 10:00 — press **Run manage cycle** on Paper Account to check now):
+  at **+50% profit** — measured against max profit for a debit vertical, against
+  the premium paid for a single long option, because that is the only figure a
+  long option has — and at **21 days to expiry**, up or down. A position that was *already* inside 21 days when you opened it is left
+  alone, or the rule would close it the moment it appeared; those ride on their
+  target and the expiry settlement. There is **no automatic loss stop**: the
+  research this follows closes debit spreads out before expiry rather than
+  stopping them, and you can still close any row by hand at any time.
+- **Credit spreads here are not managed** — they are tracked only. The engine's
+  own book on **Paper Account** is the one that takes profit and cuts on them.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """

@@ -2221,7 +2221,10 @@ def expire_ledger_trades(now_ct=None) -> int:
     intrinsic value vs a directly-fetched underlying and persist the EXPIRED row.
 
     Defensive per-trade (a bad trade never aborts the pass); returns the count
-    settled. Runs on the 5-min manage tick + the manual "Run manage cycle" button.
+    settled. ⚠ Runs on the manual account's **HOURLY** cycle (``paper_cycle_due``,
+    09:00-14:00 CT, six times a trading day) plus the "Run manage cycle" button —
+    NOT on a 5-minute tick, which this docstring claimed for months. The 1-min
+    ``manage_due`` slot belongs to the isolated DRIVER account.
     ``now_ct`` defaults to the live CT clock; inject it for deterministic tests."""
     import datetime as _dt
     from zoneinfo import ZoneInfo
@@ -2255,6 +2258,129 @@ def expire_ledger_trades(now_ct=None) -> int:
             log.exception("expire_ledger_trades: settle failed for %s", t.get("trade_id"))
             continue
     return settled
+
+
+#: The ledger structures this exit pass manages. ⚠ DEBIT rows only, and that is
+#: scope rather than an oversight: the ledger's CREDIT spreads are equally
+#: ruleless, but handing them the credit rules would change how a second book
+#: exits and needs its own measurement — the same reason the credit spreads have
+#: no ``manage_dte``. D3 asked for long options and debit spreads.
+_LEDGER_MANAGED_DIRECTION = "DEBIT"
+
+
+def _ledger_exit_ctx(trade, rep, today):
+    """The ``signal_recommender`` ctx for one DEBIT ledger row, or ``None``.
+
+    ⚠ **Every dollar figure here is PER CONTRACT**, because that is what
+    ``reprice_legs`` returns as ``unrealized_pnl`` and what
+    ``signal_recommender._debit_target_base`` compares against. The row stores
+    ``max_profit_total`` already multiplied by quantity, so a 3-lot handed
+    straight through would have a target three times too far away.
+    """
+    qty = trade.get("quantity") or 1
+    mp_total = trade.get("max_profit_total")
+    try:
+        max_profit = (float(mp_total) / int(qty)) if mp_total else None
+    except (TypeError, ValueError, ZeroDivisionError):
+        max_profit = None
+    try:
+        exp = _dt.date.fromisoformat(str(trade["expiration"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {
+        "strategy": trade.get("strategy"),
+        "direction": "DEBIT",
+        "entry_credit": trade.get("entry_credit"),
+        "entry_debit": trade.get("entry_debit"),
+        "max_profit": max_profit,
+        "unrealized_pnl": rep.get("unrealized_pnl"),
+        "dte_remaining": (exp - today).days,
+        "dte_at_entry": trade.get("dte_at_entry"),
+        "current_short_delta": None,
+    }
+
+
+def manage_ledger_trades(now_ct=None) -> int:
+    """Apply the DEBIT exit rules to OPEN ledger trades; close the ones that hit.
+
+    ⚠ **The assessment's premise was half wrong.** D3 asked to "move them into
+    the account, or give the ledger a manage cycle" — but the ledger already HAS
+    a manage cycle: ``run_manage_and_refresh`` reprices it and settles its
+    expiries on the manual account's HOURLY tick (``paper_cycle_due``,
+    09:00-14:00 CT). What it had was **no rule that closes a position before
+    expiry**, so the only pre-expiry exit was the page's Close button. A long
+    call sent from the Strategy Finder or the Market Scanner's Directional tab
+    (both list the four debit structures) rode to expiry whatever it did in
+    between.
+
+    ⚠ **Six checks a trading day is the real resolution of these rules**, and it
+    is the honest limit on them: a target reached at 09:15 is acted on at 10:00.
+    That is the manual account's own cadence and this pass deliberately rides it
+    rather than adding a seventh scheduler slot — the rules are day-scale
+    (a +50% target, a 21-DTE exit), not intraday.
+
+    One pass: reprice off the stored legs, ask ``signal_recommender.recommend``
+    (which dispatches a debit to its own rule set — the credit rules are
+    INVERTED for a negative credit, see there), and on anything but HOLD close at
+    the live per-share value with the rule's code as the exit reason. Returns the
+    count closed.
+
+    Three absences are deliberate and each is a skip rather than an action:
+    a row with **no mark** (a zero would satisfy a zero-threshold rule and record
+    a fabricated close price), a row with a P&L but **no value** to write, and an
+    **expired** row — ``expire_ledger_trades`` owns expiry and settles at
+    intrinsic, so closing one here at a stale mark would be the wrong number on
+    the wrong pass. Defensive per row: one bad trade never aborts the others.
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    import paper_trader
+    import signal_recommender
+    import signal_repricer
+
+    now_ct = now_ct or _dt.datetime.now(ZoneInfo("America/Chicago"))
+    today = now_ct.date()
+    try:
+        trades = paper_trader.get_all_trades()
+    except Exception:
+        log.exception("manage_ledger_trades read degraded → no exits")
+        return 0
+    try:
+        signal_repricer.clear_chain_cache()      # fresh marks, as the view does
+    except Exception:
+        log.exception("clear_chain_cache before ledger manage degraded")
+
+    closed = 0
+    for t in trades or []:
+        if (t.get("status") or "").upper() != "OPEN":
+            continue
+        if (t.get("direction") or "").upper() != _LEDGER_MANAGED_DIRECTION:
+            continue
+        try:
+            rep = signal_repricer.reprice_legs(t, _proxy.schwab_py_client) or {}
+            if rep.get("error") or rep.get("unrealized_pnl") is None:
+                continue
+            value = rep.get("current_value")
+            if value is None:
+                continue
+            ctx = _ledger_exit_ctx(t, rep, today)
+            if ctx is None:
+                continue
+            rec = signal_recommender.recommend(ctx)
+            if rec.get("action") == "HOLD":
+                continue
+            row = paper_trader.close_paper_trade(dict(t), float(value),
+                                                 rec.get("code") or "MANAGED")
+            paper_trader.update_trade(t["trade_id"], row)
+            log.info("ledger EXIT %s %s: %s (%s)", t.get("symbol"),
+                     t.get("strategy"), rec.get("code"), rec.get("reason"))
+            closed += 1
+        except Exception:
+            log.exception("manage_ledger_trades: exit failed for %s",
+                          t.get("trade_id"))
+            continue
+    return closed
 
 
 def _analyze_detail(result) -> dict | None:

@@ -1384,7 +1384,7 @@ while the expensive ranked menu and the apply are on-demand:
 
 | Phase | Where it runs | Output |
 |-------|---------------|--------|
-| **Detection** (state + heat) | The 5-min paper manage cycle | Tags `cache:options:paper_account` rows with `rescue_state` / `heat`; publishes `cache:options:rescue_summary` (counts) for the nav badge. |
+| **Detection** (state + heat) | The manual paper manage cycle (**hourly**, 09:00-14:00 CT - see *Service cadences*) | Tags `cache:options:paper_account` rows with `rescue_state` / `heat`; publishes `cache:options:rescue_summary` (counts) for the nav badge. |
 | **Ranked menu** | On demand (`rescue` command) | `cache:options:rescue:<position_id>` — the per-position advisory. |
 | **Apply** | On demand (`rescue_apply` command) | Mutates the paper account behind a stale-price guard; writes an audit row. |
 
@@ -1498,6 +1498,93 @@ and:
 advisory-only** (no paper position to mutate).
 
 ---
+
+# Debit exit rules (long options and debit spreads)
+
+**Files:** `options-scanner/signal_recommender.py`
+(`_is_debit` / `_debit_target_base` / `_recommend_debit`),
+`services/options_svc/compute.py` (`manage_ledger_trades` / `_ledger_exit_ctx`),
+`config/trade_mgmt.toml` `[structures.LONG_CALL|LONG_PUT|BULL_CALL|BEAR_PUT]`.
+Design: `docs/plans/2026-09-12-debit-exit-rules-design.md`.
+
+The Paper Ledger's four DEBIT structures are the only positions in the app whose
+exits are **not** credit-denominated. They run on the manual paper manage cycle
+(**hourly**, 09:00-14:00 CT), and the rule pass runs **before** the expiry
+settlement on that tick, so a position at its target on its expiration day books
+the target rather than an intrinsic settlement.
+
+## Why a separate rule set
+
+`recommend` computes `credit_total = entry_credit x 100`, and a debit row stores
+`entry_credit` as the **negative** per-share debit. The credit rules therefore do
+not merely fail to apply - they invert:
+
+```
+rule 1   pnl <= -stop_mult x credit_total   ->   pnl <= +400    CUT/MONEY_STOP
+rule 5   pnl >= tp_frac  x credit_total     ->   pnl >= -100    TAKE_PROFIT
+```
+
+Measured on the real function with a $2.00 debit, a healthy long call returns
+**CUT/MONEY_STOP at every P&L from -$199 to +$399**. `recommend` dispatches on
+`direction == "DEBIT"` (or a negative `entry_credit`) so no path reaches the
+credit rules with a negative credit.
+
+## The three rules, in order
+
+| # | Rule | Key | Ships |
+|---|---|---|---|
+| 1 | percent-of-debit stop: `pnl <= -debit_stop_frac x entry_debit` | `debit_stop_frac` | **OFF** |
+| 2 | profit target: `pnl >= tp_frac x base` | `tp_frac` (0.50) | on |
+| 3 | time exit: `dte <= exit_dte` **and** `dte_at_entry > exit_dte` | `exit_dte` (21) | on |
+
+**Rule 1 is off by source**, not by oversight: the practitioner guidance closes
+debit spreads before expiry rather than stopping them out, so a shipped level
+would be invention. `loss_rules`, `stop_mult`, `cut_dte` and the delta keys are
+credit-denominated and are **not read** on this path (*2x a debit* is a loss that
+cannot happen).
+
+**Rule 2's denominator (`_debit_target_base`) differs by structure**, because the
+source gives a percentage and not of what:
+
+| structure | base | why |
+|---|---|---|
+| `BULL_CALL` / `BEAR_PUT` | `max_profit` | mirrors the credit side, where the credit **is** the max profit |
+| `LONG_CALL` / `LONG_PUT` | `entry_debit` | no max profit exists (`unbounded = True`, `max_profit_total = None`) |
+
+On a $2.00 debit over a $5 width those are **+$150** and **+$100**. An unusable
+`max_profit` (absent, zero, negative, NaN, a string, a bool) falls back to the
+debit rather than making the target unreachable - or, at zero, firing it at
+break-even. `_ledger_exit_ctx` divides `max_profit_total` by quantity, since the
+row stores it already multiplied while the repricer's P&L is per contract.
+
+**Rule 3 is profit-blind** (`TAKE_PROFIT` ahead, `CUT` behind, code `TIME_EXIT`
+either way - distinct from `TIME_STOP`, which means DTE <= `cut_dte` **and**
+underwater), and the `dte_at_entry > exit_dte` condition is load-bearing: the
+Market Scanner's Directional tab scans **DTE 0-4** and **DTE 5-15**, so every
+debit it can produce arrives inside 21 days and an unguarded rule would close
+100% of them on the following cycle. Those positions are bounded by their target
+and by the expiry settlement instead. An unknown `dte_at_entry` declines the exit.
+
+## Scope and absences
+
+Credit rows in the ledger are **not** managed by this pass - giving them the
+credit rules would change how a second book exits, with its own measurement
+attached (the same reason the credit spreads have no `manage_dte`). Three
+absences are skips rather than actions: no mark (a zero would satisfy a
+zero-threshold rule and record a fabricated close price), a P&L with no value to
+write, and an expired row (`expire_ledger_trades` owns expiry).
+
+⚠ **`close_paper_trade` booked a debit's realized P&L with the credit formula
+until 2026-09-12** - `(entry_credit - exit_debit) x qty x 100`, so a long call
+bought at $2.00 and sold at $3.00 recorded **-$500** against a true **+$100**.
+`exit_debit` is the debit PAID on a credit row and the credit RECEIVED on a debit
+row, matching `_expire_debit_trade`. The invariant that holds it: a manual close
+at $8.00 and an expiry at an $8.00 intrinsic are identical economics and must
+book the same number.
+
+⚠ **No debit outcome data exists** - `signals.db` holds only PCS/CCS/IC and the
+ledger is empty - so 0.50 and 21 are **sourced, not fitted**. That is why they
+are config.
 
 # Known issues
 

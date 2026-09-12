@@ -82,6 +82,13 @@ DEFAULTS = {
         # (SHORT_PUT / NAKED_PUT) cannot be given different rules.
         "SHORT_PUT": {"loss_rules": False, "manage_dte": 21},
         "COVERED_CALL": {"loss_rules": False, "manage_dte": 21},
+        # The ledger's four DEBIT structures (D3). ``exit_dte`` is the time exit;
+        # the loss side is governed by ``debit_stop_frac``, which is OFF, and NOT
+        # by ``loss_rules`` (a credit-side key the debit path never reads).
+        "LONG_CALL": {"exit_dte": 21},
+        "LONG_PUT": {"exit_dte": 21},
+        "BULL_CALL": {"exit_dte": 21},
+        "BEAR_PUT": {"exit_dte": 21},
     },
 }
 
@@ -95,6 +102,21 @@ STRUCTURE_DEFAULTS = {
     # which is every spread: they already have cut_dte + the delta stops, and a
     # 21-DTE close for spreads is a separate, measurable change.
     "manage_dte": None,
+    # ── DEBIT-only keys (D3) ────────────────────────────────────────────────
+    # Time exit for a long option / debit vertical: close at or below this DTE
+    # whether the trade is up or down. ⚠ Unlike manage_dte it is NOT
+    # profit-conditional (the sourced rule is to be out before the final weeks
+    # either way) and it fires ONLY when dte_at_entry was greater - see
+    # signal_recommender._recommend_debit. None = off, which is every credit
+    # structure.
+    "exit_dte": None,
+    # OPTIONAL percent-of-debit stop: cut once this fraction of the debit paid
+    # is gone. None = OFF, and that is the SOURCED default - the practitioner
+    # sources close debit spreads before expiry rather than stopping them out,
+    # so any level here would be invention. This is the debit path's ONLY
+    # loss-side knob; `loss_rules` and `stop_mult` are credit-denominated and
+    # are not read for a debit (2x a debit is a loss that cannot happen).
+    "debit_stop_frac": None,
 }
 
 load, reset_cache = toml_loader(TRADE_MGMT_TOML, DEFAULTS, label="trade_mgmt.toml")

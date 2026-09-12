@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1267,17 +1267,45 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 </ul>
 <h2 id="paper-ledger">Paper Ledger</h2>
 <p><strong>Route:</strong> <code>/options/paper</code>.</p>
-<p>A manual paper-trading ledger.</p>
+<p>A manual paper-trading ledger. You open every row yourself; since 2026-09-12 the
+<strong>long options and debit spreads</strong> in it also close themselves (see below).</p>
 <ul>
-<li><strong>Action buttons:</strong> Reload, <strong>Close selected</strong> (enter an exit debit), <strong>Analyze
-  selected</strong> (live Greeks + P&amp;L overlay), <strong>Delete selected</strong>, <strong>Delete all
-  closed</strong>.</li>
+<li><strong>Action buttons:</strong> Reload, <strong>Close selected</strong>, <strong>Analyze selected</strong> (live
+  Greeks + P&amp;L overlay), <strong>Delete selected</strong>, <strong>Delete all closed</strong>.</li>
+<li>⚠ <strong>Close selected asks for a different number depending on the trade.</strong> For a
+  credit spread it is the <strong>debit you pay</strong> to close; for a long option or debit
+  spread it is the <strong>credit you receive</strong>. The dialog's label says which. Both are
+  <strong>per spread</strong> (i.e. per share — type <code>2.00</code>, not <code>200</code>).</li>
 <li><strong>Table:</strong> Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&amp;L, Status, Entry Time.</li>
 <li>Click a row to load its <strong>detail panel</strong>; the app automatically runs a live
   analysis and overlays current Greeks and P&amp;L.</li>
 <li>Each row also has an <strong>Expected Move</strong> button.</li>
 </ul>
+<p><strong>Automatic exits (long options and debit spreads only).</strong> Checked <strong>hourly,
+09:00–14:00 CT</strong> on the same run as the paper account — so a target reached at
+09:15 is acted on at 10:00, or immediately if you press <strong>Run manage cycle</strong> on
+Paper Account.</p>
+<ul>
+<li><strong>Profit target, +50%</strong> — of the trade's <strong>maximum profit</strong> for a debit spread,
+  of <strong>what you paid</strong> for a single long option, which has no maximum profit to
+  take a share of. On a $2.00 spread over $5 strikes those are +$150 and +$100.</li>
+<li><strong>Time exit at 21 days to expiry</strong>, up or down. ⚠ A position that already had
+  21 days or fewer when you opened it is <strong>not</strong> time-exited — that is everything
+  from the Market Scanner's <strong>Directional</strong> tab, which scans 0–15 days out. Those
+  ride on their target and on expiry.</li>
+<li><strong>No automatic loss stop.</strong> The research this follows closes debit spreads out
+  before expiry rather than stopping them; your risk is capped at the premium paid
+  regardless. Close any row by hand whenever you like.</li>
+<li><strong>Credit spreads here are tracked, not managed</strong> — only expiry settles them.
+  The engine's own book on <strong>Paper Account</strong> is the one that takes profit and cuts.</li>
+</ul>
+<blockquote>
+<p>⚠ These levels come from published practitioner guidance, <strong>not</strong> from this
+book's own results: no long option or debit spread has ever been recorded closed
+in this app. They live in a config file so they can be changed once there is
+something to measure.</p>
+</blockquote>
 <h2 id="paper-account">Paper Account</h2>
 <p><strong>Route:</strong> <code>/options/portfolio</code>.</p>
 <p>The account view for the automated paper-trading engine.</p>

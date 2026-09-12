@@ -2266,12 +2266,17 @@ Capture liberally during the session; review weekly.
 Your **hand-kept** practice book. Trades you sent here yourself, with live unrealized
 P&L. No real money.
 
+⚠ **Since 2026-09-12 it is not entirely hand-kept.** Long options and debit
+spreads here now **close themselves** on two rules (see *Automatic exits* below).
+Credit spreads are still tracked only, and every row remains closable by hand at
+any time.
+
 **This is one of three separate paper books**, and confusing them is the most common
 source of "why does this number not match" in the app:
 
 | Book | Page | Who trades it |
 |---|---|---|
-| **Paper Ledger** | this page | **You**, by hand |
+| **Paper Ledger** | this page | **You** — you open every row. Long options and debit spreads then exit automatically |
 | **Paper Account** | [Paper Account](#paper-account) | The automated engine |
 | **Driver account** | [Claude Trades](#claude-trades) | The autonomous Claude trader |
 
@@ -2283,6 +2288,56 @@ They are fully isolated. Nothing crosses between them.
 |---|---|
 | Service | `options_svc` (:8211), `cache:options:paper_trades` |
 | Re-pricing | Open trades are re-priced on page load and on the management cycle, during market hours only |
+| Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence — there is no 15:00 run), plus **Run manage cycle** on [Paper Account](#paper-account) |
+
+### Automatic exits
+
+**What closes itself, and what does not:**
+
+| Row | Automatic exits |
+|---|---|
+| Long option (`LONG_CALL` / `LONG_PUT`) | profit target · time exit · expiry settlement |
+| Debit spread (`BULL_CALL` / `BEAR_PUT`) | profit target · time exit · expiry settlement |
+| Credit spread (`PCS` / `CCS` / `IC`) | **expiry settlement only** — tracked, not managed |
+
+**The profit target is +50%, but of two different things**, because a debit
+spread and a single long option do not have the same ceiling:
+
+- a **debit spread** has a maximum profit (the width less what you paid), and the
+  target is half of *that*;
+- a **long option** has no maximum profit at all, so the target is half of **what
+  you paid** — the only figure that exists.
+
+On a $2.00 spread over $5 strikes those two rules are **+$150** and **+$100**, so
+the distinction is worth knowing rather than a technicality.
+
+**The time exit is 21 days to expiry**, and it fires whether the position is up
+or down — the practitioner rule this follows is to be out before the final weeks
+either way, because that is where an option's remaining time value bleeds
+fastest.
+
+⚠ **A position you opened with 21 days or fewer already left is never time-exited**
+— otherwise the rule would close it on the next hourly run, which is worse than
+having no rule. Everything the Market Scanner's **Directional** tab produces is
+in that category (it scans 0–4 and 5–15 days out), so those rows are bounded by
+their profit target and by expiry, not by the clock rule. The [Strategy
+Finder](#strategy-finder) is the page that produces longer-dated debits.
+
+**There is no automatic loss stop**, and that is deliberate rather than an
+omission: the research this follows (tastylive) closes debit spreads out before
+expiry rather than stopping them, having found that a stop on a defined-risk debit
+mostly converts recoverable trades into realised losses. Your whole risk is
+already the premium you paid. One line in `config/trade_mgmt.toml` turns a
+percent-of-premium stop on if you want one.
+
+> ⚠ **Six checks a trading day is the real resolution of these rules.** A target
+> reached at 09:15 is acted on at 10:00. Press **Run manage cycle** on [Paper
+> Account](#paper-account) to check immediately.
+
+> ⚠ **No results exist yet to judge these levels by.** Nothing in this app has
+> ever recorded a closed long option or debit spread, so 50% and 21 days come
+> from published practitioner guidance rather than from this book's own history.
+> They live in a config file for exactly that reason.
 
 ### Reading the screen
 

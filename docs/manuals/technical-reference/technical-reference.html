@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -152,6 +152,12 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#candidate-builders-and-economics">Candidate builders and economics</a></li>
 <li><a href="#scoring-and-ranking">Scoring and ranking</a></li>
 <li><a href="#apply-and-the-stale-price-guard">Apply and the stale-price guard</a></li>
+</ul>
+</li>
+<li><a href="#debit-exit-rules-long-options-and-debit-spreads">Debit exit rules (long options and debit spreads)</a><ul>
+<li><a href="#why-a-separate-rule-set">Why a separate rule set</a></li>
+<li><a href="#the-three-rules-in-order">The three rules, in order</a></li>
+<li><a href="#scope-and-absences">Scope and absences</a></li>
 </ul>
 </li>
 <li><a href="#known-issues">Known issues</a><ul>
@@ -1247,7 +1253,7 @@ backing.</p>
 <td><code>norm_theta</code></td>
 </tr>
 <tr>
-<td>IV Rank</td>
+<td>Vol Rank</td>
 <td>12</td>
 <td>Context</td>
 <td><code>norm_iv_rank</code></td>
@@ -1306,7 +1312,7 @@ backing.</p>
 <code>efficiency = |net_theta| / max_loss · 100</code> (daily decay as % of risk). Normalized
 by <strong>percentile rank</strong> among all candidates when peer data exists, else linearly:
 <code>min(100, efficiency / 0.5 · 100)</code>.</p>
-<p><strong>IV Rank</strong> — <code>norm_iv_rank(iv_rank)</code>: pass-through clamped to <code>[0, 100]</code>.</p>
+<p><strong>Vol Rank</strong> — <code>norm_iv_rank(iv_rank)</code>: pass-through clamped to <code>[0, 100]</code>.</p>
 <p><strong>IV/HV ratio</strong> — <code>norm_iv_hv_ratio(iv_hv)</code>: <code>(iv_hv − 0.5) / 1.0 · 100</code>, clamped
 (ratio 0.5 → 0, 1.0 → 50, 1.5+ → 100). Rewards IV richer than realized vol.</p>
 <p><strong>Vega risk</strong> — <code>norm_vega_risk(net_vega, max_loss, iv_rank)</code>: penalizes vega
@@ -1337,9 +1343,15 @@ of the short strike to the nearest wall as % of spot; <code>min(100, min_dist_pc
 </code></pre>
 <p>Returns the 1σ dollar/percent move plus ±1σ and ±2σ bands.
 <code>calc_expected_moves(price, iv_pct)</code> returns daily/weekly/monthly variants.</p>
-<p><strong>IV Rank &amp; percentile</strong> — <code>calc_iv_rank_percentile(current_iv, hv_series, lookback_days=252)</code>:
+<p><strong>Vol Rank &amp; percentile</strong> — <code>calc_iv_rank_percentile(current_iv, hv_series, lookback_days=252)</code>:
 compares current ATM IV to the trailing 252-day <strong>HV-30</strong> distribution (a realized-
-vol proxy):</p>
+vol proxy). The screens label it <strong>Vol Rank</strong>, which is what it is; the function and
+the payload field keep the legacy <code>iv_*</code> names, and <code>hv_*</code> aliases carry the honest
+ones. ⚠ It is therefore a <strong>variance-risk-premium</strong> reading — "is IV rich against
+recent realized movement" — and not an IV-vs-IV-history rank. A true IV rank needs a
+persisted daily IV series, which <code>shared/iv_history.py</code> began accruing on 2026-09-12
+(one <code>cm30_iv</code> per symbol per scan) and which needs ~20 samples before it can be
+ranked at all:</p>
 <pre><code>vol_rank       = (current_iv - hv_low_52w) / (hv_high_52w - hv_low_52w) · 100
 vol_percentile = (# days with hv &lt; current_iv) / total_days · 100
 </code></pre>
@@ -1952,7 +1964,7 @@ while the expensive ranked menu and the apply are on-demand:</p>
 <tbody>
 <tr>
 <td><strong>Detection</strong> (state + heat)</td>
-<td>The 5-min paper manage cycle</td>
+<td>The manual paper manage cycle (<strong>hourly</strong>, 09:00-14:00 CT - see <em>Service cadences</em>)</td>
 <td>Tags <code>cache:options:paper_account</code> rows with <code>rescue_state</code> / <code>heat</code>; publishes <code>cache:options:rescue_summary</code> (counts) for the nav badge.</td>
 </tr>
 <tr>
@@ -2111,6 +2123,116 @@ and:</p>
 <code>list_adjustments</code>). <code>rescue_apply</code> refuses non-paper ids — <strong>captured signals are
 advisory-only</strong> (no paper position to mutate).</p>
 <hr />
+<h1 id="debit-exit-rules-long-options-and-debit-spreads">Debit exit rules (long options and debit spreads)</h1>
+<p><strong>Files:</strong> <code>options-scanner/signal_recommender.py</code>
+(<code>_is_debit</code> / <code>_debit_target_base</code> / <code>_recommend_debit</code>),
+<code>services/options_svc/compute.py</code> (<code>manage_ledger_trades</code> / <code>_ledger_exit_ctx</code>),
+<code>config/trade_mgmt.toml</code> <code>[structures.LONG_CALL|LONG_PUT|BULL_CALL|BEAR_PUT]</code>.
+Design: <code>docs/plans/2026-09-12-debit-exit-rules-design.md</code>.</p>
+<p>The Paper Ledger's four DEBIT structures are the only positions in the app whose
+exits are <strong>not</strong> credit-denominated. They run on the manual paper manage cycle
+(<strong>hourly</strong>, 09:00-14:00 CT), and the rule pass runs <strong>before</strong> the expiry
+settlement on that tick, so a position at its target on its expiration day books
+the target rather than an intrinsic settlement.</p>
+<h2 id="why-a-separate-rule-set">Why a separate rule set</h2>
+<p><code>recommend</code> computes <code>credit_total = entry_credit x 100</code>, and a debit row stores
+<code>entry_credit</code> as the <strong>negative</strong> per-share debit. The credit rules therefore do
+not merely fail to apply - they invert:</p>
+<pre><code>rule 1   pnl &lt;= -stop_mult x credit_total   -&gt;   pnl &lt;= +400    CUT/MONEY_STOP
+rule 5   pnl &gt;= tp_frac  x credit_total     -&gt;   pnl &gt;= -100    TAKE_PROFIT
+</code></pre>
+<p>Measured on the real function with a $2.00 debit, a healthy long call returns
+<strong>CUT/MONEY_STOP at every P&amp;L from -$199 to +$399</strong>. <code>recommend</code> dispatches on
+<code>direction == "DEBIT"</code> (or a negative <code>entry_credit</code>) so no path reaches the
+credit rules with a negative credit.</p>
+<h2 id="the-three-rules-in-order">The three rules, in order</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Rule</th>
+<th>Key</th>
+<th>Ships</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>percent-of-debit stop: <code>pnl &lt;= -debit_stop_frac x entry_debit</code></td>
+<td><code>debit_stop_frac</code></td>
+<td><strong>OFF</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>profit target: <code>pnl &gt;= tp_frac x base</code></td>
+<td><code>tp_frac</code> (0.50)</td>
+<td>on</td>
+</tr>
+<tr>
+<td>3</td>
+<td>time exit: <code>dte &lt;= exit_dte</code> <strong>and</strong> <code>dte_at_entry &gt; exit_dte</code></td>
+<td><code>exit_dte</code> (21)</td>
+<td>on</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule 1 is off by source</strong>, not by oversight: the practitioner guidance closes
+debit spreads before expiry rather than stopping them out, so a shipped level
+would be invention. <code>loss_rules</code>, <code>stop_mult</code>, <code>cut_dte</code> and the delta keys are
+credit-denominated and are <strong>not read</strong> on this path (<em>2x a debit</em> is a loss that
+cannot happen).</p>
+<p><strong>Rule 2's denominator (<code>_debit_target_base</code>) differs by structure</strong>, because the
+source gives a percentage and not of what:</p>
+<table>
+<thead>
+<tr>
+<th>structure</th>
+<th>base</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BULL_CALL</code> / <code>BEAR_PUT</code></td>
+<td><code>max_profit</code></td>
+<td>mirrors the credit side, where the credit <strong>is</strong> the max profit</td>
+</tr>
+<tr>
+<td><code>LONG_CALL</code> / <code>LONG_PUT</code></td>
+<td><code>entry_debit</code></td>
+<td>no max profit exists (<code>unbounded = True</code>, <code>max_profit_total = None</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>On a $2.00 debit over a $5 width those are <strong>+$150</strong> and <strong>+$100</strong>. An unusable
+<code>max_profit</code> (absent, zero, negative, NaN, a string, a bool) falls back to the
+debit rather than making the target unreachable - or, at zero, firing it at
+break-even. <code>_ledger_exit_ctx</code> divides <code>max_profit_total</code> by quantity, since the
+row stores it already multiplied while the repricer's P&amp;L is per contract.</p>
+<p><strong>Rule 3 is profit-blind</strong> (<code>TAKE_PROFIT</code> ahead, <code>CUT</code> behind, code <code>TIME_EXIT</code>
+either way - distinct from <code>TIME_STOP</code>, which means DTE &lt;= <code>cut_dte</code> <strong>and</strong>
+underwater), and the <code>dte_at_entry &gt; exit_dte</code> condition is load-bearing: the
+Market Scanner's Directional tab scans <strong>DTE 0-4</strong> and <strong>DTE 5-15</strong>, so every
+debit it can produce arrives inside 21 days and an unguarded rule would close
+100% of them on the following cycle. Those positions are bounded by their target
+and by the expiry settlement instead. An unknown <code>dte_at_entry</code> declines the exit.</p>
+<h2 id="scope-and-absences">Scope and absences</h2>
+<p>Credit rows in the ledger are <strong>not</strong> managed by this pass - giving them the
+credit rules would change how a second book exits, with its own measurement
+attached (the same reason the credit spreads have no <code>manage_dte</code>). Three
+absences are skips rather than actions: no mark (a zero would satisfy a
+zero-threshold rule and record a fabricated close price), a P&amp;L with no value to
+write, and an expired row (<code>expire_ledger_trades</code> owns expiry).</p>
+<p>⚠ <strong><code>close_paper_trade</code> booked a debit's realized P&amp;L with the credit formula
+until 2026-09-12</strong> - <code>(entry_credit - exit_debit) x qty x 100</code>, so a long call
+bought at $2.00 and sold at $3.00 recorded <strong>-$500</strong> against a true <strong>+$100</strong>.
+<code>exit_debit</code> is the debit PAID on a credit row and the credit RECEIVED on a debit
+row, matching <code>_expire_debit_trade</code>. The invariant that holds it: a manual close
+at $8.00 and an expiry at an $8.00 intrinsic are identical economics and must
+book the same number.</p>
+<p>⚠ <strong>No debit outcome data exists</strong> - <code>signals.db</code> holds only PCS/CCS/IC and the
+ledger is empty - so 0.50 and 21 are <strong>sourced, not fitted</strong>. That is why they
+are config.</p>
 <h1 id="known-issues">Known issues</h1>
 <p>Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.</p>

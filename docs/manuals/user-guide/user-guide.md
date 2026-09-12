@@ -1108,16 +1108,43 @@ Signals the system has "captured" to track over time, with live re-pricing.
 
 **Route:** `/options/paper`.
 
-A manual paper-trading ledger.
+A manual paper-trading ledger. You open every row yourself; since 2026-09-12 the
+**long options and debit spreads** in it also close themselves (see below).
 
-- **Action buttons:** Reload, **Close selected** (enter an exit debit), **Analyze
-  selected** (live Greeks + P&L overlay), **Delete selected**, **Delete all
-  closed**.
+- **Action buttons:** Reload, **Close selected**, **Analyze selected** (live
+  Greeks + P&L overlay), **Delete selected**, **Delete all closed**.
+- ⚠ **Close selected asks for a different number depending on the trade.** For a
+  credit spread it is the **debit you pay** to close; for a long option or debit
+  spread it is the **credit you receive**. The dialog's label says which. Both are
+  **per spread** (i.e. per share — type `2.00`, not `200`).
 - **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&L, Status, Entry Time.
 - Click a row to load its **detail panel**; the app automatically runs a live
   analysis and overlays current Greeks and P&L.
 - Each row also has an **Expected Move** button.
+
+**Automatic exits (long options and debit spreads only).** Checked **hourly,
+09:00–14:00 CT** on the same run as the paper account — so a target reached at
+09:15 is acted on at 10:00, or immediately if you press **Run manage cycle** on
+Paper Account.
+
+- **Profit target, +50%** — of the trade's **maximum profit** for a debit spread,
+  of **what you paid** for a single long option, which has no maximum profit to
+  take a share of. On a $2.00 spread over $5 strikes those are +$150 and +$100.
+- **Time exit at 21 days to expiry**, up or down. ⚠ A position that already had
+  21 days or fewer when you opened it is **not** time-exited — that is everything
+  from the Market Scanner's **Directional** tab, which scans 0–15 days out. Those
+  ride on their target and on expiry.
+- **No automatic loss stop.** The research this follows closes debit spreads out
+  before expiry rather than stopping them; your risk is capped at the premium paid
+  regardless. Close any row by hand whenever you like.
+- **Credit spreads here are tracked, not managed** — only expiry settles them.
+  The engine's own book on **Paper Account** is the one that takes profit and cuts.
+
+> ⚠ These levels come from published practitioner guidance, **not** from this
+> book's own results: no long option or debit spread has ever been recorded closed
+> in this app. They live in a config file so they can be changed once there is
+> something to measure.
 
 ## Paper Account
 

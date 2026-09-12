@@ -4,6 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**Exits for long options and debit spreads — and
+two defects that had to be fixed before any rule could be added safely.** Gap
+assessment **D3**.)
+
+- ⚠ **"Give the ledger a manage cycle" was half wrong — it already has one.**
+  `run_manage_and_refresh` has repriced the Paper Ledger and settled its expiries
+  (`expire_ledger_trades`) on the manual account's cycle all along. What it
+  lacked was a rule that closes a position **before** expiry: the only pre-expiry
+  exit was the page's Close button, so a long option or debit vertical sent from
+  the Strategy Finder or the Market Scanner's **Directional** tab rode to expiry
+  whatever it did in between. `compute.manage_ledger_trades` is the rule pass,
+  and it runs **before** the settlement on the same tick.
+- ⚠ **And a stale cadence corrected while writing it.** That cycle is **HOURLY**
+  (`paper_cycle_due`, 09:00–14:00 CT — six times a trading day), while
+  `expire_ledger_trades`' own docstring said "the 5-min manage tick" and had for
+  months; the 1-minute `manage_due` slot is the isolated DRIVER account's. Six
+  checks a day is the honest resolution of these rules (a target reached at 09:15
+  is acted on at 10:00) and `page_help` now says so — the pass rides that cadence
+  rather than adding a seventh scheduler slot, because the rules are day-scale.
+  ⚠ The first draft of this feature's own help text repeated the wrong figure,
+  which is the manuals-rot trap doing its work in real time.
+- ⚠ **The credit rules are INVERTED for a debit, not merely absent.** A debit row
+  stores `entry_credit` NEGATIVE, so `recommend`'s rule 1 reads
+  `pnl <= -2 × -200` = `pnl <= +400`. Measured on the real function, a healthy
+  long call returns **CUT/MONEY_STOP at every P&L from −$199 to +$399** — it would
+  be closed on its first manage tick — and TAKE_PROFIT above that. Nothing routed
+  a debit through it yet, so it was latent; **adding the ledger's exits without
+  fixing this first would have been the bug.** `recommend` now dispatches.
+- ⚠ **A live defect: the manual close booked a debit's P&L backwards.**
+  `close_paper_trade` used `(entry_credit − exit_debit)` with no direction branch,
+  so a long call bought at $2.00 and sold at $3.00 booked **−$500** against a true
+  **+$100**. `_expire_debit_trade` exists because the same formula is wrong at
+  expiry; the ledger's only pre-expiry exit never got the same treatment. The
+  control test: closing at $8.00 by hand and expiring at an $8.00 intrinsic are
+  identical economics and must agree. The dialog's label was wrong with it — it
+  asked a long call for its "Exit debit" when closing one pays you a credit.
+- ⚠ **The profit target's denominator is a DECISION.** The source says 50%, not
+  50% *of what*, and the two readings differ: a bounded vertical takes half its
+  **max profit** (the mirror of the credit side), a long option half the **debit
+  paid**, because it has no max profit at all. On one $2.00 debit over a $5 width
+  those are **+$150 and +$100**.
+- ⚠ **The time exit needed an at-entry guard or it would have fired on 100% of
+  the inventory.** The Directional tab's windows are **DTE 0–4** and **DTE 5–15**,
+  so every debit it can produce arrives inside a 21-day threshold; `exit_dte`
+  fires only when `dte_at_entry` was greater. Those positions keep their target
+  and the expiry settlement. The un-sourced alternative (a *fraction* of the
+  entry horizon) is recorded and not built.
+- **The loss side ships OFF** (`debit_stop_frac` commented out) — sourced: the
+  practitioners close debit spreads before expiry rather than stopping them out.
+  One line to opt in.
+- ⚠ **No debit outcome data exists in this app** — `signals.db` holds only
+  PCS/CCS/IC and prod's ledger holds **0 trades** — so these levels are
+  **sourced, not fitted**, which is exactly why they live in
+  `config/trade_mgmt.toml`. Measure before moving them.
+- Design: [`docs/plans/2026-09-12-debit-exit-rules-design.md`](plans/2026-09-12-debit-exit-rules-design.md).
+  69 new tests across four files. `page_help.py` updated — the ledger's rows now
+  close themselves, which is a user-visible behaviour change.
+
+---
+
 **Last updated:** 2026-09-12 (**D2 measured and NOT built — its premise is false
 twice over — and two CCS strike-field bugs fixed, one of them live on the money
 path.** Gap assessment **D2**.)
