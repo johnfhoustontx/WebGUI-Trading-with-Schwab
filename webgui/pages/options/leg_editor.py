@@ -402,7 +402,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def _refill(leg):
         """Price ``leg`` off the chain. A share leg, a typed price, or no reading
         leaves the price exactly as it was - "no mark" is never a $0.00 leg."""
-        if price_for is None or leg.get("_manual_premium"):
+        if price_for is None:
+            # A page with no price column and no price source (the Simulator)
+            # cannot re-price a moved leg, and the price it carried belongs to
+            # the OLD contract. Drop it, so the page that does price (the
+            # Calculator, via the shared position) prices the new one.
+            if not show_premium and not _is_stock(leg):
+                leg["premium"] = None
+            return
+        if leg.get("_manual_premium"):
             return
         # A share leg's price is what the shares cost: filled only while unset
         # (0.0 is what an untouched number box reports), never over a basis.

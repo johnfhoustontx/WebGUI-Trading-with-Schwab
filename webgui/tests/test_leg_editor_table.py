@@ -286,3 +286,17 @@ def test_table_expiry_select_shows_short_labels_over_iso_values():
     sel = _hook(container, "leg-expiry")
     assert sel.options == {_EXPS[0]: "Sep 19", _EXPS[1]: "Sep 26"}
     assert sel.value == _EXPS[0]
+
+
+def test_a_page_with_no_price_column_clears_a_moved_legs_price():
+    # The Simulator shows no price and has no chain price source. A price that
+    # arrived with the leg (from the Calculator) belongs to the OLD contract, so
+    # changing strike, expiry or type must drop it — the Calculator then prices
+    # the new contract instead of showing the old one's mark.
+    ed, container = _table([_leg(premium=2.5), _leg(strike=565.0, premium=2.0)],
+                           show_premium=False, price_for=None)
+    _fire(_hook(container, "leg-strike-up"), "click")
+    assert ed.get_legs()[0]["premium"] is None
+    assert ed.get_legs()[1]["premium"] == 2.0            # untouched leg keeps its price
+    _fire(_hook(container, "leg-side", 1), "click")      # a side flip is the same contract
+    assert ed.get_legs()[1]["premium"] == 2.0
