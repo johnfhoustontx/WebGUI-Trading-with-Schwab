@@ -139,7 +139,10 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #     (``macro_skin``, the three ``gamma_*`` display knobs,
 #     ``alert_market_hours_only`` as a gate, the two remaining ``voice_*`` keys
 #     which are inert once ``voice_enabled`` is off);
-#   * or nav chrome this process has none of (``nav_pinned``).
+#   * or nav chrome this process has none of (``nav_pinned``);
+#   * or ``chain_grid_columns`` -- read only by the Calculator/Simulator entry
+#     panel, neither published here, purely to choose which chain columns to
+#     draw (and its write is a no-op on a frozen store).
 # Cross-process WRITES are refused a second way regardless: the bus is
 # read-only and ``live_main`` calls none of main's ``sync_*`` helpers.
 PUBLIC_SAFE_DEFAULTS = {
@@ -149,7 +152,7 @@ PUBLIC_SAFE_DEFAULTS = {
     "manual_paper_lifecycle_enabled", "ticker_enabled", "ticker_speed",
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
     "gamma_spot_interval", "gamma_netprem_group", "gamma_netprem_mode",
-    "gamma_netprem_symbols", "macro_skin",
+    "gamma_netprem_symbols", "macro_skin", "chain_grid_columns",
 }
 
 
