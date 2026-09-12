@@ -2374,11 +2374,17 @@ def handle_command(bus, command) -> None:
     ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
-    publish; ``sim_fetch`` (args symbol) → fetch the simulator ChainSnapshot
-    (stashed in-process), cache the selector meta + publish; ``sim_run`` (args
+    publish; ``sim_fetch`` (args symbol, lazy?, expiries?) → fetch the simulator
+    ChainSnapshot (stashed in-process), cache the grid chain then the selector meta
+    + publish; ``sim_fetch_expiry`` (args symbol/expiry) → add one expiry to the
+    stashed snapshot, merge its chain into the grid chain, cache meta + publish
+    (nothing on a stale click); ``sim_run`` (args
     symbol/expiry/kind/strike/direction/dt/mult) → compute both sweeps, cache the
-    result + publish; ``calc_load`` (args symbol) → fetch the quote + option chain,
-    cache the loader payload (chain dict + price + range) + publish; ``calc_compute``
+    result + publish; ``calc_load`` (args symbol, lazy?, expiries?) → fetch the
+    quote + option chain, cache the loader payload (chain dict + price + range, and
+    every listed expiration when lazy) + publish; ``calc_load_expiry`` (args
+    symbol/expiry) → merge one expiry's strikes into the cached loader payload +
+    publish (nothing on a stale click); ``calc_compute``
     (args = the calc params dict) → run the summary + P&L grid math, cache the
     result + publish; ``calc_iv`` (args spot/strike/option_type/mark/expiry/rate) →
     imply IV from the option mark at the intraday time-to-expiry, cache + publish;
