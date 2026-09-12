@@ -57,7 +57,16 @@ from . import shared_position as _shared
 # snapshot/merge/precedence helpers live in page_state.py.
 _SIM_KEYS = ("symbol", "strategy", "legs", "dt", "mult", "lookback", "ds", "active_tab")
 _SIM_DEFAULTS = {"symbol": "SPY", "strategy": "PCS", "legs": [], "dt": 5.0,
-                 "mult": 1.5, "lookback": "auto", "ds": 0.0, "active_tab": "Replay"}
+                 "mult": 1.5, "lookback": "auto", "ds": 0.0, "active_tab": "Price & Time"}
+
+# The view tabs, in order (2026-09-12): named for what you change — price and
+# time, volatility — and the look back at real prices last. Tab VALUES are these
+# names, so a snapshot saved under the old ones ("Replay", "What-if", "IV shock")
+# falls back to the first tab.
+TAB_PRICE_TIME = "Price & Time"
+TAB_VOLATILITY = "Volatility"
+TAB_HISTORY = "History"
+SIM_TABS = (TAB_PRICE_TIME, TAB_VOLATILITY, TAB_HISTORY)
 _LAST_SIM: dict = {}
 
 SPOT_COLOR = "#ffd54f"
@@ -343,11 +352,11 @@ def render():
     def _build_sim_tabs():
         with ui.tabs().classes("compact-subtabs").props(
                 "dense no-caps inline-label align=left") as t:
-            t_replay = ui.tab("Replay")
-            t_whatif = ui.tab("What-if")
-            t_ivshock = ui.tab("IV shock")
-            for _tab, _key in ((t_replay, "Replay"), (t_whatif, "What-if"),
-                               (t_ivshock, "IV shock")):
+            t_whatif = ui.tab(TAB_PRICE_TIME)
+            t_ivshock = ui.tab(TAB_VOLATILITY)
+            t_replay = ui.tab(TAB_HISTORY)
+            for _tab, _key in ((t_whatif, TAB_PRICE_TIME), (t_ivshock, TAB_VOLATILITY),
+                               (t_replay, TAB_HISTORY)):
                 with _tab:
                     ui.tooltip(_page_help.subtab_help("/options/simulator", _key)
                                ).props("delay=350 max-width=340px")
@@ -358,7 +367,7 @@ def render():
             tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
     else:
         tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
-    _shell.bind_breadcrumb_leaf(tabs, initial="Replay")   # default set on tab_panels
+    _shell.bind_breadcrumb_leaf(tabs, initial=TAB_PRICE_TIME)   # default set on tab_panels
 
     tile_refs = {}      # tile key -> (label, value, sub) labels, built once
     shock_cells = []    # one (base, shock, change) label triple per IV-shock row
@@ -405,7 +414,7 @@ def render():
 
         # Chart card: the panels follow the subtabs mounted under the main strip.
         with ui.column().classes(f"{CARD} w-full gap-2"):
-            with ui.tab_panels(tabs, value=tab_replay).classes("w-full flush-panels"):
+            with ui.tab_panels(tabs, value=tab_whatif).classes("w-full flush-panels"):
                 with ui.tab_panel(tab_replay):
                     with ui.row().classes("items-center gap-4 w-full"):
                         lookback_sel = ui.select(lookback_options(), value="auto",
@@ -538,7 +547,7 @@ def render():
             mult_slider.value = s["mult"]
             lookback_sel.value = s["lookback"]
             ds_slider.value = s["ds"]
-            tabs.value = s["active_tab"]
+            tabs.value = s["active_tab"] if s["active_tab"] in SIM_TABS else TAB_PRICE_TIME
             state["pending_legs"] = s["legs"] or None
         finally:
             state["restoring"] = False

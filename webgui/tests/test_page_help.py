@@ -67,7 +67,7 @@ def test_subtab_help_covers_every_sub_tab():
         "/options/scanner": {"0-DTE", "Swing", "Directional"},
         "/options/gamma": {"GEX", "Charm", "DEX", "Vanna", "Flow", "Net Prem",
                            "Term", "indices", "sectors", "megacaps"},
-        "/options/simulator": {"Replay", "What-if", "IV shock"},
+        "/options/simulator": {"Price & Time", "Volatility", "History"},
         "/options/rescue": {"At-Risk Board", "Ad-hoc Trade"},
         "/portfolio": {"Holdings", "Sectors", "Performance"},
     }

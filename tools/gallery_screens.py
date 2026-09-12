@@ -145,9 +145,11 @@ SCREENS = (
     Screen("Strategy Calculator", (
         Shot("image14", "/options/calculator"),
         Shot("image15", "/options/expected-move"),
-        Shot("image17", "/options/simulator", subtab="IV shock"),
-        Shot("image16", "/options/simulator", subtab="What-if"),
-        Shot("image18", "/options/simulator", subtab="Replay"),
+        # subtab names renamed 2026-09-12 (IV shock -> Volatility, What-if ->
+        # Price & Time, Replay -> History); these three shots are never retaken.
+        Shot("image17", "/options/simulator", subtab="Volatility"),
+        Shot("image16", "/options/simulator", subtab="Price & Time"),
+        Shot("image18", "/options/simulator", subtab="History"),
     )),
     Screen("Strategy Finder", (
         Shot("image19", "/options/swing"),

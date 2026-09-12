@@ -236,7 +236,7 @@ def test_sim_snapshot_roundtrips_via_page_state():
     from pages.options import page_state as ps
     vals = {"symbol": "AAPL", "strategy": "IC", "legs": [{"option_type": "put"}],
             "dt": 7.0, "mult": 2.0, "lookback": "5m_3d", "ds": -3.0,
-            "active_tab": "What-if", "junk": 1}
+            "active_tab": "Volatility", "junk": 1}
     snap = ps.snapshot(vals, sim._SIM_KEYS)
     assert "junk" not in snap and snap["dt"] == 7.0
     assert ps.merge_restore(snap, sim._SIM_DEFAULTS)["symbol"] == "AAPL"
@@ -908,3 +908,35 @@ def test_share_legs_are_carried_through_not_simulated_and_never_dropped():
     assert stock in pos["legs"], "the Calculator's shares were dropped"
     assert pos["strategy"] == "COVERED_CALL"
     assert any(l["option_type"] == "call" and l["strike"] == 460.0 for l in pos["legs"])
+
+
+# ── the view tabs: named for what you change, what-if first (2026-09-12) ─────
+
+def _tab_labels(container):
+    from nicegui import ui
+    return [t._props.get("label") or t._props.get("name")
+            for t in container.descendants() if isinstance(t, ui.tab)]
+
+
+def test_the_view_tabs_are_price_and_time_then_volatility_then_history():
+    from nicegui import ui
+    container = _render_cold()
+    names = [t._props.get("name") for t in container.descendants() if isinstance(t, ui.tab)]
+    assert names == ["Price & Time", "Volatility", "History"]
+    tabs = [e for e in container.descendants() if isinstance(e, ui.tabs)][0]
+    value = tabs.value
+    assert getattr(value, "_props", {}).get("name", value) == "Price & Time"   # the first tab opens
+
+
+def test_an_old_saved_tab_name_falls_back_to_the_first_tab():
+    import bus_client
+    from nicegui import ui
+    from pages.options import shared_position
+    bus_client.reset()
+    shared_position.reset()
+    sim._LAST_SIM.clear()
+    sim._LAST_SIM.update({"symbol": "SPY", "strategy": "PCS", "legs": [], "active_tab": "Replay"})
+    with ui.card() as container:
+        sim.render()
+    tabs = [e for e in container.descendants() if isinstance(e, ui.tabs)][0]
+    assert tabs.value == "Price & Time"
