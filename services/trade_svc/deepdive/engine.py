@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from repo_paths import PROXY_URL
-from . import iv_history as ivh
+from shared import iv_history as ivh  # moved to shared/ 2026-09-12 (C3)
 
 #############################################
 # LOGGING SETUP

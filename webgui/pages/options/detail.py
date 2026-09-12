@@ -44,8 +44,15 @@ from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
 # kept (many refs) but the VALUES are now class strings applied via .classes().
 GREEN, AMBER, RED, NEUTRAL = TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 
+# ⚠ ``iv`` renders as "Vol Rank", not "IV Rank", and that is the honest name:
+# ``iv_analysis.calc_iv_rank_percentile`` places current ATM IV inside the
+# 52-week REALIZED-volatility distribution - a variance-risk-premium reading, not
+# an IV-vs-IV rank. The engine module renamed it internally on 2026-04-19 and
+# exposes ``hv_rank`` aliases; the screens kept the old word until 2026-09-12.
+# A true IV rank needs ``shared/iv_history.py``'s series, which only started
+# accruing that day (gap assessment C3).
 FACTOR_LABELS = [
-    ("rr", "R:R"), ("pop", "PoP"), ("theta", "Theta"), ("iv", "IV Rank"),
+    ("rr", "R:R"), ("pop", "PoP"), ("theta", "Theta"), ("iv", "Vol Rank"),
     ("iv_hv", "IV/HV"), ("vega", "Vega Risk"), ("em", "EM Buffer"),
     ("liq", "Liquidity"), ("trend", "Trend"), ("gex", "GEX"), ("dex", "DEX"),
 ]

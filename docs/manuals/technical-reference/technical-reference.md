@@ -768,7 +768,7 @@ Each signal gets a 0–100 quality score: a weighted sum of eleven normalized fa
 | Risk/Reward | 15 | Value | `norm_rr` |
 | Probability of Profit | 10 | Value | `norm_pop` |
 | Theta efficiency | 10 | Value | `norm_theta` |
-| IV Rank | 12 | Context | `norm_iv_rank` |
+| Vol Rank | 12 | Context | `norm_iv_rank` |
 | IV/HV ratio | 10 | Context | `norm_iv_hv_ratio` |
 | Vega risk | 8 | Context | `norm_vega_risk` |
 | Expected-move buffer | 12 | Context | `norm_em_buffer` |
@@ -793,7 +793,7 @@ score = Σ(weightᵢ · normalized_factorᵢ) / 100
 by **percentile rank** among all candidates when peer data exists, else linearly:
 `min(100, efficiency / 0.5 · 100)`.
 
-**IV Rank** — `norm_iv_rank(iv_rank)`: pass-through clamped to `[0, 100]`.
+**Vol Rank** — `norm_iv_rank(iv_rank)`: pass-through clamped to `[0, 100]`.
 
 **IV/HV ratio** — `norm_iv_hv_ratio(iv_hv)`: `(iv_hv − 0.5) / 1.0 · 100`, clamped
 (ratio 0.5 → 0, 1.0 → 50, 1.5+ → 100). Rewards IV richer than realized vol.
@@ -841,9 +841,15 @@ em_1sd = price · (iv_pct/100) · sqrt(max(dte, 0.25) / 365)
 Returns the 1σ dollar/percent move plus ±1σ and ±2σ bands.
 `calc_expected_moves(price, iv_pct)` returns daily/weekly/monthly variants.
 
-**IV Rank & percentile** — `calc_iv_rank_percentile(current_iv, hv_series, lookback_days=252)`:
+**Vol Rank & percentile** — `calc_iv_rank_percentile(current_iv, hv_series, lookback_days=252)`:
 compares current ATM IV to the trailing 252-day **HV-30** distribution (a realized-
-vol proxy):
+vol proxy). The screens label it **Vol Rank**, which is what it is; the function and
+the payload field keep the legacy `iv_*` names, and `hv_*` aliases carry the honest
+ones. ⚠ It is therefore a **variance-risk-premium** reading — "is IV rich against
+recent realized movement" — and not an IV-vs-IV-history rank. A true IV rank needs a
+persisted daily IV series, which `shared/iv_history.py` began accruing on 2026-09-12
+(one `cm30_iv` per symbol per scan) and which needs ~20 samples before it can be
+ranked at all:
 
 ```
 vol_rank       = (current_iv - hv_low_52w) / (hv_high_52w - hv_low_52w) · 100

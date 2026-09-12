@@ -50,7 +50,7 @@ from .theme import BTN_3D
 
 
 def iv_rank_value(value):
-    """IV Rank cell value: the rank rounded to a whole number (0-100) for a clean,
+    """Vol Rank cell value: the rank rounded to a whole number (0-100) for a clean,
     numerically-sortable cell, or ``None`` (blank) when it's missing/non-numeric."""
     return round(value) if isinstance(value, (int, float)) else None
 
@@ -150,7 +150,9 @@ def signal_columns():
         ("max_loss", "Max loss"),
         ("rr_pct", "R/R %"),
         ("pop_pct", "PoP %"),
-        ("iv_rank", "IV Rank"),
+        # "Vol Rank", not "IV Rank" - the field ranks current ATM IV inside the
+        # 52-week REALIZED-vol distribution. See detail.py's FACTOR_LABELS note.
+        ("iv_rank", "Vol Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
         _DROPPED_COL,

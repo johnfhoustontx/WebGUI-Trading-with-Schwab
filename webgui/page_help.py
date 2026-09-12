@@ -154,6 +154,13 @@ plus single-leg directional trades on their own tab.
   so an empty tab means "nothing qualified today", not a failure.
 - **Score chip & Grade** — greener/higher means better reward-vs-risk, higher
   probability of profit, and better trend fit. Work from the top down.
+- **Vol Rank** (renamed from "IV Rank" on 2026-09-12, because that is what it
+  measures) — where this symbol's option premium sits against how much the stock
+  has *actually* moved over the past year. High means you are being paid more than
+  recent movement justifies, which is when selling premium pays; low means the
+  opposite. It is **not** a comparison of today's option prices against last
+  year's option prices — nobody sells that data, so the app started recording its
+  own on 2026-09-12 and it will take about a year to be usable.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
@@ -196,7 +203,7 @@ family for it — directional, spreads, and neutral.
   the wrong time to collect premium and the right time to pay for it, so a low-IV
   symbol correctly shows you long calls, long puts and debit spreads instead of
   credit spreads. Measured on this app's own closed trades, premium sold below an
-  IV Rank of 45 returned **less than nothing** — a 25% win rate against 76%
+  Vol Rank of 45 returned **less than nothing** — a 25% win rate against 76%
   above it.
 """,
     "/options/income": """
@@ -240,7 +247,7 @@ each morning. Three kinds of trade sit on one ranked board:
   sits below the floor is dropped rather than ranked. A short board on a calm day
   is this working, not a broken scan; the count tells you which it was. Before
   2026-09-12 there was no floor here at all, and the board's top-ranked idea on
-  the day it was added was a put spread at an IV Rank of **0.1** — the cheapest
+  the day it was added was a put spread at a Vol Rank of **0.1** — the cheapest
   premium the measurement can express.
 - Nothing here is traded automatically. The board is a shortlist; the button is
   yours to press.

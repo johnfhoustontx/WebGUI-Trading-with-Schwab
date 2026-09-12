@@ -2661,6 +2661,69 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## "Vol Rank" is a variance risk premium, and the TRUE IV rank starts here
+
+⚠ **`iv_analysis.calc_iv_rank_percentile` is not an IV rank, and the module has
+said so since 2026-04-19.** It places current ATM IV inside the 52-week
+distribution of **realized** volatility (HV-30) — a *variance risk premium*
+reading, "am I being paid more than recent movement justifies" — and exposes
+honest `hv_rank` / `hv_percentile` aliases beside the legacy `iv_*` keys. The
+screens said **"IV Rank"** for five more months; they say **"Vol Rank"** from
+2026-09-12, in the Market Scanner table, the Strategy Finder table and the Trade
+detail panel. The **field stays `iv_rank`** — renaming a payload key that three
+tiers read would be a contract change for no gain.
+
+This matters for reading the B2 measurement: the field that predicts outcomes
+there (mean R −0.15 below 45, +0.25 above 55) is the **VRP proxy**, not an IV
+rank. Nothing in the app claims a true IV rank would do better — that is the
+question a year of data will answer.
+
+**`shared/iv_history.py` is the store that makes it answerable.** It was
+`services/trade_svc/deepdive/iv_history.py` and held **7 rows, all dated
+2026-08-04**: `record_snapshot` was reached only from
+`deepdive/engine.analyze_symbol`, so it filled only when somebody opened a Deep
+Dive report. Built, tested, *called* — by a surface nobody runs daily. It moved to
+`shared/` because `options-scanner/scanner_engine.py` cannot import `services.*`
+and duplicating a store's write path is how two writers come to disagree about a
+schema; **`shared/earnings.py` is the exact precedent** for a cross-tier path to a
+store living under `services/trade_svc/data/`.
+
+**`run_full_scan` now records one `cm30_iv` per symbol per scan, at ZERO Schwab
+cost.** It rides on the **+20..+45 DTE** chain the scan already fetches for
+`run_iv_analysis`, plus the year of daily bars it already fetches for technicals.
+Measured 2026-09-12 across ten symbols, that window brackets 30 DTE every time
+(expiries at 20 / 27 / 34 / 41) and gives the *identical* CM30 as a `today..+60`
+fetch — while a wider fetch is worse, since `$SPX` on `today..+60` **timed out at
+the proxy**. ⚠ The GEX collector's chain stops at **+7 days**, which is why the
+snapshot does not ride on it.
+
+⚠ **A CLAMPED reading is refused, and this is the load-bearing rule.**
+`constant_maturity_iv` documents clamping to the nearest tenor when the target is
+outside the ladder — right for a one-off report, **corrupting for a ranked
+series**: a column mixing 7-day and 30-day readings is not rankable, the number
+still looks like an IV, and `_rank_from_series` takes `min`/`max`, so **one**
+contaminated sample pins the bottom of the range for a year. `cm30_from_chain`
+therefore returns `(value, basis)` with `basis` in
+`{exact, interpolated, clamped, None}`, and only the first two are stored. A
+missing sample costs a day; a wrong one costs the range.
+
+⚠ **`backfill_rv` accepts TWO price-history shapes now, and only one used to
+work.** The Deep Dive holds a DataFrame; `scanner_engine.fetch_price_history`
+returns the **raw Schwab payload** (`{"candles": [...]}`, epoch-**ms** stamps).
+The DataFrame-only code raised `AttributeError` on `.empty`, which the caller's
+guard swallowed — a backfill that read like a feature and wrote nothing.
+`_as_candle_frame` normalises both, so realized vol stays one computation and
+`rv_rank` works **immediately** (RV needs no waiting; only IV does).
+
+⚠ **`DEFAULT_DB_PATH` was `Path('./iv_history.db')`** — a relative default that
+would have written a stray database into the process's working directory. Both
+callers passed `repo_paths.IV_HISTORY_DB` explicitly, so nothing leaked; it is now
+that constant. **The snapshot does not feed selection** and must not until the
+series matures: `iv_rank()` reports `samples` and `sufficient` against
+`MIN_SAMPLES_FOR_RANK` (20), and acting on 7 samples would be exactly the
+unmeasured change this audit keeps catching. Design:
+[the C3 doc](docs/plans/2026-09-12-iv-history-capture-design.md).
+
 ## A dollar risk cap stops meaning its own comment once equity moves
 
 **`shared/driver_limits.scale_to_equity(limits, equity)`** resolves the driver's

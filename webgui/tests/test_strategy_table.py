@@ -161,9 +161,9 @@ def test_strategy_columns_shape():
 
 def test_strategy_columns_include_iv_rank():
     """The multi-strategy table (Strategy Finder + the Scanner's Directional tab)
-    carries an IV Rank column, sortable like the other data columns."""
+    carries a Vol Rank column, sortable like the other data columns."""
     cols = {c["field"]: c for c in st.strategy_columns()}
-    assert cols["iv_rank"]["label"] == "IV Rank"
+    assert cols["iv_rank"]["label"] == "Vol Rank"
     assert cols["iv_rank"]["sortable"] is True
 
 

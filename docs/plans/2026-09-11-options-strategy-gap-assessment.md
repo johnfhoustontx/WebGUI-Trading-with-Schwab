@@ -276,7 +276,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **B8** | Size as a percent of current equity — **shipped 2026-09-12 for the DRIVER, where its two caps had drifted to 22.5% and 89.9% of the book** | S1 | S | **Medium–high** |
 | **C1** | Record Income Window candidates for calibration — **shipped 2026-09-11** | M2 (evidence) | S–M | High |
 | **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book | X1 | S | Medium |
-| **C3** | Store a daily ATM IV to build a true IV rank | V1 | S | Medium, deferred |
+| **C3** | Store a daily ATM IV to build a true IV rank — **shipped 2026-09-12; the store, writer AND reader already existed with 7 rows** | V1 | S | Medium |
 | **C4** | Book-level Greeks | V2 | M | Medium |
 | **C5** | Trade plan snapshot and a manual-book scorecard | P1, P2 | M | Medium |
 | **D1** | Straddle and strangle templates | coverage | S | Low–medium |
@@ -601,6 +601,31 @@ income slot, and at ~5 candidates a day a useful sample is weeks away.
 **C2. Wire the profit-lock ladder and trial the lifecycle on the manual book.** `[trail].ratchet_ladder` is built and tested with no caller, and `manual_paper_lifecycle_enabled` exists and defaults off. Running one book each way gives a direct comparison of "close at 50%" with "arm break-even and ratchet".
 
 **C3. Store one ATM IV per symbol per day.** The collector already fetches the chains, so this is small. A true IV rank then exists in a year; until then, label the field "Vol rank".
+
+**Shipped 2026-09-12** — [design](2026-09-12-iv-history-capture-design.md). ⚠ **It
+was not "write the thing", it was "run the thing that exists".**
+`deepdive/iv_history.py` is a complete module — `record_snapshot`,
+`constant_maturity_iv`, `iv_rank`, `rv_rank`, a 20-sample floor — and held **7
+rows, all dated 2026-08-04**, because it is reached only from
+`engine.analyze_symbol`: it filled only when somebody opened a Deep Dive report.
+
+Moved to `shared/iv_history.py` (the `shared/earnings.py` precedent), and
+`run_full_scan` now records one `cm30_iv` per symbol per scan at **zero Schwab
+cost** — off the **+20..+45 DTE** chain it already fetches, which measured across
+ten live symbols brackets 30 DTE every time. ⚠ The collector's chain stops at
+**+7 days**, so the recommendation's "the collector already fetches the chains"
+would have **clamped every reading** and stored a 7-day IV as a 30-day one.
+
+⚠ Two more dead paths found in passing: `backfill_rv` accepted only a DataFrame
+while the scanner holds the raw Schwab payload (so it wrote nothing, silently),
+and `DEFAULT_DB_PATH` was a **relative** `./iv_history.db`. Both fixed.
+
+And the relabel was five months overdue: `iv_analysis` has documented since
+2026-04-19 that the field is a **variance risk premium** (current ATM IV inside
+the 52-week *realized*-vol distribution), while three screens plus two manuals
+still said "IV Rank". ⚠ Which means the strong B2 finding is about the **VRP
+proxy** — nothing here claims a true IV rank beats it, and the snapshot
+deliberately does **not** feed selection.
 
 **C4. Book-level Greeks:** net delta, gamma, theta and vega per book, optionally beta-weighted to SPY.
 

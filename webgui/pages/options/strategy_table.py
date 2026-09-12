@@ -106,7 +106,8 @@ def strategy_columns():
         ("rr", "R:R"),
         ("pop_pct", "PoP"),
         ("breakevens", "BE"),
-        ("iv_rank", "IV Rank"),
+        # "Vol Rank" - see detail.py's FACTOR_LABELS note.
+        ("iv_rank", "Vol Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
     ]

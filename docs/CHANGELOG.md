@@ -4,6 +4,71 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**The IV history starts accruing — the store, the
+writer AND the reader already existed, with 7 rows from one day in August.** Gap
+assessment **C3**.)
+
+- **It was not "write the thing", it was "run the thing that exists".**
+  `services/trade_svc/deepdive/iv_history.py` is a complete module — `init_db`,
+  `record_snapshot`, `constant_maturity_iv` (interpolating in total-variance
+  space, the correct linear domain), `backfill_rv`, `iv_rank`, `rv_rank`,
+  `snapshot_count`, a `MIN_SAMPLES_FOR_RANK` guard and an idempotent upsert. It
+  held **7 rows, all dated 2026-08-04**, because `record_snapshot` is reached only
+  from `deepdive/engine.analyze_symbol` — so the store filled only when somebody
+  opened a Deep Dive report. Built, tested, *called*, by a surface nobody runs
+  daily.
+- **Moved to `shared/iv_history.py`**, because `options-scanner/scanner_engine.py`
+  cannot import `services.*` and duplicating a store's write path is how two
+  writers come to disagree about a schema. `shared/earnings.py` is the exact
+  precedent — a cross-tier path to a store that also lives under
+  `services/trade_svc/data/`. Three import sites followed it.
+- **`run_full_scan` records one `cm30_iv` per symbol per scan at ZERO Schwab
+  cost**, off the **+20..+45 DTE** chain it already fetches for `run_iv_analysis`
+  and the year of daily bars it already fetches for technicals. Measured across
+  ten live symbols, that window brackets 30 DTE **every** time (20 / 27 / 34 / 41)
+  and yields the *identical* CM30 as a `today..+60` fetch — and a wider fetch is
+  actively worse: `$SPX` on `today..+60` **timed out at the proxy**. ⚠ The GEX
+  collector's chain stops at **+7 days**, which is why the snapshot does not ride
+  on it.
+- ⚠ **A CLAMPED reading is refused.** `constant_maturity_iv` clamps to the nearest
+  tenor outside the ladder — right for a report, corrupting for a ranked series:
+  a column mixing 7-day and 30-day readings is not rankable, the number still
+  looks like an IV, and `_rank_from_series` takes `min`/`max`, so **one**
+  contaminated sample pins the bottom of the range for a year. `cm30_from_chain`
+  returns `(value, basis)` and only `exact` / `interpolated` is stored.
+- ⚠ **A second dead path found while wiring it: `backfill_rv` accepted only a
+  DataFrame**, while the scanner holds the **raw Schwab payload** (epoch-ms
+  `candles`). It raised `AttributeError` on `.empty` and the caller's guard
+  swallowed it — a backfill that read like a feature and wrote nothing.
+  `_as_candle_frame` normalises both shapes, keeping realized vol as one
+  computation, so `rv_rank` works **immediately** (RV needs no waiting; only IV
+  does) and a variance risk premium becomes derivable from the two tables.
+- ⚠ **`DEFAULT_DB_PATH` was `Path('./iv_history.db')`** — a relative default that
+  would have written a stray database into whatever the process's working
+  directory happened to be. Both callers passed the constant explicitly, so
+  nothing leaked; it is now `repo_paths.IV_HISTORY_DB`.
+- **The relabel, which was five months overdue.** `iv_analysis` has documented
+  since 2026-04-19 that its `iv_rank` places current ATM IV inside the 52-week
+  **realized**-vol distribution — a *variance risk premium*, not an IV-vs-IV rank
+  — and exposes honest `hv_rank` aliases. The screens still said **"IV Rank"** in
+  three places; they now say **"Vol Rank"**, as do the Reference Guide and the
+  Technical Reference. The **field stays `iv_rank`**: renaming a payload key three
+  tiers read would be a contract change for no gain.
+- ⚠ **The snapshot does NOT feed selection**, and must not until the series
+  matures — `iv_rank()` reports `samples` and `sufficient` against a 20-sample
+  floor, and acting on 7 would be exactly the unmeasured change this audit keeps
+  catching. Note also what the B2 measurement was really of: the field that
+  predicts outcomes so strongly there is the **VRP proxy**, so nothing here claims
+  a true IV rank will do better. That is the question a year of data answers, which
+  is the C tier's stated purpose.
+- Design: [`docs/plans/2026-09-12-iv-history-capture-design.md`](plans/2026-09-12-iv-history-capture-design.md).
+  53 new tests (`shared/tests/test_iv_history_capture.py`,
+  `options-scanner/tests/test_iv_snapshot_recording.py`). Four existing label
+  assertions changed, from "IV Rank" to "Vol Rank", which is the point of the
+  change rather than an accommodation to it.
+
+---
+
 **Last updated:** 2026-09-12 (**Three B-tier items on what an OPEN position knows
 about itself — and one of the three rationales did not survive measurement.** Gap
 assessment **B5, B7, B8**.)

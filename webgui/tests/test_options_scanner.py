@@ -84,13 +84,19 @@ def test_signal_rows_strikes_strip_whole_number_decimals():
 
 
 def test_signal_columns_include_iv_rank():
-    """0-DTE / Swing tables carry an IV Rank column (dealer-cheap/rich context)."""
+    """0-DTE / Swing tables carry a Vol Rank column (dealer-cheap/rich context).
+
+    ⚠ The label is "Vol Rank" and the FIELD stays ``iv_rank``. The number ranks
+    current ATM IV inside the 52-week REALIZED-vol distribution, which the engine
+    module has said since 2026-04-19; the screens said "IV Rank" until 2026-09-12.
+    Renaming the field too would be a contract change for no gain.
+    """
     cols = {c["field"]: c["label"] for c in scanner.signal_columns()}
-    assert cols.get("iv_rank") == "IV Rank"
+    assert cols.get("iv_rank") == "Vol Rank"
 
 
 def test_signal_rows_carry_iv_rank_rounded():
-    """The per-symbol IV Rank injected by the engine shows as a whole number, and a
+    """The per-symbol Vol Rank injected by the engine shows as a whole number, and a
     missing/non-numeric rank is blank (None), not a fabricated 0."""
     rows = scanner.signal_rows([
         {"symbol": "SPY", "type": "PCS", "iv_rank": 47.6},
@@ -614,7 +620,7 @@ def test_status_line_includes_errors():
 def test_credit_spread_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in scanner.signal_columns()]
     assert labels == ["Symbol", "Strategy", "Expiry", "DTE", "Strikes",
-                      "Credit", "Max loss", "R/R %", "PoP %", "IV Rank",
+                      "Credit", "Max loss", "R/R %", "PoP %", "Vol Rank",
                       "Score", "Grade", "Dropped at", ""]
 
 

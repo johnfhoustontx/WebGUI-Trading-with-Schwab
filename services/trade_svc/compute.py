@@ -1786,7 +1786,7 @@ def _open_iv_conn():
     """Open (creating if needed) the IV/RV history SQLite store. Isolated so tests
     can stub it away."""
     from repo_paths import IV_HISTORY_DB
-    from services.trade_svc.deepdive import iv_history as ivh
+    from shared import iv_history as ivh
     IV_HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
     return ivh.init_db(IV_HISTORY_DB)
 
@@ -1797,7 +1797,7 @@ def _deep_dive_result(symbol):
     from types import SimpleNamespace
 
     from services.trade_svc.deepdive import engine
-    from services.trade_svc.deepdive import iv_history as ivh
+    from shared import iv_history as ivh
     symbol = engine.normalize_symbol((symbol or "").strip().upper())
     if not symbol:
         return None, "?"

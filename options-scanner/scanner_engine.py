@@ -38,6 +38,8 @@ sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo ro
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 from shared import scanner_config as _scfg  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
+from shared import iv_history as _iv_history  # noqa: E402
+from repo_paths import IV_HISTORY_DB  # noqa: E402
 
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
@@ -1451,6 +1453,67 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
     return (w, lo, credit, ml)
 
 
+
+def _record_iv_snapshot(symbol, chain_iv, hist, spot=None):
+    """Record today's constant-maturity ATM IV for one symbol. Gap assessment C3.
+
+    **Costs no Schwab call.** ``chain_iv`` is the +20..+45 DTE chain
+    ``run_full_scan`` already fetched for ``run_iv_analysis``, and ``hist`` the
+    year of daily bars it already fetched for the technicals. Measured
+    2026-09-12, that window brackets 30 DTE for every symbol tried and yields the
+    identical CM30 as a ``today..+60`` fetch - while the GEX collector's
+    ``today..+7`` chain would clamp every time, which is why this does not live
+    there.
+
+    ⚠ **A CLAMPED reading is refused.** ``cm30_from_chain`` reports its basis, and
+    only ``exact`` or ``interpolated`` is stored: a series mixing a 7-day and a
+    30-day reading under one column is not rankable, the number still looks like
+    an IV, and ``iv_history._rank_from_series`` takes ``min``/``max`` - so ONE
+    contaminated sample pins the bottom of the range for a year. A missing sample
+    costs one day; a wrong one costs the range.
+
+    Writes on EVERY scan. The upsert is keyed ``(symbol, snapshot_date)``, so the
+    day's LAST reading is what is kept - a consistent late-session basis, and also
+    what an intraday reader of the same row wants. One tiny upsert per symbol is
+    noise beside the chain fetches and candidate scoring this pass already does.
+
+    ⚠ Wholly guarded, and that is deliberate rather than lazy: a scan is the
+    app's product and a volatility snapshot is bookkeeping. It also does NOT feed
+    selection - ``iv_analysis``'s HV-based proxy remains the scan's ``iv_rank``,
+    because acting on a series with 7 samples is exactly the unmeasured change
+    this audit keeps finding.
+    """
+    conn = None
+    try:
+        cm30, basis = _iv_history.cm30_from_chain(chain_iv, spot=spot)
+        if cm30 is None or basis not in ("exact", "interpolated"):
+            return
+        ladder = _iv_history.atm_iv_ladder(chain_iv, spot=spot)
+        front = ladder[0] if ladder else {}
+        conn = _iv_history.init_db(IV_HISTORY_DB)
+        # Realized vol needs no waiting - it is derivable from bars already in
+        # hand - so it is backfilled here too, which is what makes ``rv_rank``
+        # and a derived variance risk premium usable TODAY rather than in a year.
+        if hist is not None:
+            try:
+                _iv_history.backfill_rv(conn, symbol, hist)
+            except Exception:  # noqa: BLE001 - the IV row is the point; RV is a bonus.
+                log.debug("RV backfill for %s degraded", symbol, exc_info=True)
+        _iv_history.record_snapshot(
+            conn, symbol, spot if spot else (chain_iv or {}).get("underlyingPrice"),
+            {"cm30_iv": cm30, "front": {"atm_iv": front.get("atm_iv"),
+                                        "dte": front.get("dte")}},
+            {})
+    except Exception:  # noqa: BLE001 - see the docstring.
+        log.debug("IV snapshot for %s degraded", symbol, exc_info=True)
+    finally:
+        if conn is not None:
+            try:
+                _iv_history.close_db(conn)
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
     """Execute one full scan cycle. Returns structured results dict."""
     from iv_analysis import run_iv_analysis
@@ -1569,6 +1632,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         chain_0 = fetch_option_chain(client, symbol, from_date=zerodte_from, to_date=zerodte_to)
         return symbol, {
             "price": price, "hist": hist, "iv_data": iv_data,
+            # The +20..+45 DTE chain rides back so the C3 volatility snapshot can
+            # be computed from it without a second fetch. It is the ONLY window in
+            # this function that brackets the 30-day tenor a comparable series
+            # needs - chain_0 stops at +4 and chain_swing at +15.
+            "chain_iv": chain_iv,
             "chain_0": chain_0, "chain_s": chain_swing,
         }
 
@@ -1599,6 +1667,10 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
         iv_data = data["iv_data"]
         results["iv_data"][symbol] = iv_data
+        # Daily volatility snapshot (gap assessment C3) - off the IV-window chain
+        # and price history this loop already has, so no Schwab call. Never raises.
+        _record_iv_snapshot(symbol, data.get("chain_iv"), data.get("hist"),
+                            spot=data.get("price"))
         log.info(f"  {symbol} IV={iv_data.get('current_iv','?')}% "
                  f"Rank={iv_data.get('iv_rank','?')} "
                  f"Pctl={iv_data.get('iv_percentile','?')}")

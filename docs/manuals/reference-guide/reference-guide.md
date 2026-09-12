@@ -1936,7 +1936,7 @@ a volatility regime. It then scores each candidate on two things:
 That is what makes a long call and a put credit spread comparable on one 0–100 number.
 
 **The columns:** Strategy · Bias · Legs · Exp · DTE · Debit/Credit · Max P · Max L ·
-R:R · PoP · BE (breakeven) · IV Rank · Score · **Grade**.
+R:R · PoP · BE (breakeven) · Vol Rank · Score · **Grade**.
 
 **The Grade is quality-gated, not fit-gated** — it is driven by structural quality and
 per-family hard gates, and carries a tooltip explaining the reason. A high score with a
