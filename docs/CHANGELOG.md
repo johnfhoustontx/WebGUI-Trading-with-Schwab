@@ -4,6 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**D2 measured and NOT built — its premise is false
+twice over — and two CCS strike-field bugs fixed, one of them live on the money
+path.** Gap assessment **D2**.)
+
+- ⚠ **"The rest of the IC pipeline already carries them" is false.** Of the 10 IC
+  signals ever recorded, **0** have coincident shorts, and their short-strike
+  separation is min 11 / median 70 / max 95 points. It cannot happen:
+  `screen_spreads` selects shorts **by delta band** (directional 0.30–0.55, income
+  0.15–0.25), and a put short and a call short inside any band sit on **opposite
+  sides of spot**. An iron butterfly needs both shorts **at the money** (~0.50
+  delta), so it needs a **new ATM selection path**, not a by-product of the condor
+  pairing.
+- ⚠ **And the pipeline's probability model would mis-score it.**
+  `pop_pct = P(put ok) + P(call ok) − 100` is correct for a condor (disjoint
+  breaches) and reports **0–9%** for an ATM body, whose profit zone is actually the
+  strike ± the credit. `max_loss` stays right, but `rr_pct`, `pop_pct`,
+  `calc_expected_pnl` and the composite would all be wrong, so a butterfly would be
+  cut by every quality gate for the wrong reason. Fixing that means writing a new
+  probability model for a structure with **zero** scanned, recorded or traded
+  instances in this app — the unmeasured change this audit keeps catching. Not
+  guessed at; the full shape D2 would need is recorded in the assessment doc.
+- ⚠ **A live data-loss defect found on the reachable path, and fixed.**
+  `rescue.build_convert_butterfly` is an `execute` action and has been used once —
+  manual position **403** (SPY), 2026-06-29. `_apply_convert`'s **CCS** branch
+  wrote the new **put** strikes over `short_strike`/`long_strike` and never moved
+  the original calls anywhere, because a standalone CCS keeps its strikes there
+  (only an IC uses `call_short`). Row 403 reads **`puts 747.0/746.0, calls
+  NULL/NULL`**, status `EXPIRED` — and the consequence is worse than a wrong
+  number: the IC pricing branch needs all four strikes, so the position became
+  **unmarkable**, with no mark, no exit rule and no P&L until it expired. The
+  **PCS** branch was never affected, and a control test pins that.
+- ⚠ **A bug of my own from earlier the same day.**
+  `signal_repricer._LEG_LAYOUT["CCS"]` read `call_short`/`call_long`, so **every
+  CCS position returned all-`None` Greeks** and contributed nothing to the book
+  total. It passed review because the fixture was written to match the wrong
+  assumption — the documented "a unit test over an invented fixture passes while
+  the live column is blank" trap. Live impact nil (all 11 open positions are PCS;
+  CCS is 15 of 273 historical rows), and `positions_priced` disclosed the gap. The
+  guard is now an **AST cross-check** reading the strike fields out of
+  `reprice_swing`'s own branches. ⚠ It must walk `parent.body`, not the `If` node —
+  `orelse` is the entire `elif` chain, so a whole-node walk made the comparison
+  pass on anything.
+- Assessment: [`docs/plans/2026-09-12-iron-butterfly-assessment.md`](plans/2026-09-12-iron-butterfly-assessment.md).
+  8 new tests. One existing fixture corrected (it asserted the shipped bug).
+
+---
+
 **Last updated:** 2026-09-12 (**Straddles and strangles, analysis only — and the
 "analysis only" half is tested on both sides of the tier boundary.** Gap
 assessment **D1**.)

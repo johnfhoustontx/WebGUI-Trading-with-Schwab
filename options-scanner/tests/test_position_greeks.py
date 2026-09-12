@@ -82,8 +82,10 @@ def test_a_call_credit_spread_is_net_SHORT_delta():
                           "vega": 0.12},
                    long={"delta": 0.08, "gamma": 0.006, "theta": -0.03,
                          "vega": 0.08})
-    g = sr.position_greeks(_pcs(strategy="CCS", call_short=500.0,
-                                call_long=495.0), chain)
+    # ⚠ The fixture names ``short_strike``/``long_strike``, which is where a
+    # standalone CCS really keeps them. It used to pass ``call_short`` and so
+    # asserted the shipped bug rather than the behaviour.
+    g = sr.position_greeks(_pcs(strategy="CCS"), chain)
     assert g["net_delta"] == pytest.approx(-0.12)
     assert g["net_theta"] > 0
 
@@ -192,3 +194,78 @@ def test_an_expired_trade_reports_no_greeks():
                            today=dt.date(2026, 9, 12))
     assert got["error"] == "expired"
     assert got.get("net_delta") is None
+
+
+# ── the leg layout must match the REPRICER's own branches ──────────────────
+
+def test_the_layout_reads_the_same_strike_FIELDS_the_repricer_does():
+    """⚠ The guard that would have caught a real bug shipped on 2026-09-12.
+
+    ``_LEG_LAYOUT`` said a CCS keeps its strikes in ``call_short``/``call_long``.
+    It does not: a **standalone** CCS keeps them in ``short_strike`` /
+    ``long_strike`` (read off the CALL map) — only an **IC** uses
+    ``call_short``/``call_long``, for its call side. So every CCS position
+    returned all-None Greeks and contributed nothing to the book's total.
+
+    It passed review because the first test fixture was written to match the
+    wrong assumption (``_pcs(strategy="CCS", call_short=500.0)``) — the
+    documented "a unit test written against an invented fixture passes while the
+    live column is entirely blank" trap. This test cannot: it reads the strike
+    field names out of ``reprice_swing``'s own source, which is the authority.
+    """
+    import ast
+    import inspect
+
+    src = inspect.getsource(sr.reprice_swing)
+    tree = ast.parse(src.strip())
+
+    def fields_in_branch(strat):
+        """The ``trade[...]`` / ``trade.get(...)`` keys read under ``strat``."""
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            if not (node.comparators and isinstance(node.comparators[0], ast.Constant)
+                    and node.comparators[0].value == strat):
+                continue
+            parent = next((n for n in ast.walk(tree)
+                           if isinstance(n, ast.If) and n.test is node), None)
+            if parent is None:
+                continue
+            out = set()
+            # ⚠ ``parent.body`` only. Walking the whole If node would include its
+            # ``orelse`` - i.e. the entire elif chain - so PCS would "read" the
+            # IC branch's fields and the comparison would pass on anything.
+            branch = [n for stmt in parent.body for n in ast.walk(stmt)]
+            for n in branch:
+                if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Constant):
+                    out.add(n.slice.value)
+                elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                        and n.func.attr == "get" and n.args
+                        and isinstance(n.args[0], ast.Constant)):
+                    out.add(n.args[0].value)
+            return {f for f in out if isinstance(f, str) and "strike" in f
+                    or f in ("call_short", "call_long")}
+        return set()
+
+    for strat in ("PCS", "CCS", "IC"):
+        repricer_fields = fields_in_branch(strat)
+        assert repricer_fields, f"could not read {strat}'s branch"
+        layout_fields = {field for _right, field, _side in sr._LEG_LAYOUT[strat]}
+        assert layout_fields == repricer_fields, (
+            strat, sorted(layout_fields), sorted(repricer_fields))
+
+
+def test_a_standalone_CCS_prices_off_short_strike_not_call_short():
+    """The concrete regression, with the fixture matching a REAL row: a CCS
+    written by the scanner has ``call_short`` NULL."""
+    chain = _chain(right="call",
+                   short={"delta": 0.20, "gamma": 0.010, "theta": -0.05,
+                          "vega": 0.12},
+                   long={"delta": 0.08, "gamma": 0.006, "theta": -0.03,
+                         "vega": 0.08})
+    row = {"symbol": "SPY", "strategy": "CCS", "short_strike": 500.0,
+           "long_strike": 495.0, "call_short": None, "call_long": None,
+           "expiration": "2026-10-16"}
+    g = sr.position_greeks(row, chain)
+    assert g["net_delta"] == pytest.approx(-0.12)
+    assert g["net_theta"] == pytest.approx(0.02)

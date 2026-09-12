@@ -246,7 +246,16 @@ _GREEK_KEYS = ("delta", "gamma", "theta", "vega")
 #: ``shared.structures`` exists.
 _LEG_LAYOUT = {
     "PCS": (("put", "short_strike", -1), ("put", "long_strike", +1)),
-    "CCS": (("call", "call_short", -1), ("call", "call_long", +1)),
+    # ⚠ A STANDALONE CCS keeps its strikes in ``short_strike`` / ``long_strike``
+    # (read off the CALL map) - only an IC uses ``call_short``/``call_long``, for
+    # its call side. This said ``call_short`` for a day on 2026-09-12, so every
+    # CCS position returned all-None Greeks and contributed nothing to the book's
+    # total. It survived review because the test fixture was written to match the
+    # wrong assumption - the documented "a unit test over an invented fixture
+    # passes while the live column is blank" trap. ``test_position_greeks`` now
+    # reads these field names out of ``reprice_swing``'s own branches by AST, so
+    # the two cannot drift again.
+    "CCS": (("call", "short_strike", -1), ("call", "long_strike", +1)),
     "IC": (("put", "short_strike", -1), ("put", "long_strike", +1),
            ("call", "call_short", -1), ("call", "call_long", +1)),
     "SHORT_PUT": (("put", "short_strike", -1),),

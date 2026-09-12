@@ -254,9 +254,23 @@ def _apply_convert(db_path, position, candidate, action):
         if buy_call is not None:
             fields["call_long"] = buy_call
     else:                     # CCS — adding a put spread below
+        # ⚠ MOVE the original call legs first. A standalone CCS keeps its strikes
+        # in short_strike/long_strike (read off the CALL map — only an IC uses
+        # call_short/call_long), so writing the new PUT strikes over them
+        # DESTROYED the call legs: the row came out with two NULLs, and
+        # reprice_swing's IC branch needs all four strikes, so the position became
+        # UNMARKABLE — no mark, no exit rule, no P&L, until it expired.
+        #
+        # One real occurrence on prod: manual position 403 (SPY), a
+        # convert_butterfly applied 2026-06-29, left as puts 747.0/746.0 with
+        # calls NULL/NULL and ultimately status EXPIRED. Found 2026-09-12 while
+        # measuring gap assessment D2. The PCS branch above never had this bug —
+        # its put strikes stay put and the calls are added beside them.
         if sell_put is not None:
+            fields["call_short"] = position.get("short_strike")
             fields["short_strike"] = sell_put
         if buy_put is not None:
+            fields["call_long"] = position.get("long_strike")
             fields["long_strike"] = buy_put
     new_ml = candidate.get("new_max_loss")
     if new_ml is not None:

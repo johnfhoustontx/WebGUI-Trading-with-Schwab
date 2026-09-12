@@ -2661,6 +2661,40 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## A CCS keeps its strikes in `short_strike`, and two bugs turned on forgetting it
+
+⚠ **Only an IC uses `call_short` / `call_long`.** A standalone **CCS** keeps its
+strikes in `short_strike` / `long_strike`, read off the **call** map —
+`reprice_swing`'s own branches are the authority, and both bugs below came from
+assuming otherwise.
+
+**1. `_apply_convert` destroyed a CCS's call legs (live, money path, fixed
+2026-09-12).** Converting a position to an IC or an iron butterfly adds the
+opposite side and relabels the row `IC`. The PCS branch was always right — its put
+strikes stay put and the calls are added beside them. The **CCS** branch wrote the
+new **put** strikes straight over `short_strike`/`long_strike` and never moved the
+calls anywhere, so the row came out with two NULLs. The consequence is worse than
+a wrong number: the IC pricing branch needs all four strikes, so the position
+became **unmarkable** — no mark, no exit rule, no P&L, until it expired. One real
+occurrence: manual position **403** (SPY), a `convert_butterfly` on 2026-06-29,
+left as `puts 747.0/746.0, calls NULL/NULL`, status `EXPIRED`.
+
+**2. `signal_repricer._LEG_LAYOUT["CCS"]` read the wrong fields** for the few
+hours between shipping the C4 Greeks and finding this, so **every CCS position
+returned all-`None` Greeks**. ⚠ It passed review because the test fixture was
+written to match the wrong assumption — the documented "a unit test over an
+invented fixture passes while the live column is entirely blank" trap, the same
+shape as the `get_quotes` envelope bug. Live impact was nil (all 11 open positions
+are PCS; CCS is 15 of 273 historical rows) and `positions_priced` would have
+disclosed the gap.
+
+**The guard is an AST cross-check**, not a third copy of the field names:
+`test_position_greeks` reads the strike fields out of `reprice_swing`'s own PCS /
+CCS / IC branches and asserts `_LEG_LAYOUT` matches. ⚠ Walk `parent.body`, not the
+`If` node — the node's `orelse` is the whole `elif` chain, so a whole-node walk
+lets PCS "read" the IC branch's fields and the comparison passes on anything.
+Assessment: [the D2 doc](docs/plans/2026-09-12-iron-butterfly-assessment.md).
+
 ## Book Greeks are NET per position, and delta is a direction not a hedge ratio
 
 **`signal_repricer.position_greeks(trade, chain)`** returns

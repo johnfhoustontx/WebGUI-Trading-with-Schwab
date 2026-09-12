@@ -280,7 +280,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **C4** | Book-level Greeks — **shipped 2026-09-12; the beta weighting is NOT built, because no beta exists anywhere in this repo** | V2 | M | Medium |
 | **C5** | Trade plan snapshot and a manual-book scorecard — **scorecard shipped 2026-09-12; the trade-plan snapshot is bigger than written and stays open** | P1, P2 | M | Medium |
 | **D1** | Straddle and strangle templates — **shipped 2026-09-12, analysis only, with that rule tested on both sides of the tier boundary** | coverage | S | Low–medium |
-| **D2** | Iron butterfly scanner on the IC pipeline | coverage | M | Medium |
+| **D2** | Iron butterfly scanner on the IC pipeline — **measured 2026-09-12 and NOT built: the premise is false twice over. Two CCS bugs fixed instead** | coverage | **L** | Medium |
 | **D3** | Exits for long options and debit spreads | X6 | M | Medium |
 | **D4** | Stock legs → covered call, protective put, collar analysis | coverage | M–L | Medium |
 | **D5** | Calendars and diagonals end to end | coverage | L | Low–medium |
@@ -696,6 +696,25 @@ live beside the Tier-1 ones — the webgui suite has no `options-scanner` on
 
 **D2. An iron butterfly scanner.** Emit IC candidates with coincident shorts; the rest of the IC pipeline already carries them. It needs a per-structure profit target: Option Alpha takes 25%, or exits 5 days before expiry; TradingBlock takes 50%.
 
+⚠ **Measured 2026-09-12 and NOT built** —
+[assessment](2026-09-12-iron-butterfly-assessment.md). **Both halves of the first
+sentence are false.** Of the 10 IC signals ever recorded, **0** have coincident
+shorts (separation min 11 / median 70 / max 95 points), and none can:
+`screen_spreads` picks shorts by DELTA BAND, so a put short and a call short sit
+on opposite sides of spot — a butterfly needs both shorts ATM, i.e. a **new
+selection path**. And the pipeline's `pop_pct = P(put) + P(call) − 100`, correct
+for a condor's disjoint breaches, reports **0–9%** for an ATM body whose profit
+zone is really the strike ± the credit, so a butterfly would be cut by every
+quality gate for the wrong reason. Fixing that means inventing a probability model
+for a structure with **zero** instances in this app.
+
+**What was fixed instead, both found by that measurement:** `_apply_convert`'s
+**CCS** branch destroyed the original call legs (position **403** on prod reads
+`puts 747/746, calls NULL/NULL`, status `EXPIRED` — the IC pricing branch needs
+all four strikes, so it was **unmarkable**), and `_LEG_LAYOUT["CCS"]` read the
+wrong fields so every CCS returned no Greeks. Both trace to the same fact: **only
+an IC uses `call_short`; a standalone CCS keeps its strikes in `short_strike`.**
+
 **D3. Exits for long options and debit spreads.** Move them into the account, or give the ledger a manage cycle. Give them a profit target — tastylive uses 50% on debit spreads, TradingBlock about 80% — and a time exit before the final weeks. The practitioner sources don't stop out losing debit spreads (tastylive closes them before expiry instead), so a percent-of-debit stop is an option, not a sourced rule.
 
 **D4. Stock legs in the leg model.** This unlocks covered call, protective put and collar analysis. It could then extend to a "protect a holding" view on the real Portfolio page, as analysis only.
@@ -739,7 +758,8 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
     - `trade_mgmt.toml` says the 50% target arms a break-even stop, which is true only for captured signals.
 10a. **The driver's open-path capacity gates could never refuse anything** — `compute._driver_open_positions` called a function that does not exist (`list_open_positions` for `fetch_open_positions`) and its `except -> []` swallowed the `AttributeError`, so `max_concurrent` and `daily_risk_budget` both read an empty book. 50 degrades in 30 days on prod, nothing breached. Fixed 2026-09-11 (found while writing B6's tests), with an AST guard over every lazily-imported engine attribute in `compute.py`.
 11. The driver has two halts at different thresholds, a $1,500 decision halt and a $2,500 session drawdown, with nothing tying them together.
-12. The Rescue ad-hoc form lists the iron butterfly, but it is relabeled as an iron condor before it leaves the browser.
+12. The Rescue ad-hoc form lists the iron butterfly, but it is relabeled as an iron condor before it leaves the browser. ⚠ Still open — and note it is the SAME underlying gap as D2's third requirement: there is no `IRON_BUTTERFLY` structure label, so a converted body is stored as `IC` and silently inherits the iron condor's exit rules.
+12a. **`_apply_convert` destroyed a CCS's original call legs** — found 2026-09-12 measuring D2, **fixed**. One real occurrence (manual position 403, `convert_butterfly` 2026-06-29) left `puts 747.0/746.0, calls NULL/NULL` and status `EXPIRED`: the IC pricing branch needs all four strikes, so the position was unmarkable for its whole life. The PCS branch was never affected.
 13. Rescue flags assignment risk on every equity short, regardless of moneyness or dividends.
 14. Captured signals settle a 0-DTE trade the moment its DTE reaches 0, at a live mark, while both paper books hold to the 15:00 CT close.
 15. Assignment has no cash-settled branch. An index cash-secured put would book shares, which is unreachable today only because the collateral check refuses full index notional in a $25,000 book.
