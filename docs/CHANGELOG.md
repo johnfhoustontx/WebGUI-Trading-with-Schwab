@@ -4,7 +4,47 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The Income board is written down, so it can
+**Last updated:** 2026-09-11 (**A7 measured, and NOT built: netting commissions
+everywhere is worth −0.019R and reorders nothing.** A measurement, not a change.)
+
+- **`tools/measure_commission_convention.py`** — read-only, two halves,
+  re-runnable, the same pattern `sweep_naked_capeff.py` set for a figure a
+  decision rests on.
+
+- **The calibration half is worth nothing.** Over prod's **910** closed captured
+  signals, netting the round-trip commission ($2.60–$5.20 a contract) moves mean
+  R by a near-uniform **−0.019** (per bucket −0.017 to −0.031) and **reorders no
+  bucket** — the tool asserts that, rather than leaving it to the eye. No
+  conclusion moves: 0DTE 55–60 stays positive at +0.180 net, and SWING 55–60 goes
+  +0.031 → **+0.012**, which only sharpens the existing "that bucket is nothing"
+  finding.
+
+- **⚠ And the audit's stated rationale for A7 is wrong.** It claimed commissions
+  "fall hardest on the lowest-scoring bucket". They do not: the denominator is
+  `entry_max_loss`, so the drop tracks **spread width**, and the largest drop
+  landed on the *highest* bucket (SWING 70–75, −0.031).
+
+- **The ranking half is real, but it is a policy change rather than a fix.** On
+  the current scan the top-10 membership is unchanged while the **order** moves,
+  and the bias is systematic: a $1-wide spread loses up to **3.82** points of
+  `rr_pct` against 0.70 for a wider one, because the fee is a fixed dollar amount
+  against a smaller credit. Ranking net therefore pushes selection toward wider
+  spreads — more dollar risk per contract under the same $250 cap. That belongs
+  with **A6** as a deliberate decision. ⚠ Sample: 10 signals on a Friday.
+
+- **So A7 was demoted from Medium to Low and left unbuilt.** What survives is the
+  operator-facing inconsistency (Captured Signals shows a gross P&L, the Paper
+  Account a net one, on adjacent screens), which is a display decision needing no
+  migration. Netting the stored column going forward would leave the
+  calibration's history spanning two conventions — the same class of defect as
+  the units trap C1 found — for a measured −0.019R.
+
+- ⚠ **C1 made it four conventions, not three:** the income board is recorded on
+  its own commission-inclusive `max_loss`. Documented where it is introduced.
+
+---
+
+**Prior —** 2026-09-11 (**The Income board is written down, so it can
 eventually be measured.** Gap assessment **C1** — and the one-line version of the
 recipe would have been a silent no-op, or worse, an auto-traded feed.)
 

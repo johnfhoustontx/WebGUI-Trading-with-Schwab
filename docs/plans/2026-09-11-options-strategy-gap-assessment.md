@@ -265,7 +265,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **A4** | Give the income cash-secured put its own delta band | §2.3 | S | Medium |
 | **A5** | Pass an earnings date from the Strategy Finder | V3 | S | Medium |
 | **A6** | Size the width search against the real book | S3, W1, W4 | S–M | Medium–high |
-| **A7** | One commission convention; rank on net | P2, W4 | S–M | Medium |
+| **A7** | One commission convention; rank on net — **measured 2026-09-11: the analytics half is worth −0.019R and reorders nothing; see below** | P2, W4 | S–M | ~~Medium~~ **Low** |
 | **B1** | Exit rules for cash-secured puts and covered calls — **shipped 2026-09-11** | X1, X3, X5 | M | High |
 | **B2** | Apply the volatility floor wherever premium is sold | V1 | S | Medium |
 | **B3** | Deployment cap for the manual book | S2 | S | Medium–high |
@@ -316,6 +316,39 @@ skips the money, time and delta stops until B1 decides. 21 new tests. Add `SHORT
 - **Today:** realized P&L is net of commissions in the account and driver books (`paper_engine.py:278-295`), but gross in captured signals (`signal_db.py:340`) and the ledger. The Market Scanner also ranks on gross `rr_pct` (`scanner_engine.py:1765-1766`).
 - **Why it matters:** the calibration's R-multiples inherit the gross figure, and commissions fall hardest on the lowest-scoring bucket.
 - **The change:** net everywhere, and rank on net.
+
+**⚠ MEASURED 2026-09-11, and the rationale above is wrong. Re-runnable:
+`python tools/measure_commission_convention.py --calibration --ranking`.**
+
+*The calibration half is worth nothing.* Over prod's **910** closed captured
+signals, netting the round-trip commission ($2.60–$5.20 a contract) moves mean R
+by a near-uniform **−0.019**, per bucket −0.017 to −0.031, and **reorders no
+bucket** (the tool asserts it). No conclusion changes: 0DTE 55–60 stays positive
+at +0.180 net, SWING 55–60 stays at nothing (+0.031 → **+0.012**, which only
+sharpens the existing "do not read the pooled table" finding).
+
+And commissions do **not** fall hardest on the lowest-scoring bucket. The
+denominator is `entry_max_loss`, so the drop tracks **spread width**, not score —
+the largest drop landed on the *highest* bucket (SWING 70–75, −0.031).
+
+*The ranking half is real but is a policy change, not a fix.* On today's scan the
+top-10 membership is unchanged but the **order** moves, and the bias is
+systematic: a $1-wide spread loses up to **3.82** points of `rr_pct` against 0.70
+for a wider one, because the fee is a fixed dollar amount against a smaller
+credit. So ranking net pushes selection toward **wider** spreads — more dollar
+risk per contract under the same $250 cap. Whether that is an improvement is
+unknown, and it belongs with **A6** (width sizing) as a deliberate decision.
+⚠ That sample is 10 signals on a Friday; re-run it on a fuller scan before
+leaning on the ordering claim.
+
+**Revised recommendation: do not "net everywhere" for the analytics.** What is
+left worth doing is the *consistency* of what the operator READS — the Captured
+Signals P&L being gross while the Paper Account's is net is a real
+apples-to-oranges on adjacent screens — and that is a display decision with no
+migration, not a change to the stored column. Netting the stored
+`signal_outcomes.realized_pnl` going forward would also leave the calibration's
+history spanning two conventions, which is the same class of defect as the units
+trap C1 found, for a measured −0.019R of benefit.
 
 ### Tier B — close the rule gaps that protect capital
 
@@ -443,7 +476,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
 6. The width search is sized for a phantom $100,000 account **(checked)**.
-7. Three commission conventions across the paper books (§A7).
+7. Three commission conventions across the paper books (§A7) — ⚠ now **four**, since C1 records the income board on the board's own commission-inclusive `max_loss`. **Measured 2026-09-11:** unifying them is worth −0.019R to the calibration and reorders no bucket, so the remaining case is the operator reading a gross P&L on one screen and a net one on the next. See §A7.
 8. **Built, tested, never called:**
    - the ratchet ladder;
    - `fill_model.vertical_fill`;
