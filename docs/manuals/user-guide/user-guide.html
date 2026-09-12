@@ -1011,14 +1011,17 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
 <li><strong>Expiry strip</strong> — one button per expiration with its days to go. Clicking one
   moves <strong>every option leg</strong> to that date (a <strong>stock</strong> leg is skipped — shares do
   not expire) and points the chain at it.</li>
-<li><strong>The chain</strong> (left half) — calls on the left, strikes in the middle, puts on the
-  right, centred on spot. The at-the-money strike is gold and in-the-money cells
-  are shaded. <strong>Click a Bid to add a SELL leg, an Ask to add a BUY leg.</strong> The leg is
-  priced at the contract's <strong>mark</strong> whichever you click — the side only decides buy
-  or sell, so the page does not look worse by the full bid/ask spread. <strong>Columns</strong>
-  chooses what else is shown (Delta and OI by default; Mark, IV, Gamma, Theta, Vega
-  and Volume on request) and remembers the choice. <strong>More strikes above / below</strong>
-  widens the window.</li>
+<li><strong>The chain</strong> (left half) — the <strong>complete</strong> chain for the selected expiration:
+  every strike, calls on the left, strikes in the middle, puts on the right, in a
+  box that scrolls and opens <strong>centred on spot</strong> (it re-centres on every load and
+  expiry change). The at-the-money strike is gold and in-the-money cells are
+  shaded. The call side reads <strong>Delta · OI · Volume · Bid · Ask</strong> towards the
+  strike and the put side mirrors it, so Bid and Ask always sit beside the strike.
+  <strong>Click a Bid to add a SELL leg, an Ask to add a BUY leg.</strong> The leg is priced at
+  the contract's <strong>mark</strong> whichever you click — the side only decides buy or sell,
+  so the page does not look worse by the full bid/ask spread. <strong>Columns</strong> adds
+  Mark, IV, Gamma, Theta or Vega (Bid and Ask cannot be removed — they are what you
+  click) and remembers the choice.</li>
 <li><strong>Legs</strong> (right half) — one row per leg: <strong>BUY/SELL</strong> and <strong>CALL/PUT</strong> (and
   <strong>STOCK</strong>) flip with one click; <strong>Qty</strong>; <strong>Expiry</strong>; <strong>Strike</strong>, typed (it snaps to
   the nearest real strike) or stepped with <strong>‹ ›</strong> and the <strong>↑ ↓</strong> keys; <strong>Price</strong>;

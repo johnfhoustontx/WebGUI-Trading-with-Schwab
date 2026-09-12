@@ -270,13 +270,14 @@ legs, and the numbers follow every change.
   the line under the panel is the trade's thesis in one sentence.
 - **Expiry strip** — one button per expiration with its days to go. Clicking
   one moves **every** leg to that date and points the chain at it.
-- **The chain** (left) — calls on the left, strikes in the middle, puts on the
-  right, centred on the current price; the at-the-money strike is gold and
-  in-the-money cells are shaded. **Click a Bid to SELL that contract, an Ask to
-  BUY it** — the leg is added at the **mark** either way (the side you click only
-  decides buy or sell). **Columns** picks what else the chain shows — Delta and
-  OI by default, plus Mark, IV, Gamma, Theta, Vega and Volume — and remembers it.
-  **More strikes** above and below widens the window.
+- **The chain** (left) — the **complete** chain for the selected expiration:
+  every strike, calls on the left, strikes in the middle, puts on the right. It
+  scrolls, and it opens **centred on the current price**; the at-the-money strike
+  is gold and in-the-money cells are shaded. Each side reads **Delta · OI ·
+  Volume · Bid · Ask** out to the strike (the puts mirror it). **Click a Bid to
+  SELL that contract, an Ask to BUY it** — the leg is added at the **mark** either
+  way (the side you click only decides buy or sell). **Columns** adds Mark, IV,
+  Gamma, Theta or Vega and remembers your choice.
 - **Legs** (right) — one row per leg. **BUY/SELL** and **CALL/PUT** flip with one
   click. The strike is typed (it snaps to the nearest real strike) or stepped
   with **‹ ›** or the **↑ ↓** keys, and the price re-fills from the chain each

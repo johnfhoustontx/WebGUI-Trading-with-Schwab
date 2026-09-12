@@ -817,14 +817,17 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
 - **Expiry strip** — one button per expiration with its days to go. Clicking one
   moves **every option leg** to that date (a **stock** leg is skipped — shares do
   not expire) and points the chain at it.
-- **The chain** (left half) — calls on the left, strikes in the middle, puts on the
-  right, centred on spot. The at-the-money strike is gold and in-the-money cells
-  are shaded. **Click a Bid to add a SELL leg, an Ask to add a BUY leg.** The leg is
-  priced at the contract's **mark** whichever you click — the side only decides buy
-  or sell, so the page does not look worse by the full bid/ask spread. **Columns**
-  chooses what else is shown (Delta and OI by default; Mark, IV, Gamma, Theta, Vega
-  and Volume on request) and remembers the choice. **More strikes above / below**
-  widens the window.
+- **The chain** (left half) — the **complete** chain for the selected expiration:
+  every strike, calls on the left, strikes in the middle, puts on the right, in a
+  box that scrolls and opens **centred on spot** (it re-centres on every load and
+  expiry change). The at-the-money strike is gold and in-the-money cells are
+  shaded. The call side reads **Delta · OI · Volume · Bid · Ask** towards the
+  strike and the put side mirrors it, so Bid and Ask always sit beside the strike.
+  **Click a Bid to add a SELL leg, an Ask to add a BUY leg.** The leg is priced at
+  the contract's **mark** whichever you click — the side only decides buy or sell,
+  so the page does not look worse by the full bid/ask spread. **Columns** adds
+  Mark, IV, Gamma, Theta or Vega (Bid and Ask cannot be removed — they are what you
+  click) and remembers the choice.
 - **Legs** (right half) — one row per leg: **BUY/SELL** and **CALL/PUT** (and
   **STOCK**) flip with one click; **Qty**; **Expiry**; **Strike**, typed (it snaps to
   the nearest real strike) or stepped with **‹ ›** and the **↑ ↓** keys; **Price**;

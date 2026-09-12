@@ -400,7 +400,11 @@ the handle's `add_leg` appends without round-tripping the other legs through
 single-line table, is mounted only by **Rescue**. `layout="card"` has **no mounts
 left** and awaits removal), **`entry_panel.py`** (the shared entry panel: ticker,
 spot, strategy, expiry strip, the chain grid, and the `legs_box` the page mounts its
-editor into; the page decides what a grid pick means via `on_pick`), **`chain_grid.py`**
+editor into; the page decides what a grid pick means via `on_pick`. ⚠ The grid is the
+COMPLETE chain as ONE `ui.html` block with a delegated click read from `data-*`
+attributes — never a widget per cell, which an index chain would turn into thousands
+of components; the DOMPurify allow-list and its `ALLOW_DATA_ATTR` default are pinned
+by test), **`chain_grid.py`**
 (PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
 `chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
 plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —

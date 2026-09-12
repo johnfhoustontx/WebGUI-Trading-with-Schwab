@@ -45,8 +45,12 @@ handoffs and the manuals). Each page keeps its own results area below.
   row. The Simulator's sliders stay in its results area.
 - **Expiry strip** — pills of date + days to expiry; selecting one points the
   grid at that date. ⚙ opens the column picker.
-- **Chain grid** (new) — calls | strike | puts, centred on spot, ITM rows shaded,
-  a spot line. Default columns **Bid, Ask, Delta, OI**; the picker adds Mark,
+- **Chain grid** (new) — calls | strike | puts, ITM rows shaded. **Revised after
+  first review:** it lists the COMPLETE chain for the selected expiration (every
+  strike) in a scroll box opened centred on spot, and the default columns are
+  **Delta · OI · Volume · Bid · Ask** (call side, outward to the strike; puts
+  mirror). Rendered as one `ui.html` block with a delegated click, since an index
+  lists hundreds of strikes. The picker adds Mark,
   IV, Gamma, Theta, Vega, Volume and the choice persists in `app_settings`.
   **Click Bid → SELL leg; click Ask → BUY leg.**
 - **Leg table** — a new `layout="table"` in `leg_editor.py`, one row per leg,

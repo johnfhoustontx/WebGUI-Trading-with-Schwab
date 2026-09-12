@@ -2500,12 +2500,15 @@ moment after you stop.</p>
    opinions. A one-line thesis says what the structure is betting on.</li>
 <li><strong>Expiry strip</strong> — every expiration with its days to go. Clicking one moves every
    option leg there and points the chain at it.</li>
-<li><strong>The chain</strong> — calls | strike | puts around spot, at-the-money strike in gold,
-   in-the-money cells shaded. <strong>Click a Bid to SELL, an Ask to BUY.</strong> ⚠ <strong>The new leg
-   is priced at the MARK either way</strong> — the column only decides the side. Pricing a
-   sell at the bid would make every structure look worse by the full spread and
-   disagree with the volatility implied from the mark. <strong>Columns</strong> adds Mark, IV,
-   Gamma, Theta, Vega or Volume to the default Bid, Ask, Delta, OI, and remembers it.</li>
+<li><strong>The chain</strong> — the complete chain for the selected expiration: <strong>every</strong> strike,
+   calls | strike | puts, in a scroll box that opens centred on spot. At-the-money
+   strike in gold, in-the-money cells shaded. Default columns, call side outward to
+   the strike: <strong>Delta · OI · Volume · Bid · Ask</strong>, mirrored on the put side.
+   <strong>Click a Bid to SELL, an Ask to BUY.</strong> ⚠ <strong>The new leg is priced at the MARK
+   either way</strong> — the column only decides the side. Pricing a sell at the bid would
+   make every structure look worse by the full spread and disagree with the
+   volatility implied from the mark. <strong>Columns</strong> adds Mark, IV, Gamma, Theta or Vega,
+   and remembers it.</li>
 <li><strong>Legs</strong> — one row per leg: BUY/SELL and CALL/PUT (or <strong>stock</strong> — see <em>Stock legs</em>
    below) toggles, quantity, expiry, strike, price and the leg's <strong>delta</strong> read from
    the chain. The strike is typed (snapped to the real ladder) or stepped with ‹ › and

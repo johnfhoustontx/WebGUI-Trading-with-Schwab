@@ -34,6 +34,16 @@ panel.** Operator request: make both pages data-entry friendly.)
   real `options_svc` handlers + a synthetic Black-Scholes chain): the leg table's
   expiry select truncated to `2026-09-…` (now `Sep 14` over ISO values), and the
   Simulator never filled the panel's SPOT readout.
+- **Revised after the operator's first look: the COMPLETE chain, centred on
+  spot.** The grid was a ±10-strike window with "more strikes" buttons; it now
+  lists every strike of the selected expiry in a scroll box that opens with the
+  at-the-money row in the middle (measured in the harness on a 301-strike chain:
+  within 1 px, and again after an expiry change). Default columns are **Delta · OI ·
+  Volume · Bid · Ask** on the call side, mirrored on the puts. At that size a widget
+  per cell would be ~3,000 components per expiry, so the body is ONE `ui.html`
+  block with a delegated click read from `data-*` attributes; a test pins the tags
+  and attributes against the shipped DOMPurify allow-list and its `ALLOW_DATA_ATTR`
+  default, and the click and centring were verified in a browser.
 - **The leg editor's `card` layout has no mounts left**; its removal (with the
   `.leg-card` theme rule and its tests) is left as its own change.
 - **Tests.** New: `test_chain_grid.py`, `test_entry.py`, `test_entry_panel.py`,
