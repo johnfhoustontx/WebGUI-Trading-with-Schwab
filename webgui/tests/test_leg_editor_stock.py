@@ -201,3 +201,23 @@ def test_setting_all_legs_to_an_expiry_is_UNCHANGED_for_options():
     """The control: an option-only set still gets every leg stamped."""
     out = LE.set_legs_expiry([_call(), _call(strike=95.0)], "2026-12-18")
     assert [l["expiry"] for l in out] == ["2026-12-18", "2026-12-18"]
+
+
+# ── the render pass must not stamp an expiry either ──────────────────────
+
+@pytest.mark.parametrize("layout", ["card", "table"])
+def test_RENDERING_a_share_leg_does_not_give_it_an_expiry(layout):
+    """⚠ The fourth writer. ``_render`` coerces every leg's expiry into the loaded
+    ladder before the body reads it, and ``coerce_choice(None, exps)`` answers
+    the FIRST expiry — so merely displaying a covered call gave its shares a
+    date, which then rode ``get_legs()`` into persistence and every hand-off."""
+    from nicegui import ui
+    with ui.card() as container:
+        ed = LE.build_leg_editor(container, layout=layout,
+                                 strikes_for=lambda e, t: [95.0, 105.0],
+                                 expiries_for=lambda: ["2026-10-16"],
+                                 show_premium=True, allow_stock=True)
+        ed.set_legs([_stock(), _call()])
+    stock, call = ed.get_legs()
+    assert stock["expiry"] is None and stock["strike"] is None
+    assert call["expiry"] == "2026-10-16"

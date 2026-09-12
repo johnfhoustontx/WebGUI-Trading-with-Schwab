@@ -27,6 +27,7 @@ from types import SimpleNamespace
 
 from nicegui import ui
 
+from . import entry as _entry
 from . import strategies as S
 
 _KEYS = ("option_type", "side", "strike", "expiry", "qty", "premium")
@@ -234,6 +235,13 @@ DEFAULT_CARD_TOKENS = {
     "remove_off": "text-[10px] text-[#4e5f70] border border-[#26313d] rounded-[2px] cursor-not-allowed",
     "add": "text-[9px] tracking-[.18em] text-[#a7dceb] border border-dashed border-[#3a6070] rounded-[2px]",
     "reset": "text-[9px] tracking-[.18em] text-[#8aa0b4] border border-[#2c3b4b] rounded-[2px]",
+    # The table layout's one-click toggles (SIDE, TYPE, the strike steppers) and
+    # the typed-price reset. Side keeps the card's long/short accent family.
+    "toggle": "text-[10px] tracking-[.12em] border rounded-[2px]",
+    "side_long": "text-[#22d3ee] border-[#22d3ee]",
+    "side_short": "text-[#2dd4a7] border-[#2dd4a7]",
+    "step": "text-[12px] text-[#9db0c2]",
+    "manual": "text-[11px] text-[#fbbf24]",
 }
 
 # The grid templates ARE the card's alignment contract: captions and cells
@@ -268,7 +276,36 @@ _CARD_ROW2_GRIDS = {
 _CARD_MAX_W = "max-w-[440px]"
 
 
-_LAYOUTS = ("row", "card")
+_LAYOUTS = ("row", "card", "table")
+
+# -- the table layout ---------------------------------------------------------
+# One row per leg, and the header shares the row's track list so a caption can
+# never drift off its column: # . SIDE . QTY . EXPIRY . STRIKE . TYPE .
+# [PRICE] . [DELTA] . remove. PRICE and DELTA collapse their tracks exactly as
+# the card's do - four combinations, four STATIC class strings.
+_TABLE_TAIL = "gap-x-1.5 items-center w-full min-w-0"
+_TABLE_GRIDS = {
+    # (show_premium, show_delta) -> the track list
+    (True, True): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
+                   f"_48px_minmax(0,0.95fr)_44px_26px] {_TABLE_TAIL}"),
+    (True, False): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
+                    f"_48px_minmax(0,0.95fr)_26px] {_TABLE_TAIL}"),
+    (False, True): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
+                    f"_48px_44px_26px] {_TABLE_TAIL}"),
+    (False, False): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
+                     f"_48px_26px] {_TABLE_TAIL}"),
+}
+
+
+def _strike_text(strike):
+    """The strike input's text: ``570``, ``567.5`` - never ``570.0``."""
+    return "" if strike is None else f"{strike:g}"
+
+
+def _usable_price(p):
+    if isinstance(p, bool) or not isinstance(p, (int, float)):
+        return None
+    return float(p) if math.isfinite(p) else None
 
 
 def card_tokens(overrides=None):
@@ -318,7 +355,7 @@ def delta_text(delta):
 def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                      on_change=lambda: None, spot_getter=lambda: 0.0, header=False,
                      layout="row", tokens=None, delta_for=None, min_legs=1,
-                     on_reset=None, allow_stock=False):
+                     on_reset=None, allow_stock=False, price_for=None):
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty().
 
@@ -328,7 +365,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     as ``show_premium=False`` collapses PREMIUM — ``min_legs`` floors the remove
     button and
     ``on_reset`` adds a RESET TO TEMPLATE button beside ADD LEG. All five are
-    inert in row mode."""
+    inert in row mode.
+
+    ``layout="table"`` is the entry panel's compact one-row-per-leg list: SIDE and
+    TYPE are one-click toggles, the strike is typed (snapped to the real ladder)
+    or stepped with the arrow buttons and Up/Down keys, and ``price_for(leg)``
+    re-fills a leg's price when it becomes a different contract - never over a
+    price the user typed (see ``entry.should_refill``). The handle gains
+    ``add_leg`` and ``refill_prices`` for the page's grid clicks and chain
+    loads."""
     # A typo here would silently render the WRONG screen with nothing to see it:
     # both layouts are valid renders of the same state, so neither the page nor
     # any test would report a failure.
@@ -337,14 +382,45 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                          f"expected one of {sorted(_LAYOUTS)}")
     state = {"legs": [], "dirty": False}
 
+    table = layout == "table"
+
     def _set_field(i, field, value):
         if not (0 <= i < len(state["legs"])):
             return
-        state["legs"][i][field] = value
+        leg = state["legs"][i]
+        leg[field] = value
         state["dirty"] = True
-        if field in ("option_type", "expiry"):
+        if table:
+            if field in ("option_type", "expiry"):
+                _snap_strike(leg)
+            if _entry.should_refill(field, leg.get("_manual_premium")):
+                _refill(leg)
+            if field in ("side", "strike", "expiry", "option_type"):
+                _render()
+        elif field in ("option_type", "expiry"):
             _sync_row_strikes(i)
         on_change()
+
+    def _refill(leg):
+        """Price ``leg`` off the chain. A share leg, a typed price, or no reading
+        leaves the price exactly as it was - "no mark" is never a $0.00 leg."""
+        if price_for is None or _is_stock(leg) or leg.get("_manual_premium"):
+            return
+        p = _usable_price(price_for(normalize_legs([leg])[0]))
+        if p is not None:
+            leg["premium"] = round(p, 2)
+
+    def _snap_strike(leg):
+        """A leg that moved to another ladder (type or expiry) takes a strike ON
+        it - the one nearest spot, the rule ``_sync_row_strikes`` applies."""
+        if _is_stock(leg):
+            return
+        opts = strikes_for(leg.get("expiry"), leg.get("option_type")) or []
+        if not opts or leg.get("strike") in opts:
+            return
+        spot = spot_getter() or 0
+        leg["strike"] = (min(opts, key=lambda k: abs(k - spot)) if spot
+                         else coerce_strike(leg.get("strike"), opts))
 
     def _set_type(i, value):
         """A leg's TYPE change re-SHAPES its row, so it re-renders rather than
@@ -356,6 +432,11 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             return
         state["legs"][i] = retype_leg(state["legs"][i], value)
         state["dirty"] = True
+        if table:
+            # retype_leg drops _manual_premium with every other private key: a
+            # new contract's typed price no longer describes anything.
+            _snap_strike(state["legs"][i])
+            _refill(state["legs"][i])
         _render()
         on_change()
 
@@ -376,6 +457,64 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         w.update()
 
     card = layout == "card"
+
+    # -- table-layout handlers ----------------------------------------------
+    def _toggle_side(i):
+        if 0 <= i < len(state["legs"]):
+            _set_field(i, "side", "long" if state["legs"][i].get("side") == "short"
+                       else "short")
+
+    def _cycle_type(i):
+        if not (0 <= i < len(state["legs"])):
+            return
+        opts = type_options(allow_stock)
+        cur = state["legs"][i].get("option_type")
+        nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else opts[0]
+        _set_type(i, nxt)
+
+    def _ladder_for(leg):
+        return strikes_for(leg.get("expiry"), leg.get("option_type")) or []
+
+    def _step(i, step):
+        if not (0 <= i < len(state["legs"])):
+            return
+        leg = state["legs"][i]
+        new = _entry.step_strike(_ladder_for(leg), leg.get("strike"), step)
+        if new is not None and new != leg.get("strike"):
+            _set_field(i, "strike", new)
+
+    def _commit_strike(i, widget):
+        """Typed strike text -> the nearest real strike. Junk puts the old strike
+        back in the box rather than clearing the leg."""
+        if not (0 <= i < len(state["legs"])):
+            return
+        leg = state["legs"][i]
+        new = _entry.parse_strike_text(widget.value, _ladder_for(leg))
+        if new is None or new == leg.get("strike"):
+            widget.value = _strike_text(leg.get("strike"))
+            return
+        _set_field(i, "strike", new)
+
+    def _set_price(i, value, reset_btn):
+        if not (0 <= i < len(state["legs"])):
+            return
+        leg = state["legs"][i]
+        if leg.get("premium") == value:
+            return          # a repaint writing the value it already holds
+        leg["premium"] = value
+        leg["_manual_premium"] = True
+        state["dirty"] = True
+        reset_btn.set_visibility(not _is_stock(leg))
+        on_change()
+
+    def _reset_price(i):
+        if not (0 <= i < len(state["legs"])):
+            return
+        leg = state["legs"][i]
+        leg["_manual_premium"] = False
+        _refill(leg)
+        _render()
+        on_change()
     tk = card_tokens(tokens)
 
     def _row_body(i, leg, exps, e_val, s_opts, s_val, lab):
@@ -483,6 +622,76 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 ui.button("RESET TO TEMPLATE", on_click=lambda e: on_reset(), color=None) \
                     .props("flat dense no-caps").classes(f"{tk['reset']} px-2")
 
+    def _table_head():
+        grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
+        caps = ["#", "SIDE", "QTY", "EXPIRY", "STRIKE", "TYPE"]
+        caps += ["PRICE"] if show_premium else []
+        caps += ["DELTA"] if delta_for is not None else []
+        with ui.element("div").classes(f"leg-thead {grid} px-1.5"):
+            for cap in caps + [""]:
+                ui.label(cap).classes(tk["eyebrow"])
+
+    def _table_body(i, leg, exps, e_val, s_opts, s_val, _lab):
+        stock = _is_stock(leg)
+        short = leg.get("side") == "short"
+        grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
+        with ui.element("div").classes(f"leg-trow {grid} {tk['frame']} px-1.5 py-1"):
+            ui.label(f"{i + 1}").classes(f"leg-num {tk['num']}")
+            ui.button("SELL" if short else "BUY", color=None,
+                      on_click=lambda e, i=i: _toggle_side(i)) \
+                .props("flat dense no-caps") \
+                .classes(f"leg-side {tk['toggle']} "
+                         f"{tk['side_short'] if short else tk['side_long']} "
+                         "w-full min-h-0 px-0")
+            qty = ui.number(value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
+                .props("dense").classes("leg-qty w-full")
+            qty.on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))
+            if stock:
+                qty.tooltip("Lots of 100 shares")
+            e_opts = leg_expiry_options(leg, exps)
+            ew = ui.select(e_opts, value=(e_val if e_opts else None)) \
+                .props("dense options-dense").classes("leg-expiry w-full min-w-0")
+            ew.on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
+            ew.set_enabled(bool(e_opts))
+            live = bool(leg_strike_options(leg, s_opts))
+            with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
+                dn = ui.button("\u2039", color=None, on_click=lambda e, i=i: _step(i, -1)) \
+                    .props("flat dense no-caps") \
+                    .classes(f"leg-strike-dn {tk['step']} px-0.5 min-h-0 min-w-0")
+                sw = ui.input(value=_strike_text(s_val)) \
+                    .props('dense spellcheck=false input-class="text-right"') \
+                    .classes("leg-strike flex-1 min-w-0")
+                up = ui.button("\u203a", color=None, on_click=lambda e, i=i: _step(i, +1)) \
+                    .props("flat dense no-caps") \
+                    .classes(f"leg-strike-up {tk['step']} px-0.5 min-h-0 min-w-0")
+            for w in (dn, sw, up):
+                w.set_enabled(live)
+            sw.on("keydown.enter", lambda e, i=i, w=sw: _commit_strike(i, w))
+            sw.on("blur", lambda e, i=i, w=sw: _commit_strike(i, w))
+            sw.on("keydown.up", lambda e, i=i: _step(i, +1))
+            sw.on("keydown.down", lambda e, i=i: _step(i, -1))
+            ui.button(str(leg.get("option_type") or "call").upper(), color=None,
+                      on_click=lambda e, i=i: _cycle_type(i)) \
+                .props("flat dense no-caps") \
+                .classes(f"leg-type {tk['toggle']} {tk['step']} w-full min-h-0 px-0")
+            if show_premium:
+                with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
+                    pw = ui.number(value=leg.get("premium"), format="%.2f") \
+                        .props("dense").classes("leg-price flex-1 min-w-0")
+                    rb = ui.button("\u21ba", color=None, on_click=lambda e, i=i: _reset_price(i)) \
+                        .props("flat dense no-caps") \
+                        .classes(f"leg-price-reset {tk['manual']} px-0.5 min-h-0 min-w-0")
+                    rb.tooltip("Typed price - click to use the chain's mark")
+                    rb.set_visibility(bool(leg.get("_manual_premium")) and not stock)
+                    pw.on_value_change(lambda e, i=i, rb=rb: _set_price(i, e.value, rb))
+                    if stock:
+                        pw.tooltip("Price paid per share")
+            if delta_for is not None:
+                ui.label(delta_text(delta_for(leg))) \
+                    .classes(f"leg-delta {tk['delta']} text-right")
+            _card_remove(i)
+        return sw
+
     def _render():
         container.clear()
         exps = expiries_for() or []
@@ -491,9 +700,11 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         # so the Simulator keeps a label on every field. The card layout carries
         # its own per-leg eyebrow captions, so ``header`` is inert there.
         lab = (lambda _t: "") if header else (lambda t: t)
-        body = _card_body if card else _row_body
+        body = _card_body if card else (_table_body if table else _row_body)
         with container:
-            if header and not card:
+            if table:
+                _table_head()
+            if header and not card and not table:
                 with ui.row().classes("items-center gap-2 no-wrap leg-head"):
                     ui.label("Type").classes("w-24")
                     ui.label("Side").classes("w-24")
@@ -515,7 +726,11 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 # either body — the two layouts physically cannot drift on it,
                 # and a third layout inherits it for free. Same for the
                 # ``_strike_widget`` registration below.
-                e_val = coerce_choice(leg.get("expiry"), exps)
+                # ⚠ A SHARE leg is skipped: ``coerce_choice(None, exps)`` answers
+                # the first expiry, so rendering a covered call used to stamp a
+                # date onto its shares — the stale-expiry hazard retype_leg and
+                # set_legs_expiry already guard, from a fourth direction.
+                e_val = None if _is_stock(leg) else coerce_choice(leg.get("expiry"), exps)
                 leg["expiry"] = e_val
                 s_opts = strikes_for(e_val, leg.get("option_type")) or []
                 s_val = coerce_strike(leg.get("strike"), s_opts)
@@ -530,7 +745,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     raise RuntimeError("leg body returned no strike widget - "
                                        "_strike_widget could not be registered")
                 leg["_strike_widget"] = sw
-            if card:
+            if card or table:
                 _card_footer()
             else:
                 ui.button("Add leg", icon="add", on_click=lambda e: _add()).props("flat dense")
@@ -579,7 +794,27 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         _render()
         on_change()
 
-    return SimpleNamespace(get_legs=get_legs, set_legs=set_legs,
+    def add_leg(leg):
+        """Append one leg (a chain-grid click) WITHOUT round-tripping the others
+        through ``set_legs``, which would drop their typed-price flags. An edit,
+        so it marks the legs dirty and fires ``on_change``."""
+        src = leg if isinstance(leg, dict) else {}
+        new = {k: src.get(k) for k in _KEYS}
+        new["qty"] = int(src.get("qty", 1) or 1)
+        state["legs"].append(new)
+        state["dirty"] = True
+        _render()
+        on_change()
+
+    def refill_prices():
+        """Price every leg off the chain (a fresh chain load) - skipping typed
+        prices and share legs. Repaints; fires nothing, like ``set_legs``."""
+        for leg in state["legs"]:
+            _refill(leg)
+        _render()
+
+    return SimpleNamespace(add_leg=add_leg, refill_prices=refill_prices,
+                           get_legs=get_legs, set_legs=set_legs,
                            apply_template=apply_template, apply_expiry=apply_expiry,
                            refresh_options=refresh_options,
                            is_dirty=lambda: state["dirty"])
