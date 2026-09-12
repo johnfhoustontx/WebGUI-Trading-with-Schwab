@@ -348,12 +348,12 @@ Routes:
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
-| `/options/calculator` | Calculator — a three-step screen (① STRATEGY / ② SYMBOL / ③ LEGS) over six metric cards + the P&L matrix on real chain strikes, in its own `[calc]` palette. Multi-leg builder, IV implied from the traded mark. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/calculator` | Calculator — the shared **entry panel** (ticker · strategy · expiry strip · chain grid beside the leg table) over collapsed pricing assumptions, six metric cards + the P&L matrix, in its own `[calc]` palette. **No action buttons**: a landed chain prices the legs and implies IV, and every edit re-prices after a 0.3 s debounce. ⚠ A grid click prices at the MARK whichever side (Bid sells, Ask buys). Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — multi-strategy single-symbol scan (directional / spreads / neutral) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. [Detail](docs/webgui-routes.md) | built |
 | `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
 | `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
-| `/options/simulator` | Simulator — Replay / What-if / IV-shock over the shared multi-leg builder; persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/simulator` | Simulator — Replay / What-if / IV-shock under the same entry panel. Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
@@ -388,12 +388,23 @@ Calculator and Simulator so templates never drift), **`leg_editor.py`** (the sha
 **editable multi-leg widget** every leg-building page mounts — `state['legs']` is the
 source of truth, each page injects its own `strikes_for`/`expiries_for` +
 `show_premium`; `apply_expiry(expiry)` propagates the Calculator's top-level Expiry to
-**all** legs. **TWO layouts over that one model:** `layout="card"` — the Calculator +
-Simulator — a two-line card whose GEOMETRY is shared while its palette enters as
+**all** legs. **Layouts over that one model:** `layout="table"` — the Calculator +
+Simulator since 2026-09-12 — one row per leg (SIDE/TYPE toggles, a strike typed or
+stepped on the real ladder, and `price_for` re-filling a leg's price when it becomes a
+different contract, never over a typed price — the private `_manual_premium` key,
+which `normalize_legs` strips); its GEOMETRY is shared while its palette enters as
 `tokens` (Calculator `[calc]` near-black, Simulator app-navy); `delta_for` /
-`show_premium` each COLLAPSE their track when the page has no source for them, and
-`min_legs` floors the remove button at 1. `layout="row"`, the original single-line
-table, is now mounted only by **Rescue**),
+`show_premium` each COLLAPSE their track, `min_legs` floors the remove button at 1, and
+the handle's `add_leg` appends without round-tripping the other legs through
+`set_legs` (which would drop their typed-price flags). `layout="row"`, the original
+single-line table, is mounted only by **Rescue**. `layout="card"` has **no mounts
+left** and awaits removal), **`entry_panel.py`** (the shared entry panel: ticker,
+spot, strategy, expiry strip, the chain grid, and the `legs_box` the page mounts its
+editor into; the page decides what a grid pick means via `on_pick`), **`chain_grid.py`**
+(PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
+`chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
+plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —
+`step_strike`, `leg_from_pick`, `should_refill`, `Debounce`, `expiry_options`),
 and **`handoff.py`** (cross-page
 signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
@@ -3426,7 +3437,10 @@ Calculator/Rescue pages read exactly FIVE contract fields (`bid`/`ask`/`mark`/
 `volatility`/`delta`) plus the two expiry maps' structure, so
 `compute.thin_calc_chain` now cuts contracts to that whitelist at publish:
 **8.77 MB → 0.68 MB (−92%)**, measured on the real prod payload, page extractors
-verified unchanged on the thinned dict. Fields were cut rather than strikes —
+verified unchanged on the thinned dict. ⚠ **The whitelist grew to TEN fields on
+2026-09-12** (adds gamma, theta, vega, openInterest, totalVolume) for the entry
+panel's chain grid, and the same thinned chain is now also published as
+`cache:options:sim_chain`; the resulting size (~1.3 MB estimated) is unmeasured on prod. Fields were cut rather than strikes —
 the leg builder legitimately offers far wings, so the strike ladder stays whole.
 
 **Two more unbounded-growth fixes from the same audit.** `driver_account_view`

@@ -4,7 +4,48 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-12 (**Stock legs in the leg model — covered call,
+**Last updated:** 2026-09-12 (**Calculator + Simulator — a shared trade-entry
+panel.** Operator request: make both pages data-entry friendly.)
+
+- **The four complaints, and what answered each.** Strike dropdowns over a
+  100-strike ladder → a typed strike that snaps to the real ladder, stepped with
+  ‹ › and ↑/↓. Five button presses (Load chain → Expiry → Fetch premiums → IV
+  Update → Calculate) → **none**: a landed chain lays the template, prices every
+  leg and implies IV, and every edit re-prices after a 0.3 s debounce. No chain to
+  pick from → a **chain grid** beside the legs where a Bid click sells and an Ask
+  click buys. Two different layouts → one `entry_panel` mounted by both pages.
+- ⚠ **A grid click prices at the MARK whichever side was clicked.** Pricing a sell
+  at the bid would understate every structure by the full spread and disagree with
+  the mark-implied IV. Operator-confirmed.
+- **The chain now keeps open interest, volume and the Greeks.** Measured first:
+  the Calculator's `calc_load` fetched every strike × expiry to +60 days but
+  `thin_calc_chain` kept five fields (bid/ask/mark/IV/delta); the Simulator's
+  `fetch_snapshot` kept strike/bid/ask/IV and no Greek or OI at all. The whitelist
+  is now ten fields. The Simulator gets a thinned chain too, as
+  `cache:options:sim_chain`, from the **same** `/chains` call (`on_chain`
+  callback) — no extra Schwab request. Payload size is estimated, not measured
+  (~0.7 → ~1.3 MB for `calc_chain`).
+- **Fix found on the way — rendering a covered call stamped an expiry onto its
+  shares**, in every leg-editor layout. `_render`'s shared coercion ran
+  `coerce_choice(None, exps)`, which answers the first expiry, so the leg set in
+  persistence and every hand-off carried a date the D4 work had closed at three
+  other writers. Pricing was safe (`_leg_expiry_years` ignores it); the data was not.
+- **Two bugs caught only by rendering the pages** in the local harness (fake bus +
+  real `options_svc` handlers + a synthetic Black-Scholes chain): the leg table's
+  expiry select truncated to `2026-09-…` (now `Sep 14` over ISO values), and the
+  Simulator never filled the panel's SPOT readout.
+- **The leg editor's `card` layout has no mounts left**; its removal (with the
+  `.leg-card` theme rule and its tests) is left as its own change.
+- **Tests.** New: `test_chain_grid.py`, `test_entry.py`, `test_entry_panel.py`,
+  `test_leg_editor_table.py`. Rewritten where the subject was removed (the four
+  buttons, the card layout, the numbered frames), each asserting the replacement.
+  One Simulator card test had become vacuous — it looped over zero cards — and was
+  dropped with its subject.
+- Docs: `page_help.py`, User Guide, Reference Guide, API Reference,
+  `docs/webgui-routes.md`. Design + plan:
+  `docs/plans/2026-09-12-calc-sim-entry-panel-{design,plan}.md`.
+
+**Prior —** 2026-09-12 (**Stock legs in the leg model — covered call,
 protective put and collar analysis.** Gap assessment **D4**.)
 
 - **The first D-tier premise measured TRUE.** The leg model really had no share
