@@ -55,6 +55,22 @@ excluded_grades = ["Weak"]
 # Capture floor: a signal must reach this to be recorded at all.
 capture_min = 58
 
+# The INCOME window's own capture floor, and 0 is deliberate.
+#
+# The composite was tuned for the 0-DTE / swing credit-spread core, and the
+# 30-45 DTE board scores well below it: measured on prod 2026-09-11, all five
+# candidates came in at 50.2-57.0 and every one graded "Marginal". Sharing
+# capture_min = 58 would therefore record NOTHING, every day, and the whole
+# point of capturing this board (gap assessment C1) is to find out whether those
+# marginal-looking trades actually work — which cannot be learned by refusing to
+# write them down.
+#
+# 0 means "whatever the board offered", not "everything": income_scan already
+# cuts below swing_min (50) service-side, so that cut is the real filter and
+# restating it here would just be a second number to drift. Raise this once
+# there is enough outcome data to say which score band is worth keeping.
+capture_min_income = 0
+
 # Index premium spreads in a mildly-negative GEX (trend-prone) regime need a
 # higher bar than the capture floor. Below gex_strong_neg, index premium is
 # skipped outright.

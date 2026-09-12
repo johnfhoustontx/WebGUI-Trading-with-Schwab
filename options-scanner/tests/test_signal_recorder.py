@@ -44,6 +44,70 @@ def test_score_floor_is_58():
     assert signal_recorder.MIN_SCORE == 58
 
 
+# --- the INCOME window has its own floor (gap assessment C1) ----------------
+# The composite was tuned for the 0-DTE / swing core and the 30-45 DTE board
+# scores well under it: measured on prod 2026-09-11, all five candidates came in
+# at 50.2-57.0. Sharing capture_min would have recorded NOTHING, every day, and
+# the feature would have shipped as a green no-op.
+
+
+def test_an_income_candidate_below_the_normal_floor_is_still_recorded(tmp_path):
+    db = tmp_path / "s.db"
+    # Built explicitly rather than through ``_make_signal``: a single-leg income
+    # candidate genuinely has NO long strike and NO width, which is the shape
+    # ``compute.income_capture_row`` hands over.
+    sig = {"symbol": "XOM", "type": "SHORT_PUT", "short_strike": 160.0,
+           "long_strike": None, "width": None, "expiration": "2026-10-16",
+           "dte": 35, "credit": 3.40, "max_loss": 156.61,
+           "composite_score": 53.5, "grade": "Marginal", "short_delta": -0.334}
+
+    assert signal_recorder.record_signals([sig], "INCOME", db_path=db, now=RTH) == 1
+
+
+def test_the_same_candidate_on_the_normal_scanners_is_still_refused(tmp_path):
+    """The discriminating pair. Without it, the test above would also pass if
+    someone simply dropped the floor for everything."""
+    db = tmp_path / "s.db"
+    sig = _make_signal(score=53.5)
+
+    assert signal_recorder.record_signals([sig], "0DTE", db_path=db, now=RTH) == 0
+    assert signal_recorder.record_signals([sig], "SWING", db_path=db, now=RTH) == 0
+
+
+def test_an_unknown_scanner_type_keeps_the_strict_floor(tmp_path):
+    """A new scanner type must not inherit the loosest floor in the file by
+    accident — it opts in by name."""
+    db = tmp_path / "s.db"
+
+    assert signal_recorder.record_signals(
+        [_make_signal(score=53.5)], "SOMETHING_NEW", db_path=db, now=RTH) == 0
+
+
+def test_the_income_floor_comes_from_config_not_a_literal(monkeypatch):
+    """The discriminating config test. Asserting the floor is 0 today proves
+    nothing; move the config and the recorder must follow. It is a module
+    constant resolved at import (the "edit + restart" contract), so this
+    reloads."""
+    import importlib
+
+    from shared import scanner_config
+
+    monkeypatch.setattr(scanner_config, "scores",
+                        lambda: {**scanner_config.DEFAULTS["scores"],
+                                 "capture_min_income": 77})
+    try:
+        importlib.reload(signal_recorder)
+        assert signal_recorder.capture_floor("INCOME") == 77
+    finally:
+        monkeypatch.undo()
+        importlib.reload(signal_recorder)
+
+
+def test_the_income_floor_is_case_insensitive():
+    assert signal_recorder.capture_floor("income") == signal_recorder.capture_floor("INCOME")
+    assert signal_recorder.capture_floor(None) == signal_recorder.MIN_SCORE
+
+
 def test_dedup_on_second_call(tmp_path):
     db = tmp_path / "s.db"
     sigs = [_make_signal(score=60)]

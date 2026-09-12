@@ -35,6 +35,23 @@ TZ = ZoneInfo("America/Chicago")
 # See docs/plans/2026-06-11-quality-first-selection-design.md.
 MIN_SCORE = _scfg.scores()["capture_min"]   # config/scanner.toml
 
+# Per-scanner-type overrides on that floor. A type opts in BY NAME: a new scanner
+# must not inherit the loosest floor in the file by accident.
+#
+# INCOME is 0 deliberately. The composite was tuned for the 0-DTE / swing core
+# and the 30-45 DTE board scores well below it — measured on prod 2026-09-11, all
+# five candidates came in at 50.2-57.0, every one graded "Marginal" — so sharing
+# capture_min would record NOTHING every day, and the point of capturing that
+# board (gap assessment C1) is to learn whether those trades work, which cannot
+# happen while they are refused. 0 means "whatever the board offered": the income
+# scan already cuts below ``swing_min`` service-side, so that is the real filter.
+_CAPTURE_FLOORS = {"INCOME": _scfg.scores()["capture_min_income"]}
+
+
+def capture_floor(scanner_type):
+    """The capture floor for one scanner type — its override, else MIN_SCORE."""
+    return _CAPTURE_FLOORS.get(str(scanner_type or "").strip().upper(), MIN_SCORE)
+
 
 def _dedup_key(sig, scanner_type):
     return f"{sig['symbol']}|{sig['type']}|{sig['short_strike']}|{sig['long_strike']}|{sig['expiration']}|{scanner_type}"
@@ -90,7 +107,8 @@ def _now():
 
 def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
                    now=None):
-    """Record signals with score >= MIN_SCORE, inside regular hours only.
+    """Record signals with score >= this type's ``capture_floor``, inside regular
+    hours only.
     Returns count inserted. Never raises — DB failures are logged and counted
     as 0.
 
@@ -109,8 +127,9 @@ def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
     genuine post-open capture in silence.
     """
     now = _now() if now is None else now
+    floor = capture_floor(scanner_type)
     eligible = [s for s in signals
-                if s.get("composite_score", s.get("score", 0)) >= MIN_SCORE]
+                if s.get("composite_score", s.get("score", 0)) >= floor]
     if not _mc.is_regular_hours(now):
         if eligible:
             # Counted at INFO, not warned: outside the session this is the

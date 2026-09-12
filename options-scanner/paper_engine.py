@@ -93,6 +93,11 @@ _ensure_file_logging()
 # Recommendations that DON'T block a new entry. None/"" = no mark yet (new signal).
 ELIGIBLE_RECS = (None, "", "HOLD")
 
+# Scanner types this cycle must never auto-open, however eligible the signal
+# looks. They are TRACKED (marked, closed, fed to the nightly calibration) but
+# entered by hand only. See the refusal in run_entry_cycle for why.
+_NO_AUTO_ENTRY_TYPES = ("INCOME",)
+
 
 #############################################
 # ENTRY ELIGIBILITY (pure)
@@ -178,6 +183,18 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
     # (symbol, reason) once so a concentrated scan does not bury the log.
     capped_seen = set()
     for sig in signals:
+        # ⚠ The Income Window is a SCREEN, not a feed, and this cycle reads every
+        # open captured signal with no type filter — so recording that board
+        # (gap assessment C1) would have turned a hand-picked shortlist into an
+        # auto-traded one. "Screen or feed?" is an open product decision, and the
+        # page promises the current answer: "Nothing here is traded
+        # automatically. The board is a shortlist; the button is yours to press."
+        #
+        # Refused by TYPE, not by shape: most income candidates are ordinary
+        # PCS/CCS spreads that the sizer would accept without complaint. An
+        # absent scanner_type still opens — that is every pre-C1 row.
+        if str(sig.get("scanner_type") or "").strip().upper() in _NO_AUTO_ENTRY_TYPES:
+            continue
         if not is_eligible(sig):
             continue
         sid = sig["signal_id"]

@@ -255,6 +255,41 @@ def test_a_rolled_position_records_its_OWN_entry_delta(tmp_path):
     assert rolled["entry_short_delta"] == 0.34
 
 
+def test_the_entry_cycle_never_opens_an_income_candidate(tmp_path):
+    """⚠ The safety property of capturing the Income board (gap assessment C1).
+
+    ``run_entry_cycle`` reads EVERY open captured signal with no scanner-type
+    filter, so recording the income board would have quietly turned a
+    hand-picked screen into an auto-traded feed — "screen or feed?" is decision 5
+    in the assessment and the user has not made it. The page says so out loud:
+    "Nothing here is traded automatically. The board is a shortlist; the button
+    is yours to press."
+
+    It is a refusal by TYPE, not by shape: two of today's five candidates are
+    ordinary PCS/CCS spreads with a width the sizer would happily accept.
+    """
+    db = _account(tmp_path)
+    income = _sig(signal_id="inc1", scanner_type="INCOME")
+    spread = _sig(signal_id="swing1", scanner_type="SWING")
+
+    pe.run_entry_cycle(None, _TODAY, [income, spread], _FakeBroker(0.40), db)
+
+    opened = pdb.fetch_open_positions(db)
+    assert [p["signal_id"] for p in opened] == ["swing1"]
+
+
+def test_a_signal_with_no_scanner_type_is_still_opened(tmp_path):
+    """Back-compat: the field is absent in older rows and in every existing
+    test fixture, and absence must not mean "refuse"."""
+    db = _account(tmp_path)
+    sig = _sig(signal_id="legacy")
+    sig.pop("scanner_type", None)
+
+    pe.run_entry_cycle(None, _TODAY, [sig], _FakeBroker(0.40), db)
+
+    assert len(pdb.fetch_open_positions(db)) == 1
+
+
 def test_the_income_structures_are_unaffected_by_any_of_this():
     """``loss_rules = false`` means there is no delta stop to sharpen. Pinned so
     that a future change to the drift rule cannot quietly reach them."""

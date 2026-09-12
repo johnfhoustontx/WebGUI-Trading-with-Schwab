@@ -4,7 +4,86 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The paper books remember the delta they opened
+**Last updated:** 2026-09-11 (**The Income board is written down, so it can
+eventually be measured.** Gap assessment **C1** — and the one-line version of the
+recipe would have been a silent no-op, or worse, an auto-traded feed.)
+
+- **`handlers.record_income_signals`** captures each day's published board as
+  captured signals under `scanner_type = "INCOME"`, which
+  `shared.calibration.family_key` buckets on its own. The 30–45 DTE window had
+  produced **no outcome data at all** — nothing recorded it — so the nightly
+  calibration could never test the playbook's central claim against this app's
+  own trades. Recorded AFTER the publish and in its own guard: the board is what
+  the reader came for, and a locked signals DB must not empty the page.
+
+- **⚠ The safety property, and it is the important part.**
+  `paper_engine.run_entry_cycle` reads every open captured signal with **no type
+  filter**, and most income candidates are ordinary PCS/CCS spreads it would size
+  without complaint — so recording the board would have quietly converted a
+  hand-picked screen into an auto-traded feed. "Screen or feed?" is decision 5 in
+  the assessment and is still open; the Income page promises the current answer.
+  `_NO_AUTO_ENTRY_TYPES` refuses by TYPE, not by shape, and an absent
+  `scanner_type` still opens — which is every pre-C1 row. A test opens a SWING
+  and an INCOME signal on identical numbers and asserts only the SWING lands.
+
+- **Four things the recommendation did not anticipate**, each found by measuring
+  the live board rather than reading the code:
+  - **The capture floor made it a no-op.** `capture_min` is 58 and the whole
+    board scores **50.2–57.0** (measured 2026-09-11; every candidate *Marginal*),
+    so `record_signals` would have kept nothing, every day. Hence
+    `capture_min_income = 0` — "whatever the board offered", since `income_scan`
+    already cuts below `swing_min` upstream — resolved by
+    `signal_recorder.capture_floor`, where a new scanner type opts in **by name**
+    rather than inheriting the loosest floor in the file.
+  - **Units.** `signals.entry_credit` / `entry_max_loss` are **per share**
+    (verified on prod: `entry_max_loss == width − entry_credit` exactly) while
+    the board carries per-**contract** dollars, and a single-leg row has no
+    `credit` at all. `compute.income_capture_row` converts. Getting it wrong
+    would be a **100×** error in the only dataset this feature produces, and
+    invisible — an R-multiple is unitless, so it would read as an implausibly
+    good strategy rather than a bug.
+  - **Shape.** A `SHORT_PUT` row carries only the normalized `legs` — no
+    `short_strike`, which `_dedup_key` indexes directly, so the naive call
+    raised. Strikes go through the existing `income_open_strike`; the delta comes
+    off the short leg, because 0 would be recorded otherwise and B6 just made
+    that load-bearing.
+  - **`MANAGE_DTE` was missing from `_CAPTURED_CLOSE_CODES`**, so a tracked
+    income signal's only exit would have been expiry while B1's own policy closes
+    it at 21 DTE in profit — the calibration would have measured a
+    hold-to-expiry policy the manage cycle never executes. `TARGET_HIT` stays
+    out: on the lifecycle path +50% arms break-even and holds.
+
+- **⚠ One convention difference, accepted and written down.** `max_loss` keeps
+  the board's **commission-inclusive** figure (74.6 on a $1-wide 0.28-credit
+  spread, not 72.0), ~1.7% larger than a scanner row's gross number, so an income
+  R-multiple is slightly conservative against a 0DTE or SWING one. Income is
+  measured in its own bucket, and a gross re-derivation would need a branch per
+  structure — three chances to be wrong against one documented bias. **A7** is the
+  change that moves every column to one convention at once.
+
+- **Also fixed:** `run_captured_manage_cycle` armed break-even off the global
+  `TP_FRAC`. Once a structure can move its own `tp_frac` that read and
+  `recommend()`'s can disagree, handing rule 3's break-even stop a position that
+  never reached its target — the same desync B6 closed in `paper_engine`. It now
+  reads `tp_frac_for` per row.
+
+- **User-visible:** income rows appear in **Captured Signals** tagged `INCOME`.
+  Documented in the Reference Guide and `page_help.py`, including the two things
+  to expect — near-universal *Marginal* grades (which is the thing being
+  measured, not a fault) and no long strike on a cash-secured put.
+
+- **Measured while wiring this, and it sharpens A4:** the day's only `SHORT_PUT`
+  (XOM 160, 35 DTE) carried a short delta of **−0.334** against the window's
+  documented 0.15–0.25 band — worse than the 0.28 the code suggested.
+
+- **Tests: 25 new.** options-scanner **1352 → 1359 passed / 2 skipped**,
+  options_svc **1562 → 1580**; shared + the webgui doc guards 372. ⚠ **No
+  evidence exists yet** — the first capture is the next scheduled income slot,
+  and at ~5 candidates a day a useful sample is weeks out. Not verified live.
+
+---
+
+**Prior —** 2026-09-11 (**The paper books remember the delta they opened
 at, and the driver's open-path risk gates were inert.** Gap assessment **B6**,
 plus a live defect the B6 tests surfaced.)
 

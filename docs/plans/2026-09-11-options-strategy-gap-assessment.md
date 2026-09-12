@@ -274,7 +274,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **B6** | Store the entry short delta — **shipped 2026-09-11** | X2 | S | Medium |
 | **B7** | Earnings awareness on open positions | V3 | S–M | Medium |
 | **B8** | Size as a percent of current equity | S1 | S | Low–medium |
-| **C1** | Record Income Window candidates for calibration | M2 (evidence) | S–M | High |
+| **C1** | Record Income Window candidates for calibration — **shipped 2026-09-11** | M2 (evidence) | S–M | High |
 | **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book | X1 | S | Medium |
 | **C3** | Store a daily ATM IV to build a true IV rank | V1 | S | Medium, deferred |
 | **C4** | Book-level Greeks | V2 | M | Medium |
@@ -374,6 +374,36 @@ attribute in `compute.py`.
 
 **C1. Record Income Window candidates** as captured signals with `scanner_type = "INCOME"`. The nightly calibration then tests the playbook's 30–45 DTE claim against the app's short-dated core on its own data. `shared.calibration.family_key` already buckets an unrecognised family on its own.
 
+**Shipped 2026-09-11 — and the one-line version of this recipe would have been a
+silent no-op.** Four things the recommendation above did not anticipate, each
+found by measuring the live board rather than reading the code:
+
+1. **The capture floor.** `capture_min` is 58 and the whole board scores
+   **50.2–57.0** (measured 2026-09-11; every candidate graded *Marginal*), so
+   `record_signals` would have kept **nothing, every day**. Hence
+   `capture_min_income = 0` — "whatever the board offered", since `income_scan`
+   already cuts below `swing_min` upstream — resolved per type by
+   `signal_recorder.capture_floor`, with a new type opting in by name.
+2. **Units.** `signals.entry_credit`/`entry_max_loss` are **per share** (verified:
+   `entry_max_loss == width − entry_credit` exactly on prod rows) while the board
+   is per-**contract** dollars, and a single-leg row has no `credit` at all.
+   `compute.income_capture_row` converts; getting it wrong would be a 100× error
+   in the only dataset this feature produces, and invisible, because an
+   R-multiple is unitless.
+3. **Shape.** A `SHORT_PUT` row carries only the normalized `legs` — no
+   `short_strike`, which `_dedup_key` indexes directly, so the naive call raised.
+4. **⚠ It would have made the board an auto-traded feed.** `run_entry_cycle`
+   reads every open captured signal with no type filter, and most income
+   candidates are ordinary spreads it would size happily. `_NO_AUTO_ENTRY_TYPES`
+   refuses the type outright — decision 5 below is still open, and the page
+   promises the current answer.
+
+Also: `MANAGE_DTE` joined `_CAPTURED_CLOSE_CODES`, or a tracked income signal's
+only exit would be expiry while B1's policy closes it at 21 DTE in profit — the
+calibration would have measured a hold-to-expiry policy the manage cycle never
+executes. ⚠ **No evidence exists yet**: the first capture is the next scheduled
+income slot, and at ~5 candidates a day a useful sample is weeks away.
+
 **C2. Wire the profit-lock ladder and trial the lifecycle on the manual book.** `[trail].ratchet_ladder` is built and tested with no caller, and `manual_paper_lifecycle_enabled` exists and defaults off. Running one book each way gives a direct comparison of "close at 50%" with "arm break-even and ratchet".
 
 **C3. Store one ATM IV per symbol per day.** The collector already fetches the chains, so this is small. A true IV rank then exists in a year; until then, label the field "Vol rank".
@@ -409,7 +439,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 1. Income Window positions got no mark and no exit rules, and logged an error on every manage cycle **(checked)** — fixed 2026-09-11 (A2).
 2. Rescue treated a cash-secured put as call-side, and offered it no candidates, not even "Close now" **(checked)** — fixed 2026-09-11 (A3); the missing roll and wheel candidates followed in B1.
 2a. **`paper_adjust.apply_roll` resolved a short put to the CALL side** — a fourth hand-written copy of the same membership test, so a single-leg roll would have been partitioned and priced on the call chain. Unreachable only because no roll candidate existed to apply, exactly like the `_close_legs` commission defect A3 found. Fixed 2026-09-11 (B1), with the seven copies of the structure sets folded into `shared/structures.py` and a test that fails on the next one.
-3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**.
+3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**. ⚠ Re-measured on the live board 2026-09-11 while wiring C1, and it is **worse than the code suggests**: the day's only `SHORT_PUT` (XOM 160, 35 DTE) carried a short delta of **−0.334**, a third again past the top of the band. A4 is the fix.
 4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
 6. The width search is sized for a phantom $100,000 account **(checked)**.

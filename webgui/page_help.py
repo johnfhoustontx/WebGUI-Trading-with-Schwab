@@ -426,10 +426,17 @@ engine's positions live on **Paper Account**.
     "/options/captured": """
 **Captured Signals — the simple version**
 
-Market Scanner signals you're **tracking over time** to see whether they're working.
+Signals you're **tracking over time** to see whether they're working — from the
+Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
 
 - **Newest first** — the table opens with your most recently captured signal at
   the top. Click any column heading to re-sort it.
+- **INCOME rows are tracked, never traded.** The 30–45 day board is written down
+  so its results can be measured; the auto-entry cycle refuses that type, so
+  nothing here opens a position for you. Expect **Marginal** grades on almost all
+  of them — the score was tuned for the short-dated trades, and whether these
+  work anyway is the question being measured. A cash-secured put shows no long
+  strike, because it has none.
 - **Action** — what to do now: green = take profit, red = cut, amber = hold.
 - **Entry vs Mark** — what you took in against what it would cost to close now;
   **Open P&L** is the difference, green in profit and red in loss. Entry is

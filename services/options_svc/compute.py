@@ -923,6 +923,101 @@ def income_open_strike(row) -> float | None:
     return None
 
 
+def _income_short_leg(row) -> dict:
+    """The normalized SHORT leg of an income row, or ``{}``."""
+    for leg in (row or {}).get("legs") or []:
+        if (leg or {}).get("side") == "short":
+            return leg or {}
+    return {}
+
+
+def income_capture_row(row) -> dict | None:
+    """One board row -> the shape ``signal_recorder.record_signals`` expects, or
+    ``None`` when it cannot be recorded faithfully (PURE).
+
+    Gap assessment C1: the 30-45 DTE window has produced no outcome data at all,
+    so the nightly calibration has never tested the playbook's central claim
+    against this app's own trades. Recorded under ``scanner_type = "INCOME"``,
+    which ``shared.calibration.family_key`` buckets on its own.
+
+    ⚠ **This exists for the UNITS, and they are the whole risk.** Verified
+    against prod's own rows, ``signals.entry_credit`` and ``entry_max_loss`` are
+    PER SHARE — `entry_max_loss == width - entry_credit` holds exactly. An income
+    board row is per-CONTRACT dollars in ``net_credit``/``max_loss`` and carries
+    the per-share ``credit`` only on an ADAPTED SPREAD, never on a single leg.
+    Handing the recorder ``net_credit`` would make every income outcome 100x
+    wrong in the one dataset this feature is built to produce, and nothing
+    downstream would flag it: an R-multiple is unitless, so the error would look
+    like an implausibly good strategy rather than a bug.
+
+    The other half is SHAPE: a spread carries the flat ``short_strike`` and the
+    normalized ``legs``; a ``SHORT_PUT`` carries only ``legs``. Strikes go
+    through ``income_open_strike`` (the reader the Open button already uses) and
+    the delta comes off the short leg, because a missing delta would be recorded
+    as 0 — and B6 made that load-bearing, since 0 makes the drift stop fire at
+    0.12 on a position that has not moved.
+
+    ``None`` for anything missing a strike or a credit rather than a zero:
+    ``_dedup_key`` indexes ``short_strike`` directly and the key is globally
+    UNIQUE with no date component, so one bad row would claim a slot forever and
+    ``INSERT OR IGNORE`` would silently discard every later capture that hashes
+    to it.
+
+    ⚠ **``max_loss`` keeps the BOARD's convention, which nets the round-trip
+    commission** — $1 wide at a 0.28 credit is 74.6, not the 72.0 a scanner row
+    would carry. So an income risk denominator is ~1.7% larger than a 0DTE or
+    SWING one and an income R-multiple is slightly conservative against them.
+    Accepted rather than re-derived: income lands in its own calibration bucket
+    where it is measured against itself, and a gross re-derivation would need a
+    branch per structure (``width - credit`` for a spread, ``strike - credit``
+    for a cash-secured put, the lot basis for a covered call) — three chances to
+    be wrong against one documented bias. Gap assessment A7 is the change that
+    moves every column to one convention at once.
+    """
+    if not isinstance(row, dict):
+        return None
+    leg = _income_short_leg(row)
+    strike = income_open_strike(row)
+    if strike is None:
+        return None
+    # Per SHARE. The flat ``credit`` when the row has one, else the contract
+    # total over the multiplier - which the short leg's own mark independently
+    # confirms on a single-leg row.
+    credit = _num(row.get("credit"))
+    if credit is None:
+        total = _num(row.get("net_credit"))
+        credit = None if total is None else round(total / 100.0, 4)
+    if credit is None:
+        return None
+    max_loss = _num(row.get("max_loss"))
+    delta = _num(row.get("short_delta"))
+    if delta is None:
+        delta = _num(leg.get("delta"))
+    return {
+        "symbol": row.get("symbol"),
+        "type": row.get("type"),
+        "short_strike": strike,
+        # None for a single leg, and that is the right answer rather than a
+        # missing field: it is what makes the structure legible in the table.
+        "long_strike": _num(row.get("long_strike")),
+        "call_short": _num(row.get("call_short")),
+        "call_long": _num(row.get("call_long")),
+        "width": _num(row.get("width")),
+        "expiration": row.get("expiration"),
+        "dte": row.get("dte") or 0,
+        "credit": credit,
+        "max_loss": None if max_loss is None else round(max_loss / 100.0, 4),
+        "composite_score": row.get("composite_score"),
+        "grade": row.get("grade") or "",
+        "short_delta": delta if delta is not None else 0,
+        "net_theta": _num(leg.get("theta")) or 0,
+        "spread_bid": _num(leg.get("bid")) or 0,
+        "spread_ask": _num(leg.get("ask")) or 0,
+        "iv_rank": _num(row.get("iv_rank")) or 0,
+        "underlying_price": _num(row.get("underlying_price")) or 0,
+    }
+
+
 def income_price_drift(board_per_share, live_per_share) -> float | None:
     """``|live - board| / board`` as a fraction, or None when either is unread.
 
@@ -2276,7 +2371,16 @@ def close_captured(signal_id, exit_val: float, reason: str) -> None:
 # The close codes that auto-close an OPEN captured signal. TARGET_HIT is NOT
 # here: the recommender no longer emits it (a +50% winner now ARMS break-even
 # and rides on toward full credit, protected by the break-even stop).
-_CAPTURED_CLOSE_CODES = ("BREAKEVEN_STOP", "MONEY_STOP", "TIME_STOP", "DELTA_STOP")
+# ``MANAGE_DTE`` joined these on 2026-09-11 with the income capture (C1). Without
+# it a tracked income signal's only exit is EXPIRY, while the app's own policy
+# closes it at 21 DTE in profit — so the calibration would measure a
+# hold-to-expiry policy the manage cycle never executes, the exact distortion the
+# 2026-08-25 calibration records for ``rr_pct``.
+#
+# ``TARGET_HIT`` is deliberately absent: this is the LIFECYCLE path, where +50%
+# arms break-even and holds rather than taking profit, so that code cannot arise.
+_CAPTURED_CLOSE_CODES = ("BREAKEVEN_STOP", "MONEY_STOP", "TIME_STOP",
+                         "DELTA_STOP", "MANAGE_DTE")
 
 
 def _captured_be_level(row) -> float:
@@ -2326,7 +2430,14 @@ def run_captured_manage_cycle() -> dict:
         return {"closed": [], "armed": []}
 
     now = dt.datetime.now(_PROJ_CT_TZ)
-    tp_dollars = signal_recommender.TP_FRAC * signal_recommender.MULTIPLIER
+    # Per STRUCTURE, not the global TP_FRAC: this cycle decides when to ARM
+    # break-even from its own threshold read, separately from recommend()'s, so a
+    # structure that moves its own tp_frac would otherwise arm at a level the
+    # rule engine has not reached and hand rule 3's break-even stop a position
+    # that never hit its target. Same desync B6 closed in paper_engine.
+    def _tp_dollars(row):
+        return (signal_recommender.tp_frac_for(row.get("strategy"))
+                * signal_recommender.MULTIPLIER)
     closed, armed = [], []
     for r in sigs:
         sid = r.get("signal_id")
@@ -2368,7 +2479,7 @@ def run_captured_manage_cycle() -> dict:
             pnl = mark.get("unrealized_pnl")
             credit = r.get("entry_credit") or 0
             if (pnl is not None and credit and not r.get("be_armed")
-                    and pnl >= tp_dollars * credit):
+                    and pnl >= _tp_dollars(r) * credit):
                 signal_db.set_be_armed(sid)
                 r["be_armed"] = 1
                 armed.append({"signal_id": sid, "symbol": r.get("symbol")})

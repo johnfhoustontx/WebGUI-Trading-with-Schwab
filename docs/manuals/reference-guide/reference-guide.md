@@ -2199,6 +2199,17 @@ time, re-pricing it and telling you whether it worked — without committing to 
 
 The table opens **newest capture first**; click any column heading to re-sort it.
 
+⚠ **From 2026-09-11 the Income board is captured here too**, tagged **INCOME** in
+the type column beside the usual **0DTE** and **SWING** rows. That is tracking
+only: the once-daily 30–45 DTE board is written down so the nightly calibration
+can eventually say whether those trades work, and **nothing captured as INCOME is
+ever opened automatically** — the auto-entry cycle refuses the type outright, so
+the Income page's promise that nothing there is traded for you still holds. Two
+consequences worth expecting: income rows will show **Marginal** grades almost
+without exception (the score was tuned for the short-dated core and this board
+runs 50–57 against it, which is exactly what the capture exists to test), and a
+cash-secured put row carries **no long strike**, because there isn't one.
+
 **The footer** sums the session in four figures: signals **opened today** and
 **closed today** (counts of captures and of closes, so a signal taken and closed in
 the same session appears in both), **P&L today (booked)** — the realized total of

@@ -2331,6 +2331,59 @@ PAIR and a reopening PAIR and books a spread reopen, so executing a single-leg
 roll is a change to the money path. `_annotate` is shared by both paths so a
 delegated menu cannot lose the board's context line.
 
+## The Income board is CAPTURED for calibration, and capturing is not trading
+
+The 30–45 DTE window had produced **no outcome data at all** — nothing recorded
+it — so the nightly calibration could never test the playbook's central claim
+against this app's own trades. `handlers.record_income_signals` captures each
+day's published board under **`scanner_type = "INCOME"`**, which
+`shared.calibration.family_key` buckets on its own (an unrecognised family is
+passed through rather than folded into 0DTE or SWING).
+
+⚠ **`paper_engine.run_entry_cycle` refuses `_NO_AUTO_ENTRY_TYPES` outright, and
+that refusal is what makes the capture safe.** That cycle reads *every* open
+captured signal with no type filter, and most income candidates are ordinary
+PCS/CCS spreads it would size without complaint — so recording the board would
+otherwise have converted a hand-picked screen into an auto-traded feed. "Screen
+or feed?" is an open product decision, and the Income page promises the current
+answer: *nothing here is traded automatically*. The refusal is by TYPE, not by
+shape; an absent `scanner_type` still opens, which is every pre-capture row.
+
+**Two things made the one-line version of this a no-op or worse**, and both are
+`compute.income_capture_row`'s reason to exist:
+
+- **Units.** `signals.entry_credit` and `entry_max_loss` are **per share** —
+  measured on prod, `entry_max_loss == width − entry_credit` exactly. An income
+  board row is per-**contract** dollars (`net_credit` 340.0, `max_loss` 15661.3)
+  and carries the per-share `credit` only on an adapted spread, never on a single
+  leg. Handing the recorder `net_credit` would make every income outcome 100×
+  wrong in the one dataset the feature exists to build, and nothing downstream
+  would flag it: an R-multiple is unitless, so it would read as an implausibly
+  good strategy rather than a bug. ⚠ `max_loss` keeps the board's
+  **commission-inclusive** convention, ~1.7% larger than a scanner row's gross
+  figure, which makes income R slightly conservative against 0DTE/SWING —
+  accepted because income is measured in its own bucket, and because a gross
+  re-derivation needs a branch per structure. A7 is the change that moves every
+  column at once.
+- **Shape.** An adapted spread carries the flat `short_strike` **and** the
+  normalized `legs`; a `SHORT_PUT` carries only `legs`. Strikes come through
+  `income_open_strike` and the delta off the short leg — a missing delta would be
+  recorded as 0, and B6 made that load-bearing.
+
+**`capture_min_income = 0` is deliberate** (`config/scanner.toml`). The composite
+was tuned for the 0-DTE/swing core and this board scores well below it — measured
+2026-09-11, all five candidates at **50.2–57.0**, every one graded *Marginal* — so
+sharing `capture_min = 58` would record **nothing, every day**. 0 means "whatever
+the board offered": `income_scan` already cuts below `swing_min` service-side, so
+that is the real filter. `signal_recorder.capture_floor` resolves it per type, and
+a new scanner type opts in **by name** rather than inheriting the loosest floor.
+
+**`MANAGE_DTE` is in `_CAPTURED_CLOSE_CODES`**, or a tracked income signal's only
+exit would be expiry while the app's own policy closes it at 21 DTE in profit —
+the calibration would then measure a hold-to-expiry policy the manage cycle never
+executes. `TARGET_HIT` stays out: on the lifecycle path +50% arms break-even and
+holds, so that code cannot arise there.
+
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 
 `strategy_scoring._reward_metric`'s NAKED branch returns

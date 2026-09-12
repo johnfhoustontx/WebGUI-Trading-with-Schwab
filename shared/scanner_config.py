@@ -36,6 +36,11 @@ DEFAULTS = {
     },
     "scores": {
         "capture_min": 58,
+        # The Income Window's own capture floor, and it is 0 ON PURPOSE - see
+        # the comment in config/scanner.toml. The whole board scores 50-57
+        # against capture_min 58, so sharing that floor would record NOTHING and
+        # the feature would be a green no-op.
+        "capture_min_income": 0,
         "neg_gex_min": 62,
         "gex_strong_neg": -0.30,
         "swing_min": 50.0,

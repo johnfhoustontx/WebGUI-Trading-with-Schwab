@@ -733,6 +733,38 @@ def _income_rank(row) -> float:
     return v if v == v else float("-inf")       # NaN != NaN
 
 
+INCOME_SCANNER_TYPE = "INCOME"
+
+
+def record_income_signals(candidates) -> int:
+    """Capture today's income board into the signal tracking DB (gap assessment
+    C1). Returns the number inserted.
+
+    The 30-45 DTE window had produced **no outcome data at all** — nothing
+    recorded it — so the nightly calibration could never test the playbook's
+    central claim against this app's own trades. ``scanner_type = "INCOME"``
+    lands it in its own bucket: ``shared.calibration.family_key`` passes an
+    unrecognised family through rather than folding it into 0DTE or SWING.
+
+    ⚠ Recording is TRACKING, never trading. ``paper_engine.run_entry_cycle``
+    refuses this scanner type outright, because it reads every open captured
+    signal with no type filter and most income candidates are ordinary spreads
+    it would happily size — so without that refusal this function would have
+    converted a hand-picked screen into an auto-traded feed.
+
+    Lazy import for the documented reason the rest of this module has one:
+    binding ``signal_recorder`` at module load pulls options-scanner's
+    ``scoring`` into ``sys.modules`` process-wide.
+    """
+    import signal_recorder
+
+    rows = [r for r in (compute.income_capture_row(c) for c in candidates or [])
+            if r]
+    if not rows:
+        return 0
+    return signal_recorder.record_signals(rows, INCOME_SCANNER_TYPE)
+
+
 def publish_income(bus, symbols=None) -> None:
     """Scan the 30-45 DTE income window across the watchlist; publish one view.
 
@@ -881,6 +913,14 @@ def publish_income(bus, symbols=None) -> None:
     # a twice-a-day path — not because it suppresses anything today.
     bus.cache_set(CACHE_INCOME, snap.model_dump(), event=EVENT_INCOME,
                   skip_unchanged=True)
+
+    # Capture the board for the nightly calibration (C1) — AFTER the publish and
+    # in its own guard, because the board is what the reader came for and this is
+    # bookkeeping behind it. A locked signals DB must not empty the page.
+    try:
+        record_income_signals(candidates)
+    except Exception:  # noqa: BLE001 — see above.
+        _degrade.degraded("options.record_income_signals")
 
 
 def _coerce_pid(pid):
