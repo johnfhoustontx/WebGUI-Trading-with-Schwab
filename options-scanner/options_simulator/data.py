@@ -80,12 +80,15 @@ def _fetch_price_history(client, symbol: str) -> pd.Series:
 
 
 def fetch_snapshot(client, symbol: str, expiry: date | None = None,
-                   horizon_days: int = 90) -> ChainSnapshot:
+                   horizon_days: int = 90, on_chain=None) -> ChainSnapshot:
     """Fetch chain for ``symbol`` plus 2-day 1-min underlying history.
 
     If ``expiry`` is given, request only that date. Otherwise pull all expiries
     in the next ``horizon_days`` so the UI can populate an Expiry picker from
     what the underlying actually offers.
+
+    ``on_chain(chain)`` receives the raw chain dict — how ``sim_fetch``
+    publishes the chain grid's chain without a second ``/chains`` call.
     """
     # --- Option chain ----------------------------------------------------
     if expiry is not None:
@@ -121,6 +124,8 @@ def fetch_snapshot(client, symbol: str, expiry: date | None = None,
         )
     chain = chain_resp.json() if hasattr(chain_resp, "json") else chain_resp
     chain = chain or {}
+    if on_chain is not None:
+        on_chain(chain)
 
     spot = float(chain.get("underlyingPrice") or 0.0)
 

@@ -210,6 +210,30 @@ def test_fetch_snapshot_returns_chainsnapshot_for_happy_path():
     assert not snap.price_history.empty
 
 
+def _client_with_chain():
+    client = MagicMock()
+    client.Options.ContractType.ALL = "ALL"
+    client.get_option_chain.return_value = _make_chain_response()
+    client.get_price_history_every_minute.side_effect = RuntimeError("no history")
+    return client
+
+
+def test_fetch_snapshot_hands_the_raw_chain_to_on_chain():
+    """sim_fetch publishes the chain grid's chain from THIS fetch — a second
+    /chains call per Simulator load would be a pure waste of the Schwab budget."""
+    client = _client_with_chain()
+    seen = []
+    snap = fetch_snapshot(client, "SPY", date(2026, 5, 30), on_chain=seen.append)
+    assert seen == [client.get_option_chain.return_value.json.return_value]
+    assert client.get_option_chain.call_count == 1
+    assert len(snap.contracts) == 2
+
+
+def test_fetch_snapshot_on_chain_is_optional():
+    snap = fetch_snapshot(_client_with_chain(), "SPY", date(2026, 5, 30))
+    assert snap.spot == 580.0
+
+
 def test_fetch_snapshot_empty_history_on_failure():
     client = MagicMock()
     client.Options.ContractType.ALL = "ALL"
