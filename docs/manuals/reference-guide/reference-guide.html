@@ -2469,7 +2469,7 @@ option chain. This is where you find out what a trade actually risks before you 
 </tr>
 <tr>
 <td>Chain</td>
-<td>Fetched on demand when you Load a symbol</td>
+<td>Fetched on demand when you enter a symbol — every strike and expiry to +60 days, each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume</td>
 </tr>
 <tr>
 <td>State</td>
@@ -2478,33 +2478,43 @@ option chain. This is where you find out what a trade actually risks before you 
 </tbody>
 </table>
 <h3 id="reading-the-screen_10">Reading the screen</h3>
-<p><strong>The screen is three numbered steps.</strong> ① STRATEGY and ③ LEGS run down a fixed
-left-hand column; ② SYMBOL, the six metric cards and the P&amp;L matrix fill the column
-beside them. The page wears its own near-black palette rather than the app-wide navy —
-that is deliberate, not a theming accident.</p>
+<p><strong>The top of the screen is the shared entry panel</strong> (the Simulator mounts the same
+one); the pricing assumptions, six metric cards and P&amp;L matrix sit below it at full
+width. The page wears its own near-black palette rather than the app-wide navy — that
+is deliberate, not a theming accident. <strong>There are no action buttons</strong> (since
+2026-09-12): no Load, Fetch Premiums, IV Update or Calculate. Every edit re-prices a
+moment after you stop.</p>
 <ol>
-<li><strong>① Strategy</strong> — a cascading menu of templates: singles, verticals (credit and
-   debit), iron condors, butterflies (long and iron), calendars, diagonals, and —
-   since 2026-09-12 — <strong>Stock + options</strong> (covered call, protective put, collar).
-   Picking one fills the leg editor. Tag chips below name the cash-flow direction (<strong>credit</strong>
-   or <strong>debit</strong>), the leg count and the lean; only the credit/debit chip is coloured,
-   because the rest are descriptions rather than opinions. A one-line thesis says what
-   the structure is betting on.</li>
-<li><strong>② Symbol</strong> — type it and press Enter, or just tab out of the field. A full-screen
+<li><strong>Symbol</strong> — type it and press Enter, or just tab out of the field. A full-screen
    wait overlay shows while the chain loads (30-second timeout), and the pill in the
-   title bar reads AWAITING SYMBOL → LOADING CHAIN → CHAIN LOADED · SYM. All the
-   scalar inputs live in this frame, and the line under them reports how many strikes
-   and expiries the chain actually carried — which is what explains a leg whose strike
-   will not snap where you expect.</li>
-<li><strong>③ Legs</strong> — one editable <strong>card</strong> per leg. Each has its own <strong>type</strong> (put, call
-   or <strong>stock</strong> — see <em>Stock legs</em> below), <strong>side</strong> (long/short), <strong>expiry</strong>,
-   <strong>strike</strong>, <strong>quantity</strong>, <strong>premium</strong>, and its <strong>delta</strong> read from the chain. Add or remove legs freely; the last one is locked,
-   because a calculator with no legs has nothing to price. Per-leg expiry is what
-   makes <strong>calendars price correctly</strong> — each leg is valued at its own time to
-   expiration. The strip on the frame keeps a running <strong>leg count, net premium and max
-   loss</strong> as you edit.</li>
-<li><strong>Fetch Premiums</strong> pulls live marks for the legs you have built.</li>
-<li><strong>Calculate</strong> produces the six metric cards and the P&amp;L matrix.</li>
+   title bar reads AWAITING SYMBOL → LOADING CHAIN → CHAIN LOADED · SYM. The status
+   line reports how many strikes and expiries the chain actually carried — which is
+   what explains a leg whose strike will not snap where you expect. <strong>Refresh</strong>
+   re-pulls the same symbol. A landed chain lays the strategy on real strikes, prices
+   every leg from the chain's mark, and implies the volatility from those prices.</li>
+<li><strong>Strategy</strong> — a cascading menu of templates: singles, verticals (credit and
+   debit), iron condors, butterflies (long and iron), calendars, diagonals, and
+   <strong>Stock + options</strong> (covered call, protective put, collar). Tag chips name the
+   cash-flow direction (<strong>credit</strong> or <strong>debit</strong>), the leg count and the lean; only the
+   credit/debit chip is coloured, because the rest are descriptions rather than
+   opinions. A one-line thesis says what the structure is betting on.</li>
+<li><strong>Expiry strip</strong> — every expiration with its days to go. Clicking one moves every
+   option leg there and points the chain at it.</li>
+<li><strong>The chain</strong> — calls | strike | puts around spot, at-the-money strike in gold,
+   in-the-money cells shaded. <strong>Click a Bid to SELL, an Ask to BUY.</strong> ⚠ <strong>The new leg
+   is priced at the MARK either way</strong> — the column only decides the side. Pricing a
+   sell at the bid would make every structure look worse by the full spread and
+   disagree with the volatility implied from the mark. <strong>Columns</strong> adds Mark, IV,
+   Gamma, Theta, Vega or Volume to the default Bid, Ask, Delta, OI, and remembers it.</li>
+<li><strong>Legs</strong> — one row per leg: BUY/SELL and CALL/PUT (or <strong>stock</strong> — see <em>Stock legs</em>
+   below) toggles, quantity, expiry, strike, price and the leg's <strong>delta</strong> read from
+   the chain. The strike is typed (snapped to the real ladder) or stepped with ‹ › and
+   the ↑ ↓ keys, and each change re-prices the leg — <strong>unless its price was typed</strong>,
+   which stays until its ↺ is pressed. Add or remove legs freely; the last one is
+   locked, because a calculator with no legs has nothing to price. Per-leg expiry is
+   what makes <strong>calendars price correctly</strong> — each leg is valued at its own time to
+   expiration. The strip under the legs keeps a running <strong>leg count, net premium and
+   max loss</strong> as you edit.</li>
 </ol>
 <h3 id="stock-legs-covered-call-protective-put-collar">Stock legs — covered call, protective put, collar</h3>
 <p>⚠ <strong>A leg can be SHARES</strong>, not an option: set its Type to <strong>stock</strong>. That is what
@@ -2539,15 +2549,15 @@ makes three whole-position structures analysable here, and they are the three th
 <p><strong>A share leg's two numbers do not mean what an option leg's mean</strong>, and the
 column labels change to say so:</p>
 <ul>
-<li><strong>LOTS</strong>, not Qty — it counts <strong>hundreds</strong> of shares. One lot is 100 shares,
+<li><strong>Qty</strong> counts <strong>lots</strong> of 100 shares, not shares. One lot is 100 shares,
   which is what one option contract covers, so one lot against one contract is a
   standard covered call. ⚠ Typing 100 there builds a <strong>10,000-share</strong> position
   and multiplies every figure by a hundred.</li>
-<li><strong>$/SHARE</strong>, not Premium — what you <strong>paid</strong> for the shares. Leave it blank and
-  <strong>Fetch Premiums</strong> fills today's price; type your own cost basis and nothing
+<li><strong>Price</strong> is what you <strong>paid</strong> per share, not a premium. Leave it blank and the
+  page fills today's price; type your own cost basis and nothing
   overwrites it, which is the point if you are asking what a call written against
   shares you have held for a year is worth.</li>
-<li><strong>Strike</strong> and <strong>Expiry</strong> show a dash. Shares have neither, and the controls are
+<li><strong>Strike</strong> and <strong>Expiry</strong> are greyed out. Shares have neither, and the controls are
   disabled rather than offering the option ladder's values against something that
   never expires.</li>
 </ul>
@@ -2569,7 +2579,7 @@ the shares separately — which is why such a position's P&amp;L there covers th
 and not the stock. Here it is the whole position, shares included; the
 <strong>100 SHARES</strong> chip under the Strategy menu is what tells you which one you are
 looking at.</p>
-<p><strong>The other inputs:</strong></p>
+<p><strong>Pricing assumptions</strong> (collapsed under the panel — rarely changed):</p>
 <table>
 <thead>
 <tr>
@@ -2578,10 +2588,6 @@ looking at.</p>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td><strong>Expiry</strong> (top level)</td>
-<td>Propagates to <strong>all</strong> legs and re-syncs their strike ladders.</td>
-</tr>
 <tr>
 <td><strong>Contracts</strong></td>
 <td>Position size. Everything scales by it.</td>
@@ -2608,10 +2614,10 @@ looking at.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>IV Update</strong> implies the volatility <strong>from the traded contract's mark</strong>, the way
+<p><strong>IV %</strong> is implied <strong>from the traded contract's mark</strong> on every chain load, the way
 ThinkorSwim does — it solves backwards from the actual price rather than using the
-chain's published figure. Before you have picked a strike it falls back to at-the-money
-chain volatility.</p>
+chain's published figure, falling back to at-the-money chain volatility. A typed IV
+therefore lasts until the next load.</p>
 <p><strong>The six metric cards</strong> are, in order: entry credit/debit (with the position size
 under it), max risk, max return, return on risk (with a per-day figure), breakeven(s)
 (with the first crossing's distance from spot), and probability of profit.</p>
@@ -2620,7 +2626,7 @@ under it), max risk, max return, return on risk (with a per-day figure), breakev
 <code>$0</code> it has not measured. A card reads <strong>Unlimited</strong> where the payoff genuinely has
 no cap — a long call's upside, a naked call's risk — and a <strong>dash</strong> where there is no
 number to give: no calculation yet, or a ratio that is not defined because one side
-is uncapped. The same rule governs the ③ LEGS strip (net premium is blank until every
+is uncapped. The same rule governs the legs strip (net premium is blank until every
 leg is priced; max loss is blank when the loss is unbounded) and the per-leg
 <strong>delta</strong>, which is blank whenever the chain carries no Greeks — routine outside
 regular hours, and the usual state of index chains overnight. A confident <code>0.00</code>
@@ -2667,8 +2673,8 @@ and a position.</p>
   check the ratio, not just the credit.</li>
 <li><strong>Loading a different symbol clears the cards and the matrix.</strong> They belonged to the
   symbol they were calculated for, and leaving them on screen under a status pill
-  naming a new one would state two symbols at once. Reloading the <em>same</em> symbol is a
-  refresh and keeps them — which is also what happens every time you navigate back to
+  naming a new one would state two symbols at once. <strong>Refresh</strong> on the <em>same</em> symbol
+  keeps them — which is also what happens every time you navigate back to
   the page, since it restores and re-loads on its own.</li>
 </ul>
 <h3 id="related-pages_10">Related pages</h3>
@@ -2697,7 +2703,7 @@ changes.</p>
 </tr>
 <tr>
 <td>Cache keys</td>
-<td><code>cache:options:sim_meta</code>, <code>:sim_result</code>, <code>:sim_replay</code></td>
+<td><code>cache:options:sim_meta</code>, <code>:sim_chain</code>, <code>:sim_result</code>, <code>:sim_replay</code></td>
 </tr>
 <tr>
 <td>Pricing</td>
@@ -2710,14 +2716,16 @@ changes.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_11">Reading the screen</h3>
-<p>Load a chain for a symbol, pick a <strong>Strategy</strong>, adjust the <strong>legs</strong> — one card per
-leg, the same widget the Calculator uses, in this page's navy rather than the
-Calculator's near-black. The chain carries no per-contract Greeks, so the cards here
-show no per-leg delta, and the last leg cannot be removed (a position with no legs
-leaves the charts frozen on the previous sweep).</p>
-<p>The top panel has three columns: the symbol controls, the strategy and its legs, and
-six <strong>position tiles</strong> — entry credit or debit, max profit, max loss, breakevens,
-delta as a share count, and theta per day. The expiry figures are the exact
+<p>The top is the Calculator's <strong>entry panel</strong>, in this page's navy rather than the
+Calculator's near-black: enter a symbol, pick a <strong>Strategy</strong>, and build the legs from
+the chain grid (<strong>Bid → SELL, Ask → BUY</strong>) or the leg rows (BUY/SELL and CALL/PUT
+toggles, typed-or-stepped strike, the expiry strip for every leg at once). Each leg
+row shows its <strong>delta</strong> from the chain — the grid's chain comes from the <strong>same</strong>
+fetch as the simulation, published as <code>cache:options:sim_chain</code>. There is no price
+box: every leg is priced from volatility. The last leg cannot be removed (a position
+with no legs leaves the charts frozen on the previous sweep).</p>
+<p>Under the panel, six <strong>position tiles</strong> — entry credit or debit, max profit, max loss,
+breakevens, delta as a share count, and theta per day. The expiry figures are the exact
 expiration payoff; they go blank, with the reason, when the legs expire on different
 dates. An <strong>Edited</strong> chip and plain-sentence warnings flag a structure whose risk is
 not what its name suggests — the classic one being a short leg that outlives its

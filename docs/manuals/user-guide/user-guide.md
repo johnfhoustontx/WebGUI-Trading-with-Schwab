@@ -792,57 +792,69 @@ watches the autonomous trader.
 **Route:** `/options/calculator`.
 
 An options P&L calculator for **any multi-leg structure**, with a price/time matrix.
-The screen is three numbered steps down a fixed left-hand column — **① Strategy**,
-**② Symbol**, **③ Legs** — with the results (six metric cards over the P&L matrix)
-in the column beside them. It wears its own near-black palette rather than the
-app-wide navy.
+The shared **entry panel** runs across the top — symbol, strategy, expiry strip, and
+the option chain beside the legs — with the results (six metric cards over the P&L
+matrix) below it. It wears its own near-black palette rather than the app-wide navy.
 
-**Inputs:**
+**The entry panel (shared with the Simulator).** Across the top of the page:
 
-- **① Strategy** — a cascading menu of templates: **Single** (long/short call/put),
+- **Symbol** — type a ticker and press **Enter** or tab out. A full-screen wait
+  overlay shows while the chain loads; the pill in the title bar reads
+  **AWAITING SYMBOL** → **LOADING CHAIN** → **CHAIN LOADED · SYM**, and the status
+  line reports how many strikes and expiries arrived. **Refresh** re-pulls the
+  same symbol for fresh quotes. There is no Load, Fetch Premiums, IV Update or
+  Calculate button: once the chain lands the strategy's legs are laid on real
+  strikes, every leg is priced from the chain, the volatility is implied from
+  those prices (the way ThinkorSwim does), and the cards and matrix follow.
+- **Strategy** — a cascading menu of templates: **Single** (long/short call/put),
   **Credit spread** and **Debit spread** (call/put), **Condor** (iron, all-call,
   all-put), **Butterfly** (call, put, iron), **Calendar** and **Diagonal** (call/put),
   and **Stock + options** (**covered call**, **protective put**, **collar** — the
-  three that need shares; see the note below).
-  Picking one fills the leg editor with sensible at-the-money strikes. Underneath,
-  tag chips say whether the structure takes in a **credit** or costs a **debit**, how
-  many legs it has, and its lean (bullish, range, pin, defined risk…), followed by a
-  one-line description of what the trade is betting on. Only the credit/debit chip is
-  coloured — the rest are descriptions, not recommendations.
-- **② Symbol** — type a ticker and press Enter or tab out (or press **Load chain**);
-  a full-screen wait overlay shows while the chain loads. The pill in the title bar
-  reads **AWAITING SYMBOL** → **LOADING CHAIN** → **CHAIN LOADED · SYM**, and the
-  line under the buttons reports how many strikes and expiries arrived. The same
-  frame holds **Spot**, **Price**, **IV %**, **Rate %**, **IV Δ %**, **Contracts**,
-  **Strikes** (how many real chain strikes either side of spot the matrix spans,
-  default 24) and **Expiry**. The top-level **Expiry** propagates to every *option*
-  leg — a **stock** leg is skipped, because shares do not expire.
-  **IV Update** implies the volatility from the traded contract's own mark, the way
-  ThinkorSwim does, falling back to the chain's at-the-money volatility before you
-  have picked a strike.
-- **③ Legs** — an editable **card per leg**: **Type** (call, put or **stock**),
-  **Side** (long/short), **Expiry**, **Strike**, **Qty**, **Premium**, and the leg's
-  **Delta** read straight from the option chain. **Add leg**, **Reset to template**, and a
-  remove ✕ that locks at the last leg. Each leg carries its **own expiry** (so
-  **calendars/diagonals** price each leg on its own clock) and its own quantity (so a
-  1-2-1 butterfly body trades at 2×). **Fetch Premiums** fills each leg's premium
-  from the chain.
-- The frame's header strip keeps a running **leg count**, **net premium** and **max
-  loss**. All three update as you edit. A **dash** there means *not known yet* rather
-  than zero — net premium is blank until every leg is priced, and max loss is blank
+  three that need shares; see the note below). Tag chips beside it say whether the
+  structure takes in a **credit** or costs a **debit**, how many legs it has, and
+  its lean; only the credit/debit chip is coloured. A one-line description of what
+  the trade is betting on sits under the panel.
+- **Expiry strip** — one button per expiration with its days to go. Clicking one
+  moves **every option leg** to that date (a **stock** leg is skipped — shares do
+  not expire) and points the chain at it.
+- **The chain** (left half) — calls on the left, strikes in the middle, puts on the
+  right, centred on spot. The at-the-money strike is gold and in-the-money cells
+  are shaded. **Click a Bid to add a SELL leg, an Ask to add a BUY leg.** The leg is
+  priced at the contract's **mark** whichever you click — the side only decides buy
+  or sell, so the page does not look worse by the full bid/ask spread. **Columns**
+  chooses what else is shown (Delta and OI by default; Mark, IV, Gamma, Theta, Vega
+  and Volume on request) and remembers the choice. **More strikes above / below**
+  widens the window.
+- **Legs** (right half) — one row per leg: **BUY/SELL** and **CALL/PUT** (and
+  **STOCK**) flip with one click; **Qty**; **Expiry**; **Strike**, typed (it snaps to
+  the nearest real strike) or stepped with **‹ ›** and the **↑ ↓** keys; **Price**;
+  and the leg's **Delta** from the chain. Changing a leg's strike, expiry or type
+  re-prices it from the chain — **unless you typed its price**, which then stays
+  until you press the **↺** beside it. Each leg keeps its **own expiry** (so
+  calendars and diagonals price each leg on its own clock) and its own quantity (so
+  a 1-2-1 butterfly body trades at 2×). **Add leg**, **Reset to template**, and a
+  remove ✕ that locks at the last leg.
+- Under the legs, a strip keeps a running **leg count**, **net premium** and **max
+  loss**. A **dash** there means *not known yet* rather than zero — max loss is blank
   when the loss has no bound (a naked call), cannot be settled on one date, or the
-  position holds **shares** (that strip reasons from strikes, and shares have none —
-  press **Calculate** and the cards give the real figure).
+  position holds **shares** (the cards give the real figure). **Delta** shows a dash
+  whenever the chain carries no Greeks, which is normal outside regular hours.
+
+**Pricing assumptions** (a collapsed row under the panel): **Price**, **IV %**,
+**Rate %**, **IV Δ %**, **Contracts** and **Strikes** (how many real chain strikes
+either side of spot the matrix spans, default 24). Editing any of them re-prices.
+IV is re-implied from the chain on every load, so a typed IV lasts until the next
+one.
 
 **Stock legs (covered call, protective put, collar).** Set a leg's Type to
 **stock** and it becomes shares rather than a contract:
 
-- **LOTS** replaces Qty and counts **hundreds** of shares — one lot is 100 shares,
-  which is what one option contract covers. ⚠ Typing 100 builds a 10,000-share
-  position and multiplies every figure by a hundred.
-- **$/SHARE** replaces Premium: what you **paid**. Blank means "today's price" and
-  **Fetch Premiums** fills it; a value you typed is never overwritten, which is the
-  point when you are pricing a call against shares you already hold.
+- **Qty** counts **lots** of 100 shares — one lot is 100 shares, which is what one
+  option contract covers. ⚠ Typing 100 builds a 10,000-share position and
+  multiplies every figure by a hundred.
+- **Price** is what you **paid** per share. Blank means "today's price" and the page
+  fills it; a value you typed is never overwritten, which is the point when you are
+  pricing a call against shares you already hold.
 - **Strike** and **Expiry** show a dash and are disabled — shares have neither.
 - ⚠ **Max risk is the stock going to zero**, and the cards now scan that far, which
   is also what shows a **protective put** or **collar** capping it.
@@ -853,10 +865,8 @@ app-wide navy.
 - ⚠ Elsewhere in the app "covered call" means the **option leg alone** (the paper
   book tracks the shares separately). Here it is the whole position — the
   **100 SHARES** chip is what tells you which.
-  **Delta** shows a dash the same way whenever the chain carries no Greeks, which is
-  normal outside regular trading hours.
 
-**Outputs (after pressing Calculate):**
+**Outputs (a moment after you stop editing):**
 
 - **Six metric cards**, always in this order: **Entry credit/debit** (with the
   position size beneath it), **Max risk**, **Max return**, **Return on risk** (with a
@@ -880,30 +890,31 @@ app-wide navy.
   *is* the maximum return.)
 
 If you arrived here via **Send to Calculator** from a signal table, the form is
-pre-filled and the calculation runs automatically. **Copy to Simulator** sends the
+pre-filled and priced once the chain loads. **Copy to Simulator** sends the
 current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
 brings them back), so you can move a structure between the P&L cards and the
 scenario/Greeks views without re-entering it. Loading a **different** symbol clears
-the cards and matrix — they belonged to the old symbol; reloading the **same** one
-keeps them.
+the cards and matrix — they belonged to the old symbol; **Refresh** on the **same**
+one keeps them.
 
 ## Simulator
 
 **Route:** `/options/simulator`.
 
 Re-prices a **multi-leg** option position under different scenarios using
-Black-Scholes. Start by entering a **Symbol** and pressing **Load chain** (or just
-press Enter / tab out of the field), then pick a **Strategy** (the same template
-menu as the Calculator — singles, verticals, condors, butterflies,
-calendars/diagonals) and adjust the **legs** in the editor — one **card** per leg
-with **Type** (call/put), **Side** (long/short), **Expiry**, **Strike** and **Qty**,
-plus **Add leg** and a remove ✕ that locks at the last leg (a position with no legs
-has nothing to simulate). **Set all legs to** puts every leg on one expiry in a
-single pick. The Simulator's chain carries no per-contract Greeks, so its leg cards
-show no Delta column — the Calculator's do. Every tab below operates on the
-**netted** position (all legs summed).
+Black-Scholes. The top of the page is the same **entry panel** as the Calculator:
+type a **Symbol** and press Enter or tab out (**Refresh** re-pulls it), pick a
+**Strategy** (the same template menu — singles, verticals, condors, butterflies,
+calendars/diagonals; the three stock structures are not offered here), and build the
+legs. **Click a Bid in the chain to add a SELL leg, an Ask to add a BUY leg**, and
+use the **expiry strip** to move every leg to one date. Each leg is a row with
+**BUY/SELL** and **CALL/PUT** toggles, **Qty**, **Expiry**, a typed-or-stepped
+**Strike** (**‹ ›** / **↑ ↓**) and its **Delta** from the chain — there is no price
+box, because the Simulator prices every leg from volatility itself. **Add leg**, and a
+remove ✕ that locks at the last leg (a position with no legs has nothing to simulate).
+Every tab below operates on the **netted** position (all legs summed).
 
-**Position tiles.** Beside the legs, six tiles state the position without any
+**Position tiles.** Under the panel, six tiles state the position without any
 hovering: **Entry credit** (or **Entry debit**), **Max profit**, **Max loss**,
 **Breakeven(s)**, **Delta** (as shares — "moves like 145 shares long") and **Theta
 per day**. The entry is the model price at today's spot, not a market fill. Max

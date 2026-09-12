@@ -181,7 +181,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Simulator</strong></td>
 <td><code>options_svc</code></td>
-<td><code>cache:options:sim_meta</code>, <code>:sim_result</code>, <code>:sim_replay</code></td>
+<td><code>cache:options:sim_meta</code>, <code>:sim_chain</code>, <code>:sim_result</code>, <code>:sim_replay</code></td>
 </tr>
 <tr>
 <td><strong>Market Scanner</strong></td>
@@ -618,7 +618,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 <tr>
 <td><code>sim_fetch</code></td>
 <td><code>{symbol}</code></td>
-<td><code>cache:options:sim_meta</code></td>
+<td><code>cache:options:sim_chain</code> (the thinned chain from the same fetch — written first), then <code>cache:options:sim_meta</code></td>
 </tr>
 <tr>
 <td><code>sim_run</code></td>
@@ -1153,6 +1153,7 @@ cache:options:notified_scan | :notified_captured    (alert de-duplication)
 cache:options:eth_eligible
 cache:options:sim_meta         events:options:sim_meta
 cache:options:sim_result       events:options:sim_result
+cache:options:sim_chain        events:options:sim_chain
 cache:options:sim_replay       events:options:sim_replay
 cache:options:calc_chain       events:options:calc_chain
 cache:options:calc_result      events:options:calc_result

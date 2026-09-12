@@ -28,7 +28,7 @@ keys that feed it. Menu order matches the rail.
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
 | **Momentum** | `sentiment_svc` | `cache:sentiment:momentum` |
 | **Calculator** | `options_svc` | `cache:options:calc_chain`, `:calc_result`, `:calc_iv` |
-| **Simulator** | `options_svc` | `cache:options:sim_meta`, `:sim_result`, `:sim_replay` |
+| **Simulator** | `options_svc` | `cache:options:sim_meta`, `:sim_chain`, `:sim_result`, `:sim_replay` |
 | **Market Scanner** | `options_svc` | `cache:options:scan_day` (rendered), `:scan` (live counts) |
 | **Strategy Finder** | `options_svc` | `cache:options:swing` |
 | **Expected Move** | `options_svc` | `cache:options:em_chain`, `:expected_move` |
@@ -239,7 +239,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `gamma_refresh` | `{symbol}` | `cache:options:gamma` + `cache:options:gamma_hist_{view}` |
 | `gamma_explain` | `{symbol}` | `cache:options:gamma_explain` |
 | `gamma_analyze` | — | `cache:options:gamma_analyze` |
-| `sim_fetch` | `{symbol}` | `cache:options:sim_meta` |
+| `sim_fetch` | `{symbol}` | `cache:options:sim_chain` (the thinned chain from the same fetch — written first), then `cache:options:sim_meta` |
 | `sim_run` | `{symbol, legs[], dt, mult}` (legs: `{kind, strike, expiry, side, qty}`; legacy `{expiry, kind, strike, direction}` single-leg args still accepted) | `cache:options:sim_result` — `{spot, symbol, legs, dt, mult, whatif_rows, whatif_baseline, ivshock: {base, shock, units: "position"}}`; the four inputs are echoed so a reader can match a result to what it asked for |
 | `sim_replay` | `{symbol, legs[], lookback}` (same multi-leg shape; legacy single-leg args still accepted) | `cache:options:sim_replay` — adds `value` + `pnl` per bar and `units: "position"` (Greeks × 100 × qty) |
 | `calc_load` | `{symbol}` | `cache:options:calc_chain` |
@@ -535,6 +535,7 @@ cache:options:notified_scan | :notified_captured    (alert de-duplication)
 cache:options:eth_eligible
 cache:options:sim_meta         events:options:sim_meta
 cache:options:sim_result       events:options:sim_result
+cache:options:sim_chain        events:options:sim_chain
 cache:options:sim_replay       events:options:sim_replay
 cache:options:calc_chain       events:options:calc_chain
 cache:options:calc_result      events:options:calc_result

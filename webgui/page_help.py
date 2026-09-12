@@ -256,50 +256,60 @@ each morning. Three kinds of trade sit on one ranked board:
 **Calculator — the simple version**
 
 Shows what an options trade makes or loses **before** you place it — any
-**multi-leg** structure. Work down the three numbered boxes on the left; the
-results appear on the right.
+**multi-leg** structure. There are no buttons to press: type a ticker, build the
+legs, and the numbers follow every change.
 
-- **① Strategy** — pick a template (single, vertical, **iron condor**,
+- **Type a ticker and press Enter** (or tab out). The chain loads, the strategy's
+  legs land on real strikes, every leg is **priced from the chain** (its mark),
+  and the volatility is worked out from those prices the way ThinkorSwim does.
+  **Refresh** re-pulls the same symbol for fresh quotes.
+- **Strategy** — pick a template (single, vertical, **iron condor**,
   **butterfly**, **calendar/diagonal**, and under **Stock + options** the
   **covered call**, **protective put** and **collar**). The chips say whether it
   takes in a **credit** or costs a **debit**, how many legs it has, and its lean;
-  the line under them is the trade's thesis in one sentence.
-- **② Symbol** — type a ticker and tab out (or press **Load chain**). The pill
-  top-right says whether a chain is loaded. **Price, IV %, IV Δ, Rate,
-  Contracts, Strikes** and **Expiry** live here — Expiry sets *every* leg's
-  expiry. Higher IV = pricier options and wider P&L swings. **IV Update** works
-  the volatility back out of the traded contract's own price, the way
-  ThinkorSwim does.
-- **③ Legs** — one card per leg: type, side, expiry, strike, quantity, premium,
-  and the leg's **delta** from the chain. The strip on the frame keeps a running
-  **leg count, net premium and max loss**. A dash means *not known yet*, not
-  zero: premiums are blank until you press **Fetch Premiums**, and delta is
-  blank whenever the chain carries no Greeks — normal outside market hours.
-- **A leg can be SHARES** — set its type to **stock**. It has no strike and no
-  expiry, so both of those cells show a dash, and its two numbers mean something
-  different: **LOTS** is *hundreds* of shares (1 lot = 100 shares, which is what
-  one option contract covers), and **$/SHARE** is what you paid for them, not an
-  option premium. Leave it blank and **Fetch Premiums** fills today's price;
-  type your own cost basis and nothing overwrites it — which is the point if you
-  are asking what a call written against shares you already hold is worth.
-  ⚠ Max risk on these is the stock going to **zero**, so it is a large number
-  and a true one; a **protective put** or a **collar** is what caps it.
-  ⚠ These three are **analysis only**. They are not on the Simulator (it prices
-  from the option chain and cannot value a share) and not on Rescue's ad-hoc
-  form (the paper account tracks shares separately from options, so it could not
-  book one). Nothing here places a trade in any case.
-- **Calculate** fills the **six cards** — entry credit/debit, max risk, max
-  return, return on risk, breakeven(s), probability of profit — and the **P&L
-  matrix** under them: one row per real strike, one column per date from **Now**
-  (today's mark-to-market) to **Exp** (the payoff at expiration), green = profit,
-  red = loss, spot row in amber. Calendars price each leg at its own expiry.
+  the line under the panel is the trade's thesis in one sentence.
+- **Expiry strip** — one button per expiration with its days to go. Clicking
+  one moves **every** leg to that date and points the chain at it.
+- **The chain** (left) — calls on the left, strikes in the middle, puts on the
+  right, centred on the current price; the at-the-money strike is gold and
+  in-the-money cells are shaded. **Click a Bid to SELL that contract, an Ask to
+  BUY it** — the leg is added at the **mark** either way (the side you click only
+  decides buy or sell). **Columns** picks what else the chain shows — Delta and
+  OI by default, plus Mark, IV, Gamma, Theta, Vega and Volume — and remembers it.
+  **More strikes** above and below widens the window.
+- **Legs** (right) — one row per leg. **BUY/SELL** and **CALL/PUT** flip with one
+  click. The strike is typed (it snaps to the nearest real strike) or stepped
+  with **‹ ›** or the **↑ ↓** keys, and the price re-fills from the chain each
+  time. Type your own **price** and it stays put through strike changes — the
+  **↺** beside it goes back to the chain's price. The strip under the legs keeps a
+  running **leg count, net premium and max loss**; a dash means *not known yet*,
+  not zero, and delta is blank whenever the chain carries no Greeks — normal
+  outside market hours.
+- **A leg can be SHARES** — click its type until it reads **STOCK**. It has no
+  strike and no expiry, so both of those controls go grey, and its two numbers
+  mean something different: **QTY** is *lots* of 100 shares (what one option
+  contract covers), and **PRICE** is what you paid per share, not an option
+  premium. Blank means today's price; type your own cost basis and nothing
+  overwrites it. ⚠ Max risk on these is the stock going to **zero**, so it is a
+  large number and a true one; a **protective put** or a **collar** is what caps
+  it. ⚠ These three are **analysis only** — not on the Simulator (it prices from
+  the option chain and cannot value a share) and not on Rescue's ad-hoc form.
+- **Pricing assumptions** (collapsed) holds **Price, IV %, Rate, IV Δ,
+  Contracts** and **Strikes** — rarely changed. IV is re-worked from the chain on
+  every load, so a typed IV lasts until the next one.
+- The **six cards** — entry credit/debit, max risk, max return, return on risk,
+  breakeven(s), probability of profit — and the **P&L matrix** under them update
+  a moment after you stop editing: one row per real strike, one column per date
+  from **Now** (today's mark-to-market) to **Exp** (the payoff at expiration),
+  green = profit, red = loss, spot row in amber. Calendars price each leg at its
+  own expiry.
 - Each date column shows **dollars and a percentage**, and the heading says what
   the percentage is *of*: **% MAX** (of the most the trade can make) when the
   payoff is capped, **% COST** (of what you paid) when it isn't, and a plain
   **%** with dashes when neither applies.
 - **Unlimited** on a card is real, not an error — a long call's upside and a
   naked call's risk have no cap.
-- Loading a **different** symbol clears the cards and matrix; reloading the same
+- Loading a **different** symbol clears the cards and matrix; refreshing the same
   one keeps them. **Copy to Simulator** sends the exact legs across. Widening
   strikes raises the credit you collect but also the max loss.
 """,
@@ -349,10 +359,16 @@ accelerate price.
 
 Re-prices a **multi-leg** option position under different what-ifs (Black-Scholes).
 
-- **Load chain** (or press Enter in the Symbol box), then pick a **Strategy** and
-  adjust the **legs** (type / side / strike / expiry / qty) — singles, spreads,
-  condors, butterflies, calendars. **Set all legs to** puts every leg on one expiry.
-- **The six tiles** beside the legs state the trade: entry credit or debit, max
+- **Type a ticker and press Enter** (or tab out; **Refresh** re-pulls it). Pick a
+  **Strategy** and its legs land on real strikes — singles, spreads, condors,
+  butterflies, calendars.
+- **The chain** — the same grid as the Calculator: **click a Bid to add a SELL
+  leg, an Ask to add a BUY leg**. **Columns** picks what it shows. The **expiry
+  strip** above it moves every leg to one date.
+- **Legs** — one row per leg: **BUY/SELL** and **CALL/PUT** flip with a click, the
+  strike is typed or stepped with **‹ ›** / **↑ ↓**, and **Delta** reads the chain.
+  There is no price box: the Simulator prices every leg from volatility itself.
+- **The six tiles** under the panel state the trade: entry credit or debit, max
   profit, max loss, breakevens, delta (as shares) and theta per day. A dash always
   says why it is blank.
 - **Edited** and the orange warnings mean the legs no longer match the strategy
