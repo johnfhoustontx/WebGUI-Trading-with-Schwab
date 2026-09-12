@@ -152,6 +152,12 @@ class SchwabPyProxyClient:
             sym_str = str(symbols)
         return self._get("/quotes", params={"symbols": sym_str})
 
+    def get_option_expirations(self, symbol: str) -> FakeResponse:
+        """Every listed expiration for ``symbol`` — Schwab's ``/expirationchain``
+        (no strikes, ~0.2 s), through the proxy's generic ``/passthrough``."""
+        return self._get("/passthrough", params={
+            "endpoint": "/expirationchain", "params": f"symbol={symbol}"})
+
     def get_option_chain(
         self,
         symbol: str,

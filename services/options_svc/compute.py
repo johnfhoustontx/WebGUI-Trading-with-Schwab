@@ -6834,8 +6834,135 @@ def thin_calc_chain(chain):
     return out
 
 
-def calc_load_symbol(symbol) -> dict:
+# ── every expiration listed, strikes on demand (2026-09-12) ──────────────────
+# The old single ``today → +60 days`` fetch stopped TSLA at Oct 30 with eleven
+# more expirations to Dec 2028 never shown, and ``$SPX``'s 60 days was too large
+# for the proxy. Measured on prod: the expiration list 0.2 s, one ``$SPX`` expiry
+# 0.6 s, TSLA's whole chain 4.3 s / 5.6 MB. So a lazy load lists every
+# expiration and fetches strikes for the first ``INITIAL_EXPIRY_COUNT`` plus any
+# the page already needs; the rest arrive one expiry per click.
+INITIAL_EXPIRY_COUNT = 2
+
+
+def parse_expiration_list(payload):
+    """Schwab ``/expirationchain`` → sorted unique ISO dates. Junk → ``[]``."""
+    rows = payload.get("expirationList") if isinstance(payload, dict) else None
+    out = set()
+    for row in rows or []:
+        raw = row.get("expirationDate") if isinstance(row, dict) else None
+        try:
+            out.add(_dt.date.fromisoformat(str(raw)[:10]).isoformat())
+        except (TypeError, ValueError):
+            continue
+    return sorted(out)
+
+
+def option_expirations(api):
+    """Every listed expiration for ``api`` (ISO strings), or ``[]`` — which the
+    caller treats as "fall back to the old fixed-window fetch", never as "no
+    options"."""
+    fetch = getattr(_proxy.schwab_py_client, "get_option_expirations", None)
+    if fetch is None:
+        return []
+    resp = fetch(api)
+    if getattr(resp, "status_code", None) != 200:
+        return []
+    return parse_expiration_list(resp.json())
+
+
+def initial_expiries(expirations, wanted=None, n=INITIAL_EXPIRY_COUNT):
+    """The expiries a lazy load fetches up front: the first ``n`` listed, plus any
+    ``wanted`` one that is listed (a restored or handed-off leg's expiry must
+    arrive WITH the load, or its strike is coerced away before the page can ask).
+    In listing order."""
+    exps = list(expirations or [])
+    chosen = set(exps[:n]) | {w for w in (wanted or []) if w in exps}
+    return [e for e in exps if e in chosen]
+
+
+def expiry_runs(expirations, chosen):
+    """``chosen`` grouped into runs CONSECUTIVE in the listing — one ``/chains``
+    call per run (``from=run[0]``, ``to=run[-1]``) returns exactly that run,
+    because no listed expiry falls between two consecutive listed ones. Unlisted
+    expiries are dropped."""
+    idx = {e: i for i, e in enumerate(expirations or [])}
+    runs, cur = [], []
+    for e in sorted((c for c in chosen or [] if c in idx), key=idx.get):
+        if cur and idx[e] == idx[cur[-1]] + 1:
+            cur.append(e)
+        else:
+            if cur:
+                runs.append(cur)
+            cur = [e]
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def merge_chains(base, extra):
+    """Two thinned chains' expiry maps as one; ``extra`` wins on a shared expiry
+    key. Returns new dicts — neither input is mutated."""
+    out = {}
+    for map_key in ("putExpDateMap", "callExpDateMap"):
+        merged = dict((base or {}).get(map_key) or {})
+        merged.update((extra or {}).get(map_key) or {})
+        out[map_key] = merged
+    return out
+
+
+def _loaded_expiries(chain):
+    return {k.split(":")[0] for mk in ("putExpDateMap", "callExpDateMap")
+            for k in ((chain or {}).get(mk) or {})}
+
+
+def _fetch_thin_runs(api, runs):
+    """``/chains`` once per run, thinned and merged. None when EVERY call failed
+    (so a caller can tell "nothing arrived" from "an empty expiry")."""
+    merged, ok = merge_chains(None, None), False
+    for run in runs:
+        resp = _proxy.schwab_py_client.get_option_chain(
+            api, contract_type="ALL", from_date=_dt.date.fromisoformat(run[0]),
+            to_date=_dt.date.fromisoformat(run[-1]))
+        if getattr(resp, "status_code", None) == 200:
+            merged = merge_chains(merged, thin_calc_chain(resp.json()))
+            ok = True
+    return merged if ok else None
+
+
+def calc_load_expiry(current, symbol, expiry):
+    """Add ONE expiry's strikes to the Calculator's cached lazy payload.
+
+    Returns the merged payload marked ``added``, or None for a click that no
+    longer applies — another symbol is loaded now, the expiry is not listed, or
+    the cached payload is not a lazy one. An expiry already loaded answers
+    without a fetch; a fetch that fails answers with ``failed`` so the page can
+    stop waiting rather than hang."""
+    cur = current if isinstance(current, dict) else {}
+    # the previous merge's markers describe THAT click, not this one
+    cur = {k: v for k, v in cur.items() if k not in ("added", "failed")}
+    exps = cur.get("expirations")
+    if not exps or expiry not in exps:
+        return None
+    if str(cur.get("symbol") or "").upper() != str(symbol or "").upper():
+        return None
+    chain = cur.get("chain") or {}
+    if expiry in _loaded_expiries(chain):
+        return dict(cur, added=expiry)
+    api = cur.get("api") or str(symbol).upper()
+    extra = _fetch_thin_runs(api, [[expiry]])
+    if extra is None:
+        return dict(cur, chain=merge_chains(chain, None), added=expiry, failed=True)
+    return dict(cur, chain=merge_chains(chain, extra), added=expiry)
+
+
+def calc_load_symbol(symbol, lazy=False, expiries=None) -> dict:
     """Fetch the quote + option chain for ``symbol`` → JSON-safe loader payload.
+
+    ``lazy=True`` (the Calculator, 2026-09-12) adds ``expirations`` — every
+    listed expiry — and fetches strikes only for ``initial_expiries(…,
+    expiries)``; ``calc_load_expiry`` adds the rest on demand. Without a usable
+    expiration list it falls back to the eager fetch below. Rescue does not pass
+    ``lazy`` and keeps the eager fetch unchanged.
 
     Mirrors the page's ``_load_symbol_data`` + ``load_symbol``: map the symbol to
     its Schwab API form ($SPX for SPX), pull the quote (lastPrice) and the
@@ -6851,18 +6978,23 @@ def calc_load_symbol(symbol) -> dict:
 
     qresp = _proxy.schwab_py_client.get_quotes([api])
     quote = qresp.json() if getattr(qresp, "status_code", None) == 200 else {}
+    info = (quote or {}).get(api, {})
+    q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
+    price = q.get("lastPrice") if isinstance(q, dict) else None
+    lo, hi = oc.generate_price_range(price) if price else (0.0, 0.0)
+    base = {"symbol": symbol, "api": api, "price": price, "range_lo": lo, "range_hi": hi}
+
+    if lazy:
+        exps = option_expirations(api)
+        if exps:
+            runs = expiry_runs(exps, initial_expiries(exps, expiries))
+            return dict(base, chain=_fetch_thin_runs(api, runs), expirations=exps)
+
     cresp = _proxy.schwab_py_client.get_option_chain(
         api, contract_type="ALL", from_date=dt.date.today(),
         to_date=dt.date.today() + dt.timedelta(days=60))
     chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
-
-    info = (quote or {}).get(api, {})
-    q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
-    price = q.get("lastPrice") if isinstance(q, dict) else None
-
-    lo, hi = oc.generate_price_range(price) if price else (0.0, 0.0)
-    return {"symbol": symbol, "api": api, "price": price,
-            "range_lo": lo, "range_hi": hi, "chain": thin_calc_chain(chain)}
+    return dict(base, chain=thin_calc_chain(chain))
 
 
 # Strategy codes the analytic ``calc_summary`` handles exactly; everything else
@@ -7081,7 +7213,9 @@ def _stash_sim_snapshot(symbol, snap) -> None:
     _SIM_SNAPSHOTS.pop(symbol, None)          # re-insert so it counts as newest
     _SIM_SNAPSHOTS[symbol] = snap
     while len(_SIM_SNAPSHOTS) > SIM_SNAPSHOT_LIMIT:
-        _SIM_SNAPSHOTS.pop(next(iter(_SIM_SNAPSHOTS)))
+        gone = next(iter(_SIM_SNAPSHOTS))
+        _SIM_SNAPSHOTS.pop(gone)
+        _SIM_EXPIRATIONS.pop(gone, None)
 
 # Equity/index option contract multiplier (shares per contract). The simulator
 # engine prices in per-share × qty units; ×100 converts the What-if curve to a
@@ -7136,7 +7270,51 @@ def _sim_records(df):
     return list(df or [])
 
 
-def sim_fetch(symbol: str) -> dict:
+def _sim_meta(snap):
+    exps = expiries_of(snap)
+    return {
+        "symbol": snap.symbol,
+        "spot": snap.spot,
+        "n_contracts": len(snap.contracts),
+        "expiries": exps,
+        "strikes": {exp: {"call": strikes_of(snap, exp, "call"),
+                          "put": strikes_of(snap, exp, "put")}
+                    for exp in exps},
+    }
+
+
+# Every listed expiration per Simulator symbol, from its last lazy fetch — what a
+# later ``sim_fetch_expiry`` checks a click against. Evicted with the snapshot.
+_SIM_EXPIRATIONS: dict = {}
+
+
+def sim_fetch_expiry(symbol, expiry):
+    """Add ONE expiry's contracts to the stashed Simulator snapshot.
+
+    Returns meta (the loaded expiries, now including ``expiry``) + ``chain`` —
+    the thinned chain for THAT expiry only, which the handler merges into the
+    cached ``sim_chain`` — marked ``added``. None when there is no snapshot for
+    the symbol or the expiry is not listed. No price-history call: the snapshot
+    already holds it."""
+    from options_simulator import data as sdata
+
+    snap = _SIM_SNAPSHOTS.get(symbol)
+    exps = _SIM_EXPIRATIONS.get(symbol) or []
+    if snap is None or expiry not in exps:
+        return None
+    if expiry in expiries_of(snap):
+        return dict(_sim_meta(snap), expirations=exps, chain=None, added=expiry)
+    raw = {}
+    extra = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol,
+                                 expiry=_dt.date.fromisoformat(expiry),
+                                 with_history=False,
+                                 on_chain=lambda c: raw.update(chain=c))
+    snap.contracts.extend(c for c in extra.contracts if str(c.expiry) == expiry)
+    return dict(_sim_meta(snap), expirations=exps,
+                chain=thin_calc_chain(raw.get("chain")), added=expiry)
+
+
+def sim_fetch(symbol: str, lazy=False, expiries=None) -> dict:
     """Fetch the ChainSnapshot for ``symbol``, stash it in-process, return meta.
 
     The whole snapshot is a Python object (price-history series + ContractRow
@@ -7151,24 +7329,42 @@ def sim_fetch(symbol: str) -> dict:
     ``chain`` is the raw /chains response from that SAME fetch, thinned like the
     Calculator's (``thin_calc_chain``) for the entry panel's chain grid. The
     handler pops it into ``cache:options:sim_chain`` — it never rides in
-    ``sim_meta``."""
+    ``sim_meta``.
+
+    ``lazy=True`` (2026-09-12) lists every expiration (``expirations``) and
+    fetches contracts for ``initial_expiries(…, expiries)`` only — price history
+    once, on the first run — the Calculator's shape; ``sim_fetch_expiry`` adds
+    the rest. Without a usable expiration list it falls back to the eager
+    +90-day fetch."""
     from options_simulator import data as sdata
 
+    client = _proxy.schwab_py_client
+    if lazy:
+        exps = option_expirations(symbol)
+        runs = expiry_runs(exps, initial_expiries(exps, expiries)) if exps else []
+        if runs:
+            snap, thin = None, merge_chains(None, None)
+            for i, run in enumerate(runs):
+                raw = {}
+                part = sdata.fetch_snapshot(
+                    client, symbol, from_date=_dt.date.fromisoformat(run[0]),
+                    to_date=_dt.date.fromisoformat(run[-1]), with_history=(i == 0),
+                    on_chain=lambda c, raw=raw: raw.update(chain=c))
+                if snap is None:
+                    snap = part
+                else:
+                    snap.contracts.extend(part.contracts)
+                thin = merge_chains(thin, thin_calc_chain(raw.get("chain")))
+            _stash_sim_snapshot(symbol, snap)
+            _SIM_EXPIRATIONS[symbol] = exps
+            return dict(_sim_meta(snap), expirations=exps, chain=thin)
+
     raw = {}
-    snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol,
+    snap = sdata.fetch_snapshot(client, symbol,
                                 on_chain=lambda c: raw.update(chain=c))
     _stash_sim_snapshot(symbol, snap)
-    exps = expiries_of(snap)
-    return {
-        "symbol": snap.symbol,
-        "spot": snap.spot,
-        "n_contracts": len(snap.contracts),
-        "expiries": exps,
-        "strikes": {exp: {"call": strikes_of(snap, exp, "call"),
-                          "put": strikes_of(snap, exp, "put")}
-                    for exp in exps},
-        "chain": thin_calc_chain(raw.get("chain")),
-    }
+    _SIM_EXPIRATIONS.pop(symbol, None)
+    return dict(_sim_meta(snap), chain=thin_calc_chain(raw.get("chain")))
 
 
 def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,

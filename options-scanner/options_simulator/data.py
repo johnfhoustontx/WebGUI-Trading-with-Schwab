@@ -80,7 +80,9 @@ def _fetch_price_history(client, symbol: str) -> pd.Series:
 
 
 def fetch_snapshot(client, symbol: str, expiry: date | None = None,
-                   horizon_days: int = 90, on_chain=None) -> ChainSnapshot:
+                   horizon_days: int = 90, on_chain=None,
+                   from_date: date | None = None, to_date: date | None = None,
+                   with_history: bool = True) -> ChainSnapshot:
     """Fetch chain for ``symbol`` plus 2-day 1-min underlying history.
 
     If ``expiry`` is given, request only that date. Otherwise pull all expiries
@@ -88,11 +90,16 @@ def fetch_snapshot(client, symbol: str, expiry: date | None = None,
     what the underlying actually offers.
 
     ``on_chain(chain)`` receives the raw chain dict — how ``sim_fetch``
-    publishes the chain grid's chain without a second ``/chains`` call.
+    publishes the grid's chain without a second ``/chains`` call.
+    ``from_date`` / ``to_date`` fetch exactly that range of expiries, and
+    ``with_history=False`` skips the price-history call — how a page that loads
+    expiries on demand adds one without re-fetching history it already has.
     """
     # --- Option chain ----------------------------------------------------
     if expiry is not None:
         kwargs = {"from_date": expiry, "to_date": expiry}
+    elif from_date is not None and to_date is not None:
+        kwargs = {"from_date": from_date, "to_date": to_date}
     else:
         today = date.today()
         kwargs = {"from_date": today, "to_date": today + timedelta(days=horizon_days)}
@@ -160,7 +167,8 @@ def fetch_snapshot(client, symbol: str, expiry: date | None = None,
     # Prefer 1-min resolution (direct schwab-py). The SchwabProxy wrapper
     # exposes only get_price_history_every_day; fall back to daily so the
     # replay tab still shows *something* through the proxy.
-    price_history = _fetch_price_history(client, symbol)
+    price_history = (_fetch_price_history(client, symbol) if with_history
+                     else pd.Series(dtype=float))
 
     return ChainSnapshot(
         spot=spot,

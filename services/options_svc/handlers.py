@@ -2574,7 +2574,9 @@ def handle_command(bus, command) -> None:
     elif command.type == "gamma_history":
         run_gamma_history(bus, command.args.get("date"), command.args.get("slot"))
     elif command.type == "sim_fetch":
-        meta = compute.sim_fetch(command.args.get("symbol", "SPY"))
+        a = command.args or {}
+        lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
+        meta = compute.sim_fetch(a.get("symbol", "SPY"), **lazy)
         # The chain goes FIRST: the page reacts to the meta version and then
         # reads the chain, so chain-already-written is the only skew it can see
         # (the gamma history ordering, for the same reason).
@@ -2584,6 +2586,22 @@ def handle_command(bus, command) -> None:
         bus.publish(EVENT_SIM_CHAIN, {"version": cver})
         version = bus.cache_set(CACHE_SIM_META, meta)
         bus.publish(EVENT_SIM_META, {"version": version})
+    elif command.type == "sim_fetch_expiry":
+        a = command.args or {}
+        meta = compute.sim_fetch_expiry(a.get("symbol"), a.get("expiry"))
+        if meta is not None:
+            # Merge the one new expiry into the cached grid chain for the same
+            # symbol, then write chain BEFORE meta, as sim_fetch does.
+            extra = meta.pop("chain", None)
+            env = bus.cache_get(CACHE_SIM_CHAIN)
+            cached = env.payload if env is not None else None
+            base = ((cached or {}).get("chain")
+                    if (cached or {}).get("symbol") == meta.get("symbol") else None)
+            cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": meta.get("symbol"),
+                                                   "chain": compute.merge_chains(base, extra)})
+            bus.publish(EVENT_SIM_CHAIN, {"version": cver})
+            version = bus.cache_set(CACHE_SIM_META, meta)
+            bus.publish(EVENT_SIM_META, {"version": version})
     elif command.type == "sim_run":
         a = command.args or {}
         result = compute.sim_run(
@@ -2601,9 +2619,20 @@ def handle_command(bus, command) -> None:
         version = bus.cache_set(CACHE_SIM_REPLAY, res)
         bus.publish(EVENT_SIM_REPLAY, {"version": version})
     elif command.type == "calc_load":
-        cc = compute.calc_load_symbol(command.args.get("symbol", "SPY"))
+        a = command.args or {}
+        # Only the Calculator asks for a lazy load; Rescue's eager call is unchanged.
+        lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
+        cc = compute.calc_load_symbol(a.get("symbol", "SPY"), **lazy)
         version = bus.cache_set(CACHE_CALC_CHAIN, cc)
         bus.publish(EVENT_CALC_CHAIN, {"version": version})
+    elif command.type == "calc_load_expiry":
+        a = command.args or {}
+        env = bus.cache_get(CACHE_CALC_CHAIN)
+        cc = compute.calc_load_expiry(env.payload if env is not None else None,
+                                      a.get("symbol"), a.get("expiry"))
+        if cc is not None:          # a stale click writes nothing
+            version = bus.cache_set(CACHE_CALC_CHAIN, cc)
+            bus.publish(EVENT_CALC_CHAIN, {"version": version})
     elif command.type == "calc_compute":
         result = compute.calc_compute(**(command.args or {}))
         version = bus.cache_set(CACHE_CALC_RESULT, result)
