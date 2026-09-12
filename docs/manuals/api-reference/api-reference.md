@@ -239,10 +239,12 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `gamma_refresh` | `{symbol}` | `cache:options:gamma` + `cache:options:gamma_hist_{view}` |
 | `gamma_explain` | `{symbol}` | `cache:options:gamma_explain` |
 | `gamma_analyze` | — | `cache:options:gamma_analyze` |
-| `sim_fetch` | `{symbol}` | `cache:options:sim_chain` (the thinned chain from the same fetch — written first), then `cache:options:sim_meta` |
+| `sim_fetch` | `{symbol, lazy?, expiries?}` — `lazy` lists every expiration and fetches contracts for the nearest two plus `expiries` | `cache:options:sim_chain` (the thinned chain from the same fetch — written first), then `cache:options:sim_meta` (a lazy fetch adds `expirations`: every listed expiry) |
+| `sim_fetch_expiry` | `{symbol, expiry}` | adds one expiry to the stashed snapshot; merges its chain into `cache:options:sim_chain`, then `cache:options:sim_meta` with `added`. A symbol with no snapshot or an unlisted expiry writes nothing |
 | `sim_run` | `{symbol, legs[], dt, mult}` (legs: `{kind, strike, expiry, side, qty}`; legacy `{expiry, kind, strike, direction}` single-leg args still accepted) | `cache:options:sim_result` — `{spot, symbol, legs, dt, mult, whatif_rows, whatif_baseline, ivshock: {base, shock, units: "position"}}`; the four inputs are echoed so a reader can match a result to what it asked for |
 | `sim_replay` | `{symbol, legs[], lookback}` (same multi-leg shape; legacy single-leg args still accepted) | `cache:options:sim_replay` — adds `value` + `pnl` per bar and `units: "position"` (Greeks × 100 × qty) |
-| `calc_load` | `{symbol}` | `cache:options:calc_chain` |
+| `calc_load` | `{symbol, lazy?, expiries?}` — `lazy` (the Calculator) lists every expiration via Schwab `/expirationchain` and fetches strikes for the nearest two plus `expiries`; without it (Rescue) the fixed today..+60-day fetch | `cache:options:calc_chain` (a lazy load adds `expirations`) |
+| `calc_load_expiry` | `{symbol, expiry}` | merges one expiry's strikes into `cache:options:calc_chain`, marked `added` (and `failed` if Schwab returned nothing). A click for another symbol or an unlisted expiry writes nothing |
 | `calc_compute` | `{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}` (each leg carries its own `expiry`/`qty`; `strategy="CUSTOM"` or any non-PCS/CCS/IC/single code → generic numeric summary) | `cache:options:calc_result` |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |

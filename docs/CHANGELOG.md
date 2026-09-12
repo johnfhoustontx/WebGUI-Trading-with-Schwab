@@ -44,6 +44,17 @@ panel.** Operator request: make both pages data-entry friendly.)
   block with a delegated click read from `data-*` attributes; a test pins the tags
   and attributes against the shipped DOMPurify allow-list and its `ALLOW_DATA_ATTR`
   default, and the click and centring were verified in a browser.
+- **Every expiration, not just the next 60 days — found by the operator on the
+  first TSLA load.** The strip ended at Oct 30 (48 days) because `calc_load` fetched
+  `today..+60` in one call — a limit older than this work — while TSLA lists **22**
+  expirations to Dec 2028. The same limit was why `$SPX` loaded no chain at all on
+  prod: its 60 days is too big for one proxy request. Measured on the box: Schwab's
+  `/expirationchain` 0.2 s, one `$SPX` expiration 0.6 s / 0.59 MB, TSLA's whole
+  chain 4.3 s / 5.64 MB. So the Calculator and Simulator now list every expiration
+  and fetch strikes for the nearest two (plus any a restored or handed-off leg
+  needs); any other expiration is fetched on click (`calc_load_expiry` /
+  `sim_fetch_expiry`) and merged in, the legs moving once it lands. Rescue's
+  ad-hoc load is unchanged. Verified in the harness at 17 expirations on both pages.
 - **The leg editor's `card` layout has no mounts left**; its removal (with the
   `.leg-card` theme rule and its tests) is left as its own change.
 - **Tests.** New: `test_chain_grid.py`, `test_entry.py`, `test_entry_panel.py`,

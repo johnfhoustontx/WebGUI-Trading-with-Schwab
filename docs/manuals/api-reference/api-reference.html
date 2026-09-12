@@ -617,8 +617,13 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>sim_fetch</code></td>
-<td><code>{symbol}</code></td>
-<td><code>cache:options:sim_chain</code> (the thinned chain from the same fetch — written first), then <code>cache:options:sim_meta</code></td>
+<td><code>{symbol, lazy?, expiries?}</code> — <code>lazy</code> lists every expiration and fetches contracts for the nearest two plus <code>expiries</code></td>
+<td><code>cache:options:sim_chain</code> (the thinned chain from the same fetch — written first), then <code>cache:options:sim_meta</code> (a lazy fetch adds <code>expirations</code>: every listed expiry)</td>
+</tr>
+<tr>
+<td><code>sim_fetch_expiry</code></td>
+<td><code>{symbol, expiry}</code></td>
+<td>adds one expiry to the stashed snapshot; merges its chain into <code>cache:options:sim_chain</code>, then <code>cache:options:sim_meta</code> with <code>added</code>. A symbol with no snapshot or an unlisted expiry writes nothing</td>
 </tr>
 <tr>
 <td><code>sim_run</code></td>
@@ -632,8 +637,13 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>calc_load</code></td>
-<td><code>{symbol}</code></td>
-<td><code>cache:options:calc_chain</code></td>
+<td><code>{symbol, lazy?, expiries?}</code> — <code>lazy</code> (the Calculator) lists every expiration via Schwab <code>/expirationchain</code> and fetches strikes for the nearest two plus <code>expiries</code>; without it (Rescue) the fixed today..+60-day fetch</td>
+<td><code>cache:options:calc_chain</code> (a lazy load adds <code>expirations</code>)</td>
+</tr>
+<tr>
+<td><code>calc_load_expiry</code></td>
+<td><code>{symbol, expiry}</code></td>
+<td>merges one expiry's strikes into <code>cache:options:calc_chain</code>, marked <code>added</code> (and <code>failed</code> if Schwab returned nothing). A click for another symbol or an unlisted expiry writes nothing</td>
 </tr>
 <tr>
 <td><code>calc_compute</code></td>

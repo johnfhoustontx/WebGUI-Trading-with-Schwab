@@ -268,8 +268,10 @@ legs, and the numbers follow every change.
   **covered call**, **protective put** and **collar**). The chips say whether it
   takes in a **credit** or costs a **debit**, how many legs it has, and its lean;
   the line under the panel is the trade's thesis in one sentence.
-- **Expiry strip** — one button per expiration with its days to go. Clicking
-  one moves **every** leg to that date and points the chain at it.
+- **Expiry strip** — **every** expiration the symbol lists, out to the longest
+  dated ones, with its days to go. The nearest two load with the symbol; clicking
+  any other fetches its strikes first ("Loading strikes for …", about a second)
+  and then moves **every** leg to that date and points the chain at it.
 - **The chain** (left) — the **complete** chain for the selected expiration:
   every strike, calls on the left, strikes in the middle, puts on the right. It
   scrolls, and it opens **centred on the current price**; the at-the-money strike

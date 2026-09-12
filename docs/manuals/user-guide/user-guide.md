@@ -814,9 +814,12 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
   structure takes in a **credit** or costs a **debit**, how many legs it has, and
   its lean; only the credit/debit chip is coloured. A one-line description of what
   the trade is betting on sits under the panel.
-- **Expiry strip** — one button per expiration with its days to go. Clicking one
-  moves **every option leg** to that date (a **stock** leg is skipped — shares do
-  not expire) and points the chain at it.
+- **Expiry strip** — one button for **every** expiration the symbol lists (TSLA
+  runs out past two years), with its days to go. Strikes for the nearest two load
+  with the symbol; clicking any other shows **Loading strikes for …** while that one
+  expiration is fetched (about a second), then moves **every option leg** to that
+  date (a **stock** leg is skipped — shares do not expire) and points the chain at
+  it. The status line says how many expirations have strikes loaded so far.
 - **The chain** (left half) — the **complete** chain for the selected expiration:
   every strike, calls on the left, strikes in the middle, puts on the right, in a
   box that scrolls and opens **centred on spot** (it re-centres on every load and

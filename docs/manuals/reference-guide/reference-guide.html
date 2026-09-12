@@ -2461,7 +2461,7 @@ option chain. This is where you find out what a trade actually risks before you 
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>options_svc</code> (:8211) — <code>calc_load</code>, <code>calc_compute</code>, <code>calc_iv</code> commands</td>
+<td><code>options_svc</code> (:8211) — <code>calc_load</code>, <code>calc_load_expiry</code>, <code>calc_compute</code>, <code>calc_iv</code> commands</td>
 </tr>
 <tr>
 <td>Cache keys</td>
@@ -2469,7 +2469,7 @@ option chain. This is where you find out what a trade actually risks before you 
 </tr>
 <tr>
 <td>Chain</td>
-<td>Fetched on demand when you enter a symbol — every strike and expiry to +60 days, each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume</td>
+<td>Fetched on demand: the full expiration list plus strikes for the nearest two expirations when you enter a symbol, then one expiration per click. Each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume</td>
 </tr>
 <tr>
 <td>State</td>
@@ -2498,8 +2498,12 @@ moment after you stop.</p>
    cash-flow direction (<strong>credit</strong> or <strong>debit</strong>), the leg count and the lean; only the
    credit/debit chip is coloured, because the rest are descriptions rather than
    opinions. A one-line thesis says what the structure is betting on.</li>
-<li><strong>Expiry strip</strong> — every expiration with its days to go. Clicking one moves every
-   option leg there and points the chain at it.</li>
+<li><strong>Expiry strip</strong> — every expiration the symbol lists, with its days to go.
+   Strikes for the nearest two load with the symbol; any other is fetched when you
+   click it (<strong>Loading strikes for …</strong>), then every option leg moves there and the
+   chain points at it. ⚠ Before 2026-09-12 the page only ever fetched the next 60
+   days, so longer-dated expirations simply did not appear, and <code>$SPX</code> — whose 60
+   days is too large for one request — loaded no chain at all.</li>
 <li><strong>The chain</strong> — the complete chain for the selected expiration: <strong>every</strong> strike,
    calls | strike | puts, in a scroll box that opens centred on spot. At-the-money
    strike in gold, in-the-money cells shaded. Default columns, call side outward to
@@ -2702,7 +2706,7 @@ changes.</p>
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>options_svc</code> (:8211) — <code>sim_fetch</code>, <code>sim_run</code>, <code>sim_replay</code></td>
+<td><code>options_svc</code> (:8211) — <code>sim_fetch</code>, <code>sim_fetch_expiry</code>, <code>sim_run</code>, <code>sim_replay</code></td>
 </tr>
 <tr>
 <td>Cache keys</td>

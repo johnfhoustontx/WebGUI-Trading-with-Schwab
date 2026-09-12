@@ -404,7 +404,11 @@ editor into; the page decides what a grid pick means via `on_pick`. ⚠ The grid
 COMPLETE chain as ONE `ui.html` block with a delegated click read from `data-*`
 attributes — never a widget per cell, which an index chain would turn into thousands
 of components; the DOMPurify allow-list and its `ALLOW_DATA_ATTR` default are pinned
-by test), **`chain_grid.py`**
+by test. ⚠ The strip lists EVERY expiration (`expirations` from Schwab
+`/expirationchain`) while the chain holds only the ones fetched so far — a lazy
+`calc_load` / `sim_fetch` brings the nearest two plus any a leg needs, and
+`calc_load_expiry` / `sim_fetch_expiry` merge one more per click. Never go back to one
+fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request), **`chain_grid.py`**
 (PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
 `chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
 plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —

@@ -1575,9 +1575,9 @@ option chain. This is where you find out what a trade actually risks before you 
 
 | | |
 |---|---|
-| Service | `options_svc` (:8211) — `calc_load`, `calc_compute`, `calc_iv` commands |
+| Service | `options_svc` (:8211) — `calc_load`, `calc_load_expiry`, `calc_compute`, `calc_iv` commands |
 | Cache keys | `cache:options:calc_chain`, `:calc_result`, `:calc_iv` |
-| Chain | Fetched on demand when you enter a symbol — every strike and expiry to +60 days, each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume |
+| Chain | Fetched on demand: the full expiration list plus strikes for the nearest two expirations when you enter a symbol, then one expiration per click. Each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume |
 | State | The page **remembers everything** — symbol, strategy, legs, fields — across navigation |
 
 ### Reading the screen
@@ -1602,8 +1602,12 @@ moment after you stop.
    cash-flow direction (**credit** or **debit**), the leg count and the lean; only the
    credit/debit chip is coloured, because the rest are descriptions rather than
    opinions. A one-line thesis says what the structure is betting on.
-3. **Expiry strip** — every expiration with its days to go. Clicking one moves every
-   option leg there and points the chain at it.
+3. **Expiry strip** — every expiration the symbol lists, with its days to go.
+   Strikes for the nearest two load with the symbol; any other is fetched when you
+   click it (**Loading strikes for …**), then every option leg moves there and the
+   chain points at it. ⚠ Before 2026-09-12 the page only ever fetched the next 60
+   days, so longer-dated expirations simply did not appear, and `$SPX` — whose 60
+   days is too large for one request — loaded no chain at all.
 4. **The chain** — the complete chain for the selected expiration: **every** strike,
    calls | strike | puts, in a scroll box that opens centred on spot. At-the-money
    strike in gold, in-the-money cells shaded. Default columns, call side outward to
@@ -1777,7 +1781,7 @@ changes.
 
 | | |
 |---|---|
-| Service | `options_svc` (:8211) — `sim_fetch`, `sim_run`, `sim_replay` |
+| Service | `options_svc` (:8211) — `sim_fetch`, `sim_fetch_expiry`, `sim_run`, `sim_replay` |
 | Cache keys | `cache:options:sim_meta`, `:sim_chain`, `:sim_result`, `:sim_replay` |
 | Pricing | Black-Scholes, per leg, each on its own clock |
 | State | Persists across navigation, like the Calculator |
