@@ -242,12 +242,12 @@ def test_sim_snapshot_roundtrips_via_page_state():
     assert ps.merge_restore(snap, sim._SIM_DEFAULTS)["symbol"] == "AAPL"
 
 
-# -- the leg editor's CARD layout ---------------------------------------------
-# The Simulator mounts the SHARED leg editor in ``layout="card"`` while keeping
-# the app-wide dark navy — the near-black CALC_* language belongs to the
-# Calculator alone. Everything below asserts against the MOUNTED element tree
-# rather than the call site's source: a source grep passes on a call that never
-# renders, and it cannot see which palette actually reached the DOM.
+# -- the shared entry panel + the leg TABLE (2026-09-12) ------------------------
+# The Simulator mounts the shared entry panel and the leg editor's
+# ``layout="table"``, keeping the app-wide dark navy — the near-black CALC_*
+# language belongs to the Calculator alone. Everything below asserts against the
+# MOUNTED element tree rather than the call site's source: a source grep passes
+# on a call that never renders, and it cannot see which palette reached the DOM.
 
 _SIM_META = {
     "symbol": "SPY", "spot": 450.0, "n_contracts": 12,
@@ -255,6 +255,14 @@ _SIM_META = {
     "strikes": {e: {"call": [445.0, 450.0, 455.0], "put": [445.0, 450.0, 455.0]}
                 for e in ("2026-06-26", "2026-07-03")},
 }
+
+
+def _sim_chain(delta=-0.31):
+    contract = [{"bid": 1.0, "ask": 1.2, "mark": 1.1, "delta": delta,
+                 "openInterest": 900, "volatility": 18.0}]
+    side = {f"{e}:9": {f"{k}": contract for k in (445.0, 450.0, 455.0)}
+            for e in ("2026-06-26", "2026-07-03")}
+    return {"symbol": "SPY", "chain": {"callExpDateMap": side, "putExpDateMap": side}}
 
 
 def _sim_container():
@@ -269,8 +277,8 @@ def _sim_container():
     return container
 
 
-def _leg_cards(container):
-    return [e for e in container.descendants() if "leg-card" in e._classes]
+def _leg_rows(container):
+    return [e for e in container.descendants() if "leg-trow" in e._classes]
 
 
 def _labels(el):
@@ -291,91 +299,165 @@ def _fire_click(el):
             listener.handler(None)
 
 
-def test_simulator_mounts_the_leg_editor_as_cards_not_rows():
-    """The page really renders the card layout — the ``leg-card`` hook is present
-    and neither row-mode artefact (the ``leg-row`` line, the ``leg-head`` header)
-    survives. Seeded PCS = two legs, so two cards."""
+def _hooked(container, cls):
+    return [e for e in container.descendants() if cls in e._classes]
+
+
+def test_simulator_mounts_the_leg_editor_as_a_table_not_cards_or_rows():
+    """Seeded PCS = two legs, so two table rows — and neither older layout's
+    artefact survives."""
     container = _sim_container()
-    assert len(_leg_cards(container)) == 2
-    assert not [e for e in container.descendants() if "leg-row" in e._classes]
-    assert not [e for e in container.descendants() if "leg-head" in e._classes]
+    assert len(_leg_rows(container)) == 2
+    for gone in ("leg-card", "leg-row", "leg-head"):
+        assert not _hooked(container, gone), gone
 
 
-def test_simulator_cards_carry_the_eyebrow_captions():
-    """The card's own captions replace the row header the page used to pass."""
-    card = _leg_cards(_sim_container())[0]
-    txt = _labels(card)
-    for cap in ("TYPE", "SIDE", "EXPIRY", "STRIKE", "QTY"):
+def test_simulator_mounts_the_shared_entry_panel_with_one_ticker():
+    container = _sim_container()
+    assert len(_hooked(container, "entry-panel")) == 1
+    assert len(_hooked(container, "entry-ticker")) == 1
+
+
+def test_simulator_table_carries_the_column_captions():
+    head = _hooked(_sim_container(), "leg-thead")[0]
+    txt = _labels(head)
+    for cap in ("SIDE", "QTY", "EXPIRY", "STRIKE", "TYPE"):
         assert cap in txt, cap
 
 
-def test_simulator_keeps_the_default_navy_card_palette():
-    """No ``tokens`` — the Simulator stays app-wide dark navy. This is the
-    regression that would otherwise be invisible: a later Calculator restyle
-    must not repaint this page, so the assertion is against
-    ``DEFAULT_CARD_TOKENS`` (and the absence of the CALC_* language), not
+def test_simulator_keeps_the_default_navy_palette():
+    """No ``tokens`` — the Simulator stays app-wide dark navy. The assertion is
+    against the shared defaults (and the absence of the CALC_* language), not
     against whatever the Calculator happens to use today."""
+    from pages.options import entry_panel as EP
     from pages.options import leg_editor as LE
     from pages.options import theme
 
-    cards = _leg_cards(_sim_container())
-    for tok in ("frame", "accent_short"):        # PCS leg 1 is the short put
-        for cls in LE.DEFAULT_CARD_TOKENS[tok].split():
-            assert cls in cards[0]._classes, cls
-    for cls in LE.DEFAULT_CARD_TOKENS["accent_long"].split():
-        assert cls in cards[1]._classes, cls     # leg 2 is the long put
-    # Nothing on the card may come from the Calculator's vocabulary that is not
-    # ALREADY part of the shared default. Subtracting the defaults (rather than
-    # hand-listing the overlap) keeps this honest when the two languages happen
-    # to agree — ``CALC_EDGE_POS`` and the navy ``accent_short`` are the same
-    # green today, and that coincidence is not a palette leak.
-    shared = {c for v in LE.DEFAULT_CARD_TOKENS.values() for c in v.split()}
+    container = _sim_container()
+    rows = _leg_rows(container)
+    for cls in LE.DEFAULT_CARD_TOKENS["frame"].split():
+        assert cls in rows[0]._classes, cls
+    for cls in LE.DEFAULT_CARD_TOKENS["side_short"].split():      # PCS leg 1 sells
+        assert cls in _hooked(container, "leg-side")[0]._classes, cls
+    panel = _hooked(container, "entry-panel")[0]
+    for cls in EP.DEFAULT_PANEL_TOKENS["frame"].split():
+        assert cls in panel._classes, cls
+    shared = ({c for v in LE.DEFAULT_CARD_TOKENS.values() for c in v.split()}
+              | {c for v in EP.DEFAULT_PANEL_TOKENS.values() for c in v.split()})
     calc = {c for name in dir(theme) if name.startswith("CALC_")
             for c in str(getattr(theme, name)).split()
             if c.startswith(("bg-[", "text-[", "border-[", "border-l-["))}
-    on_card = {c for card in cards for c in card._classes}
+    on_page = {c for e in container.descendants() for c in e._classes}
     assert calc, "no CALC_* palette found to compare against"
     for cls in calc - shared:
-        assert cls not in on_card, cls
+        assert cls not in on_page, cls
 
 
-def test_simulator_cards_have_no_premium_cell():
-    """``show_premium=False`` survives the switch — the simulator prices each leg
-    off the chain's IV, so a manual premium input would be a lie. The PREMIUM
-    track is COLLAPSED, not left as a hole, so DELTA keeps its own caption."""
+def test_simulator_table_has_no_price_column():
+    """``show_premium=False`` survives: the simulator prices each leg off the
+    chain's IV, so a typed premium would be a lie. The PRICE track collapses."""
     from nicegui import ui
     from pages.options import leg_editor as LE
 
-    card = _leg_cards(_sim_container())[0]
-    assert "PREMIUM" not in _labels(card)
-    assert len([e for e in card.descendants() if isinstance(e, ui.number)]) == 1  # qty only
-    # With no premium AND no delta source this page renders the 2-track row:
-    # STRIKE + QTY, both captions over their own cell.
-    grids = [c for e in card.descendants() for c in e._classes if c.startswith("grid-cols-")]
-    want = [c for c in LE._CARD_ROW2_COLS_MINIMAL.split() if c.startswith("grid-cols-")][0]
-    assert want in grids
-    for other in (LE._CARD_ROW2_COLS, LE._CARD_ROW2_COLS_NO_PREMIUM,
-                  LE._CARD_ROW2_COLS_NO_DELTA):
-        assert [c for c in other.split() if c.startswith("grid-cols-")][0] not in grids
+    container = _sim_container()
+    assert "PRICE" not in _labels(_hooked(container, "leg-thead")[0])
+    row = _leg_rows(container)[0]
+    assert not _hooked(row, "leg-price")
+    assert len([e for e in row.descendants() if isinstance(e, ui.number)]) == 1  # qty only
+    want = [c for c in LE._TABLE_GRIDS[(False, True)].split() if c.startswith("grid-cols-")]
+    assert want[0] in row._classes
 
 
-def test_simulator_shows_no_delta_cell_at_all():
-    """``sim_meta`` is spot/expiries/strikes with no greeks and the service keeps
-    the ChainSnapshot in-process, so this page can NEVER read a delta. It passes
-    no ``delta_for``, and the card drops the cell rather than captioning a column
-    of em-dashes that reads as broken. Certainly never a confident 0.00."""
-    card = _leg_cards(_sim_container())[0]
-    txt = _labels(card)
-    assert "DELTA" not in txt
-    assert "\u2014" not in txt
-    assert "+0.00" not in txt and "-0.00" not in txt
+def test_simulator_delta_is_an_em_dash_until_the_chain_lands_then_the_chains():
+    """The grid's chain (``options:sim_chain``, from the SAME fetch as the
+    snapshot) is the delta source. Before it lands the cell is an em-dash —
+    never a confident 0.00."""
+    import asyncio
+
+    import bus_client
+    container = _sim_container()
+    deltas = [e.text for e in _hooked(container, "leg-delta")]
+    assert deltas and all(t == "\u2014" for t in deltas)
+    assert not [t for t in deltas if t in ("+0.00", "-0.00")]
+
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain(delta=-0.31))
+    _fire(container, "_poll_meta")
+    _run_async(container, "_poll_chain", asyncio)
+    deltas = [e.text for e in _hooked(container, "leg-delta")]
+    assert "+0.31" in deltas and "-0.31" in deltas     # the short put inverts
+
+
+def _run_async(container, name, asyncio):
+    from nicegui import ui
+    timers = [e for e in container.descendants()
+              if isinstance(e, ui.timer) and getattr(e.callback, "__name__", "") == name]
+    assert timers, f"no {name} timer mounted"
+    result = timers[0].callback()
+    if asyncio.iscoroutine(result):
+        asyncio.new_event_loop().run_until_complete(result)
+
+
+def test_a_sim_chain_for_another_symbol_is_not_painted():
+    import asyncio
+
+    import bus_client
+    container = _sim_container()
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    _fire(container, "_poll_meta")
+    other = _sim_chain()
+    other["symbol"] = "QQQ"
+    bus_client.bus().cache_set("cache:options:sim_chain", other)
+    _run_async(container, "_poll_chain", asyncio)
+    assert not _hooked(container, "entry-grow")
+    assert "Load a symbol to see its chain." in _labels(container)
+
+
+def test_a_grid_click_adds_a_leg_and_prices_the_new_position():
+    import asyncio
+
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain())
+    _fire(container, "_poll_meta")
+    _run_async(container, "_poll_chain", asyncio)
+    asks = _hooked(container, "entry-call-ask")
+    strikes = [float(e.text) for e in _hooked(container, "entry-strike")]
+    _fire_click_on(asks[strikes.index(455.0)])
+    assert len(_leg_rows(container)) == 3
+    legs = _last_command("sim_run")["args"]["legs"]
+    assert {"kind": "call", "strike": 455.0, "expiry": "2026-06-26",
+            "side": "long", "qty": 1} in legs
+
+
+def _fire_click_on(el):
+    for listener in list(el._event_listeners.values()):
+        if listener.type == "click":
+            listener.handler(None)
+
+
+def test_an_expiry_pill_moves_every_leg():
+    import asyncio
+
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain())
+    _fire(container, "_poll_meta")
+    _run_async(container, "_poll_chain", asyncio)
+    pills = _hooked(container, "entry-expiry")
+    assert [p.text.split(" · ")[0] for p in pills] == ["Jun 26", "Jul 3"]
+    _fire_click_on(pills[1])
+    legs = _last_command("sim_run")["args"]["legs"]
+    assert {l["expiry"] for l in legs} == {"2026-07-03"}
 
 
 def test_simulator_floors_the_leg_count_at_one():
     """``min_legs`` is left at the default 1. Both removes are live at the seeded
-    two legs (today's behaviour); the LAST leg locks — a zero-leg simulator
-    enqueues nothing (``_current_params`` returns None) and silently freezes the
-    charts on a stale sweep, which is worse than a disabled ✕ with a tooltip."""
+    two legs; the LAST leg locks — a zero-leg simulator enqueues nothing
+    (``_current_params`` returns None) and silently freezes the charts on a stale
+    sweep, which is worse than a disabled remove with a tooltip."""
     container = _sim_container()
     removes = [b for b in _sim_buttons(container) if "leg-remove" in b._classes]
     assert len(removes) == 2 and all(b.enabled for b in removes)
@@ -384,23 +466,13 @@ def test_simulator_floors_the_leg_count_at_one():
     assert len(left) == 1 and not left[0].enabled
 
 
-def test_simulator_card_footer_offers_add_leg_and_no_reset():
+def test_simulator_legs_footer_offers_add_leg_and_no_reset():
     """``on_reset`` stays None: the strategy picker already re-seeds the template
     on every pick, so a RESET TO TEMPLATE button would be a second control for
     the same act — a Calculator affordance, not one this page asked for."""
     labels = [b.text for b in _sim_buttons(_sim_container())]
     assert "ADD LEG" in labels
     assert "RESET TO TEMPLATE" not in labels
-
-
-def test_simulator_card_is_width_capped_in_its_flex_grow_column():
-    """The legs column is ``flex-grow min-w-[340px]`` - on a desktop that is
-    ~800px, and an uncapped ``w-full`` card would stretch its two ``fr`` tracks
-    to ~700px each. The cap lives on the card itself (see leg_editor), so this
-    asserts it actually arrives on the mounted page."""
-    from pages.options import leg_editor as LE
-    for card in _leg_cards(_sim_container()):
-        assert LE._CARD_MAX_W in card._classes
 
 
 def test_replay_pnl_panel_is_green_above_zero_and_red_below():
@@ -482,10 +554,12 @@ def _last_command(kind):
     return None
 
 
-def test_the_load_button_says_load_chain():
+def test_the_reload_button_says_refresh():
+    # The panel's REFRESH replaced "Load chain": Enter or tab-out on the ticker
+    # is the load, and this re-pulls the same symbol.
     labels = [b.text for b in _sim_buttons(_render_cold())]
-    assert "Load chain" in labels
-    assert "Fetch snapshot" not in labels
+    assert "REFRESH" in labels
+    assert "Load chain" not in labels and "Fetch snapshot" not in labels
 
 
 def test_six_position_tiles_mount_as_em_dashes_before_any_price():
@@ -535,8 +609,6 @@ def test_meta_arrival_fits_the_days_slider_and_offers_snaps():
     snaps = [b.text for e in container.descendants() if "sim-snaps" in e._classes
              for b in e.descendants() if isinstance(b, ui.button)]
     assert snaps == ["Now", "Halfway", "Expiry"]
-    expiry_all = next(e for e in container.descendants() if "sim-expiry-all" in e._classes)
-    assert list(expiry_all.options) == _future_meta()["expiries"]
     edited = next(e for e in container.descendants() if "sim-edited" in e._classes)
     assert edited.visible is False                # the template, untouched
 
@@ -673,7 +745,7 @@ def test_a_calculator_handoff_names_its_strategy_and_raises_no_edited_chip():
     bus_client.bus().cache_set("cache:options:sim_meta", meta)
     _fire(container, "_poll_meta")
     assert _visible(container, "sim-edited") is False
-    assert len(_leg_cards(container)) == 4
+    assert len(_leg_rows(container)) == 4
 
 
 def test_whatif_tooltip_shows_two_decimals_and_a_leading_minus():

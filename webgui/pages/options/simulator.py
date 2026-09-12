@@ -9,10 +9,12 @@ computed **sweep rows**.
 
 Interaction model:
 
-* **Load chain** → enqueue ``sim_fetch``; a version-poll on
-  ``options:sim_meta`` populates the **leg editor** (the shared multi-leg editor
-  from ``pages.options.leg_editor``) — its per-leg expiry/strike selects pull
-  from the cached meta.
+* **Enter / tab out / Refresh** on the shared entry panel's ticker → enqueue
+  ``sim_fetch``; a version-poll on ``options:sim_meta`` populates the **leg
+  table** (``pages.options.leg_editor``, ``layout="table"``) — its expiry and
+  strike choices pull from the cached meta — and one on ``options:sim_chain``
+  paints the **chain grid** from the same fetch. Clicking a Bid in the grid adds
+  a short leg, an Ask a long one; a pill on the expiry strip moves every leg.
 * Picking a **strategy** (the dropdown) or any **leg edit** (add/remove/type/
   side/strike/expiry/qty) → enqueue both ``sim_run`` + ``sim_replay`` with the
   current legs (discrete, immediate); a version-poll on ``options:sim_result`` /
@@ -44,7 +46,7 @@ from pages.ui_guard import guard
 from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
 # pages never drift).
-from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, BTN_PRIMARY, LABEL,
+from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, LABEL,
                     MUTED, TXT_POS, TXT_NEG, TXT_WARN)
 from . import page_state as _ps
 
@@ -288,14 +290,20 @@ def replay_figure(trace, cursor=None):
 
 
 def render():
-    """Simulator page: chain load + strategy/leg editor + position tiles +
-    Replay / What-if / IV-shock tabs."""
+    """Simulator page: the shared entry panel (chain grid + leg table) +
+    position tiles + Replay / What-if / IV-shock tabs."""
+    from nicegui import run
+
+    from pages.ui_guard import guard_async
+
+    from . import entry as _entry
+    from . import entry_panel
     from . import handoff
     from . import leg_editor
     from . import strategies
-    from . import strategy_menu
     from . import overlay as _overlay
     from . import sim_view as sv
+    from .chain_grid import leg_delta
 
     ui.add_css(QUASAR_INTERNAL_CSS)
 
@@ -307,6 +315,9 @@ def render():
         "meta": None,        # last sim_meta payload (selector source)
         "result": None,      # last sim_result payload (sweep rows)
         "meta_ver": None,    # last-seen sim_meta cache version
+        "chain": None,       # the thinned chain from the same fetch (the grid)
+        "chain_ver": None,   # last-seen sim_chain cache version
+        "chain_fetching": False,  # in-flight guard for the off-loop chain read
         "result_ver": None,  # last-seen sim_result cache version
         "pending": None,     # latest sim_run params awaiting the debounce flush
         "replay": None,      # last sim_replay payload (price/Greek trace)
@@ -351,57 +362,49 @@ def render():
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-3"):
         # No page title — the tab strip names the page (2026-07-11 cleanup).
 
-        # One card, three columns (2026-09-11): the symbol controls; the strategy
-        # and its legs; and the POSITION tiles, which fill the width the legs
-        # (capped at 440px) used to leave empty — so the readouts cost no height.
-        # flex-wrap drops the tiles under the legs on a narrow screen.
+        # The shared entry panel (2026-09-12): ticker, expiry strip, and the
+        # chain grid BESIDE the leg table. The Simulator keeps the app-wide navy
+        # (no tokens).
+        # ⚠ The three STOCK structures are excluded here. The Replay and
+        # IV-shock engines price a ``ContractRow`` pulled from the option chain
+        # and have NO share concept, so a covered call selected here would draw
+        # an option-only curve under a frame that said "covered call". The
+        # Calculator is D4's analysis surface.
+        panel = entry_panel.build_entry_panel(
+            strategy_value="PCS", strategy_exclude=strategies.STOCK_STRATEGIES)
+        symbol_in = panel.symbol_in
+        strategy_sel = panel.strategy_sel
+        fetch_btn = panel.refresh_btn
+        status = panel.status_lbl
+        status.text = "Load a symbol to begin."
+        legs_box = panel.legs_box
+        with panel.legs_footer:
+            ui.button("Copy to Calculator", icon="calculate", color=None,
+                      on_click=lambda: handoff.send_to_calculator_legs(
+                          leg_editor.legs_to_payload(
+                              (state.get("meta") or {}).get("symbol")
+                              or symbol_in.value or "",
+                              editor.get_legs(), keep_premium=False))) \
+                .props("no-caps dense").classes(BTN)
+            edited_chip = ui.label(
+                "Edited: these legs no longer match the strategy's shape") \
+                .classes(f"sim-edited {TXT_WARN} text-xs border border-[#5a4a1f] "
+                         "rounded px-2 py-0.5")
+            edited_chip.set_visibility(False)
+            warn_box = ui.column().classes("gap-1 w-full")
+
+        # POSITION tiles, one row under the panel.
         with ui.column().classes(f"{CARD} w-full gap-2"):
-            with ui.row().classes("w-full gap-6 items-start flex-wrap"):
-                with ui.column().classes("gap-3 shrink-0"):
-                    symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
-                    fetch_btn = ui.button("Load chain", icon="download", color=None) \
-                        .props("no-caps").classes(BTN_PRIMARY)
-                    ui.button("Copy to Calculator", icon="calculate", color=None,
-                              on_click=lambda: handoff.send_to_calculator_legs(
-                                  leg_editor.legs_to_payload(
-                                      (state.get("meta") or {}).get("symbol")
-                                      or symbol_in.value or "",
-                                      editor.get_legs(), keep_premium=False))) \
-                        .props("no-caps").classes(BTN)
-                    status = ui.label("Load a symbol to begin.").classes(EYEBROW)
-                # Strategy + legs. ``show_premium=False`` — the simulator prices
-                # each leg from the chain's IV, so no manual premium input.
-                with ui.column().classes("gap-2 w-[440px] max-w-full shrink-0"):
-                    with ui.row().classes("items-end gap-2 w-full no-wrap"):
-                        # ⚠ The three STOCK structures are excluded here. The
-                        # Replay and IV-shock engines price a ``ContractRow``
-                        # pulled from the option chain and have NO share concept,
-                        # so a covered call selected here would draw an
-                        # option-only curve under a frame that said "covered
-                        # call". The Calculator is D4's analysis surface.
-                        strategy_sel = strategy_menu.build_strategy_menu(
-                            value="PCS", classes="w-52", boxed=True,
-                            exclude=strategies.STOCK_STRATEGIES)
-                        # dense, so the box sits level with the boxed strategy trigger
-                        expiry_all = ui.select([], label="Set all legs to") \
-                            .props("dense options-dense").classes("w-40 sim-expiry-all")
-                    edited_chip = ui.label(
-                        "Edited: these legs no longer match the strategy's shape") \
-                        .classes(f"sim-edited {TXT_WARN} text-xs border border-[#5a4a1f] "
-                                 "rounded px-2 py-0.5 self-start")
-                    edited_chip.set_visibility(False)
-                    warn_box = ui.column().classes("gap-1 w-full")
-                    legs_box = ui.column().classes("gap-2 w-full")
-                with ui.column().classes("gap-2 flex-grow min-w-[280px]"):
-                    ui.label("Position").classes(EYEBROW)
-                    with ui.element("div").classes("grid grid-cols-2 2xl:grid-cols-3 gap-2 w-full"):
-                        for t in sv.position_tiles([], None):
-                            with ui.column().classes(f"sim-tile {_TILE} gap-0.5"):
-                                t_lbl = ui.label(t["label"]).classes(EYEBROW)
-                                t_val = ui.label(t["value"]).classes(
-                                    f"{_TILE_VALUE} {_TONE_CLASS['neutral']}")
-                                t_sub = ui.label(t["sub"]).classes(f"{MUTED} text-xs")
-                            tile_refs[t["key"]] = (t_lbl, t_val, t_sub)
+            ui.label("Position").classes(EYEBROW)
+            with ui.element("div").classes(
+                    "grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-2 w-full"):
+                for t in sv.position_tiles([], None):
+                    with ui.column().classes(f"sim-tile {_TILE} gap-0.5"):
+                        t_lbl = ui.label(t["label"]).classes(EYEBROW)
+                        t_val = ui.label(t["value"]).classes(
+                            f"{_TILE_VALUE} {_TONE_CLASS['neutral']}")
+                        t_sub = ui.label(t["sub"]).classes(f"{MUTED} text-xs")
+                    tile_refs[t["key"]] = (t_lbl, t_val, t_sub)
 
         # Chart card: the panels follow the subtabs mounted under the main strip.
         with ui.column().classes(f"{CARD} w-full gap-2"):
@@ -477,20 +480,21 @@ def render():
     def _expiries_for():
         return (state.get("meta") or {}).get("expiries") or []
 
-    # ``layout="card"`` — the shared two-line leg card, in the app-wide dark navy:
-    # NO ``tokens``, so the near-black CALC_* language stays the Calculator's alone.
-    # ``header`` is dropped with it (the card carries its own eyebrow captions), and
-    # no ``delta_for`` is passed — ``sim_meta`` is spot/expiries/strikes with no
-    # greeks, so DELTA reads an em-dash rather than a made-up 0.00.
-    # ``min_legs`` stays at the default 1: a zero-leg simulator enqueues nothing
-    # (``_current_params`` returns None) and silently freezes the charts on the
-    # previous sweep, so the last ✕ is better locked than live. ``on_reset`` stays
-    # None — the strategy picker already re-seeds the template on every pick.
+    # ``layout="table"`` — the shared one-row-per-leg table, in the app-wide dark
+    # navy (NO ``tokens``: the near-black CALC_* language stays the Calculator's).
+    # ``show_premium=False``: the simulator prices each leg off the chain's IV, so
+    # a typed premium would be a lie. DELTA reads the grid's chain — the SAME
+    # fetch the snapshot came from — and an em-dash until it lands, never a
+    # made-up 0.00. ``min_legs`` stays at the default 1: a zero-leg simulator
+    # enqueues nothing (``_current_params`` returns None) and silently freezes the
+    # charts on the previous sweep, so the last remove is better locked than live.
+    # ``on_reset`` stays None — the strategy picker already re-seeds the template.
     editor = leg_editor.build_leg_editor(
         legs_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
         show_premium=False,
         on_change=lambda: (_on_legs_changed(), _capture(), _legs_ui()),
-        layout="card",
+        layout="table",
+        delta_for=lambda leg: leg_delta(state.get("chain"), leg),
         spot_getter=lambda: (state.get("meta") or {}).get("spot") or 0)
 
     # Seed the default template (PCS) so a cold page shows the strategy's legs
@@ -558,7 +562,7 @@ def render():
             _set_tone(val, t["tone"])
 
     def _paint_structure():
-        """The Edited chip, the structure warnings and the Set-all-legs options."""
+        """The Edited chip and the structure warnings."""
         legs = editor.get_legs()
         edited_chip.set_visibility(not sv.matches_template(strategy_sel.value, legs))
         warn_box.clear()
@@ -567,9 +571,6 @@ def render():
                 with ui.row().classes("items-start gap-1 no-wrap sim-warning"):
                     ui.icon("warning").classes(f"{TXT_WARN} text-base")
                     ui.label(w).classes(f"{TXT_WARN} text-xs")
-        exps = _expiries_for()
-        if list(expiry_all.options or []) != list(exps):
-            expiry_all.set_options(list(exps))
 
     def _apply_days_range():
         """Fit the Days slider to the legs: its max is the longest leg's time to its
@@ -810,14 +811,22 @@ def render():
         _request_fetch(show_wait=True)
 
     @guard
-    def _set_all_expiry(e):
-        """Set every leg to one expiry (``leg_editor.apply_expiry`` fires the
-        editor's on_change, which re-runs and repaints), then clear the picker so it
-        reads as an action rather than as a claim about the legs."""
-        if not e.value or state.get("restoring"):
+    def _set_all_expiry(expiry):
+        """An expiry pill → every leg to that expiry (``leg_editor.apply_expiry``
+        fires the editor's on_change, which re-runs and repaints)."""
+        if not expiry or state.get("restoring"):
             return
-        editor.apply_expiry(e.value)
-        expiry_all.set_value(None)
+        editor.apply_expiry(expiry)
+
+    @guard
+    def _add_pick(column, option_type, strike, expiry):
+        """A chain-grid click → a one-contract leg. No price: this page prices
+        every leg off the chain's IV, not off a premium."""
+        editor.add_leg(_entry.leg_from_pick(column, option_type, strike, expiry,
+                                            price=None))
+
+    panel.on_expiry(_set_all_expiry)
+    panel.on_pick(_add_pick)
 
     @guard
     def _reflow_charts():
@@ -840,7 +849,6 @@ def render():
         lambda e: None if state.get("restoring")
         else (editor.apply_template(strategy_sel.value), _on_legs_changed(), _capture(),
               _legs_ui()))
-    expiry_all.on_value_change(_set_all_expiry)
     # ΔS is client-side only (overlay) — re-render, never enqueue.
     ds_slider.on_value_change(lambda e: (_render_figures(), _capture()))
     # Δt + IV-mult drive the sweep → debounced enqueue.
@@ -873,6 +881,7 @@ def render():
             editor.apply_template(strategy_sel.value)
         else:
             editor.refresh_options()
+        _paint_chain()
         if meta:
             spot = meta.get("spot")
             spot_txt = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "—"
@@ -883,6 +892,34 @@ def render():
             _enqueue_run()
             _enqueue_replay()
         _legs_ui()
+
+    def _chain_for_screen():
+        """The grid's chain, only when it belongs to the symbol on screen — a
+        fetch for another symbol landing late must not paint under this one."""
+        payload = state.get("chain_payload") or {}
+        sym = (payload.get("symbol") or "").upper()
+        return payload.get("chain") if sym and sym == _sym() else None
+
+    def _paint_chain():
+        state["chain"] = _chain_for_screen()
+        spot = (state.get("meta") or {}).get("spot")
+        panel.set_chain(state["chain"], spot)
+        editor.refresh_options()        # the DELTA column reads the chain
+
+    @guard_async
+    async def _poll_chain():
+        # The :ver probe stays on the event loop (cheap); the chain payload is
+        # read OFF the loop, the Calculator's _poll_chain shape.
+        version = bus_client.read_version("options:sim_chain")
+        if version == state["chain_ver"] or state.get("chain_fetching"):
+            return
+        state["chain_ver"] = version
+        state["chain_fetching"] = True
+        try:
+            state["chain_payload"] = await run.io_bound(bus_client.read, "options:sim_chain")
+        finally:
+            state["chain_fetching"] = False
+        _paint_chain()
 
     @guard
     def _poll_meta():
@@ -925,8 +962,10 @@ def render():
     _sync_scrubber()
     _render_replay()
     state["meta_ver"] = bus_client.read_version("options:sim_meta")
+    state["chain_ver"] = bus_client.read_version("options:sim_chain")
 
     ui.timer(2.0, _poll_meta)
+    ui.timer(1.0, _poll_chain)
     ui.timer(2.0, _poll_result)
     ui.timer(2.0, _poll_replay)
     ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps
