@@ -17,7 +17,11 @@ from repo_paths import SCANNER_TOML
 from shared.config_toml import toml_loader
 
 DEFAULTS = {
-    "iv_rank": {"0-DTE": 35, "SWING": 30},
+    # Selling floors. INCOME matches SWING deliberately - see config/scanner.toml.
+    "iv_rank": {"0-DTE": 35, "SWING": 30, "INCOME": 30},
+    # Buying ceilings, all OFF (0). Mechanism shipped, gate disabled: this app has
+    # no long-premium outcome data to set a level from. See max_iv_rank().
+    "iv_rank_ceiling": {"0-DTE": 0, "SWING": 0, "INCOME": 0},
     "credit": {
         "swing": 0.12,
         "zero_dte": {"LOW": 0.08, "NORMAL": 0.12, "ELEVATED": 0.15, "HIGH": 0.20},
@@ -56,9 +60,36 @@ def _section(name):
 
 
 def min_iv_rank() -> dict:
-    """``{"0-DTE": int, "SWING": int}`` - the shape scanner_engine expects."""
+    """``{"0-DTE": int, "SWING": int, "INCOME": int}`` - selling floors.
+
+    ⚠ **Closed over ``DEFAULTS["iv_rank"]``**, so a trade type added to the TOML
+    alone is SILENTLY DROPPED. That is deliberate — it makes a typo'd key a
+    no-op rather than a phantom floor — but it means adding a surface takes both
+    halves. ``test_vol_gate.py`` pins it, because the failure mode is a scan that
+    reads as gated and never gates: ``INCOME`` was exactly that until 2026-09-12,
+    since ``income_scan`` passes ``trade_type="INCOME"`` and
+    ``MIN_IV_RANK.get(trade_type, 0)`` answered 0.
+    """
     sec = _section("iv_rank")
     return {k: sec.get(k, DEFAULTS["iv_rank"][k]) for k in DEFAULTS["iv_rank"]}
+
+
+def max_iv_rank() -> dict:
+    """Buying CEILINGS, per trade type - refuse LONG premium above this IV rank.
+
+    The mirror of :func:`min_iv_rank`, and **0 means off** (see
+    ``shared.vol_gate.blocks``), which is how every entry ships. There is no
+    long-premium outcome data in this app — ``signals.db`` holds only PCS, CCS and
+    IC — so a level here would be invention rather than measurement. The natural
+    setting is 65, ``strategy_scoring.infer_market_view``'s own "high" boundary
+    and the mirror of the floor's 35 being its "low" one; the TOML says so.
+
+    Keyed on the same trade types as the floors on purpose: a type carried by one
+    accessor and not the other is how one surface silently loses half the gate.
+    """
+    sec = _section("iv_rank_ceiling")
+    return {k: sec.get(k, DEFAULTS["iv_rank_ceiling"][k])
+            for k in DEFAULTS["iv_rank_ceiling"]}
 
 
 def min_credit_pct() -> dict:

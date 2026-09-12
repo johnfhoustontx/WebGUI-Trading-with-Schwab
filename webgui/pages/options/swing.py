@@ -43,6 +43,18 @@ def status_text(payload, n_rows):
     empty table. Naming the drop count separates that from "the scan found
     nothing" — otherwise a bare "0 swing signals." reads as a broken scan. The
     note is omitted when nothing was dropped, so a clean scan stays quiet.
+
+    ⚠ **Two drops, two sentences, and they must not be merged.** The volatility
+    gate (gap assessment B2) refuses to SELL premium when the symbol's IV rank
+    sits below the floor — a statement about today's environment, not about the
+    candidate — so borrowing "below the quality bar" for it would print something
+    untrue on exactly the scan where the reader most needs the real reason: on a
+    low-IV symbol every short-premium row goes at once, and the long-premium rows
+    that remain are the ones the gate deliberately kept.
+
+    ``vol_filtered`` is read with the same ``or 0`` as its sibling, so a payload
+    written before the field existed — Redis persists this view across a service
+    restart — renders exactly as it used to.
     """
     if not payload:
         return ""
@@ -50,6 +62,9 @@ def status_text(payload, n_rows):
     dropped = (payload or {}).get("filtered_out") or 0
     if dropped:
         line += f" {dropped} below the quality bar."
+    vol_dropped = (payload or {}).get("vol_filtered") or 0
+    if vol_dropped:
+        line += f" {vol_dropped} where premium is too cheap to sell."
     return line
 
 

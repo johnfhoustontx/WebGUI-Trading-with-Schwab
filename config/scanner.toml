@@ -15,11 +15,45 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 [iv_rank]
-# Hard pre-filter: reject a candidate below this IV Rank. Selling cheap premium
-# is destructive, so this binds only on low-IV days — most days sit well above.
-# 2026-06-11 quality retune raised 0-DTE 25 -> 35 and SWING 20 -> 30.
+# Hard pre-filter: reject a SHORT-PREMIUM candidate below this IV Rank. Selling
+# cheap premium is destructive, so this binds only on low-IV days — most days sit
+# well above. 2026-06-11 quality retune raised 0-DTE 25 -> 35 and SWING 20 -> 30.
+#
+# ⚠ Measured over 910 closed captured signals on prod (2026-09-12), these levels
+#   sit BELOW where the edge starts. Mean R by entry IV rank: 0-39 -0.149 |
+#   40-44 -0.151 | 45-49 +0.015 | 55-69 +0.239 | 85-100 +0.266, and win rate
+#   goes 24% -> 81% across the same span. Raising all three to 45 is the measured
+#   optimum on total R (it cuts 94 of 910 trades worth -14.1R and keeps +199.9R);
+#   55 gives that gain back, so tighter is NOT better past ~50. Left at 35/30
+#   because a ~10% cut to every signal the app emits is an operator decision, not
+#   a drive-by. See docs/plans/2026-09-12-volatility-gate-design.md, which also
+#   records the two honest weaknesses (ORCL + UAL are 75 of the 139 trades below
+#   50, and the 5-point grid is not monotone).
+#
+# ⚠ A key added HERE alone is silently dropped — shared/scanner_config.py's
+#   min_iv_rank() is closed over its own DEFAULTS. Add a trade type to both.
 "0-DTE" = 35
 SWING   = 30
+# The 30-45 DTE income window, ungated until 2026-09-12 (gap assessment B2).
+# 30 matches SWING on purpose: the same rule the rest of the app already lives
+# under, rather than a third number. Measured before shipping it, the live board
+# offered IREN PCS at IV rank 0.1 as its TOP-ranked idea and CRWV at 15.3 — this
+# floor cuts both and keeps the two SPY rows at 34.9.
+INCOME  = 30
+
+[iv_rank_ceiling]
+# The mirror: reject a LONG-PREMIUM candidate ABOVE this IV Rank — don't buy
+# expensive volatility. 0 means OFF, and every entry ships off.
+#
+# Not a level this repo can justify yet: signals.db holds only PCS, CCS and IC, so
+# there is NO long-premium outcome data to set one from, and switching on a gate
+# that refuses trades without measuring it is the mistake this audit keeps
+# catching. When you do set one, 65 is the natural value — it is not a new number
+# but strategy_scoring.infer_market_view's own "high" boundary, the mirror of the
+# floor's 35 being its "low" one.
+"0-DTE" = 0
+SWING   = 0
+INCOME  = 0
 
 [credit]
 # Minimum credit as a fraction of spread width, adaptive by VIX regime: when IV

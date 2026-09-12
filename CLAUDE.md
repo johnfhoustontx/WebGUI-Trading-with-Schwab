@@ -1434,6 +1434,7 @@ relocates it.
 | **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders, plus `[structures.*]`, the PER-STRUCTURE overlay on all of them | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
 | **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
+| **`config/sectors.toml`** | symbol → GICS sector, behind the paper engine's SECTOR cap. A file because nothing here derives a sector, and the workbook that existed covered 48 of 80 watchlist names | `shared/sectors.py`, read by `options-scanner/paper_concentration.py` |
 
 Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
@@ -2171,7 +2172,7 @@ invisible when wrong:
   `reset_account` therefore clears `equity_lots` too, or the next session opens
   claiming committed capital the account no longer has.
 
-## The paper engine's risk envelope has FOUR rungs, not two
+## The paper engine's risk envelope has SIX rungs, not two
 
 `config_paper.py` held only `MAX_RISK_PER_TRADE` (one trade) and
 `MAX_SESSION_DRAWDOWN` (the account), so a book could be **entirely one name**
@@ -2220,6 +2221,55 @@ trace. Check the journal before assuming the engine is stuck.
 The risk sum goes through **`shared.driver_policy.open_risk_dollars`** rather
 than a local `sum(...)` — a NaN total makes every `>` False and silently
 switches the ceiling off, the documented pins-the-bound trap.
+
+**The SIXTH rung is the SECTOR cap** (`MAX_POSITIONS_PER_SECTOR` 5 /
+`MAX_RISK_PER_SECTOR` $1,500, grouped by `config/sectors.toml` through
+`shared/sectors.py`). Four DIFFERENT semiconductors at the full symbol cap breach
+nothing above it, and that is the correlated book the playbook warns about.
+Measured before it was built: the **driver's** book once held **$21,531 across 15
+Information Technology positions — 86% of a $25,000 account in one sector** — and
+$15,018 across nine INDEX positions; the manual book peaked at $3,569 across 19
+IT positions. A $1,500 cap would have bound on 20 of 46 manual trading days and
+35 of 40 driver ones. $1,500 is two symbols at the full symbol cap and ~31% of the
+deployment ceiling, so filling the book needs four sectors; it sits strictly
+between the rungs either side, which is the test of whether a rung exists at all.
+
+**The premise was measured, not assumed** — two of this audit's rationales have
+already failed that way. Across six months of daily returns on the tradeable
+watchlist, mean pairwise correlation is **0.250 within** a sector against **0.017
+across**, 14 of the 15 most-correlated pairs share one, and the top decile of
+correlated pairs is 63% same-sector against a 21% base rate. ⚠ The grouping is
+weakest where the book concentrates: **Information Technology is 30 of the 74
+tradeable names at only 0.240 internal correlation**, because it holds IBM and TXN
+beside IONQ/RGTI (0.939) and CRWV/NBIS (0.838) — so it under-controls the
+AI-datacenter cluster, which is an argument for the tight end, not for a different
+taxonomy. ⚠ **Indices are a BUCKET, not an exemption**, and that is measured too:
+SPY/QQQ/DIA/IWM correlate **0.799** pairwise, the second-tightest group after
+Energy, so they share one `INDEX` bucket.
+
+⚠ **`config/sectors.toml` exists because both data sources the assessment
+proposed fail.** `config/symbols.toml`'s `sectors` is the SPDR ETF collection
+list, not a map; and `sentiment-dashboard/sectors_ref.py`'s workbook covers **48
+of 80 watchlist symbols**, missing MU, AMAT, MRVL, INTC, TXN, ALAB, SMCI, DELL and
+SPCX — *the semiconductors the cap is for* — so **181 of 273 historical paper
+positions (66%) were on symbols it had never heard of**. It also lists 20 symbols
+under two sectors, where TOML would silently keep the last. The new map is
+hand-maintained (nothing here derives a sector, and Schwab returns a description,
+not a classification), so the safety is structural rather than a promise:
+**`shared.sectors.group_key` gives an unmapped symbol a bucket of its OWN**
+(`"?<SYMBOL>"`), which means a new name is capped exactly as before by the tighter
+per-symbol rungs and can neither borrow another sector's allowance nor drag
+unrelated names into one — and `paper_engine._log_capped` prints the bucket, so a
+`?` in the journal is the map saying it does not know that name. `sector_of` is
+injected into `concentration_reject` (defaulting to the real map) so the decision
+stays pure; a lookup that RAISES degrades to "no grouping", never to a refusal.
+
+⚠ **The DRIVER's book is not covered, and its numbers are the worse ones.** It
+opens through `compute.open_driver_position`, which re-checks structure, defined
+risk, `max_concurrent` and `daily_risk_budget` — not `concentration_reject`, which
+lives in a module `driver_svc` policy cannot reach. Extending the cap there is a
+change to a second service's envelope with its own measurement. Design:
+[the B4 doc](docs/plans/2026-09-12-sector-cap-design.md).
 
 ## ⚠ The "0-DTE" bucket spans DTE 0..4 — the name is a WINDOW LABEL, not a DTE
 
@@ -2410,6 +2460,69 @@ exit would be expiry while the app's own policy closes it at 21 DTE in profit �
 the calibration would then measure a hold-to-expiry policy the manage cycle never
 executes. `TARGET_HIT` stays out: on the lifecycle path +50% arms break-even and
 holds, so that code cannot arise there.
+
+## Selling premium has a volatility FLOOR, and it keys on vega, not on a name
+
+**`shared/vol_gate.blocks(iv_rank, net_vega, floor, ceiling)`** is the one
+predicate: a `floor` refuses SHORT premium below it, a `ceiling` refuses LONG
+premium above it, and the bounds come from `config/scanner.toml` `[iv_rank]` /
+`[iv_rank_ceiling]` through `shared.scanner_config`. Until 2026-09-12 the floor
+lived in `run_full_scan` alone, over `signals_0dte` and `signals_swing`, so three
+premium-selling surfaces had none: the Market Scanner's **Directional** tab
+(naked shorts), the **Strategy Finder**, and the **Income Window** — whose
+`trade_type="INCOME"` had no key at all, so even a keyed lookup answered 0.
+
+⚠ **It keys on the candidate's own VEGA SIGN, never on its structure name**,
+because every list that needed it is MIXED: Directional carries `SHORT_PUT` /
+`SHORT_CALL` beside `LONG_CALL` / `LONG_PUT`, and the Strategy Finder carries
+debit verticals beside credit spreads. Cheap volatility is exactly when the
+long-premium half is the right trade, so a per-LIST filter would cut hardest
+where it must not cut at all. The Market Scanner's two credit-spread lists keep
+their existing whole-list filter — those are uniformly short premium, so the
+per-signal form would be the same answer at more cost.
+
+**Three absence rules, and each is the actual content of the function.** A
+missing `iv_rank` (`iv_analysis` returns `None` when HV history is too short) or
+a missing `net_vega` **skips** the gate — a bound cannot be enforced against an
+unknown, and an outage must degrade to ungated rather than to refused. A vega of
+**exactly zero is neither side**, so a vega-neutral structure is not handed the
+ceiling by a rounding sign (note `-0.0 < 0` is False, so the two spellings of
+zero would not even agree). And **`0` means OFF for both bounds, not "a bound at
+zero"** — an IV rank of 0.0 is a real reading, so a floor of 0 must not be the
+thing that refuses it; that is what lets the ceiling ship as all-zero.
+
+**The levels, and why only one moved.** `INCOME = 30` matches SWING — the rule
+the rest of the app already lives under, which is what makes it additive.
+⚠ **The existing 35 / 30 are measurably too LOW and were deliberately left
+alone.** Over 910 closed captured signals on prod, mean R by entry IV rank runs
+**0–39 −0.149 · 40–44 −0.151 · 45–49 +0.015 · 55–69 +0.239 · 85–100 +0.266**,
+with the win rate going 24% → 81%; a floor at **45** is the optimum on total R
+(cutting 94 trades worth −14.1R while keeping +199.9R) and 55 gives the gain
+back. The effect survives a control for `entry_score` — within every score
+tercile the low band is far worse — so it is **not the composite in disguise**,
+and the composite's own `iv` factor does not capture it. Raising all three is a
+~10% cut to every signal the app emits, so it is the operator's call, in the same
+class as `MAX_RISK_PER_TRADE`. ⚠ Two honest weaknesses before anyone acts on it:
+**ORCL and UAL are 75 of the 139 trades below 50**, and excluding them the rest
+of that band is +0.042 rather than negative; and the 5-point grid is not monotone
+(50–54 measures +0.484 on n=26).
+
+**The ceiling ships OFF, and that is a decision, not an oversight.** There is no
+long-premium outcome data in this app — `signals.db` holds only PCS, CCS and IC —
+so a level would be invention. When one is wanted, **65** is the natural value:
+not a new number but `strategy_scoring.infer_market_view`'s own "high" boundary,
+the mirror of the floor's 35 being its "low" one.
+
+⚠ **The drop count is its OWN field (`vol_filtered`), never folded into
+`filtered_out`.** The Strategy Finder renders that one as *"N below the quality
+bar"*, and a volatility drop is a statement about the environment, not about the
+candidate — folding them prints something untrue on exactly the scan where the
+reader most needs the real reason. The Income board sums it across the pass and
+says *"N too cheap to sell"*, because a short board and a quiet tape are
+different facts that the row count cannot tell apart. ⚠ And
+`scanner_config.min_iv_rank()` is **closed over its own `DEFAULTS`**, so a trade
+type added to the TOML alone is silently dropped — both halves, always. Design:
+[the B2 doc](docs/plans/2026-09-12-volatility-gate-design.md).
 
 ## A short-delta band governs the SHORT legs, aims at the midpoint, caps the top
 

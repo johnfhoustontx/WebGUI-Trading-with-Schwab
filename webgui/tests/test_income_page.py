@@ -483,3 +483,38 @@ def test_the_result_view_is_not_the_board_view():
     repaint every reader's table for one reader's button."""
     assert income.OPEN_RESULT_VIEW != income.VIEW
     assert income.OPEN_RESULT_VIEW == "options:income_open"
+
+
+# ── B2: the volatility floor's effect must be visible, not silent ────────────
+
+def test_status_text_says_when_the_volatility_floor_emptied_the_board():
+    """Gap assessment B2. The floor refuses to sell premium below the IV-rank
+    minimum, and on a market-wide low-IV day that can empty the board. Without a
+    sentence naming it, a short board is indistinguishable from a quiet tape —
+    which is the same "invisible refusal" the concentration caps already have and
+    the reason this one gets a line.
+    """
+    line = income.status_text({"candidates": [], "scanned_symbols": 23,
+                               "vol_filtered": 9})
+    assert "Nothing cleared the 30-45 day income window" in line
+    assert "9 too cheap to sell" in line
+
+
+def test_status_text_names_the_volatility_drops_beside_a_partial_board():
+    line = income.status_text({"candidates": [{}, {}], "scanned_symbols": 23,
+                               "vol_filtered": 4})
+    assert "2 candidates across 23 symbols" in line
+    assert "4 too cheap to sell" in line
+
+
+def test_status_text_stays_quiet_when_the_floor_dropped_nothing():
+    line = income.status_text({"candidates": [{}], "scanned_symbols": 3,
+                               "vol_filtered": 0})
+    assert "too cheap" not in line
+
+
+def test_status_text_renders_a_payload_written_before_the_field_existed():
+    """Redis persists this view across a restart."""
+    line = income.status_text({"candidates": [{}], "scanned_symbols": 3})
+    assert "too cheap" not in line
+    assert "1 candidate across 3 symbols" in line

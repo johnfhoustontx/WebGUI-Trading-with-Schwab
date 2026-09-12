@@ -492,3 +492,52 @@ def test_the_income_gate_cannot_skip_the_branches_around_it(monkeypatch):
     assert "rescan" in keys
     assert "analyze" in keys
     assert "market_snapshot" in keys
+
+
+# ── B2: the volatility floor's count reaches the published view ──────────────
+
+def test_publish_income_sums_the_volatility_drops_across_the_watchlist(monkeypatch):
+    """The producer side of the page's "N too cheap to sell" line.
+
+    ⚠ Driven from the PUBLISHER, not from ``status_text``: a consumer-side
+    assertion proves nothing until a test shows the producer actually emits the
+    shape the consumer tests — the exact lesson behind the `signal_band` incident
+    (a correct guard over a payload the service never wrote).
+    """
+    def _scan(sym, **kw):
+        return {"signals": [_row(sym)], "view": {}, "filtered_out": 0,
+                "vol_filtered": {"AAPL": 3, "MSFT": 2, "NVDA": 0}[sym]}
+
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "income_scan", _scan)
+
+    handlers.publish_income(bus, symbols=["AAPL", "MSFT", "NVDA"])
+
+    assert bus.cache_get(handlers.CACHE_INCOME).payload["vol_filtered"] == 5
+
+
+def test_publish_income_reports_zero_when_the_floor_dropped_nothing(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "income_scan", _one_row_each)
+
+    handlers.publish_income(bus, symbols=["AAPL"])
+
+    assert bus.cache_get(handlers.CACHE_INCOME).payload["vol_filtered"] == 0
+
+
+def test_a_failed_symbol_contributes_no_volatility_count(monkeypatch):
+    """A symbol that raised told us nothing about volatility - counting it would
+    read as a refusal where there was an outage. It is already in ``errors``."""
+    def _scan(sym, **kw):
+        if sym == "BAD":
+            raise RuntimeError("chain fetch failed")
+        return {"signals": [], "view": {}, "filtered_out": 0, "vol_filtered": 4}
+
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "income_scan", _scan)
+
+    handlers.publish_income(bus, symbols=["GOOD", "BAD"])
+
+    payload = bus.cache_get(handlers.CACHE_INCOME).payload
+    assert payload["vol_filtered"] == 4
+    assert len(payload["errors"]) == 1

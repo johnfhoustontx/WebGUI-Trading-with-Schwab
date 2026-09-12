@@ -4,6 +4,179 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**The repricer read the underlying's price from a
+key Schwab does not send, and the default was `0` — so a RULE was silently off
+for the life of the file.** Found while measuring B5/B7.)
+
+- `signal_repricer.reprice_swing` and `reprice_legs` both did
+  `(chain.get("underlying") or {}).get("last", 0)`. Schwab sends the spot as
+  **`underlyingPrice`**; `underlying` is a sub-object populated only with
+  `includeUnderlyingQuote=true`, which this app never requests. Measured live: a
+  SPY chain returned `underlying: None` / `underlyingPrice: 764.29`, so the
+  expression hit its **default on every call** — and prod's
+  `signal_marks.current_underlying` is **`0.0` across all 58,895 rows**, while
+  `current_short_delta`, `current_value` and `unrealized_pnl` on the same rows are
+  all populated and `signals.entry_underlying` is populated too.
+- ⚠ **It disabled a rule, not just a display field.**
+  `signal_recommender._recoverable` early-returns on `spot <= 0`, so the
+  `RECOVERY_MIN_CUSHION` deferral — the rule that holds a stop while the short
+  still has room — has been **permanently off** on the captured-signal path. It
+  degraded to "the stop fires", the conservative direction, which is exactly why
+  nothing ever looked wrong. Two UI paths read
+  `rep.get("current_underlying") or row.get("entry_underlying")` and so rendered
+  the **entry** price under a *current* label, and the expiry settlement paid an
+  extra quote call falling through the same `or`.
+- ⚠ **`atm_iv`, in the same module, had already found and fixed this on
+  2026-08-25** — and its comment carries the part worth keeping: the nested
+  `underlying.last` is the **live** quote and is preferred, while
+  `underlyingPrice` is **pinned to the prior close outside RTH**. That fix reached
+  one of three call sites. All three now share **`_chain_spot`**, which carries
+  that precedence, falls through a null or non-positive nested quote, and returns
+  **`None`** rather than 0 for a missing reading — `scanner_engine` defaults a
+  missing `underlyingPrice` to 0 in its own plumbing, so a 0 here means "not
+  read", and a 0 spot is worse than an absent one: it sorts among real prices and
+  compares as below every strike.
+- An **AST guard** fails if any function other than `_chain_spot` reads a spot off
+  a chain again. Written as AST rather than text on purpose: a text grep tripped
+  over the docstrings explaining the bug, and the string-stripping "fix" for that
+  made the assertion vacuous.
+- 9 new tests (`options-scanner/tests/test_repricer_underlying.py`). One of them
+  drives `_recoverable` with a real spot, which is the proof the fix restores a
+  rule rather than a field.
+
+---
+
+**Last updated:** 2026-09-12 (**A sector cap — the paper engine's sixth rung —
+and the map it needs, because both data sources the audit proposed had a hole
+exactly where the cap was for.** Gap assessment **B4**.)
+
+- **The five rungs before this were per trade, per symbol, per expiry and per
+  account**, so four DIFFERENT semiconductors at the full symbol cap breached none
+  of them. Measured on the real books: the **driver's** held **$21,531 across 15
+  Information Technology positions — 86% of a $25,000 account in one sector** —
+  plus $15,018 across nine INDEX positions; the **manual** book peaked at $3,569
+  across 19 IT positions (and $20,312 across 107 Industrials, which was SPCX
+  stacking that `MAX_POSITIONS_PER_SYMBOL` now stops on its own). A $1,500 cap
+  would have bound on **20 of 46** manual trading days and **35 of 40** driver
+  ones.
+- **`MAX_POSITIONS_PER_SECTOR = 5`, `MAX_RISK_PER_SECTOR = $1,500`**, enforced in
+  `paper_concentration.concentration_reject`. $1,500 is two symbols at the full
+  symbol cap and ~31% of the $4,837 deployment ceiling, so filling the book needs
+  four sectors — it sits strictly between the rungs either side, which is the test
+  of whether a rung exists at all. Reported **after** the symbol rungs and
+  **before** expiry: when both bind, "you already hold three MU" is the actionable
+  sentence, while "tech is full" is the answer only once the symbol has room.
+- ⚠ **Both data sources the assessment named were unusable, and the map became the
+  real deliverable.** `config/symbols.toml`'s `sectors` key is the SPDR ETF
+  *collection* list, not a map. The sentiment service's workbook covered **48 of
+  the 80 watchlist symbols** and missed **MU, AMAT, MRVL, INTC, TXN, ALAB, SMCI,
+  DELL and SPCX** — the semiconductors this item's own rationale names — so
+  **181 of 273 historical paper positions (66%) were on symbols it had never heard
+  of**, led by SPCX at 121. It also listed 20 symbols under two sectors, where
+  TOML keeps whichever came last. `config/sectors.toml` now carries 343 symbols
+  (the workbook's 311 seeded, an explicit tie-break for the 20, and the 32 missing
+  ones classified from the proxy's own `/instruments` descriptions) at **80/80**
+  watchlist coverage.
+- ⚠ **The grouping's premise was measured, not assumed**, because two of this
+  audit's rationales have already failed that way. Six months of daily returns
+  across the 73 tradeable names: mean pairwise correlation **0.250 within** a
+  sector against **0.017 across**, 14 of the 15 most-correlated pairs share one,
+  and the top decile of correlated pairs is 63% same-sector against a 21% base
+  rate. The honest weakness: **Information Technology is 30 of the 74 names at
+  only 0.240** internal correlation, holding IBM and TXN beside IONQ/RGTI (0.939)
+  and CRWV/NBIS (0.838) — it under-controls the AI-datacenter cluster, which
+  argued for the tight end rather than for inventing a theme taxonomy.
+- ⚠ **Indices are a bucket, not an exemption** — also measured. SPY/QQQ/DIA/IWM
+  correlate **0.799** pairwise, the second-tightest group in the universe after
+  Energy (0.846). Nine simultaneous index positions is one market bet, and the
+  driver book held nine.
+- **An unmapped symbol gets a bucket of its OWN** (`"?<SYMBOL>"`), never a shared
+  "unknown" pool: a new watchlist name stays capped exactly as before by the
+  tighter per-symbol rungs, cannot borrow another sector's allowance, and cannot
+  drag unrelated names together. `paper_engine._log_capped` prints the bucket, so a
+  `?` in the journal is the map saying out loud that it does not know that name —
+  the map's coverage gap surfaces without a second counter. `sector_of` is injected
+  into `concentration_reject` (defaulting to the real map) so the decision stays
+  pure, and a lookup that RAISES degrades to "no grouping", never to a refusal.
+- ⚠ **The DRIVER's book is NOT covered, and its numbers are the worse ones.** It
+  opens through `compute.open_driver_position`, which re-checks structure, defined
+  risk, `max_concurrent` and `daily_risk_budget` — not `concentration_reject`,
+  which lives in a module `driver_svc` policy cannot reach. Extending the cap
+  there is a change to a second service's envelope with its own measurement, on a
+  driver already armed and down 46.6%. Recorded as a finding, not bundled.
+- Design: [`docs/plans/2026-09-12-sector-cap-design.md`](plans/2026-09-12-sector-cap-design.md).
+  48 new tests (`shared/tests/test_sectors.py`,
+  `options-scanner/tests/test_sector_cap.py`). No existing assertion changed.
+
+---
+
+**Last updated:** 2026-09-12 (**The volatility floor now applies wherever premium
+is sold — and measuring it found the floor's LEVEL is set well below where the
+edge starts.** Gap assessment **B2**.)
+
+- **Three premium-selling surfaces had no volatility floor at all.**
+  `MIN_IV_RANK` was applied in `run_full_scan` over `signals_0dte` and
+  `signals_swing` only, so the Market Scanner's **Directional** tab (naked
+  shorts), the **Strategy Finder** and the **Income Window** sold premium at any
+  volatility. The Income Window was the worst of it, and not marginally:
+  measured on the live board, its **top-ranked** candidate was an IREN put credit
+  spread at an IV rank of **0.1**, with CRWV at 15.3 in fifth and four of five
+  rows below the SWING floor of 30. It ranked first because volatility reaches
+  that board only through `fit_vol`, weighted `0.3 × 0.4` = **12%** of the
+  composite — real, and nowhere near a refusal.
+- **`shared/vol_gate.py` is the one predicate, and it keys on the candidate's own
+  VEGA SIGN rather than on its structure name.** Every list that needed the gate
+  is mixed — naked shorts beside long options, debit verticals beside credit
+  spreads — and cheap volatility is precisely when the long-premium half is the
+  right trade, so a per-list filter would have cut hardest where it must not cut.
+  Three absence rules carry the weight: a missing `iv_rank` or `net_vega` skips
+  the gate (an outage must degrade to ungated, never to refused), a vega of
+  exactly zero is neither side, and **0 means OFF for both bounds** — an IV rank
+  of 0.0 is a real reading, so a floor of 0 must not be what refuses it.
+- **`INCOME = 30` shipped; the existing 35 / 30 deliberately did not move.**
+  ⚠ **They are measurably too low.** Over the 910 closed captured signals on prod,
+  mean R by entry IV rank runs **0–39 −0.149 · 40–44 −0.151 · 45–49 +0.015 ·
+  55–69 +0.239 · 85–100 +0.266**, win rate 24% → 81%, `corr = +0.110`. A floor at
+  **45** is the optimum on total R — it cuts 94 trades worth **−14.1R** and keeps
+  **+199.9R** — and 55 gives that gain back, so tighter stops being better past
+  ~50. The effect **survives a control for `entry_score`** (within every tercile
+  the low band is far worse: +0.053 vs +0.343 at the top) and a control for month,
+  so it is not the composite score in disguise and not one bad regime. Raising all
+  three is a ~10% cut to every signal the app emits, so it is put to the operator
+  with the numbers rather than shipped. ⚠ Two honest weaknesses recorded with it:
+  **ORCL and UAL are 75 of the 139 trades below 50** and the rest of that band is
+  +0.042 rather than negative, and the 5-point grid is not monotone.
+- **The long-premium ceiling shipped OFF, on purpose.** `[iv_rank_ceiling]` is
+  all-zero: `signals.db` holds only PCS, CCS and IC, so there is **no
+  long-premium outcome data in this app** to set a level from, and switching on a
+  gate that refuses trades without measuring it is the mistake this audit keeps
+  catching. **65** is documented as the natural value — not a new number but
+  `infer_market_view`'s own "high" boundary.
+- **The drop is visible, and it does not borrow another sentence.** `vol_filtered`
+  is its own field on both views; the Strategy Finder says *"N where premium is
+  too cheap to sell"* beside its existing *"N below the quality bar"*, and the
+  Income board sums it across the pass and says *"N too cheap to sell"*. A
+  volatility drop is a statement about the environment, not a quality judgement,
+  and a short board must be distinguishable from a quiet tape. Both `page_help`
+  entries say so too.
+- ⚠ **Two traps found while wiring it**, both of the "reads as protection, is not
+  one" class this audit keeps turning up: `scanner_config.min_iv_rank()` is
+  **closed over its own `DEFAULTS`**, so a trade type added to the TOML alone is
+  silently dropped (pinned by test now); and the shared `fake_client` fixture in
+  `test_scanner_engine.py` **zeroes `MIN_IV_RANK`**, so any new test there asserts
+  nothing about the floor unless it puts one back.
+- One existing assertion changed, with the reason recorded in its docstring:
+  `test_shipped_toml_matches_the_pre_extraction_values` compared `min_iv_rank()`
+  to a whole dict, which froze the key SET as well as the two values its docstring
+  is about. Now asserted key by key — both original values still pinned exactly.
+- Design: [`docs/plans/2026-09-12-volatility-gate-design.md`](plans/2026-09-12-volatility-gate-design.md).
+  59 new tests (`shared/tests/test_vol_gate.py`,
+  `options-scanner/tests/test_vol_gate_directional.py`,
+  `services/options_svc/tests/test_vol_floor_call_sites.py`, plus the page and
+  publisher cases).
+
+---
+
 **Last updated:** 2026-09-11 (**Three correctness/risk items: the Strategy
 Finder never read the earnings calendar, the width search sized against a phantom
 $100k book, and nothing capped total open risk.** Gap assessment **A5, A6, B3** —

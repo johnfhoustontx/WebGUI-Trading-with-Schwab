@@ -52,6 +52,7 @@ from services import _degrade  # noqa: E402
 from shared import driver_limits as _driver_limits  # noqa: E402
 from shared import scanner_config as _scanner_config  # noqa: E402
 from shared import driver_policy as _driver_policy  # noqa: E402
+from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
@@ -343,7 +344,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # below would AttributeError on chain.get(...)/extract_options(None). Degrade
     # to an explicit empty result so the handler still publishes a fresh view.
     if not chain:
-        return {"signals": [], "view": {}, "filtered_out": 0}
+        return {"signals": [], "view": {}, "filtered_out": 0,
+                "vol_filtered": 0}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
@@ -353,7 +355,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
     # (matching the no-chain guard above) BEFORE any builder runs.
     if not spot:
-        return {"signals": [], "view": {}, "filtered_out": 0}
+        return {"signals": [], "view": {}, "filtered_out": 0,
+                "vol_filtered": 0}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -432,6 +435,33 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
 
+    # Volatility gate (gap assessment B2) — refuse to SELL cheap premium, and,
+    # when a ceiling is configured, to BUY expensive premium. Until 2026-09-12
+    # ``MIN_IV_RANK`` was applied in ``run_full_scan`` alone, so both surfaces this
+    # function serves sold premium at any volatility: the live income board's
+    # TOP-ranked candidate was an IREN put credit spread at an IV rank of 0.1.
+    #
+    # ⚠ Per SIGNAL and keyed on the candidate's own vega sign, never over the
+    # whole list: this list is MIXED (debit verticals and long options beside the
+    # credit spreads), and cheap volatility is exactly when the long-premium half
+    # is the right trade. A blanket filter would cut hardest where it must not cut.
+    #
+    # The symbol's reading is passed explicitly because ``iv_rank`` is stamped onto
+    # the rows further down, after this runs.
+    #
+    # Counted SEPARATELY from the quality cut below, and the page renders its own
+    # sentence: ``filtered_out`` is rendered as "below the quality bar", and a
+    # volatility drop is a statement about the environment rather than about the
+    # candidate. See docs/plans/2026-09-12-volatility-gate-design.md.
+    vol_floor = _scanner_config.min_iv_rank().get(trade_type)
+    vol_ceiling = _scanner_config.max_iv_rank().get(trade_type)
+    gated_n = len(signals)
+    signals = [s for s in signals
+               if not _vol_gate.signal_blocks(s, floor=vol_floor,
+                                              ceiling=vol_ceiling,
+                                              iv_rank=iv.get("iv_rank"))]
+    vol_filtered = gated_n - len(signals)
+
     # Quality cut, BEFORE ids are assigned so every emitted row is addressable
     # and the detail-panel lookup can't miss one.
     scored_n = len(signals)
@@ -445,7 +475,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
-    result = {"signals": signals, "view": view, "filtered_out": filtered_out}
+    result = {"signals": signals, "view": view, "filtered_out": filtered_out,
+              "vol_filtered": vol_filtered}
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of

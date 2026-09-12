@@ -190,6 +190,14 @@ family for it — directional, spreads, and neutral.
 - Only candidates that clear a **quality bar** are listed. The status line says how
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
+- **"Too cheap to sell"** in that same line is a different cut, and a deliberate
+  one: when this symbol's option premium is historically cheap, the trades that
+  SELL premium are dropped and the ones that BUY it are kept. Cheap volatility is
+  the wrong time to collect premium and the right time to pay for it, so a low-IV
+  symbol correctly shows you long calls, long puts and debit spreads instead of
+  credit spreads. Measured on this app's own closed trades, premium sold below an
+  IV Rank of 45 returned **less than nothing** — a 25% win rate against 76%
+  above it.
 """,
     "/options/income": """
 **Income Window — the simple version**
@@ -226,6 +234,14 @@ each morning. Three kinds of trade sit on one ranked board:
   says what stopped it — not enough cash, no lot behind the call, a lot already
   covered, a call that would not cover the lot whole, or a price that has moved more
   than 15% since the scan.
+- **"Too cheap to sell"** in the status line is the volatility floor. Every trade
+  on this board SELLS premium, and selling it when it is historically cheap is how
+  you collect a small credit for a real risk — so a symbol whose option premium
+  sits below the floor is dropped rather than ranked. A short board on a calm day
+  is this working, not a broken scan; the count tells you which it was. Before
+  2026-09-12 there was no floor here at all, and the board's top-ranked idea on
+  the day it was added was a put spread at an IV Rank of **0.1** — the cheapest
+  premium the measurement can express.
 - Nothing here is traded automatically. The board is a shortlist; the button is
   yours to press.
 """,
@@ -481,6 +497,13 @@ Trades you sent by hand live on **Paper Ledger**.
   or time stop, so a losing one rides to expiry, assignment or call-away — a short
   put's stops would fire exactly when assignment, the point of the wheel, becomes
   likely. The 21-day rule only ever ends a winner early.
+- **Why a good signal sometimes never opens.** The engine refuses a trade that
+  would stack the book, and those refusals leave **no trace on this page** — only
+  in the log. Six limits, tightest first: at most **3 positions and $750** in one
+  underlying, **5 positions and $1,500** in one sector, **5 positions** sharing one
+  expiration, and **20% of the session's starting equity** at risk across the whole
+  book. The sector limit is the one that surprises people: four different
+  semiconductors are one bet, not four, and the watchlist is nearly half technology.
 - **Reset** sets a new starting balance.
 """,
     "/options/shares": """

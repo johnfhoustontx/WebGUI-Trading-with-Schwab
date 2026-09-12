@@ -42,6 +42,34 @@ MAX_POSITIONS_PER_SYMBOL = 3       # open positions in one underlying
 MAX_RISK_PER_SYMBOL      = 750.0   # summed max loss in one underlying (~3% of account)
 MAX_POSITIONS_PER_EXPIRY = 5       # open positions sharing one expiration, book-wide
 
+# --- SECTOR (gap assessment B4) ---
+# The rung between the per-symbol caps and the book-wide deployment cap: four
+# DIFFERENT semiconductors at the full symbol cap breach nothing above, and that
+# is the correlated book the playbook warns about. Enforced by
+# paper_concentration.concentration_reject, grouped by config/sectors.toml.
+#
+# Measured on the real books before choosing these (not hypothetical):
+#   * manual  - worst simultaneous Information Technology exposure $3,569 across
+#     19 positions; Industrials $20,312 across 107 (SPCX stacking, which
+#     MAX_POSITIONS_PER_SYMBOL now stops on its own);
+#   * driver  - worst IT exposure $21,531 across 15 positions, 86% of a $25,000
+#     account in ONE sector, and $15,018 across 9 INDEX positions;
+#   * a $1,500 cap would have bound on 20 of 46 trading days in the manual book
+#     and 35 of 40 in the driver's.
+#
+# And the GROUPING's premise was measured too, because two of this audit's
+# rationales have already failed that way: across six months of daily returns on
+# the tradeable watchlist, mean pairwise correlation WITHIN a sector is 0.250
+# against 0.017 ACROSS sectors, and 14 of the 15 most-correlated pairs in the
+# universe share one. Sector is a real proxy for correlation in this universe.
+#
+# $1,500 is two symbols at the full MAX_RISK_PER_SYMBOL and ~31% of the $4,837
+# deployment ceiling on the live book, so filling the book needs at least four
+# sectors. 5 positions matches MAX_POSITIONS_PER_EXPIRY for the reason that
+# number was chosen: five positions on one thing is a bet on that thing.
+MAX_POSITIONS_PER_SECTOR = 5        # open positions in one sector, book-wide
+MAX_RISK_PER_SECTOR      = 1_500.0  # summed max loss in one sector (~6% of account)
+
 # Book-wide DEPLOYMENT cap: total open max loss as a fraction of session-start
 # equity (gap assessment B3). The three caps above are per symbol and per expiry;
 # nothing capped the book as a whole, so three symbols at the $750 symbol cap is

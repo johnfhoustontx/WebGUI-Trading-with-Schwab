@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 from shared import structures as _structures  # noqa: E402
+from shared import sectors as _sectors  # noqa: E402
 
 import config_paper
 import paper_sizing
@@ -161,13 +162,26 @@ def _record_reject(db_path, sig, side, reason):
 
 
 def _log_capped(seen, symbol, reason):
-    """Log a concentration block once per (symbol, reason) per cycle."""
+    """Log a concentration block once per (symbol, reason) per cycle.
+
+    ⚠ This journal line is the ONLY trace a concentration breach leaves — the
+    refusal is deliberately invisible in the UI (see ``paper_concentration``'s
+    header), so the visible symptom is a good signal that never opens. A sector
+    reason therefore names the BUCKET as well: which sector filled up is the part
+    an operator can act on, and a bucket printed as ``?SYMBOL`` is
+    ``shared.sectors`` saying that name has no sector in ``config/sectors.toml``
+    — the one way the map's coverage gaps surface without a second counter.
+    """
     key = (symbol, reason)
     if key in seen:
         return
     seen.add(key)
-    log.info("%s SKIPPED %s %s (concentration cap)",
-             _default_broker.PREFIX, symbol, reason)
+    detail = ""
+    if reason in (paper_concentration.SECTOR_POSITION_CAP,
+                  paper_concentration.SECTOR_RISK_CAP):
+        detail = f" [{_sectors.group_key(symbol)}]"
+    log.info("%s SKIPPED %s %s%s (concentration cap)",
+             _default_broker.PREFIX, symbol, reason, detail)
 
 
 def _deployment_equity(db_path):

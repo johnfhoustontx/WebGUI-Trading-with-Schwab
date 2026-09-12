@@ -340,6 +340,17 @@ def status_text(payload) -> str:
     if scanned_txt:
         parts[0] = f"{parts[0]} {scanned_txt}"
 
+    # The volatility floor (gap assessment B2) refuses to SELL premium below the
+    # window's IV-rank minimum, and on a low-IV day it can empty the board on its
+    # own. Named here for the same reason the empty-board line above exists: a
+    # short board and a quiet tape are different facts, and the reader cannot tell
+    # them apart from the row count. The rest of the app's refusals of this kind
+    # leave no UI trace at all (see the concentration caps), which is precisely
+    # what makes "a good signal that never appeared" hard to diagnose.
+    vol_dropped = _fmt.num(p.get("vol_filtered")) or 0
+    if vol_dropped:
+        parts.append(f"{vol_dropped:.0f} too cheap to sell")
+
     ts = _short_ts(p.get("ts"))
     if ts:
         parts.append(f"scanned {ts}")

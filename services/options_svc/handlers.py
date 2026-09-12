@@ -666,6 +666,11 @@ def swing_scan(bus, args: dict) -> None:
         sig["earnings_status"] = status
     payload = {"signals": signals, "view": result.get("view"),
                "filtered_out": result.get("filtered_out") or 0,
+               # Kept SEPARATE from filtered_out, which the page renders as
+               # "below the quality bar": a volatility drop says the environment
+               # is wrong for selling premium, not that the candidate was poor.
+               # Gap assessment B2.
+               "vol_filtered": result.get("vol_filtered") or 0,
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
@@ -868,16 +873,23 @@ def publish_income(bus, symbols=None) -> None:
             out = compute.income_scan(symbol, market_state=market_state,
                                       return_chain=symbol in held) or {}
             return (symbol, list(out.get("signals") or []), None,
-                    out.get("chain"), out.get("spot"))
+                    out.get("chain"), out.get("spot"),
+                    out.get("vol_filtered") or 0)
         except Exception as exc:  # noqa: BLE001 — see the docstring.
             _degrade.degraded("options.publish_income", detail=symbol)
-            return (symbol, [], f"{symbol}: {type(exc).__name__}: {exc}", None, None)
+            return (symbol, [], f"{symbol}: {type(exc).__name__}: {exc}", None,
+                    None, 0)
 
     candidates: list = []
     errors: list = []
-    for symbol, rows, err, chain, spot in parallel_map(_scan_one, syms,
-                                                       workers=_INCOME_WORKERS):
+    # Summed across the watchlist, so the page can say the board is short because
+    # nothing had enough volatility to sell - not because the tape was quiet. Gap
+    # assessment B2; per-symbol counts would be noise on a 23-symbol pass.
+    vol_filtered = 0
+    for symbol, rows, err, chain, spot, n_vol in parallel_map(
+            _scan_one, syms, workers=_INCOME_WORKERS):
         candidates.extend(rows)
+        vol_filtered += n_vol
         if err:
             errors.append(err)
         if chain is not None:
@@ -920,6 +932,7 @@ def publish_income(bus, symbols=None) -> None:
     snap = IncomeScan(
         candidates=candidates,
         scanned_symbols=len(syms),
+        vol_filtered=vol_filtered,
         errors=errors,
         # CT, tz-aware: the page renders this as "scanned at 08:35", and the two
         # other user-facing stamps in this module are CT for the same reason.

@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 from shared import scanner_config as _scfg  # noqa: E402
+from shared import vol_gate as _vol_gate  # noqa: E402
 
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
@@ -571,6 +572,13 @@ MIN_ABS_SPREAD = 0.02
 # premium before selling. Binds only on low-IV days (most days have IV Rank well
 # above these floors). See docs/plans/2026-06-11-quality-first-selection-design.md.
 MIN_IV_RANK = _scfg.min_iv_rank()
+
+# --- Long-premium IV Rank CEILING (the mirror of the floor above) ---
+# Refuse to BUY premium above this IV Rank. Ships all-zero = OFF, because this app
+# has no long-premium outcome data to set a level from; the mechanism exists so
+# turning it on is one TOML edit. 0 means off, not "a ceiling at zero" -- see
+# shared/vol_gate.py. Gap assessment B2.
+MAX_IV_RANK = _scfg.max_iv_rank()
 
 # --- Adaptive minimum credit % by VIX regime ---
 MIN_CREDIT_PCT = _scfg.min_credit_pct()
@@ -1678,9 +1686,12 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
             view = _ssc.infer_market_view(tech or {}, iv_data or {})
             dir_sigs = []
-            for _chain, _lo, _hi in (
-                (data.get("chain_0"), zerodte_min_dte, zerodte_max_dte),
-                (data.get("chain_s"), swing_min_dte, swing_max_dte),
+            # The window's own name rides in the tuple: the volatility gate
+            # below needs it to pick that window's floor, and identifying the
+            # window by comparing chain objects would be fragile.
+            for _chain, _lo, _hi, _win_type in (
+                (data.get("chain_0"), zerodte_min_dte, zerodte_max_dte, "0-DTE"),
+                (data.get("chain_s"), swing_min_dte, swing_max_dte, "SWING"),
             ):
                 if not _chain or _chain.get("status") == "FAILED":
                     continue
@@ -1700,7 +1711,32 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 # (daily_em * sqrt(dte_min)) applied to each window, so the same
                 # candidate scores identically on the Scanner and the Swing page.
                 em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
-                dir_sigs += _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
+                _scored = _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
+
+                # Volatility gate (gap assessment B2). This list is MIXED --
+                # SHORT_PUT / SHORT_CALL beside LONG_CALL / LONG_PUT -- so the
+                # gate is PER SIGNAL on the candidate's own vega sign, never over
+                # the list: cheap volatility is exactly when the long-premium half
+                # is the right trade, and a blanket filter would cut hardest where
+                # it must not cut at all. Applied HERE rather than after the merge
+                # because this loop is the only place that still knows which
+                # WINDOW a candidate came from, and the two windows carry
+                # different floors (0-DTE 35, SWING 30). Before the per-symbol cap
+                # too, for the reason stated below it: a refused candidate must
+                # not spend a slot.
+                _kept = [
+                    s for s in _scored
+                    if not _vol_gate.signal_blocks(
+                        s, floor=MIN_IV_RANK.get(_win_type),
+                        ceiling=MAX_IV_RANK.get(_win_type),
+                        iv_rank=iv_data.get("iv_rank"))
+                ]
+                if len(_kept) != len(_scored):
+                    log.info(f"  [{_win_type}] volatility gate: "
+                             f"{len(_scored) - len(_kept)} single-leg candidates "
+                             f"removed for {symbol} (IV Rank "
+                             f"{iv_data.get('iv_rank')})")
+                dir_sigs += _kept
 
             # Drop everything that isn't worth showing, BEFORE the cap below --
             # otherwise a symbol whose best candidates are Weak spends its cap

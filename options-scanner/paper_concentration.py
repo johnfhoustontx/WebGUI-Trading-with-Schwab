@@ -26,6 +26,7 @@ import config_paper
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.driver_policy import open_risk_dollars  # noqa: E402
+from shared import sectors as _sectors  # noqa: E402
 
 #############################################
 # REASONS
@@ -34,6 +35,8 @@ from shared.driver_policy import open_risk_dollars  # noqa: E402
 SYMBOL_POSITION_CAP = "SYMBOL_POSITION_CAP"
 SYMBOL_RISK_CAP = "SYMBOL_RISK_CAP"
 EXPIRY_POSITION_CAP = "EXPIRY_POSITION_CAP"
+SECTOR_POSITION_CAP = "SECTOR_POSITION_CAP"
+SECTOR_RISK_CAP = "SECTOR_RISK_CAP"
 DEPLOYMENT_CAP = "DEPLOYMENT_CAP"
 
 #############################################
@@ -52,6 +55,8 @@ def default_limits():
         "max_positions_per_symbol": config_paper.MAX_POSITIONS_PER_SYMBOL,
         "max_risk_per_symbol": config_paper.MAX_RISK_PER_SYMBOL,
         "max_positions_per_expiry": config_paper.MAX_POSITIONS_PER_EXPIRY,
+        "max_positions_per_sector": config_paper.MAX_POSITIONS_PER_SECTOR,
+        "max_risk_per_sector": config_paper.MAX_RISK_PER_SECTOR,
         "max_deployed_risk_pct": config_paper.MAX_DEPLOYED_RISK_PCT,
     }
 
@@ -64,7 +69,7 @@ def _key(value):
 
 
 def concentration_reject(positions, symbol, expiration, added_risk,
-                         limits=None, equity=None):
+                         limits=None, equity=None, sector_of=None):
     """Return the reason opening this candidate would breach a cap, else None.
 
     ``positions`` is the OPEN book (closed rows tie up no capital and must not
@@ -78,6 +83,10 @@ def concentration_reject(positions, symbol, expiration, added_risk,
     open max loss as a fraction of it. It is reported FIRST when it binds: if the
     book as a whole is full, which symbol was asked for is irrelevant, and the
     broader reason is the more useful log line.
+
+``sector_of`` overrides the sector lookup (gap assessment B4); absent, the
+    real ``shared.sectors`` map is used. The sector rungs are reported after the
+    symbol ones and before expiry - see the comment at that check.
 
     ⚠ **No equity, or a non-finite one, SKIPS that cap rather than treating it as
     zero.** A fraction of an unknown cannot be enforced, and a zero denominator
@@ -113,12 +122,78 @@ def concentration_reject(positions, symbol, expiration, added_risk,
     if open_risk_dollars(same_symbol) + _finite(added_risk) > limits["max_risk_per_symbol"]:
         return SYMBOL_RISK_CAP
 
+    # SECTOR (gap assessment B4) - the rung between the per-symbol caps and the
+    # book-wide one. Four DIFFERENT semiconductors at the full symbol cap breach
+    # nothing above this, which is exactly the correlated book the playbook warns
+    # about; measured, the driver's book once held $21,531 across 15 Information
+    # Technology positions, 86% of a $25,000 account in one sector.
+    #
+    # Reported AFTER the symbol rungs and BEFORE expiry, deliberately: when both a
+    # symbol cap and the sector cap bind, "you already hold three MU" is the
+    # actionable sentence - the operator can pick another name - while "tech is
+    # full" is the answer only once the symbol has room. A shared expiry is the
+    # weaker coincidence of the two, so it stays last.
+    #
+    # Opt-in by DATA like the deployment cap above: a ``limits`` dict without the
+    # keys, or a cap of 0, keeps the pre-B4 behaviour untouched.
+    max_sector_n = limits.get("max_positions_per_sector")
+    max_sector_risk = limits.get("max_risk_per_sector")
+    if max_sector_n or max_sector_risk:
+        bucket = _group_of(symbol, sector_of)
+        if bucket is not None:
+            # A row whose symbol lands in no bucket is skipped rather than
+            # grouped: ``group_key`` gives an unmapped symbol a bucket of its OWN,
+            # so an unknown name is still capped against itself and can neither
+            # borrow another sector's allowance nor drag unrelated names in.
+            same_sector = [p for p in rows
+                           if _group_of(p.get("symbol"), sector_of) == bucket]
+            if max_sector_n and len(same_sector) >= max_sector_n:
+                return SECTOR_POSITION_CAP
+            # Through ``open_risk_dollars`` for the third time in this function,
+            # and for the same reason: a NaN row would poison the sum, and a NaN
+            # total makes every ``>`` False - switching the ceiling off silently.
+            if max_sector_risk and (open_risk_dollars(same_sector)
+                                    + _finite(added_risk)) > max_sector_risk:
+                return SECTOR_RISK_CAP
+
     exp = (expiration or "").strip()
     same_expiry = [p for p in rows if (p.get("expiration") or "").strip() == exp]
     if len(same_expiry) >= limits["max_positions_per_expiry"]:
         return EXPIRY_POSITION_CAP
 
     return None
+
+
+def _group_of(symbol, sector_of=None):
+    """The bucket this symbol is capped in, or ``None`` if it cannot be decided.
+
+    ``sector_of`` is injected so the decision stays pure and testable over a
+    stated map; absent, it is the real ``shared.sectors`` one, so production needs
+    no wiring at the call site and cannot forget it. An injected lookup that
+    returns nothing falls back to the shared ``group_key``, so a partial map
+    narrows the bucket rather than dissolving it.
+
+    A lookup that RAISES degrades to "no grouping", not to a refusal: the map is a
+    config read, and refusing every trade because a TOML went missing would be a
+    worse failure than not applying one of six rungs - the five around it still
+    decide. ``shared.config_toml`` never raises, so this is belt and braces
+    against an injected lookup.
+
+    An UNMAPPED symbol is visible rather than counted: the bucket it gets is
+    literally ``"?<SYMBOL>"``, and ``paper_engine._log_capped`` prints the bucket
+    in its journal line, so a ``?`` there says "this name has no sector" without
+    a second counter to keep.
+    """
+    try:
+        if sector_of is None:
+            return _sectors.group_key(symbol)
+        key = _key(symbol)
+        if key is None:
+            return None
+        found = sector_of(key)
+        return found if found else _sectors.group_key(key)
+    except Exception:  # noqa: BLE001 - see the docstring.
+        return None
 
 
 def _finite(value):

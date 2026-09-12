@@ -13,8 +13,17 @@ def _fresh():
 
 def test_shipped_toml_matches_the_pre_extraction_values():
     """These were literals in scanner_engine.py carrying dated retune comments;
-    the extraction must not have moved a single one."""
-    assert sc.min_iv_rank() == {"0-DTE": 35, "SWING": 30}
+    the extraction must not have moved a single one.
+
+    ⚠ ``min_iv_rank`` is asserted KEY BY KEY rather than as a whole dict. The
+    docstring's claim is about the two extracted VALUES, and the whole-dict form
+    additionally froze the key SET — which is a different and unwanted promise: it
+    made adding a floor for a surface that never had one (``INCOME``, gap
+    assessment B2) fail a test whose subject is drift in 35 and 30. The two
+    original values are still pinned exactly; `test_vol_gate.py` owns the key set.
+    """
+    assert sc.min_iv_rank()["0-DTE"] == 35
+    assert sc.min_iv_rank()["SWING"] == 30
     assert sc.min_credit_pct() == {
         "0-DTE": {"LOW": 0.08, "NORMAL": 0.12, "ELEVATED": 0.15, "HIGH": 0.20},
         "SWING": 0.12,

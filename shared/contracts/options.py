@@ -79,6 +79,12 @@ class IncomeScan(_Base):
     # here and named in ``errors``; reporting 1 after 22 failures would read as
     # a thin market rather than a broken pass.
     scanned_symbols: int = 0
+    # How many scored candidates the VOLATILITY floor refused across the pass —
+    # premium too cheap to sell at this symbol's IV rank (gap assessment B2).
+    # Separate from a quality drop and from an error: on a low-IV day this alone
+    # can empty the board, and the page says so rather than leaving a short board
+    # indistinguishable from a quiet tape.
+    vol_filtered: int = 0
     errors: list = []
     warnings: list = []
     ts: str | None = None            # publish time

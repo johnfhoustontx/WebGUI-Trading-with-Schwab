@@ -59,6 +59,35 @@ def test_status_text_omits_the_note_when_nothing_was_dropped():
     assert swing.status_text({"signals": [1], "filtered_out": 0}, 1) == "1 swing signals."
 
 
+def test_status_text_names_a_volatility_drop_as_ITSELF():
+    """Gap assessment B2. The volatility gate refuses to SELL premium when IV rank
+    sits below the floor, and that is a statement about the ENVIRONMENT, not about
+    the candidate's quality - so it cannot borrow the "below the quality bar"
+    sentence. On a low-IV symbol every short-premium row goes at once, which is
+    the case where a reader most needs to be told why.
+    """
+    assert swing.status_text({"signals": [], "vol_filtered": 4}, 0) == (
+        "0 swing signals. 4 where premium is too cheap to sell.")
+
+
+def test_status_text_reports_both_drops_separately():
+    """Both can happen in one scan, and each keeps its own count and wording."""
+    assert swing.status_text(
+        {"signals": [1], "filtered_out": 3, "vol_filtered": 2}, 1) == (
+        "1 swing signals. 3 below the quality bar. "
+        "2 where premium is too cheap to sell.")
+
+
+def test_status_text_omits_the_volatility_note_when_the_gate_did_nothing():
+    assert swing.status_text({"signals": [1], "vol_filtered": 0}, 1) == "1 swing signals."
+
+
+def test_status_text_survives_a_payload_written_before_the_field_existed():
+    """Redis persists this view across a restart, so the pre-B2 shape must render."""
+    assert swing.status_text({"signals": [1], "filtered_out": 2}, 1) == (
+        "1 swing signals. 2 below the quality bar.")
+
+
 def test_render_graceful_empty_cache():
     """render() must paint without crashing when the bus cache is empty
     (options service cold) — the Tier-3 graceful-empty path. Mirrors the header

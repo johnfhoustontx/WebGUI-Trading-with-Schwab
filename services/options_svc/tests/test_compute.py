@@ -271,10 +271,17 @@ def test_swing_scan_empty_when_no_chain(monkeypatch):
                         lambda symbol: {"last": 540.0})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    # ``filtered_out`` is 0, not absent: the degraded shape must match the normal
-    # one so the page never has to special-case a missing key (and "0 dropped"
-    # is the truthful reading — nothing was built, so nothing was cut).
-    assert out == {"signals": [], "view": {}, "filtered_out": 0}
+    # Every COUNT is 0 and present, not absent: the degraded shape must match the
+    # normal one so the page never has to special-case a missing key (and "0
+    # dropped" is the truthful reading — nothing was built, so nothing was cut).
+    #
+    # ⚠ Asserted field by field rather than as a whole dict. The dict form froze
+    # the KEY SET too, which is a promise these tests are not about: they are
+    # about a degraded path returning the normal shape with empty contents, and
+    # the whole-dict form made adding a legitimate new count (``vol_filtered``,
+    # gap assessment B2) fail two tests whose subject is a null chain.
+    assert out["signals"] == [] and out["view"] == {}
+    assert out["filtered_out"] == 0 and out["vol_filtered"] == 0
 
 
 def test_swing_scan_empty_when_no_spot(monkeypatch):
@@ -289,7 +296,9 @@ def test_swing_scan_empty_when_no_spot(monkeypatch):
                         lambda symbol: {})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    assert out == {"signals": [], "view": {}, "filtered_out": 0}
+    # Field by field, for the reason given in the sibling test above.
+    assert out["signals"] == [] and out["view"] == {}
+    assert out["filtered_out"] == 0 and out["vol_filtered"] == 0
 
 
 def _swing_scan_market_state_env(monkeypatch):

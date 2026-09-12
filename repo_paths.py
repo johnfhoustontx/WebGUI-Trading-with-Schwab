@@ -66,6 +66,14 @@ SCANNER_TOML = REPO_ROOT / "config" / "scanner.toml"
 # by tests. Adding a symbol has a real Schwab API-budget cost; see the file.
 SYMBOLS_TOML = REPO_ROOT / "config" / "symbols.toml"
 
+# Symbol -> GICS sector, behind the paper engine's SECTOR concentration cap (gap
+# assessment B4). Read by shared/sectors.py. A file rather than a derivation
+# because nothing in this repo can derive it: the sector workbook that already
+# existed covered 48 of 80 watchlist names and missed every semiconductor, so a
+# cap keyed on it would have policed a third of the book while reading as
+# protection. Edit + restart options_svc.
+SECTORS_TOML = REPO_ROOT / "config" / "sectors.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).

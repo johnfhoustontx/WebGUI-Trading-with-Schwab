@@ -1,6 +1,7 @@
 """Reprice open signals. 0-DTE uses intrinsic vs settlement; swings close at a
 realistic limit worked 40% into the net spread market (fill_model.FILL_FRAC),
 via the shared fill_model so the paper broker and re-pricer can never diverge."""
+import math
 import datetime
 import logging
 import pathlib as _pathlib
@@ -98,6 +99,48 @@ def legs_intrinsic_value(trade, settlement):
     return net_per_share, pnl
 
 
+
+def _chain_spot(chain):
+    """The underlying's last price off an option chain, or ``None``.
+
+    **Both shapes are real, and the ORDER is load-bearing.** The nested
+    ``underlying.last`` is the live quote and is preferred where it exists;
+    ``underlyingPrice`` is the fallback because it is **pinned to the prior close
+    outside RTH** (a documented Schwab quirk that once froze every GTH gamma
+    number). ``atm_iv`` below established that order against a live chain on
+    2026-08-25; this function exists so the two cannot disagree about it.
+
+    ⚠ **The two call sites that mark positions had it wrong from the start** —
+    ``(chain.get("underlying") or {}).get("last", 0)`` — and ``underlying`` is
+    populated only with ``includeUnderlyingQuote=true``, which this app never
+    requests. Measured live: a SPY chain came back ``underlying: None`` /
+    ``underlyingPrice: 764.29``, so the expression resolved to its DEFAULT on
+    every single call, and the default was **0**. Prod's
+    ``signal_marks.current_underlying`` is 0.0 across all 58,895 rows while every
+    sibling column on the same row is populated. That disabled a RULE, not just a
+    display field: ``signal_recommender._recoverable`` early-returns on
+    ``spot <= 0``, so the ``RECOVERY_MIN_CUSHION`` deferral was permanently off on
+    the captured-signal path — degrading to "the stop fires", which is why nothing
+    ever looked wrong.
+
+    ⚠ **A non-positive reading returns ``None``, never 0.** ``scanner_engine``
+    defaults a missing ``underlyingPrice`` to 0 in its own chain plumbing, so a 0
+    arriving here means "not read" rather than "the stock is worthless" — and a 0
+    spot is worse than an absent one: it sorts among real prices, compares as
+    below every strike, and renders as a crash. The documented
+    "never print a zero you did not read" rule.
+    """
+    chain = chain or {}
+    for value in ((chain.get("underlying") or {}).get("last"),
+                  chain.get("underlyingPrice")):
+        try:
+            spot = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(spot) and spot > 0:
+            return spot
+    return None
+
 def reprice_legs(trade, client, today=None):
     """Reprice a DEBIT/legs paper trade for display (same return shape as ``reprice_swing``).
 
@@ -123,7 +166,7 @@ def reprice_legs(trade, client, today=None):
         entry_debit = trade.get("entry_debit") or 0.0
         pnl = round(net_per_share * MULTIPLIER - entry_debit, 2)   # per contract
         pnl_pct = round(pnl / entry_debit * 100.0, 2) if entry_debit else 0.0
-        underlying = (chain.get("underlying") or {}).get("last", 0)
+        underlying = _chain_spot(chain)
         return {"current_value": round(net_per_share, 2), "unrealized_pnl": pnl,
                 "pnl_pct_of_credit": pnl_pct, "current_underlying": underlying,
                 "current_short_delta": None, "error": None}
@@ -256,7 +299,7 @@ def reprice_swing(trade, client, today=None):
             raise RuntimeError(f"unknown strategy {strat}")
         debit = round(debit, 2)
 
-        underlying = (chain.get("underlying") or {}).get("last", 0)
+        underlying = _chain_spot(chain)
         pnl = (trade["entry_credit"] - debit) * MULTIPLIER
         # pnl_pct_of_credit is stored as a PERCENT (e.g. 50.0 for 50% of max
         # credit captured), matching the `_pct` convention used by rr_pct,
@@ -319,17 +362,13 @@ def atm_iv(chain):
     chain to mark the legs, so the IV rides on data in hand.
     """
     try:
-        # ⚠ Both shapes are real. Measured against a live Schwab chain on
-        # 2026-08-25, `underlying` came back NULL while the top-level
-        # `underlyingPrice` carried the spot and the contracts carried real
-        # volatilities — so reading only the nested form refused a perfectly
-        # good IV for want of a price. The nested `last` is preferred where it
-        # exists because it is the live quote; `underlyingPrice` is pinned to
-        # the prior close outside RTH.
-        chain = chain or {}
-        spot = ((chain.get("underlying") or {}).get("last")
-                or chain.get("underlyingPrice"))
-        if isinstance(spot, bool) or not isinstance(spot, (int, float)) or spot <= 0:
+        # Both shapes are real, and the preference order (nested live quote,
+        # then the RTH-stale `underlyingPrice`) is this function's own finding
+        # from 2026-08-25 — now the shared `_chain_spot`, so the three sites that
+        # need a spot off a chain cannot drift. Its `> 0` rule is the same one
+        # this block used to carry inline.
+        spot = _chain_spot(chain or {})
+        if spot is None:
             return None
         best = None
         for map_key in ("putExpDateMap", "callExpDateMap"):

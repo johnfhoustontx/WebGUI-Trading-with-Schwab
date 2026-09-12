@@ -267,9 +267,9 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **A6** | Size the width search against the real book — **shipped 2026-09-11** | S3, W1, W4 | S–M | Medium–high |
 | **A7** | One commission convention; rank on net — **measured 2026-09-11: the analytics half is worth −0.019R and reorders nothing; see below** | P2, W4 | S–M | ~~Medium~~ **Low** |
 | **B1** | Exit rules for cash-secured puts and covered calls — **shipped 2026-09-11** | X1, X3, X5 | M | High |
-| **B2** | Apply the volatility floor wherever premium is sold | V1 | S | Medium |
+| **B2** | Apply the volatility floor wherever premium is sold — **shipped 2026-09-12; and the floor's LEVEL measured too low, see below** | V1 | S | **High** |
 | **B3** | Deployment cap for the manual book — **shipped 2026-09-11** | S2 | S | Medium–high |
-| **B4** | Sector cap | S4 | M | Medium |
+| **B4** | Sector cap — **shipped 2026-09-12, with the map it needed** | S4 | M | Medium |
 | **B5** | Expiry-day rule for physically-settled names | X4 | M | Medium |
 | **B6** | Store the entry short delta — **shipped 2026-09-11** | X2 | S | Medium |
 | **B7** | Earnings awareness on open positions | V3 | S–M | Medium |
@@ -422,6 +422,30 @@ global set. The sourced rules:
 
 **B2. Apply the volatility floor wherever premium is sold.** The Strategy Finder, the Income Window and the directional tab's naked shorts have none. Add an optional *ceiling* for the long-premium profiles: buy when volatility is low.
 
+**Shipped 2026-09-12** — [design](2026-09-12-volatility-gate-design.md).
+`shared/vol_gate.blocks` keyed on the candidate's own **vega sign**, not its
+structure name: every list that needed the gate is mixed, and cheap volatility is
+exactly when its long-premium half is the right trade. ⚠ **The Income Window was
+much worse than this line implies** — measured on the live board, its
+**top-ranked** candidate was an IREN put credit spread at an IV rank of **0.1**,
+and four of five rows sat below the SWING floor of 30; volatility reaches that
+board only through `fit_vol`, 12% of the composite. `INCOME = 30` shipped, the
+ceiling shipped **off** (no long-premium outcome data exists in this app), and
+the drop is reported as its own `vol_filtered` count rather than borrowed from
+`filtered_out`.
+
+⚠ **Measuring it turned up something bigger than the item: the floors that DO
+exist are set well below where the edge starts.** Over 910 closed captured signals
+on prod, mean R by entry IV rank runs 0–39 **−0.149** · 40–44 **−0.151** · 45–49
++0.015 · 55–69 +0.239 · 85–100 +0.266, win rate 24% → 81%. A floor at **45** is
+the optimum on total R (cuts 94 trades worth −14.1R, keeps +199.9R) and 55 gives
+the gain back. It survives controls for `entry_score` and for month, so it is not
+the composite in disguise. **Raising `"0-DTE"` / `SWING` / `INCOME` to 45 is
+decision 6 below**, not shipped: it is a ~10% cut to every signal the app emits.
+Two weaknesses to weigh first — ORCL and UAL are 75 of the 139 trades below 50
+(the rest of that band is +0.042, not negative), and the 5-point grid is not
+monotone.
+
 **B3. A deployment cap for the manual book.** Total open max loss should stay at or below a set fraction of equity. Option Alpha keeps 40–50% in cash; theoptionpremium caps open risk at 20–25%. Start at 50%, as config, so tightening is one edit.
 
 **Shipped 2026-09-11 at 0.20, the TIGHT end rather than the suggested 50%** —
@@ -441,6 +465,28 @@ strike notional, so one $15k CSP is 62% of this book and auto-entry then stops,
 correctly but invisibly (a concentration breach leaves no UI trace by design).
 
 **B4. A sector cap.** Limit both the count and the max loss per sector, with the sector map taken from `config/symbols.toml` or the sentiment service's sector reference. The scan universe's tilt to semiconductors is exactly the correlated book the playbook warns about.
+
+**Shipped 2026-09-12** — [design](2026-09-12-sector-cap-design.md).
+`MAX_POSITIONS_PER_SECTOR = 5` / `MAX_RISK_PER_SECTOR = $1,500` as a sixth rung in
+`paper_concentration.concentration_reject`.
+
+⚠ **Neither data source named above works.** `config/symbols.toml`'s `sectors` is
+the SPDR ETF collection list, not a map; and the sentiment reference covered **48
+of 80 watchlist symbols**, missing MU, AMAT, MRVL, INTC, TXN, ALAB, SMCI, DELL and
+SPCX — *the semiconductors this item's rationale names* — with **181 of 273
+historical paper positions (66%) on symbols it had never heard of**. So the map
+was the deliverable: `config/sectors.toml`, 343 symbols, 80/80 watchlist coverage.
+
+**The premise was tested and HELD**, unlike A7's: mean pairwise correlation
+**0.250 within** a sector vs **0.017 across**, and 14 of the 15 most-correlated
+pairs in the universe share one. Weakest where the book concentrates — IT is 30 of
+74 names at only 0.240 internal correlation (IBM and TXN beside IONQ/RGTI at
+0.939). Indices are a bucket rather than an exemption, measured at 0.799.
+
+Measured impact: the driver's book once held **$21,531 across 15 IT positions**,
+86% of its account in one sector. ⚠ **The driver is NOT covered** — it opens
+through `open_driver_position`, not `concentration_reject` — which is defect 16
+below.
 
 **B5. An expiry-day rule for physically-settled names.** On expiration day, close (or at least flag) any short within about 1% of its strike by a set CT time; cash-settled index options are exempt. OIC notes that exercise notices are accepted until about 5:30 pm ET, so an after-hours move can assign a short that closed out of the money. Option Alpha saw about 1.2% of its contracts assigned over five years, mostly in expiration week.
 
@@ -554,6 +600,15 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 13. Rescue flags assignment risk on every equity short, regardless of moneyness or dividends.
 14. Captured signals settle a 0-DTE trade the moment its DTE reaches 0, at a live mark, while both paper books hold to the 15:00 CT close.
 15. Assignment has no cash-settled branch. An index cash-secured put would book shares, which is unreachable today only because the collateral check refuses full index notional in a $25,000 book.
+16. **The driver's book has no concentration caps of any kind** (found while
+    measuring B4). `compute.open_driver_position` re-checks structure, defined
+    risk, `max_concurrent` and `daily_risk_budget`, but never
+    `paper_concentration.concentration_reject` — so none of the six rungs the
+    manual book now has applies to it. Measured: the driver's book has held
+    **$21,531 across 15 Information Technology positions, 86% of a $25,000 account
+    in one sector**, and **$15,018 across nine INDEX positions**. Its envelope is
+    `config/driver.toml`, in a service that cannot import that module, so closing
+    it is its own change.
 
 ---
 
@@ -564,3 +619,10 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 3. **Driver sizing.** Keep the "Very Aggressive" 12%-per-trade profile, or move toward the playbook's 1–2% and the sources' 1–5%? The driver's own realized record is the evidence to weigh.
 4. **How tight a deployment cap for the manual book?** 50% of equity at risk, or theoptionpremium's 20–25%?
 5. **Income Window: screen or feed?** Should it stay a human-picked screen, or feed auto-entry once C1 has produced outcome data?
+6. **Raise the IV-Rank floors to 45?** Measured 2026-09-12 (B2 above): everything
+   below 45 returned **mean R −0.150 at a 25.5% win rate** over 910 closed
+   captured signals, and 45 is the optimum on total R. It would cut ~10% of every
+   signal the app emits — including on symbols whose premium is merely average
+   rather than cheap — so it is one config edit (`config/scanner.toml`
+   `[iv_rank]`) with a real cost. ⚠ 55 is measurably WORSE than 50, so this is
+   not a case where the tight end wins.
