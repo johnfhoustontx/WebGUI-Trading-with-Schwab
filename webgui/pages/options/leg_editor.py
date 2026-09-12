@@ -7,20 +7,23 @@ its own row by index on change, so re-rendering (add/remove/template apply) neve
 loses in-progress edits. Each page injects ``strikes_for(expiry, otype)`` /
 ``expiries_for()`` (its own data source) and ``show_premium``.
 
-Two layouts over that one model:
+Three layouts over that one model:
 
-``layout="row"``   the original single-line table (the Simulator today).
-``layout="card"``  the redesign's two-line card — eyebrow captions over
-                   TYPE/SIDE/EXPIRY then STRIKE/QTY/PREMIUM/DELTA, a left accent
-                   bar coloured by side, and a remove button that locks at a
-                   ``min_legs`` floor. PREMIUM and DELTA each COLLAPSE their
-                   track when the page supplies no source for them, so no
-                   caption ever sits over a cell that cannot hold a value.
+``layout="table"`` the entry panel's one-row-per-leg list, mounted by the
+                   Calculator and the Simulator (2026-09-12): SIDE/TYPE one-click
+                   toggles, a typed-or-stepped strike on the real ladder, and a
+                   price that re-fills from the chain (``price_for``) unless the
+                   user typed it. PRICE and DELTA collapse their tracks when the
+                   page has no source for them.
+``layout="row"``   the original single-line table — mounted by Rescue.
+``layout="card"``  the 2026-09 two-line card. ⚠ NO page mounts it any more
+                   (both moved to ``table``); it and its ``.leg-card`` theme
+                   rule are dead code awaiting removal.
 
-The card's GEOMETRY is shared; its COLOURS are not. Both pages will mount the
-card, but the Calculator paints it in the near-black ``CALC_*`` language while
-the Simulator keeps the app-wide dark navy — so the palette enters as the
-``tokens`` argument and this module imports no page's theme constants.
+The GEOMETRY is shared; the COLOURS are not. The Calculator paints the legs in
+the near-black ``CALC_*`` language while the Simulator keeps the app-wide dark
+navy — so the palette enters as the ``tokens`` argument and this module imports
+no page's theme constants.
 """
 import math
 from types import SimpleNamespace
