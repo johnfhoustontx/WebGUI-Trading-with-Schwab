@@ -27,6 +27,19 @@ STRATEGY_TEMPLATES = {
     "CCS": [_leg("call", "short", 1, "otm_up_1"), _leg("call", "long", 1, "otm_up_2")],
     "VERT_PUT_DEBIT":  [_leg("put", "long", 1, "atm"), _leg("put", "short", 1, "otm_dn_1")],
     "VERT_CALL_DEBIT": [_leg("call", "long", 1, "atm"), _leg("call", "short", 1, "otm_up_1")],
+    # straddles / strangles (gap assessment D1) - ANALYSIS ONLY. The two SHORT
+    # ones are UNDEFINED RISK and the playbook's "Don't" list names them
+    # explicitly, so they must stay unreachable by any scanner, paper book or the
+    # driver. A straddle is both rights at ONE strike; a strangle straddles spot
+    # with two, so it costs less and needs a bigger move.
+    "LONG_STRADDLE":  [_leg("call", "long", 1, "atm"),
+                       _leg("put", "long", 1, "atm")],
+    "SHORT_STRADDLE": [_leg("call", "short", 1, "atm"),
+                       _leg("put", "short", 1, "atm")],
+    "LONG_STRANGLE":  [_leg("call", "long", 1, "otm_up_1"),
+                       _leg("put", "long", 1, "otm_dn_1")],
+    "SHORT_STRANGLE": [_leg("call", "short", 1, "otm_up_1"),
+                       _leg("put", "short", 1, "otm_dn_1")],
     # condors
     "IC": [_leg("put", "short", 1, "otm_dn_1"), _leg("put", "long", 1, "otm_dn_2"),
            _leg("call", "short", 1, "otm_up_1"), _leg("call", "long", 1, "otm_up_2")],
@@ -52,6 +65,8 @@ STRATEGY_TEMPLATES = {
 STRATEGY_GROUPS = [
     ("Singles", ["LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"]),
     ("Verticals", ["PCS", "CCS", "VERT_CALL_DEBIT", "VERT_PUT_DEBIT"]),
+    ("Straddles & strangles", ["LONG_STRADDLE", "SHORT_STRADDLE",
+                               "LONG_STRANGLE", "SHORT_STRANGLE"]),
     ("Condors", ["IC", "CONDOR_CALL", "CONDOR_PUT"]),
     ("Butterflies", ["BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY"]),
     ("Calendars", ["CALENDAR_CALL", "CALENDAR_PUT", "DIAGONAL_CALL", "DIAGONAL_PUT"]),
@@ -66,6 +81,8 @@ STRATEGY_MENU = [
                 ("Short call", "NAKED_CALL"), ("Short put", "NAKED_PUT")]),
     ("Credit spread", [("Call", "CCS"), ("Put", "PCS")]),
     ("Debit spread", [("Call", "VERT_CALL_DEBIT"), ("Put", "VERT_PUT_DEBIT")]),
+    ("Straddle", [("Long", "LONG_STRADDLE"), ("Short", "SHORT_STRADDLE")]),
+    ("Strangle", [("Long", "LONG_STRANGLE"), ("Short", "SHORT_STRANGLE")]),
     ("Condor", [("Iron", "IC"), ("Call", "CONDOR_CALL"), ("Put", "CONDOR_PUT")]),
     ("Butterfly", [("Call", "BUTTERFLY_CALL"), ("Put", "BUTTERFLY_PUT"),
                    ("Iron", "IRON_BUTTERFLY")]),
@@ -107,6 +124,17 @@ _STRATEGY_FACTS = {
                         "Buy the at-the-money put and sell one further out-of-the-money to finance it. Bearish, with the payoff capped at the strike width."),
     "VERT_CALL_DEBIT": ("DEBIT", ["DEFINED RISK", "BULLISH"],
                         "Buy the at-the-money call and sell one further out to finance it. Bullish, with the payoff capped at the strike width."),
+    # ⚠ Both SHORT ones carry UNDEFINED RISK - the same word NAKED_CALL wears,
+    # and the thing that tells a reader on the Calculator that there is no wing
+    # behind the structure. The LONG ones do not: their loss is the premium.
+    "LONG_STRADDLE": ("DEBIT", ["DEFINED RISK", "VOLATILITY"],
+                      "Buy the call and the put at the same strike. Pays on a big move either way; loses the whole premium if spot sits still, and time decay bleeds it daily."),
+    "SHORT_STRADDLE": ("CREDIT", ["UNDEFINED RISK", "THETA"],
+                       "Sell the call and the put at the same strike. The largest credit of any two-leg trade, against unlimited risk in both directions - analysis only here."),
+    "LONG_STRANGLE": ("DEBIT", ["DEFINED RISK", "VOLATILITY"],
+                      "Buy an out-of-the-money call and put. Cheaper than a straddle and needs a bigger move to pay, because spot must travel past a strike."),
+    "SHORT_STRANGLE": ("CREDIT", ["UNDEFINED RISK", "THETA"],
+                       "Sell an out-of-the-money call and put. A wider profit zone than a short straddle for a smaller credit, still with unlimited risk both ways - analysis only here."),
     "IC": ("CREDIT", ["RANGE", "THETA"],
            "Short strangle wrapped in long wings. Wants spot to finish between the two short strikes."),
     "CONDOR_CALL": ("DEBIT", ["RANGE", "THETA"],

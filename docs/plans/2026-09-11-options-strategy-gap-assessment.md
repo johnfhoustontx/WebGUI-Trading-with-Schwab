@@ -279,7 +279,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **C3** | Store a daily ATM IV to build a true IV rank — **shipped 2026-09-12; the store, writer AND reader already existed with 7 rows** | V1 | S | Medium |
 | **C4** | Book-level Greeks — **shipped 2026-09-12; the beta weighting is NOT built, because no beta exists anywhere in this repo** | V2 | M | Medium |
 | **C5** | Trade plan snapshot and a manual-book scorecard — **scorecard shipped 2026-09-12; the trade-plan snapshot is bigger than written and stays open** | P1, P2 | M | Medium |
-| **D1** | Straddle and strangle templates | coverage | S | Low–medium |
+| **D1** | Straddle and strangle templates — **shipped 2026-09-12, analysis only, with that rule tested on both sides of the tier boundary** | coverage | S | Low–medium |
 | **D2** | Iron butterfly scanner on the IC pipeline | coverage | M | Medium |
 | **D3** | Exits for long options and debit spreads | X6 | M | Medium |
 | **D4** | Stock legs → covered call, protective put, collar analysis | coverage | M–L | Medium |
@@ -683,6 +683,16 @@ present to type one.
 ### Tier D — add strategies, cheapest first
 
 **D1. Straddle and strangle templates:** long and short, straddle and strangle, analysis only.
+
+**Shipped 2026-09-12** — [design](2026-09-12-straddle-strangle-design.md). Four
+entries in the shared PURE leg model plus the four UI surfaces every other code
+has. ⚠ Both SHORT structures carry the `UNDEFINED RISK` tag, and "analysis only"
+is **tested** rather than intended: engine side, none of the four is in the
+driver's allowlist, none is classified tradeable by `shared.structures`, none has
+a leg layout in the repricer (so it refuses to mark one), none has an exit-rule
+table, and the scanner's source contains none of the codes. Those tests cannot
+live beside the Tier-1 ones — the webgui suite has no `options-scanner` on
+`sys.path`, which is the architecture that makes the rule true.
 
 **D2. An iron butterfly scanner.** Emit IC candidates with coincident shorts; the rest of the IC pipeline already carries them. It needs a per-structure profit target: Option Alpha takes 25%, or exits 5 days before expiry; TradingBlock takes 50%.
 

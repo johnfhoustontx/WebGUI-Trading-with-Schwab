@@ -4,6 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**Straddles and strangles, analysis only — and the
+"analysis only" half is tested on both sides of the tier boundary.** Gap
+assessment **D1**.)
+
+- Four templates on the shared PURE leg model — `LONG_STRADDLE`,
+  `SHORT_STRADDLE`, `LONG_STRANGLE`, `SHORT_STRANGLE` — so the Calculator and the
+  Simulator can build, price and chart them. A straddle is both rights at ONE
+  strike; a strangle straddles spot with two, so it costs less and needs a bigger
+  move. Single-expiry: the two-expiry version is a calendar, which already exists.
+  Plus the four UI surfaces every other code has (dropdown group, cascading menu
+  entry, cash-flow direction, tags, one-line thesis), with the leg-count chip
+  **derived** from the template so it cannot disagree with the legs built.
+- ⚠ **Both SHORT structures carry the `UNDEFINED RISK` tag** — the same word
+  `NAKED_CALL` wears, and what tells a reader on the Calculator that there is no
+  wing behind the position. The long ones deliberately do not: their loss is the
+  premium.
+- ⚠ **"Analysis only" is a rule, so it is TESTED rather than intended**, and in
+  two places. Tier 1 pins the tags; engine side pins that none of the four is in
+  `shared.driver_policy.ALLOWED`, none is classified tradeable by
+  `shared.structures`, none has a leg layout in `signal_repricer._LEG_LAYOUT` (so
+  the repricer refuses to mark one rather than guessing), none has a
+  `[structures.*]` exit-rule table, and `strategy_scanner`'s source contains none
+  of the codes. A template appearing in an allowlist is exactly how the
+  playbook's "Don't open undefined-risk structures" rule would be lost.
+- ⚠ **The two halves cannot live in one test file**, and the reason is the
+  architecture: the webgui suite has **no `options-scanner` on `sys.path`**,
+  because Tier 1 imports no engines. That is what makes "analysis only" true
+  rather than merely asserted — a page cannot reach the code that opens a
+  position.
+- `summary_code` returns `"CUSTOM"` for them, routing the payoff summary through
+  the **numeric** path. A straddle's payoff is a V, unbounded on at least one
+  side, so there is no exact max-profit to report and the analytic shortcut would
+  produce a confidently wrong summary card. Asserted, with a non-vacuity check
+  that the shortcut still fires for `PCS`.
+- Design: [`docs/plans/2026-09-12-straddle-strangle-design.md`](plans/2026-09-12-straddle-strangle-design.md).
+  22 new tests. No existing assertion changed.
+
+---
+
 **Last updated:** 2026-09-12 (**Book-level Greeks, off a chain already in hand —
 and the beta weighting deliberately left out.** Gap assessment **C4**.)
 
