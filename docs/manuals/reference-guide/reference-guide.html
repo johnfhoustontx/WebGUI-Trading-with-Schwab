@@ -2655,7 +2655,8 @@ to measure against — a long call, for instance, where "+125% of cost" is the f
 you actually want. A plain <strong>%</strong> over dashes means neither basis exists. Before
 2026-08-19 the column was a share of the <em>premium received</em>; for a credit spread that
 is the identical number, because the credit <strong>is</strong> the maximum return.</p>
-<p><strong>Copy to Simulator</strong> sends the exact legs across. <strong>Expected Move</strong> charts them.</p>
+<p><strong>The Simulator shows this same position</strong> — the Calculator and the Simulator work on <strong>one shared position</strong> — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+<strong>Expected Move</strong> charts the legs.</p>
 <h3 id="why-it-matters_10">Why it matters</h3>
 <p>Two numbers decide whether a credit spread is worth taking: the credit you collect and
 the width you risk. Everything else — probability, breakeven, Greeks — follows from
@@ -2737,14 +2738,9 @@ expiration payoff; they go blank, with the reason, when the legs expire on diffe
 dates. An <strong>Edited</strong> chip and plain-sentence warnings flag a structure whose risk is
 not what its name suggests — the classic one being a short leg that outlives its
 long leg, which is uncovered from that date on.</p>
-<p>Then use the three subtabs:</p>
-<p><strong>Replay.</strong> Re-prices the whole netted position along the underlying's recent actual
-price path. Stacked panels show price, the position's own <strong>profit and loss</strong> from the
-first bar, and four Greeks, over a dated axis; the scrub cursor's line states each
-bar's price, profit or loss and delta.</p>
-<p>This is the most under-used view in the app. It answers "would I have been stopped out
-of this?" using real historical movement rather than a hypothetical slider.</p>
-<p><strong>What-if.</strong> A dollar profit-and-loss payoff measured <strong>from your entry</strong>. Two sliders:</p>
+<p>Then use the three subtabs, in order:</p>
+<p><strong>Price &amp; Time.</strong> A dollar profit-and-loss payoff measured <strong>from your entry</strong>. Two
+sliders:</p>
 <ul>
 <li><strong>Price change</strong> moves the underlying up or down.</li>
 <li><strong>Time passed</strong> fast-forwards time, as far as the position's last expiry, with
@@ -2755,21 +2751,31 @@ of this?" using real historical movement rather than a hypothetical slider.</p>
 <p>Profit fills green above breakeven, loss fills red below. For a credit spread the
 profit caps at the net credit and the loss floors at width minus credit — matching the
 Calculator exactly.</p>
-<p><strong>IV Shock.</strong> Multiplies volatility to expose <strong>vega</strong> risk, as a table (today's
+<p><strong>Volatility.</strong> Multiplies volatility to expose <strong>vega</strong> risk, as a table (today's
 volatility against the shocked one, with the change) under a one-line verdict. This is
-the view that
-explains losses people find inexplicable: a position can be correct on direction and
-still lose money because implied volatility collapsed after an event, or gained value
-purely because it rose. Selling premium into an IV spike and buying it back after the
-crush is the whole basis of event trading.</p>
-<p><strong>Copy to Calculator</strong> sends the legs back the other way.</p>
+the view that explains losses people find inexplicable: a position can be correct on
+direction and still lose money because implied volatility collapsed after an event, or
+gained value purely because it rose. Selling premium into an IV spike and buying it
+back after the crush is the whole basis of event trading.</p>
+<p><strong>History.</strong> Re-prices the whole netted position along the underlying's recent actual
+price path. Stacked panels show price, the position's own <strong>profit and loss</strong> from the
+first bar, and four Greeks, over a dated axis; the scrub cursor's line states each
+bar's price, profit or loss and delta.</p>
+<p>This is the most under-used view in the app. It answers "would I have been stopped out
+of this?" using real historical movement rather than a hypothetical slider.</p>
+<p><strong>One position with the Calculator.</strong> The Simulator opens with the Calculator's
+symbol, strategy and legs, and an edit here is what the Calculator opens with next.
+Before 2026-09-12 two buttons copied legs between the pages. ⚠ The Simulator cannot
+value shares, so a covered call, protective put or collar arrives with its option
+legs only and a note; the share legs are carried through untouched and never deleted
+by an edit here.</p>
 <h3 id="why-it-matters_11">Why it matters</h3>
 <p>Most losing options trades are not wrong about direction — they are wrong about <em>path</em>
 or <em>timing</em>. The three views map exactly onto the three ways a trade goes wrong: the
-underlying moved (What-if), time ran out (Days passed), or volatility changed (IV
-Shock). Testing all three before entering is the single highest-value habit this app
+underlying moved or time ran out (Price &amp; Time), or volatility changed
+(Volatility). Testing all three before entering is the single highest-value habit this app
 supports.</p>
-<p><strong>Where it is weak.</strong> Replay uses the underlying's real path but re-prices the option
+<p><strong>Where it is weak.</strong> History uses the underlying's real path but re-prices the option
 with a model, so it cannot reproduce actual bid/ask spreads or fills. Treat it as
 "how the position would have valued", not "what I would have got".</p>
 <h3 id="when-to-use-it_11">When to use it</h3>
@@ -4614,7 +4620,7 @@ in the rail is the one that stops things.</p>
 </tr>
 <tr>
 <td><strong>Simulator</strong></td>
-<td><strong>Replay</strong> (real historical path) · <strong>What-if</strong> (price and time sliders) · <strong>IV Shock</strong> (volatility multiplier)</td>
+<td><strong>Price &amp; Time</strong> (price and time sliders) · <strong>Volatility</strong> (volatility multiplier) · <strong>History</strong> (real historical path)</td>
 </tr>
 <tr>
 <td><strong>Portfolio</strong></td>
@@ -4804,16 +4810,10 @@ workflow.</p>
 <td>Symbol, expiry and strikes</td>
 </tr>
 <tr>
-<td>Calculator</td>
-<td><strong>Copy to Simulator</strong></td>
-<td>Simulator</td>
-<td>The exact legs</td>
-</tr>
-<tr>
-<td>Simulator</td>
-<td><strong>Copy to Calculator</strong></td>
-<td>Calculator</td>
-<td>The exact legs</td>
+<td>Calculator ⇄ Simulator</td>
+<td><em>(nothing to press)</em></td>
+<td>the other page</td>
+<td>One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last</td>
 </tr>
 <tr>
 <td>Flow Alerts</td>

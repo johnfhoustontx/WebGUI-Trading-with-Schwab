@@ -353,7 +353,7 @@ Routes:
 | `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
 | `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
-| `/options/simulator` | Simulator — Replay / What-if / IV-shock under the same entry panel. Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/simulator` | Simulator — **Price & Time · Volatility · History** tabs (that order, since 2026-09-12) under the same entry panel, over ONE position shared with the Calculator (`shared_position`; no copy buttons). Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
@@ -417,8 +417,12 @@ and **`handoff.py`** (cross-page
 signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
 `cmd:options`, plus the shared `add_row_actions` per-row action-button slot, **and the
-Simulator↔Calculator leg-copy stashes** (`send_to_simulator`/`send_to_calculator_legs`
-+ `take_pending_simulator`/`take_pending_calculator_legs`), **and the Flow-Alerts→Dealer-
+Calculator legs stash** (`send_to_calculator_legs`/`take_pending_calculator_legs`, used
+by multi-leg Send to Calculator — the Simulator↔Calculator copy stashes were removed
+2026-09-12 when the two pages began sharing ONE position via
+**`shared_position.py`**: each publishes from its `_capture`, seeds from it on render,
+publishes `pending_legs` rather than a placeholder template while a chain loads, and
+the Simulator carries share legs through untouched), **and the Flow-Alerts→Dealer-
 Positioning symbol stash** (`send_to_gamma`/`take_pending_gamma`, one-shot — a symbol left
 in the stash would silently re-hijack the gamma dropdown on the page's next build); engine-free),
 **`strategy_menu.py`** (the shared cascading **Strategy picker** — a

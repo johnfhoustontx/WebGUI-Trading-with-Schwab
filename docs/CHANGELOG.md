@@ -44,6 +44,18 @@ panel.** Operator request: make both pages data-entry friendly.)
   block with a delegated click read from `data-*` attributes; a test pins the tags
   and attributes against the shipped DOMPurify allow-list and its `ALLOW_DATA_ATTR`
   default, and the click and centring were verified in a browser.
+- **One position shared by the Calculator and the Simulator; the copy buttons are
+  gone.** Operator request. Both pages publish symbol, strategy, legs (with prices)
+  and the selected expiry to `shared_position` and open with it, so whichever was
+  edited last is what the other shows; IV/rate/contracts and the sliders/tab stay
+  per page. Verified in the harness: a 3-leg TSLA position built on the Calculator
+  opened on the Simulator, a strike moved there opened on the Calculator. That round
+  trip **found a stale-price bug** — the moved call kept the old strike's price —
+  fixed by clearing a moved leg's price on the page with no price column. Share legs
+  ride through the Simulator untouched, with a note.
+- **Simulator tabs renamed and reordered: Price & Time · Volatility · History**
+  (were Replay · What-if · IV shock), Price & Time opening first. The marketing
+  gallery's three Simulator screenshots are fixed images and keep their captions.
 - **Every expiration, not just the next 60 days — found by the operator on the
   first TSLA load.** The strip ended at Oct 30 (48 days) because `calc_load` fetched
   `today..+60` in one call — a limit older than this work — while TSLA lists **22**

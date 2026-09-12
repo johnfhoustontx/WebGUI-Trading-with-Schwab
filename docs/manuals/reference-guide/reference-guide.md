@@ -1723,7 +1723,8 @@ you actually want. A plain **%** over dashes means neither basis exists. Before
 2026-08-19 the column was a share of the *premium received*; for a credit spread that
 is the identical number, because the credit **is** the maximum return.
 
-**Copy to Simulator** sends the exact legs across. **Expected Move** charts them.
+**The Simulator shows this same position** — the Calculator and the Simulator work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+**Expected Move** charts the legs.
 
 ### Why it matters
 
@@ -1804,17 +1805,10 @@ dates. An **Edited** chip and plain-sentence warnings flag a structure whose ris
 not what its name suggests — the classic one being a short leg that outlives its
 long leg, which is uncovered from that date on.
 
-Then use the three subtabs:
+Then use the three subtabs, in order:
 
-**Replay.** Re-prices the whole netted position along the underlying's recent actual
-price path. Stacked panels show price, the position's own **profit and loss** from the
-first bar, and four Greeks, over a dated axis; the scrub cursor's line states each
-bar's price, profit or loss and delta.
-
-This is the most under-used view in the app. It answers "would I have been stopped out
-of this?" using real historical movement rather than a hypothetical slider.
-
-**What-if.** A dollar profit-and-loss payoff measured **from your entry**. Two sliders:
+**Price & Time.** A dollar profit-and-loss payoff measured **from your entry**. Two
+sliders:
 
 - **Price change** moves the underlying up or down.
 - **Time passed** fast-forwards time, as far as the position's last expiry, with
@@ -1827,25 +1821,37 @@ Profit fills green above breakeven, loss fills red below. For a credit spread th
 profit caps at the net credit and the loss floors at width minus credit — matching the
 Calculator exactly.
 
-**IV Shock.** Multiplies volatility to expose **vega** risk, as a table (today's
+**Volatility.** Multiplies volatility to expose **vega** risk, as a table (today's
 volatility against the shocked one, with the change) under a one-line verdict. This is
-the view that
-explains losses people find inexplicable: a position can be correct on direction and
-still lose money because implied volatility collapsed after an event, or gained value
-purely because it rose. Selling premium into an IV spike and buying it back after the
-crush is the whole basis of event trading.
+the view that explains losses people find inexplicable: a position can be correct on
+direction and still lose money because implied volatility collapsed after an event, or
+gained value purely because it rose. Selling premium into an IV spike and buying it
+back after the crush is the whole basis of event trading.
 
-**Copy to Calculator** sends the legs back the other way.
+**History.** Re-prices the whole netted position along the underlying's recent actual
+price path. Stacked panels show price, the position's own **profit and loss** from the
+first bar, and four Greeks, over a dated axis; the scrub cursor's line states each
+bar's price, profit or loss and delta.
+
+This is the most under-used view in the app. It answers "would I have been stopped out
+of this?" using real historical movement rather than a hypothetical slider.
+
+**One position with the Calculator.** The Simulator opens with the Calculator's
+symbol, strategy and legs, and an edit here is what the Calculator opens with next.
+Before 2026-09-12 two buttons copied legs between the pages. ⚠ The Simulator cannot
+value shares, so a covered call, protective put or collar arrives with its option
+legs only and a note; the share legs are carried through untouched and never deleted
+by an edit here.
 
 ### Why it matters
 
 Most losing options trades are not wrong about direction — they are wrong about *path*
 or *timing*. The three views map exactly onto the three ways a trade goes wrong: the
-underlying moved (What-if), time ran out (Days passed), or volatility changed (IV
-Shock). Testing all three before entering is the single highest-value habit this app
+underlying moved or time ran out (Price & Time), or volatility changed
+(Volatility). Testing all three before entering is the single highest-value habit this app
 supports.
 
-**Where it is weak.** Replay uses the underlying's real path but re-prices the option
+**Where it is weak.** History uses the underlying's real path but re-prices the option
 with a model, so it cannot reproduce actual bid/ask spreads or fills. Treat it as
 "how the position would have valued", not "what I would have got".
 
@@ -3447,7 +3453,7 @@ Pages carrying their own subtab row, and what each subtab does.
 |---|---|
 | **Market Scanner** | **0-DTE** (expiring today) · **Swing** (multi-day credit spreads) · **Directional** (single-leg longs and shorts, scored on a *different*, non-comparable scale) |
 | **Dealer Positioning** | **Gamma** (hedging intensity) · **Charm** (time decay of hedges) · **Delta** (directional exposure) · **Vanna** (volatility sensitivity) · **Flow** (call vs put premium ribbon) · **Net Prem** (net premium, up to 28 symbols) · **Term** (next five expirations) |
-| **Simulator** | **Replay** (real historical path) · **What-if** (price and time sliders) · **IV Shock** (volatility multiplier) |
+| **Simulator** | **Price & Time** (price and time sliders) · **Volatility** (volatility multiplier) · **History** (real historical path) |
 | **Portfolio** | **Holdings** · **Sectors** (weights vs S&P) · **Performance** (graded positions) |
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |
 | **Claude Trades** | Monitor (default) · **Performance** (closed trades and realized P&L) |
@@ -3491,8 +3497,7 @@ workflow.
 | Market Scanner · Strategy Finder | **Send to Calculator** | Calculator | Symbol and all legs (the chain loads first, then the legs apply) |
 | Market Scanner · Strategy Finder | **Send to Paper trade** | Paper Ledger | The trade, as a paper entry |
 | Market Scanner · Strategy Finder · Paper · Captured · Calculator | **Expected Move** | Expected Move (new tab) | Symbol, expiry and strikes |
-| Calculator | **Copy to Simulator** | Simulator | The exact legs |
-| Simulator | **Copy to Calculator** | Calculator | The exact legs |
+| Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |
 | Opportunity Board | read the row, then open | Dealer Positioning · Strategy Finder | (manual) |
 

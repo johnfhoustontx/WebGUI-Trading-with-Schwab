@@ -303,8 +303,8 @@ Three built-in help features are always within reach:
   page is for and how changing its settings changes the result.
 - **Sub-tab hover tooltips** — several pages have a second row of small **view
   tabs** beneath the main strip (for example Dealer Positioning's **GEX / Charm /
-  DEX / Vanna / Flow / Net Prem / Term**, the Simulator's **Replay / What-if / IV
-  shock**, and the Scanner's **0-DTE / Swing / Directional**). Hover an individual
+  DEX / Vanna / Flow / Net Prem / Term**, the Simulator's **Price & Time / Volatility /
+  History**, and the Scanner's **0-DTE / Swing / Directional**). Hover an individual
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.
 - **User Manuals** — a tab in the **More** group. It opens this User Guide, the
@@ -896,10 +896,10 @@ one.
   *is* the maximum return.)
 
 If you arrived here via **Send to Calculator** from a signal table, the form is
-pre-filled and priced once the chain loads. **Copy to Simulator** sends the
-current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
-brings them back), so you can move a structure between the P&L cards and the
-scenario/Greeks views without re-entering it. Loading a **different** symbol clears
+pre-filled and priced once the chain loads. The Calculator and the Simulator work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+Open the Simulator after building a trade here and it is already loaded; change it
+there and the Calculator shows the change. Your IV, rate and contracts stay on this
+page. Loading a **different** symbol clears
 the cards and matrix — they belonged to the old symbol; **Refresh** on the **same**
 one keeps them.
 
@@ -934,35 +934,38 @@ you picked (resizing every leg together does not count). A warning line appears 
 a short leg expires after a long one ("From Sep 18 it is no longer covered") or when
 more calls are sold than bought (losses unlimited if the price rises).
 
-Three tabs:
+Three tabs, in this order:
 
-- **Replay** (default) — re-prices the position along the underlying's recent price
-  path and shows six stacked panels: **Price**, the position's own **Profit / loss**
-  (green above zero, red below — measured from the first bar, as if opened then),
-  then **Delta, Gamma, Theta per day, Vega**. The axis shows real dates, and times
-  are **Central** — a session's first bar reads 08:30. Drag the
-  **scrub slider** to step through the bars; the line beside it states that bar's
-  time, price, profit or loss and delta. It starts on the latest bar. A
-  **Look-back** dropdown controls how far back the path runs (Auto by DTE, or fixed
-  windows).
-- **What-if** — a **Price change** slider (an instant price overlay) and a **Time
-  passed** slider that fast-forwards from now. Time passed runs only as far as your
-  position's last expiry (in quarter days when it is three days or less away), and
-  **Now / Halfway / Expiry** buttons jump straight there. A line under the sliders
-  reads the result, e.g. *"At 386.00 on Sep 28: profit $8,240"*. Each leg decays on
-  its **own** clock, so a **calendar's** back leg correctly keeps its time value while
-  the front leg expires.
-- **IV Shock** — a **Volatility multiplier** slider and a table comparing the
+- **Price & Time** (opens first) — a **Price change** slider (an instant price
+  overlay) and a **Time passed** slider that fast-forwards from now. Time passed runs
+  only as far as your position's last expiry (in quarter days when it is three days or
+  less away), and **Now / Halfway / Expiry** buttons jump straight there. A line under
+  the sliders reads the result, e.g. *"At 386.00 on Sep 28: profit $8,240"*. Each leg
+  decays on its **own** clock, so a **calendar's** back leg correctly keeps its time
+  value while the front leg expires.
+- **Volatility** — a **Volatility multiplier** slider and a table comparing the
   position at today's volatility and at the multiplied volatility: position value,
   delta, gamma, theta per day and vega per volatility point, with the change. A line
   above states the result, e.g. *"If volatility rises 50%, this position loses
   $1,050."*
+- **History** — re-prices the position along the underlying's recent real price
+  path and shows six stacked panels: **Price**, the position's own **Profit / loss**
+  (green above zero, red below — measured from the first bar, as if opened then),
+  then **Delta, Gamma, Theta per day, Vega**. The axis shows real dates, and times
+  are **Central** — a session's first bar reads 08:30. Drag the **scrub slider** to
+  step through the bars; the line beside it states that bar's time, price, profit or
+  loss and delta. It starts on the latest bar. A **Look-back** dropdown controls how
+  far back the path runs (Auto by DTE, or fixed windows).
 
 All Simulator figures are for the **whole position** (every contract, times 100),
 the same basis a broker shows.
 
-**Copy to Calculator** sends the current legs to the Calculator for the metric cards
-+ P&L matrix (the Calculator's **Copy to Simulator** brings them back).
+**One position with the Calculator.** The Simulator opens with the Calculator's
+symbol, strategy and legs, and any change you make here is what the Calculator shows
+next — there are no copy buttons. A position that holds **shares** (a covered call,
+protective put or collar) is shown with its option legs only: a note says the shares
+are not simulated, and they stay in the position when you edit it here. The sliders
+and the open tab stay with this page.
 
 ## Market Scanner
 
