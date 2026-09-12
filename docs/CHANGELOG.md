@@ -4,7 +4,64 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**A7 measured, and NOT built: netting commissions
+**Last updated:** 2026-09-11 (**The income short-delta band reached the spreads
+and not the cash-secured put — and the realised delta was worse than the target
+suggested.** Gap assessment **A4**.)
+
+- **`swing_scan` hands its short-delta band to BOTH builders now.** It took
+  `put_d_min/put_d_max` and gave them to `screen_spreads` alone, so inside ONE
+  call the Income Window's documented 0.15–0.25 band governed its credit spreads
+  while its cash-secured put was built at `strategy_scanner._SHORT_DELTA` (0.28)
+  and the band was simply ignored.
+
+- **⚠ The audit said "sells 0.28 delta"; the measurement is worse.** 0.28 was only
+  a *target* — `nearest_by_delta` returns the closest strike on a coarse ladder
+  however far out it lands. Measured across four live chains on 2026-09-11, every
+  short sat at or above the 0.25 ceiling: **XOM 0.328**, SPY 0.281, IREN 0.274,
+  CRWV 0.274. Not one symbol was inside the band it documents.
+
+- **Three rules in `build_directional`, each a decision:**
+  - **The target is the band's MIDPOINT** (mirroring `_COVERED_TARGET_DELTA`, so a
+    band edit moves every consumer). On the real XOM $5 ladder — |delta| 0.131 /
+    0.218 / 0.328 — that alone is the fix: 0.28 picks 0.328, 0.20 picks 0.218.
+  - **Only the CEILING is enforced.** A short above `hi` is dropped, one below
+    `lo` is kept. Deliberately asymmetric: "richer premium and more assignment
+    than the window documents" is the harm, while escaping downward is a thin
+    credit the delta-aware edge floor and the credit floor already refuse — a
+    symmetric drop would be a second gate that can only empty the board.
+  - **A band never touches the LONG legs.** It says where you are willing to SELL
+    premium and nothing about where to buy it; a 0.20-delta long call is a lottery
+    ticket, not the 0.55 bet the builder intends.
+
+- **Verified against four live chains** before and after: every short moved into
+  the band (XOM 160→155, SPY 744→732, IREN 39→37, CRWV 80→75) and every long was
+  byte-identical. No candidate was dropped on any of the four, so the ceiling is a
+  safety net rather than something that fires routinely.
+
+- **⚠ It also makes the Strategy Finder's own Δ inputs bind on its single-leg
+  shorts**, which they never did. That is the page's controls finally taking
+  effect rather than a new policy — `page_help.py` already told the reader they
+  applied — and the help now says which legs they govern and which they do not.
+
+- **Seven existing tests failed, and every one was a stale fixture rather than a
+  regression.** Both shared chain fixtures stopped at 0.28 delta — the income one's
+  docstring said so outright: *"the 0.28-delta wings matter: `build_directional`
+  targets `_SHORT_DELTA = 0.28`"*. A ladder whose cheapest strike is 0.28 has
+  nothing inside a 0.15–0.25 band, so the short structures were correctly dropped
+  and the assertions found empty lists. Fixed by extending both ladders with a
+  0.18-delta wing, which makes them *more* faithful (all four live chains had one)
+  — **not one assertion was changed**, and `filtered_out == 5` came back on its
+  own. This is precisely the trap CLAUDE.md records: a fixture pinned to a
+  constant that then moved.
+
+- **Tests: 11 new.** options-scanner **1359 → 1367 passed / 2 skipped**,
+  options_svc **1580 → 1582**; shared + the webgui doc guards 372. Not verified
+  live in the sense that matters — the next income slot (Monday 08:45 CT) is the
+  first scan to use the band.
+
+---
+
+**Prior —** 2026-09-11 (**A7 measured, and NOT built: netting commissions
 everywhere is worth −0.019R and reorders nothing.** A measurement, not a change.)
 
 - **`tools/measure_commission_convention.py`** — read-only, two halves,

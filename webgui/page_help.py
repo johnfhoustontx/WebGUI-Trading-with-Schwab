@@ -178,8 +178,13 @@ Like the Market Scanner, but you pick one symbol and it ranks every strategy
 family for it — directional, spreads, and neutral.
 
 - **DTE min/max** — how many days to expiration to allow. Wider = more candidates.
-- **Put/Call Δ (delta)** — how far out-of-the-money the strikes sit. A smaller
-  |delta| is safer but pays less credit.
+- **Put/Call Δ (delta)** — how far out-of-the-money the **sold** strikes sit. A
+  smaller |delta| is safer but pays less credit. It governs every short leg —
+  the spreads' short strikes and the single-leg short put or call — and
+  deliberately **not** the long legs of a directional or debit trade, where a
+  far-out-of-the-money strike would be a lottery ticket rather than the bet. ⚠
+  Before 2026-09-11 it reached the spreads only, so a short put ignored whatever
+  you set here and was always written near 0.28 delta.
 - **Min credit %** — throw out trades that don't pay enough premium for the risk.
 - Raising deltas/credit → fewer but richer trades; lowering → more but lower quality.
 - Only candidates that clear a **quality bar** are listed. The status line says how

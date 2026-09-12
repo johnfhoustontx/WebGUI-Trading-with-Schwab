@@ -2384,6 +2384,40 @@ the calibration would then measure a hold-to-expiry policy the manage cycle neve
 executes. `TARGET_HIT` stays out: on the lifecycle path +50% arms break-even and
 holds, so that code cannot arise there.
 
+## A short-delta band governs the SHORT legs, aims at the midpoint, caps the top
+
+`swing_scan` takes `put_d_min/put_d_max` + `call_d_min/call_d_max` and — since
+2026-09-11 — hands them to **both** builders. It used to pass them to
+`screen_spreads` alone, so inside ONE call the Income Window's documented
+0.15–0.25 band governed its credit spreads while its cash-secured put was built
+at `strategy_scanner._SHORT_DELTA` (0.28) and the band was simply ignored. ⚠ The
+harm was not the target but the **realised** delta: measured across four live
+chains on 2026-09-11 every short sat at or above the ceiling — XOM **0.328**, SPY
+0.281, IREN 0.274, CRWV 0.274 — because `nearest_by_delta` returns the closest
+strike on a coarse ladder however far out it lands.
+
+Three rules, and each is a decision rather than an implementation detail:
+
+- **The target is the band's MIDPOINT**, mirroring `compute._COVERED_TARGET_DELTA`
+  so a band edit moves every consumer at once. On the real XOM $5 ladder (|delta|
+  0.131 / 0.218 / 0.328) that is the whole fix: 0.28 picks 0.328, 0.20 picks 0.218.
+- **Only the CEILING is enforced** — a short above `hi` is dropped, one below `lo`
+  is kept. Deliberately asymmetric: "richer premium and more assignment than the
+  window documents" is the harm, while escaping the band *downward* is a thin
+  credit the delta-aware edge floor (`credit/width ≥ |Δ| + EDGE_MARGIN`) and the
+  credit floor already refuse. A symmetric drop would be a second gate that can
+  only empty the board for a reason something else covers.
+- **A band never touches the LONG legs.** It says where you are willing to SELL
+  premium and nothing about where to buy it; a 0.20-delta long call is a lottery
+  ticket, not the 0.55 directional bet `build_directional` intends.
+
+`_band_abs` normalises sign and order, because `INCOME_PUT_DELTA` is signed
+`(-0.25, -0.15)` while the call band is positive and `nearest_by_delta` works on
+`abs` — and an unusable band degrades to the legacy fixed target, never to `(0,0)`,
+which would aim every short at the far wing. **Consequence worth knowing: the
+Strategy Finder's own Δ inputs now bind on its single-leg shorts**, which they
+never did — the page's help already claimed they did.
+
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 
 `strategy_scoring._reward_metric`'s NAKED branch returns

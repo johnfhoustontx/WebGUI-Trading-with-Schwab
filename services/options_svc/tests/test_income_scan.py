@@ -34,10 +34,19 @@ _EXP = (dt.date.today() + dt.timedelta(days=_DTE)).isoformat()
 def _income_chain():
     """A minimal 35-DTE chain carrying the greeks ``extract_options`` needs.
 
-    The 0.28-delta wings matter: ``build_directional`` targets
-    ``_SHORT_DELTA = 0.28``, so without them ``SHORT_PUT`` is never built and
-    every assertion about the cash-secured put would raise on an empty list
-    rather than fail on a wrong value.
+    ⚠ **The 0.18-delta wings are what make the short structures buildable, and
+    they replaced 0.28-only wings on 2026-09-11 (gap assessment A4).** This
+    docstring used to say the 0.28 wings mattered because
+    ``build_directional`` targeted ``_SHORT_DELTA = 0.28`` — a fixture pinned to
+    a constant, which is exactly how this repo's "permanent failures" were built
+    last time. ``build_directional`` now aims a short at the caller's band
+    midpoint and DROPS one richer than its ceiling, so a ladder whose cheapest
+    strike is 0.28 has nothing inside a 0.15-0.25 band and every cash-secured-put
+    assertion below would fail on an empty list.
+
+    A real 30-45 DTE chain goes much further out than 0.28 — measured on four live
+    chains, the in-band strike always existed — so the added wing makes this
+    fixture more faithful, not more permissive.
     """
     def leg(delta, mark):
         return [{"delta": delta, "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
@@ -48,11 +57,11 @@ def _income_chain():
         "underlyingPrice": 540.0,
         "callExpDateMap": {key: {
             "535.0": leg(0.60, 8.0), "545.0": leg(0.40, 4.0),
-            "555.0": leg(0.28, 2.0),
+            "555.0": leg(0.28, 2.0), "565.0": leg(0.18, 1.0),
         }},
         "putExpDateMap": {key: {
             "545.0": leg(-0.60, 8.0), "535.0": leg(-0.40, 4.0),
-            "525.0": leg(-0.28, 2.0),
+            "525.0": leg(-0.28, 2.0), "515.0": leg(-0.18, 1.0),
         }},
     }
 

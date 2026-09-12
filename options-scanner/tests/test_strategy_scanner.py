@@ -448,3 +448,119 @@ def test_iron_condor_liquidity_gate_lit_up_end_to_end():
     wide_ic = ss.adapt_iron_condor(se.build_iron_condors([wide_pcs, wide_ccs], 1)[0])
     wide_gates = sc.evaluate_gates(wide_ic)
     assert "liquidity" in wide_gates["reasons"] and not wide_gates["passed_min"]
+
+
+# ---- A4: the short legs honour the caller's delta band ----------------------
+# build_directional took NO band and always targeted _SHORT_DELTA (0.28), while
+# screen_spreads beside it in the same swing_scan call got the band the caller
+# supplied. So the Income Window's documented 0.15-0.25 short-put band applied to
+# its spreads and not to its cash-secured put.
+#
+# Measured on the live XOM 2026-10-16 ladder (2026-09-11), which is $5-wide and
+# carries exactly three candidate strikes:
+#     |delta| 0.131 @ 150   0.218 @ 155   0.328 @ 160
+# Target 0.28 picks 160 at 0.328 - a third more assignment risk than the window
+# documents. Target 0.20 (the band midpoint) picks 155 at 0.218. The fixture
+# chain below is the same shape: puts at 0.18 / 0.32 / 0.50.
+
+
+def test_a_short_put_with_no_band_keeps_the_legacy_target():
+    """Back-compat. Every caller that passes no band must be untouched: 0.28 is
+    nearest 0.32 on this ladder, which is what shipped."""
+    sigs = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30)
+    sp = next(s for s in sigs if s["type"] == "SHORT_PUT")
+    assert abs(sp["legs"][0]["delta"]) == 0.32
+
+
+def test_a_band_moves_the_short_put_to_the_midpoint_strike():
+    """The fix, on a miniature of the measured ladder: the 0.15-0.25 band targets
+    0.20 and picks 0.18, not 0.32."""
+    sigs = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                put_band=(0.15, 0.25))
+    sp = next(s for s in sigs if s["type"] == "SHORT_PUT")
+    assert abs(sp["legs"][0]["delta"]) == 0.18
+    assert sp["legs"][0]["strike"] == 440.0
+
+
+def test_the_band_is_read_as_an_ABSOLUTE_delta_whichever_sign_it_arrives_in():
+    """``compute.INCOME_PUT_DELTA`` is SIGNED (-0.25, -0.15) while
+    ``nearest_by_delta`` works on ``abs``. A caller must not be able to get that
+    wrong, so the band is normalised here."""
+    signed = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                  put_band=(-0.25, -0.15))
+    unsigned = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                    put_band=(0.15, 0.25))
+    pick = lambda out: next(s for s in out if s["type"] == "SHORT_PUT")["legs"][0]["strike"]
+    assert pick(signed) == pick(unsigned) == 440.0
+
+
+def test_the_band_order_does_not_matter():
+    out = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                               put_band=(0.25, 0.15))
+    sp = next(s for s in out if s["type"] == "SHORT_PUT")
+    assert abs(sp["legs"][0]["delta"]) == 0.18
+
+
+def test_a_call_band_moves_the_short_call_and_not_the_put():
+    sigs = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                call_band=(0.15, 0.25))
+    sc = next(s for s in sigs if s["type"] == "SHORT_CALL")
+    assert abs(sc["legs"][0]["delta"]) == 0.18
+    sp = next(s for s in sigs if s["type"] == "SHORT_PUT")
+    assert abs(sp["legs"][0]["delta"]) == 0.32      # no put band -> legacy target
+
+
+def test_the_LONG_legs_ignore_the_band_entirely():
+    """The band says where you are willing to SELL premium and nothing about
+    where you buy it. A 0.20-delta long call is a lottery ticket, not the 0.55
+    directional bet the builder intends."""
+    sigs = ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                put_band=(0.15, 0.25), call_band=(0.15, 0.25))
+    lc = next(s for s in sigs if s["type"] == "LONG_CALL")
+    lp = next(s for s in sigs if s["type"] == "LONG_PUT")
+    assert abs(lc["legs"][0]["delta"]) == 0.50
+    assert abs(lp["legs"][0]["delta"]) == 0.50
+
+
+def _rich_only_chain():
+    """A ladder whose every put is richer than a 0.25 ceiling - the coarse-ladder
+    case the XOM measurement shows is real."""
+    return {
+        "underlyingPrice": 450.0,
+        "callExpDateMap": {"2026-07-10:10": {
+            "455.0": [_contract(455.0, 0.45, 9.0)],
+            "450.0": [_contract(450.0, 0.60, 12.0)]}},
+        "putExpDateMap": {"2026-07-10:10": {
+            "445.0": [_contract(445.0, -0.45, 9.0)],
+            "450.0": [_contract(450.0, -0.60, 12.0)]}},
+    }
+
+
+def test_a_short_richer_than_the_bands_ceiling_is_DROPPED():
+    """The harm A4 names is "richer premium and more assignment than the window
+    documents", so the ceiling is enforced rather than merely aimed at."""
+    sigs = ss.build_directional(_rich_only_chain(), "SPY", 450.0, 0.18, 5, 30,
+                                put_band=(0.15, 0.25), call_band=(0.15, 0.25))
+    types = {s["type"] for s in sigs}
+    assert "SHORT_PUT" not in types
+    assert "SHORT_CALL" not in types
+    # ...and the LONG side still builds, so this is a per-structure drop and not
+    # an empty return.
+    assert {"LONG_CALL", "LONG_PUT"} <= types
+
+
+def test_a_short_CHEAPER_than_the_band_is_kept():
+    """Deliberately asymmetric. Escaping the band DOWNWARD is a thin credit, and
+    the delta-aware edge floor (credit/width >= |delta| + 0.02) plus the credit
+    floor already refuse those - a second gate here could only empty the board
+    for a reason something else already covers. Escaping UPWARD is the risk
+    nothing else catches, which is why only the ceiling is enforced."""
+    thin = {
+        "underlyingPrice": 450.0,
+        "callExpDateMap": {"2026-07-10:10": {"470.0": [_contract(470.0, 0.04, 0.2)]}},
+        "putExpDateMap": {"2026-07-10:10": {"430.0": [_contract(430.0, -0.04, 0.2)]}},
+    }
+    sigs = ss.build_directional(thin, "SPY", 450.0, 0.18, 5, 30,
+                                put_band=(0.15, 0.25), call_band=(0.15, 0.25))
+    sp = next(s for s in sigs if s["type"] == "SHORT_PUT")
+    assert abs(sp["legs"][0]["delta"]) == 0.04

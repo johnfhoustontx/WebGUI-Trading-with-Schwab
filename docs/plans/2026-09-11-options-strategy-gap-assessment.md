@@ -1,6 +1,6 @@
 # Options strategy playbook vs the app — gap assessment
 
-**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis, since acted on — **A1, A2, A3 and B1 have shipped on `claude/options-strategies-gaps-8636bf`**, and the rows they changed say so inline. Everything unmarked still describes `c152b00`.
+**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis, since acted on — **A1, A2, A3, B1, B6, C1 and A4 have shipped on `claude/options-strategies-gaps-8636bf`**, and the rows they changed say so inline. Everything unmarked still describes `c152b00`.
 **Companion:** [Options strategy playbook](2026-09-11-options-strategy-playbook.md). Rule IDs such as **S1**, **M2** or **X4** refer to its Part 1.
 
 ## Verdict
@@ -262,7 +262,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **A1** | Merge and promote `dde98b8` (concentration caps; live earnings gate) — **merged as `05ed539`; promote pending** | S4, V3 | S | High |
 | **A2** | Teach the repricer single legs (`SHORT_PUT`, `COVERED_CALL`) — **shipped 2026-09-11** | X1–X3 for income | S–M | High |
 | **A3** | Fix Rescue's put-side test for short puts — **shipped 2026-09-11** | §3.1 | S | Medium |
-| **A4** | Give the income cash-secured put its own delta band | §2.3 | S | Medium |
+| **A4** | Give the income cash-secured put its own delta band — **shipped 2026-09-11** | §2.3 | S | Medium |
 | **A5** | Pass an earnings date from the Strategy Finder | V3 | S | Medium |
 | **A6** | Size the width search against the real book | S3, W1, W4 | S–M | Medium–high |
 | **A7** | One commission convention; rank on net — **measured 2026-09-11: the analytics half is worth −0.019R and reorders nothing; see below** | P2, W4 | S–M | ~~Medium~~ **Low** |
@@ -304,6 +304,26 @@ skips the money, time and delta stops until B1 decides. 21 new tests. Add `SHORT
 `rescue.is_put_side`, replacing three copies of the membership test. `is_put_side` (`rescue.py:53`) must include `SHORT_PUT` and `NAKED_PUT`. The structural repairs (roll down-and-out for a credit) are the natural cash-secured-put repair and belong in B1.
 
 **A4. Give the income cash-secured put its own delta band.** Pass `INCOME_PUT_DELTA` to the single-leg builder. Today it ignores the band and sells 0.28 delta, which is richer premium and more assignment than the window documents.
+
+**Shipped 2026-09-11, and the measurement made it a bigger defect than this
+entry says.** `swing_scan` already took the band and handed it to `screen_spreads`
+alone, so inside ONE call the band governed the window's credit spreads while its
+cash-secured put ignored it. ⚠ And 0.28 was only the *target* — `nearest_by_delta`
+returns the closest strike on a coarse ladder however far out it lands, so the
+**realised** delta was worse on every symbol measured: XOM **0.328**, SPY 0.281,
+IREN 0.274, CRWV 0.274 — all at or above the 0.25 ceiling, not just XOM.
+
+The fix hands the band to both builders and gives `build_directional` three rules:
+the target is the band's **midpoint** (on the real XOM $5 ladder — |delta| 0.131 /
+0.218 / 0.328 — that alone moves the pick from 0.328 to 0.218); only the
+**ceiling** is enforced, because escaping the band downward is a thin credit the
+edge and credit floors already refuse; and a band **never touches the long legs**,
+where a far-OTM strike would be a lottery ticket rather than the bet. Verified
+against four live chains: every short moved into the band, every long unchanged.
+
+⚠ **It also makes the Strategy Finder's own Δ inputs bind on its single-leg
+shorts**, which they never did — the page's help already claimed they did, so the
+help became true rather than changing. Disclosed in `page_help.py`.
 
 **A5. Pass an earnings date from the Strategy Finder.** Its handler supplies none (`handlers.py:470-480`). Do it after A1, so every scanner reads the same store.
 
@@ -472,7 +492,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 1. Income Window positions got no mark and no exit rules, and logged an error on every manage cycle **(checked)** — fixed 2026-09-11 (A2).
 2. Rescue treated a cash-secured put as call-side, and offered it no candidates, not even "Close now" **(checked)** — fixed 2026-09-11 (A3); the missing roll and wheel candidates followed in B1.
 2a. **`paper_adjust.apply_roll` resolved a short put to the CALL side** — a fourth hand-written copy of the same membership test, so a single-leg roll would have been partitioned and priced on the call chain. Unreachable only because no roll candidate existed to apply, exactly like the `_close_legs` commission defect A3 found. Fixed 2026-09-11 (B1), with the seven copies of the structure sets folded into `shared/structures.py` and a test that fails on the next one.
-3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**. ⚠ Re-measured on the live board 2026-09-11 while wiring C1, and it is **worse than the code suggests**: the day's only `SHORT_PUT` (XOM 160, 35 DTE) carried a short delta of **−0.334**, a third again past the top of the band. A4 is the fix.
+3. ~~The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band~~ **(checked)** — **fixed 2026-09-11 (A4)**, and the measurement was worse than this line: the *realised* delta ran 0.274–0.328 across every live symbol checked, at or above the ceiling, because 0.28 was only a target on a coarse ladder.
 4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
 6. The width search is sized for a phantom $100,000 account **(checked)**.

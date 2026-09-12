@@ -182,6 +182,24 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
 
 _LONG_DELTA, _SHORT_DELTA = 0.55, 0.28
 
+
+def _band_abs(band):
+    """A caller's (lo, hi) short-delta band as ABSOLUTE, ordered floats, or None.
+
+    ``compute.INCOME_PUT_DELTA`` is SIGNED (-0.25, -0.15) while the call band is
+    positive, and ``nearest_by_delta`` works on ``abs`` - so normalising here is
+    what stops a caller getting the sign or the order wrong. Anything unusable
+    degrades to None, i.e. the legacy fixed target, never to a band of (0, 0)
+    that would aim every short at the far wing.
+    """
+    try:
+        lo, hi = (abs(float(band[0])), abs(float(band[1])))
+    except (TypeError, ValueError, IndexError):
+        return None
+    lo, hi = min(lo, hi), max(lo, hi)
+    return None if hi <= 0 else (lo, hi)
+
+
 _DIRECTIONAL = [
     ("LONG_CALL",  "call", "long",  "bullish", "Long Call",  _LONG_DELTA),
     ("LONG_PUT",   "put",  "long",  "bearish", "Long Put",   _LONG_DELTA),
@@ -224,17 +242,50 @@ def _assemble(stype, family, label, bias, legs, symbol, spot, atm_iv):
             "timestamp": _dt.datetime.now().isoformat(), **m}
 
 
-def build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max):
+def build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                      put_band=None, call_band=None):
+    """Single-leg directional candidates: long/short call and put.
+
+    ``put_band`` / ``call_band`` are the caller's SHORT-delta bands, e.g.
+    ``compute.INCOME_PUT_DELTA``. They do two things and nothing else:
+
+    * **aim** a short at the band's MIDPOINT instead of the fixed
+      ``_SHORT_DELTA``. Measured on the live XOM 2026-10-16 ladder, a $5-wide
+      chain offering |delta| 0.131 / 0.218 / 0.328, the 0.28 target picked 0.328
+      while the 0.15-0.25 band's midpoint picks 0.218 - a third less assignment
+      risk on the same chain. The midpoint convention mirrors
+      ``compute._COVERED_TARGET_DELTA``, so a band edit moves both.
+    * **enforce the CEILING only.** A short whose |delta| lands above ``hi`` is
+      dropped; one below ``lo`` is kept. That asymmetry is deliberate: "richer
+      premium and more assignment than the window documents" is the harm, and
+      escaping the band DOWNWARD is a thin credit that the delta-aware edge floor
+      (``credit/width >= |delta| + EDGE_MARGIN``) and the credit floor already
+      refuse. A symmetric drop would add a second gate that can only empty the
+      board for a reason something else already covers.
+
+    ⚠ **A band never touches the LONG legs.** It says where the caller is willing
+    to SELL premium and nothing about where to buy it - a 0.20-delta long call is
+    a lottery ticket, not the 0.55 directional bet this builder intends.
+
+    No band (the default, and every caller before 2026-09-11) keeps the fixed
+    ``_SHORT_DELTA`` target with no ceiling, so behaviour is unchanged.
+    """
     out = []
+    bands = {"put": _band_abs(put_band), "call": _band_abs(call_band)}
     by_kind = {k: extract_options(chain, k, dte_min, dte_max) for k in ("call", "put")}
     for stype, kind, side, bias, label, target in _DIRECTIONAL:
         fe = _front_exp(by_kind[kind])
         if not fe:
             continue
         exp, data = fe
+        band = bands[kind] if side == "short" else None
+        if band:
+            target = (band[0] + band[1]) / 2.0
         leg_data = nearest_by_delta(data["strikes"], target)
         if not leg_data:
             continue
+        if band and abs(leg_data.get("delta") or 0) > band[1]:
+            continue    # richer than the band's ceiling - see the docstring
         legs = [_leg_from(leg_data, kind, side, exp)]
         out.append(_assemble(stype, "DIRECTIONAL", label, bias, legs, symbol, spot, atm_iv))
     return out

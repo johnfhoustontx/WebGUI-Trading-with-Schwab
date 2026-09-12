@@ -376,7 +376,17 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     fams = set(families) if families else set(_SWING_FAMILIES)
     signals = []
     if "DIRECTIONAL" in fams:
-        signals += ssn.build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max)
+        # ⚠ The short-delta band goes to BOTH builders (gap assessment A4). It
+        # used to reach ``screen_spreads`` alone, so in ONE call the Income
+        # Window's documented 0.15-0.25 band governed its credit spreads while
+        # its cash-secured put was built at a fixed 0.28 target: measured on the
+        # live board 2026-09-11, the day's only SHORT_PUT (XOM 160, 35 DTE)
+        # carried -0.334. ``build_directional`` aims a short at the band's
+        # MIDPOINT and drops one richer than its ceiling, and it never touches
+        # the LONG legs - see that docstring for why the rule is asymmetric.
+        signals += ssn.build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                                        put_band=(put_d_min, put_d_max),
+                                        call_band=(call_d_min, call_d_max))
 
     # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
     # so compute screen_spreads if EITHER family is requested.
