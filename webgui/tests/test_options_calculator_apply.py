@@ -17,6 +17,7 @@ collect is not a page that is broken.
 """
 import asyncio
 import inspect
+import time
 
 import pytest
 from nicegui import ui
@@ -29,8 +30,13 @@ _EXPIRY = "2026-08-28"
 
 
 def _chain_payload():
-    strikes = {f"{k}": [{"mark": 2.4, "bid": 2.3, "ask": 2.5, "delta": -0.31,
-                         "volatility": 14.2}]
+    # Marks rise with the strike (650 -> 1.00 ... 670 -> 3.00), so a priced
+    # two-leg structure has a real, non-zero net — a flat mark would net to
+    # exactly $0 and read like the unpriced-template trap.
+    strikes = {f"{k}": [{"mark": round((k - 640.0) / 10.0, 2),
+                         "bid": round((k - 640.0) / 10.0 - 0.05, 2),
+                         "ask": round((k - 640.0) / 10.0 + 0.05, 2),
+                         "delta": -0.31, "volatility": 14.2}]
                for k in (650.0, 655.0, 660.0, 665.0, 670.0)}
     return {"symbol": "SPY", "price": 668.41,
             "chain": {"callExpDateMap": {f"{_EXPIRY}:9": strikes},
@@ -128,6 +134,9 @@ def page(monkeypatch):
 
 def test_a_landed_chain_paints_the_legs_the_strip_and_the_pill(page):
     root, polls = page
+    # Before any chain the template is unpriced, so NET is an em-dash and NOT
+    # "$0" — the trap this readout exists to avoid.
+    assert "NET —" in _texts(root)
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
     texts = _texts(root)
@@ -140,11 +149,12 @@ def test_a_landed_chain_paints_the_legs_the_strip_and_the_pill(page):
     # the legs resolved onto the real ladder and read their delta off the chain
     assert "-0.31" in texts or "+0.31" in texts, "no leg delta rendered"
 
-    # the ③ LEGS strip: a fresh template is unpriced, so NET is an em-dash and
-    # NOT "$0" — the trap this readout exists to avoid
+    # the legs strip: a landed chain PRICES the template (2026-09-12 — there is
+    # no Fetch premiums button any more), so NET is a real signed figure now
     assert "2 LEGS" in texts
-    assert "NET —" in texts
-    assert "MAX LOSS —" in texts
+    assert "NET —" not in texts
+    assert [t for t in texts if t.startswith("NET +$")], "priced template has no net"
+    assert "MAX LOSS —" not in texts
 
     # no result yet -> the placeholder names the SECOND wait, not the first
     assert "AWAITING CALCULATION" in texts
@@ -215,24 +225,21 @@ def _wearing(root, token):
     return [el for el in _walk(root) if want <= set(getattr(el, "_classes", []))]
 
 
-def test_the_two_chain_dependent_frames_light_up_only_once_it_lands(page):
-    from pages.options import theme as T
-
+def test_the_chain_grid_is_empty_until_a_chain_lands(page):
+    # Replaces the old frame-dimming test: the numbered frames went with the
+    # entry panel. What must still hold is that nothing chain-shaped shows
+    # before a chain exists.
     root, polls = page
-    # The muted colour on its own is also the eyebrow colour, worn by dozens of
-    # labels — it is the CHIP wearing it that identifies a dimmed frame.
-    off_chip = f"{T.CALC_CHIP} {calc._CHIP_TEXT['off']}"
-    # ② SYMBOL and ③ LEGS start muted: neither means anything without a chain.
-    # ① STRATEGY and P&L MATRIX never dim, so the count is exactly two.
-    assert len(_wearing(root, T.CALC_FRAME_IDLE)) == 2
-    assert len(_wearing(root, off_chip)) == 2
+    texts = _texts(root)
+    assert "Load a symbol to see its chain." in texts
+    assert not [el for el in _walk(root) if "entry-grow" in getattr(el, "_classes", [])]
 
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
 
-    assert _wearing(root, T.CALC_FRAME_IDLE) == []
-    assert _wearing(root, off_chip) == []
-    assert len(_wearing(root, T.CALC_FRAME)) == 4
+    assert "Load a symbol to see its chain." not in _texts(root)
+    assert len([el for el in _walk(root)
+                if "entry-grow" in getattr(el, "_classes", [])]) == 5
 
 
 def _click(root, label):
@@ -253,18 +260,58 @@ def _click(root, label):
     raise AssertionError(f"no button labelled {label!r}")
 
 
+def _hooked(root, cls):
+    return [el for el in _walk(root) if cls in getattr(el, "_classes", [])]
+
+
 def _symbol_input(root):
-    """The TICKER field — the page's only ui.input."""
-    inputs = [el for el in _walk(root) if isinstance(el, ui.input)]
-    assert len(inputs) == 1, f"expected one text input, found {len(inputs)}"
+    """The TICKER field — exactly one on the page (the strike boxes are inputs too)."""
+    inputs = _hooked(root, "entry-ticker")
+    assert len(inputs) == 1, f"expected one ticker input, found {len(inputs)}"
     return inputs[0]
 
 
+def _fire(root, el, event):
+    for listener in list(getattr(el, "_event_listeners", {}).values()):
+        if listener.type == event:
+            arity = len(inspect.signature(listener.handler).parameters)
+            with root:
+                listener.handler(*((None,) if arity else ()))
+
+
+def _recalc(root):
+    """Run the recalculation debounce past its delay, once."""
+    timers = [el for el in _walk(root)
+              if isinstance(el, ui.timer)
+              and getattr(el.callback, "__name__", "") == "_recalc_tick"]
+    assert len(timers) == 1, "render() no longer registers _recalc_tick"
+    real = time.monotonic
+    time.monotonic = lambda: real() + 60.0
+    try:
+        with root:
+            timers[0].callback()
+    finally:
+        time.monotonic = real
+
+
+@pytest.fixture
+def sent_commands(monkeypatch):
+    sent = []
+    real = bus_client.request
+
+    def _record(domain, command):
+        sent.append(command)
+        return real(domain, command)
+
+    monkeypatch.setattr(bus_client, "request", _record)
+    return sent
+
+
 def _calculate_spy(root, polls):
-    """Chain -> CALCULATE -> a result, through the real handlers."""
+    """Chain -> the debounce fires -> a result, through the real handlers."""
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
-    _click(root, "CALCULATE")          # attributes the result to SPY
+    _recalc(root)                      # attributes the result to SPY
     bus_client.bus().cache_set("cache:options:calc_result", _result_payload(
         {"entry_credit": 180.0, "max_loss": 320.0, "max_profit": 180.0,
          "return_on_risk": 56.3, "breakevens": [658.2], "pop": 71.4}))
@@ -293,7 +340,7 @@ def test_loading_a_different_symbol_drops_the_previous_symbols_numbers(page):
     _calculate_spy(root, polls)
 
     _symbol_input(root).value = "QQQ"
-    _click(root, "LOAD CHAIN")
+    _fire(root, _symbol_input(root), "keydown.enter")
     texts = _texts(root)
 
     assert "ENTRY CREDIT" not in texts
@@ -308,7 +355,7 @@ def test_reloading_the_same_symbol_keeps_the_result_on_screen(page):
     root, polls = page
     _calculate_spy(root, polls)
 
-    _click(root, "LOAD CHAIN")
+    _click(root, "REFRESH")
     texts = _texts(root)
 
     assert "ENTRY CREDIT" in texts
@@ -316,9 +363,53 @@ def test_reloading_the_same_symbol_keeps_the_result_on_screen(page):
     assert not [t for t in texts if t.startswith("AWAITING")]
 
 
-def test_the_page_names_the_strategy_step_once(page):
-    # The ① STRATEGY frame chip already says it; the shared picker's own caption
-    # would repeat the word one line below.
+def test_the_page_does_not_caption_the_strategy_picker_twice(page):
+    # The picker's own "Strategy" caption is switched off: the panel's trigger
+    # names the strategy it holds, and a caption over it is noise.
     root, _polls = page
     assert "Strategy" not in _texts(root)
-    assert "① STRATEGY" in _texts(root)
+
+
+def test_a_landed_chain_enqueues_one_compute_after_the_debounce(page, sent_commands):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    assert not [c for c in sent_commands if c["type"] == "calc_compute"], \
+        "priced before the user paused"
+    _recalc(root)
+    computes = [c for c in sent_commands if c["type"] == "calc_compute"]
+    assert len(computes) == 1
+    legs = computes[0]["args"]["legs"]
+    assert len(legs) == 2 and all(l["premium"] > 0 for l in legs)
+    _recalc(root)                      # nothing new poked: no second compute
+    assert len([c for c in sent_commands if c["type"] == "calc_compute"]) == 1
+
+
+def test_a_landed_chain_asks_the_service_to_imply_iv(page, sent_commands):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    assert [c for c in sent_commands if c["type"] == "calc_iv"]
+
+
+def test_clicking_a_put_bid_adds_a_short_leg_priced_at_the_mark(page, sent_commands):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    bids = _hooked(root, "entry-put-bid")
+    strikes = [el for el in _hooked(root, "entry-strike")]
+    idx = [float(el.text) for el in strikes].index(655.0)
+    _fire(root, bids[idx], "click")
+    _recalc(root)
+    legs = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
+    assert len(legs) == 3
+    assert legs[-1] == {"strike": 655.0, "premium": 1.5, "option_type": "put",
+                        "side": "short", "qty": 1, "expiry": _EXPIRY}
+    assert "3 LEGS" in _texts(root)
+
+
+def test_the_action_buttons_are_gone(page):
+    root, _polls = page
+    labels = {getattr(el, "text", None) for el in _walk(root) if isinstance(el, ui.button)}
+    for gone in ("LOAD CHAIN", "IV UPDATE", "FETCH PREMIUMS", "CALCULATE"):
+        assert gone not in labels, gone

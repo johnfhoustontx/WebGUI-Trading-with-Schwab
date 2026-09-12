@@ -1167,24 +1167,28 @@ def test_render_wears_the_calc_v3_scope_and_not_the_shared_navy_one():
     assert "QUASAR_INTERNAL_CSS" not in src, "that block is scoped .calc-v2"
 
 
-def test_render_mounts_the_card_leg_editor_with_the_calc_palette():
+def test_render_mounts_the_table_leg_editor_with_the_calc_palette():
     import inspect
     src = inspect.getsource(calc.render)
-    assert 'layout="card"' in src
+    assert 'layout="table"' in src
+    assert "price_for=" in src, "a strike change must re-price the leg"
     assert "delta_for=" in src, "the DELTA column collapses without a source"
     assert "min_legs=" in src
     assert "on_reset=" in src
 
 
-def test_render_keeps_the_top_level_expiry_inside_the_applying_guard():
-    # Programmatic expiry writes must not fire _on_expiry_change, or the legs are
-    # re-propagated mid-load. The design drops the top-level Expiry; the real page
-    # needs it for calc_compute's expiry argument.
+def test_render_sets_the_expiry_programmatically_inside_the_applying_guard():
+    # A chain landing must not fire _on_expiry_change, or the legs are
+    # re-propagated mid-load. The expiry now lives in the entry panel, whose
+    # set_chain fires nothing (test_entry_panel pins that); the guard stays as
+    # belt and braces, and calc_compute still gets the panel's expiry.
     import inspect
     src = inspect.getsource(calc.render)
-    assert src.count('state["applying"] = True') == 2
-    assert src.count('state["applying"] = False') == 2
-    assert "expiry_sel" in src
+    assert src.count('state["applying"] = True') == 1
+    assert src.count('state["applying"] = False') == 1
+    assert "panel.set_chain(" in src
+    assert "panel.selected_expiry()" in src
+    assert "expiry_sel" not in src
 
 
 def test_render_preserves_every_wired_behaviour():
