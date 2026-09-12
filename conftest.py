@@ -116,6 +116,114 @@ def _block_live_databases(request, monkeypatch):
     yield
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# THE NETWORK TWIN: the suite cannot reach a real HTTP server
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS
+# ---------------
+# ``paper_trader.add_trade`` POSTs every new paper trade to the proxy's stream
+# tracker (``trade_tracker_client.track`` -> ``repo_paths.PROXY_URL``/track), and
+# several suites call it with nothing stubbed. Off the prod box that is a
+# 1.5-second timeout per row; ON it, where the proxy is up, the suite registers
+# fake trades with the LIVE tracker.
+#
+# Measured 2026-09-12, by recording every outbound attempt across all 18 suites:
+# **47 attempts, 45 of them to the live proxy** — and it is TWO leaks, not one.
+# 18 are WRITES (/track, /untrack). 27 are market-data READS (/pricehistory,
+# /chains, /quote, /stream/quotes), mostly from sentiment_svc's app tests — which
+# on prod would spend real Schwab API calls against a budget already at
+# ~68-76k/day. The remaining 2 are tools/wait_http's own local test servers.
+#
+# THE LAYER
+# ---------
+# Two chokepoints, because production code uses two HTTP stacks:
+#   * ``requests.adapters.HTTPAdapter.send`` — BELOW ``requests.Session``. Eight
+#     production modules hold a persistent ``requests.Session()``, so patching
+#     ``requests.post`` would have missed most callers. Nothing in the repo does
+#     ``from requests import ...``.
+#   * ``urllib.request.urlopen`` — daily_trade_log reaches the proxy this way
+#     (90-second timeout), and earnings_history / edgar_fundamentals reach out.
+#     Nothing does ``from urllib.request import urlopen``.
+# Not covered, deliberately: ``httpx`` (no production module imports it) and
+# ``aiohttp`` (only ``edge_tts``, whose tests stub ``voice._synthesize``).
+#
+# ⚠ WHY IT RAISES THE NATIVE ERROR, UNLIKE THE SQLITE GUARD
+# ----------------------------------------------------------
+# A database has no "store is down" path the code handles, so a loud
+# RuntimeError is right there. An HTTP server DOES: every call site already
+# catches ``requests.RequestException`` / ``URLError`` and degrades. Raising the
+# native type makes a test take exactly the path production takes with the proxy
+# unreachable. A RuntimeError would escape those ``except`` clauses and force a
+# per-test stub at every site — the per-site patching the SQLite post-mortem
+# above says does not scale. Blocking everything broke exactly one test in the
+# measurement: a test that starts its own server.
+#
+# ESCAPE HATCH
+# ------------
+#     @pytest.mark.allow_network
+#
+# For a test that binds its OWN local server. ⚠ Check the converse too: a test
+# asserting a probe reads DOWN would pass VACUOUSLY under this guard, because the
+# guard — not the thing under test — is what said down.
+
+try:
+    import requests
+    import requests.adapters
+except ImportError:          # no requests -> the requests-stack leak cannot occur
+    requests = None
+
+import urllib.error
+import urllib.request
+
+if requests is not None:
+    class NetworkBlockedInTest(requests.exceptions.ConnectionError):
+        """Raised in place of a real ``requests`` round trip during a test.
+
+        A ``ConnectionError`` on purpose: see the block above."""
+
+    _real_http_adapter_send = requests.adapters.HTTPAdapter.send
+else:                        # pragma: no cover - requests is a hard dependency
+    NetworkBlockedInTest = None
+    _real_http_adapter_send = None
+
+
+class UrllibBlockedInTest(urllib.error.URLError):
+    """Raised in place of a real ``urllib.request.urlopen`` during a test."""
+
+
+_real_urlopen = urllib.request.urlopen
+
+_BLOCKED_HINT = ("refusing real network I/O from a test: {what}\n"
+                 "Stub the call, or mark the test @pytest.mark.allow_network if "
+                 "it starts its OWN local server.")
+
+
+@pytest.fixture(autouse=True)
+def _block_network(request, monkeypatch):
+    """Refuse every real outbound HTTP request, through both stacks."""
+    if request.node.get_closest_marker("allow_network"):
+        yield
+        return
+
+    if requests is not None:
+        def _guarded_send(self, prepared, *a, **kw):
+            raise NetworkBlockedInTest(_BLOCKED_HINT.format(
+                what=f"{prepared.method} {prepared.url}"), request=prepared)
+
+        monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", _guarded_send)
+
+    def _guarded_urlopen(url, *a, **kw):
+        target = getattr(url, "full_url", url)
+        raise UrllibBlockedInTest(_BLOCKED_HINT.format(what=f"urlopen {target}"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _guarded_urlopen)
+    yield
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "allow_live_db: test may open a real on-disk store (prefer tmp_path)")
+    config.addinivalue_line(
+        "markers", "allow_network: test may make real HTTP requests — only for a "
+                   "test that starts its OWN local server")

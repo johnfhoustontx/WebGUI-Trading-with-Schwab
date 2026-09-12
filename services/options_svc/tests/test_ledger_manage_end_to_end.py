@@ -59,11 +59,11 @@ def ledger(tmp_path, monkeypatch):
 
     monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", tmp_path / "trades.db")
     monkeypatch.setattr(trades_db, "_initialised", set())
-    # ⚠ ``add_trade`` POSTs the row to the proxy's stream tracker at
-    # ``repo_paths.PROXY_URL``. Off the prod box that is a 1.5s timeout per row;
-    # ON it, the suite would register fake trades with the LIVE proxy. The
-    # repo-root conftest guards `sqlite3.connect` against exactly this class and
-    # does not yet guard outbound HTTP.
+    # ``add_trade`` POSTs the row to the proxy's stream tracker. The repo-root
+    # conftest now refuses every real outbound HTTP request, so this can no
+    # longer reach the live proxy either way — these stubs stay only so the
+    # tracker reports success rather than its degraded "proxy down" path, which
+    # keeps this test about the LEDGER and not about the tracker.
     monkeypatch.setattr(trade_tracker_client, "track", lambda t: True)
     monkeypatch.setattr(trade_tracker_client, "untrack", lambda tid: True)
     return paper_trader
