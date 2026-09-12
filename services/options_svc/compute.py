@@ -6793,11 +6793,15 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
 # fns).
 
 
-# The five contract fields the Calculator/Rescue pages actually read (verified
-# against every `.get("...")` on a contract dict in both pages). Everything else
+# The contract fields the Calculator/Simulator/Rescue pages actually read.
+# Everything else
 # in Schwab's ~40-field contract dicts was dead weight: the raw 20-expiry chain
 # cached 8.77 MB — 53% of ALL prod Redis string bytes — with no TTL (2026-08-20).
-_CALC_CONTRACT_FIELDS = ("bid", "ask", "mark", "volatility", "delta")
+# Widened 2026-09-12 from five fields for the Calculator/Simulator chain grid
+# (open interest, volume and the Greeks). Still a whitelist: the unthinned
+# chain was 8.77 MB.
+_CALC_CONTRACT_FIELDS = ("bid", "ask", "mark", "volatility", "delta", "gamma",
+                         "theta", "vega", "openInterest", "totalVolume")
 
 
 def thin_calc_chain(chain):
@@ -6807,8 +6811,8 @@ def thin_calc_chain(chain):
     expiry key → strike key → [contracts] — and nothing else. Cutting FIELDS
     rather than cropping STRIKES is deliberate: the leg builder legitimately
     offers far wings (a user hedging with a 10-delta teenie), so the strike
-    ladder must stay whole; no page reads any other per-contract field or any
-    other top-level key. None passes through (the degrade path). Junk-tolerant:
+    ladder must stay whole; no page reads any other per-contract field (the
+    chain grid's pickable columns are exactly this set) or any other top-level key. None passes through (the degrade path). Junk-tolerant:
     a malformed strike entry becomes an empty list, never a raise.
     """
     if chain is None:

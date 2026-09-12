@@ -2988,7 +2988,7 @@ def test_calc_load_returns_chain_price_range(monkeypatch):
     assert out["range_lo"] == 450.0 * 0.95
     assert out["range_hi"] == 450.0 * 1.05
     # The chain is THINNED at publish since 2026-08-20 (see thin_calc_chain):
-    # structure preserved, contracts cut to the five page-read fields, absent
+    # structure preserved, contracts cut to the page-read fields, absent
     # maps normalized to {}.
     assert out["chain"] == {"putExpDateMap": {},
                             "callExpDateMap": {"2026-06-19:4": {"450.0": [{"mark": 1.0}]}}}
@@ -5711,8 +5711,15 @@ def test_thin_calc_chain_keeps_only_the_fields_the_pages_read():
                  _fat_contract(putCall="CALL", delta=0.5)]}}}
     out = compute.thin_calc_chain(chain)
     put = out["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
+    # Widened 2026-09-12 for the entry panel's chain grid (OI, volume, Greeks).
     assert put == {"bid": 1.0, "ask": 1.2, "mark": 1.1,
-                   "volatility": 22.5, "delta": -0.25}
+                   "volatility": 22.5, "delta": -0.25, "gamma": 0.01,
+                   "theta": -0.5, "vega": 0.1, "openInterest": 1000,
+                   "totalVolume": 500}
+    # the bulk per-contract fields no page reads stay OUT
+    for dropped in ("description", "quoteTimeInLong", "intrinsicValue", "rho",
+                    "theoreticalOptionValue"):
+        assert dropped not in put
     call = out["callExpDateMap"]["2026-08-21:1"]["6400.0"][0]
     assert call["delta"] == 0.5
     # structure the pages iterate is intact; the bulk top-level keys are gone
@@ -5743,7 +5750,8 @@ def test_calc_load_symbol_publishes_the_thinned_chain(monkeypatch):
                         lambda *a, **k: _Resp(fat))
     cc = compute.calc_load_symbol("SPX")
     contract = cc["chain"]["putExpDateMap"]["2026-08-21:1"]["6000.0"][0]
-    assert "gamma" not in contract and "description" not in contract
+    assert "rho" not in contract and "description" not in contract
+    assert contract["gamma"] == 0.01          # kept for the chain grid (2026-09-12)
     assert contract["mark"] == 1.1
     assert cc["price"] == 6400.0
 
