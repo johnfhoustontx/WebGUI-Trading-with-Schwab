@@ -653,7 +653,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             if stock:
                 qty.tooltip("Lots of 100 shares")
             e_opts = leg_expiry_options(leg, exps)
-            ew = ui.select(e_opts, value=(e_val if e_opts else None)) \
+            ew = ui.select(_entry.expiry_options(e_opts),
+                           value=(e_val if e_opts else None)) \
                 .props("dense options-dense").classes("leg-expiry w-full min-w-0")
             ew.on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
             ew.set_enabled(bool(e_opts))

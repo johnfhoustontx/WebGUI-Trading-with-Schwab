@@ -885,6 +885,7 @@ def render():
         if meta:
             spot = meta.get("spot")
             spot_txt = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "—"
+            panel.spot_lbl.text = spot_txt
             n = meta.get("n_contracts")
             n_txt = f"{n:,}" if isinstance(n, int) else "—"
             status.text = f"{meta.get('symbol')} spot {spot_txt} — {n_txt} contracts"

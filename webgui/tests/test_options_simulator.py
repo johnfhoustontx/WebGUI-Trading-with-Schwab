@@ -761,3 +761,12 @@ def test_whatif_tooltip_shows_two_decimals_and_a_leading_minus():
     assert js.startswith("function(){") and "this.x.toFixed(2)" in js
     assert "minimumFractionDigits:2" in js and "maximumFractionDigits:2" in js
     assert "y<0?'-':''" in js                      # the sign goes before the $
+
+
+def test_a_landed_meta_fills_the_panel_spot():
+    import bus_client
+    container = _render_cold()
+    assert _texts(container, "entry-spot") == ["—"]
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    _fire(container, "_poll_meta")
+    assert _texts(container, "entry-spot") == ["450.00"]

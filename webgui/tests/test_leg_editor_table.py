@@ -279,3 +279,10 @@ def test_apply_template_can_lay_legs_on_a_chosen_near_expiry():
     assert {l["expiry"] for l in ed.get_legs()} == {_EXPS[1]}
     ed.apply_template("PCS", near="2031-01-01")          # unlisted: the nearest
     assert {l["expiry"] for l in ed.get_legs()} == {_EXPS[0]}
+
+
+def test_table_expiry_select_shows_short_labels_over_iso_values():
+    _, container = _table([_leg()])
+    sel = _hook(container, "leg-expiry")
+    assert sel.options == {_EXPS[0]: "Sep 19", _EXPS[1]: "Sep 26"}
+    assert sel.value == _EXPS[0]

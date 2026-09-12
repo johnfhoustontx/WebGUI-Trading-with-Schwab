@@ -5,6 +5,7 @@ tested without a browser: stepping a strike along the real chain ladder, what a
 grid click turns into, when a leg's price re-fills from the chain, and the
 recalculation debounce. No nicegui import.
 """
+import datetime as dt
 import math
 
 #: A grid click's column → the leg's side. Clicking the Bid sells, the Ask buys
@@ -61,6 +62,24 @@ def leg_from_pick(column, option_type, strike, expiry, price):
         raise ValueError(f"not an option type: {option_type!r}")
     return {"option_type": option_type, "side": _PICK_SIDE[column],
             "strike": float(strike), "expiry": expiry, "qty": 1, "premium": price}
+
+
+def expiry_label(expiry):
+    """An ISO expiry as the short label a narrow column can hold: ``Sep 14``.
+    Anything that is not a date passes through as text, never raises."""
+    if expiry is None:
+        return ""
+    try:
+        d = dt.date.fromisoformat(str(expiry))
+    except ValueError:
+        return str(expiry)
+    return f"{d:%b} {d.day}"
+
+
+def expiry_options(expiries):
+    """``{iso: short label}`` for a select: the VALUE stays the ISO date every
+    consumer keys on, only the text shown changes."""
+    return {e: expiry_label(e) for e in (expiries or [])}
 
 
 def should_refill(field, manual):

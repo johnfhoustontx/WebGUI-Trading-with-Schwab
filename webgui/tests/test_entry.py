@@ -78,3 +78,15 @@ def test_debounce_cancel_drops_a_pending_fire():
     d.poke(0.0)
     d.cancel()
     assert d.ready(10.0) is False
+
+
+def test_expiry_label_is_a_short_month_day_and_passes_junk_through():
+    assert E.expiry_label("2026-09-14") == "Sep 14"
+    assert E.expiry_label("2026-10-03") == "Oct 3"
+    assert E.expiry_label("junk") == "junk"
+    assert E.expiry_label(None) == ""
+
+
+def test_expiry_options_map_iso_values_to_short_labels():
+    assert E.expiry_options(["2026-09-14", "2026-09-18"]) == {
+        "2026-09-14": "Sep 14", "2026-09-18": "Sep 18"}
