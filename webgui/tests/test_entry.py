@@ -1,0 +1,80 @@
+"""Pure trade-entry rules shared by the Calculator and the Simulator."""
+import pytest
+
+from pages.options import entry as E
+
+LADDER = [560.0, 565.0, 570.0, 575.0]
+
+
+def test_step_strike_moves_one_real_strike_and_stops_at_the_ends():
+    assert E.step_strike(LADDER, 570.0, +1) == 575.0
+    assert E.step_strike(LADDER, 570.0, -1) == 565.0
+    assert E.step_strike(LADDER, 575.0, +1) == 575.0
+    assert E.step_strike(LADDER, 560.0, -1) == 560.0
+
+
+def test_step_strike_snaps_an_off_ladder_value_first():
+    assert E.step_strike(LADDER, 571.0, 0) == 570.0
+    assert E.step_strike(LADDER, 573.0, +1) == 575.0     # snaps to 575, capped
+    assert E.step_strike(LADDER, 566.0, -1) == 560.0     # snaps to 565, one down
+
+
+def test_step_strike_total():
+    assert E.step_strike([], 570.0, +1) is None
+    assert E.step_strike(None, 570.0, +1) is None
+    assert E.step_strike(LADDER, None, +1) == 560.0
+    assert E.step_strike([575.0, "x", 560.0, 560.0], 560.0, +1) == 575.0
+
+
+def test_parse_strike_text_snaps_typed_text_to_the_ladder():
+    assert E.parse_strike_text("571", LADDER) == 570.0
+    assert E.parse_strike_text(" 565.00 ", LADDER) == 565.0
+    assert E.parse_strike_text("abc", LADDER) is None
+    assert E.parse_strike_text("", LADDER) is None
+    assert E.parse_strike_text(None, LADDER) is None
+    assert E.parse_strike_text("nan", LADDER) is None
+    assert E.parse_strike_text("570", []) is None
+
+
+def test_leg_from_pick_bid_sells_ask_buys_at_the_given_price():
+    sell = E.leg_from_pick("bid", "put", 565.0, "2026-09-19", price=2.07)
+    assert sell == {"option_type": "put", "side": "short", "strike": 565.0,
+                    "expiry": "2026-09-19", "qty": 1, "premium": 2.07}
+    buy = E.leg_from_pick("ask", "call", 575, "2026-09-19", price=None)
+    assert buy["side"] == "long" and buy["strike"] == 575.0 and buy["premium"] is None
+
+
+def test_leg_from_pick_rejects_what_is_not_a_click_target():
+    with pytest.raises(ValueError):
+        E.leg_from_pick("mark", "put", 565.0, "2026-09-19", price=1.0)
+    with pytest.raises(ValueError):
+        E.leg_from_pick("bid", "stock", 565.0, "2026-09-19", price=1.0)
+
+
+def test_refill_only_for_identity_fields_and_never_a_manual_price():
+    assert E.should_refill("strike", manual=False) is True
+    assert E.should_refill("expiry", manual=False) is True
+    assert E.should_refill("option_type", manual=False) is True
+    assert E.should_refill("strike", manual=True) is False
+    assert E.should_refill("qty", manual=False) is False
+    assert E.should_refill("side", manual=False) is False
+    assert E.should_refill("premium", manual=False) is False
+
+
+def test_debounce_fires_once_after_the_last_poke():
+    d = E.Debounce(0.3)
+    assert d.ready(0.0) is False
+    d.poke(0.0)
+    d.poke(0.2)
+    assert d.pending is True
+    assert d.ready(0.4) is False     # 0.2 + 0.3 = 0.5
+    assert d.ready(0.5) is True
+    assert d.pending is False
+    assert d.ready(0.9) is False     # consumed
+
+
+def test_debounce_cancel_drops_a_pending_fire():
+    d = E.Debounce(0.3)
+    d.poke(0.0)
+    d.cancel()
+    assert d.ready(10.0) is False
