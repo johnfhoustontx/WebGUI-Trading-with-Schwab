@@ -4,7 +4,7 @@ Design: docs/plans/2026-09-12-iv-history-capture-design.md.
 
 The store, the writer and the reader all already existed in
 ``services/trade_svc/deepdive/iv_history.py`` — with **7 rows, all dated
-2026-08-04**, because `record_snapshot` is reached only from
+three days** (08-04, 08-23, 08-25), because `record_snapshot` is reached only from
 `deepdive/engine.analyze_symbol`, i.e. only when someone opens a Deep Dive
 report. So this covers the two things that were actually missing: the module being
 reachable from the tier that has the chains, and a **basis** on the

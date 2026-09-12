@@ -2828,7 +2828,7 @@ question a year of data will answer.
 
 **`shared/iv_history.py` is the store that makes it answerable.** It was
 `services/trade_svc/deepdive/iv_history.py` and held **7 rows, all dated
-2026-08-04**: `record_snapshot` was reached only from
+three days** (08-04, 08-23, 08-25): `record_snapshot` was reached only from
 `deepdive/engine.analyze_symbol`, so it filled only when somebody opened a Deep
 Dive report. Built, tested, *called* — by a surface nobody runs daily. It moved to
 `shared/` because `options-scanner/scanner_engine.py` cannot import `services.*`

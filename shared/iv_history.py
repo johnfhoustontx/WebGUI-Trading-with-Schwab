@@ -17,7 +17,8 @@ about a schema. The precedent is exact: ``shared/earnings.py`` is the cross-tier
 path to ``EARNINGS_CALENDAR_DB``, a store that likewise lives under
 ``services/trade_svc/data/``.
 
-⚠ **It had 7 rows, all dated 2026-08-04**, for its whole life before that move.
+⚠ **It had 7 rows across just three days** (2026-08-04, 08-23, 08-25) for its
+whole life before that move.
 ``record_snapshot`` was reached only from ``deepdive/engine.analyze_symbol``, so
 the store filled only when somebody opened a Deep Dive report — built, tested,
 *called*, and called by a surface nobody runs daily. ``run_full_scan`` now records

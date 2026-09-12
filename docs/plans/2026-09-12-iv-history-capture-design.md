@@ -16,11 +16,16 @@ total-variance space, which is the correct linear domain), `backfill_rv`,
 `iv_rank`, `rv_rank`, `snapshot_count`, and a `MIN_SAMPLES_FOR_RANK` guard. The
 SQLite store has an idempotent upsert on `(symbol, snapshot_date)`.
 
-It holds **7 rows, all dated 2026-08-04.**
+It holds **7 rows across just three days** — three on 2026-08-04, two on 08-23,
+two on 08-25. (⚠ Corrected after the promote: an earlier note in this repo said
+"all dated 2026-08-04", which came from sampling the first two rows. The scatter
+makes the point more clearly, not less — seven readings on three unrelated days
+across three weeks is exactly what "it fills only when someone opens a Deep Dive"
+looks like.)
 
 The reason is that `record_snapshot` is called from exactly one place —
 `deepdive/engine.analyze_symbol` — so the store fills **only when someone opens a
-Deep Dive report**. Seven Deep Dives were run on one day in August. Nothing
+Deep Dive report**. Seven were run, on three scattered days in August. Nothing
 schedules it, and nothing on the scanner path has ever touched it. This is the
 "built, tested, never called" class (assessment defect 8), one layer worse: it is
 built, tested, *called*, and called by a surface nobody uses daily.

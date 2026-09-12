@@ -622,7 +622,7 @@ nothing from it.
 was not "write the thing", it was "run the thing that exists".**
 `deepdive/iv_history.py` is a complete module — `record_snapshot`,
 `constant_maturity_iv`, `iv_rank`, `rv_rank`, a 20-sample floor — and held **7
-rows, all dated 2026-08-04**, because it is reached only from
+rows across just three days** (08-04, 08-23, 08-25), because it is reached only from
 `engine.analyze_symbol`: it filled only when somebody opened a Deep Dive report.
 
 Moved to `shared/iv_history.py` (the `shared/earnings.py` precedent), and

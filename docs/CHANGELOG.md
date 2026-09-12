@@ -206,10 +206,12 @@ assessment **C3**.)
   `record_snapshot`, `constant_maturity_iv` (interpolating in total-variance
   space, the correct linear domain), `backfill_rv`, `iv_rank`, `rv_rank`,
   `snapshot_count`, a `MIN_SAMPLES_FOR_RANK` guard and an idempotent upsert. It
-  held **7 rows, all dated 2026-08-04**, because `record_snapshot` is reached only
-  from `deepdive/engine.analyze_symbol` — so the store filled only when somebody
-  opened a Deep Dive report. Built, tested, *called*, by a surface nobody runs
-  daily.
+  held **7 rows across just three days** (2026-08-04, 08-23, 08-25 — verified on
+  prod after the promote; an earlier line in this entry said "all dated
+  2026-08-04", from sampling the first two rows), because `record_snapshot` is
+  reached only from `deepdive/engine.analyze_symbol` — so the store filled only
+  when somebody opened a Deep Dive report. Built, tested, *called*, by a surface
+  nobody runs daily.
 - **Moved to `shared/iv_history.py`**, because `options-scanner/scanner_engine.py`
   cannot import `services.*` and duplicating a store's write path is how two
   writers come to disagree about a schema. `shared/earnings.py` is the exact
