@@ -12,9 +12,13 @@ Version 1.0.0 Changes:
 """
 import json
 import logging
+import sys as _sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
 
 import config_paper
 import paper_sizing
@@ -356,13 +360,14 @@ def _close(db_path, pos, exit_debit, exit_order_id, realized_pnl, reason, status
 # ⚠ Two spellings already exist for this one structure: SHORT_PUT on the scan
 # side (`services/options_svc/compute._INCOME_STRUCTURES`) and NAKED_PUT on the
 # Calculator / rescue side (`compute._SINGLE_STRATEGIES`). Both name the same
-# trade, so both assign. Do not introduce a third.
-SHORT_PUT_STRATEGIES = ("SHORT_PUT", "NAKED_PUT")
+# trade, so both assign. Do not introduce a third — and do not restate the pair
+# here either: `shared.structures` is the one home, and a test fails on a new
+# copy of it anywhere in options-scanner or services.
 
 
 def is_cash_secured_put(pos):
     """True for a single-leg short put — no long leg and no call side (PURE)."""
-    return (str(pos.get("strategy") or "").upper() in SHORT_PUT_STRATEGIES
+    return (_structures.is_short_put(pos.get("strategy"))
             and pos.get("short_strike") is not None
             and pos.get("long_strike") is None
             and pos.get("call_short") is None
@@ -426,9 +431,9 @@ def _assign_shares(db_path, pos):
 # (``webgui/pages/options/shares.COVERED_CALL_STRATEGIES``). A second spelling
 # here would be a NEW divergence rather than an inherited one — the SHORT_PUT /
 # NAKED_PUT pair exists only because two producers were built before either knew
-# about the other. ``shared/tests/test_cross_tier_mirrors.py`` pins the two
-# remaining copies against this constant.
-COVERED_CALL_STRATEGIES = ("COVERED_CALL",)
+# about the other. The name itself lives in ``shared.structures``;
+# ``shared/tests/test_cross_tier_mirrors.py`` pins the Tier-1 page, which cannot
+# import it, against that one home.
 
 
 def is_covered_call(pos):
@@ -440,7 +445,7 @@ def is_covered_call(pos):
     and owns no shares to deliver — calling one away would close a lot that was
     never pledged to it and credit the account for stock it does not hold.
     """
-    return (str(pos.get("strategy") or "").upper() in COVERED_CALL_STRATEGIES
+    return (_structures.is_covered_call(pos.get("strategy"))
             and covered_call_strike(pos) is not None
             and pos.get("long_strike") is None
             and pos.get("call_long") is None)
@@ -698,11 +703,12 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             continue   # unpriceable this cycle; leave the position open
 
         # ``strategy`` belongs in the BASE ctx, not just the lifecycle branch: the
-        # rule engine needs it to tell which structures carry the loss-side rules
-        # at all (``signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES``). Without
-        # it a cash-secured put is indistinguishable from a put credit spread and
-        # gets the spread's money, time and delta stops. It cannot change spread
-        # behaviour: ``_recoverable`` also needs ``spot`` + ``short_strike``, which
+        # rule engine resolves EVERY threshold per structure through
+        # ``shared.trade_mgmt.structure_rules`` (``[structures.*]`` in
+        # config/trade_mgmt.toml). Without it a cash-secured put is
+        # indistinguishable from a put credit spread and gets the spread's money,
+        # time and delta stops. It cannot change spread behaviour: a spread has no
+        # table, and ``_recoverable`` also needs ``spot`` + ``short_strike``, which
         # only the lifecycle branch supplies.
         ctx = {"entry_credit": pos["entry_credit"], "unrealized_pnl": per_contract,
                "current_short_delta": mark.get("current_short_delta"),
@@ -718,8 +724,9 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             # falls back to the absolute-breach delta stop when this is None.
             ctx["entry_short_delta"] = pos.get("entry_short_delta")
         rec = signal_recommender.recommend(ctx)
+        tp_frac = signal_recommender.tp_frac_for(pos.get("strategy"))
         if (lifecycle and not pos.get("be_armed") and per_contract
-                >= signal_recommender.TP_FRAC * (pos["entry_credit"] * MULTIPLIER)):
+                >= tp_frac * (pos["entry_credit"] * MULTIPLIER)):
             # Arm break-even AFTER recommend() — mirroring the captured cycle
             # (compute.run_captured_manage_cycle), which arms once the mark shows
             # +50%. The crossing cycle therefore HOLDs via Rule 5 (arm-and-hold);

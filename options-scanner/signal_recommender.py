@@ -12,6 +12,7 @@ import sys as _sys
 from datetime import date
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
 from shared import trade_mgmt as _trade_mgmt  # noqa: E402
 
 MULTIPLIER = 100
@@ -21,6 +22,14 @@ MULTIPLIER = 100
 # SAME numbers to decide what is at risk. It used to restate four of them by hand
 # under a comment asking future editors to keep the mirror in step; it now derives
 # them from the very dict below. Edit the TOML and restart options_svc.
+#
+# ⚠ These are the GLOBAL [stops] values. ``recommend()`` does NOT read them: it
+# resolves ``structure_rules(ctx["strategy"])`` per call, because the answer
+# depends on the position (see ``[structures.*]`` in the TOML). They remain the
+# module's public surface for everything that is not per-position — the streaming
+# levels below, ``paper_engine``'s arm-after-recommend check, and ``_recoverable``,
+# which only ever runs for the spread structures that have no overrides. A NEW
+# per-position threshold read belongs in ``rules``, not here.
 _STOPS = _trade_mgmt.stops()
 
 TP_FRAC = _STOPS["tp_frac"]                 # >= this credit captured -> ARM break-even
@@ -41,6 +50,18 @@ RECOVERY_MIN_CUSHION = _STOPS["recovery_min_cushion"]  # min spot<->strike cushi
 # not wired to any caller yet.
 DEFAULT_TRAIL_LADDER = _trade_mgmt.default_trail_ladder()
 RATCHET_TRAIL_LADDER = _trade_mgmt.ratchet_trail_ladder()
+
+
+def tp_frac_for(strategy):
+    """The profit-target fraction for ONE structure.
+
+    ``run_manage_cycle`` decides whether to ARM break-even from its own threshold
+    read, separately from ``recommend()``'s. Once a structure can move its own
+    ``tp_frac`` those two reads can disagree — the cycle arming at 50% while the
+    rule engine holds out for 90%, handing rule 3's break-even stop a position
+    that never reached its target. One accessor, read by both.
+    """
+    return _trade_mgmt.structure_rules(strategy)["tp_frac"]
 
 
 def track_thresholds(entry_credit):
@@ -75,8 +96,10 @@ def _recoverable(ctx):
         return False
     cushions = []
     # Put side: PCS short + the IC put short live in ``short_strike``. Breached
-    # (and NOT recoverable) once spot trades at/through it.
-    if strategy in ("PCS", "IC"):
+    # (and NOT recoverable) once spot trades at/through it. The predicate is
+    # exactly the membership test it replaces here - the line above has already
+    # restricted this to PCS/CCS/IC - but the side belongs in one place.
+    if _structures.is_put_side(strategy):
         if spot <= short:
             return False
         cushions.append(abs(spot - short) / spot)
@@ -125,25 +148,19 @@ def _locked_profit_level(ctx, credit_total):
     return lock * credit_total
 
 
-# Structures that take the PROFIT TARGET and no loss-side rule. The credit-spread
-# stops are wrong for both: a covered call losing 2x its credit is the stock
-# rallying - the shares hold that gain, and published covered-call research finds
-# stops simply produce more losers - while a cash-secured put's delta and time
-# stops fire exactly when assignment, which is the wheel's plan, becomes likely.
-#
-# So they ride to expiry, assignment or call-away unless the target is hit. This
-# is an interim policy pending a per-structure rule table in trade_mgmt.toml
-# (gap assessment B1); when that lands, delete this and key the rules off it.
-PROFIT_TARGET_ONLY_STRATEGIES = ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL")
-
-
 def recommend(ctx):
-    """Return {'action', 'reason', 'code'}. action in HOLD/CUT; code in
-    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP.
+    """Return {'action', 'reason', 'code'}. action in HOLD/CUT/TAKE_PROFIT; code in
+    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP/TARGET_HIT/MANAGE_DTE.
+
+    **Every threshold is resolved PER STRUCTURE** through
+    ``shared.trade_mgmt.structure_rules(ctx["strategy"])`` — ``[stops]`` overlaid
+    by that structure's ``[structures.*]`` table. A structure with no table (every
+    credit spread) and a ctx with no ``strategy`` at all get ``[stops]`` unchanged
+    with every rule on, so the pre-B1 callers are untouched.
 
     Lifecycle (first match wins — see the captured-autoclose design):
-      1. Money-stop (HARD): pnl <= -STOP_MULT*credit → CUT/MONEY_STOP.
-      2. Time-stop (HARD): DTE <= CUT_DTE and underwater → CUT/TIME_STOP.
+      1. Money-stop (HARD): pnl <= -stop_mult*credit → CUT/MONEY_STOP.
+      2. Time-stop (HARD): DTE <= cut_dte and underwater → CUT/TIME_STOP.
       3. Break-even stop (only when ``be_armed``): pnl <= ``be_level`` → CUT/BREAKEVEN_STOP.
       4. Delta-stop (SOFT): a delta drift/ceiling breach → CUT/DELTA_STOP, UNLESS
          ``_recoverable(ctx)`` (defers to HOLD).
@@ -155,30 +172,40 @@ def recommend(ctx):
          ``paper_engine.run_manage_cycle``) TAKE_PROFIT (``TARGET_HIT``) — the
          pre-lifecycle behavior, so the captured-autoclose rework never changes how
          those separate books exit.
-      6. HOLD with the score-drift note.
+      6. Manage-at-DTE (only when the structure sets ``manage_dte``): a
+         PROFITABLE position at or below it → TAKE_PROFIT/MANAGE_DTE. An
+         underwater one is HELD — see below.
+      7. HOLD with the score-drift note.
 
-    A ``ctx["strategy"]`` in ``PROFIT_TARGET_ONLY_STRATEGIES`` skips rules 1, 2
-    and 4 — the loss-side rules — for the reasons given at that constant. A ctx
-    without the key keeps every rule.
+    ``loss_rules = false`` in a structure's table skips rules 1, 2 and 4 — the
+    loss side — because for the Income Window's two single-leg structures each
+    one is INVERTED rather than merely unproven (a covered call losing 2x its
+    credit is the stock rallying; a cash-secured put's delta and time stops fire
+    exactly when assignment, which is the wheel's plan, becomes likely). Rule 6
+    is what replaces them, and it is one-directional by construction: closing an
+    underwater position there would be the time stop under another name.
     """
+    rules = _trade_mgmt.structure_rules(ctx.get("strategy"))
     credit_total = ctx["entry_credit"] * MULTIPLIER
     pnl = ctx.get("unrealized_pnl") or 0
     short_delta = ctx.get("current_short_delta")
     dte = ctx.get("dte_remaining", 99)
+    tp_frac, stop_mult = rules["tp_frac"], rules["stop_mult"]
     # False for the single-leg income structures, which take the target only.
-    loss_rules = ctx.get("strategy") not in PROFIT_TARGET_ONLY_STRATEGIES
+    loss_rules = rules["loss_rules"]
 
     # Rule 1: 2x credit money-stop (HARD floor — fires for every structure that
     # carries the loss-side rules at all)
-    if loss_rules and pnl <= -STOP_MULT * credit_total:
-        return {"action": "CUT", "reason": f"{STOP_MULT:g}x credit stop",
+    if loss_rules and pnl <= -stop_mult * credit_total:
+        return {"action": "CUT", "reason": f"{stop_mult:g}x credit stop",
                 "code": "MONEY_STOP"}
 
     # Rule 2: low DTE and underwater (HARD floor). An armed, PROFITABLE trade near
     # expiry is NOT time-stopped (it rides to full credit, protected by the
     # break-even stop below).
-    if loss_rules and dte <= CUT_DTE and pnl < 0:
-        return {"action": "CUT", "reason": f"DTE <= {CUT_DTE} and underwater",
+    cut_dte = rules["cut_dte"]
+    if loss_rules and dte <= cut_dte and pnl < 0:
+        return {"action": "CUT", "reason": f"DTE <= {cut_dte} and underwater",
                 "code": "TIME_STOP"}
 
     # Rule 3: profit-lock stop — only once +50% has been seen (``be_armed``). Cuts
@@ -207,12 +234,12 @@ def recommend(ctx):
     entry_delta = ctx.get("entry_short_delta")
     if loss_rules and short_delta is not None:
         if entry_delta is None:
-            breached = abs(short_delta) >= DELTA_ABS_FALLBACK
+            breached = abs(short_delta) >= rules["delta_abs_fallback"]
             reason = (f"short delta {abs(short_delta):.2f} breached "
-                      f"{DELTA_ABS_FALLBACK:.2f}")
+                      f"{rules['delta_abs_fallback']:.2f}")
         else:
-            breached = (abs(short_delta) >= abs(entry_delta) + DELTA_DRIFT
-                        or abs(short_delta) >= DELTA_HARD_CEILING)
+            breached = (abs(short_delta) >= abs(entry_delta) + rules["delta_drift"]
+                        or abs(short_delta) >= rules["delta_hard_ceiling"])
             reason = (f"short delta {abs(short_delta):.2f} drifted from "
                       f"entry {abs(entry_delta):.2f}")
         if breached:
@@ -229,16 +256,33 @@ def recommend(ctx):
     # paper_engine.run_manage_cycle with a minimal ctx — keep the pre-lifecycle
     # TAKE_PROFIT: the captured-autoclose rework is scoped to captured signals and
     # must not change how those separate books exit (they have their own managers).
-    if pnl >= TP_FRAC * credit_total and not ctx.get("be_armed"):
+    if pnl >= tp_frac * credit_total and not ctx.get("be_armed"):
         if ctx.get("lifecycle"):
             return {"action": "HOLD",
-                    "reason": f">={int(TP_FRAC*100)}% credit captured — break-even armed",
+                    "reason": f">={int(tp_frac*100)}% credit captured — break-even armed",
                     "code": "HOLD"}
         return {"action": "TAKE_PROFIT",
-                "reason": f">={int(TP_FRAC*100)}% credit captured",
+                "reason": f">={int(tp_frac*100)}% credit captured",
                 "code": "TARGET_HIT"}
 
-    # Rule 6: default HOLD with score-drift note when available
+    # Rule 6: manage at DTE (playbook X5 — OptionsPlay closes premium sales at 21
+    # DTE because gamma rises; tastylive found managing at 21 days improved all
+    # three strategies it tested). Set only for the structures whose table names
+    # ``manage_dte``; every spread has None and is unaffected.
+    #
+    # ⚠ A PROFIT is required, and that is the whole design rather than a
+    # nicety: these structures have no loss-side rule on purpose, so closing an
+    # underwater one here would be the ``cut_dte`` time stop under another name —
+    # firing exactly when the cash-secured put would take assignment, which is the
+    # wheel's plan. Break-even is not a profit either; closing flat pays the
+    # round trip for nothing.
+    manage_dte = rules["manage_dte"]
+    if manage_dte is not None and dte is not None and dte <= manage_dte and pnl > 0:
+        return {"action": "TAKE_PROFIT",
+                "reason": f"managing at DTE <= {manage_dte} while in profit",
+                "code": "MANAGE_DTE"}
+
+    # Rule 7: default HOLD with score-drift note when available
     es = ctx.get("entry_score")
     cs = ctx.get("current_score")
     if es is not None and cs is not None:
@@ -397,7 +441,7 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
 
 
 CLOSE_REASON_CODES = frozenset(
-    {"TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP"}
+    {"TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP", "MANAGE_DTE"}
 )
 
 

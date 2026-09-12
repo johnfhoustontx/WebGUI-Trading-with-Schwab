@@ -4,7 +4,98 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**The Income Window's positions were unmanaged —
+**Last updated:** 2026-09-11 (**Exit rules are per structure now, and the wheel's
+two structures have a settled one.** Gap assessment item **B1** — it also closes
+the interim policy A2 shipped the same day, and fixes a latent defect and one
+wrong copy of the put-side test that the taxonomy work exposed.)
+
+- **`[structures.*]` in `config/trade_mgmt.toml`, read through
+  `shared.trade_mgmt.structure_rules(strategy)`.** Each table OVERLAYS `[stops]`,
+  so a structure names only what differs. A structure with no table — every credit
+  spread — and a ctx with no `strategy` resolve to `[stops]` unchanged with every
+  rule on, which makes the table additive by construction. `recommend()` resolves
+  it **per position**, the one threshold read in that module that cannot be a
+  module constant.
+
+- **The settled answer on the loss side: `loss_rules = false`** for `SHORT_PUT`
+  and `COVERED_CALL`, which is what A2 shipped as a hardcoded tuple. It is config
+  now because it is a trading rule, not a fact about the code.
+  `PROFIT_TARGET_ONLY_STRATEGIES` is gone.
+
+- **`manage_dte = 21` — the one new behaviour.** A **profitable** income position
+  at or below 21 DTE closes (`MANAGE_DTE`, a new code in `CLOSE_REASON_CODES`);
+  an underwater one is HELD. Playbook X5: OptionsPlay closes premium sales there
+  because gamma rises, tastylive found managing at 21 days improved all three
+  strategies it tested. ⚠ The profit condition is the design, not a nicety —
+  closing an underwater position there would be the `cut_dte` stop under another
+  name, firing exactly when the put would take assignment. So the rule can end a
+  winner early and never realise a loser. **Spreads deliberately get none:**
+  applying X5 to PCS/CCS/IC would change how every position in the app exits.
+
+- **The profit target stayed 0.50.** TradingBlock's ~90% short put / ~95% covered
+  call pairs with rolling into the next ~45-DTE cycle, which this app cannot do
+  for a single leg, so the higher target alone means ~20 more days for the last 40
+  points of a small credit. `tp_frac` is in the table; the default does not use
+  it. `paper_engine`'s arm-break-even check now reads the same
+  `signal_recommender.tp_frac_for`, so using the knob cannot desync the arm from
+  the target — a divergence the knob itself created.
+
+- **`shared/structures.py` — one home for the taxonomy**, imported by
+  `options-scanner` and `services` alike. ⚠ **Seven copies of those sets had
+  accumulated and one was WRONG:** `paper_adjust.apply_roll` tested
+  `strategy in ("PCS", "IC")` to pick the option right, so a short put resolved to
+  `"CALL"` and its roll would have been partitioned and priced on the call chain.
+  Unreachable only because single-leg positions had no roll candidate to apply —
+  the same shape as the `_close_legs` commission defect beside it. `test_structures.py`
+  now fails on a new copy anywhere in either tier, walking the AST for both the
+  inline `x in (...)` shape and the assigned constant, because five of the seven
+  were constants under a comment asking the next editor to keep the mirror in
+  step. `paper_engine.COVERED_CALL_STRATEGIES` went with them, so
+  `test_cross_tier_mirrors` re-anchored on `shared.structures` and the Tier-1 page
+  is the last copy (Tier 1 takes no `services.*` import).
+
+- **Rescue offers the repairs the playbook prescribes (X3).** Every spread roll
+  builder early-returns for a single leg, so a tested cash-secured put's whole menu
+  was "Close now" — while the builders for exactly those rolls sat one function
+  away in `single_candidates`, written for the ad-hoc naked shorts and never wired
+  to the paper book. `rescue_candidates` routes single-leg positions there;
+  `single_candidates` learned `COVERED_CALL` (roll **up** and out, no "define
+  risk" row since the shares already bound it) and gained a zero-economics
+  **wheel** row, `accept_assignment` / `let_called_away` — the alternative B1's
+  table names, and the one row a quote gap cannot remove. ⚠ All **advisory**:
+  `apply_roll` books a spread reopen, so executing a single-leg roll is a change
+  to the money path and its own commit.
+
+- **One existing assertion changed, deliberately.**
+  `test_naked_put_candidates_are_close_roll_protect_all_advisory` gained
+  `accept_assignment` in its exact set (and the matching rename). This app reserves
+  the full strike notional as a short put's max loss on BOTH paths, so "do nothing
+  and buy the shares at the strike" is a real option for either spelling; splitting
+  the advice by which screen asked would mean one position getting two answers.
+
+- **Known wording debt, not fixed here:** `single_candidates` still calls a short
+  put "undefined-risk". This app collateralises one at the full strike notional, so
+  the phrase is wrong for it — but it is a copy decision on a screen this change
+  does not otherwise touch, and it belongs with the `pages/copy.py` pass.
+
+- **Tests: 73 new.** options-scanner **1327 → 1341 passed / 2 skipped**,
+  options_svc **1541 → 1554**, shared **432 passed (+46)**. Each subject was
+  watched to fail first at the unit level, and the taxonomy guard was written
+  before the consolidation and listed all six offenders. ⚠ Two of the four
+  end-to-end manage-cycle tests passed on their FIRST run, because the rule they
+  drive had already been implemented and watched to fail in
+  `test_signal_recommender`. The closing one was then re-checked against a
+  deliberately disabled rule and does fail without it; the "underwater rides
+  through" one passes either way and is a guard, not a proof.
+
+- **Not verified live.** The manage cycle runs hourly 09:00–14:00 CT and Rescue is
+  read on demand; nothing exercised either on a Friday evening. The first real
+  exercise is the next trading day, and the visible signal is a closed income
+  position whose exit reason reads `MANAGE_DTE`.
+
+---
+
+**Prior —** 2026-09-11 (**The Income Window's positions were unmanaged —
 nothing marked them, no rule could close them, and the Rescue board scored a
 cash-secured put backwards.** Gap assessment items A2 and A3.)
 

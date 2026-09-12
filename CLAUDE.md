@@ -1431,7 +1431,7 @@ relocates it.
 | file | holds | read by |
 |---|---|---|
 | **`config/driver.toml`** | the autonomous driver's risk envelope — target band, per-trade + daily risk caps, VIX ceiling, loss halt, decision budget | `driver_svc.settings` (guardrails) **and** `options_svc.compute` (the paper sizer's cap) |
-| **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
+| **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders, plus `[structures.*]`, the PER-STRUCTURE overlay on all of them | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
 | **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
 
@@ -2203,46 +2203,99 @@ on", not "no earnings"**: `not_listed` deliberately does not block, because
 failing closed would empty the watchlist whenever vendor coverage thins. The
 older `data/earnings_cache.json` is dead — all-`null` since 2026-08-29.
 
-## The Income Window's single-leg positions are priced, and take the TARGET ONLY
+## Exit rules are PER STRUCTURE, and the Income Window's two are the reason
 
-`signal_repricer.reprice_swing` prices PCS/CCS/IC **and** the two single-leg
-income structures — `SHORT_PUT`/`NAKED_PUT` off the put map, and `COVERED_CALL`
-off the call map (its strike lives in `short_strike`, the same field the spreads
-use for their short leg). Each is ONE short option, so the mark comes from
-`fill_model.realistic_single_fill` — that leg's own bid/ask, worked `FILL_FRAC`
-from the natural side — never the net-spread form with zero quotes for a leg that
-does not exist. ⚠ Until 2026-09-11 the repricer raised on anything but the three
-spreads, so `run_manage_cycle` hit `per_contract is None`, skipped the position
-and logged an ERROR every cycle: the Income board could open a position that
-nothing would ever mark, manage or close, and the Rescue board could not even
-offer "Close now" because that needs a mark.
+**`shared/trade_mgmt.structure_rules(strategy)` is the one accessor** — `[stops]`
+overlaid by that structure's `[structures.<canonical name>]` table in
+`config/trade_mgmt.toml`. `signal_recommender.recommend` resolves it **per
+position**, which is why it is the one thing in that module that is not a
+module-level constant: unlike every other accessor there, the answer depends on
+the position. A structure with **no** table — every credit spread — and a ctx
+with no `strategy` at all get `[stops]` unchanged with every rule on, so the
+table is additive by construction and the pre-2026-09-11 callers are untouched.
 
-**Those two structures take the PROFIT TARGET and no loss-side rule** —
-`signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES`, read off `ctx["strategy"]`,
-which `run_manage_cycle` now puts in the BASE ctx and not only the lifecycle
-branch. Rules 1, 2 and 4 (the 2× credit money stop, the `cut_dte` time stop and
-the delta stop) are skipped, because each is wrong here rather than merely
-unproven: a covered call losing 2× its credit is the stock rallying — the shares
-hold that gain, and Option Alpha's covered-call study found stops simply produce
-more losers — while a cash-secured put's delta and time stops fire exactly when
-assignment becomes likely, which is the wheel's plan and the reason `equity_lots`
-exists. ⚠ **This is an interim policy.** The per-structure rule table belongs in
-`config/trade_mgmt.toml`; when it lands, this constant goes with it. Putting the
-money stop back without that decision re-breaks the wheel.
+Two keys exist only per structure, with no `[stops]` counterpart:
+
+- **`loss_rules = false`** skips rules 1, 2 and 4 (the 2× credit money stop, the
+  `cut_dte` time stop, the delta stop). Set for `SHORT_PUT` and `COVERED_CALL`,
+  because for them each rule is **inverted** rather than merely unproven: a
+  covered call losing 2× its credit is the stock rallying — the shares hold that
+  gain, and Option Alpha's covered-call study found stops simply produce more
+  losers — while a cash-secured put's delta and time stops fire exactly when
+  assignment becomes likely, which is the wheel's plan and the reason
+  `equity_lots` exists. Putting the money stop back re-breaks the wheel.
+- **`manage_dte = 21`** closes a **profitable** position at or below that DTE
+  (`MANAGE_DTE`; playbook X5 — gamma rises and the last few percent of premium is
+  not worth it). ⚠ The profit condition IS the design: closing an underwater one
+  there would be the `cut_dte` stop under another name. **Spreads deliberately
+  have none** — X5 is written about premium selling generally, but applying it to
+  PCS/CCS/IC would change how every position in the app exits, which is a
+  separate change with its own measurement.
+
+The profit target stays the global **0.50** for these two. TradingBlock's ~90% /
+~95% pairs with rolling straight into the next cycle, which this app cannot do
+for a single leg, so the higher target alone would just hold ~20 more days for
+the last 40 points of a small credit. `tp_frac` is in the table if the evidence
+changes — and `paper_engine`'s arm-break-even check reads the same
+`signal_recommender.tp_frac_for`, so the two cannot disagree about where the
+target is. Design:
+[the B1 doc](docs/plans/2026-09-11-income-exit-rules-design.md).
+
+**The mark.** `signal_repricer.reprice_swing` prices PCS/CCS/IC **and** the two
+single-leg income structures — the put map for `SHORT_PUT`/`NAKED_PUT`, the call
+map for `COVERED_CALL` (its strike lives in `short_strike`, the same field the
+spreads use for their short leg), the side chosen by the taxonomy below. Each is
+ONE short option, so the mark comes from `fill_model.realistic_single_fill` —
+that leg's own bid/ask, worked `FILL_FRAC` from the natural side — never the
+net-spread form with zero quotes for a leg that does not exist. ⚠ Until
+2026-09-11 the repricer raised on anything but the three spreads, so
+`run_manage_cycle` hit `per_contract is None`, skipped the position and logged an
+ERROR every cycle: the Income board could open a position that nothing would ever
+mark, manage or close, and the Rescue board could not even offer "Close now"
+because that needs a mark.
 
 ⚠ **A covered call's mark is the OPTION LEG only.** Nothing here prices a bare
 share — which is why `/options/shares` dashes Mark and Unrealized — so its
 `unrealized_pnl` is not the position's economics: the shares' gain is invisible to
-it. Read it as "what closing the call would cost", never as the trade's P&L.
+it. Read it as "what closing the call would cost", never as the trade's P&L. That
+is also an independent reason the money stop cannot apply: it would be measuring
+half the position.
 
-**`rescue.is_put_side` is the ONE side test** (`PUT_SIDE_STRATEGIES`). Three
-copies of `strategy in ("PCS", "IC")` had drifted from the structures the book can
-actually hold, and a `SHORT_PUT` matched none of them — so the at-risk board
-scored a cash-secured put with the CALL-side formula: a put drifting toward its
-strike read as safe, one well clear of it read as already breached, and the
-context notes hunted for a call wall. An iron condor counts as put-side there
-because `short_strike` holds its put short, which is the field the proximity test
-reads.
+**`shared/structures.py` is the ONE home for the taxonomy** — which side the risk
+is on (`is_put_side`, `short_right`), what shape the position is (`is_single_leg`,
+`is_short_put`, `is_covered_call`), how many legs it takes to close
+(`option_legs`), and one canonical name per structure (`canonical`, which the rule
+table is keyed on so `SHORT_PUT` and `NAKED_PUT` cannot be given different rules).
+It is **vocabulary, not policy**; the rules are the TOML above. Both
+`options-scanner` and `services/*` import it.
+
+⚠ **It exists because seven copies of those sets had accumulated across tiers
+that cannot import each other, and one was WRONG.** `paper_adjust.apply_roll`
+tested `strategy in ("PCS", "IC")` to pick the option right, so a short put
+resolved to `"CALL"` and its roll would have been priced off the call chain —
+unreachable only because single-leg positions had no roll candidate to apply, the
+same shape as the `_close_legs` commission defect beside it. The earlier round of
+this fixed `rescue.is_put_side` alone, where a `SHORT_PUT` matching neither name
+had the at-risk board scoring it with the CALL-side formula. **`test_structures.py`
+now fails on a new copy anywhere in `options-scanner` or `services`** — an AST
+walk over both the inline `x in (...)` shape and the assigned constant, since five
+of the seven were constants with a comment above them asking the next editor to
+keep the mirror in step. `webgui/pages/options/shares.py` is the one remaining
+copy: Tier 1 takes no `services.*` import and widening its allow-list was out of
+scope, so `test_cross_tier_mirrors.py` pins it against `shared.structures`.
+
+**Rescue routes single-leg positions to `single_candidates`.** Every spread roll
+builder early-returns for them — a roll needs a long leg to re-price — so a tested
+cash-secured put's entire menu was "Close now", while the repairs the playbook
+prescribes sat unused one function away in the builders written for the ad-hoc
+naked shorts. Those now cover `COVERED_CALL` too (roll **up** and out; no
+"define risk" row, since the shares already bound it) and carry a zero-economics
+**wheel** row — `accept_assignment` / `let_called_away` — which is the one row a
+quote gap can never remove, and the alternative B1's rule table names. ⚠ They are
+**advisory**: `paper_adjust.apply_roll` partitions `est_fill_legs` into a closing
+PAIR and a reopening PAIR and books a spread reopen, so executing a single-leg
+roll is a change to the money path. `_annotate` is shared by both paths so a
+delegated menu cannot lose the board's context line.
 
 ## The NAKED reward gate is a RATE (per year), not a per-trade return
 

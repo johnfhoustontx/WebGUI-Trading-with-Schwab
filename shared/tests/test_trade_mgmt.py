@@ -96,6 +96,150 @@ def test_the_toml_does_not_restate_the_derived_four():
             "ignored while looking authoritative")
 
 
+# --- the per-structure rule table (gap assessment B1) ----------------------
+# A structure's table OVERLAYS [stops], so it names only what differs. An
+# unlisted structure therefore resolves to [stops] unchanged with the loss-side
+# rules on - which is exactly what every spread already did, making the table
+# additive by construction.
+
+def test_a_spread_gets_the_global_rules_and_every_loss_side_stop():
+    r = trade_mgmt.structure_rules("PCS")
+    st = trade_mgmt.stops()
+    assert r["loss_rules"] is True
+    assert r["manage_dte"] is None
+    for key, value in st.items():
+        assert r[key] == value
+
+
+def test_an_unlisted_structure_is_treated_exactly_like_a_spread():
+    assert trade_mgmt.structure_rules("SOMETHING_NEW") == trade_mgmt.structure_rules("PCS")
+
+
+def test_no_strategy_at_all_still_returns_the_global_rules():
+    """``recommend()`` is called with a ctx that may carry no ``strategy`` — the
+    pre-B1 callers. They must keep every rule."""
+    assert trade_mgmt.structure_rules(None) == trade_mgmt.structure_rules("PCS")
+
+
+@pytest.mark.parametrize("strategy", ["SHORT_PUT", "NAKED_PUT", "COVERED_CALL"])
+def test_the_income_structures_carry_no_loss_side_rule(strategy):
+    r = trade_mgmt.structure_rules(strategy)
+    assert r["loss_rules"] is False
+    assert r["manage_dte"] == 21
+
+
+@pytest.mark.parametrize("strategy", ["SHORT_PUT", "NAKED_PUT", "COVERED_CALL"])
+def test_the_income_structures_keep_the_global_profit_target(strategy):
+    """B1 deliberately did NOT move the target to TradingBlock's 0.90/0.95 —
+    that pairs with an automatic roll this app cannot do. The knob exists; the
+    default does not use it."""
+    assert trade_mgmt.structure_rules(strategy)["tp_frac"] == trade_mgmt.stops()["tp_frac"]
+
+
+def test_both_short_put_spellings_resolve_to_the_same_rules():
+    """The table is keyed on the canonical name, so the two spellings cannot be
+    given different exit rules by an edit to one of them."""
+    assert trade_mgmt.structure_rules("NAKED_PUT") == trade_mgmt.structure_rules("SHORT_PUT")
+
+
+def test_a_structure_table_overlays_stops_rather_than_replacing_them(monkeypatch):
+    """The discriminating test: a table naming ONE key must inherit the rest, not
+    blank them. A dict-replace would drop ``tp_frac`` and every stop.
+
+    Uses a structure with NO built-in table (a call credit spread, the plausible
+    "manage my spreads at 14 DTE too" edit) so the inherited values are the ones
+    a real TOML edit would actually produce. Naming ``SHORT_PUT`` here would
+    assert an unreachable state instead: ``toml_loader`` deep-merges, so a real
+    file naming one key inside ``[structures.SHORT_PUT]`` keeps the shipped
+    ``loss_rules = false`` beside it."""
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {
+        "stops": {**trade_mgmt.DEFAULTS["stops"], "tp_frac": 0.77},
+        "structures": {"CCS": {"manage_dte": 14}}})
+    r = trade_mgmt.structure_rules("CCS")
+    assert r["manage_dte"] == 14
+    assert r["tp_frac"] == 0.77                      # inherited from [stops]
+    assert r["stop_mult"] == trade_mgmt.DEFAULTS["stops"]["stop_mult"]
+    assert r["loss_rules"] is True                   # not named -> the default
+
+
+def test_a_real_toml_edit_keeps_the_shipped_siblings(monkeypatch, tmp_path):
+    """The converse, driven through the REAL loader rather than a stubbed
+    ``load``. A file naming only ``manage_dte`` must not silently re-arm the
+    money stop on a covered call."""
+    toml = tmp_path / "trade_mgmt.toml"
+    toml.write_text("[structures.COVERED_CALL]\nmanage_dte = 14\n", encoding="utf-8")
+    load, _reset = trade_mgmt.toml_loader(toml, trade_mgmt.DEFAULTS,
+                                          label="trade_mgmt.toml")
+    monkeypatch.setattr(trade_mgmt, "load", load)
+    r = trade_mgmt.structure_rules("COVERED_CALL")
+    assert r["manage_dte"] == 14
+    assert r["loss_rules"] is False
+
+
+def test_a_structure_can_override_the_profit_target(monkeypatch):
+    """TradingBlock's ~90% short put / ~95% covered call is a one-line edit."""
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {
+        "stops": trade_mgmt.DEFAULTS["stops"],
+        "structures": {"COVERED_CALL": {"tp_frac": 0.95}}})
+    assert trade_mgmt.structure_rules("COVERED_CALL")["tp_frac"] == 0.95
+    assert trade_mgmt.structure_rules("PCS")["tp_frac"] == 0.50
+
+
+def test_a_malformed_structure_table_degrades_to_the_BUILT_IN_one(monkeypatch):
+    """Degrading to the global rules here would re-arm the money stop on a
+    covered call because of a typo — the exact rule this table exists to remove.
+    So a junk table falls back to the shipped one, which is also the loader's own
+    contract ("the built-in defaults are the real values")."""
+    monkeypatch.setattr(trade_mgmt, "load",
+                        lambda: {"structures": {"SHORT_PUT": "junk"}})
+    assert trade_mgmt.structure_rules("SHORT_PUT")["loss_rules"] is False
+
+
+def test_a_malformed_structures_section_is_not_fatal(monkeypatch):
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {"structures": ["junk"]})
+    assert trade_mgmt.structure_rules("SHORT_PUT")["loss_rules"] is False
+    assert trade_mgmt.structure_rules("PCS")["loss_rules"] is True
+
+
+def test_a_junk_table_on_an_unknown_structure_still_gives_the_global_rules():
+    """There is nothing to fall back TO for a structure with no shipped table,
+    so it lands on the global rules — with every stop on, which is the safe end
+    for something the app does not recognise."""
+    assert trade_mgmt.structure_rules("SOMETHING_NEW")["loss_rules"] is True
+
+
+def test_the_shipped_toml_is_the_source_of_the_income_rules():
+    """Not a duplicate of the accessor tests: those would still pass if the
+    values lived only in DEFAULTS. The TOML is what the operator edits."""
+    import tomllib
+
+    from repo_paths import TRADE_MGMT_TOML
+
+    with open(TRADE_MGMT_TOML, "rb") as fh:
+        raw = tomllib.load(fh)
+    for name in ("SHORT_PUT", "COVERED_CALL"):
+        table = raw.get("structures", {}).get(name)
+        assert table is not None, f"[structures.{name}] is missing from the TOML"
+        assert table["loss_rules"] is False
+        assert table["manage_dte"] == 21
+
+
+def test_the_toml_does_not_key_a_structure_by_an_alternate_spelling():
+    """``[structures.NAKED_PUT]`` would look authoritative and be silently
+    ignored — the table is keyed on the canonical name."""
+    import tomllib
+
+    from repo_paths import TRADE_MGMT_TOML
+    from shared import structures
+
+    with open(TRADE_MGMT_TOML, "rb") as fh:
+        raw = tomllib.load(fh)
+    for name in raw.get("structures", {}):
+        assert structures.canonical(name) == name, (
+            f"[structures.{name}] is not the canonical spelling — it would be "
+            f"ignored. Use [structures.{structures.canonical(name)}].")
+
+
 # --- the consumers actually read it ----------------------------------------
 # signal_recommender lives in options-scanner and is NOT importable from here
 # without putting a hyphenated app dir on sys.path (the documented `scoring`

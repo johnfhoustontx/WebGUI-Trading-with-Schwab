@@ -2387,13 +2387,19 @@ The fills log is also the best available audit trail when a position behaves une
   high-scoring captured signal that simply never opens. Check
   `journalctl --user -u trading-prod-options_svc | grep concentration` before assuming
   the engine is stuck.
-- ⚠ **An Income position takes the profit target and nothing else.** A cash-secured
-  put or covered call opened from the Income board is priced and marked like any other
-  position, and it closes automatically at **+50% of the credit**. It has no money,
-  delta or time stop, so otherwise it rides to expiry, assignment or call-away. That is
-  deliberate — a covered call losing twice its credit is simply the stock rallying, and a
-  short put's stops would fire exactly when assignment, which is the point of the wheel,
-  becomes likely. Before 2026-09-11 these positions were not even marked.
+- ⚠ **An Income position has its own exit rules, and they are deliberately one-sided.**
+  A cash-secured put or covered call opened from the Income board is priced and marked
+  like any other position, and it closes automatically on either of two rules: **+50% of
+  the credit**, or **21 days to expiry while it is in profit**. It has **no money, delta
+  or time stop**, so a losing one rides to expiry, assignment or call-away. All of that
+  is deliberate — a covered call losing twice its credit is simply the stock rallying,
+  and a short put's stops would fire exactly when assignment, which is the point of the
+  wheel, becomes likely. The 21-day rule only ever ends a *winner* early: closing a
+  losing position there would be the time stop this structure does not have. A position
+  closed that way shows an exit reason of `MANAGE_DTE`. The rules live in
+  `config/trade_mgmt.toml` under `[structures.SHORT_PUT]` and
+  `[structures.COVERED_CALL]` — edit and restart the options service. Before
+  2026-09-11 these positions were not even marked.
 - ⚠ **A covered call's unrealized figure covers the option only.** Nothing here prices a
   bare share, so the shares' gain or loss is not in it. Read it as what buying the call
   back would cost.
@@ -2492,8 +2498,9 @@ their cost basis.
 
 ### What it is
 
-Damage control. It finds credit spreads that have gone against you and offers a ranked
-menu of ways to fix them, each costed including commissions.
+Damage control. It finds positions that have gone against you — credit spreads, and the
+Income board's cash-secured puts and covered calls — and offers a ranked menu of ways to
+fix them, each costed including commissions.
 
 ### Where the data comes from
 
@@ -2525,6 +2532,16 @@ a price that no longer exists.
 
 **Ad-hoc Trade** lets you evaluate a position you enter manually rather than one from
 the books.
+
+**A cash-secured put or covered call gets a different menu** (from 2026-09-11): buy to
+close, roll away and out for a credit — down for a put, up for a call — buy a
+further-OTM option to define the risk on a put, and **let it assign** / **let the shares
+go**, which is the choice of doing nothing and taking the stock. That last row has no
+economics on purpose: it is the wheel's plan, and the reason these positions carry no
+delta or time stop. ⚠ **Every row on that menu is advisory — there is no Apply button**,
+because the apply path is written for two-leg spreads. Read it, then act in the Paper
+Account or Income board yourself. Before this the whole menu for one of these positions
+was a single "Close now" row.
 
 ### Why it matters
 

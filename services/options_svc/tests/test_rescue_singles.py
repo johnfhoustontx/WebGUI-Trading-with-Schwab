@@ -156,13 +156,23 @@ def test_long_call_skips_convert_when_leg_unpriceable():
 # --------------------------------------------------------------------------- #
 # single_candidates — NAKED
 # --------------------------------------------------------------------------- #
-def test_naked_put_candidates_are_close_roll_protect_all_advisory():
+def test_naked_put_candidates_are_close_roll_protect_assign_all_advisory():
+    """``accept_assignment`` joined this set on 2026-09-11 (gap assessment B1).
+
+    Not a relaxation of the assertion — it is still an exact set, and every row
+    must still be advisory. The row is correct for a short put in EITHER
+    spelling: this app reserves the full strike notional as a short put's max
+    loss (``_adhoc_single`` does it here, ``open_income_position`` for the paper
+    book), so "do nothing and buy the shares at the strike" is a real option on
+    both paths. Splitting the advice by which screen asked would mean the same
+    position getting different answers.
+    """
     pos = _pos(strategy="NAKED_PUT", short_strike=100.0, entry_credit=1.50,
                quantity=1)
     cands = rescue.single_candidates(pos, _mark(current_value=2.00), _flat_pricer)
     actions = [c["action"] for c in cands]
     assert actions[0] == "close"
-    assert set(actions) == {"close", "roll", "buy_protection"}
+    assert set(actions) == {"close", "roll", "buy_protection", "accept_assignment"}
     assert all(c["apply_kind"] == "advisory" for c in cands)
 
 

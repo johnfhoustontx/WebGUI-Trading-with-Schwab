@@ -202,38 +202,59 @@ def test_every_band_word_the_service_publishes_has_a_hover_quoting_its_band():
 
 
 # --- the covered-call identifier --------------------------------------------
-# ONE string, "COVERED_CALL", in three tiers that cannot import each other:
+# ONE string, "COVERED_CALL", in three places — now anchored on the one home
+# rather than on a chain of peers:
 #
-#   services/options_svc/compute.py  COVERED_CALL_TYPE       - the scan-row TYPE
-#   options-scanner/paper_engine.py  COVERED_CALL_STRATEGIES - the position
-#                                                              STRATEGY it settles
+#   shared/structures.py             COVERED_CALL      - the TAXONOMY, imported
+#                                                        by options-scanner and
+#                                                        services alike
+#   services/options_svc/compute.py  COVERED_CALL_TYPE - the scan-row TYPE
 #   webgui/pages/options/shares.py   COVERED_CALL_STRATEGIES - the position
-#                                                              STRATEGY it displays
+#                                                        STRATEGY it displays
 #
 # ⚠ Those are two DIFFERENT FIELDS, and until ``compute.open_income_position``
 # existed the mirror was not real: a scan row's ``type`` and a paper position's
 # ``strategy`` merely happened to spell the same word, with nothing carrying one
 # into the other. That function is the link — it stores ``strategy = row["type"]``
-# — so the three now genuinely have to agree, and this is the test that says so.
+# — so they genuinely have to agree, and this is the test that says so.
 # ``shares.py`` claimed to be "pinned by a test on both sides" for a while when
 # no such test existed; writing it was cheaper than deleting the claim.
+#
+# ``paper_engine.COVERED_CALL_STRATEGIES`` used to be the third leg here and is
+# GONE (2026-09-11, gap assessment B1) — it reads ``shared.structures`` now, so
+# there is nothing left to mirror on that side. The page is the last copy,
+# because Tier 1 takes no ``services.*`` import and widening its allow-list was
+# out of scope; ``shared/tests/test_structures.py`` fails on a new copy anywhere
+# in the other two tiers.
 
 COVERED_CALL_WORD = "COVERED_CALL"
 
 
 def test_the_covered_call_identifier_is_one_word_in_three_tiers():
+    taxonomy = _const("shared/structures.py", "COVERED_CALL")
     scan_type = _const("services/options_svc/compute.py", "COVERED_CALL_TYPE")
-    engine = _const("options-scanner/paper_engine.py", "COVERED_CALL_STRATEGIES")
     page = _const("webgui/pages/options/shares.py", "COVERED_CALL_STRATEGIES")
     assert scan_type == COVERED_CALL_WORD, (
         "the scan-row type changed; the position strategy written by "
-        "open_income_position changes with it, so both engine and page must move")
-    assert tuple(engine) == (COVERED_CALL_WORD,)
+        "open_income_position changes with it, so both the taxonomy and the "
+        "page must move")
+    assert tuple(taxonomy) == (COVERED_CALL_WORD,)
     assert tuple(page) == (COVERED_CALL_WORD,)
-    assert scan_type in engine and scan_type in page, (
+    assert scan_type in taxonomy and scan_type in page, (
         "open_income_position stores the scan row's TYPE as the position's "
         "STRATEGY, so a type the engine cannot recognise is a covered call that "
         "is never called away and a lot that can never leave the book.")
+
+
+def test_the_short_put_spellings_are_not_restated_in_the_page_tier():
+    """The converse, and the one Tier-1 copy worth policing: ``shares.py``
+    displays covered calls, so it names only that word. A SHORT_PUT / NAKED_PUT
+    pair appearing there would be an eighth copy of the taxonomy in the one tier
+    that cannot import it."""
+    src = (ROOT / "webgui/pages/options/shares.py").read_text(encoding="utf-8")
+    assert "NAKED_PUT" not in src, (
+        "shares.py has grown its own short-put spelling pair; the taxonomy lives "
+        "in shared/structures.py")
 
 
 def test_the_openable_income_structures_are_the_two_single_leg_products():

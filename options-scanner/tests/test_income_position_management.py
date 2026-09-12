@@ -5,8 +5,10 @@ only PCS/CCS/IC, so ``run_manage_cycle`` hit ``per_contract is None`` and skippe
 the position entirely - no mark, no rule, no way to close it, and an error in the
 journal every cycle. The repricer now prices them, which makes a second thing
 load-bearing: the cycle must hand the STRATEGY to the rule engine, because the
-credit-spread stops are wrong for these two structures
-(``signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES``).
+credit-spread stops are wrong for these two structures. Which rules each
+structure gets is now ``[structures.*]`` in config/trade_mgmt.toml (gap
+assessment B1), read per position through
+``shared.trade_mgmt.structure_rules``.
 
 These tests drive the real recommender - only the repricer is stubbed, since it
 has its own tests - so they fail if either half is missing.
@@ -19,8 +21,9 @@ import paper_engine as pe
 
 _CT = ZoneInfo("America/Chicago")
 
-_EXPIRY = "2026-06-03"          # the position's expiry
-_TODAY = "2026-05-20"           # two weeks before it, so nothing settles
+_EXPIRY = "2026-06-03"          # the position's expiry — DTE 14, inside manage_dte
+_EXPIRY_FAR = "2026-06-25"      # DTE 36 — outside it, so the target rules alone
+_TODAY = "2026-05-20"           # two weeks before the near one, so nothing settles
 _NOW_CT = datetime(2026, 5, 20, 10, 0, tzinfo=_CT)
 
 
@@ -47,7 +50,8 @@ def _account(tmp_path):
     return db
 
 
-def _open_short_put(db, *, strike=100.0, credit=2.0, qty=1, strategy="SHORT_PUT"):
+def _open_short_put(db, *, strike=100.0, credit=2.0, qty=1, strategy="SHORT_PUT",
+                    expiration=_EXPIRY):
     """Mirrors ``test_assignment._open_short_put``: the strike notional is the
     reservation, reserved before the row is inserted. ``run_entry_cycle`` cannot
     open one - it sizes off ``width``, which a single-leg short has none of."""
@@ -57,7 +61,7 @@ def _open_short_put(db, *, strike=100.0, credit=2.0, qty=1, strategy="SHORT_PUT"
         "signal_id": f"csp-{strike}", "symbol": "AAPL", "strategy": strategy,
         "short_strike": strike, "long_strike": None,
         "call_short": None, "call_long": None, "width": None,
-        "expiration": _EXPIRY, "dte_at_entry": 35, "quantity": qty,
+        "expiration": expiration, "dte_at_entry": 35, "quantity": qty,
         "entry_credit": credit, "entry_order_id": None,
         "max_loss_per": strike, "max_loss_total": notional,
         "entry_ts": "2026-04-29T09:31:00"})
@@ -150,3 +154,75 @@ def test_a_cash_secured_put_is_not_delta_stopped(tmp_path, monkeypatch):
     pe.run_manage_cycle(None, _TODAY, _FakeBroker(), db, now_ct=_NOW_CT)
 
     assert _position(db, pos_id)["status"] == "OPEN"
+
+
+# ── manage_dte, end to end (gap assessment B1) ───────────────────────────────
+
+
+def test_a_profitable_cash_secured_put_is_closed_inside_the_manage_window(
+        tmp_path, monkeypatch):
+    """DTE 14, +30% of the credit: short of the profit target, so before B1 this
+    position ground on through the highest-gamma stretch of its life for the last
+    few percent."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, qty=1)
+    _mark(monkeypatch, value=1.40, pnl=60.0, delta=-0.12, underlying=107.0)
+
+    pe.run_manage_cycle(None, _TODAY, _FakeBroker(1.40), db, now_ct=_NOW_CT)
+
+    row = _position(db, pos_id)
+    assert row["status"] == "CLOSED"
+    assert row["exit_reason"] == "MANAGE_DTE"
+
+
+def test_an_underwater_cash_secured_put_rides_through_the_manage_window(
+        tmp_path, monkeypatch):
+    """The other half of the same rule, and the reason it is not just a time stop
+    with a new name: the wheel takes the shares."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, qty=1)
+    _mark(monkeypatch, value=2.60, pnl=-60.0, delta=-0.44, underlying=99.0)
+
+    pe.run_manage_cycle(None, _TODAY, _FakeBroker(2.60), db, now_ct=_NOW_CT)
+
+    assert _position(db, pos_id)["status"] == "OPEN"
+
+
+def test_the_break_even_arm_follows_the_structures_own_profit_target(
+        tmp_path, monkeypatch):
+    """``run_manage_cycle`` decides whether to ARM break-even from its own
+    threshold read, separately from ``recommend()``'s. A per-structure ``tp_frac``
+    makes those two reads capable of disagreeing — the cycle arming at 50% while
+    the rule engine holds out for 90%, which then hands rule 3's break-even stop a
+    position the target has not reached. Both must read the same table."""
+    from shared import trade_mgmt
+
+    real = trade_mgmt.structure_rules
+    monkeypatch.setattr(trade_mgmt, "structure_rules",
+                        lambda s: ({**real(s), "tp_frac": 0.90}
+                                   if s == "SHORT_PUT" else real(s)))
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, expiration=_EXPIRY_FAR)
+    _mark(monkeypatch, value=0.80, pnl=120.0, delta=-0.10, underlying=110.0)  # +60%
+
+    pe.run_manage_cycle(None, _TODAY, _FakeBroker(0.80), db, now_ct=_NOW_CT,
+                        lifecycle=True, be_level_fn=lambda pos: 0.0)
+
+    row = _position(db, pos_id)
+    assert row["status"] == "OPEN"
+    assert not row["be_armed"]
+
+
+def test_the_break_even_arm_still_fires_at_the_shipped_target(tmp_path, monkeypatch):
+    """The control for the test above: at the shipped 0.50 the same +60% mark
+    arms and holds, so that test is about the table and not about the mark."""
+    db = _account(tmp_path)
+    pos_id = _open_short_put(db, strike=100.0, credit=2.0, expiration=_EXPIRY_FAR)
+    _mark(monkeypatch, value=0.80, pnl=120.0, delta=-0.10, underlying=110.0)
+
+    pe.run_manage_cycle(None, _TODAY, _FakeBroker(0.80), db, now_ct=_NOW_CT,
+                        lifecycle=True, be_level_fn=lambda pos: 0.0)
+
+    row = _position(db, pos_id)
+    assert row["status"] == "OPEN"
+    assert row["be_armed"]

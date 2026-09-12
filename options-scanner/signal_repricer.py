@@ -3,20 +3,17 @@ realistic limit worked 40% into the net spread market (fill_model.FILL_FRAC),
 via the shared fill_model so the paper broker and re-pricer can never diverge."""
 import datetime
 import logging
+import pathlib as _pathlib
+import sys as _sys
 
 import fill_model
+
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
 
 log = logging.getLogger("signal_repricer")
 
 MULTIPLIER = 100
-
-# The Income Window's two single-leg structures. Each is ONE short option, so it
-# prices off that leg's own market (``fill_model.realistic_single_fill``) and not
-# a net spread market. Two spellings for the short put already exist - SHORT_PUT
-# on the scan side, NAKED_PUT on the Calculator/rescue side - and both can sit in
-# the book, so both are listed here.
-SHORT_PUT_STRATEGIES = ("SHORT_PUT", "NAKED_PUT")
-COVERED_CALL_STRATEGY = "COVERED_CALL"
 
 # Per-run cache keyed by (symbol, expiration) — avoids redundant API calls
 _chain_cache = {}
@@ -242,17 +239,16 @@ def reprice_swing(trade, client, today=None):
                 raise RuntimeError("missing leg quotes")
             debit = (fill_model.realistic_vertical_fill(psb, psa, plb, pla, "BUY_TO_CLOSE")
                      + fill_model.realistic_vertical_fill(csb, csa, clb, cla, "BUY_TO_CLOSE"))
-        elif strat in SHORT_PUT_STRATEGIES:
-            pm = chain.get("putExpDateMap", {})
-            sb, sa, short_delta = _leg_bid_ask(pm, trade["short_strike"])
-            if None in (sb, sa):
-                raise RuntimeError("missing leg quotes")
-            debit = fill_model.realistic_single_fill(sb, sa, "BUY_TO_CLOSE")
-        elif strat == COVERED_CALL_STRATEGY:
-            # The call's strike is stored in ``short_strike``, the same field the
-            # spread structures use for their short leg.
-            cm = chain.get("callExpDateMap", {})
-            sb, sa, short_delta = _leg_bid_ask(cm, trade["short_strike"])
+        elif _structures.is_single_leg(strat):
+            # The Income Window's two structures. Each is ONE short option, so it
+            # prices off that leg's own market and never the net-spread form with
+            # zero quotes for a leg that does not exist. The strike lives in
+            # ``short_strike`` for BOTH - the same field the spreads use for their
+            # short leg - and only the side differs, so the taxonomy decides it.
+            side = ("putExpDateMap" if _structures.is_put_side(strat)
+                    else "callExpDateMap")
+            sb, sa, short_delta = _leg_bid_ask(chain.get(side, {}),
+                                               trade["short_strike"])
             if None in (sb, sa):
                 raise RuntimeError("missing leg quotes")
             debit = fill_model.realistic_single_fill(sb, sa, "BUY_TO_CLOSE")

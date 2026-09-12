@@ -51,6 +51,53 @@ recovery_min_cushion = 0.015    # 1.5% spot <-> short-strike cushion
 default_ladder = [[0.50, 0.0]]
 ratchet_ladder = [[0.50, 0.0], [0.65, 0.25], [0.80, 0.50]]
 
+[structures]
+# ─── PER-STRUCTURE OVERRIDES ON EVERYTHING ABOVE ────────────────────────────
+#
+#   A structure's table OVERLAYS [stops]: name only what differs and the rest is
+#   inherited. A structure with no table here gets the global rules with every
+#   loss-side stop on — which is what every credit spread already did, so adding
+#   a table can only ever change the structure it names.
+#
+#   Keyed on the CANONICAL structure name (shared/structures.py). The short put
+#   has two spellings in this codebase — SHORT_PUT on the scan side, NAKED_PUT
+#   on the Calculator/rescue side — and BOTH read the [structures.SHORT_PUT]
+#   table below, so they cannot be given different exit rules. A
+#   [structures.NAKED_PUT] table would look authoritative and be ignored.
+#
+#   Two keys exist only here, with no [stops] counterpart:
+#     loss_rules  false = no money stop, no time stop, no delta stop.
+#     manage_dte  close a PROFITABLE position at or below this DTE. A LOSING one
+#                 is HELD — closing it there would be the loss-side stop under
+#                 another name. Unset = off.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The Income Window's cash-secured put (both spellings).
+#
+# No loss-side rule, because each one is INVERTED here rather than merely
+# unproven: a rising short delta and a shrinking DTE are the signs that
+# assignment is becoming likely, and taking the shares is the wheel's PLAN —
+# it is why equity_lots and _assign_shares exist.
+[structures.SHORT_PUT]
+loss_rules = false
+manage_dte = 21
+# tp_frac is inherited (0.50). TradingBlock takes ~90% here, but pairs it with
+# rolling straight into the next ~45-DTE cycle, which this app cannot do for a
+# single leg — so 0.90 alone would just mean holding ~20 more days for the last
+# 40 points of a small credit. Set `tp_frac = 0.90` to try it anyway.
+
+# The Income Window's covered call against a held lot.
+#
+# No loss-side rule for a stronger reason still: a covered call losing 2x its
+# credit IS the stock rallying, and the shares hold that gain. ⚠ This app prices
+# no bare share, so a covered call's unrealized_pnl covers the OPTION LEG ONLY —
+# any money stop read off it is measuring half the position. Published
+# covered-call research also finds stops produce more losers, not fewer.
+[structures.COVERED_CALL]
+loss_rules = false
+manage_dte = 21
+# TradingBlock takes ~95% here; same reasoning as above. `tp_frac = 0.95`.
+
 [rescue]
 # Escalation bands the at-risk board owns ALONE. The four it shares with [stops]
 # (delta_critical, delta_drift, money_tested_mult, dte_urgent) are deliberately

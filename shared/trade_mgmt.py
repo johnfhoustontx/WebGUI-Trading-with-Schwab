@@ -20,9 +20,19 @@ listing them again - the mirror is now structural instead of clerical, and the
 escalation bands rescue owns alone (warn levels, proximity, dte_manage) stay in
 their own section.
 
+``[structures.*]`` is the SECOND half of the same argument. The rules above are
+written for a credit spread, and for the Income Window's two single-leg
+structures the loss-side ones are not merely unproven but inverted - a covered
+call losing 2x its credit is the stock rallying, and a cash-secured put's delta
+stop fires exactly when assignment, which is the wheel's plan, becomes likely.
+A2 shipped that as a hardcoded tuple in ``signal_recommender``; it is config now,
+because it is a trading rule and not a fact about the code. See
+``structure_rules()`` and docs/plans/2026-09-11-income-exit-rules-design.md.
+
 Missing file / bad TOML / missing key -> the built-in defaults, never a raise.
 """
 from repo_paths import TRADE_MGMT_TOML
+from shared import structures as _structures
 from shared.config_toml import toml_loader
 
 DEFAULTS = {
@@ -59,6 +69,29 @@ DEFAULTS = {
         "proximity_watch_pct": 0.03,     # underlying within 3% of the short strike
         "proximity_tested_pct": 0.01,
     },
+    "structures": {
+        # Per-structure OVERLAYS on [stops]. Each table names only what differs;
+        # everything else is inherited, so an unlisted structure gets the global
+        # rules with every loss-side stop on - which is what every spread
+        # already did.
+        #
+        # Keyed on structures.canonical(), so the short put's two spellings
+        # (SHORT_PUT / NAKED_PUT) cannot be given different rules.
+        "SHORT_PUT": {"loss_rules": False, "manage_dte": 21},
+        "COVERED_CALL": {"loss_rules": False, "manage_dte": 21},
+    },
+}
+
+# Rules that exist ONLY per structure - they have no [stops] counterpart, so the
+# overlay needs its own defaults for them.
+STRUCTURE_DEFAULTS = {
+    # Do the loss-side rules (money stop, time stop, delta stop) apply at all?
+    "loss_rules": True,
+    # Close a PROFITABLE position at or below this DTE (playbook X5: manage
+    # premium selling at 21 days, where gamma starts to dominate). None = off,
+    # which is every spread: they already have cut_dte + the delta stops, and a
+    # 21-DTE close for spreads is a separate, measurable change.
+    "manage_dte": None,
 }
 
 load, reset_cache = toml_loader(TRADE_MGMT_TOML, DEFAULTS, label="trade_mgmt.toml")
@@ -93,6 +126,32 @@ def default_trail_ladder():
 
 def ratchet_trail_ladder():
     return _ladder("ratchet_ladder")
+
+
+def structure_rules(strategy) -> dict:
+    """The effective rule set for ONE structure: ``[stops]`` overlaid by
+    ``[structures.<canonical name>]``, plus the two per-structure-only keys
+    ``loss_rules`` and ``manage_dte``.
+
+    An unlisted structure - and a caller with no ``strategy`` at all - resolves
+    to ``[stops]`` unchanged with every loss-side rule ON, so the table is purely
+    additive and the pre-B1 callers are unaffected.
+
+    Not memoised into a module constant on purpose: unlike every other accessor
+    here the answer DEPENDS ON THE POSITION, so ``recommend()`` resolves it per
+    call. ``load()`` is mtime-cached, so that costs a dict merge.
+    """
+    base = {**STRUCTURE_DEFAULTS, **stops()}
+    name = _structures.canonical(strategy)
+    over = _section("structures").get(name)
+    if not isinstance(over, dict):
+        # A junk table falls back to the SHIPPED one rather than to the global
+        # rules: degrading the other way would re-arm the money stop on a covered
+        # call because of a typo, which is the rule this table exists to remove.
+        over = DEFAULTS["structures"].get(name)
+    if not isinstance(over, dict):
+        return base
+    return {**base, **over}
 
 
 def rescue_thresholds() -> dict:

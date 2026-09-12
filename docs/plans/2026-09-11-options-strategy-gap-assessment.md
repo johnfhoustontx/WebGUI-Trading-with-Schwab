@@ -1,6 +1,6 @@
 # Options strategy playbook vs the app — gap assessment
 
-**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis only — no code was changed
+**Date:** 2026-09-11 · **Code compared:** `main` at `c152b00`, identical to `origin/main` (what prod runs) · **Status:** analysis, since acted on — **A1, A2, A3 and B1 have shipped on `claude/options-strategies-gaps-8636bf`**, and the rows they changed say so inline. Everything unmarked still describes `c152b00`.
 **Companion:** [Options strategy playbook](2026-09-11-options-strategy-playbook.md). Rule IDs such as **S1**, **M2** or **X4** refer to its Part 1.
 
 ## Verdict
@@ -14,11 +14,11 @@ Outside those three structures, coverage thins quickly:
 | **analyze** in the Calculator or Simulator | 16 |
 | **generate** from a scanner | 10 |
 | **paper-trade** | 9 |
-| **manage with automated exit rules** | **3** — PCS, CCS, IC |
+| **manage with automated exit rules** | **5** since B1 — PCS, CCS, IC on the full rule set; the cash-secured put and covered call on a target plus a 21-DTE manage, with no loss-side stop by design (was **3**) |
 
 Three findings matter more than any missing strategy:
 
-1. **Positions the app already opens were left unmanaged.** Cash-secured puts and covered calls opened from the Income Window got no profit target, no stop, and no close action: the repricer could not price a single leg, so every exit rule was skipped and they rode to expiry (§3.1, checked by hand). **Fixed 2026-09-11** by A2 and A3 — they are now marked and take the profit target, with the loss-side rules deliberately held back pending B1.
+1. **Positions the app already opens were left unmanaged.** Cash-secured puts and covered calls opened from the Income Window got no profit target, no stop, and no close action: the repricer could not price a single leg, so every exit rule was skipped and they rode to expiry (§3.1, checked by hand). **Fixed 2026-09-11** by A2, A3 and B1 — they are marked, they take the profit target and a 21-DTE management rule, they carry no loss-side stop by a sourced decision now written as config, and the Rescue board offers the rolls and the wheel instead of one "Close now" row.
 2. **Entry rules are applied on some scan surfaces and not others.** The implied-volatility floor binds one of four surfaces, and the earnings gate is live on one of three paths. The Strategy Finder and Income Window can sell premium at any volatility, into regimes the Market Scanner would refuse (§2.3).
 3. **Two of the largest risk gaps already had a tested fix that hadn't shipped.** Commit `dde98b8` on `claude/orcl-concentration-risk-9ad685` (2026-09-09) adds per-symbol and per-expiry concentration caps and makes the earnings gate fire on the live scan. It was not in `main` at `c152b00`. **It has since been merged on this branch as `05ed539`** (§7, A1), and it reaches prod once `main` is fast-forwarded and promoted.
 
@@ -48,8 +48,8 @@ Two of the brief's sources could not be read. Investopedia blocks the crawler, a
 | Long call | Yes | Market Scanner directional tab (0–15 DTE); Strategy Finder | Ledger | No | Ad-hoc form only | No |
 | Long put | Yes | as long call | Ledger | No | Ad-hoc only | No |
 | Short (naked) call | Yes | Directional tab; Strategy Finder | No — undefined risk refused | No | Ad-hoc only | No, by policy |
-| Short put / cash-secured put | Yes | Directional tab; Strategy Finder; Income Window (30–45 DTE) | Account, from the Income Window only | **No** — expiry settlement and assignment only | **Broken** (§3.1) | No |
-| Covered call | No — no stock leg | Income Window, against held share lots | Account | **No** — call-away at expiry only | No candidates | No |
+| Short put / cash-secured put | Yes | Directional tab; Strategy Finder; Income Window (30–45 DTE) | Account, from the Income Window only | **Yes** since B1 — target, 21-DTE manage, then assignment | **Yes** since B1 — advisory (§3.1) | No |
+| Covered call | No — no stock leg | Income Window, against held share lots | Account | **Yes** since B1 — target, 21-DTE manage, then call-away | **Yes** since B1 — advisory | No |
 | Protective (married) put | No | No | No | No | No | No |
 | Collar | No | No | No | No | No | No |
 | Bull call spread (debit) | Yes | Strategy Finder only | Ledger | No | Ad-hoc only | No |
@@ -134,8 +134,12 @@ The Market Scanner carries the market-context gates but ranks gross of commissio
 
 ### 3.1 Income Window positions were unmanaged (checked)
 
-**Fixed 2026-09-11 by A2 and A3.** The chain below is what was wrong, kept because
-it explains why the fix has two halves — a mark and a strategy-aware rule set.
+**Fixed 2026-09-11 by A2, A3 and B1.** The chain below is what was wrong, kept
+because it explains why the fix has three halves — a mark (A2), a side test that
+knows these structures (A3), and a rule set that is per structure rather than
+global (B1). B1 also closed the last consequence below: the Rescue board now
+routes single-leg positions to the single-option builders, so the rolls and the
+wheel are on the menu instead of "Close now" alone.
 
 Here is the whole chain, each link read by hand:
 
@@ -262,7 +266,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **A5** | Pass an earnings date from the Strategy Finder | V3 | S | Medium |
 | **A6** | Size the width search against the real book | S3, W1, W4 | S–M | Medium–high |
 | **A7** | One commission convention; rank on net | P2, W4 | S–M | Medium |
-| **B1** | Exit rules for cash-secured puts and covered calls | X1, X3, X5 | M | High |
+| **B1** | Exit rules for cash-secured puts and covered calls — **shipped 2026-09-11** | X1, X3, X5 | M | High |
 | **B2** | Apply the volatility floor wherever premium is sold | V1 | S | Medium |
 | **B3** | Deployment cap for the manual book | S2 | S | Medium–high |
 | **B4** | Sector cap | S4 | M | Medium |
@@ -315,7 +319,21 @@ skips the money, time and delta stops until B1 decides. 21 new tests. Add `SHORT
 
 ### Tier B — close the rule gaps that protect capital
 
-**B1. Exit rules for cash-secured puts and covered calls** (after A2). Needs a per-structure rule table in `trade_mgmt.toml` rather than one global set. The sourced rules:
+**B1. Exit rules for cash-secured puts and covered calls.** **Shipped
+2026-09-11** — [design](2026-09-11-income-exit-rules-design.md). `[structures.*]`
+in `config/trade_mgmt.toml`, read per position through
+`shared.trade_mgmt.structure_rules`; `loss_rules = false` makes A2's interim
+policy permanent and config-driven, and `manage_dte = 21` is the one new
+behaviour (a **profitable** position closes, an underwater one is held — closing
+it would be the time stop this structure deliberately lacks). The profit target
+stayed 0.50: TradingBlock's 0.90/0.95 pairs with an automatic roll this app
+cannot do for a single leg. Rolling (X3) landed as Rescue routing single-leg
+positions to `single_candidates`, which gained `COVERED_CALL` and a wheel row —
+**advisory**, because `apply_roll` books a spread reopen. Also folded the seven
+copies of the structure sets into `shared/structures.py`, which surfaced a wrong
+one: `paper_adjust.apply_roll` resolved a short put to the CALL side. 73 new
+tests. Needed a per-structure rule table in `trade_mgmt.toml` rather than one
+global set. The sourced rules:
 
 | Structure | Rules |
 |---|---|
@@ -374,7 +392,8 @@ skips the money, time and delta stops until B1 decides. 21 new tests. Add `SHORT
 Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re-read by hand.
 
 1. Income Window positions got no mark and no exit rules, and logged an error on every manage cycle **(checked)** — fixed 2026-09-11 (A2).
-2. Rescue treated a cash-secured put as call-side, and offered it no candidates, not even "Close now" **(checked)** — fixed 2026-09-11 (A3).
+2. Rescue treated a cash-secured put as call-side, and offered it no candidates, not even "Close now" **(checked)** — fixed 2026-09-11 (A3); the missing roll and wheel candidates followed in B1.
+2a. **`paper_adjust.apply_roll` resolved a short put to the CALL side** — a fourth hand-written copy of the same membership test, so a single-leg roll would have been partitioned and priced on the call chain. Unreachable only because no roll candidate existed to apply, exactly like the `_close_legs` commission defect A3 found. Fixed 2026-09-11 (B1), with the seven copies of the structure sets folded into `shared/structures.py` and a test that fails on the next one.
 3. The income cash-secured put sells 0.28 delta against a documented 0.15–0.25 band **(checked)**.
 4. The earnings gate never fires on the Market Scanner or the Strategy Finder **(checked)**. `dde98b8`, merged as `05ed539`, fixes the Market Scanner; the Strategy Finder still passes no date (A5).
 5. The volatility floor binds one scan surface of four **(checked)**.
@@ -400,7 +419,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 ## 9. Decisions for you
 
 1. **Promote `dde98b8`?** It is merged on this branch as `05ed539`, with the failing test set unchanged. What remains is fast-forwarding `main` and promoting after the close.
-2. **Cash-secured puts and covered calls: stops, or the wheel?** The wheel accepts assignment and keeps selling; a stop-based rule set exits instead. A2 shipped with the wheel-shaped interim answer — the profit target acts, the money, time and delta stops do not — so this decision is still open, and B1 is where it lands for good.
+2. ~~**Cash-secured puts and covered calls: stops, or the wheel?**~~ **Settled 2026-09-11 by B1: the wheel.** `loss_rules = false` for both structures — no money, time or delta stop — because each of those rules is inverted here rather than merely unproven, and for a covered call the money stop would be reading a P&L that covers only the option leg. What replaces the loss side is `manage_dte = 21`, which acts only on a position in profit. It is config (`[structures.*]`), so reversing it is one edit, but reversing it re-breaks the wheel.
 3. **Driver sizing.** Keep the "Very Aggressive" 12%-per-trade profile, or move toward the playbook's 1–2% and the sources' 1–5%? The driver's own realized record is the evidence to weigh.
 4. **How tight a deployment cap for the manual book?** 50% of equity at risk, or theoptionpremium's 20–25%?
 5. **Income Window: screen or feed?** Should it stay a human-picked screen, or feed auto-entry once C1 has produced outcome data?

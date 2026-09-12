@@ -31,11 +31,16 @@ Version 1.0.0 Changes:
 - Initial implementation (Task 5.2 — rescue tested trades).
 """
 import logging
+import pathlib as _pathlib
+import sys as _sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import paper_account_db
 import paper_engine
+
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
 
 log = logging.getLogger("paper_adjust")
 
@@ -303,8 +308,14 @@ def apply_roll(db_path, position, candidate, broker=None):
         return _result(False, action, position.get("position_id"),
                        error="position not open")
     qty = position.get("quantity") or 1
-    is_put = position.get("strategy") in ("PCS", "IC")
-    right = "PUT" if is_put else "CALL"
+    # ⚠ This was a FOURTH hand-written copy of the put-side membership test, and
+    # it was wrong: a SHORT_PUT / NAKED_PUT matched neither name, so it resolved
+    # to ``right = "CALL"`` and every leg below would have been partitioned and
+    # priced on the call chain. Unreachable only because a single-leg position
+    # had no roll candidate to apply (rescue's roll builders all return None for
+    # them) - which is exactly the shape the ``_close_legs`` commission defect
+    # had. ``shared.structures`` is the one answer now.
+    right = _structures.short_right(position.get("strategy"))
 
     # Partition est_fill_legs into the closing pair (buy back short / sell long of
     # the OLD spread) and the reopening pair (sell new short / buy new long).

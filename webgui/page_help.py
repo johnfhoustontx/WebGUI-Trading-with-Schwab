@@ -343,12 +343,17 @@ the ±1 standard-deviation cone.
     "/options/rescue": """
 **Rescue — the simple version**
 
-Flags credit spreads that are **in trouble** and offers ways to fix them.
+Flags positions that are **in trouble** and offers ways to fix them — credit
+spreads, and the Income board's cash-secured puts and covered calls.
 
 - **At-risk board** — paper positions scored **tested** or **critical**, ranked by
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
+- **A cash-secured put or covered call gets a different menu**: buy to close, roll
+  away and out for a credit, define the risk, or **let it assign / let the shares
+  go** — doing nothing and taking the stock, which for the wheel is the plan
+  rather than a failure. Every row there is advisory; none has an Apply button.
 - **Apply** adjusts your paper position. No real money, and no live order is
   placed. The board refreshes itself as positions are re-priced.
 - **Not every option has an Apply button.** One marked *Manual* is a trade you
@@ -459,6 +464,11 @@ Trades you sent by hand live on **Paper Ledger**.
   re-price and auto-close existing ones. This also runs on its own **at the top of
   each hour, 09:00–14:00 CT** (there is no 15:00 run) — so a target hit at 09:15 is
   acted on at 10:00 unless you press **Run manage cycle** yourself.
+- **A cash-secured put or covered call exits on its own rules**: **+50% of the
+  credit**, or **21 days to expiry while it is in profit**. It has no money, delta
+  or time stop, so a losing one rides to expiry, assignment or call-away — a short
+  put's stops would fire exactly when assignment, the point of the wheel, becomes
+  likely. The 21-day rule only ever ends a winner early.
 - **Reset** sets a new starting balance.
 """,
     "/options/shares": """

@@ -9,6 +9,7 @@ See docs/plans/2026-06-21-rescue-tested-trades-design.md.
 from __future__ import annotations
 import datetime as _dt
 
+from shared import structures as _structures
 from shared import trade_mgmt as _trade_mgmt
 
 # The at-risk escalation map, from config/trade_mgmt.toml.
@@ -36,32 +37,17 @@ def _dte(expiration: str, today: _dt.date | None = None) -> int:
     return (exp - today).days
 
 
-# Put-side structures: the danger is the underlying FALLING toward the short
-# strike. The Income Window's cash-secured put belongs here and was missing, so
-# it was scored with the CALL-side formula - a put drifting toward its strike
-# looked safe, one well clear of it read as already breached, and the context
-# notes hunted for a call wall. Both spellings are listed: SHORT_PUT on the scan
-# side, NAKED_PUT on the Calculator/rescue side.
-#
-# An iron condor is both sides; it counts as put-side here because ``short_strike``
-# holds its put short, which is the field the proximity test reads.
-#
-# ONE predicate, called everywhere the side is needed, so a structure cannot be
-# added to one copy of the membership test and missed in another.
-PUT_SIDE_STRATEGIES = ("PCS", "IC", "SHORT_PUT", "NAKED_PUT")
-
-# One short option, not a spread: the Income Window's two structures. Used for
-# the commission leg count. ⚠ Three tiers now name this same set for their own
-# purpose - ``signal_repricer`` to pick a pricing branch and
-# ``signal_recommender.PROFIT_TARGET_ONLY_STRATEGIES`` to pick a rule set - and
-# they cannot import each other. Fold them into one home when the per-structure
-# rule table lands (gap assessment B1); until then, change all three together.
-SINGLE_LEG_STRATEGIES = ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL")
-
-
 def is_put_side(position) -> bool:
-    """True when the position's risk is to the DOWNSIDE."""
-    return position.get("strategy") in PUT_SIDE_STRATEGIES
+    """True when the position's risk is to the DOWNSIDE.
+
+    The sets themselves moved to ``shared.structures`` — the one home for the
+    taxonomy, reached by ``options-scanner`` too. Seven copies had accumulated
+    across the tiers and one of them was wrong (``paper_adjust``'s), which is
+    what earned them a single home and a test that fails on the next copy. This
+    wrapper survives because every caller here holds a position DICT, not a
+    strategy string.
+    """
+    return _structures.is_put_side(position.get("strategy"))
 
 
 def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> dict:
@@ -297,10 +283,7 @@ def _close_legs(position) -> int:
     None for them - so the two-leg default was never actually charged, and it
     would have overstated every such close by $0.65 a contract.
     """
-    strategy = position.get("strategy")
-    if strategy == "IC":
-        return 4
-    return 1 if strategy in SINGLE_LEG_STRATEGIES else 2
+    return _structures.option_legs(position.get("strategy"))
 
 
 def _close_pair(position, mark, price_leg, right):
@@ -886,10 +869,60 @@ def _single_candidate(action, label, *, gross, commission, rationale,
     }
 
 
+def _single_wheel_candidate(position, mark, strike, qty) -> dict | None:
+    """"Do nothing, and let it settle into shares" — as a real menu row.
+
+    B1's rule table names this as the tested cash-secured put's alternative to
+    rolling (accept assignment and keep turning the wheel) and the covered call's
+    (let the shares be called away if selling them was the plan). It is also the
+    REASON those structures carry no delta or time stop: both of those fire
+    exactly when this outcome becomes likely. A menu that cannot express it is
+    arguing for a repair the plan never asked for.
+
+    Zero economics on purpose — no quote, no mark, no commission — so it is the
+    one row a quote gap can never remove. ``None`` for any other structure.
+    """
+    strategy = position.get("strategy")
+    shares = 100 * max(1, qty)
+    if _structures.is_short_put(strategy):
+        return _single_candidate(
+            "accept_assignment", "Let it assign (keep the wheel turning)",
+            gross=0.0, commission=0.0, new_max_loss=None,
+            dte_after=mark.get("dte"),
+            rationale=[f"Do nothing. If it finishes in the money you buy "
+                       f"{shares} shares at {strike:g} — the collateral is "
+                       f"already reserved for exactly that — and you write "
+                       f"calls against them from there.",
+                       "The premium you collected is yours either way, so the "
+                       "real cost basis is the strike less that credit."],
+            warnings=["Assignment converts this into stock; the shares then "
+                      "carry the downside, not the option."],
+            score=40.0)
+    if _structures.is_covered_call(strategy):
+        return _single_candidate(
+            "let_called_away", "Let the shares go (called away)",
+            gross=0.0, commission=0.0, new_max_loss=None,
+            dte_after=mark.get("dte"),
+            rationale=[f"Do nothing. If it finishes in the money the {shares} "
+                       f"shares are sold at {strike:g}, which is the outcome "
+                       f"writing the call asked for.",
+                       "You keep the premium and the gain up to the strike; "
+                       "what you give up is anything above it."],
+            score=40.0)
+    return None
+
+
 def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[dict]:
     """Build advisory rescue candidates for a single-option position. Pure; a
     candidate needing an unpriceable leg is skipped. Order: close first (the safe
-    floor), then the repairs."""
+    floor), then the repairs.
+
+    Serves TWO callers. The ad-hoc single advisory (``LONG_CALL`` / ``LONG_PUT``
+    / ``NAKED_CALL`` / ``NAKED_PUT``) is what it was written for; since
+    2026-09-11 the paper Rescue board also routes the Income Window's structures
+    here, because the spread roll builders all early-return for them and left a
+    cash-secured put with "Close now" as its entire menu (gap assessment B1).
+    """
     strategy = (position.get("strategy") or "").upper()
     sym = position.get("symbol")
     qty = int(position.get("quantity") or 1)
@@ -898,8 +931,14 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
     entry_credit = _num(position.get("entry_credit")) or 0.0
     cv = mark.get("current_value")
     dte = mark.get("dte")
-    right = "CALL" if strategy in ("LONG_CALL", "NAKED_CALL") else "PUT"
+    # A LONG_PUT is the only put outside the put-side taxonomy (it is a bought
+    # option, not a short obligation), so it is named; everything else follows
+    # the structure's own side - which is what admits COVERED_CALL without a
+    # fourth list of strategy names.
+    right = ("PUT" if strategy == "LONG_PUT" or _structures.is_put_side(strategy)
+             else "CALL")
     rword = "call" if right == "CALL" else "put"
+    covered = _structures.is_covered_call(strategy)
     try:
         w = max(1, round(strike * 0.05)) if strike else 1
     except (TypeError, ValueError):
@@ -949,8 +988,22 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
                 score=52.0))
         return out
 
-    # NAKED_CALL / NAKED_PUT — defend undefined risk.
-    undef = "This position is undefined-risk."
+    # A SHORT option: NAKED_CALL / NAKED_PUT (ad-hoc) and the Income Window's
+    # SHORT_PUT / COVERED_CALL (the paper board).
+    #
+    # ⚠ "undefined-risk" is kept as-is for everything but the covered call, which
+    # is NOT the same claim as the taxonomy's: this app collateralises a short put
+    # at the full strike notional, so the phrase is arguably wrong for one too.
+    # Changing it is a copy decision on a screen this change does not otherwise
+    # touch - see the design doc §4.
+    undef = ("The shares cover this call." if covered
+             else "This position is undefined-risk.")
+    # ``away`` = further from the money on this structure's own side: DOWN for a
+    # put-side short, UP for a call-side one.
+    away = strike - w if right == "PUT" else strike + w
+    away_word = "down" if right == "PUT" else "up"
+    close_why = ("frees the shares to write another call" if covered
+                 else "removes the undefined risk")
     # 1. close — buy to close (debit).
     if cv is not None:
         out.append(_single_candidate(
@@ -958,26 +1011,31 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
             gross=-(cv * 100 * qty), commission=commission_for(1, sym, qty),
             new_max_loss=0.0, dte_after=dte,
             realized_pnl=mark.get("unrealized_pnl"),
-            rationale=["Buy to close — removes the undefined risk."],
+            rationale=[f"Buy to close — {close_why}."],
             context=[undef], score=60.0))
-    # 2. roll — buy to close + sell a new option away & out for a credit.
+    # 2. roll — buy to close + sell a new option away & out for a credit. The
+    # playbook's repair for a tested short: roll away, out, or both, FOR A CREDIT
+    # (a debit roll adds risk, and sometimes taking the loss is the right answer).
     new_expiry = _add_days(expiry, 30)
-    roll_strike = strike - w if strategy == "NAKED_PUT" else strike + w
-    ns = price_leg(sym, new_expiry, right, roll_strike) if cv is not None else None
+    ns = price_leg(sym, new_expiry, right, away) if cv is not None else None
+    roll_why = ("keeps the shares and widens the strike they would be called at."
+                if covered else "buys room; still undefined risk.")
     if cv is not None and ns is not None:
         out.append(_single_candidate(
-            "roll", f"Roll {'down' if strategy == 'NAKED_PUT' else 'up'} & out",
+            "roll", f"Roll {away_word} & out",
             gross=(-cv + ns) * 100 * qty, commission=commission_for(2, sym, qty),
             new_expiry=new_expiry, dte_after=(dte or 0) + 30,
             est_fill_legs=[_leg("BUY", right, strike, expiry, qty, cv),
-                           _leg("SELL", right, roll_strike, new_expiry, qty, ns)],
-            rationale=["Roll away and out for a credit — buys room; still "
-                       "undefined risk."],
-            context=[undef], warnings=["Position remains undefined-risk."],
+                           _leg("SELL", right, away, new_expiry, qty, ns)],
+            rationale=[f"Roll {away_word} and out for a credit — {roll_why}"],
+            context=[undef],
+            warnings=(["The shares are still committed to the new call."] if covered
+                      else ["Position remains undefined-risk."]),
             score=45.0))
     # 3. buy_protection — buy a further-OTM same-type option → DEFINES the risk.
-    prot_strike = strike - w if strategy == "NAKED_PUT" else strike + w
-    pp = price_leg(sym, expiry, right, prot_strike)
+    # Not offered for a covered call: the shares already bound it, and buying a
+    # further-OTM call only caps upside the shares have already forfeited.
+    pp = None if covered else price_leg(sym, expiry, right, away)
     if pp is not None:
         gross = -(pp * 100 * qty)
         credit_dollars = entry_credit * 100 * qty
@@ -986,11 +1044,17 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
             gross=gross, commission=commission_for(1, sym, qty),
             new_max_loss=max(0.0, w * 100 * qty - (credit_dollars + round(gross, 2))),
             new_width=w, dte_after=dte,
-            est_fill_legs=[_leg("BUY", right, prot_strike, expiry, qty, pp)],
+            est_fill_legs=[_leg("BUY", right, away, expiry, qty, pp)],
             rationale=[f"Buy a further-OTM {rword} → converts to a credit spread "
                        f"that DEFINES your max loss."],
             score=52.0))
-    return out
+    # 4. the wheel — do nothing and let the contract settle into (or out of)
+    # shares. It is B1's documented alternative to rolling a tested income
+    # position and the reason those structures carry no delta or time stop, so a
+    # menu that cannot express it argues for a repair the plan never asked for.
+    # Costs nothing, so it is always offered: no quote, no mark, no economics.
+    out.append(_single_wheel_candidate(position, mark, strike, qty))
+    return [c for c in out if c]
 
 
 #############################################
@@ -1261,12 +1325,44 @@ _BUILDERS = [build_close, build_partial_close, build_narrow, build_convert_ic,
              build_roll_out, build_roll_down_out, build_inverted, build_futures_hedge]
 
 
+def _annotate(candidate, ctx) -> dict:
+    """The engine notes and the two blanket warnings every candidate carries,
+    whichever family built it. Shared by both paths below so a delegated menu
+    cannot quietly lose the board's context line."""
+    own = list(candidate.get("context") or [])
+    candidate["context"] = [n for n in ctx["notes"] if n not in own] + own
+    if ctx.get("assignment_risk") and "assignment" not in " ".join(candidate.get("warnings", [])).lower():
+        candidate.setdefault("warnings", []).append("Assignment risk on this instrument.")
+    if candidate.get("net_cash", 0.0) < 0 and "debit" not in " ".join(candidate.get("warnings", [])).lower():
+        candidate.setdefault("warnings", []).append("Net debit — costs money to apply.")
+    return candidate
+
+
 def rescue_candidates(position, mark, price_leg, gex=None, regime=None,
                       underlying=None) -> list[dict]:
     """Build, annotate, score, and rank every applicable rescue action. Pure;
     never raises (a failing builder is dropped)."""
     ctx = strategic_context(position, gex, regime,
                             underlying or mark.get("current_underlying"))
+    # The Income Window's single-leg structures go to the single-option builders.
+    # Every spread builder early-returns for them - a roll needs a long leg to
+    # re-price - so before this they came back with "Close now" and nothing else,
+    # while the repairs the playbook actually prescribes for a tested short (roll
+    # away, roll out, define the risk, or take the shares) sat unused one function
+    # away. They keep ``single_candidates``'s own scores: those are advisory rows
+    # with no new max loss or width for ``score_candidate`` to rank on.
+    if _structures.is_single_leg(position.get("strategy")):
+        try:
+            single = single_candidates(position, mark, price_leg, gex, regime)
+        except Exception:
+            # Keeps this function's "never raises" contract. ⚠ An empty menu here
+            # is indistinguishable from "nothing applies" - the same degrade the
+            # spread path takes when every builder fails - so read a blank board
+            # as "look at the journal", not as "no repair exists".
+            single = []
+        out = [_annotate(c, ctx) for c in single if c]
+        out.sort(key=lambda x: x["score"], reverse=True)
+        return out
     out = []
     for fn in _BUILDERS:
         try:
@@ -1275,11 +1371,7 @@ def rescue_candidates(position, mark, price_leg, gex=None, regime=None,
             c = None
         if not c:
             continue
-        c.setdefault("context", list(ctx["notes"]))
-        if ctx.get("assignment_risk") and "assignment" not in " ".join(c.get("warnings", [])).lower():
-            c.setdefault("warnings", []).append("Assignment risk on this instrument.")
-        if c.get("net_cash", 0.0) < 0 and "debit" not in " ".join(c.get("warnings", [])).lower():
-            c.setdefault("warnings", []).append("Net debit — costs money to apply.")
+        _annotate(c, ctx)
         c["score"] = score_candidate(c, position.get("max_loss_total"),
                                      mark.get("current_short_delta"), ctx)
         out.append(c)

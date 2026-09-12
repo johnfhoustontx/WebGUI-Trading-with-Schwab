@@ -48,10 +48,14 @@ def test_arms_beyond_threshold_still_holds():
 # ── The Income Window's single-leg structures ────────────────────────────────
 # A covered call losing 2x its credit is the stock rallying - the shares hold
 # that gain - and a cash-secured put's delta stop fires exactly when assignment,
-# which is the wheel's plan, becomes likely. So these two take profit and
-# otherwise ride to expiry or assignment until a per-structure rule table exists.
-# Each test pairs the exempt structure against a spread on the SAME numbers, so
-# it is the strategy, not the thresholds, that changes the outcome.
+# which is the wheel's plan, becomes likely. So these two take profit, manage at
+# 21 DTE, and otherwise ride to expiry or assignment.
+#
+# The rules come from ``[structures.*]`` in config/trade_mgmt.toml (gap
+# assessment B1); the hardcoded ``PROFIT_TARGET_ONLY_STRATEGIES`` tuple A2
+# shipped as the interim is gone. Each test pairs the structure against a spread
+# on the SAME numbers, so it is the structure, not the thresholds, that changes
+# the outcome.
 
 
 def test_a_cash_secured_put_is_not_money_stopped():
@@ -88,6 +92,120 @@ def test_a_ctx_without_a_strategy_keeps_every_rule():
     """Callers that omit the key - the captured cycle's non-lifecycle path among
     them - must be completely unaffected by the exemption."""
     assert rec.recommend(_ctx(credit=1.0, pnl=-200.0))["code"] == "MONEY_STOP"
+
+
+# ── manage_dte: X5, "manage premium selling at 21 days" ──────────────────────
+# The one NEW behaviour B1 adds. It is one-directional by construction: it can
+# end a WINNER early, never realise a loser - closing an underwater position at
+# 21 DTE would be the loss-side stop B1 just removed, under another name.
+
+
+def test_a_profitable_income_position_is_closed_at_21_dte():
+    numbers = _ctx(credit=1.70, pnl=40.0, dte_remaining=21)     # +23%, under the target
+    assert rec.recommend({**numbers, "strategy": "PCS"})["action"] == "HOLD"
+
+    r = rec.recommend({**numbers, "strategy": "SHORT_PUT"})
+
+    assert r["action"] == "TAKE_PROFIT"
+    assert r["code"] == "MANAGE_DTE"
+    assert "21" in r["reason"]
+
+
+def test_a_covered_call_is_managed_at_21_dte_too():
+    r = rec.recommend({**_ctx(credit=0.80, pnl=15.0, dte_remaining=18),
+                       "strategy": "COVERED_CALL"})
+    assert r["code"] == "MANAGE_DTE"
+
+
+def test_an_underwater_income_position_is_HELD_at_21_dte():
+    """The wheel: the put takes assignment, the call's shares cover it. Closing
+    here would reintroduce the time stop this structure has no loss-side rule
+    for."""
+    for strategy in ("SHORT_PUT", "NAKED_PUT", "COVERED_CALL"):
+        r = rec.recommend({**_ctx(credit=1.70, pnl=-60.0, dte_remaining=12),
+                           "strategy": strategy})
+        assert r["action"] == "HOLD", strategy
+        assert r["code"] == "HOLD", strategy
+
+
+def test_a_flat_income_position_is_not_managed():
+    """Exactly break-even is not a profit, and closing it pays two commissions
+    for nothing."""
+    r = rec.recommend({**_ctx(credit=1.70, pnl=0.0, dte_remaining=12),
+                       "strategy": "SHORT_PUT"})
+    assert r["action"] == "HOLD"
+
+
+def test_a_profitable_income_position_above_the_window_still_holds():
+    r = rec.recommend({**_ctx(credit=1.70, pnl=40.0, dte_remaining=22),
+                       "strategy": "SHORT_PUT"})
+    assert r["action"] == "HOLD"
+
+
+def test_the_profit_target_keeps_its_own_label_when_both_apply():
+    """+50% inside the 21-DTE window is a TARGET_HIT, not a MANAGE_DTE - both
+    close, and the exit reason is stored on the closed position, so the more
+    specific label has to win."""
+    r = rec.recommend({**_ctx(credit=1.70, pnl=90.0, dte_remaining=10),
+                       "strategy": "SHORT_PUT"})
+    assert r["code"] == "TARGET_HIT"
+
+
+def test_a_spread_has_no_manage_dte_at_all():
+    """Deliberate: X5 is written about premium selling generally, but applying it
+    to spreads would change how every position in the app exits. They already
+    have cut_dte plus the delta stops."""
+    for strategy in ("PCS", "CCS", "IC"):
+        r = rec.recommend({**_ctx(credit=1.0, pnl=30.0, dte_remaining=3),
+                           "strategy": strategy})
+        assert r["action"] == "HOLD", strategy
+
+
+def test_manage_dte_closes_the_position_rather_than_only_advising():
+    """``paper_engine.run_manage_cycle`` acts on the ACTION and stores the CODE
+    as the exit reason; ``plan_auto_closes`` acts on the code alone. Both have to
+    recognise it, or the rule advises into the void."""
+    assert rec.auto_close_reason("MANAGE_DTE") == "MANAGE_DTE"
+    assert "MANAGE_DTE" in rec.CLOSE_REASON_CODES
+
+
+# --- the rules are CONFIG, not literals ------------------------------------
+
+def test_the_recommender_reads_the_structure_table(monkeypatch):
+    """The discriminating test. Asserting a cash-secured put is exempt today
+    proves nothing - it was exempt before B1 too, from a hardcoded tuple. Move
+    the config and the recommender must follow."""
+    from shared import trade_mgmt
+
+    real = trade_mgmt.structure_rules
+
+    def _fake(strategy):
+        rules = dict(real(strategy))
+        if strategy == "PCS":            # give a SPREAD the income treatment
+            rules.update(loss_rules=False, manage_dte=30)
+        return rules
+
+    monkeypatch.setattr(trade_mgmt, "structure_rules", _fake)
+    numbers = _ctx(credit=1.0, pnl=-200.0, dte_remaining=28)
+    assert rec.recommend({**numbers, "strategy": "PCS"})["action"] == "HOLD"
+    assert rec.recommend({**numbers, "strategy": "CCS"})["code"] == "MONEY_STOP"
+    assert rec.recommend({**_ctx(credit=1.0, pnl=20.0, dte_remaining=28),
+                          "strategy": "PCS"})["code"] == "MANAGE_DTE"
+
+
+def test_a_structure_can_move_its_own_profit_target(monkeypatch):
+    """TradingBlock's ~90% short put is a one-line TOML edit, so the target has
+    to come from the table and not from the module constant."""
+    from shared import trade_mgmt
+
+    real = trade_mgmt.structure_rules
+    monkeypatch.setattr(trade_mgmt, "structure_rules",
+                        lambda s: {**real(s), "tp_frac": 0.90}
+                        if s == "SHORT_PUT" else real(s))
+    # +60% of the credit: past the global 0.50, short of this structure's 0.90.
+    numbers = _ctx(credit=1.70, pnl=102.0, dte_remaining=30)
+    assert rec.recommend({**numbers, "strategy": "SHORT_PUT"})["action"] == "HOLD"
+    assert rec.recommend({**numbers, "strategy": "PCS"})["code"] == "TARGET_HIT"
 
 
 def test_cut_at_2x_credit_loss():
