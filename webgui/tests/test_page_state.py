@@ -28,8 +28,3 @@ def test_snapshot_whitelists_keys():
     assert ps.snapshot({"symbol": "SPY"}, ("symbol", "dt")) == {"symbol": "SPY"}
 
 
-def test_pick_seed_precedence():
-    assert ps.pick_seed(handoff={"x": 1}, last={"y": 2}) == "handoff"
-    assert ps.pick_seed(handoff=None, last={"y": 2}) == "restore"
-    assert ps.pick_seed(handoff=None, last=None) == "default"
-    assert ps.pick_seed(handoff={}, last={}) == "default"     # empty == absent

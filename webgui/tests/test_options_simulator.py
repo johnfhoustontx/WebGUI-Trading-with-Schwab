@@ -269,8 +269,11 @@ def _sim_container():
     """Render the Simulator over a warm sim_meta; return the mount container."""
     import bus_client
     from nicegui import ui
+    from pages.options import shared_position
 
     bus_client.reset()
+    sim._LAST_SIM.clear()
+    shared_position.reset()
     bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
     with ui.card() as container:
         sim.render()
@@ -538,8 +541,10 @@ def _future_meta(days_near=10, days_far=40):
 def _render_cold():
     import bus_client
     from nicegui import ui
+    from pages.options import shared_position
     bus_client.reset()
     sim._LAST_SIM.clear()
+    shared_position.reset()
     with ui.card() as container:
         sim.render()
     return container
@@ -741,21 +746,24 @@ def test_a_stale_replay_for_other_legs_is_not_drawn():
     assert "Pricing this position…" in _texts(container, "opacity-70")
 
 
-def test_a_calculator_handoff_names_its_strategy_and_raises_no_edited_chip():
+def test_the_calculators_position_names_its_strategy_and_raises_no_edited_chip():
     """Review finding: the picker stayed on PCS after an iron condor was copied in,
-    and the Edited chip called legs nobody edited 'edited'."""
+    and the Edited chip called legs nobody edited 'edited'. The copy button is gone
+    (2026-09-12); the Calculator's position is now simply what the Simulator opens
+    with, and the same two guarantees hold."""
     import bus_client
     from nicegui import ui
-    from pages.options import handoff
+    from pages.options import shared_position
     bus_client.reset()
     sim._LAST_SIM.clear()
+    shared_position.reset()
     meta = _future_meta()
     exp = meta["expiries"][0]
     ic = [{"option_type": "put", "side": "short", "strike": 445.0, "expiry": exp, "qty": 1},
           {"option_type": "put", "side": "long", "strike": 440.0, "expiry": exp, "qty": 1},
           {"option_type": "call", "side": "short", "strike": 455.0, "expiry": exp, "qty": 1},
           {"option_type": "call", "side": "long", "strike": 460.0, "expiry": exp, "qty": 1}]
-    handoff.set_pending_simulator({"symbol": "SPY", "legs": ic})
+    shared_position.publish("SPY", "PCS", ic, exp)
     with ui.card() as container:
         sim.render()
     bus_client.bus().cache_set("cache:options:sim_meta", meta)
@@ -831,3 +839,72 @@ def test_an_unloaded_expiry_is_fetched_then_every_leg_moves_there():
     legs = _last_command("sim_run")["args"]["legs"]
     assert {l["expiry"] for l in legs} == {"2026-07-17"}
     assert len(_leg_rows(container)) == 2          # moved, not re-seeded or dropped
+
+
+# ── one position shared with the Calculator (2026-09-12) ────────────────────
+
+def test_the_copy_to_calculator_button_is_gone():
+    labels = [b.text for b in _sim_buttons(_render_cold())]
+    assert "Copy to Calculator" not in labels
+
+
+def test_the_simulator_opens_with_the_shared_symbol_and_legs():
+    import bus_client
+    from nicegui import ui
+    from pages.options import shared_position
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    meta = dict(_future_meta(), symbol="TSLA")
+    exp = meta["expiries"][0]
+    legs = [{"option_type": "call", "side": "short", "strike": 455.0, "expiry": exp,
+             "qty": 2, "premium": 3.1},
+            {"option_type": "call", "side": "long", "strike": 460.0, "expiry": exp,
+             "qty": 2, "premium": 1.2}]
+    shared_position.publish("TSLA", "CCS", legs, exp)
+    with ui.card() as container:
+        sim.render()
+    fetch = _last_command("sim_fetch")
+    assert fetch["args"]["symbol"] == "TSLA" and exp in fetch["args"]["expiries"]
+    bus_client.bus().cache_set("cache:options:sim_meta", meta)
+    _fire(container, "_poll_meta")
+    run = _last_command("sim_run")["args"]
+    assert run["symbol"] == "TSLA"
+    assert sorted((l["strike"], l["qty"]) for l in run["legs"]) == [(455.0, 2), (460.0, 2)]
+
+
+def test_a_simulator_edit_is_published_for_the_calculator():
+    import bus_client
+    from pages.options import shared_position
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    _fire_click_on(_hooked(container, "leg-side")[0])            # flip leg 1
+    pos = shared_position.current()
+    assert pos["symbol"] == "SPY"
+    assert pos["legs"][0]["side"] == "long"
+
+
+def test_share_legs_are_carried_through_not_simulated_and_never_dropped():
+    import bus_client
+    from nicegui import ui
+    from pages.options import shared_position
+    bus_client.reset()
+    sim._LAST_SIM.clear()
+    meta = _future_meta()
+    exp = meta["expiries"][0]
+    stock = {"option_type": "stock", "side": "long", "strike": None, "expiry": None,
+             "qty": 1, "premium": 450.0}
+    call = {"option_type": "call", "side": "short", "strike": 455.0, "expiry": exp,
+            "qty": 1, "premium": 2.0}
+    shared_position.publish("SPY", "COVERED_CALL", [stock, call], exp)
+    with ui.card() as container:
+        sim.render()
+    bus_client.bus().cache_set("cache:options:sim_meta", meta)
+    _fire(container, "_poll_meta")
+    assert len(_leg_rows(container)) == 1                          # the call only
+    assert [t for t in _texts(container, "sim-warning") if "share" in t]
+    _fire_click_on(_hooked(container, "leg-strike-up")[0])         # an edit here…
+    pos = shared_position.current()
+    assert stock in pos["legs"], "the Calculator's shares were dropped"
+    assert pos["strategy"] == "COVERED_CALL"
+    assert any(l["option_type"] == "call" and l["strike"] == 460.0 for l in pos["legs"])

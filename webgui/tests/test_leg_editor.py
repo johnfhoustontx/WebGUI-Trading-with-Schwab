@@ -25,15 +25,6 @@ def test_normalize_drops_premium_when_requested():
     assert out[0]["qty"] == 2
 
 
-def test_legs_to_payload_uppercases_symbol_and_strips_dollar():
-    legs = [{"option_type": "call", "side": "long", "strike": 100,
-             "expiry": "2026-07-17", "qty": 1, "premium": 2.5}]
-    p = LE.legs_to_payload("$spx", legs, keep_premium=False)
-    assert p["symbol"] == "SPX"
-    assert p["legs"][0]["premium"] is None
-    assert set(p["legs"][0]) == {"option_type", "side", "strike", "expiry", "qty", "premium"}
-
-
 def test_coerce_strike_snaps_to_nearest_in_options():
     assert LE.coerce_strike(736, [735, 736, 737]) == 736         # exact stays
     assert LE.coerce_strike(737.5, [735, 736, 737, 738]) in (737, 738)  # nearest (tie)

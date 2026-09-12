@@ -49,6 +49,8 @@ from .inputs import select_all_on_focus, should_load
 from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, LABEL,
                     MUTED, TXT_POS, TXT_NEG, TXT_WARN)
 from . import page_state as _ps
+# The ONE position shared with the Calculator (replaces the copy buttons).
+from . import shared_position as _shared
 
 # Persisted (single-user) Simulator input snapshot — survives navigation + browser
 # reload, resets on a webgui restart (same as the other persisting pages). The pure
@@ -298,7 +300,6 @@ def render():
 
     from . import entry as _entry
     from . import entry_panel
-    from . import handoff
     from . import leg_editor
     from . import strategies
     from . import overlay as _overlay
@@ -317,6 +318,8 @@ def render():
         "meta_ver": None,    # last-seen sim_meta cache version
         "chain": None,       # the thinned chain from the same fetch (the grid)
         "pending_move": None,  # an unloaded expiry the legs move to once it lands
+        "carried_shares": [],  # share legs from the shared position (not simulated)
+        "carried_strategy": None,  # the shared strategy name while shares ride along
         "chain_ver": None,   # last-seen sim_chain cache version
         "chain_fetching": False,  # in-flight guard for the off-loop chain read
         "result_ver": None,  # last-seen sim_result cache version
@@ -380,13 +383,6 @@ def render():
         status.text = "Load a symbol to begin."
         legs_box = panel.legs_box
         with panel.legs_footer:
-            ui.button("Copy to Calculator", icon="calculate", color=None,
-                      on_click=lambda: handoff.send_to_calculator_legs(
-                          leg_editor.legs_to_payload(
-                              (state.get("meta") or {}).get("symbol")
-                              or symbol_in.value or "",
-                              editor.get_legs(), keep_premium=False))) \
-                .props("no-caps dense").classes(BTN)
             edited_chip = ui.label(
                 "Edited: these legs no longer match the strategy's shape") \
                 .classes(f"sim-edited {TXT_WARN} text-xs border border-[#5a4a1f] "
@@ -510,15 +506,23 @@ def render():
         write; wired to every input change). No-op while restoring."""
         if state.get("restoring"):
             return
+        pending = state.get("pending_legs")
+        legs = [dict(l) for l in pending] if pending else editor.get_legs()
         _LAST_SIM.clear()
         _LAST_SIM.update(_ps.snapshot({
             "symbol": (symbol_in.value or "").strip().upper(),
             "strategy": strategy_sel.value,
-            "legs": editor.get_legs(),
+            "legs": legs,
             "dt": float(dt_slider.value), "mult": float(mult_slider.value),
             "lookback": lookback_sel.value, "ds": float(ds_slider.value),
             "active_tab": tabs.value,
         }, _SIM_KEYS))
+        # …and the position the Calculator opens with. Share legs this page cannot
+        # simulate ride along untouched — an edit here must never delete them.
+        shares = state.get("carried_shares") or []
+        _shared.publish(symbol_in.value,
+                        state.get("carried_strategy") if shares else strategy_sel.value,
+                        list(shares) + legs, panel.selected_expiry())
 
     def _restore(snap):
         """Apply a persisted snapshot to the widgets under the restoring guard
@@ -567,8 +571,15 @@ def render():
         legs = editor.get_legs()
         edited_chip.set_visibility(not sv.matches_template(strategy_sel.value, legs))
         warn_box.clear()
+        warnings = list(sv.structure_warnings(legs))
+        n_shares = len(state.get("carried_shares") or [])
+        if n_shares:
+            warnings.insert(0, f"The Calculator's position also holds {n_shares} share "
+                               f"leg{'' if n_shares == 1 else 's'}. The Simulator prices "
+                               "option legs only, so the figures here leave the shares "
+                               "out; they stay in the position.")
         with warn_box:
-            for w in sv.structure_warnings(legs):
+            for w in warnings:
                 with ui.row().classes("items-start gap-1 no-wrap sim-warning"):
                     ui.icon("warning").classes(f"{TXT_WARN} text-base")
                     ui.label(w).classes(f"{TXT_WARN} text-xs")
@@ -914,6 +925,7 @@ def render():
         pending = state.pop("pending_legs", None)
         if pending:
             editor.set_legs(pending)
+            _capture()          # these legs are the shared position now
         elif not editor.is_dirty():
             editor.apply_template(strategy_sel.value)
         else:
@@ -1009,26 +1021,29 @@ def render():
     ui.timer(2.0, _poll_replay)
     ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps
 
-    # Seed precedence: an explicit Copy-to-Simulator handoff > the persisted snapshot
-    # > SPY/PCS defaults. Both the handoff + restore paths stash their legs in
-    # ``pending_legs`` and re-load; ``_apply_meta`` applies them when the fresh meta
-    # lands and runs (auto-refresh) with the restored sliders.
-    p = handoff.take_pending_simulator()
-    seed = _ps.pick_seed(p, _LAST_SIM)
-    if seed == "handoff":
-        symbol_in.value = p.get("symbol") or symbol_in.value
-        state["pending_legs"] = p.get("legs") or []
-        # Name the strategy the copied legs carry, so the picker and the Edited
-        # chip describe THEM rather than whatever the picker last showed. Under
-        # the restoring guard: the template must not overwrite the copied legs.
-        code = sv.template_for(state["pending_legs"])
-        if code:
-            state["restoring"] = True
-            try:
-                strategy_sel.value = code
-            finally:
-                state["restoring"] = False
-        _request_fetch()
-    elif seed == "restore":
+    # Seed: this page's own snapshot supplies its sliders and tab, and the
+    # position shared with the Calculator — whichever page was edited last —
+    # supplies the symbol, legs and strategy. Both ride ``pending_legs`` and a
+    # re-load; ``_apply_meta`` applies the legs when the fresh meta lands.
+    position = _shared.current()
+    if _LAST_SIM:
         _restore(_LAST_SIM)
-        _request_fetch()   # auto-refresh: re-load + re-run with the restored legs/sliders
+    if position:
+        options, shares = _shared.split_stock_legs(position.get("legs"))
+        state["carried_shares"] = shares
+        state["carried_strategy"] = position.get("strategy") if shares else None
+        state["restoring"] = True
+        try:
+            symbol_in.value = position["symbol"]
+            state["pending_legs"] = options or None
+            # Name the strategy the legs actually form, so the picker and the
+            # Edited chip describe THEM; the template must not overwrite them.
+            code = sv.template_for(options) or (
+                position.get("strategy")
+                if position.get("strategy") not in strategies.STOCK_STRATEGIES else None)
+            if code:
+                strategy_sel.value = code
+        finally:
+            state["restoring"] = False
+    if _LAST_SIM or position:
+        _request_fetch()   # auto-refresh: re-load + re-run with the legs/sliders

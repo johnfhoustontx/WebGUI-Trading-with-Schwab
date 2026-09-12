@@ -21,7 +21,7 @@ import shell as _shell
 from .theme import BTN_3D
 
 _pending = {"calculator": None, "expected_move": None, "swing": None,
-            "simulator": None, "calculator_legs": None, "gamma": None}
+            "calculator_legs": None, "gamma": None}
 
 
 # Per signal-type: list of (field_name, option_type, side) for the strike legs.
@@ -103,26 +103,6 @@ def send_to_calculator(signal):
         return
     set_pending_calculator(signal)
     _shell.navigate_to("/options/calculator")
-
-
-def set_pending_simulator(payload):
-    _pending["simulator"] = payload
-
-
-def take_pending_simulator():
-    """Return and clear the pending simulator leg payload (one-shot)."""
-    p = _pending.get("simulator")
-    _pending["simulator"] = None
-    return p
-
-
-def send_to_simulator(payload):
-    """Stash a {symbol, legs} payload and open the Simulator page."""
-    if not payload or not payload.get("symbol"):
-        ui.notify("No legs to copy.", type="warning")
-        return
-    set_pending_simulator(payload)
-    _shell.navigate_to("/options/simulator")
 
 
 def set_pending_calculator_legs(payload):

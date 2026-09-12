@@ -2,9 +2,8 @@
 
 The Calculator + Simulator keep a single-user module-level snapshot of their inputs
 and restore it on render (see the page modules). These helpers are the pure,
-unit-tested core: whitelist a snapshot, overlay it on defaults, and resolve the seed
-precedence (an explicit cross-page handoff copy beats the persisted snapshot, which
-beats the cold defaults)."""
+unit-tested core: whitelist a snapshot and overlay it on defaults. The symbol,
+strategy and legs the two pages share live in ``shared_position``."""
 
 
 def snapshot(values: dict, keys) -> dict:
@@ -26,14 +25,3 @@ def merge_restore(snap: dict | None, defaults: dict) -> dict:
         out.update({k: v for k, v in snap.items() if k in defaults})
     return out
 
-
-def pick_seed(handoff, last) -> str:
-    """Seed precedence → 'handoff' | 'restore' | 'default'.
-
-    An explicit Copy-to-Calculator/Simulator handoff is a fresh intent and wins over
-    the persisted snapshot; the snapshot wins over cold defaults. Empty == absent."""
-    if handoff:
-        return "handoff"
-    if last:
-        return "restore"
-    return "default"

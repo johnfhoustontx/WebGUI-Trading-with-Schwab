@@ -185,11 +185,6 @@ def set_legs_expiry(legs, expiry):
     return out
 
 
-def legs_to_payload(symbol, legs, keep_premium=True):
-    """Normalized cross-page copy payload: {symbol (upper, no $), legs:[...]}"""
-    return {"symbol": (symbol or "").replace("$", "").upper(),
-            "legs": normalize_legs(legs, keep_premium=keep_premium)}
-
 
 def coerce_strike(value, options):
     """Snap ``value`` to a member of ``options`` (nearest numeric), or None.
@@ -819,11 +814,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         _render()
         on_change()
 
-    def refill_prices():
+    def refill_prices(only_missing=False):
         """Price every leg off the chain (a fresh chain load) - skipping typed
-        prices, and share legs that already have one. Repaints; fires nothing,
-        like ``set_legs``."""
+        prices, and share legs that already have one. ``only_missing`` prices
+        just the legs with no price yet: legs arriving from the other page carry
+        the prices set there, and a leg's typed flag does not travel with it.
+        Repaints; fires nothing, like ``set_legs``."""
         for leg in state["legs"]:
+            if only_missing and _usable_price(leg.get("premium")):
+                continue
             _refill(leg)
         _render()
 

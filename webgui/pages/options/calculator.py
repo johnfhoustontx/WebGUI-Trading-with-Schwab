@@ -45,6 +45,8 @@ from .theme import (THEME, CALC_CSS, CALC_KEYFRAMES_CSS, CALC_FONT_HEAD_HTML,
                     CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
                     CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN)
 from . import page_state as _ps
+# The ONE position shared with the Simulator (replaces the copy buttons).
+from . import shared_position as _shared
 # The chain readers moved to chain_grid (2026-09-12) so the Simulator can read
 # the same chain without importing another PAGE. Re-exported by name — the
 # helpers below and the page's tests still reach them as ``calculator.X``.
@@ -1161,13 +1163,6 @@ def render():
             ui.button("EXPECTED MOVE", color=None, on_click=lambda: send_to_em()) \
                 .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3") \
                 .tooltip("Chart the expected move for these legs")
-            ui.button("COPY TO SIMULATOR", color=None,
-                      on_click=lambda: handoff.send_to_simulator(
-                          leg_editor.legs_to_payload(
-                              (symbol_in.value or "").replace("$", "").upper(),
-                              editor.get_legs(), keep_premium=False))) \
-                .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3") \
-                .tooltip("Open these legs in the Simulator")
             action_lbl = ui.label("").classes(
                 f"w-full {CALC_MUTED} text-[9px] tracking-[.14em]")
 
@@ -1326,14 +1321,27 @@ def render():
         write; wired to every input change). No-op while restoring."""
         if state.get("restoring"):
             return
+        legs = _legs_for_share()
         _LAST_CALC.clear()
         _LAST_CALC.update(_ps.snapshot({
             "symbol": (symbol_in.value or "").strip().upper(),
-            "strategy": strategy_sel.value, "legs": editor.get_legs(),
+            "strategy": strategy_sel.value, "legs": legs,
             "iv": iv_in.value, "rate": rate_in.value, "ivadj": ivchg_in.value,
             "contracts": int(contracts_in.value or 1), "price": price_in.value,
             "num_strikes": int(nstrikes_in.value or 24), "expiry": panel.selected_expiry(),
         }, _CALC_KEYS))
+        # …and the position the Simulator opens with. Whichever page was edited
+        # last is what the other one shows.
+        _shared.publish(symbol_in.value, strategy_sel.value, legs,
+                        panel.selected_expiry())
+
+    def _legs_for_share():
+        """The legs this page stands for. While legs are waiting for their chain
+        (restored or handed in), the editor still holds a placeholder template —
+        publishing THAT would overwrite the real position the moment any input
+        fired, e.g. the price the chain itself sets."""
+        pending = state.get("pending_legs")
+        return [dict(l) for l in pending] if pending else editor.get_legs()
 
     def _restore(snap):
         """Apply a persisted snapshot to the widgets under the restoring guard (so
@@ -1748,11 +1756,12 @@ def render():
         pending = state.pop("pending_legs", None)
         if pending:
             editor.set_legs(pending)
-            # Copied legs carry no premium → price them; a restored snapshot keeps
-            # the user's own premiums (refill never overwrites a set share price,
-            # and an option leg with a price is left for the user to change).
+            # Legs from the shared position or a hand-off keep the prices they
+            # carry (a price typed earlier is one of them); only unpriced legs —
+            # e.g. one added on the Simulator, which has no price column — are
+            # priced from the chain.
             if any(l.get("premium") in (None, 0) for l in pending):
-                fetch_premiums()
+                editor.refill_prices(only_missing=True)
         elif not editor.is_dirty():
             _seed_template()   # re-seed (template ratios × Contracts), priced
         else:
@@ -1760,6 +1769,9 @@ def render():
         _sync_legs()
         _sync_status()
         if _has_contracts(state.get("chain")):
+            # the legs just laid ARE this page's position now — publish them, so
+            # the Simulator opens with a hand-off or a fresh template too
+            _capture()
             fetch_iv()
             _poke()
         if cc.get("symbol") is not None and not exps:
@@ -1909,10 +1921,23 @@ def render():
         load_symbol()   # enqueue calc_load; legs applied when the chain arrives
 
     # Restore the persisted snapshot — but only when no handoff consumed the seed
-    # (an explicit Copy/Send-to-Calculator wins). Auto-refresh: reload the chain
-    # (fresh price) → _apply_chain applies the restored legs + recomputes.
-    if not _pending and not _legs_in and _LAST_CALC:
-        _restore(_LAST_CALC)
+    # (a Send-to-Calculator wins). Then overlay the position shared with the
+    # Simulator, which carries whichever page was edited last. Auto-refresh:
+    # reload the chain (fresh price) → _apply_chain applies the legs + recomputes.
+    _position = _shared.current()
+    if not _pending and not _legs_in and (_LAST_CALC or _position):
+        if _LAST_CALC:
+            _restore(_LAST_CALC)
+        if _position:
+            state["restoring"] = True
+            try:
+                symbol_in.value = _position["symbol"]
+                if _position.get("strategy") in strategy_options():
+                    strategy_sel.value = _position["strategy"]
+                state["pending_legs"] = _position.get("legs") or None
+                state["pending_expiry"] = _position.get("expiry")
+            finally:
+                state["restoring"] = False
         load_symbol()
 
     # First paint of the derived readouts. LAST, so it reflects whatever the

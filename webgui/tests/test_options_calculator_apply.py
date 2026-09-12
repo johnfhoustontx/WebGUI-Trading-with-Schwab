@@ -25,6 +25,7 @@ from nicegui import ui
 import bus_client
 from pages.options import calculator as calc
 from pages.options import handoff
+from pages.options import shared_position
 
 _EXPIRY = "2026-08-28"
 
@@ -125,6 +126,7 @@ def page(monkeypatch):
     # and the next render restores it. Under random ordering that is a failure
     # that moves around.
     calc._LAST_CALC.clear()
+    shared_position.reset()        # the position shared with the Simulator, too
     for key in handoff._pending:
         handoff._pending[key] = None
     with ui.card() as root:
@@ -515,3 +517,62 @@ def test_a_failed_expiry_fetch_stops_waiting_and_says_so(page):
     texts = _texts(root)
     assert "Loading strikes for Oct 30…" not in texts
     assert [t for t in texts if "could not load strikes for Oct 30" in t]
+
+
+# ── one position shared with the Simulator (2026-09-12) ─────────────────────
+
+def test_the_copy_to_simulator_button_is_gone(page):
+    root, _polls = page
+    labels = {getattr(el, "text", None) for el in _walk(root) if isinstance(el, ui.button)}
+    assert "COPY TO SIMULATOR" not in labels
+
+
+def test_the_calculator_publishes_its_position_as_it_changes(page):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    _click_grid(root, "bid", "put", 655.0)
+    pos = shared_position.current()
+    assert pos["symbol"] == "SPY" and len(pos["legs"]) == 3
+    assert pos["legs"][-1] == {"option_type": "put", "side": "short", "strike": 655.0,
+                               "expiry": _EXPIRY, "qty": 1, "premium": 1.5}
+
+
+def test_a_landed_chain_publishes_the_legs_it_laid(monkeypatch, sent_commands):
+    # A scanner hand-off or a fresh template is a position the Simulator must see
+    # even before the user touches anything here.
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    bus_client.reset()
+    calc._LAST_CALC.clear()
+    shared_position.reset()
+    with ui.card() as root:
+        calc.render()
+    polls = _polls(root)
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    pos = shared_position.current()
+    assert pos and len(pos["legs"]) == 2 and all(l["strike"] for l in pos["legs"])
+
+
+def test_the_calculator_opens_with_the_shared_position(monkeypatch, sent_commands):
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    bus_client.reset()
+    calc._LAST_CALC.clear()
+    for key in handoff._pending:
+        handoff._pending[key] = None
+    legs = [{"option_type": "put", "side": "short", "strike": 660.0, "expiry": _EXPIRY,
+             "qty": 1, "premium": 9.99},                    # a price typed on this page earlier
+            {"option_type": "put", "side": "long", "strike": 650.0, "expiry": _EXPIRY,
+             "qty": 1, "premium": None}]                    # a leg the Simulator added
+    shared_position.publish("SPY", "PCS", legs, _EXPIRY)
+    with ui.card() as root:
+        calc.render()
+    polls = _polls(root)
+    load = [c for c in sent_commands if c["type"] == "calc_load"][-1]
+    assert load["args"]["symbol"] == "SPY" and _EXPIRY in load["args"]["expiries"]
+
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    _recalc(root)
+    got = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
+    assert [(l["strike"], l["premium"]) for l in got] == [(660.0, 9.99), (650.0, 1.0)]
