@@ -2661,6 +2661,52 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## The profit-lock ladder is live, and it can only ever raise a stop
+
+**`[trail].active`** names the ladder in force — `"ratchet"` as shipped
+2026-09-12, read through `shared.trade_mgmt.active_trail_ladder()`. ⚠ An unknown
+or malformed name falls back to the **inert** `default_ladder` (a single
+break-even rung), never to the richer one: a typo in a risk config must not
+switch on an untried policy.
+
+⚠ **`_locked_profit_level` has taken `ctx["trail_ladder"]` and
+`ctx["peak_pnl_frac"]` since it was written, and NOTHING ever passed them** — so
+the ratchet was inert whatever the TOML said. Two call sites now supply both:
+`paper_engine.run_manage_cycle`'s **lifecycle branch** and
+`compute.run_captured_manage_cycle`.
+
+**The peak must be THIS cycle's `mfe`, not `pos["mfe"]`.** The row is fetched
+before the mark, so its stored value lags one cycle — and on the very cycle where
+a trade peaks and then collapses, that lag is the difference between locking 50%
+of the credit and locking nothing. On the captured side the peak is
+`signal_db.peak_unrealized`, one indexed `MAX(unrealized_pnl)` over the marks the
+cycle already writes. ⚠ **Both return `None`, never 0.0, when there is no peak**:
+a 0 clears the first rung (whose lock is 0.0), and `_locked_profit_level` reads a
+missing peak as "no lock" — which is exactly today's plain break-even behaviour,
+and therefore what every position opened before this change keeps.
+
+**It cannot increase loss exposure on any path.** Rule 3 computes
+`stop_level = max(be_level, _locked_profit_level(...))`, so a lock only ever
+raises a stop that is **already above break-even**. Its cost is exiting a
+recovered winner early.
+
+**Measured before switching it on** (replaying all 281 closed captured signals
+against their own mark series, 10%-of-credit slippage on every ladder exit): close
+outright at +50% **+$4,788** · break-even stop **+$8,173** · **ratchet
++$8,556**. Better on 43, worse on 18, identical on 220, and ahead in every month
+and both scanner types. ⚠ It **reverses at a 50% haircut** (+$6,526 vs +$6,924) —
+a higher floor triggers more often, so it pays slippage more often. The edge is
+real and small.
+
+⚠ **`manual_paper_lifecycle_enabled` is still OFF, deliberately.** Closing at +50%
+against holding-and-ratcheting is a $3,768 gap on the same sample — far bigger
+than the ladder's own contribution — but it is the claim that does *not* survive
+slicing: **September reversed it** (+$74 vs −$125, better on 0 of 9) and **0-DTE
+gets nothing** (−$456 vs −$369), since a same-week trade has no room to ratchet.
+Flipping it changes how every position in the manual book exits, so it is an
+operator decision with those numbers. Design:
+[the C2 doc](docs/plans/2026-09-12-profit-lock-ladder-design.md).
+
 ## "Vol Rank" is a variance risk premium, and the TRUE IV rank starts here
 
 ⚠ **`iv_analysis.calc_iv_rank_percentile` is not an IV rank, and the module has

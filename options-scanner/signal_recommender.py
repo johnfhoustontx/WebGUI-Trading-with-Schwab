@@ -50,6 +50,11 @@ RECOVERY_MIN_CUSHION = _STOPS["recovery_min_cushion"]  # min spot<->strike cushi
 # not wired to any caller yet.
 DEFAULT_TRAIL_LADDER = _trade_mgmt.default_trail_ladder()
 RATCHET_TRAIL_LADDER = _trade_mgmt.ratchet_trail_ladder()
+# The one in force, per ``[trail].active`` - "ratchet" as shipped 2026-09-12
+# (gap assessment C2; the replay is in that accessor's docstring). Callers thread
+# this into ctx["trail_ladder"] alongside ctx["peak_pnl_frac"]; the mechanism has
+# taken both since it was written and nothing ever passed them.
+ACTIVE_TRAIL_LADDER = _trade_mgmt.active_trail_ladder()
 
 
 def tp_frac_for(strategy):

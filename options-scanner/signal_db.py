@@ -242,6 +242,42 @@ def get_open_signals(scanner_type=None, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
+def peak_unrealized(signal_id, db_path=DEFAULT_DB_PATH):
+    """The best unrealized P&L this signal has ever marked, or ``None``.
+
+    The peak the profit-lock ladder needs (gap assessment C2) - one
+    ``MAX(unrealized_pnl)`` over the marks the manage cycle is already writing,
+    so it costs a single indexed aggregate per open signal per cycle.
+
+    ⚠ **``None``, not 0.0, for a signal with no marks.** A 0 peak clears the
+    ladder's first rung (whose lock is 0.0) and would therefore look like "armed
+    at break-even" on a position that has never been marked - and the moment a
+    ladder locks a positive fraction at a low peak, a phantom 0 becomes a phantom
+    stop. ``_locked_profit_level`` treats ``None`` as "no lock", which is exactly
+    today's plain break-even behaviour.
+
+    Never raises: it runs inside a manage cycle, and a failed read must not cost
+    the cycle its exits.
+    """
+    try:
+        conn = connect(db_path)
+    except Exception:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT MAX(unrealized_pnl) AS peak FROM signal_marks "
+            "WHERE signal_id = ? AND unrealized_pnl IS NOT NULL",
+            (signal_id,)).fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    peak = row["peak"] if not isinstance(row, tuple) else row[0]
+    return float(peak) if isinstance(peak, (int, float)) else None
+
+
 def insert_mark(mark_row, db_path=DEFAULT_DB_PATH):
     conn = connect(db_path)
     try:

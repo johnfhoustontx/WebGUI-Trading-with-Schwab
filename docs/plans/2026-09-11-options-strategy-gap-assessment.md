@@ -275,7 +275,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **B7** | Earnings awareness on open positions — **shipped 2026-09-12 as a heat modifier; ⚠ its rationale did NOT reproduce on this book's data** | V3 | S–M | ~~Medium~~ **Low** |
 | **B8** | Size as a percent of current equity — **shipped 2026-09-12 for the DRIVER, where its two caps had drifted to 22.5% and 89.9% of the book** | S1 | S | **Medium–high** |
 | **C1** | Record Income Window candidates for calibration — **shipped 2026-09-11** | M2 (evidence) | S–M | High |
-| **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book | X1 | S | Medium |
+| **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book — **ladder shipped 2026-09-12; the lifecycle trial is decision 8** | X1 | S | Medium |
 | **C3** | Store a daily ATM IV to build a true IV rank — **shipped 2026-09-12; the store, writer AND reader already existed with 7 rows** | V1 | S | Medium |
 | **C4** | Book-level Greeks | V2 | M | Medium |
 | **C5** | Trade plan snapshot and a manual-book scorecard | P1, P2 | M | Medium |
@@ -600,6 +600,22 @@ income slot, and at ~5 candidates a day a useful sample is weeks away.
 
 **C2. Wire the profit-lock ladder and trial the lifecycle on the manual book.** `[trail].ratchet_ladder` is built and tested with no caller, and `manual_paper_lifecycle_enabled` exists and defaults off. Running one book each way gives a direct comparison of "close at 50%" with "arm break-even and ratchet".
 
+**The LADDER shipped 2026-09-12; the lifecycle trial did not** —
+[design](2026-09-12-profit-lock-ladder-design.md). ⚠ The mechanism was inert
+whatever the TOML said: `_locked_profit_level` has taken `trail_ladder` and
+`peak_pnl_frac` since it was written and nothing ever passed them.
+
+**No book each way was needed** — every closed captured signal carries a mark
+series, so both policies were replayed against the **same real price path**. With
+a 10%-of-credit slippage haircut, over 281 signals: close at +50% **+$4,788**,
+break-even stop **+$8,173**, **ratchet +$8,556**. The ratchet is ahead in every
+month and both scanner types, and structurally cannot increase loss exposure
+(rule 3 takes `max(be_level, locked)`), so it ships on.
+
+⚠ **The lifecycle toggle is decision 8, not a ship.** Its gap is far larger
+(+$3,768) but does not survive slicing: September reversed it and 0-DTE gains
+nothing from it.
+
 **C3. Store one ATM IV per symbol per day.** The collector already fetches the chains, so this is small. A true IV rank then exists in a year; until then, label the field "Vol rank".
 
 **Shipped 2026-09-12** — [design](2026-09-12-iv-history-capture-design.md). ⚠ **It
@@ -702,6 +718,12 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 3. **Driver sizing.** Keep the "Very Aggressive" 12%-per-trade profile, or move toward the playbook's 1–2% and the sources' 1–5%? The driver's own realized record is the evidence to weigh.
 4. **How tight a deployment cap for the manual book?** 50% of equity at risk, or theoptionpremium's 20–25%?
 5. **Income Window: screen or feed?** Should it stay a human-picked screen, or feed auto-entry once C1 has produced outcome data?
+8. **Turn on `manual_paper_lifecycle_enabled`?** Measured 2026-09-12 (C2
+   above): holding-and-ratcheting beat closing at +50% by **$3,768** over 281
+   replayed trades, because 118 of the 205 that reached +50% ran on to ≥95% of
+   credit. ⚠ But **September reversed it** and **0-DTE gains nothing**, and the
+   sample is three months in which this book was profitable — "hold longer"
+   flatters exactly that. It changes how every position in the manual book exits.
 6. **Raise the IV-Rank floors to 45?** Measured 2026-09-12 (B2 above): everything
    below 45 returned **mean R −0.150 at a 25.5% win rate** over 910 closed
    captured signals, and 45 is the optimum on total R. It would cut ~10% of every

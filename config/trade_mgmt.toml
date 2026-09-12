@@ -57,6 +57,26 @@ recovery_min_cushion = 0.015    # 1.5% spot <-> short-strike cushion
 default_ladder = [[0.50, 0.0]]
 ratchet_ladder = [[0.50, 0.0], [0.65, 0.25], [0.80, 0.50]]
 
+# WHICH ladder is in force: "default" (a single break-even rung - the plain
+# break-even stop) or "ratchet". Anything else falls back to "default", because a
+# typo in a risk config must never switch on an untried policy.
+#
+# ⚠ Measured before switching this on (gap assessment C2). Replaying all 281 closed
+#   captured signals against their OWN mark series, with a 10%-of-credit slippage
+#   haircut on every ladder exit:
+#     close outright at +50%   +$4,788
+#     break-even stop (was)    +$8,173
+#     ratchet 65/80 (now)      +$8,556     <- +$383, +4.7%
+#   Better on 43 trades, worse on 18, identical on 220, and ahead in EVERY month
+#   (Jul +0 / Aug +299 / Sep +84) and both scanner types (0DTE +124, SWING +259).
+#   ⚠ It reverses at a 50% haircut (+$6,526 vs +$6,924): a higher floor triggers
+#   more often, so it pays slippage more often. The edge is real and small.
+#
+# It cannot increase LOSS exposure on any path - signal_recommender rule 3 takes
+# max(be_level, locked_level), so a lock only ever raises a stop already above
+# break-even. Its cost is exiting a recovered winner early (the 18 above).
+active = "ratchet"
+
 [structures]
 # ─── PER-STRUCTURE OVERRIDES ON EVERYTHING ABOVE ────────────────────────────
 #

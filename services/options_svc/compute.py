@@ -2599,8 +2599,35 @@ def run_captured_manage_cycle() -> dict:
             if rep.get("error"):
                 continue
 
-            mark = signal_recommender.build_mark(r, rep, now,
-                                                 be_level=_captured_be_level(r))
+            # The profit-lock ladder (gap assessment C2). ``build_mark`` has
+            # accepted both of these since it was written and the cycle never
+            # passed them, so the ratchet was inert on the one book that DOES arm
+            # a break-even stop today.
+            #
+            # The peak is one indexed MAX over the marks this cycle already
+            # writes. ⚠ None (no marks yet, or no credit) keeps today's plain
+            # break-even behaviour, because ``_locked_profit_level`` reads a
+            # missing peak as "no lock" - never as a peak of zero.
+            #
+            # ⚠ Guarded SEPARATELY from the enclosing per-signal try, and that is
+            # the point: this block is inside it, so ANY failure here would abort
+            # the rest of this signal's management for the cycle — including its
+            # exits. The ladder is an enhancement; losing it must never cost a
+            # position its stop. (Found by three existing tests whose stubbed
+            # ``signal_db`` has no such attribute — which is exactly the shape a
+            # renamed or missing helper takes in production.)
+            try:
+                _peak = signal_db.peak_unrealized(sid)
+            except Exception:  # noqa: BLE001 — see above.
+                _degrade.degraded("options.captured_peak")
+                _peak = None
+            _credit_total = (r.get("entry_credit") or 0) * 100.0
+            mark = signal_recommender.build_mark(
+                r, rep, now, be_level=_captured_be_level(r),
+                trail_ladder=signal_recommender.ACTIVE_TRAIL_LADDER,
+                peak_pnl_frac=(_peak / _credit_total
+                               if _peak is not None and _credit_total > 0
+                               else None))
             if not mark:
                 continue
             signal_db.insert_mark(mark)

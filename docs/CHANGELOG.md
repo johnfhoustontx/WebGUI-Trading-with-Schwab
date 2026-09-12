@@ -4,6 +4,63 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**The profit-lock ladder is live — and the bigger
+half of C2 measured well enough to put to the operator rather than ship.** Gap
+assessment **C2**.)
+
+- ⚠ **The ratchet was inert whatever the TOML said.** `_locked_profit_level` has
+  taken `ctx["trail_ladder"]` and `ctx["peak_pnl_frac"]` since it was written and
+  **nothing ever passed them**. `[trail].active` now names the ladder in force
+  (`"ratchet"`), and two call sites supply both inputs:
+  `paper_engine.run_manage_cycle`'s lifecycle branch and
+  `compute.run_captured_manage_cycle`.
+- **Measured before switching it on**, by replaying all 281 closed captured
+  signals against their **own mark series** with a 10%-of-credit slippage haircut
+  on every ladder exit: close outright at +50% **+$4,788** · break-even stop
+  (today's lifecycle) **+$8,173** · **ratchet 65/80 +$8,556**. Better on 43
+  trades, worse on 18, identical on 220, and ahead in **every month** (Jul +0 /
+  Aug +299 / Sep +84) and **both scanner types** (0DTE +124, SWING +259).
+  ⚠ It **reverses at a 50% haircut** (+$6,526 vs +$6,924) — a higher floor
+  triggers more often, so it pays slippage more often. The edge is real and small.
+- **The structural argument matters as much as the number:** rule 3 takes
+  `max(be_level, locked_level)`, so a lock only ever raises a stop **already above
+  break-even**. It cannot increase loss exposure on any path; its cost is exiting
+  a recovered winner early, which is what the 18 "worse" trades are.
+- ⚠ **The peak is THIS cycle's `mfe`, not `pos["mfe"]`.** The row is fetched
+  before the mark, so the stored value lags a cycle — and on the cycle where a
+  trade peaks and collapses, that lag is the difference between locking 50% of the
+  credit and locking nothing. On the captured side it is a new
+  `signal_db.peak_unrealized`, one indexed `MAX` over marks already being written.
+  Both return **`None`, never 0.0**, when there is no peak: a 0 clears the first
+  rung, and `_locked_profit_level` reads a missing peak as "no lock" — exactly
+  today's behaviour, which is what every existing position keeps.
+- ⚠ **`manual_paper_lifecycle_enabled` stays OFF.** Closing at +50% against
+  holding-and-ratcheting is a **$3,768** gap on the same sample — much larger than
+  the ladder's own contribution — because of the 205 trades that reached +50%,
+  **118 ran on to ≥95% of credit** while 61 fell back. But it is the claim that
+  does *not* survive slicing: **September reversed it** (+$74 vs −$125, ratchet
+  better on 0 of 9) and **0-DTE gets nothing** (−$456 vs −$369). Flipping it
+  changes how every position in the manual book exits, so it goes to the operator
+  with the numbers.
+- ⚠ **A data anomaly found while replaying, and a check on an earlier claim.**
+  Five `MANUAL_CLOSE` rows (all MU, 2026-06-15..17) book exactly
+  `entry_credit × 100` — the full credit, as if the spread expired worthless —
+  while their last mark shows them underwater: $3,010 of phantom profit. More
+  broadly, 130 of 388 `MANUAL_CLOSE` rows book exactly the full credit, and
+  `MANUAL_CLOSE` accounts for **+$50,102** of the book's reported P&L against
+  +$11,664 for every other reason combined. Recorded as a finding to investigate,
+  not a proven defect. **It does not move the B2 result**, which was re-checked
+  rather than assumed: mean R by entry IV rank is −0.150 / +0.187 / +0.251 as
+  published, −0.150 / +0.187 / +0.250 excluding the five suspect rows, and
+  −0.150 / +0.197 / +0.252 excluding **every** `MANUAL_CLOSE` row.
+- Design: [`docs/plans/2026-09-12-profit-lock-ladder-design.md`](plans/2026-09-12-profit-lock-ladder-design.md).
+  26 new tests (`shared/tests/test_trail_ladder_active.py`,
+  `options-scanner/tests/test_trail_ladder_wiring.py`,
+  `services/options_svc/tests/test_captured_trail_ladder.py`). No existing
+  assertion changed.
+
+---
+
 **Last updated:** 2026-09-12 (**The IV history starts accruing — the store, the
 writer AND the reader already existed, with 7 rows from one day in August.** Gap
 assessment **C3**.)

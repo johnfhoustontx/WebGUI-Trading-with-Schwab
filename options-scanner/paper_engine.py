@@ -719,6 +719,12 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
         dte = _dte_remaining(pos["expiration"], now_date)
         mark = signal_repricer.reprice_swing(trade, client)
         per_contract = mark.get("unrealized_pnl")     # ONE contract
+        # ⚠ THIS cycle's peak, not ``pos["mfe"]``. The row was fetched before the
+        # mark, so its stored value lags by one cycle — and on the very cycle
+        # where a trade peaks and then collapses, that lag is the difference
+        # between the ratchet locking 50% of the credit and locking nothing.
+        # Gap assessment C2.
+        mfe = None
 
         if per_contract is not None:
             pnl = round(per_contract * qty, 2)                 # position-level unrealized
@@ -798,6 +804,24 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             ctx["spot"] = mark.get("current_underlying")
             ctx["short_strike"] = pos.get("short_strike")
             ctx["call_short"] = pos.get("call_short")
+            # The profit-lock ladder (gap assessment C2). ``_locked_profit_level``
+            # has taken both of these since it was written and NOTHING ever passed
+            # them, so the ratchet was inert whatever the TOML said.
+            #
+            # LIFECYCLE ONLY, deliberately: the driver passes ``lifecycle=False``
+            # and the manual book's toggle defaults off, so neither book that
+            # trades today reaches this — flipping that toggle is a separate,
+            # measured operator decision (see the design doc's finding 2).
+            #
+            # A missing peak or a zero credit yields None, and
+            # ``_locked_profit_level`` returns 0.0 for a missing peak — so a
+            # position with no excursion history keeps exactly today's plain
+            # break-even behaviour, which is every position opened before this.
+            ctx["trail_ladder"] = signal_recommender.ACTIVE_TRAIL_LADDER
+            credit_total = (pos["entry_credit"] or 0) * MULTIPLIER * (qty or 1)
+            ctx["peak_pnl_frac"] = (mfe / credit_total
+                                    if mfe is not None and credit_total > 0
+                                    else None)
         rec = signal_recommender.recommend(ctx)
         tp_frac = signal_recommender.tp_frac_for(pos.get("strategy"))
         if (lifecycle and not pos.get("be_armed") and per_contract

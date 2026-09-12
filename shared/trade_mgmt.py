@@ -49,6 +49,9 @@ DEFAULTS = {
         "recovery_min_cushion": 0.015,  # min spot<->short-strike cushion to defer
     },
     "trail": {
+        # Which ladder is in force: "default" (a single break-even rung - today's
+        # behaviour) or "ratchet". See active_trail_ladder() for the measurement.
+        "active": "ratchet",
         # Peak-driven profit-lock ladder for the armed break-even stop. Each rung
         # is [peak_frac, lock_frac]: once PEAK profit reaches peak_frac of the
         # credit, the stop ratchets to lock in lock_frac of it.
@@ -118,6 +121,32 @@ def _ladder(key):
         except Exception:
             continue
     return out or [(float(r[0]), float(r[1])) for r in DEFAULTS["trail"][key]]
+
+
+#: Ladder names ``[trail].active`` may take. A NAME rather than a fourth array,
+#: so both ladders stay side by side in the TOML and reverting is one word.
+_LADDER_KEYS = {"default": "default_ladder", "ratchet": "ratchet_ladder"}
+
+
+def active_trail_ladder():
+    """The profit-lock ladder in force, from ``[trail].active``.
+
+    ⚠ **An unknown or malformed name falls back to the INERT default ladder**, not
+    to the richer one. A typo in a risk config must never silently switch on an
+    untried policy - the same direction ``structure_rules`` takes when a
+    ``[structures.*]`` table is junk.
+
+    Measured over 281 closed captured signals replayed on their own mark series,
+    the ratchet beats the plain break-even stop it replaces by +$383 (+4.7%) at a
+    10% slippage haircut, and wins in every month and both scanner types. It
+    reverses only at an implausible 50% haircut. Structurally it cannot increase
+    loss exposure: ``signal_recommender`` rule 3 takes
+    ``max(be_level, _locked_profit_level(...))``, so a lock only ever raises a stop
+    that is already above break-even.
+    """
+    name = _section("trail").get("active")
+    key = _LADDER_KEYS.get(name) if isinstance(name, str) else None
+    return _ladder(key or "default_ladder")
 
 
 def default_trail_ladder():
