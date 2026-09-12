@@ -193,3 +193,127 @@ def chain_strikes(chain, expiry, option_type):
             except (ValueError, TypeError):
                 continue
     return sorted(out)
+
+
+# ── the entry panel's chain grid ────────────────────────────────────────────
+#: Registry order IS the on-screen column order, per side. Whole words except
+#: the trader acronyms (IV, OI). Every key is a field ``thin_calc_chain`` keeps.
+GRID_COLUMNS = {
+    "bid": "Bid", "ask": "Ask", "mark": "Mark", "delta": "Delta",
+    "volatility": "IV", "gamma": "Gamma", "theta": "Theta", "vega": "Vega",
+    "openInterest": "OI", "totalVolume": "Volume",
+}
+DEFAULT_COLUMNS = ["bid", "ask", "delta", "openInterest"]
+#: The click targets — a grid without them cannot add a leg.
+_REQUIRED_COLUMNS = ("bid", "ask")
+_PRICE_FIELDS = {"bid", "ask", "mark"}
+_GREEK_FIELDS = {"delta", "gamma", "theta", "vega"}
+#: Schwab sends -999.0 for a greek (or IV) it does not have.
+_SENTINEL = 999.0
+
+_EMPTY_GRID = {"rows": [], "more_above": False, "more_below": False}
+
+
+def parse_columns(value):
+    """A saved column choice → a usable one, in registry order.
+
+    Anything unusable (not a list, nothing known) falls back to the defaults, and
+    Bid/Ask are always put back — a stored setting must never be able to take away
+    the only way to add a leg from the grid."""
+    if not isinstance(value, (list, tuple)):
+        return list(DEFAULT_COLUMNS)
+    picked = {v for v in value if isinstance(v, str) and v in GRID_COLUMNS}
+    if not picked:
+        return list(DEFAULT_COLUMNS)
+    picked.update(_REQUIRED_COLUMNS)
+    return [k for k in GRID_COLUMNS if k in picked]
+
+
+def _compact(n):
+    for size, suffix in ((1_000_000, "M"), (1_000, "k")):
+        if abs(n) >= size:
+            return f"{n / size:.1f}{suffix}"
+    return f"{int(round(n))}"
+
+
+def cell_text(field, value):
+    """One grid cell. An em-dash for anything that is not a reading.
+
+    A zero or negative PRICE is "no market", not a $0.00 option; a zero open
+    interest or volume IS a reading and prints ``0``."""
+    v = _finite(value)
+    if v is None:
+        return "—"
+    if field in _PRICE_FIELDS:
+        return f"{v:.2f}" if v > 0 else "—"
+    if field in _GREEK_FIELDS and abs(v) >= _SENTINEL:
+        return "—"
+    if field == "gamma":
+        return f"{v:.3f}"
+    if field in _GREEK_FIELDS:
+        return f"{v:.2f}"
+    if field == "volatility":
+        return f"{v:.1f}" if 0 < v < _SENTINEL else "—"
+    return _compact(v)
+
+
+def _side_map(chain, map_key, expiry):
+    """{strike: first contract} for one side of one expiry. Junk entries skipped."""
+    out = {}
+    for exp_key, strikes in (chain.get(map_key) or {}).items():
+        if not isinstance(exp_key, str) or exp_key.split(":")[0] != str(expiry):
+            continue
+        for sk, contracts in (strikes or {}).items():
+            try:
+                k = float(sk)
+            except (TypeError, ValueError):
+                continue
+            if (isinstance(contracts, list) and contracts
+                    and isinstance(contracts[0], dict)):
+                out[k] = contracts[0]
+    return out
+
+
+def chain_grid_rows(chain, expiry, spot, above=15, below=15):
+    """The grid's rows for one expiry: ``below`` strikes at or under spot plus
+    ``above`` strikes over it, with the in-the-money side and the at-the-money
+    strike flagged.
+
+    TOTAL: a junk chain or an unlisted expiry gives no rows. With no usable spot
+    the window starts at the bottom of the ladder and nothing is flagged — a
+    guessed spot would shade the wrong half of the grid."""
+    if not isinstance(chain, dict):
+        return dict(_EMPTY_GRID)
+    calls = _side_map(chain, "callExpDateMap", expiry)
+    puts = _side_map(chain, "putExpDateMap", expiry)
+    strikes = sorted(set(calls) | set(puts))
+    if not strikes:
+        return dict(_EMPTY_GRID)
+    s = _finite(spot)
+    above, below = max(int(above), 0), max(int(below), 0)
+    if s is None:
+        lo, hi, atm = 0, min(len(strikes), above + below), None
+    else:
+        under = sum(1 for k in strikes if k <= s)
+        lo, hi = max(under - below, 0), min(under + above, len(strikes))
+        atm = min(strikes, key=lambda k: abs(k - s))
+    rows = [{"strike": k,
+             "call": dict(calls.get(k) or {}), "put": dict(puts.get(k) or {}),
+             "call_itm": s is not None and k < s,
+             "put_itm": s is not None and k > s,
+             "atm": k == atm}
+            for k in strikes[lo:hi]]
+    return {"rows": rows, "more_below": lo > 0, "more_above": hi < len(strikes)}
+
+
+def expiry_pills(expiries, today):
+    """The expiry strip's pills: ISO value, a short date label, days to expiry."""
+    out = []
+    for e in expiries or []:
+        try:
+            d = dt.date.fromisoformat(str(e))
+        except ValueError:
+            continue
+        out.append({"value": str(e), "label": f"{d:%b} {d.day}",
+                    "dte": (d - today).days})
+    return out
