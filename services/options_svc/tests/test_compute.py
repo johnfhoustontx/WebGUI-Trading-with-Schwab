@@ -2444,13 +2444,23 @@ def test_find_contract_matches_by_triple():
     assert compute.find_contract(snap, "2026-06-19", "call", 999) is None
 
 
-def _patch_sim(monkeypatch, snap):
-    """Stub the lazily-imported ``options_simulator.data``/``.engine`` modules."""
+def _patch_sim(monkeypatch, snap, raw_chain=None):
+    """Stub the lazily-imported ``options_simulator.data``/``.engine`` modules.
+
+    Returns a call counter; ``raw_chain`` is what the fake fetch hands to
+    ``on_chain`` (the real one hands over the /chains response it parsed)."""
     import sys as _sys
     import types as _types
 
-    fake_data = _types.SimpleNamespace(
-        fetch_snapshot=lambda client, symbol: snap)
+    calls = {"fetch_snapshot": 0}
+
+    def _fetch_snapshot(client, symbol, on_chain=None):
+        calls["fetch_snapshot"] += 1
+        if on_chain is not None:
+            on_chain(raw_chain if raw_chain is not None else {})
+        return snap
+
+    fake_data = _types.SimpleNamespace(fetch_snapshot=_fetch_snapshot)
 
     class _FakeDF:
         def __init__(self, rows):
@@ -2501,6 +2511,7 @@ def _patch_sim(monkeypatch, snap):
     monkeypatch.setitem(_sys.modules, "options_simulator", _types.ModuleType("options_simulator"))
     monkeypatch.setitem(_sys.modules, "options_simulator.data", fake_data)
     monkeypatch.setitem(_sys.modules, "options_simulator.engine", fake_engine)
+    return calls
 
 
 def test_sim_fetch_stores_snapshot_and_returns_meta(monkeypatch):
@@ -2519,6 +2530,25 @@ def test_sim_fetch_stores_snapshot_and_returns_meta(monkeypatch):
     assert meta["strikes"]["2026-06-18"] == {"call": [460], "put": []}
     # Snapshot stashed in-process for sim_run.
     assert compute._SIM_SNAPSHOTS["SPY"] is snap
+
+
+def test_sim_fetch_returns_the_thinned_chain_from_the_one_fetch(monkeypatch):
+    """The Simulator's chain grid reads the chain sim_fetch ALREADY fetched —
+    one /chains call per load, thinned exactly like the Calculator's."""
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    raw = {"callExpDateMap": {"2026-06-19:7": {"450.0": [
+               {"bid": 1.0, "ask": 1.2, "mark": 1.1, "openInterest": 900,
+                "description": "SPY 06/19/2026 450 C"}]}},
+           "putExpDateMap": {}, "underlyingPrice": 450.0}
+    calls = _patch_sim(monkeypatch, snap, raw_chain=raw)
+    compute._SIM_SNAPSHOTS.clear()
+
+    meta = compute.sim_fetch("SPY")
+
+    assert calls["fetch_snapshot"] == 1
+    c = meta["chain"]["callExpDateMap"]["2026-06-19:7"]["450.0"][0]
+    assert c == {"bid": 1.0, "ask": 1.2, "mark": 1.1, "openInterest": 900}
+    assert set(meta["chain"]) == {"callExpDateMap", "putExpDateMap"}
 
 
 def test_sim_run_returns_whatif_and_ivshock(monkeypatch):

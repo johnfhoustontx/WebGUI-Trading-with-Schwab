@@ -1269,6 +1269,35 @@ def test_persist_briefing_skips_without_analysis(monkeypatch, tmp_path):
 
 
 # ── Simulator (Task 2.6e) ────────────────────────────────────────────────────
+def test_sim_fetch_command_publishes_the_chain_before_the_meta(monkeypatch):
+    """The page reacts to the META version and then reads the chain, so the chain
+    must already be written - and it must not ride inside the meta payload."""
+    bus = Bus(fake=True)
+    chain = {"callExpDateMap": {}, "putExpDateMap": {}}
+    meta = {"symbol": "SPY", "spot": 450.0, "n_contracts": 0,
+            "expiries": [], "strikes": {}, "chain": chain}
+    monkeypatch.setattr(handlers.compute, "sim_fetch", lambda symbol: dict(meta))
+    order = []
+    real = bus.cache_set
+
+    def _spy(key, payload, **kw):
+        order.append(key)
+        return real(key, payload, **kw)
+
+    monkeypatch.setattr(bus, "cache_set", _spy)
+    sub = bus.subscribe("events:options:sim_chain")
+
+    handlers.handle_command(bus, Command(type="sim_fetch", args={"symbol": "SPY"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert order == ["cache:options:sim_chain", "cache:options:sim_meta"]
+    env = bus.cache_get("cache:options:sim_chain")
+    assert env.payload == {"symbol": "SPY", "chain": chain}
+    assert msg is not None and msg.get("version") == env.version
+    assert "chain" not in bus.cache_get("cache:options:sim_meta").payload
+
+
 def test_sim_fetch_command_caches_meta(monkeypatch):
     bus = Bus(fake=True)
     meta = {"symbol": "SPY", "spot": 450.0, "n_contracts": 3,

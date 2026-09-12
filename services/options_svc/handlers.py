@@ -372,6 +372,11 @@ EVENT_GAMMA_SYMBOLS = "events:options:gamma_symbols"
 
 CACHE_SIM_META = "cache:options:sim_meta"
 EVENT_SIM_META = "events:options:sim_meta"
+# The Simulator entry panel's chain grid - the thinned chain from sim_fetch's
+# own /chains call. Its own key, so a Simulator load never changes the
+# Calculator's chain (cache:options:calc_chain).
+CACHE_SIM_CHAIN = "cache:options:sim_chain"
+EVENT_SIM_CHAIN = "events:options:sim_chain"
 
 CACHE_SIM_RESULT = "cache:options:sim_result"
 EVENT_SIM_RESULT = "events:options:sim_result"
@@ -2570,6 +2575,13 @@ def handle_command(bus, command) -> None:
         run_gamma_history(bus, command.args.get("date"), command.args.get("slot"))
     elif command.type == "sim_fetch":
         meta = compute.sim_fetch(command.args.get("symbol", "SPY"))
+        # The chain goes FIRST: the page reacts to the meta version and then
+        # reads the chain, so chain-already-written is the only skew it can see
+        # (the gamma history ordering, for the same reason).
+        chain = meta.pop("chain", None) if isinstance(meta, dict) else None
+        cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": (meta or {}).get("symbol"),
+                                               "chain": chain})
+        bus.publish(EVENT_SIM_CHAIN, {"version": cver})
         version = bus.cache_set(CACHE_SIM_META, meta)
         bus.publish(EVENT_SIM_META, {"version": version})
     elif command.type == "sim_run":

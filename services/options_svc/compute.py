@@ -7146,10 +7146,17 @@ def sim_fetch(symbol: str) -> dict:
     the sorted expiries, and a nested ``strikes`` map (expiry → {call, put}).
     Computing the full nested strike map up front (vs. a per-(expiry,kind)
     follow-up command) keeps selector changes instant on the page with no extra
-    round-trip — the per-symbol cost is one pass over the contracts list."""
+    round-trip — the per-symbol cost is one pass over the contracts list.
+
+    ``chain`` is the raw /chains response from that SAME fetch, thinned like the
+    Calculator's (``thin_calc_chain``) for the entry panel's chain grid. The
+    handler pops it into ``cache:options:sim_chain`` — it never rides in
+    ``sim_meta``."""
     from options_simulator import data as sdata
 
-    snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol)
+    raw = {}
+    snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol,
+                                on_chain=lambda c: raw.update(chain=c))
     _stash_sim_snapshot(symbol, snap)
     exps = expiries_of(snap)
     return {
@@ -7160,6 +7167,7 @@ def sim_fetch(symbol: str) -> dict:
         "strikes": {exp: {"call": strikes_of(snap, exp, "call"),
                           "put": strikes_of(snap, exp, "put")}
                     for exp in exps},
+        "chain": thin_calc_chain(raw.get("chain")),
     }
 
 
