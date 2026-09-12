@@ -541,7 +541,7 @@ def results_panel_facts(status, has_result):
                     "on real strikes and are priced from the chain"}
 
 
-def chain_line(status, symbol, expiry_count, strike_count):
+def chain_line(status, symbol, expiry_count, strike_count, loaded=None):
     """The entry panel's status line.
 
     Says what the page is doing, or — once loaded — how much of a chain it got,
@@ -552,8 +552,13 @@ def chain_line(status, symbol, expiry_count, strike_count):
         sym = (symbol or "").strip().upper()
         return f"fetching option chain · {sym}" if sym else "fetching option chain"
     if state == "ready":
-        return (f"{int(strike_count or 0)} strikes · "
+        line = (f"{int(strike_count or 0)} strikes · "
                 f"{int(expiry_count or 0)} expiries")
+        # ``loaded``: how many of those carry strikes yet (a lazy load fetches
+        # the rest per click) — said only when it is not all of them
+        if isinstance(loaded, int) and loaded < int(expiry_count or 0):
+            line += f" · {loaded} loaded"
+        return line
     return "type a ticker, then press Enter or tab out to load the chain"
 
 
@@ -1072,6 +1077,9 @@ def render():
         "spot": None,         # last loaded chain price (the ② SYMBOL readout)
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
         "pending_expiry": None,  # expiry to select when the next chain lands
+        "pending_move": None,    # an unloaded expiry the legs move to once it lands
+        "chain_symbol": None,    # the symbol the loaded chain belongs to
+        "expirations": None,     # every listed expiration (a lazy load)
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
         "restoring": False,   # True while restoring a persisted snapshot (suppress enqueues)
         "last_loaded": None,   # last symbol a Load was triggered for (tab/Enter dedup)
@@ -1411,8 +1419,10 @@ def render():
                          add=_TONE_TEXT["pos" if spot else "dim"])
         exp = panel.selected_expiry()
         exps = _expiries_for()
+        listed = state.get("expirations") or exps
         strikes = set(_strikes_for(exp, "call")) | set(_strikes_for(exp, "put"))
-        panel.status_lbl.text = chain_line(status, symbol_in.value, len(exps), len(strikes))
+        panel.status_lbl.text = chain_line(status, symbol_in.value, len(listed),
+                                           len(strikes), loaded=len(exps))
         _sync_results()
 
     # Seed the default template (PCS). Tolerates empty strikes/expiries pre-load.
@@ -1446,13 +1456,35 @@ def render():
     @guard
     def _on_expiry_change(expiry):
         """An expiry pill → move every leg to it and price them there. Suppressed
-        while restoring or while a chain is being applied."""
+        while restoring or while a chain is being applied.
+
+        An expiry whose strikes have not been fetched yet is requested first
+        (``calc_load_expiry``); the legs move when it lands, in ``_merge_chain``."""
         if state.get("restoring") or state.get("applying"):
             return
+        if not panel.is_loaded(expiry):
+            state["pending_move"] = expiry
+            bus_client.request("options", {"type": "calc_load_expiry", "args": {
+                "symbol": state.get("chain_symbol") or _sym(), "expiry": expiry}})
+            _sync_status()
+            return
+        state["pending_move"] = None
         editor.apply_expiry(expiry)     # fires on_change: capture, strip, poke
         editor.refill_prices()
         _sync_legs()
         _sync_status()
+
+    def _sym():
+        return (symbol_in.value or "").strip().upper()
+
+    def _wanted_expiries():
+        """Expiries the next load must bring WITH it: a restored or handed-off
+        expiry, the legs waiting to be applied, the legs on screen and the pill
+        selected now — any of them missing would coerce a strike away."""
+        out = {state.get("pending_expiry"), panel.selected_expiry()}
+        for leg in (state.get("pending_legs") or []) + editor.get_legs():
+            out.add(leg.get("expiry"))
+        return sorted(str(e) for e in out if e)
 
     panel.on_expiry(_on_expiry_change)
 
@@ -1503,7 +1535,10 @@ def render():
             state["loading"] = True
             wait.show(f"Loading {sym}…")
             ui.timer(_overlay.LOAD_TIMEOUT_SEC, _load_timeout, once=True)
-        bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+        # lazy: every expiration listed, strikes for the first two plus the
+        # expiries this page already needs (see compute.calc_load_symbol)
+        bus_client.request("options", {"type": "calc_load", "args": {
+            "symbol": sym, "lazy": True, "expiries": _wanted_expiries()}})
         _sync_status()
 
     @guard
@@ -1644,10 +1679,55 @@ def render():
             "expiry": str(panel.selected_expiry() or ""), "legs": legs})
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
+    def _merge_chain(cc):
+        """One more expiry arrived for the chain on screen (``calc_load_expiry``).
+        Nothing is re-seeded and no result is cleared: the grid gains the expiry,
+        and legs waiting on it move there."""
+        state["chain"] = cc.get("chain")
+        state["expirations"] = cc.get("expirations") or state.get("expirations")
+        state["applying"] = True
+        try:
+            panel.set_chain(state["chain"], state.get("spot"),
+                            expirations=state["expirations"])
+        finally:
+            state["applying"] = False
+        move = state.get("pending_move")
+        if move and move == cc.get("added") and cc.get("failed"):
+            state["pending_move"] = None
+            # back to the expiry the legs are actually on, so the grid stops
+            # promising strikes that are not coming
+            on = next((l.get("expiry") for l in editor.get_legs() if l.get("expiry")), None)
+            state["applying"] = True
+            try:
+                loaded = _expiries_for()
+                panel.set_expiry(on if on and panel.is_loaded(on)
+                                 else (loaded[0] if loaded else None))
+            finally:
+                state["applying"] = False
+            panel.status_lbl.text = f"could not load strikes for {_entry.expiry_label(move)}"
+            ui.notify(f"Schwab returned no strikes for {move}.", type="warning")
+        elif move and panel.is_loaded(move):
+            state["pending_move"] = None
+            editor.apply_expiry(move)       # fires on_change: capture, strip, poke
+            editor.refill_prices()
+        else:
+            editor.refresh_options()
+        _sync_legs()
+        if not (move and cc.get("failed")):
+            _sync_status()
+
     def _apply_chain(cc):
         cc = cc or {}
+        if (cc.get("added") and state.get("chain") is not None
+                and str(cc.get("symbol") or "").upper()
+                == str(state.get("chain_symbol") or "").upper()):
+            _merge_chain(cc)
+            return
         state["loading"] = False
         wait.hide()
+        state["pending_move"] = None
+        state["chain_symbol"] = cc.get("symbol")
+        state["expirations"] = cc.get("expirations")
         state["chain"] = cc.get("chain")
         if cc.get("price"):
             state["spot"] = round(cc["price"], 2)
@@ -1658,7 +1738,8 @@ def render():
             # keeps a pending (restored / handed-off) expiry if listed, else the
             # one already selected, else the nearest — and fires nothing
             panel.set_chain(state["chain"], state.get("spot"),
-                            expiry=state.pop("pending_expiry", None))
+                            expiry=state.pop("pending_expiry", None),
+                            expirations=state["expirations"])
         finally:
             state["applying"] = False
         # Pending legs copied in (Simulator / scanner / a restored snapshot) win;

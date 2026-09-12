@@ -316,6 +316,7 @@ def render():
         "result": None,      # last sim_result payload (sweep rows)
         "meta_ver": None,    # last-seen sim_meta cache version
         "chain": None,       # the thinned chain from the same fetch (the grid)
+        "pending_move": None,  # an unloaded expiry the legs move to once it lands
         "chain_ver": None,   # last-seen sim_chain cache version
         "chain_fetching": False,  # in-flight guard for the off-loop chain read
         "result_ver": None,  # last-seen sim_result cache version
@@ -791,7 +792,14 @@ def render():
             state["loading"] = True
             wait.show(f"Loading {sym}…")
             ui.timer(_overlay.LOAD_TIMEOUT_SEC, _fetch_timeout, once=True)
-        bus_client.request("options", {"type": "sim_fetch", "args": {"symbol": sym}})
+        # lazy: every expiration listed, contracts for the first two plus the
+        # expiries this page already needs (see compute.sim_fetch)
+        wanted = {panel.selected_expiry()}
+        for leg in (state.get("pending_legs") or []) + editor.get_legs():
+            wanted.add(leg.get("expiry"))
+        bus_client.request("options", {"type": "sim_fetch", "args": {
+            "symbol": sym, "lazy": True,
+            "expiries": sorted(str(e) for e in wanted if e)}})
         status.text = "Loading chain…"
 
     @guard
@@ -813,9 +821,18 @@ def render():
     @guard
     def _set_all_expiry(expiry):
         """An expiry pill → every leg to that expiry (``leg_editor.apply_expiry``
-        fires the editor's on_change, which re-runs and repaints)."""
+        fires the editor's on_change, which re-runs and repaints).
+
+        An expiry the snapshot does not hold yet is fetched first
+        (``sim_fetch_expiry``); the legs move when its meta lands."""
         if not expiry or state.get("restoring"):
             return
+        if expiry not in _expiries_for():
+            state["pending_move"] = expiry
+            bus_client.request("options", {"type": "sim_fetch_expiry", "args": {
+                "symbol": _sym(), "expiry": expiry}})
+            return
+        state["pending_move"] = None
         editor.apply_expiry(expiry)
 
     @guard
@@ -865,9 +882,29 @@ def render():
     symbol_in.on("focusout", lambda e: _symbol_submit())
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
+    def _merge_meta(meta):
+        """One more expiry arrived for the snapshot on screen. Nothing is
+        re-seeded; legs waiting on it move there (which re-runs), and a fetch
+        that brought no contracts stops the wait and says so."""
+        state["meta"] = meta
+        _paint_chain()
+        move = state.get("pending_move")
+        if move and move == meta.get("added"):
+            state["pending_move"] = None
+            if move in _expiries_for():
+                editor.apply_expiry(move)   # fires on_change: run + replay + repaint
+                return
+            status.text = f"No contracts came back for {move}."
+        _legs_ui()
+
     def _apply_meta(meta):
+        if (meta and meta.get("added") and state.get("meta")
+                and meta.get("symbol") == (state.get("meta") or {}).get("symbol")):
+            _merge_meta(meta)
+            return
         state["loading"] = False
         wait.hide()
+        state["pending_move"] = None
         state["meta"] = meta or None
         # Repopulate the editor's per-leg expiry/strike selects from the new
         # chain. Pending legs copied in from the Calculator win; else when the
@@ -904,7 +941,8 @@ def render():
     def _paint_chain():
         state["chain"] = _chain_for_screen()
         spot = (state.get("meta") or {}).get("spot")
-        panel.set_chain(state["chain"], spot)
+        panel.set_chain(state["chain"], spot,
+                        expirations=(state.get("meta") or {}).get("expirations"))
         editor.refresh_options()        # the DELTA column reads the chain
 
     @guard_async

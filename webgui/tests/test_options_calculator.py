@@ -1139,6 +1139,9 @@ def test_chain_line_says_what_to_do_next():
 
     ready = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
     assert calc.chain_line(ready, "SPY", 6, 48) == "48 strikes · 6 expiries"
+    # a lazy load: every expiration listed, only some with strikes fetched yet
+    assert calc.chain_line(ready, "TSLA", 17, 301, loaded=3) ==         "301 strikes · 17 expiries · 3 loaded"
+    assert calc.chain_line(ready, "TSLA", 17, 301, loaded=17) == "301 strikes · 17 expiries"
 
 
 def test_matrix_note_names_the_percentage_basis():
@@ -1184,8 +1187,10 @@ def test_render_sets_the_expiry_programmatically_inside_the_applying_guard():
     # belt and braces, and calc_compute still gets the panel's expiry.
     import inspect
     src = inspect.getsource(calc.render)
-    assert src.count('state["applying"] = True') == 1
-    assert src.count('state["applying"] = False') == 1
+    # every programmatic write (the load, the per-expiry merge, a failed
+    # fetch's revert) raises the guard AND releases it
+    assert src.count('state["applying"] = True') >= 1
+    assert src.count('state["applying"] = True') == src.count('state["applying"] = False')
     assert "panel.set_chain(" in src
     assert "panel.selected_expiry()" in src
     assert "expiry_sel" not in src

@@ -786,3 +786,48 @@ def test_a_landed_meta_fills_the_panel_spot():
     bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
     _fire(container, "_poll_meta")
     assert _texts(container, "entry-spot") == ["450.00"]
+
+
+# ── every expiration listed, strikes on demand (2026-09-12) ─────────────────
+_ALL_EXPS = ["2026-06-26", "2026-07-03", "2026-07-17"]
+
+
+def test_the_simulator_asks_for_a_lazy_fetch():
+    import bus_client
+    container = _render_cold()
+    symbol = _hooked(container, "entry-ticker")[0]
+    symbol.value = "TSLA"
+    for listener in list(symbol._event_listeners.values()):
+        if listener.type == "keydown.enter":
+            listener.handler(None)
+    cmd = _last_command("sim_fetch")
+    assert cmd["args"]["symbol"] == "TSLA" and cmd["args"]["lazy"] is True
+    assert isinstance(cmd["args"]["expiries"], list)
+
+
+def test_an_unloaded_expiry_is_fetched_then_every_leg_moves_there():
+    import asyncio
+
+    import bus_client
+    container = _render_cold()
+    meta = dict(_SIM_META, expirations=_ALL_EXPS)
+    bus_client.bus().cache_set("cache:options:sim_meta", meta)
+    bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain())
+    _fire(container, "_poll_meta")
+    _run_async(container, "_poll_chain", asyncio)
+
+    pills = _hooked(container, "entry-expiry")
+    assert [p.text.split(" · ")[0] for p in pills] == ["Jun 26", "Jul 3", "Jul 17"]
+    _fire_click_on(pills[2])
+    req = _last_command("sim_fetch_expiry")
+    assert req["args"] == {"symbol": "SPY", "expiry": "2026-07-17"}
+
+    far = dict(meta, added="2026-07-17",
+               expiries=["2026-06-26", "2026-07-03", "2026-07-17"],
+               strikes=dict(meta["strikes"], **{"2026-07-17": {"call": [445.0, 450.0, 455.0],
+                                                             "put": [445.0, 450.0, 455.0]}}))
+    bus_client.bus().cache_set("cache:options:sim_meta", far)
+    _fire(container, "_poll_meta")
+    legs = _last_command("sim_run")["args"]["legs"]
+    assert {l["expiry"] for l in legs} == {"2026-07-17"}
+    assert len(_leg_rows(container)) == 2          # moved, not re-seeded or dropped

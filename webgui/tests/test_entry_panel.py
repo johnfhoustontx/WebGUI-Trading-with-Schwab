@@ -211,3 +211,45 @@ def test_panel_classes_are_spaceless_tailwind_arbitraries():
     for src in list(EP.DEFAULT_PANEL_TOKENS.values()) + list(EP._GRID_TRACKS.values()):
         for arb in re.findall(r"\[[^\]]*\]", src):
             assert " " not in arb, src
+
+
+# ── every listed expiration, strikes on demand (2026-09-12) ─────────────────
+
+_ALL = ["2026-09-19", "2026-09-26", "2026-10-30", "2026-11-20"]
+
+
+def test_the_strip_lists_every_expiration_not_just_the_loaded_ones(saved):
+    panel, root = _panel()
+    panel.set_chain(_chain(), 571.0, expirations=_ALL)
+    assert [e.text for e in _all(root, "entry-expiry")] == [
+        "Sep 19 · 7d", "Sep 26 · 14d", "Oct 30 · 48d", "Nov 20 · 69d"]
+
+
+def test_clicking_an_unloaded_expiration_notifies_and_says_it_is_loading(saved):
+    panel, root = _panel()
+    seen = []
+    panel.on_expiry(seen.append)
+    panel.set_chain(_chain(), 571.0, expirations=_ALL)
+    _fire(_all(root, "entry-expiry")[3], "click")
+    assert seen == ["2026-11-20"] and panel.selected_expiry() == "2026-11-20"
+    assert _strikes(root) == []
+    assert [e.text for e in _all(root, "entry-empty")] == ["Loading strikes for Nov 20…"]
+
+
+def test_set_chain_keeps_an_unloaded_selection_that_is_still_listed(saved):
+    panel, root = _panel()
+    panel.set_chain(_chain(), 571.0, expirations=_ALL)
+    panel.set_expiry("2026-11-20")
+    assert panel.selected_expiry() == "2026-11-20"
+    chain = _chain()
+    chain["callExpDateMap"]["2026-11-20:69"] = chain["callExpDateMap"]["2026-09-19:7"]
+    chain["putExpDateMap"]["2026-11-20:69"] = chain["putExpDateMap"]["2026-09-19:7"]
+    assert panel.set_chain(chain, 571.0, expirations=_ALL) == "2026-11-20"
+    assert len(_strikes(root)) == 31
+
+
+def test_is_loaded_reports_whether_strikes_have_arrived(saved):
+    panel, _ = _panel()
+    panel.set_chain(_chain(), 571.0, expirations=_ALL)
+    assert panel.is_loaded("2026-09-19") is True
+    assert panel.is_loaded("2026-11-20") is False

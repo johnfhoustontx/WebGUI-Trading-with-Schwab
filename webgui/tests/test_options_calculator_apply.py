@@ -432,3 +432,86 @@ def test_the_action_buttons_are_gone(page):
     labels = {getattr(el, "text", None) for el in _walk(root) if isinstance(el, ui.button)}
     for gone in ("LOAD CHAIN", "IV UPDATE", "FETCH PREMIUMS", "CALCULATE"):
         assert gone not in labels, gone
+
+
+# ── every expiration listed, strikes on demand (2026-09-12) ─────────────────
+_FAR = "2026-10-30"
+
+
+def _lazy_payload(**extra):
+    cc = _chain_payload()
+    cc["expirations"] = [_EXPIRY, "2026-09-04", _FAR]
+    cc["expirations"].sort()
+    cc.update(extra)
+    return cc
+
+
+def _with_far(cc):
+    far = {f"{k}": [dict(v[0], mark=v[0]["mark"] + 5)] for k, v in
+           cc["chain"]["putExpDateMap"][f"{_EXPIRY}:9"].items()}
+    out = dict(cc, added=_FAR)
+    out["chain"] = {mk: dict(cc["chain"][mk], **{f"{_FAR}:72": far})
+                    for mk in ("callExpDateMap", "putExpDateMap")}
+    return out
+
+
+def test_the_load_asks_the_service_for_a_lazy_chain(page, sent_commands):
+    root, _polls = page
+    _symbol_input(root).value = "TSLA"
+    _fire(root, _symbol_input(root), "keydown.enter")
+    load = [c for c in sent_commands if c["type"] == "calc_load"][-1]
+    assert load["args"]["symbol"] == "TSLA" and load["args"]["lazy"] is True
+    assert isinstance(load["args"]["expiries"], list)
+
+
+def test_every_listed_expiration_gets_a_pill(page):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
+    _drive(root, polls)
+    pills = [el.text for el in _hooked(root, "entry-expiry")]
+    assert len(pills) == 3 and any(t.startswith("Oct 30") for t in pills)
+
+
+def test_an_unloaded_expiry_is_fetched_then_the_legs_move_when_it_lands(page, sent_commands):
+    root, polls = page
+    cc = _lazy_payload()
+    bus_client.bus().cache_set("cache:options:calc_chain", cc)
+    _drive(root, polls)
+    far_pill = [el for el in _hooked(root, "entry-expiry") if el.text.startswith("Oct 30")][0]
+    _fire(root, far_pill, "click")
+
+    req = [c for c in sent_commands if c["type"] == "calc_load_expiry"]
+    assert req and req[-1]["args"] == {"symbol": "SPY", "expiry": _FAR}
+    assert "Loading strikes for Oct 30…" in _texts(root)
+
+    bus_client.bus().cache_set("cache:options:calc_chain", _with_far(cc))
+    _drive(root, polls)
+    _recalc(root)
+    legs = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
+    assert {l["expiry"] for l in legs} == {_FAR}
+    assert all(l["premium"] >= 5 for l in legs), "legs not re-priced at the far expiry"
+
+
+def test_a_merge_does_not_reseed_or_drop_the_users_legs(page):
+    root, polls = page
+    cc = _lazy_payload()
+    bus_client.bus().cache_set("cache:options:calc_chain", cc)
+    _drive(root, polls)
+    _click_grid(root, "bid", "put", 655.0)          # the legs are now the user's
+    bus_client.bus().cache_set("cache:options:calc_chain", _with_far(cc))
+    _drive(root, polls)
+    assert "3 LEGS" in _texts(root)
+
+
+def test_a_failed_expiry_fetch_stops_waiting_and_says_so(page):
+    root, polls = page
+    cc = _lazy_payload()
+    bus_client.bus().cache_set("cache:options:calc_chain", cc)
+    _drive(root, polls)
+    far_pill = [el for el in _hooked(root, "entry-expiry") if el.text.startswith("Oct 30")][0]
+    _fire(root, far_pill, "click")
+    bus_client.bus().cache_set("cache:options:calc_chain", dict(cc, added=_FAR, failed=True))
+    _drive(root, polls)
+    texts = _texts(root)
+    assert "Loading strikes for Oct 30…" not in texts
+    assert [t for t in texts if "could not load strikes for Oct 30" in t]

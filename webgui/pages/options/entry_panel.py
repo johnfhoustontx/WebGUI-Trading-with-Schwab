@@ -131,7 +131,7 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
     nothing); ``on_expiry(cb)`` with ``cb(expiry)``; ``on_pick(cb)`` with
     ``cb(column, option_type, strike, expiry)``."""
     tk = panel_tokens(tokens)
-    state = {"chain": None, "spot": None, "expiry": None,
+    state = {"chain": None, "spot": None, "expiry": None, "expirations": None,
              "columns": saved_columns(), "today": today}
     listeners = {"expiry": [], "pick": []}
 
@@ -210,9 +210,17 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         if pick is not None:
             _pick(*pick)
 
+    def _loaded():
+        return cg.chain_expiries(state["chain"] or {})
+
+    def _listed():
+        """Every expiration the page may pick: the service's full listing when it
+        sent one, else just what the chain carries (an eager load)."""
+        return list(state["expirations"] or _loaded())
+
     def _paint_strip():
         strip.clear()
-        pills = cg.expiry_pills(cg.chain_expiries(state["chain"] or {}), _today())
+        pills = cg.expiry_pills(_listed(), _today())
         swap = " ".join(tk[k] for k in _PILL_KEYS)
         with strip:
             for p in pills:
@@ -248,8 +256,13 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         grid_title.text = f"CHAIN · {expiry}" if expiry else "CHAIN"
         g = cg.chain_grid_rows(chain, expiry, state["spot"])
         has = bool(g["rows"])
-        grid_empty.text = ("Load a symbol to see its chain." if not chain
-                           else "No strikes listed for this expiry.")
+        if not chain:
+            grid_empty.text = "Load a symbol to see its chain."
+        elif expiry and expiry not in _loaded():
+            label = cg.expiry_pills([expiry], _today())
+            grid_empty.text = f"Loading strikes for {label[0]['label'] if label else expiry}…"
+        else:
+            grid_empty.text = "No strikes listed for this expiry."
         for el, show in ((grid_empty, not has), (grid_head, has),
                          (grid_hint, has), (grid_body, has)):
             el.set_visibility(show)
@@ -275,12 +288,15 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
             client.run_javascript(center_js(grid_body.id))
 
     # ── the handle ────────────────────────────────────────────────────────
-    def set_chain(chain, spot, expiry=None):
-        """Show ``chain``. The expiry kept is ``expiry`` if listed, else the one
+    def set_chain(chain, spot, expiry=None, expirations=None):
+        """Show ``chain``. ``expirations`` is the service's full listing (a lazy
+        load): every one gets a pill, and the ones whose strikes have not arrived
+        say so when picked. The expiry kept is ``expiry`` if listed, else the one
         already selected if still listed, else the nearest. Fires nothing."""
         state["chain"] = chain if isinstance(chain, dict) else None
         state["spot"] = spot
-        exps = cg.chain_expiries(state["chain"] or {})
+        state["expirations"] = list(expirations) if expirations else None
+        exps = _listed()
         if expiry in exps:
             state["expiry"] = expiry
         elif state["expiry"] not in exps:
@@ -290,7 +306,7 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         return state["expiry"]
 
     def set_expiry(expiry):
-        if expiry in cg.chain_expiries(state["chain"] or {}) and expiry != state["expiry"]:
+        if expiry in _listed() and expiry != state["expiry"]:
             state["expiry"] = expiry
             _paint_strip()
             _paint_grid()
@@ -303,5 +319,6 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         refresh_btn=refresh_btn, strategy_sel=strategy_sel, bar_extra=bar_extra,
         legs_box=legs_box, legs_footer=legs_footer,
         set_chain=set_chain, set_expiry=set_expiry,
+        is_loaded=lambda expiry: expiry in _loaded(),
         selected_expiry=lambda: state["expiry"],
         on_expiry=listeners["expiry"].append, on_pick=listeners["pick"].append)
