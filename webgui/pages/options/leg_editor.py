@@ -404,7 +404,11 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def _refill(leg):
         """Price ``leg`` off the chain. A share leg, a typed price, or no reading
         leaves the price exactly as it was - "no mark" is never a $0.00 leg."""
-        if price_for is None or _is_stock(leg) or leg.get("_manual_premium"):
+        if price_for is None or leg.get("_manual_premium"):
+            return
+        # A share leg's price is what the shares cost: filled only while unset
+        # (0.0 is what an untouched number box reports), never over a basis.
+        if _is_stock(leg) and _usable_price(leg.get("premium")):
             return
         p = _usable_price(price_for(normalize_legs([leg])[0]))
         if p is not None:
@@ -770,13 +774,18 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def get_legs():
         return normalize_legs(state["legs"])    # strips _strike_widget
 
-    def apply_template(name):
+    def apply_template(name, near=None):
         # Place default strikes off the NEAR expiry's real strikes (not the
         # cross-expiry union), so condor/butterfly wings land on strikes that
         # actually exist for that expiry — distinct, and valid at render time (the
         # union can include strikes absent from the chosen expiry, e.g. a 737.5 from
         # another expiry that isn't in a 0DTE integer chain).
+        # ``near``: lay the legs on a CHOSEN expiry (the entry panel's strip)
+        # rather than the nearest; a far leg takes the next one after it. An
+        # unlisted ``near`` falls back to the nearest.
         exps = expiries_for() or []
+        if near in exps:
+            exps = exps[exps.index(near):]
         near = exps[0] if exps else None
         placement = (strikes_for(near, "call") if near else strikes_for(None, "call")) or []
         legs = S.build_default_legs(name, spot_getter() or 0, placement, exps)
@@ -808,7 +817,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
 
     def refill_prices():
         """Price every leg off the chain (a fresh chain load) - skipping typed
-        prices and share legs. Repaints; fires nothing, like ``set_legs``."""
+        prices, and share legs that already have one. Repaints; fires nothing,
+        like ``set_legs``."""
         for leg in state["legs"]:
             _refill(leg)
         _render()

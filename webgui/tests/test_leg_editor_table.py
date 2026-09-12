@@ -260,3 +260,22 @@ def test_build_leg_editor_still_rejects_an_unknown_layout():
         with pytest.raises(ValueError):
             LE.build_leg_editor(container, layout="tabel", strikes_for=lambda e, t: [],
                                 expiries_for=lambda: [], show_premium=True)
+
+
+def test_refill_prices_a_share_leg_only_while_it_has_no_price():
+    # A share leg's price is what the shares cost; unset means "spot now", and a
+    # basis the user already has is never overwritten (fill_stock_premiums' rule).
+    stock = {"option_type": "stock", "side": "long", "strike": None,
+             "expiry": None, "qty": 1, "premium": None}
+    ed, _ = _table([stock, dict(stock, premium=88.0)], allow_stock=True,
+                   price_for=lambda leg: 101.5 if leg["option_type"] == "stock" else None)
+    ed.refill_prices()
+    assert [l["premium"] for l in ed.get_legs()] == [101.5, 88.0]
+
+
+def test_apply_template_can_lay_legs_on_a_chosen_near_expiry():
+    ed, _ = _table([], spot_getter=lambda: 570.0)
+    ed.apply_template("PCS", near=_EXPS[1])
+    assert {l["expiry"] for l in ed.get_legs()} == {_EXPS[1]}
+    ed.apply_template("PCS", near="2031-01-01")          # unlisted: the nearest
+    assert {l["expiry"] for l in ed.get_legs()} == {_EXPS[0]}
