@@ -125,7 +125,12 @@ def test_a_subtab_shot_names_a_subtab_that_exists():
     for s, sh in subtabbed:
         assert sh.route == "/options/simulator", \
             f"{s.title}: {sh.route} carries a subtab this test cannot check"
-    source = pathlib.Path(__file__).resolve().parents[1] / "pages" / "options" / "simulator.py"
-    text = source.read_text(encoding="utf-8")
+    # The page builds its tabs from SIM_TABS (2026-09-12), so the check reads the
+    # page's own tuple — the values ui.tab() is actually given — rather than
+    # grepping the source for a literal it no longer contains.
+    from pages.options import simulator
+    source = pathlib.Path(simulator.__file__).read_text(encoding="utf-8")
+    assert "ui.tab(TAB_" in source, "the Simulator no longer builds its tabs from SIM_TABS"
     for _s, sh in subtabbed:
-        assert f'ui.tab("{sh.subtab}")' in text, f"{sh.subtab!r} is not a Simulator subtab"
+        assert sh.subtab in simulator.SIM_TABS, f"{sh.subtab!r} is not a Simulator subtab"
+    assert {sh.subtab for _s, sh in subtabbed} == set(simulator.SIM_TABS)
