@@ -50,13 +50,30 @@ def is_put_side(position) -> bool:
     return _structures.is_put_side(position.get("strategy"))
 
 
-def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> dict:
+def assess_position_risk(position, mark, gex=None, regime=None, today=None,
+                         earnings_date=None) -> dict:
     """Classify a single open position into ok/watch/tested/critical + 0-100 heat.
 
     position: paper position dict (short_strike, long_strike, entry_credit,
         quantity, strategy, symbol, expiration). mark: latest reprice
         (current_underlying, current_short_delta, unrealized_pnl). gex/regime are
         optional heat *modifiers* (never standalone triggers).
+
+    ``earnings_date`` (gap assessment B7) is the symbol's next scheduled report,
+    INJECTED rather than looked up so this stays a pure decision over a position
+    and a mark - the caller owns the SQLite read, exactly as ``sector_of`` is
+    injected into the paper engine's concentration caps. It joins gex/regime as a
+    **modifier**, deliberately: measured over the 132 closed captured signals
+    whose whole life sits inside the earnings calendar's coverage window, the ones
+    that spanned a report did BETTER (mean R -0.059 at a 14.9% win rate against
+    -0.241 and 12.3%), so the sourced claim is not reproduced in this book and
+    must not be allowed to call a calm position tested. (The raw all-time split
+    looked damning - +0.254 / 75.6% against -0.032 / 16.2% - but the calendar
+    only starts 2026-08-24, so everything earlier was filed as "no report" and the
+    comparison was really June-July against August-September.)
+
+    Returns ``earnings_inside`` and ``pinned_at_expiry`` alongside the state, both
+    always present so a reader never special-cases a missing key.
     """
     th = RESCUE_THRESHOLDS
     state = "ok"
@@ -122,8 +139,104 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> d
         if (not put_side) and "bull" in ts:
             heat += 6
 
+    # 7. earnings modifier — a report lands inside this position's life (B7).
+    # Weighted the same as the regime tilt above, which is the honest weight for a
+    # factor the sources support and this book's own data does not reproduce. It
+    # NEVER touches ``state``: see the docstring.
+    earnings_inside = _earnings_inside(position, earnings_date, today)
+    if earnings_inside:
+        heat += 6
+
+    # 8. expiry-day pin (B5) — a PHYSICALLY-settled short sitting on its strike on
+    # expiration day, where an after-hours move can produce an exercise notice.
+    # Information, not a second escalation path: rule 1 (proximity) and rule 4
+    # (dte_urgent) between them already read critical here. Index options are
+    # exempt because they are European and cash-settled — B5's own carve-out.
+    pinned = _pinned_at_expiry(position, und, th, today)
+    if pinned:
+        heat += 6
+
     heat = max(0.0, min(100.0, heat))
-    return {"state": state, "heat": round(heat, 1), "dte": dte}
+    return {"state": state, "heat": round(heat, 1), "dte": dte,
+            "earnings_inside": earnings_inside, "pinned_at_expiry": pinned}
+
+
+def _as_date(value):
+    """An ISO date string as a ``date``, or ``None``. Never raises.
+
+    A malformed date must not raise inside the board's per-position read, and must
+    not be allowed to invent a report either.
+    """
+    if isinstance(value, _dt.date) and not isinstance(value, _dt.datetime):
+        return value
+    if isinstance(value, _dt.datetime):
+        return value.date()
+    if not isinstance(value, str):
+        return None
+    try:
+        return _dt.date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return None
+
+
+def _earnings_inside(position, earnings_date, today=None) -> bool:
+    """Does a scheduled report fall between today and this position's expiry?
+
+    Inclusive at both ends: a report on expiration morning is the most
+    consequential case there is, and ``shared.earnings.days_to_earnings`` makes
+    the same choice about a report TODAY. A report already past, or one landing
+    after the position is gone, changes nothing about the position.
+    """
+    report = _as_date(earnings_date)
+    expiry = _as_date(position.get("expiration") if isinstance(position, dict) else None)
+    if report is None or expiry is None:
+        return False
+    day = today or _dt.date.today()
+    return day <= report <= expiry
+
+
+def _pinned_at_expiry(position, underlying, thresholds, today=None) -> bool:
+    """Is an assignable short sitting on its strike, on expiration day?
+
+    Three conditions, and each is a decision:
+
+    * **expiration day**, not merely near it — ordinary proximity is rule 1's job
+      and already escalates. Pin risk is specifically an expiration-day fact.
+    * **within the proximity threshold**, reusing ``proximity_tested_pct`` rather
+      than a second number so the two cannot drift.
+    * **physically settled.** An index option is European and cash-settled, so a
+      pin there is a settlement price and not an assignment risk. B5 asks for
+      exactly this carve-out.
+
+    No spot, no strike, no expiry -> False. Unknown proximity is not a pin.
+    """
+    if not isinstance(position, dict):
+        return False
+    expiry = _as_date(position.get("expiration"))
+    if expiry is None or expiry != (today or _dt.date.today()):
+        return False
+    if _instrument_kind(position.get("symbol", "")) == "index":
+        return False
+    short = _short_of(position)
+    if not short or underlying is None:
+        return False
+    try:
+        return abs(float(underlying) - float(short)) / float(short) <= \
+            thresholds["proximity_tested_pct"]
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
+def _short_of(position):
+    """The threatened short strike — ``call_short`` for a call-side structure.
+
+    ``short_strike`` holds the put-side short for PCS/IC and the sold strike for
+    both single-leg income structures; a CCS's sold call lives in ``call_short``.
+    The taxonomy decides which, never a membership test spelled out here.
+    """
+    if is_put_side(position):
+        return position.get("short_strike")
+    return position.get("call_short") or position.get("short_strike")
 
 
 _FUTURES_PREFIXES = ("/ES", "/NQ", "/MES", "/MNQ", "/RTY", "/YM")
@@ -137,9 +250,18 @@ def _instrument_kind(symbol: str) -> str:
     return "index" if is_index_symbol(s) else "equity"
 
 
-def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
+def strategic_context(position, gex=None, regime=None, underlying=None,
+                      earnings_date=None, earnings_status=None, today=None) -> dict:
     """Market-structure annotation: dealer gamma, regime, settlement mechanics.
-    Returns notes[] + boolean flags used as ranking modifiers (never hard gates)."""
+    Returns notes[] + boolean flags used as ranking modifiers (never hard gates).
+
+    ``earnings_date`` / ``earnings_status`` come from ``shared.earnings`` via the
+    caller (gap assessment B7). ⚠ The status matters as much as the date:
+    ``not_listed`` means the vendor does not carry the symbol — *we do not know* —
+    and a board that renders that as "no earnings" walks the reader into an
+    unlisted report wearing the appearance of protection, which is the trap
+    ``shared.earnings.coverage`` exists to name.
+    """
     notes: list[str] = []
     kind = _instrument_kind(position.get("symbol", ""))
     short = position.get("short_strike")
@@ -160,6 +282,11 @@ def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
             notes.append(f"Short strike rests near a {'put' if is_put else 'call'} "
                          f"wall ({wall:g}) — a bounce is statistically more likely.")
 
+    # ⚠ ASSIGNMENT RISK IS MONEYNESS-AWARE (gap assessment B5, defect 13).
+    # Until 2026-09-12 the equity branch below set this unconditionally True with
+    # a note about ex-dividend and deep-ITM shorts — so the flag was on for every
+    # equity short ever assessed and therefore carried no information at all,
+    # while the futures branch beside it had gated on moneyness all along.
     assignment_risk = False
     if kind == "index":
         notes.append("Index option (European, cash-settled): no early-assignment risk; "
@@ -174,9 +301,39 @@ def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
         else:
             notes.append("Futures option (American): assignment possible if the short goes ITM.")
     else:
-        assignment_risk = True
-        notes.append("Equity/ETF option (American): early assignment possible near "
-                     "ex-dividend or when deep ITM.")
+        # ⚠ No spot -> stay conservative and keep the flag. Unknown moneyness must
+        # not CLEAR a risk; absent a price the honest statement is the general one.
+        if underlying is None or not short:
+            assignment_risk = True
+            notes.append("Equity/ETF option (American): early assignment is possible, "
+                         "and there is no live price to say how close the short is.")
+        else:
+            itm = (underlying < short) if is_put else (underlying > short)
+            assignment_risk = bool(itm)
+            if itm:
+                notes.append("Equity/ETF option (American): the short is in the money — "
+                             "early assignment is possible.")
+            else:
+                notes.append("Equity/ETF option (American): the short is out of the "
+                             "money; assignment becomes possible if it goes ITM.")
+        # ⚠ The old note also promised an ex-dividend check. There is no
+        # ex-dividend DATE anywhere in this repo — the chain carries
+        # ``dividendYield`` and nothing else — so it described a test that does not
+        # exist. Naming an untested risk is the failure mode this audit keeps
+        # finding, so the claim is gone rather than restated.
+
+    pinned = _pinned_at_expiry(position, underlying, RESCUE_THRESHOLDS, today)
+    if pinned:
+        notes.append("Expiration day with the short on its strike: settlement can land "
+                     "either side, and an assignment here is decided after the close.")
+
+    earnings_inside = _earnings_inside(position, earnings_date, today)
+    if earnings_inside:
+        notes.append(f"An earnings report ({_as_date(earnings_date)}) lands before this "
+                     f"position expires — the move can exceed the expected one.")
+    elif earnings_status == "not_listed":
+        notes.append("Earnings: not checked — the calendar does not carry this symbol, "
+                     "so a report before expiry cannot be ruled out.")
 
     if regime:
         ts = (regime.get("trend_state") or "")
@@ -184,7 +341,8 @@ def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
             notes.append(f"Regime: {ts} (confidence {regime.get('trend_confidence', 0):.0%}).")
 
     return {"notes": notes, "negative_gamma": negative_gamma,
-            "near_wall": near_wall, "assignment_risk": assignment_risk, "kind": kind}
+            "near_wall": near_wall, "assignment_risk": assignment_risk, "kind": kind,
+            "earnings_inside": earnings_inside, "pinned_at_expiry": pinned}
 
 
 _ROLL_ACTIONS = {"roll_down", "roll_out", "roll_down_out", "inverted"}
@@ -1339,11 +1497,21 @@ def _annotate(candidate, ctx) -> dict:
 
 
 def rescue_candidates(position, mark, price_leg, gex=None, regime=None,
-                      underlying=None) -> list[dict]:
+                      underlying=None, earnings_date=None, earnings_status=None,
+                      today=None) -> list[dict]:
     """Build, annotate, score, and rank every applicable rescue action. Pure;
-    never raises (a failing builder is dropped)."""
+    never raises (a failing builder is dropped).
+
+    ``earnings_date`` / ``earnings_status`` are threaded straight to
+    ``strategic_context`` so the board's context line can name a report landing
+    before expiry (gap assessment B7). They affect NOTES only - no candidate is
+    added, removed or re-scored by them, because this book's own outcome data
+    does not reproduce an earnings penalty.
+    """
     ctx = strategic_context(position, gex, regime,
-                            underlying or mark.get("current_underlying"))
+                            underlying or mark.get("current_underlying"),
+                            earnings_date=earnings_date,
+                            earnings_status=earnings_status, today=today)
     # The Income Window's single-leg structures go to the single-option builders.
     # Every spread builder early-returns for them - a roll needs a long leg to
     # re-price - so before this they came back with "Close now" and nothing else,

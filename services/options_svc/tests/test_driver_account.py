@@ -328,7 +328,14 @@ def test_open_driver_position_wide_spx_opens_under_raised_cap(tmp_path, monkeypa
     per-trade cap ($1500) but is rejected RISK_TOO_HIGH under the old $250 cap. This
     is the fix that lets the driver actually TRADE $SPX/MU: at $250 the paper sizer
     returned 0 contracts, so those picks logged 'Executed' (the enqueue) yet never
-    opened."""
+    opened.
+
+    ⚠ The patch target is ``_driver_per_trade_cap``, not the
+    ``_DRIVER_MAX_RISK_PER_TRADE`` constant it used to be. B8 made the sizer's cap
+    a CALL-time read so it can follow live equity - a module constant bound at
+    import never could - and patching the constant therefore stopped biting. The
+    assertions are unchanged; only the seam moved.
+    """
     db = tmp_path / "driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
     compute.ensure_driver_account()
@@ -336,13 +343,13 @@ def test_open_driver_position_wide_spx_opens_under_raised_cap(tmp_path, monkeypa
                          short_strike=6000.0, long_strike=6010.0, width=10.0,
                          entry_credit=2.95)   # (10-2.95)*100 = $705/contract
     # Old $250 cap → floor(250/705) = 0 contracts → rejected.
-    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 250.0)
+    monkeypatch.setattr(compute, "_driver_per_trade_cap", lambda: 250.0)
     r0 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
     assert r0["status"] == "rejected" and r0["reason"] == "RISK_TOO_HIGH"
     assert compute.driver_account_view()["snapshot"]["open_count"] == 0
     # Raised $3000 cap (the "Very Aggressive" default) → floor(3000/705)=4, clamped to the
     # requested 2 → opens.
-    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 3000.0)
+    monkeypatch.setattr(compute, "_driver_per_trade_cap", lambda: 3000.0)
     r1 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
     assert r1["status"] == "opened" and r1["qty"] == 2
     assert r1["max_loss_total"] == 1410.0     # 705 * 2

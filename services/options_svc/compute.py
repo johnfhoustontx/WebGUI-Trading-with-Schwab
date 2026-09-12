@@ -1629,6 +1629,53 @@ def collect_eod_summary(now_ct=None) -> dict:
 _DRIVER_MAX_RISK_PER_TRADE = _driver_limits.per_trade_max_risk()
 
 
+def _driver_equity():
+    """The driver book's live equity, or ``None``.
+
+    ⚠ **``None``, never 0, for a missing reading.** A zero denominator would
+    refuse every trade forever, which reads as a broken driver rather than as a
+    cap — the documented "never treat a missing reading as zero" rule, and the
+    same choice ``paper_concentration`` makes about its own equity argument.
+
+    Fully guarded: this runs on the open path, which must never raise.
+    """
+    import paper_engine
+    try:
+        snap = paper_engine.account_snapshot(DRIVER_PAPER_DB) or {}
+        eq = snap.get("equity")
+    except Exception:  # noqa: BLE001 — see the docstring.
+        _degrade.degraded("options.driver_equity")
+        return None
+    if isinstance(eq, bool) or not isinstance(eq, (int, float)):
+        return None
+    return float(eq) if math.isfinite(float(eq)) and eq > 0 else None
+
+
+def _driver_risk_limits():
+    """The driver's risk envelope resolved against live equity (B8).
+
+    ``min(dollars, pct x equity)`` via ``shared.driver_limits.scale_to_equity``, so
+    a drawn-down book tightens and a grown one never loosens. Measured on the live
+    book: at $13,347 equity the $3,000 per-trade cap (documented "~12% of the
+    book") was 22.5% and the $12,000 budget ("~half the book") was 89.9%.
+
+    ⚠ Read at CALL time, not bound at import — the whole point is that it follows
+    the book, and ``driver_svc``'s decision path scales the same way against the
+    same quantity. If only one side scaled, the driver would approve a trade the
+    sizer then zeroes, which is the documented "Executed but nothing opened"
+    symptom whose only trace is a log line.
+    """
+    return _driver_limits.scale_to_equity(_driver_limits.risk(), _driver_equity())
+
+
+def _driver_per_trade_cap():
+    """The per-trade risk cap the fill re-sizer uses, resolved against equity."""
+    try:
+        return float(_driver_risk_limits()["per_trade_max_risk"])
+    except Exception:  # noqa: BLE001 — never lose an open over a config read.
+        return float(_DRIVER_MAX_RISK_PER_TRADE)
+
+
 # Reject reasons for the OPEN-path guardrail re-check. Named constants because the
 # /driver decision log renders them and the tests assert on them.
 REJECT_NOT_ALLOWED = "structure not in allowlist / no defined risk"
@@ -1680,7 +1727,7 @@ def _driver_open_capacity_reason(signal, qty):
       cap was ``max_concurrent x per_trade_max_risk`` (~2x the documented "half
       the book"). Counting the OPEN positions makes the budget mean its name.
     """
-    limits = _driver_limits.risk()
+    limits = _driver_risk_limits()
     open_rows = _driver_open_positions()
     if len(open_rows) >= int(limits["max_concurrent"]):
         return REJECT_MAX_CONCURRENT
@@ -1782,7 +1829,10 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
             return {"status": "rejected", "reason": "LOW_CREDIT"}
         # Re-size on the ACTUAL fill credit (keeps realized risk within the cap).
         sized, max_loss_per = paper_sizing.size_contracts(
-            fill, signal["width"], max_risk=_DRIVER_MAX_RISK_PER_TRADE)  # driver cap, not manual $250
+            fill, signal["width"],
+            # The driver's cap, not the manual $250 — and resolved against live
+            # equity (B8), so a drawn-down book sizes down with it.
+            max_risk=_driver_per_trade_cap())
         open_qty = min(q, sized)               # the guardrail clamp is a CEILING
         if max_loss_per <= 0 or open_qty < 1:
             return {"status": "rejected", "reason": "RISK_TOO_HIGH"}
@@ -2376,6 +2426,27 @@ def reprice_captured() -> dict:
 _LOSS_STOP_CODES = ("MONEY_STOP", "DELTA_STOP", "TIME_STOP")
 _CUT_HEAT_FLOOR = 60.0
 
+
+
+def _earnings_for(rows) -> dict:
+    """``{symbol: (status, date or None)}`` for a batch of position rows.
+
+    One local SQLite read for the whole batch (``income_earnings_map`` dedupes on
+    the way in), so the Rescue overlay on a 14-position book does not open the
+    calendar fourteen times. Gap assessment B7.
+
+    Fully guarded: an unreadable calendar yields ``{}``, which every caller reads
+    as "no report known". That is the same degradation ``shared.earnings`` already
+    chooses, and the conservative direction here — the earnings signal is a heat
+    MODIFIER that can only raise a position up a ranked list, never escalate its
+    state, so losing it costs ordering rather than protection.
+    """
+    try:
+        syms = [r.get("symbol") for r in (rows or []) if isinstance(r, dict)]
+        return income_earnings_map([sym for sym in syms if sym])
+    except Exception:  # noqa: BLE001 — see the docstring.
+        _degrade.degraded("options.rescue_earnings_map")
+        return {}
 
 def _attach_rescue_assessment(r, rep, mark) -> None:
     """Tag a captured-signal row with ``rescue_state`` + ``heat`` (in place).
@@ -7884,9 +7955,21 @@ def _advisory_from_position(pos, *, source: str, force_advisory: bool,
 
         # 4. engine.
         price_leg = _make_leg_pricer(symbol)
+        # The calendar read is local SQLite and costs no API call, so the board
+        # can afford one per position (gap assessment B7). ``status`` matters as
+        # much as the date: ``not_listed`` means the vendor does not carry the
+        # symbol, which the context line must not render as "no earnings".
+        try:
+            _earn_status, _earn_date = _income_earnings(symbol)
+        except Exception:  # noqa: BLE001 — a board that renders beats one that raises.
+            _degrade.degraded("options.rescue_earnings", detail=symbol)
+            _earn_status, _earn_date = "not_listed", None
         candidates = _rescue_candidates(pos, engine_mark, price_leg, gex, regime,
-                                        underlying=underlying)
-        risk = _assess_position_risk(pos, engine_mark, gex, regime)
+                                        underlying=underlying,
+                                        earnings_date=_earn_date,
+                                        earnings_status=_earn_status)
+        risk = _assess_position_risk(pos, engine_mark, gex, regime,
+                                     earnings_date=_earn_date)
 
         # context = the engine notes (carried on candidates[0].context), else [].
         context = []
@@ -8536,6 +8619,10 @@ def assess_open_positions() -> dict:
         positions = _load_open_positions()
     except Exception:
         positions = []
+    # ONE calendar read for the batch (gap assessment B7) - local SQLite, deduped
+    # by ``income_earnings_map``, zero API cost. Outside the loop so a 14-position
+    # book does not open the store fourteen times.
+    _earn = _earnings_for(positions)
     for pos in positions or []:
         try:
             pid = pos.get("position_id")
@@ -8546,7 +8633,9 @@ def assess_open_positions() -> dict:
                 "current_short_delta": pos.get("current_short_delta"),
                 "dte": _rescue_dte(pos.get("expiration")),
             }
-            risk = _assess_position_risk(pos, mark, gex=None, regime=None)
+            risk = _assess_position_risk(
+                pos, mark, gex=None, regime=None,
+                earnings_date=(_earn.get(pos.get("symbol")) or (None, None))[1])
             state = risk.get("state", "ok")
             per_position[pid] = {"state": state, "heat": risk.get("heat", 0.0)}
             if state in ("tested", "critical"):

@@ -2661,6 +2661,86 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## A dollar risk cap stops meaning its own comment once equity moves
+
+**`shared/driver_limits.scale_to_equity(limits, equity)`** resolves the driver's
+two dollar caps as **`min(dollars, pct × equity)`** — so a drawn-down book
+tightens and a grown one can **never** loosen. That asymmetry is the whole safety
+argument: restoring a stale percentage is allowed, raising appetite is a decision.
+
+⚠ **Why it exists, measured on the live book 2026-09-12.** The driver is down
+46.6% from $25,000 to **$13,347**, and its two caps now say the opposite of their
+own comments: `per_trade_max_risk` $3,000 (*"~12% of the book"*) is **22.5%**, and
+`daily_risk_budget` $12,000 (*"~half the book"*) is **89.9%**. Nothing was
+mis-set; the numbers stopped meaning what they were chosen to mean. The shipped
+`per_trade_max_risk_pct = 0.12` / `daily_risk_budget_pct = 0.48` are exactly those
+comments' stated intent — at $25,000 they reproduce the dollar figures — so this
+restores intent rather than retuning appetite. Effective caps today: **$1,602 per
+trade, $6,406 of open risk**. `0` turns either off.
+
+⚠ **Scaled on BOTH driver paths, and that is not belt-and-braces.**
+`driver_svc/handlers` scales `settings.limits()` before the cycle and
+`options_svc.compute._driver_risk_limits()` scales again at the open path. If only
+the decision side scaled, the driver would approve a trade the sizer then zeroes —
+the documented *"Executed but nothing opened"* failure whose only trace is a log
+line. Both read the live `equity` off the same account snapshot.
+`_DRIVER_MAX_RISK_PER_TRADE` survives only as the fallback; the sizer now calls
+`_driver_per_trade_cap()` at **call** time, since a module constant bound at
+import can never follow a book.
+
+**Every absence leaves the dollar cap alone** — no equity, a zero or non-finite
+one, a missing or zero percentage, a non-numeric ceiling. A fraction of an unknown
+cannot be enforced and a zero denominator would refuse every trade forever, which
+reads as a broken driver rather than as a cap.
+
+⚠ **The manual book deliberately did NOT change.** $250 per trade is 1.03% of
+$24,184 and `MAX_SESSION_DRAWDOWN` $2,500 is 10.3% — both within a whisker of
+intent — and B3 already made its book-level ceiling a percentage. And
+`MAX_RISK_PER_TRADE` must stay flat while `scanner_engine.DEFAULT_MAX_RISK_DOLLARS`
+is wired to that exact constant: floating one and not the other would re-open the
+21.9%-of-orders `RISK_TOO_HIGH` problem A6 closed, from the other end. The
+driver's sizing **appetite** is still an open operator decision; this only makes
+the config honest.
+
+## An open position's Rescue read knows about earnings and about a pin
+
+Two **modifiers** on `rescue.assess_position_risk`, beside the GEX and regime ones
+its docstring already calls *"never standalone triggers"* — and the weight is the
+finding, not an implementation detail.
+
+**Earnings (B7) is a modifier because the measurement did not reproduce the
+claim.** `earnings_date` is INJECTED (the caller owns the SQLite read, as
+`sector_of` is injected into the concentration caps) and adds the same +6 as the
+regime tilt. ⚠ Over all 910 closed captured signals the split looked decisive —
+*no report* +0.254 mean R at 75.6% win against *spanned a report* −0.032 at
+**16.2%** — but the earnings calendar's rows only begin **2026-08-24**, so
+everything earlier was filed as "no report" and the comparison was really
+June–July against August–September. Restricted to the 132 signals whose whole life
+sits inside coverage, it **inverts**: spanned **−0.059 at 14.9%** against
+**−0.241 at 12.3%**. So the factor may reorder a ranked list and must never
+escalate `state`. **No push ships** — a phone alert is a standing stream with a
+certain cost and an absent measured case. And the *entry* half is already covered:
+all 67 spanning positions would be refused today by A1/A5's gate.
+
+**The expiry-day pin (B5) is a flag, not a close.** `_pinned_at_expiry` needs
+expiration **day** (not merely near it — ordinary proximity is rule 1's job and
+already escalates), the `proximity_tested_pct` threshold reused rather than a
+second number, and a **physically settled** name. ⚠ B5's *"close it by a set CT
+time"* half is deliberately **not built**: `run_manage_cycle` settles at intrinsic
+against the **15:00 CT** close and models no after-hours leg, so the 17:30 ET
+exercise notice it defends against **cannot occur in this simulation**. Nor can it
+be measured — `signal_outcomes.settlement_underlying` is NULL in all 910 rows and
+both books hold **zero `equity_lots`**, so no assignment has ever occurred here.
+
+⚠ **`strategic_context`'s `assignment_risk` was unconditionally `True` for every
+equity short** (assessment defect 13) — a flag always on carries no information,
+while the futures branch beside it had gated on moneyness all along. It is now ITM
+or nothing, with **no spot meaning keep the flag** (unknown moneyness must not
+CLEAR a risk). And the note **stopped claiming an ex-dividend check**: there is no
+ex-dividend *date* anywhere in this repo, only `dividendYield`, so it described a
+test that does not exist. Design:
+[the B5/B7/B8 doc](docs/plans/2026-09-12-position-awareness-design.md).
+
 ## Observability — a swallowed exception must leave a trace
 
 **`services/_degrade.py` is the house guard-rail for the repo's most expensive bug

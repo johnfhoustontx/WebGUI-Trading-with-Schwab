@@ -18,6 +18,7 @@ consumer loop handles sync handlers.
 from datetime import date, datetime, timezone
 
 from repo_paths import ENV_FLAGS
+from shared import driver_limits as _driver_limits
 from services.driver_svc import compute, settings
 from shared.contracts.driver import (
     AutonomousState,
@@ -363,6 +364,16 @@ def run_autonomous_cycle(bus) -> None:
         eff_target = settings.DAILY_TARGET
     lim = settings.limits()
     lim["daily_target"] = eff_target          # halt_state banks at the dynamic target
+    # Equity-relative risk caps (gap assessment B8): min(dollars, pct x equity), so
+    # a drawn-down book tightens and a grown one never loosens.
+    #
+    # ⚠ Scaled HERE as well as on the open path, and that is not belt-and-braces.
+    # options_svc re-checks the same two caps against the real book; if the
+    # decision path offered a budget the open path then refused, the driver would
+    # log an enqueue that never becomes a position — the documented "Executed but
+    # nothing opened" failure whose only trace is a log line. Both sides read the
+    # live ``equity`` from the same account snapshot.
+    lim = _driver_limits.scale_to_equity(lim, (paper.get("snapshot") or {}).get("equity"))
     out = compute.run_cycle(scan, paper, target=eff_target, limits=lim, market=market)
     # Kill-switch tightening: re-read control RIGHT BEFORE firing. The top-of-fn gate
     # only catches a STOP/disable from before the cycle; the cycle itself is slow (a

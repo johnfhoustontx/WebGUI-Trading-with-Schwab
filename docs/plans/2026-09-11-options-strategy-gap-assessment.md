@@ -270,10 +270,10 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **B2** | Apply the volatility floor wherever premium is sold — **shipped 2026-09-12; and the floor's LEVEL measured too low, see below** | V1 | S | **High** |
 | **B3** | Deployment cap for the manual book — **shipped 2026-09-11** | S2 | S | Medium–high |
 | **B4** | Sector cap — **shipped 2026-09-12, with the map it needed** | S4 | M | Medium |
-| **B5** | Expiry-day rule for physically-settled names | X4 | M | Medium |
+| **B5** | Expiry-day rule for physically-settled names — **the FLAG shipped 2026-09-12; the close deliberately did not, see below** | X4 | M | Medium |
 | **B6** | Store the entry short delta — **shipped 2026-09-11** | X2 | S | Medium |
-| **B7** | Earnings awareness on open positions | V3 | S–M | Medium |
-| **B8** | Size as a percent of current equity | S1 | S | Low–medium |
+| **B7** | Earnings awareness on open positions — **shipped 2026-09-12 as a heat modifier; ⚠ its rationale did NOT reproduce on this book's data** | V3 | S–M | ~~Medium~~ **Low** |
+| **B8** | Size as a percent of current equity — **shipped 2026-09-12 for the DRIVER, where its two caps had drifted to 22.5% and 89.9% of the book** | S1 | S | **Medium–high** |
 | **C1** | Record Income Window candidates for calibration — **shipped 2026-09-11** | M2 (evidence) | S–M | High |
 | **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book | X1 | S | Medium |
 | **C3** | Store a daily ATM IV to build a true IV rank | V1 | S | Medium, deferred |
@@ -490,6 +490,23 @@ below.
 
 **B5. An expiry-day rule for physically-settled names.** On expiration day, close (or at least flag) any short within about 1% of its strike by a set CT time; cash-settled index options are exempt. OIC notes that exercise notices are accepted until about 5:30 pm ET, so an after-hours move can assign a short that closed out of the money. Option Alpha saw about 1.2% of its contracts assigned over five years, mostly in expiration week.
 
+**The FLAG shipped 2026-09-12; the CLOSE deliberately did not** —
+[design](2026-09-12-position-awareness-design.md). ⚠ `run_manage_cycle` settles an
+expiring position at intrinsic against the **15:00 CT** close and models no
+after-hours leg, so the 17:30 ET exercise notice this rule defends against
+**cannot occur in this simulation** — closing positions to avoid it would protect
+against something the paper book cannot express. Nor is it measurable:
+`signal_outcomes.settlement_underlying` is NULL in all 910 rows and both books
+hold **zero `equity_lots`**, so no assignment has ever occurred here.
+
+What shipped instead is defect 13 finally meaning something: `assignment_risk` was
+**unconditionally `True` for every equity short** while the futures branch beside
+it gated on moneyness all along. It is now ITM or nothing (no spot → keep the
+flag: unknown moneyness must not CLEAR a risk), plus a `pinned_at_expiry` flag +
+heat modifier for a physically-settled short on its strike on expiration day, with
+index names exempt. The note also **stopped claiming an ex-dividend check** —
+there is no ex-dividend *date* in this repo, only `dividendYield`.
+
 **B6. Store the entry short delta.** **Shipped 2026-09-11.** An additive
 nullable `paper_positions.entry_short_delta`, written by all three producers
 (the captured entry cycle, `open_driver_position` off the raw scan row's
@@ -509,7 +526,43 @@ attribute in `compute.py`.
 
 **B7. Earnings awareness on open positions.** Raise Rescue heat and send a push when a position's expiration spans a report. Nothing in `rescue.py`, `signal_recommender.py` or `services/driver_svc` reads the calendar today. Option Alpha's 10-year study of 1,546 reports found misses averaged 34–38% beyond the expected move.
 
+**Shipped 2026-09-12 as a heat MODIFIER — and ⚠ this is the fourth audit rationale
+that did not survive measurement.** Over all 910 closed captured signals the split
+looked decisive: *no report* +0.254 mean R at **75.6%** win against *spanned a
+report* −0.032 at **16.2%**. But the earnings calendar's rows only begin
+**2026-08-24**, so every earlier position was filed as "no report" and the
+comparison was really June–July against August–September. Restricted to the 132
+signals whose whole life sits inside coverage it **inverts**: spanned **−0.059 at
+14.9%** against **−0.241 at 12.3%**.
+
+So: a +6 modifier (the same weight as the regime tilt) that can reorder a ranked
+list and **never** escalate `state`; **no push**, since a phone alert is a
+standing stream with a certain cost and no measured case; and no rule change,
+because the *entry* half is already covered — all 67 spanning positions would be
+refused today by A1/A5's gate, and **0** such positions are open in either book.
+Option Alpha's figure is about the *size* of earnings moves, which is real, so
+"not reproduced here" is a reason to keep this advisory rather than to ignore it.
+
 **B8. Size as a percent of current equity,** so the cap shrinks in a drawdown instead of staying $250 / $3,000.
+
+**Shipped 2026-09-12 for the DRIVER, which is the whole of it.** Measured live: the
+driver is down 46.6% to **$13,347**, so `per_trade_max_risk` $3,000 (its own
+comment: *"~12% of the book"*) is **22.5%** and `daily_risk_budget` $12,000
+(*"~half the book"*) is **89.9%**. Nothing was mis-set — the numbers stopped
+meaning what they were chosen to mean, which is exactly this item.
+`shared.driver_limits.scale_to_equity` resolves both as **`min(dollars, pct ×
+equity)`**, so a drawn-down book tightens and a grown one can **never** loosen; the
+shipped 0.12 / 0.48 are the comments' own intent and reproduce the dollar figures
+at $25,000. Effective caps today: **$1,602** and **$6,406**. Scaled on BOTH driver
+paths, because a decision path offering what the open path refuses is the
+documented "Executed but nothing opened" failure.
+
+⚠ **The manual book deliberately did not change**: $250 is 1.03% of $24,184 and
+$2,500 is 10.3%, B3 already made its book ceiling a percentage, and floating
+`MAX_RISK_PER_TRADE` would desync `scanner_engine.DEFAULT_MAX_RISK_DOLLARS` and
+re-open A6's `RISK_TOO_HIGH` problem from the other end. And this does **not**
+answer decision 3 — the driver's sizing appetite is still open; it only makes the
+config honest about whatever percentage is chosen.
 
 ### Tier C — measure before changing the core
 
@@ -600,6 +653,11 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
 13. Rescue flags assignment risk on every equity short, regardless of moneyness or dividends.
 14. Captured signals settle a 0-DTE trade the moment its DTE reaches 0, at a live mark, while both paper books hold to the 15:00 CT close.
 15. Assignment has no cash-settled branch. An index cash-secured put would book shares, which is unreachable today only because the collateral check refuses full index notional in a $25,000 book.
+15a. **`signal_outcomes.settlement_underlying` is written by nothing** — NULL in
+    all 910 rows — so the app has no record of where any expiring position
+    actually settled. Found while measuring B5, which is unmeasurable because of
+    it. Its sibling `signal_marks.current_underlying` was worse (a literal `0.0`
+    in all 58,895 rows) and is fixed; this one is still open.
 16. **The driver's book has no concentration caps of any kind** (found while
     measuring B4). `compute.open_driver_position` re-checks structure, defined
     risk, `max_concurrent` and `daily_risk_budget`, but never

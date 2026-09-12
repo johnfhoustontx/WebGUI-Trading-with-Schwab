@@ -36,6 +36,21 @@ target_floor = 250.0
 # $SPX picks from opening at all.
 per_trade_max_risk = 3000.0     # max $ loss on one spread (~12% of the book)
 daily_risk_budget  = 12000.0    # cap on Σ open driver max-loss (~half the book)
+
+# The same two caps as a FRACTION of live equity, enforced as
+# min(dollars, pct x equity) - so they can only ever tighten, never loosen.
+#
+# Not a new appetite. 0.12 and 0.48 are exactly what the two comments above have
+# always claimed, and at the $25,000 the book started with they reproduce the
+# dollar figures. They exist because a fixed dollar cap stops meaning what it says
+# once equity moves: measured on the live driver book 2026-09-12 at $13,347 after
+# a 46.6% drawdown, "~12% of the book" was actually 22.5% and "~half the book" was
+# 89.9%. With these, the effective caps there become $1,602 and $6,406.
+#
+# 0 turns either off (the dollar cap alone then applies). Gap assessment B8; the
+# driver's sizing APPETITE is still an open decision, and this does not answer it.
+per_trade_max_risk_pct = 0.12
+daily_risk_budget_pct  = 0.48
 max_concurrent       = 10       # max open driver positions
 max_trades_per_cycle = 5        # max new trades per 30-min checkpoint
 vix_max              = 35.0     # no NEW entries above this VIX

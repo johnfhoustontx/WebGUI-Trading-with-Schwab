@@ -371,6 +371,19 @@ spreads, and the Income board's cash-secured puts and covered calls.
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
+- **Two things nudge a position UP the board without ever putting it in trouble on
+  their own.** An **earnings report** landing before the position expires: the
+  move can be much larger than the options priced in, and the context line names
+  the date. And **expiration day with the short sitting on its strike** — the
+  settlement print can land either side, and on a stock (never an index) an
+  assignment is decided after the close. Neither raises the *state*; both raise
+  the heat, so of two equally tested positions the one with a report inside it
+  reads first.
+- **"Early assignment is possible" now means something.** It appears only when
+  the short is actually **in the money** — before, it appeared on every stock
+  position regardless, which made it worth ignoring. An index option never shows
+  it: those are cash-settled and cannot be assigned at all. With no live price
+  the app says so rather than guessing.
 - **A cash-secured put or covered call gets a different menu**: buy to close, roll
   away and out for a credit, define the risk, or **let it assign / let the shares
   go** — doing nothing and taking the stock, which for the wheel is the plan

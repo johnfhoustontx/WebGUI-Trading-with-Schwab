@@ -39,10 +39,31 @@ def test_debit_candidates_get_debit_warning():
 
 
 def test_equity_assignment_warning_present():
-    cands = rescue.rescue_candidates(_pos(symbol="AAPL"), _mark(), _flat_pricer)
-    # equity -> assignment_risk True -> at least one candidate carries the note
+    """An ITM equity short's assignment note reaches the candidates' warnings.
+
+    ⚠ The fixture moved from underlying 501 to 498, and the reason is the point of
+    the test. With a short put at 500 and the underlying at 501 the short is OUT
+    of the money and cannot be assigned — this used to pass anyway because
+    ``strategic_context`` set ``assignment_risk`` unconditionally True for every
+    equity short, which is assessment defect 13. So the old assertion pinned the
+    defect. The SUBJECT of the test is the plumbing (a context flag reaching a
+    candidate's warnings), and that is preserved exactly by making the short
+    genuinely ITM; the converse is now asserted below.
+    """
+    cands = rescue.rescue_candidates(_pos(symbol="AAPL"),
+                                     _mark(current_underlying=498.0), _flat_pricer)
     assert any(any("assignment" in w.lower() for w in c.get("warnings", []))
                for c in cands)
+
+
+def test_an_OUT_of_the_money_equity_short_carries_no_assignment_warning():
+    """The other half of the same fix (gap assessment B5): a flag that is always
+    on carries no information, so an OTM short must not raise it."""
+    cands = rescue.rescue_candidates(_pos(symbol="AAPL"),
+                                     _mark(current_underlying=520.0), _flat_pricer)
+    assert cands, "fixture produced no candidates"
+    assert not any(any("assignment" in w.lower() for w in c.get("warnings", []))
+                   for c in cands)
 
 
 def test_a_failing_builder_is_dropped_not_raised():
