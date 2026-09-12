@@ -17,9 +17,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 [stops]
-# Reaching tp_frac ARMS a break-even stop — it is not an immediate close. The
-# trade keeps running with its downside pinned; the [trail] ladder decides
-# whether the stop then ratchets further.
+# ⚠ Reaching tp_frac does TWO DIFFERENT THINGS depending on the book, and this
+# comment claimed only the first for months:
+#   * CAPTURED SIGNALS arm a break-even stop and keep running with the downside
+#     pinned; the [trail] ladder decides whether it then ratchets further.
+#   * The MANUAL PAPER BOOK and the DRIVER close outright at this fraction. The
+#     manual book can opt into the captured behaviour — Settings →
+#     manual_paper_lifecycle_enabled, default OFF — and the driver cannot.
+# Published research is split on which is better, so neither is "the" rule; see
+# docs/plans/2026-09-11-options-strategy-gap-assessment.md §3.2.
 tp_frac = 0.50            # fraction of credit captured
 
 stop_mult = 2.0           # cut at >= this multiple of the credit, as a loss

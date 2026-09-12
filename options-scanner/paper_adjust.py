@@ -362,6 +362,13 @@ def apply_roll(db_path, position, candidate, broker=None):
         "width": new_width, "expiration": new_expiry,
         "dte_at_entry": position.get("dte_at_entry"), "quantity": qty,
         "entry_credit": reopen_credit, "entry_order_id": None,
+        # The ROLLED position's own entry delta, from the candidate (gap
+        # assessment B6). It is genuinely a new entry at a new strike, so
+        # inheriting the old position's delta would measure drift from a strike
+        # that is no longer there. ``build_roll_out`` carries the current delta;
+        # the roll-DOWN builders carry None, because the new strike's delta was
+        # never priced - and None correctly means "not recorded".
+        "entry_short_delta": candidate.get("new_short_delta"),
         "max_loss_per": max_loss_per, "max_loss_total": new_ml,
         "entry_ts": datetime.now(TZ).isoformat(),
     })

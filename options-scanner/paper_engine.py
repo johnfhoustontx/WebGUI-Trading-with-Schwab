@@ -260,7 +260,12 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
                 "width": sig["width"], "expiration": sig["expiration"],
                 "dte_at_entry": sig.get("dte_at_entry", 0), "quantity": qty,
                 "entry_credit": fill, "entry_order_id": oid, "max_loss_per": max_loss_per,
-                "max_loss_total": max_loss_total, "entry_ts": resp["enteredTime"]})
+                "max_loss_total": max_loss_total, "entry_ts": resp["enteredTime"],
+                # The delta the trade was SIZED for. The drift stop measures
+                # against it; without it every position fell to the absolute
+                # ceiling, which is too tight for a rich short and far too loose
+                # for a cheap one. Absent stays None, never 0.0.
+                "entry_short_delta": sig.get("entry_short_delta")})
             log.info("%s OPENED %s %s x%s credit %.2f BP %.2f", _default_broker.PREFIX,
                      sig["symbol"], sig["strategy"], qty, fill, max_loss_total)
         except Exception:
@@ -710,9 +715,18 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
         # time and delta stops. It cannot change spread behaviour: a spread has no
         # table, and ``_recoverable`` also needs ``spot`` + ``short_strike``, which
         # only the lifecycle branch supplies.
+        #
+        # ``entry_short_delta`` belongs there for the same reason, and sat in the
+        # LIFECYCLE branch alone until 2026-09-11 — where neither book that
+        # trades could reach it, since lifecycle is off by default for the manual
+        # account and always off for the driver. So the delta stop always used
+        # the absolute ceiling: too tight for a rich short, far too loose for a
+        # cheap one. None still means "not recorded" and keeps that fallback,
+        # which is every position opened before the column existed.
         ctx = {"entry_credit": pos["entry_credit"], "unrealized_pnl": per_contract,
                "current_short_delta": mark.get("current_short_delta"),
-               "dte_remaining": dte, "strategy": pos.get("strategy")}
+               "dte_remaining": dte, "strategy": pos.get("strategy"),
+               "entry_short_delta": pos.get("entry_short_delta")}
         if lifecycle:
             ctx["lifecycle"] = True
             ctx["be_armed"] = bool(pos.get("be_armed"))
@@ -720,9 +734,6 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             ctx["spot"] = mark.get("current_underlying")
             ctx["short_strike"] = pos.get("short_strike")
             ctx["call_short"] = pos.get("call_short")
-            # paper_positions carries no entry_short_delta column — recommend()
-            # falls back to the absolute-breach delta stop when this is None.
-            ctx["entry_short_delta"] = pos.get("entry_short_delta")
         rec = signal_recommender.recommend(ctx)
         tp_frac = signal_recommender.tp_frac_for(pos.get("strategy"))
         if (lifecycle and not pos.get("be_armed") and per_contract

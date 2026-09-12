@@ -113,6 +113,40 @@ def _driver_signal(**o):
     return base
 
 
+def test_open_driver_position_records_the_entry_short_delta(tmp_path, monkeypatch):
+    """Gap assessment B6. The driver feeds RAW scanner signals, which key the
+    short leg's delta under ``short_delta``; the engine path reads
+    ``entry_short_delta``, so it goes through the same normalisation block that
+    already maps ``id``/``type``/``credit``. Without it the driver's book — the
+    one that trades on its own — would keep falling to the absolute delta
+    ceiling, which is the loosest possible stop on a cheaply-sold short."""
+    import paper_account_db
+
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+
+    compute.open_driver_position(_driver_signal(short_delta=0.19), qty=1,
+                                 broker=_fake_broker(1.50))
+
+    assert paper_account_db.fetch_open_positions(db)[0]["entry_short_delta"] == 0.19
+
+
+def test_open_driver_position_records_nothing_when_the_signal_has_no_delta(
+        tmp_path, monkeypatch):
+    """None, not 0.0 — a delta of zero would make the drift rule fire at 0.12 on
+    a position that has not moved."""
+    import paper_account_db
+
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+
+    compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50))
+
+    assert paper_account_db.fetch_open_positions(db)[0]["entry_short_delta"] is None
+
+
 def test_open_driver_position_stores_entry_context(tmp_path, monkeypatch):
     """The decision context passed at open is persisted as JSON on entry_context so a
     later post-mortem can attribute the entry regime. A None context stores NULL."""

@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     dte_at_entry INTEGER,
     quantity INTEGER,
     entry_credit REAL,
+    entry_short_delta REAL, -- the SHORT leg's delta at open. NULL = not recorded,
+                            -- which is NOT zero: recommend() falls back to the
+                            -- absolute delta ceiling when it is missing, where a
+                            -- 0.0 would make the drift rule fire at 0.12.
     entry_order_id INTEGER,
     max_loss_per REAL,
     max_loss_total REAL,
@@ -151,7 +155,11 @@ def init_db(db_path=None):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(paper_positions)")}
         for name, decl in (("parent_position_id", "INTEGER"), ("mae", "REAL"),
                            ("mfe", "REAL"), ("entry_context", "TEXT"),
-                           ("be_armed", "INTEGER DEFAULT 0")):
+                           ("be_armed", "INTEGER DEFAULT 0"),
+                           # No DEFAULT: every existing row must read NULL, which
+                           # the rule engine treats as "not recorded" and answers
+                           # with the absolute ceiling - the pre-B6 behaviour.
+                           ("entry_short_delta", "REAL")):
             if name not in cols:
                 conn.execute(f"ALTER TABLE paper_positions ADD COLUMN {name} {decl}")
         conn.commit()
@@ -467,8 +475,8 @@ def insert_position(db_path, p):
     try:
         cols = ("signal_id", "symbol", "strategy", "short_strike", "long_strike",
                 "call_short", "call_long", "width", "expiration", "dte_at_entry",
-                "quantity", "entry_credit", "entry_order_id", "max_loss_per",
-                "max_loss_total", "entry_ts", "entry_context")
+                "quantity", "entry_credit", "entry_short_delta", "entry_order_id",
+                "max_loss_per", "max_loss_total", "entry_ts", "entry_context")
         cur = conn.execute(
             f"INSERT INTO paper_positions ({','.join(cols)}) "
             f"VALUES ({','.join('?' for _ in cols)})",

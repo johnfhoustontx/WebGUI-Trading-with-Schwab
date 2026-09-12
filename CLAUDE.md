@@ -2108,6 +2108,22 @@ buying power: an arbitrary structure with no defined risk could be opened into
 the $25k paper book, and the book could grow past `max_concurrent` without limit,
 because the guardrails live in a service `options_svc` **cannot import**.
 
+⚠ **That second layer was INERT for at least a month, and the guard's own
+docstring is why nobody noticed (fixed 2026-09-11).** `_driver_open_positions`
+called `paper_account_db.list_open_positions` — a function that does not exist —
+and its `except Exception -> []` swallowed the `AttributeError`, so both
+book-level gates measured an always-empty book: `max_concurrent` could never
+refuse, and `daily_risk_budget` could never see risk already deployed. It
+*spoke* (50 degrades in 30 days on prod) and nothing read the counter. The
+docstring argued `[]` "is the same thing an empty book means" — true of a read
+failure, false of a typo, and the reason reading the code could not catch it.
+**The lesson generalises: `compute.py` lazy-imports `paper_account_db`,
+`paper_engine` and `signal_db` inside ~40 functions, so a misspelled attribute
+is not a startup error but a silent degrade on one path, and `pyrightconfig.json`
+deliberately does not cover this file.** `test_driver_open_capacity_binds.py`
+drives the gates through a real book and AST-walks the source for every
+`<module>.<attr>` on those three names.
+
 **Cycle-only concepts are deliberately NOT re-checked at the open path** —
 `max_trades_per_cycle` and the model's stand-down are meaningless for a single
 open, and the VIX ceiling needs the decision-time market read. The halt flag
@@ -2231,6 +2247,24 @@ Two keys exist only per structure, with no `[stops]` counterpart:
   have none** — X5 is written about premium selling generally, but applying it to
   PCS/CCS/IC would change how every position in the app exits, which is a
   separate change with its own measurement.
+
+**`paper_positions.entry_short_delta` is what makes the delta stop mean what it
+says.** `delta_drift` measures adverse movement *relative to entry*, and the
+column did not exist until 2026-09-11 — so every paper position fell to
+`delta_abs_fallback` (0.35), which is **too tight** for a short sold rich (a
+0.30-delta spread opens 0.05 from its own stop) and **far too loose** for one
+sold cheap (a 0.10-delta short has to more than triple before the stop notices,
+where the drift rule acts at 0.22). It is recorded by all three producers that
+open a position — the captured-signal entry cycle, `open_driver_position` (which
+maps the raw scan row's `short_delta` in the same `setdefault` block that already
+normalises `id`/`type`/`credit`), and `apply_roll`, which takes the CANDIDATE's
+`new_short_delta` because a roll is a new entry at a new strike. ⚠ **`None` means
+"not recorded" and keeps the fallback — never write `0.0`**, which would make the
+drift rule fire at 0.12 on a position that has not moved. And
+`run_manage_cycle` puts it in the **base** ctx: it sat in the lifecycle branch
+alone, which neither book that trades ever takes (the manual account's toggle
+defaults off and the driver passes `lifecycle=False` explicitly), so the column
+alone would have changed nothing.
 
 The profit target stays the global **0.50** for these two. TradingBlock's ~90% /
 ~95% pairs with rolling straight into the next cycle, which this app cannot do

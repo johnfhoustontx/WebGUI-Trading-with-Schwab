@@ -271,7 +271,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **B3** | Deployment cap for the manual book | S2 | S | Medium–high |
 | **B4** | Sector cap | S4 | M | Medium |
 | **B5** | Expiry-day rule for physically-settled names | X4 | M | Medium |
-| **B6** | Store the entry short delta | X2 | S | Medium |
+| **B6** | Store the entry short delta — **shipped 2026-09-11** | X2 | S | Medium |
 | **B7** | Earnings awareness on open positions | V3 | S–M | Medium |
 | **B8** | Size as a percent of current equity | S1 | S | Low–medium |
 | **C1** | Record Income Window candidates for calibration | M2 (evidence) | S–M | High |
@@ -349,7 +349,22 @@ global set. The sourced rules:
 
 **B5. An expiry-day rule for physically-settled names.** On expiration day, close (or at least flag) any short within about 1% of its strike by a set CT time; cash-settled index options are exempt. OIC notes that exercise notices are accepted until about 5:30 pm ET, so an after-hours move can assign a short that closed out of the money. Option Alpha saw about 1.2% of its contracts assigned over five years, mostly in expiration week.
 
-**B6. Store the entry short delta** on paper positions, so the delta-drift stop works as designed instead of always falling back to 0.35 (`paper_engine.py:679-681`).
+**B6. Store the entry short delta.** **Shipped 2026-09-11.** An additive
+nullable `paper_positions.entry_short_delta`, written by all three producers
+(the captured entry cycle, `open_driver_position` off the raw scan row's
+`short_delta`, and `apply_roll` off the candidate's `new_short_delta`), and moved
+into the manage cycle's **base** ctx — it had been threaded into the lifecycle
+branch alone, which neither book that trades ever takes. `None` keeps the old
+fallback, so nothing already in either book changes. The income structures are
+untouched: `loss_rules = false` leaves no delta stop to sharpen.
+
+⚠ **Writing these tests surfaced a live defect outside the audit:**
+`compute._driver_open_positions` called `paper_account_db.list_open_positions`,
+which does not exist, and the `except -> []` made the driver's open-path
+`max_concurrent` and `daily_risk_budget` gates measure an always-empty book. 50
+degrades in 30 days on prod; nothing breached, because the decision-side
+guardrails held. Fixed with an AST guard over every lazily-imported engine
+attribute in `compute.py`.
 
 **B7. Earnings awareness on open positions.** Raise Rescue heat and send a push when a position's expiration spans a report. Nothing in `rescue.py`, `signal_recommender.py` or `services/driver_svc` reads the calendar today. Option Alpha's 10-year study of 1,546 reports found misses averaged 34–38% beyond the expected move.
 
@@ -408,6 +423,7 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
     - The driver scheduler's comment says its exits run on a 5-minute cycle; it is 1 minute.
     - `expire_ledger_trades` says it runs on a 5-minute tick; it is hourly plus on demand.
     - `trade_mgmt.toml` says the 50% target arms a break-even stop, which is true only for captured signals.
+10a. **The driver's open-path capacity gates could never refuse anything** — `compute._driver_open_positions` called a function that does not exist (`list_open_positions` for `fetch_open_positions`) and its `except -> []` swallowed the `AttributeError`, so `max_concurrent` and `daily_risk_budget` both read an empty book. 50 degrades in 30 days on prod, nothing breached. Fixed 2026-09-11 (found while writing B6's tests), with an AST guard over every lazily-imported engine attribute in `compute.py`.
 11. The driver has two halts at different thresholds, a $1,500 decision halt and a $2,500 session drawdown, with nothing tying them together.
 12. The Rescue ad-hoc form lists the iron butterfly, but it is relabeled as an iron condor before it leaves the browser.
 13. Rescue flags assignment risk on every equity short, regardless of moneyness or dividends.

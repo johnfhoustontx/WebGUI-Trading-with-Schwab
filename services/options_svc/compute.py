@@ -1483,14 +1483,31 @@ REJECT_RISK_BUDGET = "daily risk budget exhausted (open positions)"
 
 
 def _driver_open_positions():
-    """Open rows in the driver's paper book. Defensive -> [] (a read failure must
-    not silently DISABLE the capacity gates below, so the caller treats [] as
-    'no evidence of capacity used', which is the same thing an empty book means;
-    a hard failure would be worse than a conservative pass here because the
-    per-trade cap and buying-power checks still apply downstream)."""
+    """Open rows in the driver's paper book.
+
+    ⚠ **This called a function that does not exist** — ``list_open_positions``
+    for ``fetch_open_positions`` — from some point before 2026-08-12 until
+    2026-09-11. The ``except`` below swallowed the ``AttributeError``, so both
+    capacity gates measured an always-empty book and neither could refuse
+    anything. Measured on prod: the degrade had fired 50 times in 30 days. The
+    driver's book happened to stay small, so nothing was breached and the only
+    symptom was a counter.
+
+    The docstring that shipped with the bug is why it survived: it argued that
+    ``[]`` "is the same thing an empty book means", which is true of a read
+    failure and completely false of a typo. A guard whose degrade path is
+    indistinguishable from its success path cannot be audited by reading it —
+    ``tests/test_driver_open_capacity_binds.py`` drives the gate through a real
+    book instead, and its AST guard checks every lazily-imported engine
+    attribute in this file, because a lazy import turns a misspelling into a
+    runtime error inside whichever broad ``except`` wraps the call.
+
+    Still defensive: a genuine read failure must not hard-fail an open, and the
+    per-trade cap and buying-power checks still apply downstream.
+    """
     try:
         import paper_account_db   # lazy, as everywhere else on this path
-        return paper_account_db.list_open_positions(DRIVER_PAPER_DB) or []
+        return paper_account_db.fetch_open_positions(DRIVER_PAPER_DB) or []
     except Exception:
         _degrade.degraded("options._driver_open_positions")
         return []
@@ -1566,6 +1583,12 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
         signal.setdefault("strategy", signal.get("type"))
         signal.setdefault("entry_credit", signal.get("credit"))
         signal.setdefault("dte_at_entry", signal.get("dte", 0))
+        # The short leg's delta at open (gap assessment B6). A raw scan row keys
+        # it ``short_delta``; the engine path reads ``entry_short_delta``, and the
+        # delta-drift stop measures against it. Absent leaves None, which means
+        # "not recorded" and falls back to the absolute ceiling - never 0.0,
+        # which would make the drift rule fire at 0.12 on an unmoved position.
+        signal.setdefault("entry_short_delta", signal.get("short_delta"))
         ensure_driver_account()
         # Clear a STALE (prior-day) drawdown halt before checking it: a new session
         # un-halts + resets the daily counters. Idempotent (no-op if already today),
@@ -1622,6 +1645,7 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
             "call_long": signal.get("call_long"), "width": signal["width"],
             "expiration": signal["expiration"], "dte_at_entry": signal.get("dte_at_entry", 0),
             "quantity": open_qty, "entry_credit": fill, "entry_order_id": oid,
+            "entry_short_delta": signal.get("entry_short_delta"),
             "max_loss_per": max_loss_per, "max_loss_total": max_loss_total,
             "entry_ts": resp["enteredTime"],
             "entry_context": _json.dumps(context) if isinstance(context, dict) else None})

@@ -4,7 +4,79 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-11 (**Exit rules are per structure now, and the wheel's
+**Last updated:** 2026-09-11 (**The paper books remember the delta they opened
+at, and the driver's open-path risk gates were inert.** Gap assessment **B6**,
+plus a live defect the B6 tests surfaced.)
+
+- **`paper_positions.entry_short_delta`** (B6). `[stops].delta_drift` measures
+  adverse movement RELATIVE to entry and there was no column for the entry
+  delta, so every paper position fell to `delta_abs_fallback` (0.35) — **too
+  tight** for a short sold rich (a 0.30-delta spread opens 0.05 from its own
+  stop) and **far too loose** for one sold cheap (a 0.10-delta short has to more
+  than triple before the stop notices, where the drift rule acts at 0.22). The
+  2026-08-25 calibration measured the stop ladder as the app's actual edge, and
+  `DELTA_STOP` is its second most expensive rung, so a stop on the wrong
+  threshold taxes the one thing that works.
+
+- **All three producers record it:** the captured-signal entry cycle,
+  `open_driver_position` (mapping the raw scan row's `short_delta` in the same
+  `setdefault` block that already normalises `id`/`type`/`credit`), and
+  `apply_roll`, which takes the CANDIDATE's `new_short_delta` — a roll is a new
+  entry at a new strike, so inheriting the old delta would measure drift from a
+  strike no longer in the trade. ⚠ Absent stays `None`, never `0.0`: `None`
+  means "not recorded" and keeps the fallback, while a zero would make the drift
+  rule fire at 0.12 on a position that has not moved. An additive nullable
+  column, so every position already in either book keeps exactly the pre-B6
+  behaviour.
+
+- **And `run_manage_cycle` puts it in the BASE ctx.** It was already threaded —
+  inside the LIFECYCLE branch alone, which neither book that trades ever takes
+  (the manual account's toggle defaults off, the driver passes `lifecycle=False`
+  explicitly). The column alone would have changed nothing.
+
+- **⚠ The income structures are deliberately untouched:** `loss_rules = false`
+  means there is no delta stop for an entry delta to sharpen. Pinned by test so
+  a later change to the drift rule cannot quietly reach them.
+
+- **The defect the B6 tests surfaced: the driver's open-path capacity gates
+  could never refuse anything.** `compute._driver_open_positions` called
+  `paper_account_db.list_open_positions` — **a function that does not exist** —
+  and its `except Exception -> []` swallowed the `AttributeError`, so
+  `max_concurrent` and `daily_risk_budget` both measured an always-empty book.
+  CLAUDE.md calls this re-check "not redundant, and removing it re-opens a real
+  hole"; a typo had removed it. **Measured on prod: 50 degrades in 30 days.** It
+  speaks at WARNING with a traceback and nobody read the counter. The driver's
+  book held 2 positions and $1,089 of risk against a $12,000 budget, so nothing
+  was breached — the decision-side guardrails in `driver_svc` were carrying it
+  alone. ⚠ The driver is **armed** in prod (`cache:driver:control` enabled since
+  2026-09-03).
+
+- **Why reading the code could not catch it:** the docstring argued `[]` "is the
+  same thing an empty book means" — true of a read failure, false of a typo. A
+  guard whose degrade path is indistinguishable from its success path has to be
+  tested by driving it, so `test_driver_open_capacity_binds.py` runs the gates
+  against a real tmp book. Its sixth test is the general fix: an **AST walk**
+  over `compute.py` for every `<module>.<attr>` on the three lazily-imported
+  engines (`paper_account_db`, `paper_engine`, `signal_db`), checked against the
+  real modules. `compute.py` imports them inside ~40 functions, so a misspelling
+  is a silent degrade on one path rather than a startup error, and
+  `pyrightconfig.json` deliberately does not cover this file. That test named
+  the offending line on its first run.
+
+- **Also:** `config/trade_mgmt.toml`'s `[stops]` header claimed reaching
+  `tp_frac` arms a break-even stop. That is true of captured signals only — the
+  manual book and the driver close outright — and it was gap assessment §8 item
+  10. Corrected in place.
+
+- **Tests: 19 new.** options-scanner **1341 → 1352 passed / 2 skipped**,
+  options_svc **1554 → 1562**. Each was watched to fail first; the two that
+  passed on their first run (a signal with no delta, and the income-structure
+  guard) are guards rather than proofs, and the roll test was re-checked against
+  a disabled write. **Not verified live** — no paper position has opened since.
+
+---
+
+**Prior —** 2026-09-11 (**Exit rules are per structure now, and the wheel's
 two structures have a settled one.** Gap assessment item **B1** — it also closes
 the interim policy A2 shipped the same day, and fixes a latent defect and one
 wrong copy of the put-side test that the taxonomy work exposed.)
