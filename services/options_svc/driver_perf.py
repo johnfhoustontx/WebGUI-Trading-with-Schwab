@@ -44,6 +44,13 @@ def build_scorecard(positions, snapshot) -> dict:
         "best": best, "worst": worst,
         "by_symbol": _group(closed, "symbol"),
         "by_strategy": _group(closed, "strategy"),
+        # ⚠ How a trade ENDED, added 2026-09-12 (gap assessment C5). Not
+        # decoration: replaying the profit-lock ladder turned up that
+        # MANUAL_CLOSE accounts for +$50,102 of the captured book's reported P&L
+        # against +$11,664 for every other reason combined, with 130 of its 388
+        # rows booking exactly the full credit. Split by symbol and strategy that
+        # is invisible; split by exit reason it is the first row you read.
+        "by_exit_reason": _group(closed, "exit_reason"),
     }
 
 

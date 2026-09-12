@@ -36,6 +36,15 @@ from pages import busy as _busy
 from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
+# The scorecard's PURE render vocabulary, shared with the Paper Account page since
+# 2026-09-12 (gap assessment C5). Imported by NAME so ``driver.<fn>`` still
+# resolves for the page body and its tests - the page USES the vocabulary, it does
+# not own it. See pages/scorecard.py.
+from pages.scorecard import (  # noqa: F401
+    PNL_GREEN, PNL_NEUTRAL, PNL_RED, best_worst_text, money as _pnl,
+    percent as _pct, pnl_class, pnl_color, scorecard_exit_reason_rows,
+    scorecard_headline_chips, scorecard_quality_chips, scorecard_strategy_rows,
+    scorecard_symbol_rows)
 from pages.options.theme import BTN, BTN_DANGER, BTN_PRIMARY
 
 # Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
@@ -72,19 +81,6 @@ def _money(v):
 # read by COLOR, not by hunting for a +/- sign. These hexes equal the theme
 # TXT_POS/TXT_NEG/TXT_NEUTRAL tokens, but are kept LOCAL because driver.py has no
 # theme.py dependency (it's not an options-section page).
-PNL_GREEN, PNL_RED, PNL_NEUTRAL = "#66bb6a", "#ef5350", "#bdbdbd"
-
-
-def pnl_color(v):
-    """Hex color for a numeric P&L: green > 0, red < 0, grey for 0 / None / junk."""
-    if not isinstance(v, (int, float)) or v == 0:
-        return PNL_NEUTRAL
-    return PNL_GREEN if v > 0 else PNL_RED
-
-
-def pnl_class(v):
-    """Tailwind text arbitrary-value class for a numeric P&L (mirrors :func:`pnl_color`)."""
-    return f"text-[{pnl_color(v)}]"
 
 
 def current_day_decisions(decisions, today_ct=None):
@@ -471,96 +467,6 @@ def paper_summary(paper_view):
 # more live than ``AutonomousState.perf``, which only updates per 30-min cycle).
 # All builders are defensive: an unpublished view → ``{}`` → an empty/placeholder
 # card, never a raise. ``profit_factor`` ``None`` (no losses yet) renders as "—".
-def _pnl(v):
-    """Signed dollar string for a P&L scorecard cell; exactly-zero is unsigned
-    (``$0.00``), None → ``$0.00`` (a fresh-account scorecard reads cleanly)."""
-    try:
-        v = float(v)
-    except (TypeError, ValueError):
-        v = 0.0
-    if v == 0:
-        return "$0.00"
-    return f"{'+' if v > 0 else '-'}${abs(v):,.2f}"
-
-
-def _pct(frac):
-    """A 0..1 fraction as a 1-dp percent (``0.6667 → '66.7%'``); None/garbage → '0.0%'."""
-    try:
-        return f"{float(frac) * 100:.1f}%"
-    except (TypeError, ValueError):
-        return "0.0%"
-
-
-def scorecard_headline_chips(perf):
-    """Headline (label, value) chips: trades, open/closed, win rate, realized,
-    open unrealized, total P&L — the at-a-glance row of the scorecard."""
-    p = perf or {}
-    return [
-        ("Trades", str(int(p.get("total_trades") or 0))),
-        ("Open", str(int(p.get("open") or 0))),
-        ("Closed", str(int(p.get("closed") or 0))),
-        ("Win rate", _pct(p.get("win_rate"))),
-        ("Realized", _pnl(p.get("realized_pnl"))),
-        ("Open P&L", _pnl(p.get("open_unrealized"))),
-        ("Total P&L", _pnl(p.get("total_pnl"))),
-    ]
-
-
-def scorecard_quality_chips(perf):
-    """Quality (label, value) chips: avg win, avg loss, profit factor.
-
-    ``profit_factor`` is ``None`` until there is at least one loss (gross-win /
-    gross-loss is undefined with no losses) — render it as the em-dash "—"."""
-    p = perf or {}
-    pf = p.get("profit_factor")
-    pf_text = "—" if pf is None else f"{float(pf):.2f}"
-    return [
-        ("Avg win", _pnl(p.get("avg_win"))),
-        ("Avg loss", _pnl(p.get("avg_loss"))),
-        ("Profit factor", pf_text),
-    ]
-
-
-def _breakdown_rows(rows, key):
-    """Format a P&L-by-{symbol|strategy} list (signed pnl, percent win-rate)."""
-    out = []
-    for r in rows or []:
-        r = r or {}
-        out.append({
-            key: r.get(key, "?"),
-            "trades": r.get("trades", 0),
-            "pnl": _pnl(r.get("pnl")),
-            "_pnl_color": pnl_color(r.get("pnl")),
-            "_pnl_class": pnl_class(r.get("pnl")),
-            "win_rate": _pct(r.get("win_rate")),
-        })
-    return out
-
-
-def scorecard_symbol_rows(perf):
-    """Render-ready P&L-by-symbol table rows (from ``perf['by_symbol']``)."""
-    return _breakdown_rows((perf or {}).get("by_symbol"), "symbol")
-
-
-def scorecard_strategy_rows(perf):
-    """Render-ready P&L-by-strategy table rows (from ``perf['by_strategy']``)."""
-    return _breakdown_rows((perf or {}).get("by_strategy"), "strategy")
-
-
-def best_worst_text(perf):
-    """``'Best MU +$120.00 · Worst MU -$60.00'`` — the extreme closed trades.
-
-    Empty (nothing closed) → ``''`` so the card can hide the line. Defensive over a
-    missing symbol / non-numeric realized_pnl."""
-    p = perf or {}
-    bits = []
-    for label, pos in (("Best", p.get("best")), ("Worst", p.get("worst"))):
-        if isinstance(pos, dict):
-            sym = pos.get("symbol") or "?"
-            bits.append(f"{label} {sym} {_pnl(pos.get('realized_pnl'))}")
-    return " · ".join(bits)
-
-
 def resolve_switch_state(pending, actual_enabled):
     """Optimistic Autonomous-switch state — the anti-flicker guard.
 

@@ -461,7 +461,13 @@ def test_paper_account_view_shape(monkeypatch):
 
 
 def test_paper_account_view_defensive_on_failure(monkeypatch):
-    """Each sub-read failure degrades gracefully: snapshot→None, lists→[], flag→False."""
+    """Each sub-read failure degrades gracefully: snapshot→None, lists→[], flag→False.
+
+    ⚠ Asserted field by field rather than as a whole dict, and this is the THIRD
+    test today whose whole-dict form froze a KEY SET its own docstring is not
+    about — it made adding a legitimate field (``perf``, gap assessment C5) fail a
+    test whose subject is a cold database. The degradations are what is pinned.
+    """
     import sys as _sys
     import types as _types
 
@@ -475,8 +481,12 @@ def test_paper_account_view_defensive_on_failure(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
 
     out = compute.paper_account_view()
-    assert out == {"snapshot": None, "positions": [], "orders": [],
-                   "lots": [], "has_account": False}
+    assert out["snapshot"] is None
+    assert out["positions"] == [] and out["orders"] == [] and out["lots"] == []
+    assert out["has_account"] is False
+    # The scorecard degrades the same way: an EMPTY card, not a missing key, so
+    # the page renders "no trades yet" rather than special-casing an absence.
+    assert (out["perf"] or {}).get("total_trades") == 0
 
 
 def test_paper_account_view_carries_the_open_equity_lots(monkeypatch):

@@ -4,6 +4,65 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**The book that trades finally has a track record,
+and the scorecard now splits P&L by how a trade ENDED.** Gap assessment **C5**,
+scorecard half.)
+
+- ⚠ **The manual account — the book that auto-trades every captured signal — had
+  no track record on screen at all**: no win rate, no profit factor, no
+  breakdown. The driver's isolated book has had all three since `driver_perf.py`
+  was written. `build_scorecard` is already pure over `(positions, snapshot)`, so
+  `compute.manual_account_perf()` is an accessor rather than a second
+  implementation. It rides the existing `cache:options:paper_account` view (one
+  database must not get two publish cadences) and reads the FULL history itself —
+  the view's `positions` is the OPEN set, and a scorecard over open rows alone
+  reports a win rate of zero forever.
+- ⚠ **`build_scorecard` gained `by_exit_reason`, and that axis exists because of
+  a measurement.** While replaying the ladder (C2): `MANUAL_CLOSE` accounts for
+  **+$50,102** of the captured book's reported P&L against **+$11,664** for every
+  other reason combined, with **130 of 388** of its rows booking exactly
+  `entry_credit × 100` and five contradicted by their own last mark. Split by
+  symbol and strategy that is invisible. **Not** asserted to be a defect — a
+  manual close can legitimately differ from the last mark; the change makes the
+  question visible where the book is read.
+- **`webgui/pages/scorecard.py`** now holds the pure render builders, moved out of
+  `pages/driver.py`. `driver.py` imports them by name, so
+  `driver.scorecard_headline_chips` still resolves for its page body and the 25
+  existing assertions in `test_driver_monitor.py`.
+- ⚠ **Two silent shadowing bugs caught in that one move**, both the class a shared
+  module is meant to end. `driver.py` re-assigned
+  `PNL_GREEN, PNL_RED, PNL_NEUTRAL` **after** the import, so the local values won
+  while `scorecard.py`'s first draft held the Simulator's payoff green/red. And
+  `portfolio.py` already has its own **unsigned** `_money` (the account-card
+  formatter), so `money as _money` was shadowed and the new track record printed
+  realized P&L **without a sign**. Lesson, now in CLAUDE.md: when moving a
+  formatter into a shared module, grep the destination for the name you import.
+- **The Paper Account page gets one LINE, not the driver's full card** — that page
+  already carries the account cards, positions and fills. Blank until something has
+  closed (a fresh book reading "0.0% win" says it loses, not that it has no
+  record), and an undefined profit factor is omitted rather than printed as "—",
+  which mid-sentence reads as a rendering fault.
+- ⚠ **`manual_analytics()` exists and nothing consumes it** — the equity curve and
+  MAE/MFE analytics, a separate unused surface, and the THIRD "built, never
+  called" this audit has found after the ratchet ladder and the IV history.
+  Recorded so it is not rediscovered as new.
+- ⚠ **C5's trade-plan snapshot did NOT ship.** "The rules in force at entry" is a
+  far larger object than when the item was written — `[stops]` overlaid by
+  `[structures.*]`, the active `[trail]` ladder, `tp_frac_for`, `cut_dte`, the
+  delta triad and the lifecycle flag, six of which moved today — and it needs a
+  granularity decision of its own. A free-text thesis implies a workflow change on
+  a book whose positions open automatically, since no human is present to type
+  one. Both stay open.
+- One existing assertion changed — the **third** today of exactly this shape:
+  `test_paper_account_view_defensive_on_failure` compared the view to a whole dict
+  and so froze its KEY SET, which its docstring is not about (its subject is a
+  cold database). Asserted field by field; the degradations are what is pinned.
+- Design: [`docs/plans/2026-09-12-manual-scorecard-design.md`](plans/2026-09-12-manual-scorecard-design.md).
+  24 new tests (`webgui/tests/test_scorecard_shared.py`,
+  `services/options_svc/tests/test_manual_scorecard.py`).
+
+---
+
 **Last updated:** 2026-09-12 (**The profit-lock ladder is live — and the bigger
 half of C2 measured well enough to put to the operator rather than ship.** Gap
 assessment **C2**.)

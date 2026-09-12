@@ -278,7 +278,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book — **ladder shipped 2026-09-12; the lifecycle trial is decision 8** | X1 | S | Medium |
 | **C3** | Store a daily ATM IV to build a true IV rank — **shipped 2026-09-12; the store, writer AND reader already existed with 7 rows** | V1 | S | Medium |
 | **C4** | Book-level Greeks | V2 | M | Medium |
-| **C5** | Trade plan snapshot and a manual-book scorecard | P1, P2 | M | Medium |
+| **C5** | Trade plan snapshot and a manual-book scorecard — **scorecard shipped 2026-09-12; the trade-plan snapshot is bigger than written and stays open** | P1, P2 | M | Medium |
 | **D1** | Straddle and strangle templates | coverage | S | Low–medium |
 | **D2** | Iron butterfly scanner on the IC pipeline | coverage | M | Medium |
 | **D3** | Exits for long options and debit spreads | X6 | M | Medium |
@@ -647,6 +647,24 @@ deliberately does **not** feed selection.
 
 **C5. Trade plan and scorecard.** Snapshot the rules in force at entry and a free-text thesis on each position. Give the manual book the win-rate and profit-factor scorecard the driver has (`driver_perf.py`).
 
+**The SCORECARD shipped 2026-09-12** —
+[design](2026-09-12-manual-scorecard-design.md). `build_scorecard` was already
+pure over `(positions, snapshot)`, so `compute.manual_account_perf()` is an
+accessor; the pure render builders moved to `webgui/pages/scorecard.py` now that
+two pages draw them. ⚠ And it gained a new axis, `by_exit_reason`, because
+replaying the ladder showed `MANUAL_CLOSE` accounts for **+$50,102** of the
+captured book's reported P&L against +$11,664 for everything else, with 130 of
+388 of its rows booking exactly the full credit — invisible when split by symbol
+and strategy.
+
+⚠ **The trade-plan snapshot did NOT ship, and is bigger than written.** "The
+rules in force at entry" now means `[stops]` overlaid by `[structures.*]`, the
+active `[trail]` ladder, `tp_frac_for`, `cut_dte`, the delta triad and the
+lifecycle flag — six of which moved on 2026-09-12 — so it needs a granularity
+decision of its own. And a free-text thesis implies a workflow change on a book
+whose positions open automatically: there is no moment at which a human is
+present to type one.
+
 ### Tier D — add strategies, cheapest first
 
 **D1. Straddle and strangle templates:** long and short, straddle and strangle, analysis only.
@@ -683,6 +701,12 @@ Not playbook gaps, but surfaced by the audit. Items marked **(checked)** were re
    - the ratchet ladder;
    - `fill_model.vertical_fill`;
    - five `config_paper` constants: `STARTING_BALANCE`, `SLIPPAGE_TICKS`, `OPTION_TICK`, `ENTRY_CYCLE_MIN`, `MANAGE_CYCLE_MIN`.
+   - ⚠ **and `compute.manual_analytics()`** (the manual book's equity curve +
+     MAE/MFE analytics), found 2026-09-12 while shipping C5's scorecard. A
+     SEPARATE unused surface from the scorecard, recorded so it is not
+     rediscovered as new. That makes four instances found by this audit alone —
+     the ratchet ladder (C2), the IV-history writer (C3),
+     `signal_outcomes.settlement_underlying` (15a) and this.
 9. **Orphaned journals:** the settle-and-render half of `daily_trade_log.py`, and the `trade_performance_db` fill journal.
 10. **Stale prose:**
     - The driver scheduler's comment says its exits run on a 5-minute cycle; it is 1 minute.

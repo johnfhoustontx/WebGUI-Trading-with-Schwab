@@ -2661,6 +2661,63 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## The scorecard is shared, and it breaks P&L down by how a trade ENDED
+
+**`webgui/pages/scorecard.py`** holds the PURE render builders both books' cards
+draw — moved out of `pages/driver.py` on 2026-09-12 when the manual account got a
+scorecard of its own (gap assessment C5). A second page reaching into the driver
+PAGE for its view vocabulary is the wrong shape; same reasoning as `pages/fmt.py`
+and `pages/copy.py`. `driver.py` imports them **by name**, so
+`driver.scorecard_headline_chips` still resolves for its page body and the 25
+existing assertions in `test_driver_monitor.py`.
+
+⚠ **Two silent shadowing bugs were caught in that one move**, and both are the
+class a shared module is supposed to end: `driver.py` re-assigned
+`PNL_GREEN, PNL_RED, PNL_NEUTRAL` **after** the new import, so the local values
+won while `scorecard.py`'s first draft quietly held the Simulator's payoff
+green/red; and `portfolio.py` already has its own **unsigned** `_money` (the
+account-card formatter — "Equity $24,184.20"), so `money as _money` was shadowed
+by it and the new track record printed realized P&L **without a sign**. The page
+imports the module, not the name. **When moving a formatter into a shared module,
+grep the destination for the name you are importing.**
+
+**`compute.manual_account_perf()`** is the manual book's scorecard —
+`build_scorecard` was already pure over `(positions, snapshot)`, so this is an
+accessor, not a second implementation. It rides the existing
+`cache:options:paper_account` view rather than a new one, for the same reason
+`lots` does: one database must not get two publish cadences, or the cards and the
+scorecard could disagree about the same account. ⚠ It reads the FULL history
+itself — the view's `positions` is the OPEN set, and a scorecard over open rows
+alone would report a win rate of zero forever.
+
+⚠ **`build_scorecard` gained `by_exit_reason`, and that axis is the point.**
+Measured while replaying the ladder: `MANUAL_CLOSE` accounts for **+$50,102** of
+the captured book's reported P&L against **+$11,664** for every other reason
+combined, with **130 of 388** of its rows booking exactly `entry_credit × 100` —
+the full credit, as if the spread expired worthless — and five contradicted by
+their own last mark. Split by symbol and strategy that is invisible; split by exit
+reason it is the first row. It is **not** asserted to be a defect (a manual close
+can legitimately differ from the last mark); the change makes the question visible
+where the book is read.
+
+**Two copy rules on the Paper Account page's one-line track record**, both the
+same shape as the app's other empty states: it is **blank until something has
+CLOSED** (a fresh book reading "0.0% win" says it *loses*, not that it has no
+record), and an **undefined profit factor is omitted, not printed** — `None` means
+"no losses yet", and an em-dash mid-sentence reads as a rendering fault. The
+driver page shows "—" because there it is a labelled chip, where the absence is
+legible.
+
+⚠ **`manual_analytics()` exists and nothing consumes it** — the equity curve and
+MAE/MFE analytics, a separate unused surface from the scorecard, and the THIRD
+"built, never called" this audit has turned up (after the ratchet ladder and the
+IV history). Recorded so it is not rediscovered as new. And C5's **trade-plan
+snapshot did not ship**: "the rules in force at entry" is now a much larger object
+than when it was written (six of those rules moved today) and needs a granularity
+decision of its own, while a free-text thesis implies a workflow change on a book
+whose positions open automatically. Design:
+[the C5 doc](docs/plans/2026-09-12-manual-scorecard-design.md).
+
 ## The profit-lock ladder is live, and it can only ever raise a stop
 
 **`[trail].active`** names the ladder in force — `"ratchet"` as shipped

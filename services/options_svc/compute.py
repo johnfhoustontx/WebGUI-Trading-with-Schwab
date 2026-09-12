@@ -1354,12 +1354,24 @@ def paper_account_view() -> dict:
     except Exception:
         has_account = False
 
+    # The book's own track record (gap assessment C5). It rides THIS view rather
+    # than a new one for the same reason ``lots`` does: one database must not get
+    # two publish cadences, or the cards and the scorecard could disagree about
+    # the same account. ``positions`` above is the OPEN set, so the scorecard
+    # reads the full history itself - a scorecard over open rows alone would
+    # report a win rate of zero forever.
+    try:
+        perf = manual_account_perf()
+    except Exception:
+        perf = None
+
     return {
         "snapshot": snapshot,
         "positions": positions,
         "orders": orders,
         "lots": lots,
         "has_account": has_account,
+        "perf": perf,
     }
 
 
@@ -1499,6 +1511,45 @@ def driver_account_perf(positions=None, snapshot=None) -> dict:
         except Exception:
             snapshot = {}
     return driver_perf.build_scorecard(positions, snapshot or {})
+
+
+def manual_account_perf(positions=None, snapshot=None) -> dict:
+    """Performance scorecard over the MANUAL paper account (gap assessment C5).
+
+    The mirror of :func:`driver_account_perf` on the default DB — the book that
+    auto-trades every captured signal, and which had **no track record on screen
+    at all**: no win rate, no profit factor, no breakdown. ``build_scorecard`` is
+    already pure over ``(positions, snapshot)``, so this is the accessor rather
+    than a second implementation.
+
+    ``db_path=None`` IS the manual account throughout this engine, the same
+    convention ``manual_analytics`` and ``paper_account_view`` use. ⚠ Scoring the
+    wrong file would silently report the driver's −46.6% record as this book's.
+
+    ``positions``/``snapshot`` may be injected by a caller that has already read
+    the book. Defensive → an empty scorecard on any failure: it feeds a page card,
+    which must render "no trades yet" rather than a traceback.
+    """
+    import paper_account_db
+    import paper_engine
+
+    from services.options_svc import driver_perf
+
+    if positions is None:
+        try:
+            positions = paper_account_db.fetch_all_positions(None)
+        except Exception:
+            positions = []
+    if snapshot is None:
+        try:
+            snapshot = paper_engine.account_snapshot(None)
+        except Exception:
+            snapshot = {}
+    try:
+        return driver_perf.build_scorecard(positions, snapshot or {})
+    except Exception:  # noqa: BLE001 - see the docstring.
+        _degrade.degraded("options.manual_account_perf")
+        return driver_perf.build_scorecard([], {})
 
 
 def _book_analytics(db_path, *, starting_balance=25000.0, positions=None) -> dict:

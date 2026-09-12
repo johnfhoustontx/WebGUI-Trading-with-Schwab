@@ -20,6 +20,11 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+# ⚠ Imported as a MODULE, not by name: this page already has its own ``_money``
+# (the unsigned account-card formatter — "Equity $24,184.20"), and a
+# ``money as _money`` import was silently shadowed by it, printing the track
+# record's realized P&L without its sign.
+from pages import scorecard as _scorecard
 from .perf_charts import equity_curve_figure, excursion_text
 from .rescue import AT_RISK_STATES as _AT_RISK_STATES
 from .rescue import heat_border_class, rescue_highlight, rescue_highlight
@@ -135,6 +140,34 @@ def order_rows(orders):
     return rows
 
 
+
+def scorecard_text(perf) -> str:
+    """One-line track record for the manual book. PURE.
+
+    ``'7 closed · 71.4% win · +$420.00 realized · 2.00 profit factor'``
+
+    ⚠ **Empty until something has CLOSED.** A fresh or all-open book would
+    otherwise read "0.0% win", which says the book loses rather than that it has
+    no record yet - the same distinction the Desk's empty states are built around.
+
+    ⚠ **An undefined profit factor is omitted, not printed.** ``None`` means "no
+    losses yet" (gross win / gross loss is undefined), and an em-dash mid-sentence
+    reads as a rendering fault; the driver page shows "—" because there it is a
+    labelled chip, where the absence is legible.
+    """
+    p = perf or {}
+    closed = p.get("closed") or 0
+    if not closed:
+        return ""
+    bits = [f"{int(closed)} closed",
+            f"{_scorecard.percent(p.get('win_rate'))} win",
+            f"{_scorecard.money(p.get('realized_pnl'))} realized"]
+    pf = p.get("profit_factor")
+    if isinstance(pf, (int, float)) and not isinstance(pf, bool):
+        bits.append(f"{float(pf):.2f} profit factor")
+    return " · ".join(bits)
+
+
 def render():
     """Paper Portfolio page: account cards + positions + fills log (bus-fed)."""
     # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
@@ -159,6 +192,11 @@ def render():
     account_box = ui.column().classes("w-full gap-0")
     with account_box:
         cards_box = ui.row().classes("gap-3 flex-wrap")
+        # The book's own track record (gap assessment C5). One line above the
+        # tables rather than the driver page's full card: this page already
+        # carries the account cards, the positions and the fills, and a second
+        # multi-table block would bury them.
+        scorecard_label = ui.label("").classes("text-xs opacity-70")
         ui.label("Open positions").classes("text-subtitle1 mt-2")
         pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
         # Symbol cell gets a colored left-border + faint tint when the position is
@@ -228,6 +266,7 @@ def render():
                     with ui.card().classes("p-2 min-w-[110px]"):
                         ui.label(label).classes("text-xs opacity-60")
                         ui.label(value).classes("text-base font-bold")
+        scorecard_label.text = scorecard_text(pa.get("perf"))
         pos_table.rows = position_rows(pa.get("positions"))
         ord_table.rows = order_rows(pa.get("orders"))
         pos_table.update()
