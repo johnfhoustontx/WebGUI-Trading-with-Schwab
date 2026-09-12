@@ -46,9 +46,15 @@ DEFAULT_PANEL_TOKENS = {
 #: The pill's two states, as ONE swap set so repaints never stack them.
 _PILL_KEYS = ("pill_on", "pill_off")
 
-#: Rows each side of spot on first paint; "more" adds this many again.
-GRID_WINDOW = 10
-_WINDOW_STEP = 10
+#: The grid body's height: the COMPLETE chain scrolls inside it, and every
+#: paint scrolls the at-the-money row to its middle.
+GRID_BODY_H = "max-h-[460px]"
+
+#: Delegated click: one listener on the body reads the cell's data-* attributes
+#: (see ``chain_grid.grid_body_html``). Non-pick clicks emit nothing.
+_PICK_JS = ("(e) => { const c = e.target.closest('[data-pick]'); "
+            "if (c) emit({pick: c.dataset.pick, side: c.dataset.side, "
+            "strike: c.dataset.strike}); }")
 
 #: Bid and Ask sit NEXT TO the strike on both sides (the thinkorswim layout), so
 #: the click targets are the columns nearest the middle.
@@ -75,11 +81,38 @@ def panel_tokens(overrides=None):
 
 
 def side_columns(columns):
-    """(call columns, put columns): each side reads OUTWARD from the strike, so
-    the calls list ends with Bid, Ask and the puts list starts with them."""
+    """(call columns, put columns). The calls read left to right in registry
+    order — Delta · OI · Volume · Bid · Ask by default — and the puts MIRROR them,
+    so Bid and Ask sit against the strike on both sides."""
     cols = cg.parse_columns(columns)
-    rest = [c for c in cols if c not in _PICKS]
-    return rest[::-1] + list(_PICKS), list(_PICKS) + rest
+    return list(cols), list(reversed(cols))
+
+
+def center_js(element_id):
+    """Scroll a grid body so its at-the-money row sits in the middle. Deferred a
+    frame so it runs after the new content is in the DOM, and it moves only the
+    body's own scrollTop — never the page."""
+    return ("setTimeout(() => { const b = getHtmlElement(%d); "
+            "const r = b && b.querySelector('[data-atm]'); "
+            "if (r) { b.scrollTop = r.offsetTop - b.clientHeight / 2 "
+            "+ r.offsetHeight / 2; } }, 60);" % int(element_id))
+
+
+def pick_from_args(args):
+    """A delegated click's payload → ``(column, option_type, strike)``, or None
+    for anything that is not a well-formed Bid/Ask cell."""
+    if not isinstance(args, dict):
+        return None
+    column, side = args.get("pick"), args.get("side")
+    if column not in _PICKS or side not in ("call", "put"):
+        return None
+    try:
+        strike = float(args.get("strike"))
+    except (TypeError, ValueError):
+        return None
+    if strike != strike or strike in (float("inf"), float("-inf")):
+        return None
+    return column, side, strike
 
 
 def saved_columns():
@@ -98,7 +131,7 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
     nothing); ``on_expiry(cb)`` with ``cb(expiry)``; ``on_pick(cb)`` with
     ``cb(column, option_type, strike, expiry)``."""
     tk = panel_tokens(tokens)
-    state = {"chain": None, "spot": None, "expiry": None, "window": GRID_WINDOW,
+    state = {"chain": None, "spot": None, "expiry": None,
              "columns": saved_columns(), "today": today}
     listeners = {"expiry": [], "pick": []}
 
@@ -138,7 +171,18 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         with ui.row().classes("w-full items-start gap-3 no-wrap"):
             with ui.column().classes("entry-grid flex-[1.4_1_0%] min-w-0 gap-0.5"):
                 grid_title = ui.label("CHAIN").classes(tk["eyebrow"])
-                grid_box = ui.column().classes("w-full min-w-0 gap-0")
+                # The header reserves the same scrollbar gutter as the body, so
+                # its columns line up with the scrolling rows under it.
+                grid_head = ui.element("div").classes(
+                    "w-full overflow-y-hidden [scrollbar-gutter:stable]")
+                grid_hint = ui.label("CALLS · click Bid to sell, Ask to buy · PUTS") \
+                    .classes(f"{tk['muted']} text-[9px] text-center w-full")
+                grid_empty = ui.label("Load a symbol to see its chain.") \
+                    .classes(f"entry-empty {tk['muted']} py-4")
+                grid_body = ui.html("").classes(
+                    f"entry-gridbody relative w-full {GRID_BODY_H} overflow-y-auto "
+                    "[scrollbar-gutter:stable]")
+                grid_body.on("click", lambda e: _on_grid_click(e), js_handler=_PICK_JS)
             with ui.column().classes("entry-legs flex-1 min-w-[430px] gap-2"):
                 ui.label("LEGS").classes(tk["eyebrow"])
                 legs_box = ui.column().classes("w-full min-w-0 gap-1")
@@ -156,15 +200,15 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         if expiry == state["expiry"]:
             return
         state["expiry"] = expiry
-        state["window"] = GRID_WINDOW
         _paint_strip()
         _paint_grid()
         for cb in list(listeners["expiry"]):
             cb(expiry)
 
-    def _more(step):
-        state["window"] += step
-        _paint_grid()
+    def _on_grid_click(e):
+        pick = pick_from_args(getattr(e, "args", None))
+        if pick is not None:
+            _pick(*pick)
 
     def _paint_strip():
         strip.clear()
@@ -189,6 +233,7 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
                 if key in _PICKS:
                     box.set_enabled(False)
                 box.on_value_change(lambda e, k=key: _toggle_column(k, e.value))
+        # Bid and Ask stay ticked and locked: they are the grid's click targets.
 
     def _toggle_column(key, on):
         cols = [c for c in state["columns"] if c != key] + ([key] if on else [])
@@ -196,61 +241,38 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         app_settings.set(SETTINGS_KEY, list(state["columns"]))
         _paint_grid()
 
-    def _cell(row, side, field, itm):
-        c = row[side]
-        text = cg.cell_text(field, c.get(field))
-        tone = f" {tk[field]}" if field in _PICKS else ""
-        wash = f" {tk['itm']}" if itm else ""
-        if field in _PICKS:
-            lbl = ui.label(text).classes(
-                f"entry-pick entry-{side}-{field} {tk['cell']}{tone}{wash} "
-                f"{tk['pick']} text-center px-1 py-0.5")
-            lbl.on("click", lambda e, f=field, s=side, k=row["strike"]: _pick(f, s, k))
-        else:
-            ui.label(text).classes(f"{tk['cell']}{wash} text-center px-1 py-0.5")
-
     def _paint_grid():
-        grid_box.clear()
         chain, expiry = state["chain"], state["expiry"]
         call_cols, put_cols = side_columns(state["columns"])
-        n = len(put_cols)
-        track = _GRID_TRACKS[n]
+        track = _GRID_TRACKS[len(put_cols)]
         grid_title.text = f"CHAIN · {expiry}" if expiry else "CHAIN"
-        g = cg.chain_grid_rows(chain, expiry, state["spot"],
-                               above=state["window"], below=state["window"])
-        with grid_box:
-            if not g["rows"]:
-                ui.label("Load a symbol to see its chain." if not chain
-                         else "No strikes listed for this expiry.") \
-                    .classes(f"entry-empty {tk['muted']} py-4")
-                return
-            with ui.element("div").classes(f"entry-ghead {track} {tk['rule']} pb-0.5"):
+        g = cg.chain_grid_rows(chain, expiry, state["spot"])
+        has = bool(g["rows"])
+        grid_empty.text = ("Load a symbol to see its chain." if not chain
+                           else "No strikes listed for this expiry.")
+        for el, show in ((grid_empty, not has), (grid_head, has),
+                         (grid_hint, has), (grid_body, has)):
+            el.set_visibility(show)
+        grid_head.clear()
+        if has:
+            with grid_head, ui.element("div").classes(
+                    f"entry-ghead {track} {tk['rule']} pb-0.5"):
                 for f in call_cols:
                     ui.label(cg.GRID_COLUMNS[f]).classes(f"{tk['eyebrow']} text-center")
                 ui.label("STRIKE").classes(f"{tk['eyebrow']} text-center")
                 for f in put_cols:
                     ui.label(cg.GRID_COLUMNS[f]).classes(f"{tk['eyebrow']} text-center")
-            ui.label("CALLS · click Bid to sell, Ask to buy · PUTS") \
-                .classes(f"{tk['muted']} text-[9px] text-center w-full")
-            if g["more_below"]:
-                ui.button("more strikes below", color=None,
-                          on_click=lambda e: _more(_WINDOW_STEP)) \
-                    .props("flat dense no-caps") \
-                    .classes(f"entry-more-below {tk['muted']} w-full min-h-0 text-[10px]")
-            for row in g["rows"]:
-                with ui.element("div").classes(f"entry-grow {track}"):
-                    for f in call_cols:
-                        _cell(row, "call", f, row["call_itm"])
-                    ui.label(f"{row['strike']:g}").classes(
-                        f"entry-strike {'entry-atm ' + tk['strike_atm'] if row['atm'] else tk['strike']} "
-                        "text-center rounded-[2px] py-0.5")
-                    for f in put_cols:
-                        _cell(row, "put", f, row["put_itm"])
-            if g["more_above"]:
-                ui.button("more strikes above", color=None,
-                          on_click=lambda e: _more(_WINDOW_STEP)) \
-                    .props("flat dense no-caps") \
-                    .classes(f"entry-more-above {tk['muted']} w-full min-h-0 text-[10px]")
+        grid_body.content = cg.grid_body_html(g["rows"], call_cols, put_cols, track, tk)
+        if has:
+            _center_on_spot()
+
+    def _center_on_spot():
+        # Only a connected browser has a body to scroll. A chain always lands
+        # after the page is up (a poll timer applies it), so nothing real is
+        # skipped — this just keeps an unconnected build from queueing JS.
+        client = grid_body.client
+        if getattr(client, "has_socket_connection", False):
+            client.run_javascript(center_js(grid_body.id))
 
     # ── the handle ────────────────────────────────────────────────────────
     def set_chain(chain, spot, expiry=None):
@@ -263,7 +285,6 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
             state["expiry"] = expiry
         elif state["expiry"] not in exps:
             state["expiry"] = exps[0] if exps else None
-        state["window"] = GRID_WINDOW
         _paint_strip()
         _paint_grid()
         return state["expiry"]

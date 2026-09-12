@@ -7,6 +7,7 @@ them by name. No nicegui import — everything here is unit-tested without a
 browser.
 """
 import datetime as dt
+import html as _html
 import math
 
 
@@ -196,14 +197,18 @@ def chain_strikes(chain, expiry, option_type):
 
 
 # ── the entry panel's chain grid ────────────────────────────────────────────
-#: Registry order IS the on-screen column order, per side. Whole words except
-#: the trader acronyms (IV, OI). Every key is a field ``thin_calc_chain`` keeps.
+#: Registry order runs from the grid's OUTER edge to the strike: it is the call
+#: side left to right, and the put side mirrors it, so Bid and Ask — last here —
+#: always sit against the strike. The optional Greeks go outermost. Whole words
+#: except the trader acronyms (IV, OI). Every key is a field ``thin_calc_chain``
+#: keeps.
 GRID_COLUMNS = {
-    "bid": "Bid", "ask": "Ask", "mark": "Mark", "delta": "Delta",
-    "volatility": "IV", "gamma": "Gamma", "theta": "Theta", "vega": "Vega",
-    "openInterest": "OI", "totalVolume": "Volume",
+    "gamma": "Gamma", "theta": "Theta", "vega": "Vega", "volatility": "IV",
+    "delta": "Delta", "openInterest": "OI", "totalVolume": "Volume",
+    "mark": "Mark", "bid": "Bid", "ask": "Ask",
 }
-DEFAULT_COLUMNS = ["bid", "ask", "delta", "openInterest"]
+#: The operator's default (2026-09-12): Delta · OI · Volume · Bid · Ask.
+DEFAULT_COLUMNS = ["delta", "openInterest", "totalVolume", "bid", "ask"]
 #: The click targets — a grid without them cannot add a leg.
 _REQUIRED_COLUMNS = ("bid", "ask")
 _PRICE_FIELDS = {"bid", "ask", "mark"}
@@ -274,10 +279,11 @@ def _side_map(chain, map_key, expiry):
     return out
 
 
-def chain_grid_rows(chain, expiry, spot, above=15, below=15):
-    """The grid's rows for one expiry: ``below`` strikes at or under spot plus
-    ``above`` strikes over it, with the in-the-money side and the at-the-money
-    strike flagged.
+def chain_grid_rows(chain, expiry, spot, above=None, below=None):
+    """The grid's rows for one expiry, with the in-the-money side and the
+    at-the-money strike flagged. By default EVERY strike (the page scrolls the
+    at-the-money row into view); ``below`` / ``above`` crop to that many strikes
+    at-or-under / over spot.
 
     TOTAL: a junk chain or an unlisted expiry gives no rows. With no usable spot
     the window starts at the bottom of the ladder and nothing is flagged — a
@@ -290,12 +296,14 @@ def chain_grid_rows(chain, expiry, spot, above=15, below=15):
     if not strikes:
         return dict(_EMPTY_GRID)
     s = _finite(spot)
-    above, below = max(int(above), 0), max(int(below), 0)
+    n = len(strikes)
+    above = n if above is None else max(int(above), 0)
+    below = n if below is None else max(int(below), 0)
     if s is None:
-        lo, hi, atm = 0, min(len(strikes), above + below), None
+        lo, hi, atm = 0, min(n, above + below), None
     else:
         under = sum(1 for k in strikes if k <= s)
-        lo, hi = max(under - below, 0), min(under + above, len(strikes))
+        lo, hi = max(under - below, 0), min(under + above, n)
         atm = min(strikes, key=lambda k: abs(k - s))
     rows = [{"strike": k,
              "call": dict(calls.get(k) or {}), "put": dict(puts.get(k) or {}),
@@ -317,3 +325,48 @@ def expiry_pills(expiries, today):
         out.append({"value": str(e), "label": f"{d:%b} {d.day}",
                     "dte": (d - today).days})
     return out
+
+
+def _strike_attr(strike):
+    return f"{strike:g}"
+
+
+def grid_body_html(rows, call_cols, put_cols, track, tokens):
+    """The grid body as ONE html block: a row per strike, calls | strike | puts.
+
+    One block rather than a widget per cell because the grid is the COMPLETE
+    chain — an index can list hundreds of strikes, and a NiceGUI element per cell
+    would be thousands of components per expiry. Clicks are delegated: every Bid
+    and Ask cell carries ``data-pick`` / ``data-side`` / ``data-strike``, and the
+    panel's single listener reads them. The at-the-money row carries
+    ``data-atm`` so the page can scroll it to the middle.
+
+    ``tokens`` needs ``strike``, ``strike_atm``, ``itm``, ``cell``, ``pick``,
+    ``bid``, ``ask``. Only ``div`` and ``class`` / ``data-*`` are emitted — all
+    survive the DOMPurify pass ``ui.html`` applies (pinned by test)."""
+    esc = _html.escape
+    out = []
+    for row in rows or []:
+        k = _strike_attr(row["strike"])
+        atm = " data-atm=\"1\"" if row.get("atm") else ""
+        out.append(f'<div class="entry-grow {esc(track)}" data-strike="{k}"{atm}>')
+        for side, cols, itm in (("call", call_cols, row.get("call_itm")),
+                                ("put", put_cols, row.get("put_itm"))):
+            if side == "put":
+                cls = tokens["strike_atm"] if row.get("atm") else tokens["strike"]
+                out.append(f'<div class="entry-gstrike {esc(cls)} text-center '
+                           f'rounded-[2px] py-0.5">{esc(k)}</div>')
+            contract = row.get(side) or {}
+            for field in cols:
+                text = esc(cell_text(field, contract.get(field)))
+                wash = f" {tokens['itm']}" if itm else ""
+                if field in _REQUIRED_COLUMNS:
+                    out.append(
+                        f'<div class="{esc(tokens["cell"])} {esc(tokens[field])} '
+                        f'{esc(tokens["pick"])}{esc(wash)} text-center px-1 py-0.5" '
+                        f'data-pick="{field}" data-side="{side}" data-strike="{k}">{text}</div>')
+                else:
+                    out.append(f'<div class="{esc(tokens["cell"])}{esc(wash)} '
+                               f'text-center px-1 py-0.5">{text}</div>')
+        out.append("</div>")
+    return "".join(out)

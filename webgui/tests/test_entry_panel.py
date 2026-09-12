@@ -47,10 +47,25 @@ def _all(root, cls):
     return [e for e in root.descendants() if cls in e._classes]
 
 
-def _fire(el, event):
+def _fire(el, event, args=None):
+    from types import SimpleNamespace
     for listener in list(el._event_listeners.values()):
         if listener.type == event:
-            listener.handler(None)
+            listener.handler(SimpleNamespace(args=args) if args is not None else None)
+
+
+def _body(root):
+    return _all(root, "entry-gridbody")[0]
+
+
+def _strikes(root):
+    """The strikes the grid body lists, in order (the rows are one html block)."""
+    return [float(k) for k in re.findall(r'class="entry-grow[^"]*" data-strike="([^"]+)"',
+                                         _body(root).content)]
+
+
+def _click_cell(root, pick, side, strike):
+    _fire(_body(root), "click", {"pick": pick, "side": side, "strike": f"{strike:g}"})
 
 
 def test_panel_has_exactly_one_ticker_input(saved):
@@ -60,16 +75,17 @@ def test_panel_has_exactly_one_ticker_input(saved):
 
 def test_no_chain_shows_the_empty_line_and_no_rows(saved):
     _, root = _panel()
-    assert not _all(root, "entry-grow")
+    assert _strikes(root) == []
+    assert _all(root, "entry-empty")[0].visible
     assert [e.text for e in _all(root, "entry-empty")] == ["Load a symbol to see its chain."]
+    assert not _body(root).visible
 
 
-def test_set_chain_paints_the_nearest_expiry_and_a_window_around_spot(saved):
+def test_set_chain_paints_the_nearest_expiry_and_the_complete_ladder(saved):
     panel, root = _panel()
     assert panel.set_chain(_chain(), 571.0) == "2026-09-19"
-    strikes = [float(e.text) for e in _all(root, "entry-strike")]
-    assert len(strikes) == 2 * EP.GRID_WINDOW
-    assert strikes[EP.GRID_WINDOW - 1] <= 571.0 < strikes[EP.GRID_WINDOW]
+    assert _strikes(root) == [float(k) for k in range(500, 651, 5)]     # every strike
+    assert _body(root).visible and not _all(root, "entry-empty")[0].visible
     assert [e.text for e in _all(root, "entry-expiry")] == ["Sep 19 · 7d", "Sep 26 · 14d"]
 
 
@@ -80,11 +96,16 @@ def test_set_chain_keeps_a_requested_expiry_then_the_current_one(saved):
     assert panel.set_chain(_chain(), 572.0, expiry="2031-01-01") == "2026-09-26"
 
 
-def test_the_atm_strike_is_marked(saved):
+def test_the_atm_strike_is_marked_for_centring(saved):
     panel, root = _panel()
     panel.set_chain(_chain(), 571.0)
-    atm = [e.text for e in _all(root, "entry-atm")]
-    assert atm == ["570"]
+    assert re.findall(r'data-strike="([^"]+)" data-atm', _body(root).content) == ["570"]
+
+
+def test_center_js_scrolls_only_the_body_to_the_atm_row():
+    js = EP.center_js(42)
+    assert "getHtmlElement(42)" in js and "[data-atm]" in js
+    assert "b.scrollTop" in js and "scrollIntoView" not in js   # never the page
 
 
 def test_clicking_a_put_bid_picks_bid_put_strike_expiry(saved):
@@ -92,10 +113,7 @@ def test_clicking_a_put_bid_picks_bid_put_strike_expiry(saved):
     picks = []
     panel.on_pick(lambda *a: picks.append(a))
     panel.set_chain(_chain(), 571.0)
-    rows = _all(root, "entry-grow")
-    target = [e for e in rows[EP.GRID_WINDOW - 1].descendants()
-              if "entry-put-bid" in e._classes][0]
-    _fire(target, "click")
+    _click_cell(root, "bid", "put", 570.0)
     assert picks == [("bid", "put", 570.0, "2026-09-19")]
 
 
@@ -104,14 +122,32 @@ def test_clicking_a_call_ask_picks_ask_call(saved):
     picks = []
     panel.on_pick(lambda *a: picks.append(a))
     panel.set_chain(_chain(), 571.0)
-    _fire(_all(root, "entry-call-ask")[0], "click")
-    assert picks[0][:2] == ("ask", "call")
+    _click_cell(root, "ask", "call", 505.0)
+    assert picks == [("ask", "call", 505.0, "2026-09-19")]
+
+
+def test_a_click_that_is_not_a_well_formed_pick_does_nothing(saved):
+    panel, root = _panel()
+    picks = []
+    panel.on_pick(lambda *a: picks.append(a))
+    panel.set_chain(_chain(), 571.0)
+    for junk in ({}, {"pick": "mark", "side": "put", "strike": "570"},
+                 {"pick": "bid", "side": "stock", "strike": "570"},
+                 {"pick": "bid", "side": "put", "strike": "abc"},
+                 {"pick": "bid", "side": "put", "strike": "nan"}):
+        _fire(_body(root), "click", junk)
+    assert picks == []
+
+
+def test_the_default_columns_read_delta_oi_volume_bid_ask_then_mirror():
+    calls, puts = EP.side_columns(None)
+    assert calls == ["delta", "openInterest", "totalVolume", "bid", "ask"]
+    assert puts == ["ask", "bid", "totalVolume", "openInterest", "delta"]
 
 
 def test_bid_and_ask_sit_next_to_the_strike_on_both_sides():
-    calls, puts = EP.side_columns(["bid", "ask", "delta", "openInterest"])
-    assert calls == ["openInterest", "delta", "bid", "ask"]
-    assert puts == ["bid", "ask", "delta", "openInterest"]
+    calls, puts = EP.side_columns(["gamma", "bid", "ask", "delta"])
+    assert calls[-2:] == ["bid", "ask"] and puts[:2] == ["ask", "bid"]
 
 
 def test_clicking_an_expiry_pill_repaints_and_notifies(saved):
@@ -135,24 +171,16 @@ def test_set_expiry_is_programmatic_and_fires_nothing(saved):
     assert panel.selected_expiry() == "2026-09-26" and seen == []
 
 
-def test_more_strikes_below_extends_the_window(saved):
-    panel, root = _panel()
-    panel.set_chain(_chain(), 571.0)
-    before = len(_all(root, "entry-grow"))
-    _fire(_all(root, "entry-more-below")[0], "click")
-    assert len(_all(root, "entry-grow")) > before
-
-
 def test_the_grid_uses_the_saved_columns_and_the_picker_persists(saved):
     saved[EP.SETTINGS_KEY] = ["bid", "ask", "gamma"]
     panel, root = _panel()
     panel.set_chain(_chain(), 571.0)
     heads = [e.text for e in _all(root, "entry-ghead")[0].descendants()
              if isinstance(e, ui.label)]
-    assert heads == ["Gamma", "Bid", "Ask", "STRIKE", "Bid", "Ask", "Gamma"]
+    assert heads == ["Gamma", "Bid", "Ask", "STRIKE", "Ask", "Bid", "Gamma"]
     box = _all(root, "entry-col-openInterest")[0]
     box.value = True
-    assert saved[EP.SETTINGS_KEY] == ["bid", "ask", "gamma", "openInterest"]
+    assert saved[EP.SETTINGS_KEY] == ["gamma", "openInterest", "bid", "ask"]
     heads = [e.text for e in _all(root, "entry-ghead")[0].descendants()
              if isinstance(e, ui.label)]
     assert "OI" in heads
@@ -168,6 +196,7 @@ def test_an_unlisted_expiry_says_so(saved):
     panel, root = _panel()
     panel.set_chain({"callExpDateMap": {"2026-09-19:7": {}}, "putExpDateMap": {}}, 571.0)
     assert [e.text for e in _all(root, "entry-empty")] == ["No strikes listed for this expiry."]
+    assert _all(root, "entry-empty")[0].visible and _strikes(root) == []
 
 
 def test_panel_tokens_merge_and_ignore_junk():

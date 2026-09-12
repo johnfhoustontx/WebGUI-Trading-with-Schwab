@@ -232,14 +232,13 @@ def test_the_chain_grid_is_empty_until_a_chain_lands(page):
     root, polls = page
     texts = _texts(root)
     assert "Load a symbol to see its chain." in texts
-    assert not [el for el in _walk(root) if "entry-grow" in getattr(el, "_classes", [])]
+    assert _grid_strikes(root) == []
 
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
 
     assert "Load a symbol to see its chain." not in _texts(root)
-    assert len([el for el in _walk(root)
-                if "entry-grow" in getattr(el, "_classes", [])]) == 5
+    assert _grid_strikes(root) == [650.0, 655.0, 660.0, 665.0, 670.0]
 
 
 def _click(root, label):
@@ -262,6 +261,28 @@ def _click(root, label):
 
 def _hooked(root, cls):
     return [el for el in _walk(root) if cls in getattr(el, "_classes", [])]
+
+
+def _grid_body(root):
+    return _hooked(root, "entry-gridbody")[0]
+
+
+def _grid_strikes(root):
+    """Strikes the chain grid lists — its rows are one html block now."""
+    import re
+    return [float(k) for k in re.findall(r'class="entry-grow[^"]*" data-strike="([^"]+)"',
+                                         _grid_body(root).content)]
+
+
+def _click_grid(root, pick, side, strike):
+    """A delegated grid click, as the browser's js_handler emits it."""
+    from types import SimpleNamespace
+    body = _grid_body(root)
+    for listener in list(body._event_listeners.values()):
+        if listener.type == "click":
+            with root:
+                listener.handler(SimpleNamespace(
+                    args={"pick": pick, "side": side, "strike": f"{strike:g}"}))
 
 
 def _symbol_input(root):
@@ -396,10 +417,8 @@ def test_clicking_a_put_bid_adds_a_short_leg_priced_at_the_mark(page, sent_comma
     root, polls = page
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
-    bids = _hooked(root, "entry-put-bid")
-    strikes = [el for el in _hooked(root, "entry-strike")]
-    idx = [float(el.text) for el in strikes].index(655.0)
-    _fire(root, bids[idx], "click")
+    assert 655.0 in _grid_strikes(root)
+    _click_grid(root, "bid", "put", 655.0)
     _recalc(root)
     legs = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
     assert len(legs) == 3

@@ -36,7 +36,7 @@ DEFAULTS = {
     "macro_skin": "A",               # Macro Board skin: A (Instrument) | B (Heat Lattice)
     # Calculator/Simulator chain grid columns (entry_panel; parsed by
     # chain_grid.parse_columns, which always keeps Bid and Ask).
-    "chain_grid_columns": ["bid", "ask", "delta", "openInterest"],
+    "chain_grid_columns": ["delta", "openInterest", "totalVolume", "bid", "ask"],
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

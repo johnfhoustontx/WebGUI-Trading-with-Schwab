@@ -409,7 +409,7 @@ def test_a_sim_chain_for_another_symbol_is_not_painted():
     other["symbol"] = "QQQ"
     bus_client.bus().cache_set("cache:options:sim_chain", other)
     _run_async(container, "_poll_chain", asyncio)
-    assert not _hooked(container, "entry-grow")
+    assert _grid_strikes(container) == []
     assert "Load a symbol to see its chain." in _labels(container)
 
 
@@ -422,13 +422,29 @@ def test_a_grid_click_adds_a_leg_and_prices_the_new_position():
     bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain())
     _fire(container, "_poll_meta")
     _run_async(container, "_poll_chain", asyncio)
-    asks = _hooked(container, "entry-call-ask")
-    strikes = [float(e.text) for e in _hooked(container, "entry-strike")]
-    _fire_click_on(asks[strikes.index(455.0)])
+    assert _grid_strikes(container) == [445.0, 450.0, 455.0]
+    _click_grid(container, "ask", "call", 455.0)
     assert len(_leg_rows(container)) == 3
     legs = _last_command("sim_run")["args"]["legs"]
     assert {"kind": "call", "strike": 455.0, "expiry": "2026-06-26",
             "side": "long", "qty": 1} in legs
+
+
+def _grid_strikes(container):
+    import re
+    body = _hooked(container, "entry-gridbody")[0]
+    return [float(k) for k in re.findall(r'class="entry-grow[^"]*" data-strike="([^"]+)"',
+                                         body.content)]
+
+
+def _click_grid(container, pick, side, strike):
+    """A delegated grid click, as the browser's js_handler emits it."""
+    from types import SimpleNamespace
+    body = _hooked(container, "entry-gridbody")[0]
+    for listener in list(body._event_listeners.values()):
+        if listener.type == "click":
+            listener.handler(SimpleNamespace(
+                args={"pick": pick, "side": side, "strike": f"{strike:g}"}))
 
 
 def _fire_click_on(el):

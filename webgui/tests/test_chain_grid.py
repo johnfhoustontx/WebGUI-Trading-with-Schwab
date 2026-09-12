@@ -41,8 +41,17 @@ CHAIN = {
 }
 
 
-def test_default_columns_are_bid_ask_delta_oi():
-    assert cg.DEFAULT_COLUMNS == ["bid", "ask", "delta", "openInterest"]
+def test_default_columns_are_delta_oi_volume_bid_ask():
+    # Operator's order (2026-09-12), read on the CALL side from the outside in.
+    assert cg.DEFAULT_COLUMNS == ["delta", "openInterest", "totalVolume", "bid", "ask"]
+
+
+def test_column_registry_runs_from_the_outer_edge_to_the_strike():
+    # Registry order IS the call side's left-to-right order: optional Greeks on
+    # the outer edge, Bid and Ask last so they sit against the strike.
+    assert list(cg.GRID_COLUMNS) == ["gamma", "theta", "vega", "volatility", "delta",
+                                     "openInterest", "totalVolume", "mark", "bid", "ask"]
+    assert cg.parse_columns(cg.DEFAULT_COLUMNS) == cg.DEFAULT_COLUMNS
 
 
 def test_column_labels_are_whole_words_or_trader_acronyms():
@@ -53,7 +62,7 @@ def test_column_labels_are_whole_words_or_trader_acronyms():
 
 
 def test_parse_columns_keeps_known_in_registry_order_and_falls_back():
-    assert cg.parse_columns(["openInterest", "bid", "ask"]) == ["bid", "ask", "openInterest"]
+    assert cg.parse_columns(["bid", "ask", "openInterest"]) == ["openInterest", "bid", "ask"]
     assert cg.parse_columns(["nope"]) == cg.DEFAULT_COLUMNS
     assert cg.parse_columns(None) == cg.DEFAULT_COLUMNS
     assert cg.parse_columns("bid") == cg.DEFAULT_COLUMNS
@@ -62,7 +71,7 @@ def test_parse_columns_keeps_known_in_registry_order_and_falls_back():
 
 def test_parse_columns_always_keeps_bid_and_ask():
     # Bid and Ask are the click targets; a grid without them cannot add a leg.
-    assert cg.parse_columns(["delta"]) == ["bid", "ask", "delta"]
+    assert cg.parse_columns(["delta"]) == ["delta", "bid", "ask"]
 
 
 def test_cell_text_formats_by_field_and_dashes_non_readings():
@@ -96,6 +105,14 @@ def test_grid_rows_window_around_spot_and_flag_itm():
     assert r570["atm"] is True and r575["atm"] is False
     assert r570["call"]["openInterest"] == 4120
     assert r570["put"]["delta"] == -0.3
+
+
+def test_grid_rows_default_to_the_complete_ladder():
+    # The grid shows EVERY strike (2026-09-12); the page scrolls it to spot.
+    g = cg.chain_grid_rows(CHAIN, "2026-09-19", spot=571.0)
+    assert [r["strike"] for r in g["rows"]] == [560.0, 565.0, 570.0, 575.0, 580.0]
+    assert g["more_below"] is False and g["more_above"] is False
+    assert [r["atm"] for r in g["rows"]] == [False, False, True, False, False]
 
 
 def test_grid_rows_the_whole_ladder_fits_a_wide_window():
@@ -136,3 +153,66 @@ def test_expiry_pills_label_and_dte():
     assert pills == [{"value": "2026-09-12", "label": "Sep 12", "dte": 0},
                      {"value": "2026-09-19", "label": "Sep 19", "dte": 7}]
     assert cg.expiry_pills(["2026-10-03"], today=dt.date(2026, 9, 12))[0]["label"] == "Oct 3"
+
+
+# ── the grid body as ONE html block (2026-09-12) ─────────────────────────────
+import re as _re
+import pathlib as _pathlib
+
+_TK = {"strike": "t-strike", "strike_atm": "t-atm", "itm": "t-itm", "cell": "t-cell",
+       "pick": "t-pick", "bid": "t-bid", "ask": "t-ask"}
+
+
+def _html():
+    g = cg.chain_grid_rows(CHAIN, "2026-09-19", spot=571.0)
+    return cg.grid_body_html(g["rows"], ["delta", "bid", "ask"], ["bid", "ask", "delta"],
+                             "grid grid-cols-[x]", _TK)
+
+
+def test_grid_body_html_is_one_row_per_strike_with_the_atm_marked():
+    out = _html()
+    rows = _re.findall(r'<div class="entry-grow[^"]*"[^>]*data-strike="([^"]+)"', out)
+    assert rows == ["560", "565", "570", "575", "580"]
+    assert out.count("data-atm") == 1
+    assert _re.search(r'data-strike="570"[^>]*data-atm', out)
+
+
+def test_grid_body_html_bid_and_ask_cells_carry_what_a_click_needs():
+    out = _html()
+    picks = _re.findall(r'data-pick="(bid|ask)" data-side="(call|put)" data-strike="([^"]+)"', out)
+    assert ("bid", "put", "570") in picks and ("ask", "call", "560") in picks
+    assert len(picks) == 5 * 4                     # 2 click targets per side per strike
+    assert "t-pick" in out and "t-bid" in out and "t-ask" in out
+
+
+def test_grid_body_html_shades_only_the_in_the_money_side():
+    out = _html()
+    row560 = _re.search(r'data-strike="560".*?(?=<div class="entry-grow|$)', out, _re.S).group(0)
+    call_cells = row560.split("entry-gstrike")[0]
+    put_cells = row560.split("entry-gstrike")[1]
+    assert "t-itm" in call_cells and "t-itm" not in put_cells
+
+
+def test_grid_body_html_escapes_and_stays_total_on_no_rows():
+    assert cg.grid_body_html([], ["bid", "ask"], ["bid", "ask"], "grid", _TK) == ""
+
+
+def test_grid_body_html_emits_nothing_dompurify_would_strip():
+    """ui.html sanitizes through the bundled DOMPurify (CLAUDE.md): a stripped
+    attribute is invisible server-side, so the allow-list is checked here.
+    data-* attributes survive because DOMPurify's ALLOW_DATA_ATTR defaults on —
+    pinned against the shipped bundle so a NiceGUI upgrade that flips it fails."""
+    from nicegui import ui
+    src = (_pathlib.Path(ui.__file__).parent / "static" / "dompurify.mjs") \
+        .read_text(encoding="utf-8", errors="replace")
+    allow = set()
+    for run in _re.findall(r'(?:"[a-z][a-z0-9-]*",){19,}"[a-z][a-z0-9-]*"', src):
+        tokens = set(_re.findall(r'"([a-z][a-z0-9-]*)"', run))
+        if "script" not in tokens:
+            allow |= tokens
+    assert "!1!==e.ALLOW_DATA_ATTR" in src, "DOMPurify's data-* default changed"
+    out = _html()
+    tags = set(_re.findall(r"<([a-zA-Z][\w-]*)", out))
+    attrs = {a for a in _re.findall(r'([a-zA-Z][\w-]*)="', out) if not a.startswith("data-")}
+    assert not sorted(n for n in tags | attrs if n.lower() not in allow)
+    assert tags == {"div"} and "class" in attrs
