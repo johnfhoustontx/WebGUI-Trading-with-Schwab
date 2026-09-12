@@ -168,6 +168,48 @@ def scorecard_text(perf) -> str:
     return " · ".join(bits)
 
 
+
+def greeks_text(greeks) -> str:
+    """One-line book-level risk read. PURE. Gap assessment C4.
+
+    ``'Net theta +$24.00 a day · long 1.44 delta · short 0.48 vega'``
+
+    ⚠ **Theta is named in DOLLARS A DAY and delta as a DIRECTION**, and that
+    asymmetry is deliberate. Theta is genuinely additive — it is what the book
+    earns for a day passing. A cross-symbol delta TOTAL is not a hedge ratio:
+    without a beta there is no sense in which a $970 MU delta and a $145 PG delta
+    add up, so the line says which way the book leans and by how much, and never
+    implies a share count to hedge with. The beta weighting the assessment calls
+    "optional" is not shipped for exactly that reason — see the design doc.
+
+    ⚠ **Blank when nothing is priced.** An unpriced book must not read as a flat
+    one; zero delta is a real reading (a balanced condor) and says something
+    quite different from "no readings yet".
+    """
+    g = greeks or {}
+    theta, delta, vega = g.get("net_theta"), g.get("net_delta"), g.get("net_vega")
+    if all(v is None for v in (theta, delta, vega)):
+        return ""
+    bits = []
+    if isinstance(theta, (int, float)) and not isinstance(theta, bool):
+        bits.append(f"Net theta {_scorecard.money(theta)} a day")
+    if isinstance(delta, (int, float)) and not isinstance(delta, bool):
+        lean = "flat" if delta == 0 else ("long" if delta > 0 else "short")
+        bits.append(f"{lean} {abs(float(delta)):.2f} delta"
+                    if delta else "delta flat")
+    if isinstance(vega, (int, float)) and not isinstance(vega, bool):
+        side = "flat" if vega == 0 else ("long" if vega > 0 else "short")
+        bits.append(f"{side} {abs(float(vega)):.2f} vega")
+    line = " · ".join(bits)
+    # Say so when the sum covers only part of the book — a total that silently
+    # omits positions is worse than one that admits the gap.
+    priced, total = g.get("positions_priced"), g.get("positions_total")
+    if (isinstance(priced, int) and isinstance(total, int)
+            and 0 < priced < total):
+        line += f" (priced {priced} of {total})"
+    return line
+
+
 def render():
     """Paper Portfolio page: account cards + positions + fills log (bus-fed)."""
     # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
@@ -197,6 +239,8 @@ def render():
         # carries the account cards, the positions and the fills, and a second
         # multi-table block would bury them.
         scorecard_label = ui.label("").classes("text-xs opacity-70")
+        # Book-level risk (gap assessment C4) — one line beside the track record.
+        greeks_label = ui.label("").classes("text-xs opacity-70")
         ui.label("Open positions").classes("text-subtitle1 mt-2")
         pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
         # Symbol cell gets a colored left-border + faint tint when the position is
@@ -267,6 +311,7 @@ def render():
                         ui.label(label).classes("text-xs opacity-60")
                         ui.label(value).classes("text-base font-bold")
         scorecard_label.text = scorecard_text(pa.get("perf"))
+        greeks_label.text = greeks_text(pa.get("greeks"))
         pos_table.rows = position_rows(pa.get("positions"))
         ord_table.rows = order_rows(pa.get("orders"))
         pos_table.update()

@@ -277,7 +277,7 @@ Keep the stops, and keep measuring. The calibration re-run due 2026-09-23 is the
 | **C1** | Record Income Window candidates for calibration — **shipped 2026-09-11** | M2 (evidence) | S–M | High |
 | **C2** | Wire the profit-lock ladder; trial the lifecycle on the manual book — **ladder shipped 2026-09-12; the lifecycle trial is decision 8** | X1 | S | Medium |
 | **C3** | Store a daily ATM IV to build a true IV rank — **shipped 2026-09-12; the store, writer AND reader already existed with 7 rows** | V1 | S | Medium |
-| **C4** | Book-level Greeks | V2 | M | Medium |
+| **C4** | Book-level Greeks — **shipped 2026-09-12; the beta weighting is NOT built, because no beta exists anywhere in this repo** | V2 | M | Medium |
 | **C5** | Trade plan snapshot and a manual-book scorecard — **scorecard shipped 2026-09-12; the trade-plan snapshot is bigger than written and stays open** | P1, P2 | M | Medium |
 | **D1** | Straddle and strangle templates | coverage | S | Low–medium |
 | **D2** | Iron butterfly scanner on the IC pipeline | coverage | M | Medium |
@@ -644,6 +644,21 @@ proxy** — nothing here claims a true IV rank beats it, and the snapshot
 deliberately does **not** feed selection.
 
 **C4. Book-level Greeks:** net delta, gamma, theta and vega per book, optionally beta-weighted to SPY.
+
+**Shipped 2026-09-12** — [design](2026-09-12-book-greeks-design.md).
+`signal_repricer.position_greeks` reads BOTH legs off the chain the reprice
+already fetched (no API cost), stores four nullable columns on the position, and
+`compute.book_greeks` sums them. ⚠ Summing the stored `current_short_delta` would
+NOT have been net delta: a −0.20 short against a −0.08 long is +0.12, so a
+short-leg total overstates the book's direction by the whole long-leg offset.
+
+⚠ **The beta weighting is not built**: nothing in this repo stores or computes a
+beta, and Schwab does not serve one, so producing a beta-weighted delta would mean
+inventing the input to the only quantity the reader cares about. The page
+therefore names theta in **dollars a day** (additive) and delta as a
+**direction**, never as a hedge ratio. It is derivable from the daily bars
+`run_full_scan` already fetches — the same shape as C3's finding — and is a
+follow-up.
 
 **C5. Trade plan and scorecard.** Snapshot the rules in force at entry and a free-text thesis on each position. Give the manual book the win-rate and profit-factor scorecard the driver has (`driver_perf.py`).
 

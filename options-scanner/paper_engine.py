@@ -734,6 +734,14 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
                 current_value=mark.get("current_value"),
                 unrealized_pnl=pnl,
                 current_short_delta=mark.get("current_short_delta"),
+                # Net per-position Greeks (gap assessment C4) - computed off the
+                # chain this reprice already fetched, so no API cost. None when
+                # a leg was unquotable, which keeps that position OUT of the
+                # book's sum rather than counting it as flat.
+                net_delta=mark.get("net_delta"),
+                net_gamma=mark.get("net_gamma"),
+                net_theta=mark.get("net_theta"),
+                net_vega=mark.get("net_vega"),
                 mae=mae, mfe=mfe,
                 last_mark_ts=datetime.now(TZ).isoformat())
 

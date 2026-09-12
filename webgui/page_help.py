@@ -517,6 +517,16 @@ Trades you sent by hand live on **Paper Ledger**.
   or time stop, so a losing one rides to expiry, assignment or call-away — a short
   put's stops would fire exactly when assignment, the point of the wheel, becomes
   likely. The 21-day rule only ever ends a winner early.
+- **The two lines above the tables.** The first is the book's **track record** —
+  closed trades, win rate, realized P&L, profit factor — and it stays blank until
+  something has actually closed, because "0.0% win" on an all-open book would say
+  it loses rather than that it has no record yet. The second is the book's
+  **risk**: net theta in dollars a day (what the book earns for a day passing —
+  positive is what you want when selling premium), and which way the book leans
+  in delta. ⚠ That delta is a **direction, not a share count to hedge with**:
+  adding a $970 stock's delta to a $145 stock's delta is arithmetic, not risk, and
+  the app does not pretend otherwise. If only part of the book could be priced,
+  the line says so.
 - **Why a good signal sometimes never opens.** The engine refuses a trade that
   would stack the book, and those refusals leave **no trace on this page** — only
   in the log. Six limits, tightest first: at most **3 positions and $750** in one

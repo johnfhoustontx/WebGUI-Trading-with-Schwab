@@ -1365,6 +1365,13 @@ def paper_account_view() -> dict:
     except Exception:
         perf = None
 
+    # Book-level Greeks (gap assessment C4) over the OPEN positions this view
+    # already read - so no second query and no chain fetch.
+    try:
+        greeks = book_greeks(positions)
+    except Exception:
+        greeks = None
+
     return {
         "snapshot": snapshot,
         "positions": positions,
@@ -1372,6 +1379,7 @@ def paper_account_view() -> dict:
         "lots": lots,
         "has_account": has_account,
         "perf": perf,
+        "greeks": greeks,
     }
 
 
@@ -1511,6 +1519,56 @@ def driver_account_perf(positions=None, snapshot=None) -> dict:
         except Exception:
             snapshot = {}
     return driver_perf.build_scorecard(positions, snapshot or {})
+
+
+#: The four Greeks the book reports. Ordered as a reader wants them: direction
+#: first, then the two that a premium seller watches daily.
+_BOOK_GREEKS = ("net_delta", "net_gamma", "net_theta", "net_vega")
+
+
+def book_greeks(positions) -> dict:
+    """Net Greeks summed across a book's OPEN positions (gap assessment C4).
+
+    Each position contributes ``greek x quantity`` - the stored values are PER
+    CONTRACT. Returns the four sums plus ``positions_priced`` /
+    ``positions_total``, because a partial book is the normal case on the first
+    cycle after a restart and a total that silently omits three positions is worse
+    than one that says so.
+
+    ⚠ A greek is ``None`` when NO position had a reading for it, never 0.0: a flat
+    book and an unpriced book are different facts, and this repo's costliest bug
+    class is exactly the second rendering as the first. A position with a reading
+    but no quantity is counted as one contract, matching the sizing default.
+
+    ⚠ **The delta total is a DIRECTION, not a hedge ratio.** Without a beta there
+    is no sense in which MU's delta and PG's delta add up - see the design doc.
+    ``net_theta`` by contrast is dollars per day and genuinely additive.
+    """
+    # A non-iterable reaches this from a stale cache payload, so the type check is
+    # on the CONTAINER as well as the rows.
+    if not isinstance(positions, (list, tuple)):
+        positions = []
+    rows = [p for p in positions if isinstance(p, dict)]
+    out = {g: None for g in _BOOK_GREEKS}
+    out["positions_total"] = len(rows)
+    priced = 0
+    for g in _BOOK_GREEKS:
+        total, seen = 0.0, 0
+        for p in rows:
+            v = p.get(g)
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                continue
+            if not math.isfinite(float(v)):
+                continue
+            qty = p.get("quantity")
+            qty = int(qty) if isinstance(qty, int) and qty > 0 else 1
+            total += float(v) * qty
+            seen += 1
+        if seen:
+            out[g] = round(total, 4)
+            priced = max(priced, seen)
+    out["positions_priced"] = priced
+    return out
 
 
 def manual_account_perf(positions=None, snapshot=None) -> dict:

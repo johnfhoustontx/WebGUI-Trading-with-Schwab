@@ -2661,6 +2661,51 @@ both run. It closes the replay case with machinery the service already trusts; a
 dedup store keyed on the stream message id would be the stronger fix and is not
 built.
 
+## Book Greeks are NET per position, and delta is a direction not a hedge ratio
+
+**`signal_repricer.position_greeks(trade, chain)`** returns
+`{net_delta, net_gamma, net_theta, net_vega}` per contract, signed by side, off
+the chain `reprice_swing` **already fetched** — so it costs no API call, the same
+argument that made C3's IV snapshot free. Four additive nullable columns on
+`paper_positions` store it on the manage tick, and
+`compute.book_greeks(positions)` sums `greek × quantity` over the open book, which
+`cache:options:paper_account` publishes.
+
+⚠ **Summing `current_short_delta` would NOT have been net delta.** A put credit
+spread at a −0.20 short and a −0.08 long is **+0.12** net, so a book total built
+from short legs overstates its direction by the whole long-leg offset. That column
+stays what it is (the delta stop is about the short strike's moneyness); the
+Greeks read both legs.
+
+**Signs follow the POSITION, not the option** — a short leg contributes MINUS its
+greek. So a credit spread must come out net **positive** delta, negative gamma,
+**positive** theta (Schwab reports per-option theta as negative) and negative
+vega. A sign error would render a premium-selling book as *long volatility*, which
+is why the tests assert each sign rather than a magnitude. `_LEG_LAYOUT` is keyed
+on `shared.structures.canonical`, so `NAKED_PUT` and `SHORT_PUT` cannot be given
+different leg layouts.
+
+⚠ **`None` means "not computed", never zero — at every level.** A zero delta is a
+real and meaningful reading (a balanced iron condor), so an unquotable leg refuses
+the whole POSITION rather than contributing flat, and `book_greeks` reports `None`
+when no position had a reading. It also reports `positions_priced` /
+`positions_total`, because a partial book is the normal case on the first cycle
+after a restart and a total that silently omits three positions is worse than one
+that says so. A leg missing ONE greek yields `None` for that greek only — partial
+data is normal off-hours, and dropping the position would lose a usable direction.
+
+⚠ **Theta is dollars-per-day and additive; a cross-symbol DELTA total is not a
+hedge ratio.** Without a beta there is no sense in which a $970 MU delta and a
+$145 PG delta add up, so the page names theta in dollars and delta as a
+direction ("long 1.44 delta"), and never implies a share count to hedge with.
+**The beta weighting the assessment calls "optional" is NOT shipped**: nothing in
+this repo stores or computes a beta and Schwab does not serve one, so producing
+one would be inventing the input to the only quantity the reader cares about. It
+is derivable — `run_full_scan` already fetches a year of daily bars per symbol —
+which is the same shape as C3, and it is recorded as a follow-up rather than
+guessed at. Design:
+[the C4 doc](docs/plans/2026-09-12-book-greeks-design.md).
+
 ## The scorecard is shared, and it breaks P&L down by how a trade ENDED
 
 **`webgui/pages/scorecard.py`** holds the PURE render builders both books' cards

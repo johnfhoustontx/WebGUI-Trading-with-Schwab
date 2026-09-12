@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS paper_positions (
                             -- which is NOT zero: recommend() falls back to the
                             -- absolute delta ceiling when it is missing, where a
                             -- 0.0 would make the drift rule fire at 0.12.
+    -- NET position Greeks at the last mark (gap assessment C4), per contract and
+    -- signed by side, so a credit spread reads positive theta. NULL = not
+    -- computed, which is NOT zero: a zero delta is a real reading (a balanced
+    -- iron condor), so an unpriceable position must not join the book's sum flat.
+    net_delta REAL,
+    net_gamma REAL,
+    net_theta REAL,
+    net_vega REAL,
     entry_order_id INTEGER,
     max_loss_per REAL,
     max_loss_total REAL,
@@ -159,7 +167,12 @@ def init_db(db_path=None):
                            # No DEFAULT: every existing row must read NULL, which
                            # the rule engine treats as "not recorded" and answers
                            # with the absolute ceiling - the pre-B6 behaviour.
-                           ("entry_short_delta", "REAL")):
+                           ("entry_short_delta", "REAL"),
+                           # No DEFAULT, same reason: NULL must mean "not
+                           # computed" so an old row is excluded from the book's
+                           # Greeks rather than counted as flat.
+                           ("net_delta", "REAL"), ("net_gamma", "REAL"),
+                           ("net_theta", "REAL"), ("net_vega", "REAL")):
             if name not in cols:
                 conn.execute(f"ALTER TABLE paper_positions ADD COLUMN {name} {decl}")
         conn.commit()

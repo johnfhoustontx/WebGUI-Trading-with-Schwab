@@ -232,6 +232,112 @@ def _leg_bid_ask(leg_map, strike):
     return None, None, None
 
 
+
+#############################################
+# NET POSITION GREEKS (gap assessment C4)
+#############################################
+
+#: The greek names read off a Schwab contract, and the keys the book sums.
+_GREEK_KEYS = ("delta", "gamma", "theta", "vega")
+
+#: Leg layout per structure: ``(map, strike_field, side)`` where side is -1 for a
+#: SHORT leg. Keyed on the CANONICAL structure name so ``NAKED_PUT`` and
+#: ``SHORT_PUT`` cannot be given different layouts - the same reason
+#: ``shared.structures`` exists.
+_LEG_LAYOUT = {
+    "PCS": (("put", "short_strike", -1), ("put", "long_strike", +1)),
+    "CCS": (("call", "call_short", -1), ("call", "call_long", +1)),
+    "IC": (("put", "short_strike", -1), ("put", "long_strike", +1),
+           ("call", "call_short", -1), ("call", "call_long", +1)),
+    "SHORT_PUT": (("put", "short_strike", -1),),
+    "COVERED_CALL": (("call", "short_strike", -1),),
+}
+
+
+def _leg_greeks(leg_map, strike):
+    """``{delta, gamma, theta, vega}`` for one strike, values possibly ``None``.
+
+    ``None`` for the whole leg when the strike is absent from the map - which is
+    what makes an unquotable leg refuse the POSITION rather than contribute zero.
+    """
+    if strike is None:
+        return None
+    try:
+        key = f"{float(strike):.1f}"
+    except (TypeError, ValueError):
+        return None
+    for _exp_key, strikes in (leg_map or {}).items():
+        row = (strikes or {}).get(key)
+        if row:
+            ctr = row[0] or {}
+            return {g: _finite_greek(ctr.get(g)) for g in _GREEK_KEYS}
+    return None
+
+
+def _finite_greek(value):
+    """A real number, or ``None``. Rejects bool and every non-finite float - a NaN
+    would propagate into the book's sum and make every comparison against it
+    False, which is this repo's most-documented bug class."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    v = float(value)
+    return v if math.isfinite(v) else None
+
+
+def position_greeks(trade, chain):
+    """Net per-contract Greeks for one position: ``{net_delta, net_gamma,
+    net_theta, net_vega}``, any value possibly ``None``.
+
+    **Signs follow the POSITION, not the option.** A short leg contributes MINUS
+    its greek, so a put credit spread comes out net POSITIVE delta (it profits as
+    the underlying rises), net negative gamma, net POSITIVE theta (a credit book
+    earns time - Schwab reports per-option theta as negative) and net negative
+    vega. A sign error here would render a premium-selling book as long
+    volatility, which is why the tests assert each sign rather than a magnitude.
+
+    Costs no API call: ``chain`` is the one ``reprice_swing`` already fetched.
+    Pure and defensive - a display number must never be able to break a mark.
+
+    ⚠ **``None`` means "not computed", never zero.** A zero delta is a real and
+    meaningful reading (a balanced iron condor), so a position whose leg was
+    unquotable must not join the book's sum as flat. A leg missing ONE greek
+    yields ``None`` for that greek only: partial data is normal off-hours, and
+    dropping the position entirely would lose a usable direction reading.
+    """
+    out = {f"net_{g}": None for g in _GREEK_KEYS}
+    if not isinstance(trade, dict) or not isinstance(chain, dict):
+        return out
+    layout = _LEG_LAYOUT.get(_structures.canonical(trade.get("strategy")))
+    if not layout:
+        return out
+
+    maps = {"put": chain.get("putExpDateMap") or {},
+            "call": chain.get("callExpDateMap") or {}}
+    legs = []
+    for right, field, side in layout:
+        got = _leg_greeks(maps[right], trade.get(field))
+        if got is None:
+            return out            # an unquotable leg refuses the position
+        legs.append((side, got))
+    if not legs:
+        return out
+
+    for g in _GREEK_KEYS:
+        parts = [side * leg[g] for side, leg in legs if leg[g] is not None]
+        if len(parts) == len(legs):
+            out[f"net_{g}"] = round(sum(parts), 6)
+    return out
+
+
+def _greeks_or_none(trade, chain):
+    """:func:`position_greeks`, guarded. See the call site in ``reprice_swing``."""
+    try:
+        return position_greeks(trade, chain)
+    except Exception:  # noqa: BLE001 - a display number must not cost the mark.
+        log.debug("position_greeks failed for %s",
+                  (trade or {}).get("symbol"), exc_info=True)
+        return {f"net_{g}": None for g in _GREEK_KEYS}
+
 def reprice_swing(trade, client, today=None):
     """Return a dict with current_value, unrealized_pnl, etc. Never raises.
 
@@ -319,6 +425,10 @@ def reprice_swing(trade, client, today=None):
             # detail panel's Expected Move for captured signals, which had a
             # price but no IV at all and so never rendered that expansion.
             "current_short_iv": atm_iv(chain),
+            # Net per-position Greeks (gap assessment C4), off the chain already
+            # in hand. Guarded separately: the mark is the money path and these
+            # are a display number, so a failure here must not lose the reprice.
+            **_greeks_or_none(trade, chain),
             "error": None,
         }
     except Exception as e:

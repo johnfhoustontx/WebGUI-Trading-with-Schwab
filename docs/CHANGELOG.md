@@ -4,6 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-12 (**Book-level Greeks, off a chain already in hand —
+and the beta weighting deliberately left out.** Gap assessment **C4**.)
+
+- **`signal_repricer.position_greeks`** returns net delta / gamma / theta / vega
+  per position, signed by side, from the chain `reprice_swing` **already fetches**
+  every manage cycle — no extra API call. Four additive nullable columns on
+  `paper_positions` store it, and `compute.book_greeks` sums `greek × quantity`
+  over the open book onto the existing `cache:options:paper_account` view.
+- ⚠ **Summing `current_short_delta` would not have been net delta.** A −0.20 short
+  against a −0.08 long is **+0.12**, so a book total built from short legs
+  overstates its direction by the whole long-leg offset. That column keeps its own
+  job (the delta stop is about the short strike's moneyness).
+- **Signs follow the POSITION, not the option** — a short leg contributes minus
+  its greek — so a credit spread reads net positive delta, negative gamma,
+  **positive theta** and negative vega. A sign error would render a
+  premium-selling book as long volatility, so the tests assert each sign rather
+  than a magnitude. The leg layout is keyed on `shared.structures.canonical`.
+- ⚠ **`None` means "not computed", never zero, at every level.** A zero delta is a
+  real reading (a balanced condor), so an unquotable leg refuses the whole
+  position rather than contributing flat, and `book_greeks` reports `None` when
+  nothing was priced — plus `positions_priced` / `positions_total`, because a
+  partial book is normal on the first cycle after a restart. A leg missing ONE
+  greek yields `None` for that greek alone; partial data is normal off-hours.
+- ⚠ **The beta weighting is NOT shipped, and that is the honest half.** Nothing in
+  this repo stores or computes a beta and Schwab does not serve one, so a
+  beta-weighted delta would be inventing the input to the only quantity the reader
+  cares about. Consequently the page names **theta in dollars a day** (genuinely
+  additive) and **delta as a direction** ("long 1.44 delta"), never as a hedge
+  ratio: without beta, adding a $970 MU delta to a $145 PG delta is arithmetic
+  rather than risk. It is derivable from the year of daily bars `run_full_scan`
+  already fetches — the same shape as C3 — and is recorded as a follow-up.
+- Design: [`docs/plans/2026-09-12-book-greeks-design.md`](plans/2026-09-12-book-greeks-design.md).
+  50 new tests (`options-scanner/tests/test_position_greeks.py`,
+  `services/options_svc/tests/test_book_greeks.py`, plus the page line). No
+  existing assertion changed.
+
+---
+
 **Last updated:** 2026-09-12 (**The book that trades finally has a track record,
 and the scorecard now splits P&L by how a trade ENDED.** Gap assessment **C5**,
 scorecard half.)

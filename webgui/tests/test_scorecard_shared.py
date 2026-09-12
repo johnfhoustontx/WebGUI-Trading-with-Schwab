@@ -153,3 +153,62 @@ def test_the_scorecard_line_omits_an_undefined_profit_factor():
     line = portfolio.scorecard_text({**_perf(), "profit_factor": None})
     assert "profit factor" not in line.lower()
     assert "71.4%" in line
+
+
+# ── C4: the book's Greeks line ───────────────────────────────────────────────
+
+def _greeks(**over):
+    base = {"net_delta": 1.44, "net_gamma": -0.048, "net_theta": 24.0,
+            "net_vega": -0.48, "positions_priced": 12, "positions_total": 12}
+    base.update(over)
+    return base
+
+
+def test_the_greeks_line_names_theta_in_DOLLARS_A_DAY():
+    """Theta is the additive one and the number a premium seller reads daily."""
+    from pages.options import portfolio
+    line = portfolio.greeks_text(_greeks())
+    assert "+$24.00 a day" in line
+
+
+def test_the_greeks_line_gives_delta_a_DIRECTION_not_a_hedge_ratio():
+    """⚠ Without a beta there is no sense in which MU's delta and PG's delta add
+    up, so the line must not present the total as a hedge ratio."""
+    from pages.options import portfolio
+    line = portfolio.greeks_text(_greeks())
+    assert "hedge" not in line.lower()
+    assert "long" in line.lower()
+
+
+def test_a_negative_delta_book_reads_as_SHORT():
+    from pages.options import portfolio
+    assert "short" in portfolio.greeks_text(_greeks(net_delta=-1.2)).lower()
+
+
+def test_a_flat_delta_book_reads_as_FLAT_not_as_missing():
+    """Zero is a real reading — a balanced condor — and must not look absent."""
+    from pages.options import portfolio
+    line = portfolio.greeks_text(_greeks(net_delta=0.0))
+    assert "flat" in line.lower()
+
+
+def test_the_line_says_when_it_covers_only_PART_of_the_book():
+    """A total that silently omits positions is worse than one that says so."""
+    from pages.options import portfolio
+    line = portfolio.greeks_text(_greeks(positions_priced=9, positions_total=12))
+    assert "9 of 12" in line
+
+
+def test_the_line_stays_quiet_when_the_whole_book_is_priced():
+    from pages.options import portfolio
+    assert "of 12" not in portfolio.greeks_text(_greeks())
+
+
+def test_the_line_is_blank_when_nothing_is_priced():
+    """An unpriced book must not read as a flat one."""
+    from pages.options import portfolio
+    assert portfolio.greeks_text(
+        {"net_delta": None, "net_theta": None,
+         "positions_priced": 0, "positions_total": 3}) == ""
+    assert portfolio.greeks_text({}) == ""
+    assert portfolio.greeks_text(None) == ""
