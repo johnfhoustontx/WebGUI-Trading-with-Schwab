@@ -79,6 +79,11 @@ def test_the_ledger_debit_set_is_the_shared_taxonomy():
     assert paper_trader.PAPER_DEBIT_TYPES == set(structures.LEDGER_DEBIT)
 
 
+def test_the_ledger_credit_set_is_the_shared_taxonomy():
+    from shared import structures
+    assert paper_trader._CREDIT_TYPES == frozenset(structures.LEDGER_CREDIT)
+
+
 def test_a_finder_butterfly_and_condor_open_through_the_DEBIT_path():
     """Before 2026-09-13 these fell into the credit branch and KeyErrored on
     ``short_strike``. Now they are booked by their legs, qty included."""

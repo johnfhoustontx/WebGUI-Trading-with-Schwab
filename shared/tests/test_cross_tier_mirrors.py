@@ -453,5 +453,5 @@ def test_the_pages_paper_button_covers_exactly_the_ledgers_debit_structures():
     send."""
     taxonomy = set(_const("shared/structures.py", "LEDGER_DEBIT"))
     page = set(_const("webgui/pages/options/strategy_table.py", "_PAPER_TYPES"))
-    credit = {"PCS", "CCS", "IC", "IRON_CONDOR"}
+    credit = set(_const("shared/structures.py", "LEDGER_CREDIT"))
     assert page == taxonomy | credit

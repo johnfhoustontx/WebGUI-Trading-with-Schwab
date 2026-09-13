@@ -202,6 +202,17 @@ def test_ledger_debit_is_the_four_originals_plus_the_four_finder_structures():
         "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
 
 
+def test_ledger_credit_is_the_spreads_and_both_iron_condor_spellings():
+    """The credit spreads the ledger's credit branch books. ``IC`` is the
+    engine's key and ``IRON_CONDOR`` the Strategy Finder's - one structure, two
+    names, both sendable."""
+    assert set(structures.LEDGER_CREDIT) == {"PCS", "CCS", "IC", "IRON_CONDOR"}
+
+
+def test_the_ledger_credit_and_debit_sets_are_disjoint():
+    assert not set(structures.LEDGER_CREDIT) & set(structures.LEDGER_DEBIT)
+
+
 def test_every_ledger_debit_name_is_its_own_canonical_spelling():
     """The exit-rule tables are keyed on ``canonical``; an alias here would give
     a structure the Paper button can send a table nobody reads."""

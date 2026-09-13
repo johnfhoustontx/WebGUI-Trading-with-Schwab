@@ -58,6 +58,13 @@ _DEFAULT_LEGS = 2
 LEDGER_DEBIT = ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
                 "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT")
 
+# The credit spreads the Paper LEDGER's credit branch books
+# (paper_trader.create_paper_trade): the two-strike verticals and the iron condor,
+# which carries TWO names - ``IC`` is the engine's key, ``IRON_CONDOR`` the Strategy
+# Finder's. With LEDGER_DEBIT this is everything the Paper button may send; the
+# page's list is pinned to their union by test_cross_tier_mirrors.
+LEDGER_CREDIT = ("PCS", "CCS", "IC", "IRON_CONDOR")
+
 
 def normalise(strategy) -> str:
     """A structure name in canonical form; ``""`` for anything absent."""

@@ -52,8 +52,9 @@ from shared import structures as _structures  # noqa: E402
 PAPER_DEBIT_TYPES = set(_structures.LEDGER_DEBIT)
 
 # The credit structures the ledger's credit branch builds: two-strike spreads and
-# the iron condor (``IC`` is the engine's key, ``IRON_CONDOR`` the Finder's).
-_CREDIT_TYPES = frozenset({"PCS", "CCS", "IC", "IRON_CONDOR"})
+# the iron condor (``IC`` is the engine's key, ``IRON_CONDOR`` the Finder's). See
+# shared.structures.LEDGER_CREDIT, the one source for the set.
+_CREDIT_TYPES = frozenset(_structures.LEDGER_CREDIT)
 
 # Shares per option contract. Ledger rows store PER-SHARE prices (entry_credit,
 # max_loss_per) and PER-CONTRACT dollars (*_total); this is the factor between them.
