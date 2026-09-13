@@ -256,8 +256,11 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   (`$95.20 / $104.80`), and a position holding shares states its dollars **per
   position** rather than per contract.
 - **While a scan runs** the cards read *Scanning SPY…* — the symbol you asked for,
-  never the one before. A slow scan says so and keeps waiting, and the results
-  that land are always for the symbol being scanned.
+  never the one before. If nothing has come back after a while, the cards become
+  one still card and the page says the scan is taking longer than expected: a late
+  result still appears, and if nothing arrives, check **System Status** and scan
+  again. Results that land are always for the scan you asked for — same symbol,
+  same settings.
 
 **The seven groups**
 

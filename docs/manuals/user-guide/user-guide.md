@@ -1367,9 +1367,9 @@ press **Scan** when you are ready.
 
 The top-pick cards turn into grey placeholders reading *Scanning SPY…* — always the
 symbol you asked for, never the previous one — and the old list is cleared. If the
-scan is slow the page says *The scan is taking longer than expected — results will
-appear when it finishes.* and keeps waiting. Whatever lands belongs to the symbol
-being scanned.
+scan is slow the cards become one still card and the page says *The scan is taking longer than expected. It will appear here if it finishes; if nothing arrives, check System Status and scan again.* A late
+result still appears. Whatever lands belongs to the scan you asked for — same symbol,
+same settings.
 
 **The summary strip**
 

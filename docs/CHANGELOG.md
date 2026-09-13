@@ -30,8 +30,10 @@ appealing and easy to use".)
   list **instantly**. The page stops sending `families`, so every scan builds all
   seven groups; unticking the last chip returns to All; the choice resets for a new
   symbol.
-- **Top picks:** up to four cards, the best score from four *different* groups among
-  the visible rows — score and grade, expiry, legs, a payoff shape (profit green,
+- **Top picks:** up to four cards — the best score from each *different* group among
+  the visible rows first, then, when fewer than four groups are visible (one chip
+  clicked, say), the next-best remaining ideas in score order, so every slot fills —
+  score (the same whole number as the list's badge) and grade, expiry, legs, a payoff shape (profit green,
   loss red, dashed zero line, a tick at today's price), a split bar (max loss left,
   max profit right, scaled to the larger of the two; ∞ for an unlimited side), a
   probability-of-profit bar (amber < 40%, blue 40–60%, green > 60%), cost, Calculator
@@ -41,9 +43,12 @@ appealing and easy to use".)
   and no longer height-capped. Legs, breakevens and bias moved to the detail panel,
   which starts collapsed, opens on every card or row click and is cleared by a new
   scan.
-- **Loading:** placeholder cards read *Scanning SYMBOL…*; a slow scan says "The scan is
-  taking longer than expected — results will appear when it finishes."; results
-  always belong to the symbol being scanned.
+- **Loading:** placeholder cards read *Scanning SYMBOL…*. If the busy backstop fires with
+  no result they become ONE still card (*No result for SYMBOL yet.*, or the shared
+  cold-feed line when nothing has published this session) and the status says "The scan is taking longer than expected. It will appear here if it finishes; if nothing arrives, check System Status and scan again."
+  — a late result still paints. A result is painted only when it answers the request
+  being waited on (symbol and the echoed `params`, so SPY 1–2 wk never paints as SPY
+  1–3 mo).
 - **Cost wording:** `$195 debit` / `$804 credit` / `$54,058 debit for 100 shares`.
 - **Code:** new PURE `webgui/pages/options/finder_view.py` (formatting, presets and
   *Custom* detection, chips, top picks, bar geometry, the fixed-pixel payoff SVG —

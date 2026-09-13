@@ -2830,8 +2830,10 @@ cheap to sell** count is a different reason: trades that would sell premium, dro
 because this symbol's volatility is historically low (trades that buy premium are kept).
 
 **While a scan runs** the cards become placeholders reading *Scanning SPY…* — the symbol
-asked for, never the previous one. A slow scan says it is taking longer than expected
-and keeps waiting; whatever lands belongs to the symbol being scanned.
+asked for, never the previous one. A slow scan turns them into one still card and says
+it is taking longer than expected — a late result still appears, and if nothing arrives,
+check System Status and scan again; whatever lands belongs to the scan asked for, same
+symbol and same settings.
 
 ⚠ **On fairly priced options, two structures are in that count on nearly every scan: the
 short straddle and the covered call.** Both are judged as premium sales, whose bar asks

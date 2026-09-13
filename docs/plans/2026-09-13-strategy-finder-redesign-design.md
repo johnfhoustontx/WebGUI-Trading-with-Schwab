@@ -56,12 +56,14 @@ comparing structures, and exploring settings.
 5. **Ranked list** — Strategy (with mini payoff shape) · Score · Expiry·DTE · Cost ·
    Max profit · Max loss · Probability of profit (bar) · Grade · actions. Legs,
    breakevens and bias move to the detail panel. The list grows with the page.
-6. **Detail panel** — the existing shared panel, collapsed until a card or row is
-   clicked, so the list keeps its width.
+6. **Detail panel** — the shared panel, collapsed until a card or row is clicked, so
+   the list keeps its width; every selection reopens it and a new scan clears it.
 
 **Loading / empty.** While scanning, the cards show grey placeholders reading
-*Scanning SPY…* instead of the previous symbol. Before any scan, one line says what
-to do. A cold service shows the shared waiting line.
+*Scanning SPY…* instead of the previous symbol. If no result arrives before the busy
+backstop, they become one still card and the status says "The scan is taking longer than expected. It will appear here if it finishes; if nothing arrives, check System Status and scan again."
+(a late result still paints). Before any scan, one line says what to do. A cold
+service shows the shared waiting line on that card.
 
 **Narrow screens.** Cards wrap to two columns, then one; the list scrolls sideways
 inside its own box, never the page.
@@ -72,7 +74,7 @@ Stays inside the app's dark-navy tokens (`theme.py`) and the Tailwind-only rule.
 No new palette section.
 
 - **Payoff shape** — a hand-drawn SVG polyline at a **fixed pixel size**
-  (≈120×32; ≈72×20 in the list), profitable part green, losing part red, faint zero
+  (280×56 centred on a card; 72×20 in the list), profitable part green, losing part red, faint zero
   line, a tick at today's price. Fixed size because a stretched `viewBox` needs
   `vector-effect`, which DOMPurify strips (CLAUDE.md gotcha). Pinned by the
   DOMPurify allow-list test the other SVG builders carry.
@@ -89,11 +91,15 @@ No new palette section.
 ## Data (options_svc, additive)
 
 - **`payoff_curve`** on each candidate: ~25 `[price, pnl_per_contract]` points across
-  spot ± 2 × the expected move to that candidate's front expiry, valued exactly as
+  the WIDER of spot ± 2 × the expected move to that candidate's front expiry and the
+  outermost option strikes ± 3% (so a wide-winged condor's max loss stays inside the
+  window), valued exactly as
   `payoff_metrics` values the position (intrinsic for single-expiry options,
   front-expiry Black-Scholes for later legs, spot for shares), gross of commission.
   Tier 1 cannot import the pricing engine, so the page cannot compute it for
-  calendars and share structures itself.
+  calendars and share structures itself. A row whose option legs all carry mark 0
+  (an adapted spread without marks) gets `None` rather than a shape that prices the
+  entry as free.
 - **`group`** on each candidate: which of the seven build groups produced it
   (`DIRECTIONAL`, `VERTICAL`, `NEUTRAL`, `STRADDLE`, `BUTTERFLY`, `CALENDAR`,
   `STOCK`). Distinct from the scoring `family` field. Stamping it in the service
@@ -116,8 +122,11 @@ review of the 13-structure work).
 - `swing.py` becomes widgets and wiring only. New `finder_columns()` for the slim
   list; `strategy_table.strategy_columns()` is **unchanged** — the Market Scanner's
   Directional tab still uses it.
-- Unchanged: the shared detail panel, the Calculator / Paper / Expected Move
-  hand-offs, the `_PAPER_TYPES` gate.
+- The shared detail panel gains `open()` / `collapse()` / `is_open` on its handle
+  (driven by the same function as its header toggle, whose one tooltip is retitled
+  rather than re-created); its default stays open for the other pages.
+- Unchanged: the Calculator / Paper / Expected Move hand-offs, the `_PAPER_TYPES`
+  gate.
 
 ## Testing
 
