@@ -15,6 +15,8 @@ No ``ui.`` calls live here — everything is unit-tested in
 score zone) to a fixed Tailwind class (Tailwind-first standard), never a runtime
 ``.style()`` hex.
 """
+from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
+
 from . import scanner
 from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 
@@ -60,8 +62,8 @@ def legs_summary(legs):
 
     ``L`` = long, ``S`` = short; strike + ``C``/``P`` for call/put. An option leg
     of more than one contract carries ``N×`` (a butterfly body reads
-    ``S 2×100C``). A share lot prints ``L 100 SH`` (``qty`` counts 100-share
-    lots). A leg on a LATER expiration than the earliest carries its ``MM/DD``
+    ``S 2×100C``). A share lot prints ``L 100 shares`` (``qty`` counts 100-share
+    lots; a missing or malformed qty reads as 1). A leg on a LATER expiration than the earliest carries its ``MM/DD``
     so a calendar reads without the detail panel. Empty/None → '—'.
     """
     if not legs:
@@ -71,9 +73,12 @@ def legs_summary(legs):
     parts = []
     for leg in legs:
         side = "L" if (leg.get("side") == "long") else "S"
-        qty = int(leg.get("qty") or 1)
+        # A malformed qty (NaN, a non-numeric string) must never raise here: one
+        # bad row would abort the whole table paint on three screens.
+        n = _fmt.num(leg.get("qty"))
+        qty = int(n) if n is not None and n >= 1 else 1
         if leg.get("kind") == "stock":
-            parts.append(f"{side} {100 * qty} SH")
+            parts.append(f"{side} {100 * qty} shares")
             continue
         kind = "C" if (leg.get("kind") == "call") else "P"
         lots = f"{qty}×" if qty > 1 else ""

@@ -559,7 +559,7 @@ def test_detail_signal_does_not_mutate_its_input():
 def test_legs_summary_prints_a_share_lot():
     legs = [{"kind": "stock", "side": "long", "strike": None, "qty": 1},
             {"kind": "call", "side": "short", "strike": 105.0, "expiration": "2026-10-16"}]
-    assert st.legs_summary(legs) == "L 100 SH / S 105C"
+    assert st.legs_summary(legs) == "L 100 shares / S 105C"
 
 
 def test_legs_summary_dates_only_a_leg_on_a_LATER_expiry():
@@ -583,7 +583,7 @@ def test_legs_summary_shows_a_multi_lot_butterfly_body():
 
 def test_legs_summary_share_lots_scale_with_qty():
     legs = [{"kind": "stock", "side": "long", "strike": None, "qty": 2}]
-    assert st.legs_summary(legs) == "L 200 SH"
+    assert st.legs_summary(legs) == "L 200 shares"
 
 
 def test_finder_offers_the_calculators_seven_groups():
@@ -603,3 +603,30 @@ def test_finder_new_group_labels_are_the_calculators_group_names():
     # The Calculator splits the Finder's one group into two.
     assert swing._FAMILY_OPTIONS["BUTTERFLY"] == "Butterflies & condors"
     assert {"Butterflies", "Condors"} <= calc_names
+
+
+def test_legs_summary_nan_qty_renders_as_one_lot_without_raising():
+    legs = [{"kind": "stock", "side": "long", "strike": None, "qty": float("nan")},
+            {"kind": "call", "side": "short", "strike": 100.0,
+             "expiration": "2026-10-16", "qty": float("nan")}]
+    assert st.legs_summary(legs) == "L 100 shares / S 100C"
+
+
+def test_legs_summary_string_qty_renders_as_one_lot_without_raising():
+    legs = [{"kind": "stock", "side": "long", "strike": None, "qty": "two"},
+            {"kind": "call", "side": "short", "strike": 100.0,
+             "expiration": "2026-10-16", "qty": "two"}]
+    assert st.legs_summary(legs) == "L 100 shares / S 100C"
+
+
+def test_legs_summary_later_dated_multi_lot_leg_carries_both():
+    legs = [{"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-10-16", "qty": 1},
+            {"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-11-13", "qty": 2}]
+    assert st.legs_summary(legs) == "L 100C / S 2×100C 11/13"
+
+
+def test_legs_summary_undated_leg_gets_no_date_and_does_not_move_the_front():
+    legs = [{"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16"},
+            {"kind": "put", "side": "long", "strike": 95.0, "expiration": None},
+            {"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-11-13"}]
+    assert st.legs_summary(legs) == "S 100C / L 95P / L 100C 11/13"

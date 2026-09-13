@@ -68,8 +68,9 @@ def status_text(payload, n_rows):
     return line
 
 
-# Build groups, labelled with the Calculator's STRATEGY_GROUPS names so a structure
-# is called the same thing on both pages.
+# Build groups. The four NEW groups reuse the Calculator's STRATEGY_GROUPS names
+# where one exists; "Butterflies & condors" spans the Calculator's "Butterflies"
+# and "Condors". Iron condors stay under "Neutral".
 _FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
                    "NEUTRAL": "Neutral", "STRADDLE": "Straddles & strangles",
                    "BUTTERFLY": "Butterflies & condors", "CALENDAR": "Calendars",
@@ -81,8 +82,8 @@ def render():
     # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     with ui.column().classes("w-full gap-2"):
-        # Primary controls span the FULL page width, so symbol + DTE + strategies
-        # + Scan all sit on one line (the detail panel no longer squeezes them).
+        # Primary controls span the FULL page width (the detail panel no longer
+        # squeezes them); with seven strategy checkboxes the row wraps as needed.
         with ui.row().classes("items-end gap-3 flex-wrap"):
             symbol_in = select_all_on_focus(
                 ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
