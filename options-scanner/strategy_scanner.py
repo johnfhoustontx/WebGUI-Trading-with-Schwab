@@ -297,8 +297,13 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
 
 
 def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
-    """``n`` ``[price, pnl_per_contract]`` points across spot ± ``width_moves`` ×
-    the expected move to the front expiry, for the Strategy Finder's payoff shapes.
+    """``n`` ``[price, pnl_per_contract]`` points for the Strategy Finder's payoff
+    shapes, across the WIDER of spot ± ``width_moves`` × the expected move to the
+    front expiry and the outermost OPTION strikes ± 3%. The strike bound is what
+    keeps a defined-risk position looking defined: a wide-winged condor's max loss
+    sits past two expected moves, and a window that stops short draws it as
+    unbounded. A missing, non-numeric, NaN or non-positive ``atm_iv`` sizes the
+    move at 0.20.
 
     Valued exactly as ``payoff_metrics`` values the position (``_pl_at`` with the
     same front-expiry rule) and GROSS of commission - it is a shape, not a
@@ -316,23 +321,34 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
         return None
     if not math.isfinite(s) or s <= 0:
         return None
-    iv = atm_iv if isinstance(atm_iv, (int, float)) and math.isfinite(atm_iv) and atm_iv > 0 else 0.20
+    try:
+        iv = float(atm_iv)                  # a numpy scalar is a real reading too
+    except (TypeError, ValueError):
+        iv = float("nan")
+    if not math.isfinite(iv) or iv <= 0:
+        iv = 0.20
     try:
         days = float(dte)
     except (TypeError, ValueError):
         days = 1.0
     days = max(int(days), 1) if math.isfinite(days) else 1
     move = s * iv * math.sqrt(days / 365.0)
-    lo, hi = max(s - width_moves * move, 0.0), s + width_moves * move
+    lo, hi = s - width_moves * move, s + width_moves * move
+    strikes = [l["strike"] for l in _option_legs(legs) if l.get("strike") is not None]
+    if strikes:
+        lo, hi = min(lo, min(strikes) * 0.97), max(hi, max(strikes) * 1.03)
+    lo = max(lo, 0.0)
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
     front = _front_expiration(legs) if _needs_front_valuation(legs) else None
+    points = []
     try:
-        return [[round(lo + (hi - lo) * i / (n - 1), 2),
-                 round(_pl_at(legs, entry_cost, lo + (hi - lo) * i / (n - 1), front)
-                       * _CONTRACT_MULT, 2)]
-                for i in range(n)]
+        for i in range(n):
+            x = lo + (hi - lo) * i / (n - 1)
+            pnl = _pl_at(legs, entry_cost, x, front) * _CONTRACT_MULT
+            points.append([round(x, 2), round(pnl, 2)])
     except ValueError:
         return None
+    return points
 
 
 _LONG_DELTA, _SHORT_DELTA = 0.55, 0.28

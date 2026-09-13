@@ -1752,9 +1752,38 @@ def test_payoff_curve_refuses_a_degenerate_grid():
 def test_payoff_curve_treats_a_bad_dte_as_one_day():
     import math
     legs = [_leg("call", "long", 100.0, 3.0)]
-    em = 100.0 * 0.28 * math.sqrt(1 / 365)
+    # IV 0.60 so two one-day moves (+/-6.3) sit outside the strike +/-3% bound,
+    # which would otherwise set the window and hide what dte did.
+    em = 100.0 * 0.60 * math.sqrt(1 / 365)
     for bad in (float("nan"), "x", -5, None):
-        pts = ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=bad, n=25)
+        pts = ss.payoff_curve(legs, spot=100.0, atm_iv=0.60, dte=bad, n=25)
         assert pts is not None and len(pts) == 25, bad
         assert abs(pts[0][0] - (100.0 - 2 * em)) < 0.02, bad
         assert abs(pts[-1][0] - (100.0 + 2 * em)) < 0.02, bad
+
+
+def test_payoff_curve_window_reaches_the_outermost_strikes():
+    # 10-wide wings for a 2.00 credit: max loss $800 lives past +/-2 expected moves.
+    ic = [_leg("put", "long", 80.0, 0.50), _leg("put", "short", 90.0, 1.50),
+          _leg("call", "short", 110.0, 1.50), _leg("call", "long", 120.0, 0.50)]
+    pts = ss.payoff_curve(ic, spot=100.0, atm_iv=0.28, dte=30, n=25)
+    assert pts[0][0] <= 80.0 * 0.97 + 0.01 and pts[-1][0] >= 120.0 * 1.03 - 0.01
+    assert abs(pts[0][1] - (-800.0)) < 1.0
+    assert abs(pts[-1][1] - (-800.0)) < 1.0
+
+
+def test_payoff_curve_window_ignores_share_legs_strike():
+    call = _leg("call", "short", 105.0, 1.0)
+    call["expiration"] = _exp(30)
+    pts = ss.payoff_curve([_stock(100.0), call], spot=100.0, atm_iv=0.28, dte=30, n=25)
+    assert pts is not None and len(pts) == 25
+
+
+def test_payoff_curve_accepts_a_numpy_iv():
+    import math
+    import numpy as np
+    legs = [_leg("put", "long", 100.0, 3.0)]
+    pts = ss.payoff_curve(legs, spot=100.0, atm_iv=np.float32(0.28), dte=30, n=25)
+    em = 100.0 * 0.28 * math.sqrt(30 / 365)
+    assert abs(pts[0][0] - (100.0 - 2 * em)) < 0.02
+    assert abs(pts[-1][0] - (100.0 + 2 * em)) < 0.02
