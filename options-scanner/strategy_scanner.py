@@ -540,6 +540,67 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
+_CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
+
+
+def _usable_iv(iv):
+    """A chain IV (percent) that _front_value can price: finite and positive.
+    Schwab's -999 sentinel, NaN and 0 are not."""
+    try:
+        v = float(iv)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
+def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
+    """Call/put calendar (same ATM strike) and call/put diagonal (back leg one
+    listed strike further IN the money, so it is a debit), inside the scan's own
+    DTE window.
+
+    Front = nearest expiry; back = the expiry whose DTE is nearest front + 28 with
+    at least 7 days between them. No second chain fetch: a window without two such
+    expiries builds nothing, and the user widens DTE max for longer calendars.
+    """
+    out = []
+    for kind, label, direction in (("call", "Call", 1), ("put", "Put", -1)):
+        # A back leg without a usable IV cannot be priced at the front expiry
+        # (_front_value raises on it), so it is never a candidate. The filter also
+        # drops such strikes from the FRONT expiry, which is valued at intrinsic and
+        # would not need one - deliberately conservative: a leg with no IV is a leg
+        # whose quote is not trustworthy either.
+        by_exp = {e: {**v, "strikes": {k: leg for k, leg in v["strikes"].items()
+                                       if _usable_iv(leg.get("iv"))}}
+                  for e, v in extract_options(chain, kind, dte_min, dte_max).items()}
+        by_exp = {e: v for e, v in by_exp.items() if v["strikes"]}
+        if len(by_exp) < 2:
+            continue
+        ordered = sorted(by_exp.items(), key=lambda kv: kv[1]["dte"])
+        f_exp, f = ordered[0]
+        backs = [(e, v) for e, v in ordered[1:] if v["dte"] - f["dte"] >= _CAL_MIN_GAP]
+        if not backs:
+            continue
+        b_exp, b = min(backs, key=lambda kv: abs(kv[1]["dte"] - (f["dte"] + _CAL_BACK_OFFSET)))
+        k = _atm_strike(set(f["strikes"]) & set(b["strikes"]), spot)
+        if k is None:
+            continue
+        legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
+                _leg_from(b["strikes"][k], kind, "long", b_exp)]
+        out.append(_assemble(f"CALENDAR_{kind.upper()}", "NEUTRAL", f"{label} Calendar",
+                             "neutral", legs, symbol, spot, atm_iv))
+        # One strike deeper IN the money: below ATM for a call, above for a put.
+        deeper = sorted(s for s in b["strikes"] if (k - s) * direction > 0)
+        if deeper:
+            kb = deeper[-1] if direction > 0 else deeper[0]
+            legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
+                    _leg_from(b["strikes"][kb], kind, "long", b_exp)]
+            out.append(_assemble(f"DIAGONAL_{kind.upper()}", "DIRECTIONAL",
+                                 f"{label} Diagonal",
+                                 "bullish" if direction > 0 else "bearish",
+                                 legs, symbol, spot, atm_iv))
+    return out
+
+
 def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False,
                 liq_keys=("bid", "ask", "volume")):
     """Build a normalized leg from a credit-spread source dict (greeks default 0).

@@ -864,3 +864,61 @@ def test_a_fractional_strike_ladder_still_builds_a_butterfly():
     legs = sorted(out["BUTTERFLY_CALL"]["legs"], key=lambda l: l["strike"])
     assert legs[1]["strike"] == 437.5
     assert legs[1]["strike"] - legs[0]["strike"] == legs[2]["strike"] - legs[1]["strike"]
+
+
+def test_calendar_sells_the_front_and_buys_the_expiry_nearest_plus_28():
+    chain = _ladder_chain(days=(7, 21, 35, 49))
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    legs = {l["side"]: l for l in out["CALENDAR_CALL"]["legs"]}
+    assert legs["short"]["expiration"] == _exp(7) and legs["long"]["expiration"] == _exp(35)
+    assert legs["short"]["strike"] == legs["long"]["strike"] == 100.0
+    assert out["CALENDAR_CALL"]["expiration"] == _exp(7)
+    assert out["CALENDAR_PUT"]["family"] == "NEUTRAL"
+
+
+def test_diagonal_back_leg_is_one_strike_further_IN_the_money_and_a_debit():
+    """The standard diagonal: sell the front at the money, buy the back month one
+    strike deeper in the money. That is a DEBIT whose loss is about what you paid;
+    the out-of-the-money version first planned came out as a credit."""
+    out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
+    c = {l["side"]: l["strike"] for l in out["DIAGONAL_CALL"]["legs"]}
+    p = {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]}
+    assert c == {"short": 100.0, "long": 95.0}
+    assert p == {"short": 100.0, "long": 105.0}
+    for t in ("DIAGONAL_CALL", "DIAGONAL_PUT"):
+        assert out[t]["net_debit"] is not None
+
+
+def test_no_calendar_without_two_expiries_seven_days_apart():
+    assert ss.build_calendars(_ladder_chain(days=(7, 10)), "XYZ", 100.0, 0.28, 5, 60) == []
+    assert ss.build_calendars(_ladder_chain(days=(30,)), "XYZ", 100.0, 0.28, 5, 60) == []
+
+
+def test_a_back_leg_with_the_schwab_sentinel_iv_is_never_chosen():
+    """-999 is Schwab's 'no IV' sentinel; _front_value raises on it. The builder
+    must never pick such a leg - no crash, and no calendar or diagonal whose back
+    leg carries it."""
+    chain = _ladder_chain(days=(7, 35))
+    back = [k for k in chain["callExpDateMap"] if k.endswith(":35")][0]
+    chain["callExpDateMap"][back]["100.0"][0]["volatility"] = -999.0
+    out = ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60)      # must not raise
+    for s in out:
+        for leg in s["legs"]:
+            assert leg["iv"] != -999.0, (s["type"], leg)
+    cal = _by_type(out).get("CALENDAR_CALL")
+    assert cal is None or {l["strike"] for l in cal["legs"]} != {100.0}
+
+
+def test_atm_call_calendar_risks_about_its_debit_and_profits_between_two_breakevens():
+    """A long calendar's worst case at the front expiry is roughly the debit paid
+    (both legs near worthless far below, near parity far above), net of two
+    contracts' round-trip commission; it profits in a band around the strike."""
+    import commissions as _cm
+    cal = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))[
+        "CALENDAR_CALL"]
+    comm = _cm.round_trip_commission(2, None, 1)
+    assert cal["net_debit"] is not None
+    assert abs(cal["max_loss"] - (cal["net_debit"] + comm)) < 1.50
+    assert cal["max_profit"] > 0
+    assert len(cal["breakevens"]) == 2
+    assert cal["breakevens"][0] < 100.0 < cal["breakevens"][1]
