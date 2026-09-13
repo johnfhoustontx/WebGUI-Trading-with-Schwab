@@ -192,6 +192,11 @@ def payoff_metrics(legs, spot, symbol=None):
     if front is not None:
         # A Black-Scholes-valued curve peaks BETWEEN breakpoints, so sample it.
         points |= {far_high * i / 800 for i in range(801)}
+        # ...and past it. A later leg keeps time value beyond 2x the top strike, so
+        # a put diagonal's worst case (S -> infinity: the back put decays to zero
+        # and the whole debit is lost) sits out there. Measured at IV 150 on a
+        # 7/35-DTE ladder, stopping at far_high understated max loss by ~$117.
+        points |= {far_high * 2 ** j for j in range(1, 5)}      # out to 32x the top strike
     pls = [_pl_at(legs, entry_cost, S, front) for S in sorted(points)]
     bounded_max = max(pls)
     bounded_min = min(pls)
@@ -558,6 +563,18 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
 
 
 _CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
+# The front leg sits at least a week out. The page's default DTE window starts at
+# 0, so "nearest expiry" was a 0-2 DTE front whose calendar can barely profit -
+# measured call-calendar R:R -0.004 at 0/28, 0.18 at 1/29, 0.55 at 7/35 - and every
+# such row was cut, leaving the Calendars checkbox showing nothing.
+_CAL_MIN_FRONT_DTE = 7
+_DIAG_SHORT_DELTA, _DIAG_LONG_DELTA = 0.30, 0.70
+
+
+def _can_profit(sig):
+    """A structure whose best case is not a positive dollar figure is not a trade."""
+    mp = sig.get("max_profit")
+    return isinstance(mp, (int, float)) and math.isfinite(mp) and mp > 0
 
 
 def _usable_iv(iv):
@@ -570,14 +587,50 @@ def _usable_iv(iv):
     return math.isfinite(v) and v > 0
 
 
-def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
-    """Call/put calendar (same ATM strike) and call/put diagonal (back leg one
-    listed strike further IN the money, so it is a debit), inside the scan's own
-    DTE window.
+def _nearest_delta_strike(strikes, target):
+    """The strike whose |delta| is nearest ``target``; a tie goes to the LOWER
+    strike, so the choice never depends on dict order. None for no strikes."""
+    if not strikes:
+        return None
+    return min(strikes, key=lambda s: (abs(abs(strikes[s]["delta"]) - target), s))
 
-    Front = nearest expiry; back = the expiry whose DTE is nearest front + 28 with
-    at least 7 days between them. No second chain fetch: a window without two such
-    expiries builds nothing, and the user widens DTE max for longer calendars.
+
+def _diagonal(kind, label, direction, f_exp, f, b_exp, b, symbol, spot, atm_iv):
+    """The standard diagonal (the poor man's covered call and its put mirror):
+    SELL the out-of-the-money front strike nearest 0.30 delta, BUY the
+    in-the-money back strike nearest 0.70 delta, both judged against SPOT.
+
+    Skipped when the net debit reaches the strike width. With an AT-the-money short
+    that rule could never pass for calls on a flat term structure - debit = width +
+    (back time value - front time value) - and passed for puts only by the sign of
+    the interest rate; the out-of-the-money short puts the spot-to-short distance
+    inside the width, which is what the practitioner rule assumes. Also skipped
+    when max profit is not positive.
+    """
+    otm = {s: leg for s, leg in f["strikes"].items() if (s - spot) * direction > 0}
+    itm = {s: leg for s, leg in b["strikes"].items() if (spot - s) * direction > 0}
+    ks = _nearest_delta_strike(otm, _DIAG_SHORT_DELTA)
+    kb = _nearest_delta_strike(itm, _DIAG_LONG_DELTA)
+    if ks is None or kb is None:
+        return None
+    legs = [_leg_from(f["strikes"][ks], kind, "short", f_exp),
+            _leg_from(b["strikes"][kb], kind, "long", b_exp)]
+    if (legs[1]["mark"] - legs[0]["mark"]) >= abs(ks - kb):
+        return None     # costs its width: no upside beyond rate carry
+    diag = _assemble(f"DIAGONAL_{kind.upper()}", "DIRECTIONAL", f"{label} Diagonal",
+                     "bullish" if direction > 0 else "bearish", legs, symbol, spot, atm_iv)
+    return diag if _can_profit(diag) else None
+
+
+def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
+    """Call/put calendar (short and long at the same ATM strike) and call/put
+    diagonal (see ``_diagonal``), inside the scan's own DTE window.
+
+    Front = nearest expiry at least ``_CAL_MIN_FRONT_DTE`` (7) days out; back = the
+    expiry whose DTE is nearest front + 28 with at least 7 days between them. A
+    candidate whose max profit is not a positive number is dropped. No second
+    chain fetch: a window without two such expiries builds nothing, and the user
+    widens DTE max for longer calendars.
     """
     out = []
     for kind, label, direction in (("call", "Call", 1), ("put", "Put", -1)):
@@ -591,37 +644,33 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
                                        if _usable_iv(leg.get("iv"))}}
                   for e, v in raw.items()}
         by_exp = {e: v for e, v in by_exp.items() if v["strikes"]}
-        if len(by_exp) < 2:
-            continue
         ordered = sorted(by_exp.items(), key=lambda kv: kv[1]["dte"])
-        f_exp, f = ordered[0]
-        backs = [(e, v) for e, v in ordered[1:] if v["dte"] - f["dte"] >= _CAL_MIN_GAP]
+        fronts = [(e, v) for e, v in ordered
+                  if v["dte"] >= max(dte_min, _CAL_MIN_FRONT_DTE)]
+        if not fronts:
+            continue
+        f_exp, f = fronts[0]
+        backs = [(e, v) for e, v in ordered if v["dte"] - f["dte"] >= _CAL_MIN_GAP]
         if not backs:
             continue
         b_exp, b = min(backs, key=lambda kv: abs(kv[1]["dte"] - (f["dte"] + _CAL_BACK_OFFSET)))
         # The ATM is taken over the UNION of the two expiries' strikes BEFORE the
         # IV filter, and must survive the filter in BOTH. A true ATM dropped for a
         # missing delta or an unusable IV is a hole at the money: recentring on the
-        # next common strike would build an off-centre "calendar" and a diagonal
-        # hung off it, so that kind builds neither. Taking it after the filter
-        # would let a sentinel-IV ATM on BOTH expiries silently recentre.
+        # next common strike would build an off-centre "calendar", so that kind
+        # builds none. Taking it after the filter would let a sentinel-IV ATM on
+        # BOTH expiries silently recentre. The diagonal does not use this strike.
         k = _atm_strike(set(raw[f_exp]["strikes"]) | set(raw[b_exp]["strikes"]), spot)
-        if k is None or k not in f["strikes"] or k not in b["strikes"]:
-            continue
-        legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
-                _leg_from(b["strikes"][k], kind, "long", b_exp)]
-        out.append(_assemble(f"CALENDAR_{kind.upper()}", "NEUTRAL", f"{label} Calendar",
-                             "neutral", legs, symbol, spot, atm_iv))
-        # One strike deeper IN the money: below ATM for a call, above for a put.
-        deeper = sorted(s for s in b["strikes"] if (k - s) * direction > 0)
-        if deeper:
-            kb = deeper[-1] if direction > 0 else deeper[0]
+        if k is not None and k in f["strikes"] and k in b["strikes"]:
             legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
-                    _leg_from(b["strikes"][kb], kind, "long", b_exp)]
-            out.append(_assemble(f"DIAGONAL_{kind.upper()}", "DIRECTIONAL",
-                                 f"{label} Diagonal",
-                                 "bullish" if direction > 0 else "bearish",
-                                 legs, symbol, spot, atm_iv))
+                    _leg_from(b["strikes"][k], kind, "long", b_exp)]
+            cal = _assemble(f"CALENDAR_{kind.upper()}", "NEUTRAL", f"{label} Calendar",
+                            "neutral", legs, symbol, spot, atm_iv)
+            if _can_profit(cal):
+                out.append(cal)
+        diag = _diagonal(kind, label, direction, f_exp, f, b_exp, b, symbol, spot, atm_iv)
+        if diag is not None:
+            out.append(diag)
     return out
 
 

@@ -880,18 +880,22 @@ def test_calendar_sells_the_front_and_buys_the_expiry_nearest_plus_28():
     assert out["CALENDAR_PUT"]["family"] == "NEUTRAL"
 
 
-def test_diagonal_back_leg_is_one_strike_further_IN_the_money_and_a_debit():
-    """The standard diagonal: sell the front at the money, buy the back month one
-    strike deeper in the money. That is a DEBIT whose loss is about what you paid;
-    the out-of-the-money version first planned came out as a credit."""
+def test_diagonals_buy_in_the_money_and_never_cost_their_width():
+    """The standard diagonal sells the out-of-the-money front and buys the back
+    month in the money, both judged against spot: a DEBIT below the strike width.
+
+    On this $5 ladder the nearest-0.30 OTM front strike is 105 / 95 (the only OTM
+    strikes near that delta sit a whole step out, |delta| ~0.11 / ~0.09) and the
+    nearest-0.70 ITM back strike is 95 / 105, so each side spans $10."""
     out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
     c = {l["side"]: l["strike"] for l in out["DIAGONAL_CALL"]["legs"]}
     p = {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]}
-    assert c == {"short": 100.0, "long": 95.0}
-    assert p == {"short": 100.0, "long": 105.0}
+    assert c == {"short": 105.0, "long": 95.0}
+    assert p == {"short": 95.0, "long": 105.0}
     for t in ("DIAGONAL_CALL", "DIAGONAL_PUT"):
         assert out[t]["net_debit"] is not None
-
+        assert out[t]["net_debit"] < _diag_width(out[t]) * 100
+        assert out[t]["max_profit"] > 0
 
 def test_no_calendar_without_two_expiries_seven_days_apart():
     assert ss.build_calendars(_ladder_chain(days=(7, 10)), "XYZ", 100.0, 0.28, 5, 60) == []
@@ -947,24 +951,29 @@ def test_a_hole_at_the_money_builds_no_straddle_fly_or_condor_but_keeps_strangle
     assert ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90) == []
 
 
-def test_a_back_leg_hole_at_the_money_skips_that_kinds_calendar_and_diagonal():
+def test_a_back_leg_hole_at_the_money_skips_that_kinds_calendar():
     """The sentinel chain: the back 100C has IV -999. A calendar recentred on 95 or
-    105 is not an ATM calendar, so neither the call calendar nor the call diagonal
-    is built - and the put side, whose ATM is intact, is unaffected."""
+    105 is not an ATM calendar, so the call calendar is not built - and the put
+    side, whose ATM is intact, is unaffected. A diagonal does not use the ATM
+    strike, so it is still built, never on the hole."""
     chain = _ladder_chain(days=(7, 35))
     back = [k for k in chain["callExpDateMap"] if k.endswith(":35")][0]
     chain["callExpDateMap"][back]["100.0"][0]["volatility"] = -999.0
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
-    assert "CALENDAR_CALL" not in out and "DIAGONAL_CALL" not in out
+    assert "CALENDAR_CALL" not in out
+    assert "DIAGONAL_CALL" in out
+    assert all(l["strike"] != 100.0 for l in out["DIAGONAL_CALL"]["legs"])
     assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
     assert {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]} == {
-        "short": 100.0, "long": 105.0}
+        "short": 95.0, "long": 105.0}
 
 
 def test_a_back_leg_missing_at_the_money_skips_the_calendar_too():
     chain = _drop(_ladder_chain(days=(7, 35)), "callExpDateMap", 35, "100.0")
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
-    assert "CALENDAR_CALL" not in out and "DIAGONAL_CALL" not in out
+    assert "CALENDAR_CALL" not in out
+    assert "DIAGONAL_CALL" in out
+    assert all(l["strike"] != 100.0 for l in out["DIAGONAL_CALL"]["legs"])
     assert "CALENDAR_PUT" in out
 
 
@@ -1039,3 +1048,99 @@ def test_condor_shorts_are_symmetric_about_the_body_and_kinds_match_the_type():
 def test_call_butterfly_is_near_delta_neutral():
     out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
     assert abs(out["BUTTERFLY_CALL"]["net_delta"]) < 0.05
+
+
+# ---- Review follow-up: far tail, front floor, no unprofitable structure ----
+def _put_diagonal_legs(iv_pct):
+    import options_calculator as oc
+    iv = iv_pct / 100
+    short = _leg("put", "short", 100.0,
+                 oc.bs_price(100.0, 100.0, 7 / 365, oc.RISK_FREE_RATE, iv, "put"), iv=iv_pct)
+    long_ = _leg("put", "long", 105.0,
+                 oc.bs_price(100.0, 105.0, 35 / 365, oc.RISK_FREE_RATE, iv, "put"), iv=iv_pct)
+    short["expiration"], long_["expiration"] = _exp(7), _exp(35)
+    return [short, long_]
+
+
+@pytest.mark.parametrize("iv_pct", [150.0, 100.0])
+def test_put_diagonal_max_loss_sees_the_plateau_as_the_stock_runs_away(iv_pct):
+    """A put diagonal's worst case is S -> infinity: the front put is worthless and
+    the long back put's time value decays to nothing, so it loses the whole debit.
+    At a high IV the back put still carries value at 2x the top strike, so sampling
+    stopped there understated the loss by ~$117 at IV 150."""
+    legs = _put_diagonal_legs(iv_pct)
+    m = ss.payoff_metrics(legs, spot=100.0)
+    entry = legs[1]["mark"] - legs[0]["mark"]
+    far = -ss._pl_at(legs, entry, 100 * 105.0, ss._front_expiration(legs)) * 100
+    assert abs(far - m["net_debit"]) < 0.01          # the plateau IS the debit
+    assert abs(m["max_loss"] - (far + m["commission"])) < 2.0
+
+
+def test_calendar_front_leg_is_at_least_seven_days_out():
+    """The default DTE window starts at 0, so the front was a 0-2 DTE expiry whose
+    calendar can barely profit (measured R:R -0.004 at 0/28) and was always cut."""
+    out = _by_type(ss.build_calendars(_ladder_chain(days=(1, 8, 36)), "XYZ", 100.0, 0.28, 0, 60))
+    legs = {l["side"]: l for l in out["CALENDAR_CALL"]["legs"]}
+    assert legs["short"]["expiration"] == _exp(8)
+    assert legs["long"]["expiration"] == _exp(36)
+
+
+def test_no_calendar_when_only_the_sub_seven_day_expiry_could_be_the_front():
+    assert ss.build_calendars(_ladder_chain(days=(1, 14)), "XYZ", 100.0, 0.28, 0, 60) == []
+
+
+def test_a_calendar_that_cannot_profit_is_never_emitted(monkeypatch):
+    real = ss._assemble
+
+    def _no_profit(*a, **k):
+        s = real(*a, **k)
+        s["max_profit"] = -1.29
+        return s
+    monkeypatch.setattr(ss, "_assemble", _no_profit)
+    assert ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60) == []
+
+
+def test_a_calendar_with_no_max_profit_figure_is_never_emitted(monkeypatch):
+    real = ss._assemble
+
+    def _none(*a, **k):
+        s = real(*a, **k)
+        s["max_profit"] = None
+        return s
+    monkeypatch.setattr(ss, "_assemble", _none)
+    assert ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60) == []
+
+
+def _diag_width(sig):
+    ks = [l["strike"] for l in sig["legs"]]
+    return abs(ks[0] - ks[1])
+
+
+def test_a_diagonal_sells_thirty_delta_front_and_buys_seventy_delta_back():
+    """Practitioner geometry (the poor man's covered call and its put mirror):
+    short ~0.30 delta out of the money on the front, long ~0.70 delta in the money
+    on the back, net debit under the width. An at-the-money short can never satisfy
+    that rule for calls on a flat term structure."""
+    out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35), step=1.0, n=15),
+                                      "XYZ", 100.0, 0.28, 5, 60))
+    for t, call in (("DIAGONAL_CALL", True), ("DIAGONAL_PUT", False)):
+        legs = {l["side"]: l for l in out[t]["legs"]}
+        short, long_ = legs["short"], legs["long"]
+        assert short["expiration"] == _exp(7) and long_["expiration"] == _exp(35)
+        assert abs(abs(short["delta"]) - 0.30) <= 0.10, (t, short["delta"])
+        assert abs(abs(long_["delta"]) - 0.70) <= 0.10, (t, long_["delta"])
+        if call:
+            assert short["strike"] > 100.0 and long_["strike"] < 100.0
+        else:
+            assert short["strike"] < 100.0 and long_["strike"] > 100.0
+        assert out[t]["net_debit"] < _diag_width(out[t]) * 100
+        assert out[t]["max_profit"] > 0
+
+@pytest.mark.parametrize("step,n", [(5.0, 6), (1.0, 15), (2.5, 8)])
+def test_every_emitted_diagonal_costs_less_than_its_width(step, n):
+    for days in ((7, 35), (14, 42)):
+        sigs = ss.build_calendars(_ladder_chain(days=days, step=step, n=n),
+                                  "XYZ", 100.0, 0.28, 5, 60)
+        for s in sigs:
+            if s["type"].startswith("DIAGONAL_"):
+                assert s["net_debit"] < _diag_width(s) * 100, s["id"]
