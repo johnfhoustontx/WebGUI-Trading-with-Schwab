@@ -374,6 +374,10 @@ def _line(x1, y1, x2, y2, stroke, extra=""):
             f'stroke="{stroke}"{extra}/>')
 
 
+def _sign_stroke(pnl):
+    return PROFIT_STROKE if pnl > 0 else LOSS_STROKE if pnl < 0 else ZERO_STROKE
+
+
 def payoff_svg(curve, spot, width=120, height=32):
     """A small payoff shape: profit green, loss red, a dashed zero line, a tick at
     today's price.
@@ -382,8 +386,9 @@ def payoff_svg(curve, spot, width=120, height=32):
     is a FIXED pixel size with a matching ``viewBox`` and no
     ``preserveAspectRatio``: stretching a viewBox needs ``vector-effect`` to keep
     strokes even, and DOMPurify strips that attribute (CLAUDE.md). One ``<line>``
-    per segment, coloured by the sign of the segment's MID P&L - a polyline
-    cannot change colour part-way. Returns ``""`` when there is nothing to draw
+    per segment, coloured by its sign - a polyline cannot change colour part-way
+    - and a segment that CROSSES zero is split at the interpolated break-even so
+    the colour changes exactly there. Returns ``""`` when there is nothing to draw
     (fewer than two usable points, or no price range).
     """
     pts = []
@@ -416,11 +421,18 @@ def payoff_svg(curve, spot, width=120, height=32):
     zero_y = sy(0.0)
     parts = [_line(_PAD, zero_y, w - _PAD, zero_y, ZERO_STROKE,
                    ' stroke-width="1" stroke-dasharray="2 2"')]
+    seg = ' stroke-width="1.5" stroke-linecap="round"'
     for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-        mid = (y1 + y2) / 2.0
-        stroke = PROFIT_STROKE if mid > 0 else LOSS_STROKE if mid < 0 else ZERO_STROKE
-        parts.append(_line(sx(x1), sy(y1), sx(x2), sy(y2), stroke,
-                           ' stroke-width="1.5" stroke-linecap="round"'))
+        if y1 * y2 < 0:
+            # Crosses break-even: split at the interpolated zero so red and green
+            # meet exactly there, instead of one colour spilling past it.
+            xc = x1 + (0.0 - y1) / (y2 - y1) * (x2 - x1)
+            parts.append(_line(sx(x1), sy(y1), sx(xc), zero_y, _sign_stroke(y1), seg))
+            parts.append(_line(sx(xc), zero_y, sx(x2), sy(y2), _sign_stroke(y2), seg))
+        else:
+            # Same sign, or touching zero at one end: the non-zero end decides.
+            parts.append(_line(sx(x1), sy(y1), sx(x2), sy(y2),
+                               _sign_stroke(y1 if y1 != 0 else y2), seg))
     s = _fmt.num(spot)
     if s is not None and x_lo <= s <= x_hi:
         x = sx(s)

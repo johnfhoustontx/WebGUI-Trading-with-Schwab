@@ -210,24 +210,27 @@ def test_payoff_svg_is_fixed_size_and_colours_by_sign():
 def test_payoff_svg_geometry():
     svg = fv.payoff_svg(_CURVE, spot=100.0, width=120, height=32)
     assert 'viewBox="0 0 120 32"' in svg and "style=" not in svg
-    # two segments + a dashed zero line + a spot tick
-    assert svg.count("<line ") == 4
-    assert svg.count(f'stroke="{fv.LOSS_STROKE}"') == 1
+    # a flat loss, a crossing segment split in two, a dashed zero line, a spot tick
+    assert svg.count("<line ") == 5
+    assert svg.count(f'stroke="{fv.LOSS_STROKE}"') == 2
     assert svg.count(f'stroke="{fv.PROFIT_STROKE}"') == 1
     assert "stroke-dasharray" in svg and f'stroke="{fv.SPOT_STROKE}"' in svg
 
 
 def test_payoff_svg_skips_the_spot_tick_off_the_curve_and_junk_points():
     svg = fv.payoff_svg(_CURVE + [[float("nan"), 1.0], None, [1]], spot=500.0)
-    assert svg.count("<line ") == 3 and fv.SPOT_STROKE not in svg
+    assert svg.count("<line ") == 4 and fv.SPOT_STROKE not in svg
     assert fv.payoff_svg([[100.0, 1.0], [100.0, 2.0]], 100.0) == ""
 
 
 def test_payoff_svg_emits_nothing_dompurify_would_strip():
+    _assert_dompurify_clean(fv.payoff_svg(_CURVE, spot=100.0))
+
+
+def _assert_dompurify_clean(svg):
     import re
     from test_rings import _dompurify_allowlist
     allow = _dompurify_allowlist()
-    svg = fv.payoff_svg(_CURVE, spot=100.0)
     tags = set(re.findall(r"<([a-zA-Z][\w-]*)", svg))
     attrs = set(re.findall(r'\s([a-zA-Z][\w:-]*)="', svg))
     stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
@@ -235,3 +238,28 @@ def test_payoff_svg_emits_nothing_dompurify_would_strip():
     # Non-vacuity: we really parsed an SVG and really checked its attributes.
     assert {"svg", "line"} <= tags
     assert {"viewBox", "x1", "stroke", "stroke-dasharray"} <= attrs
+
+
+def _segments(svg):
+    import re
+    return [dict(re.findall(r'([\w-]+)="([^"]*)"', m))
+            for m in re.findall(r"<line ([^>]*)/>", svg)
+            if 'stroke-dasharray' not in m]
+
+
+def test_payoff_svg_changes_colour_exactly_at_break_even():
+    curve = [[90.0, -100.0], [110.0, 100.0]]
+    svg = fv.payoff_svg(curve, spot=None, width=120, height=32)
+    red, green = _segments(svg)
+    assert red["stroke"] == fv.LOSS_STROKE and green["stroke"] == fv.PROFIT_STROKE
+    # P&L 0 at price 100 -> x = 2 + 0.5 * 116 = 60; zero line at y = 2 + 0.5 * 28 = 16
+    assert (red["x2"], red["y2"]) == ("60", "16") == (green["x1"], green["y1"])
+    assert (red["x1"], green["x2"]) == ("2", "118")
+    _assert_dompurify_clean(svg)
+
+
+def test_payoff_svg_segment_touching_zero_takes_its_other_end():
+    up = _segments(fv.payoff_svg([[90.0, 0.0], [110.0, 100.0]], spot=None))
+    down = _segments(fv.payoff_svg([[90.0, -100.0], [110.0, 0.0]], spot=None))
+    assert [s["stroke"] for s in up] == [fv.PROFIT_STROKE]
+    assert [s["stroke"] for s in down] == [fv.LOSS_STROKE]
