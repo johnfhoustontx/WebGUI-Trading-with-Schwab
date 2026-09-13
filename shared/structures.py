@@ -47,9 +47,11 @@ _DEFAULT_LEGS = 2
 
 # Debit structures the Paper LEDGER records, reprices and settles generically by
 # their legs (paper_trader._create_debit_trade / signal_repricer.reprice_legs /
-# legs_intrinsic_value). Anything NOT here that is not a credit spread falls into
-# create_paper_trade's credit branch and KeyErrors on ``short_strike`` - which is
-# why the page's Paper button is pinned to this list by test_cross_tier_mirrors.
+# legs_intrinsic_value). Anything NOT here that is not a credit spread is refused
+# BY NAME at the top of create_paper_trade (a ValueError) - it used to fall into the
+# credit branch and KeyError on ``short_strike``, protection the first such row to
+# gain that field would have removed. The page's Paper button is pinned to this
+# list by test_cross_tier_mirrors.
 # ⚠ No straddle or strangle, long or short: they are ANALYSIS ONLY (D1,
 # docs/plans/2026-09-12-straddle-strangle-design.md), pinned by
 # options-scanner/tests/test_straddle_analysis_only.py.

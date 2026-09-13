@@ -1145,7 +1145,8 @@ Signals the system has "captured" to track over time, with live re-pricing.
 **Route:** `/options/paper`.
 
 A manual paper-trading ledger. You open every row yourself; since 2026-09-12 the
-**long options and debit spreads** in it also close themselves (see below).
+**long options and debit spreads** in it also close themselves (see below), and
+since 2026-09-13 so do butterflies and condors.
 
 - **Action buttons:** Reload, **Close selected**, **Analyze selected** (live
   Greeks + P&L overlay), **Delete selected**, **Delete all closed**.
@@ -1159,7 +1160,7 @@ A manual paper-trading ledger. You open every row yourself; since 2026-09-12 the
   analysis and overlays current Greeks and P&L.
 - Each row also has an **Expected Move** button.
 
-**Automatic exits (long options and debit spreads only).** Checked **hourly,
+**Automatic exits (long options, debit spreads, butterflies and condors only).** Checked **hourly,
 09:00–14:00 CT** on the same run as the paper account — so a target reached at
 09:15 is acted on at 10:00, or immediately if you press **Run manage cycle** on
 Paper Account.
@@ -1171,6 +1172,10 @@ Paper Account.
   21 days or fewer when you opened it is **not** time-exited — that is everything
   from the Market Scanner's **Directional** tab, which scans 0–15 days out. Those
   ride on their target and on expiry.
+- **Butterflies and condors** (from the Strategy Finder) take the same +50% target,
+  measured against their maximum profit, but have **no time exit** at all. They
+  gain most of their value in the last two weeks, so a 21-day exit would close
+  them near break-even. A butterfly's middle strike shows as `S 2×100C`.
 - **No automatic loss stop.** The research this follows closes debit spreads out
   before expiry rather than stopping them; your risk is capped at the premium paid
   regardless. Close any row by hand whenever you like.
@@ -1319,11 +1324,60 @@ parameters and press **Scan**:
 
 - **Symbol**
 - **DTE** min / max (days to expiration)
-- **Put Δ** and **Call Δ** min / max (delta bands for strike selection)
+- **Strategies** — seven groups, all ticked by default (see below)
+- **Put Δ** and **Call Δ** min / max (delta bands for strike selection), under
+  **Advanced — credit spreads**
 - **Min credit %**
 
 Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Market Scanner.
+per-row action buttons) and detail panel as the Market Scanner.
+
+**The seven strategy groups:**
+
+| Group | Builds | How the strikes are picked |
+| --- | --- | --- |
+| **Directional** | long call, long put, short call, short put | long legs near 0.55 delta; shorts at the middle of your delta band. The short put is the cash-secured put |
+| **Spreads** | bull call, bear put, put credit, call credit | debit spreads buy ~0.60 delta and sell ~0.30; credit spreads use your delta band and **Min credit %** |
+| **Neutral** | iron condor | built from the credit spreads |
+| **Straddles & strangles** | long and short straddle, long and short strangle | straddle at the money; long strangle buys both sides near 0.30 delta; short strangle sells at the middle of your delta band |
+| **Butterflies & condors** | call butterfly, put butterfly, iron butterfly, call condor, put condor | body at the money; wings the same distance either side, the listed distance nearest half the expected move. A condor's shorts sit one wing out, its longs two |
+| **Calendars** | call and put calendar, call and put diagonal | calendar: same at-the-money strike, near month short, later month long. Diagonal: short the near month near 0.30 delta out of the money, long the later month near 0.70 delta in the money |
+| **Stock + options** | covered call, protective put, collar | one 100-share lot at today's price; the sold call at the middle of your call delta band, the bought put near 0.25 delta |
+
+Things worth knowing before you read the results:
+
+- **Calendars and diagonals need two expirations inside your DTE range** — the
+  near one at least **7 days** out, the later one the expiration nearest **four
+  weeks** after it, and at least a week after it. If **DTE max** does not reach
+  that far, no calendar is built; widen it. No extra data is fetched for them.
+  The share structures also use an expiration at least 7 days out.
+- **Nothing is built off-centre.** When the at-the-money strike is missing from
+  the chain, the straddles, butterflies, condors and calendar are skipped rather
+  than moved to the next strike.
+- **Some candidates are skipped on purpose:** a short strangle or covered call
+  whose sold option would sit above your delta band's ceiling; a protective put or
+  collar whose put is under 0.10 delta (a collar also needs its call at 0.05 or
+  more); a diagonal whose short is outside 0.15–0.45 delta or whose cost reaches
+  the width between its strikes.
+- **The Legs column** reads `L 100 shares / S 105C`. `S 2×100C` is two contracts
+  (a butterfly's middle), and a leg on a later expiration carries its date — a
+  calendar reads `S 100C / L 100C 11/13`.
+- **Earnings:** a calendar or diagonal is checked against its **later** expiration,
+  because the back month is still open when a report lands after the near month
+  expires.
+- ⚠ **The short straddle and the covered call are built but nearly always cut.**
+  Both win too rarely for the bar that premium-selling trades must clear, so they
+  are counted in the status line's **below the quality bar** figure rather than
+  listed. The Calculator still builds both. Long straddles and strangles usually
+  pass only as **Marginal**.
+
+**Send to Paper trade** appears only on rows the Paper Ledger records correctly:
+credit spreads, iron condors, long calls and puts, debit spreads, and the call and
+put **butterflies and condors**. Straddles and strangles are for study only and
+have no button; neither do the iron butterfly, calendars, diagonals or the share
+structures. **Send to Calculator** carries every row, calendars (both expirations)
+and share legs included — but clicking an expiration pill on the Calculator
+afterwards moves **every** option leg to that date, which collapses a calendar.
 
 ## Overview
 

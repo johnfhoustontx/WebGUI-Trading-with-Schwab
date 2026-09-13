@@ -4,7 +4,86 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-13 (**Strategy Finder moved to the main menu.**
+**Last updated:** 2026-09-13 (**Strategy Finder — every structure the Calculator
+knows.** Operator request: "scan for all strategies using the updated rules".)
+
+- **Four new build groups, 13 new structures**, all on by default beside
+  Directional / Spreads / Neutral: **Straddles & strangles** (long/short straddle
+  and strangle), **Butterflies & condors** (call/put/iron butterfly, call/put
+  condor), **Calendars** (call/put calendar and diagonal) and **Stock + options**
+  (covered call, protective put, collar on one 100-share lot at spot). The
+  cash-secured put is the existing `SHORT_PUT`, not a new row. No extra Schwab
+  call: every builder reads the chain `swing_scan` already fetched, and the
+  volatility gate, earnings gate and quality cut apply unchanged.
+- **Payoff math** (`strategy_scanner.payoff_metrics`): a leg set with a later
+  expiry or a share leg is valued at the **front expiry** — back legs at
+  Black-Scholes on their own IV, floored at intrinsic; shares at spot; sampled out
+  to 32× the top strike. Single-expiry option sets keep the intrinsic path byte for
+  byte. Commission is billed **per option contract** (a butterfly body is two;
+  shares are free), and a share structure's capital is the cash it ties up.
+- **Scoring:** gate profiles for every new type (`_TYPE_PROFILE`); the iron
+  butterfly is judged `DEBIT` by put–call parity; long straddles/strangles carry
+  `family = "VOLATILITY"` so they reward a near breakeven. Re-runnable measurement:
+  `tools/sweep_strategy_gates.py` (the design doc's Scoring table quotes it with
+  parameters).
+- **Earnings gate** reads a multi-expiry row's **latest** expiration.
+- **Page:** seven checkboxes; the Legs cell prints `L 100 shares`, `S 2×100C`, and
+  a later leg's `MM/DD`. Send to Calculator carries calendars and share legs.
+- **Paper:** Send to Paper adds call/put butterflies and condors
+  (`shared.structures.LEDGER_DEBIT`, pinned to the page's `_PAPER_TYPES`). The
+  ledger records, reprices and settles the `qty 2` body; `create_paper_trade` now
+  refuses an unsupported type **by name** instead of relying on a `short_strike`
+  KeyError. The ledger's Strikes cell shows `2×` and its detail panel both
+  breakevens (debit rows now join breakevens with ` / `; old `, ` rows still parse).
+
+**Operator decisions.** (1) **D1 kept** — straddles and strangles, long or short,
+are built and shown but never paper-traded. (2) **No time exit for butterflies and
+condors** — a long fly gains most of its value in the final two weeks (95/100/105
+at spot 100: $1.20 at 30 DTE, $1.42 at 21, ~$3.10 target near 3 DTE), so a 21-DTE
+exit would close it flat; they keep the 50%-of-max-profit target and expiry
+settlement, and the original four debit structures keep `exit_dte = 21`. (3) **The
+short straddle and covered call are counted, not shown** — both fail `NAKED`'s 65
+PoP bar (57.3 and ~52 at spot 100, IV 0.28) and no bar is invented without outcome
+data.
+
+**Revised while building** (each recorded in the design doc):
+
+- **Diagonal geometry, three times** — an out-of-the-money long priced as a
+  credit; an in-the-money long against an at-the-money short cost more than the
+  width on every call chain; settled on short front ~0.30 delta (0.15–0.45
+  accepted) against long back ~0.70 delta, skipped when debit ≥ width (not the
+  playbook's 75%, which rejects both diagonals on a $1 ladder at 7/35 DTE).
+- **Calendar front floor of 7 DTE** — the page's DTE min of 0 put the front at
+  0–2 DTE, where every calendar measured R:R −0.004 to 0.27 and was cut. Share
+  structures take the same floor.
+- **ATM-hole rule** — a straddle, fly, condor or calendar whose listed at-the-money
+  strike is missing from one side is skipped, never recentred; calendars judge
+  each month's ladder on its own local spacing (step limit max(10% of spot,
+  $2.50), so low-priced chains keep their calendars).
+- **Long strangle wings** — its own ~0.30-delta strikes; the short strangle's
+  ~0.15-delta strikes never cleared LONG's PoP bar.
+- **A real 0.25-delta hedge** for the protective put and collar (the band midpoint
+  had bought 0.08 delta), with no hedge under 0.10 and no collar call under 0.05.
+- **Collar capital** — capital = max loss rated a collar ~10× as capital-efficient
+  as a covered call on the same lot.
+- **Far tail for put diagonals** — stopping at 2× the top strike understated max
+  loss by ~$117 at IV 150.
+- **IV sentinel** — a later leg with Schwab's `-999`, NaN or zero IV is never built
+  (it would otherwise price as a confident payoff).
+
+**Known limits.** Condors are **ladder-dependent** — the wing is the listed distance
+nearest half the expected move, so one strike step flips a condor between Good and
+Weak (spot 100, IV 0.28: Weak at 30 DTE on $2.50 strikes, at 14 DTE on $5). A
+calendar is skipped when a perfectly legitimate ladder **changes spacing** next to
+the money ($2.50 strikes up to 100, $5 above): from two neighbours that looks
+exactly like a missing strike, and the builder skips rather than risk an
+off-centre calendar. Clicking an **expiry pill on the Calculator** after Send
+to Calculator moves every option leg to one date, collapsing a calendar.
+
+- Design + plan: [`docs/plans/2026-09-13-strategy-finder-all-structures-design.md`](plans/2026-09-13-strategy-finder-all-structures-design.md)
+  / [`-plan.md`](plans/2026-09-13-strategy-finder-all-structures-plan.md).
+
+**Prior —** 2026-09-13 (**Strategy Finder moved to the main menu.**
 Operator request.)
 
 - `/options/swing` left the Options tab strip and is now a standalone rail row

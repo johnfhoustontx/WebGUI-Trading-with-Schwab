@@ -246,8 +246,9 @@ def _latest_expiration(sig):
 
 # Candidate build groups. ``families=None`` builds all of these. The first three
 # are ALSO the ``family`` value their candidates carry; the four added 2026-09-13
-# are build groups only - their candidates carry NEUTRAL or DIRECTIONAL, the one
-# vocabulary strategy_scoring reads (see the design doc).
+# are build groups only - their candidates carry NEUTRAL, VOLATILITY (the long
+# straddle/strangle) or DIRECTIONAL, the vocabulary strategy_scoring reads (see
+# the design doc).
 _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL",
                    "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK")
 
@@ -297,16 +298,18 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
          (``dem = spot·iv·√(1/365)`` ⇒ invert to a fraction; this dodges the
          percent/decimal trap — ``run_iv_analysis``'s ``current_iv`` is a PERCENT),
       3. infer the market view,
-      4. build candidates by family — DIRECTIONAL (long/short calls & puts) and
-         VERTICAL (debit verticals + adapted PCS/CCS credit spreads) and NEUTRAL
-         (iron condors). Credit spreads feed BOTH the VERTICAL credit set AND the
-         NEUTRAL iron condors, so ``screen_spreads`` runs whenever EITHER family is
-         requested,
+      4. build candidates by group — DIRECTIONAL (long/short calls & puts),
+         VERTICAL (debit verticals + adapted PCS/CCS credit spreads), NEUTRAL
+         (iron condors), STRADDLE (long/short straddles & strangles), BUTTERFLY
+         (call/put/iron butterflies, call/put condors), CALENDAR (call/put
+         calendars & diagonals) and STOCK (covered call, protective put, collar).
+         Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron
+         condors, so ``screen_spreads`` runs whenever EITHER group is requested,
       5. score + rank + assign ids.
 
-    ``families`` (default all Phase-1 families) restricts which candidate families
-    are built. ``market_state`` (optional) is the live committed five-state
-    classifier label (bullish / lack_of_bullishness / neutral / lack_of_bearishness
+    ``families`` (default all seven groups in ``_SWING_FAMILIES``) restricts which
+    candidate groups are built. ``market_state`` (optional) is the live committed
+    five-state classifier label (bullish / lack_of_bullishness / neutral / lack_of_bearishness
     / bearish); it is threaded to ``score_all`` for the low-weight family-ranking
     tilt. ``None`` (absent/bad composite) applies no tilt. The caller (the ``swing``
     command handler) reads it from ``cache:sentiment:composite`` — compute stays
@@ -458,6 +461,13 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # The conflict is read against the LATEST leg expiration, not the row's
         # ``expiration`` (the front): a calendar or diagonal holds its back month
         # through a report the front leg expires ahead of.
+        #
+        # ⚠ The two halves read DIFFERENT legs: ``earnings_gate_applies`` gets the
+        # FRONT leg's ``dte`` while the conflict check gets the latest expiry. That
+        # is correct only because every multi-expiry structure has a front of at
+        # least ``strategy_scanner._MIN_FRONT_DTE`` (7) days, so it can never take
+        # the 0-DTE bucket's same-day exemption. A multi-expiry builder with a
+        # same-day front would need the predicate fed the latest leg's DTE too.
         signals = [s for s in signals
                    if not (se.earnings_gate_applies(trade_type, s.get("dte"))
                            and se.check_earnings_conflict(earnings_date,

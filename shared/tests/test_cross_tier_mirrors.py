@@ -448,8 +448,8 @@ def test_every_published_gamma_history_is_one_a_screen_actually_draws():
 def test_the_pages_paper_button_covers_exactly_the_ledgers_debit_structures():
     """The Paper button (webgui) and the ledger's debit path (options-scanner) are
     two lists in tiers that cannot share one. A type with the button but not the
-    debit path falls into the CREDIT branch of create_paper_trade and KeyErrors on
-    short_strike; the converse is a structure the ledger supports that nobody can
+    debit path is refused by name in create_paper_trade, so the button would fail
+    every click; the converse is a structure the ledger supports that nobody can
     send."""
     taxonomy = set(_const("shared/structures.py", "LEDGER_DEBIT"))
     page = set(_const("webgui/pages/options/strategy_table.py", "_PAPER_TYPES"))

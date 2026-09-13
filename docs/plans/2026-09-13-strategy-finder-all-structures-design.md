@@ -82,12 +82,13 @@ Schwab calls**.
 | Long strangle | its own OTM wings nearest **0.30 delta**, independent of the band. *Revised while building:* buying the short strangle's band-midpoint strikes put both wings near 0.15 delta, where PoP measured 22–25 in every IV × DTE cell — always under LONG's 30 bar (the two rows' PoPs sum to ~100) |
 | Collar put, protective put | the long put nearest **0.25 delta**, not the sell band; skipped under 0.10 delta (a collar also needs a call ≥ 0.05) — below that the position is essentially plain long stock. Front expiry ≥ 7 DTE, as for calendars. *Revised while building:* the band midpoint bought a 0.08-delta hedge, and at the page's default DTE min of 0 a same-day hedge passed the gates |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
-| Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
+| Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM), skipped when either expiry's own ladder has a hole at the money (spacing read next to the money; a local step wider than max(10% of spot, $2.50) is a hole). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
 | Diagonal | short the FRONT month out of the money near **0.30 delta** (accepted only inside 0.15–0.45), long the BACK month in the money near **0.70 delta**; skipped when the debit reaches the strike width. ⚠ The playbook (`2026-09-11-options-strategy-playbook.md`) says *debit ≤ 75% of width*; 100% is deliberate — measured on a $1 ladder at 7/35 DTE the call diagonal costs 87.5% and the put 78.5% of width, so 75% would reject both. *Revised three times while building:* an out-of-the-money long priced as a credit; an in-the-money long against an at-the-money short cost more than the width on every call chain measured (debit = width + back time value − front time value), so only put diagonals could ever pass, and only on interest-rate carry. The 0.30/0.70 pairing is the practitioner shape the width rule assumes |
 
-**No calendar is built when the window has no two expiries ≥ 7 days apart.** At
-the default 5–30 window the calendar is short; widening DTE max gives longer
-ones. This is the accepted cost of not fetching a second window — `$SPX` on a
+**No calendar is built when the window has no two expiries ≥ 7 days apart.** The
+back month is the expiry nearest front + 28 days, so DTE max decides whether a
+calendar exists and how close to four weeks it gets; the page's default window
+(0–120) reaches it. This is the accepted cost of not fetching a second window — `$SPX` on a
 wide window has already timed out at the proxy.
 
 **Never emitted:** a calendar or diagonal whose max profit is not above zero, and any
@@ -106,21 +107,54 @@ structure-agnostic. What each structure needs is a **gate profile** in
 `strategy_scoring._TYPE_PROFILE` — an unmapped type silently falls to `DEBIT`,
 which gives an unbounded long an unjudgeable reward and cuts it.
 
-Measured by pricing each structure with Black-Scholes (spot 100, IV 28%,
-14/30/45 DTE, wings at half the expected move) through the real scorers:
+Measured with **`tools/sweep_strategy_gates.py`** — a synthetic Black-Scholes chain
+(front and front + 28 days), the real builders at the page's default delta bands (put
+−0.20…−0.10, call 0.10…0.20), scored against a neutral view. Default parameters: **spot
+100, IV 0.28, $2.50 strikes**; grade at front DTE 14 / 30 / 45.
 
-| Structure | Profile | Measured vs the `min` bar | Outcome |
+| Structure | Profile | 14 / 30 / 45 DTE | Deciding figure (vs the `min` bar) |
 |---|---|---|---|
-| Long straddle, long strangle | LONG | PoP 36–43 vs 30 with strangle wings near 0.30 delta; reward auto-passes (unbounded) | passes |
-| Call/put butterfly | DEBIT | R:R 3.4–3.9 vs 0.6; PoP 31–34 vs 30 | passes, barely on PoP |
-| Iron butterfly | DEBIT | identical to the long butterfly | passes, barely |
-| Call/put condor | DEBIT | R:R 0.67–0.81; PoP 54–57 on a $1 ladder — ⚠ **ladder-dependent**: on $5 strikes around $100 it measures 0.22 at 14 DTE and 0.53 at 30 (cut), 0.79 at 45 | passes on fine ladders |
-| Calendar, diagonal | DEBIT | measured before the calendar front floor and the 0.70-delta diagonal — **re-measure with `tools/sweep_strategy_gates.py`** (Task 8) | to be re-measured |
-| Collar | DEBIT | R:R 1.06; PoP 51 | passes |
-| Protective put | LONG | PoP 46–48 | passes |
-| Short strangle (1-σ) | NAKED | PoP 73–76 vs 65; capeff far above 0.10/yr | passes |
-| **Short straddle** | NAKED | **PoP 57 vs 65 at every DTE** | **always cut** |
-| **Covered call** | NAKED | **PoP ~54 vs 65** (and R:R 0.06–0.09 would fail DEBIT's 0.6) | **always cut** |
+| Long straddle | LONG | Marginal / Marginal / Marginal | PoP 42.7 vs 30; reward auto-passes (unbounded); composite 53–55 |
+| Long strangle | LONG | Marginal / Marginal / Marginal | PoP 34.5–37.8 with ~0.30-delta wings; composite 50–52 |
+| Short straddle | NAKED | **Weak / Weak / Weak** | **PoP 57.3 vs 65** |
+| Short strangle | NAKED | Good / Good / Good | PoP 77.8–79.1; capeff 0.50–0.93/yr vs 0.10 |
+| Call / put butterfly | DEBIT | Weak / Good / Good | PoP 29.2 at 14 (vs 30); R:R 2.99–3.98 |
+| Iron butterfly | DEBIT | Weak / Good / Good | within 0.14 R:R and 1.1 PoP of the long butterfly (by parity) |
+| Call / put condor | DEBIT | Good / **Weak** / Good | R:R 0.53–0.54 at 30 (vs 0.6), where the wing lands at 5; 0.79–0.92 at 14 and 45 |
+| Call / put calendar | DEBIT | Good / Good / Good | R:R 0.82–2.19; PoP 43.6–50.0 |
+| Call diagonal | DEBIT | Weak / Good / Good | R:R 0.44 at 14; 0.69 / 0.90 |
+| Put diagonal | DEBIT | Weak / Weak / Good | R:R 0.45 / 0.47 at 14 / 30; 0.68 at 45 |
+| Covered call | NAKED | **Weak / Weak / Weak** | **PoP 51.8–52.4 vs 65** |
+| Protective put | LONG | Good / Good / Good | PoP 42.3–44.6 |
+| Collar | DEBIT | Good / Good / Good | R:R 1.66–2.00; PoP 44.0–47.0 |
+
+Other parameters change rows, which is why every figure is quoted with its own:
+
+- **`--step 5`**, 14 DTE: **no short strangle, covered call or collar is built** (the
+  nearest sold call, 105 at 0.203 delta, is over the 0.20 ceiling); butterflies pass
+  (PoP 45.1) and condors fail (R:R 0.22); the long strangle fails PoP (26.7); both
+  diagonals pass.
+- **`--iv 0.20`**: butterflies fail PoP at 30 and 45 DTE too (28.1, 23.6–24.7) and pass
+  at 14; condors fail R:R at 14 (0.49); the put diagonal fails at 14 and 30.
+
+**What the sweep showed, against the estimates this table replaced.** The first draft
+was a hand-priced estimate taken before several builder revisions, and four rows did not
+survive measurement:
+
+- *Butterflies "pass, barely on PoP" (31–34)* — at 14 DTE on a $2.50 ladder the wing is
+  2.5 and PoP is **29.2**: Weak. They pass at 30/45, but at IV 0.20 fail there too.
+- *Condors "pass on fine ladders, R:R 0.67–0.81"* — they fail wherever the wing rounds
+  **up** past half the expected move (R:R 0.53 at 30 DTE on $2.50 strikes). The condor is
+  the most ladder-dependent row.
+- *Long straddle/strangle "passes"* — the gates pass, but the composite sits at **50–55**,
+  so they list as **Marginal**, only just over the service's 50 cut.
+- *Collar "R:R 1.06, PoP 51"; protective put "PoP 46–48"* — measured after the
+  0.25-delta hedge and the 7-day front: collar R:R **1.66–2.00**, PoP 44–47; protective
+  put PoP **42–45**. Both still Good.
+
+The two cuts held: short straddle PoP 57.3 and covered call PoP ~52, against 65, at
+every DTE, ladder and IV swept. (The short straddle would pass `NEUTRAL` — PoP 57.3 vs
+55 — so `NAKED` is the choice that cuts it, not the only profile that could.)
 
 Decisions:
 
@@ -130,9 +164,11 @@ Decisions:
   butterfly if judged the same way.
 - **Flies, condors and calendars carry `family = "NEUTRAL"`**, so
   `q_breakeven_vs_em` rewards a wide profit zone rather than a breakeven near
-  spot, which is meaningless for a position centred on spot. Straddles and
-  strangles are `NEUTRAL` too; share structures and diagonals keep a directional
-  family.
+  spot, which is meaningless for a position centred on spot. The **short** straddle
+  and strangle are `NEUTRAL` too; share structures and diagonals keep a directional
+  family. *Revised while building:* the **long** straddle and strangle carry
+  `family = "VOLATILITY"`, which takes the near-breakeven branch — a long volatility
+  trade profits from a move, so the move it needs should be small.
 - **Short straddles and covered calls keep the existing bars and are counted, not
   shown** (operator decision). No threshold is invented without outcome data; the
   status line's "N below the quality bar" includes them and the Calculator still
@@ -153,7 +189,8 @@ back month spanning a report is exposed to it even when the front expires first.
 
 - Four new family checkboxes using the Calculator's group names; all seven on by
   default.
-- Columns unchanged. **Legs cell:** a share leg prints `L 100 SH`; a leg on a
+- Columns unchanged. **Legs cell:** a share leg prints `L 100 shares` (*revised while
+  building*); a leg of more than one contract carries `N×` (`S 2×100C`); a leg on a
   later expiry carries its date (`S 100C / L 100C 10/16`).
 - **Strategy cell** uses the Finder's existing label style ("Long Straddle",
   "Call Calendar", "Covered Call"), set by the builder. *Revised while planning:*
@@ -170,7 +207,8 @@ back month spanning a report is exposed to it even when the front expires first.
 - **Send to Paper** (operator decision: only where the ledger is right) adds
   `BUTTERFLY_CALL`, `BUTTERFLY_PUT`, `CONDOR_CALL`, `CONDOR_PUT` to
   `strategy_table._PAPER_TYPES` **and**
-  `paper_trader.PAPER_DEBIT_TYPES`, 
+  `paper_trader.PAPER_DEBIT_TYPES` (both now read from
+  `shared.structures.LEDGER_DEBIT`, pinned equal by `test_cross_tier_mirrors`).
   **Exit rule (operator decision 2026-09-13): no time exit** for butterflies and
   condors — they keep the 50%-of-max-profit target and settle at expiry. A 21-DTE
   exit suits trades that lose value to time; a long fly gains most of its value in the

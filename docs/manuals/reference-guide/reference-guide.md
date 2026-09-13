@@ -2297,13 +2297,14 @@ They are fully isolated. Nothing crosses between them.
 |---|---|
 | Long option (`LONG_CALL` / `LONG_PUT`) | profit target · time exit · expiry settlement |
 | Debit spread (`BULL_CALL` / `BEAR_PUT`) | profit target · time exit · expiry settlement |
+| Butterfly / condor (`BUTTERFLY_CALL` / `BUTTERFLY_PUT` / `CONDOR_CALL` / `CONDOR_PUT`) | profit target · expiry settlement — **no time exit** |
 | Credit spread (`PCS` / `CCS` / `IC`) | **expiry settlement only** — tracked, not managed |
 
 **The profit target is +50%, but of two different things**, because a debit
 spread and a single long option do not have the same ceiling:
 
 - a **debit spread** has a maximum profit (the width less what you paid), and the
-  target is half of *that*;
+  target is half of *that* — as it is for a **butterfly or condor**;
 - a **long option** has no maximum profit at all, so the target is half of **what
   you paid** — the only figure that exists.
 
@@ -2321,6 +2322,15 @@ having no rule. Everything the Market Scanner's **Directional** tab produces is
 in that category (it scans 0–4 and 5–15 days out), so those rows are bounded by
 their profit target and by expiry, not by the clock rule. The [Strategy
 Finder](#strategy-finder) is the page that produces longer-dated debits.
+
+⚠ **Butterflies and condors have no time exit at all** (operator decision,
+2026-09-13). The 21-day rule suits a trade that *loses* value to time; a long
+butterfly *gains* most of its value in the last two weeks — a 95/100/105 call
+butterfly at spot 100 is worth about $1.20 at 30 days and $1.42 at 21, and reaches
+its ~$3.10 target only near 3 days out — so the rule would close every such entry
+near break-even within days. They ride to the target or to expiry. A butterfly's
+body reads `S 2×100C` in the Strikes cell, and its detail panel shows both
+breakevens.
 
 **There is no automatic loss stop**, and that is deliberate rather than an
 omission: the research this follows (tastylive) closes debit spreads out before
@@ -2660,15 +2670,55 @@ comparable score.
 ### Reading the screen
 
 **Inputs:** symbol, **DTE min/max** (wider allows more candidates), and a **Strategies**
-multiselect across three families:
+row of seven checkboxes, all ticked by default:
 
-- **Directional** — long and naked short calls and puts.
-- **Spreads** — debit (bull call, bear put) and credit (PCS, CCS).
-- **Neutral** — iron condors.
+| Group | Structures |
+|---|---|
+| **Directional** | long and naked short calls and puts (the short put is the cash-secured put) |
+| **Spreads** | debit (bull call, bear put) and credit (PCS, CCS) |
+| **Neutral** | iron condors |
+| **Straddles & strangles** | long and short straddle, long and short strangle |
+| **Butterflies & condors** | call, put and iron butterfly; call and put condor |
+| **Calendars** | call and put calendar; call and put diagonal |
+| **Stock + options** | covered call, protective put, collar — each on one 100-share lot bought at spot |
 
 An **Advanced** panel exposes the credit-spread filters: put/call **delta** bounds (how
 far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
-and a **minimum credit** percentage.
+and a **minimum credit** percentage. The delta bounds also place the two other sold
+options that are out of the money by design — the **short strangle** and the call in a
+**covered call** or **collar** — at the band's midpoint, and drop one that lands above
+the band's ceiling. They do not move a straddle's or butterfly's shorts, which sit at the
+money by definition.
+
+**How the newer structures are built** — all from the chain the scan already fetched,
+so they cost no extra data:
+
+- **Straddle, butterfly body, iron butterfly body** — the at-the-money strike. If that
+  strike is missing from either side of the chain the structure is **skipped**, never
+  moved to the next strike: an off-centre "straddle" is a different trade under a neutral
+  name.
+- **Long strangle** — its own out-of-the-money wings near **0.30 delta**, not the short
+  strangle's strikes. Bought at the delta band's midpoint (~0.15 delta) it could never
+  win often enough to pass.
+- **Butterfly and condor wings** — the distance, listed on **both** sides of the body,
+  nearest **half the 1-σ expected move**. A condor's shorts sit one wing out, its longs
+  two. Symmetric on purpose: a broken wing is a different risk profile.
+- **Calendar** — the near expiration at least **7 days** out, the later one nearest
+  **near + 28 days** and at least a week after it, both inside your DTE range; same
+  at-the-money strike. Skipped when either month's strike ladder has a hole at the money.
+  If DTE max does not reach a second expiration, no calendar is built — widen it.
+- **Diagonal** — short the near month out of the money near **0.30 delta** (accepted
+  only between 0.15 and 0.45), long the later month in the money near **0.70 delta**.
+  Skipped when the debit reaches the width between the two strikes, since it then has no
+  upside worth the name.
+- **Covered call / protective put / collar** — near expiration at least 7 days out. The
+  sold call is at the call band's midpoint; the bought put is near **0.25 delta**, and a
+  put under 0.10 delta builds neither the protective put nor the collar (a collar also
+  needs its call at 0.05 delta or more) — below that the position is just shares.
+
+⚠ **`COVERED_CALL` here is the whole position — shares plus the call**, as in the
+[Calculator](#calculator). On the paper account the same name means the option leg
+alone, which is one reason these rows get no Paper button.
 
 **The view banner.** Before ranking anything, the scanner *infers a market view* for the
 symbol from its technicals and implied volatility — a direction, a conviction level, and
@@ -2686,14 +2736,40 @@ R:R · PoP · BE (breakeven) · Vol Rank · Score · **Grade**.
 per-family hard gates, and carries a tooltip explaining the reason. A high score with a
 poor grade means "fits your view, but badly constructed".
 
+**The Legs column** prints a share lot as `L 100 shares`, a leg of more than one
+contract as `S 2×100C` (a butterfly's body), and a leg on a later expiration with its
+date — `S 100C / L 100C 11/13` is a calendar.
+
 **The status line** reports how many candidates were **cut below the quality bar**. That
 count is what distinguishes *"the scan found things and rejected them all"* from *"the
 scan found nothing"* — two very different situations that would otherwise look identical.
 
+⚠ **Two structures are in that count on nearly every scan: the short straddle and the
+covered call.** Both are judged as premium sales, whose bar asks for a 65% probability of
+profit, and both measure around 57% and 52%. That is an operator decision — no lower bar
+is invented without outcome data — so they are counted, not shown. The long straddle and
+long strangle typically pass only as *Marginal*. Measured outcomes for every structure are
+in the *Technical Reference* (Strategy Finder scoring).
+
+**Earnings.** A calendar or diagonal is checked against its **latest** expiration: the
+back month is still open through a report that lands after the front expires.
+
 **Row actions** send to [Calculator](#calculator) or [Expected Move](#expected-move) for
-all types, and to paper trading for credit structures (PCS, CCS, IC) and defined-risk
-debit structures (long call/put, bull call, bear put). Naked shorts are excluded from
-paper trading because their risk is undefined.
+all types — a calendar arrives with both expirations and a share leg as the Calculator's
+stock leg. ⚠ Clicking an expiration pill on the Calculator afterwards moves **every**
+option leg to that one date, which collapses a calendar into a single-expiry trade.
+
+**Send to Paper trade** appears for credit structures (PCS, CCS, IC), defined-risk debit
+structures (long call/put, bull call, bear put) and the **call and put butterflies and
+condors**. No button for:
+
+| Structure | Why |
+|---|---|
+| Naked shorts | undefined risk |
+| Straddles and strangles, long or short | **analysis only** — a standing decision; the ledger refuses them by name |
+| Iron butterfly | the ledger's credit path understands only two-strike spreads and iron condors |
+| Calendars and diagonals | the ledger settles every leg at intrinsic, which is wrong for a back month |
+| Covered call, protective put, collar | the ledger holds no shares |
 
 ### Why it matters
 

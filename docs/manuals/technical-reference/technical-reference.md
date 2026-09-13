@@ -861,6 +861,115 @@ Returned under both `iv_*` (legacy) and `hv_*` (honest) keys.
 **Historical volatility** — `calc_historical_vol_series(candles, window=30)`:
 rolling 30-day std of daily log returns, annualized: `std · sqrt(252) · 100`.
 
+## Strategy Finder scoring (Fit + Quality)
+
+**Files:** `options-scanner/strategy_scanner.py` (builders, `payoff_metrics`,
+`pop_from_payoff`), `options-scanner/strategy_scoring.py` (`GATE_BARS`,
+`_TYPE_PROFILE`, `score_strategy`), `services/options_svc/compute.py` (`swing_scan`).
+Design: `docs/plans/2026-09-13-strategy-finder-all-structures-design.md`.
+
+This is a **separate** score from the eleven-factor composite above. Each candidate is
+scored on one 0–100 scale so that different structures rank together:
+
+```
+fit       = 0.6 · directional fit (net delta vs the inferred view)
+          + 0.4 · volatility fit  (net vega  vs the vol regime)
+quality   = weighted q_rr 0.30 · q_be 0.25 · q_pop 0.25 · q_liq 0.20
+composite = 0.7 · quality + 0.3 · fit
+```
+
+`q_be` rewards a breakeven **near spot** for every family except `NEUTRAL`, where it
+rewards a **wide** profit zone (breakeven spread ÷ 1-σ move). Flies, condors, calendars
+and the short straddle/strangle carry `NEUTRAL`; the long straddle/strangle carry
+`VOLATILITY`, which takes the near-breakeven branch, because a long volatility trade
+wants the move it needs to be small. Diagonals and share structures are `DIRECTIONAL`.
+
+**Hard gates and grade.** Each type maps to a gate profile (an unmapped type falls to
+`DEBIT`). Failing any `min` bar caps the composite at **39** (`GATE_FAIL_CAP`) and grades
+**Weak**; clearing every `excellent` bar with composite ≥ **78** is **Strong**; otherwise
+≥ **58** is **Good**, else **Marginal**. The service then cuts anything **Weak or under 50**
+(`SWING_MIN_SCORE`) and reports the count as *below the quality bar*.
+
+| Profile | Types | `min` liq / reward / PoP | `excellent` liq / reward / PoP |
+|---|---|---|---|
+| `LONG` | long call/put, long straddle/strangle, protective put | 40 / R:R 0.8 / 30 | 70 / 1.5 / 45 |
+| `NAKED` | short call/put, short straddle/strangle, covered call | 40 / capeff 0.10 per yr / 65 | 70 / 0.20 / 78 |
+| `DEBIT` | bull call, bear put, call/put/iron butterfly, call/put condor, call/put calendar, call/put diagonal, collar | 45 / R:R 0.6 / 30 | 75 / 1.2 / 45 |
+| `CREDIT` | PCS, CCS | 45 / R:R 0.15 / 60 | 75 / 0.33 / 72 |
+| `NEUTRAL` | iron condor | 45 / R:R 0.12 / 55 | 75 / 0.25 / 68 |
+
+For `LONG`, an unbounded max profit auto-passes the reward bar. For `NAKED` the reward is
+annualised capital efficiency, `(max_profit / capital) · 365 / max(dte, 5)` (see the NAKED
+reward note in `strategy_scoring._reward_metric`). **The iron butterfly is judged `DEBIT`
+although it takes a credit**: by put–call parity its payoff is the long butterfly's, and
+under `NEUTRAL`'s 55 PoP bar both would be cut every time.
+
+### Payoff: two valuation paths
+
+`payoff_metrics` evaluates P&L at payoff breakpoints (price 0, each strike, 2× the top
+strike) and interpolates breakevens on a fine grid.
+
+- **Single-expiry option sets** (every structure that existed before 2026-09-13, plus
+  straddles, strangles, butterflies and condors) value each leg at **intrinsic on the
+  expiry**. This path is unchanged byte for byte, pinned by
+  `test_single_expiry_options_never_take_the_front_valuation_path`.
+- **A set with a later-expiring leg or a share leg** (calendars, diagonals, covered call,
+  protective put, collar) is valued at the **front expiry**: a share leg is worth the
+  price; a leg expiring then is worth intrinsic; a later leg is Black-Scholes at **its own
+  IV** over the days remaining after the front, **floored at intrinsic** (equity options
+  are American, so a deep in-the-money put is worth at least `K − S`). Because that curve
+  peaks between breakpoints, 801 points to 2× the top strike are sampled, plus points out
+  to **32×** — a put diagonal's worst case is the back put decaying to nothing far above
+  the strikes. A later leg with an unusable IV (Schwab's `-999`, NaN, zero) is never built.
+- A share lot counts like a long call in the tail test, so a protective put is unbounded
+  upside and a covered call is bounded; share sets scan from a price of **zero**.
+
+PoP (`pop_from_payoff`) integrates a **zero-drift normal** over ±6σ,
+`σ = spot · atm_iv · √(max(dte, 0.5)/365)`, counting the prices where that same P&L is
+positive; `dte` is the **front** leg's.
+
+**Commission** is round-trip (open + close) **per option contract**:
+`contracts × rate × 2`, where a leg's contracts are its `qty` — a butterfly body counts
+two — and **share legs cost nothing**. It is subtracted from max profit and added to max
+loss, so R:R and capital efficiency are net of it. **Capital** for a share structure is
+the larger of its max loss and the cash the position ties up (`net debit × 100 +
+commission`); without that a collar, whose max loss is ~10% of the shares' cost, rated
+about ten times as capital-efficient as a covered call on the same lot.
+
+### Measured outcomes, and how to re-measure
+
+`tools/sweep_strategy_gates.py` builds a synthetic Black-Scholes chain (front and front +
+28 days), runs the real builders with the page's default delta bands (put −0.20…−0.10,
+call 0.10…0.20) and scores against a neutral view. No Schwab call, no database.
+
+```
+python tools/sweep_strategy_gates.py                  # spot 100, IV 0.28, $2.50 strikes
+python tools/sweep_strategy_gates.py --step 5
+python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
+```
+
+Default run (spot 100, IV 0.28, $2.50 strikes), grade by front DTE:
+
+| Structure | 14 | 30 | 45 | Deciding figure |
+|---|---|---|---|---|
+| Long straddle / long strangle | Marginal | Marginal | Marginal | gates pass; composite 50–55 |
+| Short straddle | Weak | Weak | Weak | PoP 57.3 vs 65 |
+| Short strangle | Good | Good | Good | PoP 77.8–79.1 |
+| Call / put / iron butterfly | Weak | Good | Good | PoP 29.2 at 14 (vs 30) |
+| Call / put condor | Good | Weak | Good | R:R ~0.53 at 30 (vs 0.6) — the wing lands at 5 |
+| Call / put calendar | Good | Good | Good | R:R 0.82–2.19 |
+| Call diagonal | Weak | Good | Good | R:R 0.44 at 14 |
+| Put diagonal | Weak | Weak | Good | R:R 0.45 / 0.47 at 14 / 30 |
+| Covered call | Weak | Weak | Weak | PoP 52 vs 65 |
+| Protective put / collar | Good | Good | Good | PoP 42–45 / R:R 1.66–2.00 |
+
+⚠ **These move with the ladder, wing width and IV — quote them with their parameters.**
+On **$5 strikes at 14 DTE** no short strangle, covered call or collar is built at all (the
+nearest sold call, 105 at 0.203 delta, is over the 0.20 ceiling), butterflies pass (PoP 45) and condors fail
+(R:R 0.22). At **IV 0.20** butterflies fail PoP at 30 and 45 DTE as well. Condors are the
+most ladder-dependent row: the wing is whichever listed distance is nearest half the
+expected move, so one step changes the structure.
+
 ---
 
 # Technical Indicators
@@ -1499,7 +1608,7 @@ advisory-only** (no paper position to mutate).
 
 ---
 
-# Debit exit rules (long options and debit spreads)
+# Debit exit rules (long options, debit spreads, butterflies, condors)
 
 **Files:** `options-scanner/signal_recommender.py`
 (`_is_debit` / `_debit_target_base` / `_recommend_debit`),
@@ -1507,7 +1616,9 @@ advisory-only** (no paper position to mutate).
 `config/trade_mgmt.toml` `[structures.LONG_CALL|LONG_PUT|BULL_CALL|BEAR_PUT]`.
 Design: `docs/plans/2026-09-12-debit-exit-rules-design.md`.
 
-The Paper Ledger's four DEBIT structures are the only positions in the app whose
+The Paper Ledger's DEBIT structures (`shared.structures.LEDGER_DEBIT`: the four
+above plus the Strategy Finder's `BUTTERFLY_CALL`/`BUTTERFLY_PUT`/`CONDOR_CALL`/
+`CONDOR_PUT`, added 2026-09-13) are the only positions in the app whose
 exits are **not** credit-denominated. They run on the manual paper manage cycle
 (**hourly**, 09:00-14:00 CT), and the rule pass runs **before** the expiry
 settlement on that tick, so a position at its target on its expiration day books
@@ -1549,6 +1660,7 @@ source gives a percentage and not of what:
 | structure | base | why |
 |---|---|---|
 | `BULL_CALL` / `BEAR_PUT` | `max_profit` | mirrors the credit side, where the credit **is** the max profit |
+| `BUTTERFLY_*` / `CONDOR_*` | `max_profit` | bounded, so the same rule as a vertical |
 | `LONG_CALL` / `LONG_PUT` | `entry_debit` | no max profit exists (`unbounded = True`, `max_profit_total = None`) |
 
 On a $2.00 debit over a $5 width those are **+$150** and **+$100**. An unusable
@@ -1564,6 +1676,15 @@ Market Scanner's Directional tab scans **DTE 0-4** and **DTE 5-15**, so every
 debit it can produce arrives inside 21 days and an unguarded rule would close
 100% of them on the following cycle. Those positions are bounded by their target
 and by the expiry settlement instead. An unknown `dte_at_entry` declines the exit.
+
+⚠ **Butterflies and condors have no `[structures.*]` table, so no `exit_dte` and no
+rule 3** (operator decision, 2026-09-13). A time exit suits a trade that loses value
+to time; a long fly gains most of its value in the final two weeks — a 95/100/105
+call fly at spot 100 is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
+only near 3 DTE — so `exit_dte = 21` would close every 22–30 DTE entry flat. Adding
+a table with `exit_dte` reverses that decision. The ledger records, reprices and
+settles a butterfly's `qty 2` body leg; straddles and strangles are refused by name
+in `paper_trader.create_paper_trade` (analysis only, D1).
 
 ## Scope and absences
 

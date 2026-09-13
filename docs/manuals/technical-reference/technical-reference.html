@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -121,6 +121,11 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#composite-0100-score">Composite 0–100 score</a></li>
 <li><a href="#factor-normalizers">Factor normalizers</a></li>
 <li><a href="#expected-move-and-iv-analysis">Expected move and IV analysis</a></li>
+<li><a href="#strategy-finder-scoring-fit-quality">Strategy Finder scoring (Fit + Quality)</a><ul>
+<li><a href="#payoff-two-valuation-paths">Payoff: two valuation paths</a></li>
+<li><a href="#measured-outcomes-and-how-to-re-measure">Measured outcomes, and how to re-measure</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li><a href="#technical-indicators">Technical Indicators</a></li>
@@ -154,7 +159,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#apply-and-the-stale-price-guard">Apply and the stale-price guard</a></li>
 </ul>
 </li>
-<li><a href="#debit-exit-rules-long-options-and-debit-spreads">Debit exit rules (long options and debit spreads)</a><ul>
+<li><a href="#debit-exit-rules-long-options-debit-spreads-butterflies-condors">Debit exit rules (long options, debit spreads, butterflies, condors)</a><ul>
 <li><a href="#why-a-separate-rule-set">Why a separate rule set</a></li>
 <li><a href="#the-three-rules-in-order">The three rules, in order</a></li>
 <li><a href="#scope-and-absences">Scope and absences</a></li>
@@ -1358,6 +1363,202 @@ vol_percentile = (# days with hv &lt; current_iv) / total_days · 100
 <p>Returned under both <code>iv_*</code> (legacy) and <code>hv_*</code> (honest) keys.</p>
 <p><strong>Historical volatility</strong> — <code>calc_historical_vol_series(candles, window=30)</code>:
 rolling 30-day std of daily log returns, annualized: <code>std · sqrt(252) · 100</code>.</p>
+<h2 id="strategy-finder-scoring-fit-quality">Strategy Finder scoring (Fit + Quality)</h2>
+<p><strong>Files:</strong> <code>options-scanner/strategy_scanner.py</code> (builders, <code>payoff_metrics</code>,
+<code>pop_from_payoff</code>), <code>options-scanner/strategy_scoring.py</code> (<code>GATE_BARS</code>,
+<code>_TYPE_PROFILE</code>, <code>score_strategy</code>), <code>services/options_svc/compute.py</code> (<code>swing_scan</code>).
+Design: <code>docs/plans/2026-09-13-strategy-finder-all-structures-design.md</code>.</p>
+<p>This is a <strong>separate</strong> score from the eleven-factor composite above. Each candidate is
+scored on one 0–100 scale so that different structures rank together:</p>
+<pre><code>fit       = 0.6 · directional fit (net delta vs the inferred view)
+          + 0.4 · volatility fit  (net vega  vs the vol regime)
+quality   = weighted q_rr 0.30 · q_be 0.25 · q_pop 0.25 · q_liq 0.20
+composite = 0.7 · quality + 0.3 · fit
+</code></pre>
+<p><code>q_be</code> rewards a breakeven <strong>near spot</strong> for every family except <code>NEUTRAL</code>, where it
+rewards a <strong>wide</strong> profit zone (breakeven spread ÷ 1-σ move). Flies, condors, calendars
+and the short straddle/strangle carry <code>NEUTRAL</code>; the long straddle/strangle carry
+<code>VOLATILITY</code>, which takes the near-breakeven branch, because a long volatility trade
+wants the move it needs to be small. Diagonals and share structures are <code>DIRECTIONAL</code>.</p>
+<p><strong>Hard gates and grade.</strong> Each type maps to a gate profile (an unmapped type falls to
+<code>DEBIT</code>). Failing any <code>min</code> bar caps the composite at <strong>39</strong> (<code>GATE_FAIL_CAP</code>) and grades
+<strong>Weak</strong>; clearing every <code>excellent</code> bar with composite ≥ <strong>78</strong> is <strong>Strong</strong>; otherwise
+≥ <strong>58</strong> is <strong>Good</strong>, else <strong>Marginal</strong>. The service then cuts anything <strong>Weak or under 50</strong>
+(<code>SWING_MIN_SCORE</code>) and reports the count as <em>below the quality bar</em>.</p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>Types</th>
+<th><code>min</code> liq / reward / PoP</th>
+<th><code>excellent</code> liq / reward / PoP</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LONG</code></td>
+<td>long call/put, long straddle/strangle, protective put</td>
+<td>40 / R:R 0.8 / 30</td>
+<td>70 / 1.5 / 45</td>
+</tr>
+<tr>
+<td><code>NAKED</code></td>
+<td>short call/put, short straddle/strangle, covered call</td>
+<td>40 / capeff 0.10 per yr / 65</td>
+<td>70 / 0.20 / 78</td>
+</tr>
+<tr>
+<td><code>DEBIT</code></td>
+<td>bull call, bear put, call/put/iron butterfly, call/put condor, call/put calendar, call/put diagonal, collar</td>
+<td>45 / R:R 0.6 / 30</td>
+<td>75 / 1.2 / 45</td>
+</tr>
+<tr>
+<td><code>CREDIT</code></td>
+<td>PCS, CCS</td>
+<td>45 / R:R 0.15 / 60</td>
+<td>75 / 0.33 / 72</td>
+</tr>
+<tr>
+<td><code>NEUTRAL</code></td>
+<td>iron condor</td>
+<td>45 / R:R 0.12 / 55</td>
+<td>75 / 0.25 / 68</td>
+</tr>
+</tbody>
+</table>
+<p>For <code>LONG</code>, an unbounded max profit auto-passes the reward bar. For <code>NAKED</code> the reward is
+annualised capital efficiency, <code>(max_profit / capital) · 365 / max(dte, 5)</code> (see the NAKED
+reward note in <code>strategy_scoring._reward_metric</code>). <strong>The iron butterfly is judged <code>DEBIT</code>
+although it takes a credit</strong>: by put–call parity its payoff is the long butterfly's, and
+under <code>NEUTRAL</code>'s 55 PoP bar both would be cut every time.</p>
+<h3 id="payoff-two-valuation-paths">Payoff: two valuation paths</h3>
+<p><code>payoff_metrics</code> evaluates P&amp;L at payoff breakpoints (price 0, each strike, 2× the top
+strike) and interpolates breakevens on a fine grid.</p>
+<ul>
+<li><strong>Single-expiry option sets</strong> (every structure that existed before 2026-09-13, plus
+  straddles, strangles, butterflies and condors) value each leg at <strong>intrinsic on the
+  expiry</strong>. This path is unchanged byte for byte, pinned by
+  <code>test_single_expiry_options_never_take_the_front_valuation_path</code>.</li>
+<li><strong>A set with a later-expiring leg or a share leg</strong> (calendars, diagonals, covered call,
+  protective put, collar) is valued at the <strong>front expiry</strong>: a share leg is worth the
+  price; a leg expiring then is worth intrinsic; a later leg is Black-Scholes at <strong>its own
+  IV</strong> over the days remaining after the front, <strong>floored at intrinsic</strong> (equity options
+  are American, so a deep in-the-money put is worth at least <code>K − S</code>). Because that curve
+  peaks between breakpoints, 801 points to 2× the top strike are sampled, plus points out
+  to <strong>32×</strong> — a put diagonal's worst case is the back put decaying to nothing far above
+  the strikes. A later leg with an unusable IV (Schwab's <code>-999</code>, NaN, zero) is never built.</li>
+<li>A share lot counts like a long call in the tail test, so a protective put is unbounded
+  upside and a covered call is bounded; share sets scan from a price of <strong>zero</strong>.</li>
+</ul>
+<p>PoP (<code>pop_from_payoff</code>) integrates a <strong>zero-drift normal</strong> over ±6σ,
+<code>σ = spot · atm_iv · √(max(dte, 0.5)/365)</code>, counting the prices where that same P&amp;L is
+positive; <code>dte</code> is the <strong>front</strong> leg's.</p>
+<p><strong>Commission</strong> is round-trip (open + close) <strong>per option contract</strong>:
+<code>contracts × rate × 2</code>, where a leg's contracts are its <code>qty</code> — a butterfly body counts
+two — and <strong>share legs cost nothing</strong>. It is subtracted from max profit and added to max
+loss, so R:R and capital efficiency are net of it. <strong>Capital</strong> for a share structure is
+the larger of its max loss and the cash the position ties up (<code>net debit × 100 +
+commission</code>); without that a collar, whose max loss is ~10% of the shares' cost, rated
+about ten times as capital-efficient as a covered call on the same lot.</p>
+<h3 id="measured-outcomes-and-how-to-re-measure">Measured outcomes, and how to re-measure</h3>
+<p><code>tools/sweep_strategy_gates.py</code> builds a synthetic Black-Scholes chain (front and front +
+28 days), runs the real builders with the page's default delta bands (put −0.20…−0.10,
+call 0.10…0.20) and scores against a neutral view. No Schwab call, no database.</p>
+<pre><code>python tools/sweep_strategy_gates.py                  # spot 100, IV 0.28, $2.50 strikes
+python tools/sweep_strategy_gates.py --step 5
+python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
+</code></pre>
+<p>Default run (spot 100, IV 0.28, $2.50 strikes), grade by front DTE:</p>
+<table>
+<thead>
+<tr>
+<th>Structure</th>
+<th>14</th>
+<th>30</th>
+<th>45</th>
+<th>Deciding figure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Long straddle / long strangle</td>
+<td>Marginal</td>
+<td>Marginal</td>
+<td>Marginal</td>
+<td>gates pass; composite 50–55</td>
+</tr>
+<tr>
+<td>Short straddle</td>
+<td>Weak</td>
+<td>Weak</td>
+<td>Weak</td>
+<td>PoP 57.3 vs 65</td>
+</tr>
+<tr>
+<td>Short strangle</td>
+<td>Good</td>
+<td>Good</td>
+<td>Good</td>
+<td>PoP 77.8–79.1</td>
+</tr>
+<tr>
+<td>Call / put / iron butterfly</td>
+<td>Weak</td>
+<td>Good</td>
+<td>Good</td>
+<td>PoP 29.2 at 14 (vs 30)</td>
+</tr>
+<tr>
+<td>Call / put condor</td>
+<td>Good</td>
+<td>Weak</td>
+<td>Good</td>
+<td>R:R ~0.53 at 30 (vs 0.6) — the wing lands at 5</td>
+</tr>
+<tr>
+<td>Call / put calendar</td>
+<td>Good</td>
+<td>Good</td>
+<td>Good</td>
+<td>R:R 0.82–2.19</td>
+</tr>
+<tr>
+<td>Call diagonal</td>
+<td>Weak</td>
+<td>Good</td>
+<td>Good</td>
+<td>R:R 0.44 at 14</td>
+</tr>
+<tr>
+<td>Put diagonal</td>
+<td>Weak</td>
+<td>Weak</td>
+<td>Good</td>
+<td>R:R 0.45 / 0.47 at 14 / 30</td>
+</tr>
+<tr>
+<td>Covered call</td>
+<td>Weak</td>
+<td>Weak</td>
+<td>Weak</td>
+<td>PoP 52 vs 65</td>
+</tr>
+<tr>
+<td>Protective put / collar</td>
+<td>Good</td>
+<td>Good</td>
+<td>Good</td>
+<td>PoP 42–45 / R:R 1.66–2.00</td>
+</tr>
+</tbody>
+</table>
+<p>⚠ <strong>These move with the ladder, wing width and IV — quote them with their parameters.</strong>
+On <strong>$5 strikes at 14 DTE</strong> no short strangle, covered call or collar is built at all (the
+nearest sold call, 105 at 0.203 delta, is over the 0.20 ceiling), butterflies pass (PoP 45) and condors fail
+(R:R 0.22). At <strong>IV 0.20</strong> butterflies fail PoP at 30 and 45 DTE as well. Condors are the
+most ladder-dependent row: the wing is whichever listed distance is nearest half the
+expected move, so one step changes the structure.</p>
 <hr />
 <h1 id="technical-indicators">Technical Indicators</h1>
 <p><strong>File:</strong> <code>shared/analysis_lib/technical.py</code>. All operate on OHLCV DataFrames.</p>
@@ -2123,13 +2324,15 @@ and:</p>
 <code>list_adjustments</code>). <code>rescue_apply</code> refuses non-paper ids — <strong>captured signals are
 advisory-only</strong> (no paper position to mutate).</p>
 <hr />
-<h1 id="debit-exit-rules-long-options-and-debit-spreads">Debit exit rules (long options and debit spreads)</h1>
+<h1 id="debit-exit-rules-long-options-debit-spreads-butterflies-condors">Debit exit rules (long options, debit spreads, butterflies, condors)</h1>
 <p><strong>Files:</strong> <code>options-scanner/signal_recommender.py</code>
 (<code>_is_debit</code> / <code>_debit_target_base</code> / <code>_recommend_debit</code>),
 <code>services/options_svc/compute.py</code> (<code>manage_ledger_trades</code> / <code>_ledger_exit_ctx</code>),
 <code>config/trade_mgmt.toml</code> <code>[structures.LONG_CALL|LONG_PUT|BULL_CALL|BEAR_PUT]</code>.
 Design: <code>docs/plans/2026-09-12-debit-exit-rules-design.md</code>.</p>
-<p>The Paper Ledger's four DEBIT structures are the only positions in the app whose
+<p>The Paper Ledger's DEBIT structures (<code>shared.structures.LEDGER_DEBIT</code>: the four
+above plus the Strategy Finder's <code>BUTTERFLY_CALL</code>/<code>BUTTERFLY_PUT</code>/<code>CONDOR_CALL</code>/
+<code>CONDOR_PUT</code>, added 2026-09-13) are the only positions in the app whose
 exits are <strong>not</strong> credit-denominated. They run on the manual paper manage cycle
 (<strong>hourly</strong>, 09:00-14:00 CT), and the rule pass runs <strong>before</strong> the expiry
 settlement on that tick, so a position at its target on its expiration day books
@@ -2198,6 +2401,11 @@ source gives a percentage and not of what:</p>
 <td>mirrors the credit side, where the credit <strong>is</strong> the max profit</td>
 </tr>
 <tr>
+<td><code>BUTTERFLY_*</code> / <code>CONDOR_*</code></td>
+<td><code>max_profit</code></td>
+<td>bounded, so the same rule as a vertical</td>
+</tr>
+<tr>
 <td><code>LONG_CALL</code> / <code>LONG_PUT</code></td>
 <td><code>entry_debit</code></td>
 <td>no max profit exists (<code>unbounded = True</code>, <code>max_profit_total = None</code>)</td>
@@ -2216,6 +2424,14 @@ Market Scanner's Directional tab scans <strong>DTE 0-4</strong> and <strong>DTE 
 debit it can produce arrives inside 21 days and an unguarded rule would close
 100% of them on the following cycle. Those positions are bounded by their target
 and by the expiry settlement instead. An unknown <code>dte_at_entry</code> declines the exit.</p>
+<p>⚠ <strong>Butterflies and condors have no <code>[structures.*]</code> table, so no <code>exit_dte</code> and no
+rule 3</strong> (operator decision, 2026-09-13). A time exit suits a trade that loses value
+to time; a long fly gains most of its value in the final two weeks — a 95/100/105
+call fly at spot 100 is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
+only near 3 DTE — so <code>exit_dte = 21</code> would close every 22–30 DTE entry flat. Adding
+a table with <code>exit_dte</code> reverses that decision. The ledger records, reprices and
+settles a butterfly's <code>qty 2</code> body leg; straddles and strangles are refused by name
+in <code>paper_trader.create_paper_trade</code> (analysis only, D1).</p>
 <h2 id="scope-and-absences">Scope and absences</h2>
 <p>Credit rows in the ledger are <strong>not</strong> managed by this pass - giving them the
 credit rules would change how a second book exits, with its own measurement

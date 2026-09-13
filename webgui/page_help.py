@@ -182,14 +182,45 @@ plus single-leg directional trades on their own tab.
 **Strategy Finder — the simple version**
 
 Like the Market Scanner, but you pick one symbol and it ranks every strategy
-family for it — directional, spreads, and neutral.
+it can build for it on one score.
 
+- **Strategies** — seven groups, all ticked by default. Untick one to leave it
+  out of the scan:
+  - **Directional** — long and short calls and puts. A short put is also the
+    cash-secured put.
+  - **Spreads** — bull call and bear put (you pay), put and call credit spreads
+    (you collect).
+  - **Neutral** — iron condors.
+  - **Straddles & strangles** — a straddle buys or sells the call and put at the
+    money; a long strangle buys both sides about 0.30 delta out, a short
+    strangle sells both sides inside your delta settings.
+  - **Butterflies & condors** — call and put butterflies and the iron butterfly
+    centred at the money, and call and put condors. The wings sit about half
+    the expected move away, on a strike that exists on both sides.
+  - **Calendars** — a calendar sells the near month and buys a later one at the
+    same strike; a diagonal sells a near-month strike about 0.30 delta out of
+    the money and buys a later-month strike about 0.70 delta in the money.
+  - **Stock + options** — covered call, protective put and collar, each on 100
+    shares bought at today's price.
 - **DTE min/max** — how many days to expiration to allow. Wider = more candidates.
+  ⚠ **Calendars and diagonals need two expirations inside that range**: the near
+  one at least 7 days out, the later one about four weeks after it and at least a
+  week after it. A narrow range builds no calendar — widen **DTE max** if you
+  want one. The share structures also use an expiration at least 7 days out.
+- **Nothing is built off-centre.** If the at-the-money strike is missing from the
+  chain, the straddle, butterflies, condors and calendar are skipped rather than
+  quietly moved to the next strike.
+- **Legs** reads like `L 100 shares / S 105C`: `2×` is two contracts (a
+  butterfly's middle), and a leg on a later expiration carries its date, so a
+  calendar reads `S 100C / L 100C 11/13`.
 - **Put/Call Δ (delta)** — how far out-of-the-money the **sold** strikes sit. A
-  smaller |delta| is safer but pays less credit. It governs every short leg —
-  the spreads' short strikes and the single-leg short put or call — and
-  deliberately **not** the long legs of a directional or debit trade, where a
-  far-out-of-the-money strike would be a lottery ticket rather than the bet. ⚠
+  smaller |delta| is safer but pays less credit. It governs every short leg that
+  is out of the money by design — the spreads' short strikes, the single-leg
+  short put or call, the short strangle, and the call sold in a covered call or
+  collar — and deliberately **not** the long legs of a directional or debit
+  trade, where a far-out-of-the-money strike would be a lottery ticket rather
+  than the bet. A straddle's, butterfly's or condor's shorts sit where the
+  structure puts them, and a diagonal keeps its own 0.30 target. ⚠
   Before 2026-09-11 it reached the spreads only, so a short put ignored whatever
   you set here and was always written near 0.28 delta.
 - **Min credit %** — throw out trades that don't pay enough premium for the risk.
@@ -197,6 +228,20 @@ family for it — directional, spreads, and neutral.
 - Only candidates that clear a **quality bar** are listed. The status line says how
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
+- ⚠ **Two structures are built but almost never shown: the short straddle and
+  the covered call.** Both win less often than the bar for selling premium asks
+  (about 57% and 52% of the time against 65%), so they land in that "below the
+  quality bar" count on nearly every scan. That is a decision, not a fault — the
+  **Calculator** still builds both. Long straddles and strangles usually clear
+  the bar only just, as **Marginal**.
+- **Send to Paper trade** is offered only where the paper ledger records the
+  trade correctly: credit spreads, iron condors, long calls and puts, debit
+  spreads, and the call and put **butterflies and condors**. There is no Paper
+  button for straddles or strangles (study only), the iron butterfly, calendars,
+  diagonals, or anything holding shares. **Send to Calculator** works on every
+  row, calendars and shares included — but clicking an expiration pill on the
+  Calculator afterwards moves every option leg to that one date, which turns a
+  calendar into something else.
 - **"Too cheap to sell"** in that same line is a different cut, and a deliberate
   one: when this symbol's option premium is historically cheap, the trades that
   SELL premium are dropped and the ones that BUY it are kept. Cheap volatility is
@@ -499,7 +544,8 @@ engine's positions live on **Paper Account**.
 
 - **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
   you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
-  and when you **Opened** it.
+  and when you **Opened** it. A butterfly's middle strike reads `S 2×100C`
+  (two contracts), and its detail panel lists both breakevens.
 - **Entry is positive for a credit and negative for a debit** — one column, and
   the sign tells you which. **P&L** is unrealised while a trade is open and
   realised once it is closed.
@@ -513,7 +559,10 @@ engine's positions live on **Paper Account**.
   the premium paid for a single long option, because that is the only figure a
   long option has — and at **21 days to expiry**, up or down. A position that was *already* inside 21 days when you opened it is left
   alone, or the rule would close it the moment it appeared; those ride on their
-  target and the expiry settlement. There is **no automatic loss stop**: the
+  target and the expiry settlement. ⚠ **Butterflies and condors** (sent from the
+  Strategy Finder) have the +50%-of-max-profit target but **no 21-day exit**:
+  they gain most of their value in the final two weeks, so that rule would close
+  them flat. They ride to the target or to expiry. There is **no automatic loss stop**: the
   research this follows closes debit spreads out before expiry rather than
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here are not managed** — they are tracked only. The engine's
