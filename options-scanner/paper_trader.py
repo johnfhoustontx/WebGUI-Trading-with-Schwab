@@ -20,6 +20,7 @@ Version 1.0.0 Changes:
 - Trade lifecycle (open/close/expire)
 """
 
+import math
 import pathlib as _pathlib
 import sys as _sys
 import uuid
@@ -144,6 +145,12 @@ def _credit_max_loss_per_share(signal):
     return round((max_loss - commission) / _CONTRACT_MULT, 4)
 
 
+def _is_positive_finite(value):
+    """A real, finite number above zero (a bool is not one)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > 0)
+
+
 def create_paper_trade(signal, quantity=1, mode="PAPER"):
     """Create a paper trade from a scanner signal.
 
@@ -161,6 +168,12 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
         raise ValueError(f"{stype} is not paper-tradeable")
     now = datetime.now(TZ)
     if signal.get("type") in PAPER_DEBIT_TYPES:
+        # ``_create_debit_trade`` books ``net_debit or 0.0``, so a debit structure
+        # with no positive debit (absent, zero, a credit, NaN) would open as a FREE
+        # trade and overstate every later mark by the premium it never recorded.
+        if not _is_positive_finite(signal.get("net_debit")):
+            raise ValueError(f"{stype} has no debit (net_debit="
+                             f"{signal.get('net_debit')!r}) - not paper-tradeable")
         return _create_debit_trade(signal, quantity, mode, now)
     multiplier = 100
     max_loss_per = _credit_max_loss_per_share(signal)

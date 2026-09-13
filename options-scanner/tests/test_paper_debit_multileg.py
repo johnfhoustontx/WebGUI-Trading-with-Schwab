@@ -129,3 +129,35 @@ def test_a_two_breakeven_row_joins_them_with_the_iron_condor_separator():
     trade = paper_trader.create_paper_trade(sig, 1)
     assert trade["breakeven"] == " / ".join(str(b) for b in sig["breakevens"])
     assert [float(p) for p in trade["breakeven"].split("/")] ==         [float(b) for b in sig["breakevens"]]
+
+
+# --- a debit trade must carry a debit ---------------------------------------
+
+def _no_debit_fly(**over):
+    sig = _fly_signal()
+    sig.update(over)
+    return sig
+
+
+@pytest.mark.parametrize("over", (
+    {"net_debit": None},                          # nothing to book
+    {"net_debit": None, "net_credit": 20.0},      # a long fly priced for a credit
+    {"net_debit": 0.0},
+    {"net_debit": -150.0},
+    {"net_debit": float("nan")},
+    {"net_debit": float("inf")},
+    {"net_debit": "150"},
+))
+def test_a_debit_type_with_no_positive_debit_is_refused(over):
+    """``_create_debit_trade`` stores ``entry_debit = net_debit or 0.0``, so a debit
+    structure arriving without a positive debit was booked as a FREE trade and
+    every later mark overstated its P&L by the premium it never recorded."""
+    with pytest.raises(ValueError, match=r"BUTTERFLY_CALL has no debit"):
+        paper_trader.create_paper_trade(_no_debit_fly(**over), 1)
+
+
+def test_a_debit_type_with_a_real_debit_still_opens():
+    sig = _fly_signal()
+    assert sig["net_debit"] == 100.0                 # 7 - 2*4 + 2 = 1.00 per share
+    trade = paper_trader.create_paper_trade(sig, 1)
+    assert trade["direction"] == "DEBIT" and trade["entry_debit"] == 100.0
