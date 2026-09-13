@@ -194,6 +194,8 @@ def top_picks(signals, k=4):
     Four spreads in a row would be one idea shown four times; the cards exist to
     compare structures.
     """
+    if k <= 0:
+        return []
     picks, taken = [], set()
     for s in ranked(signals):
         g = s.get("group")
@@ -257,3 +259,173 @@ def summary_facts(payload):
 
     return {"symbol": symbol, "price": price, "pills": pills,
             "vol_rank": vol_rank, "counts": " · ".join(parts)}
+
+
+# ------------------------------------------------------------------------- bars
+
+# Width classes snap to 5% steps: a FIXED, finite class set (the Tailwind
+# finite-palette rule), never a runtime ``w-[43.7%]``.
+_WIDTH = {p: ("w-0" if p == 0 else "w-full" if p == 100 else f"w-[{p}%]")
+          for p in range(0, 101, 5)}
+
+
+def _snap(pct):
+    """``pct`` to the nearest 5 in [0, 100]. A positive value never snaps to 0 -
+    a real $1,960 profit beside a $53,817 loss must still show a sliver."""
+    f = _fmt.num(pct)
+    if f is None or f <= 0:
+        return 0
+    return max(5, min(100, int(round(f / 5.0)) * 5))
+
+
+def _width(pct):
+    return _WIDTH[_snap(pct)]
+
+
+# Which side of a payoff is unbounded. Restated from strategy_table's
+# ``_profit_is_unbounded`` / ``_loss_is_unbounded`` (that module cannot be imported
+# here, see the docstring): the explicit engine flags first, then the legacy
+# ``unbounded`` partitioned by ``max_profit`` for a row cached before them.
+def _profit_unbounded(sig):
+    if sig.get("unbounded_profit"):
+        return True
+    return bool(sig.get("unbounded")) and sig.get("max_profit") is None
+
+
+def _loss_unbounded(sig):
+    if sig.get("unbounded_loss"):
+        return True
+    return bool(sig.get("unbounded")) and sig.get("max_profit") is not None
+
+
+_INFINITY = "∞"
+
+
+def risk_reward_bar(sig):
+    """One split bar: red max loss left, green max profit right.
+
+    Both halves scale to the LARGER of the two, so the bar shows the shape of the
+    bet (a butterfly mostly green, a covered call mostly red). A single scale
+    across rows would let one covered call flatten every other bar. An unbounded
+    side draws full and is labelled ``∞`` - for a naked short, whose ``max_loss``
+    is a margin proxy, drawing that number to scale would read as a cap.
+
+    ``{"loss_class", "profit_class", "loss_label", "profit_label"}``, or None when
+    neither side has a usable number.
+    """
+    s = sig or {}
+    p_inf, l_inf = _profit_unbounded(s), _loss_unbounded(s)
+    profit = None if p_inf else _fmt.num(s.get("max_profit"))
+    loss = None if l_inf else _fmt.num(s.get("max_loss"))
+    profit = None if profit is None else abs(profit)
+    loss = None if loss is None else abs(loss)
+    if not (p_inf or l_inf) and profit is None and loss is None:
+        return None
+
+    def _half(value, inf, other_inf):
+        if inf:
+            return "w-full", _INFINITY
+        if value is None:
+            return "w-0", NO_READING
+        if other_inf:
+            return _width(0 if value == 0 else 1), money(value)   # a sliver
+        top = max(v for v in (profit, loss) if v is not None)
+        return _width(100.0 * value / top if top > 0 else 0), money(value)
+
+    loss_class, loss_label = _half(loss, l_inf, p_inf)
+    profit_class, profit_label = _half(profit, p_inf, l_inf)
+    return {"loss_class": loss_class, "profit_class": profit_class,
+            "loss_label": loss_label, "profit_label": profit_label}
+
+
+def pop_bar(pop):
+    """Probability-of-profit bar, 0-100%: amber below 40, green above 60.
+
+    ``pop`` is a PERCENT (the engine's ``pop_pct``), not a fraction.
+    ``{"class", "tone": "warn" | "neutral" | "pos", "label"}``, or None.
+    """
+    f = _fmt.num(pop)
+    if f is None:
+        return None
+    tone = "warn" if f < 40 else "pos" if f > 60 else "neutral"
+    return {"class": _width(f), "tone": tone, "label": f"{round(f)}%"}
+
+
+# ------------------------------------------------------------------- payoff SVG
+
+# The app's existing P/L colours (simulator.whatif_figure). A hand-drawn chart's
+# stroke colours are chart config, outside the Tailwind class rule.
+PROFIT_STROKE = "#34d399"
+LOSS_STROKE = "#f87171"
+ZERO_STROKE = "#3a4a6b"
+SPOT_STROKE = "#8794b4"
+_PAD = 2
+_SPOT_TICK = 4          # half-height of today's-price tick, px
+
+
+def _n(v):
+    """A coordinate as short text: one decimal, no trailing ``.0``."""
+    t = f"{v:.1f}"
+    return t[:-2] if t.endswith(".0") else t
+
+
+def _line(x1, y1, x2, y2, stroke, extra=""):
+    return (f'<line x1="{_n(x1)}" y1="{_n(y1)}" x2="{_n(x2)}" y2="{_n(y2)}" '
+            f'stroke="{stroke}"{extra}/>')
+
+
+def payoff_svg(curve, spot, width=120, height=32):
+    """A small payoff shape: profit green, loss red, a dashed zero line, a tick at
+    today's price.
+
+    ``curve`` is the service's ``payoff_curve`` - ``[[price, pnl], ...]``. The SVG
+    is a FIXED pixel size with a matching ``viewBox`` and no
+    ``preserveAspectRatio``: stretching a viewBox needs ``vector-effect`` to keep
+    strokes even, and DOMPurify strips that attribute (CLAUDE.md). One ``<line>``
+    per segment, coloured by the sign of the segment's MID P&L - a polyline
+    cannot change colour part-way. Returns ``""`` when there is nothing to draw
+    (fewer than two usable points, or no price range).
+    """
+    pts = []
+    for p in curve or []:
+        try:
+            x, y = _fmt.num(p[0]), _fmt.num(p[1])
+        except (TypeError, IndexError, KeyError):
+            continue
+        if x is not None and y is not None:
+            pts.append((x, y))
+    if len(pts) < 2:
+        return ""
+    pts.sort(key=lambda q: q[0])
+    x_lo, x_hi = pts[0][0], pts[-1][0]
+    if x_hi <= x_lo:
+        return ""
+    y_lo = min(0.0, min(q[1] for q in pts))
+    y_hi = max(0.0, max(q[1] for q in pts))
+    w, h = int(width), int(height)
+    inner_w, inner_h = w - 2 * _PAD, h - 2 * _PAD
+
+    def sx(x):
+        return _PAD + (x - x_lo) / (x_hi - x_lo) * inner_w
+
+    def sy(y):
+        if y_hi <= y_lo:                      # a flat-zero payoff: centre it
+            return h / 2.0
+        return _PAD + (y_hi - y) / (y_hi - y_lo) * inner_h
+
+    zero_y = sy(0.0)
+    parts = [_line(_PAD, zero_y, w - _PAD, zero_y, ZERO_STROKE,
+                   ' stroke-width="1" stroke-dasharray="2 2"')]
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        mid = (y1 + y2) / 2.0
+        stroke = PROFIT_STROKE if mid > 0 else LOSS_STROKE if mid < 0 else ZERO_STROKE
+        parts.append(_line(sx(x1), sy(y1), sx(x2), sy(y2), stroke,
+                           ' stroke-width="1.5" stroke-linecap="round"'))
+    s = _fmt.num(spot)
+    if s is not None and x_lo <= s <= x_hi:
+        x = sx(s)
+        parts.append(_line(x, max(0.0, zero_y - _SPOT_TICK), x,
+                           min(float(h), zero_y + _SPOT_TICK), SPOT_STROKE,
+                           ' stroke-width="1"'))
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+            f'viewBox="0 0 {w} {h}">' + "".join(parts) + "</svg>")

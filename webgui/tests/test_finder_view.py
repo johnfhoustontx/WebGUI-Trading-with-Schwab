@@ -133,3 +133,105 @@ def test_summary_facts_conviction_bands_and_cheap_premium():
     assert f["price"] is None and f["vol_rank"] is None
     one = fv.summary_facts({"symbol": "X", "signals": [{"underlying_price": 1.0}]})
     assert one["counts"] == "1 idea"
+
+
+def test_top_picks_with_no_room_returns_nothing():
+    assert fv.top_picks([_sig("A", "VERTICAL", 80)], k=0) == []
+
+
+# ------------------------------------------------------------ bars and payoff SVG
+
+def test_split_bar_scales_loss_and_profit_to_the_larger():
+    b = fv.risk_reward_bar({"max_loss": 200.0, "max_profit": 800.0})
+    assert b["loss_class"] == "w-[25%]" and b["profit_class"] == "w-full"
+    b = fv.risk_reward_bar({"max_loss": 53817.0, "max_profit": 1960.0})
+    assert b["loss_class"] == "w-full" and b["profit_class"] == "w-[5%]"
+
+
+def test_split_bar_labels_are_money():
+    b = fv.risk_reward_bar({"max_loss": 200.0, "max_profit": 800.0})
+    assert b["loss_label"] == "$200" and b["profit_label"] == "$800"
+
+
+def test_split_bar_unbounded_profit_is_full_and_marked():
+    b = fv.risk_reward_bar({"max_loss": 500.0, "max_profit": None, "unbounded_profit": True})
+    assert b["profit_class"] == "w-full" and b["profit_label"] == "∞"
+
+
+def test_split_bar_unbounded_loss_is_full_and_marked():
+    """A naked short's max_loss is a MARGIN PROXY, not a cap - drawing it to scale
+    would read as a bounded risk."""
+    b = fv.risk_reward_bar({"max_loss": 10866.0, "max_profit": 240.0, "unbounded_loss": True})
+    assert b["loss_class"] == "w-full" and b["loss_label"] == "∞"
+    assert b["profit_class"] == "w-[5%]"
+
+
+def test_split_bar_one_side_missing_draws_that_side_empty():
+    b = fv.risk_reward_bar({"max_loss": 300.0, "max_profit": None})
+    assert b["loss_class"] == "w-full" and b["profit_class"] == "w-0"
+    assert b["profit_label"] == "—"
+
+
+def test_split_bar_missing_numbers_draws_nothing():
+    assert fv.risk_reward_bar({}) is None
+
+
+def test_width_classes_snap_to_five_and_never_hide_a_positive():
+    assert fv._snap(0) == 0 and fv._snap(0.4) == 5 and fv._snap(2.4) == 5
+    assert fv._snap(97.6) == 100 and fv._snap(140) == 100 and fv._snap(-3) == 0
+    assert set(fv._WIDTH) == set(range(0, 101, 5))
+
+
+def test_pop_bar_snaps_and_colours_by_band():
+    assert fv.pop_bar(46.4) == {"class": "w-[45%]", "tone": "neutral", "label": "46%"}
+    assert fv.pop_bar(31.0)["tone"] == "warn"
+    assert fv.pop_bar(72.0)["tone"] == "pos"
+    assert fv.pop_bar(None) is None
+
+
+def test_pop_bar_band_edges():
+    assert fv.pop_bar(40.0)["tone"] == "neutral"
+    assert fv.pop_bar(60.0)["tone"] == "neutral"
+    assert fv.pop_bar(120.0)["class"] == "w-full"
+
+
+_CURVE = [[90.0, -300.0], [100.0, -300.0], [110.0, 700.0]]
+
+
+def test_payoff_svg_is_fixed_size_and_colours_by_sign():
+    curve = _CURVE
+    svg = fv.payoff_svg(curve, spot=100.0, width=120, height=32)
+    assert svg.startswith("<svg") and 'width="120"' in svg and 'height="32"' in svg
+    assert "preserveAspectRatio" not in svg and "vector-effect" not in svg
+    assert fv.PROFIT_STROKE in svg and fv.LOSS_STROKE in svg
+    assert fv.payoff_svg(None, 100.0) == "" and fv.payoff_svg([[1, 2]], 100.0) == ""
+
+
+def test_payoff_svg_geometry():
+    svg = fv.payoff_svg(_CURVE, spot=100.0, width=120, height=32)
+    assert 'viewBox="0 0 120 32"' in svg and "style=" not in svg
+    # two segments + a dashed zero line + a spot tick
+    assert svg.count("<line ") == 4
+    assert svg.count(f'stroke="{fv.LOSS_STROKE}"') == 1
+    assert svg.count(f'stroke="{fv.PROFIT_STROKE}"') == 1
+    assert "stroke-dasharray" in svg and f'stroke="{fv.SPOT_STROKE}"' in svg
+
+
+def test_payoff_svg_skips_the_spot_tick_off_the_curve_and_junk_points():
+    svg = fv.payoff_svg(_CURVE + [[float("nan"), 1.0], None, [1]], spot=500.0)
+    assert svg.count("<line ") == 3 and fv.SPOT_STROKE not in svg
+    assert fv.payoff_svg([[100.0, 1.0], [100.0, 2.0]], 100.0) == ""
+
+
+def test_payoff_svg_emits_nothing_dompurify_would_strip():
+    import re
+    from test_rings import _dompurify_allowlist
+    allow = _dompurify_allowlist()
+    svg = fv.payoff_svg(_CURVE, spot=100.0)
+    tags = set(re.findall(r"<([a-zA-Z][\w-]*)", svg))
+    attrs = set(re.findall(r'\s([a-zA-Z][\w:-]*)="', svg))
+    stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
+    assert not stripped, f"DOMPurify would strip: {stripped}"
+    # Non-vacuity: we really parsed an SVG and really checked its attributes.
+    assert {"svg", "line"} <= tags
+    assert {"viewBox", "x1", "stroke", "stroke-dasharray"} <= attrs
