@@ -104,8 +104,9 @@ review of the 13-structure work).
 
 ## Code shape
 
-- `strategy_scanner.payoff_curve(...)` + attach in `_assemble` and the credit
-  adapters; `compute.swing_scan` stamps `group`.
+- `strategy_scanner.payoff_curve(...)`, a pure function; `compute.swing_scan` stamps
+  `group` as each builder returns and attaches `payoff_curve` to the emitted rows
+  only — the builders themselves are untouched, so their outputs stay byte-identical.
 - New PURE `webgui/pages/options/finder_view.py`: money/date formatting, expiry and
   risk-style presets (incl. *Custom* detection), chip counts and filtering, top-pick
   selection, bar geometry, payoff SVG, summary-strip facts. Unit-tested without a
