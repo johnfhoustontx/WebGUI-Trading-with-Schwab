@@ -4,7 +4,9 @@ The options service publishes ``cache:options:swing`` as
 ``{signals:[...], view:{...}, symbol, params}`` where each signal is the NORMALIZED
 multi-strategy shape (LONG_CALL / LONG_PUT / SHORT_CALL / SHORT_PUT / BULL_CALL /
 BEAR_PUT / PCS / CCS / IRON_CONDOR, each carrying a ``legs`` list, ``family``,
-``bias``, ``net_debit``/``net_credit``, ``breakevens``, ``rr``, …). These pure
+``bias``, ``net_debit``/``net_credit``, ``breakevens``, ``rr``, …). The Strategy
+Finder also emits straddles/strangles, butterflies/condors, calendars/diagonals
+(legs on two expirations) and share structures (a ``kind: "stock"`` leg). These pure
 functions format that shape into ``ui.table`` columns/rows + a market-view banner,
 and adapt a signal so the SHARED Trade detail panel (``detail.py``) renders it.
 
@@ -56,15 +58,30 @@ def _short_exp(expiration):
 def legs_summary(legs):
     """Compact one-line summary of the legs, e.g. ``"L 450C / S 455C"``.
 
-    ``L`` = long, ``S`` = short; strike + ``C``/``P`` for call/put. Empty/None → '—'.
+    ``L`` = long, ``S`` = short; strike + ``C``/``P`` for call/put. An option leg
+    of more than one contract carries ``N×`` (a butterfly body reads
+    ``S 2×100C``). A share lot prints ``L 100 SH`` (``qty`` counts 100-share
+    lots). A leg on a LATER expiration than the earliest carries its ``MM/DD``
+    so a calendar reads without the detail panel. Empty/None → '—'.
     """
     if not legs:
         return "—"
+    exps = [l.get("expiration") for l in legs if l.get("expiration")]
+    front = min(exps) if exps else None
     parts = []
     for leg in legs:
         side = "L" if (leg.get("side") == "long") else "S"
+        qty = int(leg.get("qty") or 1)
+        if leg.get("kind") == "stock":
+            parts.append(f"{side} {100 * qty} SH")
+            continue
         kind = "C" if (leg.get("kind") == "call") else "P"
-        parts.append(f"{side} {_fmt_strike(leg.get('strike'))}{kind}")
+        lots = f"{qty}×" if qty > 1 else ""
+        text = f"{side} {lots}{_fmt_strike(leg.get('strike'))}{kind}"
+        exp = leg.get("expiration")
+        if exp and front and exp != front:
+            text += f" {_short_exp(exp)}"
+        parts.append(text)
     return " / ".join(parts) if parts else "—"
 
 

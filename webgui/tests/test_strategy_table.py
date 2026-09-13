@@ -552,3 +552,54 @@ def test_detail_signal_does_not_mutate_its_input():
     sig = {"net_debit": 240.0}
     st.detail_signal(sig)
     assert sig == {"net_debit": 240.0}
+
+
+# --- legs cell: shares, calendars, multi-lot legs --------------------------
+
+def test_legs_summary_prints_a_share_lot():
+    legs = [{"kind": "stock", "side": "long", "strike": None, "qty": 1},
+            {"kind": "call", "side": "short", "strike": 105.0, "expiration": "2026-10-16"}]
+    assert st.legs_summary(legs) == "L 100 SH / S 105C"
+
+
+def test_legs_summary_dates_only_a_leg_on_a_LATER_expiry():
+    legs = [{"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16"},
+            {"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-11-13"}]
+    assert st.legs_summary(legs) == "S 100C / L 100C 11/13"
+
+
+def test_legs_summary_single_expiry_is_unchanged():
+    legs = [{"kind": "put", "side": "short", "strike": 445.0, "expiration": "2026-10-16"},
+            {"kind": "put", "side": "long", "strike": 440.0, "expiration": "2026-10-16"}]
+    assert st.legs_summary(legs) == "S 445P / L 440P"
+
+
+def test_legs_summary_shows_a_multi_lot_butterfly_body():
+    legs = [{"kind": "call", "side": "long", "strike": 95.0, "expiration": "2026-10-16", "qty": 1},
+            {"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16", "qty": 2},
+            {"kind": "call", "side": "long", "strike": 105.0, "expiration": "2026-10-16", "qty": 1}]
+    assert st.legs_summary(legs) == "L 95C / S 2×100C / L 105C"
+
+
+def test_legs_summary_share_lots_scale_with_qty():
+    legs = [{"kind": "stock", "side": "long", "strike": None, "qty": 2}]
+    assert st.legs_summary(legs) == "L 200 SH"
+
+
+def test_finder_offers_the_calculators_seven_groups():
+    from pages.options import swing
+    assert list(swing._FAMILY_OPTIONS) == [
+        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK"]
+    assert swing._FAMILY_OPTIONS["STRADDLE"] == "Straddles & strangles"
+    assert swing._FAMILY_OPTIONS["STOCK"] == "Stock + options"
+
+
+def test_finder_new_group_labels_are_the_calculators_group_names():
+    from pages.options import swing
+    from pages.options.strategies import STRATEGY_GROUPS
+    calc_names = {name for name, _codes in STRATEGY_GROUPS}
+    for code in ("STRADDLE", "CALENDAR", "STOCK"):
+        assert swing._FAMILY_OPTIONS[code] in calc_names
+    # The Calculator splits the Finder's one group into two.
+    assert swing._FAMILY_OPTIONS["BUTTERFLY"] == "Butterflies & condors"
+    assert {"Butterflies", "Condors"} <= calc_names

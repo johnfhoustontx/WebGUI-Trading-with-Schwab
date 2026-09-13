@@ -68,9 +68,12 @@ def status_text(payload, n_rows):
     return line
 
 
-# Strategy-family checkbox options (Diagonal is a later phase — omitted).
+# Build groups, labelled with the Calculator's STRATEGY_GROUPS names so a structure
+# is called the same thing on both pages.
 _FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
-                   "NEUTRAL": "Neutral"}
+                   "NEUTRAL": "Neutral", "STRADDLE": "Straddles & strangles",
+                   "BUTTERFLY": "Butterflies & condors", "CALENDAR": "Calendars",
+                   "STOCK": "Stock + options"}
 
 
 def render():
@@ -87,7 +90,7 @@ def render():
             dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
             with ui.column().classes("gap-0"):
                 ui.label("Strategies").classes("text-xs text-[#8794b4]")
-                with ui.row().classes("items-center gap-3 no-wrap"):
+                with ui.row().classes("items-center gap-3 flex-wrap"):
                     family_cbs = {
                         code: ui.checkbox(label, value=True).props("dense")
                         for code, label in _FAMILY_OPTIONS.items()
