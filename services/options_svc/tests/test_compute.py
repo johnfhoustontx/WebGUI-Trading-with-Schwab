@@ -345,6 +345,84 @@ def test_swing_scan_no_market_state_no_tilt(monkeypatch, unfiltered_swing):
     assert pcs and pcs[0]["state_tilt"] == 0.0
 
 
+# ── The four build groups added 2026-09-13 (straddle / butterfly / calendar / stock) ──
+
+def _patch_swing_inputs(monkeypatch, chain):
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: chain)
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": 540.0})
+    monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})
+    monkeypatch.setattr(compute.se, "calc_technicals",
+                        lambda hist: {"trend": "NEUTRAL", "rsi14": 50,
+                                      "price": 540.0, "sma20": 540.0})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None:
+                        {"iv_rank": 50.0, "expected_moves": {"daily": {"move_dollars": 5.0}}})
+    monkeypatch.setattr(compute.se, "screen_spreads", lambda *a, **k: [])
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+
+
+def _bs_ladder_chain(dtes=(10, 38), spot=540.0, iv=0.18):
+    """A SYMMETRIC Black-Scholes chain: strikes every $5 from 510 to 570 listed on
+    BOTH maps for each expiry. ``_swing_chain`` cannot serve these tests - its call
+    and put ladders are disjoint and asymmetric, so no at-the-money straddle, no
+    symmetric butterfly wing and no calendar strike exists on it."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    calls, puts = {}, {}
+    for dte in dtes:
+        key = f"{(dt.date.today() + dt.timedelta(days=dte)).isoformat()}:{dte}"
+        T = dte / 365.0
+        calls[key], puts[key] = {}, {}
+        for k in range(510, 571, 5):
+            for kind, m in (("call", calls[key]), ("put", puts[key])):
+                px = oc.bs_price(spot, float(k), T, oc.RISK_FREE_RATE, iv, kind)
+                mark = round(max(px, 0.05), 2)
+                m[f"{float(k)}"] = [{
+                    "delta": round(oc.bs_delta(spot, float(k), T, oc.RISK_FREE_RATE, iv, kind), 4),
+                    "mark": mark, "bid": round(max(mark - 0.05, 0.01), 2),
+                    "ask": round(mark + 0.05, 2), "theta": -0.05, "vega": 0.30,
+                    "gamma": 0.01, "volatility": iv * 100.0,
+                    "totalVolume": 1000, "openInterest": 5000}]
+    return {"underlyingPrice": spot, "callExpDateMap": calls, "putExpDateMap": puts}
+
+
+def test_default_swing_scan_builds_all_seven_groups(monkeypatch, unfiltered_swing):
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    types = {s["type"] for s in compute.swing_scan(
+        "SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10)["signals"]}
+    assert {"LONG_STRADDLE", "BUTTERFLY_CALL", "CALENDAR_CALL", "COVERED_CALL"} <= types
+
+
+def test_an_unchecked_group_is_not_built(monkeypatch, unfiltered_swing):
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    types = {s["type"] for s in compute.swing_scan(
+        "SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10,
+        families=["DIRECTIONAL"])["signals"]}
+    assert not types & {"LONG_STRADDLE", "BUTTERFLY_CALL", "CALENDAR_CALL", "COVERED_CALL"}
+
+
+def test_a_calendar_is_earnings_gated_on_its_BACK_month(monkeypatch, unfiltered_swing):
+    import datetime as dt
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    report = dt.date.today() + dt.timedelta(days=20)   # after the front, before the back
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["CALENDAR"], earnings_date=report.isoformat())
+    assert not [s for s in out["signals"] if s["type"].startswith("CALENDAR")]
+
+
+def test_the_calendar_earnings_control_builds_without_a_report(monkeypatch, unfiltered_swing):
+    """The control for the test above: the same scan with NO report does build a
+    calendar, so the empty list there is the gate and not an empty fixture."""
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["CALENDAR"])
+    assert [s for s in out["signals"] if s["type"].startswith("CALENDAR")]
+
+
 # ── Swing quality cut (score >= SWING_MIN_SCORE, no excluded grade) ─────────
 
 def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
@@ -356,7 +434,9 @@ def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
     one, which a directional-only cut would have kept) and the Good rows remain.
     """
     _swing_scan_market_state_env(monkeypatch)
-    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # Measures the original three groups; the all-groups default is covered by the new tests.
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["DIRECTIONAL", "VERTICAL", "NEUTRAL"])
 
     # Non-vacuity: something survived, so an "all Weak dropped" pass isn't free.
     assert out["signals"], "the cut emptied a fixture that has Good candidates"
@@ -372,7 +452,9 @@ def test_swing_scan_reports_how_many_it_dropped(monkeypatch):
     """An empty/short table must be explainable: ``filtered_out`` separates
     'nothing cleared the bar' from 'the scan found nothing at all'."""
     _swing_scan_market_state_env(monkeypatch)
-    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # Measures the original three groups; the all-groups default is covered by the new tests.
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["DIRECTIONAL", "VERTICAL", "NEUTRAL"])
     # 4 directional + 1 adapted PCS graded Weak; BULL_CALL/BEAR_PUT survive.
     assert out["filtered_out"] == 5
     assert len(out["signals"]) == 2

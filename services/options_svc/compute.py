@@ -236,8 +236,20 @@ def assign_ids(signals, symbol):
     return signals
 
 
-# Phase-1 candidate families. ``families=None`` ⇒ build all of these.
-_SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
+def _latest_expiration(sig):
+    """The LAST expiration a candidate is exposed to. A calendar's back month can
+    span a report its front leg expires ahead of, so the earnings gate must read
+    this, not ``sig["expiration"]`` (the front). Single-expiry rows are unchanged."""
+    exps = [l.get("expiration") for l in sig.get("legs") or [] if l.get("expiration")]
+    return max(exps) if exps else sig.get("expiration")
+
+
+# Candidate build groups. ``families=None`` builds all of these. The first three
+# are ALSO the ``family`` value their candidates carry; the four added 2026-09-13
+# are build groups only - their candidates carry NEUTRAL or DIRECTIONAL, the one
+# vocabulary strategy_scoring reads (see the design doc).
+_SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL",
+                   "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK")
 
 # Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
 # strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
@@ -405,6 +417,20 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         signals += [ssn.adapt_credit_spread(s) for s in spreads]
     if "NEUTRAL" in fams:
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
+    # The four build groups added 2026-09-13. The short-delta band reaches the two
+    # builders that SELL an out-of-the-money option (the short strangle, the
+    # covered call's call) and binds nothing else - see each builder's docstring.
+    bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
+    if "STRADDLE" in fams:
+        signals += ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
+                                                 dte_min, dte_max, **bands)
+    if "BUTTERFLY" in fams:
+        signals += ssn.build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max)
+    if "CALENDAR" in fams:
+        signals += ssn.build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max)
+    if "STOCK" in fams:
+        signals += ssn.build_stock_structures(chain, symbol, spot, atm_iv,
+                                              dte_min, dte_max, **bands)
 
     # Window filters, BEFORE scoring — a candidate this window does not trade is
     # not a candidate the quality bar rejected, and ``filtered_out`` below is
@@ -428,10 +454,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # Per-signal rather than per-scan because the predicate reads DTE, and
         # one scan spans a DTE range: within a 0..4 request the same-day
         # candidates keep the exemption while the overnight ones do not.
+        #
+        # The conflict is read against the LATEST leg expiration, not the row's
+        # ``expiration`` (the front): a calendar or diagonal holds its back month
+        # through a report the front leg expires ahead of.
         signals = [s for s in signals
                    if not (se.earnings_gate_applies(trade_type, s.get("dte"))
                            and se.check_earnings_conflict(earnings_date,
-                                                          s.get("expiration")))]
+                                                          _latest_expiration(s)))]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
 
