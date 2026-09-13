@@ -118,3 +118,14 @@ def test_a_fly_still_takes_its_target_on_max_profit():
     rec = signal_recommender.recommend(
         _ledger_ctx("BUTTERFLY_CALL", 150.0, dte_remaining=25))
     assert rec["code"] == "TARGET_HIT"                 # 50% of the $300 max profit
+
+
+def test_a_two_breakeven_row_joins_them_with_the_iron_condor_separator():
+    """The webgui's ``detail.breakevens`` parses ``"put_be/call_be"`` - the
+    iron-condor convention. Joined with ", " every two-breakeven ledger row
+    rendered its breakeven as an em-dash."""
+    sig = _fly_signal()
+    assert len(sig["breakevens"]) == 2
+    trade = paper_trader.create_paper_trade(sig, 1)
+    assert trade["breakeven"] == " / ".join(str(b) for b in sig["breakevens"])
+    assert [float(p) for p in trade["breakeven"].split("/")] ==         [float(b) for b in sig["breakevens"]]

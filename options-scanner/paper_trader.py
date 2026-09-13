@@ -92,7 +92,10 @@ def _create_debit_trade(signal, quantity, mode, now):
         "max_profit_total": (round(max_profit * quantity, 2)
                              if max_profit is not None else None),
         "unbounded": bool(signal.get("unbounded")),
-        "breakeven": ", ".join(str(b) for b in (signal.get("breakevens") or [])),
+        # " / " - the iron-condor "put_be/call_be" convention the webgui's
+        # detail.breakevens parses. It was ", " until 2026-09-13, which rendered
+        # every two-breakeven row (a butterfly, a condor) as an em-dash.
+        "breakeven": " / ".join(str(b) for b in (signal.get("breakevens") or [])),
         "short_strike": None, "long_strike": None, "width": None,
         "short_delta": None, "net_theta": signal.get("net_theta", 0),
         "entry_delta": None, "entry_theta": None, "entry_vega": None, "entry_gamma": None,

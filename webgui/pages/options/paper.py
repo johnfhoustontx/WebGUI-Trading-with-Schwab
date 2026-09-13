@@ -158,14 +158,15 @@ def trade_pnl(t):
 
 
 def _legs_text(legs):
-    """Compact leg string for a DEBIT/legs trade, e.g. ``L 450C`` or ``L 100C / S 105C``
-    (mirrors the swing table's leg format)."""
-    parts = []
-    for leg in legs or []:
-        side = "L" if leg.get("side") == "long" else "S"
-        kind = "C" if leg.get("kind") == "call" else "P"
-        parts.append(f"{side} {leg.get('strike', '?')}{kind}")
-    return " / ".join(parts) if parts else "—"
+    """Compact leg string for a DEBIT/legs trade, e.g. ``L 450C`` or ``L 100C / S 105C``.
+
+    IS the swing table's ``strategy_table.legs_summary`` rather than a mirror of
+    it: the ledger stores legs in the same ``{kind, side, strike, qty}`` shape.
+    The mirror this replaced ignored ``qty``, so a butterfly - the first ledger
+    debit with a two-lot body - read ``L 95.0C / S 100.0C / L 105.0C``, a call
+    spread with a stray short call, where the Finder shows ``S 2×100C``."""
+    from .strategy_table import legs_summary
+    return legs_summary(legs)
 
 
 def _strikes(t):

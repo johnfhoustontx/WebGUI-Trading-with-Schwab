@@ -469,3 +469,22 @@ def test_the_ledger_help_explains_the_entry_sign():
     import page_help
     text = page_help.HELP_MD["/options/paper"]
     assert "debit" in text.lower()
+
+
+def test_strikes_show_a_butterflys_two_lot_body():
+    """A butterfly is the first ledger debit with a leg of qty 2; without the
+    count the row read like a call spread plus a stray short call."""
+    fly = {"strategy": "BUTTERFLY_CALL", "direction": "DEBIT",
+           "legs": [{"kind": "call", "side": "long", "strike": 95.0, "qty": 1},
+                    {"kind": "call", "side": "short", "strike": 100.0, "qty": 2},
+                    {"kind": "call", "side": "long", "strike": 105.0, "qty": 1}]}
+    assert paper._strikes(fly) == "L 95C / S 2×100C / L 105C"
+
+
+def test_a_butterfly_rows_breakeven_renders_both_values():
+    """The ledger writes " / " (the iron-condor convention). Rows stored before
+    that fix carry ", ", and must render too rather than as an em-dash."""
+    for stored in ("96.0 / 104.0", "96.0, 104.0"):
+        s = paper.synth_from_trade({"symbol": "XYZ", "breakeven": stored})
+        assert detail.breakeven_text(s["breakeven"]) == "$96.00 / $104.00", stored
+

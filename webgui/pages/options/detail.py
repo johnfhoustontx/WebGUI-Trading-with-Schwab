@@ -31,6 +31,8 @@ the gauge**: it was the only chart on all four pages that mount this panel
 now. If one of those pages ever gains a chart created after first render, it has
 to bring its own anchor — this panel no longer provides one.
 """
+import re
+
 from nicegui import ui
 
 import bus_client
@@ -456,6 +458,12 @@ def breakevens(raw):
     (scanner_engine.py:1069). The old code formatted with ``_money``, which
     requires a number, so every IC rendered an em-dash. Credit spreads store a
     plain float. Both shapes are handled; anything unparseable yields [].
+
+    ⚠ The paper ledger's DEBIT rows joined two breakevens with ", " until
+    2026-09-13 (now " / "), so a butterfly or condor stored before then would
+    render an em-dash; comma-plus-SPACE is accepted as a separator too. A bare
+    comma is not, so a thousands-separated "1,234.5" stays junk rather than
+    becoming two numbers.
     """
     if raw is None:
         return []
@@ -464,7 +472,7 @@ def breakevens(raw):
     if isinstance(raw, (int, float)):
         return [float(raw)]
     out = []
-    for part in str(raw).split("/"):
+    for part in re.split(r"/|,\s+", str(raw)):
         try:
             out.append(float(part.strip()))
         except (TypeError, ValueError):

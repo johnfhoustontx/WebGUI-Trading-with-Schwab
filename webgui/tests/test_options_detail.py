@@ -428,6 +428,15 @@ def test_breakevens_returns_empty_for_missing_or_junk():
     assert detail.breakevens("not/a/number") == []
 
 
+
+def test_breakevens_accepts_the_ledgers_legacy_comma_separator():
+    """Debit ledger rows written before 2026-09-13 joined two breakevens with
+    ", ". A thousands separator (no space) is not a separator, so it stays junk
+    rather than splitting one number in two."""
+    assert detail.breakevens("96.0, 104.0") == [96.0, 104.0]
+    assert detail.breakevens("96.0 / 104.0") == [96.0, 104.0]
+    assert detail.breakevens("1,234.5") == []
+
 def test_breakeven_text_formats_both_sides():
     assert detail.breakeven_text("5900.5/6010.2") == "$5,900.50 / $6,010.20"
     assert detail.breakeven_text(398.45) == "$398.45"
