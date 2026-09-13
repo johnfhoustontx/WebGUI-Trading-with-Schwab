@@ -1395,9 +1395,11 @@ One chip per strategy group, each with how many ideas it holds, plus **All**.
 
 **Top picks**
 
-Up to four cards: the best-scoring idea from each of four **different** groups
-among what the chips are showing — so four near-identical spreads never crowd out
-the comparison. Each card shows:
+Up to four cards: the best-scoring idea from each **different** group among what
+the chips are showing comes first — so four near-identical spreads never crowd out
+the comparison. When fewer than four groups are showing (you clicked one chip, say),
+the spare cards go to the next-best ideas by score, so a single group still fills
+all four. Each card shows:
 
 - the strategy, its **score** badge and **grade**;
 - the expiration and days to go (`Oct 16 · 8d`);

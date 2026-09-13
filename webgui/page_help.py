@@ -224,9 +224,11 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   **All**) to see everything again. Chips filter instantly — nothing is
   rescanned, because every scan builds all seven groups. A new symbol starts
   back at All.
-- **Top picks** — up to four cards, each the best-scoring idea from a
-  **different** group among what the chips show, so four spreads never crowd out
-  the comparison. A card gives the score and grade, the expiration, the legs, and:
+- **Top picks** — up to four cards. Each group among what the chips show gets its
+  best-scoring idea onto a card before any group gets a second, so four spreads
+  never crowd out the comparison; when fewer than four groups are showing (one
+  chip clicked, say), the spare cards go to the next-best ideas by score. A card
+  gives the score and grade, the expiration, the legs, and:
   - **a payoff shape** — what the trade makes or loses across a range of prices:
     green where it profits, red where it loses, a dashed line at break-even and a
     small tick at today's price;

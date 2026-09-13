@@ -103,7 +103,24 @@ def test_top_picks_take_the_best_of_distinct_groups():
     sigs = [_sig("A", "VERTICAL", 80), _sig("B", "VERTICAL", 79), _sig("C", "CALENDAR", 70),
             _sig("D", "STOCK", 75), _sig("E", "BUTTERFLY", 60), _sig("F", "STRADDLE", 55)]
     assert [s["id"] for s in fv.top_picks(sigs, k=4)] == ["A", "D", "C", "E"]
-    assert [s["id"] for s in fv.top_picks(sigs[:2], k=4)] == ["A"]
+    assert [s["id"] for s in fv.top_picks(sigs[:2], k=4)] == ["A", "B"]
+
+
+def test_top_picks_fill_every_slot_when_a_filter_leaves_one_group():
+    """Clicking one chip (say Calendars) must still show up to four cards."""
+    sigs = [_sig(i, "CALENDAR", sc) for i, sc in
+            (("P", 61), ("Q", 90), ("R", 75), ("S", 82), ("T", 40))]
+    assert [s["id"] for s in fv.top_picks(sigs, k=4)] == ["Q", "S", "R", "P"]
+
+
+def test_top_picks_take_distinct_groups_first_then_fill_by_score():
+    sigs = [_sig("A", "VERTICAL", 80), _sig("B", "VERTICAL", 79),
+            _sig("C", "CALENDAR", 50), _sig("D", "VERTICAL", 60)]
+    # The one calendar beats the second and third spread to a card ...
+    assert [s["id"] for s in fv.top_picks(sigs, k=3)] == ["A", "C", "B"]
+    # ... and the remaining slots fill in score order, never duplicating a card.
+    assert [s["id"] for s in fv.top_picks(sigs, k=4)] == ["A", "C", "B", "D"]
+    assert [s["id"] for s in fv.top_picks(sigs, k=9)] == ["A", "C", "B", "D"]
 
 
 def test_top_picks_put_unscored_last_and_break_ties_by_id():

@@ -272,23 +272,28 @@ def ranked(signals):
 
 
 def top_picks(signals, k=4):
-    """Up to ``k`` cards: the best-scoring signal of each DIFFERENT group.
+    """Up to ``k`` cards: the best of each DIFFERENT group first, then the rest.
 
-    Four spreads in a row would be one idea shown four times; the cards exist to
-    compare structures.
+    Four spreads in a row would be one idea shown four times, so each group's
+    best idea takes a card before any group gets a second. When the visible rows
+    span fewer than ``k`` groups - a single chip clicked, say - the remaining
+    slots FILL with the next-best ideas in score order, so a one-group filter
+    still shows up to ``k`` cards rather than one.
     """
     if k <= 0:
         return []
-    picks, taken = [], set()
-    for s in ranked(signals):
+    order = ranked(signals)
+    picks, taken, rest = [], set(), []
+    for s in order:
         g = s.get("group")
         if g in taken:
+            rest.append(s)
             continue
         taken.add(g)
         picks.append(s)
         if len(picks) >= k:
-            break
-    return picks
+            return picks
+    return picks + rest[:k - len(picks)]
 
 
 # ------------------------------------------------------------------ summary strip

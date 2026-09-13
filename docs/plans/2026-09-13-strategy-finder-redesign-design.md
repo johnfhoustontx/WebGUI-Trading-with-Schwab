@@ -47,8 +47,10 @@ comparing structures, and exploring settings.
    cheap to sell*.
 3. **Strategy chips** — one per group with its count, plus *All*. Filters cards and
    list instantly.
-4. **Top picks** — up to four cards: the best-scoring idea from four *different*
-   groups among the visible rows. Each card: name, score badge + grade, expiry ·
+4. **Top picks** — up to four cards: the best-scoring idea from each *different*
+   group among the visible rows first, then — when fewer than four groups are
+   visible, e.g. a single chip — the next-best remaining ideas in score order, so
+   every slot fills. Each card: name, score badge + grade, expiry ·
    DTE, legs in plain words, a payoff shape, a split risk/reward bar, a
    probability-of-profit bar, cost, and Calculator (+ Paper where allowed).
 5. **Ranked list** — Strategy (with mini payoff shape) · Score · Expiry·DTE · Cost ·

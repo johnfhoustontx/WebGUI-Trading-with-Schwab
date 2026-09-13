@@ -2768,9 +2768,11 @@ A chip shows only its group; more chips add groups; removing the last chip, or c
 **All**, shows everything. The filter is instant — nothing is rescanned — and both the
 cards and the list follow it. A new symbol starts back at All.
 
-**Top picks.** Up to four cards, each the best-scoring idea from a **different** group
-among what the chips show — the cards exist to compare structures, and four spreads in a
-row would be one idea shown four times. A card carries the score and grade, the
+**Top picks.** Up to four cards. Each group among what the chips show gets its
+best-scoring idea onto a card before any group gets a second — the cards exist to compare
+structures, and four spreads in a row would be one idea shown four times. When fewer than
+four groups are showing (a single chip clicked, say), the spare cards go to the next-best
+ideas by score, so the row still fills. A card carries the score and grade, the
 expiration and days to go, the legs, the cost, **Calculator** and — where the Paper
 Ledger can record it — **Paper**, plus three pictures:
 
