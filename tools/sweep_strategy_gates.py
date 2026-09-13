@@ -62,8 +62,11 @@ Columns:
               ("unb" = unbounded)
     maxL      max loss, per contract, commission included
     EM        the 1-sigma move the breakeven factor judged this row against:
-              spot * iv * sqrt(max(dte, 1) / 365), off the ROW's dte (a share
-              structure on a short --days front builds on the back month)
+              spot * iv * sqrt(max(dte, 1) / 365), off the ROW's dte (on a
+              --days front under 7, every builder that takes the 7-day front
+              floor through `strategy_scanner._front_pair` -- straddles,
+              strangles, butterflies, the iron butterfly, condors and the
+              share structures -- builds on the back month instead)
     R:R       max_profit / max_loss ("-" when undefined)
     PoP       probability of profit, percent
     profile   `strategy_scoring.gate_profile` -- which GATE_BARS row applies

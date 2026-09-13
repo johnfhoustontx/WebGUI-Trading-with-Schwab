@@ -1686,3 +1686,15 @@ def test_a_long_fly_costing_its_whole_wing_and_an_iron_fly_for_a_debit_are_not_e
     out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
     assert "BUTTERFLY_CALL" not in out           # 9.0 - 4.0 + 0.1 = 5.10 debit
     assert "IRON_BUTTERFLY" not in out           # 0.5 + 2.0 - 5.0 - 0.1 = -2.60
+
+
+def test_a_long_fly_priced_just_under_its_wing_that_commission_makes_unprofitable_is_not_emitted():
+    """Inside the range is not enough: a $5-wide call fly bought for $4.97 passes
+    ``_priced_inside``, but the four-contract round-trip commission takes its max
+    profit below zero (measured -2.2), so it can never make money. The put side,
+    fairly priced, is the control."""
+    chain = _ladder_chain()
+    _marks(chain, "callExpDateMap", {"95.0": 8.97, "100.0": 2.05, "105.0": 0.10})
+    out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "BUTTERFLY_CALL" not in out           # 8.97 - 4.10 + 0.10 = 4.97 debit
+    assert out["BUTTERFLY_PUT"]["max_profit"] > 0

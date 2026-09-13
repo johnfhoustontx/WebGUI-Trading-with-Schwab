@@ -2,7 +2,8 @@
 
 Given a Schwab option chain + spot, build NORMALIZED candidate signals. Each
 carries a canonical ``legs`` list + payoff economics (max P/L, breakevens, PoP,
-capital), per-contract dollars net of round-trip commission.
+capital) in per-contract dollars. ``net_debit`` / ``net_credit`` are gross; max
+profit, max loss and capital are net of round-trip commission.
 
 * ``build_directional`` - long/short call and put, nearest expiry in the window.
 * ``build_debit_verticals`` - bull call and bear put spreads, nearest expiry.
@@ -605,6 +606,8 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
 
     A long fly or condor not priced for a debit under its wing, and an iron
     butterfly not priced for a credit under its wing, is dropped (``_priced_inside``).
+    So is one priced inside that range whose round-trip commission still leaves no
+    positive max profit (``_can_profit``) - a fly bought just under its wing.
     """
     fp = _front_pair(chain, dte_min, dte_max)
     if not fp:
@@ -635,14 +638,14 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
         legs = [_leg_from(m[lo], kind, "long", exp), body(_leg_from(m[k], kind, "short", exp), 2),
                 _leg_from(m[hi], kind, "long", exp)]
         fly = _assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv)
-        if _priced_inside(fly, "net_debit", d):
+        if _priced_inside(fly, "net_debit", d) and _can_profit(fly):
             out.append(fly)
 
     legs = [_leg_from(ps[lo], "put", "long", exp), _leg_from(ps[k], "put", "short", exp),
             _leg_from(cs[k], "call", "short", exp), _leg_from(cs[hi], "call", "long", exp)]
     iron = _assemble("IRON_BUTTERFLY", "NEUTRAL", "Iron Butterfly", "neutral", legs,
                      symbol, spot, atm_iv)
-    if _priced_inside(iron, "net_credit", d):
+    if _priced_inside(iron, "net_credit", d) and _can_profit(iron):
         out.append(iron)
 
     lo2, hi2 = _listed(both, k - 2 * d), _listed(both, k + 2 * d)
@@ -654,7 +657,7 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
                     _leg_from(m[hi], kind, "short", exp),
                     _leg_from(m[hi2], kind, "long", exp)]
             condor = _assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv)
-            if _priced_inside(condor, "net_debit", d):
+            if _priced_inside(condor, "net_debit", d) and _can_profit(condor):
                 out.append(condor)
     return out
 
