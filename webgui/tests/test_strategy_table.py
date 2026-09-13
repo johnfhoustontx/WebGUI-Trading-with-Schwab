@@ -640,3 +640,102 @@ def test_paper_button_on_butterfly_but_not_straddles_calendars_or_shares():
         {"id": "e", "type": "LONG_STRADDLE"}, {"id": "f", "type": "SHORT_STRANGLE"}])}
     assert rows["a"]["_allow_paper"] is True
     assert not any(rows[k]["_allow_paper"] for k in "bcdef")    # e, f: D1
+
+
+# --- detail panel end to end: shares, calendars, flies, every breakeven -----
+# Shaped like strategy_scanner._assemble output: legs from _stock_leg/_leg_from,
+# ``expiration`` the FRONT expiry, net_debit/net_credit/max_loss per CONTRACT.
+
+def _finder_leg(kind, side, strike, exp, qty=1, mark=2.0):
+    return {"kind": kind, "side": side, "strike": strike, "expiration": exp,
+            "qty": qty, "mark": mark, "delta": 0.3, "theta": -0.05, "vega": 0.1,
+            "gamma": 0.01, "iv": 25.0, "bid": mark - 0.05, "ask": mark + 0.05,
+            "volume": 100, "oi": 1000}
+
+
+def _finder_signal(stype, family, label, bias, legs, *, net_debit=None,
+                   net_credit=None, max_profit=None, max_loss=None, breakevens=()):
+    exps = [l["expiration"] for l in legs if l.get("expiration")]
+    return {"id": f"XYZ_{stype}", "symbol": "XYZ", "type": stype, "family": family,
+            "strategy_label": label, "bias": bias, "legs": legs,
+            "expiration": min(exps), "dte": 33, "net_debit": net_debit,
+            "net_credit": net_credit, "max_profit": max_profit, "max_loss": max_loss,
+            "breakevens": list(breakevens), "unbounded": False,
+            "unbounded_profit": False, "unbounded_loss": False,
+            "capital": max_loss, "commission": 1.30, "rr": None, "net_delta": 0.7,
+            "net_theta": 0.02, "net_vega": -0.1, "net_gamma": -0.01, "pop_pct": 55.0,
+            "underlying_price": 538.2}
+
+
+def _covered_call():
+    stock = {"kind": "stock", "side": "long", "strike": None, "expiration": None,
+             "qty": 1, "mark": 538.2, "delta": 1.0, "theta": 0.0, "vega": 0.0,
+             "gamma": 0.0, "iv": 0.0}
+    return _finder_signal("COVERED_CALL", "DIRECTIONAL", "Covered Call", "bullish",
+                          [stock, _finder_leg("call", "short", 545.0, "2026-10-16",
+                                              mark=2.04)],
+                          net_debit=53616.0, max_profit=684.0, max_loss=53616.0,
+                          breakevens=[536.16])
+
+
+def _calendar():
+    return _finder_signal("CALENDAR_CALL", "NEUTRAL", "Call Calendar", "neutral",
+                          [_finder_leg("call", "short", 100.0, "2026-10-16", mark=2.1),
+                           _finder_leg("call", "long", 100.0, "2026-11-13", mark=3.4)],
+                          net_debit=130.0, max_profit=210.0, max_loss=130.0,
+                          breakevens=[96.5, 104.1])
+
+
+def _butterfly():
+    return _finder_signal("BUTTERFLY_CALL", "BUTTERFLY", "Call Butterfly", "neutral",
+                          [_finder_leg("call", "long", 95.0, "2026-10-16", mark=6.0),
+                           _finder_leg("call", "short", 100.0, "2026-10-16", qty=2,
+                                       mark=2.8),
+                           _finder_leg("call", "long", 105.0, "2026-10-16", mark=0.9)],
+                          net_debit=130.0, max_profit=370.0, max_loss=130.0,
+                          breakevens=[96.3, 103.7])
+
+
+def test_detail_signal_passes_every_breakeven():
+    from pages.options import detail
+    out = st.detail_signal(_calendar())
+    assert detail.breakevens(out["breakeven"]) == [96.5, 104.1]
+    assert detail.breakeven_text(out["breakeven"]) == "$96.50 / $104.10"
+    ic = st.detail_signal(_iron_condor())
+    assert detail.breakeven_text(ic["breakeven"]) == "$378.80 / $421.20"
+
+
+def test_detail_signal_single_breakeven_stays_a_number():
+    assert st.detail_signal(_covered_call())["breakeven"] == 536.16
+
+
+def test_detail_signal_skips_a_non_numeric_breakeven():
+    from pages.options import detail
+    out = st.detail_signal(dict(_calendar(), breakevens=[96.5, None, "x", float("nan"), True, 104.1]))
+    assert detail.breakevens(out["breakeven"]) == [96.5, 104.1]
+
+
+def test_panel_covered_call_shows_shares_and_per_position_money():
+    from pages.options import detail
+    s = st.detail_signal(_covered_call())
+    assert detail.contract_lines(s) == ["Buy 100 shares", "Sell 545 C"]
+    assert detail.expiry_caption(s) == "Exp 2026-10-16"
+    assert detail.cost_row(s) == ("Debit", "$53,616.00 per position")
+    assert detail.money_for(s, s["max_loss"]) == "$53,616.00 per position"
+
+
+def test_panel_calendar_dates_each_leg_and_drops_the_single_exp():
+    from pages.options import detail
+    s = st.detail_signal(_calendar())
+    assert detail.contract_lines(s) == ["Sell 100 C  2026-10-16",
+                                        "Buy 100 C  2026-11-13"]
+    assert detail.expiry_caption(s) is None
+    assert detail.cost_row(s) == ("Debit", "$130.00 per contract")
+
+
+def test_panel_butterfly_body_uses_the_tables_quantity_marker():
+    from pages.options import detail
+    s = st.detail_signal(_butterfly())
+    assert detail.contract_lines(s) == ["Buy 95 C  /  Sell 2× 100 C  /  Buy 105 C"]
+    assert detail.expiry_caption(s) == "Exp 2026-10-16"
+    assert detail.breakeven_text(s["breakeven"]) == "$96.30 / $103.70"

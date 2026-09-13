@@ -433,6 +433,28 @@ def money_per_contract(per_share):
     return "—" if v is None else f"${v:,.2f} per contract"
 
 
+def _is_stock_leg(leg):
+    return isinstance(leg, dict) and str(leg.get("kind", "")).lower() == "stock"
+
+
+def money_unit(signal):
+    """'per position' when the signal holds a share leg, else 'per contract'.
+
+    A covered call, protective put or collar is 100 shares PLUS the options, so
+    its dollars (tens of thousands for the share lot) are not a contract's. The
+    number itself is already right - the Finder's per-contract figure ×100 over
+    the per-share scale - only the unit it claims changes.
+    """
+    legs = (signal or {}).get("legs") or []
+    return "per position" if any(_is_stock_leg(l) for l in legs) else "per contract"
+
+
+def money_for(signal, per_share):
+    """``money_per_contract`` with the unit ``money_unit`` names for this signal."""
+    v = per_contract(per_share)
+    return "—" if v is None else f"${v:,.2f} {money_unit(signal)}"
+
+
 def cost_row(signal):
     """(label, text) for the money-in/out row — 'Credit' or 'Debit'.
 
@@ -448,7 +470,7 @@ def cost_row(signal):
     if not isinstance(v, (int, float)) or isinstance(v, bool):
         return ("Credit", "—")
     label = "Debit" if v < 0 else "Credit"
-    return (label, money_per_contract(abs(v)))
+    return (label, money_for(s, abs(v)))
 
 
 def breakevens(raw):
@@ -550,22 +572,59 @@ def _leg_pair(short_k, long_k, right):
     return f"Sell {short_k:g} {right}  /  Buy {long_k:g} {right}"
 
 
-def _leg_instruction(leg):
-    """One leg as 'Sell 2x 410 C', or None when it carries no usable strike.
+def _leg_instruction(leg, with_expiry=False):
+    """One leg as 'Sell 2× 410 C', or None when it carries no usable strike.
 
-    ``qty`` is shown ONLY when it is not 1 — a butterfly body trades at 2x, and
-    an invisible multiplier misstates the position. ``kind`` decides the right,
-    so a call can never be labelled as a put.
+    ``qty`` is shown ONLY when it is not 1 — a butterfly body trades at 2×, and
+    an invisible multiplier misstates the position. The marker is the one the
+    Finder's Legs cell prints (``strategy_table.legs_summary``). ``kind`` decides
+    the right, so a call can never be labelled as a put.
+
+    A SHARE leg (``kind: "stock"``, strike and expiry None) is 'Buy 100 shares':
+    ``qty`` counts 100-share lots, and a missing or malformed qty reads as one
+    lot, as the Legs cell does. It was dropped as "no strike" until 2026-09-13,
+    so a covered call read as a naked short call.
+
+    ``with_expiry`` appends the leg's own expiry, for a position whose legs span
+    more than one (a calendar or diagonal).
     """
+    action = "Sell" if str(leg.get("side", "")).lower() == "short" else "Buy"
+    if _is_stock_leg(leg):
+        n = num(leg.get("qty"))
+        lots = int(n) if n is not None and n >= 1 else 1
+        return f"{action} {100 * lots} shares"
     strike = leg.get("strike")
     if not isinstance(strike, (int, float)) or isinstance(strike, bool):
         return None
-    action = "Sell" if str(leg.get("side", "")).lower() == "short" else "Buy"
     right = "C" if str(leg.get("kind", "")).lower() == "call" else "P"
     qty = leg.get("qty", 1)
-    mult = f"{qty:g}x " if isinstance(qty, (int, float)) and not isinstance(
+    mult = f"{qty:g}× " if isinstance(qty, (int, float)) and not isinstance(
         qty, bool) and qty != 1 else ""
-    return f"{action} {mult}{strike:g} {right}"
+    text = f"{action} {mult}{strike:g} {right}"
+    exp = leg.get("expiration")
+    if with_expiry and exp:
+        text += f"  {exp}"
+    return text
+
+
+def _option_expiries(legs):
+    """The distinct expirations the OPTION legs carry (a share leg has none)."""
+    return {l.get("expiration") for l in legs or []
+            if isinstance(l, dict) and not _is_stock_leg(l) and l.get("expiration")}
+
+
+def expiry_caption(signal):
+    """'Exp YYYY-MM-DD' under the contract lines, or None to draw nothing.
+
+    None when there is no expiration, AND when the option legs span more than one
+    expiry: each leg line then names its own date, and a single 'Exp' (the FRONT
+    month) would read as the whole position's.
+    """
+    s = signal or {}
+    if len(_option_expiries(s.get("legs"))) > 1:
+        return None
+    exp = s.get("expiration")
+    return f"Exp {exp}" if exp else None
 
 
 def _lines_from_legs(legs):
@@ -576,15 +635,21 @@ def _lines_from_legs(legs):
     ('Sell 400 P / Buy 395 P') while build_debit_verticals emits [long, short]
     ('Buy 400 C / Sell 410 C') — in both cases the defining leg leads. Grouping
     by kind keeps an iron condor's two verticals on separate lines.
+
+    A share leg groups as its own kind, so it takes a line of its own. When the
+    option legs span MORE than one expiry every leg takes its own line with its
+    own date: grouped, a calendar read 'Sell 100 C  /  Buy 100 C' — buying and
+    selling the same contract.
     """
+    multi = len(_option_expiries(legs)) > 1
     groups, order = {}, []
-    for leg in legs:
+    for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
             continue
-        text = _leg_instruction(leg)
+        text = _leg_instruction(leg, with_expiry=multi)
         if text is None:
             continue
-        kind = str(leg.get("kind", "")).lower()
+        kind = i if multi else str(leg.get("kind", "")).lower()
         if kind not in groups:
             groups[kind] = []
             order.append(kind)
@@ -682,17 +747,17 @@ def _build_cards(s):
         with ui.column().classes(f"w-full gap-0 {CARD}"):
             for line in lines:
                 ui.label(line).classes("text-sm font-bold")
-            exp = s.get("expiration")
-            if exp:
-                ui.label(f"Exp {exp}").classes(f"text-xs {MUTED}")
+            caption = expiry_caption(s)
+            if caption:
+                ui.label(caption).classes(f"text-xs {MUTED}")
 
     # 2 — THE ECONOMICS. Four figures, each carrying its unit: the two dollar
     # rows say "per contract" outright, so a per-share number can never be read
-    # as a position total.
+    # as a position total — or "per position" when shares are part of it.
     with ui.column().classes("w-full gap-1"):
         cost_label, cost_text = cost_row(s)
         _kv(cost_label, cost_text, GREEN if cost_label == "Credit" else NEUTRAL)
-        _kv("Max loss", money_per_contract(s.get("max_loss")), RED)
+        _kv("Max loss", money_for(s, s.get("max_loss")), RED)
         _kv("Breakeven", breakeven_text(s.get("breakeven")))
         _kv("Probability", _pct(s.get("pop_pct")), pop_color(s.get("pop_pct")))
         # What the trade's own price REQUIRES, directly under what it offers, so

@@ -526,8 +526,10 @@ def test_contract_lines_shows_quantity_above_one():
         {"kind": "call", "side": "short", "strike": 410.0, "qty": 2},
         {"kind": "call", "side": "long", "strike": 420.0, "qty": 1},
     ]}
+    # The marker is "2×", the same one the Strategy Finder's Legs cell prints
+    # (strategy_table.legs_summary) - it read "2x" here until 2026-09-13.
     assert detail.contract_lines(sig) == [
-        "Buy 400 C  /  Sell 2x 410 C  /  Buy 420 C"]
+        "Buy 400 C  /  Sell 2× 410 C  /  Buy 420 C"]
 
 
 def test_contract_lines_empty_legs_falls_back_to_strike_keys():
@@ -539,6 +541,108 @@ def test_contract_lines_ignores_legs_missing_a_strike():
     sig = {"type": "LONG_CALL",
            "legs": [{"kind": "call", "side": "long", "strike": None, "qty": 1}]}
     assert detail.contract_lines(sig) == []
+
+
+# --- the Strategy Finder's share and two-expiry structures --------------------
+# Leg shapes copied from options-scanner/strategy_scanner.py: ``_stock_leg`` (a
+# strike-less, expiry-less 100-share lot) and ``_leg_from`` (every option leg
+# carries its own ``expiration``). A share leg used to be dropped as "no strike",
+# so a covered call read as a naked short call.
+
+def _stock(side="long", qty=1, mark=538.2):
+    return {"kind": "stock", "side": side, "strike": None, "expiration": None,
+            "qty": qty, "mark": mark, "delta": 1.0, "theta": 0.0, "vega": 0.0,
+            "gamma": 0.0, "iv": 0.0}
+
+
+def _opt(kind, side, strike, exp="2026-10-16", qty=1):
+    return {"kind": kind, "side": side, "strike": strike, "expiration": exp,
+            "qty": qty, "mark": 2.04, "delta": 0.3, "theta": -0.1, "vega": 0.2,
+            "gamma": 0.01, "iv": 24.0}
+
+
+def test_contract_lines_covered_call_shows_the_shares():
+    sig = {"type": "COVERED_CALL", "legs": [_stock(), _opt("call", "short", 545.0)]}
+    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545 C"]
+
+
+def test_contract_lines_protective_put_and_collar_keep_leg_order():
+    pp = {"type": "PROTECTIVE_PUT", "legs": [_stock(), _opt("put", "long", 520.0)]}
+    assert detail.contract_lines(pp) == ["Buy 100 shares", "Buy 520 P"]
+    collar = {"type": "COLLAR", "legs": [_stock(), _opt("call", "short", 545.0),
+                                         _opt("put", "long", 520.0)]}
+    assert detail.contract_lines(collar) == ["Buy 100 shares", "Sell 545 C", "Buy 520 P"]
+
+
+def test_share_leg_scales_with_lots_and_names_a_short_lot():
+    assert detail.contract_lines({"legs": [_stock(qty=2)]}) == ["Buy 200 shares"]
+    assert detail.contract_lines({"legs": [_stock(side="short")]}) == ["Sell 100 shares"]
+
+
+def test_share_leg_with_a_malformed_qty_reads_as_one_lot():
+    for bad in (float("nan"), "two", None, True, 0):
+        assert detail.contract_lines({"legs": [_stock(qty=bad)]}) == ["Buy 100 shares"]
+
+
+def test_contract_lines_calendar_dates_each_leg_on_its_own_line():
+    # One line, "Sell 100 C  /  Buy 100 C", read as buying and selling the SAME
+    # contract. Each leg now names its own expiry.
+    sig = {"type": "CALENDAR_CALL", "expiration": "2026-10-16",
+           "legs": [_opt("call", "short", 100.0, "2026-10-16"),
+                    _opt("call", "long", 100.0, "2026-11-13")]}
+    assert detail.contract_lines(sig) == ["Sell 100 C  2026-10-16",
+                                          "Buy 100 C  2026-11-13"]
+
+
+def test_contract_lines_diagonal_dates_each_leg():
+    sig = {"type": "DIAGONAL_PUT", "expiration": "2026-10-16",
+           "legs": [_opt("put", "short", 95.0, "2026-10-16"),
+                    _opt("put", "long", 105.0, "2026-11-13")]}
+    assert detail.contract_lines(sig) == ["Sell 95 P  2026-10-16",
+                                          "Buy 105 P  2026-11-13"]
+
+
+def test_contract_lines_share_leg_does_not_make_a_single_expiry_multi():
+    sig = {"legs": [_stock(), _opt("call", "short", 545.0, "2026-10-16")]}
+    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545 C"]
+
+
+def test_expiry_caption_single_expiry_is_unchanged():
+    assert detail.expiry_caption({"expiration": "2026-10-16"}) == "Exp 2026-10-16"
+    sig = {"expiration": "2026-10-16",
+           "legs": [_stock(), _opt("call", "short", 545.0, "2026-10-16")]}
+    assert detail.expiry_caption(sig) == "Exp 2026-10-16"
+
+
+def test_expiry_caption_absent_when_the_legs_carry_their_own_dates():
+    sig = {"expiration": "2026-10-16",
+           "legs": [_opt("call", "short", 100.0, "2026-10-16"),
+                    _opt("call", "long", 100.0, "2026-11-13")]}
+    assert detail.expiry_caption(sig) is None
+
+
+def test_expiry_caption_none_without_an_expiration():
+    assert detail.expiry_caption({}) is None
+
+
+def test_money_unit_is_per_position_only_with_a_share_leg():
+    assert detail.money_unit({"legs": [_opt("call", "short", 545.0)]}) == "per contract"
+    assert detail.money_unit({}) == "per contract"
+    assert detail.money_unit({"legs": [_stock(), _opt("call", "short", 545.0)]}) == (
+        "per position")
+
+
+def test_cost_row_and_money_for_say_per_position_for_shares():
+    sig = {"net_cost": -536.16,
+           "legs": [_stock(), _opt("call", "short", 545.0)]}
+    assert detail.cost_row(sig) == ("Debit", "$53,616.00 per position")
+    assert detail.money_for(sig, 536.16) == "$53,616.00 per position"
+    assert detail.money_for(sig, None) == "—"
+
+
+def test_money_for_an_option_only_signal_matches_money_per_contract():
+    sig = {"legs": [_opt("put", "short", 400.0)]}
+    assert detail.money_for(sig, 1.55) == detail.money_per_contract(1.55)
 
 
 def test_cost_row_labels_credit_and_debit():

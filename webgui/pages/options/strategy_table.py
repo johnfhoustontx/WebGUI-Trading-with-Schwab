@@ -303,8 +303,10 @@ def detail_signal(signal):
 
     ``detail.py`` reads ``credit``/``breakeven``/``pop_pct``/``dte``; the normalized
     multi-leg signal stores ``net_credit``/``net_debit`` + a ``breakevens`` list, so
-    fill ``credit`` from ``net_credit`` ONLY and ``breakeven`` (first breakeven) when
-    absent. A debit structure (``net_credit`` None) deliberately leaves ``credit``
+    fill ``credit`` from ``net_credit`` ONLY and ``breakeven`` when absent: the one
+    number itself, or EVERY breakeven joined with " / " (the separator
+    ``detail.breakevens`` parses) — a straddle, fly, condor or calendar showed only
+    its lower breakeven when this took the first. A debit structure (``net_credit`` None) deliberately leaves ``credit``
     unset → the panel's green "Credit" tile shows "—" rather than the DEBIT amount
     mislabeled as a credit. The input is NOT mutated.
 
@@ -330,8 +332,14 @@ def detail_signal(signal):
     if max_loss_d is not None:
         out["max_loss"] = round(max_loss_d / _CONTRACT_MULT, 6)
     if out.get("breakeven") is None:
-        bes = out.get("breakevens") or []
-        out["breakeven"] = bes[0] if bes else None
+        bes = [v for v in (_fmt.num(b) for b in out.get("breakevens") or [])
+               if v is not None]
+        if not bes:
+            out["breakeven"] = None
+        elif len(bes) == 1:
+            out["breakeven"] = bes[0]
+        else:
+            out["breakeven"] = " / ".join(repr(b) for b in bes)
     _fill_net_cost(out)
     return out
 
