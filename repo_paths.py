@@ -393,6 +393,30 @@ APP_HOST  = str(_env_local.get("app_host") or f"app.{SITE_HOST}").strip().lower(
 # separated by ORIGIN rather than by a path filter someone has to get right.
 LIVE_HOST = str(_env_local.get("live_host") or f"live.{SITE_HOST}").strip().lower()
 
+
+def _public_proxy_url(raw, proxy_url):
+    """The proxy's address as a BROWSER reaches it, or ``proxy_url``. Never raises.
+
+    ``PROXY_URL`` is where this PROCESS reaches the proxy — loopback on the VPS.
+    A link a human clicks (the Status page's Authorize button) opens in the
+    viewer's browser, where 127.0.0.1 is the viewer's own device, so it needs the
+    address the proxy is published at: the ``tailscale serve`` URL. Anything that
+    is not an http(s) URL falls back rather than rendering a dead link.
+    """
+    value = raw.get("proxy_public_url")
+    if not isinstance(value, str):
+        return proxy_url
+    value = value.strip().rstrip("/")
+    if not value.lower().startswith(("http://", "https://")):
+        return proxy_url
+    return value
+
+
+# Machine-local like proxy_host — the tailnet name is a property of the box.
+# Pinned to PROXY_URL under pytest so a marker cannot change what a suite sees.
+PROXY_PUBLIC_URL = (PROXY_URL if "pytest" in sys.modules
+                    else _public_proxy_url(_env_local, PROXY_URL))
+
 # ⚠ WHAT THE PUBLIC FILE SERVER IS ROOTED AT, and the single most damaging value
 # in this file to get wrong. One level up publishes shared/tokens.json,
 # shared/appsettings.json, shared/webgui_auth.json and config/env.local.toml to

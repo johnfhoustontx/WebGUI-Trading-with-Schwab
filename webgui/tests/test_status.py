@@ -356,6 +356,16 @@ def test_auth_target_present_and_links_to_auth_page():
     assert status.AUTH_URL.endswith(":8100/auth")
 
 
+def test_auth_link_is_the_browser_facing_url_not_the_server_one():
+    """The button opens in the VIEWER's browser, where 127.0.0.1 is the viewer's
+    own device. It must come from PROXY_PUBLIC_URL (the tailnet address on the
+    VPS), never from PROXY_URL, which is where the SERVER reaches the proxy."""
+    import inspect
+    src = inspect.getsource(status)
+    assert 'AUTH_URL = f"{PROXY_PUBLIC_URL}/auth"' in src
+    assert 'f"{PROXY_URL}/auth"' not in src
+
+
 def test_auth_status_proxy_down_is_unknown():
     up, detail = status.auth_status({"up": False})
     assert up is None

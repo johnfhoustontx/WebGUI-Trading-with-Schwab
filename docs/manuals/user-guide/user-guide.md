@@ -65,8 +65,10 @@ The app reads market data and your positions from Schwab, so you need:
 - Those keys saved into **`shared/appsettings.json`** (copy the provided
   `shared/appsettings.example.json` and fill in your keys).
 - A **one-time Schwab login**: after starting the app, open **System Status → Schwab
-  Authorization → Authorize** (or `http://127.0.0.1:8100/auth`) and sign in. This
-  creates your token file.
+  Authorization → Authorize** and sign in. This creates your token file. The
+  button opens the proxy's login page, which is on your private Tailscale network
+  rather than the public site — so the device you click it from must be signed in
+  to Tailscale.
 
 > **Good to know:** the app refreshes your Schwab login automatically most of the
 > time. If live data stops and **System Status** shows the Schwab login expired,

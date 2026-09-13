@@ -456,7 +456,7 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 </tr>
 <tr>
 <td><strong>First-time authorization</strong></td>
-<td>Start the proxy, then open <strong><code>http://127.0.0.1:8100/auth</code></strong> (or the <strong>Authorize</strong> button on the app's <strong>System Status</strong> page) and complete the Schwab login.</td>
+<td>Start the proxy, then use the <strong>Authorize</strong> button on the app's <strong>System Status</strong> page and complete the Schwab login. The button opens <code>{proxy_public_url}/auth</code> (<code>repo_paths.PROXY_PUBLIC_URL</code>, from <code>config/env.local.toml</code>) — on the VPS the <code>tailscale serve</code> address of <code>:8100</code>; unset, <code>http://127.0.0.1:8100/auth</code>, reachable only on the same machine or through the SSH tunnel.</td>
 <td>Required</td>
 </tr>
 </tbody>

@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-13 (**Strategy Finder — every structure the Calculator
+**Last updated:** 2026-09-13 (**System Status Authorize button fixed.** Operator
+report: "the Re-authorize button points to 127.0.0.1 … it does not work".)
+
+- **Cause.** `status.AUTH_URL` was `{PROXY_URL}/auth` — the SERVER's loopback
+  address. The button opens in the viewer's browser, so on the VPS it opened the
+  viewer's own device. It last worked when browser and stack shared the Windows box.
+- **And the tailnet route was missing.** `vps2` had **no `tailscale serve` config**
+  — lost with the replacement box — so `/auth` was reachable only by SSH tunnel.
+  Re-created as `tailscale serve --bg --https=8100 http://127.0.0.1:8100` (8100,
+  since Caddy holds `*:443`); needs Serve enabled in the tailnet admin console.
+- **Fix.** `repo_paths.PROXY_PUBLIC_URL`, from a new machine-local
+  `proxy_public_url` in `config/env.local.toml` (http(s) only, trailing slash
+  trimmed, anything else falls back to `PROXY_URL`; pinned to `PROXY_URL` under
+  pytest). `AUTH_URL` reads it; server traffic stays on `PROXY_URL`.
+- Tests: `tests/test_proxy_public_url.py` (5) + a source guard in
+  `webgui/tests/test_status.py`. Docs: env template, runbook, User Guide,
+  Technical Reference.
+
+**Prior —** 2026-09-13 (**Strategy Finder — every structure the Calculator
 knows.** Operator request: "scan for all strategies using the updated rules".)
 
 - **Four new build groups, 13 new structures**, all on by default beside

@@ -536,9 +536,14 @@ its environment, because only the *units* have an `EnvironmentFile`.
   for you.
 - **Reach prod's web GUI at `https://app.neuralstrike.co`** (Caddy + a password
   and TOTP login, since 2026-09-06). `tools/open_webgui.ps1` is the **fallback**
-  for when the cert or Caddy breaks, and remains the only route to the proxy's
-  `:8100` `/auth` — needed every 7 days when the Schwab refresh token expires —
-  which is deliberately not on the public domain. **Dev is not on the domain at
+  for when the cert or Caddy breaks. The proxy's `:8100` `/auth` — needed every
+  7 days when the Schwab refresh token expires — is deliberately not on the public
+  domain: prod publishes it to the tailnet with
+  `tailscale serve --bg --https=8100 http://127.0.0.1:8100`, and
+  `proxy_public_url` in `config/env.local.toml` points the System Status
+  **Authorize** button at that address. ⚠ Without that key the button opens
+  `http://127.0.0.1:8100/auth`, which works only through the SSH tunnel — from
+  a phone or over `app.neuralstrike.co` it opens the viewer's own device. **Dev is not on the domain at
   all**; forward `:9500`, or reach it over the tailnet. ⚠ Never change either
   bind to `0.0.0.0`: the gate's wall exemption is scoped by a loopback check, so
   a widened bind turns a local carve-out into an open door.

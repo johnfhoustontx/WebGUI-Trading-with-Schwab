@@ -125,7 +125,7 @@ The proxy owns all Schwab authentication; no other process holds credentials.
 | **Schwab developer account + registered app** | Yields an **App Key** and **App Secret**. Register the callback URL as **`https://127.0.0.1:8182`**. | Required |
 | **`shared/appsettings.json`** | Copy `shared/appsettings.example.json` and fill `Schwab.AppKey` / `Schwab.AppSecret` (both default to `REPLACE_ME`). **Gitignored.** | Required |
 | **`shared/tokens.json`** | The OAuth tokens (`AccessToken` / `RefreshToken` / expiry). Created by the first authorization — copy `shared/tokens.example.json` if you need the shape. **Gitignored.** | Required |
-| **First-time authorization** | Start the proxy, then open **`http://127.0.0.1:8100/auth`** (or the **Authorize** button on the app's **System Status** page) and complete the Schwab login. | Required |
+| **First-time authorization** | Start the proxy, then use the **Authorize** button on the app's **System Status** page and complete the Schwab login. The button opens `{proxy_public_url}/auth` (`repo_paths.PROXY_PUBLIC_URL`, from `config/env.local.toml`) — on the VPS the `tailscale serve` address of `:8100`; unset, `http://127.0.0.1:8100/auth`, reachable only on the same machine or through the SSH tunnel. | Required |
 
 > **Token lifetimes matter operationally.** An **expired access token is normal** —
 > the proxy refreshes it automatically. An **expired refresh token is fatal** to

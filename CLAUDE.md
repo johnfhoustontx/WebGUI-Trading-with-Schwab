@@ -1780,7 +1780,10 @@ third Caddy host block reverse-proxying to `webgui/live_main.py` on `:8501`, whi
 the way in must not depend on the thing that broke. The proxy on `:8100` is
 **never** on the public domain — it is published on the tailnet by
 `tailscale serve`, which is also how the Schwab refresh token gets re-minted at
-`/auth` every 7 days.
+`/auth` every 7 days. ⚠ A link a BROWSER opens must use `PROXY_PUBLIC_URL`
+(`proxy_public_url` in `env.local.toml`), never `PROXY_URL` — that is where the
+server reaches the proxy, and in the viewer's browser 127.0.0.1 is their own
+device. The Status page's Authorize button shipped that way and was dead.
 
 ⚠ **Never change any of these binds to `0.0.0.0`.** The login is a second control,
 not a replacement for the first — Caddy is the only thing that should ever talk to

@@ -207,8 +207,10 @@ the plain-English checklist — the <em>Technical Reference</em> has the full de
 <li>Those keys saved into <strong><code>shared/appsettings.json</code></strong> (copy the provided
   <code>shared/appsettings.example.json</code> and fill in your keys).</li>
 <li>A <strong>one-time Schwab login</strong>: after starting the app, open <strong>System Status → Schwab
-  Authorization → Authorize</strong> (or <code>http://127.0.0.1:8100/auth</code>) and sign in. This
-  creates your token file.</li>
+  Authorization → Authorize</strong> and sign in. This creates your token file. The
+  button opens the proxy's login page, which is on your private Tailscale network
+  rather than the public site — so the device you click it from must be signed in
+  to Tailscale.</li>
 </ul>
 <blockquote>
 <p><strong>Good to know:</strong> the app refreshes your Schwab login automatically most of the

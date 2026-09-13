@@ -45,6 +45,7 @@ from repo_paths import (
     NICEGUI_URL,
     OWNS_PROXY,
     PROXY_PORT,
+    PROXY_PUBLIC_URL,
     PROXY_URL,
     REPO_ROOT,
     SERVICE_PORTS,
@@ -55,8 +56,10 @@ from repo_paths import (
 _HTTP_TIMEOUT = 2.5
 
 # Schwab OAuth re-login page served by the proxy (Step-1/2/3 login flow). Opened
-# in a new tab by the "Authorize" button on the Schwab Authorization card.
-AUTH_URL = f"{PROXY_URL}/auth"
+# in a new tab by the "Authorize" button on the Schwab Authorization card — so in
+# the VIEWER's browser, which is why it is PROXY_PUBLIC_URL (the tailnet address)
+# and not PROXY_URL, where 127.0.0.1 would mean the viewer's own device.
+AUTH_URL = f"{PROXY_PUBLIC_URL}/auth"
 
 # A domain's published cache is considered "stale" past this age (services that
 # publish on a timer should refresh well inside this). Trade is on-demand, so its
