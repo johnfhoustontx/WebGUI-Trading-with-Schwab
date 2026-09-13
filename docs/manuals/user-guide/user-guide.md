@@ -236,7 +236,8 @@ question, plus a block of machine controls pinned to the bottom.
 | Rail item | Pages |
 |-----------|-------|
 | **Strategy Tools** (group) | Calculator · Simulator |
-| **Options** (group) | Market Scanner · Strategy Finder · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue |
+| **Options** (group) | Market Scanner · Income · Expected Move · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue |
+| **Strategy Finder** (standalone) | — |
 | **Trade Analyzer** (group) | Analyze · Rank Board |
 | **Claude Trades** (standalone) | — |
 
@@ -1015,21 +1016,6 @@ days; you rarely need to press **Run scan**.
 > failed. Index names (`$SPX`, `SPY`, `QQQ`) are also frequently absent, because
 > their implied volatility is usually too low to clear the credit floor.
 
-## Strategy Finder
-
-**Route:** `/options/swing`.
-
-A focused, on-demand scan for one symbol over a swing horizon. Enter the
-parameters and press **Scan**:
-
-- **Symbol**
-- **DTE** min / max (days to expiration)
-- **Put Δ** and **Call Δ** min / max (delta bands for strike selection)
-- **Min credit %**
-
-Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Market Scanner.
-
 ## Income
 
 **Route:** `/options/income`.
@@ -1322,6 +1308,22 @@ log.
 > at-risk table and gets a full candidate menu, but it has **no Apply button** (there's no
 > paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 > Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
+
+## Strategy Finder
+
+**Route:** `/options/swing`. Its own row on the main menu, directly under the
+Options group — it has no tab strip.
+
+A focused, on-demand scan for one symbol over a swing horizon. Enter the
+parameters and press **Scan**:
+
+- **Symbol**
+- **DTE** min / max (days to expiration)
+- **Put Δ** and **Call Δ** min / max (delta bands for strike selection)
+- **Min credit %**
+
+Results appear in the same signal table (with the same Score chip, Grade, and the
+three per-row action buttons) and detail panel as the Market Scanner.
 
 ## Overview
 

@@ -188,8 +188,8 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **15 items** — a top-pinned **Desk** alone in a
-**caption-less leading `NAV_SECTIONS` block** (2026-08-18), 10 in three captioned
+the left drawer holds **16 items** — a top-pinned **Desk** alone in a
+**caption-less leading `NAV_SECTIONS` block** (2026-08-18), 11 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
@@ -214,7 +214,7 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
 (Desk alone) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
-(Strategy Tools · Options · Trade Analyzer · Claude Trades) · **ACCOUNT**
+(Strategy Tools · Options · Strategy Finder · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
 at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
@@ -281,7 +281,7 @@ this app's Highcharts have no ResizeObserver, so a reflow on every hover would
 leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
 only the icon is visible when collapsed, **the icon is the affordance** (the
 `icon` arg is live again — the earlier colored-dot indicator is retired; a test
-guards that the 15 drawer icons stay non-empty + mutually distinct). Labels/title
+guards that the 16 drawer icons stay non-empty + mutually distinct). Labels/title
 clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
 264px of content raising a scrollbar in the rail. **Section captions cross-fade to
 HAIRLINES in the rail** (2026-08-16): `.nav-sep` is the exact INVERSE of the

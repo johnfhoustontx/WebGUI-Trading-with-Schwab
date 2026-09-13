@@ -78,12 +78,12 @@ The left menu is grouped into three captioned sections. Each answers one questio
 | **Strategy Tools** ▸ Calculator | You have a specific trade in mind and want its risk, reward and breakeven. |
 | ▸ Simulator | You want to know how that trade behaves as price, time and volatility change. |
 | **Options** ▸ Market Scanner | You want today's ranked credit-spread and directional candidates. |
-| ▸ Strategy Finder | You have one symbol and want the best structure for it. |
 | ▸ Expected Move | You want to see whether your strikes sit outside the market's expected range. |
 | ▸ Captured Signals | You want to follow signals you bookmarked and see if they worked. |
 | ▸ Paper Ledger | You want your own hand-kept practice trades. |
 | ▸ Paper Account | You want the automated practice engine's account. |
 | ▸ Rescue | You have a credit spread going wrong and want ranked repair options. |
+| **Strategy Finder** | You have one symbol and want the best structure for it. |
 | **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock, or a ranked shortlist to pick one from. |
 | **Claude Trades** | You want to watch (or stop) the autonomous paper trader. |
 
@@ -1975,86 +1975,6 @@ Throughout the session. It is the default landing page for a reason.
 
 ---
 
-## Strategy Finder
-
-*Menu: STRATEGY → Options → Strategy Finder · Route `/options/swing`*
-
-### What it is
-
-The Market Scanner inverted. Instead of scanning many symbols for one kind of trade, you
-give it **one symbol** and it ranks **every strategy family** for that symbol on a single
-comparable score.
-
-### Where the data comes from
-
-| | |
-|---|---|
-| Service | `options_svc` (:8211), `swing_scan` command → `cache:options:swing` |
-| Trigger | On demand — press **Scan** |
-
-### Reading the screen
-
-**Inputs:** symbol, **DTE min/max** (wider allows more candidates), and a **Strategies**
-multiselect across three families:
-
-- **Directional** — long and naked short calls and puts.
-- **Spreads** — debit (bull call, bear put) and credit (PCS, CCS).
-- **Neutral** — iron condors.
-
-An **Advanced** panel exposes the credit-spread filters: put/call **delta** bounds (how
-far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
-and a **minimum credit** percentage.
-
-**The view banner.** Before ranking anything, the scanner *infers a market view* for the
-symbol from its technicals and implied volatility — a direction, a conviction level, and
-a volatility regime. It then scores each candidate on two things:
-
-1. **Fit** — how well the structure matches that inferred view.
-2. **Structural quality** — whether the trade is well-built regardless of view.
-
-That is what makes a long call and a put credit spread comparable on one 0–100 number.
-
-**The columns:** Strategy · Bias · Legs · Exp · DTE · Debit/Credit · Max P · Max L ·
-R:R · PoP · BE (breakeven) · Vol Rank · Score · **Grade**.
-
-**The Grade is quality-gated, not fit-gated** — it is driven by structural quality and
-per-family hard gates, and carries a tooltip explaining the reason. A high score with a
-poor grade means "fits your view, but badly constructed".
-
-**The status line** reports how many candidates were **cut below the quality bar**. That
-count is what distinguishes *"the scan found things and rejected them all"* from *"the
-scan found nothing"* — two very different situations that would otherwise look identical.
-
-**Row actions** send to [Calculator](#calculator) or [Expected Move](#expected-move) for
-all types, and to paper trading for credit structures (PCS, CCS, IC) and defined-risk
-debit structures (long call/put, bull call, bear put). Naked shorts are excluded from
-paper trading because their risk is undefined.
-
-### Why it matters
-
-Most traders default to one structure and force every market view through it. This page
-inverts that: it starts from what the symbol is actually doing and asks which structure
-best expresses it. Frequently the answer is not the one you had in mind.
-
-The Fit-plus-Quality score is the app's most genuinely useful piece of scoring, because
-it makes structures comparable that normally cannot be compared at all.
-
-**Where it is weak.** The inferred view is a model output, not a fact. If you disagree
-with the banner, the ranking beneath it is ranking against the wrong hypothesis — read
-the banner first and discard the scan if it is wrong.
-
-### When to use it
-
-After [Opportunity Board](#opportunity-board) or [Momentum](#momentum) surfaces a
-symbol, and any time you have a directional opinion and want the best way to express it.
-
-### Related pages
-
-[Market Scanner](#market-scanner) · [Calculator](#calculator) ·
-[Overview](#overview) (for the directional opinion itself).
-
----
-
 ## Income
 
 *Menu: STRATEGY → Options → Income · Route `/options/income`*
@@ -2717,6 +2637,86 @@ in a symbol you are short premium in.
 
 [Captured Signals](#captured-signals) · [Paper Ledger](#paper-ledger) ·
 [Simulator](#simulator) (to model a repair before applying it).
+
+---
+
+## Strategy Finder
+
+*Menu: STRATEGY → Strategy Finder · Route `/options/swing`*
+
+### What it is
+
+The Market Scanner inverted. Instead of scanning many symbols for one kind of trade, you
+give it **one symbol** and it ranks **every strategy family** for that symbol on a single
+comparable score.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211), `swing_scan` command → `cache:options:swing` |
+| Trigger | On demand — press **Scan** |
+
+### Reading the screen
+
+**Inputs:** symbol, **DTE min/max** (wider allows more candidates), and a **Strategies**
+multiselect across three families:
+
+- **Directional** — long and naked short calls and puts.
+- **Spreads** — debit (bull call, bear put) and credit (PCS, CCS).
+- **Neutral** — iron condors.
+
+An **Advanced** panel exposes the credit-spread filters: put/call **delta** bounds (how
+far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
+and a **minimum credit** percentage.
+
+**The view banner.** Before ranking anything, the scanner *infers a market view* for the
+symbol from its technicals and implied volatility — a direction, a conviction level, and
+a volatility regime. It then scores each candidate on two things:
+
+1. **Fit** — how well the structure matches that inferred view.
+2. **Structural quality** — whether the trade is well-built regardless of view.
+
+That is what makes a long call and a put credit spread comparable on one 0–100 number.
+
+**The columns:** Strategy · Bias · Legs · Exp · DTE · Debit/Credit · Max P · Max L ·
+R:R · PoP · BE (breakeven) · Vol Rank · Score · **Grade**.
+
+**The Grade is quality-gated, not fit-gated** — it is driven by structural quality and
+per-family hard gates, and carries a tooltip explaining the reason. A high score with a
+poor grade means "fits your view, but badly constructed".
+
+**The status line** reports how many candidates were **cut below the quality bar**. That
+count is what distinguishes *"the scan found things and rejected them all"* from *"the
+scan found nothing"* — two very different situations that would otherwise look identical.
+
+**Row actions** send to [Calculator](#calculator) or [Expected Move](#expected-move) for
+all types, and to paper trading for credit structures (PCS, CCS, IC) and defined-risk
+debit structures (long call/put, bull call, bear put). Naked shorts are excluded from
+paper trading because their risk is undefined.
+
+### Why it matters
+
+Most traders default to one structure and force every market view through it. This page
+inverts that: it starts from what the symbol is actually doing and asks which structure
+best expresses it. Frequently the answer is not the one you had in mind.
+
+The Fit-plus-Quality score is the app's most genuinely useful piece of scoring, because
+it makes structures comparable that normally cannot be compared at all.
+
+**Where it is weak.** The inferred view is a model output, not a fact. If you disagree
+with the banner, the ranking beneath it is ranking against the wrong hypothesis — read
+the banner first and discard the scan if it is wrong.
+
+### When to use it
+
+After [Opportunity Board](#opportunity-board) or [Momentum](#momentum) surfaces a
+symbol, and any time you have a directional opinion and want the best way to express it.
+
+### Related pages
+
+[Market Scanner](#market-scanner) · [Calculator](#calculator) ·
+[Overview](#overview) (for the directional opinion itself).
 
 ---
 

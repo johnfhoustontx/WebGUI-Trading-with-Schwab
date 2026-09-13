@@ -572,7 +572,8 @@ def _serve_manual(name: str):
 # trading workflow: find → analyze → track → repair. (route, label, icon)
 OPTIONS_CHILDREN = [
     ("/options/scanner", "Market Scanner", "radar"),
-    ("/options/swing", "Strategy Finder", "swap_vert"),
+    # Strategy Finder is NOT here: it left this strip on 2026-09-13 for its own
+    # main-menu row, directly under this group (see FLAT_NAV / NAV_SECTIONS).
     # The 30-45 DTE income window sits in the FIND phase beside the other two
     # scanners — it is the same find -> analyze -> track -> repair workflow at a
     # longer horizon, which is why it is a tab here and not a new rail group
@@ -586,7 +587,8 @@ OPTIONS_CHILDREN = [
     # assignment turns an option position into stock, so the inventory is part
     # of what the book holds, not a separate workflow (design doc 2026-09-05).
     #
-    # ⚠ This makes NINE tabs in the Options strip — seven was the most it had
+    # ⚠ This made NINE tabs in the Options strip (eight since Strategy Finder
+    # moved to the main menu on 2026-09-13) — seven was the most it had
     # carried before Income and Shares landed together — and wrapping at a
     # narrow width is UNVERIFIED (nobody has opened a browser on it). The
     # design's stated fallback if it wraps is to move THIS page under ACCOUNT
@@ -643,6 +645,11 @@ TRADE_CHILDREN = [
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
+    # Promoted out of the Options tab strip on 2026-09-13: it sits in the rail
+    # directly under the Options group and above Trade Analyzer. It is a
+    # one-symbol "which structure fits?" tool, used on its own rather than as a
+    # step you tab into from the Scanner.
+    ("/options/swing", "Strategy Finder", "swap_vert"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -760,6 +767,7 @@ NAV_SECTIONS = [
     ("STRATEGY", [
         _sec_group("Strategy Tools"),
         _sec_group("Options"),
+        _sec_page("/options/swing"),      # Strategy Finder
         _sec_group("Trade Analyzer"),
         _sec_page("/driver"),             # Claude Trades
     ]),
@@ -2307,7 +2315,7 @@ def options_calculator_page() -> None:
 
 @_page("/options/swing")
 def options_swing_page() -> None:
-    with _layout("/options/swing", "Options · Strategy Finder"):
+    with _layout("/options/swing", "Strategy Finder"):
         from pages.options import swing
         swing.render()
 

@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-12 (**Calculator + Simulator — a shared trade-entry
+**Last updated:** 2026-09-13 (**Strategy Finder moved to the main menu.**
+Operator request.)
+
+- `/options/swing` left the Options tab strip and is now a standalone rail row
+  in the STRATEGY section, directly under the Options group and above Trade
+  Analyzer. It lives in `FLAT_NAV` (beside Claude Trades, the section's other
+  standalone page) and `NAV_SECTIONS` places it; the route is unchanged, so
+  every Send-to link and the gallery shot still resolve.
+- Breadcrumb is now **Strategy › Strategy Finder**, the browser tab reads
+  "Strategy Finder", and the page has no tab strip. The Options strip drops to
+  eight tabs.
+- Both end-user manuals moved their Strategy Finder section to sit after Rescue,
+  since `test_end_user_manuals_follow_the_rail_order` pins manual order to the
+  rail; the User Guide's navigation table and the Reference Guide's menu table
+  and `Menu:` line were corrected (the User Guide's Options row had also been
+  missing Income and Shares).
+
+**Prior —** 2026-09-12 (**Calculator + Simulator — a shared trade-entry
 panel.** Operator request: make both pages data-entry friendly.)
 
 - **The four complaints, and what answered each.** Strike dropdowns over a

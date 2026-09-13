@@ -106,6 +106,8 @@ def test_group_children_maps_routes_to_their_group():
     assert main._group_children("/trade") == main.TRADE_CHILDREN
     assert main._group_children("/trade/board") == main.TRADE_CHILDREN
     assert main._group_children("/driver") is None                  # flat page — no strip
+    # Strategy Finder left the Options strip for its own rail row (2026-09-13).
+    assert main._group_children("/options/swing") is None
     # Rail pages are standalone: promoted OUT of the Options tab strip.
     for route, _label, _icon in main.OPTIONS_RAIL:
         assert main._group_children(route) is None, route
@@ -458,6 +460,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/trade/board") == [
         "Strategy", "Trade Analyzer", "Rank Board"]
     assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]
+    assert main.breadcrumb_trail("/options/swing") == ["Strategy", "Strategy Finder"]
     assert main.breadcrumb_trail("/portfolio") == ["Account", "Portfolio"]
     # The bottom-pinned block is not a NAV_SECTIONS caption, so it names its own.
     assert main.breadcrumb_trail("/status") == ["System", "System Status"]
@@ -589,8 +592,8 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 15 drawer items (the 11
-    NAV_SECTIONS entries — the pinned landing block's Desk, plus the 10 workflow
+    ``icon`` arg; the dot is retired. Scope is the 16 drawer items (the 12
+    NAV_SECTIONS entries — the pinned landing block's Desk, plus the 11 workflow
     ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons are not rail
     affordances (the tab strip renders labels only)."""
     from collections import Counter
@@ -598,7 +601,7 @@ def test_drawer_icons_are_present_and_distinct():
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 15, f"expected 15 drawer items, got {len(items)}: {items}"
+    assert len(items) == 16, f"expected 16 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1352,7 +1355,7 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
     # The Options strip keeps its find -> analyze -> track -> repair workflow.
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
-        "/options/scanner", "/options/swing", "/options/income",
+        "/options/scanner", "/options/income",
         "/options/expected-move", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/shares", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
@@ -1404,6 +1407,21 @@ def test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled():
     assert not [p for p, _l, _i in main.SYSTEM_RAIL if p in pages]
 
 
+def test_strategy_finder_is_a_rail_row_between_options_and_trade_analyzer():
+    """Strategy Finder moved OUT of the Options tab strip onto the main menu
+    (2026-09-13), directly under the Options group and above Trade Analyzer.
+
+    Both halves are needed: present in the rail AND absent from the strip, or the
+    page renders in two places and highlights neither."""
+    import main
+    caption, entries = next(s for s in main.NAV_SECTIONS if s[0] == "STRATEGY")
+    names = [e[1] if e[0] == "group" else e[2] for e in entries]
+    assert names == ["Strategy Tools", "Options", "Strategy Finder",
+                     "Trade Analyzer", "Claude Trades"]
+    assert entries[2] == main._sec_page("/options/swing")
+    assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/swing"]
+
+
 def test_nav_section_captions_and_their_derived_counts():
     """The captions are the design's three, in its order, and each count is
     DERIVED from the section's length rather than written down — a literal would
@@ -1417,7 +1435,7 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 4, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 5, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src

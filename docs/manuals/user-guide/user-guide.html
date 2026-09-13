@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -111,7 +111,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#calculator">Calculator</a></li>
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#market-scanner">Market Scanner</a></li>
-<li><a href="#strategy-finder">Strategy Finder</a></li>
 <li><a href="#income">Income</a><ul>
 <li><a href="#opening-one-in-the-paper-account">Opening one in the paper account</a></li>
 </ul>
@@ -122,6 +121,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#shares">Shares</a></li>
 <li><a href="#rescue">Rescue</a></li>
+<li><a href="#strategy-finder">Strategy Finder</a></li>
 <li><a href="#overview">Overview</a></li>
 <li><a href="#evidence">Evidence</a></li>
 <li><a href="#rank-board">Rank Board</a><ul>
@@ -394,7 +394,11 @@ question, plus a block of machine controls pinned to the bottom.</p>
 </tr>
 <tr>
 <td><strong>Options</strong> (group)</td>
-<td>Market Scanner · Strategy Finder · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue</td>
+<td>Market Scanner · Income · Expected Move · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue</td>
+</tr>
+<tr>
+<td><strong>Strategy Finder</strong> (standalone)</td>
+<td>—</td>
 </tr>
 <tr>
 <td><strong>Trade Analyzer</strong> (group)</td>
@@ -1195,18 +1199,6 @@ signals" counts only those still qualifying.</p>
 failed. Index names (<code>$SPX</code>, <code>SPY</code>, <code>QQQ</code>) are also frequently absent, because
 their implied volatility is usually too low to clear the credit floor.</p>
 </blockquote>
-<h2 id="strategy-finder">Strategy Finder</h2>
-<p><strong>Route:</strong> <code>/options/swing</code>.</p>
-<p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
-parameters and press <strong>Scan</strong>:</p>
-<ul>
-<li><strong>Symbol</strong></li>
-<li><strong>DTE</strong> min / max (days to expiration)</li>
-<li><strong>Put Δ</strong> and <strong>Call Δ</strong> min / max (delta bands for strike selection)</li>
-<li><strong>Min credit %</strong></li>
-</ul>
-<p>Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Market Scanner.</p>
 <h2 id="income">Income</h2>
 <p><strong>Route:</strong> <code>/options/income</code>.</p>
 <p>A board of premium worth <strong>selling</strong> 30 to 45 days out, ranked across the whole
@@ -1479,6 +1471,19 @@ at-risk table and gets a full candidate menu, but it has <strong>no Apply button
 paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 Captured signals do <strong>not</strong> add to the Rescue nav badge (that counts paper positions).</p>
 </blockquote>
+<h2 id="strategy-finder">Strategy Finder</h2>
+<p><strong>Route:</strong> <code>/options/swing</code>. Its own row on the main menu, directly under the
+Options group — it has no tab strip.</p>
+<p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
+parameters and press <strong>Scan</strong>:</p>
+<ul>
+<li><strong>Symbol</strong></li>
+<li><strong>DTE</strong> min / max (days to expiration)</li>
+<li><strong>Put Δ</strong> and <strong>Call Δ</strong> min / max (delta bands for strike selection)</li>
+<li><strong>Min credit %</strong></li>
+</ul>
+<p>Results appear in the same signal table (with the same Score chip, Grade, and the
+three per-row action buttons) and detail panel as the Market Scanner.</p>
 <h2 id="overview">Overview</h2>
 <p><strong>Route:</strong> <code>/trade</code>. The first tab of the Trade Analyzer group, and the screen the
 <strong>Signal desk</strong> command bar sits above on all four tabs.</p>
