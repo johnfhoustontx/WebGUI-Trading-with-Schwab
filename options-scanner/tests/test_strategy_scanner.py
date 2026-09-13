@@ -665,3 +665,52 @@ def test_assemble_takes_dte_from_the_front_OPTION_leg_not_a_share_leg():
                      [_stock(100.0), call], "XYZ", 100.0, 0.28)
     assert s["expiration"] == _exp(30) and s["dte"] == 30
     assert s["pop_pct"] is not None
+
+
+import math
+import pytest
+
+
+def _put_cal_legs(front_days=14, back_days=42, K=100.0, iv=20.0):
+    import options_calculator as oc
+    f, b = front_days / 365, back_days / 365
+    short = _leg("put", "short", K,
+                 oc.bs_price(100.0, K, f, oc.RISK_FREE_RATE, iv / 100, "put"), iv=iv)
+    long_ = _leg("put", "long", K,
+                 oc.bs_price(100.0, K, b, oc.RISK_FREE_RATE, iv / 100, "put"), iv=iv)
+    short["expiration"], long_["expiration"] = _exp(front_days), _exp(back_days)
+    return short, long_
+
+
+def test_put_calendar_max_loss_is_its_debit_plus_commission():
+    """A long put is American: deep ITM it is worth at least its intrinsic. European
+    BS undershoots that, which would book a put calendar a loss beyond its debit."""
+    short, long_ = _put_cal_legs()
+    m = ss.payoff_metrics([short, long_], spot=100.0)
+    debit = (long_["mark"] - short["mark"]) * 100
+    assert m["net_debit"] == round(debit, 2)
+    assert m["unbounded"] is False
+    assert abs(m["max_loss"] - (debit + 2.60)) < 1.0
+
+
+def test_call_diagonal_max_loss_is_bounded_by_the_width():
+    short, long_ = _cal_legs()
+    import options_calculator as oc
+    long_["strike"] = 105.0
+    long_["mark"] = oc.bs_price(100.0, 105.0, 42 / 365, oc.RISK_FREE_RATE, 0.26, "call")
+    m = ss.payoff_metrics([short, long_], spot=100.0)
+    entry = (long_["mark"] - short["mark"]) * 100       # signed: + debit / - credit
+    assert m["max_loss"] is not None and math.isfinite(m["max_loss"])
+    assert m["max_loss"] > 0
+    assert m["max_loss"] <= entry + 5.0 * 100 + m["commission"] + 1e-6
+
+
+@pytest.mark.parametrize("bad_iv", [-999.0, float("nan"), 0])
+def test_calendar_with_an_unusable_back_leg_iv_raises(bad_iv):
+    """Schwab's -999 sentinel, a NaN and a missing IV must not become a confident
+    payoff: -999 would clamp to a 1% vol, NaN makes max() order-dependent, and 0
+    used to invent 20%."""
+    short, long_ = _cal_legs()
+    long_["iv"] = bad_iv
+    with pytest.raises(ValueError, match="unpriceable later leg"):
+        ss.payoff_metrics([short, long_], spot=100.0)

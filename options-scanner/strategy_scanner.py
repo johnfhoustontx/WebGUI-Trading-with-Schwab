@@ -120,9 +120,10 @@ def _front_value(leg, S, front):
     A share is worth S. A leg expiring at the front is worth its intrinsic. A
     later leg keeps time value: Black-Scholes at its OWN IV (the chain's
     ``volatility`` is a percent) over the calendar days between the two
-    expirations. Both settle at 16:00 ET, so whole days / 365 is exact here and is
-    not the inline time-to-expiry CLAUDE.md forbids (that rule is about a
-    wall-clock ``now``, which does not enter this calculation).
+    expirations, floored at intrinsic, and an unusable IV RAISES. Both settle at
+    16:00 ET, so whole days / 365 is exact here and is not the inline
+    time-to-expiry CLAUDE.md forbids (that rule is about a wall-clock ``now``,
+    which does not enter this calculation).
     """
     if _is_stock(leg):
         return float(S)
@@ -132,17 +133,27 @@ def _front_value(leg, S, front):
     days = (_dt.date.fromisoformat(exp) - _dt.date.fromisoformat(front)).days
     if days <= 0:
         return _intrinsic(leg, S)
-    T = days / 365.0
+    iv = leg.get("iv")
+    try:
+        iv = float(iv)
+    except (TypeError, ValueError):
+        iv = float("nan")
+    if not math.isfinite(iv) or iv <= 0:
+        # Schwab's -999 sentinel, a NaN, or no IV at all. Pricing anyway would turn
+        # a missing input into a confident payoff (-999 clamped to a 1% vol, NaN
+        # making max() order-dependent), so refuse loudly.
+        raise ValueError(f"unpriceable later leg: iv={leg.get('iv')!r}")
+    # The floor is INTRINSIC, not European BS: equity options are American, so a
+    # long put deep in the money is worth at least K - S (it can be exercised).
+    # European BS gives K*e^(-rT) - S there - below intrinsic - which would book a
+    # put calendar a loss of more than its whole debit on every downside point.
     if S <= 0:
-        # bs_price takes log(S/K): at a stock price of zero a call is worthless
-        # and a put is worth its discounted strike (the S->0 limit of the formula).
-        if leg["kind"] == "call":
-            return 0.0
-        return leg["strike"] * math.exp(-_oc.RISK_FREE_RATE * T)
-    iv = leg.get("iv") or 0
-    sigma = iv / 100.0 if iv > 1.5 else (iv or 0.20)
-    return _oc.bs_price(S, leg["strike"], T, _oc.RISK_FREE_RATE,
-                        max(sigma, 0.01), leg["kind"])
+        # bs_price takes log(S/K). At a stock price of zero a call is worthless and
+        # a put is worth its intrinsic, the whole strike.
+        return 0.0 if leg["kind"] == "call" else float(leg["strike"])
+    theo = _oc.bs_price(S, leg["strike"], days / 365.0, _oc.RISK_FREE_RATE,
+                        iv / 100.0, leg["kind"])      # chain IV is always a percent
+    return max(theo, _intrinsic(leg, S))
 
 
 def _pl_at(legs, entry_cost, S, front=None):
