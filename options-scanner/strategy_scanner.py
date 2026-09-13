@@ -427,6 +427,55 @@ def build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
+def _short_target(band):
+    return (band[0] + band[1]) / 2.0 if band else _SHORT_DELTA
+
+
+def _front_pair(chain, dte_min, dte_max):
+    """(exp, call_strikes, put_strikes) for the nearest expiry both maps list."""
+    calls = extract_options(chain, "call", dte_min, dte_max)
+    puts = extract_options(chain, "put", dte_min, dte_max)
+    common = sorted(set(calls) & set(puts), key=lambda e: calls[e]["dte"])
+    if not common:
+        return None
+    e = common[0]
+    return e, calls[e]["strikes"], puts[e]["strikes"]
+
+
+def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                              put_band=None, call_band=None):
+    """Long/short straddle (ATM) and long/short strangle (band-midpoint shorts).
+
+    The short-delta band's CEILING binds the short STRANGLE only - a straddle's
+    shorts are ~0.50 delta by definition and applying it would delete the
+    structure every time. The long strangle buys the same strikes the short
+    strangle sells, so the two rows compare like for like.
+    """
+    fp = _front_pair(chain, dte_min, dte_max)
+    if not fp:
+        return []
+    exp, cs, ps = fp
+    out = []
+    k = _atm_strike(set(cs) & set(ps), spot)
+    if k is not None:
+        for stype, side, label in (("LONG_STRADDLE", "long", "Long Straddle"),
+                                   ("SHORT_STRADDLE", "short", "Short Straddle")):
+            legs = [_leg_from(cs[k], "call", side, exp), _leg_from(ps[k], "put", side, exp)]
+            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+    cb, pb = _band_abs(call_band), _band_abs(put_band)
+    c = nearest_by_delta({s: v for s, v in cs.items() if s > spot}, _short_target(cb))
+    p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _short_target(pb))
+    if c and p:
+        for stype, side, label in (("LONG_STRANGLE", "long", "Long Strangle"),
+                                   ("SHORT_STRANGLE", "short", "Short Strangle")):
+            if side == "short" and ((cb and abs(c["delta"]) > cb[1])
+                                    or (pb and abs(p["delta"]) > pb[1])):
+                continue
+            legs = [_leg_from(c, "call", side, exp), _leg_from(p, "put", side, exp)]
+            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+    return out
+
+
 def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False,
                 liq_keys=("bid", "ask", "volume")):
     """Build a normalized leg from a credit-spread source dict (greeks default 0).

@@ -734,3 +734,69 @@ def test_half_expected_move():
     import math
     assert abs(ss._half_em(100.0, 0.28, 30) - 100 * 0.28 * math.sqrt(30 / 365) / 2) < 1e-9
     assert ss._half_em(100.0, 0.28, 0) == ss._half_em(100.0, 0.28, 1)
+
+
+def _ladder_chain(spot=100.0, days=(30,), step=5.0, n=6, iv=28.0):
+    """A symmetric chain: strikes spot +/- n*step on every expiry in ``days``,
+    Black-Scholes marks and deltas so strike selection behaves like a real chain."""
+    import options_calculator as oc
+    chain = {"underlyingPrice": spot, "callExpDateMap": {}, "putExpDateMap": {}}
+    for d in days:
+        key = f"{_exp(d)}:{d}"
+        chain["callExpDateMap"][key], chain["putExpDateMap"][key] = {}, {}
+        for i in range(-n, n + 1):
+            K, T = spot + i * step, d / 365
+            for kind, m in (("call", "callExpDateMap"), ("put", "putExpDateMap")):
+                mark = oc.bs_price(spot, K, T, oc.RISK_FREE_RATE, iv / 100, kind)
+                delta = oc.bs_delta(spot, K, T, oc.RISK_FREE_RATE, iv / 100, kind)
+                chain[m][key][f"{K:.1f}"] = [_contract(K, delta, round(max(mark, 0.01), 2),
+                                                      volatility=iv)]
+    return chain
+
+
+def _by_type(sigs):
+    return {s["type"]: s for s in sigs}
+
+
+def test_straddles_sit_at_the_money_on_the_front_expiry():
+    out = _by_type(ss.build_straddles_strangles(_ladder_chain(days=(30, 60)), "XYZ",
+                                                100.0, 0.28, 5, 90))
+    for t, side in (("LONG_STRADDLE", "long"), ("SHORT_STRADDLE", "short")):
+        legs = out[t]["legs"]
+        assert {(l["kind"], l["side"], l["strike"]) for l in legs} == {
+            ("call", side, 100.0), ("put", side, 100.0)}
+        assert out[t]["expiration"] == _exp(30) and out[t]["family"] == "NEUTRAL"
+
+
+def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
+    out = _by_type(ss.build_straddles_strangles(
+        _ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
+        put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
+    short = {l["kind"]: l for l in out["SHORT_STRANGLE"]["legs"]}
+    long_ = {l["kind"]: l for l in out["LONG_STRANGLE"]["legs"]}
+    assert short["call"]["strike"] > 100.0 and short["put"]["strike"] < 100.0
+    assert abs(abs(short["call"]["delta"]) - 0.15) < 0.08
+    assert {k: l["strike"] for k, l in short.items()} == {k: l["strike"] for k, l in long_.items()}
+
+
+def test_the_band_ceiling_drops_a_short_strangle_but_never_a_straddle():
+    rich = _ladder_chain(step=20.0, n=2)   # nothing between ATM (0.5) and far OTM
+    out = _by_type(ss.build_straddles_strangles(
+        rich, "XYZ", 100.0, 0.28, 5, 90, put_band=(-0.20, -0.30), call_band=(0.20, 0.30)))
+    assert "SHORT_STRADDLE" in out
+    for l in out.get("SHORT_STRANGLE", {"legs": []})["legs"]:
+        assert abs(l["delta"]) <= 0.30
+
+
+def test_the_band_ceiling_binds_when_the_only_otm_strike_is_richer_than_it():
+    """The step-20 ladder above never exercises the ceiling: its far strikes sit
+    at |delta| ~0.01, inside any band. Here the only OTM strikes are 105 (call
+    ~0.30) and 95 (put ~0.23), both richer than a 0.10 ceiling, so the short
+    strangle must be dropped - while the straddle, which the band never binds,
+    and the long strangle survive."""
+    out = _by_type(ss.build_straddles_strangles(
+        _ladder_chain(step=5.0, n=1), "XYZ", 100.0, 0.28, 5, 90,
+        put_band=(-0.05, -0.10), call_band=(0.05, 0.10)))
+    assert "SHORT_STRANGLE" not in out
+    assert "SHORT_STRADDLE" in out
+    assert "LONG_STRANGLE" in out
