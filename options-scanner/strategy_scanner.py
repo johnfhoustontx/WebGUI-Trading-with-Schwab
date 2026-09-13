@@ -462,9 +462,14 @@ def _short_target(band):
 
 
 def _front_pair(chain, dte_min, dte_max):
-    """(exp, call_strikes, put_strikes) for the nearest expiry both maps list."""
-    calls = extract_options(chain, "call", dte_min, dte_max)
-    puts = extract_options(chain, "put", dte_min, dte_max)
+    """(exp, call_strikes, put_strikes) for the nearest expiry both maps list at
+    least ``_MIN_FRONT_DTE`` (7) days out - the floor is applied HERE, so every
+    caller (straddles/strangles, butterflies/condors, share structures) gets it
+    and none can forget it. A window whose ``dte_min`` is already higher keeps it.
+    """
+    floor = max(dte_min, _MIN_FRONT_DTE)
+    calls = extract_options(chain, "call", floor, dte_max)
+    puts = extract_options(chain, "put", floor, dte_max)
     common = sorted(set(calls) & set(puts), key=lambda e: calls[e]["dte"])
     if not common:
         return None
@@ -493,7 +498,8 @@ _LONG_STRANGLE_DELTA = 0.30
 
 def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
                               put_band=None, call_band=None):
-    """Long/short straddle (ATM) and long/short strangle.
+    """Long/short straddle (ATM) and long/short strangle, on the nearest expiry at
+    least ``_MIN_FRONT_DTE`` (7) days out (see ``_front_pair``).
 
     The short strangle sells the out-of-the-money strikes nearest the short-delta
     bands' midpoints, and those bands' CEILING binds it alone - a straddle's shorts
@@ -561,7 +567,8 @@ def _listed(strikes, target):
 
 
 def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
-    """Call/put butterfly, iron butterfly (ATM body) and call/put condor.
+    """Call/put butterfly, iron butterfly (ATM body) and call/put condor, on the
+    nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out (see ``_front_pair``).
 
     Wings sit at the listed SYMMETRIC distance nearest half the 1-sigma expected
     move to the front expiry; a condor's shorts sit one wing either side of ATM and
@@ -616,12 +623,17 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
 
 
 _CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
-# The front leg sits at least a week out - for calendars, diagonals and the share
-# structures. The page's default DTE window starts at 0, so "nearest expiry" was a
-# 0-2 DTE front: a calendar there can barely profit (measured call-calendar R:R
-# -0.004 at 0/28, 0.18 at 1/29, 0.55 at 7/35, and every such row was cut), and a
-# protective put hedging with a put that expires tomorrow showed a $110 max loss
-# and passed the LONG gate.
+# The front leg sits at least a week out. ONE constant governs every group that
+# takes it: calendars and diagonals (``build_calendars``), the share structures
+# (covered call, protective put, collar), straddles and strangles, and butterflies,
+# the iron butterfly and condors (the last three through ``_front_pair``). Only the
+# single-leg directionals and the debit verticals keep the nearest expiry in the
+# window. The page's default DTE window starts at 0, so "nearest expiry" was a 0-2
+# DTE front: a calendar there can barely profit (measured call-calendar R:R -0.004
+# at 0/28, 0.18 at 1/29, 0.55 at 7/35, and every such row was cut), a protective
+# put hedging with a put that expires tomorrow showed a $110 max loss and passed
+# the LONG gate, and a straddle, fly or condor on a daily-listing name was a
+# same-day bet (operator decision 2026-09-13).
 _MIN_FRONT_DTE = 7
 _DIAG_SHORT_DELTA, _DIAG_LONG_DELTA = 0.30, 0.70
 # The short front leg must sit inside this |delta| band. Out of the money alone let
@@ -820,7 +832,7 @@ def build_stock_structures(chain, symbol, spot, atm_iv, dte_min, dte_max,
     account's ``COVERED_CALL`` is the option leg alone, so this row gets no Paper
     button.
     """
-    fp = _front_pair(chain, max(dte_min, _MIN_FRONT_DTE), dte_max)
+    fp = _front_pair(chain, dte_min, dte_max)     # applies the _MIN_FRONT_DTE floor
     if not fp:
         return []
     exp, cs, ps = fp

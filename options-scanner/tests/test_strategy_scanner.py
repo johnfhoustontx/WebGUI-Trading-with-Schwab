@@ -1595,3 +1595,35 @@ def test_a_collar_whose_call_is_under_five_delta_is_not_built():
     assert call["strike"] == 115.0 and abs(call["delta"]) < 0.05
     assert "COLLAR" not in out
     assert "PROTECTIVE_PUT" in out
+
+
+# ---- Final review: straddles, strangles, flies and condors take the 7-day front ----
+def test_neutral_structures_skip_an_expiry_under_seven_days():
+    """Operator decision 2026-09-13. The page's DTE min defaults to 0, and on a
+    daily-listing name the nearest common expiry is a 0-1 DTE structure: a
+    straddle, strangle, butterfly, iron butterfly or condor there is a same-day
+    bet, not the position the Finder describes. They take the calendars' and
+    share structures' 7-day front floor."""
+    chain = _ladder_chain(days=(1, 30))
+    rows = (ss.build_straddles_strangles(chain, "XYZ", 100.0, 0.28, 0, 90,
+                                         put_band=(-0.20, -0.10), call_band=(0.10, 0.20))
+            + ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 0, 90))
+    out = _by_type(rows)
+    for t in ("LONG_STRADDLE", "SHORT_STRADDLE", "LONG_STRANGLE", "SHORT_STRANGLE",
+              "BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY",
+              "CONDOR_CALL", "CONDOR_PUT"):
+        assert out[t]["expiration"] == _exp(30), t
+        assert all(l["expiration"] == _exp(30) for l in out[t]["legs"]), t
+
+
+def test_directional_and_debit_verticals_keep_the_nearest_front():
+    """The floor is for the neutral and multi-expiry groups only: a single long or
+    short option and a debit vertical still build on the nearest expiry in the
+    window, 1 DTE here. A $1 ladder, so the 0.60 and 0.30 debit legs land on
+    different strikes at 1 DTE."""
+    chain = _ladder_chain(days=(1, 30), step=1.0, n=10)
+    for rows in (ss.build_directional(chain, "XYZ", 100.0, 0.28, 0, 90),
+                 ss.build_debit_verticals(chain, "XYZ", 100.0, 0.28, 0, 90)):
+        assert rows
+        for s in rows:
+            assert s["expiration"] == _exp(1), s["type"]
