@@ -175,18 +175,24 @@ _TYPE_PROFILE = {
     # Strategy Finder, every structure (2026-09-13). Measured by
     # tools/sweep_strategy_gates.py - quote its figures WITH their parameters.
     "LONG_STRADDLE": "LONG", "LONG_STRANGLE": "LONG", "PROTECTIVE_PUT": "LONG",
-    # SHORT_STRADDLE and COVERED_CALL fail NAKED on PoP (~57 and ~52-54 vs 65)
-    # and are counted in "below the quality bar" rather than shown. COVERED_CALL
+    # On FAIRLY PRICED chains SHORT_STRADDLE and COVERED_CALL fail NAKED on PoP
+    # (~57 and ~52-54 vs 65) and are counted in "below the quality bar" rather
+    # than shown. ⚠ Not unconditional: with options marked above the IV the scorer
+    # prices PoP with (`sweep_strategy_gates.py --rich`), the short straddle's
+    # larger credit widens its breakevens past 65 - Weak at --rich 1.1 (PoP 61.6),
+    # Good from 1.2 (PoP 66.3) at spot 100, IV 0.28, step 2.5, 30 DTE - while the
+    # covered call stays Weak to at least 1.5. COVERED_CALL
     # fails EVERY profile - on PoP under NAKED and on R:R and/or PoP under the
     # others (R:R 0.05-0.13, PoP under 55). ⚠ SHORT_STRADDLE does NOT: it would
     # PASS NEUTRAL (PoP 57.3 vs 55, R:R 0.16-0.39 vs 0.12), so NAKED is the
     # choice that cuts it, not the only profile that could. Measured at spot 100,
-    # IV 0.20 and 0.28, step 2.5 and 5, 14/30/45 DTE.
+    # IV 0.20 and 0.28, step 2.5 and 5, 14/30/45 DTE, fairly priced.
     # Operator decision: no bar is invented without outcome data.
     "SHORT_STRADDLE": "NAKED", "SHORT_STRANGLE": "NAKED", "COVERED_CALL": "NAKED",
     # IRON_BUTTERFLY is the long butterfly's payoff by put-call parity; judging it
-    # under NEUTRAL's 55 PoP bar would cut it every time — and so would the long
-    # butterfly if judged the same way.
+    # under NEUTRAL's 55 PoP bar would cut it on nearly every fairly priced chain
+    # (PoP 23.6-51.9 at 14/30/45 DTE, both IVs and ladders above) — and so would
+    # the long butterfly if judged the same way. A rich chain can lift it over.
     "BUTTERFLY_CALL": "DEBIT", "BUTTERFLY_PUT": "DEBIT", "IRON_BUTTERFLY": "DEBIT",
     "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
     "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",

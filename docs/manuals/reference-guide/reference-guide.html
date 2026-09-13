@@ -3893,10 +3893,14 @@ date — <code>S 100C / L 100C 11/13</code> is a calendar.</p>
 <p><strong>The status line</strong> reports how many candidates were <strong>cut below the quality bar</strong>. That
 count is what distinguishes <em>"the scan found things and rejected them all"</em> from <em>"the
 scan found nothing"</em> — two very different situations that would otherwise look identical.</p>
-<p>⚠ <strong>Two structures are in that count on nearly every scan: the short straddle and the
-covered call.</strong> Both are judged as premium sales, whose bar asks for a 65% probability of
-profit, and both measure around 57% and 52%. That is an operator decision — no lower bar
-is invented without outcome data — so they are counted, not shown. The long straddle and
+<p>⚠ <strong>On fairly priced options, two structures are in that count on nearly every scan: the
+short straddle and the covered call.</strong> Both are judged as premium sales, whose bar asks
+for a 65% probability of profit, and both measure around 57% and 52%. That is an operator
+decision — no lower bar is invented without outcome data — so they are counted, not
+shown. The cut is not unconditional: when options are priced <strong>rich</strong> — premium well above
+the volatility the probability is computed from — a short straddle's larger credit widens
+its breakevens past the bar (in a synthetic test, from about 20% rich), and it is listed.
+The covered call stayed cut in every case tested. The long straddle and
 long strangle typically pass only as <em>Marginal</em>. Measured outcomes for every structure are
 in the <em>Technical Reference</em> (Strategy Finder scoring).</p>
 <p><strong>Earnings.</strong> A calendar or diagonal is checked against its <strong>latest</strong> expiration: the

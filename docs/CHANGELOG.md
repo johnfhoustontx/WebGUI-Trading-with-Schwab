@@ -27,6 +27,20 @@ knows.** Operator request: "scan for all strategies using the updated rules".)
   `tools/sweep_strategy_gates.py` (the design doc's Scoring table quotes it with
   parameters).
 - **Earnings gate** reads a multi-expiry row's **latest** expiration.
+- **Breakeven horizon fixed** (found in review). The breakeven-vs-expected-move
+  factor used ONE move for a whole scan, `daily × √max(DTE min, 1)` — at the page's
+  DTE min of 0 a one-day move for every candidate, so directional breakevens scored
+  ~0 and neutral profit zones ~100. `score_all(..., daily_move=)` now judges each
+  candidate against the move to its own expiry. Size of the change is
+  `√(front DTE / max(DTE min, 1))`: nil on a chain listing dailies, large on a
+  monthly-only name (spot 100, IV 0.28: long call +10, butterflies −9, calendars
+  Strong → Good). The Income board rides the same path and barely moves.
+- **Market Scanner, Directional tab** — the same fix. It scored with one move per
+  window (`daily × √window min`), so a DTE-4 trade in the 0–4 window was judged
+  against a one-day move; it now passes the same `daily_move`, and a candidate
+  scores identically there and on the Finder. On a Black-Scholes chain a long
+  call/put at DTE 4 gains ~7 and a short call/put at DTE 12 ~5, and several cross
+  the 50 floor.
 - **Page:** seven checkboxes; the Legs cell prints `L 100 shares`, `S 2×100C`, and
   a later leg's `MM/DD`. Send to Calculator carries calendars and share legs.
 - **Paper:** Send to Paper adds call/put butterflies and condors
@@ -42,9 +56,12 @@ condors** — a long fly gains most of its value in the final two weeks (95/100/
 at spot 100, IV 28%: $1.20 at 30 DTE, $1.42 at 21, ~$3.10 target near 3 DTE), so a 21-DTE
 exit would close it flat; they keep the 50%-of-max-profit target and expiry
 settlement, and the original four debit structures keep `exit_dte = 21`. (3) **The
-short straddle and covered call are counted, not shown** — both fail `NAKED`'s 65
-PoP bar (57.3 and ~52 at spot 100, IV 0.28) and no bar is invented without outcome
-data.
+short straddle and covered call are counted, not shown** — on fairly priced chains
+both fail `NAKED`'s 65 PoP bar (57.3 and ~52 at spot 100, IV 0.28) and no bar is
+invented without outcome data. ⚠ Not unconditional: with options marked ~20% above
+the volatility the scorer prices probability with (`sweep_strategy_gates.py --rich
+1.2`), the short straddle grades Good (PoP 66.3); the covered call stays cut to at
+least `--rich 1.5`.
 
 **Revised while building** (each recorded in the design doc):
 

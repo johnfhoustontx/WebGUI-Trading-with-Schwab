@@ -882,7 +882,10 @@ composite = 0.7 · quality + 0.3 · fit
 rewards a **wide** profit zone (breakeven spread ÷ 1-σ move). Both are measured in units
 of the 1-σ move **to that candidate's own expiry** — daily expected move × √DTE, floored
 at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-day one.
-Flies, condors, calendars
+The **Market Scanner's Directional tab** scores its single-leg candidates the same way
+(`run_full_scan` passes the same `daily_move`), so one candidate scores identically on
+both pages; in either, a candidate without a usable DTE falls back to one move at its
+scan window's DTE minimum. Flies, condors, calendars
 and the short straddle/strangle carry `NEUTRAL`; the long straddle/strangle carry
 `VOLATILITY`, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are `DIRECTIONAL`.
@@ -905,7 +908,8 @@ For `LONG`, an unbounded max profit auto-passes the reward bar. For `NAKED` the 
 annualised capital efficiency, `(max_profit / capital) · 365 / max(dte, 5)` (see the NAKED
 reward note in `strategy_scoring._reward_metric`). **The iron butterfly is judged `DEBIT`
 although it takes a credit**: by put–call parity its payoff is the long butterfly's, and
-under `NEUTRAL`'s 55 PoP bar both would be cut every time.
+under `NEUTRAL`'s 55 PoP bar both would be cut on nearly every fairly priced chain
+measured (PoP 23.6–51.9 at 14/30/45 DTE), though a rich chain can lift them over it.
 
 ### Payoff: two valuation paths
 
@@ -945,13 +949,16 @@ about ten times as capital-efficient as a covered call on the same lot.
 
 `tools/sweep_strategy_gates.py` builds a synthetic Black-Scholes chain (front and front +
 28 days), runs the real builders with the page's default delta bands (put −0.20…−0.10,
-call 0.10…0.20) and scores against a neutral view, with breakevens judged against the
-expected move to each candidate's front expiry. No Schwab call, no database.
+call 0.10…0.20) and scores through `score_all` the way `swing_scan` does, against a
+neutral view, with breakevens judged against the expected move to each candidate's own
+expiry. It measures gates and grades only — not the volatility gate, the earnings filter,
+the 50 / not-Weak cut or the market-state tilt. No Schwab call, no database.
 
 ```
 python tools/sweep_strategy_gates.py                  # spot 100, IV 0.28, $2.50 strikes
 python tools/sweep_strategy_gates.py --step 5
 python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
+python tools/sweep_strategy_gates.py --rich 1.2              # marks 20% over fair value
 ```
 
 Default run (spot 100, IV 0.28, $2.50 strikes), grade by front DTE:
@@ -972,7 +979,16 @@ Default run (spot 100, IV 0.28, $2.50 strikes), grade by front DTE:
 ⚠ **These move with the ladder, wing width and IV — quote them with their parameters.**
 On **$5 strikes at 14 DTE** no short strangle, covered call or collar is built at all (the
 nearest sold call, 105 at 0.203 delta, is over the 0.20 ceiling), butterflies pass (PoP 45) and condors fail
-(R:R 0.22). At **IV 0.20** butterflies fail PoP at 30 and 45 DTE as well. Condors are the
+(R:R 0.22). At **IV 0.20** butterflies fail PoP at 30 and 45 DTE as well.
+
+⚠ **The two NAKED cuts hold on FAIRLY PRICED chains.** `--rich` marks every option above
+the volatility the scorer computes probability with. At spot 100, IV 0.28, $2.50 strikes,
+30 DTE, the short straddle is still Weak at `--rich 1.1` (PoP 61.6) but **Good** from
+`--rich 1.2` (PoP 66.3, composite 71.9) — its bigger credit widens the breakevens past 65.
+The covered call stays Weak to at least `--rich 1.5` (PoP 56.6–60.1 across 7–45 DTE and both
+ladders). So "counted, not shown" is a statement about fair prices, not a guarantee.
+
+Condors are the
 most ladder-dependent row: the wing is whichever listed distance is nearest half the
 expected move, so one step changes the structure.
 

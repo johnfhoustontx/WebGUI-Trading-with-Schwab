@@ -31,6 +31,14 @@ absent. A Marginal 45 here is cut on the page.
     python tools/sweep_strategy_gates.py
     python tools/sweep_strategy_gates.py --step 5
     python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
+    python tools/sweep_strategy_gates.py --rich 1.2
+
+`--rich` marks every option at Black-Scholes on `iv * rich` while the greeks, the
+chain's `volatility` and the scorer's `atm_iv` stay at `iv` -- premium priced
+ABOVE the volatility the scorer computes probability of profit with, the way a
+rich chain reads to it. The two NAKED cuts are a statement about fairly priced
+chains (`rich` 1.0): at spot 100, IV 0.28, step 2.5, the short straddle passes
+from about 1.2 (PoP 66.3) while the covered call stays cut to at least 1.5.
 
 For each front DTE in `--days` the chain lists two expiries, front and
 front + 28 (so the calendar/diagonal builders find a back month), strikes
@@ -98,10 +106,11 @@ BACK_OFFSET = 28
 SPAN = 0.40
 
 
-def chain(spot, iv, days, step):
+def chain(spot, iv, days, step, rich=1.0):
     """A Schwab-shaped chain: one expiration per entry in `days`, strikes
-    spot +/- SPAN on a `step` ladder. Marks are Black-Scholes at
-    `RISK_FREE_RATE` floored at 0.01, bid/ask +/-2% of mark; greeks analytic.
+    spot +/- SPAN on a `step` ladder. Marks are Black-Scholes at `iv * rich` and
+    `RISK_FREE_RATE` floored at 0.01, bid/ask +/-2% of mark; greeks analytic at
+    `iv`.
     Liquidity is generous on purpose -- this sweep is about the reward and PoP
     bars, and a liquidity failure would mask them.
     """
@@ -117,7 +126,7 @@ def chain(spot, iv, days, step):
                 K = round(spot + i * step, 2)
                 if K <= 0:
                     continue
-                mark = round(max(oc.bs_price(spot, K, T, r, iv, kind), 0.01), 2)
+                mark = round(max(oc.bs_price(spot, K, T, r, iv * rich, kind), 0.01), 2)
                 side[f"{K}"] = [{
                     "delta": round(oc.bs_delta(spot, K, T, r, iv, kind), 4),
                     "mark": mark,
@@ -146,9 +155,9 @@ def _legs_text(legs):
     return " ".join(parts)
 
 
-def rows(spot, iv, front_days, step):
+def rows(spot, iv, front_days, step, rich=1.0):
     """One scored row per candidate the four builders emit at this front DTE."""
-    c = chain(spot, iv, (front_days, front_days + BACK_OFFSET), step)
+    c = chain(spot, iv, (front_days, front_days + BACK_OFFSET), step, rich)
     # swing_scan's two inputs: the engine's DAILY expected move in dollars, and
     # the scalar fallback at the window's DTE min (0 here, so one day).
     daily_move = spot * iv * math.sqrt(1 / 365.0)
@@ -182,8 +191,9 @@ def _num(v, fmt):
     return format(v, fmt)
 
 
-def _fmt(all_rows, spot, iv, step):
+def _fmt(all_rows, spot, iv, step, rich=1.0):
     out = [f"Strategy Finder gate sweep -- spot {spot:g}, iv {iv:g}, step {step:g}, "
+           f"marks at iv x {rich:g}, "
            f"back = front + {BACK_OFFSET}, bands put {PUT_BAND} call {CALL_BAND}",
            ""]
     head = (f"{'type':<16}{'dte':>4}  {'legs':<30}{'net':>9}{'maxP':>9}{'maxL':>10}"
@@ -214,10 +224,12 @@ def main(argv=None):
     ap.add_argument("--days", default="14,30,45",
                     help="comma-separated FRONT DTEs (default 14,30,45)")
     ap.add_argument("--step", type=float, default=2.5, help="strike ladder step")
+    ap.add_argument("--rich", type=float, default=1.0,
+                    help="mark options at iv * RICH (default 1.0 = fairly priced)")
     a = ap.parse_args(argv)
     fronts = [int(x) for x in a.days.split(",") if x.strip()]
-    all_rows = [r for d in fronts for r in rows(a.spot, a.iv, d, a.step)]
-    print(_fmt(all_rows, a.spot, a.iv, a.step))
+    all_rows = [r for d in fronts for r in rows(a.spot, a.iv, d, a.step, a.rich)]
+    print(_fmt(all_rows, a.spot, a.iv, a.step, a.rich))
     return 0
 
 

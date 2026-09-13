@@ -1559,10 +1559,13 @@ per-row action buttons) and detail panel as the Market Scanner.</p>
 <li><strong>Earnings:</strong> a calendar or diagonal is checked against its <strong>later</strong> expiration,
   because the back month is still open when a report lands after the near month
   expires.</li>
-<li>⚠ <strong>The short straddle and the covered call are built but nearly always cut.</strong>
-  Both win too rarely for the bar that premium-selling trades must clear, so they
-  are counted in the status line's <strong>below the quality bar</strong> figure rather than
-  listed. The Calculator still builds both. Long straddles and strangles usually
+<li>⚠ <strong>On fairly priced options, the short straddle and the covered call are built
+  but nearly always cut.</strong> Both win too rarely for the bar that premium-selling
+  trades must clear, so they are counted in the status line's <strong>below the quality
+  bar</strong> figure rather than listed. When options are priced <strong>rich</strong> — well above the
+  volatility the odds are worked out from — a short straddle's bigger credit can
+  carry it over the bar, and it is listed; the covered call stayed cut in every case
+  tested. The Calculator still builds both. Long straddles and strangles usually
   pass only as <strong>Marginal</strong>.</li>
 </ul>
 <p><strong>Send to Paper trade</strong> appears only on rows the Paper Ledger records correctly:

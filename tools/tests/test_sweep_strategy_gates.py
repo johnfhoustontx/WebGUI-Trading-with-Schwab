@@ -62,3 +62,20 @@ def test_sweep_scores_like_production_with_a_per_candidate_daily_move(monkeypatc
     rows = list(tool.rows(100.0, 0.28, 30, 2.5))
     assert rows and len(seen) == len(rows)
     assert all(d == 100.0 * 0.28 * math.sqrt(1 / 365.0) for d in seen)
+
+
+def test_the_cuts_are_a_statement_about_fairly_priced_chains():
+    """The docs say the two cuts hold on FAIRLY PRICED chains. Pin what happens
+    when every option is marked above the volatility the scorer prices
+    probability with (``--rich``): the short straddle's larger credit widens its
+    breakevens past NAKED's 65 PoP bar and it passes, while the covered call
+    stays cut. If either flips, the qualified wording in the manuals is stale.
+    """
+    tool = _tool()
+    fair = {r["type"]: r for r in tool.rows(100.0, 0.28, 30, 2.5)}
+    assert fair["SHORT_STRADDLE"]["grade"] == "Weak"
+    for rich, straddle_passes in ((1.1, False), (1.2, True), (1.5, True)):
+        by = {r["type"]: r for r in tool.rows(100.0, 0.28, 30, 2.5, rich=rich)}
+        assert (by["SHORT_STRADDLE"]["grade"] != "Weak") is straddle_passes, rich
+        assert by["COVERED_CALL"]["grade"] == "Weak", rich
+        assert "PoP" in by["COVERED_CALL"]["grade_reason"], rich

@@ -2746,10 +2746,14 @@ date — `S 100C / L 100C 11/13` is a calendar.
 count is what distinguishes *"the scan found things and rejected them all"* from *"the
 scan found nothing"* — two very different situations that would otherwise look identical.
 
-⚠ **Two structures are in that count on nearly every scan: the short straddle and the
-covered call.** Both are judged as premium sales, whose bar asks for a 65% probability of
-profit, and both measure around 57% and 52%. That is an operator decision — no lower bar
-is invented without outcome data — so they are counted, not shown. The long straddle and
+⚠ **On fairly priced options, two structures are in that count on nearly every scan: the
+short straddle and the covered call.** Both are judged as premium sales, whose bar asks
+for a 65% probability of profit, and both measure around 57% and 52%. That is an operator
+decision — no lower bar is invented without outcome data — so they are counted, not
+shown. The cut is not unconditional: when options are priced **rich** — premium well above
+the volatility the probability is computed from — a short straddle's larger credit widens
+its breakevens past the bar (in a synthetic test, from about 20% rich), and it is listed.
+The covered call stayed cut in every case tested. The long straddle and
 long strangle typically pass only as *Marginal*. Measured outcomes for every structure are
 in the *Technical Reference* (Strategy Finder scoring).
 

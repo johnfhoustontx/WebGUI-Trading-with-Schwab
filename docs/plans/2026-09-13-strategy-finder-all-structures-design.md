@@ -153,16 +153,21 @@ survive measurement:
   0.25-delta hedge and the 7-day front: collar R:R **1.66–2.00**, PoP 44–47; protective
   put PoP **42–45**. Both still Good.
 
-The two cuts held: short straddle PoP 57.3 and covered call PoP ~52–54, against 65, at
-every DTE, ladder and IV swept. (The short straddle would pass `NEUTRAL` — PoP 57.3 vs
+The two cuts held on the fairly priced chains swept: short straddle PoP 57.3 and covered
+call PoP ~52–54, against 65, at every DTE, ladder and IV. **They are not unconditional**
+(found 2026-09-13, after shipping): with options marked above the volatility the scorer
+prices probability with (`--rich`, spot 100, IV 0.28, $2.50, 30 DTE), the short straddle is
+still Weak at 1.1 (PoP 61.6) but Good from 1.2 (PoP 66.3); the covered call stays Weak to
+at least 1.5. (The short straddle would pass `NEUTRAL` — PoP 57.3 vs
 55 — so `NAKED` is the choice that cuts it, not the only profile that could.)
 
 Decisions:
 
 - **Iron butterfly is DEBIT, not NEUTRAL/CREDIT**, despite taking a credit: by
   put–call parity it is the long butterfly's payoff, measured identical. Under
-  NEUTRAL's 55 PoP bar it would be cut every time — and so would the long
-  butterfly if judged the same way.
+  NEUTRAL's 55 PoP bar it would be cut on nearly every fairly priced chain
+  (PoP 23.6–51.9 at 14/30/45 DTE) — and so would the long butterfly if judged the
+  same way. A rich chain can lift it over.
 - **Flies, condors and calendars carry `family = "NEUTRAL"`**, so
   `q_breakeven_vs_em` rewards a wide profit zone rather than a breakeven near
   spot, which is meaningless for a position centred on spot. The **short** straddle

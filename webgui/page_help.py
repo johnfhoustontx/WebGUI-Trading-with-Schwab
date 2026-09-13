@@ -230,11 +230,14 @@ it can build for it on one score.
 - Only candidates that clear a **quality bar** are listed. The status line says how
   many were cut, which is what tells "everything failed the bar" apart from
   "nothing was found at all".
-- ⚠ **Two structures are built but almost never shown: the short straddle and
-  the covered call.** Both win less often than the bar for selling premium asks
-  (about 57% and 52% of the time against 65%), so they land in that "below the
-  quality bar" count on nearly every scan. That is a decision, not a fault — the
-  **Calculator** still builds both. Long straddles and strangles usually clear
+- ⚠ **Two structures are built but, on fairly priced options, almost never
+  shown: the short straddle and the covered call.** Both win less often than the
+  bar for selling premium asks (about 57% and 52% of the time against 65%), so
+  they land in that "below the quality bar" count on nearly every scan. That is a
+  decision, not a fault — the **Calculator** still builds both. When options are
+  priced **rich** (well above the volatility the odds are worked out from), a
+  short straddle's bigger credit can lift it over the bar and it is listed; the
+  covered call stayed cut in every case tested. Long straddles and strangles usually clear
   the bar only just, as **Marginal**.
 - **Send to Paper trade** is offered only where the paper ledger records the
   trade correctly: credit spreads, iron condors, long calls and puts, debit
