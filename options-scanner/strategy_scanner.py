@@ -306,13 +306,17 @@ def _front_exp(opts_by_exp):
 
 
 def _atm_strike(strikes, spot):
-    """The listed strike nearest spot, or None for an empty ladder."""
-    return min(strikes, key=lambda k: abs(k - spot)) if strikes else None
+    """The listed strike nearest spot, or None for an empty ladder.
+
+    An exact tie (spot midway between two strikes) goes to the LOWER strike, so
+    the choice never depends on set iteration order."""
+    return min(strikes, key=lambda k: (abs(k - spot), k)) if strikes else None
 
 
 def _half_em(spot, atm_iv, dte):
     """Half the 1-sigma expected move to ``dte`` - the wing target (design doc)."""
-    return spot * max(atm_iv or 0.0, 0.0) * math.sqrt(max(dte, 1) / 365.0) / 2.0
+    iv = atm_iv if (atm_iv is not None and math.isfinite(atm_iv)) else 0.0   # `nan or 0` is nan
+    return spot * max(iv, 0.0) * math.sqrt(max(dte, 1) / 365.0) / 2.0
 
 
 def _symmetric_wing(strikes, center, target):
@@ -456,8 +460,12 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
         return []
     exp, cs, ps = fp
     out = []
-    k = _atm_strike(set(cs) & set(ps), spot)
-    if k is not None:
+    # The ATM over the UNION of both maps: extract_options drops a strike with no
+    # delta, so the true ATM can be missing from one side. Recentring on the next
+    # COMMON strike would build an off-centre "straddle" (a 0.30 call against a
+    # -0.70 put); a hole at the money builds no straddle instead.
+    k = _atm_strike(set(cs) | set(ps), spot)
+    if k is not None and k in cs and k in ps:
         for stype, side, label in (("LONG_STRADDLE", "long", "Long Straddle"),
                                    ("SHORT_STRADDLE", "short", "Short Straddle")):
             legs = [_leg_from(cs[k], "call", side, exp), _leg_from(ps[k], "put", side, exp)]
@@ -476,16 +484,22 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
     return out
 
 
+_LISTED_TOL = 5e-5   # half of _symmetric_wing's round(..., 4) step
+
+
 def _listed(strikes, target):
     """The listed strike KEY equal to ``target`` up to float error, else None.
 
     Strike keys are floats parsed from the chain while wing distances are rounded,
-    so ``k - d`` on a fractional ladder need not hash to the listed key.
+    so ``k - d`` on a fractional ladder need not hash to the listed key. The
+    tolerance is HALF the 4-dp rounding step ``_symmetric_wing`` applies (5e-5):
+    that rounding can leave ``k - d`` up to that far off a listed key, and a
+    tighter tolerance would silently build nothing on a 5-decimal ladder.
     """
     if not strikes:
         return None
     best = min(strikes, key=lambda x: abs(x - target))
-    return best if abs(best - target) < 1e-6 else None
+    return best if abs(best - target) <= _LISTED_TOL else None
 
 
 def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
@@ -501,8 +515,11 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
         return []
     exp, cs, ps = fp
     both = set(cs) & set(ps)
-    k = _atm_strike(both, spot)
-    if k is None:
+    # ATM over the UNION, and it must be listed on BOTH sides - see
+    # build_straddles_strangles. Recentring on a common strike after a hole at the
+    # money built a 95/105/115 "neutral" butterfly.
+    k = _atm_strike(set(cs) | set(ps), spot)
+    if k is None or k not in both:
         return []
     dte = _dte_for(exp)
     d = _symmetric_wing(both, k, _half_em(spot, atm_iv, dte))
@@ -569,9 +586,10 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
         # drops such strikes from the FRONT expiry, which is valued at intrinsic and
         # would not need one - deliberately conservative: a leg with no IV is a leg
         # whose quote is not trustworthy either.
+        raw = extract_options(chain, kind, dte_min, dte_max)
         by_exp = {e: {**v, "strikes": {k: leg for k, leg in v["strikes"].items()
                                        if _usable_iv(leg.get("iv"))}}
-                  for e, v in extract_options(chain, kind, dte_min, dte_max).items()}
+                  for e, v in raw.items()}
         by_exp = {e: v for e, v in by_exp.items() if v["strikes"]}
         if len(by_exp) < 2:
             continue
@@ -581,8 +599,14 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
         if not backs:
             continue
         b_exp, b = min(backs, key=lambda kv: abs(kv[1]["dte"] - (f["dte"] + _CAL_BACK_OFFSET)))
-        k = _atm_strike(set(f["strikes"]) & set(b["strikes"]), spot)
-        if k is None:
+        # The ATM is taken over the UNION of the two expiries' strikes BEFORE the
+        # IV filter, and must survive the filter in BOTH. A true ATM dropped for a
+        # missing delta or an unusable IV is a hole at the money: recentring on the
+        # next common strike would build an off-centre "calendar" and a diagonal
+        # hung off it, so that kind builds neither. Taking it after the filter
+        # would let a sentinel-IV ATM on BOTH expiries silently recentre.
+        k = _atm_strike(set(raw[f_exp]["strikes"]) | set(raw[b_exp]["strikes"]), spot)
+        if k is None or k not in f["strikes"] or k not in b["strikes"]:
             continue
         legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
                 _leg_from(b["strikes"][k], kind, "long", b_exp)]

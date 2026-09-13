@@ -13,7 +13,6 @@ trades.
 has no ``options-scanner`` on ``sys.path`` — Tier 1 imports no engines, which is
 the architecture that makes "analysis only" true rather than merely intended.
 """
-import inspect
 
 FOUR = ("LONG_STRADDLE", "SHORT_STRADDLE", "LONG_STRANGLE", "SHORT_STRANGLE")
 

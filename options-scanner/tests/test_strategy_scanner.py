@@ -779,7 +779,11 @@ def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
     assert {k: l["strike"] for k, l in short.items()} == {k: l["strike"] for k, l in long_.items()}
 
 
-def test_the_band_ceiling_drops_a_short_strangle_but_never_a_straddle():
+def test_a_far_ladder_keeps_both_short_structures():
+    """On a step-20 ladder the only OTM strikes sit far out (|delta| ~0.03), inside
+    any band, so the ceiling never binds here: the short straddle is built and any
+    short strangle's legs stay within the band. The test below exercises the
+    ceiling actually dropping a strangle."""
     rich = _ladder_chain(step=20.0, n=2)   # nothing between ATM (0.5) and far OTM
     out = _by_type(ss.build_straddles_strangles(
         rich, "XYZ", 100.0, 0.28, 5, 90, put_band=(-0.20, -0.30), call_band=(0.20, 0.30)))
@@ -922,3 +926,116 @@ def test_atm_call_calendar_risks_about_its_debit_and_profits_between_two_breakev
     assert cal["max_profit"] > 0
     assert len(cal["breakevens"]) == 2
     assert cal["breakevens"][0] < 100.0 < cal["breakevens"][1]
+
+
+# ---- Review follow-up: chain holes, ties and NaN ----
+def _drop(chain, map_key, days, strike):
+    exp = [k for k in chain[map_key] if k.endswith(f":{days}")][0]
+    del chain[map_key][exp][strike]
+    return chain
+
+
+def test_a_hole_at_the_money_builds_no_straddle_fly_or_condor_but_keeps_strangles():
+    """extract_options drops a strike with no delta, so the true ATM can be missing
+    from ONE map. Recentring on the next common strike built a 105 'straddle' with
+    a 0.30 call against a -0.70 put and a 95/105/115 'neutral' butterfly. The ATM
+    is taken over the UNION of both maps; missing from either, those skip."""
+    chain = _drop(_ladder_chain(), "putExpDateMap", 30, "100.0")
+    straddles = _by_type(ss.build_straddles_strangles(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "LONG_STRADDLE" not in straddles and "SHORT_STRADDLE" not in straddles
+    assert "LONG_STRANGLE" in straddles and "SHORT_STRANGLE" in straddles
+    assert ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90) == []
+
+
+def test_a_back_leg_hole_at_the_money_skips_that_kinds_calendar_and_diagonal():
+    """The sentinel chain: the back 100C has IV -999. A calendar recentred on 95 or
+    105 is not an ATM calendar, so neither the call calendar nor the call diagonal
+    is built - and the put side, whose ATM is intact, is unaffected."""
+    chain = _ladder_chain(days=(7, 35))
+    back = [k for k in chain["callExpDateMap"] if k.endswith(":35")][0]
+    chain["callExpDateMap"][back]["100.0"][0]["volatility"] = -999.0
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out and "DIAGONAL_CALL" not in out
+    assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
+    assert {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]} == {
+        "short": 100.0, "long": 105.0}
+
+
+def test_a_back_leg_missing_at_the_money_skips_the_calendar_too():
+    chain = _drop(_ladder_chain(days=(7, 35)), "callExpDateMap", 35, "100.0")
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out and "DIAGONAL_CALL" not in out
+    assert "CALENDAR_PUT" in out
+
+
+def test_atm_strike_breaks_an_exact_tie_toward_the_lower_strike():
+    assert ss._atm_strike({100.0, 105.0}, 102.5) == 100.0
+    assert ss._atm_strike({1000.0, 1005.0}, 1002.5) == 1000.0
+    assert ss._atm_strike({105.0, 100.0}, 102.5) == 100.0
+
+
+def test_half_expected_move_treats_a_nan_iv_as_zero():
+    assert ss._half_em(100.0, float("nan"), 30) == 0.0
+    assert ss._half_em(100.0, float("inf"), 30) == 0.0
+
+
+def test_listed_tolerance_is_half_the_wing_rounding_step():
+    """_symmetric_wing rounds a distance to 4 dp, so k +/- d can sit up to 5e-5 off
+    a listed key on a 5-decimal ladder; _listed must still find it."""
+    assert ss._listed({100.0, 105.0}, 100.00004) == 100.0
+    assert ss._listed({100.0, 105.0}, 99.99996) == 100.0
+    assert ss._listed({100.0, 105.0}, 100.0001) is None
+
+
+def test_a_tenth_step_ladder_builds_a_call_butterfly():
+    out = _by_type(ss.build_butterflies_condors(
+        _ladder_chain(spot=10.3, step=0.1, n=10, iv=40.0), "XYZ", 10.3, 0.40, 5, 90))
+    legs = sorted(out["BUTTERFLY_CALL"]["legs"], key=lambda l: l["strike"])
+    assert abs(legs[1]["strike"] - 10.3) < 1e-9
+    assert abs((legs[1]["strike"] - legs[0]["strike"])
+               - (legs[2]["strike"] - legs[1]["strike"])) < 1e-9
+
+
+def test_spot_on_a_strike_is_the_straddle_and_is_excluded_from_the_strangle():
+    out = _by_type(ss.build_straddles_strangles(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    assert {l["strike"] for l in out["SHORT_STRADDLE"]["legs"]} == {100.0}
+    for t in ("LONG_STRANGLE", "SHORT_STRANGLE"):
+        k = {l["kind"]: l["strike"] for l in out[t]["legs"]}
+        assert k["call"] > 100.0 and k["put"] < 100.0
+
+
+def test_no_shared_expiry_builds_no_neutral_structure():
+    chain = _ladder_chain(days=(30, 60))
+    for map_key, days in (("callExpDateMap", 60), ("putExpDateMap", 30)):
+        del chain[map_key][[k for k in chain[map_key] if k.endswith(f":{days}")][0]]
+    assert ss.build_straddles_strangles(chain, "XYZ", 100.0, 0.28, 5, 90) == []
+    assert ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90) == []
+
+
+def test_a_condor_is_omitted_when_two_wings_out_are_unlisted():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(n=1), "XYZ", 100.0, 0.28, 5, 90))
+    assert {"BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY"} <= set(out)
+    assert not any(t.startswith("CONDOR_") for t in out)
+
+
+def test_put_butterfly_is_all_puts_symmetric_with_a_two_lot_body():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    legs = sorted(out["BUTTERFLY_PUT"]["legs"], key=lambda l: l["strike"])
+    assert [(l["side"], l["qty"]) for l in legs] == [("long", 1), ("short", 2), ("long", 1)]
+    assert all(l["kind"] == "put" for l in legs)
+    assert legs[1]["strike"] == 100.0
+    assert legs[1]["strike"] - legs[0]["strike"] == legs[2]["strike"] - legs[1]["strike"]
+
+
+def test_condor_shorts_are_symmetric_about_the_body_and_kinds_match_the_type():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    for t, kind in (("CONDOR_CALL", "call"), ("CONDOR_PUT", "put")):
+        legs = sorted(out[t]["legs"], key=lambda l: l["strike"])
+        ks = [l["strike"] for l in legs]
+        assert ks[2] - 100.0 == 100.0 - ks[1]
+        assert all(l["kind"] == kind for l in legs)
+
+
+def test_call_butterfly_is_near_delta_neutral():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    assert abs(out["BUTTERFLY_CALL"]["net_delta"]) < 0.05
