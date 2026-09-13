@@ -50,6 +50,10 @@ from shared import structures as _structures  # noqa: E402
 # call sites test membership against it.
 PAPER_DEBIT_TYPES = set(_structures.LEDGER_DEBIT)
 
+# The credit structures the ledger's credit branch builds: two-strike spreads and
+# the iron condor (``IC`` is the engine's key, ``IRON_CONDOR`` the Finder's).
+_CREDIT_TYPES = frozenset({"PCS", "CCS", "IC", "IRON_CONDOR"})
+
 # Shares per option contract. Ledger rows store PER-SHARE prices (entry_credit,
 # max_loss_per) and PER-CONTRACT dollars (*_total); this is the factor between them.
 _CONTRACT_MULT = 100
@@ -143,6 +147,15 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
     In the future, replace this with schwab order placement:
         client.place_order(account_hash, order)
     """
+    # Refuse by NAME. Before this, a straddle/strangle (analysis only, D1) was kept
+    # out only because the credit branch KeyErrored on a ``short_strike`` its row
+    # lacks - protection the first such row to gain that field would silently
+    # remove. The page's Paper button exists only for allowed types, so a refusal
+    # here means a hand-enqueued ``paper_create``, which the service scaffold's
+    # consumer already logs and dead-letters.
+    stype = signal.get("type")
+    if stype not in _CREDIT_TYPES and stype not in PAPER_DEBIT_TYPES:
+        raise ValueError(f"{stype} is not paper-tradeable")
     now = datetime.now(TZ)
     if signal.get("type") in PAPER_DEBIT_TYPES:
         return _create_debit_trade(signal, quantity, mode, now)

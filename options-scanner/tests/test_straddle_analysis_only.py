@@ -30,13 +30,21 @@ def test_the_repricer_cannot_mark_one():
 def test_the_scanner_may_show_one_but_the_ledger_cannot_open_one():
     """The Strategy Finder BUILDS these (2026-09-13) so a trader can compare them;
     D1 is about what can be OPENED, and that stays nothing. A scanner row reaches
-    the ledger only through ``paper_trader.create_paper_trade``: the debit path is
-    gated by ``PAPER_DEBIT_TYPES``, and anything else falls into the credit branch,
-    which needs ``short_strike`` / ``long_strike`` / ``width`` / ``credit`` a
-    straddle row does not carry - so it raises rather than opening a position."""
+    the ledger only through ``paper_trader.create_paper_trade``, which opens only
+    the credit spreads and ``PAPER_DEBIT_TYPES`` and refuses every other type by
+    name - so it raises rather than opening a position."""
     import paper_trader
     for code in FOUR:
         assert code not in paper_trader.PAPER_DEBIT_TYPES, code
+
+
+
+def test_an_analysis_only_structure_is_refused_by_name():
+    import pytest
+    import paper_trader
+    for code in FOUR:
+        with pytest.raises(ValueError, match="not paper-tradeable"):
+            paper_trader.create_paper_trade({"type": code, "symbol": "XYZ"}, 1)
 
 
 def _straddle_chain(spot=100.0, days=30):
@@ -56,11 +64,13 @@ def _straddle_chain(spot=100.0, days=30):
                                     "105.0": c(-0.70, 6.0)}}}
 
 
-def test_a_real_finder_row_for_each_raises_in_the_credit_branch():
-    """Proves the docstring above rather than restating it: a row built by the
-    Finder itself carries none of the credit fields, so ``create_paper_trade``
-    raises before building a trade dict. It is a pure dict builder - no database
-    and no network - which is what makes this safe to call here."""
+def test_a_real_finder_row_for_each_is_refused_by_name():
+    """Proves the docstring above rather than restating it, on rows the Finder
+    itself built. ``create_paper_trade`` refuses the type BY NAME before it
+    builds a trade dict - explicitly, where it used to rely on the credit branch
+    KeyError-ing on a ``short_strike`` these rows lack, which the first row to
+    gain that field would have silently removed. It is a pure dict builder - no
+    database and no network - which is what makes this safe to call here."""
     import pytest
     import paper_trader
     import strategy_scanner as ss
@@ -68,7 +78,7 @@ def test_a_real_finder_row_for_each_raises_in_the_credit_branch():
         _straddle_chain(), "XYZ", 100.0, 0.28, 5, 90)}
     assert set(rows) == set(FOUR)
     for code, row in rows.items():
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="not paper-tradeable"):
             paper_trader.create_paper_trade(row, 1)
 
 
