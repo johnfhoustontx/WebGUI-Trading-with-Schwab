@@ -1260,3 +1260,73 @@ def test_a_hole_on_the_diagonals_own_long_strike_is_never_picked(hole):
         long_ = next(l for l in diag["legs"] if l["side"] == "long")
         assert long_["strike"] != 96.0
         assert long_["iv"] != -999.0
+
+
+# ---- Review follow-up: a calendar needs BOTH ladders whole at the money ----
+def _keep_strikes(chain, days, keep):
+    """Leave only ``keep`` (strike keys) listed on both maps for the ``days`` expiry."""
+    for m in ("callExpDateMap", "putExpDateMap"):
+        exp = [k for k in chain[m] if k.endswith(f":{days}")][0]
+        chain[m][exp] = {k: v for k, v in chain[m][exp].items() if k in keep}
+    return chain
+
+
+def _cal_strikes(out, t):
+    return {l["strike"] for l in out[t]["legs"]} if t in out else None
+
+
+@pytest.mark.parametrize("spot", [100.0, 100.5])
+def test_a_front_hole_at_the_money_builds_no_calendar(spot):
+    """The mirror of the back-leg hole: with the FRONT 100C missing, recentring
+    built a call calendar at 95 (spot 100) or 105 (spot 100.5)."""
+    chain = _drop(_ladder_chain(days=(7, 35)), "callExpDateMap", 7, "100.0")
+    out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out
+    assert "CALENDAR_PUT" in out
+
+
+@pytest.mark.parametrize("front_step,back_step,spot,want", [
+    (5.0, 1.0, 102.0, 100.0),
+    (1.0, 2.5, 101.8, 100.0), (1.0, 2.5, 102.0, 100.0), (1.0, 2.5, 103.0, 105.0),
+    (2.5, 1.0, 101.8, 100.0), (2.5, 1.0, 102.0, 100.0), (2.5, 1.0, 103.0, 105.0),
+])
+def test_non_nesting_ladders_build_at_the_nearest_common_strike(front_step, back_step,
+                                                                  spot, want):
+    """$1 against $2.5 strikes do not nest, yet 100 and 105 are listed on both and
+    sit within a step of spot - a legitimate calendar, which the grid rule refused."""
+    n = {1.0: 15, 2.5: 8, 5.0: 6}
+    chain = _merge_chains(_ladder_chain(days=(7,), step=front_step, n=n[front_step]),
+                          _ladder_chain(days=(35,), step=back_step, n=n[back_step]))
+    out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.28, 5, 60))
+    assert _cal_strikes(out, "CALENDAR_CALL") == {want}
+    assert _cal_strikes(out, "CALENDAR_PUT") == {want}
+
+
+def test_a_stray_far_strike_does_not_distort_the_back_ladder():
+    """One odd strike far from the money (62.5 on a $5 ladder) made the smallest gap
+    anywhere 2.5, so a whole ladder read as a hole at spot 102."""
+    back = _ladder_chain(days=(35,), step=5.0, n=8)
+    for m in ("callExpDateMap", "putExpDateMap"):
+        exp = next(iter(back[m]))
+        back[m][exp]["62.5"] = back[m][exp]["60.0"]
+    chain = _merge_chains(_ladder_chain(days=(7,), step=1.0, n=15), back)
+    out = _by_type(ss.build_calendars(chain, "XYZ", 102.0, 0.28, 5, 60))
+    assert _cal_strikes(out, "CALENDAR_CALL") == {100.0}
+
+
+def test_a_single_strike_back_expiry_builds_no_calendar():
+    """One listed strike carries no spacing, so whether the money is covered cannot
+    be judged."""
+    chain = _keep_strikes(_ladder_chain(days=(7, 35)), 35, {"100.0"})
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out and "CALENDAR_PUT" not in out
+
+
+def test_a_back_expiry_listing_only_far_strikes_builds_no_calendar():
+    """A back month listing only 80 and 120 under a $1 front at spot 100 built a
+    calendar at 80 - twenty points from the money."""
+    chain = _merge_chains(_ladder_chain(days=(7,), step=1.0, n=20),
+                          _keep_strikes(_ladder_chain(days=(35,), step=1.0, n=20), 35,
+                                        {"80.0", "120.0"}))
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out and "CALENDAR_PUT" not in out

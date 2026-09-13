@@ -617,52 +617,51 @@ def _usable_iv(iv):
     return math.isfinite(v) and v > 0
 
 
-def _calendar_atm(front_listed, back_listed, spot):
-    """The calendar strike from the two expiries' LISTED strikes, or None for a hole.
+_LADDER_MAX_STEP_FRAC = 0.10
 
-    Start from the front ATM (nearest spot; an exact tie prefers a strike both
-    expiries list). Then find the strike the BACK ladder's own grid puts at that
-    spot: the front ATM itself when it sits on that grid, otherwise the nearer of
-    the two grid strikes either side of it. That back strike must be listed, and
-    listed on the front too; if not, the chain has a hole where it should have a
-    strike, and recentring would build an off-centre calendar.
 
-    * A weekly front lists $1 strikes where the monthly back lists $5, so a front
-      ATM of 102 is simply off the back grid - not a hole - and the calendar sits
-      at 100.
-    * An on-grid front ATM of 100 with the back 100 missing is a hole.
-    * An off-grid front ATM of 101 with the back 100 missing is a hole too. The
-      nearest strike both list there is 105, a four-point recentre that a
-      "within one back step of spot" guard would let through.
+def _local_step(listed, spot):
+    """The ladder's own spacing AT the money, or None when it has a hole there.
 
-    The grid step is the smallest gap between consecutive back strikes. Its ORIGIN
-    is the listed back strike nearest the front ATM, not the lowest back strike: a
-    chain can carry a stray off-grid strike far from the money (an adjusted
-    deliverable, a half-step wing), and anchoring the grid there would call every
-    at-the-money strike off-grid.
+    A ladder has a hole at the money when the strike its OWN local spacing puts
+    nearest spot is not listed. The spacing is read next to the money - the gap
+    from the strike nearest spot to its immediate listed neighbours - never from
+    the whole ladder, so a stray far strike (62.5 on a $5 ladder) cannot distort
+    it. Also a hole: fewer than two strikes (no spacing to judge by), and a local
+    step wider than 10% of spot - a ladder listing only 80 and 120 under a $100
+    stock passes the grid test (80 is "on" a 40-wide grid) yet covers nothing.
     """
-    fa = _atm_strike(front_listed, spot, prefer=front_listed & back_listed)
-    if fa is None or not back_listed:
+    strikes = sorted(listed)
+    if len(strikes) < 2:
         return None
-    back = sorted(back_listed)
-    gaps = [g for g in (round(b - a, 4) for a, b in zip(back, back[1:])) if g > 0]
-    if gaps:
-        step = min(gaps)
-        origin = _atm_strike(back_listed, fa)
-        x = (fa - origin) / step
-        if abs(x - round(x)) < 1e-6:
-            cands = [fa]
-        else:
-            lo = origin + math.floor(x) * step
-            cands = [lo, lo + step]
-    else:
-        cands = [fa]
-    listed = {c: _listed(back_listed, c) for c in cands}
-    g = min(cands, key=lambda c: (abs(c - fa), listed[c] is None, c))
-    k = listed[g]
-    if k is None or _listed(front_listed, k) is None:
+    origin = _atm_strike(listed, spot)
+    i = strikes.index(origin)
+    gaps = [abs(strikes[j] - origin) for j in (i - 1, i + 1) if 0 <= j < len(strikes)]
+    step = round(min(gaps), 4)
+    if step <= 0 or step > _LADDER_MAX_STEP_FRAC * spot:
         return None
-    return _listed(front_listed, k)
+    grid = origin + round((spot - origin) / step) * step
+    return step if _listed(listed, grid) is not None else None
+
+
+def _calendar_atm(front_listed, back_listed, spot):
+    """The calendar strike from the two expiries' LISTED strikes, or None.
+
+    Both ladders must be whole at the money (``_local_step``): a strike missing
+    where either expiry's own spacing says it belongs is a hole, and recentring
+    would build an off-centre calendar - on the front as much as on the back. Then
+    the calendar sits at the nearest strike BOTH list, no further from spot than
+    the wider of the two local steps. That is what lets a $1 weekly against a $5
+    or $2.5 monthly (ladders that need not nest) build at 100 when spot is 102.
+    """
+    front_step = _local_step(front_listed, spot)
+    back_step = _local_step(back_listed, spot)
+    if front_step is None or back_step is None:
+        return None
+    k = _atm_strike(front_listed & back_listed, spot)
+    if k is None or abs(k - spot) > max(front_step, back_step):
+        return None
+    return k
 
 
 def _nearest_delta_strike(strikes, target):
