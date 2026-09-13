@@ -3796,8 +3796,22 @@ comparable score.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_20">Reading the screen</h3>
-<p><strong>Inputs:</strong> symbol, <strong>DTE min/max</strong> (wider allows more candidates), and a <strong>Strategies</strong>
-row of seven checkboxes, all ticked by default:</p>
+<p>The page reads top to bottom: a <strong>scan bar</strong>, a <strong>summary strip</strong>, <strong>strategy chips</strong>,
+up to four <strong>top picks</strong>, and the <strong>ranked list</strong>, with the Trade detail panel beside it.</p>
+<p><strong>The scan bar.</strong> A <strong>Symbol</strong> box and <strong>Scan</strong> (Enter, or tabbing out of the box, scans
+too). Nothing else rescans — change the settings, then press Scan.</p>
+<ul>
+<li><strong>Expiry</strong> presets fill the <strong>DTE min / max</strong> boxes beside them: <strong>1–2 wk</strong> (7–14 days),
+  <strong>2–6 wk</strong> (14–42), <strong>1–3 mo</strong> (30–90) and <strong>Any</strong> (0–120, the default). Typing in
+  either box releases the preset, so a hand-set range is never shown under a preset's
+  name. A wider range allows more candidates.</li>
+<li><strong>Risk style</strong> sets the short-leg delta bands on <strong>both</strong> sides at once:
+  <strong>Conservative</strong> 0.05–0.10, <strong>Balanced</strong> 0.10–0.20 (the default) and <strong>Aggressive</strong>
+  0.20–0.30. It is shorthand for the four delta fields under <strong>Advanced</strong>; edit those by
+  hand to anything else and the picker shows <strong>Custom</strong>.</li>
+</ul>
+<p><strong>Every scan builds all seven strategy groups</strong> — the chips below choose what you see,
+not what is built:</p>
 <table>
 <thead>
 <tr>
@@ -3889,31 +3903,117 @@ so they cost no extra data:</p>
 <a href="#calculator">Calculator</a>. The Paper button books into the <strong>Paper Ledger</strong>, which holds
 no shares — so these rows get no Paper button. (On the paper account, <code>COVERED_CALL</code>
 means the option leg alone.)</p>
-<p><strong>The view banner.</strong> Before ranking anything, the scanner <em>infers a market view</em> for the
-symbol from its technicals and implied volatility — a direction, a conviction level, and
-a volatility regime. It then scores each candidate on two things:</p>
+<p><strong>The summary strip.</strong> After a scan it names the symbol and its price, the <strong>Vol Rank</strong>
+(one value per scan, so it is not repeated on every row), and the <em>market view</em> the
+scanner inferred before ranking anything — shown as pills for a direction, a conviction
+level and a volatility regime, read from the symbol's technicals and implied volatility.
+It then scores each candidate on two things:</p>
 <ol>
 <li><strong>Fit</strong> — how well the structure matches that inferred view.</li>
 <li><strong>Structural quality</strong> — whether the trade is well-built regardless of view.</li>
 </ol>
 <p>That is what makes a long call and a put credit spread comparable on one 0–100 number.</p>
-<p><strong>The columns:</strong> Strategy · Bias · Legs · Exp · DTE · Debit/Credit · Max P · Max L ·
-R:R · PoP · BE (breakeven) · Vol Rank · Score · <strong>Grade</strong>.</p>
+<p><strong>Strategy chips.</strong> One chip per group that produced ideas, with its count, plus <strong>All</strong>.
+A chip shows only its group; more chips add groups; removing the last chip, or clicking
+<strong>All</strong>, shows everything. The filter is instant — nothing is rescanned — and both the
+cards and the list follow it. A new symbol starts back at All.</p>
+<p><strong>Top picks.</strong> Up to four cards, each the best-scoring idea from a <strong>different</strong> group
+among what the chips show — the cards exist to compare structures, and four spreads in a
+row would be one idea shown four times. A card carries the score and grade, the
+expiration and days to go, the legs, the cost, <strong>Calculator</strong> and — where the Paper
+Ledger can record it — <strong>Paper</strong>, plus three pictures:</p>
+<table>
+<thead>
+<tr>
+<th>Picture</th>
+<th>How to read it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Payoff shape</strong></td>
+<td>Profit or loss at the (nearest) expiration across a range of prices around today's: <strong>green</strong> where it makes money, <strong>red</strong> where it loses, a dashed zero line, and a tick at today's price. A shape to recognise the bet by, not a chart to read values off</td>
+</tr>
+<tr>
+<td><strong>Split bar</strong></td>
+<td><strong>Max loss</strong> in red growing left from the centre, <strong>max profit</strong> in green growing right, both scaled to the <strong>larger of the two</strong> — so it shows the balance of one trade (a butterfly mostly green, a covered call mostly red), never a comparison between trades. An unlimited side fills its half and reads <strong>∞</strong></td>
+</tr>
+<tr>
+<td><strong>Probability-of-profit bar</strong></td>
+<td>0–100%: <strong>amber</strong> under 40%, <strong>blue</strong> from 40% to 60%, <strong>green</strong> over 60%</td>
+</tr>
+</tbody>
+</table>
+<p>Clicking a card opens it in the detail panel.</p>
+<p><strong>Cost</strong> names the direction in words — <code>$195 debit</code>, <code>$804 credit</code> — and adds <em>for 100
+shares</em> when the trade holds stock (<code>$54,058 debit for 100 shares</code>), so a collar is never
+mistaken for a contract's worth.</p>
+<p><strong>The ranked list.</strong> Every idea the chips show, best score first:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strategy</strong></td>
+<td>name, with a small payoff shape</td>
+</tr>
+<tr>
+<td><strong>Score</strong></td>
+<td>0–100, coloured by zone</td>
+</tr>
+<tr>
+<td><strong>Expiry</strong></td>
+<td>expiration and days to go</td>
+</tr>
+<tr>
+<td><strong>Cost</strong></td>
+<td>as on the cards</td>
+</tr>
+<tr>
+<td><strong>Max profit</strong> / <strong>Max loss</strong></td>
+<td>dollars, or <strong>∞</strong>; a naked short's loss carries an <em>undefined risk</em> tag, because its figure is a margin estimate, not a cap</td>
+</tr>
+<tr>
+<td><strong>Probability of profit</strong></td>
+<td>bar plus percent</td>
+</tr>
+<tr>
+<td><strong>Grade</strong></td>
+<td>quality grade, with its reason on hover</td>
+</tr>
+</tbody>
+</table>
+<p>The last column holds <strong>Send to Calculator</strong>, <strong>Send to Paper trade</strong> (where allowed) and
+<strong>Expected Move</strong>. The number columns sort on their values. The list grows with the page
+rather than scrolling in a short box. Legs, breakevens and bias are not columns — they are
+in the detail panel.</p>
 <p><strong>The Grade is quality-gated, not fit-gated</strong> — it is driven by structural quality and
 per-family hard gates, and carries a tooltip explaining the reason. A high score with a
 poor grade means "fits your view, but badly constructed".</p>
-<p><strong>The Legs column</strong> prints a share lot as <code>L 100 shares</code>, a leg of more than one
+<p><strong>The legs line on a card</strong> prints a share lot as <code>L 100 shares</code>, a leg of more than one
 contract as <code>S 2×100C</code> (a butterfly's body), and a leg on a later expiration with its
 date — <code>S 100C / L 100C 11/13</code> is a calendar.</p>
-<p><strong>The Trade detail panel</strong> (click a row) follows the same rules in words: <code>Buy 100
+<p><strong>The Trade detail panel</strong> starts <strong>closed</strong>, so the list keeps its width, opens whenever
+a card or row is clicked, and is cleared by a new scan. It follows the same rules in
+words: <code>Buy 100
 shares</code> for a share lot, <code>Sell 2× 100 C</code> for a butterfly's body, each leg on its own line
 with its own date when the legs span more than one expiration (the single "Exp" caption is
 then left off, since it would name only the near month), <strong>every</strong> breakeven joined with
 <code>/</code>, and dollars stated <strong>per position</strong> rather than per contract when shares are part
 of it — a share lot is thousands of dollars, not a contract's worth.</p>
-<p><strong>The status line</strong> reports how many candidates were <strong>cut below the quality bar</strong>. That
-count is what distinguishes <em>"the scan found things and rejected them all"</em> from <em>"the
-scan found nothing"</em> — two very different situations that would otherwise look identical.</p>
+<p><strong>The count line</strong> in the summary strip reads like <em>16 ideas · 6 below the quality bar ·
+0 where premium is too cheap to sell</em>. The <strong>below the quality bar</strong> count is what
+distinguishes <em>"the scan found things and rejected them all"</em> from <em>"the scan found
+nothing"</em> — two very different situations that would otherwise look identical. The <strong>too
+cheap to sell</strong> count is a different reason: trades that would sell premium, dropped
+because this symbol's volatility is historically low (trades that buy premium are kept).</p>
+<p><strong>While a scan runs</strong> the cards become placeholders reading <em>Scanning SPY…</em> — the symbol
+asked for, never the previous one. A slow scan says it is taking longer than expected
+and keeps waiting; whatever lands belongs to the symbol being scanned.</p>
 <p>⚠ <strong>On fairly priced options, two structures are in that count on nearly every scan: the
 short straddle and the covered call.</strong> Both are judged as premium sales, whose bar asks
 for a 65% probability of profit, and both measure around 57% and 52%. That is an operator
@@ -3926,8 +4026,8 @@ long strangle typically pass only as <em>Marginal</em>. Measured outcomes for ev
 in the <em>Technical Reference</em> (Strategy Finder scoring).</p>
 <p><strong>Earnings.</strong> A calendar or diagonal is checked against its <strong>latest</strong> expiration: the
 back month is still open through a report that lands after the front expires.</p>
-<p><strong>Row actions</strong> send to <a href="#calculator">Calculator</a> or <a href="#expected-move">Expected Move</a> for
-all types — a calendar arrives with both expirations and a share leg as the Calculator's
+<p><strong>Calculator</strong> (on a card) and the list's <strong>Send to Calculator</strong> and <strong>Expected Move</strong>
+work for all types — a calendar arrives with both expirations and a share leg as the Calculator's
 stock leg. ⚠ Clicking an expiration pill on the Calculator afterwards moves <strong>every</strong>
 option leg to that one date, which collapses a calendar into a single-expiry trade.</p>
 <p><strong>Send to Paper trade</strong> appears for credit structures (PCS, CCS, IC), defined-risk debit
@@ -3972,8 +4072,8 @@ best expresses it. Frequently the answer is not the one you had in mind.</p>
 <p>The Fit-plus-Quality score is the app's most genuinely useful piece of scoring, because
 it makes structures comparable that normally cannot be compared at all.</p>
 <p><strong>Where it is weak.</strong> The inferred view is a model output, not a fact. If you disagree
-with the banner, the ranking beneath it is ranking against the wrong hypothesis — read
-the banner first and discard the scan if it is wrong.</p>
+with the view pills, the ranking beneath them is ranking against the wrong hypothesis —
+read the pills first and discard the scan if they are wrong.</p>
 <h3 id="when-to-use-it_18">When to use it</h3>
 <p>After <a href="#opportunity-board">Opportunity Board</a> or <a href="#momentum">Momentum</a> surfaces a
 symbol, and any time you have a directional opinion and want the best way to express it.</p>

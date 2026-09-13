@@ -1481,27 +1481,191 @@ Captured signals do <strong>not</strong> add to the Rescue nav badge (that count
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><strong>Route:</strong> <code>/options/swing</code>. Its own row on the main menu, directly under the
 Options group — it has no tab strip.</p>
-<p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
-parameters and press <strong>Scan</strong>:</p>
+<p>A focused, on-demand scan for one symbol. It builds every strategy it can for that
+symbol — seven groups, always all of them — and ranks them on one score. The page
+reads top to bottom: the scan bar, a summary of the scan, strategy chips, up to four
+top picks, and the full ranked list.</p>
+<p><strong>The scan bar</strong></p>
 <ul>
-<li><strong>Symbol</strong></li>
-<li><strong>DTE</strong> min / max (days to expiration)</li>
-<li><strong>Strategies</strong> — seven groups, all ticked by default (see below)</li>
-<li><strong>Put Δ</strong> and <strong>Call Δ</strong> min / max (delta bands for strike selection), under
-  <strong>Advanced — delta bands and credit floor</strong>. The bands place every option the
-  Finder sells out of the money: the credit spreads, the short put and short call,
-  the short strangle, and the call in a covered call or collar.</li>
-<li><strong>Min credit %</strong>, in the same panel — it applies to the credit spreads only</li>
+<li><strong>Symbol</strong> — type a ticker and press <strong>Scan</strong>. Enter, or tabbing out of the box,
+  scans too.</li>
+<li><strong>Expiry</strong> — four presets set the <strong>DTE min / max</strong> boxes (days to expiration)
+  beside them:</li>
 </ul>
-<p>Results appear in the same signal table (with the same Score chip, Grade, and the
-per-row action buttons) and detail panel as the Market Scanner. For the newer
-structures the detail panel reads the way the position is held: a share leg is
-<strong>Buy 100 shares</strong>, a calendar or diagonal lists each leg with <strong>its own expiration
-date</strong> (and drops the single "Exp" line, which would name only the near month),
-<strong>every</strong> breakeven is shown — a straddle or butterfly reads <code>$95.20 / $104.80</code> —
-a butterfly's middle reads <code>Sell 2× 100 C</code>, and a position holding shares states its
-dollars <strong>per position</strong> rather than per contract.</p>
-<p><strong>The seven strategy groups:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>DTE min – max</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1–2 wk</strong></td>
+<td>7 – 14</td>
+</tr>
+<tr>
+<td><strong>2–6 wk</strong></td>
+<td>14 – 42</td>
+</tr>
+<tr>
+<td><strong>1–3 mo</strong></td>
+<td>30 – 90</td>
+</tr>
+<tr>
+<td><strong>Any</strong></td>
+<td>0 – 120 (the default)</td>
+</tr>
+</tbody>
+</table>
+<p>Type in either box and the preset lets go, so a range you set by hand is never
+  shown under a preset's name. A wider range finds more candidates.
+- <strong>Risk style</strong> — how far out of the money the options the Finder <strong>sells</strong> sit,
+  on both the put and the call side. A smaller delta is safer but pays less.</p>
+<table>
+<thead>
+<tr>
+<th>Style</th>
+<th>Short-leg delta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Conservative</strong></td>
+<td>0.05 – 0.10</td>
+</tr>
+<tr>
+<td><strong>Balanced</strong></td>
+<td>0.10 – 0.20 (the default)</td>
+</tr>
+<tr>
+<td><strong>Aggressive</strong></td>
+<td>0.20 – 0.30</td>
+</tr>
+</tbody>
+</table>
+<p>If you edit the delta fields under <strong>Advanced</strong> by hand, the picker clears and
+  shows <strong>Custom</strong>.
+- <strong>Advanced — delta bands and credit floor</strong> (collapsed) holds the exact numbers:
+  - <strong>Put Δ</strong> and <strong>Call Δ</strong> min / max. The bands place every option the Finder
+    sells out of the money: the credit spreads, the short put and short call, the
+    short strangle, and the call in a covered call or collar. They do not move a
+    straddle's or butterfly's shorts, which sit at the money by definition.
+  - <strong>Min credit %</strong> — it applies to the credit spreads only.</p>
+<p>Changing the preset, the risk style or the Advanced fields does <strong>not</strong> rescan;
+press <strong>Scan</strong> when you are ready.</p>
+<p><strong>While it scans</strong></p>
+<p>The top-pick cards turn into grey placeholders reading <em>Scanning SPY…</em> — always the
+symbol you asked for, never the previous one — and the old list is cleared. If the
+scan is slow the page says <em>The scan is taking longer than expected — results will
+appear when it finishes.</em> and keeps waiting. Whatever lands belongs to the symbol
+being scanned.</p>
+<p><strong>The summary strip</strong></p>
+<p>After a scan, one strip names:</p>
+<ul>
+<li>the <strong>symbol</strong> and its <strong>price</strong>;</li>
+<li>the <strong>market view</strong> the scan inferred, as pills — the direction, how strong the
+  conviction is, and the volatility regime;</li>
+<li>the <strong>Vol Rank</strong> (one value per scan, so it lives here rather than on every row);</li>
+<li>a <strong>count line</strong>, for example <em>16 ideas · 6 below the quality bar · 0 where premium
+  is too cheap to sell</em>. The two cut counts are different reasons, explained below.</li>
+</ul>
+<p><strong>Strategy chips</strong></p>
+<p>One chip per strategy group, each with how many ideas it holds, plus <strong>All</strong>.</p>
+<ul>
+<li>Click a chip to show <strong>only</strong> that group; click more chips to add them.</li>
+<li>Click a chosen chip again to remove it. Removing the last one — or clicking
+  <strong>All</strong> — shows everything again.</li>
+<li>Chips <strong>filter instantly</strong>: every scan already built all seven groups, so nothing
+  is rescanned. The cards and the list both follow the chips.</li>
+<li>A new symbol starts back at <strong>All</strong>.</li>
+</ul>
+<p><strong>Top picks</strong></p>
+<p>Up to four cards: the best-scoring idea from each of four <strong>different</strong> groups
+among what the chips are showing — so four near-identical spreads never crowd out
+the comparison. Each card shows:</p>
+<ul>
+<li>the strategy, its <strong>score</strong> badge and <strong>grade</strong>;</li>
+<li>the expiration and days to go (<code>Oct 16 · 8d</code>);</li>
+<li>the legs, written like <code>L 100 shares / S 105C</code> (<code>S 2×100C</code> is two contracts, a
+  butterfly's middle; a leg on a later expiration carries its date — a calendar
+  reads <code>S 100C / L 100C 11/13</code>);</li>
+<li>a <strong>payoff shape</strong> — a small picture of what the trade makes or loses across a
+  range of prices at its (nearest) expiration: <strong>green</strong> where it profits, <strong>red</strong>
+  where it loses, a <strong>dashed line</strong> at zero and a small <strong>tick at today's price</strong>.
+  It is a shape, not a chart to read values off;</li>
+<li>a <strong>split bar</strong> — <strong>max loss</strong> in red growing left from the middle, <strong>max profit</strong>
+  in green growing right, both drawn against the larger of the two, with the dollar
+  figures underneath. It shows the shape of the bet at a glance: a butterfly is
+  mostly green, a covered call mostly red. A side with no limit fills its half and
+  reads <strong>∞</strong>;</li>
+<li>a <strong>probability-of-profit bar</strong>, 0–100%: <strong>amber</strong> under 40%, <strong>blue</strong> from 40%
+  to 60%, <strong>green</strong> over 60%;</li>
+<li>the <strong>cost</strong> — <code>$195 debit</code>, <code>$804 credit</code>, or <code>$54,058 debit for 100 shares</code>
+  when the trade holds stock;</li>
+<li><strong>Calculator</strong>, and <strong>Paper</strong> where the Paper Ledger can record the trade (see
+  below).</li>
+</ul>
+<p>Click anywhere else on a card to open it in the detail panel.</p>
+<p><strong>The ranked list</strong></p>
+<p>Every idea the chips show, best score first:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strategy</strong></td>
+<td>the name, with a small payoff shape beside it</td>
+</tr>
+<tr>
+<td><strong>Score</strong></td>
+<td>the 0–100 score, coloured by zone</td>
+</tr>
+<tr>
+<td><strong>Expiry</strong></td>
+<td>the expiration and days to go</td>
+</tr>
+<tr>
+<td><strong>Cost</strong></td>
+<td>debit or credit in dollars, with <em>for 100 shares</em> when stock is held</td>
+</tr>
+<tr>
+<td><strong>Max profit</strong></td>
+<td>in dollars, or <strong>∞</strong> when there is no limit</td>
+</tr>
+<tr>
+<td><strong>Max loss</strong></td>
+<td>in dollars, or <strong>∞</strong>; a naked short also carries an <em>undefined risk</em> tag</td>
+</tr>
+<tr>
+<td><strong>Probability of profit</strong></td>
+<td>a small bar plus the percent, in the same colours as the cards</td>
+</tr>
+<tr>
+<td><strong>Grade</strong></td>
+<td>quality grade; hover it for the reason</td>
+</tr>
+</tbody>
+</table>
+<p>The last column holds the three action buttons (hover for their names): <strong>Send to
+Calculator</strong>, <strong>Send to Paper trade</strong> (only where allowed) and <strong>Expected Move</strong>.
+Click the Score, Expiry, Max profit, Max loss or Probability of profit header to
+sort by it. The list grows with the page rather than scrolling in a short box.</p>
+<p><strong>The detail panel</strong></p>
+<p>The Trade detail panel beside the list starts <strong>closed</strong>, so the list keeps its
+width, and opens whenever you click a card or a row. A new scan clears it. The legs,
+breakevens and bias live here rather than in the list, and they read the way the
+position is held: a share leg is <strong>Buy 100 shares</strong>, a calendar or diagonal lists
+each leg with <strong>its own expiration date</strong> (and drops the single "Exp" line, which
+would name only the near month), <strong>every</strong> breakeven is shown — a straddle or
+butterfly reads <code>$95.20 / $104.80</code> — a butterfly's middle reads <code>Sell 2× 100 C</code>, and
+a position holding shares states its dollars <strong>per position</strong> rather than per
+contract.</p>
+<p><strong>The seven strategy groups</strong></p>
 <table>
 <thead>
 <tr>
@@ -1552,8 +1716,9 @@ dollars <strong>per position</strong> rather than per contract.</p>
 <ul>
 <li><strong>Calendars and diagonals need two expirations inside your DTE range</strong> — the
   near one at least <strong>7 days</strong> out, the later one the expiration nearest <strong>four
-  weeks</strong> after it, and at least a week after it. If <strong>DTE max</strong> does not reach
-  that far, no calendar is built; widen it. No extra data is fetched for them.</li>
+  weeks</strong> after it, and at least a week after it. A narrow range, such as the
+  <strong>1–2 wk</strong> preset, often holds no such pair and builds no calendar; pick a wider
+  preset or raise <strong>DTE max</strong>. No extra data is fetched for them.</li>
 <li><strong>Straddles, strangles, butterflies, the iron butterfly, condors and the share
   structures also use an expiration at least 7 days out.</strong> With <strong>DTE min</strong> at 0,
   none of them is built on a 0–6 day expiration; the floor applies by itself, so
@@ -1570,29 +1735,34 @@ dollars <strong>per position</strong> rather than per contract.</p>
   costing its whole wing, and an iron butterfly priced for a debit or taking in its
   whole wing. Wide quotes can put the mid prices there, and those prices are wrong
   rather than the trade good.</li>
-<li><strong>The Legs column</strong> reads <code>L 100 shares / S 105C</code>. <code>S 2×100C</code> is two contracts
-  (a butterfly's middle), and a leg on a later expiration carries its date — a
-  calendar reads <code>S 100C / L 100C 11/13</code>.</li>
 <li><strong>Earnings:</strong> a calendar or diagonal is checked against its <strong>later</strong> expiration,
   because the back month is still open when a report lands after the near month
   expires.</li>
+<li><strong>Below the quality bar</strong> counts candidates that were built and scored but did
+  not clear the bar. That count is what tells "everything failed" apart from
+  "nothing was found".</li>
+<li><strong>Too cheap to sell</strong> counts trades that would <strong>sell</strong> premium, dropped because
+  this symbol's option premium is historically cheap; trades that <strong>buy</strong> premium
+  are kept. A low-premium symbol correctly shows long calls, long puts and debit
+  spreads instead of credit spreads.</li>
 <li>⚠ <strong>On fairly priced options, the short straddle and the covered call are built
   but nearly always cut.</strong> Both win too rarely for the bar that premium-selling
-  trades must clear, so they are counted in the status line's <strong>below the quality
-  bar</strong> figure rather than listed. When options are priced <strong>rich</strong> — well above the
+  trades must clear, so they are counted in the summary's <strong>below the quality bar</strong>
+  figure rather than listed. When options are priced <strong>rich</strong> — well above the
   volatility the odds are worked out from — a short straddle's bigger credit can
   carry it over the bar, and it is listed; the covered call stayed cut in every case
   tested. The Calculator still builds both. Long straddles and strangles usually
   pass only as <strong>Marginal</strong>.</li>
 </ul>
-<p><strong>Send to Paper trade</strong> appears only on rows the Paper Ledger records correctly:
-credit spreads, iron condors, long calls and puts, debit spreads, and the call and
-put <strong>butterflies and condors</strong>. A debit trade that arrives with no debit to pay
-is refused rather than booked as free. Straddles and strangles are for study only and
-have no button; neither do the iron butterfly, calendars, diagonals or the share
-structures. <strong>Send to Calculator</strong> carries every row, calendars (both expirations)
-and share legs included — but clicking an expiration pill on the Calculator
-afterwards moves <strong>every</strong> option leg to that date, which collapses a calendar.</p>
+<p><strong>Paper</strong> (on a card) and <strong>Send to Paper trade</strong> (in the list) appear only for
+trades the Paper Ledger records correctly: credit spreads, iron condors, long calls
+and puts, debit spreads, and the call and put <strong>butterflies and condors</strong>. A debit
+trade that arrives with no debit to pay is refused rather than booked as free.
+Straddles and strangles are for study only and have no button; neither do the iron
+butterfly, calendars, diagonals or the share structures. <strong>Calculator</strong> carries every
+idea, calendars (both expirations) and share legs included — but clicking an
+expiration pill on the Calculator afterwards moves <strong>every</strong> option leg to that date,
+which collapses a calendar.</p>
 <h2 id="overview">Overview</h2>
 <p><strong>Route:</strong> <code>/trade</code>. The first tab of the Trade Analyzer group, and the screen the
 <strong>Signal desk</strong> command bar sits above on all four tabs.</p>

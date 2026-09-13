@@ -182,33 +182,107 @@ plus single-leg directional trades on their own tab.
 **Strategy Finder — the simple version**
 
 Like the Market Scanner, but you pick one symbol and it ranks every strategy
-it can build for it on one score.
+it can build for it on one score. Top to bottom: the scan bar, a summary of the
+scan, strategy chips, up to four top picks, and the full ranked list.
 
-- **Strategies** — seven groups, all ticked by default. Untick one to leave it
-  out of the scan:
-  - **Directional** — long and short calls and puts. A short put is also the
-    cash-secured put.
-  - **Spreads** — bull call and bear put (you pay), put and call credit spreads
-    (you collect).
-  - **Neutral** — iron condors.
-  - **Straddles & strangles** — a straddle buys or sells the call and put at the
-    money; a long strangle buys both sides about 0.30 delta out, a short
-    strangle sells both sides aimed at the middle of your delta settings,
-    skipping a side that lands richer than the top of the range (one below the
-    bottom is kept).
-  - **Butterflies & condors** — call and put butterflies and the iron butterfly
-    centred at the money, and call and put condors. The wings sit about half
-    the expected move away, on a strike that exists on both sides.
-  - **Calendars** — a calendar sells the near month and buys a later one at the
-    same strike; a diagonal sells a near-month strike about 0.30 delta out of
-    the money and buys a later-month strike about 0.70 delta in the money.
-  - **Stock + options** — covered call, protective put and collar, each on 100
-    shares bought at today's price.
-- **DTE min/max** — how many days to expiration to allow. Wider = more candidates.
-  ⚠ **Calendars and diagonals need two expirations inside that range**: the near
-  one at least 7 days out, the later one about four weeks after it and at least a
-  week after it. A narrow range builds no calendar — widen **DTE max** if you
-  want one.
+**The scan bar**
+
+- **Symbol**, then **Scan** (Enter, or tabbing out of the box, scans too).
+- **Expiry** — four presets, *1–2 wk · 2–6 wk · 1–3 mo · Any*, fill in **DTE
+  min / max** (days to expiration) for you. Type in either box and the preset
+  lets go, so a range you set by hand is never mislabelled. A wider range finds
+  more.
+- **Risk style** — how far out of the money the options you **sell** sit:
+  *Conservative* 0.05–0.10 delta, *Balanced* 0.10–0.20 (the default) and
+  *Aggressive* 0.20–0.30, on both the put and the call side. A smaller delta is
+  safer but pays less. Edit the numbers under **Advanced** yourself and the
+  picker shows **Custom** instead.
+- **Advanced — delta bands and credit floor** (collapsed) holds the four delta
+  fields and **Min credit %**.
+  - **Put/Call Δ (delta)** governs every short leg that is out of the money by
+    design — the spreads' short strikes, the single-leg short put or call, the
+    short strangle, and the call sold in a covered call or collar — and
+    deliberately **not** the long legs of a directional or debit trade, where a
+    far-out-of-the-money strike would be a lottery ticket rather than the bet. A
+    straddle's, butterfly's or condor's shorts sit where the structure puts them,
+    and a diagonal keeps its own 0.30 target. ⚠ Before 2026-09-11 it reached the
+    spreads only, so a short put ignored whatever you set here and was always
+    written near 0.28 delta.
+  - **Min credit %** — throw out credit spreads that don't pay enough premium for
+    the risk. It applies to the spreads only.
+  - Raising deltas/credit → fewer but richer trades; lowering → more but lower
+    quality.
+
+**After a scan**
+
+- **The summary** names the symbol and its price, the market view the scan
+  inferred as pills (direction, conviction, volatility), the **Vol Rank**, and a
+  count: *16 ideas · 6 below the quality bar · 0 where premium is too cheap to
+  sell*.
+- **Strategy chips** — one per group with its count, plus **All**. Click a chip
+  to show only that group; click more to add them; click the last one off (or
+  **All**) to see everything again. Chips filter instantly — nothing is
+  rescanned, because every scan builds all seven groups. A new symbol starts
+  back at All.
+- **Top picks** — up to four cards, each the best-scoring idea from a
+  **different** group among what the chips show, so four spreads never crowd out
+  the comparison. A card gives the score and grade, the expiration, the legs, and:
+  - **a payoff shape** — what the trade makes or loses across a range of prices:
+    green where it profits, red where it loses, a dashed line at break-even and a
+    small tick at today's price;
+  - **a split bar** — max loss in red to the left, max profit in green to the
+    right, both drawn against the larger of the two, so a butterfly reads mostly
+    green and a covered call mostly red. An unlimited side fills its half and reads
+    **∞**;
+  - **a probability-of-profit bar** — amber under 40%, blue from 40 to 60%, green
+    over 60%;
+  - the cost, and **Calculator** plus **Paper** where the paper ledger can take it.
+
+  Click a card to open it in the detail panel.
+- **The ranked list** — every idea the chips show, best score first: Strategy
+  (with a small payoff shape) · Score · Expiry · Cost · Max profit · Max loss ·
+  Probability of profit · Grade, then the Calculator / Paper / Expected Move
+  buttons. Click a number column's header to sort by it. A naked short's max loss
+  carries an **undefined risk** tag, since that figure is a margin estimate, not a
+  cap.
+- **Cost** says which way the money moves: `$195 debit`, `$804 credit`, and
+  `$54,058 debit for 100 shares` when the trade holds stock.
+- **Click a card or a row** for the Trade detail panel, which starts closed so the
+  list keeps its width. The legs, breakevens and bias live there: a share leg reads
+  `Buy 100 shares`, a butterfly's middle `Sell 2× 100 C`, a calendar or diagonal
+  lists each leg with its own expiration date, every breakeven is shown
+  (`$95.20 / $104.80`), and a position holding shares states its dollars **per
+  position** rather than per contract.
+- **While a scan runs** the cards read *Scanning SPY…* — the symbol you asked for,
+  never the one before. A slow scan says so and keeps waiting, and the results
+  that land are always for the symbol being scanned.
+
+**The seven groups**
+
+- **Directional** — long and short calls and puts. A short put is also the
+  cash-secured put.
+- **Spreads** — bull call and bear put (you pay), put and call credit spreads
+  (you collect).
+- **Neutral** — iron condors.
+- **Straddles & strangles** — a straddle buys or sells the call and put at the
+  money; a long strangle buys both sides about 0.30 delta out, a short strangle
+  sells both sides aimed at the middle of your delta settings, skipping a side
+  that lands richer than the top of the range (one below the bottom is kept).
+- **Butterflies & condors** — call and put butterflies and the iron butterfly
+  centred at the money, and call and put condors. The wings sit about half the
+  expected move away, on a strike that exists on both sides.
+- **Calendars** — a calendar sells the near month and buys a later one at the
+  same strike; a diagonal sells a near-month strike about 0.30 delta out of the
+  money and buys a later-month strike about 0.70 delta in the money.
+- **Stock + options** — covered call, protective put and collar, each on 100
+  shares bought at today's price.
+
+**What gets built, and what gets cut**
+
+- ⚠ **Calendars and diagonals need two expirations inside your DTE range**: the
+  near one at least 7 days out, the later one about four weeks after it and at
+  least a week after it. A narrow range, such as the *1–2 wk* preset, often holds
+  no such pair and builds no calendar — pick a wider preset or raise **DTE max**.
 - **Straddles, strangles, butterflies, the iron butterfly, condors and the share
   structures also use an expiration at least 7 days out** — so with **DTE min** at
   0 none of them is built on a 0–6 day expiration. You do not need to raise DTE min
@@ -222,31 +296,9 @@ it can build for it on one score.
   credit, or cost its whole wing — and an iron butterfly cost a debit, or take in
   its whole wing. Those prices are wrong rather than the trade good, so the row is
   never listed.
-- **Legs** reads like `L 100 shares / S 105C`: `2×` is two contracts (a
-  butterfly's middle), and a leg on a later expiration carries its date, so a
-  calendar reads `S 100C / L 100C 11/13`.
-- **Click a row** for the Trade detail panel. A share leg reads `Buy 100 shares`,
-  a calendar or diagonal lists each leg with its own expiration date, every
-  breakeven is shown (`$95.20 / $104.80`), and a position holding shares states its
-  dollars **per position** rather than per contract.
-- **Put/Call Δ (delta)** and **Min credit %** sit under the collapsed **Advanced —
-  delta bands and credit floor**.
-- **Put/Call Δ (delta)** — how far out-of-the-money the **sold** strikes sit. A
-  smaller |delta| is safer but pays less credit. It governs every short leg that
-  is out of the money by design — the spreads' short strikes, the single-leg
-  short put or call, the short strangle, and the call sold in a covered call or
-  collar — and deliberately **not** the long legs of a directional or debit
-  trade, where a far-out-of-the-money strike would be a lottery ticket rather
-  than the bet. A straddle's, butterfly's or condor's shorts sit where the
-  structure puts them, and a diagonal keeps its own 0.30 target. ⚠
-  Before 2026-09-11 it reached the spreads only, so a short put ignored whatever
-  you set here and was always written near 0.28 delta.
-- **Min credit %** — throw out credit spreads that don't pay enough premium for the
-  risk. It applies to the spreads only.
-- Raising deltas/credit → fewer but richer trades; lowering → more but lower quality.
-- Only candidates that clear a **quality bar** are listed. The status line says how
-  many were cut, which is what tells "everything failed the bar" apart from
-  "nothing was found at all".
+- Only candidates that clear a **quality bar** are listed. The summary's count
+  says how many were cut, which is what tells "everything failed the bar" apart
+  from "nothing was found at all".
 - ⚠ **Two structures are built but, on fairly priced options, almost never
   shown: the short straddle and the covered call.** Both win less often than the
   bar for selling premium asks (about 57% and 52% of the time against 65%), so
@@ -254,25 +306,28 @@ it can build for it on one score.
   decision, not a fault — the **Calculator** still builds both. When options are
   priced **rich** (well above the volatility the odds are worked out from), a
   short straddle's bigger credit can lift it over the bar and it is listed; the
-  covered call stayed cut in every case tested. Long straddles and strangles usually clear
-  the bar only just, as **Marginal**.
-- **Send to Paper trade** is offered only where the paper ledger records the
-  trade correctly: credit spreads, iron condors, long calls and puts, debit
-  spreads, and the call and put **butterflies and condors**. There is no Paper
-  button for straddles or strangles (study only), the iron butterfly, calendars,
-  diagonals, or anything holding shares. The ledger also refuses a debit trade
-  that arrives without a debit to pay. **Send to Calculator** works on every
-  row, calendars and shares included — but clicking an expiration pill on the
-  Calculator afterwards moves every option leg to that one date, which turns a
-  calendar into something else.
-- **"Too cheap to sell"** in that same line is a different cut, and a deliberate
+  covered call stayed cut in every case tested. Long straddles and strangles
+  usually clear the bar only just, as **Marginal**.
+- **"Too cheap to sell"** in that same count is a different cut, and a deliberate
   one: when this symbol's option premium is historically cheap, the trades that
   SELL premium are dropped and the ones that BUY it are kept. Cheap volatility is
   the wrong time to collect premium and the right time to pay for it, so a low-IV
   symbol correctly shows you long calls, long puts and debit spreads instead of
-  credit spreads. Measured on this app's own closed trades, premium sold below an
+  credit spreads. Measured on this app's own closed trades, premium sold below a
   Vol Rank of 45 returned **less than nothing** — a 25% win rate against 76%
   above it.
+
+**Sending a trade on**
+
+- **Paper** is offered only where the paper ledger records the trade correctly:
+  credit spreads, iron condors, long calls and puts, debit spreads, and the call
+  and put **butterflies and condors**. There is no Paper button for straddles or
+  strangles (study only), the iron butterfly, calendars, diagonals, or anything
+  holding shares. The ledger also refuses a debit trade that arrives without a
+  debit to pay.
+- **Calculator** works on every idea, calendars and shares included — but
+  clicking an expiration pill on the Calculator afterwards moves every option leg
+  to that one date, which turns a calendar into something else.
 """,
     "/options/income": """
 **Income Window — the simple version**

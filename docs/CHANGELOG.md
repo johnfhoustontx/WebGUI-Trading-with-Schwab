@@ -4,7 +4,64 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-13 (**System Status Authorize button fixed.** Operator
+**Last updated:** 2026-09-13 (**Strategy Finder redesign — top picks, a slim list,
+chips and presets.** Operator request: "make the Strategy Finder page more visually
+appealing and easy to use".)
+
+- **What was wrong** (local harness, 1440 px, a 16-row SPY scan): 14 columns pushed
+  Score, Grade and the action buttons off-screen; the results sat in a ~10-row scroll
+  box; money read as raw numbers (`-54057.72 debit` beside `-195.34 debit`); the
+  controls were a flat strip of seven checkboxes and number boxes; Vol Rank repeated
+  the same value on every row; the detail panel squeezed the table while empty.
+- **Scan bar.** Symbol + Scan; **Expiry** presets *1–2 wk · 2–6 wk · 1–3 mo · Any*
+  (7–14 / 14–42 / 30–90 / 0–120) beside DTE min/max — editing a box clears the preset;
+  **Risk style** *Conservative 0.05–0.10 · Balanced 0.10–0.20 (default) · Aggressive
+  0.20–0.30* sets the short-leg delta bands on both sides, with a read-only *Custom*
+  marker when the Advanced fields are edited by hand. No control rescans.
+- **Risk-style levels revised while planning.** The design's first draft
+  (0.10–0.15 / 0.15–0.25 / 0.25–0.35) would have labelled today's default band
+  *Custom* and silently moved the default scan; *Balanced* is now exactly the
+  pre-redesign band, so a scan with untouched controls is unchanged.
+- **Summary strip:** symbol and price, market-view pills (direction, conviction,
+  volatility regime), Vol Rank (moved out of the table), and one count line —
+  *N ideas · K below the quality bar · J where premium is too cheap to sell*, the two
+  cuts still two sentences.
+- **Strategy chips** — one per group with its count, plus All — filter the cards and
+  list **instantly**. The page stops sending `families`, so every scan builds all
+  seven groups; unticking the last chip returns to All; the choice resets for a new
+  symbol.
+- **Top picks:** up to four cards, the best score from four *different* groups among
+  the visible rows — score and grade, expiry, legs, a payoff shape (profit green,
+  loss red, dashed zero line, a tick at today's price), a split bar (max loss left,
+  max profit right, scaled to the larger of the two; ∞ for an unlimited side), a
+  probability-of-profit bar (amber < 40%, blue 40–60%, green > 60%), cost, Calculator
+  and — where allowed — Paper. A click opens the detail panel.
+- **Ranked list:** Strategy (with a small payoff shape) · Score · Expiry · Cost · Max
+  profit · Max loss · Probability of profit · Grade · actions, sortable on the numbers
+  and no longer height-capped. Legs, breakevens and bias moved to the detail panel,
+  which starts collapsed, opens on every card or row click and is cleared by a new
+  scan.
+- **Loading:** placeholder cards read *Scanning SYMBOL…*; a slow scan says "The scan is
+  taking longer than expected — results will appear when it finishes."; results
+  always belong to the symbol being scanned.
+- **Cost wording:** `$195 debit` / `$804 credit` / `$54,058 debit for 100 shares`.
+- **Code:** new PURE `webgui/pages/options/finder_view.py` (formatting, presets and
+  *Custom* detection, chips, top picks, bar geometry, the fixed-pixel payoff SVG —
+  pinned against the DOMPurify allow-list); `swing.py` is widgets and wiring;
+  `strategy_table.strategy_columns()` is unchanged for the Market Scanner's
+  Directional tab.
+- **Service (additive, no contract change):** each candidate carries its build
+  `group` and a `payoff_curve` from `strategy_scanner.payoff_curve`, valued as
+  `payoff_metrics` values the position, gross of commission. **The Income board
+  skips curves** (`income_scan` passes `payoff=False`) — nothing reads one there.
+- **Docs:** `page_help.py`, the User Guide and the Reference Guide describe the new
+  page; `docs/webgui-routes.md` has the route detail.
+- ⚠ **The marketing gallery shot is stale** — `tools/gallery_screens.py` `image19`
+  (`/options/swing`) still shows the old table until the next gallery capture run.
+- Design + plan: [`docs/plans/2026-09-13-strategy-finder-redesign-design.md`](plans/2026-09-13-strategy-finder-redesign-design.md)
+  / [`-plan.md`](plans/2026-09-13-strategy-finder-redesign-plan.md).
+
+**Prior —** 2026-09-13 (**System Status Authorize button fixed.** Operator
 report: "the Re-authorize button points to 127.0.0.1 … it does not work".)
 
 - **Cause.** `status.AUTH_URL` was `{PROXY_URL}/auth` — the SERVER's loopback
