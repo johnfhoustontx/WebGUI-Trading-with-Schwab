@@ -476,6 +476,70 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
     return out
 
 
+def _listed(strikes, target):
+    """The listed strike KEY equal to ``target`` up to float error, else None.
+
+    Strike keys are floats parsed from the chain while wing distances are rounded,
+    so ``k - d`` on a fractional ladder need not hash to the listed key.
+    """
+    if not strikes:
+        return None
+    best = min(strikes, key=lambda x: abs(x - target))
+    return best if abs(best - target) < 1e-6 else None
+
+
+def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
+    """Call/put butterfly, iron butterfly (ATM body) and call/put condor.
+
+    Wings sit at the listed SYMMETRIC distance nearest half the 1-sigma expected
+    move to the front expiry; a condor's shorts sit one wing either side of ATM and
+    its longs two. All carry ``family="NEUTRAL"`` so ``q_breakeven_vs_em`` rewards a
+    wide profit zone rather than a breakeven near spot.
+    """
+    fp = _front_pair(chain, dte_min, dte_max)
+    if not fp:
+        return []
+    exp, cs, ps = fp
+    both = set(cs) & set(ps)
+    k = _atm_strike(both, spot)
+    if k is None:
+        return []
+    dte = _dte_for(exp)
+    d = _symmetric_wing(both, k, _half_em(spot, atm_iv, dte))
+    if not d:
+        return []
+    lo, hi = _listed(both, k - d), _listed(both, k + d)
+    if lo is None or hi is None:
+        return []
+    out = []
+
+    def body(leg, qty):
+        leg["qty"] = qty
+        return leg
+
+    for stype, kind, m, label in (("BUTTERFLY_CALL", "call", cs, "Call Butterfly"),
+                                  ("BUTTERFLY_PUT", "put", ps, "Put Butterfly")):
+        legs = [_leg_from(m[lo], kind, "long", exp), body(_leg_from(m[k], kind, "short", exp), 2),
+                _leg_from(m[hi], kind, "long", exp)]
+        out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+
+    legs = [_leg_from(ps[lo], "put", "long", exp), _leg_from(ps[k], "put", "short", exp),
+            _leg_from(cs[k], "call", "short", exp), _leg_from(cs[hi], "call", "long", exp)]
+    out.append(_assemble("IRON_BUTTERFLY", "NEUTRAL", "Iron Butterfly", "neutral", legs,
+                         symbol, spot, atm_iv))
+
+    lo2, hi2 = _listed(both, k - 2 * d), _listed(both, k + 2 * d)
+    if lo2 is not None and hi2 is not None:
+        for stype, kind, m, label in (("CONDOR_CALL", "call", cs, "Call Condor"),
+                                      ("CONDOR_PUT", "put", ps, "Put Condor")):
+            legs = [_leg_from(m[lo2], kind, "long", exp),
+                    _leg_from(m[lo], kind, "short", exp),
+                    _leg_from(m[hi], kind, "short", exp),
+                    _leg_from(m[hi2], kind, "long", exp)]
+            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+    return out
+
+
 def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False,
                 liq_keys=("bid", "ask", "volume")):
     """Build a normalized leg from a credit-spread source dict (greeks default 0).

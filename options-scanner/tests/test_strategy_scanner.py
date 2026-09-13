@@ -800,3 +800,67 @@ def test_the_band_ceiling_binds_when_the_only_otm_strike_is_richer_than_it():
     assert "SHORT_STRANGLE" not in out
     assert "SHORT_STRADDLE" in out
     assert "LONG_STRANGLE" in out
+
+
+def test_call_butterfly_is_symmetric_with_a_two_lot_body():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    legs = sorted(out["BUTTERFLY_CALL"]["legs"], key=lambda l: l["strike"])
+    assert [(l["side"], l["qty"]) for l in legs] == [("long", 1), ("short", 2), ("long", 1)]
+    assert legs[1]["strike"] == 100.0
+    assert legs[1]["strike"] - legs[0]["strike"] == legs[2]["strike"] - legs[1]["strike"]
+    assert out["BUTTERFLY_CALL"]["family"] == "NEUTRAL"
+    assert out["BUTTERFLY_CALL"]["net_debit"] is not None
+
+
+def test_iron_butterfly_shorts_both_sides_at_the_money():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    legs = {(l["kind"], l["side"]): l["strike"] for l in out["IRON_BUTTERFLY"]["legs"]}
+    assert legs[("call", "short")] == legs[("put", "short")] == 100.0
+    assert legs[("call", "long")] - 100.0 == 100.0 - legs[("put", "long")]
+    assert out["IRON_BUTTERFLY"]["net_credit"] is not None
+
+
+def test_condor_has_four_symmetric_strikes_long_outside():
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    for t in ("CONDOR_CALL", "CONDOR_PUT"):
+        legs = sorted(out[t]["legs"], key=lambda l: l["strike"])
+        assert [l["side"] for l in legs] == ["long", "short", "short", "long"]
+        ks = [l["strike"] for l in legs]
+        assert ks[1] - ks[0] == ks[3] - ks[2] and ks[1] < 100.0 < ks[2]
+
+
+def test_no_wing_on_a_ladder_with_one_strike():
+    one = _ladder_chain(n=0)
+    assert ss.build_butterflies_condors(one, "XYZ", 100.0, 0.28, 5, 90) == []
+
+
+def test_call_butterfly_max_profit_and_loss_match_its_wing_and_debit():
+    """A long call fly risks its debit and earns the wing less the debit - both
+    net of four contracts' round-trip commission (the body is a two-lot)."""
+    import commissions as _cm
+    fly = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))[
+        "BUTTERFLY_CALL"]
+    legs = sorted(fly["legs"], key=lambda l: l["strike"])
+    wing = legs[1]["strike"] - legs[0]["strike"]
+    comm = _cm.round_trip_commission(4, None, 1)
+    assert abs(fly["max_loss"] - (fly["net_debit"] + comm)) < 1.0
+    assert abs(fly["max_profit"] - (wing * 100 - fly["net_debit"] - comm)) < 1.0
+
+
+def test_iron_butterfly_max_profit_and_loss_match_its_wing_and_credit():
+    import commissions as _cm
+    fly = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))[
+        "IRON_BUTTERFLY"]
+    k = {(l["kind"], l["side"]): l["strike"] for l in fly["legs"]}
+    wing = k[("call", "long")] - k[("call", "short")]
+    comm = _cm.round_trip_commission(4, None, 1)
+    assert abs(fly["max_profit"] - (fly["net_credit"] - comm)) < 1.0
+    assert abs(fly["max_loss"] - (wing * 100 - fly["net_credit"] + comm)) < 1.0
+
+
+def test_a_fractional_strike_ladder_still_builds_a_butterfly():
+    out = _by_type(ss.build_butterflies_condors(
+        _ladder_chain(spot=437.5, step=2.5), "XYZ", 437.5, 0.28, 5, 90))
+    legs = sorted(out["BUTTERFLY_CALL"]["legs"], key=lambda l: l["strike"])
+    assert legs[1]["strike"] == 437.5
+    assert legs[1]["strike"] - legs[0]["strike"] == legs[2]["strike"] - legs[1]["strike"]
