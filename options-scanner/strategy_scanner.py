@@ -222,6 +222,12 @@ def payoff_metrics(legs, spot, symbol=None):
     else:
         max_loss = round(abs(bounded_min) * _CONTRACT_MULT + comm, 2)
         capital = max_loss if not unbounded else round(margin_proxy + comm, 2)
+    if any(_is_stock(l) for l in legs):
+        # A share structure ties up the cash that buys the shares, whatever it
+        # risks. A collar's max loss is ~10% of that, so capital = max loss rated
+        # it ~10x as capital-efficient as a covered call on the same lot.
+        cash = round(max(net, 0.0) * _CONTRACT_MULT, 2) + comm
+        capital = round(max(max_loss, cash), 2)
 
     net_debit = round(net * _CONTRACT_MULT, 2) if net > 0 else None
     net_credit = round(-net * _CONTRACT_MULT, 2) if net < 0 else None

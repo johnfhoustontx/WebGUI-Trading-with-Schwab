@@ -1430,3 +1430,23 @@ def test_protective_put_has_unbounded_profit_and_loses_down_to_its_strike():
     comm = _cm.round_trip_commission(1, None, 1)
     assert s["max_profit"] is None and s["unbounded_profit"] is True
     assert abs(s["max_loss"] - ((100.0 + put["mark"] - put["strike"]) * 100 + comm)) < 0.05
+
+
+# ---- Review follow-up: a share structure's capital is the cash it ties up ----
+def test_a_collars_capital_is_the_cash_to_open_not_its_max_loss():
+    """A collar risks ~$980 but ties up ~$9,977 of cash in the shares. Scoring
+    capital efficiency on the max loss rated collars ~10x better than covered calls
+    and protective puts, which tie up the same cash."""
+    import commissions as _cm
+    s = _stock_structures()["COLLAR"]
+    comm = _cm.round_trip_commission(2, None, 1)
+    assert abs(s["capital"] - (s["net_debit"] + comm)) < 0.05
+    assert s["capital"] >= s["max_loss"]
+
+
+def test_covered_call_and_protective_put_capital_are_unchanged():
+    """Both already reported the cash to open; pinned numerically on the default
+    $5 ladder (spot 100, IV 28, 30 DTE, bands 0.10-0.20)."""
+    out = _stock_structures()
+    assert out["COVERED_CALL"]["capital"] == 9948.30
+    assert out["PROTECTIVE_PUT"]["capital"] == 10031.30
