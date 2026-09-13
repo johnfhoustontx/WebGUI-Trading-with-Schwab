@@ -172,6 +172,19 @@ _TYPE_PROFILE = {
     "BULL_CALL": "DEBIT", "BEAR_PUT": "DEBIT",
     "PCS": "CREDIT", "CCS": "CREDIT",
     "IRON_CONDOR": "NEUTRAL", "IC": "NEUTRAL",
+    # Strategy Finder, every structure (2026-09-13). Measured by
+    # tools/sweep_strategy_gates.py - quote its figures WITH their parameters.
+    "LONG_STRADDLE": "LONG", "LONG_STRANGLE": "LONG", "PROTECTIVE_PUT": "LONG",
+    # SHORT_STRADDLE and COVERED_CALL clear NO profile's PoP bar (~57 and ~54 vs
+    # NAKED's 65) and are counted in "below the quality bar" rather than shown.
+    # Operator decision: no bar is invented without outcome data.
+    "SHORT_STRADDLE": "NAKED", "SHORT_STRANGLE": "NAKED", "COVERED_CALL": "NAKED",
+    # IRON_BUTTERFLY is the long butterfly's payoff by put-call parity; judging it
+    # under NEUTRAL's 55 PoP bar would cut both every time.
+    "BUTTERFLY_CALL": "DEBIT", "BUTTERFLY_PUT": "DEBIT", "IRON_BUTTERFLY": "DEBIT",
+    "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
+    "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",
+    "DIAGONAL_CALL": "DEBIT", "DIAGONAL_PUT": "DEBIT", "COLLAR": "DEBIT",
 }
 
 # Lenient per-leg liquidity floors (skipped for any leg missing that field, so

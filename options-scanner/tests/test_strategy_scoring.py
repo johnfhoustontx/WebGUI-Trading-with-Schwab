@@ -838,3 +838,37 @@ def test_unfillable_credit_spread_is_not_floored_by_the_placeholder():
     """A 27%-wide short leg must score near 0, not be lifted to 25 by the wing."""
     val = sc.q_liq(_sig([_WIDE_SHORT, _SPY_CCS_LONG_WING], type="CCS"))
     assert val < 10, val           # was 25.0 = avg(0, 50)
+
+
+# ---------------------------------------------------------------------------
+# Strategy Finder, every structure (2026-09-13) -- explicit gate profiles
+# ---------------------------------------------------------------------------
+
+NEW_STRUCTURE_PROFILES = {
+    "LONG_STRADDLE": "LONG", "LONG_STRANGLE": "LONG", "PROTECTIVE_PUT": "LONG",
+    "SHORT_STRADDLE": "NAKED", "SHORT_STRANGLE": "NAKED", "COVERED_CALL": "NAKED",
+    "BUTTERFLY_CALL": "DEBIT", "BUTTERFLY_PUT": "DEBIT", "IRON_BUTTERFLY": "DEBIT",
+    "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
+    "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",
+    "DIAGONAL_CALL": "DEBIT", "DIAGONAL_PUT": "DEBIT", "COLLAR": "DEBIT",
+}
+
+
+def test_every_new_finder_structure_has_an_EXPLICIT_profile():
+    """An unmapped type silently falls to DEBIT - which gives an unbounded long an
+    unjudgeable reward and cuts it. Explicit entries make that choice visible.
+    IRON_BUTTERFLY is DEBIT despite its credit: put-call parity makes it the long
+    butterfly's payoff (see the 2026-09-13 design doc)."""
+    for t, prof in NEW_STRUCTURE_PROFILES.items():
+        assert sc._TYPE_PROFILE.get(t) == prof, t
+
+
+def test_long_straddle_mapping_changes_the_reward_gate_outcome():
+    """The mapping is not bookkeeping: an unbounded long (rr None, a set debit)
+    auto-passes the reward gate under LONG, and is unjudgeable -- a fail --
+    under the DEBIT default it would otherwise have fallen to."""
+    sig = {"type": "LONG_STRADDLE", "rr": None, "net_debit": 500.0,
+           "max_profit": None}
+    assert sc.gate_profile(sig) == "LONG"
+    assert sc._reward_metric(sig, sc.gate_profile(sig)) == float("inf")
+    assert sc._reward_metric(sig, "DEBIT") is None
