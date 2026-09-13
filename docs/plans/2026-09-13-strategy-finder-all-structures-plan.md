@@ -7,6 +7,13 @@ more option structures (straddles, strangles, butterflies, iron butterfly, condo
 calendars, diagonals, covered call, protective put, collar), with Send to Paper
 only for the debit structures the Paper Ledger already handles correctly.
 
+⚠ **D1 still stands (operator decision 2026-09-13):** straddles and strangles —
+long AND short — are *analysis only* (`docs/plans/2026-09-12-straddle-strangle-design.md`).
+The Finder builds and shows them, but none is ever paper-tradeable, has an exit
+table, a leg layout, or a driver entry. The only D1 test that changes is
+`test_the_scanner_emits_no_such_structure`, rewritten (Task 4 follow-up) to assert
+none of the four can be OPENED rather than that none is built.
+
 **Architecture:** New pure builders in `options-scanner/strategy_scanner.py` emit
 the existing normalized candidate shape. `payoff_metrics` / `pop_from_payoff` gain
 a second valuation path — front-expiry Black-Scholes for later-expiring legs, spot
@@ -1250,7 +1257,7 @@ are all single-expiry options — the third test above is its guard.
 
 ---
 
-### Task 11: Send to Paper for the six debit structures
+### Task 11: Send to Paper for the four debit structures (butterflies and condors)
 
 **Files:**
 - Modify: `shared/structures.py` — add `LEDGER_DEBIT`
@@ -1342,12 +1349,11 @@ assertions.
 In `shared/tests/test_structures.py`:
 
 ```python
-def test_ledger_debit_is_the_four_originals_plus_the_six_finder_structures():
+def test_ledger_debit_is_the_four_originals_plus_the_four_finder_structures():
     from shared import structures as s
     assert set(s.LEDGER_DEBIT) == {
         "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
-        "LONG_STRADDLE", "LONG_STRANGLE", "BUTTERFLY_CALL", "BUTTERFLY_PUT",
-        "CONDOR_CALL", "CONDOR_PUT"}
+        "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
 ```
 
 In `shared/tests/test_cross_tier_mirrors.py` (Tier 1 cannot import `shared.structures`):
@@ -1387,8 +1393,10 @@ Run all three → FAIL.
 # legs_intrinsic_value). Anything NOT here that is not a credit spread falls into
 # create_paper_trade's credit branch and KeyErrors on ``short_strike`` - which is
 # why the page's Paper button is pinned to this list by test_cross_tier_mirrors.
+# ⚠ No straddle or strangle, long or short: they are ANALYSIS ONLY (D1,
+# docs/plans/2026-09-12-straddle-strangle-design.md), pinned by
+# options-scanner/tests/test_straddle_analysis_only.py.
 LEDGER_DEBIT = ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
-                "LONG_STRADDLE", "LONG_STRANGLE",
                 "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT")
 ```
 
@@ -1421,8 +1429,7 @@ PAPER_DEBIT_TYPES = set(_structures.LEDGER_DEBIT)
 # condors, it settles at intrinsic (wrong for a back month), and it holds no shares.
 _PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
                 "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
-                "LONG_STRADDLE", "LONG_STRANGLE", "BUTTERFLY_CALL", "BUTTERFLY_PUT",
-                "CONDOR_CALL", "CONDOR_PUT"}
+                "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
 ```
 
 `config/trade_mgmt.toml`, after `[structures.BEAR_PUT]`:
@@ -1430,14 +1437,8 @@ _PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
 ```toml
 # Strategy Finder debit structures (2026-09-13) — the same time exit as the four
 # above. The profit target needs no table: _debit_target_base already takes a
-# fraction of MAX PROFIT for a bounded butterfly/condor and of the DEBIT for an
-# unbounded straddle/strangle.
-[structures.LONG_STRADDLE]
-exit_dte = 21
-
-[structures.LONG_STRANGLE]
-exit_dte = 21
-
+# fraction of MAX PROFIT for a bounded butterfly/condor. No straddle/strangle
+# table: those are analysis only (D1), and test_straddle_analysis_only pins that.
 [structures.BUTTERFLY_CALL]
 exit_dte = 21
 
@@ -1454,12 +1455,13 @@ exit_dte = 21
 Extend the page test:
 
 ```python
-def test_paper_button_on_long_straddle_but_not_calendar_or_covered_call():
+def test_paper_button_on_butterfly_but_not_straddles_calendars_or_shares():
     rows = {r["id"]: r for r in st.strategy_rows([
-        {"id": "a", "type": "LONG_STRADDLE"}, {"id": "b", "type": "CALENDAR_CALL"},
-        {"id": "c", "type": "COVERED_CALL"}, {"id": "d", "type": "IRON_BUTTERFLY"}])}
+        {"id": "a", "type": "BUTTERFLY_CALL"}, {"id": "b", "type": "CALENDAR_CALL"},
+        {"id": "c", "type": "COVERED_CALL"}, {"id": "d", "type": "IRON_BUTTERFLY"},
+        {"id": "e", "type": "LONG_STRADDLE"}, {"id": "f", "type": "SHORT_STRANGLE"}])}
     assert rows["a"]["_allow_paper"] is True
-    assert not any(rows[k]["_allow_paper"] for k in "bcd")
+    assert not any(rows[k]["_allow_paper"] for k in "bcdef")    # e, f: D1
 ```
 
 **Step 4: Run**
@@ -1473,7 +1475,7 @@ $PY -m pytest services/options_svc -rf
 
 Expected: PASS; failing sets unchanged.
 
-**Step 5: Commit** — `git commit -m "feat(finder): paper-trade the six debit structures the ledger settles"`
+**Step 5: Commit** — `git commit -m "feat(finder): paper-trade the four debit structures the ledger settles"`
 
 ---
 
@@ -1528,7 +1530,7 @@ here. Commit: `git commit -m "test(finder): calendar and covered call hand off t
 - `webgui/page_help.py` — the `/options/swing` guide: name the four new groups;
   say short straddles and covered calls are built but almost never clear the bar
   (they are counted in "below the quality bar"); say the Paper button appears for
-  long straddles/strangles, butterflies and condors only; say calendars come from
+  butterflies and condors only (straddles and strangles are analysis only, D1); say calendars come from
   inside the DTE range, so widen DTE max for longer ones.
 - `docs/manuals/user-guide/user-guide.md` and
   `docs/manuals/reference-guide/reference-guide.md` — the `## Strategy Finder`

@@ -163,14 +163,20 @@ back month spanning a report is exposed to it even when the front expires first.
   and a covered call.
 - **Expected Move** already drops share legs and draws the front expiry.
 - **Send to Paper** (operator decision: only where the ledger is right) adds
-  `LONG_STRADDLE`, `LONG_STRANGLE`, `BUTTERFLY_CALL`, `BUTTERFLY_PUT`,
-  `CONDOR_CALL`, `CONDOR_PUT` to `strategy_table._PAPER_TYPES` **and**
+  `BUTTERFLY_CALL`, `BUTTERFLY_PUT`, `CONDOR_CALL`, `CONDOR_PUT` to
+  `strategy_table._PAPER_TYPES` **and**
   `paper_trader.PAPER_DEBIT_TYPES`, plus a `[structures.*]` table with
   `exit_dte = 21` for each, mirroring the four existing debit structures.
   **Precondition:** the ledger must reprice and settle a `qty 2` body leg
   correctly; if it does not, the butterflies ship without the button rather than
   the ledger being changed.
-- No Paper button for iron butterfly, short straddle/strangle, calendars,
+- **Straddles and strangles, long and short, stay ANALYSIS ONLY** (D1,
+  `docs/plans/2026-09-12-straddle-strangle-design.md` — operator decision
+  2026-09-13 to keep it). The Finder builds and shows them; none gets a Paper
+  button, an exit-rule table, a repricer leg layout or a driver entry. The one D1
+  test that asserted `strategy_scanner` never names them is rewritten to assert
+  none of the four can be *opened*.
+- No Paper button for iron butterfly, straddles or strangles, calendars,
   diagonals or share structures — the ledger's credit path only understands
   two-strike spreads and iron condors, it settles every leg at intrinsic (wrong
   for a back month), and it holds no shares.
