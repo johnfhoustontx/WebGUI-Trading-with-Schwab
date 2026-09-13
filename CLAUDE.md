@@ -2760,9 +2760,13 @@ lead with **DEBIT**, because you pay for the shares; the paper account's and the
 Income board's `COVERED_CALL` is the **option leg only** (`paper_positions` holds
 no shares, and such a position's `unrealized_pnl` covers the option alone), which
 is correctly a credit structure. ⚠ **So a Finder covered call — or protective put
-or collar — must never gain a Paper button**: the ledger would book it as a bare
-short call. `strategy_table._PAPER_TYPES` is pinned to
-`shared.structures.LEDGER_DEBIT` ∪ the credit spreads by `test_cross_tier_mirrors`. The **`100 SHARES`** chip on all three templates is what
+or collar — must never gain a Paper button**: `paper_trader.create_paper_trade`
+refuses by name any type outside the credit spreads ∪ `PAPER_DEBIT_TYPES`, so the
+button would fail every click. `strategy_table._PAPER_TYPES` is a literal pinned
+equal to `shared.structures.LEDGER_DEBIT` ∪ the credit spreads by
+`test_cross_tier_mirrors`.
+
+The **`100 SHARES`** chip on all three templates is what
 distinguishes them on screen. All three route to the NUMERIC summary — none is in
 `_ANALYTIC_CODES`, and a share leg pasted into an analytic strategy falls to
 `CUSTOM` because the shape multiset cannot match, so the analytic formulas are

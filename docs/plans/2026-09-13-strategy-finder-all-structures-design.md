@@ -109,7 +109,8 @@ which gives an unbounded long an unjudgeable reward and cuts it.
 
 Measured with **`tools/sweep_strategy_gates.py`** — a synthetic Black-Scholes chain
 (front and front + 28 days), the real builders at the page's default delta bands (put
-−0.20…−0.10, call 0.10…0.20), scored against a neutral view. Default parameters: **spot
+−0.20…−0.10, call 0.10…0.20), scored against a neutral view, with breakevens judged
+against the expected move to each candidate's front expiry. Default parameters: **spot
 100, IV 0.28, $2.50 strikes**; grade at front DTE 14 / 30 / 45.
 
 | Structure | Profile | 14 / 30 / 45 DTE | Deciding figure (vs the `min` bar) |
@@ -152,7 +153,7 @@ survive measurement:
   0.25-delta hedge and the 7-day front: collar R:R **1.66–2.00**, PoP 44–47; protective
   put PoP **42–45**. Both still Good.
 
-The two cuts held: short straddle PoP 57.3 and covered call PoP ~52, against 65, at
+The two cuts held: short straddle PoP 57.3 and covered call PoP ~52–54, against 65, at
 every DTE, ladder and IV swept. (The short straddle would pass `NEUTRAL` — PoP 57.3 vs
 55 — so `NAKED` is the choice that cuts it, not the only profile that could.)
 
@@ -207,8 +208,9 @@ back month spanning a report is exposed to it even when the front expires first.
 - **Send to Paper** (operator decision: only where the ledger is right) adds
   `BUTTERFLY_CALL`, `BUTTERFLY_PUT`, `CONDOR_CALL`, `CONDOR_PUT` to
   `strategy_table._PAPER_TYPES` **and**
-  `paper_trader.PAPER_DEBIT_TYPES` (both now read from
-  `shared.structures.LEDGER_DEBIT`, pinned equal by `test_cross_tier_mirrors`).
+  `paper_trader.PAPER_DEBIT_TYPES` (which now reads
+  `shared.structures.LEDGER_DEBIT`; `_PAPER_TYPES` stays a literal, pinned equal to
+  `LEDGER_DEBIT` ∪ the credit spreads by `test_cross_tier_mirrors`).
   **Exit rule (operator decision 2026-09-13): no time exit** for butterflies and
   condors — they keep the 50%-of-max-profit target and settle at expiry. A 21-DTE
   exit suits trades that lose value to time; a long fly gains most of its value in the

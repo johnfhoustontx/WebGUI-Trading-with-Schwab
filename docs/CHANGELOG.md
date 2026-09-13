@@ -39,7 +39,7 @@ knows.** Operator request: "scan for all strategies using the updated rules".)
 **Operator decisions.** (1) **D1 kept** — straddles and strangles, long or short,
 are built and shown but never paper-traded. (2) **No time exit for butterflies and
 condors** — a long fly gains most of its value in the final two weeks (95/100/105
-at spot 100: $1.20 at 30 DTE, $1.42 at 21, ~$3.10 target near 3 DTE), so a 21-DTE
+at spot 100, IV 28%: $1.20 at 30 DTE, $1.42 at 21, ~$3.10 target near 3 DTE), so a 21-DTE
 exit would close it flat; they keep the 50%-of-max-profit target and expiry
 settlement, and the original four debit structures keep `exit_dte = 21`. (3) **The
 short straddle and covered call are counted, not shown** — both fail `NAKED`'s 65

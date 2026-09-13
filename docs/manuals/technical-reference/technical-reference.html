@@ -1448,8 +1448,10 @@ strike) and interpolates breakevens on a fine grid.</p>
   peaks between breakpoints, 801 points to 2× the top strike are sampled, plus points out
   to <strong>32×</strong> — a put diagonal's worst case is the back put decaying to nothing far above
   the strikes. A later leg with an unusable IV (Schwab's <code>-999</code>, NaN, zero) is never built.</li>
-<li>A share lot counts like a long call in the tail test, so a protective put is unbounded
-  upside and a covered call is bounded; share sets scan from a price of <strong>zero</strong>.</li>
+<li>Every Finder payoff is evaluated down to a price of zero. What is specific to a share
+  leg: it is valued at the price itself, it counts like a long call in the upside tail
+  test (so a protective put is unbounded upside and a covered call is bounded), and its
+  structure's capital is the cash it ties up (below).</li>
 </ul>
 <p>PoP (<code>pop_from_payoff</code>) integrates a <strong>zero-drift normal</strong> over ±6σ,
 <code>σ = spot · atm_iv · √(max(dte, 0.5)/365)</code>, counting the prices where that same P&amp;L is
@@ -1464,7 +1466,8 @@ about ten times as capital-efficient as a covered call on the same lot.</p>
 <h3 id="measured-outcomes-and-how-to-re-measure">Measured outcomes, and how to re-measure</h3>
 <p><code>tools/sweep_strategy_gates.py</code> builds a synthetic Black-Scholes chain (front and front +
 28 days), runs the real builders with the page's default delta bands (put −0.20…−0.10,
-call 0.10…0.20) and scores against a neutral view. No Schwab call, no database.</p>
+call 0.10…0.20) and scores against a neutral view, with breakevens judged against the
+expected move to each candidate's front expiry. No Schwab call, no database.</p>
 <pre><code>python tools/sweep_strategy_gates.py                  # spot 100, IV 0.28, $2.50 strikes
 python tools/sweep_strategy_gates.py --step 5
 python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
@@ -2427,7 +2430,7 @@ and by the expiry settlement instead. An unknown <code>dte_at_entry</code> decli
 <p>⚠ <strong>Butterflies and condors have no <code>[structures.*]</code> table, so no <code>exit_dte</code> and no
 rule 3</strong> (operator decision, 2026-09-13). A time exit suits a trade that loses value
 to time; a long fly gains most of its value in the final two weeks — a 95/100/105
-call fly at spot 100 is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
+call fly at spot 100 and IV 28% is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
 only near 3 DTE — so <code>exit_dte = 21</code> would close every 22–30 DTE entry flat. Adding
 a table with <code>exit_dte</code> reverses that decision. The ledger records, reprices and
 settles a butterfly's <code>qty 2</code> body leg; straddles and strangles are refused by name

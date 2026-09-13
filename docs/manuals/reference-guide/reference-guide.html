@@ -3401,7 +3401,7 @@ Finder</a> is the page that produces longer-dated debits.</p>
 <p>⚠ <strong>Butterflies and condors have no time exit at all</strong> (operator decision,
 2026-09-13). The 21-day rule suits a trade that <em>loses</em> value to time; a long
 butterfly <em>gains</em> most of its value in the last two weeks — a 95/100/105 call
-butterfly at spot 100 is worth about $1.20 at 30 days and $1.42 at 21, and reaches
+butterfly at spot 100 and IV 28% is worth about $1.20 at 30 days and $1.42 at 21, and reaches
 its ~$3.10 target only near 3 days out — so the rule would close every such entry
 near break-even within days. They ride to the target or to expiry. A butterfly's
 body reads <code>S 2×100C</code> in the Strikes cell, and its detail panel shows both
@@ -3838,10 +3838,11 @@ row of seven checkboxes, all ticked by default:</p>
 </table>
 <p>An <strong>Advanced</strong> panel exposes the credit-spread filters: put/call <strong>delta</strong> bounds (how
 far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
-and a <strong>minimum credit</strong> percentage. The delta bounds also place the two other sold
-options that are out of the money by design — the <strong>short strangle</strong> and the call in a
-<strong>covered call</strong> or <strong>collar</strong> — at the band's midpoint, and drop one that lands above
-the band's ceiling. They do not move a straddle's or butterfly's shorts, which sit at the
+and a <strong>minimum credit</strong> percentage. The delta bounds also place every other sold
+option that is out of the money by design — the Directional <strong>short put</strong> and <strong>short
+call</strong>, the <strong>short strangle</strong>, and the call in a <strong>covered call</strong> or <strong>collar</strong> — at the
+band's midpoint, and drop one that lands above the band's ceiling (one below the floor is
+kept). They do not move a straddle's or butterfly's shorts, which sit at the
 money by definition.</p>
 <p><strong>How the newer structures are built</strong> — all from the chain the scan already fetched,
 so they cost no extra data:</p>
@@ -3870,8 +3871,9 @@ so they cost no extra data:</p>
   needs its call at 0.05 delta or more) — below that the position is just shares.</li>
 </ul>
 <p>⚠ <strong><code>COVERED_CALL</code> here is the whole position — shares plus the call</strong>, as in the
-<a href="#calculator">Calculator</a>. On the paper account the same name means the option leg
-alone, which is one reason these rows get no Paper button.</p>
+<a href="#calculator">Calculator</a>. The Paper button books into the <strong>Paper Ledger</strong>, which holds
+no shares — so these rows get no Paper button. (On the paper account, <code>COVERED_CALL</code>
+means the option leg alone.)</p>
 <p><strong>The view banner.</strong> Before ranking anything, the scanner <em>infers a market view</em> for the
 symbol from its technicals and implied volatility — a direction, a conviction level, and
 a volatility regime. It then scores each candidate on two things:</p>
@@ -3920,7 +3922,7 @@ condors</strong>. No button for:</p>
 </tr>
 <tr>
 <td>Straddles and strangles, long or short</td>
-<td><strong>analysis only</strong> — a standing decision; the ledger refuses them by name</td>
+<td><strong>analysis only</strong> — a standing decision; the paper ledger does not accept them</td>
 </tr>
 <tr>
 <td>Iron butterfly</td>

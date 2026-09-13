@@ -921,8 +921,10 @@ strike) and interpolates breakevens on a fine grid.
   peaks between breakpoints, 801 points to 2× the top strike are sampled, plus points out
   to **32×** — a put diagonal's worst case is the back put decaying to nothing far above
   the strikes. A later leg with an unusable IV (Schwab's `-999`, NaN, zero) is never built.
-- A share lot counts like a long call in the tail test, so a protective put is unbounded
-  upside and a covered call is bounded; share sets scan from a price of **zero**.
+- Every Finder payoff is evaluated down to a price of zero. What is specific to a share
+  leg: it is valued at the price itself, it counts like a long call in the upside tail
+  test (so a protective put is unbounded upside and a covered call is bounded), and its
+  structure's capital is the cash it ties up (below).
 
 PoP (`pop_from_payoff`) integrates a **zero-drift normal** over ±6σ,
 `σ = spot · atm_iv · √(max(dte, 0.5)/365)`, counting the prices where that same P&L is
@@ -940,7 +942,8 @@ about ten times as capital-efficient as a covered call on the same lot.
 
 `tools/sweep_strategy_gates.py` builds a synthetic Black-Scholes chain (front and front +
 28 days), runs the real builders with the page's default delta bands (put −0.20…−0.10,
-call 0.10…0.20) and scores against a neutral view. No Schwab call, no database.
+call 0.10…0.20) and scores against a neutral view, with breakevens judged against the
+expected move to each candidate's front expiry. No Schwab call, no database.
 
 ```
 python tools/sweep_strategy_gates.py                  # spot 100, IV 0.28, $2.50 strikes
@@ -1680,7 +1683,7 @@ and by the expiry settlement instead. An unknown `dte_at_entry` declines the exi
 ⚠ **Butterflies and condors have no `[structures.*]` table, so no `exit_dte` and no
 rule 3** (operator decision, 2026-09-13). A time exit suits a trade that loses value
 to time; a long fly gains most of its value in the final two weeks — a 95/100/105
-call fly at spot 100 is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
+call fly at spot 100 and IV 28% is $1.20 at 30 DTE, $1.42 at 21, and reaches its ~$3.10 target
 only near 3 DTE — so `exit_dte = 21` would close every 22–30 DTE entry flat. Adding
 a table with `exit_dte` reverses that decision. The ledger records, reprices and
 settles a butterfly's `qty 2` body leg; straddles and strangles are refused by name

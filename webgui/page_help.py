@@ -193,7 +193,9 @@ it can build for it on one score.
   - **Neutral** — iron condors.
   - **Straddles & strangles** — a straddle buys or sells the call and put at the
     money; a long strangle buys both sides about 0.30 delta out, a short
-    strangle sells both sides inside your delta settings.
+    strangle sells both sides aimed at the middle of your delta settings,
+    skipping a side that lands richer than the top of the range (one below the
+    bottom is kept).
   - **Butterflies & condors** — call and put butterflies and the iron butterfly
     centred at the money, and call and put condors. The wings sit about half
     the expected move away, on a strike that exists on both sides.
