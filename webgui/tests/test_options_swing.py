@@ -100,3 +100,12 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:swing") is None  # confirm empty
     with ui.card():
         swing.render()  # must not raise
+
+
+def test_delta_band_expander_does_not_claim_credit_spreads_only():
+    """The delta bands now bind every short leg the Finder sells - the naked short
+    put/call, the short strangle and the covered call or collar call as well as
+    PCS/CCS - so the expander must not be labelled as a credit-spread control."""
+    src = inspect.getsource(swing)
+    assert "Advanced — credit spreads" not in src
+    assert "Advanced — delta bands and credit floor" in src

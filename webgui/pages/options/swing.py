@@ -98,8 +98,10 @@ def render():
                     }
             scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
             status = ui.label("").classes("opacity-70")
-        # Credit-spread-only gates (collapsed; constrain PCS/CCS only).
-        with ui.expansion("Advanced — credit spreads").classes("w-full"):
+        # Collapsed. The delta bands govern every SHORT leg the Finder sells (the
+        # credit spreads, the naked short put/call, the short strangle and the
+        # covered call or collar call); the credit floor is the spreads' alone.
+        with ui.expansion("Advanced — delta bands and credit floor").classes("w-full"):
             with ui.row().classes("items-end gap-2 flex-wrap"):
                 put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
                 put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
