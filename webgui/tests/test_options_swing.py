@@ -144,7 +144,8 @@ def _widgets(card, kind):
 
 def _number(card, label):
     from nicegui import ui
-    (n,) = [e for e in _widgets(card, ui.number) if e.props.get("label") == label]
+    (n,) = [e for e in _widgets(card, ui.number)
+            if label in (e.props.get("label"), e.props.get("aria-label"))]
     return n
 
 
@@ -166,33 +167,92 @@ _PAYLOAD = {"symbol": "SPY", "signals": [_FLY, _NAKED], "filtered_out": 0,
             "vol_filtered": 0, "view": {"direction": "neutral"}}
 
 
-def test_an_expiry_preset_writes_both_boxes_and_a_hand_edit_clears_it():
+def _segment(card, options):
+    """The pill buttons of one segmented group, by label, and the active label."""
+    buttons = {k: v for k, v in _buttons(card).items() if k in options}
+    assert set(buttons) == set(options)
+    on = swing.SEG_ON.split()[0]
+    active = [k for k, b in buttons.items() if on in b._classes]
+    assert len(active) <= 1
+    return buttons, (active[0] if active else None)
+
+
+_EXPIRY = [label for label, _lo, _hi in swing.fv.EXPIRY_PRESETS]
+_RISK = list(swing.fv.RISK_STYLES)
+
+
+def test_the_scan_bar_uses_pill_groups_not_quasar_toggles():
     from nicegui import ui
     card = _render_page()
-    expiry, _risk = _widgets(card, ui.toggle)
-    assert expiry.value == "Any"
-    expiry.value = "2–6 wk"
+    assert _widgets(card, ui.toggle) == []
+    for options in (_EXPIRY, _RISK):
+        buttons, _active = _segment(card, options)
+        for b in buttons.values():
+            assert "no-caps" in b.props and "font-normal" in b._classes
+
+
+def test_scan_bar_groups_share_one_label_style():
+    """Symbol, Expiry and Risk style each carry the same EYEBROW label above the
+    control, rather than a q-field floating label beside a bare toggle."""
+    from nicegui import ui
+    card = _render_page()
+    eyebrows = [e.text for e in _widgets(card, ui.label)
+                if swing.EYEBROW.split()[0] in e._classes]
+    assert eyebrows[:3] == ["Symbol", "Expiry", "Risk style"]
+    symbol = _widgets(card, ui.input)[0]
+    assert "label" not in symbol.props
+
+
+def test_an_expiry_preset_writes_both_boxes_and_a_hand_edit_clears_it():
+    card = _render_page()
+    buttons, active = _segment(card, _EXPIRY)
+    assert active == "Any"
+    _click(buttons["2–6 wk"], card)
     assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (14, 42)
-    assert expiry.value == "2–6 wk"
+    assert _segment(card, _EXPIRY)[1] == "2–6 wk"
     _number(card, "DTE max").value = 50
-    assert expiry.value is None
+    assert _segment(card, _EXPIRY)[1] is None
     _number(card, "DTE max").value = 42
-    assert expiry.value == "2–6 wk"
+    assert _segment(card, _EXPIRY)[1] == "2–6 wk"
 
 
 def test_a_risk_style_writes_the_delta_fields_and_a_hand_edit_shows_custom():
     from nicegui import ui
     card = _render_page()
-    _expiry, risk = _widgets(card, ui.toggle)
+    buttons, active = _segment(card, _RISK)
     (custom,) = [e for e in _widgets(card, ui.label) if e.text == "Custom"]
-    assert risk.value == "Balanced" and not custom.visible
-    risk.value = "Aggressive"
+    assert active == "Balanced" and not custom.visible
+    _click(buttons["Aggressive"], card)
     assert _number(card, "Put Δ min").value == -0.30
     assert _number(card, "Call Δ max").value == 0.30
-    assert risk.value == "Aggressive" and not custom.visible
+    assert _segment(card, _RISK)[1] == "Aggressive" and not custom.visible
     _number(card, "Call Δ max").value = 0.27
-    assert risk.value is None and custom.visible
-    assert "Custom" not in risk.options          # never a choosable value
+    assert _segment(card, _RISK)[1] is None and custom.visible
+    assert "Custom" not in _buttons(card)           # never a choosable value
+
+
+def test_the_split_bar_marks_its_zero_point():
+    card = _render_page(_PAYLOAD)
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    ticks = [e for e in grid.descendants() if swing.SPLIT_TICK.split()[0] in e._classes]
+    assert ticks and all(set(swing.SPLIT_TICK.split()) <= set(t._classes) for t in ticks)
+
+
+def test_the_card_payoff_shape_is_centred():
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    shapes = [e for e in grid.descendants() if isinstance(e, ui.html)]
+    assert shapes and all("self-center" in e._classes for e in shapes)
+    assert all('width="280"' in e.content for e in shapes)
+
+
+def test_the_advanced_expansion_is_light():
+    from nicegui import ui
+    card = _render_page()
+    (adv,) = _widgets(card, ui.expansion)
+    assert "finder-advanced" in adv._classes and "dense" in adv.props
+    assert ".finder-advanced .q-focus-helper" in swing.FINDER_CSS
 
 
 def test_chips_filter_the_list_and_cards_without_a_scan(monkeypatch):

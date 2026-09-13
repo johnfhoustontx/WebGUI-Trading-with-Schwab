@@ -451,7 +451,9 @@ def test_card_facts_for_a_top_pick():
     c = fv.card_facts(_FLY)
     assert c["title"] == "Call Butterfly" and c["score"] == 72.1 and c["grade"] == "Good"
     assert c["expiry"] == "Oct 16 · 30d" and c["cost"] == "$120 debit"
-    assert 'width="120"' in c["payoff_svg"] and 'height="32"' in c["payoff_svg"]
+    # A card is ~300px wide: the shape fills it rather than sitting in a corner.
+    assert 'width="280"' in c["payoff_svg"] and 'height="56"' in c["payoff_svg"]
+    _assert_dompurify_clean(c["payoff_svg"])
     assert c["rr"] == fv.risk_reward_bar(_FLY) and c["pop"] == fv.pop_bar(31.5)
     assert c["pop_fill"] == fv.POP_FILL["warn"]
     assert c["score_text"] == "72"
@@ -466,3 +468,10 @@ def test_card_facts_degrade():
 def test_pop_fill_is_a_fixed_class_per_tone():
     assert set(fv.POP_FILL) == {"warn", "neutral", "pos"}
     assert all(v.startswith("bg-[#") for v in fv.POP_FILL.values())
+
+
+def test_pop_fill_neutral_is_the_theme_accent_not_grey():
+    from pages.options import theme
+    assert fv.POP_FILL["neutral"] == f"bg-[{theme.THEME['palette']['primary']}]"
+    assert fv.POP_FILL["warn"] == "bg-[#fbbf24]" and fv.POP_FILL["pos"] == "bg-[#34d399]"
+    assert len(set(fv.POP_FILL.values())) == 3

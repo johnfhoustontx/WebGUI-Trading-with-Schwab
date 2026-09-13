@@ -17,6 +17,8 @@ import math as _math
 
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 
+from .theme import THEME as _THEME   # config only - theme.py imports no widget code
+
 NO_READING = _fmt.NO_READING
 
 # The seven build groups ``swing_scan`` stamps on each candidate as ``group``, in
@@ -445,8 +447,11 @@ def pop_bar(pop):
 
 
 # The odds bar's fill per tone - a fixed class set, bound through a table slot's
-# ``:class`` (amber / the muted slate / the app's profit green).
-POP_FILL = {"warn": "bg-[#fbbf24]", "neutral": "bg-[#8794b4]", "pos": "bg-[#34d399]"}
+# ``:class``: amber below 40, the theme's accent blue between (grey read as "no
+# data"), the app's profit green above 60.
+POP_FILL = {"warn": "bg-[#fbbf24]",
+            "neutral": f"bg-[{_THEME['palette']['primary']}]",
+            "pos": "bg-[#34d399]"}
 
 
 def _pop_fill(bar):
@@ -634,6 +639,9 @@ def finder_rows(signals, *, score_class, grade_class, paper_types):
     return rows
 
 
+CARD_SHAPE_W, CARD_SHAPE_H = 280, 56
+
+
 def card_facts(sig):
     """What a top-pick card says. The legs line and the paper gate are added by
     the page (their helpers live in widget-importing modules)."""
@@ -647,8 +655,9 @@ def card_facts(sig):
         "grade": s.get("grade") or "",
         "expiry": expiry_text(s),
         "cost": cost_text(s),
+        # A card is ~300px wide; the list keeps its 72x20 shape.
         "payoff_svg": payoff_svg(s.get("payoff_curve"), s.get("underlying_price"),
-                                 width=120, height=32),
+                                 width=CARD_SHAPE_W, height=CARD_SHAPE_H),
         "rr": risk_reward_bar(s),
         "pop": pop,
         "pop_fill": _pop_fill(pop),

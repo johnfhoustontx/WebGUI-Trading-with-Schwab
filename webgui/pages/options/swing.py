@@ -33,7 +33,7 @@ from . import finder_view as fv
 from .inputs import bind_symbol_load, select_all_on_focus
 from .scanner import score_zone_class
 from .theme import (BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D, CARD, EYEBROW, LABEL,
-                    MUTED, TXT_NEG, TXT_POS)
+                    MUTED, THEME, TXT_NEG, TXT_POS)
 
 # Before any scan has published for this session.
 EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
@@ -42,16 +42,73 @@ EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 # test_strategy_table pins these labels against the Calculator's group names.
 _FAMILY_OPTIONS = dict(fv.GROUPS)
 
-# Quasar-internal escape hatch: the app-wide TABLE_CSS caps every table body at
-# 65vh. This list grows with the page instead (the old short scroll box hid most
-# of a scan), so the cap is lifted for this table only.
-FINDER_CSS = ".finder-table .q-table__middle { max-height: none; }"
+# Quasar-internal escape hatch (the ONE ui.add_css this page injects):
+# - the app-wide TABLE_CSS caps every table body at 65vh; this list grows with the
+#   page instead (the old short scroll box hid most of a scan);
+# - the Advanced expansion header's q-focus-helper paints a full-width grey slab
+#   on hover/focus, which no prop turns off.
+FINDER_CSS = (".finder-table .q-table__middle { max-height: none; }\n"
+              ".finder-advanced .q-focus-helper { display: none; }")
 
-# The split bar's two fills - the app's P/L red and green (simulator payoff).
+_PALETTE = THEME["palette"]
+
+# The split bar's two fills - the app's P/L red and green (simulator payoff) -
+# and the tick marking its zero point, in the theme's muted text colour.
 _LOSS_FILL = "bg-[#f87171]"
 _PROFIT_FILL = "bg-[#34d399]"
+SPLIT_TICK = f"w-[2px] h-3 shrink-0 bg-[{_PALETTE['muted']}]"
 _CHIP = "px-3 py-1 text-xs"
 _PILL = "px-2 py-0.5 text-xs"
+
+# Segmented pill group (Expiry presets, Risk style) - the chips' look, in a
+# bordered box the height of a dense outlined input so one row lines up.
+SEG_BOX = (f"inline-flex flex-nowrap items-center gap-0.5 p-[3px] h-10 "
+           f"rounded-[8px] border border-[{_PALETTE['input_border']}]")
+SEG_ON = f"{BADGE_ACCENT} px-2.5 min-h-[30px] text-xs font-normal"
+SEG_OFF = (f"bg-transparent text-[{_PALETTE['muted']}] hover:text-[{_PALETTE['title']}] "
+           "rounded-[6px] px-2.5 min-h-[30px] text-xs font-normal")
+_FIELD_PROPS = "dense outlined"
+
+
+class _Segmented:
+    """A row of pill buttons, at most one active; ``value`` None = none active.
+
+    Replaces ``ui.toggle``, whose QBtnToggle internals (bold white labels, a solid
+    Quasar-colour active block) no prop can restyle to the chips' look. Setting
+    ``value`` from code repaints only; a click repaints and calls ``on_change``.
+    """
+
+    def __init__(self, options, value, on_change):
+        self._on_change = on_change
+        self._value = None
+        self._buttons = {}
+        with ui.element("div").classes(SEG_BOX) as self.element:
+            for opt in options:
+                btn = ui.button(opt, color=None).props("no-caps dense unelevated") \
+                    .classes(SEG_OFF)
+                btn.on("click", lambda _e, o=opt: self._clicked(o))
+                self._buttons[opt] = btn
+        self.value = value
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new):
+        self._value = new if new in self._buttons else None
+        for opt, btn in self._buttons.items():
+            if opt == self._value:
+                btn.classes(remove=SEG_OFF, add=SEG_ON)
+            else:
+                btn.classes(remove=SEG_ON, add=SEG_OFF)
+
+    @guard
+    def _clicked(self, opt):
+        if opt == self._value:
+            return
+        self.value = opt
+        self._on_change(opt)
 
 
 def pct_to_fraction(value):
@@ -167,40 +224,54 @@ def render():
     sync = {"on": False}        # True while code writes linked controls
 
     with ui.column().classes("w-full gap-3"):
-        # 1 - Scan bar.
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            with ui.row().classes("w-full items-end gap-4 flex-wrap"):
-                symbol_in = select_all_on_focus(
-                    ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
+        # 1 - Scan bar. One bottom-aligned row that wraps: every group carries the
+        # same EYEBROW label above a 40px-tall control (dense outlined inputs and
+        # the pill boxes share that height), so the labels and the controls each
+        # sit on one line. Scan is last.
+        with ui.column().classes(f"{CARD} w-full gap-1"):
+            with ui.row().classes("w-full items-end gap-x-5 gap-y-3 flex-wrap"):
                 with ui.column().classes("gap-1"):
-                    ui.label("Expiry").classes(f"text-xs {EYEBROW}")
-                    with ui.row().classes("items-end gap-2 flex-wrap"):
-                        expiry_toggle = ui.toggle(
+                    ui.label("Symbol").classes(EYEBROW)
+                    symbol_in = select_all_on_focus(
+                        ui.input(value="SPY")
+                        .props(f"{_FIELD_PROPS} autofocus aria-label=Symbol")
+                        .classes("w-28"))
+                with ui.column().classes("gap-1"):
+                    ui.label("Expiry").classes(EYEBROW)
+                    with ui.row().classes("items-center gap-2 flex-wrap"):
+                        expiry_seg = _Segmented(
                             [label for label, _lo, _hi in fv.EXPIRY_PRESETS],
-                            value=fv.expiry_preset_for(0, 120),
-                        ).props("dense no-caps unelevated")
-                        dte_min = ui.number("DTE min", value=0, min=0).classes("w-20")
-                        dte_max = ui.number("DTE max", value=120, min=1).classes("w-20")
+                            fv.expiry_preset_for(0, 120),
+                            lambda v: _on_expiry_choice(v))
+                        dte_min = ui.number(value=0, min=0) \
+                            .props(f'{_FIELD_PROPS} aria-label="DTE min"').classes("w-20")
+                        ui.label("to").classes(f"text-xs {MUTED}")
+                        dte_max = ui.number(value=120, min=1) \
+                            .props(f'{_FIELD_PROPS} aria-label="DTE max"').classes("w-20")
+                        ui.label("days").classes(f"text-xs {MUTED}")
                 with ui.column().classes("gap-1"):
-                    ui.label("Risk style").classes(f"text-xs {EYEBROW}")
+                    ui.label("Risk style").classes(EYEBROW)
                     with ui.row().classes("items-center gap-2 no-wrap"):
-                        risk_toggle = ui.toggle(list(fv.RISK_STYLES),
-                                                value=fv.RISK_DEFAULT) \
-                            .props("dense no-caps unelevated")
+                        risk_seg = _Segmented(list(fv.RISK_STYLES), fv.RISK_DEFAULT,
+                                              lambda v: _on_risk_choice(v))
                         # Read-only: shown when the Advanced fields match no style.
-                        # It is never a toggle option, so it can never be "chosen".
+                        # It is never an option, so it can never be "chosen".
                         custom_badge = ui.label(fv.RISK_CUSTOM) \
                             .classes(f"{BADGE_MUTED} {_PILL}")
                         custom_badge.set_visibility(False)
                 scan_btn = ui.button("Scan", icon="search", color=None) \
-                    .props("no-caps").classes(BTN_3D)
-                status = ui.label("").classes(f"text-sm {MUTED}")
-            # Collapsed. The delta bands govern every SHORT leg the Finder sells (the
-            # credit spreads, the naked short put/call, the short strangle and the
-            # covered call or collar call); the credit floor is the spreads' alone.
-            with ui.expansion("Advanced — delta bands and credit floor").classes("w-full"):
+                    .props("no-caps").classes(f"{BTN_3D} h-10 px-4")
+                status = ui.label("").classes(f"text-sm {MUTED} self-center")
+            # Collapsed and deliberately quiet: a small muted header, no hover slab
+            # (FINDER_CSS). The delta bands govern every SHORT leg the Finder sells
+            # (the credit spreads, the naked short put/call, the short strangle and
+            # the covered call or collar call); the credit floor is the spreads' alone.
+            with ui.expansion("Advanced — delta bands and credit floor") \
+                    .classes("finder-advanced w-full") \
+                    .props(f'dense header-class="px-1 min-h-[32px] text-xs '
+                           f'text-[{_PALETTE["muted"]}]"'):
                 start = fv.risk_bands(fv.RISK_DEFAULT)
-                with ui.row().classes("items-end gap-2 flex-wrap"):
+                with ui.row().classes("items-end gap-2 flex-wrap pt-1"):
                     put_dmin = ui.number("Put Δ min", value=start["put_d_min"],
                                          format="%.2f").classes("w-24")
                     put_dmax = ui.number("Put Δ max", value=start["put_d_max"],
@@ -239,10 +310,10 @@ def render():
     # --------------------------------------------------------------- controls
 
     @guard
-    def _on_expiry_choice(e):
+    def _on_expiry_choice(value):
         if sync["on"]:
             return
-        rng = fv.expiry_range_for(e.value)
+        rng = fv.expiry_range_for(value)
         if rng is None:            # a cleared toggle writes nothing
             return
         sync["on"] = True
@@ -255,23 +326,17 @@ def render():
     def _refresh_expiry_toggle(_e=None):
         if sync["on"]:
             return
-        label = fv.expiry_preset_for(dte_min.value, dte_max.value)
-        if expiry_toggle.value != label:
-            sync["on"] = True
-            try:
-                expiry_toggle.value = label
-            finally:
-                sync["on"] = False
+        expiry_seg.value = fv.expiry_preset_for(dte_min.value, dte_max.value)
 
     def _bands():
         return {"put_d_min": put_dmin.value, "put_d_max": put_dmax.value,
                 "call_d_min": call_dmin.value, "call_d_max": call_dmax.value}
 
     @guard
-    def _on_risk_choice(e):
+    def _on_risk_choice(value):
         if sync["on"]:
             return
-        bands = fv.bands_for_choice(e.value)   # never risk_bands("Custom")
+        bands = fv.bands_for_choice(value)     # never risk_bands("Custom")
         if bands is None:
             return
         sync["on"] = True
@@ -292,17 +357,10 @@ def render():
         value = fv.risk_toggle_value(b["put_d_min"], b["put_d_max"],
                                      b["call_d_min"], b["call_d_max"])
         custom_badge.set_visibility(value is None)
-        if risk_toggle.value != value:
-            sync["on"] = True
-            try:
-                risk_toggle.value = value
-            finally:
-                sync["on"] = False
+        risk_seg.value = value
 
-    expiry_toggle.on_value_change(_on_expiry_choice)
     dte_min.on_value_change(_refresh_expiry_toggle)
     dte_max.on_value_change(_refresh_expiry_toggle)
-    risk_toggle.on_value_change(_on_risk_choice)
     for field in (put_dmin, put_dmax, call_dmin, call_dmax):
         field.on_value_change(_refresh_risk_toggle)
 
@@ -375,13 +433,18 @@ def render():
                 _chip(f"{label} {n}", code)
 
     def _split_bar(rr):
-        # Loss grows leftwards from the centre, profit rightwards, both scaled to
-        # the larger of the two (finder_view.risk_reward_bar).
-        with ui.element("div").classes(
-                "flex flex-nowrap w-full h-2 rounded overflow-hidden bg-white/5"):
-            with ui.element("div").classes("flex flex-nowrap justify-end w-1/2 h-full"):
+        # Loss grows leftwards from the centre tick, profit rightwards, both scaled
+        # to the larger of the two (finder_view.risk_reward_bar). The tick makes
+        # the zero point explicit, so an empty left half reads as "little risk"
+        # rather than as a gap.
+        with ui.element("div").classes("flex flex-nowrap items-center w-full h-3"):
+            with ui.element("div").classes(
+                    "flex flex-nowrap justify-end flex-1 h-2 rounded-l overflow-hidden "
+                    "bg-white/5"):
                 ui.element("div").classes(f"h-full {_LOSS_FILL} {rr['loss_class']}")
-            with ui.element("div").classes("flex flex-nowrap w-1/2 h-full"):
+            ui.element("div").classes(SPLIT_TICK)
+            with ui.element("div").classes(
+                    "flex flex-nowrap flex-1 h-2 rounded-r overflow-hidden bg-white/5"):
                 ui.element("div").classes(f"h-full {_PROFIT_FILL} {rr['profit_class']}")
         with ui.row().classes("w-full justify-between no-wrap"):
             ui.label(f"Max loss {rr['loss_label']}").classes(f"text-xs {TXT_NEG}")
@@ -403,7 +466,7 @@ def render():
             ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
             ui.label(c["legs"]).classes("text-xs")
             if c["payoff_svg"]:
-                ui.html(c["payoff_svg"])
+                ui.html(c["payoff_svg"]).classes("self-center max-w-full overflow-hidden")
             if c["rr"]:
                 _split_bar(c["rr"])
             if c["pop"]:
