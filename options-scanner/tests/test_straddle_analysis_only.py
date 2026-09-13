@@ -1,4 +1,5 @@
 """D1: the straddle/strangle templates stay ANALYSIS ONLY, engine side.
+The Strategy Finder builds them for comparison; nothing can open one.
 
 Design: docs/plans/2026-09-12-straddle-strangle-design.md.
 
@@ -27,12 +28,49 @@ def test_the_repricer_cannot_mark_one():
         assert all(v is None for v in greeks.values()), code
 
 
-def test_the_scanner_emits_no_such_structure():
-    """The builders emit a closed set of types; none of these is among them."""
-    import strategy_scanner
-    src = inspect.getsource(strategy_scanner)
+def test_the_scanner_may_show_one_but_the_ledger_cannot_open_one():
+    """The Strategy Finder BUILDS these (2026-09-13) so a trader can compare them;
+    D1 is about what can be OPENED, and that stays nothing. A scanner row reaches
+    the ledger only through ``paper_trader.create_paper_trade``: the debit path is
+    gated by ``PAPER_DEBIT_TYPES``, and anything else falls into the credit branch,
+    which needs ``short_strike`` / ``long_strike`` / ``width`` / ``credit`` a
+    straddle row does not carry - so it raises rather than opening a position."""
+    import paper_trader
     for code in FOUR:
-        assert code not in src, code
+        assert code not in paper_trader.PAPER_DEBIT_TYPES, code
+
+
+def _straddle_chain(spot=100.0, days=30):
+    """Three strikes, both maps, one expiry - enough for all four builders."""
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=days)).isoformat()
+    key = f"{exp}:{days}"
+
+    def c(delta, mark):
+        return [{"delta": delta, "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
+                 "theta": -0.02, "vega": 0.10, "gamma": 0.01, "volatility": 28.0,
+                 "totalVolume": 500, "openInterest": 1000}]
+    return {"underlyingPrice": spot,
+            "callExpDateMap": {key: {"95.0": c(0.77, 6.5), "100.0": c(0.53, 3.4),
+                                     "105.0": c(0.30, 1.5)}},
+            "putExpDateMap": {key: {"95.0": c(-0.23, 1.2), "100.0": c(-0.47, 2.9),
+                                    "105.0": c(-0.70, 6.0)}}}
+
+
+def test_a_real_finder_row_for_each_raises_in_the_credit_branch():
+    """Proves the docstring above rather than restating it: a row built by the
+    Finder itself carries none of the credit fields, so ``create_paper_trade``
+    raises before building a trade dict. It is a pure dict builder - no database
+    and no network - which is what makes this safe to call here."""
+    import pytest
+    import paper_trader
+    import strategy_scanner as ss
+    rows = {s["type"]: s for s in ss.build_straddles_strangles(
+        _straddle_chain(), "XYZ", 100.0, 0.28, 5, 90)}
+    assert set(rows) == set(FOUR)
+    for code, row in rows.items():
+        with pytest.raises(KeyError):
+            paper_trader.create_paper_trade(row, 1)
 
 
 def test_the_paper_engine_has_no_leg_layout_for_one():
