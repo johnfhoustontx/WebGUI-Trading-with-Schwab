@@ -616,11 +616,13 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
 
 
 _CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
-# The front leg sits at least a week out. The page's default DTE window starts at
-# 0, so "nearest expiry" was a 0-2 DTE front whose calendar can barely profit -
-# measured call-calendar R:R -0.004 at 0/28, 0.18 at 1/29, 0.55 at 7/35 - and every
-# such row was cut, leaving the Calendars checkbox showing nothing.
-_CAL_MIN_FRONT_DTE = 7
+# The front leg sits at least a week out - for calendars, diagonals and the share
+# structures. The page's default DTE window starts at 0, so "nearest expiry" was a
+# 0-2 DTE front: a calendar there can barely profit (measured call-calendar R:R
+# -0.004 at 0/28, 0.18 at 1/29, 0.55 at 7/35, and every such row was cut), and a
+# protective put hedging with a put that expires tomorrow showed a $110 max loss
+# and passed the LONG gate.
+_MIN_FRONT_DTE = 7
 _DIAG_SHORT_DELTA, _DIAG_LONG_DELTA = 0.30, 0.70
 # The short front leg must sit inside this |delta| band. Out of the money alone let
 # through a near-ATM short (spot 100.1 on a $5 ladder sold the 100P at -0.47) and,
@@ -738,7 +740,7 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
     """Call/put calendar (short and long at the same ATM strike) and call/put
     diagonal (see ``_diagonal``), inside the scan's own DTE window.
 
-    Front = nearest expiry at least ``_CAL_MIN_FRONT_DTE`` (7) days out; back = the
+    Front = nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out; back = the
     expiry whose DTE is nearest front + 28 with at least 7 days between them. A
     candidate whose max profit is not a positive number is dropped. No second
     chain fetch: a window without two such expiries builds nothing, and the user
@@ -758,7 +760,7 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
         by_exp = {e: v for e, v in by_exp.items() if v["strikes"]}
         ordered = sorted(by_exp.items(), key=lambda kv: kv[1]["dte"])
         fronts = [(e, v) for e, v in ordered
-                  if v["dte"] >= max(dte_min, _CAL_MIN_FRONT_DTE)]
+                  if v["dte"] >= max(dte_min, _MIN_FRONT_DTE)]
         if not fronts:
             continue
         f_exp, f = fronts[0]
@@ -787,6 +789,12 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
+# The protective put and collar buy a real hedge. Under 0.10 delta the "hedge" is
+# a lottery ticket and the position is bare stock; a collar selling a call under
+# 0.05 delta is a protective put with a token credit attached.
+_PROTECTIVE_PUT_DELTA, _MIN_HEDGE_PUT_DELTA, _MIN_COLLAR_CALL_DELTA = 0.25, 0.10, 0.05
+
+
 def _stock_leg(spot):
     """One 100-share lot at spot (the Calculator's D4 share-leg convention)."""
     return {"kind": _oc.STOCK_KIND, "side": "long", "strike": None, "expiration": None,
@@ -797,21 +805,32 @@ def _stock_leg(spot):
 def build_stock_structures(chain, symbol, spot, atm_iv, dte_min, dte_max,
                            put_band=None, call_band=None):
     """Covered call, protective put and collar, each on one 100-share lot bought at
-    spot. The short call is at the call band's midpoint and obeys its CEILING; the
-    long put is at the put band's midpoint and does not (a band governs where you
-    SELL premium). ⚠ ``COVERED_CALL`` here is the WHOLE position, as in the
-    Calculator - the paper account's ``COVERED_CALL`` is the option leg alone, so
-    this row gets no Paper button.
+    spot, on the nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out.
+
+    The short call is the out-of-the-money call nearest the call band's midpoint and
+    obeys its CEILING. The long put is the out-of-the-money put nearest
+    ``_PROTECTIVE_PUT_DELTA`` (0.25) and ignores ``put_band``, which is accepted for
+    signature symmetry only: a band says where you SELL premium, and borrowed for a
+    hedge it bought a 0.08-delta lottery ticket. A hedge under
+    ``_MIN_HEDGE_PUT_DELTA`` builds neither the protective put nor the collar, and a
+    collar whose call is under ``_MIN_COLLAR_CALL_DELTA`` is not built - both are
+    essentially bare stock (or a bare protective put) under another name.
+
+    ⚠ ``COVERED_CALL`` here is the WHOLE position, as in the Calculator - the paper
+    account's ``COVERED_CALL`` is the option leg alone, so this row gets no Paper
+    button.
     """
-    fp = _front_pair(chain, dte_min, dte_max)
+    fp = _front_pair(chain, max(dte_min, _MIN_FRONT_DTE), dte_max)
     if not fp:
         return []
     exp, cs, ps = fp
-    cb, pb = _band_abs(call_band), _band_abs(put_band)
+    cb = _band_abs(call_band)
     c = nearest_by_delta({s: v for s, v in cs.items() if s > spot}, _short_target(cb))
     if c and cb and abs(c["delta"]) > cb[1]:
         c = None
-    p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _short_target(pb))
+    p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _PROTECTIVE_PUT_DELTA)
+    if p and abs(p["delta"]) < _MIN_HEDGE_PUT_DELTA:
+        p = None
     out = []
     if c:
         legs = [_stock_leg(spot), _leg_from(c, "call", "short", exp)]
@@ -821,7 +840,7 @@ def build_stock_structures(chain, symbol, spot, atm_iv, dte_min, dte_max,
         legs = [_stock_leg(spot), _leg_from(p, "put", "long", exp)]
         out.append(_assemble("PROTECTIVE_PUT", "DIRECTIONAL", "Protective Put", "bullish",
                              legs, symbol, spot, atm_iv))
-    if c and p:
+    if c and p and abs(c["delta"]) >= _MIN_COLLAR_CALL_DELTA:
         legs = [_stock_leg(spot), _leg_from(c, "call", "short", exp),
                 _leg_from(p, "put", "long", exp)]
         out.append(_assemble("COLLAR", "DIRECTIONAL", "Collar", "bullish",

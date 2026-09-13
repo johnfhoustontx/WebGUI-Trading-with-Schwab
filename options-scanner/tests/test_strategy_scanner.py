@@ -1385,21 +1385,27 @@ def test_a_far_ladder_call_under_the_band_floor_still_builds_the_covered_call():
     """On a step-20 ladder the only out-of-the-money calls sit far out (120C at
     |delta| ~0.014): under a 0.10 ceiling AND below the 0.05 floor. Only the
     ceiling binds - escaping the band downward is a thin credit, not extra
-    assignment risk - so the covered call and collar are built. The test below
-    exercises the ceiling actually dropping them."""
+    assignment risk - so the covered call is built. The test below exercises the
+    ceiling actually dropping it. The collar and protective put are not built on
+    this ladder, but for a different reason: its only out-of-the-money put (80P,
+    ~0.002 delta) is under the 0.10 hedge floor, and the 120C is under the collar's
+    0.05 call floor."""
     out = _by_type(ss.build_stock_structures(_ladder_chain(step=20.0, n=2), "XYZ",
                                              100.0, 0.28, 5, 90, call_band=(0.05, 0.10)))
     call = next(l for l in out["COVERED_CALL"]["legs"] if l["kind"] == "call")
     assert call["strike"] == 120.0 and abs(call["delta"]) < 0.05
-    assert "COLLAR" in out and "PROTECTIVE_PUT" in out
+    assert "COLLAR" not in out and "PROTECTIVE_PUT" not in out
 
 
 def test_the_call_band_ceiling_binds_when_the_only_otm_call_is_richer_than_it():
     """On ``step=5, n=1`` the only out-of-the-money call is 105 at ~0.30 delta,
     richer than a 0.10 ceiling: no covered call and no collar. The long put is
-    not governed by a band's ceiling, so the protective put is still built."""
+    not governed by a band's ceiling: the only out-of-the-money put, 95P at ~0.23,
+    is richer than the 0.20 put ceiling passed here, and the protective put is
+    still built."""
     out = _by_type(ss.build_stock_structures(_ladder_chain(step=5.0, n=1), "XYZ",
-                                             100.0, 0.28, 5, 90, call_band=(0.05, 0.10)))
+                                             100.0, 0.28, 5, 90, call_band=(0.05, 0.10),
+                                             put_band=(-0.20, -0.10)))
     assert "COVERED_CALL" not in out and "COLLAR" not in out
     assert "PROTECTIVE_PUT" in out
 
@@ -1457,10 +1463,11 @@ def test_a_collars_capital_is_the_cash_to_open_not_its_max_loss():
 
 def test_covered_call_and_protective_put_capital_are_unchanged():
     """Both already reported the cash to open; pinned numerically on the default
-    $5 ladder (spot 100, IV 28, 30 DTE, bands 0.10-0.20)."""
+    $5 ladder (spot 100, IV 28, 30 DTE, bands 0.10-0.20). The protective put buys
+    the 95P since it took its own 0.25-delta hedge (it was 10031.30 on the 90P)."""
     out = _stock_structures()
     assert out["COVERED_CALL"]["capital"] == 9948.30
-    assert out["PROTECTIVE_PUT"]["capital"] == 10031.30
+    assert out["PROTECTIVE_PUT"]["capital"] == 10115.30
 
 
 # ---- Review follow-up: long straddles and strangles want nearby breakevens ----
@@ -1540,3 +1547,51 @@ def test_a_long_strangle_on_the_default_band_clears_the_long_pop_bar():
         put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))["LONG_STRANGLE"]
     assert s["dte"] == 30
     assert s["pop_pct"] >= sc.GATE_BARS["LONG"]["min"]["pop"] == 30
+
+
+# ---- Review follow-up: share structures - a 7-day front, a real 0.25-delta hedge ----
+def test_share_structures_skip_an_expiry_under_seven_days():
+    """The page's DTE min defaults to 0. On a 1-DTE front a protective put hedging
+    with a put that expires tomorrow showed a tiny max loss and passed the LONG
+    gate; the share structures take the calendar's 7-day front floor instead."""
+    out = _by_type(ss.build_stock_structures(
+        _ladder_chain(days=(1, 30)), "XYZ", 100.0, 0.28, 0, 90,
+        put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
+    for t in ("COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"):
+        assert out[t]["expiration"] == _exp(30), t
+        assert all(l["expiration"] == _exp(30) for l in out[t]["legs"] if l["kind"] != "stock")
+
+
+def test_the_protective_put_buys_a_quarter_delta_hedge_not_the_short_band():
+    """A band says where you SELL premium. Borrowed for a hedge, the 0.10-0.20 put
+    band bought the 90P at ~0.08 delta - a lottery ticket, not protection."""
+    out = _stock_structures()
+    for t in ("PROTECTIVE_PUT", "COLLAR"):
+        put = next(l for l in out[t]["legs"] if l["kind"] == "put")
+        assert put["side"] == "long" and put["strike"] < 100.0
+        assert abs(abs(put["delta"]) - 0.25) <= 0.10, (t, put["strike"], put["delta"])
+
+
+def test_a_hedge_under_ten_delta_builds_no_protective_put_or_collar():
+    """On a step-20 ladder the only out-of-the-money put is 80P at ~0.002 delta:
+    holding it is essentially holding bare stock, so neither hedge row is built.
+    The covered call does not hold a put and is unaffected."""
+    out = _by_type(ss.build_stock_structures(_ladder_chain(step=20.0, n=2), "XYZ",
+                                             100.0, 0.28, 5, 90, call_band=(0.05, 0.10)))
+    assert "PROTECTIVE_PUT" not in out and "COLLAR" not in out
+    assert "COVERED_CALL" in out
+
+
+def test_a_collar_whose_call_is_under_five_delta_is_not_built():
+    """With 105C and 110C unlisted the nearest out-of-the-money call is 115C at
+    ~0.04 delta: a collar selling it is essentially a protective put, so it is not
+    built - while the protective put and covered call are."""
+    chain = _ladder_chain()
+    for k in ("105.0", "110.0"):
+        _drop(chain, "callExpDateMap", 30, k)
+    out = _by_type(ss.build_stock_structures(chain, "XYZ", 100.0, 0.28, 5, 90,
+                                             put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
+    call = next(l for l in out["COVERED_CALL"]["legs"] if l["kind"] == "call")
+    assert call["strike"] == 115.0 and abs(call["delta"]) < 0.05
+    assert "COLLAR" not in out
+    assert "PROTECTIVE_PUT" in out
