@@ -2582,8 +2582,7 @@ _BB_CHIP = ("flex-1 min-w-[124px] border border-l-[3px] rounded-[2px] "
 # sorted by a canonical CSS-property list in which every per-side property
 # (``border-left-color``) follows its shorthand (``border-color``). At equal
 # specificity the later rule wins, so the stripe holds the left edge however the
-# two class strings are concatenated. ``pages/options/leg_editor.py``'s leg-card
-# accents (``accent_long``/``accent_short``) already depend on this.
+# two class strings are concatenated.
 _BB_STRIPE = {
     "rising_leading": "border-l-emerald-400/70",
     "rising_lagging": "border-l-emerald-400/40",

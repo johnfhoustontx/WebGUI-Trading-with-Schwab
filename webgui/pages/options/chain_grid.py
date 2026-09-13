@@ -112,6 +112,18 @@ def extract_premium(chain, option_type, strike, expiry=None):
     return None
 
 
+def extract_price(chain, option_type, strike, expiry, source):
+    """One leg's price from the chosen side of the quote: ``"bid"``, ``"ask"``,
+    or the mark (``extract_premium``) for anything else.
+
+    A zero or missing bid/ask is no reading — ``None``, never a $0.00 leg."""
+    if source not in ("bid", "ask"):
+        return extract_premium(chain, option_type, strike, expiry)
+    c = _find_contract(chain, option_type, strike, expiry)
+    v = _finite((c or {}).get(source))
+    return v if v is not None and v > 0 else None
+
+
 def extract_delta(chain, option_type, strike, expiry=None):
     """Per-contract delta for one leg from the cached chain, or ``None``.
 

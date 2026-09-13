@@ -51,7 +51,7 @@ from . import shared_position as _shared
 # the same chain without importing another PAGE. Re-exported by name — the
 # helpers below and the page's tests still reach them as ``calculator.X``.
 from .chain_grid import (_finite, _DELTA_LIMIT, extract_atm_iv, _find_contract,  # noqa: F401
-                         extract_premium, extract_delta, position_delta, leg_delta,
+                         extract_premium, extract_price, extract_delta, position_delta, leg_delta,
                          chain_expiries, chain_strikes)
 # The PURE leg model (no nicegui), so the module-level helpers below stay
 # importable without it — ``leg_editor`` and ``ui`` are imported lazily in
@@ -863,16 +863,13 @@ _METRIC_EDGE = {"pos": CALC_EDGE_POS, "neg": CALC_EDGE_NEG,
                 "accent": CALC_EDGE_ACCENT, "warn": CALC_EDGE_WARN,
                 "dim": f"border-l-2 border-l-[{_C['dim']}]"}
 
-# The shared leg editor's card palette, repainted in [calc]. The GEOMETRY is the
+# The shared leg editor's palette, repainted in [calc]. The GEOMETRY is the
 # editor's; only the colours enter from here, which is how the Simulator keeps
-# the app-wide navy while mounting the same card.
+# the app-wide navy while mounting the same leg table.
 _LEG_TOKENS = {
     "frame": f"border border-[{_C['edge_idle']}] rounded-[2px] bg-[{_C['frame_b']}]",
     "eyebrow": (f"text-[8px] tracking-[.14em] text-[{_C['label']}] "
                 f"whitespace-nowrap truncate"),
-    # Side -> accent, the design's cyan long / green short.
-    "accent_long": f"border-l-2 border-l-[{_C['accent']}]",
-    "accent_short": f"border-l-2 border-l-[{_C['pos']}]",
     "num": f"text-[10px] text-[{_C['label']}]",
     "delta": f"text-[11px] text-[{_C['txt']}] whitespace-nowrap",
     "remove": (f"text-[10px] text-[{_C['btn_txt']}] border "
@@ -1226,10 +1223,11 @@ def render():
     def _expiries_for():
         return chain_expiries(state.get("chain") or {})
 
-    def _price_for(leg):
-        """One leg's price for the table's refill: the chain's mark (else the
-        bid/ask mid) at the leg's own expiry, falling back to a no-expiry strike
-        match as the old Fetch premiums did. A SHARE leg costs spot."""
+    def _price_for(leg, source="mark"):
+        """One leg's price for the table's refill, from the side of the quote the
+        row chose - the bid, the ask, or the mark (else the bid/ask mid) - at the
+        leg's own expiry, falling back to a no-expiry strike match as the old
+        Fetch premiums did. A SHARE leg costs spot."""
         if leg_editor.is_stock_leg(leg):
             spot = _finite(price_in.value)
             return spot if spot is not None and spot > 0 else None
@@ -1237,10 +1235,11 @@ def render():
         strike = leg.get("strike")
         if chain is None or isinstance(strike, bool) or not isinstance(strike, (int, float)):
             return None
-        prem = extract_premium(chain, leg.get("option_type"), float(strike),
-                               expiry=leg.get("expiry") or panel.selected_expiry())
+        prem = extract_price(chain, leg.get("option_type"), float(strike),
+                             leg.get("expiry") or panel.selected_expiry(), source)
         if prem is None:
-            prem = extract_premium(chain, leg.get("option_type"), float(strike))
+            prem = extract_price(chain, leg.get("option_type"), float(strike),
+                                 None, source)
         return prem
 
     def _delta_for(leg):
@@ -1497,11 +1496,11 @@ def render():
     panel.on_expiry(_on_expiry_change)
 
     def _add_pick(column, option_type, strike, expiry):
-        """A chain-grid click → a one-contract leg at the MARK (see entry.leg_from_pick)."""
-        leg = _entry.leg_from_pick(column, option_type, strike, expiry, price=None)
-        price = _price_for(leg)
-        leg["premium"] = round(price, 2) if price is not None else None
-        editor.add_leg(leg)             # fires on_change: capture, strip, poke
+        """A chain-grid click MOVES the leg on the same side and type to that
+        contract, or adds one when none matches (``editor.place_pick``), priced
+        at that row's Bid / Mark / Ask - the mark for a new row."""
+        editor.place_pick(_entry.leg_from_pick(column, option_type, strike, expiry,
+                                               price=None))   # fires on_change
 
     panel.on_pick(guard(_add_pick))
 

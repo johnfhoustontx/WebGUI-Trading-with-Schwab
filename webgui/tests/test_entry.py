@@ -26,16 +26,6 @@ def test_step_strike_total():
     assert E.step_strike([575.0, "x", 560.0, 560.0], 560.0, +1) == 575.0
 
 
-def test_parse_strike_text_snaps_typed_text_to_the_ladder():
-    assert E.parse_strike_text("571", LADDER) == 570.0
-    assert E.parse_strike_text(" 565.00 ", LADDER) == 565.0
-    assert E.parse_strike_text("abc", LADDER) is None
-    assert E.parse_strike_text("", LADDER) is None
-    assert E.parse_strike_text(None, LADDER) is None
-    assert E.parse_strike_text("nan", LADDER) is None
-    assert E.parse_strike_text("570", []) is None
-
-
 def test_leg_from_pick_bid_sells_ask_buys_at_the_given_price():
     sell = E.leg_from_pick("bid", "put", 565.0, "2026-09-19", price=2.07)
     assert sell == {"option_type": "put", "side": "short", "strike": 565.0,
@@ -90,3 +80,45 @@ def test_expiry_label_is_a_short_month_day_and_passes_junk_through():
 def test_expiry_options_map_iso_values_to_short_labels():
     assert E.expiry_options(["2026-09-14", "2026-09-18"]) == {
         "2026-09-14": "Sep 14", "2026-09-18": "Sep 18"}
+
+
+# ── a grid click moves the matching leg (2026-09-12) ────────────────────────
+
+def _L(otype, side, strike, **kw):
+    return dict({"option_type": otype, "side": side, "strike": strike,
+                 "expiry": "2026-09-19", "qty": 1, "premium": None}, **kw)
+
+
+def test_pick_target_is_the_leg_with_the_same_side_and_type():
+    pcs = [_L("put", "short", 570.0), _L("put", "long", 565.0)]
+    assert E.pick_target(pcs, _L("put", "short", 555.0)) == 0
+    assert E.pick_target(pcs, _L("put", "long", 575.0)) == 1
+
+
+def test_pick_target_is_none_when_nothing_matches_so_the_page_adds_a_leg():
+    pcs = [_L("put", "short", 570.0), _L("put", "long", 565.0)]
+    assert E.pick_target(pcs, _L("call", "short", 580.0)) is None
+    assert E.pick_target([], _L("call", "short", 580.0)) is None
+
+
+def test_pick_target_prefers_the_nearest_strike_among_several_matches():
+    ladder = [_L("call", "long", 560.0), _L("call", "short", 570.0),
+              _L("call", "long", 580.0)]
+    assert E.pick_target(ladder, _L("call", "long", 578.0)) == 2
+    assert E.pick_target(ladder, _L("call", "long", 561.0)) == 0
+
+
+def test_pick_target_never_moves_a_share_leg_and_is_total_on_junk():
+    legs = [{"option_type": "stock", "side": "long", "strike": None, "expiry": None,
+             "qty": 1, "premium": 100.0}, "junk", None]
+    assert E.pick_target(legs, _L("call", "long", 100.0)) is None
+    assert E.pick_target(None, _L("call", "long", 100.0)) is None
+    assert E.pick_target([_L("call", "long", None)], _L("call", "long", 100.0)) == 0
+
+
+def test_price_sources_are_bid_mark_ask_with_mark_the_default():
+    assert list(E.PRICE_SOURCES) == ["bid", "mark", "ask"]
+    assert E.PRICE_SOURCES == {"bid": "Bid", "mark": "Mark", "ask": "Ask"}
+    assert E.DEFAULT_PRICE_SOURCE == "mark"
+    assert E.price_source(None) == "mark" and E.price_source("ask") == "ask"
+    assert E.price_source("last") == "mark"

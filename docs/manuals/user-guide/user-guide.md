@@ -826,14 +826,18 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
   expiry change). The at-the-money strike is gold and in-the-money cells are
   shaded. The call side reads **Delta · OI · Volume · Bid · Ask** towards the
   strike and the put side mirrors it, so Bid and Ask always sit beside the strike.
-  **Click a Bid to add a SELL leg, an Ask to add a BUY leg.** The leg is priced at
-  the contract's **mark** whichever you click — the side only decides buy or sell,
+  **Click a Bid to SELL, an Ask to BUY.** The click **moves** the leg you already
+  have on that side and type — a put Bid moves your short put to that strike and
+  expiration, keeping its quantity — and adds a new leg only when there is none. It
+  is priced at the contract's **mark** whichever you click — the side only decides buy or sell,
   so the page does not look worse by the full bid/ask spread. **Columns** adds
   Mark, IV, Gamma, Theta or Vega (Bid and Ask cannot be removed — they are what you
   click) and remembers the choice.
 - **Legs** (right half) — one row per leg: **BUY/SELL** and **CALL/PUT** (and
-  **STOCK**) flip with one click; **Qty**; **Expiry**; **Strike**, typed (it snaps to
-  the nearest real strike) or stepped with **‹ ›** and the **↑ ↓** keys; **Price**;
+  **STOCK**) flip with one click; **Qty**; **Expiry**; **Strike**, a dropdown of the
+  real strikes that opens on the current one, stepped one strike with **‹ ›**;
+  **Price**, with a **Bid / Mark / Ask** dropdown beside it choosing which side of
+  the quote the leg is priced at (Mark to start);
   and the leg's **Delta** from the chain. Changing a leg's strike, expiry or type
   re-prices it from the chain — **unless you typed its price**, which then stays
   until you press the **↺** beside it. Each leg keeps its **own expiry** (so
@@ -912,10 +916,11 @@ Black-Scholes. The top of the page is the same **entry panel** as the Calculator
 type a **Symbol** and press Enter or tab out (**Refresh** re-pulls it), pick a
 **Strategy** (the same template menu — singles, verticals, condors, butterflies,
 calendars/diagonals; the three stock structures are not offered here), and build the
-legs. **Click a Bid in the chain to add a SELL leg, an Ask to add a BUY leg**, and
+legs. **Click a Bid in the chain to SELL, an Ask to BUY** (the click moves the leg
+already on that side, or adds one), and
 use the **expiry strip** to move every leg to one date. Each leg is a row with
-**BUY/SELL** and **CALL/PUT** toggles, **Qty**, **Expiry**, a typed-or-stepped
-**Strike** (**‹ ›** / **↑ ↓**) and its **Delta** from the chain — there is no price
+**BUY/SELL** and **CALL/PUT** toggles, **Qty**, **Expiry**, a **Strike** dropdown
+(**‹ ›** step it) and its **Delta** from the chain — there is no price
 box, because the Simulator prices every leg from volatility itself. **Add leg**, and a
 remove ✕ that locks at the last leg (a position with no legs has nothing to simulate).
 Every tab below operates on the **netted** position (all legs summed).

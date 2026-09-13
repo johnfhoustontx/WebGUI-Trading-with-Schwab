@@ -56,6 +56,25 @@ panel.** Operator request: make both pages data-entry friendly.)
 - **Simulator tabs renamed and reordered: Price & Time · Volatility · History**
   (were Replay · What-if · IV shock), Price & Time opening first. The marketing
   gallery's three Simulator screenshots are fixed images and keep their captions.
+- **Grid clicks move a leg; strike and price are dropdowns; the card layout is
+  gone.** Operator request, three parts. (1) A Bid/Ask click used to ADD a row every
+  time, so editing a template from the chain piled up legs; `leg_editor.place_pick`
+  now moves the leg on the same side and type (`entry.pick_target`, nearest strike
+  when several match), keeping its quantity and price source and dropping a typed
+  price, and adds a leg only when nothing matches. (2) The strike is a dropdown of
+  the real ladder again (‹ › still step) — the typed box asked for typing — and each
+  row gains a **Bid / Mark / Ask** price dropdown (`chain_grid.extract_price`; a zero
+  side is no reading, never $0.00). ⚠ The strike dropdown is not `with_input`:
+  Quasar's filter box has a 50px min-width in a layer page CSS cannot override, and
+  it rendered under the ‹ button. The table's tracks were tightened and the row text
+  set to 11px so both dropdowns fit a 1280px window, measured in the harness.
+  (3) The unused two-line `card` layout, its `_CARD_*` grids, the side-accent tokens
+  and both `.leg-card` theme blocks are deleted; `DEFAULT_CARD_TOKENS`/`card_tokens`
+  are now `DEFAULT_LEG_TOKENS`/`leg_tokens`. ⚠ Not verified: whether row 1's small
+  dropdown menus open on a real, visible screen. In both automation browsers (each a
+  hidden tab) row 1's Expiry and price menus mounted off-screen and empty, including
+  the Simulator's Expiry menu, which predates this change. Row 2's opened in the
+  in-app browser, but not in Chrome, so the pattern is not a reliable signal.
 - **Every expiration, not just the next 60 days — found by the operator on the
   first TSLA load.** The strip ended at Oct 30 (48 days) because `calc_load` fetched
   `today..+60` in one call — a limit older than this work — while TSLA lists **22**

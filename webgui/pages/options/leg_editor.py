@@ -7,18 +7,20 @@ its own row by index on change, so re-rendering (add/remove/template apply) neve
 loses in-progress edits. Each page injects ``strikes_for(expiry, otype)`` /
 ``expiries_for()`` (its own data source) and ``show_premium``.
 
-Three layouts over that one model:
+Two layouts over that one model:
 
 ``layout="table"`` the entry panel's one-row-per-leg list, mounted by the
                    Calculator and the Simulator (2026-09-12): SIDE/TYPE one-click
-                   toggles, a typed-or-stepped strike on the real ladder, and a
-                   price that re-fills from the chain (``price_for``) unless the
+                   toggles, a strike DROPDOWN on the real ladder (‹ › step it),
+                   and a price that re-fills from the chain (``price_for``) at the
+                   Bid, Mark or Ask the row's own dropdown chooses, unless the
                    user typed it. PRICE and DELTA collapse their tracks when the
-                   page has no source for them.
+                   page has no source for them. A chain-grid click MOVES the
+                   matching leg (``place_pick``) rather than adding a row.
 ``layout="row"``   the original single-line table — mounted by Rescue.
-``layout="card"``  the 2026-09 two-line card. ⚠ NO page mounts it any more
-                   (both moved to ``table``); it and its ``.leg-card`` theme
-                   rule are dead code awaiting removal.
+
+(The 2026-09 two-line ``card`` layout was removed on 2026-09-12, once both of its
+pages had moved to ``table``.)
 
 The GEOMETRY is shared; the COLOURS are not. The Calculator paints the legs in
 the near-black ``CALC_*`` language while the Simulator keeps the app-wide dark
@@ -47,7 +49,7 @@ def type_options(allow_stock=False) -> list:
     """The TYPE select's options for one MOUNT.
 
     ⚠ **Stock is opt-in per mount, and the default is off.** Gating the strategy
-    MENU is not enough on its own: the Simulator mounts this same card layout, so
+    MENU is not enough on its own: the Simulator mounts this same leg table, so
     an always-on ``stock`` entry would let a user hand-build a share leg on a page
     whose Replay and IV-shock engines price a ``ContractRow`` off the option chain
     and cannot value one. The Rescue ad-hoc form is worse — it BOOKS, into an
@@ -217,24 +219,22 @@ def coerce_choice(value, options):
     return options[0] if options else None
 
 
-# ── the card layout ──────────────────────────────────────────────────────────
-# Card-layout palette. Enters as an argument so the Calculator can pass its own
-# near-black CALC_* tokens while the Simulator keeps the app-wide dark navy —
-# the two pages share the GEOMETRY, not the colours. The defaults below are that
-# dark navy, so a page that passes nothing still looks like the rest of the app.
-DEFAULT_CARD_TOKENS = {
+# ── the leg palette ──────────────────────────────────────────────────────────
+# Enters as an argument so the Calculator can pass its own near-black CALC_*
+# tokens while the Simulator keeps the app-wide dark navy — the two pages share
+# the GEOMETRY, not the colours. The defaults below are that dark navy, so a page
+# that passes nothing still looks like the rest of the app.
+DEFAULT_LEG_TOKENS = {
     "frame": "border border-[#213152] rounded-[2px] bg-[rgba(9,14,20,.55)]",
     "eyebrow": "text-[8px] tracking-[.14em] text-[#7f8db0] whitespace-nowrap truncate",
-    "accent_long": "border-l-2 border-l-[#22d3ee]",
-    "accent_short": "border-l-2 border-l-[#2dd4a7]",
     "num": "text-[10px] text-[#7189a0]",
     "delta": "text-[11px] text-[#cdd8ee] whitespace-nowrap",
     "remove": "text-[10px] text-[#9db0c2] border border-[#3a4a5b] rounded-[2px]",
     "remove_off": "text-[10px] text-[#4e5f70] border border-[#26313d] rounded-[2px] cursor-not-allowed",
     "add": "text-[9px] tracking-[.18em] text-[#a7dceb] border border-dashed border-[#3a6070] rounded-[2px]",
     "reset": "text-[9px] tracking-[.18em] text-[#8aa0b4] border border-[#2c3b4b] rounded-[2px]",
-    # The table layout's one-click toggles (SIDE, TYPE, the strike steppers) and
-    # the typed-price reset. Side keeps the card's long/short accent family.
+    # The one-click toggles (SIDE, TYPE, the strike steppers) and the
+    # typed-price reset.
     "toggle": "text-[10px] tracking-[.12em] border rounded-[2px]",
     "side_long": "text-[#22d3ee] border-[#22d3ee]",
     "side_short": "text-[#2dd4a7] border-[#2dd4a7]",
@@ -242,62 +242,38 @@ DEFAULT_CARD_TOKENS = {
     "manual": "text-[11px] text-[#fbbf24]",
 }
 
-# The grid templates ARE the card's alignment contract: captions and cells
-# share one track list, so a caption can never drift off the cell under it.
-_CARD_ROW1_COLS = "grid grid-cols-[72px_78px_minmax(0,1fr)] gap-x-2 gap-y-0.5 items-center w-full"
-# An omitted cell COLLAPSES its track rather than leaving a hole: a 4-track grid
-# fed 3 cells would slide the next value under the wrong caption, which is worse
-# than a narrower card. PREMIUM goes when the page prices legs itself; DELTA goes
-# when the page passes no ``delta_for`` — a captioned column that can NEVER hold
-# a value reads as broken rather than as not-applicable, and on the Simulator
-# (``sim_meta`` carries no greeks) it never can. Four combinations, four STATIC
-# class strings — a finite set, never a runtime-built arbitrary value.
-_CARD_ROW2_TAIL = "gap-x-2 gap-y-0.5 items-center w-full"
-_CARD_ROW2_COLS = f"grid grid-cols-[minmax(0,1.25fr)_46px_minmax(0,1fr)_44px] {_CARD_ROW2_TAIL}"
-_CARD_ROW2_COLS_NO_PREMIUM = f"grid grid-cols-[minmax(0,1.25fr)_46px_44px] {_CARD_ROW2_TAIL}"
-_CARD_ROW2_COLS_NO_DELTA = f"grid grid-cols-[minmax(0,1.25fr)_46px_minmax(0,1fr)] {_CARD_ROW2_TAIL}"
-_CARD_ROW2_COLS_MINIMAL = f"grid grid-cols-[minmax(0,1.25fr)_46px] {_CARD_ROW2_TAIL}"
-_CARD_ROW2_GRIDS = {
-    # (show_premium, show_delta) -> the row-2 track list
-    (True, True): _CARD_ROW2_COLS,
-    (False, True): _CARD_ROW2_COLS_NO_PREMIUM,
-    (True, False): _CARD_ROW2_COLS_NO_DELTA,
-    (False, False): _CARD_ROW2_COLS_MINIMAL,
-}
 
-# The track list above is drawn for a ~424px column (the Calculator's). Left to
-# stretch across the Simulator's ``flex-grow min-w-[340px]`` column — ~800px on
-# a desktop — the two ``fr`` tracks absorb ~700px each and the card renders a
-# 700px-wide select showing "450.0". The cap rides the CARD rather than a page's
-# column, because "this geometry wants ≤440px" is a fact about the card, not
-# about any one host; in a narrower column it is simply inert.
-_CARD_MAX_W = "max-w-[440px]"
-
-
-_LAYOUTS = ("row", "card", "table")
+_LAYOUTS = ("row", "table")
 
 # -- the table layout ---------------------------------------------------------
 # One row per leg, and the header shares the row's track list so a caption can
 # never drift off its column: # . SIDE . QTY . EXPIRY . STRIKE . TYPE .
-# [PRICE] . [DELTA] . remove. PRICE and DELTA collapse their tracks exactly as
-# the card's do - four combinations, four STATIC class strings.
-_TABLE_TAIL = "gap-x-1.5 items-center w-full min-w-0"
+# [PRICE FROM . PRICE] . [DELTA] . remove. The two price tracks and DELTA
+# collapse when the page has no source for them - four combinations, four STATIC
+# class strings.
+# Drawn for a ~480px column (the entry panel's half at a 1280px window): the
+# fixed tracks are as narrow as their contents allow, so the three that hold
+# dropdowns - expiry, strike, price - keep the room.
+_TABLE_TAIL = "gap-x-1 items-center w-full min-w-0"
+_TABLE_HEAD = "grid-cols-[16px_40px_36px_minmax(0,1.15fr)_minmax(0,1.25fr)_40px"
 _TABLE_GRIDS = {
     # (show_premium, show_delta) -> the track list
-    (True, True): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
-                   f"_48px_minmax(0,0.95fr)_44px_26px] {_TABLE_TAIL}"),
-    (True, False): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
-                    f"_48px_minmax(0,0.95fr)_26px] {_TABLE_TAIL}"),
-    (False, True): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
-                    f"_48px_44px_26px] {_TABLE_TAIL}"),
-    (False, False): ("grid grid-cols-[16px_46px_50px_minmax(0,1.15fr)_minmax(0,1.5fr)"
-                     f"_48px_26px] {_TABLE_TAIL}"),
+    (True, True): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_38px_22px] {_TABLE_TAIL}",
+    (True, False): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_22px] {_TABLE_TAIL}",
+    (False, True): f"grid {_TABLE_HEAD}_38px_22px] {_TABLE_TAIL}",
+    (False, False): f"grid {_TABLE_HEAD}_22px] {_TABLE_TAIL}",
 }
 
 
 def _strike_text(strike):
-    """The strike input's text: ``570``, ``567.5`` - never ``570.0``."""
+    """A strike as the dropdown shows it: ``570``, ``567.5`` - never ``570.0``."""
     return "" if strike is None else f"{strike:g}"
+
+
+def strike_choices(strikes):
+    """``{strike: label}`` for the strike dropdown - the VALUE stays the float
+    every consumer keys on, only the text shown changes."""
+    return {k: _strike_text(k) for k in (strikes or [])}
 
 
 def _usable_price(p):
@@ -306,13 +282,13 @@ def _usable_price(p):
     return float(p) if math.isfinite(p) else None
 
 
-def card_tokens(overrides=None):
-    """``DEFAULT_CARD_TOKENS`` with known keys overridden. Unknown keys are
+def leg_tokens(overrides=None):
+    """``DEFAULT_LEG_TOKENS`` with known keys overridden. Unknown keys are
     ignored, so a typo cannot silently introduce a token nothing reads; blank and
     non-string values are ignored too, so a page whose own token computed to ""
     degrades to the default look rather than to an unstyled element. A
     non-mapping ``overrides`` is ignored outright rather than raising."""
-    out = dict(DEFAULT_CARD_TOKENS)
+    out = dict(DEFAULT_LEG_TOKENS)
     if not isinstance(overrides, dict):
         overrides = {}
     for k, v in overrides.items():
@@ -357,21 +333,18 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty().
 
-    ``layout="card"`` swaps the single-line row for the two-line card; ``tokens``
-    overrides its palette (see ``card_tokens``), ``delta_for(leg)`` supplies the
-    per-leg delta the card shows — omit it and the DELTA cell collapses, exactly
-    as ``show_premium=False`` collapses PREMIUM — ``min_legs`` floors the remove
-    button and
-    ``on_reset`` adds a RESET TO TEMPLATE button beside ADD LEG. All five are
-    inert in row mode.
-
     ``layout="table"`` is the entry panel's compact one-row-per-leg list: SIDE and
-    TYPE are one-click toggles, the strike is typed (snapped to the real ladder)
-    or stepped with the arrow buttons and Up/Down keys, and ``price_for(leg)``
-    re-fills a leg's price when it becomes a different contract - never over a
-    price the user typed (see ``entry.should_refill``). The handle gains
-    ``add_leg`` and ``refill_prices`` for the page's grid clicks and chain
-    loads."""
+    TYPE are one-click toggles, the strike is a dropdown of the real ladder (‹ ›
+    step it), and ``price_for(leg, source)`` re-fills a leg's price
+    from the chain at the row's chosen Bid / Mark / Ask whenever the leg becomes a
+    different contract - never over a price the user typed (see
+    ``entry.should_refill``). ``tokens`` overrides its palette (see
+    ``leg_tokens``), ``delta_for(leg)`` supplies the per-leg delta — omit it and
+    the DELTA cell collapses, exactly as ``show_premium=False`` collapses PRICE —
+    ``min_legs`` floors the remove button and ``on_reset`` adds a RESET TO
+    TEMPLATE button beside ADD LEG. The handle gains ``place_pick`` and
+    ``refill_prices`` for the page's grid clicks and chain loads. All of these
+    are inert in row mode."""
     # A typo here would silently render the WRONG screen with nothing to see it:
     # both layouts are valid renders of the same state, so neither the page nor
     # any test would report a failure.
@@ -400,8 +373,9 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         on_change()
 
     def _refill(leg):
-        """Price ``leg`` off the chain. A share leg, a typed price, or no reading
-        leaves the price exactly as it was - "no mark" is never a $0.00 leg."""
+        """Price ``leg`` off the chain at its chosen source. A share leg, a typed
+        price, or no reading leaves the price exactly as it was - "no mark" is
+        never a $0.00 leg."""
         if price_for is None:
             # A page with no price column and no price source (the Simulator)
             # cannot re-price a moved leg, and the price it carried belongs to
@@ -416,7 +390,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         # (0.0 is what an untouched number box reports), never over a basis.
         if _is_stock(leg) and _usable_price(leg.get("premium")):
             return
-        p = _usable_price(price_for(normalize_legs([leg])[0]))
+        p = _usable_price(price_for(normalize_legs([leg])[0],
+                                    _entry.price_source(leg.get("_price_source"))))
         if p is not None:
             leg["premium"] = round(p, 2)
 
@@ -440,11 +415,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         ``retype_leg`` drops along with every other non-normalized key."""
         if not (0 <= i < len(state["legs"])):
             return
+        source = state["legs"][i].get("_price_source")
         state["legs"][i] = retype_leg(state["legs"][i], value)
         state["dirty"] = True
         if table:
             # retype_leg drops _manual_premium with every other private key: a
-            # new contract's typed price no longer describes anything.
+            # new contract's typed price no longer describes anything. The
+            # row's price SOURCE is a choice about the row, so it stays.
+            if source is not None:
+                state["legs"][i]["_price_source"] = source
             _snap_strike(state["legs"][i])
             _refill(state["legs"][i])
         _render()
@@ -465,8 +444,6 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             w.value = min(opts, key=lambda s: abs(s - spot)) if spot else opts[0]
             state["legs"][i]["strike"] = w.value
         w.update()
-
-    card = layout == "card"
 
     # -- table-layout handlers ----------------------------------------------
     def _toggle_side(i):
@@ -493,17 +470,30 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         if new is not None and new != leg.get("strike"):
             _set_field(i, "strike", new)
 
-    def _commit_strike(i, widget):
-        """Typed strike text -> the nearest real strike. Junk puts the old strike
-        back in the box rather than clearing the leg."""
+    def _pick_strike(i, value):
+        """A strike chosen from the dropdown. ``None`` is the filter box being
+        cleared mid-typing, not a request to un-strike the leg."""
+        if not (0 <= i < len(state["legs"])) or value is None:
+            return
+        if value != state["legs"][i].get("strike"):
+            _set_field(i, "strike", value)
+
+    def _set_source(i, value):
+        """The row's Bid / Mark / Ask choice: re-price from that side now, over a
+        typed price too - choosing a source IS asking for the chain's price."""
         if not (0 <= i < len(state["legs"])):
             return
         leg = state["legs"][i]
-        new = _entry.parse_strike_text(widget.value, _ladder_for(leg))
-        if new is None or new == leg.get("strike"):
-            widget.value = _strike_text(leg.get("strike"))
-            return
-        _set_field(i, "strike", new)
+        source = _entry.price_source(value)
+        if source == _entry.price_source(leg.get("_price_source")) \
+                and not leg.get("_manual_premium"):
+            return          # a repaint writing the value it already holds
+        leg["_price_source"] = source
+        leg["_manual_premium"] = False
+        state["dirty"] = True
+        _refill(leg)
+        _render()
+        on_change()
 
     def _set_price(i, value, reset_btn):
         if not (0 <= i < len(state["legs"])):
@@ -525,7 +515,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         _refill(leg)
         _render()
         on_change()
-    tk = card_tokens(tokens)
+    tk = leg_tokens(tokens)
 
     def _row_body(i, leg, exps, e_val, s_opts, s_val, lab):
         with ui.row().classes("items-end gap-2 no-wrap leg-row"):
@@ -549,68 +539,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 .props("flat dense round").classes("w-10").tooltip("Remove leg")
         return sw
 
-    def _card_body(i, leg, exps, e_val, s_opts, s_val, _lab):
-        # Side → accent, mapped from the finite {long, short} set to a fixed
-        # class (never a runtime-built colour). An unrecognised side reads as
-        # long, the same default the rest of the module uses.
-        accent = tk["accent_short"] if leg.get("side") == "short" else tk["accent_long"]
-        with ui.element("div").classes(
-                f"leg-card {tk['frame']} {accent} w-full {_CARD_MAX_W} "
-                f"flex items-stretch gap-2 px-2 py-1.5"):
-            ui.label(f"{i + 1:02d}").classes(f"{tk['num']} shrink-0 w-5 pt-1")
-            with ui.element("div").classes("flex-1 min-w-0 flex flex-col gap-1"):
-                lbl = leg_labels(leg)
-                with ui.element("div").classes(_CARD_ROW1_COLS):
-                    ui.label(lbl["type"]).classes(tk["eyebrow"])
-                    ui.label(lbl["side"]).classes(tk["eyebrow"])
-                    ui.label(lbl["expiry"]).classes(tk["eyebrow"])
-                    ui.select(type_options(allow_stock),
-                              value=leg.get("option_type")) \
-                        .props("dense options-dense").classes("w-full") \
-                        .on_value_change(lambda e, i=i: _set_type(i, e.value))
-                    ui.select(["long", "short"], value=leg.get("side")) \
-                        .props("dense options-dense").classes("w-full") \
-                        .on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
-                    # A SHARE leg has no expiry to pick, so the control is emptied
-                    # and disabled rather than offering the option ladder's dates
-                    # against something that never expires.
-                    _e_opts = leg_expiry_options(leg, exps)
-                    _ew = ui.select(_e_opts, value=(e_val if _e_opts else None)) \
-                        .props("dense options-dense").classes("w-full")
-                    _ew.on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
-                    _ew.set_enabled(bool(_e_opts))
-                show_delta = delta_for is not None
-                with ui.element("div").classes(
-                        _CARD_ROW2_GRIDS[(bool(show_premium), show_delta)]):
-                    ui.label(lbl["strike"]).classes(tk["eyebrow"])
-                    ui.label(lbl["qty"]).classes(tk["eyebrow"])
-                    if show_premium:
-                        ui.label(lbl["premium"]).classes(tk["eyebrow"])
-                    if show_delta:
-                        ui.label("DELTA").classes(f"{tk['eyebrow']} text-right")
-                    # Inert for a share leg, for the same reason as the expiry.
-                    _s_opts = leg_strike_options(leg, s_opts)
-                    sw = ui.select(_s_opts, value=(s_val if _s_opts else None)) \
-                        .props("dense options-dense").classes("w-full leg-strike")
-                    sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
-                    sw.set_enabled(bool(_s_opts))
-                    ui.number(value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
-                        .props("dense").classes("w-full") \
-                        .on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))
-                    if show_premium:
-                        ui.number(value=leg.get("premium") or 0.0, format="%.2f") \
-                            .props("dense").classes("w-full") \
-                            .on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
-                    if show_delta:
-                        # A source that returns None for THIS leg still gets a
-                        # cell — an em-dash is "no reading now", which is not the
-                        # same claim as having no source at all.
-                        (ui.label(delta_text(delta_for(leg)))
-                         .classes(f"{tk['delta']} text-right"))
-            _card_remove(i)
-        return sw
-
-    def _card_remove(i):
+    def _remove_button(i):
         live = can_remove(len(state["legs"]), min_legs)
         floor = max(int(min_legs or 0), 0)
         # The tooltip hangs off a WRAPPER, not the button: Quasar kills pointer
@@ -624,7 +553,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             ui.tooltip("Remove leg" if live
                        else f"At least {floor} leg{'' if floor == 1 else 's'} required")
 
-    def _card_footer():
+    def _table_footer():
         with ui.row().classes("items-center gap-2 no-wrap"):
             ui.button("ADD LEG", on_click=lambda e: _add(), color=None) \
                 .props("flat dense no-caps").classes(f"{tk['add']} px-2")
@@ -635,7 +564,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def _table_head():
         grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
         caps = ["#", "SIDE", "QTY", "EXPIRY", "STRIKE", "TYPE"]
-        caps += ["PRICE"] if show_premium else []
+        caps += ["PRICE", ""] if show_premium else []
         caps += ["DELTA"] if delta_for is not None else []
         with ui.element("div").classes(f"leg-thead {grid} px-1.5"):
             for cap in caps + [""]:
@@ -664,35 +593,47 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 .props("dense options-dense").classes("leg-expiry w-full min-w-0")
             ew.on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
             ew.set_enabled(bool(e_opts))
-            live = bool(leg_strike_options(leg, s_opts))
+            ladder = leg_strike_options(leg, s_opts)
             with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
-                dn = ui.button("\u2039", color=None, on_click=lambda e, i=i: _step(i, -1)) \
+                dn = ui.button("‹", color=None, on_click=lambda e, i=i: _step(i, -1)) \
                     .props("flat dense no-caps") \
                     .classes(f"leg-strike-dn {tk['step']} px-0.5 min-h-0 min-w-0")
-                sw = ui.input(value=_strike_text(s_val)) \
-                    .props('dense spellcheck=false input-class="text-right"') \
+                # A dropdown of the real ladder, opening on the leg's strike. The
+                # value is always one of its options (``_render`` coerced it), so
+                # the select can never raise on an off-ladder strike.
+                # ⚠ Not ``with_input``: Quasar gives that filter box a 50px
+                # min-width in its own !important layer, which a page's CSS cannot
+                # override, and in this track it slid under the ‹ button. A plain
+                # q-select still jumps to a strike typed while it has focus.
+                sw = ui.select(strike_choices(ladder), value=(s_val if ladder else None)) \
+                    .props("dense options-dense") \
                     .classes("leg-strike flex-1 min-w-0")
-                up = ui.button("\u203a", color=None, on_click=lambda e, i=i: _step(i, +1)) \
+                up = ui.button("›", color=None, on_click=lambda e, i=i: _step(i, +1)) \
                     .props("flat dense no-caps") \
                     .classes(f"leg-strike-up {tk['step']} px-0.5 min-h-0 min-w-0")
             for w in (dn, sw, up):
-                w.set_enabled(live)
-            sw.on("keydown.enter", lambda e, i=i, w=sw: _commit_strike(i, w))
-            sw.on("blur", lambda e, i=i, w=sw: _commit_strike(i, w))
-            sw.on("keydown.up", lambda e, i=i: _step(i, +1))
-            sw.on("keydown.down", lambda e, i=i: _step(i, -1))
+                w.set_enabled(bool(ladder))
+            sw.on_value_change(lambda e, i=i: _pick_strike(i, e.value))
             ui.button(str(leg.get("option_type") or "call").upper(), color=None,
                       on_click=lambda e, i=i: _cycle_type(i)) \
                 .props("flat dense no-caps") \
                 .classes(f"leg-type {tk['toggle']} {tk['step']} w-full min-h-0 px-0")
             if show_premium:
+                src = ui.select(dict(_entry.PRICE_SOURCES),
+                                value=_entry.price_source(leg.get("_price_source"))) \
+                    .props("dense options-dense").classes("leg-price-source w-full min-w-0")
+                # No tooltip here: a tooltip child inside a q-select stops its
+                # menu opening (seen in the browser, 2026-09-12).
+                src.on_value_change(lambda e, i=i: _set_source(i, e.value))
+                # Shares cost spot: there is no bid/ask side to choose.
+                src.set_visibility(not stock)
                 with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
                     pw = ui.number(value=leg.get("premium"), format="%.2f") \
                         .props("dense").classes("leg-price flex-1 min-w-0")
-                    rb = ui.button("\u21ba", color=None, on_click=lambda e, i=i: _reset_price(i)) \
+                    rb = ui.button("↺", color=None, on_click=lambda e, i=i: _reset_price(i)) \
                         .props("flat dense no-caps") \
                         .classes(f"leg-price-reset {tk['manual']} px-0.5 min-h-0 min-w-0")
-                    rb.tooltip("Typed price - click to use the chain's mark")
+                    rb.tooltip("Typed price - click to use the chain's price")
                     rb.set_visibility(bool(leg.get("_manual_premium")) and not stock)
                     pw.on_value_change(lambda e, i=i, rb=rb: _set_price(i, e.value, rb))
                     if stock:
@@ -700,22 +641,21 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             if delta_for is not None:
                 ui.label(delta_text(delta_for(leg))) \
                     .classes(f"leg-delta {tk['delta']} text-right")
-            _card_remove(i)
+            _remove_button(i)
         return sw
 
     def _render():
         container.clear()
         exps = expiries_for() or []
         # ``header`` mode (row layout): the field labels move to a single header
-        # row and each leg renders label-less inputs — a clean table. Default off,
-        # so the Simulator keeps a label on every field. The card layout carries
-        # its own per-leg eyebrow captions, so ``header`` is inert there.
+        # row and each leg renders label-less inputs — a clean table. Default off.
+        # The table layout carries its own header, so ``header`` is inert there.
         lab = (lambda _t: "") if header else (lambda t: t)
-        body = _card_body if card else (_table_body if table else _row_body)
+        body = _table_body if table else _row_body
         with container:
             if table:
                 _table_head()
-            if header and not card and not table:
+            elif header:
                 with ui.row().classes("items-center gap-2 no-wrap leg-head"):
                     ui.label("Type").classes("w-24")
                     ui.label("Side").classes("w-24")
@@ -734,9 +674,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 # the display. (Not an edit → no dirty flag.)
                 #
                 # ⚠ This pass lives HERE, above the layout dispatch, and not in
-                # either body — the two layouts physically cannot drift on it,
-                # and a third layout inherits it for free. Same for the
-                # ``_strike_widget`` registration below.
+                # either body — the two layouts physically cannot drift on it.
+                # Same for the ``_strike_widget`` registration below.
                 # ⚠ A SHARE leg is skipped: ``coerce_choice(None, exps)`` answers
                 # the first expiry, so rendering a covered call used to stamp a
                 # date onto its shares — the stale-expiry hazard retype_leg and
@@ -756,8 +695,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     raise RuntimeError("leg body returned no strike widget - "
                                        "_strike_widget could not be registered")
                 leg["_strike_widget"] = sw
-            if card or table:
-                _card_footer()
+            if table:
+                _table_footer()
             else:
                 ui.button("Add leg", icon="add", on_click=lambda e: _add()).props("flat dense")
 
@@ -803,17 +742,22 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         _render()
 
     def apply_expiry(expiry):
-        """Set every leg's expiry to ``expiry`` and re-render (strike selects re-sync
-        to that expiry's strikes via _render's coercion). Fires on_change. The dirty
-        flag is preserved — an untouched single-expiry template still routes analytic."""
-        state["legs"] = set_legs_expiry(state["legs"], expiry)
+        """Set every OPTION leg's expiry to ``expiry`` and re-render (strikes
+        re-snap to that expiry's ladder via _render's coercion). Fires on_change.
+        In place, so each row keeps its price source and typed-price flag — the
+        rule ``set_legs_expiry`` states for share legs holds here too. The dirty
+        flag is preserved — an untouched single-expiry template still routes
+        analytic."""
+        for leg in state["legs"]:
+            if not _is_stock(leg):
+                leg["expiry"] = expiry
         _render()
         on_change()
 
     def add_leg(leg):
-        """Append one leg (a chain-grid click) WITHOUT round-tripping the others
-        through ``set_legs``, which would drop their typed-price flags. An edit,
-        so it marks the legs dirty and fires ``on_change``."""
+        """Append one leg WITHOUT round-tripping the others through ``set_legs``,
+        which would drop their typed-price flags. An edit, so it marks the legs
+        dirty and fires ``on_change``."""
         src = leg if isinstance(leg, dict) else {}
         new = {k: src.get(k) for k in _KEYS}
         new["qty"] = int(src.get("qty", 1) or 1)
@@ -821,6 +765,31 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         state["dirty"] = True
         _render()
         on_change()
+
+    def place_pick(leg):
+        """A chain-grid click. It MOVES the leg on the same side and type (a Bid
+        click on a put moves the short put; see ``entry.pick_target``) to the
+        clicked contract — keeping that row's quantity and price source, dropping
+        a typed price, which described the old contract — and adds a new leg
+        only when nothing matches. The moved or added leg is priced here, at its
+        row's source. Returns the row index it landed on."""
+        src = leg if isinstance(leg, dict) else {}
+        new = {k: src.get(k) for k in _KEYS}
+        new["qty"] = int(src.get("qty", 1) or 1)
+        i = _entry.pick_target(state["legs"], new)
+        if i is None:
+            state["legs"].append(new)
+            i = len(state["legs"]) - 1
+        else:
+            cur = state["legs"][i]
+            for k in ("option_type", "side", "strike", "expiry", "premium"):
+                cur[k] = new[k]
+            cur["_manual_premium"] = False
+        _refill(state["legs"][i])
+        state["dirty"] = True
+        _render()
+        on_change()
+        return i
 
     def refill_prices(only_missing=False):
         """Price every leg off the chain (a fresh chain load) - skipping typed
@@ -834,7 +803,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             _refill(leg)
         _render()
 
-    return SimpleNamespace(add_leg=add_leg, refill_prices=refill_prices,
+    return SimpleNamespace(add_leg=add_leg, place_pick=place_pick,
+                           refill_prices=refill_prices,
                            get_legs=get_legs, set_legs=set_legs,
                            apply_template=apply_template, apply_expiry=apply_expiry,
                            refresh_options=refresh_options,

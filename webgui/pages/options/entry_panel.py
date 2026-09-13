@@ -9,7 +9,7 @@ what a pick means (``on_pick``) and owns the leg editor mounted into
 
 Colours enter as ``tokens`` (see ``panel_tokens``) so the Calculator can paint
 the panel in its near-black ``[calc]`` language while the Simulator keeps the
-app-wide dark navy — the same split ``leg_editor.card_tokens`` makes.
+app-wide dark navy — the same split ``leg_editor.leg_tokens`` makes.
 """
 import datetime as dt
 from types import SimpleNamespace

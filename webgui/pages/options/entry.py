@@ -39,15 +39,40 @@ def step_strike(strikes, current, step):
     return xs[max(0, min(i, len(xs) - 1))]
 
 
-def parse_strike_text(text, strikes):
-    """Typed strike text → the nearest real strike, or None when it is not a number."""
-    try:
-        v = float(str(text).strip())
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(v):
-        return None
-    return step_strike(strikes, v, 0)
+#: Where a leg's price comes from, in the order the price dropdown lists them.
+#: Mark is the default — a grid click and a fresh leg both price there.
+PRICE_SOURCES = {"bid": "Bid", "mark": "Mark", "ask": "Ask"}
+DEFAULT_PRICE_SOURCE = "mark"
+
+
+def price_source(value):
+    """``value`` if it is a known price source, else the default (the mark)."""
+    return value if value in PRICE_SOURCES else DEFAULT_PRICE_SOURCE
+
+
+def pick_target(legs, leg):
+    """Which existing leg a grid click MOVES, or None to add ``leg`` as a new one.
+
+    The target is an option leg on the same side and type as the click (a Bid
+    click on a put moves the short put). When several match — a ladder, a
+    butterfly's wings — the one nearest the clicked strike moves. A share leg is
+    never a target: it has no strike to move."""
+    best, best_dist = None, None
+    want = float(leg.get("strike")) if isinstance(leg, dict) and isinstance(
+        leg.get("strike"), (int, float)) else None
+    for i, cur in enumerate(legs or []):
+        if not isinstance(cur, dict):
+            continue
+        if (cur.get("option_type") != leg.get("option_type")
+                or cur.get("side") != leg.get("side")
+                or cur.get("option_type") not in _PICK_TYPES):
+            continue
+        k = cur.get("strike")
+        dist = (abs(float(k) - want) if want is not None and isinstance(k, (int, float))
+                and not isinstance(k, bool) and math.isfinite(k) else math.inf)
+        if best is None or dist < best_dist:
+            best, best_dist = i, dist
+    return best
 
 
 def leg_from_pick(column, option_type, strike, expiry, price):

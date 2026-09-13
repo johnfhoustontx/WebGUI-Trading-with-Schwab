@@ -277,14 +277,17 @@ legs, and the numbers follow every change.
   scrolls, and it opens **centred on the current price**; the at-the-money strike
   is gold and in-the-money cells are shaded. Each side reads **Delta · OI ·
   Volume · Bid · Ask** out to the strike (the puts mirror it). **Click a Bid to
-  SELL that contract, an Ask to BUY it** — the leg is added at the **mark** either
-  way (the side you click only decides buy or sell). **Columns** adds Mark, IV,
-  Gamma, Theta or Vega and remembers your choice.
+  SELL that contract, an Ask to BUY it.** The click **moves** the leg already on
+  that side — a put Bid moves your short put there — and adds a new leg only when
+  you have none on that side. It is priced at the **mark** (the side you click only
+  decides buy or sell). **Columns** adds Mark, IV, Gamma, Theta or Vega and
+  remembers your choice.
 - **Legs** (right) — one row per leg. **BUY/SELL** and **CALL/PUT** flip with one
-  click. The strike is typed (it snaps to the nearest real strike) or stepped
-  with **‹ ›** or the **↑ ↓** keys, and the price re-fills from the chain each
-  time. Type your own **price** and it stays put through strike changes — the
-  **↺** beside it goes back to the chain's price. The strip under the legs keeps a
+  click. The **strike** is a dropdown of the real strikes (it opens on the
+  current one), and **‹ ›** step it one strike. The **price** dropdown picks where
+  the leg is priced — **Bid, Mark or Ask** (Mark to start) — and the price re-fills
+  from there each time the leg changes. Type your own **price** and it stays put
+  through strike changes — the **↺** beside it goes back to the chain's price. The strip under the legs keeps a
   running **leg count, net premium and max loss**; a dash means *not known yet*,
   not zero, and delta is blank whenever the chain carries no Greeks — normal
   outside market hours.
@@ -368,11 +371,12 @@ Re-prices a **multi-leg** option position under different what-ifs (Black-Schole
 - **Type a ticker and press Enter** (or tab out; **Refresh** re-pulls it). Pick a
   **Strategy** and its legs land on real strikes — singles, spreads, condors,
   butterflies, calendars.
-- **The chain** — the same grid as the Calculator: **click a Bid to add a SELL
-  leg, an Ask to add a BUY leg**. **Columns** picks what it shows. The **expiry
+- **The chain** — the same grid as the Calculator: **click a Bid to SELL, an Ask
+  to BUY** — the click moves the leg already on that side, or adds one if there is
+  none. **Columns** picks what it shows. The **expiry
   strip** above it moves every leg to one date.
 - **Legs** — one row per leg: **BUY/SELL** and **CALL/PUT** flip with a click, the
-  strike is typed or stepped with **‹ ›** / **↑ ↓**, and **Delta** reads the chain.
+  strike is a dropdown (**‹ ›** step it), and **Delta** reads the chain.
   There is no price box: the Simulator prices every leg from volatility itself.
 - **The six tiles** under the panel state the trade: entry credit or debit, max
   profit, max loss, breakevens, delta (as shares) and theta per day. A dash always

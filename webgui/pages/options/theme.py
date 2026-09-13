@@ -454,20 +454,11 @@ def build_quasar_css(theme):
 .calc-v2 .leg-row .q-field__marginal{{min-height:32px;padding-top:0;padding-bottom:0;}}
 .calc-v2 .leg-row .q-field__append{{padding-left:0;}}
 .calc-v2 .leg-row .q-field__native{{font-size:13px;}}
-/* Leg CARDS — the card layout's two compact grid rows per leg (the Simulator
-   mounts it; the row rules above never match it). Geometry MIRRORS
-   ``.calc-v3 .leg-card`` in build_calc_css — the two scopes paint one shape in
-   two palettes, which is the premise of a shared widget whose colours enter as
-   tokens. Without these the cells fall through to the generic control above:
-   40px tall and 8px-rounded, ~2.5x the intended card height with rounded fields
-   inside a 2px-radius frame. Radius is restated here (it is NOT in the .calc-v3
-   block) because THIS scope's generic control is 8px, where that one is already
-   2px. Sizes only — no colour, so build_quasar_css stays hex-free. */
-.calc-v2 .leg-card .q-field__control{{min-height:28px;padding:0 7px;border-radius:2px;}}
-.calc-v2 .leg-card .q-field__control .q-field__native,
-.calc-v2 .leg-card .q-field__marginal{{min-height:28px;padding-top:0;padding-bottom:0;}}
-.calc-v2 .leg-card .q-field__append{{padding-left:0;}}
-.calc-v2 .leg-card .q-field__native{{font-size:11px;letter-spacing:.08em;}}
+/* Leg table rows — dropdowns in narrow grid tracks: slim side padding and a
+   smaller dropdown arrow, so "Sep 14", "570" and "Mark" fit. Sizes only. */
+.calc-v2 .leg-trow .q-field__control{{padding:0 4px;}}
+.calc-v2 .leg-trow .q-field__append{{padding-left:0;}}
+.calc-v2 .leg-trow .q-field__append .q-icon{{font-size:12px;}}
 /* Centered strike value in the leg table. */
 .calc-v2 .leg-strike .q-field__native{{justify-content:center;text-align:center;}}
 /* Tabs (Simulator) — light labels, accent indicator, transparent panels so the
@@ -1187,7 +1178,7 @@ def build_calc_css(theme):
     """Quasar-internal escape-hatch CSS for the Calculator, scoped ``.calc-v3``.
 
     Reaches only the DOM component ``.classes()`` cannot: the boxed q-field
-    control and its leg-card variants, and the body-mounted cascading strategy
+    control, and the body-mounted cascading strategy
     popup (``.strat-menu-calc``, which is teleported OUT of the scope)."""
     c = theme["calc"]
     return f"""
@@ -1209,13 +1200,16 @@ def build_calc_css(theme):
   justify-content:space-between;flex:1;text-transform:none;
 }}
 .calc-v3 .strategy-menu-btn .q-icon{{color:{c['icon_soft']};}}
-/* Leg CARD cells — two compact grid rows per leg. */
-.calc-v3 .leg-card .q-field__control{{min-height:28px;padding:0 7px;}}
-.calc-v3 .leg-card .q-field__control .q-field__native,
-.calc-v3 .leg-card .q-field__marginal{{min-height:28px;padding-top:0;padding-bottom:0;}}
-.calc-v3 .leg-card .q-field__append{{padding-left:0;}}
-.calc-v3 .leg-card .q-field__native{{font-size:11px;letter-spacing:.08em;}}
+/* Leg table rows — dropdowns in narrow grid tracks: slim side padding and a
+   smaller dropdown arrow, so "Sep 14", "570" and "Mark" fit. Sizes only. */
+.calc-v3 .leg-trow .q-field__control{{padding:0 4px;}}
+.calc-v3 .leg-trow .q-field__append{{padding-left:0;}}
+.calc-v3 .leg-trow .q-field__append .q-icon{{font-size:12px;}}
 .calc-v3 .leg-strike .q-field__native{{justify-content:center;text-align:center;font-size:12px;}}
+/* ...and 11px text in the row's fields (after the strike rule, which it must
+   override), so "Mark" and a four-digit strike fit their tracks. */
+.calc-v3 .leg-trow .q-field__native,.calc-v3 .leg-trow .q-field__native input,
+.calc-v3 .leg-trow .q-field__native span{{font-size:11px;}}
 /* Cascading strategy popup — teleported to <body>, so NOT under .calc-v3. */
 .strat-menu-calc.q-menu{{
   background:{c['frame_a']}!important;border:1px solid {c['edge']};

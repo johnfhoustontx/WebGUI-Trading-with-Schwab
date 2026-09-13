@@ -415,18 +415,33 @@ def test_a_landed_chain_asks_the_service_to_imply_iv(page, sent_commands):
     assert [c for c in sent_commands if c["type"] == "calc_iv"]
 
 
-def test_clicking_a_put_bid_adds_a_short_leg_priced_at_the_mark(page, sent_commands):
+def test_clicking_a_call_bid_adds_a_short_call_priced_at_the_mark(page, sent_commands):
+    # The put credit spread holds no short call, so the click adds a leg.
     root, polls = page
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
     assert 655.0 in _grid_strikes(root)
-    _click_grid(root, "bid", "put", 655.0)
+    _click_grid(root, "bid", "call", 655.0)
     _recalc(root)
     legs = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
     assert len(legs) == 3
-    assert legs[-1] == {"strike": 655.0, "premium": 1.5, "option_type": "put",
+    assert legs[-1] == {"strike": 655.0, "premium": 1.5, "option_type": "call",
                         "side": "short", "qty": 1, "expiry": _EXPIRY}
     assert "3 LEGS" in _texts(root)
+
+
+def test_clicking_a_put_bid_moves_the_short_put_instead_of_adding_a_row(page, sent_commands):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    _click_grid(root, "bid", "put", 655.0)
+    _recalc(root)
+    legs = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
+    assert len(legs) == 2
+    short = [l for l in legs if l["side"] == "short"]
+    assert short == [{"strike": 655.0, "premium": 1.5, "option_type": "put",
+                      "side": "short", "qty": 1, "expiry": _EXPIRY}]
+    assert "2 LEGS" in _texts(root)
 
 
 def test_the_action_buttons_are_gone(page):
@@ -499,7 +514,7 @@ def test_a_merge_does_not_reseed_or_drop_the_users_legs(page):
     cc = _lazy_payload()
     bus_client.bus().cache_set("cache:options:calc_chain", cc)
     _drive(root, polls)
-    _click_grid(root, "bid", "put", 655.0)          # the legs are now the user's
+    _click_grid(root, "bid", "call", 655.0)         # the legs are now the user's
     bus_client.bus().cache_set("cache:options:calc_chain", _with_far(cc))
     _drive(root, polls)
     assert "3 LEGS" in _texts(root)
@@ -531,10 +546,10 @@ def test_the_calculator_publishes_its_position_as_it_changes(page):
     root, polls = page
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
-    _click_grid(root, "bid", "put", 655.0)
+    _click_grid(root, "bid", "call", 655.0)
     pos = shared_position.current()
     assert pos["symbol"] == "SPY" and len(pos["legs"]) == 3
-    assert pos["legs"][-1] == {"option_type": "put", "side": "short", "strike": 655.0,
+    assert pos["legs"][-1] == {"option_type": "call", "side": "short", "strike": 655.0,
                                "expiry": _EXPIRY, "qty": 1, "premium": 1.5}
 
 

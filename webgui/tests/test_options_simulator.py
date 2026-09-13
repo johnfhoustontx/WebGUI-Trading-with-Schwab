@@ -338,14 +338,14 @@ def test_simulator_keeps_the_default_navy_palette():
 
     container = _sim_container()
     rows = _leg_rows(container)
-    for cls in LE.DEFAULT_CARD_TOKENS["frame"].split():
+    for cls in LE.DEFAULT_LEG_TOKENS["frame"].split():
         assert cls in rows[0]._classes, cls
-    for cls in LE.DEFAULT_CARD_TOKENS["side_short"].split():      # PCS leg 1 sells
+    for cls in LE.DEFAULT_LEG_TOKENS["side_short"].split():      # PCS leg 1 sells
         assert cls in _hooked(container, "leg-side")[0]._classes, cls
     panel = _hooked(container, "entry-panel")[0]
     for cls in EP.DEFAULT_PANEL_TOKENS["frame"].split():
         assert cls in panel._classes, cls
-    shared = ({c for v in LE.DEFAULT_CARD_TOKENS.values() for c in v.split()}
+    shared = ({c for v in LE.DEFAULT_LEG_TOKENS.values() for c in v.split()}
               | {c for v in EP.DEFAULT_PANEL_TOKENS.values() for c in v.split()})
     calc = {c for name in dir(theme) if name.startswith("CALC_")
             for c in str(getattr(theme, name)).split()
@@ -416,7 +416,7 @@ def test_a_sim_chain_for_another_symbol_is_not_painted():
     assert "Load a symbol to see its chain." in _labels(container)
 
 
-def test_a_grid_click_adds_a_leg_and_prices_the_new_position():
+def test_a_grid_click_on_an_unmatched_side_adds_a_leg_and_prices_the_new_position():
     import asyncio
 
     import bus_client
@@ -940,3 +940,20 @@ def test_an_old_saved_tab_name_falls_back_to_the_first_tab():
         sim.render()
     tabs = [e for e in container.descendants() if isinstance(e, ui.tabs)][0]
     assert tabs.value == "Price & Time"
+
+
+def test_a_grid_click_on_a_matching_side_moves_that_leg_instead_of_adding_one():
+    import asyncio
+
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _SIM_META)
+    bus_client.bus().cache_set("cache:options:sim_chain", _sim_chain())
+    _fire(container, "_poll_meta")
+    _run_async(container, "_poll_chain", asyncio)
+    before = _last_command("sim_run")["args"]["legs"]
+    assert {l["side"] for l in before if l["kind"] == "put"} == {"short", "long"}
+    _click_grid(container, "ask", "put", 445.0)           # moves the long put
+    assert len(_leg_rows(container)) == 2
+    legs = _last_command("sim_run")["args"]["legs"]
+    assert [l["strike"] for l in legs if l["side"] == "long"] == [445.0]

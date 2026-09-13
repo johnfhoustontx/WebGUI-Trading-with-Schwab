@@ -2508,15 +2508,19 @@ moment after you stop.</p>
    calls | strike | puts, in a scroll box that opens centred on spot. At-the-money
    strike in gold, in-the-money cells shaded. Default columns, call side outward to
    the strike: <strong>Delta · OI · Volume · Bid · Ask</strong>, mirrored on the put side.
-   <strong>Click a Bid to SELL, an Ask to BUY.</strong> ⚠ <strong>The new leg is priced at the MARK
-   either way</strong> — the column only decides the side. Pricing a sell at the bid would
+   <strong>Click a Bid to SELL, an Ask to BUY.</strong> The click <strong>moves</strong> the leg already on
+   that side and type (a put Bid moves the short put), and adds a leg only when
+   there is none — so a template is edited from the chain rather than piled onto.
+   ⚠ <strong>The leg is priced at the MARK either way</strong> — the column only decides the side. Pricing a sell at the bid would
    make every structure look worse by the full spread and disagree with the
    volatility implied from the mark. <strong>Columns</strong> adds Mark, IV, Gamma, Theta or Vega,
    and remembers it.</li>
 <li><strong>Legs</strong> — one row per leg: BUY/SELL and CALL/PUT (or <strong>stock</strong> — see <em>Stock legs</em>
    below) toggles, quantity, expiry, strike, price and the leg's <strong>delta</strong> read from
-   the chain. The strike is typed (snapped to the real ladder) or stepped with ‹ › and
-   the ↑ ↓ keys, and each change re-prices the leg — <strong>unless its price was typed</strong>,
+   the chain. The strike is a dropdown of the real ladder, stepped with ‹ ›, and a <strong>Bid /
+   Mark / Ask</strong> dropdown picks which side of the quote prices the leg — Mark by
+   default; Bid or Ask shows what a fill at the natural side would cost. Each
+   change re-prices the leg — <strong>unless its price was typed</strong>,
    which stays until its ↺ is pressed. Add or remove legs freely; the last one is
    locked, because a calculator with no legs has nothing to price. Per-leg expiry is
    what makes <strong>calendars price correctly</strong> — each leg is valued at its own time to
@@ -2727,7 +2731,8 @@ changes.</p>
 <p>The top is the Calculator's <strong>entry panel</strong>, in this page's navy rather than the
 Calculator's near-black: enter a symbol, pick a <strong>Strategy</strong>, and build the legs from
 the chain grid (<strong>Bid → SELL, Ask → BUY</strong>) or the leg rows (BUY/SELL and CALL/PUT
-toggles, typed-or-stepped strike, the expiry strip for every leg at once). Each leg
+toggles, a strike dropdown, the expiry strip for every leg at once). A grid click
+moves the leg already on that side rather than adding another. Each leg
 row shows its <strong>delta</strong> from the chain — the grid's chain comes from the <strong>same</strong>
 fetch as the simulation, published as <code>cache:options:sim_chain</code>. There is no price
 box: every leg is priced from volatility. The last leg cannot be removed (a position

@@ -205,7 +205,8 @@ def test_setting_all_legs_to_an_expiry_is_UNCHANGED_for_options():
 
 # ── the render pass must not stamp an expiry either ──────────────────────
 
-@pytest.mark.parametrize("layout", ["card", "table"])
+# (Rescue's row layout offers no share leg at all; the card layout is gone.)
+@pytest.mark.parametrize("layout", ["table"])
 def test_RENDERING_a_share_leg_does_not_give_it_an_expiry(layout):
     """⚠ The fourth writer. ``_render`` coerces every leg's expiry into the loaded
     ladder before the body reads it, and ``coerce_choice(None, exps)`` answers

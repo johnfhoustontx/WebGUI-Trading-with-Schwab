@@ -216,3 +216,27 @@ def test_grid_body_html_emits_nothing_dompurify_would_strip():
     attrs = {a for a in _re.findall(r'([a-zA-Z][\w-]*)="', out) if not a.startswith("data-")}
     assert not sorted(n for n in tags | attrs if n.lower() not in allow)
     assert tags == {"div"} and "class" in attrs
+
+
+# ── a leg priced from a chosen side of the quote (2026-09-12) ───────────────
+
+_Q_EXP = "2026-09-19"
+_Q_CHAIN = {"putExpDateMap": {f"{_Q_EXP}:7": {
+    "565.0": [{"bid": 1.9, "ask": 2.1, "mark": 2.0}],
+    "570.0": [{"bid": 0.0, "ask": 2.6, "mark": 0.0}]}}}
+
+
+def test_extract_price_reads_the_chosen_side_of_the_quote():
+    assert cg.extract_price(_Q_CHAIN, "put", 565.0, _Q_EXP, "bid") == 1.9
+    assert cg.extract_price(_Q_CHAIN, "put", 565.0, _Q_EXP, "ask") == 2.1
+    assert cg.extract_price(_Q_CHAIN, "put", 565.0, _Q_EXP, "mark") == 2.0
+
+
+def test_extract_price_mark_is_extract_premium_and_unknown_source_is_the_mark():
+    assert cg.extract_price(_Q_CHAIN, "put", 565.0, _Q_EXP, None) == 2.0
+    assert cg.extract_price(_Q_CHAIN, "put", 565.0, _Q_EXP, "junk") == 2.0
+
+
+def test_extract_price_a_zero_side_is_no_reading_not_a_zero_price():
+    assert cg.extract_price(_Q_CHAIN, "put", 570.0, _Q_EXP, "bid") is None
+    assert cg.extract_price(_Q_CHAIN, "put", 575.0, _Q_EXP, "ask") is None

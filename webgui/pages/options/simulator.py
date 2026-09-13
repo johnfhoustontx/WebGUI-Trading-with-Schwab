@@ -857,10 +857,11 @@ def render():
 
     @guard
     def _add_pick(column, option_type, strike, expiry):
-        """A chain-grid click → a one-contract leg. No price: this page prices
-        every leg off the chain's IV, not off a premium."""
-        editor.add_leg(_entry.leg_from_pick(column, option_type, strike, expiry,
-                                            price=None))
+        """A chain-grid click MOVES the leg on the same side and type to that
+        contract, or adds one when none matches (``editor.place_pick``). No price:
+        this page prices every leg off the chain's IV, not off a premium."""
+        editor.place_pick(_entry.leg_from_pick(column, option_type, strike, expiry,
+                                               price=None))
 
     panel.on_expiry(_set_all_expiry)
     panel.on_pick(_add_pick)

@@ -1,10 +1,10 @@
 """The leg editor's compact ``layout="table"`` — the entry panel's leg list.
 
-One row per leg: side and type are one-click toggles, the strike is typed or
-stepped along the REAL ladder (never a long dropdown), and the price re-fills
-from the chain when the leg becomes a different contract — unless it was typed.
-Driven through the real widgets' event listeners, the way test_leg_editor.py
-drives the card layout.
+One row per leg: side and type are one-click toggles, the strike is a dropdown
+of the REAL ladder (‹ › step it), and the price re-fills from the chain at the
+row's Bid / Mark / Ask when the leg becomes a different contract — unless it was
+typed. A chain-grid click moves the matching leg (``place_pick``). Driven through
+the real widgets' event listeners.
 """
 import re
 
@@ -28,8 +28,12 @@ def _leg(**kw):
     return base
 
 
-def _price_for(leg):
-    return _MARKS.get((leg.get("option_type"), leg.get("strike"), leg.get("expiry")))
+def _price_for(leg, source="mark"):
+    # the bid a dime under the mark and the ask a dime over it
+    mark = _MARKS.get((leg.get("option_type"), leg.get("strike"), leg.get("expiry")))
+    if mark is None:
+        return None
+    return round(mark + {"bid": -0.1, "ask": 0.1}.get(source, 0.0), 2)
 
 
 def _table(legs, **kw):
@@ -100,35 +104,6 @@ def test_table_strike_buttons_step_one_real_strike():
     assert ed.get_legs()[0]["strike"] == 565.0
 
 
-def test_table_strike_input_snaps_typed_text_on_enter_and_blur():
-    ed, container = _table([_leg()])
-    box = _hook(container, "leg-strike")
-    box.value = "574"
-    _fire(box, "keydown.enter")
-    assert ed.get_legs()[0]["strike"] == 575.0
-    box = _hook(container, "leg-strike")
-    box.value = "566"
-    _fire(box, "blur")
-    assert ed.get_legs()[0]["strike"] == 565.0
-
-
-def test_table_strike_junk_text_restores_the_strike():
-    ed, container = _table([_leg()])
-    box = _hook(container, "leg-strike")
-    box.value = "abc"
-    _fire(box, "keydown.enter")
-    assert ed.get_legs()[0]["strike"] == 570.0
-    assert _hook(container, "leg-strike").value == "570"
-
-
-def test_table_strike_arrow_keys_step():
-    ed, container = _table([_leg()])
-    _fire(_hook(container, "leg-strike"), "keydown.up")
-    assert ed.get_legs()[0]["strike"] == 575.0
-    _fire(_hook(container, "leg-strike"), "keydown.down")
-    assert ed.get_legs()[0]["strike"] == 570.0
-
-
 def test_table_strike_change_refills_the_price_from_the_chain():
     ed, container = _table([_leg()])
     _fire(_hook(container, "leg-strike-dn"), "click")
@@ -138,7 +113,7 @@ def test_table_strike_change_refills_the_price_from_the_chain():
 def test_table_refill_keeps_the_old_price_when_the_chain_has_none():
     # never a zeroed price: "no mark" is not "$0.00"
     ed, container = _table([_leg(strike=565.0, premium=2.0)],
-                           price_for=lambda leg: None)
+                           price_for=lambda leg, source: None)
     _fire(_hook(container, "leg-strike-up"), "click")
     assert ed.get_legs()[0]["premium"] == 2.0
 
@@ -268,7 +243,7 @@ def test_refill_prices_a_share_leg_only_while_it_has_no_price():
     stock = {"option_type": "stock", "side": "long", "strike": None,
              "expiry": None, "qty": 1, "premium": None}
     ed, _ = _table([stock, dict(stock, premium=88.0)], allow_stock=True,
-                   price_for=lambda leg: 101.5 if leg["option_type"] == "stock" else None)
+                   price_for=lambda leg, source: 101.5 if leg["option_type"] == "stock" else None)
     ed.refill_prices()
     assert [l["premium"] for l in ed.get_legs()] == [101.5, 88.0]
 
@@ -300,3 +275,136 @@ def test_a_page_with_no_price_column_clears_a_moved_legs_price():
     assert ed.get_legs()[1]["premium"] == 2.0            # untouched leg keeps its price
     _fire(_hook(container, "leg-side", 1), "click")      # a side flip is the same contract
     assert ed.get_legs()[1]["premium"] == 2.0
+
+
+# ── the strike dropdown (2026-09-12) ────────────────────────────────────────
+
+def test_table_strike_is_a_dropdown_of_the_real_ladder():
+    _, container = _table([_leg()])
+    sel = _hook(container, "leg-strike")
+    assert isinstance(sel, ui.select)
+    assert sel.options == {560.0: "560", 565.0: "565", 570.0: "570", 575.0: "575"}
+    assert sel.value == 570.0
+
+
+def test_table_choosing_a_strike_moves_the_leg_and_refills_its_price():
+    ed, container = _table([_leg()])
+    _hook(container, "leg-strike").value = 575.0
+    assert ed.get_legs()[0]["strike"] == 575.0
+    assert ed.get_legs()[0]["premium"] == 3.1
+    assert ed.is_dirty()
+
+
+def test_table_a_cleared_strike_filter_does_not_unstrike_the_leg():
+    ed, container = _table([_leg()])
+    _hook(container, "leg-strike").value = None
+    assert ed.get_legs()[0]["strike"] == 570.0
+
+
+# ── the price-source dropdown (2026-09-12) ──────────────────────────────────
+
+def test_table_price_source_dropdown_offers_bid_mark_ask_and_starts_at_the_mark():
+    _, container = _table([_leg()])
+    sel = _hook(container, "leg-price-source")
+    assert sel.options == {"bid": "Bid", "mark": "Mark", "ask": "Ask"}
+    assert sel.value == "mark"
+
+
+def test_table_choosing_a_source_reprices_the_leg_from_that_side():
+    ed, container = _table([_leg()])
+    _hook(container, "leg-price-source").value = "bid"
+    assert ed.get_legs()[0]["premium"] == 2.4
+    _hook(container, "leg-price-source").value = "ask"
+    assert ed.get_legs()[0]["premium"] == 2.6
+
+
+def test_table_the_chosen_source_prices_the_next_strike_too():
+    ed, container = _table([_leg()])
+    _hook(container, "leg-price-source").value = "ask"
+    _fire(_hook(container, "leg-strike-dn"), "click")       # 570 -> 565
+    assert ed.get_legs()[0]["premium"] == 2.1
+    assert _hook(container, "leg-price-source").value == "ask"
+
+
+def test_table_choosing_a_source_replaces_a_typed_price():
+    ed, container = _table([_leg()])
+    _hook(container, "leg-price").value = 9.99
+    _hook(container, "leg-price-source").value = "bid"
+    assert ed.get_legs()[0]["premium"] == 2.4
+    assert not _hook(container, "leg-price-reset").visible
+
+
+def test_table_source_survives_a_type_flip_and_an_expiry_change():
+    ed, container = _table([_leg(strike=565.0)])
+    _hook(container, "leg-price-source").value = "ask"
+    ed.apply_expiry(_EXPS[1])
+    ed.refill_prices()                                    # what the page does next
+    assert ed.get_legs()[0]["premium"] == 2.3             # 2.2 mark + a dime
+    assert _hook(container, "leg-price-source").value == "ask"
+
+
+def test_table_share_leg_hides_the_price_source():
+    _, container = _table([{"option_type": "stock", "side": "long", "strike": None,
+                            "expiry": None, "qty": 1, "premium": 100.0}],
+                          allow_stock=True)
+    assert not _hook(container, "leg-price-source").visible
+
+
+def test_normalize_strips_the_price_source():
+    assert "_price_source" not in LE.normalize_legs([_leg(_price_source="bid")])[0]
+
+
+# ── a grid click moves the matching leg (2026-09-12) ────────────────────────
+
+def _pick(side, otype, strike, expiry=_EXPS[0]):
+    return {"option_type": otype, "side": side, "strike": strike, "expiry": expiry,
+            "qty": 1, "premium": None}
+
+
+def test_place_pick_moves_the_leg_on_the_same_side_and_type():
+    ed, container = _table([_leg(), _leg(side="long", strike=565.0, premium=2.0)])
+    assert ed.place_pick(_pick("short", "put", 575.0)) == 0
+    legs = ed.get_legs()
+    assert len(legs) == 2
+    assert (legs[0]["side"], legs[0]["strike"], legs[0]["premium"]) == ("short", 575.0, 3.1)
+    assert legs[1]["strike"] == 565.0                     # the other leg untouched
+    assert ed.is_dirty()
+
+
+def test_place_pick_adds_a_leg_only_when_nothing_matches():
+    ed, _ = _table([_leg()])
+    assert ed.place_pick(_pick("long", "call", 570.0)) == 1
+    legs = ed.get_legs()
+    assert len(legs) == 2 and legs[1]["option_type"] == "call"
+    assert legs[1]["premium"] == 4.0
+
+
+def test_place_pick_keeps_the_rows_quantity_and_price_source_but_not_a_typed_price():
+    ed, container = _table([_leg(qty=3)])
+    _hook(container, "leg-price-source").value = "bid"
+    _hook(container, "leg-price").value = 9.99
+    ed.place_pick(_pick("short", "put", 565.0, _EXPS[1]))
+    leg = ed.get_legs()[0]
+    assert (leg["qty"], leg["expiry"], leg["strike"]) == (3, _EXPS[1], 565.0)
+    assert leg["premium"] == 2.1                          # 2.2 mark - a dime: the bid
+    assert not _hook(container, "leg-price-reset").visible
+
+
+def test_place_pick_with_no_reading_leaves_the_moved_leg_unpriced():
+    # the old contract's price must not ride onto the new one
+    ed, _ = _table([_leg()])
+    ed.place_pick(_pick("short", "put", 560.0))
+    assert ed.get_legs()[0]["premium"] is None
+
+
+def test_place_pick_fires_on_change_once():
+    hits = []
+    ed, _ = _table([_leg()], on_change=lambda: hits.append(1))
+    ed.place_pick(_pick("short", "put", 565.0))
+    assert hits == [1]
+
+
+def test_place_pick_on_a_page_with_no_price_column_moves_the_leg_unpriced():
+    ed, _ = _table([_leg(premium=2.5)], show_premium=False, price_for=None)
+    ed.place_pick(_pick("short", "put", 575.0))
+    assert ed.get_legs() == [dict(_leg(), strike=575.0, premium=None)]
