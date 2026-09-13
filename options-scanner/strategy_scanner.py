@@ -77,7 +77,7 @@ def _sign(leg):
 
 def _is_stock(leg):
     """A 100-share-lot leg (the Calculator's D4 convention), not an option."""
-    return leg.get("kind") == "stock"
+    return leg.get("kind") == _oc.STOCK_KIND
 
 
 def _option_contracts(legs):
@@ -756,6 +756,48 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
         diag = _diagonal(kind, label, direction, f_exp, f, b_exp, b, symbol, spot, atm_iv)
         if diag is not None:
             out.append(diag)
+    return out
+
+
+def _stock_leg(spot):
+    """One 100-share lot at spot (the Calculator's D4 share-leg convention)."""
+    return {"kind": _oc.STOCK_KIND, "side": "long", "strike": None, "expiration": None,
+            "qty": 1, "mark": float(spot), "delta": 1.0, "theta": 0.0, "vega": 0.0,
+            "gamma": 0.0, "iv": 0.0}
+
+
+def build_stock_structures(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                           put_band=None, call_band=None):
+    """Covered call, protective put and collar, each on one 100-share lot bought at
+    spot. The short call is at the call band's midpoint and obeys its CEILING; the
+    long put is at the put band's midpoint and does not (a band governs where you
+    SELL premium). ⚠ ``COVERED_CALL`` here is the WHOLE position, as in the
+    Calculator - the paper account's ``COVERED_CALL`` is the option leg alone, so
+    this row gets no Paper button.
+    """
+    fp = _front_pair(chain, dte_min, dte_max)
+    if not fp:
+        return []
+    exp, cs, ps = fp
+    cb, pb = _band_abs(call_band), _band_abs(put_band)
+    c = nearest_by_delta({s: v for s, v in cs.items() if s > spot}, _short_target(cb))
+    if c and cb and abs(c["delta"]) > cb[1]:
+        c = None
+    p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _short_target(pb))
+    out = []
+    if c:
+        legs = [_stock_leg(spot), _leg_from(c, "call", "short", exp)]
+        out.append(_assemble("COVERED_CALL", "DIRECTIONAL", "Covered Call", "bullish",
+                             legs, symbol, spot, atm_iv))
+    if p:
+        legs = [_stock_leg(spot), _leg_from(p, "put", "long", exp)]
+        out.append(_assemble("PROTECTIVE_PUT", "DIRECTIONAL", "Protective Put", "bullish",
+                             legs, symbol, spot, atm_iv))
+    if c and p:
+        legs = [_stock_leg(spot), _leg_from(c, "call", "short", exp),
+                _leg_from(p, "put", "long", exp)]
+        out.append(_assemble("COLLAR", "DIRECTIONAL", "Collar", "bullish",
+                             legs, symbol, spot, atm_iv))
     return out
 
 

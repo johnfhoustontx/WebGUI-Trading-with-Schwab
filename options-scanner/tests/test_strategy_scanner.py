@@ -1342,3 +1342,91 @@ def test_low_priced_chains_keep_their_calendars(chain_spot, step, spot, want):
     out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.40, 5, 60))
     assert _cal_strikes(out, "CALENDAR_CALL") == {want}
     assert _cal_strikes(out, "CALENDAR_PUT") == {want}
+
+
+# ---- Covered call, protective put, collar ----
+def _stock_structures(**kw):
+    kw.setdefault("put_band", (-0.20, -0.10))
+    kw.setdefault("call_band", (0.10, 0.20))
+    return _by_type(ss.build_stock_structures(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
+                                              **kw))
+
+
+def test_share_structures_hold_one_lot_and_band_midpoint_options():
+    out = _by_type(ss.build_stock_structures(
+        _ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
+        put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
+    for t in ("COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"):
+        stock = [l for l in out[t]["legs"] if l["kind"] == "stock"]
+        assert len(stock) == 1 and stock[0]["qty"] == 1 and stock[0]["mark"] == 100.0
+        assert out[t]["family"] == "DIRECTIONAL"
+    cc = {l["kind"]: l for l in out["COVERED_CALL"]["legs"]}
+    assert cc["call"]["side"] == "short" and cc["call"]["strike"] > 100.0
+    pp = {l["kind"]: l for l in out["PROTECTIVE_PUT"]["legs"]}
+    assert pp["put"]["side"] == "long" and pp["put"]["strike"] < 100.0
+    col = {l["kind"]: l for l in out["COLLAR"]["legs"]}
+    assert col["call"]["strike"] == cc["call"]["strike"]
+    assert col["put"]["strike"] == pp["put"]["strike"]
+    assert out["PROTECTIVE_PUT"]["unbounded_profit"] is True
+
+
+def test_a_far_ladder_call_under_the_band_floor_still_builds_the_covered_call():
+    """On a step-20 ladder the only out-of-the-money calls sit far out (120C at
+    |delta| ~0.014): under a 0.10 ceiling AND below the 0.05 floor. Only the
+    ceiling binds - escaping the band downward is a thin credit, not extra
+    assignment risk - so the covered call and collar are built. The test below
+    exercises the ceiling actually dropping them."""
+    out = _by_type(ss.build_stock_structures(_ladder_chain(step=20.0, n=2), "XYZ",
+                                             100.0, 0.28, 5, 90, call_band=(0.05, 0.10)))
+    call = next(l for l in out["COVERED_CALL"]["legs"] if l["kind"] == "call")
+    assert call["strike"] == 120.0 and abs(call["delta"]) < 0.05
+    assert "COLLAR" in out and "PROTECTIVE_PUT" in out
+
+
+def test_the_call_band_ceiling_binds_when_the_only_otm_call_is_richer_than_it():
+    """On ``step=5, n=1`` the only out-of-the-money call is 105 at ~0.30 delta,
+    richer than a 0.10 ceiling: no covered call and no collar. The long put is
+    not governed by a band's ceiling, so the protective put is still built."""
+    out = _by_type(ss.build_stock_structures(_ladder_chain(step=5.0, n=1), "XYZ",
+                                             100.0, 0.28, 5, 90, call_band=(0.05, 0.10)))
+    assert "COVERED_CALL" not in out and "COLLAR" not in out
+    assert "PROTECTIVE_PUT" in out
+
+
+def test_the_share_leg_kind_is_the_pricers_stock_constant():
+    import options_calculator as oc
+    out = _stock_structures()
+    for t in ("COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"):
+        shares = [l for l in out[t]["legs"] if not l.get("strike")]
+        assert len(shares) == 1 and shares[0]["kind"] == oc.STOCK_KIND
+
+
+def test_covered_call_risks_the_stock_less_the_premium_and_caps_at_the_strike():
+    import commissions as _cm
+    s = _stock_structures()["COVERED_CALL"]
+    call = next(l for l in s["legs"] if l["kind"] == "call")
+    comm = _cm.round_trip_commission(1, None, 1)
+    assert abs(s["max_loss"] - ((100.0 - call["mark"]) * 100 + comm)) < 0.05
+    assert abs(s["max_profit"] - ((call["strike"] - 100.0 + call["mark"]) * 100 - comm)) < 0.05
+    assert s["unbounded_profit"] is False and s["unbounded_loss"] is False
+
+
+def test_collar_is_bounded_by_its_put_and_call_strikes():
+    import commissions as _cm
+    s = _stock_structures()["COLLAR"]
+    call = next(l for l in s["legs"] if l["kind"] == "call")
+    put = next(l for l in s["legs"] if l["kind"] == "put")
+    comm = _cm.round_trip_commission(2, None, 1)
+    assert abs(s["max_loss"]
+               - ((100.0 + put["mark"] - call["mark"] - put["strike"]) * 100 + comm)) < 0.05
+    assert abs(s["max_profit"]
+               - ((call["strike"] - 100.0 - put["mark"] + call["mark"]) * 100 - comm)) < 0.05
+
+
+def test_protective_put_has_unbounded_profit_and_loses_down_to_its_strike():
+    import commissions as _cm
+    s = _stock_structures()["PROTECTIVE_PUT"]
+    put = next(l for l in s["legs"] if l["kind"] == "put")
+    comm = _cm.round_trip_commission(1, None, 1)
+    assert s["max_profit"] is None and s["unbounded_profit"] is True
+    assert abs(s["max_loss"] - ((100.0 + put["mark"] - put["strike"]) * 100 + comm)) < 0.05
