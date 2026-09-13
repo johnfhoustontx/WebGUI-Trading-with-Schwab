@@ -1,10 +1,21 @@
-"""Multi-strategy candidate builders for the Swing Scanner (pure).
+"""Multi-strategy candidate builders for the Strategy Finder (pure).
 
-Given a Schwab option chain + spot, build NORMALIZED candidate signals across
-families (directional, verticals, neutral, diagonal). Each candidate carries a
-canonical ``legs`` list + payoff economics (max P/L, breakevens, PoP, capital).
-Credit verticals (PCS/CCS) are produced by ``scanner_engine.screen_spreads`` and
-adapted here; this module owns the new families.
+Given a Schwab option chain + spot, build NORMALIZED candidate signals. Each
+carries a canonical ``legs`` list + payoff economics (max P/L, breakevens, PoP,
+capital), per-contract dollars net of round-trip commission.
+
+* ``build_directional`` - long/short call and put, nearest expiry in the window.
+* ``build_debit_verticals`` - bull call and bear put spreads, nearest expiry.
+* ``build_straddles_strangles`` - long/short straddle and strangle.
+* ``build_butterflies_condors`` - call/put butterfly, iron butterfly, call/put condor.
+* ``build_calendars`` - call/put calendar and the call/put diagonal.
+* ``build_stock_structures`` - covered call, protective put and collar on one
+  100-share lot.
+
+Every builder from straddles down takes a front expiry at least
+``_MIN_FRONT_DTE`` (7) days out. Credit verticals (PCS/CCS) and iron condors are
+produced by ``scanner_engine`` and only normalized here
+(``adapt_credit_spread`` / ``adapt_iron_condor``).
 """
 import datetime as _dt
 import math
