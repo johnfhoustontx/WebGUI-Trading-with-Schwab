@@ -175,12 +175,18 @@ _TYPE_PROFILE = {
     # Strategy Finder, every structure (2026-09-13). Measured by
     # tools/sweep_strategy_gates.py - quote its figures WITH their parameters.
     "LONG_STRADDLE": "LONG", "LONG_STRANGLE": "LONG", "PROTECTIVE_PUT": "LONG",
-    # SHORT_STRADDLE and COVERED_CALL clear NO profile's PoP bar (~57 and ~54 vs
-    # NAKED's 65) and are counted in "below the quality bar" rather than shown.
+    # SHORT_STRADDLE and COVERED_CALL fail NAKED on PoP (~57 and ~52-54 vs 65)
+    # and are counted in "below the quality bar" rather than shown. COVERED_CALL
+    # fails EVERY profile - on PoP under NAKED and on R:R and/or PoP under the
+    # others (R:R 0.05-0.13, PoP under 55). ⚠ SHORT_STRADDLE does NOT: it would
+    # PASS NEUTRAL (PoP 57.3 vs 55, R:R 0.16-0.39 vs 0.12), so NAKED is the
+    # choice that cuts it, not the only profile that could. Measured at spot 100,
+    # IV 0.20 and 0.28, step 2.5 and 5, 14/30/45 DTE.
     # Operator decision: no bar is invented without outcome data.
     "SHORT_STRADDLE": "NAKED", "SHORT_STRANGLE": "NAKED", "COVERED_CALL": "NAKED",
     # IRON_BUTTERFLY is the long butterfly's payoff by put-call parity; judging it
-    # under NEUTRAL's 55 PoP bar would cut both every time.
+    # under NEUTRAL's 55 PoP bar would cut the iron butterfly and the long
+    # butterfly every time.
     "BUTTERFLY_CALL": "DEBIT", "BUTTERFLY_PUT": "DEBIT", "IRON_BUTTERFLY": "DEBIT",
     "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
     "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",
