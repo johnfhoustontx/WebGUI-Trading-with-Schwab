@@ -80,7 +80,7 @@ Schwab calls**.
 | Straddle, iron butterfly, butterfly body | at-the-money strike |
 | Strangle shorts, covered call, collar call | the delta band's midpoint (as the other shorts do) |
 | Long strangle | its own OTM wings nearest **0.30 delta**, independent of the band. *Revised while building:* buying the short strangle's band-midpoint strikes put both wings near 0.15 delta, where PoP measured 22–25 in every IV × DTE cell — always under LONG's 30 bar (the two rows' PoPs sum to ~100) |
-| Collar put, protective put | the long put at the put band's midpoint |
+| Collar put, protective put | the long put nearest **0.25 delta**, not the sell band; skipped under 0.10 delta (a collar also needs a call ≥ 0.05) — below that the position is essentially plain long stock. Front expiry ≥ 7 DTE, as for calendars. *Revised while building:* the band midpoint bought a 0.08-delta hedge, and at the page's default DTE min of 0 a same-day hedge passed the gates |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
 | Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
 | Diagonal | short the FRONT month out of the money near **0.30 delta** (accepted only inside 0.15–0.45), long the BACK month in the money near **0.70 delta**; skipped when the debit reaches the strike width. ⚠ The playbook (`2026-09-11-options-strategy-playbook.md`) says *debit ≤ 75% of width*; 100% is deliberate — measured on a $1 ladder at 7/35 DTE the call diagonal costs 87.5% and the put 78.5% of width, so 75% would reject both. *Revised three times while building:* an out-of-the-money long priced as a credit; an in-the-money long against an at-the-money short cost more than the width on every call chain measured (debit = width + back time value − front time value), so only put diagonals could ever pass, and only on interest-rate carry. The 0.30/0.70 pairing is the practitioner shape the width rule assumes |
@@ -170,8 +170,12 @@ back month spanning a report is exposed to it even when the front expires first.
 - **Send to Paper** (operator decision: only where the ledger is right) adds
   `BUTTERFLY_CALL`, `BUTTERFLY_PUT`, `CONDOR_CALL`, `CONDOR_PUT` to
   `strategy_table._PAPER_TYPES` **and**
-  `paper_trader.PAPER_DEBIT_TYPES`, plus a `[structures.*]` table with
-  `exit_dte = 21` for each, mirroring the four existing debit structures.
+  `paper_trader.PAPER_DEBIT_TYPES`, 
+  **Exit rule (operator decision 2026-09-13): no time exit** for butterflies and
+  condors — they keep the 50%-of-max-profit target and settle at expiry. A 21-DTE
+  exit suits trades that lose value to time; a long fly gains most of its value in the
+  last two weeks (95/100/105 at spot 100: $1.20 at 30 DTE, $1.42 at 21, target ~$3.10
+  only near 3 DTE), so it would close flat within days of opening.
   **Precondition:** the ledger must reprice and settle a `qty 2` body leg
   correctly; if it does not, the butterflies ship without the button rather than
   the ledger being changed.
