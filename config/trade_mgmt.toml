@@ -183,21 +183,16 @@ exit_dte = 21
 exit_dte = 21
 # debit_stop_frac = 0.60
 
-# Strategy Finder debit structures (2026-09-13) — the same time exit as the four
-# above. The profit target needs no table: _debit_target_base already takes a
-# fraction of MAX PROFIT for a bounded butterfly/condor. No straddle/strangle
-# table: those are analysis only (D1), and test_straddle_analysis_only pins that.
-[structures.BUTTERFLY_CALL]
-exit_dte = 21
-
-[structures.BUTTERFLY_PUT]
-exit_dte = 21
-
-[structures.CONDOR_CALL]
-exit_dte = 21
-
-[structures.CONDOR_PUT]
-exit_dte = 21
+# The Strategy Finder's long butterflies and condors (BUTTERFLY_CALL/PUT,
+# CONDOR_CALL/PUT) are paper-tradeable too, and deliberately have NO table, so NO
+# time exit (operator decision, 2026-09-13). A 21-DTE exit fits a trade that LOSES
+# value to time; a long fly/condor GAINS most of its value in the last two weeks.
+# A 95/100/105 call fly at spot 100 is worth $1.20 at 30 DTE and $1.42 at 21, and
+# reaches its ~$3.10 target only near 3 DTE - so an exit_dte of 21 would close
+# every 22-30 DTE entry flat within days. They keep the [stops] tp_frac target,
+# taken on MAX PROFIT (_debit_target_base), and settle at expiry. Adding a table
+# here with exit_dte reverses that decision. No straddle/strangle table either:
+# those are analysis only (D1), pinned by test_straddle_analysis_only.
 
 [rescue]
 # Escalation bands the at-risk board owns ALONE. The four it shares with [stops]

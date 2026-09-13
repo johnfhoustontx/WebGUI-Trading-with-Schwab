@@ -89,12 +89,14 @@ DEFAULTS = {
         "LONG_PUT": {"exit_dte": 21},
         "BULL_CALL": {"exit_dte": 21},
         "BEAR_PUT": {"exit_dte": 21},
-        # The Strategy Finder's long butterflies and condors (2026-09-13): the
-        # same time exit. No straddle/strangle - analysis only (D1).
-        "BUTTERFLY_CALL": {"exit_dte": 21},
-        "BUTTERFLY_PUT": {"exit_dte": 21},
-        "CONDOR_CALL": {"exit_dte": 21},
-        "CONDOR_PUT": {"exit_dte": 21},
+        # The Strategy Finder's long butterflies and condors are paper-tradeable
+        # but deliberately have NO table - no time exit (operator decision
+        # 2026-09-13). They gain most of their value in the last two weeks: a
+        # 95/100/105 call fly at spot 100 is $1.20 at 30 DTE, $1.42 at 21, and
+        # reaches its ~$3.10 target only near 3 DTE, so a 21-DTE exit would close
+        # every 22-30 DTE entry flat. They keep the tp_frac target on max profit
+        # and settle at expiry. See config/trade_mgmt.toml. No straddle/strangle
+        # either - analysis only (D1).
     },
 }
 

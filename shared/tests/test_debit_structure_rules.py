@@ -122,13 +122,30 @@ def test_a_TOML_edit_to_one_debit_table_leaves_its_siblings_alone(
 
 # ── every structure the ledger can hold as a debit (2026-09-13) ─────────────
 
-def test_every_ledger_debit_structure_has_a_time_exit():
-    """``shared.structures.LEDGER_DEBIT`` is what the Paper button may send, so a
-    structure added there without a table would ride to expiry with no time
-    exit. Checked through the accessor AND in the shipped TOML, since the
-    accessor alone passes while a value lives only in DEFAULTS."""
+_RANGE_DEBITS = ("BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT")
+
+
+def test_the_ledger_debit_list_is_the_originals_plus_the_range_debits():
+    """Guards the split below: a structure added to LEDGER_DEBIT must be put in
+    one camp or the other on purpose."""
+    assert set(structures.LEDGER_DEBIT) == set(_DEBITS) | set(_RANGE_DEBITS)
+
+
+def test_the_original_debits_have_a_time_exit_and_flies_and_condors_have_none():
+    """OPERATOR DECISION (2026-09-13). A 21-DTE exit fits a trade that LOSES
+    value to time. A long butterfly or condor GAINS most of its value in the last
+    two weeks - a 95/100/105 call fly at spot 100 is worth $1.20 at 30 DTE, $1.42
+    at 21, and reaches a ~$3.10 target only near 3 DTE - so every 22-30 DTE entry
+    would be closed flat within days. They keep the 50%-of-max-profit target and
+    settle at expiry. Checked through the accessor AND in the shipped TOML, since
+    the accessor alone passes while a value lives only in DEFAULTS."""
     shipped = _raw().get("structures", {})
-    for name in structures.LEDGER_DEBIT:
+    for name in _DEBITS:
         assert trade_mgmt.structure_rules(name).get("exit_dte") == 21, name
         assert (shipped.get(name) or {}).get("exit_dte") == 21, name
+    for name in _RANGE_DEBITS:
+        assert trade_mgmt.structure_rules(name).get("exit_dte") is None, name
+        assert "exit_dte" not in (shipped.get(name) or {}), name
+        assert "exit_dte" not in (trade_mgmt.DEFAULTS["structures"].get(name) or {}), name
+    for name in structures.LEDGER_DEBIT:
         assert (shipped.get(name) or {}).get("debit_stop_frac") in (None, 0), name

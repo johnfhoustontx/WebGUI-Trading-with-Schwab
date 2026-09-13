@@ -88,3 +88,33 @@ def test_a_finder_butterfly_and_condor_open_through_the_DEBIT_path():
     assert fly["max_profit_total"] is not None           # bounded: target on max profit
     condor = paper_trader.create_paper_trade(_condor_signal("call"), 1)
     assert condor["direction"] == "DEBIT" and len(condor["legs"]) == 4
+
+
+def _ledger_ctx(strategy, pnl, *, dte_remaining, dte_at_entry=30):
+    """The ctx ``options_svc.compute._ledger_exit_ctx`` builds for a debit row -
+    every dollar figure PER CONTRACT."""
+    return {"strategy": strategy, "direction": "DEBIT", "entry_credit": -2.00,
+            "entry_debit": 200.0, "max_profit": 300.0, "unrealized_pnl": pnl,
+            "dte_remaining": dte_remaining, "dte_at_entry": dte_at_entry,
+            "current_short_delta": None}
+
+
+@pytest.mark.parametrize("name", ("BUTTERFLY_CALL", "BUTTERFLY_PUT",
+                                  "CONDOR_CALL", "CONDOR_PUT"))
+def test_a_fly_or_condor_entered_at_30_DTE_is_not_time_exited_at_21(name):
+    """Operator decision 2026-09-13: these gain most of their value in the last
+    two weeks, so a 21-DTE exit would close every 22-30 DTE entry flat. The
+    LONG_CALL control proves the ctx is one the time exit does fire on."""
+    import signal_recommender
+    for dte in (21, 10, 3):
+        rec = signal_recommender.recommend(_ledger_ctx(name, 0.0, dte_remaining=dte))
+        assert rec["code"] == "HOLD", (name, dte, rec)
+    control = signal_recommender.recommend(_ledger_ctx("LONG_CALL", 0.0, dte_remaining=21))
+    assert control["code"] == "TIME_EXIT"
+
+
+def test_a_fly_still_takes_its_target_on_max_profit():
+    import signal_recommender
+    rec = signal_recommender.recommend(
+        _ledger_ctx("BUTTERFLY_CALL", 150.0, dte_remaining=25))
+    assert rec["code"] == "TARGET_HIT"                 # 50% of the $300 max profit
