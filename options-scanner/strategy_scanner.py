@@ -296,6 +296,36 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
     return round(prob * 100, 1)
 
 
+def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
+    """``n`` ``[price, pnl_per_contract]`` points across spot ± ``width_moves`` ×
+    the expected move to the front expiry, for the Strategy Finder's payoff shapes.
+
+    Valued exactly as ``payoff_metrics`` values the position (``_pl_at`` with the
+    same front-expiry rule) and GROSS of commission - it is a shape, not a
+    number the page quotes. ``None`` when the position cannot be valued (no spot,
+    or a later leg with an unusable IV, which ``_front_value`` refuses): the page
+    then draws no shape rather than a made-up one.
+    """
+    try:
+        s = float(spot)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(s) or s <= 0:
+        return None
+    iv = atm_iv if isinstance(atm_iv, (int, float)) and math.isfinite(atm_iv) and atm_iv > 0 else 0.20
+    move = s * iv * math.sqrt(max(int(dte or 0), 1) / 365.0)
+    lo, hi = max(s - width_moves * move, 0.0), s + width_moves * move
+    entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
+    front = _front_expiration(legs) if _needs_front_valuation(legs) else None
+    try:
+        return [[round(lo + (hi - lo) * i / (n - 1), 2),
+                 round(_pl_at(legs, entry_cost, lo + (hi - lo) * i / (n - 1), front)
+                       * _CONTRACT_MULT, 2)]
+                for i in range(n)]
+    except ValueError:
+        return None
+
+
 _LONG_DELTA, _SHORT_DELTA = 0.55, 0.28
 
 

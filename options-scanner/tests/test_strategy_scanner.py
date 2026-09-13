@@ -1698,3 +1698,46 @@ def test_a_long_fly_priced_just_under_its_wing_that_commission_makes_unprofitabl
     out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
     assert "BUTTERFLY_CALL" not in out           # 8.97 - 4.10 + 0.10 = 4.97 debit
     assert out["BUTTERFLY_PUT"]["max_profit"] > 0
+
+
+# ---- Strategy Finder redesign: payoff_curve ----
+def test_payoff_curve_long_call_is_flat_then_rising_per_contract():
+    legs = [_leg("call", "long", 100.0, 3.0)]
+    pts = ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=30, n=25)
+    assert len(pts) == 25
+    xs = [p[0] for p in pts]
+    assert xs == sorted(xs) and xs[0] < 100.0 < xs[-1]
+    low, high = pts[0][1], pts[-1][1]
+    assert abs(low - (-300.0)) < 0.01          # below the strike: lose the debit
+    assert high > 0
+
+
+def test_payoff_curve_spans_two_expected_moves_to_the_front_expiry():
+    import math
+    legs = [_leg("put", "long", 100.0, 3.0)]
+    pts = ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=30, n=25)
+    em = 100.0 * 0.28 * math.sqrt(30 / 365)
+    assert abs(pts[0][0] - (100.0 - 2 * em)) < 0.02
+    assert abs(pts[-1][0] - (100.0 + 2 * em)) < 0.02
+
+
+def test_payoff_curve_values_a_calendar_at_the_front_expiry():
+    short, long_ = _cal_legs()
+    pts = ss.payoff_curve([short, long_], spot=100.0, atm_iv=0.28, dte=14, n=25)
+    peak = max(pts, key=lambda p: p[1])
+    assert abs(peak[0] - 100.0) < 3.0 and peak[1] > 0
+
+
+def test_payoff_curve_covered_call_includes_the_shares():
+    call = _leg("call", "short", 105.0, 1.0)
+    call["expiration"] = _exp(30)
+    pts = ss.payoff_curve([_stock(100.0), call], spot=100.0, atm_iv=0.28, dte=30, n=25)
+    assert pts[0][1] < -500                     # shares lose below spot
+    assert abs(pts[-1][1] - 600.0) < 0.5        # capped at strike - spot + credit
+
+
+def test_payoff_curve_refuses_unusable_inputs_quietly():
+    bad = [_leg("call", "short", 100.0, 1.0, iv=-999.0), _leg("call", "long", 100.0, 2.0, iv=-999.0)]
+    bad[0]["expiration"], bad[1]["expiration"] = _exp(7), _exp(35)
+    assert ss.payoff_curve(bad, spot=100.0, atm_iv=0.28, dte=7) is None
+    assert ss.payoff_curve([_leg("call", "long", 100.0, 3.0)], spot=None, atm_iv=0.28, dte=30) is None
