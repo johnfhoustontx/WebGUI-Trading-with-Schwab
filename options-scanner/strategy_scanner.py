@@ -309,11 +309,12 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
     same front-expiry rule) and GROSS of commission - it is a shape, not a
     number the page quotes. ``None`` when the position cannot be valued (no spot,
     or a later leg with an unusable IV, which ``_front_value`` refuses): the page
-    then draws no shape rather than a made-up one. ``None`` too for ``n < 2``,
+    then draws no shape rather than a made-up one. ``None`` too for no legs
+    (a flat line at zero would be exactly such a made-up shape) and for ``n < 2``,
     which is no grid at all. A missing, non-numeric, NaN or sub-one ``dte`` spans
     a ONE-day move - the narrowest honest width, never a crash.
     """
-    if not isinstance(n, int) or n < 2:
+    if not legs or not isinstance(n, int) or n < 2:
         return None
     try:
         s = float(spot)

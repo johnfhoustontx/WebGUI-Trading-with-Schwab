@@ -462,10 +462,16 @@ def test_adapted_credit_spreads_are_VERTICAL_and_iron_condors_NEUTRAL(monkeypatc
 def test_every_emitted_swing_candidate_carries_a_payoff_curve(monkeypatch, unfiltered_swing):
     _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
     out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # EVERY row on this fixture can be valued - the share structures (covered
+    # call, protective put, collar) included - so none may come back without a
+    # shape. ``None`` is for a position that genuinely cannot be valued, and this
+    # chain holds none.
+    import strategy_scanner as ssn
+    assert any(any(ssn._is_stock(l) for l in s["legs"]) for s in out["signals"]),         "fixture must include a share structure or that half asserts nothing"
     for s in out["signals"]:
         curve = s.get("payoff_curve")
-        assert curve is None or (len(curve) == 25 and all(len(p) == 2 for p in curve)), s["type"]
-    assert any(s.get("payoff_curve") for s in out["signals"])
+        assert curve is not None, s["type"]
+        assert len(curve) == 25 and all(len(p) == 2 for p in curve), s["type"]
 
 
 def test_the_payoff_curve_is_computed_only_for_rows_that_survive_the_cut(monkeypatch):
@@ -488,8 +494,64 @@ def test_the_payoff_curve_is_computed_only_for_rows_that_survive_the_cut(monkeyp
     assert len(seen) == len(out["signals"])
     # The scan's spot and each row's own dte reach the builder.
     assert all(spot == 540.0 for spot, _, _ in seen)
+    # A FRACTION, not the percent run_iv_analysis reports: 18% passed as 18.0
+    # would draw a window a hundred times too wide.
+    assert all(0 < iv < 1.5 for _, iv, _ in seen), [iv for _, iv, _ in seen]
     assert sorted(d for _, _, d in seen) == sorted(s.get("dte") for s in out["signals"])
 
+
+
+def _income_inputs(monkeypatch):
+    """The income window over the symmetric ladder: one 35-DTE expiry and a PCS +
+    CCS out of the stubbed spread screen, so ``income_scan`` emits rows."""
+    import datetime as dt
+
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain(dtes=(35,)))
+    exp = (dt.date.today() + dt.timedelta(days=35)).isoformat()
+    common = {"symbol": "SPY", "expiration": exp, "underlying_price": 540.0,
+              "short_mark": 1.2, "long_mark": 0.6, "credit": 0.6, "max_loss": 4.4}
+    monkeypatch.setattr(compute.se, "screen_spreads", lambda *a, **k: [
+        {**common, "type": "PCS", "short_strike": 525.0, "long_strike": 520.0},
+        {**common, "type": "CCS", "short_strike": 555.0, "long_strike": 560.0}])
+
+
+def _count_payoff_calls(monkeypatch):
+    import strategy_scanner as ssn
+
+    real, calls = ssn.payoff_curve, []
+
+    def _spy(*a, **k):
+        calls.append(a)
+        return real(*a, **k)
+
+    monkeypatch.setattr(ssn, "payoff_curve", _spy)
+    return calls
+
+
+def test_the_income_board_carries_no_payoff_curve_and_never_builds_one(monkeypatch,
+                                                                       unfiltered_swing):
+    """Nothing reads a curve off ``cache:options:income``, so the income path must
+    neither publish one nor pay the ~25 valuations per row to build it."""
+    _income_inputs(monkeypatch)
+    calls = _count_payoff_calls(monkeypatch)
+    sigs = compute.income_scan("SPY")["signals"]
+    assert sigs, "the income fixture must emit rows or this asserts nothing"
+    assert not any("payoff_curve" in s for s in sigs)
+    assert calls == []
+
+
+def test_the_finder_path_still_builds_curves_on_the_income_inputs(monkeypatch,
+                                                                  unfiltered_swing):
+    """The control for the test above: the SAME inputs through ``swing_scan``'s
+    default do build a curve per row, so the empty call list there is the switch
+    and not an input the builder refuses."""
+    _income_inputs(monkeypatch)
+    calls = _count_payoff_calls(monkeypatch)
+    sigs = compute.swing_scan("SPY", compute.INCOME_DTE_MIN, compute.INCOME_DTE_MAX,
+                              -0.25, -0.15, 0.15, 0.25, 0.10,
+                              families=("VERTICAL", "DIRECTIONAL"))["signals"]
+    assert sigs and len(calls) == len(sigs)
+    assert all(s.get("payoff_curve") for s in sigs)
 
 # ── Swing quality cut (score >= SWING_MIN_SCORE, no excluded grade) ─────────
 

@@ -1743,6 +1743,13 @@ def test_payoff_curve_refuses_unusable_inputs_quietly():
     assert ss.payoff_curve([_leg("call", "long", 100.0, 3.0)], spot=None, atm_iv=0.28, dte=30) is None
 
 
+
+def test_payoff_curve_draws_no_shape_for_no_legs():
+    """An empty position is not a flat line at zero - that would be a made-up
+    shape, which the docstring promises the page never gets."""
+    assert ss.payoff_curve([], spot=100.0, atm_iv=0.28, dte=30) is None
+    assert ss.payoff_curve(None, spot=100.0, atm_iv=0.28, dte=30) is None
+
 def test_payoff_curve_refuses_a_degenerate_grid():
     legs = [_leg("call", "long", 100.0, 3.0)]
     assert ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=30, n=1) is None

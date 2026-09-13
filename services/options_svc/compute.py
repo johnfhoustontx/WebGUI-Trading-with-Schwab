@@ -299,7 +299,7 @@ def _passes_swing_cut(sig):
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
-               earnings_date=None, return_chain=False) -> dict:
+               earnings_date=None, return_chain=False, payoff=True) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -351,6 +351,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       straight over the report the spreads were just protected from.
     * ``return_chain`` adds the fetched ``chain`` + ``spot`` to the returned
       dict so the covered-call screen can reuse them (see the return statement).
+
+    ``payoff`` (default True) attaches each emitted row's ``payoff_curve`` for the
+    Strategy Finder. :func:`income_scan` passes False: nothing reads a curve off
+    ``cache:options:income``, so it would be published bytes and ~25 valuations
+    per row for no reader.
 
     ``strategy_scanner`` / ``strategy_scoring`` are imported lazily here (not at
     module top) to avoid binding the process-wide ``sys.modules`` entries merely by
@@ -552,7 +557,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # after the quality cut, so only emitted rows pay for its ~25 valuations. It
     # uses the scan's own spot + ATM IV and the row's front ``dte``; ``None`` when
     # the position cannot be valued (the page then draws no shape).
-    for s in signals:
+    for s in (signals if payoff else ()):
         s["payoff_curve"] = ssn.payoff_curve(s.get("legs") or [], spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
               "vol_filtered": vol_filtered}
@@ -766,7 +771,9 @@ def income_scan(symbol, market_state=None, return_chain=False) -> dict:
                      trade_type="INCOME",
                      structures=_INCOME_STRUCTURES,
                      earnings_date=earnings_date,
-                     return_chain=return_chain)
+                     return_chain=return_chain,
+                     # No payoff shapes: the Income board draws none.
+                     payoff=False)
     for s in out["signals"]:
         s["earnings_status"] = status
     return out
