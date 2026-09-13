@@ -1214,10 +1214,12 @@ def test_an_exact_tie_goes_to_the_strike_both_maps_list():
 
 
 def test_mixed_spacing_with_the_back_grid_strike_missing_builds_no_calendar():
-    """Front $1, back $5 with the back 100C absent, spot 101: the front ATM 101 is
-    off the back's $5 grid, and the back strike that grid puts next to it is 100 -
-    which is missing. The nearest strike both list is 105, a four-point recentre,
-    so the call kind is a hole. The put side, whose back 100 is intact, builds."""
+    """Front $1, back $5 with the back 100C absent, spot 101. The back call ladder
+    judges itself: its strike nearest spot is 105, whose listed neighbours (95 and
+    110) put its own local step at 5, and on that spacing the strike nearest 101 is
+    100 - not listed, so the back ladder has a hole at the money and the call
+    calendar is skipped rather than recentred four points onto 105. The put side,
+    whose back 100 is intact, builds."""
     chain = _merge_chains(_ladder_chain(days=(7,), step=1.0, n=15),
                           _drop(_ladder_chain(days=(35,), step=5.0, n=6),
                                 "callExpDateMap", 35, "100.0"))
@@ -1238,29 +1240,37 @@ def test_a_near_the_money_put_is_never_sold_as_a_diagonal_short():
 
 
 def test_a_token_delta_short_is_not_a_diagonal():
-    """On the $5 ladder at spot 100 the nearest out-of-the-money front strikes are
-    105C (delta ~0.11) and 95P (~0.09): a token short, not the ~0.30 one a diagonal
-    sells, so neither kind is built."""
-    out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
+    """On the $2.50 ladder at IV 28 the nearest out-of-the-money front strikes are
+    102.5C (delta ~0.28) and 97.5P (~0.24), and both diagonals build. At IV 14 the
+    same strikes are 102.5C ~0.11 and 97.5P ~0.09: a token short, not the ~0.30 one
+    a diagonal sells, so neither kind is built. (The $5 ladder's own case is the
+    first assertion of test_diagonals_buy_in_the_money_and_never_cost_their_width.)"""
+    rich = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35), step=2.5, n=8),
+                                       "XYZ", 100.0, 0.28, 5, 60))
+    assert "DIAGONAL_CALL" in rich and "DIAGONAL_PUT" in rich
+    chain = _ladder_chain(days=(7, 35), step=2.5, n=8, iv=14.0)
+    assert abs(_raw_contract(chain, "callExpDateMap", 7, "102.5")["delta"]) < 0.15
+    assert abs(_raw_contract(chain, "putExpDateMap", 7, "97.5")["delta"]) < 0.15
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.14, 5, 60))
     assert "DIAGONAL_CALL" not in out and "DIAGONAL_PUT" not in out
 
 
 @pytest.mark.parametrize("hole", ["sentinel", "deleted"])
 def test_a_hole_on_the_diagonals_own_long_strike_is_never_picked(hole):
     """On the $1 ladder the call diagonal buys the back 96C. With that contract
-    unusable (Schwab's -999 IV) or absent, it must pick another listed strike or
-    build nothing - never 96."""
+    unusable (Schwab's -999 IV) or absent, it picks the next listed strike nearest
+    0.70 delta - 97C, against the same 102C short - never 96."""
     chain = _ladder_chain(days=(7, 35), step=1.0, n=15)
     if hole == "sentinel":
         _raw_contract(chain, "callExpDateMap", 35, "96.0")["volatility"] = -999.0
     else:
         _drop(chain, "callExpDateMap", 35, "96.0")
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
-    diag = out.get("DIAGONAL_CALL")
-    if diag is not None:
-        long_ = next(l for l in diag["legs"] if l["side"] == "long")
-        assert long_["strike"] != 96.0
-        assert long_["iv"] != -999.0
+    diag = out["DIAGONAL_CALL"]
+    legs = {l["side"]: l for l in diag["legs"]}
+    assert legs["short"]["strike"] == 102.0
+    assert legs["long"]["strike"] == 97.0
+    assert legs["long"]["iv"] != -999.0
 
 
 # ---- Review follow-up: a calendar needs BOTH ladders whole at the money ----
@@ -1488,3 +1498,31 @@ def test_a_twelve_to_twenty_five_dollar_stock_on_two_fifty_strikes_keeps_its_cal
     out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.40, 5, 60))
     assert _cal_strikes(out, "CALENDAR_CALL") == {want}
     assert _cal_strikes(out, "CALENDAR_PUT") == {want}
+
+
+# ---- Review follow-up: a spacing change next to the money is skipped ----
+def _spacing_change_chain():
+    """$1 front; a back ladder listing $2.50 strikes up to 100 and $5 above it."""
+    back = _ladder_chain(days=(35,), step=2.5, n=12)
+    wide = _ladder_chain(days=(35,), step=5.0, n=6)
+    for m in ("callExpDateMap", "putExpDateMap"):
+        exp = next(iter(back[m]))
+        back[m][exp] = {**{k: v for k, v in back[m][exp].items() if float(k) <= 100.0},
+                        **{k: v for k, v in wide[m][exp].items() if float(k) > 100.0}}
+    return _merge_chains(_ladder_chain(days=(7,), step=1.0, n=15), back)
+
+
+def test_a_back_spacing_change_next_to_the_money_builds_no_calendar():
+    """A deliberate CONSERVATIVE skip. At spot 101.5 the back ladder's strike nearest
+    spot is 100, whose neighbours 97.5 and 105 put its local step at 2.5 - and on
+    that spacing 102.5 belongs next to the money and is not listed. From two
+    neighbours a spacing change and a missing strike look the same, so the builder
+    cannot tell this legitimate ladder from a hole; skipping never builds an
+    off-centre calendar. The same chain at spot 100.5, where the 2.5 spacing puts
+    100 next to the money, builds at 100."""
+    chain = _spacing_change_chain()
+    out = _by_type(ss.build_calendars(chain, "XYZ", 101.5, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out and "CALENDAR_PUT" not in out
+    control = _by_type(ss.build_calendars(chain, "XYZ", 100.5, 0.28, 5, 60))
+    assert _cal_strikes(control, "CALENDAR_CALL") == {100.0}
+    assert _cal_strikes(control, "CALENDAR_PUT") == {100.0}
