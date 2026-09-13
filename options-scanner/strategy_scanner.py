@@ -566,6 +566,23 @@ def _listed(strikes, target):
     return best if abs(best - target) <= _LISTED_TOL else None
 
 
+def _priced_inside(sig, key, wing):
+    """True when ``sig[key]`` (per-contract dollars) is strictly between 0 and the
+    wing's full value, ``wing * 100``.
+
+    A long butterfly or condor is worth between 0 and its wing at expiry, so it
+    must cost a DEBIT inside that range; an iron butterfly is the same payoff
+    shifted down by its wing, so it must collect a CREDIT inside it. Mid marks on
+    a wide market can put either outside: measured 95C 6.5 / 100C 4.1 x2 / 105C
+    1.5 is a $20 credit for a long fly, which reported max loss 25.2, R:R 20.4, no
+    breakevens and PoP 100 and ranked first. Outside the range the marks are
+    wrong, not the trade good, so the row is not emitted.
+    """
+    v = sig.get(key)
+    return (isinstance(v, (int, float)) and math.isfinite(v)
+            and 0 < v < wing * _CONTRACT_MULT)
+
+
 def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
     """Call/put butterfly, iron butterfly (ATM body) and call/put condor, on the
     nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out (see ``_front_pair``).
@@ -574,6 +591,9 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
     move to the front expiry; a condor's shorts sit one wing either side of ATM and
     its longs two. All carry ``family="NEUTRAL"`` so ``q_breakeven_vs_em`` rewards a
     wide profit zone rather than a breakeven near spot.
+
+    A long fly or condor not priced for a debit under its wing, and an iron
+    butterfly not priced for a credit under its wing, is dropped (``_priced_inside``).
     """
     fp = _front_pair(chain, dte_min, dte_max)
     if not fp:
@@ -603,12 +623,16 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
                                   ("BUTTERFLY_PUT", "put", ps, "Put Butterfly")):
         legs = [_leg_from(m[lo], kind, "long", exp), body(_leg_from(m[k], kind, "short", exp), 2),
                 _leg_from(m[hi], kind, "long", exp)]
-        out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+        fly = _assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv)
+        if _priced_inside(fly, "net_debit", d):
+            out.append(fly)
 
     legs = [_leg_from(ps[lo], "put", "long", exp), _leg_from(ps[k], "put", "short", exp),
             _leg_from(cs[k], "call", "short", exp), _leg_from(cs[hi], "call", "long", exp)]
-    out.append(_assemble("IRON_BUTTERFLY", "NEUTRAL", "Iron Butterfly", "neutral", legs,
-                         symbol, spot, atm_iv))
+    iron = _assemble("IRON_BUTTERFLY", "NEUTRAL", "Iron Butterfly", "neutral", legs,
+                     symbol, spot, atm_iv)
+    if _priced_inside(iron, "net_credit", d):
+        out.append(iron)
 
     lo2, hi2 = _listed(both, k - 2 * d), _listed(both, k + 2 * d)
     if lo2 is not None and hi2 is not None:
@@ -618,7 +642,9 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
                     _leg_from(m[lo], kind, "short", exp),
                     _leg_from(m[hi], kind, "short", exp),
                     _leg_from(m[hi2], kind, "long", exp)]
-            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+            condor = _assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv)
+            if _priced_inside(condor, "net_debit", d):
+                out.append(condor)
     return out
 
 

@@ -1627,3 +1627,62 @@ def test_directional_and_debit_verticals_keep_the_nearest_front():
         assert rows
         for s in rows:
             assert s["expiration"] == _exp(1), s["type"]
+
+
+# ---- Final review: a fly or condor priced the wrong way round is not a trade ----
+def _marks(chain, map_key, marks):
+    """Overwrite the 30-DTE mark (and a tight bid/ask around it) per strike."""
+    for strike, mark in marks.items():
+        c = _raw_contract(chain, map_key, 30, strike)
+        c["mark"], c["bid"], c["ask"] = mark, mark - 0.05, mark + 0.05
+
+
+def test_the_default_ladder_builds_a_debit_fly_and_condor_and_a_credit_iron_fly():
+    """The control for the three tests below: on fairly priced marks every one of
+    these is built, the long structures for a debit and the iron fly for a credit
+    under its wing."""
+    out = _by_type(ss.build_butterflies_condors(_ladder_chain(), "XYZ", 100.0, 0.28, 5, 90))
+    for t in ("BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"):
+        assert out[t]["net_debit"] > 0, t
+    assert 0 < out["IRON_BUTTERFLY"]["net_credit"] < 500.0
+
+
+def test_a_long_butterfly_priced_for_a_credit_is_not_emitted():
+    """Mid marks on a wide market can break convexity. Measured: 95C 6.5 / 100C
+    4.1 x2 / 105C 1.5 is a $20 CREDIT for a long fly, which reported max loss
+    25.2, R:R 20.4, no breakevens and PoP 100 - and ranked first."""
+    chain = _ladder_chain()
+    _marks(chain, "callExpDateMap", {"95.0": 6.5, "100.0": 4.1, "105.0": 1.5})
+    out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "BUTTERFLY_CALL" not in out
+    assert out["BUTTERFLY_PUT"]["net_debit"] > 0          # the put side is untouched
+
+
+def test_a_long_condor_priced_for_a_credit_is_not_emitted():
+    chain = _ladder_chain()
+    # 90P/95P long-short and 105P/110P short-long: 1.0 - 3.0 - 7.0 + 8.0 = -1.0
+    _marks(chain, "putExpDateMap", {"90.0": 1.0, "95.0": 3.0, "105.0": 7.0, "110.0": 8.0})
+    out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "CONDOR_PUT" not in out
+    assert out["CONDOR_CALL"]["net_debit"] > 0
+
+
+def test_an_iron_butterfly_whose_credit_reaches_its_width_is_not_emitted():
+    """A $5-wide iron fly collecting $5.20 cannot lose - the marks are wrong, not
+    the trade good."""
+    chain = _ladder_chain()
+    _marks(chain, "callExpDateMap", {"100.0": 4.1, "105.0": 1.5})
+    _marks(chain, "putExpDateMap", {"100.0": 4.1, "95.0": 1.5})
+    out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "IRON_BUTTERFLY" not in out
+
+
+def test_a_long_fly_costing_its_whole_wing_and_an_iron_fly_for_a_debit_are_not_emitted():
+    """The other edge of the same range: a $5-wide call fly bought for $5.10 can
+    never profit, and an iron fly that PAYS to open is not an iron fly."""
+    chain = _ladder_chain()
+    _marks(chain, "callExpDateMap", {"95.0": 9.0, "100.0": 2.0, "105.0": 0.1})
+    _marks(chain, "putExpDateMap", {"95.0": 5.0, "100.0": 0.5})
+    out = _by_type(ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "BUTTERFLY_CALL" not in out           # 9.0 - 4.0 + 0.1 = 5.10 debit
+    assert "IRON_BUTTERFLY" not in out           # 0.5 + 2.0 - 5.0 - 0.1 = -2.60
