@@ -1476,3 +1476,15 @@ def test_a_long_straddle_scores_higher_when_its_breakevens_are_nearer_spot():
         max(dear["breakevens"]) - min(dear["breakevens"]))
     em = 15.0
     assert sc.q_breakeven_vs_em(cheap, em) > sc.q_breakeven_vs_em(dear, em)
+
+
+# ---- Review follow-up: the calendar step limit floors at $2.50 ----
+@pytest.mark.parametrize("chain_spot,spot,want", [(20.0, 20.0, 20.0), (15.0, 14.0, 15.0)])
+def test_a_twelve_to_twenty_five_dollar_stock_on_two_fifty_strikes_keeps_its_calendars(
+        chain_spot, spot, want):
+    """$2.50 is the normal strike spacing from $12.50 to $25, where it exceeds 10% of
+    spot. A $1 floor refused every calendar on those chains."""
+    chain = _ladder_chain(spot=chain_spot, days=(7, 35), step=2.5, n=5, iv=40.0)
+    out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.40, 5, 60))
+    assert _cal_strikes(out, "CALENDAR_CALL") == {want}
+    assert _cal_strikes(out, "CALENDAR_PUT") == {want}
