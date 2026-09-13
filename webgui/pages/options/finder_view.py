@@ -301,6 +301,32 @@ def _conviction_word(c):
     return "high"
 
 
+def payload_answers_scan(scan_symbol, payload):
+    """Whether a newly published payload is the answer to the scan in progress.
+
+    ``cache:options:swing`` is ONE slot: scan AAPL then quickly MSFT and AAPL's
+    result still lands, as does any other tab's scan. While a scan waits
+    (``scan_symbol`` set), only a payload for that symbol may replace the
+    placeholders. ``None`` means nothing is waiting, so anything paints; a blank
+    request names no symbol, so any answer is its answer.
+    """
+    if scan_symbol is None or not str(scan_symbol).strip():
+        return True
+    got = (payload or {}).get("symbol")
+    return bool(got) and str(got).strip().upper() == str(scan_symbol).strip().upper()
+
+
+def no_data_label(payload):
+    """What the empty list says after a scan that returned no rows - the reason,
+    in the page's voice, rather than Quasar's "No data available"."""
+    p = payload or {}
+    if _fmt.num(p.get("filtered_out")):
+        return "No strategies cleared the quality bar for this symbol."
+    if _fmt.num(p.get("vol_filtered")):
+        return "No strategies to show — premium is too cheap to sell for this symbol."
+    return "No strategies could be built for this symbol in this expiry range."
+
+
 def summary_facts(payload):
     """The summary strip's facts, or None before any scan has published.
 

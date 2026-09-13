@@ -158,7 +158,9 @@ def _click(element, card):
     from nicegui.events import GenericEventArguments
     (listener,) = [l for l in element._event_listeners.values()
                    if l.type.split(".")[0] == "click"]
-    with card:
+    # NiceGUI runs a handler inside the SENDER's parent slot (events.handle_event),
+    # which is what decides where anything the handler builds is mounted.
+    with element.parent_slot:
         listener.handler(GenericEventArguments(sender=element, client=element.client,
                                                args=None))
 
@@ -334,26 +336,140 @@ def test_a_scan_that_never_comes_back_on_a_cold_feed_says_so(monkeypatch):
     assert not list(grid.descendants())          # the placeholders are gone
 
 
-def test_a_scan_that_never_comes_back_restores_the_last_result(monkeypatch):
+def _fire_poll(card):
+    from nicegui import ui
+    (timer,) = [t for t in card.descendants()
+                if isinstance(t, ui.timer) and t.interval == 2.0]
+    with card:
+        timer.callback()
+
+
+def _publish(payload):
+    bus_client.bus().cache_set("cache:options:swing", payload)
+
+
+def _placeholder_texts(card):
+    from nicegui import ui
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    return [e.text for e in grid.descendants() if isinstance(e, ui.label)]
+
+
+def _scan(card, monkeypatch, symbol):
+    from nicegui import ui
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: None)
+    _widgets(card, ui.input)[0].value = symbol
+    _click(_buttons(card)["Scan"], card)
+
+
+def test_a_slow_scan_says_it_is_still_coming_and_keeps_waiting(monkeypatch):
     from nicegui import ui
     card = _render_page(_PAYLOAD)
-    monkeypatch.setattr(bus_client, "request", lambda *a, **k: None)
     (table,) = _widgets(card, ui.table)
-    _click(_buttons(card)["Scan"], card)
-    assert table.rows == []
+    _scan(card, monkeypatch, "msft")
     _fire_scan_timeout(card)
+    (status,) = [e for e in _widgets(card, ui.label) if e.text == swing.SCAN_SLOW]
+    assert swing.SCAN_SLOW == ("The scan is taking longer than expected — "
+                               "results will appear when it finishes.")
+    assert _placeholder_texts(card) == ["Scanning MSFT…"] * 4
+    assert table.rows == []
+    # ... and the late result still lands.
+    _publish({**_PAYLOAD, "symbol": "MSFT"})
+    _fire_poll(card)
+    assert {r["id"] for r in table.rows} == {"fly", "sp"} and status.text == ""
+
+
+def test_a_result_for_another_symbol_never_lands_under_the_scan(monkeypatch):
+    """Scan AAPL, then quickly MSFT: AAPL's result (or another tab's scan) must
+    not paint under the MSFT request."""
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    _scan(card, monkeypatch, "MSFT")
+    _publish({**_PAYLOAD, "symbol": "AAPL"})
+    _fire_poll(card)
+    assert table.rows == []
+    assert _placeholder_texts(card) == ["Scanning MSFT…"] * 4
+    _publish({**_PAYLOAD, "symbol": "MSFT", "signals": [_FLY]})
+    _fire_poll(card)
+    assert [r["id"] for r in table.rows] == ["fly"]
+    # No scan waiting any more: any new result paints, as before.
+    _publish({**_PAYLOAD, "symbol": "QQQ"})
+    _fire_poll(card)
     assert {r["id"] for r in table.rows} == {"fly", "sp"}
 
 
-def test_the_detail_panel_starts_collapsed_and_opens_on_the_first_selection():
+def _panel(card):
+    (col,) = [e for e in card.descendants()
+              if "w-11" in e._classes or "w-[360px]" in e._classes]
+    return col
+
+
+def _row_click(card, sig_id):
     from nicegui import ui
-    card = _render_page(_PAYLOAD)
-    (table,) = _widgets(card, ui.table)
-    panels = [e for e in card.descendants() if "w-11" in e._classes]
-    assert len(panels) == 1                      # collapsed at build
     from nicegui.events import GenericEventArguments
+    (table,) = _widgets(card, ui.table)
     (listener,) = [l for l in table._event_listeners.values() if l.type == "rowClick"]
     with card:
         listener.handler(GenericEventArguments(sender=table, client=table.client,
-                                               args=[{}, {"id": "fly"}, 0]))
-    assert "w-11" not in panels[0]._classes and "w-[360px]" in panels[0]._classes
+                                               args=[{}, {"id": sig_id}, 0]))
+
+
+def test_the_detail_panel_starts_collapsed_and_opens_on_the_first_selection():
+    card = _render_page(_PAYLOAD)
+    assert "w-11" in _panel(card)._classes          # collapsed at build
+    _row_click(card, "fly")
+    assert "w-11" not in _panel(card)._classes and "w-[360px]" in _panel(card)._classes
+
+
+def test_every_selection_reopens_a_collapsed_panel():
+    """A click that updates a collapsed panel invisibly reads as broken."""
+    card = _render_page(_PAYLOAD)
+    _row_click(card, "fly")
+    (toggle,) = [b for b in _widgets(card, __import__("nicegui").ui.button)
+                 if b.props.get("icon") == "last_page"]
+    _click(toggle, card)                             # the user collapses it
+    assert "w-11" in _panel(card)._classes
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    first_card = next(iter(grid.default_slot.children))
+    _click(first_card, card)                         # selecting a card reopens
+    assert "w-[360px]" in _panel(card)._classes
+
+
+def test_a_new_scan_clears_the_detail_panel(monkeypatch):
+    from nicegui import ui
+    from pages.options import detail
+    card = _render_page(_PAYLOAD)
+    _row_click(card, "fly")
+    placeholder = [e for e in _widgets(card, ui.label) if e.text == detail._PLACEHOLDER]
+    assert not placeholder
+    _scan(card, monkeypatch, "MSFT")
+    assert [e for e in _widgets(card, ui.label) if e.text == detail._PLACEHOLDER]
+
+
+def test_the_card_paper_dialog_survives_a_repaint():
+    """ui.dialog mounts on the client layout but leaves a CANARY in the slot it
+    was built from, and deletes itself when that canary is collected. Built from
+    a pick card, the next repaint (picks_grid.clear()) would close an open dialog
+    under the user's hands."""
+    import gc
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    client = card.client
+    before = {id(e) for e in client.elements.values() if isinstance(e, ui.dialog)}
+    _click(_buttons(card)["Paper"], card)
+    (dialog,) = [e for e in client.elements.values()
+                 if isinstance(e, ui.dialog) and id(e) not in before]
+    _click(_buttons(card)["Butterflies & condors 1"], card)   # repaints the cards
+    _click(_buttons(card)["All 2"], card)
+    gc.collect()
+    assert not dialog.is_deleted
+
+
+def test_the_list_says_why_it_is_empty(monkeypatch):
+    from nicegui import ui
+    empty = {"symbol": "SPY", "signals": [], "filtered_out": 4, "vol_filtered": 0}
+    card = _render_page(empty)
+    (table,) = _widgets(card, ui.table)
+    assert table.props["no-data-label"] == swing.fv.no_data_label(empty)
+    _scan(card, monkeypatch, "qqq")
+    assert table.props["no-data-label"] == "Scanning QQQ…"

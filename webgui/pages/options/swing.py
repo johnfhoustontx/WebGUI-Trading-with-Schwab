@@ -38,13 +38,20 @@ from .theme import (BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D, CARD, EYEBROW, LABEL
 # Before any scan has published for this session.
 EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 
+# The busy backstop fired but the scan is still running: a slow scan still lands
+# later, so this says so rather than calling it failed.
+SCAN_SLOW = ("The scan is taking longer than expected — "
+             "results will appear when it finishes.")
+
 # The seven build groups, by chip order. Kept under its old name because
 # test_strategy_table pins these labels against the Calculator's group names.
 _FAMILY_OPTIONS = dict(fv.GROUPS)
 
 # Quasar-internal escape hatch (the ONE ui.add_css this page injects):
 # - the app-wide TABLE_CSS caps every table body at 65vh; this list grows with the
-#   page instead (the old short scroll box hid most of a scan);
+#   page instead (the old short scroll box hid most of a scan). Accepted cost: the
+#   sticky header now scrolls away with the page, since the table body no longer
+#   scrolls on its own;
 # - the Advanced expansion header's q-focus-helper paints a full-width grey slab
 #   on hover/focus, which no prop turns off.
 FINDER_CSS = (".finder-table .q-table__middle { max-height: none; }\n"
@@ -164,6 +171,9 @@ def card_view(sig):
 
 # ------------------------------------------------------------------ table slots
 
+# v-html skips the DOMPurify pass ui.html gets. Safe here only because
+# ``finder_view.payoff_svg`` builds the string from formatted numbers and fixed
+# colour constants - no text from the payload - pinned by test_finder_view.
 _STRATEGY_SLOT = r'''
 <q-td :props="props">
   <div class="flex flex-nowrap items-center gap-2">
@@ -304,8 +314,11 @@ def render():
     scan_busy = _busy.build_busy(list_box, "Scanning…")
 
     by_id: dict = {}
+    # scanning: the seq of the scan whose busy backstop is armed.
+    # scan_symbol: the symbol a scan is waiting on (None = nothing waiting); only
+    # a payload for it may replace the placeholders.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
-             "scanning": None, "scan_seq": 0, "opened": False}
+             "scanning": None, "scan_seq": 0, "scan_symbol": None}
 
     # --------------------------------------------------------------- controls
 
@@ -370,11 +383,9 @@ def render():
     def _select_signal(sig):
         if not sig:
             return
-        if not state["opened"]:
-            # Opened once, on the first selection; after that the user's own
-            # collapse is respected.
-            state["opened"] = True
-            detail_panel.open()
+        # Every selection opens the panel: a click that updated a collapsed panel
+        # invisibly would read as a click that did nothing.
+        detail_panel.open()
         detail_panel.update(strategy_table.detail_signal(sig))
 
     def _on_row_click(event):
@@ -484,7 +495,16 @@ def render():
                 if c["allow_paper"]:
                     ui.button("Paper", icon="request_quote", color=None) \
                         .props("no-caps dense").classes(BTN) \
-                        .on("click.stop", lambda _e, s=sig: handoff.send_to_paper(s))
+                        .on("click.stop", lambda _e, s=sig: _open_paper(s))
+
+    @guard
+    def _open_paper(sig):
+        # A ui.dialog leaves a canary in the slot it is built from and deletes
+        # itself when that canary goes. Built from a pick card, the next repaint
+        # (picks_grid.clear()) would close it under the user; list_box is never
+        # cleared, and it is where the table rows' own Paper dialog is built.
+        with list_box:
+            handoff.send_to_paper(sig)
 
     def _paint_cards(picks):
         picks_grid.clear()
@@ -511,6 +531,7 @@ def render():
         visible = fv.filter_groups(signals, state["active"])
         _paint_cards(fv.top_picks(visible))
         table.rows = finder_rows(visible)
+        table.props(f'no-data-label="{fv.no_data_label(state["payload"])}"')
         table.update()
         empty_line.set_visibility(not has_scan)
         table.set_visibility(has_scan)
@@ -524,6 +545,7 @@ def render():
         state["symbol"] = symbol
         state["payload"] = payload
         state["scanning"] = None
+        state["scan_symbol"] = None
         by_id.clear()
         for s in signals:
             if s.get("id"):
@@ -542,11 +564,15 @@ def render():
         state["scanning"] = None
         scan_busy.hide()
         if (state["payload"] or {}).get("symbol"):
-            status.text = "The scan did not come back - showing the last result."
+            # Still waiting: the placeholders stay and scan_symbol stays set, so
+            # the late result paints when it lands and nothing else does.
+            status.text = SCAN_SLOW
         else:
+            # Nothing has published this session at all - the feed, not the scan.
+            state["scan_symbol"] = None
             empty_line.text = _copy.WAITING_OPTIONS
-        _paint_summary(state["payload"])
-        _paint_results()
+            _paint_summary(state["payload"])
+            _paint_results()
 
     @guard
     def _request_scan():
@@ -556,13 +582,17 @@ def render():
         state["scan_seq"] += 1
         seq = state["scan_seq"]
         state["scanning"] = seq
+        state["scan_symbol"] = params["symbol"]
         status.text = ""
+        # The panel described a row of the previous scan.
+        detail_panel.clear()
         # The old cards and rows belong to the previous scan (maybe another
         # symbol), so they go - rather than reading as this scan's result.
         summary_box.set_visibility(False)
         chips_row.clear()
         _paint_placeholders(params["symbol"])
         table.rows = []
+        table.props(f'no-data-label="{scanning_text(params["symbol"])}"')
         table.update()
         empty_line.set_visibility(False)
         table.set_visibility(True)
@@ -595,6 +625,9 @@ def render():
         if version == state["version"]:
             return
         state["version"] = version
-        _paint_payload(bus_client.read("options:swing"))
+        payload = bus_client.read("options:swing")
+        if not fv.payload_answers_scan(state["scan_symbol"], payload):
+            return      # another symbol's result - keep waiting for ours
+        _paint_payload(payload)
 
     ui.timer(2.0, _maybe_repaint)

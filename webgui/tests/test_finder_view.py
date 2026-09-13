@@ -475,3 +475,49 @@ def test_pop_fill_neutral_is_the_theme_accent_not_grey():
     assert fv.POP_FILL["neutral"] == f"bg-[{theme.THEME['palette']['primary']}]"
     assert fv.POP_FILL["warn"] == "bg-[#fbbf24]" and fv.POP_FILL["pos"] == "bg-[#34d399]"
     assert len(set(fv.POP_FILL.values())) == 3
+
+
+# ------------------------------------------------------------ review fixes (Task 5)
+
+def test_payload_answers_scan_only_for_the_symbol_being_scanned():
+    assert fv.payload_answers_scan(None, {"symbol": "AAPL"}) is True
+    assert fv.payload_answers_scan("MSFT", {"symbol": "AAPL"}) is False
+    assert fv.payload_answers_scan("MSFT", {"symbol": "msft"}) is True
+    assert fv.payload_answers_scan("MSFT", None) is False
+    assert fv.payload_answers_scan("MSFT", {}) is False
+    # A blank request names no symbol, so any answer is its answer.
+    assert fv.payload_answers_scan("", {"symbol": "SPY"}) is True
+
+
+def test_no_data_label_names_the_reason_in_the_pages_voice():
+    assert fv.no_data_label({"filtered_out": 4}) == (
+        "No strategies cleared the quality bar for this symbol.")
+    assert fv.no_data_label({"filtered_out": 4, "vol_filtered": 2}) == (
+        "No strategies cleared the quality bar for this symbol.")
+    assert fv.no_data_label({"vol_filtered": 3}) == (
+        "No strategies to show — premium is too cheap to sell for this symbol.")
+    assert fv.no_data_label({}) == (
+        "No strategies could be built for this symbol in this expiry range.")
+    assert fv.no_data_label(None) == fv.no_data_label({})
+
+
+def test_payoff_svg_carries_nothing_but_numbers_and_fixed_colours():
+    """The list slot renders ``_payoff_svg`` through Vue's v-html, which is NOT
+    sanitised. Safe only because every value in it is a number we formatted or a
+    fixed constant - so feed it label-like junk and check the output grammar."""
+    import re
+    junk = [["<script>alert(1)</script>", "1"], ['90" onload="x', -5],
+            [95.0, "-1e999"], ["100", "200"], [110.0, -50.0], [120, "</svg><img src=x>"]]
+    svg = fv.payoff_svg(junk, spot='"><img onerror=alert(1)>', width=72, height=20)
+    assert svg.startswith("<svg") and svg.count("<line ") >= 2   # really drew
+    assert re.fullmatch(r'[A-Za-z0-9 <>/="#.:\-]+', svg)
+    assert set(re.findall(r"<(/?[A-Za-z]+)", svg)) <= {"svg", "/svg", "line"}
+    value = re.compile(r"-?\d+(\.\d+)?|#[0-9a-f]{6}|round|\d+ \d+"
+                       r"|0 0 \d+ \d+|http://www\.w3\.org/2000/svg")
+    pairs = re.findall(r'([A-Za-z-]+)="([^"]*)"', svg)
+    assert pairs
+    for name, val in pairs:
+        assert value.fullmatch(val), (name, val)
+    for bad in ("script", "img", "onload", "onerror", "alert"):
+        assert bad not in svg
+
