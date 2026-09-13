@@ -185,8 +185,8 @@ _TYPE_PROFILE = {
     # Operator decision: no bar is invented without outcome data.
     "SHORT_STRADDLE": "NAKED", "SHORT_STRANGLE": "NAKED", "COVERED_CALL": "NAKED",
     # IRON_BUTTERFLY is the long butterfly's payoff by put-call parity; judging it
-    # under NEUTRAL's 55 PoP bar would cut the iron butterfly and the long
-    # butterfly every time.
+    # under NEUTRAL's 55 PoP bar would cut it every time — and so would the long
+    # butterfly if judged the same way.
     "BUTTERFLY_CALL": "DEBIT", "BUTTERFLY_PUT": "DEBIT", "IRON_BUTTERFLY": "DEBIT",
     "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
     "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",

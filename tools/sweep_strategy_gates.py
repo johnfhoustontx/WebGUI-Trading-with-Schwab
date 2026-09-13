@@ -15,10 +15,18 @@ number nobody could re-run -- see `tools/sweep_naked_capeff.py`).
 PURE: a synthetic Black-Scholes chain in memory (analytic delta, gamma, theta
 and vega, so the vega-sign fit and liquidity scores behave as on a real chain),
 then the REAL `strategy_scanner` builders and the REAL
-`strategy_scoring.score_strategy`. No Schwab call, no SQLite, no live DB, no
-network. Not a test -- deliberately outside pytest's `test_*` collection;
-`tools/tests/test_sweep_strategy_gates.py` pins that it still reaches every
-structure and still reproduces the two cuts.
+`strategy_scoring.score_all`, called the way `compute.swing_scan` calls it. No
+Schwab call, no SQLite, no live DB, no network. Not a test -- deliberately
+outside pytest's `test_*` collection; `tools/tests/test_sweep_strategy_gates.py`
+pins that it still reaches all sixteen structures, still reproduces the two cuts
+(and their PoP reason), and still scores the way production does.
+
+⚠ WHAT IT DOES NOT RUN. It measures the GATES and the GRADE the scorer assigns
+-- nothing downstream of `score_all` in `swing_scan`. So a row here is NOT a row
+the Finder would show: the volatility gate (`vol_gate.signal_blocks` against the
+symbol's IV rank), the earnings filter, the `_passes_swing_cut` score/grade cut
+(`SWING_MIN_SCORE` 50, Weak excluded) and the market-state family tilt are all
+absent. A Marginal 45 here is cut on the page.
 
     python tools/sweep_strategy_gates.py
     python tools/sweep_strategy_gates.py --step 5
@@ -29,8 +37,11 @@ front + 28 (so the calendar/diagonal builders find a back month), strikes
 spot +/- 40% on a `--step` ladder. All four builders run with the Finder's
 default short-delta bands (put -0.20..-0.10, call 0.10..0.20) over a 0 to
 front + 30 DTE window, and each candidate is scored against a NEUTRAL view
-(`direction neutral, conviction 0.1, vol_regime mid`) with
-`em_1sd = spot * iv * sqrt(front / 365)`.
+(`direction neutral, conviction 0.1, vol_regime mid`). The breakeven factor's
+move mirrors production: `score_all(..., daily_move=spot * iv * sqrt(1 / 365))`,
+which judges each candidate against `daily_move * sqrt(max(dte, 1))` -- the move
+to ITS OWN expiry. The scalar fallback is production's too, `daily_move *
+sqrt(max(dte_min, 1))` with this window's DTE min of 0.
 
 Columns:
     type      the normalized signal type (the `_TYPE_PROFILE` key)
@@ -135,14 +146,18 @@ def _legs_text(legs):
 def rows(spot, iv, front_days, step):
     """One scored row per candidate the four builders emit at this front DTE."""
     c = chain(spot, iv, (front_days, front_days + BACK_OFFSET), step)
-    em_1sd = spot * iv * math.sqrt(front_days / 365.0)
+    # swing_scan's two inputs: the engine's DAILY expected move in dollars, and
+    # the scalar fallback at the window's DTE min (0 here, so one day).
+    daily_move = spot * iv * math.sqrt(1 / 365.0)
+    em_fallback = daily_move * math.sqrt(max(0, 1))
     for name in BUILDERS:
         kw = {"put_band": PUT_BAND, "call_band": CALL_BAND} if name in BANDED else {}
         for sig in getattr(ss, name)(c, "SWEEP", spot, iv, 0, front_days + 30, **kw):
             profile = sc.gate_profile(sig)
             # The PRODUCTION expression, called rather than restated.
             reward = sc._reward_metric(dict(sig), profile)
-            scored = sc.score_strategy(dict(sig), NEUTRAL_VIEW, iv, em_1sd)
+            scored = sc.score_all([dict(sig)], NEUTRAL_VIEW, iv, em_fallback,
+                                  daily_move=daily_move)[0]
             net = (sig["net_debit"] if sig.get("net_debit") is not None
                    else -(sig.get("net_credit") or 0.0))
             yield {
@@ -174,7 +189,8 @@ def _fmt(all_rows, spot, iv, step):
     for r in all_rows:
         if r["front"] != front:
             front = r["front"]
-            out += [f"-- front {front} DTE (em_1sd {spot * iv * math.sqrt(front / 365):.2f})",
+            out += [f"-- front {front} DTE (1-sigma move to it "
+                    f"{spot * iv * math.sqrt(max(front, 1) / 365):.2f})",
                     head]
         grade = r["grade"] if r["grade"] != "Weak" else f"Weak ({r['grade_reason']})"
         maxp = "unb" if r["max_profit"] is None else _num(r["max_profit"], ".2f")
