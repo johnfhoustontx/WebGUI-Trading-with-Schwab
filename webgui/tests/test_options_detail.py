@@ -715,3 +715,32 @@ def test_dte_text_distinguishes_live_from_entry():
     assert detail.dte_text({"dte": 12}) == "12 DTE"
     assert detail.dte_text({"dte": 12, "dte_is_entry": True}) == "12 DTE at entry"
     assert detail.dte_text({}) == "—"
+
+
+def _panel_column(handle):
+    return handle._header.parent_slot.parent
+
+
+def test_panel_opens_by_default_and_can_be_collapsed_then_opened():
+    """The Strategy Finder starts the panel collapsed and opens it on the first
+    selection. The DEFAULT stays open, since three other pages mount it."""
+    from nicegui import ui
+
+    with ui.card():
+        h = detail.render()
+    col = _panel_column(h)
+    assert h.is_open is True and "w-[360px]" in col._classes
+
+    h.collapse()
+    assert h.is_open is False
+    assert "w-11" in col._classes and "w-[360px]" not in col._classes
+
+    h.collapse()                      # idempotent: no toggle back open
+    assert h.is_open is False
+
+    h.open()
+    assert h.is_open is True
+    assert "w-[360px]" in col._classes and "w-11" not in col._classes
+
+    h.open()                          # idempotent
+    assert h.is_open is True

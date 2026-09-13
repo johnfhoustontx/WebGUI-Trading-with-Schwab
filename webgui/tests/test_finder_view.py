@@ -263,3 +263,206 @@ def test_payoff_svg_segment_touching_zero_takes_its_other_end():
     down = _segments(fv.payoff_svg([[90.0, -100.0], [110.0, 0.0]], spot=None))
     assert [s["stroke"] for s in up] == [fv.PROFIT_STROKE]
     assert [s["stroke"] for s in down] == [fv.LOSS_STROKE]
+
+
+# ------------------------------------------------------------ review nits (Task 5)
+
+def test_pop_bar_colour_follows_the_rounded_label():
+    """The label and the colour must agree: a bar reading "40%" is not amber."""
+    b = fv.pop_bar(39.6)
+    assert b["label"] == "40%" and b["tone"] == "neutral"
+    b = fv.pop_bar(60.4)
+    assert b["label"] == "60%" and b["tone"] == "neutral"
+    assert fv.pop_bar(39.4)["tone"] == "warn"
+    assert fv.pop_bar(60.6)["tone"] == "pos"
+
+
+def test_halves_round_up_everywhere():
+    """Python's round() is banker's rounding: round(42.5) == 42, round(12.5/5) == 2.
+    One rule for every number the page shows."""
+    assert fv.pop_bar(42.5)["label"] == "43%"
+    assert fv.pop_bar(41.5)["label"] == "42%"
+    assert fv._snap(12.5) == 15 and fv._snap(22.5) == 25
+    f = fv.summary_facts({"symbol": "X", "signals": [{"iv_rank": 42.5}]})
+    assert f["vol_rank"] == "Vol Rank 43"
+
+
+def test_money_never_prints_a_negative_zero():
+    assert fv.money(-0.001) == "$0.00"
+    assert fv.money(-0.0) == "$0.00"
+    assert fv.money(-0.004) == "$0.00"
+    assert fv.money(-0.006) == "-$0.01"
+
+
+def test_summary_facts_reports_both_drops_separately():
+    """Moved from swing.status_text (B2): a volatility drop is a statement about the
+    environment, not the candidate, so it keeps its own count and sentence."""
+    f = fv.summary_facts({"symbol": "X", "signals": [{"id": "a"}], "filtered_out": 3,
+                          "vol_filtered": 2})
+    assert f["counts"] == ("1 idea · 3 below the quality bar · "
+                           "2 where premium is too cheap to sell")
+    # A payload written before vol_filtered existed renders as it always did.
+    old = fv.summary_facts({"symbol": "X", "signals": [{"id": "a"}], "filtered_out": 2})
+    assert old["counts"] == "1 idea · 2 below the quality bar"
+
+
+# ------------------------------------------------------------ controls wiring
+
+def test_expiry_range_for_a_preset_and_not_for_anything_else():
+    assert fv.expiry_range_for("2–6 wk") == (14, 42)
+    assert fv.expiry_range_for("Any") == (0, 120)
+    assert fv.expiry_range_for(None) is None
+    assert fv.expiry_range_for("Custom") is None
+
+
+def test_bands_for_choice_never_raises_on_custom():
+    """``risk_bands("Custom")`` raises KeyError; the toggle's handler goes through
+    this so a Custom (or cleared) value writes nothing."""
+    assert fv.bands_for_choice("Aggressive") == fv.risk_bands("Aggressive")
+    assert fv.bands_for_choice(fv.RISK_CUSTOM) is None
+    assert fv.bands_for_choice(None) is None
+    assert fv.bands_for_choice("nonsense") is None
+
+
+def test_risk_toggle_value_is_none_for_custom():
+    """The toggle offers only the three styles; a hand-edited band shows NO
+    selection plus a read-only Custom marker, never a "Custom" option value."""
+    b = fv.risk_bands("Balanced")
+    assert fv.risk_toggle_value(b["put_d_min"], b["put_d_max"],
+                                b["call_d_min"], b["call_d_max"]) == "Balanced"
+    assert fv.risk_toggle_value(-0.30, -0.12, 0.10, 0.20) is None
+
+
+# ------------------------------------------------------------ chips
+
+def test_toggle_chip_membership_and_all():
+    assert fv.toggle_chip(None, "VERTICAL") == {"VERTICAL"}
+    assert fv.toggle_chip({"VERTICAL"}, "CALENDAR") == {"VERTICAL", "CALENDAR"}
+    assert fv.toggle_chip({"VERTICAL", "CALENDAR"}, "VERTICAL") == {"CALENDAR"}
+    # Removing the last chip goes back to All rather than an empty page.
+    assert fv.toggle_chip({"VERTICAL"}, "VERTICAL") is None
+    assert fv.toggle_chip({"VERTICAL"}, fv.ALL_CHIP) is None
+
+
+def test_toggle_chip_does_not_mutate_its_input():
+    active = {"VERTICAL"}
+    fv.toggle_chip(active, "CALENDAR")
+    assert active == {"VERTICAL"}
+
+
+def test_chip_is_active():
+    assert fv.chip_is_active(None, fv.ALL_CHIP) is True
+    assert fv.chip_is_active(None, "VERTICAL") is False
+    assert fv.chip_is_active({"VERTICAL"}, "VERTICAL") is True
+    assert fv.chip_is_active({"VERTICAL"}, fv.ALL_CHIP) is False
+
+
+def test_carry_chips_survives_a_repaint_and_resets_on_a_new_symbol():
+    sigs = [_sig("A", "VERTICAL", 70), _sig("C", "CALENDAR", 65)]
+    assert fv.carry_chips({"VERTICAL"}, "SPY", "SPY", sigs) == {"VERTICAL"}
+    assert fv.carry_chips({"VERTICAL"}, "SPY", "QQQ", sigs) is None
+    assert fv.carry_chips(None, "SPY", "SPY", sigs) is None
+    # A chosen group that the new scan did not produce is dropped ...
+    assert fv.carry_chips({"VERTICAL", "STOCK"}, "SPY", "SPY", sigs) == {"VERTICAL"}
+    # ... and if nothing chosen survives, back to All.
+    assert fv.carry_chips({"STOCK"}, "SPY", "SPY", sigs) is None
+
+
+# ------------------------------------------------------------ list + cards
+
+def test_finder_columns_fit_without_the_old_extras():
+    names = [c["name"] for c in fv.finder_columns()]
+    assert names == ["strategy", "composite_score", "expiry", "cost", "max_profit",
+                     "max_loss", "pop", "grade", "actions"]
+
+
+def test_finder_columns_sort_numbers_by_number():
+    """A formatted "$1,234" sorts as text; the sortable money / odds / expiry
+    columns point their ``field`` at a numeric twin and a slot shows the text."""
+    cols = {c["name"]: c for c in fv.finder_columns()}
+    assert cols["composite_score"]["sortable"]
+    assert cols["composite_score"]["field"] == "composite_score"
+    assert cols["expiry"]["field"] == "_dte" and cols["expiry"]["sortable"]
+    assert cols["max_profit"]["field"] == "_max_profit_n"
+    assert cols["max_loss"]["field"] == "_max_loss_n"
+    assert cols["pop"]["field"] == "_pop_n"
+    assert not cols["cost"].get("sortable") and not cols["actions"].get("sortable")
+
+
+_FLY = {"id": "x", "type": "BUTTERFLY_CALL", "group": "BUTTERFLY",
+        "strategy_label": "Call Butterfly", "composite_score": 72.1, "grade": "Good",
+        "grade_reason": "ok", "expiration": "2026-10-16", "dte": 30,
+        "net_debit": 120.0, "max_profit": 374.8, "max_loss": 125.2, "pop_pct": 31.5,
+        "payoff_curve": [[90, -120], [100, 380], [110, -120]], "underlying_price": 100.0}
+
+_HOOKS = {"score_class": lambda s: f"score-{s}", "grade_class": lambda g: f"grade-{g}",
+          "paper_types": {"BUTTERFLY_CALL"}}
+
+
+def test_finder_rows_carry_shape_bars_and_paper_gate():
+    row = fv.finder_rows([_FLY], **_HOOKS)[0]
+    assert row["id"] == "x"
+    assert row["strategy"] == "Call Butterfly" and row["cost"] == "$120 debit"
+    assert row["_payoff_svg"].startswith("<svg") and row["_allow_paper"] is True
+    assert 'width="72"' in row["_payoff_svg"] and 'height="20"' in row["_payoff_svg"]
+    assert row["_pop"]["label"] == "32%" and row["pop"] == "32%"
+    assert row["_pop_fill"] == fv.POP_FILL["warn"]
+    assert row["expiry"] == "Oct 16 · 30d" and row["_dte"] == 30
+    assert row["max_profit"] == "$375" and row["max_loss"] == "$125"
+    assert row["_max_profit_n"] == 374.8 and row["_max_loss_n"] == 125.2
+    assert row["_rr"] == fv.risk_reward_bar(_FLY)
+    assert row["_score_class"] == "score-72.1" and row["_grade_class"] == "grade-Good"
+    assert row["grade"] == "Good" and row["grade_reason"] == "ok"
+    assert row["_undefined_risk"] is False
+
+
+def test_finder_rows_paper_gate_and_hooks_are_injected():
+    row = fv.finder_rows([_FLY], score_class=str, grade_class=str, paper_types=set())[0]
+    assert row["_allow_paper"] is False
+
+
+def test_finder_rows_mark_unbounded_sides():
+    long_call = {"id": "lc", "type": "LONG_CALL", "net_debit": 300.0, "max_profit": None,
+                 "unbounded_profit": True, "max_loss": 300.0}
+    naked = {"id": "sp", "type": "SHORT_PUT", "net_credit": 240.0, "max_profit": 240.0,
+             "max_loss": 10866.0, "unbounded_loss": True}
+    rows = {r["id"]: r for r in fv.finder_rows([long_call, naked], **_HOOKS)}
+    assert rows["lc"]["max_profit"] == "∞" and rows["lc"]["_undefined_risk"] is False
+    assert rows["lc"]["_max_profit_n"] > 1e9
+    assert rows["sp"]["max_loss"] == "∞" and rows["sp"]["_undefined_risk"] is True
+    assert rows["sp"]["_max_loss_n"] > 1e9
+
+
+def test_finder_rows_degrade_on_a_bare_signal():
+    row = fv.finder_rows([{"id": "b"}], **_HOOKS)[0]
+    assert row["strategy"] == "" and row["cost"] == "—" and row["expiry"] == "—"
+    assert row["pop"] == "—" and row["_pop"] is None and row["_pop_fill"] == ""
+    assert row["_payoff_svg"] == "" and row["_rr"] is None
+    assert row["max_profit"] == "—" and row["_max_profit_n"] is None
+    assert row["_pop_n"] is None and row["_dte"] is None
+
+
+def test_finder_rows_are_ranked_best_first():
+    sigs = [_sig("A", "VERTICAL", 50), _sig("B", "CALENDAR", 80), _sig("C", "STOCK", None)]
+    assert [r["id"] for r in fv.finder_rows(sigs, **_HOOKS)] == ["B", "A", "C"]
+
+
+def test_card_facts_for_a_top_pick():
+    c = fv.card_facts(_FLY)
+    assert c["title"] == "Call Butterfly" and c["score"] == 72.1 and c["grade"] == "Good"
+    assert c["expiry"] == "Oct 16 · 30d" and c["cost"] == "$120 debit"
+    assert 'width="120"' in c["payoff_svg"] and 'height="32"' in c["payoff_svg"]
+    assert c["rr"] == fv.risk_reward_bar(_FLY) and c["pop"] == fv.pop_bar(31.5)
+    assert c["pop_fill"] == fv.POP_FILL["warn"]
+    assert c["score_text"] == "72"
+
+
+def test_card_facts_degrade():
+    c = fv.card_facts({})
+    assert c["title"] == "—" and c["score"] is None and c["score_text"] == "—"
+    assert c["payoff_svg"] == "" and c["pop"] is None and c["pop_fill"] == ""
+
+
+def test_pop_fill_is_a_fixed_class_per_tone():
+    assert set(fv.POP_FILL) == {"warn", "neutral", "pos"}
+    assert all(v.startswith("bg-[#") for v in fv.POP_FILL.values())

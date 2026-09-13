@@ -13,6 +13,7 @@ unbounded-side predicates) are restated here with a pointer back.
 Design: ``docs/plans/2026-09-13-strategy-finder-redesign-design.md``.
 """
 import datetime as _dt
+import math as _math
 
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 
@@ -37,6 +38,16 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
+def _half_up(x):
+    """Round to the nearest whole number, halves UP.
+
+    Python's ``round`` is banker's rounding (``round(42.5) == 42``), which would
+    make the page round one half down and the next up. Every whole number this
+    page shows - a percent, Vol Rank, a bar's 5% step - goes through here.
+    """
+    return int(_math.floor(x + 0.5))
+
+
 # --------------------------------------------------------------------------- text
 
 def money(v):
@@ -49,10 +60,11 @@ def money(v):
     f = _fmt.num(v)
     if f is None:
         return NO_READING
-    sign = "-" if f < 0 else ""
     a = abs(f)
     # Compare the ROUNDED cents, so 99.996 reads "$100", never "$100.00".
     body = f"{a:,.0f}" if round(a, 2) >= 100 else f"{a:,.2f}"
+    # The sign is decided AFTER rounding: -0.001 is "$0.00", never "-$0.00".
+    sign = "-" if f < 0 and body.strip("0.,") else ""
     return f"{sign}${body}"
 
 
@@ -113,6 +125,15 @@ EXPIRY_PRESETS = [
 ]
 
 
+def expiry_range_for(label):
+    """``(DTE min, DTE max)`` for a preset label; None for anything else (a cleared
+    toggle, a hand-edited range)."""
+    for p_label, p_lo, p_hi in EXPIRY_PRESETS:
+        if label == p_label:
+            return p_lo, p_hi
+    return None
+
+
 def expiry_preset_for(lo, hi):
     """The preset label a DTE range matches, or None when it is hand-edited."""
     a, b = _fmt.num(lo), _fmt.num(hi)
@@ -154,7 +175,67 @@ def risk_style_for(put_d_min, put_d_max, call_d_min, call_d_max):
     return RISK_CUSTOM
 
 
+def bands_for_choice(choice):
+    """The bands a risk-style TOGGLE value selects, or None.
+
+    The page's handler goes through this rather than :func:`risk_bands`, which
+    raises on ``"Custom"``: Custom is a read-only state (the fields match no
+    style), never a choice that writes four fields.
+    """
+    return risk_bands(choice) if choice in RISK_STYLES else None
+
+
+def risk_toggle_value(put_d_min, put_d_max, call_d_min, call_d_max):
+    """The toggle's value for four band fields: a style name, or None for Custom.
+
+    The toggle offers only the three styles, so a hand-edited band shows no
+    selection (plus the page's read-only Custom marker).
+    """
+    style = risk_style_for(put_d_min, put_d_max, call_d_min, call_d_max)
+    return style if style in RISK_STYLES else None
+
+
 # --------------------------------------------------------------- chips and picks
+
+ALL_CHIP = "ALL"
+
+
+def toggle_chip(active, code):
+    """The active chip set after clicking ``code``. ``None`` means All.
+
+    All resets; a chip toggles its membership; un-choosing the last chip goes
+    back to All rather than to an empty page. Never mutates ``active``.
+    """
+    if code == ALL_CHIP:
+        return None
+    if active is None:
+        return {code}
+    out = set(active)
+    if code in out:
+        out.discard(code)
+    else:
+        out.add(code)
+    return out or None
+
+
+def chip_is_active(active, code):
+    """Whether chip ``code`` renders highlighted for the active set."""
+    if code == ALL_CHIP:
+        return active is None
+    return active is not None and code in active
+
+
+def carry_chips(active, prev_symbol, symbol, signals):
+    """Chip state across a repaint: kept for the same symbol, All for a new one.
+
+    Groups the new payload did not produce are dropped, and if nothing chosen
+    survives the page goes back to All.
+    """
+    if active is None or prev_symbol != symbol:
+        return None
+    present = {code for code, _label, _n in chip_counts(signals)}
+    kept = set(active) & present
+    return kept or None
 
 def chip_counts(signals):
     """``[(code, label, n), ...]`` in :data:`GROUPS` order, only groups with rows."""
@@ -224,6 +305,15 @@ def summary_facts(payload):
     ``{"symbol", "price", "pills", "vol_rank", "counts"}``. Vol Rank lives here
     rather than in the list because a scan is one symbol, so every row carried the
     same value.
+
+    ⚠ **Two drops, two sentences, never merged** (moved here from the old
+    ``swing.status_text``). The service's quality cut and the volatility gate (gap
+    assessment B2) both remove candidates, but the gate refuses to SELL premium
+    when IV rank sits below the floor - a statement about today's environment, not
+    the candidate - so borrowing "below the quality bar" for it would print
+    something untrue on exactly the scan where the reader most needs the reason.
+    Both read with a falsy default, so a payload written before ``vol_filtered``
+    existed (Redis keeps this view across a restart) renders as it always did.
     """
     p = payload or {}
     symbol = p.get("symbol")
@@ -246,7 +336,7 @@ def summary_facts(payload):
         pills.append(f"Volatility {view['vol_regime']}")
 
     rank = _fmt.num(first.get("iv_rank"))
-    vol_rank = None if rank is None else f"Vol Rank {round(rank)}"
+    vol_rank = None if rank is None else f"Vol Rank {_half_up(rank)}"
 
     n = len(signals)
     parts = [f"{n} idea" if n == 1 else f"{n} ideas"]
@@ -275,7 +365,7 @@ def _snap(pct):
     f = _fmt.num(pct)
     if f is None or f <= 0:
         return 0
-    return max(5, min(100, int(round(f / 5.0)) * 5))
+    return max(5, min(100, _half_up(f / 5.0) * 5))
 
 
 def _width(pct):
@@ -347,8 +437,20 @@ def pop_bar(pop):
     f = _fmt.num(pop)
     if f is None:
         return None
-    tone = "warn" if f < 40 else "pos" if f > 60 else "neutral"
-    return {"class": _width(f), "tone": tone, "label": f"{round(f)}%"}
+    # The band is decided on the ROUNDED percent, so the colour always agrees
+    # with the label beside it (39.6 reads "40%" and is not amber).
+    whole = _half_up(f)
+    tone = "warn" if whole < 40 else "pos" if whole > 60 else "neutral"
+    return {"class": _width(f), "tone": tone, "label": f"{whole}%"}
+
+
+# The odds bar's fill per tone - a fixed class set, bound through a table slot's
+# ``:class`` (amber / the muted slate / the app's profit green).
+POP_FILL = {"warn": "bg-[#fbbf24]", "neutral": "bg-[#8794b4]", "pos": "bg-[#34d399]"}
+
+
+def _pop_fill(bar):
+    return POP_FILL.get((bar or {}).get("tone"), "")
 
 
 # ------------------------------------------------------------------- payoff SVG
@@ -441,3 +543,113 @@ def payoff_svg(curve, spot, width=120, height=32):
                            ' stroke-width="1"'))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
             f'viewBox="0 0 {w} {h}">' + "".join(parts) + "</svg>")
+
+
+# ------------------------------------------------------------ list and cards
+
+# An unbounded side sorts past every real figure. float("inf") cannot cross the
+# JSON wire to the table, so a large finite stand-in.
+_UNBOUNDED_SORT = 1e12
+
+
+def finder_columns():
+    """``ui.table`` columns for the slim ranked list.
+
+    Legs, breakevens, bias and Vol Rank are gone from the list (the detail panel
+    and the summary strip carry them). The money, odds and expiry columns sort on
+    a NUMERIC twin field - their shown text ("$1,234", "Oct 16 · 30d") would sort
+    as a string - and the page's slots render the text.
+    """
+    spec = [
+        ("strategy", "Strategy", "strategy", True),
+        ("composite_score", "Score", "composite_score", True),
+        ("expiry", "Expiry", "_dte", True),
+        ("cost", "Cost", "cost", False),
+        ("max_profit", "Max profit", "_max_profit_n", True),
+        ("max_loss", "Max loss", "_max_loss_n", True),
+        ("pop", "Probability of profit", "_pop_n", True),
+        ("grade", "Grade", "grade", False),
+    ]
+    cols = [{"name": name, "label": label, "field": field, "sortable": sortable,
+             "align": "left"} for name, label, field, sortable in spec]
+    cols.append({"name": "actions", "label": "", "field": "actions",
+                 "sortable": False, "align": "center"})
+    return cols
+
+
+def _max_profit_cell(sig):
+    if _profit_unbounded(sig):
+        return _INFINITY, _UNBOUNDED_SORT
+    v = _fmt.num(sig.get("max_profit"))
+    return (NO_READING, None) if v is None else (money(abs(v)), abs(v))
+
+
+def _max_loss_cell(sig):
+    if _loss_unbounded(sig):
+        return _INFINITY, _UNBOUNDED_SORT
+    v = _fmt.num(sig.get("max_loss"))
+    return (NO_READING, None) if v is None else (money(abs(v)), abs(v))
+
+
+def finder_rows(signals, *, score_class, grade_class, paper_types):
+    """Rows for the ranked list, best score first.
+
+    The three hooks are INJECTED because their homes (``scanner.score_zone_class``,
+    ``strategy_table.grade_class`` and ``strategy_table._PAPER_TYPES``) import the
+    widget library; ``swing.finder_rows`` passes the real ones, so the paper gate
+    stays one set rather than a copy here.
+    """
+    rows = []
+    for s in ranked(signals):
+        profit_text, profit_n = _max_profit_cell(s)
+        loss_text, loss_n = _max_loss_cell(s)
+        pop = pop_bar(s.get("pop_pct"))
+        dte = _fmt.num(s.get("dte"))
+        score = s.get("composite_score")
+        rows.append({
+            "id": s.get("id"),
+            "strategy": s.get("strategy_label") or "",
+            "composite_score": score,
+            "expiry": expiry_text(s),
+            "cost": cost_text(s),
+            "max_profit": profit_text,
+            "max_loss": loss_text,
+            "pop": pop["label"] if pop else NO_READING,
+            "grade": s.get("grade") or "",
+            "grade_reason": s.get("grade_reason") or "",
+            "_dte": None if dte is None else int(dte),
+            "_max_profit_n": profit_n,
+            "_max_loss_n": loss_n,
+            "_pop_n": _fmt.num(s.get("pop_pct")),
+            "_score_class": score_class(score),
+            "_grade_class": grade_class(s.get("grade")),
+            "_payoff_svg": payoff_svg(s.get("payoff_curve"), s.get("underlying_price"),
+                                      width=72, height=20),
+            "_rr": risk_reward_bar(s),
+            "_pop": pop,
+            "_pop_fill": _pop_fill(pop),
+            "_allow_paper": s.get("type") in paper_types,
+            "_undefined_risk": _loss_unbounded(s),
+        })
+    return rows
+
+
+def card_facts(sig):
+    """What a top-pick card says. The legs line and the paper gate are added by
+    the page (their helpers live in widget-importing modules)."""
+    s = sig or {}
+    score = _fmt.num(s.get("composite_score"))
+    pop = pop_bar(s.get("pop_pct"))
+    return {
+        "title": s.get("strategy_label") or NO_READING,
+        "score": score,
+        "score_text": NO_READING if score is None else str(_half_up(score)),
+        "grade": s.get("grade") or "",
+        "expiry": expiry_text(s),
+        "cost": cost_text(s),
+        "payoff_svg": payoff_svg(s.get("payoff_curve"), s.get("underlying_price"),
+                                 width=120, height=32),
+        "rr": risk_reward_bar(s),
+        "pop": pop,
+        "pop_fill": _pop_fill(pop),
+    }

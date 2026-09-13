@@ -858,6 +858,25 @@ class _Handle:
         self._flag_badge = flag_badge  # floats on the toggle; survives collapse
         self._body = body            # cleared + rebuilt per selection
 
+    # Open / collapse from the page. The panel opens by default (three pages mount
+    # it that way); the Strategy Finder collapses it at build and opens it on the
+    # first selection so the list keeps its width until there is something to show.
+    # ``_set_open`` is installed by ``render`` - the same function the header
+    # toggle runs, so the two can never disagree about what "open" means.
+    _set_open = None
+
+    @property
+    def is_open(self):
+        return bool(self._state["open"])
+
+    def open(self):
+        if not self.is_open and self._set_open:
+            self._set_open(True)
+
+    def collapse(self):
+        if self.is_open and self._set_open:
+            self._set_open(False)
+
     def _set_flag_badge(self, n):
         txt = flag_badge_text(n)
         self._flag_badge.text = txt
@@ -957,8 +976,8 @@ def render(width: int = 360):
 
     state = {"open": True, "has_signal": False}
 
-    def toggle():
-        state["open"] = not state["open"]
+    def set_open(flag):
+        state["open"] = bool(flag)
         title.visible = state["open"]
         body.visible = state["open"]
         header.visible = state["open"] and state["has_signal"]
@@ -969,6 +988,8 @@ def render(width: int = 360):
             col.classes(remove=expanded_w, add="w-11")
             toggle_btn.props("icon=first_page").tooltip("Expand panel")
 
-    toggle_btn.on_click(toggle)
-    return _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,
-                   flag_box, flag_badge, body)
+    toggle_btn.on_click(lambda: set_open(not state["open"]))
+    handle = _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,
+                     flag_box, flag_badge, body)
+    handle._set_open = set_open
+    return handle

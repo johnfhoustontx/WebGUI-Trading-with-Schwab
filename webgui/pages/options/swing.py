@@ -1,33 +1,57 @@
-"""Swing Scanner page (Tier-3 reader).
+"""Strategy Finder page (``/options/swing``) - a Tier-3 reader.
 
-A dedicated user-parameterized swing credit-spread scan with custom DTE / delta /
-credit gates. This page holds **no engine call**: the scan pipeline
-(``screen_spreads`` + ``build_iron_condors`` + ``score_all_signals``) lives in
-``services/options_svc/compute.swing_scan``, and the cross-app ``scoring``
-collision guard is gone (the service process loads no sentiment code). The Scan
-button enqueues a ``swing_scan`` command (with the user's inputs as args) onto
-the Redis bus; the service runs it and writes the result under
-``cache:options:swing``; this page only **reads** that payload and formats it.
+One symbol, every structure the service can build for it, ranked on one score.
+This page holds **no engine call**: the Scan button enqueues a ``swing_scan``
+command (with the user's inputs as args) onto the Redis bus, the options service
+runs ``compute.swing_scan`` and writes ``cache:options:swing``, and this page only
+**reads** that payload.
 
 Cache view read: ``options:swing`` →
-``{signals:[...], view:{...}, filtered_out: int, symbol, params}``
-where each signal is the NORMALIZED multi-strategy shape (LONG_CALL/.../IRON_CONDOR
-with a ``legs`` list, ``family``, ``bias``, ``net_debit``/``net_credit``,
-``breakevens``, …). Results render via the multi-strategy ``strategy_table`` columns/
-rows + an inferred-view banner + the shared Trade detail panel + legs-aware handoff
-row actions. A fetch-free version-poll ``ui.timer`` repaints when the bus cache
-version changes (graceful-empty when the service is cold).
+``{signals:[...], view:{...}, filtered_out, vol_filtered, symbol, params}``; each
+signal is the NORMALIZED multi-strategy shape (``legs``, ``net_debit`` /
+``net_credit``, ``max_profit`` / ``max_loss``, ``pop_pct`` …) plus, since the
+2026-09-13 redesign, ``group`` (which chip it belongs to) and ``payoff_curve``
+(the shape drawn on each card and row). Both are optional: a payload without them
+renders with no shapes and no chips.
+
+Top to bottom: a scan bar (symbol, expiry presets, risk style, Advanced fields),
+a summary strip, instant-filter strategy chips, up to four top-pick cards, and a
+slim ranked list beside the shared Trade detail panel. Every sentence and number
+those widgets show comes from the PURE ``finder_view`` module; this file is
+widgets and wiring. Design:
+``docs/plans/2026-09-13-strategy-finder-redesign-design.md``.
 """
 import bus_client
-from pages import busy as _busy
 from nicegui import ui
 
+from pages import busy as _busy
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.ui_guard import guard
 
-from .inputs import bind_symbol_load, select_all_on_focus
-from .theme import BTN_3D
-
 from . import detail, handoff, strategy_table
+from . import finder_view as fv
+from .inputs import bind_symbol_load, select_all_on_focus
+from .scanner import score_zone_class
+from .theme import (BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D, CARD, EYEBROW, LABEL,
+                    MUTED, TXT_NEG, TXT_POS)
+
+# Before any scan has published for this session.
+EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
+
+# The seven build groups, by chip order. Kept under its old name because
+# test_strategy_table pins these labels against the Calculator's group names.
+_FAMILY_OPTIONS = dict(fv.GROUPS)
+
+# Quasar-internal escape hatch: the app-wide TABLE_CSS caps every table body at
+# 65vh. This list grows with the page instead (the old short scroll box hid most
+# of a scan), so the cap is lifted for this table only.
+FINDER_CSS = ".finder-table .q-table__middle { max-height: none; }"
+
+# The split bar's two fills - the app's P/L red and green (simulator payoff).
+_LOSS_FILL = "bg-[#f87171]"
+_PROFIT_FILL = "bg-[#34d399]"
+_CHIP = "px-3 py-1 text-xs"
+_PILL = "px-2 py-0.5 text-xs"
 
 
 def pct_to_fraction(value):
@@ -35,181 +59,469 @@ def pct_to_fraction(value):
     return float(value) / 100.0
 
 
-def status_text(payload, n_rows):
-    """Status line under the table. Pure.
+def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
+    """The ``swing_scan`` command args.
 
-    The service drops candidates that fail its quality cut (score below the bar
-    or an excluded grade), so a scan that worked perfectly can still render an
-    empty table. Naming the drop count separates that from "the scan found
-    nothing" — otherwise a bare "0 swing signals." reads as a broken scan. The
-    note is omitted when nothing was dropped, so a clean scan stays quiet.
-
-    ⚠ **Two drops, two sentences, and they must not be merged.** The volatility
-    gate (gap assessment B2) refuses to SELL premium when the symbol's IV rank
-    sits below the floor — a statement about today's environment, not about the
-    candidate — so borrowing "below the quality bar" for it would print something
-    untrue on exactly the scan where the reader most needs the real reason: on a
-    low-IV symbol every short-premium row goes at once, and the long-premium rows
-    that remain are the ones the gate deliberately kept.
-
-    ``vol_filtered`` is read with the same ``or 0`` as its sibling, so a payload
-    written before the field existed — Redis persists this view across a service
-    restart — renders exactly as it used to.
+    No ``families``: every scan builds all seven groups (the service's ``None``
+    default) and the chips filter them on the page, instantly and without a
+    rescan.
     """
-    if not payload:
-        return ""
-    line = f"{n_rows} swing signals."
-    dropped = (payload or {}).get("filtered_out") or 0
-    if dropped:
-        line += f" {dropped} below the quality bar."
-    vol_dropped = (payload or {}).get("vol_filtered") or 0
-    if vol_dropped:
-        line += f" {vol_dropped} where premium is too cheap to sell."
-    return line
+    return {
+        "symbol": (symbol or "").strip().upper(),
+        "dte_min": int(dte_min),
+        "dte_max": int(dte_max),
+        "put_d_min": float(bands["put_d_min"]),
+        "put_d_max": float(bands["put_d_max"]),
+        "call_d_min": float(bands["call_d_min"]),
+        "call_d_max": float(bands["call_d_max"]),
+        "min_cr_fraction": pct_to_fraction(min_credit_pct),
+    }
 
 
-# Build groups. The four NEW groups reuse the Calculator's STRATEGY_GROUPS names
-# where one exists; "Butterflies & condors" spans the Calculator's "Butterflies"
-# and "Condors". Iron condors stay under "Neutral".
-_FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
-                   "NEUTRAL": "Neutral", "STRADDLE": "Straddles & strangles",
-                   "BUTTERFLY": "Butterflies & condors", "CALENDAR": "Calendars",
-                   "STOCK": "Stock + options"}
+def scanning_text(symbol):
+    """What the placeholder cards say while a scan runs - the symbol being
+    scanned, never the previous one."""
+    sym = (symbol or "").strip().upper()
+    return f"Scanning {sym}…" if sym else "Scanning…"
+
+
+def finder_rows(signals):
+    """``finder_view.finder_rows`` with the real score / grade classes and the
+    ``_PAPER_TYPES`` gate, which live in widget-importing modules."""
+    return fv.finder_rows(signals, score_class=score_zone_class,
+                          grade_class=strategy_table.grade_class,
+                          paper_types=strategy_table._PAPER_TYPES)
+
+
+def card_view(sig):
+    """A top-pick card's facts: ``finder_view.card_facts`` plus the legs line, the
+    score / grade classes and the paper gate."""
+    out = fv.card_facts(sig)
+    s = sig or {}
+    out["legs"] = strategy_table.legs_summary(s.get("legs"))
+    out["score_class"] = score_zone_class(s.get("composite_score"))
+    out["grade_class"] = strategy_table.grade_class(s.get("grade"))
+    out["allow_paper"] = s.get("type") in strategy_table._PAPER_TYPES
+    return out
+
+
+# ------------------------------------------------------------------ table slots
+
+_STRATEGY_SLOT = r'''
+<q-td :props="props">
+  <div class="flex flex-nowrap items-center gap-2">
+    <span v-if="props.row._payoff_svg" class="inline-flex shrink-0"
+          v-html="props.row._payoff_svg"></span>
+    <span>{{ props.row.strategy || '—' }}</span>
+  </div>
+</q-td>
+'''
+
+_SCORE_SLOT = r'''
+<q-td :props="props">
+  <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
+</q-td>
+'''
+
+_EXPIRY_SLOT = r'''
+<q-td :props="props">{{ props.row.expiry }}</q-td>
+'''
+
+_MAX_PROFIT_SLOT = r'''
+<q-td :props="props">{{ props.row.max_profit }}</q-td>
+'''
+
+# A naked short's max loss is a margin proxy, not a cap - say so on the cell.
+_MAX_LOSS_SLOT = r'''
+<q-td :props="props">
+  {{ props.row.max_loss }}
+  <q-badge v-if="props.row._undefined_risk" label="undefined risk"
+           class="q-ml-xs text-[9px] px-1 py-0 bg-[#b71c1c] text-white"/>
+</q-td>
+'''
+
+_POP_SLOT = r'''
+<q-td :props="props">
+  <div v-if="props.row._pop" class="flex flex-nowrap items-center gap-2">
+    <div class="w-16 h-1.5 rounded overflow-hidden bg-white/10">
+      <div :class="'h-full ' + props.row._pop.class + ' ' + props.row._pop_fill"></div>
+    </div>
+    <span class="text-xs">{{ props.row.pop }}</span>
+  </div>
+  <span v-else>—</span>
+</q-td>
+'''
+
+_GRADE_SLOT = r'''
+<q-td :props="props">
+  <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
+  <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
+</q-td>
+'''
 
 
 def render():
-    """Multi-strategy Swing Scanner: inputs + Scan + view banner + strategy table."""
-    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
+    """The Strategy Finder: scan bar, summary, chips, top picks, ranked list."""
+    # No page title - the tab strip names the page (2026-07-11 dead-space cleanup).
+    ui.add_css(FINDER_CSS)
+    sync = {"on": False}        # True while code writes linked controls
 
-    with ui.column().classes("w-full gap-2"):
-        # Primary controls span the FULL page width (the detail panel no longer
-        # squeezes them); with seven strategy checkboxes the row wraps as needed.
-        with ui.row().classes("items-end gap-3 flex-wrap"):
-            symbol_in = select_all_on_focus(
-                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
-            dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
-            dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
-            with ui.column().classes("gap-0"):
-                ui.label("Strategies").classes("text-xs text-[#8794b4]")
-                with ui.row().classes("items-center gap-3 flex-wrap"):
-                    family_cbs = {
-                        code: ui.checkbox(label, value=True).props("dense")
-                        for code, label in _FAMILY_OPTIONS.items()
-                    }
-            scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
-            status = ui.label("").classes("opacity-70")
-        # Collapsed. The delta bands govern every SHORT leg the Finder sells (the
-        # credit spreads, the naked short put/call, the short strangle and the
-        # covered call or collar call); the credit floor is the spreads' alone.
-        with ui.expansion("Advanced — delta bands and credit floor").classes("w-full"):
-            with ui.row().classes("items-end gap-2 flex-wrap"):
-                put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
-                put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
-                call_dmin = ui.number("Call Δ min", value=0.10, format="%.2f").classes("w-24")
-                call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
-                mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
-        banner = ui.label(strategy_table.view_banner_text(None)).classes("opacity-80 text-sm")
-        # Results table + shared detail panel side by side, below the controls.
-        results_row = ui.row().classes("w-full no-wrap gap-4 items-start")
-        with results_row:
-            table = ui.table(columns=strategy_table.strategy_columns(), rows=[],
-                             row_key="id").classes("flex-grow min-w-0")
+    with ui.column().classes("w-full gap-3"):
+        # 1 - Scan bar.
+        with ui.column().classes(f"{CARD} w-full gap-2"):
+            with ui.row().classes("w-full items-end gap-4 flex-wrap"):
+                symbol_in = select_all_on_focus(
+                    ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
+                with ui.column().classes("gap-1"):
+                    ui.label("Expiry").classes(f"text-xs {EYEBROW}")
+                    with ui.row().classes("items-end gap-2 flex-wrap"):
+                        expiry_toggle = ui.toggle(
+                            [label for label, _lo, _hi in fv.EXPIRY_PRESETS],
+                            value=fv.expiry_preset_for(0, 120),
+                        ).props("dense no-caps unelevated")
+                        dte_min = ui.number("DTE min", value=0, min=0).classes("w-20")
+                        dte_max = ui.number("DTE max", value=120, min=1).classes("w-20")
+                with ui.column().classes("gap-1"):
+                    ui.label("Risk style").classes(f"text-xs {EYEBROW}")
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        risk_toggle = ui.toggle(list(fv.RISK_STYLES),
+                                                value=fv.RISK_DEFAULT) \
+                            .props("dense no-caps unelevated")
+                        # Read-only: shown when the Advanced fields match no style.
+                        # It is never a toggle option, so it can never be "chosen".
+                        custom_badge = ui.label(fv.RISK_CUSTOM) \
+                            .classes(f"{BADGE_MUTED} {_PILL}")
+                        custom_badge.set_visibility(False)
+                scan_btn = ui.button("Scan", icon="search", color=None) \
+                    .props("no-caps").classes(BTN_3D)
+                status = ui.label("").classes(f"text-sm {MUTED}")
+            # Collapsed. The delta bands govern every SHORT leg the Finder sells (the
+            # credit spreads, the naked short put/call, the short strangle and the
+            # covered call or collar call); the credit floor is the spreads' alone.
+            with ui.expansion("Advanced — delta bands and credit floor").classes("w-full"):
+                start = fv.risk_bands(fv.RISK_DEFAULT)
+                with ui.row().classes("items-end gap-2 flex-wrap"):
+                    put_dmin = ui.number("Put Δ min", value=start["put_d_min"],
+                                         format="%.2f").classes("w-24")
+                    put_dmax = ui.number("Put Δ max", value=start["put_d_max"],
+                                         format="%.2f").classes("w-24")
+                    call_dmin = ui.number("Call Δ min", value=start["call_d_min"],
+                                          format="%.2f").classes("w-24")
+                    call_dmax = ui.number("Call Δ max", value=start["call_d_max"],
+                                          format="%.2f").classes("w-24")
+                    mincr = ui.number("Min credit %", value=10.0,
+                                      format="%.1f").classes("w-28")
+
+        # 2 - Summary strip (hidden until a scan has published).
+        summary_box = ui.row().classes(f"{CARD} w-full items-center gap-3 flex-wrap")
+        summary_box.set_visibility(False)
+        # 3 - Strategy chips.
+        chips_row = ui.row().classes("w-full items-center gap-2 flex-wrap")
+        # 4 - Top picks: four across, two on a narrow screen, one on a phone.
+        picks_grid = ui.element("div").classes(
+            "grid w-full gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4")
+        # 5 + 6 - The ranked list beside the shared detail panel.
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
+            list_box = ui.column().classes("flex-grow min-w-0 gap-2 min-h-[120px]")
+            with list_box:
+                empty_line = ui.label(EMPTY_PROMPT).classes(f"text-sm {MUTED}")
+                table = ui.table(columns=fv.finder_columns(), rows=[], row_key="id") \
+                    .classes("finder-table w-full")
             detail_panel = detail.render()
-    # A scan can take seconds; until it lands the table still shows the PREVIOUS
-    # symbol's candidates, which reads as a result rather than as stale data.
-    scan_busy = _busy.build_busy(results_row, "Scanning…")
+    # The list keeps its width until there is something to show.
+    detail_panel.collapse()
+    scan_busy = _busy.build_busy(list_box, "Scanning…")
 
     by_id: dict = {}
-    # Last-seen bus cache version for the fetch-free repaint timer.
-    seen = {"version": None}
+    state = {"payload": None, "symbol": None, "active": None, "version": None,
+             "scanning": None, "scan_seq": 0, "opened": False}
 
-    def _select(event):
-        row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
-        sig = by_id.get(row.get("id")) if isinstance(row, dict) else None
-        if sig:
-            detail_panel.update(strategy_table.detail_signal(sig))
+    # --------------------------------------------------------------- controls
 
-    table.on("rowClick", _select)
-    # per-row buttons: Calculator / Paper (gated) / Expected Move — legs-aware.
-    handoff.add_strategy_row_actions(table, lambda row: by_id.get(row.get("id")))
-    # Quality-colored composite score chip + bias colored by direction.
-    table.add_slot('body-cell-composite_score', r'''
-      <q-td :props="props">
-        <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
-      </q-td>
-    ''')
-    table.add_slot('body-cell-bias', r'''
-      <q-td :props="props">
-        <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
-      </q-td>
-    ''')
-    # A naked short's max loss is a margin proxy, not a cap — say so on the cell.
-    table.add_slot('body-cell-max_loss', r'''
-      <q-td :props="props">
-        {{ props.value }}
-        <q-badge v-if="props.row._undefined_risk" label="undefined risk"
-                 class="q-ml-xs text-[9px] px-1 py-0 bg-[#b71c1c] text-white"/>
-      </q-td>
-    ''')
-    # Quality grade colored by pass/fail band + a tooltip with the reason.
-    table.add_slot('body-cell-grade', r'''
-      <q-td :props="props">
-        <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
-        <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
-      </q-td>
-    ''')
+    @guard
+    def _on_expiry_choice(e):
+        if sync["on"]:
+            return
+        rng = fv.expiry_range_for(e.value)
+        if rng is None:            # a cleared toggle writes nothing
+            return
+        sync["on"] = True
+        try:
+            dte_min.value, dte_max.value = rng
+        finally:
+            sync["on"] = False
 
-    def _populate(payload):
-        """Paint the table + detail map + view banner from a swing-result dict."""
+    @guard
+    def _refresh_expiry_toggle(_e=None):
+        if sync["on"]:
+            return
+        label = fv.expiry_preset_for(dte_min.value, dte_max.value)
+        if expiry_toggle.value != label:
+            sync["on"] = True
+            try:
+                expiry_toggle.value = label
+            finally:
+                sync["on"] = False
+
+    def _bands():
+        return {"put_d_min": put_dmin.value, "put_d_max": put_dmax.value,
+                "call_d_min": call_dmin.value, "call_d_max": call_dmax.value}
+
+    @guard
+    def _on_risk_choice(e):
+        if sync["on"]:
+            return
+        bands = fv.bands_for_choice(e.value)   # never risk_bands("Custom")
+        if bands is None:
+            return
+        sync["on"] = True
+        try:
+            put_dmin.value = bands["put_d_min"]
+            put_dmax.value = bands["put_d_max"]
+            call_dmin.value = bands["call_d_min"]
+            call_dmax.value = bands["call_d_max"]
+        finally:
+            sync["on"] = False
+        custom_badge.set_visibility(False)
+
+    @guard
+    def _refresh_risk_toggle(_e=None):
+        if sync["on"]:
+            return
+        b = _bands()
+        value = fv.risk_toggle_value(b["put_d_min"], b["put_d_max"],
+                                     b["call_d_min"], b["call_d_max"])
+        custom_badge.set_visibility(value is None)
+        if risk_toggle.value != value:
+            sync["on"] = True
+            try:
+                risk_toggle.value = value
+            finally:
+                sync["on"] = False
+
+    expiry_toggle.on_value_change(_on_expiry_choice)
+    dte_min.on_value_change(_refresh_expiry_toggle)
+    dte_max.on_value_change(_refresh_expiry_toggle)
+    risk_toggle.on_value_change(_on_risk_choice)
+    for field in (put_dmin, put_dmax, call_dmin, call_dmax):
+        field.on_value_change(_refresh_risk_toggle)
+
+    # -------------------------------------------------------------- selection
+
+    @guard
+    def _select_signal(sig):
+        if not sig:
+            return
+        if not state["opened"]:
+            # Opened once, on the first selection; after that the user's own
+            # collapse is respected.
+            state["opened"] = True
+            detail_panel.open()
+        detail_panel.update(strategy_table.detail_signal(sig))
+
+    def _on_row_click(event):
+        args = event.args
+        row = args[1] if isinstance(args, list) and len(args) > 1 else args
+        if isinstance(row, dict):
+            _select_signal(by_id.get(row.get("id")))
+
+    table.on("rowClick", _on_row_click)
+    # Per-row Calculator / Paper (gated) / Expected Move - legs-aware.
+    handoff.add_strategy_row_actions(table, lambda row: by_id.get((row or {}).get("id")))
+    table.add_slot("body-cell-strategy", _STRATEGY_SLOT)
+    table.add_slot("body-cell-composite_score", _SCORE_SLOT)
+    table.add_slot("body-cell-expiry", _EXPIRY_SLOT)
+    table.add_slot("body-cell-max_profit", _MAX_PROFIT_SLOT)
+    table.add_slot("body-cell-max_loss", _MAX_LOSS_SLOT)
+    table.add_slot("body-cell-pop", _POP_SLOT)
+    table.add_slot("body-cell-grade", _GRADE_SLOT)
+
+    # ---------------------------------------------------------------- painters
+
+    def _paint_summary(payload):
+        facts = fv.summary_facts(payload)
+        summary_box.clear()
+        summary_box.set_visibility(facts is not None)
+        if facts is None:
+            return
+        with summary_box:
+            ui.label(facts["symbol"]).classes(f"text-h6 font-bold {LABEL}")
+            if facts["price"]:
+                ui.label(facts["price"]).classes(f"text-subtitle1 {MUTED}")
+            for pill in facts["pills"]:
+                ui.label(pill).classes(f"{BADGE_MUTED} {_PILL}")
+            if facts["vol_rank"]:
+                ui.label(facts["vol_rank"]).classes(f"{BADGE_ACCENT} {_PILL}")
+            ui.label(facts["counts"]).classes(f"text-sm {MUTED} ml-auto")
+
+    @guard
+    def _on_chip(code):
+        state["active"] = fv.toggle_chip(state["active"], code)
+        _paint_results()
+
+    def _chip(label, code):
+        tone = BADGE_ACCENT if fv.chip_is_active(state["active"], code) else BADGE_MUTED
+        ui.button(label, color=None).props("no-caps dense unelevated") \
+            .classes(f"{tone} {_CHIP}").on("click", lambda _e, c=code: _on_chip(c))
+
+    def _paint_chips(signals):
+        chips_row.clear()
+        counts = fv.chip_counts(signals)
+        if not counts:
+            return
+        with chips_row:
+            _chip(f"All {len(signals)}", fv.ALL_CHIP)
+            for code, label, n in counts:
+                _chip(f"{label} {n}", code)
+
+    def _split_bar(rr):
+        # Loss grows leftwards from the centre, profit rightwards, both scaled to
+        # the larger of the two (finder_view.risk_reward_bar).
+        with ui.element("div").classes(
+                "flex flex-nowrap w-full h-2 rounded overflow-hidden bg-white/5"):
+            with ui.element("div").classes("flex flex-nowrap justify-end w-1/2 h-full"):
+                ui.element("div").classes(f"h-full {_LOSS_FILL} {rr['loss_class']}")
+            with ui.element("div").classes("flex flex-nowrap w-1/2 h-full"):
+                ui.element("div").classes(f"h-full {_PROFIT_FILL} {rr['profit_class']}")
+        with ui.row().classes("w-full justify-between no-wrap"):
+            ui.label(f"Max loss {rr['loss_label']}").classes(f"text-xs {TXT_NEG}")
+            ui.label(f"Max profit {rr['profit_label']}").classes(f"text-xs {TXT_POS}")
+
+    def _pick_card(sig):
+        c = card_view(sig)
+        card = ui.column().classes(
+            f"{CARD} w-full gap-2 cursor-pointer hover:border-[#3b82f6]")
+        card.on("click", lambda _e, s=sig: _select_signal(s))
+        with card:
+            with ui.row().classes("w-full items-start justify-between no-wrap gap-2"):
+                ui.label(c["title"]).classes(f"text-sm font-bold {LABEL}")
+                with ui.row().classes("items-center gap-1 no-wrap shrink-0"):
+                    ui.label(c["score_text"]).classes(
+                        f"{c['score_class']} text-[#111] text-xs font-bold rounded px-1.5")
+                    if c["grade"]:
+                        ui.label(c["grade"]).classes(f"text-xs {c['grade_class']}")
+            ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
+            ui.label(c["legs"]).classes("text-xs")
+            if c["payoff_svg"]:
+                ui.html(c["payoff_svg"])
+            if c["rr"]:
+                _split_bar(c["rr"])
+            if c["pop"]:
+                with ui.element("div").classes(
+                        "w-full h-1.5 rounded overflow-hidden bg-white/5"):
+                    ui.element("div").classes(f"h-full {c['pop']['class']} {c['pop_fill']}")
+                ui.label(f"{c['pop']['label']} probability of profit") \
+                    .classes(f"text-xs {MUTED}")
+            ui.label(c["cost"]).classes(f"text-sm {LABEL}")
+            with ui.row().classes("gap-2 no-wrap"):
+                # click.stop: a button press is not also a card selection.
+                ui.button("Calculator", icon="calculate", color=None) \
+                    .props("no-caps dense").classes(BTN) \
+                    .on("click.stop", lambda _e, s=sig: handoff.send_signal_to_calculator(s))
+                if c["allow_paper"]:
+                    ui.button("Paper", icon="request_quote", color=None) \
+                        .props("no-caps dense").classes(BTN) \
+                        .on("click.stop", lambda _e, s=sig: handoff.send_to_paper(s))
+
+    def _paint_cards(picks):
+        picks_grid.clear()
+        with picks_grid:
+            for sig in picks:
+                _pick_card(sig)
+
+    def _paint_placeholders(symbol):
+        picks_grid.clear()
+        with picks_grid:
+            for _ in range(4):
+                with ui.column().classes(
+                        f"{CARD} w-full h-40 items-center justify-center animate-pulse"):
+                    ui.label(scanning_text(symbol)).classes(f"text-sm {MUTED}")
+
+    def _signals():
+        return [s for s in ((state["payload"] or {}).get("signals") or []) if s]
+
+    def _paint_results():
+        """Chips, cards and list from the CACHED payload - no scan."""
+        signals = _signals()
+        has_scan = bool((state["payload"] or {}).get("symbol"))
+        _paint_chips(signals)
+        visible = fv.filter_groups(signals, state["active"])
+        _paint_cards(fv.top_picks(visible))
+        table.rows = finder_rows(visible)
+        table.update()
+        empty_line.set_visibility(not has_scan)
+        table.set_visibility(has_scan)
+
+    def _paint_payload(payload):
         payload = payload or {}
-        signals = payload.get("signals") or []
+        signals = [s for s in (payload.get("signals") or []) if s]
+        symbol = payload.get("symbol")
+        # Chip choices survive a repaint; a new symbol starts back at All.
+        state["active"] = fv.carry_chips(state["active"], state["symbol"], symbol, signals)
+        state["symbol"] = symbol
+        state["payload"] = payload
+        state["scanning"] = None
         by_id.clear()
         for s in signals:
             if s.get("id"):
                 by_id[s["id"]] = s
-        table.rows = strategy_table.strategy_rows(signals)
-        table.update()
-        banner.text = strategy_table.view_banner_text(payload.get("view"))
-        status.text = status_text(payload, len(table.rows))
+        status.text = ""
         scan_busy.hide()
+        _paint_summary(payload)
+        _paint_results()
+
+    # ------------------------------------------------------------------- scan
+
+    @guard
+    def _scan_timed_out(seq):
+        if state["scanning"] != seq:
+            return                              # the result landed, or a newer scan
+        state["scanning"] = None
+        scan_busy.hide()
+        if (state["payload"] or {}).get("symbol"):
+            status.text = "The scan did not come back - showing the last result."
+        else:
+            empty_line.text = _copy.WAITING_OPTIONS
+        _paint_summary(state["payload"])
+        _paint_results()
 
     @guard
     def _request_scan():
-        params = {
-            "symbol": symbol_in.value.strip().upper(),
-            "dte_min": int(dte_min.value),
-            "dte_max": int(dte_max.value),
-            "families": [code for code, cb in family_cbs.items() if cb.value],
-            "put_d_min": float(put_dmin.value),
-            "put_d_max": float(put_dmax.value),
-            "call_d_min": float(call_dmin.value),
-            "call_d_max": float(call_dmax.value),
-            "min_cr_fraction": pct_to_fraction(mincr.value),
-        }
+        params = scan_params(symbol_in.value, dte_min.value, dte_max.value, _bands(),
+                             mincr.value)
         bus_client.request("options", {"type": "swing_scan", "args": params})
-        if not params["families"]:
-            # Falsy families ⇒ the service scans ALL families (the contract);
-            # surface it so an all-unchecked group isn't a silent "scan everything".
-            ui.notify("No strategies selected — scanning all.", type="info")
-        ui.notify("Scanning — results appear when the scan finishes.")
-        status.text = "Scanning…"
-        scan_busy.show(f"Scanning {params['symbol']}…")
+        state["scan_seq"] += 1
+        seq = state["scan_seq"]
+        state["scanning"] = seq
+        status.text = ""
+        # The old cards and rows belong to the previous scan (maybe another
+        # symbol), so they go - rather than reading as this scan's result.
+        summary_box.set_visibility(False)
+        chips_row.clear()
+        _paint_placeholders(params["symbol"])
+        table.rows = []
+        table.update()
+        empty_line.set_visibility(False)
+        table.set_visibility(True)
+        scan_busy.show(scanning_text(params["symbol"]))
+        ui.timer(_busy.BUSY_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
 
     scan_btn.on_click(_request_scan)
     # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan
     # button), deduped so tabbing through an unchanged symbol won't re-scan.
     bind_symbol_load(symbol_in, _request_scan)
 
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    state["version"] = bus_client.read_version("options:swing")
+    _paint_payload(bus_client.read("options:swing"))
+
     # A symbol handed over from the Trade Plan: seed the input and scan at once,
-    # the same one-shot pattern Dealer Positioning uses.
+    # the same one-shot pattern Dealer Positioning uses. After the initial paint,
+    # so the cached result cannot overwrite the scanning placeholders.
     _handoff_sym = handoff.take_pending_swing()
     if _handoff_sym:
         symbol_in.value = _handoff_sym
         _request_scan()
-
-    # Initial paint from the bus cache (graceful-empty if the service is cold).
-    seen["version"] = bus_client.read_version("options:swing")
-    _populate(bus_client.read("options:swing") or {})
 
     @guard
     def _maybe_repaint():
@@ -217,9 +529,9 @@ def render():
         # only re-read + repaint on change. The service bumps it when a requested
         # swing scan finishes.
         version = bus_client.read_version("options:swing")
-        if version == seen["version"]:
+        if version == state["version"]:
             return
-        seen["version"] = version
-        _populate(bus_client.read("options:swing") or {})
+        state["version"] = version
+        _paint_payload(bus_client.read("options:swing"))
 
     ui.timer(2.0, _maybe_repaint)
