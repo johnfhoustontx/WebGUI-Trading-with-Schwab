@@ -595,6 +595,10 @@ _CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
 # such row was cut, leaving the Calendars checkbox showing nothing.
 _CAL_MIN_FRONT_DTE = 7
 _DIAG_SHORT_DELTA, _DIAG_LONG_DELTA = 0.30, 0.70
+# The short front leg must sit inside this |delta| band. Out of the money alone let
+# through a near-ATM short (spot 100.1 on a $5 ladder sold the 100P at -0.47) and,
+# on a coarse ladder, a token 0.09-0.12 option that ranked above real diagonals.
+_DIAG_SHORT_BAND = (0.15, 0.45)
 
 
 def _can_profit(sig):
@@ -671,8 +675,9 @@ def _nearest_delta_strike(strikes, target):
 
 def _diagonal(kind, label, direction, f_exp, f, b_exp, b, symbol, spot, atm_iv):
     """The standard diagonal (the poor man's covered call and its put mirror):
-    SELL the out-of-the-money front strike nearest 0.30 delta, BUY the
-    in-the-money back strike nearest 0.70 delta, both judged against SPOT.
+    SELL the out-of-the-money front strike nearest 0.30 delta, among those inside
+    ``_DIAG_SHORT_BAND`` (none inside: no diagonal), BUY the in-the-money back
+    strike nearest 0.70 delta, both judged against SPOT.
 
     Skipped when the net debit reaches the strike width. With an AT-the-money short
     that rule could never pass for calls on a flat term structure - debit = width +
@@ -681,7 +686,9 @@ def _diagonal(kind, label, direction, f_exp, f, b_exp, b, symbol, spot, atm_iv):
     inside the width, which is what the practitioner rule assumes. Also skipped
     when max profit is not positive.
     """
-    otm = {s: leg for s, leg in f["strikes"].items() if (s - spot) * direction > 0}
+    lo, hi = _DIAG_SHORT_BAND
+    otm = {s: leg for s, leg in f["strikes"].items()
+           if (s - spot) * direction > 0 and lo <= abs(leg["delta"]) <= hi}
     itm = {s: leg for s, leg in b["strikes"].items() if (spot - s) * direction > 0}
     ks = _nearest_delta_strike(otm, _DIAG_SHORT_DELTA)
     kb = _nearest_delta_strike(itm, _DIAG_LONG_DELTA)

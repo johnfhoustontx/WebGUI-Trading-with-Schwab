@@ -886,18 +886,18 @@ def test_diagonals_buy_in_the_money_and_never_cost_their_width():
     """The standard diagonal sells the out-of-the-money front and buys the back
     month in the money, both judged against spot: a DEBIT below the strike width.
 
-    On this $5 ladder the nearest-0.30 OTM front strike is 105 / 95 (the only OTM
-    strikes near that delta sit a whole step out, |delta| ~0.11 / ~0.09) and the
-    nearest-0.70 ITM back strike is 95 / 105, so each side spans $10."""
-    out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
-    c = {l["side"]: l["strike"] for l in out["DIAGONAL_CALL"]["legs"]}
-    p = {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]}
-    assert c == {"short": 105.0, "long": 95.0}
-    assert p == {"short": 95.0, "long": 105.0}
+    On the $5 ladder at spot 100 no diagonal is built: the nearest out-of-the-money
+    front strikes are 105C (|delta| ~0.11) and 95P (~0.09), both below the short
+    leg's 0.15-0.45 band - a token short, not the ~0.30 one a diagonal sells. On
+    the $1 ladder both sides build, and neither costs its width."""
+    coarse = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
+    assert "DIAGONAL_CALL" not in coarse and "DIAGONAL_PUT" not in coarse
+    fine = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35), step=1.0, n=15),
+                                       "XYZ", 100.0, 0.28, 5, 60))
     for t in ("DIAGONAL_CALL", "DIAGONAL_PUT"):
-        assert out[t]["net_debit"] is not None
-        assert out[t]["net_debit"] < _diag_width(out[t]) * 100
-        assert out[t]["max_profit"] > 0
+        assert fine[t]["net_debit"] is not None
+        assert fine[t]["net_debit"] < _diag_width(fine[t]) * 100
+        assert fine[t]["max_profit"] > 0
 
 def test_no_calendar_without_two_expiries_seven_days_apart():
     assert ss.build_calendars(_ladder_chain(days=(7, 10)), "XYZ", 100.0, 0.28, 5, 60) == []
@@ -963,19 +963,20 @@ def test_a_back_leg_hole_at_the_money_skips_that_kinds_calendar():
     chain["callExpDateMap"][back]["100.0"][0]["volatility"] = -999.0
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
     assert "CALENDAR_CALL" not in out
-    assert "DIAGONAL_CALL" in out
-    assert all(l["strike"] != 100.0 for l in out["DIAGONAL_CALL"]["legs"])
+    # The 0.15-0.45 short band - not the hole - excludes the diagonal here; see
+    # test_a_hole_on_the_diagonals_own_long_strike_is_never_picked.
+    assert "DIAGONAL_CALL" not in out
     assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
-    assert {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]} == {
-        "short": 95.0, "long": 105.0}
+    assert "DIAGONAL_PUT" not in out
 
 
 def test_a_back_leg_missing_at_the_money_skips_the_calendar_too():
     chain = _drop(_ladder_chain(days=(7, 35)), "callExpDateMap", 35, "100.0")
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
     assert "CALENDAR_CALL" not in out
-    assert "DIAGONAL_CALL" in out
-    assert all(l["strike"] != 100.0 for l in out["DIAGONAL_CALL"]["legs"])
+    # The 0.15-0.45 short band - not the hole - excludes the diagonal here; see
+    # test_a_hole_on_the_diagonals_own_long_strike_is_never_picked.
+    assert "DIAGONAL_CALL" not in out
     assert "CALENDAR_PUT" in out
 
 
@@ -1222,3 +1223,40 @@ def test_mixed_spacing_with_the_back_grid_strike_missing_builds_no_calendar():
     out = _by_type(ss.build_calendars(chain, "XYZ", 101.0, 0.28, 5, 60))
     assert "CALENDAR_CALL" not in out
     assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
+
+
+# ---- Review follow-up: the diagonal's short leg sits inside a delta band ----
+def test_a_near_the_money_put_is_never_sold_as_a_diagonal_short():
+    """At spot 100.1 the only out-of-the-money put strike on a $5 ladder near 0.30
+    delta is the 100P at about -0.47 - an at-the-money short under another name."""
+    out = ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.1, 0.28, 5, 60)
+    for s in out:
+        if s["type"].startswith("DIAGONAL_"):
+            short = next(l for l in s["legs"] if l["side"] == "short")
+            assert abs(short["delta"]) <= 0.45, (s["type"], short["strike"], short["delta"])
+
+
+def test_a_token_delta_short_is_not_a_diagonal():
+    """On the $5 ladder at spot 100 the nearest out-of-the-money front strikes are
+    105C (delta ~0.11) and 95P (~0.09): a token short, not the ~0.30 one a diagonal
+    sells, so neither kind is built."""
+    out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
+    assert "DIAGONAL_CALL" not in out and "DIAGONAL_PUT" not in out
+
+
+@pytest.mark.parametrize("hole", ["sentinel", "deleted"])
+def test_a_hole_on_the_diagonals_own_long_strike_is_never_picked(hole):
+    """On the $1 ladder the call diagonal buys the back 96C. With that contract
+    unusable (Schwab's -999 IV) or absent, it must pick another listed strike or
+    build nothing - never 96."""
+    chain = _ladder_chain(days=(7, 35), step=1.0, n=15)
+    if hole == "sentinel":
+        _raw_contract(chain, "callExpDateMap", 35, "96.0")["volatility"] = -999.0
+    else:
+        _drop(chain, "callExpDateMap", 35, "96.0")
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    diag = out.get("DIAGONAL_CALL")
+    if diag is not None:
+        long_ = next(l for l in diag["legs"] if l["side"] == "long")
+        assert long_["strike"] != 96.0
+        assert long_["iv"] != -999.0
