@@ -480,6 +480,13 @@ def _front_atm(chain, exp, spot):
     return _atm_strike(lc | lp, spot, prefer=lc & lp)
 
 
+# ``family`` is read in one place, ``strategy_scoring.q_breakeven_vs_em``: NEUTRAL
+# (with two breakevens) rewards a WIDE profit zone, anything else rewards the
+# nearest breakeven being CLOSE to spot. A short straddle/strangle wants the wide
+# zone; a long one profits from a big move, so the move it needs should be small.
+_STRADDLE_FAMILY = {"long": "VOLATILITY", "short": "NEUTRAL"}
+
+
 def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
                               put_band=None, call_band=None):
     """Long/short straddle (ATM) and long/short strangle (band-midpoint shorts).
@@ -504,7 +511,8 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
         for stype, side, label in (("LONG_STRADDLE", "long", "Long Straddle"),
                                    ("SHORT_STRADDLE", "short", "Short Straddle")):
             legs = [_leg_from(cs[k], "call", side, exp), _leg_from(ps[k], "put", side, exp)]
-            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+            out.append(_assemble(stype, _STRADDLE_FAMILY[side], label, "neutral", legs,
+                                 symbol, spot, atm_iv))
     cb, pb = _band_abs(call_band), _band_abs(put_band)
     c = nearest_by_delta({s: v for s, v in cs.items() if s > spot}, _short_target(cb))
     p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _short_target(pb))
@@ -515,7 +523,8 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
                                     or (pb and abs(p["delta"]) > pb[1])):
                 continue
             legs = [_leg_from(c, "call", side, exp), _leg_from(p, "put", side, exp)]
-            out.append(_assemble(stype, "NEUTRAL", label, "neutral", legs, symbol, spot, atm_iv))
+            out.append(_assemble(stype, _STRADDLE_FAMILY[side], label, "neutral", legs,
+                                 symbol, spot, atm_iv))
     return out
 
 

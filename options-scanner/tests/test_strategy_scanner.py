@@ -761,11 +761,12 @@ def _by_type(sigs):
 def test_straddles_sit_at_the_money_on_the_front_expiry():
     out = _by_type(ss.build_straddles_strangles(_ladder_chain(days=(30, 60)), "XYZ",
                                                 100.0, 0.28, 5, 90))
-    for t, side in (("LONG_STRADDLE", "long"), ("SHORT_STRADDLE", "short")):
+    for t, side, family in (("LONG_STRADDLE", "long", "VOLATILITY"),
+                            ("SHORT_STRADDLE", "short", "NEUTRAL")):
         legs = out[t]["legs"]
         assert {(l["kind"], l["side"], l["strike"]) for l in legs} == {
             ("call", side, 100.0), ("put", side, 100.0)}
-        assert out[t]["expiration"] == _exp(30) and out[t]["family"] == "NEUTRAL"
+        assert out[t]["expiration"] == _exp(30) and out[t]["family"] == family
 
 
 def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
@@ -1450,3 +1451,28 @@ def test_covered_call_and_protective_put_capital_are_unchanged():
     out = _stock_structures()
     assert out["COVERED_CALL"]["capital"] == 9948.30
     assert out["PROTECTIVE_PUT"]["capital"] == 10031.30
+
+
+# ---- Review follow-up: long straddles and strangles want nearby breakevens ----
+def test_long_straddles_and_strangles_are_volatility_shorts_stay_neutral():
+    out = _by_type(ss.build_straddles_strangles(
+        _ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
+        put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
+    assert out["LONG_STRADDLE"]["family"] == "VOLATILITY"
+    assert out["LONG_STRANGLE"]["family"] == "VOLATILITY"
+    assert out["SHORT_STRADDLE"]["family"] == "NEUTRAL"
+    assert out["SHORT_STRANGLE"]["family"] == "NEUTRAL"
+
+
+def test_a_long_straddle_scores_higher_when_its_breakevens_are_nearer_spot():
+    """A long straddle profits from a BIG move, so the move it needs - the distance
+    to its nearest breakeven - should be small. Tagged NEUTRAL it was rewarded for
+    breakevens far apart, which ranks the dearer straddle first."""
+    import strategy_scoring as sc
+    cheap, dear = (_by_type(ss.build_straddles_strangles(
+        _ladder_chain(iv=iv), "XYZ", 100.0, iv / 100, 5, 90))["LONG_STRADDLE"]
+        for iv in (28.0, 50.0))
+    assert max(cheap["breakevens"]) - min(cheap["breakevens"]) < (
+        max(dear["breakevens"]) - min(dear["breakevens"]))
+    em = 15.0
+    assert sc.q_breakeven_vs_em(cheap, em) > sc.q_breakeven_vs_em(dear, em)
