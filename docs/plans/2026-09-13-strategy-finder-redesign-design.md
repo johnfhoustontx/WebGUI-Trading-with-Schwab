@@ -36,7 +36,10 @@ comparing structures, and exploring settings.
 1. **Scan bar.** Symbol + Scan (Enter still scans). **Expiry presets** — *1–2 wk ·
    2–6 wk · 1–3 mo · Any* — beside DTE min/max; editing a box deselects the
    preset. **Risk style** — *Conservative · Balanced · Aggressive* — sets the
-   short-leg delta bands on both sides to 0.10–0.15 / 0.15–0.25 / 0.25–0.35; the raw
+   short-leg delta bands on both sides to 0.05–0.10 / **0.10–0.20 (default)** / 0.20–0.30
+   (*revised while planning:* the first draft's 0.10–0.15 / 0.15–0.25 / 0.25–0.35 would
+   have relabelled today's default band as *Custom* and silently changed the default
+   scan); the raw
    delta and credit fields stay under **Advanced**, and editing them shows *Custom*.
 2. **Summary strip** (after a scan): symbol and price; the market view as pills
    (direction · conviction · volatility regime); Vol Rank (moved out of the table);
