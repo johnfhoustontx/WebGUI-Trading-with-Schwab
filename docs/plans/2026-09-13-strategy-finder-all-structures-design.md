@@ -150,7 +150,11 @@ back month spanning a report is exposed to it even when the front expires first.
   default.
 - Columns unchanged. **Legs cell:** a share leg prints `L 100 SH`; a leg on a
   later expiry carries its date (`S 100C / L 100C 10/16`).
-- **Strategy cell** uses the Calculator's `strategy_label` wording.
+- **Strategy cell** uses the Finder's existing label style ("Long Straddle",
+  "Call Calendar", "Covered Call"), set by the builder. *Revised while planning:*
+  the design said the Calculator's `strategy_label` wording, but the builders live
+  in `options-scanner`, which cannot import that Tier-1 module, and a third copy
+  of the label table would be the drift this doc avoids elsewhere.
 
 ## Hand-offs
 
