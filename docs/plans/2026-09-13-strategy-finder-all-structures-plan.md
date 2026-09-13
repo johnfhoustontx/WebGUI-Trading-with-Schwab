@@ -1344,6 +1344,37 @@ Run: `cd options-scanner && $PY -m pytest tests/test_paper_debit_multileg.py -p 
 and `reprice_legs`'s `_fetch_chain` call before running; adjust the calls, not the
 assertions.
 
+**Step 1b: An EXPLICIT refusal in `create_paper_trade`** (from the Task 3-4 code
+review). Today a straddle row cannot be opened only because the credit branch
+KeyErrors on `short_strike` — protection by a missing field, which the first row
+to gain that field would silently remove. Before touching the debit list:
+
+```python
+# options-scanner/tests/test_straddle_analysis_only.py - ADD, do not replace
+def test_an_analysis_only_structure_is_refused_by_name():
+    import pytest
+    import paper_trader
+    for code in FOUR:
+        with pytest.raises(ValueError, match="not paper-tradeable"):
+            paper_trader.create_paper_trade({"type": code, "symbol": "XYZ"}, 1)
+```
+
+In `paper_trader.create_paper_trade`, first statement:
+
+```python
+    stype = signal.get("type")
+    if stype not in _CREDIT_TYPES and stype not in PAPER_DEBIT_TYPES:
+        raise ValueError(f"{stype} is not paper-tradeable")
+```
+
+with `_CREDIT_TYPES = frozenset({"PCS", "CCS", "IC", "IRON_CONDOR"})` beside
+`PAPER_DEBIT_TYPES`. ⚠ First grep every caller of `create_paper_trade` and every
+test that passes it a `type` — confirm each legitimate type is in one of the two
+sets (the scanner's own rows may carry other spellings); if one is not, STOP and
+report rather than widening the set by guesswork. Check whether the `paper_create`
+handler in `services/options_svc/handlers.py` should record the refusal instead of
+raising into the consumer, and report what it does today.
+
 **Step 2: Failing taxonomy + mirror tests**
 
 In `shared/tests/test_structures.py`:
