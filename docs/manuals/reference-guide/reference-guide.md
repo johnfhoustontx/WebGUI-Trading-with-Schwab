@@ -2682,9 +2682,10 @@ row of seven checkboxes, all ticked by default:
 | **Calendars** | call and put calendar; call and put diagonal |
 | **Stock + options** | covered call, protective put, collar — each on one 100-share lot bought at spot |
 
-An **Advanced** panel exposes the credit-spread filters: put/call **delta** bounds (how
-far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
-and a **minimum credit** percentage. The delta bounds also place every other sold
+A collapsed **Advanced — delta bands and credit floor** panel holds put/call **delta**
+bounds (how far out-of-the-money the sold strikes sit — a smaller absolute delta is safer
+but pays less) and a **minimum credit** percentage, which filters the credit spreads
+only. The delta bounds place the credit spreads' short strikes and also every other sold
 option that is out of the money by design — the Directional **short put** and **short
 call**, the **short strangle**, and the call in a **covered call** or **collar** — at the
 band's midpoint, and drop one that lands above the band's ceiling (one below the floor is
@@ -2694,6 +2695,14 @@ money by definition.
 **How the newer structures are built** — all from the chain the scan already fetched,
 so they cost no extra data:
 
+- **Which expiration** — every newer structure except the calendar and diagonal (which
+  take two, below) sits on the **nearest expiration at least 7 days out** inside your
+  DTE range: straddles, strangles, butterflies, the iron butterfly, condors and the
+  share structures. With DTE min at 0 none of them is built on a 0–6 day expiration,
+  and nothing needs widening for it — the floor applies by itself. A structure that
+  close to expiry is a same-day bet rather than the trade its name describes (an
+  operator decision). The Directional rows and the debit and credit spreads still take
+  the nearest expiration in the range.
 - **Straddle, butterfly body, iron butterfly body** — the at-the-money strike. If that
   strike is missing from either side of the chain the structure is **skipped**, never
   moved to the next strike: an off-centre "straddle" is a different trade under a neutral
@@ -2704,6 +2713,12 @@ so they cost no extra data:
 - **Butterfly and condor wings** — the distance, listed on **both** sides of the body,
   nearest **half the 1-σ expected move**. A condor's shorts sit one wing out, its longs
   two. Symmetric on purpose: a broken wing is a different risk profile.
+- **Butterfly and condor prices** — a long butterfly or condor is worth between nothing
+  and its wing at expiry, so it must cost a **debit** smaller than the wing; an iron
+  butterfly is the same payoff shifted down, so it must take in a **credit** smaller than
+  the wing. When wide quotes put the mid prices outside that range — a long butterfly
+  "paid" a credit reports a 100% probability of profit and ranks first — the row is **not
+  shown**: the prices are wrong, not the trade good.
 - **Calendar** — the near expiration at least **7 days** out, the later one nearest
   **near + 28 days** and at least a week after it, both inside your DTE range; same
   at-the-money strike. Skipped when either month's strike ladder has a hole at the money.
@@ -2712,7 +2727,7 @@ so they cost no extra data:
   only between 0.15 and 0.45), long the later month in the money near **0.70 delta**.
   Skipped when the debit reaches the width between the two strikes, since it then has no
   upside worth the name.
-- **Covered call / protective put / collar** — near expiration at least 7 days out. The
+- **Covered call / protective put / collar** — the 7-day expiration above. The
   sold call is at the call band's midpoint; the bought put is near **0.25 delta**, and a
   put under 0.10 delta builds neither the protective put nor the collar (a collar also
   needs its call at 0.05 delta or more) — below that the position is just shares.
@@ -2742,6 +2757,13 @@ poor grade means "fits your view, but badly constructed".
 contract as `S 2×100C` (a butterfly's body), and a leg on a later expiration with its
 date — `S 100C / L 100C 11/13` is a calendar.
 
+**The Trade detail panel** (click a row) follows the same rules in words: `Buy 100
+shares` for a share lot, `Sell 2× 100 C` for a butterfly's body, each leg on its own line
+with its own date when the legs span more than one expiration (the single "Exp" caption is
+then left off, since it would name only the near month), **every** breakeven joined with
+` / `, and dollars stated **per position** rather than per contract when shares are part
+of it — a share lot is thousands of dollars, not a contract's worth.
+
 **The status line** reports how many candidates were **cut below the quality bar**. That
 count is what distinguishes *"the scan found things and rejected them all"* from *"the
 scan found nothing"* — two very different situations that would otherwise look identical.
@@ -2767,7 +2789,9 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 
 **Send to Paper trade** appears for credit structures (PCS, CCS, IC), defined-risk debit
 structures (long call/put, bull call, bear put) and the **call and put butterflies and
-condors**. No button for:
+condors**. The ledger refuses a debit structure that arrives with no positive debit,
+rather than opening it as a free trade whose every later mark would overstate the
+result. No button for:
 
 | Structure | Why |
 |---|---|

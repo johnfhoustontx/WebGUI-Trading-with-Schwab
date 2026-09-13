@@ -3836,9 +3836,10 @@ row of seven checkboxes, all ticked by default:</p>
 </tr>
 </tbody>
 </table>
-<p>An <strong>Advanced</strong> panel exposes the credit-spread filters: put/call <strong>delta</strong> bounds (how
-far out-of-the-money the strikes sit — a smaller absolute delta is safer but pays less)
-and a <strong>minimum credit</strong> percentage. The delta bounds also place every other sold
+<p>A collapsed <strong>Advanced — delta bands and credit floor</strong> panel holds put/call <strong>delta</strong>
+bounds (how far out-of-the-money the sold strikes sit — a smaller absolute delta is safer
+but pays less) and a <strong>minimum credit</strong> percentage, which filters the credit spreads
+only. The delta bounds place the credit spreads' short strikes and also every other sold
 option that is out of the money by design — the Directional <strong>short put</strong> and <strong>short
 call</strong>, the <strong>short strangle</strong>, and the call in a <strong>covered call</strong> or <strong>collar</strong> — at the
 band's midpoint, and drop one that lands above the band's ceiling (one below the floor is
@@ -3847,6 +3848,14 @@ money by definition.</p>
 <p><strong>How the newer structures are built</strong> — all from the chain the scan already fetched,
 so they cost no extra data:</p>
 <ul>
+<li><strong>Which expiration</strong> — every newer structure except the calendar and diagonal (which
+  take two, below) sits on the <strong>nearest expiration at least 7 days out</strong> inside your
+  DTE range: straddles, strangles, butterflies, the iron butterfly, condors and the
+  share structures. With DTE min at 0 none of them is built on a 0–6 day expiration,
+  and nothing needs widening for it — the floor applies by itself. A structure that
+  close to expiry is a same-day bet rather than the trade its name describes (an
+  operator decision). The Directional rows and the debit and credit spreads still take
+  the nearest expiration in the range.</li>
 <li><strong>Straddle, butterfly body, iron butterfly body</strong> — the at-the-money strike. If that
   strike is missing from either side of the chain the structure is <strong>skipped</strong>, never
   moved to the next strike: an off-centre "straddle" is a different trade under a neutral
@@ -3857,6 +3866,12 @@ so they cost no extra data:</p>
 <li><strong>Butterfly and condor wings</strong> — the distance, listed on <strong>both</strong> sides of the body,
   nearest <strong>half the 1-σ expected move</strong>. A condor's shorts sit one wing out, its longs
   two. Symmetric on purpose: a broken wing is a different risk profile.</li>
+<li><strong>Butterfly and condor prices</strong> — a long butterfly or condor is worth between nothing
+  and its wing at expiry, so it must cost a <strong>debit</strong> smaller than the wing; an iron
+  butterfly is the same payoff shifted down, so it must take in a <strong>credit</strong> smaller than
+  the wing. When wide quotes put the mid prices outside that range — a long butterfly
+  "paid" a credit reports a 100% probability of profit and ranks first — the row is <strong>not
+  shown</strong>: the prices are wrong, not the trade good.</li>
 <li><strong>Calendar</strong> — the near expiration at least <strong>7 days</strong> out, the later one nearest
   <strong>near + 28 days</strong> and at least a week after it, both inside your DTE range; same
   at-the-money strike. Skipped when either month's strike ladder has a hole at the money.
@@ -3865,7 +3880,7 @@ so they cost no extra data:</p>
   only between 0.15 and 0.45), long the later month in the money near <strong>0.70 delta</strong>.
   Skipped when the debit reaches the width between the two strikes, since it then has no
   upside worth the name.</li>
-<li><strong>Covered call / protective put / collar</strong> — near expiration at least 7 days out. The
+<li><strong>Covered call / protective put / collar</strong> — the 7-day expiration above. The
   sold call is at the call band's midpoint; the bought put is near <strong>0.25 delta</strong>, and a
   put under 0.10 delta builds neither the protective put nor the collar (a collar also
   needs its call at 0.05 delta or more) — below that the position is just shares.</li>
@@ -3890,6 +3905,12 @@ poor grade means "fits your view, but badly constructed".</p>
 <p><strong>The Legs column</strong> prints a share lot as <code>L 100 shares</code>, a leg of more than one
 contract as <code>S 2×100C</code> (a butterfly's body), and a leg on a later expiration with its
 date — <code>S 100C / L 100C 11/13</code> is a calendar.</p>
+<p><strong>The Trade detail panel</strong> (click a row) follows the same rules in words: <code>Buy 100
+shares</code> for a share lot, <code>Sell 2× 100 C</code> for a butterfly's body, each leg on its own line
+with its own date when the legs span more than one expiration (the single "Exp" caption is
+then left off, since it would name only the near month), <strong>every</strong> breakeven joined with
+<code>/</code>, and dollars stated <strong>per position</strong> rather than per contract when shares are part
+of it — a share lot is thousands of dollars, not a contract's worth.</p>
 <p><strong>The status line</strong> reports how many candidates were <strong>cut below the quality bar</strong>. That
 count is what distinguishes <em>"the scan found things and rejected them all"</em> from <em>"the
 scan found nothing"</em> — two very different situations that would otherwise look identical.</p>
@@ -3911,7 +3932,9 @@ stock leg. ⚠ Clicking an expiration pill on the Calculator afterwards moves <s
 option leg to that one date, which collapses a calendar into a single-expiry trade.</p>
 <p><strong>Send to Paper trade</strong> appears for credit structures (PCS, CCS, IC), defined-risk debit
 structures (long call/put, bull call, bear put) and the <strong>call and put butterflies and
-condors</strong>. No button for:</p>
+condors</strong>. The ledger refuses a debit structure that arrives with no positive debit,
+rather than opening it as a free trade whose every later mark would overstate the
+result. No button for:</p>
 <table>
 <thead>
 <tr>

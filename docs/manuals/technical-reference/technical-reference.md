@@ -885,7 +885,14 @@ at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-da
 The **Market Scanner's Directional tab** scores its single-leg candidates the same way
 (`run_full_scan` passes the same `daily_move`), so one candidate scores identically on
 both pages; in either, a candidate without a usable DTE falls back to one move at its
-scan window's DTE minimum. Flies, condors, calendars
+scan window's DTE minimum. ⚠ **The Income board scores through the same `swing_scan`
+path, so its `entry_score` changed basis on 2026-09-13** — from one move at the window's
+30-DTE minimum to the move to each candidate's own 30–45 DTE expiry, a factor of
+√(DTE / 30), so at most ~1.22 on the move. Scores captured under `scanner_type = "INCOME"`
+before and after that date are not directly comparable for calibration. The capture
+takes whatever the board publishes (`capture_min_income = 0`), so no capture floor moved;
+a row whose score crosses the board's own 50 cut is the only way the published — and so
+captured — set can differ. Flies, condors, calendars
 and the short straddle/strangle carry `NEUTRAL`; the long straddle/strangle carry
 `VOLATILITY`, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are `DIRECTIONAL`.
@@ -910,6 +917,28 @@ reward note in `strategy_scoring._reward_metric`). **The iron butterfly is judge
 although it takes a credit**: by put–call parity its payoff is the long butterfly's, and
 under `NEUTRAL`'s 55 PoP bar both would be cut on nearly every fairly priced chain
 measured (PoP 23.6–51.9 at 14/30/45 DTE), though a rich chain can lift them over it.
+
+### Expiry floor and mispriced wings
+
+`strategy_scanner._front_pair` picks the nearest expiry both the call and put maps list
+**at least `_MIN_FRONT_DTE` (7) days out** — `max(dte_min, 7)`, so a window whose DTE min
+is already higher keeps it. The floor is applied inside `_front_pair` itself, so every
+caller takes it: straddles and strangles (`build_straddles_strangles`), call/put/iron
+butterflies and call/put condors (`build_butterflies_condors`) and the share structures
+(`build_stock_structures`). Calendars and diagonals apply the same constant to their front
+month in `build_calendars`. Only the single-leg directionals, the debit and credit
+verticals and the iron condor built from the credit spreads keep the nearest expiry in
+the window. At the page's default DTE min of 0 this
+means no straddle, strangle, fly, condor or share structure is built on a 0–6 DTE expiry
+(operator decision, 2026-09-13 — on a daily-listing name those were same-day bets).
+
+`_priced_inside` then drops a structure whose mid-mark price is impossible for its
+payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its
+`net_debit` must lie strictly inside `(0, wing × 100)`; an iron butterfly is that payoff
+shifted down by the wing, so its `net_credit` must lie inside the same range. Outside it,
+the marks are wrong rather than the trade good: measured, 95C 6.5 / 100C 4.1 ×2 / 105C
+1.5 is a $20 credit for a long fly, which reported max loss 25.2, R:R 20.4, no
+breakevens and PoP 100, and ranked first. Non-finite or absent prices are dropped too.
 
 ### Payoff: two valuation paths
 
@@ -1706,7 +1735,11 @@ call fly at spot 100 and IV 28% is $1.20 at 30 DTE, $1.42 at 21, and reaches its
 only near 3 DTE — so `exit_dte = 21` would close every 22–30 DTE entry flat. Adding
 a table with `exit_dte` reverses that decision. The ledger records, reprices and
 settles a butterfly's `qty 2` body leg; straddles and strangles are refused by name
-in `paper_trader.create_paper_trade` (analysis only, D1).
+in `paper_trader.create_paper_trade` (analysis only, D1). That function also refuses a
+`PAPER_DEBIT_TYPES` signal whose `net_debit` is not a positive finite number
+(`ValueError "<TYPE> has no debit"`): `_create_debit_trade` books `net_debit or 0.0`, so
+an absent, zero, negative or NaN debit would otherwise open a **free** trade and
+overstate every later mark by the premium it never recorded.
 
 ## Scope and absences
 

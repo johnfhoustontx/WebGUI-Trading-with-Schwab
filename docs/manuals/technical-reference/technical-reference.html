@@ -122,6 +122,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#factor-normalizers">Factor normalizers</a></li>
 <li><a href="#expected-move-and-iv-analysis">Expected move and IV analysis</a></li>
 <li><a href="#strategy-finder-scoring-fit-quality">Strategy Finder scoring (Fit + Quality)</a><ul>
+<li><a href="#expiry-floor-and-mispriced-wings">Expiry floor and mispriced wings</a></li>
 <li><a href="#payoff-two-valuation-paths">Payoff: two valuation paths</a></li>
 <li><a href="#measured-outcomes-and-how-to-re-measure">Measured outcomes, and how to re-measure</a></li>
 </ul>
@@ -1382,7 +1383,14 @@ at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-da
 The <strong>Market Scanner's Directional tab</strong> scores its single-leg candidates the same way
 (<code>run_full_scan</code> passes the same <code>daily_move</code>), so one candidate scores identically on
 both pages; in either, a candidate without a usable DTE falls back to one move at its
-scan window's DTE minimum. Flies, condors, calendars
+scan window's DTE minimum. ⚠ <strong>The Income board scores through the same <code>swing_scan</code>
+path, so its <code>entry_score</code> changed basis on 2026-09-13</strong> — from one move at the window's
+30-DTE minimum to the move to each candidate's own 30–45 DTE expiry, a factor of
+√(DTE / 30), so at most ~1.22 on the move. Scores captured under <code>scanner_type = "INCOME"</code>
+before and after that date are not directly comparable for calibration. The capture
+takes whatever the board publishes (<code>capture_min_income = 0</code>), so no capture floor moved;
+a row whose score crosses the board's own 50 cut is the only way the published — and so
+captured — set can differ. Flies, condors, calendars
 and the short straddle/strangle carry <code>NEUTRAL</code>; the long straddle/strangle carry
 <code>VOLATILITY</code>, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are <code>DIRECTIONAL</code>.</p>
@@ -1439,6 +1447,25 @@ reward note in <code>strategy_scoring._reward_metric</code>). <strong>The iron b
 although it takes a credit</strong>: by put–call parity its payoff is the long butterfly's, and
 under <code>NEUTRAL</code>'s 55 PoP bar both would be cut on nearly every fairly priced chain
 measured (PoP 23.6–51.9 at 14/30/45 DTE), though a rich chain can lift them over it.</p>
+<h3 id="expiry-floor-and-mispriced-wings">Expiry floor and mispriced wings</h3>
+<p><code>strategy_scanner._front_pair</code> picks the nearest expiry both the call and put maps list
+<strong>at least <code>_MIN_FRONT_DTE</code> (7) days out</strong> — <code>max(dte_min, 7)</code>, so a window whose DTE min
+is already higher keeps it. The floor is applied inside <code>_front_pair</code> itself, so every
+caller takes it: straddles and strangles (<code>build_straddles_strangles</code>), call/put/iron
+butterflies and call/put condors (<code>build_butterflies_condors</code>) and the share structures
+(<code>build_stock_structures</code>). Calendars and diagonals apply the same constant to their front
+month in <code>build_calendars</code>. Only the single-leg directionals, the debit and credit
+verticals and the iron condor built from the credit spreads keep the nearest expiry in
+the window. At the page's default DTE min of 0 this
+means no straddle, strangle, fly, condor or share structure is built on a 0–6 DTE expiry
+(operator decision, 2026-09-13 — on a daily-listing name those were same-day bets).</p>
+<p><code>_priced_inside</code> then drops a structure whose mid-mark price is impossible for its
+payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its
+<code>net_debit</code> must lie strictly inside <code>(0, wing × 100)</code>; an iron butterfly is that payoff
+shifted down by the wing, so its <code>net_credit</code> must lie inside the same range. Outside it,
+the marks are wrong rather than the trade good: measured, 95C 6.5 / 100C 4.1 ×2 / 105C
+1.5 is a $20 credit for a long fly, which reported max loss 25.2, R:R 20.4, no
+breakevens and PoP 100, and ranked first. Non-finite or absent prices are dropped too.</p>
 <h3 id="payoff-two-valuation-paths">Payoff: two valuation paths</h3>
 <p><code>payoff_metrics</code> evaluates P&amp;L at payoff breakpoints (price 0, each strike, 2× the top
 strike) and interpolates breakevens on a fine grid.</p>
@@ -2451,7 +2478,11 @@ call fly at spot 100 and IV 28% is $1.20 at 30 DTE, $1.42 at 21, and reaches its
 only near 3 DTE — so <code>exit_dte = 21</code> would close every 22–30 DTE entry flat. Adding
 a table with <code>exit_dte</code> reverses that decision. The ledger records, reprices and
 settles a butterfly's <code>qty 2</code> body leg; straddles and strangles are refused by name
-in <code>paper_trader.create_paper_trade</code> (analysis only, D1).</p>
+in <code>paper_trader.create_paper_trade</code> (analysis only, D1). That function also refuses a
+<code>PAPER_DEBIT_TYPES</code> signal whose <code>net_debit</code> is not a positive finite number
+(<code>ValueError "&lt;TYPE&gt; has no debit"</code>): <code>_create_debit_trade</code> books <code>net_debit or 0.0</code>, so
+an absent, zero, negative or NaN debit would otherwise open a <strong>free</strong> trade and
+overstate every later mark by the premium it never recorded.</p>
 <h2 id="scope-and-absences">Scope and absences</h2>
 <p>Credit rows in the ledger are <strong>not</strong> managed by this pass - giving them the
 credit rules would change how a second book exits, with its own measurement

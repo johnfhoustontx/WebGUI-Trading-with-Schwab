@@ -49,6 +49,40 @@ knows.** Operator request: "scan for all strategies using the updated rules".)
   refuses an unsupported type **by name** instead of relying on a `short_strike`
   KeyError. The ledger's Strikes cell shows `2×` and its detail panel both
   breakevens (debit rows now join breakevens with ` / `; old `, ` rows still parse).
+- **7-day front for straddles, strangles, flies and condors** (operator decision,
+  `8d9b792`). At the page's DTE min of 0 they took the nearest common expiry — a
+  0–1 DTE structure on a daily-listing name. `_front_pair` now applies
+  `_MIN_FRONT_DTE` itself, so straddles/strangles, call/put/iron butterflies,
+  condors and the share structures share the calendars' floor, and no caller can
+  forget it. Directionals, debit/credit verticals and the iron condor keep the
+  nearest expiry; nobody needs to raise DTE min for the floor to apply.
+- **Mispriced wings are never emitted** (`56035b4`). Wide mid marks can break
+  convexity: 95C 6.5 / 100C 4.1 ×2 / 105C 1.5 is a $20 credit for a long fly that
+  reported R:R 20.4, PoP 100 and ranked first. A long fly or condor must now cost a
+  debit strictly inside `(0, wing × 100)`, and an iron butterfly collect a credit
+  inside the same range (`_priced_inside`).
+- **The Paper Ledger refuses a debit trade with no debit** (`e0d33df`).
+  `_create_debit_trade` booked `net_debit or 0.0`, so a debit type with an absent,
+  zero, negative or NaN `net_debit` opened as a free trade and overstated every
+  later mark; `create_paper_trade` now raises `"<TYPE> has no debit"`.
+  (`4ea87d7`: `LEDGER_CREDIT` joins `LEDGER_DEBIT` in `shared/structures.py`.)
+- **Trade detail panel** (`74dc9a4`). It dropped a strike-less leg, so a covered
+  call read "Sell 545 C" — a naked short call. A share leg now reads `Buy 100
+  shares`; a calendar or diagonal gives each leg its own line and date and drops the
+  single `Exp` caption (which named only the front month); every breakeven is joined
+  with ` / ` (it took the first); the quantity marker is `2×`; and a position holding
+  shares says "per position" rather than "per contract".
+- **Expander label** (`79716a1`): "Advanced — credit spreads" is now "Advanced —
+  delta bands and credit floor". The delta bands also bind the naked short put and
+  call, the short strangle and the covered call / collar call; the credit floor is
+  the spreads' alone.
+- ⚠ **Calibration basis — Income `entry_score`.** The per-expiry breakeven move
+  (`3836600` Finder, `f287c73` Directional tab) also reaches the Income board through
+  `swing_scan`, so Income scores captured under `scanner_type = "INCOME"` change basis
+  at this change: the move went from √30 days to √(each row's 30–45 DTE), at most
+  ~1.22× wider. Compare Income scores across that date with care. The capture floor
+  (`capture_min_income = 0`) is unchanged, so the capture still takes whatever the
+  board publishes; only a row crossing the board's own 50 cut changes that set.
 
 **Operator decisions.** (1) **D1 kept** — straddles and strangles, long or short,
 are built and shown but never paper-traded. (2) **No time exit for butterflies and

@@ -1486,11 +1486,19 @@ parameters and press <strong>Scan</strong>:</p>
 <li><strong>DTE</strong> min / max (days to expiration)</li>
 <li><strong>Strategies</strong> — seven groups, all ticked by default (see below)</li>
 <li><strong>Put Δ</strong> and <strong>Call Δ</strong> min / max (delta bands for strike selection), under
-  <strong>Advanced — credit spreads</strong></li>
-<li><strong>Min credit %</strong></li>
+  <strong>Advanced — delta bands and credit floor</strong>. The bands place every option the
+  Finder sells out of the money: the credit spreads, the short put and short call,
+  the short strangle, and the call in a covered call or collar.</li>
+<li><strong>Min credit %</strong>, in the same panel — it applies to the credit spreads only</li>
 </ul>
 <p>Results appear in the same signal table (with the same Score chip, Grade, and the
-per-row action buttons) and detail panel as the Market Scanner.</p>
+per-row action buttons) and detail panel as the Market Scanner. For the newer
+structures the detail panel reads the way the position is held: a share leg is
+<strong>Buy 100 shares</strong>, a calendar or diagonal lists each leg with <strong>its own expiration
+date</strong> (and drops the single "Exp" line, which would name only the near month),
+<strong>every</strong> breakeven is shown — a straddle or butterfly reads <code>$95.20 / $104.80</code> —
+a butterfly's middle reads <code>Sell 2× 100 C</code>, and a position holding shares states its
+dollars <strong>per position</strong> rather than per contract.</p>
 <p><strong>The seven strategy groups:</strong></p>
 <table>
 <thead>
@@ -1543,8 +1551,12 @@ per-row action buttons) and detail panel as the Market Scanner.</p>
 <li><strong>Calendars and diagonals need two expirations inside your DTE range</strong> — the
   near one at least <strong>7 days</strong> out, the later one the expiration nearest <strong>four
   weeks</strong> after it, and at least a week after it. If <strong>DTE max</strong> does not reach
-  that far, no calendar is built; widen it. No extra data is fetched for them.
-  The share structures also use an expiration at least 7 days out.</li>
+  that far, no calendar is built; widen it. No extra data is fetched for them.</li>
+<li><strong>Straddles, strangles, butterflies, the iron butterfly, condors and the share
+  structures also use an expiration at least 7 days out.</strong> With <strong>DTE min</strong> at 0,
+  none of them is built on a 0–6 day expiration; the floor applies by itself, so
+  there is no need to raise DTE min for it. Directional trades and the debit and
+  credit spreads still take the nearest expiration in your range.</li>
 <li><strong>Nothing is built off-centre.</strong> When the at-the-money strike is missing from
   the chain, the straddles, butterflies, condors and calendar are skipped rather
   than moved to the next strike.</li>
@@ -1552,7 +1564,10 @@ per-row action buttons) and detail panel as the Market Scanner.</p>
   whose sold option would sit above your delta band's ceiling; a protective put or
   collar whose put is under 0.10 delta (a collar also needs its call at 0.05 or
   more); a diagonal whose short is outside 0.15–0.45 delta or whose cost reaches
-  the width between its strikes.</li>
+  the width between its strikes; a long butterfly or condor priced for a credit or
+  costing its whole wing, and an iron butterfly priced for a debit or taking in its
+  whole wing. Wide quotes can put the mid prices there, and those prices are wrong
+  rather than the trade good.</li>
 <li><strong>The Legs column</strong> reads <code>L 100 shares / S 105C</code>. <code>S 2×100C</code> is two contracts
   (a butterfly's middle), and a leg on a later expiration carries its date — a
   calendar reads <code>S 100C / L 100C 11/13</code>.</li>
@@ -1570,7 +1585,8 @@ per-row action buttons) and detail panel as the Market Scanner.</p>
 </ul>
 <p><strong>Send to Paper trade</strong> appears only on rows the Paper Ledger records correctly:
 credit spreads, iron condors, long calls and puts, debit spreads, and the call and
-put <strong>butterflies and condors</strong>. Straddles and strangles are for study only and
+put <strong>butterflies and condors</strong>. A debit trade that arrives with no debit to pay
+is refused rather than booked as free. Straddles and strangles are for study only and
 have no button; neither do the iron butterfly, calendars, diagonals or the share
 structures. <strong>Send to Calculator</strong> carries every row, calendars (both expirations)
 and share legs included — but clicking an expiration pill on the Calculator

@@ -56,7 +56,13 @@ that `options_calculator` documents keeping deliberately separate from the
 Finder's zero-drift normal. Rows would not be comparable.
 
 - A leg set of **single-expiry options takes today's code path byte for byte** —
-  the existing 9 structures' numbers, grades and cuts do not move.
+  the existing 9 structures' payoff economics (max profit/loss, breakevens, PoP) do
+  not move. *Revised while building:* their **grades and cuts did move**, on the
+  Finder and on the Market Scanner's Directional tab, because the
+  breakeven-vs-expected-move factor now judges each candidate against the move to
+  its OWN expiry (`score_all(..., daily_move=)`) rather than one move per scan or
+  window. The Income board rides the same path, so its captured `entry_score`
+  changes basis at that commit.
 - When a set holds a **later-expiring leg or a share leg**, value each leg at the
   front expiry with `options_calculator.leg_value`: Black-Scholes at that leg's
   OWN IV and remaining T for a back month, the underlying price for shares. The
@@ -77,6 +83,7 @@ Schwab calls**.
 
 | Structure | Rule |
 |---|---|
+| Expiry for straddles/strangles, butterflies, iron butterfly, condors, share structures | the nearest expiry both maps list at least **7 DTE** (`_MIN_FRONT_DTE`, applied inside `_front_pair` so no caller can forget it). *Revised after shipping (operator decision 2026-09-13):* at the page's default DTE min of 0 these took the nearest common expiry — a 0–1 DTE structure on a daily-listing name. Directionals, debit and credit verticals and the iron condor keep the nearest expiry in the window |
 | Straddle, iron butterfly, butterfly body | at-the-money strike |
 | Strangle shorts, covered call, collar call | the delta band's midpoint (as the other shorts do) |
 | Long strangle | its own OTM wings nearest **0.30 delta**, independent of the band. *Revised while building:* buying the short strangle's band-midpoint strikes put both wings near 0.15 delta, where PoP measured 22–25 in every IV × DTE cell — always under LONG's 30 bar (the two rows' PoPs sum to ~100) |
@@ -94,7 +101,12 @@ wide window has already timed out at the proxy.
 **Never emitted:** a calendar or diagonal whose max profit is not above zero, and any
 straddle, butterfly, condor, calendar or diagonal whose at-the-money strike is missing
 from one side of the chain (the builder skips rather than recentring on the next
-strike, which would build an off-centre structure under a neutral name).
+strike, which would build an off-centre structure under a neutral name). *Added after
+shipping (2026-09-13):* a long butterfly or condor whose `net_debit` is not strictly
+inside `(0, wing × 100)`, and an iron butterfly whose `net_credit` is not inside the same
+range (`_priced_inside`). Mid marks on a wide market can break convexity — 95C 6.5 /
+100C 4.1 ×2 / 105C 1.5 is a $20 credit for a long fly that reported R:R 20.4, PoP 100 and
+ranked first — and outside that range the marks are wrong, not the trade good.
 
 **The delta-band ceiling applies only where a short is out of the money by
 design** — strangle, covered call, collar. A straddle's or iron butterfly's shorts
@@ -203,6 +215,15 @@ back month spanning a report is exposed to it even when the front expires first.
   the design said the Calculator's `strategy_label` wording, but the builders live
   in `options-scanner`, which cannot import that Tier-1 module, and a third copy
   of the label table would be the drift this doc avoids elsewhere.
+- **Trade detail panel** (*added after shipping*): the shared panel dropped a
+  strike-less leg, so a covered call read "Sell 545 C" — a naked short call. A share
+  leg now reads `Buy 100 shares`; when the option legs span more than one expiry each
+  leg takes its own line with its own date and the single `Exp` caption is dropped;
+  `detail_signal` joins every breakeven with ` / ` rather than taking the first; the
+  quantity marker is `2×`; and a position holding shares says "per position".
+- The collapsed expander is labelled **"Advanced — delta bands and credit floor"** (was
+  "Advanced — credit spreads"): the bands also bind the naked shorts, the short
+  strangle and the covered call / collar call; the credit floor is the spreads' alone.
 
 ## Hand-offs
 
@@ -223,7 +244,10 @@ back month spanning a report is exposed to it even when the front expires first.
   only near 3 DTE), so it would close flat within days of opening.
   **Precondition:** the ledger must reprice and settle a `qty 2` body leg
   correctly; if it does not, the butterflies ship without the button rather than
-  the ledger being changed.
+  the ledger being changed. *Added after shipping:* `create_paper_trade` refuses a
+  `PAPER_DEBIT_TYPES` signal whose `net_debit` is not a positive finite number —
+  `_create_debit_trade` books `net_debit or 0.0`, so one would otherwise open as a
+  free trade and overstate every later mark.
 - **Straddles and strangles, long and short, stay ANALYSIS ONLY** (D1,
   `docs/plans/2026-09-12-straddle-strangle-design.md` — operator decision
   2026-09-13 to keep it). The Finder builds and shows them; none gets a Paper
@@ -262,4 +286,6 @@ covers them.
 - Paper-trading credit multi-leg structures, calendars or shares (ledger changes).
 - New gate bars for short straddles / covered calls.
 - A second chain fetch for longer calendars.
-- Changing the existing 9 structures' economics.
+- Changing the existing 9 structures' payoff economics. (Their scores did change —
+  see *Payoff math*: the per-expiry expected move re-grades them on the Finder and the
+  Directional tab.)

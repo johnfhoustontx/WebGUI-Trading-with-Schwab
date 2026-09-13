@@ -208,13 +208,29 @@ it can build for it on one score.
   ⚠ **Calendars and diagonals need two expirations inside that range**: the near
   one at least 7 days out, the later one about four weeks after it and at least a
   week after it. A narrow range builds no calendar — widen **DTE max** if you
-  want one. The share structures also use an expiration at least 7 days out.
+  want one.
+- **Straddles, strangles, butterflies, the iron butterfly, condors and the share
+  structures also use an expiration at least 7 days out** — so with **DTE min** at
+  0 none of them is built on a 0–6 day expiration. You do not need to raise DTE min
+  to get this; the 7-day floor applies by itself. Directional trades and the debit
+  and credit spreads still use the nearest expiration in your range.
 - **Nothing is built off-centre.** If the at-the-money strike is missing from the
   chain, the straddle, butterflies, condors and calendar are skipped rather than
   quietly moved to the next strike.
+- **A butterfly or condor with impossible prices is dropped.** When the chain's
+  quotes are wide, the mid prices can make a long butterfly or condor pay you a
+  credit, or cost its whole wing — and an iron butterfly cost a debit, or take in
+  its whole wing. Those prices are wrong rather than the trade good, so the row is
+  never listed.
 - **Legs** reads like `L 100 shares / S 105C`: `2×` is two contracts (a
   butterfly's middle), and a leg on a later expiration carries its date, so a
   calendar reads `S 100C / L 100C 11/13`.
+- **Click a row** for the Trade detail panel. A share leg reads `Buy 100 shares`,
+  a calendar or diagonal lists each leg with its own expiration date, every
+  breakeven is shown (`$95.20 / $104.80`), and a position holding shares states its
+  dollars **per position** rather than per contract.
+- **Put/Call Δ (delta)** and **Min credit %** sit under the collapsed **Advanced —
+  delta bands and credit floor**.
 - **Put/Call Δ (delta)** — how far out-of-the-money the **sold** strikes sit. A
   smaller |delta| is safer but pays less credit. It governs every short leg that
   is out of the money by design — the spreads' short strikes, the single-leg
@@ -225,7 +241,8 @@ it can build for it on one score.
   structure puts them, and a diagonal keeps its own 0.30 target. ⚠
   Before 2026-09-11 it reached the spreads only, so a short put ignored whatever
   you set here and was always written near 0.28 delta.
-- **Min credit %** — throw out trades that don't pay enough premium for the risk.
+- **Min credit %** — throw out credit spreads that don't pay enough premium for the
+  risk. It applies to the spreads only.
 - Raising deltas/credit → fewer but richer trades; lowering → more but lower quality.
 - Only candidates that clear a **quality bar** are listed. The status line says how
   many were cut, which is what tells "everything failed the bar" apart from
@@ -243,7 +260,8 @@ it can build for it on one score.
   trade correctly: credit spreads, iron condors, long calls and puts, debit
   spreads, and the call and put **butterflies and condors**. There is no Paper
   button for straddles or strangles (study only), the iron butterfly, calendars,
-  diagonals, or anything holding shares. **Send to Calculator** works on every
+  diagonals, or anything holding shares. The ledger also refuses a debit trade
+  that arrives without a debit to pay. **Send to Calculator** works on every
   row, calendars and shares included — but clicking an expiration pill on the
   Calculator afterwards moves every option leg to that one date, which turns a
   calendar into something else.
