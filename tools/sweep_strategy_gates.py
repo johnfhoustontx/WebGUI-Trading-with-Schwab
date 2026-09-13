@@ -53,6 +53,9 @@ Columns:
     maxP      max profit, per contract, net of round-trip commission
               ("unb" = unbounded)
     maxL      max loss, per contract, commission included
+    EM        the 1-sigma move the breakeven factor judged this row against:
+              spot * iv * sqrt(max(dte, 1) / 365), off the ROW's dte (a share
+              structure on a short --days front builds on the back month)
     R:R       max_profit / max_loss ("-" when undefined)
     PoP       probability of profit, percent
     profile   `strategy_scoring.gate_profile` -- which GATE_BARS row applies
@@ -184,18 +187,17 @@ def _fmt(all_rows, spot, iv, step):
            f"back = front + {BACK_OFFSET}, bands put {PUT_BAND} call {CALL_BAND}",
            ""]
     head = (f"{'type':<16}{'dte':>4}  {'legs':<30}{'net':>9}{'maxP':>9}{'maxL':>10}"
-            f"{'R:R':>7}{'PoP':>6}  {'profile':<8}{'reward':>7}{'score':>7}  grade")
+            f"{'EM':>7}{'R:R':>7}{'PoP':>6}  {'profile':<8}{'reward':>7}{'score':>7}  grade")
     front = None
     for r in all_rows:
         if r["front"] != front:
             front = r["front"]
-            out += [f"-- front {front} DTE (1-sigma move to it "
-                    f"{spot * iv * math.sqrt(max(front, 1) / 365):.2f})",
-                    head]
+            out += [f"-- front {front} DTE", head]
         grade = r["grade"] if r["grade"] != "Weak" else f"Weak ({r['grade_reason']})"
         maxp = "unb" if r["max_profit"] is None else _num(r["max_profit"], ".2f")
         out.append(f"{r['type']:<16}{r['dte']:>4}  {r['legs']:<30}{r['net']:>9.2f}"
                    f"{maxp:>9}{_num(r['max_loss'], '.2f'):>10}"
+                   f"{spot * iv * math.sqrt(max(r['dte'], 1) / 365):>7.2f}"
                    f"{_num(r['rr'], '.2f'):>7}{_num(r['pop'], '.1f'):>6}  "
                    f"{r['profile']:<8}{_num(r['reward'], '.2f'):>7}"
                    f"{r['score']:>7.1f}  {grade}")

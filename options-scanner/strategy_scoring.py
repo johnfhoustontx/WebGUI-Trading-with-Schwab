@@ -911,8 +911,15 @@ def _em_for_signal(sig, em_1sd, daily_move):
 
     ``daily_move * sqrt(max(dte, 1))`` when both the daily move and the signal's
     ``dte`` are usable; otherwise the caller's scalar ``em_1sd`` — exactly the
-    pre-2026-09-13 reading, so an unknown horizon degrades to the old behaviour
-    rather than to a silent one-day move.
+    pre-2026-09-13 reading. "Unusable" means a MISSING, non-numeric, NaN or
+    negative ``dte``.
+
+    ⚠ A ``dte`` of 0 is taken at its word as a same-day contract and gets one
+    day's move. The scorer cannot tell that from a data fault:
+    ``strategy_scanner._dte_for`` folds an UNPARSEABLE expiration into 0 as well
+    (the same ambiguity ``_reward_metric``'s ``dte <= 0`` guard documents), so such
+    a signal is judged against a one-day move rather than the scalar. The scorer
+    deliberately does not re-parse expirations to find out.
     """
     if daily_move is None or not isinstance(sig, dict):
         return em_1sd

@@ -386,7 +386,10 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         civ = (iv or {}).get("current_iv")
         atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
 
-    # 1-sigma dollar move to the front of the trade horizon (breakeven-vs-EM factor).
+    # FALLBACK only: the 1-sigma move at the window's DTE minimum. score_all uses
+    # it just when ``daily_move`` (dem, below) is unusable or a candidate carries no
+    # usable ``dte``; otherwise each candidate is judged against the move to its own
+    # expiry.
     em_1sd = (dem or 0.0) * math.sqrt(max(dte_min, 1))
 
     view = ssc.infer_market_view(tech or {}, iv or {})
