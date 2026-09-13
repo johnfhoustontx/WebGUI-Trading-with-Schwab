@@ -79,7 +79,7 @@ Schwab calls**.
 |---|---|
 | Straddle, iron butterfly, butterfly body | at-the-money strike |
 | Strangle shorts, covered call, collar call | the delta band's midpoint (as the other shorts do) |
-| Long strangle | same deltas as the short strangle, bought |
+| Long strangle | its own OTM wings nearest **0.30 delta**, independent of the band. *Revised while building:* buying the short strangle's band-midpoint strikes put both wings near 0.15 delta, where PoP measured 22–25 in every IV × DTE cell — always under LONG's 30 bar (the two rows' PoPs sum to ~100) |
 | Collar put, protective put | the long put at the put band's midpoint |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
 | Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
@@ -111,7 +111,7 @@ Measured by pricing each structure with Black-Scholes (spot 100, IV 28%,
 
 | Structure | Profile | Measured vs the `min` bar | Outcome |
 |---|---|---|---|
-| Long straddle, long strangle | LONG | PoP 36–43 vs 30; reward auto-passes (unbounded) | passes |
+| Long straddle, long strangle | LONG | PoP 36–43 vs 30 with strangle wings near 0.30 delta; reward auto-passes (unbounded) | passes |
 | Call/put butterfly | DEBIT | R:R 3.4–3.9 vs 0.6; PoP 31–34 vs 30 | passes, barely on PoP |
 | Iron butterfly | DEBIT | identical to the long butterfly | passes, barely |
 | Call/put condor | DEBIT | R:R 0.67–0.81; PoP 54–57 on a $1 ladder — ⚠ **ladder-dependent**: on $5 strikes around $100 it measures 0.22 at 14 DTE and 0.53 at 30 (cut), 0.79 at 45 | passes on fine ladders |
