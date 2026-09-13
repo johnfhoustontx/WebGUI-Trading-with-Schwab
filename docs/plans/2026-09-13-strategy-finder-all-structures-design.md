@@ -83,7 +83,7 @@ Schwab calls**.
 | Collar put, protective put | the long put at the put band's midpoint |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
 | Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
-| Diagonal | as a calendar, the back leg is the IN-the-money back-month strike nearest **0.70 delta**, and the diagonal is skipped when its debit reaches the strike width. *Revised twice while building:* the out-of-the-money version priced as a credit; the one-strike-in-the-money version cost more than the width on a $5 ladder ($5.15 on $5), leaving an upside a dividend would erase and a misleading PoP |
+| Diagonal | short the FRONT month out of the money near **0.30 delta**, long the BACK month in the money near **0.70 delta**; skipped when the debit reaches the strike width. *Revised three times while building:* an out-of-the-money long priced as a credit; an in-the-money long against an at-the-money short cost more than the width on every call chain measured (debit = width + back time value − front time value), so only put diagonals could ever pass, and only on interest-rate carry. The 0.30/0.70 pairing is the practitioner shape the width rule assumes |
 
 **No calendar is built when the window has no two expiries ≥ 7 days apart.** At
 the default 5–30 window the calendar is short; widening DTE max gives longer
