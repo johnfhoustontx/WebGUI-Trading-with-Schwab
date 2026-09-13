@@ -79,6 +79,23 @@ def _pl_at(legs, entry_cost, S):
     return v - entry_cost
 
 
+def _is_stock(leg):
+    """A 100-share-lot leg (the Calculator's D4 convention), not an option."""
+    return leg.get("kind") == "stock"
+
+
+def _option_contracts(legs):
+    """Option CONTRACTS in a leg set: each option leg's qty, share legs excluded.
+
+    ``commissions.round_trip_commission`` bills per contract but was handed
+    ``len(legs)``, which is right only while every leg is one contract. A
+    butterfly's body is one dict at qty 2, and Schwab charges nothing for stock.
+    For every all-options qty-1 leg set this equals ``len(legs)``, so the existing
+    nine structures are billed exactly as before.
+    """
+    return sum(int(l.get("qty", 1) or 1) for l in legs if not _is_stock(l))
+
+
 def payoff_metrics(legs, spot, symbol=None):
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)   # +debit
     net = round(entry_cost, 4)
@@ -109,7 +126,7 @@ def payoff_metrics(legs, spot, symbol=None):
     # so R:R / capital-efficiency / grade all see net-of-commission economics.
     # Never subtracted from an UNBOUNDED profit (None). Breakevens are the
     # gross-payoff crossing levels (display convention); left unshifted.
-    comm = _cm.round_trip_commission(legs, symbol, 1)
+    comm = _cm.round_trip_commission(_option_contracts(legs), symbol, 1)
 
     # Override the extremum on whichever side is unbounded. Everything ×100
     # (per-contract dollars), commission then folded in.

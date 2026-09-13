@@ -564,3 +564,35 @@ def test_a_short_CHEAPER_than_the_band_is_kept():
                                 put_band=(0.15, 0.25), call_band=(0.15, 0.25))
     sp = next(s for s in sigs if s["type"] == "SHORT_PUT")
     assert abs(sp["legs"][0]["delta"]) == 0.04
+
+
+# ---- Strategy Finder: every structure (2026-09-13) ----
+import datetime as _dt
+
+
+def _exp(days):
+    return (_dt.date.today() + _dt.timedelta(days=days)).isoformat()
+
+
+def _stock(spot, qty=1):
+    return {"kind": "stock", "side": "long", "strike": None, "expiration": None,
+            "qty": qty, "mark": spot, "delta": 1.0, "theta": 0.0, "vega": 0.0,
+            "gamma": 0.0, "iv": 0.0}
+
+
+def test_option_contracts_counts_qty_and_ignores_shares():
+    fly = [_leg("call", "long", 445.0, 8.0), _leg("call", "short", 450.0, 6.0, qty=2),
+           _leg("call", "long", 455.0, 3.5)]
+    assert ss._option_contracts(fly) == 4
+    assert ss._option_contracts([_stock(450.0), _leg("call", "short", 455.0, 3.5)]) == 1
+
+
+def test_butterfly_commission_charges_four_contracts():
+    fly = [_leg("call", "long", 445.0, 8.0), _leg("call", "short", 450.0, 6.0, qty=2),
+           _leg("call", "long", 455.0, 3.5)]
+    assert ss.payoff_metrics(fly, spot=450.0)["commission"] == round(4 * 0.65 * 2, 4)
+
+
+def test_existing_qty_one_commission_is_unchanged():
+    legs = [_leg("call", "long", 450.0, 6.0), _leg("call", "short", 455.0, 3.5)]
+    assert ss.payoff_metrics(legs, spot=450.0)["commission"] == 2.60
